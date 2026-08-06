@@ -11,15 +11,23 @@
  */
 
 import { lazy, Suspense, useCallback, useMemo, useRef, useState } from "react"
+import { createPortal } from "react-dom"
 import { Bot, Minimize2, RotateCcw, Square } from "lucide-react"
+import type { Layout } from "react-resizable-panels"
 import { Button } from "@/components/ui/button"
+import { ChatContextPin } from "@/components/chat/ChatContextPin"
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Spinner } from "@/components/ui/spinner"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { applyStagedEvents, type ApplyContext } from "@/lib/agent/apply"
 import type { AgentProposal } from "@/lib/agent/protocol"
 import { useAgentSession } from "@/lib/agent/session-store"
+import { applyCellScrollAnchor, readCellScrollAnchor } from "@/lib/agent/synchronized-scroll"
 import { buildUndoEvents } from "@/lib/agent/undo"
+import type { TargetPresenceSelection } from "@/lib/sync/presence-store"
+import type { TranslatedEditorCommit } from "../TranslatedEditor"
+import { readAgentWorkbenchLayout, writeAgentWorkbenchLayout } from "@/lib/agent/workbench-layout"
 import {
   deriveWorkingSet,
   pendingRows,
@@ -29,6 +37,7 @@ import {
 } from "@/lib/agent/working-set"
 import { checkRulesForCell } from "@/lib/rules/rule-engine"
 import { AgentDockView, type AgentDockViewProps } from "./AgentDockView"
+import { AgentContextPane, type AgentWorkbenchCell } from "./AgentContextPane"
 import { CreditsDial, type CreditsDialProps } from "./CreditsDial"
 import { lintCellFor } from "./ProposalCard"
 import { ProposalReceipt } from "./ProposalReceipt"
@@ -44,16 +53,50 @@ type WorkbenchTab = "sessions" | "memory"
 
 export interface AgentWorkbenchProps {
   /** Same wiring the dock panel gets — one source of truth in ProjectWorkspace. */
-  agent: Omit<AgentDockViewProps, "suggestedActions" | "pendingPrompt" | "onPendingPromptConsumed" | "pendingChip" | "onPendingChipConsumed">
+  agent: Omit<AgentDockViewProps, "suggestedActions" | "pendingPrompt" | "onPendingPromptConsumed" | "pendingChip" | "onPendingChipConsumed" | "onChooseContext" | "onFocusChange">
   /** Org agent-credit gauge in the header (maintainer+ only; self-hides). */
   credits?: CreditsDialProps | null
   /** Leave the workbench (back to the editor). */
   onClose: () => void
   /** Jump the editor to a cell ("open" on a working-set row). */
   onJumpToCell?: (fileId: string, cellId: string) => void
+  /** Open the project file explorer without leaving Agent mode. */
+  onChooseFile?: () => void
+  /** Keep visible file/cell state aligned with an agent focus tool call. */
+  onFocusChange?: (fileId: string, cellId?: string, fileName?: string) => void
+  /** When provided, the workbench toolbar joins the workspace header. */
+  toolbarPortalTarget?: HTMLElement | null
+  /** Bounded, live editor context shown beside the agent. */
+  workspace?: {
+    cells: AgentWorkbenchCell[]
+    fileName?: string | null
+    sourceLanguage?: string | null
+    targetLanguage?: string | null
+    focusedCellId?: string | null
+    totalCells?: number
+    /** False when the chosen file is not available in the local editor yet. */
+    scopeAvailable?: boolean
+    loading?: boolean
+    /** Reuses the editor's authoritative target commit path. */
+    editable?: boolean
+    onCommitTarget?: (cellId: string, snapshot: TranslatedEditorCommit) => void | Promise<void>
+    cellLockHolders?: ReadonlyMap<string, string>
+    onClaimCell?: (cellId: string) => void
+    onReleaseCell?: (cellId: string) => void
+    onTargetPresenceSelection?: (cellId: string, selection: TargetPresenceSelection | null) => void
+  }
 }
 
-export function AgentWorkbench({ agent, credits, onClose, onJumpToCell }: AgentWorkbenchProps) {
+export function AgentWorkbench({
+  agent,
+  credits,
+  onClose,
+  onJumpToCell,
+  onChooseFile,
+  onFocusChange,
+  toolbarPortalTarget,
+  workspace,
+}: AgentWorkbenchProps) {
   const { state, stop, reset, decide } = useAgentSession(agent.projectId)
   // Decisions per proposal row (key: proposalId:cellId) live in the SESSION
   // store, not here — closing/reopening the workbench must not forget what
@@ -62,6 +105,10 @@ export function AgentWorkbench({ agent, credits, onClose, onJumpToCell }: AgentW
   const [applying, setApplying] = useState(false)
   const [tab, setTab] = useState<WorkbenchTab>("sessions")
   const panelRef = useRef<WorkingSetPanelHandle>(null)
+  const sourceScrollRef = useRef<HTMLDivElement>(null)
+  const targetScrollRef = useRef<HTMLDivElement>(null)
+  const scrollSourceRef = useRef<"source" | "target" | null>(null)
+  const initialLayout = useMemo(() => readAgentWorkbenchLayout(agent.projectId), [agent.projectId])
 
   const rows = useMemo(() => deriveWorkingSet(state.runs, decided), [state.runs, decided])
   const pending = useMemo(() => pendingRows(rows), [rows])
@@ -74,6 +121,27 @@ export function AgentWorkbench({ agent, credits, onClose, onJumpToCell }: AgentW
     [rows],
   )
   const hasReviewWork = stageRows.length > 0
+  const workspaceCellsById = useMemo(
+    () => new Map((workspace?.cells ?? []).map((cell) => [cell.cellId, cell])),
+    [workspace?.cells],
+  )
+  const contextCells = useMemo<AgentWorkbenchCell[]>(
+    () => hasReviewWork
+      ? stageRows.map((row) => {
+          const live = workspaceCellsById.get(row.cellId)
+          return {
+            ...live,
+            cellId: row.cellId,
+            fileId: row.fileId ?? live?.fileId ?? "",
+            ref: row.ref ?? live?.ref,
+            source: row.source ?? live?.source ?? "",
+            target: row.target ?? live?.target ?? "",
+            status: row.status ?? live?.status,
+          }
+        })
+      : workspace?.cells ?? [],
+    [hasReviewWork, stageRows, workspace?.cells, workspaceCellsById],
+  )
 
   const activeRun = state.runs.find((r) => r.status === "running")
   const progress = activeRun?.progress
@@ -222,87 +290,172 @@ export function AgentWorkbench({ agent, credits, onClose, onJumpToCell }: AgentW
     [decided, enabledRules, agent.resolveCell, applying, undoProposal],
   )
 
-  return (
-    <div className="flex h-full min-h-0 flex-col">
-      {/* Job header */}
-      <div className="flex items-center gap-2 border-b px-3 py-1.5">
-        <Bot className="h-4 w-4 text-muted-foreground" />
-        <span className="text-sm font-medium">Agent</span>
-        {activeRun && (
-          <span className="flex items-center gap-1.5 text-xs text-muted-foreground" role="status">
-            <Spinner className="h-3 w-3" />
-            {progress ? `${progress.label} — ${progress.done}/${progress.total}` : "working…"}
-          </span>
-        )}
-        {state.queued.length > 0 && (
-          <span className="text-[11px] text-muted-foreground">{state.queued.length} queued</span>
-        )}
-        <span className="ml-auto flex items-center gap-1">
-          {credits && <CreditsDial {...credits} />}
-          {state.isStreaming && (
-            <Button type="button" variant="outline" size="sm" className="h-6 text-[11px]" onClick={stop}>
-              <Square data-icon="inline-start" />
-              Stop
-            </Button>
-          )}
-          <AppTooltip content="Drop this conversation and start a fresh session">
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="h-6 text-[11px] text-muted-foreground"
-              onClick={reset}
-            >
-              <RotateCcw data-icon="inline-start" />
-              New session
-            </Button>
-          </AppTooltip>
-          <AppTooltip content="Back to the editor">
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="h-6 text-[11px] text-muted-foreground"
-              onClick={onClose}
-              aria-label="Close workbench"
-            >
-              <Minimize2 data-icon="inline-start" />
-              Editor
-            </Button>
-          </AppTooltip>
-        </span>
-      </div>
+  const handleLayoutChanged = useCallback((layout: Layout) => {
+    writeAgentWorkbenchLayout(agent.projectId, layout)
+  }, [agent.projectId])
 
-      <Tabs
-        value={tab}
-        onValueChange={(next) => setTab(next as WorkbenchTab)}
-        className="flex min-h-0 flex-1 flex-col gap-0"
-      >
-        <TabsList variant="line" className="mx-3 mt-1.5 w-fit" aria-label="Agent workbench sections">
-          <TabsTrigger value="sessions">Sessions</TabsTrigger>
-          <TabsTrigger value="memory">Memory</TabsTrigger>
-        </TabsList>
+  const synchronizeScroll = useCallback((from: "source" | "target", container: HTMLDivElement) => {
+    if (scrollSourceRef.current && scrollSourceRef.current !== from) {
+      scrollSourceRef.current = null
+      return
+    }
+    const destination = from === "source" ? targetScrollRef.current : sourceScrollRef.current
+    const anchor = readCellScrollAnchor(container)
+    if (!destination || !anchor) return
+    scrollSourceRef.current = from
+    applyCellScrollAnchor(destination, anchor)
+    requestAnimationFrame(() => {
+      if (scrollSourceRef.current === from) scrollSourceRef.current = null
+    })
+  }, [])
+
+  const toolbar = (
+    <div
+      role="group"
+      aria-label="Agent workbench toolbar"
+      className={toolbarPortalTarget === undefined
+        ? "flex min-h-11 shrink-0 items-center gap-2 border-b border-border/70 bg-background px-3"
+        : "flex min-w-0 flex-1 items-center gap-2"}
+    >
+      <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
+        <Bot className="size-3.5" />
+      </span>
+      <span className="flex min-w-0 items-baseline gap-2">
+        <span className="shrink-0 text-sm font-semibold leading-none">Agent</span>
+        <span
+          className="max-w-32 truncate text-[10px] text-muted-foreground"
+          data-testid="agent-workbench-file-name"
+        >
+          {workspace?.fileName ?? agent.fileName ?? "Project workspace"}
+        </span>
+      </span>
+      <span aria-hidden className="mx-0.5 h-5 w-px shrink-0 bg-border/70" />
+      <TabsList className="h-7 shrink-0 rounded-md bg-muted/70 p-0.5" aria-label="Agent workbench sections">
+        <TabsTrigger value="sessions" className="h-6 flex-none px-2.5 text-[11px] transition-colors">Sessions</TabsTrigger>
+        <TabsTrigger value="memory" className="h-6 flex-none px-2.5 text-[11px] transition-colors">Memory</TabsTrigger>
+      </TabsList>
+      {activeRun && (
+        <span className="flex items-center gap-1.5 text-xs text-muted-foreground" role="status">
+          <Spinner className="h-3 w-3" />
+          {progress ? `${progress.label} — ${progress.done}/${progress.total}` : "working…"}
+        </span>
+      )}
+      {state.queued.length > 0 && (
+        <span className="text-[11px] text-muted-foreground">{state.queued.length} queued</span>
+      )}
+      <span className="ml-auto flex shrink-0 items-center gap-1">
+        {credits && <CreditsDial {...credits} />}
+        {state.isStreaming && (
+          <Button type="button" variant="outline" size="sm" className="h-6 text-[11px]" onClick={stop}>
+            <Square data-icon="inline-start" />
+            Stop
+          </Button>
+        )}
+        <AppTooltip content="Drop this conversation and start a fresh session">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-7 text-[11px] text-muted-foreground"
+            onClick={reset}
+          >
+            <RotateCcw data-icon="inline-start" />
+            New session
+          </Button>
+        </AppTooltip>
+        <AppTooltip content="Back to the editor">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-7 text-[11px]"
+            onClick={onClose}
+            aria-label="Close workbench"
+          >
+            <Minimize2 data-icon="inline-start" />
+            Editor
+          </Button>
+        </AppTooltip>
+      </span>
+    </div>
+  )
+
+  return (
+    <Tabs
+      value={tab}
+      onValueChange={(next) => setTab(next as WorkbenchTab)}
+      className="flex h-full min-h-0 flex-col gap-0"
+    >
+      {toolbarPortalTarget === undefined
+        ? toolbar
+        : toolbarPortalTarget
+          ? createPortal(toolbar, toolbarPortalTarget)
+          : null}
 
         <TabsContent value="sessions" className="flex min-h-0 flex-1 flex-col">
-          {/* Chat is the SPINE (agent-complete §2): until the session stages
-              something to review, the conversation is the whole surface — a
-              centered column. The working set is a STAGE summoned by review
-              work (pending drafts / decisions), and the chat becomes its
-              narrator. */}
-          <div className="flex min-h-0 flex-1">
-            {hasReviewWork ? (
-              <>
-                <div className="flex w-[380px] min-w-[320px] flex-none flex-col border-r">
+          <ResizablePanelGroup
+            id={`agent-workbench-${agent.projectId}`}
+            orientation="horizontal"
+            defaultLayout={initialLayout}
+            onLayoutChanged={handleLayoutChanged}
+            className="min-h-0 flex-1"
+          >
+            <ResizablePanel id="source" minSize="16%">
+              <AgentContextPane
+                kind="source"
+                cells={contextCells}
+                language={workspace?.sourceLanguage}
+                fileName={workspace?.fileName ?? agent.fileName}
+                totalCells={hasReviewWork ? contextCells.length : workspace?.totalCells}
+                focusedCellId={workspace?.focusedCellId}
+                scopeAvailable={workspace?.scopeAvailable}
+                loading={workspace?.loading}
+                onChooseFile={onChooseFile}
+                scrollContainerRef={sourceScrollRef}
+                onScroll={(event) => synchronizeScroll("source", event.currentTarget)}
+              />
+            </ResizablePanel>
+            <ResizableHandle aria-label="Resize source and Agent panes" className="bg-border/70 hover:bg-primary/40" />
+            <ResizablePanel id="luna" minSize="28%">
+              <section aria-label="Agent pane" className="flex h-full min-h-0 flex-col bg-background">
+                <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border/70 px-3">
+                  <span className="text-[11px] font-semibold tracking-tight text-foreground/90">Agent</span>
+                  {onChooseFile && (
+                    <span className="ml-auto">
+                      <ChatContextPin
+                        includeCellContext
+                        onToggle={() => {}}
+                        currentCell={null}
+                        fileName={workspace?.fileName ?? agent.fileName}
+                        onChooseContext={onChooseFile}
+                        compact
+                        bare
+                      />
+                    </span>
+                  )}
+                </div>
+                <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
                   <AgentDockView
                     {...agent}
                     renderProposalOverride={renderProposalOverride}
                     onReviewMemory={() => setTab("memory")}
+                    onChooseContext={onChooseFile}
+                    onFocusChange={onFocusChange}
+                    hideContextPin
                   />
                 </div>
-                <div className="min-w-0 flex-1">
+              </section>
+            </ResizablePanel>
+            <ResizableHandle aria-label="Resize Agent and target panes" className="bg-border/70 hover:bg-primary/40" />
+            <ResizablePanel id="target" minSize="16%">
+              {hasReviewWork ? (
+                <div className="h-full min-h-0">
                   <WorkingSetPanel
                     ref={panelRef}
                     rows={stageRows}
+                    showSource={false}
+                    title="Target"
+                    language={workspace?.targetLanguage}
                     busy={applying}
                     lintRow={lintRow}
                     onAccept={(row, value) => acceptRows([{ row, value }])}
@@ -313,17 +466,29 @@ export function AgentWorkbench({ agent, credits, onClose, onJumpToCell }: AgentW
                     onJumpToCell={onJumpToCell}
                   />
                 </div>
-              </>
-            ) : (
-              <div className="mx-auto flex w-full max-w-3xl min-w-0 flex-col">
-                <AgentDockView
-                  {...agent}
-                  renderProposalOverride={renderProposalOverride}
-                  onReviewMemory={() => setTab("memory")}
+              ) : (
+                <AgentContextPane
+                  kind="target"
+                  cells={contextCells}
+                  language={workspace?.targetLanguage}
+                  fileName={workspace?.fileName ?? agent.fileName}
+                  totalCells={workspace?.totalCells}
+                  focusedCellId={workspace?.focusedCellId}
+                  scopeAvailable={workspace?.scopeAvailable}
+                  loading={workspace?.loading}
+                  onChooseFile={onChooseFile}
+                  scrollContainerRef={targetScrollRef}
+                  onScroll={(event) => synchronizeScroll("target", event.currentTarget)}
+                  editable={workspace?.editable}
+                  onCommitTarget={workspace?.onCommitTarget}
+                  cellLockHolders={workspace?.cellLockHolders}
+                  onClaimCell={workspace?.onClaimCell}
+                  onReleaseCell={workspace?.onReleaseCell}
+                  onTargetPresenceSelection={workspace?.onTargetPresenceSelection}
                 />
-              </div>
-            )}
-          </div>
+              )}
+            </ResizablePanel>
+          </ResizablePanelGroup>
         </TabsContent>
 
         <TabsContent value="memory" className="min-h-0 flex-1 overflow-auto">
@@ -338,7 +503,6 @@ export function AgentWorkbench({ agent, credits, onClose, onJumpToCell }: AgentW
             <AgentMemoryTab projectId={agent.projectId} roleLevel={agent.roleLevel ?? null} />
           </Suspense>
         </TabsContent>
-      </Tabs>
-    </div>
+    </Tabs>
   )
 }

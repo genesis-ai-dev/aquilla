@@ -13,6 +13,7 @@
 // ── Tool kinds (v2 semantic tools + v1 escape hatches) ─────────────────────
 
 export type ToolKind =
+  | "focus" // move the visible workbench to a project file/cell
   | "read" // aligned source/target rows for a ref range / file span
   | "examples" // few-shot pairs: validated first, then FTS-similar
   | "search" // project-wide FTS (source | target | comments | terms)
@@ -59,6 +60,7 @@ export interface ToolResultData {
 
 export type AgentFrame =
   | { type: 'run_start'; runId: string; sessionId?: string }
+  | { type: 'focus_changed'; fileId: string; fileName: string; cellId?: string }
   | { type: 'assistant_delta'; text: string }
   | { type: 'code_start'; step: number; kind: ToolKind; summary: string } // summary: first 120 chars of sql / "N events" / topic / ref range
   | { type: 'code_result'; step: number; ok: boolean; summary: string; data?: ToolResultData } // summary: compressed result block (what the model saw), ≤2000 chars for UI

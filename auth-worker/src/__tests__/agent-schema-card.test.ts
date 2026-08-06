@@ -123,7 +123,8 @@ describe("buildSystemPrompt — role filtering", () => {
       targetLanguage: "Punjabi",
     })
     expect(withPair).toContain("from English into Punjabi")
-    expect(withPair).toContain("never ask the user what language")
+    expect(withPair).toContain("language for translation output, not ordinary conversation")
+    expect(withPair).toContain("Never ask the user what language")
 
     const withoutPair = buildSystemPrompt({ ...baseCtx, roleLevel: 400 })
     expect(withoutPair).toContain("infer it from the project's existing target text")
@@ -144,7 +145,7 @@ describe("buildSystemPrompt — role filtering", () => {
     expect(prompt).toContain("at most ONE question")
   })
 
-  it("injects the translator profile as JSON and a respond-in line", () => {
+  it("injects the translator profile as JSON and treats its language as a fallback", () => {
     const prompt = buildSystemPrompt({
       ...baseCtx,
       roleLevel: 400,
@@ -154,7 +155,9 @@ describe("buildSystemPrompt — role filtering", () => {
     expect(prompt).toContain("## Translator profile")
     expect(prompt).toContain('"age": "32"')
     expect(prompt).toContain('"religiousBackground": "Christian"')
-    expect(prompt).toContain("Respond to the user in Tagalog.")
+    expect(prompt).toContain("Use Tagalog only as the fallback conversation language")
+    expect(prompt).toContain("reply in the language the user just used")
+    expect(prompt).not.toContain("Respond to the user in Tagalog")
   })
 
   it("caps over-long profile fields and drops empty ones (never trust the client)", () => {
@@ -172,7 +175,7 @@ describe("buildSystemPrompt — role filtering", () => {
   it("adds no profile block when none is supplied", () => {
     const prompt = buildSystemPrompt({ ...baseCtx, roleLevel: 400 })
     expect(prompt).not.toContain("## Translator profile")
-    expect(prompt).not.toContain("Respond to the user in")
+    expect(prompt).not.toContain("fallback conversation language")
   })
 
   it("grounds the situation when a file is focused — name, kind, and relative-reference rule", () => {

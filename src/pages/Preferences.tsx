@@ -56,7 +56,11 @@ const PROFILE_TEXT_FIELDS: {
   label: string
   placeholder: string
 }[] = [
-  { key: "responseLanguage", label: "Assistant language", placeholder: "e.g. Tagalog — the AI replies in this language" },
+  {
+    key: "responseLanguage",
+    label: "Fallback assistant language",
+    placeholder: "e.g. Tagalog — used only when your message's language is unclear",
+  },
   { key: "age", label: "Age", placeholder: "e.g. 32" },
   { key: "gender", label: "Gender", placeholder: "e.g. Female" },
   { key: "educationLevel", label: "Level of education", placeholder: "e.g. High school" },

@@ -59,6 +59,14 @@ export interface AquiferProposalItem {
   proposal: AquiferPublishProposal
 }
 
+export interface FocusItem {
+  id: string
+  kind: "focus"
+  fileId: string
+  fileName: string
+  cellId?: string
+}
+
 /**
  * One `run_code` sandbox call (AQU-AGENT §2/§4). `tool.code.start`/
  * `tool.code.output` carry no step counter (unlike code_start/code_result),
@@ -120,6 +128,7 @@ export type TimelineItem =
   | ChangesetItem
   | MemoryProposedItem
   | BriefProposedItem
+  | FocusItem
 
 export type AgentRunStatus = "running" | "ok" | "capped" | "error"
 
@@ -196,6 +205,14 @@ export function reduceRunFrame(run: AgentRunUi, frame: AgentFrame): AgentRunUi {
   switch (frame.type) {
     case "run_start":
       return { ...run, runId: frame.runId }
+    case "focus_changed":
+      return appendItem(run, {
+        id: nextId(run),
+        kind: "focus",
+        fileId: frame.fileId,
+        fileName: frame.fileName,
+        cellId: frame.cellId,
+      })
     case "assistant_delta": {
       const last = run.items[run.items.length - 1]
       if (last?.kind === "text") {

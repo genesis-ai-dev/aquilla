@@ -116,6 +116,43 @@ describe("POST /api/v1/ai/agent/run — access control", () => {
   })
 })
 
+describe("POST /api/v1/ai/agent/run — conversation language", () => {
+  it("keeps an English user message conversationally English in an Urdu translation project", async () => {
+    await seedProjectWorld()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_settings (project_id, settings, version, updated_by) VALUES (?, ?, 1, 2)",
+    )
+      .bind(PROJECT, JSON.stringify({ sourceLanguage: "English", targetLanguage: "Urdu" }))
+      .run()
+    const jwt = await jwtFor("alice")
+
+    const upstreamBodies: { messages: { role: string; content: string }[] }[] = []
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+      upstreamBodies.push(JSON.parse(String(init?.body)))
+      return modelTurn({ role: "assistant", content: "Hello! How can I help?" })
+    })
+
+    const res = await postRun(jwt, {
+      projectId: PROJECT,
+      messages: [{ role: "user", content: "hello" }],
+    })
+    expect(res.status).toBe(200)
+    await res.text()
+
+    const systemMessages = upstreamBodies[0].messages
+      .filter((message) => message.role === "system")
+      .map((message) => message.content)
+    expect(systemMessages).toHaveLength(2)
+    expect(systemMessages[0]).toContain("from English into Urdu")
+    expect(systemMessages[0]).toContain("language for translation output, not ordinary conversation")
+    expect(systemMessages[1]).toContain("language of the user's latest message")
+    expect(systemMessages[1]).toContain("including greetings, headings, explanations, and questions")
+    expect(systemMessages[1]).toContain("Never greet or otherwise converse in that target language")
+    expect(systemMessages[1]).toContain("only if that is also unclear, use English")
+    expect(systemMessages.join("\n")).not.toContain("Reply to the user in Urdu")
+  })
+})
+
 describe("POST /api/v1/ai/agent/run — scripted full loop", () => {
   it("sql → compressed block → emit → proposal frame → done", async () => {
     await seedProjectWorld()

@@ -134,6 +134,7 @@ const DRAFTING_RECIPE = `## Canonical drafting recipe (the 80% case — use this
 Do NOT hand-write translations with propose unless the user asks for a specific wording — draft uses the project's own patterns.`
 
 const TOOLS_CONTRACT = `## Your tools
+- focus({fileId?|fileName?|ref?, cellId?}) — move the user's visible workbench to a file and optional cell/reference. Use when they ask to open, show, navigate to, or work in a file. This is a reversible UI focus change, not a project edit; it also rebinds :file/:cell for later tools.
 - read({fileId?|ref?, filter?, limit?, offset?}) — aligned source/target rows in display order with per-cell status (untranslated | drafted | stale | validated | translated). Scope by ref ("MRK 4", "MRK 4:1-20") or file. START HERE for most tasks.
 - examples({text?|cellIds?, n?}) — approved human translation pairs to imitate, ranked by source similarity. Unreviewed drafts are excluded. Use before writing any translation yourself.
 - search({q, side?, fileId?, limit?}) — full-text search; side: cells (default) | source | target | comments | terms.
@@ -198,7 +199,7 @@ export interface AgentPromptContext {
     geographicalSetting?: string
     otherInfo?: string
   }
-  /** Language the agent should reply in (driven by the profile). */
+  /** Fallback reply language when the user's conversational language is unclear. */
   responseLanguage?: string
   /** project_settings.translationBrief.l1Summary — the brief's resident summary. */
   briefSummary?: string
@@ -239,7 +240,7 @@ function translatorProfileBlock(ctx: AgentPromptContext): string {
     block += `\n\n## Translator profile (the person you are assisting — tailor depth, examples, and application to them)\n${JSON.stringify(clean, null, 2)}`
   }
   if (language) {
-    block += `\n\nRespond to the user in ${language}.`
+    block += `\n\nUse ${language} only as the fallback conversation language when the user's recent messages are too ambiguous to identify their language. Otherwise, reply in the language the user just used.`
   }
   return block
 }
@@ -286,7 +287,7 @@ ${kinds.map((k) => `- ${EVENT_LINES[k]}`).join("\n")}${
         }`
 
   const languagePair = ctx.targetLanguage
-    ? ` The project translates ${ctx.sourceLanguage ? `from ${ctx.sourceLanguage} ` : ""}into ${ctx.targetLanguage} — never ask the user what language to translate into.`
+    ? ` The project translates ${ctx.sourceLanguage ? `from ${ctx.sourceLanguage} ` : ""}into ${ctx.targetLanguage} — this is the language for translation output, not ordinary conversation. Never ask the user what language to translate into.`
     : ` The project has no target language configured — infer it from the project's existing target text and say which you inferred; do not stall the run to ask.`
 
   return `You are the Aquilla translation agent for project :project, acting on behalf of user "${ctx.username}" (role: ${roleName}). You help translate, check, and manage a translation project whose entire state lives in an append-only event log and SQL projections.${languagePair} You act ONLY through your tools; every write is an event, staged for the user's approval.${translatorProfileBlock(ctx)}${briefBlock(ctx)}

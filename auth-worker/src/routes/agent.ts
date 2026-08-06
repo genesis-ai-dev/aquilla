@@ -24,7 +24,8 @@ import { stageEvents, type AgentProposal, type EmitStageContext } from "../lib/a
 import { getCookbook } from "../lib/agent/docs"
 import { readModelTurn, type ToolCall, type UpstreamMessage } from "../lib/agent/upstream"
 import { compactConvo, loadSession, saveSession, type StoredMessage } from "../lib/agent/sessions"
-import { executeRead, type ReadArgs } from "../lib/agent/tools/read"
+import { executeRead, resolveScope, type ReadArgs } from "../lib/agent/tools/read"
+import { selectCellPairs } from "../lib/agent/tools/select-cells"
 import { executeExamples, type ExamplesArgs } from "../lib/agent/tools/examples"
 import { executeSearch, type SearchArgs } from "../lib/agent/tools/search"
 import { executeDraft, type DraftArgs } from "../lib/agent/tools/draft"
@@ -92,7 +93,7 @@ const RESULT_SUMMARY_MAX = 2000
 
 // ── SSE frame types (wire contract — keep byte-identical to the plan doc) ──
 
-type CodeKind = "sql" | "emit" | "docs" | "aquifer" | "read" | "examples" | "search" | "draft"
+type CodeKind = "focus" | "sql" | "emit" | "docs" | "aquifer" | "read" | "examples" | "search" | "draft"
 
 /** A researched Q&A the agent wants to publish back to bibletranslation.org.
  *  Unlike an event AgentProposal, applying this does NOT go through the
@@ -109,6 +110,7 @@ export interface AquiferPublishProposal {
 
 type AgentFrame =
   | { type: "run_start"; runId: string; sessionId?: string }
+  | { type: "focus_changed"; fileId: string; fileName: string; cellId?: string }
   | { type: "assistant_delta"; text: string }
   | { type: "code_start"; step: number; kind: CodeKind; summary: string }
   | { type: "code_result"; step: number; ok: boolean; summary: string; data?: ToolResultData }
@@ -147,6 +149,22 @@ const AQUIFER_PROPS = {
 
 function buildTools(bibleResourcesEnabled: boolean) {
   const tools: Record<string, unknown>[] = [
+    {
+      type: "function",
+      function: {
+        name: "focus",
+        description:
+          "Move the user's visible workbench to a project file and optional cell/reference. Use this when the user asks to open, show, navigate to, or work in a file. This changes UI focus only; it does not edit project data.",
+        parameters: {
+          type: "object",
+          properties: {
+            ...SCOPE_PROPS,
+            fileName: { type: "string", description: "File name when no file id/alias is known; exact names are preferred, otherwise a unique partial match is accepted." },
+            cellId: { type: "string", description: "Optional cell id, #c-alias, or :cell." },
+          },
+        },
+      },
+    },
     {
       type: "function",
       function: {
@@ -695,10 +713,9 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
         targetLanguage: languages.targetLanguage,
         bibleResourcesEnabled,
         translatorProfile: body.translatorProfile,
-        // Profile language is the sole driver for the agent — it never had a
-        // response-language setting, and defaulting to the project target
-        // language would force target-language replies on owners/PMs who don't
-        // read it. Unset → current English-default behavior.
+        // The profile language is an ambiguity fallback. The user's latest
+        // message drives ordinary conversation; the project target language
+        // remains reserved for translation output.
         responseLanguage: body.translatorProfile?.responseLanguage,
         briefSummary,
       }),
@@ -708,7 +725,10 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
     // existing schema-card prompt stays byte-identical.
     {
       role: "system" as const,
-      content: buildAugmentSystemPrompt({ memory, workingLanguage: languages.targetLanguage }),
+      content: buildAugmentSystemPrompt({
+        memory,
+        fallbackResponseLanguage: body.translatorProfile?.responseLanguage,
+      }),
     },
     // AQU-AGENT Wave-2 — attached artifacts. The user attached these files in
     // the composer; they're already uploaded as project artifacts. Tell the
@@ -1018,6 +1038,116 @@ async function runSqlTool(sql: string, t: ToolCallEnv): Promise<string> {
   return text
 }
 
+/** Move the client workbench's visible file/cell without writing project data.
+ * The focused ids also rebind :file/:cell for subsequent tools in this run. */
+async function runFocusTool(args: Record<string, unknown>, t: ToolCallEnv): Promise<string> {
+  t.send({
+    type: "code_start",
+    step: t.step,
+    kind: "focus",
+    summary: String(args.ref ?? args.fileName ?? args.fileId ?? "project file").slice(0, 120),
+  })
+
+  let scopedArgs: { fileId?: unknown; ref?: unknown } = { fileId: args.fileId, ref: args.ref }
+  if (args.fileName !== undefined && args.fileId === undefined && args.ref === undefined) {
+    if (typeof args.fileName !== "string" || !args.fileName.trim()) {
+      const msg = "error: fileName must be a non-empty string"
+      t.send({ type: "code_result", step: t.step, ok: false, summary: msg })
+      return msg
+    }
+    const matches = await t.env.AQUILLA_PG.prepare(
+        `SELECT id, name FROM files
+       WHERE project_id = ? AND deleted_at IS NULL AND name ILIKE ?
+       ORDER BY CASE WHEN lower(name) = lower(?) THEN 0 ELSE 1 END, length(name), name
+       LIMIT 2`,
+      )
+      .bind(t.stageCtx.projectId, `%${args.fileName.trim()}%`, args.fileName.trim())
+      .all<{ id: string; name: string }>()
+    if (matches.results.length === 0) {
+      const msg = `error: no project file matches "${args.fileName.trim()}"`
+      t.send({ type: "code_result", step: t.step, ok: false, summary: msg })
+      return msg
+    }
+    const requestedName = args.fileName.trim().toLocaleLowerCase()
+    const exact = matches.results.find((row) => row.name.toLocaleLowerCase() === requestedName)
+    if (!exact && matches.results.length > 1) {
+      const msg = `error: file name is ambiguous — matches ${matches.results.map((row) => row.name).join(", ")}`
+      t.send({ type: "code_result", step: t.step, ok: false, summary: msg })
+      return msg
+    }
+    scopedArgs = { fileId: (exact ?? matches.results[0]).id }
+  }
+
+  const scope = await resolveScope(t.env.AQUILLA_PG, scopedArgs, {
+    projectId: t.stageCtx.projectId,
+    focusedFileId: t.stageCtx.fileId,
+    aliases: t.aliases,
+  })
+  if (!scope.ok) {
+    const msg = `error: ${scope.error}`
+    t.send({ type: "code_result", step: t.step, ok: false, summary: msg })
+    return msg
+  }
+
+  const file = await t.env.AQUILLA_PG.prepare(
+    "SELECT id, name FROM files WHERE project_id = ? AND id = ? AND deleted_at IS NULL",
+  )
+    .bind(t.stageCtx.projectId, scope.fileId)
+    .first<{ id: string; name: string }>()
+  if (!file) {
+    const msg = "error: focused file does not exist in this project"
+    t.send({ type: "code_result", step: t.step, ok: false, summary: msg })
+    return msg
+  }
+
+  let cellId: string | undefined
+  if (args.cellId !== undefined) {
+    if (typeof args.cellId !== "string") {
+      const msg = "error: cellId must be a string"
+      t.send({ type: "code_result", step: t.step, ok: false, summary: msg })
+      return msg
+    }
+    if (args.cellId === ":cell") cellId = t.stageCtx.cellId
+    else if (AliasMap.isAlias(args.cellId)) cellId = t.aliases.resolve(args.cellId)
+    else cellId = args.cellId
+    if (!cellId) {
+      const msg = `error: ${args.cellId === ":cell" ? ":cell is not bound" : `unknown cell ${args.cellId}`}`
+      t.send({ type: "code_result", step: t.step, ok: false, summary: msg })
+      return msg
+    }
+    const exists = await t.env.AQUILLA_PG.prepare(
+      "SELECT cell_id FROM cells WHERE project_id = ? AND file_id = ? AND cell_id = ? LIMIT 1",
+    )
+      .bind(t.stageCtx.projectId, file.id, cellId)
+      .first<{ cell_id: string }>()
+    if (!exists) {
+      const msg = "error: cell does not belong to the focused file"
+      t.send({ type: "code_result", step: t.step, ok: false, summary: msg })
+      return msg
+    }
+  } else if (scope.range) {
+    const pairs = await selectCellPairs(t.env.AQUILLA_PG, t.stageCtx.projectId, scope)
+    cellId = pairs[0]?.cellId
+  }
+
+  t.stageCtx.fileId = file.id
+  t.stageCtx.cellId = cellId
+  t.sqlVars.fileId = file.id
+  t.sqlVars.cellId = cellId
+  t.aliases.alias(file.id, "f")
+  if (cellId) t.aliases.alias(cellId, "c")
+
+  t.send({
+    type: "focus_changed",
+    fileId: file.id,
+    fileName: file.name,
+    ...(cellId ? { cellId } : {}),
+  })
+  const msg = `Focused ${file.name}${cellId ? " at the requested cell" : ""}. Subsequent :file/:cell references now use this focus.`
+  t.send({ type: "code_result", step: t.step, ok: true, summary: msg })
+  return msg
+}
+
 async function runEmitTool(events: unknown[], t: ToolCallEnv): Promise<string> {
   t.send({ type: "code_start", step: t.step, kind: "emit", summary: `${events.length} events` })
   const { proposal, modelVerdictBlock } = await stageEvents(t.env.AQUILLA_PG, events, t.stageCtx)
@@ -1162,6 +1292,8 @@ async function executeToolCall(call: ToolCall, t: ToolCallEnv): Promise<string> 
   }
 
   switch (call.function.name) {
+    case "focus":
+      return runFocusTool(args, t)
     case "read":
       return runReadTool(args as ReadArgs, t)
     case "examples":

@@ -36,6 +36,12 @@ function row(overrides: Partial<WorkingSetRow>): WorkingSetRow {
 const strikethroughs = (container: HTMLElement) => container.querySelectorAll(".line-through")
 
 describe("pending-diff rendering", () => {
+  it("can render target-only when source lives in the adjacent workbench pane", () => {
+    render(<WorkingSetPanel rows={[row({})]} showSource={false} title="Target" />)
+    expect(screen.getByLabelText("Target review pane")).toHaveTextContent("nuevo")
+    expect(screen.getByLabelText("Target review pane")).not.toHaveTextContent("The beginning")
+  })
+
   it("shows only the proposed text for an empty cell — no crossed-out copy", () => {
     const { container } = render(<WorkingSetPanel rows={[row({ target: "" })]} />)
     expect(screen.getAllByText("nuevo")).toHaveLength(1)

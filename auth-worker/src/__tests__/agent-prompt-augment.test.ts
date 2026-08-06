@@ -47,3 +47,26 @@ describe("buildAugmentSystemPrompt — memory index", () => {
     expect(prompt).toContain("read_memory")
   })
 })
+
+describe("buildAugmentSystemPrompt — conversation language", () => {
+  it("keeps conversational replies aligned with the user instead of the translation target", () => {
+    const prompt = buildAugmentSystemPrompt({ memory: ctx([]) })
+
+    expect(prompt).toContain("language of the user's latest message")
+    expect(prompt).toContain("including greetings, headings, explanations, and questions")
+    expect(prompt).toContain("Translation drafts, explicitly quoted translation examples")
+    expect(prompt).toContain("Never greet or otherwise converse in that target language")
+    expect(prompt).toContain("only if that is also unclear, use English")
+    expect(prompt).not.toContain("project's working language")
+  })
+
+  it("uses the translator preference only as an ambiguity fallback", () => {
+    const prompt = buildAugmentSystemPrompt({
+      memory: ctx([]),
+      fallbackResponseLanguage: "Tagalog",
+    })
+
+    expect(prompt).toContain("only if that is also unclear, use Tagalog")
+    expect(prompt).not.toContain("Reply to the user in Tagalog")
+  })
+})

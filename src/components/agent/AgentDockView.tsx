@@ -78,6 +78,12 @@ export interface AgentDockViewProps {
   /** Workbench seam: jump to the Memory tab from a memory/brief proposal
    *  notice. Omitted in the dock panel, which has no Memory tab. */
   onReviewMemory?: () => void
+  /** Workbench seam: open the file explorer used to choose context. */
+  onChooseContext?: () => void
+  /** Reversible UI navigation requested by the agent's focus tool. */
+  onFocusChange?: (fileId: string, cellId?: string, fileName?: string) => void
+  /** The workbench places its file picker in the pane header. */
+  hideContextPin?: boolean
 }
 
 export function AgentDockView({
@@ -98,6 +104,9 @@ export function AgentDockView({
   onPendingChipConsumed,
   renderProposalOverride,
   onReviewMemory,
+  onChooseContext,
+  onFocusChange,
+  hideContextPin = false,
 }: AgentDockViewProps) {
   const { state, send, stop, noteActivity } = useAgentSession(projectId)
   const [includeContext, setIncludeContext] = useState(true)
@@ -156,6 +165,7 @@ export function AgentDockView({
         wire,
         display,
         jwt,
+        onFocusChange,
         request: {
           projectId,
           ...(includeContext && (context.fileId || context.cellId)
@@ -168,7 +178,7 @@ export function AgentDockView({
       // Attachments belong to the message that carried them — clear after send.
       if (attachments.length > 0) setAttachments([])
     },
-    [jwt, send, projectId, includeContext, context, attachments],
+    [jwt, send, projectId, includeContext, context, attachments, onFocusChange],
   )
 
   // Run a prompt handed in from a suggested action (tapped in chat mode, which
@@ -202,13 +212,16 @@ export function AgentDockView({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <ChatContextPin
-        includeCellContext={includeContext}
-        onToggle={setIncludeContext}
-        currentCell={currentCell}
-        fileName={fileName}
-        compact
-      />
+      {!hideContextPin && (
+        <ChatContextPin
+          includeCellContext={includeContext}
+          onToggle={setIncludeContext}
+          currentCell={currentCell}
+          fileName={fileName}
+          onChooseContext={onChooseContext}
+          compact
+        />
+      )}
 
       {state.runs.length === 0 ? (
         jwt ? (

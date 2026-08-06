@@ -115,4 +115,31 @@ describe("OrgBreadcrumb", () => {
     const fades = container.querySelectorAll('[data-slot="breadcrumb"] > span[aria-hidden]')
     expect(fades).toHaveLength(2)
   })
+
+  it("compacts the project location while keeping the full hierarchy inspectable", async () => {
+    renderBreadcrumb(
+      <OrgBreadcrumb
+        compact
+        orgId={7}
+        section="Dev Project"
+        sectionTo="/projects/project-1"
+        trail={[{ label: "Agent" }]}
+      />,
+      "/project/project-1/agent",
+    )
+
+    const trigger = screen.getByRole("button", { name: "Inspect workspace location" })
+    expect(trigger).toHaveTextContent("Dev Project")
+    expect(trigger).toHaveTextContent("Agent")
+    expect(screen.queryByRole("navigation", { name: "Full workspace location" })).not.toBeInTheDocument()
+
+    fireEvent.click(trigger)
+
+    const fullLocation = await screen.findByRole("navigation", { name: "Full workspace location" })
+    expect(fullLocation).toHaveTextContent("All organizations")
+    expect(fullLocation).toHaveTextContent("Dev Org")
+    expect(fullLocation).toHaveTextContent("Dev Project")
+    expect(fullLocation).toHaveTextContent("Agent")
+    expect(fullLocation.querySelector('[aria-current="page"]')).toHaveTextContent("Agent")
+  })
 })

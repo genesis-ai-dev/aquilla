@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react"
+import { ChevronDown } from "lucide-react"
 import { Link, useLocation } from "react-router-dom"
 import { useActiveOrg } from "@/context/OrgContext"
 import { ALL_ORGS_PARAM, orgHomePath, parseOrgPath } from "@/lib/navigation/org-paths"
@@ -11,6 +12,13 @@ import {
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb"
 import { AppTooltip } from "@/components/ui/tooltip"
+import {
+  Popover,
+  PopoverContent,
+  PopoverHeader,
+  PopoverTitle,
+  PopoverTrigger,
+} from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
 
 interface OrgBreadcrumbParent {
@@ -33,6 +41,8 @@ interface OrgBreadcrumbProps {
   orgId?: number | null
   /** Segments after section (e.g. open file, current book/chapter). Last is current page. */
   trail?: OrgBreadcrumbTrailSegment[]
+  /** Collapse the trail into an inspectable location control for dense toolbars. */
+  compact?: boolean
 }
 
 interface Crumb {
@@ -106,7 +116,7 @@ function renderCrumbItem(crumb: Crumb, key: string) {
   )
 }
 
-export function OrgBreadcrumb({ parent, section, sectionTo, orgId, trail = [] }: OrgBreadcrumbProps) {
+export function OrgBreadcrumb({ parent, section, sectionTo, orgId, trail = [], compact = false }: OrgBreadcrumbProps) {
   const { activeOrgId, isAllOrgs, orgs, guestOrgs, setActiveOrg, setAllOrgs } = useActiveOrg()
   const location = useLocation()
   const scrollRef = useRef<HTMLOListElement | null>(null)
@@ -197,6 +207,7 @@ export function OrgBreadcrumb({ parent, section, sectionTo, orgId, trail = [] }:
 
   // Stable key so parent re-renders with a fresh `trail` array don't reset scroll.
   const crumbKey = crumbs.map((crumb) => crumb.label).join("\0")
+  const pathLabel = crumbs.map((crumb) => crumb.label).join(" › ")
 
   const updateScrollEdges = useCallback(() => {
     const el = scrollRef.current
@@ -216,6 +227,60 @@ export function OrgBreadcrumb({ parent, section, sectionTo, orgId, trail = [] }:
     ro.observe(el)
     return () => ro.disconnect()
   }, [updateScrollEdges, crumbKey])
+
+  if (compact) {
+    const currentLabel = crumbs.at(-1)?.label
+    return (
+      <Popover>
+        <PopoverTrigger
+          render={
+            <button
+              type="button"
+              aria-label="Inspect workspace location"
+              title={pathLabel}
+              className="flex h-7 min-w-0 max-w-56 items-center gap-1.5 rounded-md px-2 text-left text-xs text-foreground outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/50"
+            />
+          }
+        >
+          <span className="min-w-0 truncate font-medium">{section}</span>
+          {currentLabel && currentLabel !== section && (
+            <span className="hidden shrink-0 text-[10px] text-muted-foreground sm:inline">· {currentLabel}</span>
+          )}
+          <ChevronDown className="size-3 shrink-0 text-muted-foreground" />
+        </PopoverTrigger>
+        <PopoverContent align="start" className="w-64 gap-1 p-2">
+          <PopoverHeader className="px-2 pb-1 pt-0.5">
+            <PopoverTitle className="text-[11px] text-muted-foreground">Workspace location</PopoverTitle>
+          </PopoverHeader>
+          <nav aria-label="Full workspace location" className="flex flex-col gap-0.5">
+            {crumbs.map((crumb, index) => {
+              const className = cn(
+                "flex min-h-8 items-center rounded-md px-2 text-xs outline-none",
+                crumb.isCurrent
+                  ? "bg-accent font-medium text-foreground"
+                  : "text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50",
+              )
+              const label = (
+                <>
+                  <span aria-hidden className="mr-2 w-3 text-center text-[10px] text-muted-foreground/60">
+                    {index === crumbs.length - 1 ? "•" : "›"}
+                  </span>
+                  <span className="min-w-0 truncate">{crumb.label}</span>
+                </>
+              )
+              if (crumb.to) {
+                return <Link key={`${crumb.label}-${index}`} to={crumb.to} onClick={crumb.onClick} className={className}>{label}</Link>
+              }
+              if (crumb.onClick) {
+                return <button key={`${crumb.label}-${index}`} type="button" onClick={crumb.onClick} className={className}>{label}</button>
+              }
+              return <div key={`${crumb.label}-${index}`} aria-current={crumb.isCurrent ? "page" : undefined} className={className}>{label}</div>
+            })}
+          </nav>
+        </PopoverContent>
+      </Popover>
+    )
+  }
 
   return (
     <Breadcrumb className="relative min-w-0 px-3">

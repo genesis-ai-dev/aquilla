@@ -10,7 +10,8 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { act, render, screen, fireEvent, waitFor, within } from "@testing-library/react"
+import type { Editor } from "@tiptap/core"
 import type { AgentFrame } from "@/lib/agent/protocol"
 
 // Stub the chat rail but keep the workbench seam: render each proposal
@@ -144,6 +145,18 @@ function workbenchProps(): AgentWorkbenchProps {
       onApplied: vi.fn(),
     },
     onClose: () => {},
+    onChooseFile: vi.fn(),
+    workspace: {
+      fileName: "Mark.md",
+      sourceLanguage: "English",
+      targetLanguage: "Italian",
+      focusedCellId: "c1",
+      totalCells: 2,
+      cells: [
+        { cellId: "c1", fileId: "f1", ref: "MRK 1:1", source: "The beginning", target: "L'inizio", status: "unvalidated" },
+        { cellId: "c2", fileId: "f1", ref: "MRK 1:2", source: "As it is written", target: "", status: "empty" },
+      ],
+    },
   }
 }
 
@@ -160,25 +173,35 @@ async function primeSessionWithDraftRun(): Promise<void> {
 
 beforeEach(() => {
   agentSessionStore(PROJECT).reset()
+  window.localStorage.clear()
 })
 
-describe("AgentWorkbench layout (chat spine vs stage)", () => {
-  it("an empty session is a single centered chat column — no empty grid", () => {
+describe("AgentWorkbench three-pane layout", () => {
+  it("keeps source, Agent, and target visible before the first prompt", () => {
     render(<AgentWorkbench {...workbenchProps()} />)
-    // No working-set stage until there's an artifact to review.
-    expect(screen.queryByLabelText("Working set")).toBeNull()
-    expect(screen.queryByText(/cells the agent reads and drafts appear here/)).toBeNull()
+    expect(screen.getByLabelText("Source pane")).toBeInTheDocument()
+    expect(screen.getByLabelText("Agent pane")).toBeInTheDocument()
+    expect(screen.getByLabelText("Target pane")).toBeInTheDocument()
+    expect(screen.getByText("The beginning")).toBeInTheDocument()
+    expect(screen.getByText("L'inizio")).toBeInTheDocument()
+    expect(screen.getAllByRole("separator")).toHaveLength(2)
   })
 
-  it("summons the working-set stage once the run STAGES drafts", async () => {
+  it("shows the active filename once in the workbench chrome", () => {
+    render(<AgentWorkbench {...workbenchProps()} />)
+    expect(screen.getAllByText("Mark.md")).toHaveLength(1)
+  })
+
+  it("turns the target pane into the existing review editor when the agent stages drafts", async () => {
     await primeSessionWithDraftRun()
     render(<AgentWorkbench {...workbenchProps()} />)
-    expect(screen.getByLabelText("Working set")).toBeInTheDocument()
+    expect(screen.getByLabelText("Target review pane")).toBeInTheDocument()
+    expect(screen.getByLabelText("Source pane")).toHaveTextContent("The house is red")
+    // Source has its own stable pane, so review rows do not duplicate it.
+    expect(screen.getByLabelText("Target review pane")).not.toHaveTextContent("The house is red")
   })
 
-  it("a read-only run stays in the chat spine — passage cards, no grid", async () => {
-    // Reads render as PassageCards in the conversation; mirroring them into
-    // the stage was the double-display the user report flagged.
+  it("a read-only run leaves the workspace context in place", async () => {
     scriptedFrames = [
       { type: "run_start", runId: "run-r" },
       { type: "code_start", step: 1, kind: "read", summary: ":file" },
@@ -200,7 +223,44 @@ describe("AgentWorkbench layout (chat spine vs stage)", () => {
     await waitFor(() => expect(agentSessionStore(PROJECT).getState().isStreaming).toBe(false))
 
     render(<AgentWorkbench {...workbenchProps()} />)
-    expect(screen.queryByLabelText("Working set")).toBeNull()
+    expect(screen.getByLabelText("Source pane")).toHaveTextContent("The beginning")
+    expect(screen.getByLabelText("Target pane")).toHaveTextContent("L'inizio")
+  })
+
+  it("keeps the header focused on session actions while panes remain manually resizable", () => {
+    render(<AgentWorkbench {...workbenchProps()} />)
+    const toolbar = screen.getByRole("group", { name: "Agent workbench toolbar" })
+    expect(within(toolbar).getByRole("tab", { name: "Sessions" })).toBeInTheDocument()
+    expect(within(toolbar).getByRole("tab", { name: "Memory" })).toBeInTheDocument()
+    expect(within(toolbar).getByRole("button", { name: "New session" })).toBeInTheDocument()
+    expect(within(toolbar).getByRole("button", { name: "Close workbench" })).toHaveTextContent("Editor")
+    expect(within(screen.getByLabelText("Agent pane")).getByRole("button", { name: "Change agent file" }))
+      .toHaveTextContent("Change file")
+    expect(screen.queryByRole("button", { name: /layout/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /source pane/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /target pane/i })).not.toBeInTheDocument()
+    expect(screen.getAllByRole("separator")).toHaveLength(2)
+  })
+
+  it("reuses the translation editor and sends its rich snapshot through the workspace commit path", async () => {
+    const props = workbenchProps()
+    const onCommitTarget = vi.fn()
+    props.workspace = { ...props.workspace!, editable: true, onCommitTarget }
+    const { container } = render(<AgentWorkbench {...props} />)
+
+    fireEvent.click(screen.getByRole("textbox", { name: "MRK 1:1 — unvalidated" }))
+    await act(async () => { await Promise.resolve() })
+    const editorSurface = container.querySelector(".ProseMirror") as HTMLElement & { editor?: Editor }
+    expect(editorSurface).toHaveAttribute("contenteditable", "true")
+
+    act(() => {
+      editorSurface.editor?.commands.setContent("Workbench correction")
+      fireEvent.blur(editorSurface)
+    })
+    await waitFor(() => expect(onCommitTarget).toHaveBeenCalledWith("c1", expect.objectContaining({
+      value: "Workbench correction",
+      valueHtml: expect.stringContaining("Workbench correction"),
+    })))
   })
 })
 

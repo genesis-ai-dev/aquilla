@@ -17,6 +17,7 @@ import {
   ChevronRight,
   Database,
   FileText,
+  FolderOpen,
   PenLine,
   Quote,
   Search,
@@ -38,6 +39,7 @@ import { CodeActivityBlock } from "./CodeActivityBlock"
 import { BriefProposalNotice, MemoryProposalNotice } from "./MemoryProposalNotice"
 
 const TOOL_ICON: Record<ToolKind, typeof Database> = {
+  focus: FolderOpen,
   sql: Database,
   emit: Send,
   docs: FileText,
@@ -49,6 +51,7 @@ const TOOL_ICON: Record<ToolKind, typeof Database> = {
 }
 
 const TOOL_LABEL: Record<ToolKind, string> = {
+  focus: "focus",
   sql: "sql",
   emit: "stage",
   docs: "docs",
@@ -167,6 +170,13 @@ export function AgentRunView({
             return <MemoryProposalNotice key={item.id} item={item} onReviewMemory={onReviewMemory} />
           case "brief-proposed":
             return <BriefProposalNotice key={item.id} item={item} onReviewMemory={onReviewMemory} />
+          case "focus":
+            return (
+              <Marker key={item.id} role="status">
+                <MarkerIcon><FolderOpen /></MarkerIcon>
+                <MarkerContent>Focused {item.fileName}</MarkerContent>
+              </Marker>
+            )
         }
       })}
 

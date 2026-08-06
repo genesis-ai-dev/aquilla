@@ -1,9 +1,10 @@
 /**
  * translator-profile.ts — user-level translator profile.
  *
- * A per-user profile describing the translator (response language + demographics)
+ * A per-user profile describing the translator (fallback response language + demographics)
  * that is injected as JSON into the AI chat and agent system prompts so summaries
- * and answers are tailored to them, and so replies come back in their language.
+ * and answers are tailored to them. Conversation otherwise follows the language
+ * of the user's latest message.
  *
  * STORAGE: device-scoped localStorage today, behind this module's
  * get/set/subscribe boundary. Server-sync progression path: persist under
@@ -22,7 +23,7 @@ const CHANGE_EVENT = "codex:translator-profile-changed"
 export const MAX_PROFILE_FIELD_CHARS = 280
 
 export interface TranslatorProfile {
-  /** Language the AI should reply in, e.g. "Tagalog". The one functionally-wired field. */
+  /** Fallback reply language for messages whose language is ambiguous, e.g. "Tagalog". */
   responseLanguage?: string
   age?: string
   gender?: string
@@ -105,7 +106,7 @@ export function profileForPrompt(profile: TranslatorProfile | null | undefined):
 }
 
 /**
- * Resolve the language the AI should reply in.
+ * Resolve the fallback language for an ambiguous conversational message.
  * Precedence (approved): the user's profile language wins; the project's
  * `main_chat_language` is the fallback; otherwise undefined (model default).
  */
@@ -119,7 +120,7 @@ export function effectiveResponseLanguage(
 }
 
 /**
- * The system-prompt fragment describing the translator + the language to reply in.
+ * The system-prompt fragment describing the translator + fallback reply language.
  * Returns "" when there is nothing to say. JSON-encodes the profile so the model
  * gets unambiguous key/values.
  *
@@ -141,7 +142,7 @@ export function translatorProfilePromptBlock(
       JSON.stringify(clean, null, 2)
   }
   if (language) {
-    block += `\n\nRespond to the user in ${language}.`
+    block += `\n\nUse ${language} only as the fallback conversation language when the user's recent messages are too ambiguous to identify their language. Otherwise, reply in the language the user just used.`
   }
   return block
 }

@@ -43,6 +43,84 @@ export class AgentPage {
     await this.page.getByRole("button", { name: "Close workbench" }).click()
   }
 
+  async startNewSession(): Promise<void> {
+    await this.page.getByRole("button", { name: "New session" }).click()
+    await expect(this.page.getByRole("region", { name: "Target pane" })).toBeVisible()
+  }
+
+  /** The full-screen contract: the document remains visible around the agent and
+   * both dividers are keyboard-accessible separators. */
+  async expectThreePaneWorkbench(): Promise<void> {
+    const workspaceHeader = this.page.getByRole("banner")
+    const toolbar = workspaceHeader.getByRole("group", { name: "Agent workbench toolbar" })
+    await expect(toolbar.getByRole("tab", { name: "Sessions" })).toBeVisible()
+    await expect(toolbar.getByRole("tab", { name: "Memory" })).toBeVisible()
+    await expect(toolbar.getByRole("button", { name: "New session" })).toBeVisible()
+    await expect(toolbar.getByRole("button", { name: "Close workbench" })).toHaveText("Editor")
+    await expect(this.page.getByRole("main").getByRole("group", { name: "Agent workbench toolbar" })).toHaveCount(0)
+    const location = workspaceHeader.getByRole("button", { name: "Inspect workspace location" })
+    await expect(location).toBeVisible()
+    await location.click()
+    await expect(this.page.getByRole("navigation", { name: "Full workspace location" })).toBeVisible()
+    await this.page.keyboard.press("Escape")
+    await expect(this.page.getByRole("region", { name: "Source pane" })).toBeVisible()
+    await expect(this.page.getByRole("region", { name: "Agent pane" })).toBeVisible()
+    await expect(this.page.getByRole("region", { name: /Target (pane|review pane)/ })).toBeVisible()
+    await expect(this.page.getByRole("separator", { name: /Resize .* panes/ })).toHaveCount(2)
+  }
+
+  /** The conversation owns a bounded viewport inside the middle pane. This
+   * catches flex-height regressions where content is clipped by the panel and
+   * wheel/trackpad input cannot move the agent timeline. */
+  async expectAgentTimelineScrollable(): Promise<void> {
+    const viewport = this.page.locator('[data-slot="message-scroller-viewport"]')
+    await expect(viewport).toBeVisible()
+    await expect.poll(
+      () => viewport.evaluate((element) => element.scrollHeight > element.clientHeight),
+      { timeout: 10_000 },
+    ).toBe(true)
+
+    const before = await viewport.evaluate((element) => element.scrollTop)
+    await viewport.hover()
+    await this.page.mouse.wheel(0, 400)
+    await expect.poll(() => viewport.evaluate((element) => element.scrollTop)).toBeGreaterThan(before)
+  }
+
+  /** Use the workbench context control as a file picker. Selection keeps the
+   * `/agent` route and loads the same file into both document panes. */
+  async chooseWorkbenchFile(nameSubstring: string): Promise<void> {
+    await this.page.getByRole("button", { name: /(?:Choose|Change) agent file/ }).click()
+    const file = this.page
+      .locator("aside")
+      .locator('[data-showcase="sidebar.file"]')
+      .filter({ has: this.page.getByRole("button", { name: new RegExp(nameSubstring, "i") }) })
+    await expect(file).toBeVisible()
+    await file.click()
+    await expect(this.page).toHaveURL(/\/agent$/)
+  }
+
+  async expectWorkbenchFile(fileName: RegExp, sourceText: string): Promise<void> {
+    const source = this.page.getByRole("region", { name: "Source pane" })
+    const target = this.page.getByRole("region", { name: "Target pane" })
+    await expect(this.page.getByTestId("agent-workbench-file-name")).toHaveText(fileName, { timeout: 30_000 })
+    await expect(this.page.getByRole("button", { name: "Change agent file" })).toHaveText("Change file")
+    await expect(source.getByText(fileName)).toHaveCount(0)
+    await expect(target.getByText(fileName)).toHaveCount(0)
+    await expect(source.getByText(sourceText, { exact: false })).toBeVisible({ timeout: 30_000 })
+  }
+
+  /** Edit a committed target directly in the workbench using the same
+   * TranslatedEditor surface and outbox path as the main translation grid. */
+  async editFirstWorkbenchTarget(value: string): Promise<void> {
+    const targetPane = this.page.getByRole("region", { name: "Target pane" })
+    const target = targetPane.getByRole("textbox").first()
+    await target.click()
+    await expect(target).toHaveAttribute("contenteditable", "true")
+    await target.fill(value)
+    await target.press("Escape")
+    await expect(targetPane.getByText(value, { exact: true })).toBeVisible({ timeout: 15_000 })
+  }
+
   // ── Session + attachment ──────────────────────────────────────────────
 
   /** Type a prompt into the agent composer and submit it. Shared by both

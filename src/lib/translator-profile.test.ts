@@ -65,7 +65,7 @@ describe("isProfileEmpty / profileForPrompt", () => {
   })
 })
 
-describe("effectiveResponseLanguage — profile overrides project", () => {
+describe("effectiveResponseLanguage — ambiguity fallback", () => {
   it("uses the profile language when set, ignoring the project fallback", () => {
     expect(effectiveResponseLanguage({ responseLanguage: "Tagalog" }, "Spanish")).toBe("Tagalog")
   })
@@ -81,17 +81,19 @@ describe("effectiveResponseLanguage — profile overrides project", () => {
 })
 
 describe("translatorProfilePromptBlock", () => {
-  it("renders the profile as JSON and an explicit respond-in line", () => {
+  it("renders the profile as JSON and an explicit fallback-language rule", () => {
     const block = translatorProfilePromptBlock({ age: "32", responseLanguage: "Tagalog" }, "Tagalog")
     expect(block).toContain("## Translator profile")
     expect(block).toContain('"age": "32"')
-    expect(block).toContain("Respond to the user in Tagalog.")
+    expect(block).toContain("Use Tagalog only as the fallback conversation language")
+    expect(block).toContain("reply in the language the user just used")
+    expect(block).not.toContain("Respond to the user in Tagalog")
   })
 
-  it("emits the respond-in line even when the profile is otherwise empty", () => {
+  it("emits the fallback rule even when the profile is otherwise empty", () => {
     const block = translatorProfilePromptBlock({}, "Swahili")
     expect(block).not.toContain("## Translator profile")
-    expect(block).toContain("Respond to the user in Swahili.")
+    expect(block).toContain("Use Swahili only as the fallback conversation language")
   })
 
   it("returns an empty string when there is nothing to say", () => {

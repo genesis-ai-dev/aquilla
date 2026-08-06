@@ -41,6 +41,16 @@ describe("reduceRunFrame", () => {
     expect(run.status).toBe("ok")
   })
 
+  it("keeps agent focus changes in the ordered timeline", () => {
+    const run = fold([
+      { type: "code_start", step: 1, kind: "focus", summary: "Mark" },
+      { type: "focus_changed", fileId: "f1", fileName: "Mark.usfm", cellId: "c1" },
+      { type: "code_result", step: 1, ok: true, summary: "Focused Mark.usfm" },
+    ])
+    expect(run.items.map((item) => item.kind)).toEqual(["tool", "focus"])
+    expect(run.items[1]).toMatchObject({ kind: "focus", fileId: "f1", fileName: "Mark.usfm", cellId: "c1" })
+  })
+
   it("pairs code_result with its step and leaves unresolved steps running", () => {
     const run = fold([
       { type: "code_start", step: 1, kind: "sql", summary: "SELECT 1" },

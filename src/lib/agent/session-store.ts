@@ -42,6 +42,8 @@ export interface AgentSendOptions {
   jwt: string
   /** Everything but sessionId/messages — projectId, context, profile. */
   request: Omit<AgentRunRequest, "sessionId" | "messages">
+  /** Keep the visible workbench in step with an agent-initiated focus change. */
+  onFocusChange?: (fileId: string, cellId?: string, fileName?: string) => void
 }
 
 export interface AgentSessionState {
@@ -270,7 +272,12 @@ export class AgentSessionStore {
         },
         jwt: options.jwt,
         signal: controller.signal,
-        onFrame: (frame) => this.updateRun(run.localId, (r) => reduceRunFrame(r, frame)),
+        onFrame: (frame) => {
+          if (frame.type === "focus_changed") {
+            options.onFocusChange?.(frame.fileId, frame.cellId, frame.fileName)
+          }
+          this.updateRun(run.localId, (r) => reduceRunFrame(r, frame))
+        },
       })
       // Stream closed without a done frame → don't leave a forever-spinner.
       this.updateRun(run.localId, (r) => (r.status === "running" ? { ...r, status: "ok" } : r))

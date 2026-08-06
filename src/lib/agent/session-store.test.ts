@@ -53,6 +53,22 @@ describe("AgentSessionStore", () => {
     expect(store.getState().runs[0].status).toBe("ok")
   })
 
+  it("forwards verified agent focus changes to the workspace callback", async () => {
+    const { impl, calls, finish } = deferredRunAgent()
+    const onFocusChange = vi.fn()
+    const store = new AgentSessionStore(impl)
+    store.send({ ...sendOptions("open Mark"), onFocusChange })
+    await flush()
+
+    calls[0].onFrame({ type: "focus_changed", fileId: "f1", fileName: "Mark.usfm", cellId: "c1" })
+    calls[0].onFrame({ type: "done", runId: "r1", status: "ok" })
+    finish(0)
+    await flush()
+
+    expect(onFocusChange).toHaveBeenCalledWith("f1", "c1", "Mark.usfm")
+    expect(store.getState().runs[0].items).toContainEqual(expect.objectContaining({ kind: "focus", fileId: "f1" }))
+  })
+
   it("queues prompts sent mid-run and dispatches them in order", async () => {
     const { impl, calls, finish } = deferredRunAgent()
     const store = new AgentSessionStore(impl)

@@ -6,12 +6,12 @@
 //   1. project brief — verbatim, marked human-authored
 //   2. approved-memory index — path + first line; full text via read_memory
 //   3. new-tool guidance — sandbox / import / memory tools
-//   4. language rule — scaffolding is English; reply in the working language
+//   4. language rule — conversation follows the user; translation follows the project
 
 import type { MemoryContext } from "../../../../db/shared/agent-memory"
 
-/** Fallback phrasing when no working language is resolvable from settings. */
-const WORKING_LANGUAGE_FALLBACK = "the project's working language"
+/** Default only when the user's conversational language cannot be inferred. */
+const RESPONSE_LANGUAGE_FALLBACK = "English"
 
 /** Max approved-memory entries to render in the index (adversarial-panel
  *  mem-m1). The index is ordered most-recently-updated first; the rest are
@@ -20,8 +20,8 @@ const MEMORY_INDEX_RENDER_CAP = 50
 
 export interface AugmentArgs {
   memory: MemoryContext
-  /** Project working (target) language, if resolvable; else the fallback. */
-  workingLanguage?: string
+  /** User preference used only when recent user messages are too ambiguous. */
+  fallbackResponseLanguage?: string
 }
 
 /**
@@ -79,11 +79,17 @@ export function buildAugmentSystemPrompt(args: AugmentArgs): string {
       "- propose_memory / propose_brief_update STAGE durable notes for human review. While you are parsing untrusted artifact content (after run_code or load_artifact in a turn), these are temporarily disabled.",
   )
 
-  // 4. Language rule (last, so it is the freshest instruction).
-  const lang = args.workingLanguage?.trim() || WORKING_LANGUAGE_FALLBACK
+  // 4. Language separation (last, so it is the freshest instruction). The
+  // project's target language is deliberately absent here: it governs drafted
+  // translation text, never ordinary conversation.
+  const fallbackLanguage = args.fallbackResponseLanguage?.trim() || RESPONSE_LANGUAGE_FALLBACK
   sections.push(
-    "## Language\n" +
-      `All internal scaffolding (tool names, this prompt) is English. Reply to the user in ${lang}.`,
+    "## Conversation and translation languages\n" +
+      "- Reply conversationally in the language of the user's latest message. The entire conversational response — including greetings, headings, explanations, and questions — must use that language. Do this even when it differs from the project's translation target language.\n" +
+      "- If the latest message is too short, non-linguistic, or genuinely ambiguous, infer the language from the user's recent messages; only if that is also unclear, use " +
+      `${fallbackLanguage}.\n` +
+      "- Translation drafts, explicitly quoted translation examples, and other target-text content must still use the project's configured target language. Never greet or otherwise converse in that target language merely because it is the project target.\n" +
+      "- Keep internal scaffolding, tool names, and technical identifiers unchanged.",
   )
 
   return sections.join("\n\n")

@@ -92,6 +92,7 @@ describe("agent route — harness tool registration & dispatch", () => {
     // Tool registration: the served tool list carries every new harness tool.
     const toolNames = (upstreamBodies[0].tools ?? []).map((t) => t.function.name)
     for (const name of [
+      "focus",
       "run_code",
       "load_artifact",
       "read_sandbox_file",
@@ -109,6 +110,49 @@ describe("agent route — harness tool registration & dispatch", () => {
 
     // The run settled ok with a done frame.
     expect(frames.find((f) => f.type === "done")).toMatchObject({ status: "ok" })
+  })
+
+  it("focuses a verified project file and rebinds later tools in the same run", async () => {
+    await seedWorld()
+    const jwt = await jwtFor("alice")
+    const fileId = "33333333-3333-4333-8333-333333333333"
+    const cellId = "44444444-4444-4444-8444-444444444444"
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO files (id, project_id, name, book_code, event_id) VALUES (?, ?, 'Mark.usfm', 'MRK', 'file-event')",
+    ).bind(fileId, PROJECT).run()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO cells (project_id, file_id, cell_id, side, value, canonical_ref, event_id, last_edit_at)
+       VALUES (?, ?, ?, 'source', 'The beginning', 'MRK 1:1', 'source-event', 0),
+              (?, ?, ?, 'target', '', 'MRK 1:1', 'target-event', 0)`,
+    ).bind(PROJECT, fileId, cellId, PROJECT, fileId, cellId).run()
+
+    const focusThenRead = {
+      role: "assistant",
+      content: null,
+      tool_calls: [
+        { id: "f1", type: "function", function: { name: "focus", arguments: JSON.stringify({ fileName: "Mark" }) } },
+        { id: "r1", type: "function", function: { name: "read", arguments: JSON.stringify({ fileId: ":file" }) } },
+      ],
+    }
+    const script: Record<string, unknown>[] = [focusThenRead, { role: "assistant", content: "Mark is open." }]
+    const upstreamBodies: { messages: { role: string; content: string; tool_call_id?: string }[] }[] = []
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+      upstreamBodies.push(JSON.parse(String(init?.body)))
+      return modelTurn(script.shift()!)
+    })
+
+    const res = await postRun(jwt, {
+      projectId: PROJECT,
+      messages: [{ role: "user", content: "Open Mark and show me what is there" }],
+    })
+    const frames = parseFrames(await res.text())
+
+    expect(frames.find((frame) => frame.type === "focus_changed")).toMatchObject({
+      fileId,
+      fileName: "Mark.usfm",
+    })
+    const readResult = upstreamBodies[1].messages.find((message) => message.tool_call_id === "r1")
+    expect(readResult?.content).toContain("The beginning")
   })
 
   it("emits a budget meter and halts with budget.exhausted at the cost cap", async () => {

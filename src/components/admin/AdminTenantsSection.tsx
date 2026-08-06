@@ -1,29 +1,20 @@
-import { useMemo, useState } from "react"
+import { useMemo } from "react"
 import { type ColumnDef } from "@tanstack/react-table"
-import { Building2, ChevronRight, ExternalLink } from "lucide-react"
+import { Building2, ExternalLink } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { DataTable, DataTableColumnHeader } from "@/components/ui/data-table"
 import { DateTooltip } from "@/components/ui/date-tooltip"
 import { EmptyState } from "@/components/ui/empty"
-import { TableCell, TableRow } from "@/components/ui/table"
-import { cn } from "@/lib/utils"
 import type { AdminOrg, AdminTeam } from "@/lib/frontier/admin"
 import { OrgWithAvatar } from "@/components/OrgWithAvatar"
-import { TeamWithAvatar } from "@/components/TeamWithAvatar"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
+import { ADMIN_TABLE_PANEL_CLASS } from "@/components/admin/shared"
 
 /**
- * Tenants — the merge of the old Orgs and Teams tabs. Orgs are the rows;
- * expanding one reveals its teams inline (teams always nest under an org), so
- * the two flat tables become one navigable hierarchy. "Open" drills into the
- * org workspace (platform admins resolve owner-level everywhere).
+ * Tenants — flat cross-tenant list of organizations. Team nesting lives on the
+ * Teams tab; this table only shows a per-org team count. "Open" switches into
+ * the org workspace (platform admins resolve owner-level everywhere).
  */
-
-/** GitLab full_paths lead with the org's own path; drop it so a team reads locally. */
-function relativeTeamPath(name: string): string {
-  const i = name.indexOf("/")
-  return i === -1 ? name : name.slice(i + 1)
-}
 
 export function AdminTenantsSection({
   orgs,
@@ -34,51 +25,16 @@ export function AdminTenantsSection({
   teams: AdminTeam[]
   onOpenOrg: (orgId: number) => void
 }) {
-  const [expanded, setExpanded] = useState<Set<number>>(new Set())
-
-  const teamsByOrg = useMemo(() => {
-    const map = new Map<number, AdminTeam[]>()
+  const teamCountByOrg = useMemo(() => {
+    const map = new Map<number, number>()
     for (const t of teams) {
-      const list = map.get(t.orgId) ?? []
-      list.push(t)
-      map.set(t.orgId, list)
+      map.set(t.orgId, (map.get(t.orgId) ?? 0) + 1)
     }
     return map
   }, [teams])
 
-  const toggle = (orgId: number) =>
-    setExpanded((prev) => {
-      const next = new Set(prev)
-      if (next.has(orgId)) next.delete(orgId)
-      else next.add(orgId)
-      return next
-    })
-
   const columns = useMemo<ColumnDef<AdminOrg>[]>(
     () => [
-      {
-        id: "expand",
-        enableSorting: false,
-        header: () => null,
-        cell: ({ row }) => {
-          const o = row.original
-          const orgTeams = teamsByOrg.get(o.id) ?? []
-          const isOpen = expanded.has(o.id)
-          return (
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-xs"
-              onClick={() => toggle(o.id)}
-              disabled={orgTeams.length === 0}
-              aria-expanded={isOpen}
-              aria-label={isOpen ? `Collapse ${o.name ?? o.id}` : `Expand ${o.name ?? o.id}`}
-            >
-              <ChevronRight className={cn(isOpen && "rotate-90")} />
-            </Button>
-          )
-        },
-      },
       {
         id: "organization",
         accessorFn: (o) => (o.name ?? `#${o.id}`).toLowerCase(),
@@ -122,13 +78,13 @@ export function AdminTenantsSection({
       },
       {
         id: "teams",
-        accessorFn: (o) => (teamsByOrg.get(o.id) ?? []).length,
+        accessorFn: (o) => teamCountByOrg.get(o.id) ?? 0,
         header: ({ column }) => (
           <DataTableColumnHeader column={column} title="Teams" className="justify-end" />
         ),
         cell: ({ row }) => (
           <div className="text-right tabular-nums text-muted-foreground">
-            {(teamsByOrg.get(row.original.id) ?? []).length}
+            {teamCountByOrg.get(row.original.id) ?? 0}
           </div>
         ),
       },
@@ -162,7 +118,7 @@ export function AdminTenantsSection({
         ),
       },
     ],
-    [expanded, onOpenOrg, teamsByOrg],
+    [onOpenOrg, teamCountByOrg],
   )
 
   if (orgs.length === 0) {
@@ -199,35 +155,8 @@ export function AdminTenantsSection({
         </span>
       )}
       testId="admin-tenants-table"
-      renderSubRow={(o) => {
-        const orgTeams = teamsByOrg.get(o.id) ?? []
-        if (!expanded.has(o.id) || orgTeams.length === 0) return null
-        return (
-          <TableRow className="bg-muted/20 hover:bg-muted/20">
-            <TableCell />
-            <TableCell colSpan={7}>
-              <ul className="flex flex-col gap-1">
-                {orgTeams.map((t) => {
-                  const local = relativeTeamPath(t.name)
-                  return (
-                    <li key={t.id} className="flex items-center gap-2 text-xs">
-                      <TeamWithAvatar
-                        name={local}
-                        size="xs"
-                        nameClassName="text-xs font-medium"
-                      />
-                      <span className="text-muted-foreground">
-                        {t.memberCount} {t.memberCount === 1 ? "member" : "members"} · {t.projectCount}{" "}
-                        {t.projectCount === 1 ? "project" : "projects"}
-                      </span>
-                    </li>
-                  )
-                })}
-              </ul>
-            </TableCell>
-          </TableRow>
-        )
-      }}
+      className={ADMIN_TABLE_PANEL_CLASS}
+      dense
     />
   )
 }

@@ -3,6 +3,7 @@ import {
   buildProjectWsUrl,
   createLinkUpstreamChangedHandler,
   createWsReconciler,
+  fileInventoryChanged,
   isOwnWriteEcho,
   isValidationEvent,
   parseProjectWsMessage,
@@ -599,5 +600,27 @@ describe("isValidationEvent", () => {
     expect(isValidationEvent("source.cell.create")).toBe(false)
     expect(isValidationEvent("cell.audio.attach")).toBe(false)
     expect(isValidationEvent("file.create")).toBe(false)
+  })
+})
+
+// AQU-744: staged imports create the file tombstoned and reveal it at
+// finalize. A view whose file list was fetched during the staged window must
+// treat a progress frame for an unknown file id as the reveal and re-pull the
+// inventory — even when an older worker stamps the frame fileCreated: false.
+describe("fileInventoryChanged (AQU-744 staged-import reveal)", () => {
+  const frame = (file: string, fileCreated: boolean) => ({ file, fileCreated })
+
+  it("refetches on the server's explicit inventory signal", () => {
+    expect(fileInventoryChanged(frame("f1", true), new Set(["f1"]))).toBe(true)
+    expect(fileInventoryChanged(frame("f-new", true), new Set())).toBe(true)
+  })
+
+  it("refetches when the frame names a file this client has never seen", () => {
+    expect(fileInventoryChanged(frame("f-staged", false), new Set(["f-other"]))).toBe(true)
+    expect(fileInventoryChanged(frame("f-staged", false), new Set())).toBe(true)
+  })
+
+  it("stays progress-only for a known file without the signal", () => {
+    expect(fileInventoryChanged(frame("f1", false), new Set(["f1", "f2"]))).toBe(false)
   })
 })

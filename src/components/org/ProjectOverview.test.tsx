@@ -79,6 +79,10 @@ vi.mock("@/lib/sync/cloud-projects", () => ({
   setProjectDeadline: vi.fn(),
   setProjectPm: (jwt: string, projectId: string, pmUserId: number | null) => setProjectPm(jwt, projectId, pmUserId),
   fetchAccessibleProjects: (jwt: string) => fetchAccessibleProjects(jwt),
+  // MembersTab -> useProjectOrgId (AQU-672) resolves the project's own org to
+  // seed member-add suggestions. These tests drive the roster through the
+  // member-scopes mock, so a miss keeps the suggestion path inert.
+  resolveCloudProjectResult: vi.fn(async () => ({ ok: false as const, reason: "not-found" as const })),
 }))
 const downloadProjectBundle = vi.fn()
 vi.mock("@/lib/sync/export-bundle", () => ({

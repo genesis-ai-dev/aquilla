@@ -17,7 +17,7 @@ import posthog from "@/lib/posthog"
 // project settings (languages, system prompt, validation rules, health) — maintainer"
 // (row 600). Lowering the floor to PROJECT_LEAD (500) would widen server permissions
 // without spec support — do not change without a matching auth-worker update + spec citation.
-const EDIT_ROLE_FLOOR = ROLE.MAINTAINER
+export const SETTINGS_EDIT_ROLE_FLOOR = ROLE.MAINTAINER
 
 export type CannotEditReason = "offline" | "role" | null
 
@@ -26,6 +26,28 @@ export type PatchOutcome =
   | { kind: "conflict"; latest: ProjectSettingsResponse }
   | { kind: "blocked"; reason: "offline" | "role" }
   | { kind: "error"; message: string }
+
+/**
+ * Map a non-`ok` {@link PatchOutcome} to a user-facing message, or `null` when
+ * the write succeeded. `patch` never rejects — it resolves an outcome — so any
+ * caller that ignores the result silently swallows role/offline/conflict/server
+ * failures (the AQU-749 class of silent no-op). Callers that write on a user's
+ * behalf should surface `describePatchFailure(outcome)` instead of dropping it.
+ */
+export function describePatchFailure(outcome: PatchOutcome): string | null {
+  switch (outcome.kind) {
+    case "ok":
+      return null
+    case "blocked":
+      return outcome.reason === "offline"
+        ? "You're offline — reconnect to save term base changes."
+        : "You need the Maintainer role or higher to change the term base."
+    case "conflict":
+      return "The term base was changed elsewhere. Re-open the concept and try again."
+    case "error":
+      return `Saving the term base failed: ${outcome.message}`
+  }
+}
 
 export interface UseProjectSettings {
   /** Merged view: server values overlay local IDB values for keys the
@@ -348,7 +370,7 @@ export function useProjectSettings(
     [local, server],
   )
 
-  const canEdit = isOnline && roleLevel != null && roleLevel >= EDIT_ROLE_FLOOR
+  const canEdit = isOnline && roleLevel != null && roleLevel >= SETTINGS_EDIT_ROLE_FLOOR
   const reasonCannotEdit: CannotEditReason = canEdit
     ? null
     : !isOnline
@@ -407,10 +429,10 @@ export function useProjectSettings(
     // 2. Offline → apply locally (preserve work, server reconciles on reconnect).
     // 3. roleLevel === null → unsynced project (server has no record of this
     //    project); apply locally only, no server roundtrip. Same as original.
-    // 4. roleLevel < EDIT_ROLE_FLOOR → synced project, below floor. DO NOT apply
+    // 4. roleLevel < SETTINGS_EDIT_ROLE_FLOOR → synced project, below floor. DO NOT apply
     //    locally — this was the root cause of AQU-255 silent divergence. The
     //    server would reject, leaving stale IDB data the user can't clear.
-    // 5. roleLevel >= EDIT_ROLE_FLOOR → optimistic local apply happens *after*
+    // 5. roleLevel >= SETTINGS_EDIT_ROLE_FLOOR → optimistic local apply happens *after*
     //    this block, just before the serialized server write.
 
     if (!projectId || !jwt) return { kind: "error", message: "no session or project" }
@@ -433,7 +455,7 @@ export function useProjectSettings(
       return { kind: "blocked", reason: "role" }
     }
 
-    if (roleLevel < EDIT_ROLE_FLOOR) {
+    if (roleLevel < SETTINGS_EDIT_ROLE_FLOOR) {
       // Synced project below floor — do NOT apply locally; the server will
       // reject and we'd silently diverge (the original AQU-255 bug).
       return { kind: "blocked", reason: "role" }

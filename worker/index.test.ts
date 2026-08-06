@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs"
+import { resolve } from "node:path"
 import { describe, it, expect } from "vitest"
 import { injectInviteMeta } from "./index"
 
@@ -43,19 +45,35 @@ async function fetchWorker(path: string, cookie?: string) {
 }
 
 describe("worker/index — routing", () => {
-  it("GET / with no cookie serves homepage.html", async () => {
+  // `/` is the marketing homepage for everyone. It used to branch on the
+  // aq_hint cookie; that never actually ran in production (the asset router
+  // preempted the Worker) and it made the most-requested URL on the site
+  // uncacheable. Identity is resolved in the browser now — AppEntryBanner.
+  it("GET / serves homepage.html with no cookie", async () => {
     const res = await fetchWorker("/")
     expect(await res.text()).toBe("served:/homepage.html")
   })
 
-  it("GET / with aq_hint=1 cookie serves index.html", async () => {
+  it("GET / serves homepage.html even with aq_hint=1 — no identity branch", async () => {
     const res = await fetchWorker("/", "aq_hint=1")
-    expect(await res.text()).toBe("served:/index.html")
+    expect(await res.text()).toBe("served:/homepage.html")
   })
 
-  it("GET / with unrelated cookie still serves homepage.html", async () => {
-    const res = await fetchWorker("/", "session=abc123")
-    expect(await res.text()).toBe("served:/homepage.html")
+  it("GET / is byte-identical regardless of cookies, so it can be shared-cached", async () => {
+    const anon = await (await fetchWorker("/")).text()
+    const signedIn = await (await fetchWorker("/", "aq_hint=1")).text()
+    const other = await (await fetchWorker("/", "someone=else")).text()
+    expect(signedIn).toBe(anon)
+    expect(other).toBe(anon)
+  })
+
+  it("GET / is edge-cacheable and does not vary on Cookie", async () => {
+    const res = await fetchWorker("/", "aq_hint=1")
+    const cc = res.headers.get("Cache-Control") ?? ""
+    expect(cc).toContain("public")
+    expect(cc).toMatch(/s-maxage=\d+/)
+    expect(cc).not.toContain("no-store")
+    expect(res.headers.get("Vary") ?? "").not.toMatch(/cookie/i)
   })
 
   it("GET /homepage always serves homepage.html (no cookie)", async () => {
@@ -205,5 +223,41 @@ describe("worker/index — non-canonical host noindex (SEO)", () => {
   it("localhost dev responses are left untouched", async () => {
     const res = await fetchHost("localhost:8788".split(":")[0])
     expect(res.headers.get("X-Robots-Tag")).toBeNull()
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Deployment-config contract.
+//
+// The routing tests above call the Worker's `fetch` directly. In production the
+// Cloudflare asset router runs BEFORE the Worker and serves any path it can
+// resolve to an asset — and `/` resolves to index.html. So "GET / with no
+// cookie serves homepage.html" passed here for months while aquilla.app/`
+// served the empty SPA shell to every signed-out visitor and crawler.
+//
+// `run_worker_first` is what makes the tests above describe reality. It is
+// deployment config, not code, so it needs its own assertion — this is the
+// level the regression escaped at.
+describe("wrangler.toml — asset router must not preempt the Worker at /", () => {
+  const toml = readFileSync(resolve(__dirname, "../wrangler.toml"), "utf8")
+  const assetBlocks = toml.split(/^\[.*assets\]$/m).slice(1)
+
+  it("declares an assets block per environment", () => {
+    // top-level + production + development + staging + preview
+    expect(assetBlocks).toHaveLength(5)
+  })
+
+  it("runs the Worker first for / in every environment", () => {
+    for (const block of assetBlocks) {
+      const decl = /run_worker_first\s*=\s*\[([^\]]*)\]/.exec(block)
+      expect(decl, `an assets block is missing run_worker_first:\n${block.trim().slice(0, 200)}`).toBeTruthy()
+      expect(decl![1]).toContain('"/"')
+    }
+  })
+
+  it("keeps SPA fallback on, so app routes still resolve to index.html", () => {
+    for (const block of assetBlocks) {
+      expect(block).toContain('not_found_handling = "single-page-application"')
+    }
   })
 })

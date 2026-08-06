@@ -51,15 +51,15 @@ See [Sync architecture](SYNC.md) for the producer/consumer contract.
   emission/reconciliation, and source-artifact upload as one contract.
 - A transient read failure is not an empty project and must not trigger data
   deletion or branch reset.
-- Production, staging, and development use explicit isolated Worker, route, Neon,
+- Production and development use explicit isolated Worker, route, Neon,
   and R2 bindings.
 
 ## Deployment contract
 
 [Deployment environments](DEPLOYMENT-ENVIRONMENTS.md) is the canonical executable
 matrix. It defines the only supported branch/profile/hostname combinations and the
-commands that verify them. [Staging](STAGING.md) and the
-[Workers Builds runbook](runbooks/cloudflare-workers-builds.md) contain the detailed
+commands that verify them. The
+[Workers Builds runbook](runbooks/cloudflare-workers-builds.md) contains the detailed
 operating procedures.
 
 ## Documentation precedence

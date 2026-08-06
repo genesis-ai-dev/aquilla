@@ -30,7 +30,7 @@ test("join page with invalid token shows error state and Back to projects", asyn
   // organization home. Assert the durable destination, not the transient "/"
   // route that immediately redirects and may never be observable.
   await alice.getByRole("button", { name: /Back to projects/i }).click()
-  await expect(alice).toHaveURL(/\/orgs\/[^/]+$/)
+  await expect(alice).toHaveURL(/\/orgs\/[^/?]+$/, { timeout: 10_000 })
   await expect(alice.getByRole("heading", { name: "Acme", exact: true })).toBeVisible()
 })
 

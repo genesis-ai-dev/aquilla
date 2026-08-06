@@ -1,6 +1,7 @@
 import { Extension, Node as TiptapNode, mergeAttributes } from "@tiptap/core"
 import type { Node as ProseMirrorNode } from "@tiptap/pm/model"
-import { Plugin } from "@tiptap/pm/state"
+import { Plugin, type Selection } from "@tiptap/pm/state"
+import { Decoration, DecorationSet } from "@tiptap/pm/view"
 import {
   validateIdmlTranslation,
   type IdmlDiagnostic,
@@ -119,6 +120,217 @@ export function idmlEditablePlainOffsetPosition(
     return true
   })
   return requested
+}
+
+interface EditableSlotRange {
+  /** First text position inside the slot. */
+  start: number
+  /** Last text position inside the slot (equals `start` while it is empty). */
+  end: number
+}
+
+function editableSlotRanges(doc: ProseMirrorNode): EditableSlotRange[] {
+  const ranges: EditableSlotRange[] = []
+  doc.descendants((node, position) => {
+    if (node.type.name !== IDML_SLOT_NODE_NAME) return true
+    if (node.attrs.editable === true) {
+      ranges.push({ start: position + 1, end: position + 1 + node.content.size })
+    }
+    return false
+  })
+  return ranges
+}
+
+export interface IdmlRange {
+  from: number
+  to: number
+}
+
+/**
+ * The parts of `[from, to]` that lie in editable slot text — the only content a
+ * translator owns. Protected tokens and locked slots fall out, so a selection
+ * spanning them can be cleared without touching the IDML structure.
+ */
+export function editableIdmlRangesIn(
+  doc: ProseMirrorNode,
+  from: number,
+  to: number,
+): IdmlRange[] {
+  return editableSlotRanges(doc)
+    .map((range) => ({ from: Math.max(from, range.start), to: Math.min(to, range.end) }))
+    .filter((range) => range.from < range.to)
+}
+
+function editableSlotAt(
+  doc: ProseMirrorNode,
+  position: number,
+): { start: number; node: ProseMirrorNode } | null {
+  let found: { start: number; node: ProseMirrorNode } | null = null
+  doc.descendants((node, nodePosition) => {
+    if (found) return false
+    if (node.type.name !== IDML_SLOT_NODE_NAME) return true
+    const start = nodePosition + 1
+    if (
+      node.attrs.editable === true
+      && position >= start
+      && position <= start + node.content.size
+    ) {
+      found = { start, node }
+    }
+    return false
+  })
+  return found
+}
+
+/**
+ * A slot holds only text and hard breaks, so its content maps 1:1 onto a string
+ * — one ProseMirror position per character, with a hard break counting as "\n".
+ */
+function slotPlainText(slot: ProseMirrorNode): string {
+  let text = ""
+  slot.forEach((child) => {
+    text += child.isText ? child.text ?? "" : child.type.name === "hardBreak" ? "\n" : ""
+  })
+  return text
+}
+
+function segmentBoundaries(text: string, granularity: "grapheme" | "word"): number[] {
+  const boundaries = [0]
+  const segmenter = typeof Intl !== "undefined" && "Segmenter" in Intl
+    ? new Intl.Segmenter(undefined, { granularity })
+    : null
+  if (segmenter) {
+    for (const { segment } of segmenter.segment(text)) {
+      boundaries.push((boundaries[boundaries.length - 1] ?? 0) + segment.length)
+    }
+    return boundaries
+  }
+  // Code points keep surrogate pairs intact where Intl.Segmenter is missing.
+  for (const codePoint of text) {
+    boundaries.push((boundaries[boundaries.length - 1] ?? 0) + codePoint.length)
+  }
+  return boundaries
+}
+
+interface IdmlWordSegment {
+  start: number
+  end: number
+  whitespace: boolean
+}
+
+function wordSegments(text: string): IdmlWordSegment[] {
+  const segmenter = typeof Intl !== "undefined" && "Segmenter" in Intl
+    ? new Intl.Segmenter(undefined, { granularity: "word" })
+    : null
+  if (segmenter) {
+    return Array.from(segmenter.segment(text), ({ segment, index }) => ({
+      start: index,
+      end: index + segment.length,
+      whitespace: /^\s+$/u.test(segment),
+    }))
+  }
+
+  // Keep the fallback useful in runtimes without Intl.Segmenter: whitespace,
+  // word characters, and punctuation each form one deletion unit.
+  return Array.from(text.matchAll(/\s+|[\p{L}\p{N}\p{M}_]+|[^\s\p{L}\p{N}\p{M}_]+/gu), (match) => ({
+    start: match.index,
+    end: match.index + match[0].length,
+    whitespace: /^\s+$/u.test(match[0]),
+  }))
+}
+
+/**
+ * Native word deletion treats whitespace beside the caret as part of the
+ * adjacent word operation. Intl.Segmenter exposes that whitespace as its own
+ * segment, so using every raw segment boundary made Option/Ctrl+Backspace
+ * remove only a trailing space on its first press.
+ */
+function wordDeletionBoundary(
+  text: string,
+  offset: number,
+  direction: IdmlDeleteDirection,
+): number | null {
+  const segments = wordSegments(text)
+  if (direction === "backward") {
+    let index = segments.findLastIndex((segment) => segment.start < offset)
+    if (index < 0) return null
+
+    // Consume whitespace immediately before the caret, then the adjacent word
+    // (or punctuation unit). Whitespace before that word remains the separator
+    // from the preceding word.
+    while (index >= 0 && segments[index]?.whitespace) index -= 1
+    const boundary = segments[index]?.start ?? 0
+    return boundary < offset ? boundary : null
+  }
+
+  let index = segments.findIndex((segment) => segment.end > offset)
+  if (index < 0) return null
+  // Consume whitespace immediately after the caret, the following word (or
+  // punctuation unit), and its trailing whitespace up to the next word.
+  while (index < segments.length && segments[index]?.whitespace) index += 1
+  if (index >= segments.length) return text.length > offset ? text.length : null
+  index += 1
+  while (index < segments.length && segments[index]?.whitespace) index += 1
+  const boundary = segments[index - 1]?.end
+  return boundary !== undefined && boundary > offset ? boundary : null
+}
+
+function lineBoundaries(text: string): number[] {
+  const boundaries = [0]
+  for (let index = 0; index < text.length; index += 1) {
+    if (text[index] === "\n") boundaries.push(index + 1)
+  }
+  boundaries.push(text.length)
+  return boundaries
+}
+
+export type IdmlDeleteDirection = "backward" | "forward"
+export type IdmlDeleteGranularity = "character" | "word" | "line"
+
+/**
+ * AQU-740: the range a Backspace/Delete press should remove, expressed in
+ * ProseMirror positions and confined to one editable slot.
+ *
+ * IDML deletes cannot be left to the browser. Removing a slot's last character
+ * makes the browser drop the emptied `<span>`, which reaches ProseMirror as
+ * "an anchor disappeared" and is refused by the round-trip guard — so the final
+ * character of every slot was undeletable. Computing the range ourselves keeps
+ * the empty slot (legal, and how an untranslated unit already looks) and never
+ * lets the DOM diverge from the document.
+ *
+ * Returns null when there is nothing deletable, e.g. Backspace at a slot's
+ * start, where the neighbour is protected structure.
+ */
+export function idmlDeletionRange(
+  doc: ProseMirrorNode,
+  selection: Selection,
+  direction: IdmlDeleteDirection,
+  granularity: IdmlDeleteGranularity,
+): IdmlRange | null {
+  if (!selection.empty) return { from: selection.from, to: selection.to }
+  const position = selection.from
+  const slot = editableSlotAt(doc, position)
+  if (!slot) return null
+  const text = slotPlainText(slot.node)
+  const offset = position - slot.start
+  if (granularity === "word") {
+    const boundary = wordDeletionBoundary(text, offset, direction)
+    if (boundary === null) return null
+    return direction === "backward"
+      ? { from: slot.start + boundary, to: position }
+      : { from: position, to: slot.start + boundary }
+  }
+  const boundaries = granularity === "line"
+    ? lineBoundaries(text)
+    : segmentBoundaries(text, "grapheme")
+  if (direction === "backward") {
+    const previous = boundaries.filter((boundary) => boundary < offset).pop()
+    if (previous === undefined) return null
+    return { from: slot.start + previous, to: position }
+  }
+  const next = boundaries.find((boundary) => boundary > offset)
+  if (next === undefined) return null
+  return { from: position, to: slot.start + next }
 }
 
 export function isEditableIdmlSelection(selection: {
@@ -296,7 +508,6 @@ function exactAttributes(element: HTMLElement, expected: ReadonlySet<string>): b
 
 function decorateIdmlStyleBoundary(element: HTMLElement, characterStyle: string): void {
   element.className = "idml-style-boundary"
-  element.title = `InDesign character style: ${characterStyle}`
   const normalized = characterStyle.toLowerCase()
   element.style.fontWeight = /(?:bold|black|heavy)/.test(normalized) ? "700" : ""
   element.style.fontStyle = /(?:italic|oblique)/.test(normalized) ? "italic" : ""
@@ -541,6 +752,75 @@ export function serializeIdmlEditorDocument(doc: ProseMirrorNode): string | null
   return `${html}</p>`
 }
 
+/**
+ * AQU-740: where the paragraph needs a synthetic trailing `<br>` so the caret
+ * keeps a layout box, or null.
+ *
+ * ProseMirror appends `<br class="ProseMirror-trailingBreak">` to a textblock
+ * whose content ends in a hard break — without it, the caret position after a
+ * trailing `<br>` has no line box and the browser paints the cursor at the
+ * block's first line instead ("the cursor sticks at the beginning while I
+ * type"). IDML slots are inline nodes, not textblocks, so they never receive
+ * that compensation. This finds the paragraph's last box-producing child and,
+ * when it is an editable slot ending in a hard break, returns the position of
+ * that slot's content end. Empty slots and non-break protected tokens render
+ * no line box of their own and are skipped; a protected `br` token already
+ * ends the flow with its own break, where a second `<br>` would paint a
+ * spurious blank line.
+ */
+function idmlTrailingBreakPosition(doc: ProseMirrorNode): number | null {
+  if (doc.childCount !== 1) return null
+  const paragraph = doc.child(0)
+  if (paragraph.type.name !== IDML_PARAGRAPH_NODE_NAME) return null
+  for (let index = paragraph.childCount - 1; index >= 0; index -= 1) {
+    const child = paragraph.child(index)
+    if (child.type.name === IDML_TOKEN_NODE_NAME) {
+      if ((child.attrs.tokenKind as IdmlProtectedTokenKind) === "br") return null
+      continue
+    }
+    if (child.type.name !== IDML_SLOT_NODE_NAME) return null
+    if (child.content.size === 0) continue
+    const last = child.child(child.childCount - 1)
+    if (last.type.name !== "hardBreak" || child.attrs.editable !== true) return null
+    let position = 1
+    for (let sibling = 0; sibling < index; sibling += 1) {
+      position += paragraph.child(sibling).nodeSize
+    }
+    return position + 1 + child.content.size
+  }
+  return null
+}
+
+export function createIdmlTrailingBreakExtension(): Extension {
+  return Extension.create({
+    name: "idmlTrailingBreak",
+    addProseMirrorPlugins() {
+      return [new Plugin({
+        props: {
+          decorations(state) {
+            const position = idmlTrailingBreakPosition(state.doc)
+            if (position === null) return DecorationSet.empty
+            return DecorationSet.create(state.doc, [
+              // A zero-width space, not a second <br>: it gives the empty last
+              // line a text box for the caret without terminating another line
+              // (Chrome draws a spurious third line for double breaks inside an
+              // inline span). side 1 keeps the widget after the caret position
+              // so typed text lands before it; the stable key reuses the DOM
+              // node across redraws.
+              Decoration.widget(position, () => {
+                const compensation = document.createElement("span")
+                compensation.className = "idml-trailing-break"
+                compensation.textContent = "\u200b"
+                return compensation
+              }, { side: 1, key: "idml-trailing-break" }),
+            ])
+          },
+        },
+      })]
+    },
+  })
+}
+
 export function createIdmlGuardExtension({ context, onRejected }: IdmlGuardOptions): Extension {
   return Extension.create({
     name: "idmlTransactionGuard",
@@ -578,10 +858,57 @@ export function idmlEditorExtensions(options: IdmlGuardOptions) {
     IdmlParagraph,
     IdmlSlot,
     IdmlToken,
+    createIdmlTrailingBreakExtension(),
     createIdmlGuardExtension(options),
   ]
 }
 
 export function idmlDiagnosticMessage(diagnostic: IdmlDiagnostic | undefined): string {
   return diagnosticMessage(diagnostic)
+}
+
+/**
+ * AQU-758: strip whitespace that would enter an IDML slot as *spurious* — the
+ * leading, trailing, and doubled spaces InDesign renders as unintended breaks
+ * and the "Extra whitespace in translation" health check (`double-space`)
+ * otherwise flags only after the fact. Prevent them at entry instead of
+ * accepting-then-flagging.
+ *
+ * `\n` is preserved (it becomes an InDesign `<Br/>`); a run of spaces/tabs is
+ * collapsed to a single space, and any space that would abut a line break, a
+ * slot boundary, or an existing space is dropped. Only literal ASCII spaces and
+ * tabs are touched, so meaningful non-breaking spaces and other Unicode
+ * whitespace pass through unchanged.
+ *
+ * `before`/`after` are the slot characters flanking the insertion point (empty
+ * at a slot edge or against a protected token / line break). `mode` separates a
+ * paste — where a space landing at the slot end is trailing whitespace and is
+ * removed — from live typing, where a lone trailing space begins the next word
+ * and must survive so the user can keep typing.
+ */
+export function sanitizeIdmlSlotInsertion(
+  text: string,
+  before: string,
+  after: string,
+  mode: "paste" | "type" = "paste",
+): string {
+  const lines = text.replace(/\r\n?/g, "\n").split("\n")
+  const lastIndex = lines.length - 1
+  return lines
+    .map((line, index) => {
+      let next = line.replace(/[ \t]+/g, " ")
+      // Trim a leading space when it would abut the slot start, a preceding
+      // line break (any line after the first), or an existing space.
+      if (index > 0 || before === "" || before.endsWith(" ")) {
+        next = next.replace(/^ +/, "")
+      }
+      // Trim a trailing space when it would abut a following line break (any
+      // line but the last) or an existing space. On paste, a space landing at
+      // the slot end is trailing whitespace too; while typing it is left alone.
+      if (index < lastIndex || after.startsWith(" ") || (mode === "paste" && after === "")) {
+        next = next.replace(/ +$/, "")
+      }
+      return next
+    })
+    .join("\n")
 }

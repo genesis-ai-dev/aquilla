@@ -26,7 +26,7 @@ account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 #
 # Examples:
 #   pnpm run deploy:aquilla:auth        # = wrangler deploy --env=production
-#   (cd auth-worker && wrangler deploy --env=staging)
+#   (cd auth-worker && wrangler deploy --env=development)
 # These commands sync the worker's routes to match the env block — they
 # ADD routes new to the list and REMOVE routes that have been deleted.
 #
@@ -104,6 +104,9 @@ name = "EMAIL"
 [observability]
 enabled = true
 
+[version_metadata]
+binding = "CF_VERSION_METADATA"
+
 # Smart Placement: run the Worker near its backend (Hyperdrive→Neon, US-side)
 # instead of at the requester's edge PoP. Primary reason is geo: outbound
 # fetches to OpenRouter then egress from a US region, so Anthropic models stop
@@ -141,6 +144,7 @@ BASE_URL = "https://aquilla.app"
 SYNC_WORKER_URL = "https://api.aquilla.app/sync"
 DEFAULT_LLM_MODEL = "anthropic/claude-sonnet-4.5"
 ENVIRONMENT = "production"
+DEPLOYMENT_WORKER_NAME = "aquilla-identity-local"
 # AQU-713 legacy identity bridge. Production enables JIT migration by default;
 # all three migration secrets above must be provisioned before deployment.
 LEGACY_USER_MIGRATION_ENABLED = "true"
@@ -198,6 +202,9 @@ crons = ["*/5 * * * *"]
 [env.production.observability]
 enabled = true
 
+[env.production.version_metadata]
+binding = "CF_VERSION_METADATA"
+
 [[env.production.hyperdrive]]
 binding = "HYPERDRIVE"
 id = "69bcc10e67464f2eaf4fe91a9141e7cd"
@@ -228,6 +235,7 @@ BASE_URL = "https://aquilla.app"
 SYNC_WORKER_URL = "https://api.aquilla.app/sync"
 DEFAULT_LLM_MODEL = "anthropic/claude-sonnet-4.5"
 ENVIRONMENT = "production"
+DEPLOYMENT_WORKER_NAME = "aquilla-identity"
 LEGACY_USER_MIGRATION_ENABLED = "true"
 FRONTIER_D1_ACCOUNT_ID = "6a80496d1e59948a9cbaa3c643ba81d7"
 GITLAB_URL = "https://git.genesisrnd.com"
@@ -283,6 +291,9 @@ bucket_name = "aquilla-snapshots-dev"
 [[env.development.send_email]]
 name = "EMAIL"
 
+[env.development.version_metadata]
+binding = "CF_VERSION_METADATA"
+
 [env.development.vars]
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = "43200"
@@ -302,6 +313,7 @@ BASE_URL = "https://dev.aquilla.app"
 SYNC_WORKER_URL = "https://api.dev.aquilla.app/sync"
 DEFAULT_LLM_MODEL = "anthropic/claude-sonnet-4.5"
 ENVIRONMENT = "development"
+DEPLOYMENT_WORKER_NAME = "aquilla-dev-identity"
 LEGACY_USER_MIGRATION_ENABLED = "true"
 FRONTIER_D1_ACCOUNT_ID = "6a80496d1e59948a9cbaa3c643ba81d7"
 GITLAB_URL = "https://git.genesisrnd.com"
@@ -317,91 +329,6 @@ MONDAY_CLIENT_ID = ""
 MONDAY_APP_ID = ""
 MONDAY_APP_SLUG = ""
 MONDAY_REDIRECT_URI = "https://aquilla.app/oauth/callback"
-
-# ---------------------------------------------------------------------------
-# Staging environment — for the staging branch, deployed to api.staging.aquilla.app
-# Pre-production QA environment. Physically separate Neon branch so experiments
-# don't pollute prod identities. Same SECRET_KEY + SYNC_SECRET_KEY as prod so
-# tokens minted against staging still verify against prod workers.
-# ---------------------------------------------------------------------------
-[env.staging]
-name = "aquilla-staging-identity"
-account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
-routes = [
-  "api.staging.aquilla.app/identity/*",
-  "api.staging.aquilla.app/chat/*",
-]
-
-[env.staging.build]
-command = "bash ../scripts/verify-deploy-branch.sh staging"
-
-# See top-level [placement] — keep env blocks in sync (they don't inherit it).
-[env.staging.placement]
-mode = "smart"
-
-# See top-level [triggers] — env blocks don't inherit crons either.
-[env.staging.triggers]
-crons = ["*/5 * * * *"]
-
-# Staging runs on Neon (Postgres) to mirror prod. index.ts builds AQUILLA_PG
-# from the Postgres shim over Hyperdrive → the Neon `staging` branch (project
-# sweet-paper-88472094, branch `staging`).
-#
-# ONE-TIME PROVISIONING (AQU-146) — create the staging Hyperdrive config, then
-# paste its id below (replace the placeholder):
-#   wrangler hyperdrive create aquilla-staging \
-#     --connection-string="<neon staging branch pooled connection string>" \
-#     --caching-disabled
-# Get the pooled connection string from the Neon `staging` branch; keep it OUT of git.
-[[env.staging.hyperdrive]]
-binding = "HYPERDRIVE"
-id = "822231ade4da4db5b1955702e13d1ac3"
-
-[[env.staging.r2_buckets]]
-binding = "SNAPSHOTS"
-bucket_name = "aquilla-snapshots-staging"
-
-[[env.staging.send_email]]
-name = "EMAIL"
-
-[env.staging.vars]
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = "43200"
-EMAIL_FROM = "noreply@support.aquilla.app"
-# Team inbox for the public "book a call" form (routes/contact.ts). Must be a
-# routed destination address in Cloudflare Email Routing.
-CONTACT_EMAIL = "joel@frontierrnd.com"
-# EMAIL_FROM is an unmonitored noreply@, so replies are routed here instead.
-# This address MUST be wired to a human in Cloudflare Email Routing, or a
-# reply lands nowhere (see services/email.ts DEFAULT_REPLY_TO).
-EMAIL_REPLY_TO = "support@aquilla.app"
-# Public community invite. When set, welcome emails render the Discord CTA and
-# point support at it (a real person answers there). Leave unset on stealth
-# deploys to omit it.
-DISCORD_INVITE_URL = "https://discord.gg/T2EndwXe4W"
-BASE_URL = "https://staging.aquilla.app"
-SYNC_WORKER_URL = "https://api.staging.aquilla.app/sync"
-DEFAULT_LLM_MODEL = "anthropic/claude-sonnet-4.5"
-ENVIRONMENT = "staging"
-LEGACY_USER_MIGRATION_ENABLED = "false"
-FRONTIER_D1_ACCOUNT_ID = "6a80496d1e59948a9cbaa3c643ba81d7"
-GITLAB_URL = "https://git.genesisrnd.com"
-ADMIN_EMAILS = "ryderwishart@gmail.com,danieljlosey@gmail.com,the.disciplexiii@gmail.com,joel@frontierrnd.com,jade@frontierrnd.com"
-ADMIN_REQUIRE_ELEVATION = "true"
-# Monday.com integration (see top-level [vars] note).
-MONDAY_CLIENT_ID = ""
-MONDAY_APP_ID = ""
-MONDAY_APP_SLUG = ""
-MONDAY_REDIRECT_URI = "https://aquilla.app/oauth/callback"
-
-# ---------------------------------------------------------------------------
-# e2e test environment. Local e2e (scripts/e2e-up.ts) runs `wrangler dev` on
-# the DEFAULT profile and points Hyperdrive at a local Postgres via
-# WRANGLER_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE — so it boots on
-# Postgres, not D1. This [env.e2e] block only matters for a deployed
-# `wrangler deploy --env e2e`; it needs its own Hyperdrive binding (Postgres is
-# the only datastore now).
-# ---------------------------------------------------------------------------
 [env.e2e]
 name = "aquilla-identity-e2e"
 

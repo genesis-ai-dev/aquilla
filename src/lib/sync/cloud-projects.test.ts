@@ -3,9 +3,11 @@ import { describe, it, expect, vi, afterEach } from "vitest"
 import {
   fetchAccessibleProjects,
   minimalProjectRecord,
+  renameProject,
   resolveCloudProject,
   type CloudProjectSummary,
 } from "./cloud-projects"
+import { UserError } from "@/lib/errors/user-error"
 
 const API = "https://api.example.test"
 const originalFetch = global.fetch
@@ -294,5 +296,38 @@ describe("fetchAccessibleProjects orgId", () => {
     global.fetch = vi.fn(async (input) => { url = typeof input === "string" ? input : (input as Request).url; return new Response(JSON.stringify({ projects: [] }), { status: 200 }) }) as unknown as typeof fetch
     await fetchAccessibleProjects("jwt")
     expect(url).toMatch(/\/api\/v2\/projects$/)
+  })
+})
+
+// AQU-765: rename a project via PATCH /api/v2/projects/:id (maintainer+).
+describe("renameProject", () => {
+  afterEach(() => { global.fetch = originalFetch })
+
+  it("PATCHes the project with the new name and returns the parsed row", async () => {
+    const fetchMock = mockFetch(200, { id: "p-1", name: "Bible Genesis Project" })
+    global.fetch = fetchMock as unknown as typeof fetch
+
+    const result = await renameProject("jwt-user", "p-1", "Bible Genesis Project", API)
+    expect(result).toEqual({ id: "p-1", name: "Bible Genesis Project" })
+
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(url).toBe(`${API}/api/v2/projects/p-1`)
+    expect(init!.method).toBe("PATCH")
+    expect((init!.headers as Record<string, string>).Authorization).toBe("Bearer jwt-user")
+    expect(JSON.parse(init!.body as string)).toEqual({ name: "Bible Genesis Project" })
+  })
+
+  it("encodes the project id in the path", async () => {
+    const fetchMock = mockFetch(200, { id: "a/b", name: "X" })
+    global.fetch = fetchMock as unknown as typeof fetch
+    await renameProject("jwt", "a/b", "X", API)
+    expect(fetchMock.mock.calls[0][0]).toBe(`${API}/api/v2/projects/a%2Fb`)
+  })
+
+  it("throws a UserError carrying the status on a 403 (permission block)", async () => {
+    global.fetch = mockFetch(403, { error: "maintainer or higher required" }) as unknown as typeof fetch
+    await expect(renameProject("jwt", "p-1", "X", API)).rejects.toMatchObject({ status: 403 })
+    // and it is specifically a UserError so callers can branch on the type
+    await expect(renameProject("jwt", "p-1", "X", API)).rejects.toBeInstanceOf(UserError)
   })
 })

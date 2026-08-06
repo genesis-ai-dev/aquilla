@@ -63,7 +63,7 @@
 | Settings    | Preferences page Privacy section renders             | `e2e/specs/orgs/preferences.smoke.spec.ts`                    |   ✅   |
 | Settings    | Appearance theme selection persists without accent presets | `e2e/specs/orgs/preferences-theme.smoke.spec.ts`          |   ✅   |
 | Export      | Primary "Download <file>" in the file's own format   | `e2e/specs/editor/export.smoke.spec.ts`                       |   ✅   |
-| Export      | IDML import → story milestone with 50-cell subsection navigation → empty and populated single-activation edits preserve pointer position, spacing, and caret order → strict artifact export preserves original character-style runs | `e2e/specs/editor/idml-roundtrip.smoke.spec.ts` | ✅ |
+| Export      | IDML import → story milestone with 50-cell subsection navigation → empty and populated single-activation edits preserve pointer position and caret order while sanitizing spurious whitespace at entry (AQU-758) → active style slots retain internal metadata without exposing raw native tooltips → typed drafts backspace to empty without tripping the protected-formatting guard → modifier word deletion owns adjacent whitespace → a trailing line break keeps its caret line box and a line-two read-view click remounts at the same document offset → strict artifact export preserves original character-style runs | `e2e/specs/editor/idml-roundtrip.smoke.spec.ts` | ✅ |
 | Export      | Convert to another format (collapsed section)        | `e2e/specs/editor/export-format-switch.smoke.spec.ts` (partial — native format pre-selected, switch to CSV) | ✅ |
 | Marketing   | Homepage "book a call": Google Calendar booking link + contact form → POST /api/v2/contact/book-call → sent state | `e2e/specs/marketing/book-call.smoke.spec.ts` | ✅ |
 | Editor      | Formatting bubble menu (bold/italic/underline/strikethrough/code) | `e2e/specs/editor/formatting-bubble-menu.smoke.spec.ts` + `formatting-inline-code-toggle.smoke.spec.ts` + `formatting-underline-strikethrough.smoke.spec.ts` | ✅ |
@@ -135,7 +135,7 @@
 | Projects    | Projects list page renders project cards              | `e2e/specs/projects/projects-list-page.smoke.spec.ts`         |   ✅   |
 | Projects    | Project overview shows scoped loading progress, then opens editor; breadcrumbs preserve clickable organization ancestry | `e2e/specs/projects/project-overview.smoke.spec.ts` | ✅ |
 | Projects    | Opening a project blocks the surface with an "Opening project" overlay until the workspace chunk lands; back-navigation aborts to idle (AQU-737) | `e2e/specs/projects/open-project-blocking-overlay.smoke.spec.ts` | ✅ |
-| Projects    | Project settings keeps synced name read-only and persists source language | `e2e/specs/projects/project-settings.smoke.spec.ts` | ✅ |
+| Projects    | Project settings renames the project (AQU-765 server rename) and persists source language | `e2e/specs/projects/project-settings.smoke.spec.ts` | ✅ |
 | Projects    | Project card role badge shows user's role             | `e2e/specs/projects/project-card-role-badge.smoke.spec.ts`    |   ✅   |
 | Projects    | Org home project name filter narrows list             | `e2e/specs/projects/org-home-project-filter.smoke.spec.ts`    |   ✅   |
 | Projects    | Org home status filter (All/Stalled/Overdue/Needs attention)   | `e2e/specs/projects/org-home-status-filter.smoke.spec.ts`     |   ✅   |
@@ -166,6 +166,7 @@
 | Editor      | CellExpansion tabs ArrowRight/Home/End keyboard nav   | `e2e/specs/editor/cell-expansion-tab-arrow-nav.smoke.spec.ts` |   ✅   |
 | Editor      | Tab / Shift+Tab moves focus between target cells      | `e2e/specs/editor/cell-tab-navigation.smoke.spec.ts`          |   ✅   |
 | Editor      | Select source text → Add to termbase creates draft concept | `e2e/specs/editor/add-to-termbase-from-selection.smoke.spec.ts` | ✅ |
+| Editor      | Below-Maintainer: Add to termbase dialog opens blocked (disabled input/submit, role message, Cancel) | `e2e/specs/editor/add-to-termbase-from-selection.smoke.spec.ts` | ✅ |
 | Editor      | /project/:id/voice deep-link activates audio lens     | `e2e/specs/editor/voice-deep-link.smoke.spec.ts`              |   ✅   |
 | Editor      | Cell history drawer shows edit history                | `e2e/specs/editor/cell-history-drawer.smoke.spec.ts`          |   ✅   |
 | Editor      | HistoryDrawer show/hide intermediate edits toggle     | `e2e/specs/editor/history-drawer-intermediate-edits.smoke.spec.ts` | ✅ |
@@ -187,7 +188,7 @@
 | Editor      | No-file placeholder renders when no file open         | `e2e/specs/editor/editor-no-file-placeholder.smoke.spec.ts`   |   ✅   |
 | Editor      | Sidebar corpus collapse toggle                        | `e2e/specs/editor/sidebar-corpus-collapse.smoke.spec.ts`      |   ✅   |
 | Editor      | Import dialog opens and shows upload/eBible options   | `e2e/specs/editor/import-dialog.smoke.spec.ts`                |   ✅   |
-| Editor      | eBible import search and select corpus                | `e2e/specs/editor/import-dialog-ebible.smoke.spec.ts` + `import-dialog-ebible-search.smoke.spec.ts` | ✅ |
+| Editor      | eBible import search/select and imported file persists across reload | `e2e/specs/editor/import-dialog-ebible.smoke.spec.ts` + `import-dialog-ebible-search.smoke.spec.ts` + `import-ebible-persists-reload.smoke.spec.ts` | ✅ |
 | Editor      | Export scope toggle (file vs project)                 | `e2e/specs/editor/export-scope-toggle.smoke.spec.ts`          |   ✅   |
 | Editor      | Export lossy format warning badge                     | `e2e/specs/editor/export-lossy-warning.smoke.spec.ts`         |   ✅   |
 | Editor      | Search scope toggle (file / project / passages)       | `e2e/specs/editor/search-scope-toggle.smoke.spec.ts`          |   ✅   |

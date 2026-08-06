@@ -7,12 +7,15 @@ import { sanitizeIdmlEditorHtml } from "@/lib/richtext/editor-content"
 import {
   IDML_SLOT_NODE_NAME,
   IDML_TOKEN_NODE_NAME,
+  editableIdmlRangesIn,
   hasIdmlCellMetadata,
+  idmlDeletionRange,
   idmlEditablePlainOffsetPosition,
   idmlEditableSlotOffsetPosition,
   idmlEditorExtensions,
   prepareIdmlEditorContent,
   resolveIdmlEditorConfiguration,
+  sanitizeIdmlSlotInsertion,
   serializeIdmlEditorDocument,
   validateIdmlEditorCommit,
   type IdmlEditorConfiguration,
@@ -44,12 +47,37 @@ const CONFIGURATION = {
   context: { sourceHtml: SOURCE_HTML, metadata: METADATA },
 } satisfies IdmlEditorConfiguration
 
+const SINGLE_SLOT_SOURCE =
+  `<p data-idml-version="2">`
+  + `<span data-idml-slot="0" data-idml-character-style="${STYLE_BODY}" data-idml-protected="slot">Alpha</span>`
+  + `</p>`
+
+const SINGLE_SLOT_CONFIGURATION = {
+  kind: "ready",
+  context: {
+    sourceHtml: SINGLE_SLOT_SOURCE,
+    metadata: {
+      version: 2,
+      slotCount: 1,
+      editableSlotIndexes: [0],
+      protectedTokenCount: 0,
+      anchorSequenceHash: createHash("sha256")
+        .update(`slot:0:editable:${STYLE_BODY}`)
+        .digest("hex"),
+    },
+  },
+} satisfies IdmlEditorConfiguration
+
 const editors: Editor[] = []
 afterEach(() => {
   for (const editor of editors.splice(0)) editor.destroy()
 })
 
-function createEditor(onRejected = vi.fn(), html = SOURCE_HTML): Editor {
+function createEditor(
+  onRejected = vi.fn(),
+  html = SOURCE_HTML,
+  context = CONFIGURATION.context,
+): Editor {
   const editor = new Editor({
     content: html,
     extensions: [
@@ -64,7 +92,7 @@ function createEditor(onRejected = vi.fn(), html = SOURCE_HTML): Editor {
         horizontalRule: false,
       }),
       ...idmlEditorExtensions({
-        context: CONFIGURATION.context,
+        context,
         onRejected,
       }),
     ],
@@ -258,5 +286,162 @@ describe("IDML ProseMirror transaction guard", () => {
 
     expect(editor.state.doc.toJSON()).toEqual(before)
     expect(rejected).toHaveBeenCalledTimes(1)
+  })
+})
+
+// AQU-740: deletion cannot be left to the browser — removing a slot's last
+// character makes it drop the emptied span, which the guard refuses as anchor
+// removal, so deletion ranges are computed against the document instead.
+describe("IDML deletion ranges", () => {
+  it("confines a range to the editable slots it covers", () => {
+    const editor = createEditor(vi.fn())
+    const slotStart = nodePosition(editor, IDML_SLOT_NODE_NAME) + 1
+    const slotEnd = slotStart + editor.state.doc.nodeAt(slotStart - 1)!.content.size
+
+    // A whole-document range keeps only the editable slot's text: the tab token
+    // and the locked "LOCK" slot are structure, not the translator's content.
+    expect(editableIdmlRangesIn(editor.state.doc, 0, editor.state.doc.content.size))
+      .toEqual([{ from: slotStart, to: slotEnd }])
+    // A range covering only protected anchors has nothing to write over.
+    expect(editableIdmlRangesIn(editor.state.doc, slotEnd + 1, editor.state.doc.content.size))
+      .toEqual([])
+  })
+
+  it("deletes within a slot and never past its protected edges", () => {
+    const editor = createEditor(vi.fn())
+    const slotStart = nodePosition(editor, IDML_SLOT_NODE_NAME) + 1
+    const slotEnd = slotStart + editor.state.doc.nodeAt(slotStart - 1)!.content.size
+    const rangeAt = (
+      position: number,
+      direction: "backward" | "forward",
+      granularity: "character" | "word" | "line" = "character",
+    ) => {
+      editor.commands.setTextSelection(position)
+      return idmlDeletionRange(editor.state.doc, editor.state.selection, direction, granularity)
+    }
+
+    expect(rangeAt(slotEnd, "backward")).toEqual({ from: slotEnd - 1, to: slotEnd })
+    expect(rangeAt(slotStart, "forward")).toEqual({ from: slotStart, to: slotStart + 1 })
+    // Backspace at the slot start and Delete at its end would take protected
+    // structure with them, so they delete nothing at all.
+    expect(rangeAt(slotStart, "backward")).toBeNull()
+    expect(rangeAt(slotEnd, "forward")).toBeNull()
+    // "Alpha one" — one word back from the end.
+    expect(rangeAt(slotEnd, "backward", "word")).toEqual({ from: slotEnd - 3, to: slotEnd })
+    expect(rangeAt(slotEnd, "backward", "line")).toEqual({ from: slotStart, to: slotEnd })
+  })
+
+  it("deletes an adjacent word together with whitespace beside the caret", () => {
+    const targetHtml = SINGLE_SLOT_SOURCE.replace(">Alpha</span>", ">alpha beta </span>")
+    const editor = createEditor(
+      vi.fn(),
+      targetHtml,
+      SINGLE_SLOT_CONFIGURATION.context,
+    )
+    const slotStart = nodePosition(editor, IDML_SLOT_NODE_NAME) + 1
+    const slotEnd = slotStart + editor.state.doc.nodeAt(slotStart - 1)!.content.size
+
+    editor.commands.setTextSelection(slotEnd)
+    expect(idmlDeletionRange(editor.state.doc, editor.state.selection, "backward", "word"))
+      .toEqual({ from: slotStart + "alpha ".length, to: slotEnd })
+
+    editor.commands.setTextSelection(slotStart + "alpha".length)
+    expect(idmlDeletionRange(editor.state.doc, editor.state.selection, "forward", "word"))
+      .toEqual({ from: slotStart + "alpha".length, to: slotEnd })
+  })
+
+  it("steps over a whole grapheme rather than half a surrogate pair", () => {
+    const editor = createEditor(vi.fn())
+    const slotStart = nodePosition(editor, IDML_SLOT_NODE_NAME) + 1
+    const slot = editor.state.doc.nodeAt(slotStart - 1)!
+    editor.commands.insertContentAt(
+      { from: slotStart, to: slotStart + slot.content.size },
+      "👍🏽",
+    )
+    const emojiEnd = slotStart + (editor.state.doc.nodeAt(slotStart - 1)?.content.size ?? 0)
+    editor.commands.setTextSelection(emojiEnd)
+
+    expect(idmlDeletionRange(editor.state.doc, editor.state.selection, "backward", "character"))
+      .toEqual({ from: slotStart, to: emojiEnd })
+  })
+})
+
+// AQU-740: ProseMirror only appends its trailing-break compensation to
+// textblocks; inline IDML slots miss it, so the caret after a trailing <br>
+// had no layout box and the browser painted the cursor at the first line.
+describe("IDML trailing break caret box", () => {
+  it("renders a caret box for a trailing hard break and drops it when text follows", () => {
+    const editor = createEditor(vi.fn(), SINGLE_SLOT_SOURCE, SINGLE_SLOT_CONFIGURATION.context)
+    const slotStart = nodePosition(editor, IDML_SLOT_NODE_NAME) + 1
+    const slotEnd = slotStart + editor.state.doc.nodeAt(slotStart - 1)!.content.size
+    expect(editor.view.dom.querySelector(".idml-trailing-break")).toBeNull()
+
+    editor.view.dispatch(editor.state.tr.insert(slotEnd, editor.state.schema.nodes.hardBreak.create()))
+    expect(editor.view.dom.querySelector(".idml-trailing-break")).toBeTruthy()
+    // The widget is view-only: exactly the one real break serializes.
+    const serialized = serializeIdmlEditorDocument(editor.state.doc)
+    expect(serialized?.match(/<br>/g)).toHaveLength(1)
+    expect(validateIdmlTranslation(
+      SINGLE_SLOT_SOURCE,
+      serialized!,
+      SINGLE_SLOT_CONFIGURATION.context.metadata,
+    ).valid).toBe(true)
+
+    editor.view.dispatch(editor.state.tr.insertText("x", slotEnd + 1))
+    expect(editor.view.dom.querySelector(".idml-trailing-break")).toBeNull()
+  })
+
+  it("adds no synthetic break while rendered content follows the hard break", () => {
+    // Default fixture: the locked "LOCK" slot renders after slot 0, so the
+    // break already has a following line box to give the caret.
+    const editor = createEditor(vi.fn())
+    const slotStart = nodePosition(editor, IDML_SLOT_NODE_NAME) + 1
+    const slotEnd = slotStart + editor.state.doc.nodeAt(slotStart - 1)!.content.size
+
+    editor.view.dispatch(editor.state.tr.insert(slotEnd, editor.state.schema.nodes.hardBreak.create()))
+    expect(editor.view.dom.querySelector("span[data-idml-slot=\"0\"] br")).toBeTruthy()
+    expect(editor.view.dom.querySelector(".idml-trailing-break")).toBeNull()
+  })
+})
+
+describe("sanitizeIdmlSlotInsertion (AQU-758)", () => {
+  it("collapses doubled spaces and drops leading/trailing spaces on paste into an empty slot", () => {
+    expect(sanitizeIdmlSlotInsertion("  hello   world  ", "", "", "paste")).toBe("hello world")
+  })
+
+  it("keeps a single word separator when pasting against existing slot text", () => {
+    // Caret sits after "Source" (before = "e"), so a leading space is a real
+    // word gap and survives; a doubled interior space is still collapsed.
+    expect(sanitizeIdmlSlotInsertion(" Pasted  text", "e", "", "paste")).toBe(" Pasted text")
+  })
+
+  it("drops a leading space that would double against a preceding space", () => {
+    expect(sanitizeIdmlSlotInsertion(" more", " ", "", "paste")).toBe("more")
+  })
+
+  it("preserves line breaks but strips spaces that would abut them", () => {
+    expect(sanitizeIdmlSlotInsertion("a \n b", "", "", "paste")).toBe("a\nb")
+  })
+
+  it("leaves non-breaking spaces and other Unicode whitespace untouched", () => {
+    expect(sanitizeIdmlSlotInsertion("keep nbsp", "x", "y", "paste")).toBe("keep nbsp")
+  })
+
+  it("blocks a leading space typed into an empty slot", () => {
+    expect(sanitizeIdmlSlotInsertion(" ", "", "", "type")).toBe("")
+  })
+
+  it("blocks a second consecutive space typed after an existing space", () => {
+    expect(sanitizeIdmlSlotInsertion(" ", " ", "", "type")).toBe("")
+  })
+
+  it("allows a lone trailing space while typing so the next word can follow", () => {
+    // before = "d" (end of a word), slot end after — a paste would strip this,
+    // but live typing must keep it so "word " can become "word next".
+    expect(sanitizeIdmlSlotInsertion(" ", "d", "", "type")).toBe(" ")
+  })
+
+  it("allows an ordinary single space typed between two words", () => {
+    expect(sanitizeIdmlSlotInsertion(" ", "d", "n", "type")).toBe(" ")
   })
 })

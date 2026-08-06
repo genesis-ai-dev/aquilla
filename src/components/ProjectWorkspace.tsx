@@ -1,6 +1,7 @@
 import { Suspense, lazy, useState, useMemo, useRef, useEffect, useCallback } from "react"
 import { useParams, useNavigate, useSearchParams, useLocation } from "react-router-dom"
 import { useProject } from "@/hooks/useProject"
+import { describePatchFailure, SETTINGS_EDIT_ROLE_FLOOR } from "@/hooks/useProjectSettings"
 import { useNavHistoryTitle } from "@/context/NavHistoryContext"
 import { deriveNavTitle } from "@/lib/navigation/deriveTitle"
 import { deriveCellAreaState } from "@/lib/editor/cell-area-state"
@@ -466,6 +467,14 @@ export function ProjectWorkspace() {
     () => projectFiles.map((f) => ({ id: f.id, name: f.name })),
     [projectFiles],
   )
+
+  // AQU-744: current visible file ids, readable from the long-lived WS
+  // message handler without re-subscribing on every inventory change. A
+  // `file.progress.updated` frame naming an id missing from this set is a
+  // staged import's reveal — the trigger to re-pull the file list.
+  const projectFileIds = useMemo(() => new Set(projectFiles.map((f) => f.id)), [projectFiles])
+  const projectFileIdsRef = useRef(projectFileIds)
+  projectFileIdsRef.current = projectFileIds
 
   const project = useMemo<ProjectRecord | null>(() => {
     if (!hydratedProject) return null
@@ -2595,8 +2604,26 @@ export function ProjectWorkspace() {
       createdBy: currentUsername,
     }
     const updated = addConcept(project, draft)
-    await patchSettings({ terminology: updated.terminology ?? [] })
+    // AQU-754: patchSettings never rejects — it resolves a PatchOutcome. The
+    // prior code ignored it, so an "add concept" from the editor silently
+    // no-op'd whenever the write was rejected (below Maintainer, offline,
+    // version conflict, or a 5xx) — the same silent-failure the Terminology
+    // page hit in AQU-749. Surface it so AddConceptDialog keeps the dialog open
+    // and shows why, instead of closing as if the concept was saved.
+    const failure = describePatchFailure(await patchSettings({ terminology: updated.terminology ?? [] }))
+    if (failure) throw new Error(failure)
   }, [project, currentUsername, patchSettings])
+
+  // AQU-754 follow-up: when the caller is on a synced project below the
+  // termbase write floor, open AddConceptDialog pre-blocked (input + Create
+  // draft disabled, reason shown, Cancel active) instead of letting them type
+  // a draft that patchSettings is guaranteed to reject. serverRoleLevel is the
+  // server-resolved role (null = unsynced/local-only project, which saves
+  // locally and must stay writable).
+  const addConceptBlockedReason =
+    serverRoleLevel != null && serverRoleLevel < SETTINGS_EDIT_ROLE_FLOOR
+      ? describePatchFailure({ kind: "blocked", reason: "role" })
+      : null
 
   /** Called when a user manually saves an edited BT from the BT tab. */
   const saveBacktranslation = useCallback((cell: CellData, btText: string, polished: boolean) => {
@@ -3102,7 +3129,7 @@ export function ProjectWorkspace() {
     let cancelled = false
     let reconciler: import("@/lib/sync/ws-reconciler").WsReconciler | null = null
     void (async () => {
-      const { createWsReconciler, isOwnWriteEcho, isValidationEvent, createLinkUpstreamChangedHandler } =
+      const { createWsReconciler, isOwnWriteEcho, isValidationEvent, createLinkUpstreamChangedHandler, fileInventoryChanged } =
         await import("@/lib/sync/ws-reconciler")
       const { syncWorkerHttpOrigin } = await import("@/lib/sync/sync-worker-url")
       if (cancelled || !project?.id) return
@@ -3251,10 +3278,15 @@ export function ProjectWorkspace() {
                 // network failure. Do not turn a realtime hint into an
                 // unhandled rejection.
               })
-              // The first import chunk owns file.create. Refresh the project
-              // inventory so remote users see the new row immediately; later
-              // bulk chunks do not cause an editor-wide reload storm.
-              if (msg.fileCreated) {
+              // AQU-744: staged imports (AQU-635) create the file tombstoned
+              // and reveal it only at finalize — so "new row in the visible
+              // inventory" is signalled either by the server's flag or by this
+              // frame referencing a file this client has never seen (the
+              // membership check also covers pre-AQU-744 workers, whose reveal
+              // frames still say fileCreated: false). Later bulk chunks emit
+              // no frames at all, so large imports still cause no editor-wide
+              // reload storm.
+              if (fileInventoryChanged(msg, projectFileIdsRef.current)) {
                 refresh()
               } else if (activeFileIdRef.current === msg.file) {
                 // The bulk uploader emits this final frame only after every
@@ -5754,6 +5786,7 @@ export function ProjectWorkspace() {
             onAssignVoice={handleAssignVoice}
             onProjectChanged={refresh}
             onAddConceptFromSelection={handleAddConceptFromSelection}
+            addConceptBlockedReason={addConceptBlockedReason}
             onAskAiFromSelection={handleAskAiFromSelection}
             onAttachMediaFile={handleAttachMediaFile}
             onAttachMediaUrl={handleAttachMediaUrl}

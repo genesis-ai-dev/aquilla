@@ -86,19 +86,39 @@ test("IDML import, protected edit, and strict artifact export preserve original 
     .toBeVisible()
   await alice.keyboard.press("Escape")
 
-  await ws.editIdmlCellFromBlankArea(0, "Chapitre", "  Un")
+  // AQU-758 sanitizes whitespace at entry: the deliberately doubled space
+  // typed before "Un" collapses to a single space in the committed cell.
+  await ws.editIdmlCellFromBlankArea(0, "Chapitre", "  Un", "Chapitre Un")
   // The first click on a populated cell happens on the cheap read surface.
-  // Preserve its exact slot offset across the ProseMirror remount, including
-  // both spaces before "Un", then insert at that clicked position.
-  await ws.editIdmlCellAtTextOffset(0, 10, "X", "Chapitre  XUn")
+  // Preserve its exact slot offset across the ProseMirror remount (offset 9
+  // is the boundary before "U"), then insert at that clicked position.
+  await ws.editIdmlCellAtTextOffset(0, 9, "X", "Chapitre XUn")
   // Re-enter the populated IDML target through its read view. The activation
   // fallback must append at the real ProseMirror slot end, not jump to the
   // beginning as the browser-recorded AQU-740 regression did.
   await ws.editCell(0, " — suite")
-  await expect(ws.cellRow(0)).toContainText("Chapitre  XUn — suite")
+  await expect(ws.cellRow(0)).toContainText("Chapitre XUn — suite")
   await expect(
     alice.getByText(/This edit would remove protected InDesign formatting/i),
   ).toHaveCount(0)
+
+  // AQU-740: deleting a slot's final character must not trip the protected-
+  // formatting guard (native deletion used to drop the emptied slot span).
+  // The second cell is typed into and backspaced empty again, ending exactly
+  // as it started — untranslated — so the export assertions below still hold.
+  await ws.deleteIdmlDraftToEmpty(1, "xy", 2)
+  // AQU-740: a line break typed at a slot's end keeps a caret line box, so the
+  // cursor no longer parks at the cell's first line after Enter. Also ends
+  // with the cell untranslated.
+  await ws.verifyIdmlTrailingBreakCaret(1)
+  // AQU-740 manual QA found that word deletion stopped at trailing whitespace,
+  // requiring a second keypress for the word itself. One modifier press owns
+  // both pieces and the probe restores the untranslated state.
+  await ws.deleteIdmlWordPastTrailingSpace(1)
+  // A committed hard break must count as one position when the cheap read view
+  // hands a line-two click to ProseMirror. The appended character proves the
+  // caret did not land between the final two existing characters.
+  await ws.verifyIdmlMultilineReentry(1)
 
   // A lossless re-import can advance the source event for IDML structure while
   // retaining exactly the same translatable source text. That must preserve
@@ -108,7 +128,7 @@ test("IDML import, protected edit, and strict artifact export preserve original 
   await alice.reload()
   await ws.openFileBySubstring("protected-roundtrip")
   await ws.waitForEditor()
-  await expect(ws.cellRow(0)).toContainText("Chapitre  XUn — suite")
+  await expect(ws.cellRow(0)).toContainText("Chapitre XUn — suite")
   await expect(alice.getByTestId("stale-source-indicator")).toHaveCount(0)
   await expect(
     alice.getByText(/Source text changed since your last edit/i),
@@ -126,7 +146,7 @@ test("IDML import, protected edit, and strict artifact export preserve original 
   await ws.importFile(collidingFixture)
   await ws.openFileBySubstring("protected-roundtrip")
   await ws.waitForEditor()
-  await expect(ws.cellRow(0)).toContainText("Chapitre  XUn — suite")
+  await expect(ws.cellRow(0)).toContainText("Chapitre XUn — suite")
   await expect(alice.getByTestId("stale-source-indicator")).toHaveCount(0)
 
   await ws.openExportDialog()
@@ -147,7 +167,7 @@ test("IDML import, protected edit, and strict artifact export preserve original 
   const story = await output.file(STORY_PATH)!.async("string")
 
   expect(story).toContain(
-    'AppliedCharacterStyle="CharacterStyle/Plain"><Content>Chapitre  XUn — suite</Content>',
+    'AppliedCharacterStyle="CharacterStyle/Plain"><Content>Chapitre XUn — suite</Content>',
   )
   expect(story).toContain(
     'AppliedCharacterStyle="CharacterStyle/Plain"><Content>the </Content>',

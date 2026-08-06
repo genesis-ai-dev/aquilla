@@ -26,12 +26,6 @@ else
       github_environment="production"
       api_host="api.aquilla.app"
       ;;
-    staging)
-      wrangler_environment="staging"
-      live_environment="staging"
-      github_environment="non-production"
-      api_host="api.staging.aquilla.app"
-      ;;
     dev)
       wrangler_environment="development"
       live_environment="development"

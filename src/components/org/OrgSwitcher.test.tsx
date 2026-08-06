@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest"
-import { render, screen, waitFor, act, fireEvent } from "@testing-library/react"
+import { render, screen, waitFor, fireEvent } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { MemoryRouter, useLocation } from "react-router-dom"
 import { OrgProvider } from "@/context/OrgContext"
 import { OrgSwitcher } from "./OrgSwitcher"
@@ -8,6 +9,12 @@ import { OrgSwitcher } from "./OrgSwitcher"
 function LocationProbe() {
   const loc = useLocation()
   return <div data-testid="loc">{loc.pathname + loc.search}</div>
+}
+
+async function openOrgSwitcher(name: string | RegExp) {
+  const trigger = screen.getByRole("button", { name })
+  await userEvent.click(trigger)
+  await screen.findByRole("textbox", { name: /find an organization/i })
 }
 
 vi.mock("@/hooks/useFrontierSession", () => ({
@@ -46,11 +53,11 @@ describe("OrgSwitcher", () => {
     // Open the switcher; each org is listed with its role.
     const switcher = screen.getByRole("button", { name: "Organization switcher: All organizations" })
     expect(switcher).toBeInTheDocument()
-    await act(async () => { switcher.click() })
+    await openOrgSwitcher("Organization switcher: All organizations")
     expect(screen.getByText("Come and See")).toBeInTheDocument()
     expect(screen.getByText(/maintainer/i)).toBeInTheDocument()
     // Selecting an org makes it the active scope and persists it.
-    await act(async () => { screen.getByRole("menuitem", { name: /side org/i }).click() })
+    fireEvent.click(screen.getByRole("menuitem", { name: /side org/i }))
     await waitFor(() => expect(localStorage.getItem("org:active")).toBe("2"))
   })
 
@@ -63,10 +70,7 @@ describe("OrgSwitcher", () => {
     render(<MemoryRouter><OrgProvider><OrgSwitcher /></OrgProvider></MemoryRouter>)
     await waitFor(() => expect(screen.getByText("All organizations")).toBeInTheDocument())
 
-    const trigger = screen.getByRole("button", { name: "Organization switcher: All organizations" })
-    await act(async () => {
-      trigger.click()
-    })
+    await openOrgSwitcher("Organization switcher: All organizations")
 
     const search = screen.getByRole("textbox", { name: /find an organization/i })
     expect(search).toBeInTheDocument()
@@ -85,9 +89,7 @@ describe("OrgSwitcher", () => {
     await waitFor(() => {
       expect(screen.queryByRole("textbox", { name: /find an organization/i })).not.toBeInTheDocument()
     })
-    await act(async () => {
-      trigger.click()
-    })
+    await openOrgSwitcher("Organization switcher: All organizations")
     const reopened = await screen.findByRole("textbox", { name: /find an organization/i })
     expect(reopened).toHaveValue("")
     expect(screen.getByText("Come and See")).toBeInTheDocument()
@@ -101,7 +103,7 @@ describe("OrgSwitcher", () => {
     render(<MemoryRouter><OrgProvider><OrgSwitcher /></OrgProvider></MemoryRouter>)
     await waitFor(() => expect(screen.getByText("Acme")).toBeInTheDocument())
 
-    await act(async () => { screen.getByRole("button", { name: /acme/i }).click() })
+    await openOrgSwitcher(/acme/i)
     const search = await screen.findByRole("textbox", { name: /find an organization/i })
     expect(screen.getByRole("menuitem", { name: /^create$/i })).toBeInTheDocument()
 
@@ -120,9 +122,7 @@ describe("OrgSwitcher", () => {
     render(<MemoryRouter><OrgProvider><OrgSwitcher /></OrgProvider></MemoryRouter>)
     await waitFor(() => expect(screen.getByText("All organizations")).toBeInTheDocument())
 
-    await act(async () => {
-      screen.getByRole("button", { name: "Organization switcher: All organizations" }).click()
-    })
+    await openOrgSwitcher("Organization switcher: All organizations")
     const search = await screen.findByRole("textbox", { name: /find an organization/i })
     await waitFor(() => expect(search).toHaveFocus())
 
@@ -144,18 +144,18 @@ describe("OrgSwitcher", () => {
     await waitFor(() => expect(screen.getByText("Acme")).toBeInTheDocument())
 
     // Open the switcher
-    await act(async () => { screen.getByRole("button", { name: /acme/i }).click() })
+    await openOrgSwitcher(/acme/i)
 
     // Click Create in the menu
     const createItem = await screen.findByRole("menuitem", { name: /^create$/i })
-    await act(async () => { createItem.click() })
+    fireEvent.click(createItem)
 
     // Dialog opens with name field
     const input = await screen.findByLabelText(/organization name/i)
     fireEvent.change(input, { target: { value: "New Org" } })
 
     // Submit
-    await act(async () => { screen.getByRole("button", { name: /create organization/i }).click() })
+    fireEvent.click(screen.getByRole("button", { name: /create organization/i }))
 
     await waitFor(() => expect(createOrg).toHaveBeenCalledWith("jwt", "New Org"))
   })
@@ -172,7 +172,7 @@ describe("OrgSwitcher", () => {
     render(<MemoryRouter><OrgProvider><OrgSwitcher /></OrgProvider></MemoryRouter>)
     await waitFor(() => expect(screen.getByText("Acme")).toBeInTheDocument())
 
-    await act(async () => { screen.getByRole("button", { name: /acme/i }).click() })
+    await openOrgSwitcher(/acme/i)
 
     expect(screen.queryByTestId("guest-orgs")).not.toBeInTheDocument()
     expect(screen.queryByText("guest")).not.toBeInTheDocument()
@@ -191,7 +191,7 @@ describe("OrgSwitcher", () => {
     render(<MemoryRouter><OrgProvider><OrgSwitcher /></OrgProvider></MemoryRouter>)
     await waitFor(() => expect(screen.getByText("Acme")).toBeInTheDocument())
 
-    await act(async () => { screen.getByRole("button", { name: /acme/i }).click() })
+    await openOrgSwitcher(/acme/i)
 
     await waitFor(() => expect(screen.getByTestId("guest-orgs")).toBeInTheDocument())
     expect(screen.getByText("Guest Org")).toBeInTheDocument()
@@ -213,9 +213,9 @@ describe("OrgSwitcher", () => {
     render(<MemoryRouter><OrgProvider><OrgSwitcher /><LocationProbe /></OrgProvider></MemoryRouter>)
     await waitFor(() => expect(screen.getByText("Acme")).toBeInTheDocument())
 
-    await act(async () => { screen.getByRole("button", { name: /acme/i }).click() })
+    await openOrgSwitcher(/acme/i)
     await waitFor(() => expect(screen.getByTestId("guest-orgs")).toBeInTheDocument())
-    await act(async () => { screen.getByRole("menuitem", { name: /guest org/i }).click() })
+    fireEvent.click(screen.getByRole("menuitem", { name: /guest org/i }))
 
     // Lands on the guest org's scoped shared view…
     await waitFor(() => expect(screen.getByTestId("loc")).toHaveTextContent("/shared?org=2"))
@@ -223,9 +223,71 @@ describe("OrgSwitcher", () => {
     expect(screen.getByRole("button", { name: /guest org/i })).toBeInTheDocument()
 
     // Reopening shows the checkmark on the guest row and no member/all-orgs check.
-    await act(async () => { screen.getByRole("button", { name: /guest org/i }).click() })
+    await openOrgSwitcher(/guest org/i)
     const guestSection = screen.getByTestId("guest-orgs")
     expect(guestSection.querySelector(".lucide-check")).not.toBeNull()
+  })
+
+  // AQU-759: the search box filters the list as you type, and the list stays
+  // alphabetical regardless of API order.
+  it("many orgs: filters as you type, keeps the list alphabetical", async () => {
+    listMyOrgs.mockResolvedValue([
+      { id: 1, name: "Zulu Org", role: { level: 700, name: "owner" } },
+      { id: 2, name: "Alpha Org", role: { level: 700, name: "owner" } },
+      { id: 3, name: "Mike Org", role: { level: 700, name: "owner" } },
+      { id: 4, name: "Bravo Org", role: { level: 700, name: "owner" } },
+      { id: 5, name: "Yankee Org", role: { level: 700, name: "owner" } },
+      { id: 6, name: "Charlie Org", role: { level: 700, name: "owner" } },
+    ])
+    render(<MemoryRouter><OrgProvider><OrgSwitcher /></OrgProvider></MemoryRouter>)
+    await screen.findByRole("button", { name: /organization switcher/i })
+    await openOrgSwitcher(/organization switcher/i)
+
+    const search = await screen.findByLabelText(/find an organization/i)
+
+    // Rendered alphabetically even though the API returned them out of order.
+    const names = screen.getAllByRole("menuitem").map((n) => n.textContent ?? "")
+    const order = ["Alpha Org", "Bravo Org", "Charlie Org", "Mike Org", "Yankee Org", "Zulu Org"].map(
+      (n) => names.findIndex((t) => t.includes(n)),
+    )
+    expect(order.every((i) => i >= 0)).toBe(true)
+    expect(order).toEqual([...order].sort((a, b) => a - b))
+
+    // Typing filters the list to matching orgs only.
+    fireEvent.change(search, { target: { value: "brav" } })
+    await waitFor(() => expect(screen.getByText("Bravo Org")).toBeInTheDocument())
+    expect(screen.queryByText("Alpha Org")).not.toBeInTheDocument()
+    expect(screen.queryByText("Zulu Org")).not.toBeInTheDocument()
+
+    // A query that matches nothing shows an empty state.
+    fireEvent.change(search, { target: { value: "zzzzz" } })
+    await waitFor(() => expect(screen.getByText(/no organizations found/i)).toBeInTheDocument())
+  })
+
+  // AQU-759 (regression guard for AQU-473): filtering also narrows guest orgs
+  // while each surviving guest row keeps its "Guest" tag.
+  it("search filters guest orgs and preserves the Guest tag", async () => {
+    listMyOrgs.mockResolvedValue([
+      { id: 1, name: "Alpha Org", role: { level: 700, name: "owner" } },
+      { id: 2, name: "Bravo Org", role: { level: 700, name: "owner" } },
+      { id: 3, name: "Charlie Org", role: { level: 700, name: "owner" } },
+      { id: 4, name: "Delta Org", role: { level: 700, name: "owner" } },
+    ])
+    fetchAccessibleProjects.mockResolvedValue([
+      { id: "pg", name: "P", orgId: 9, orgName: "Golf Guest", role: { level: 100, name: "viewer", source: "override" } },
+      { id: "ph", name: "P2", orgId: 8, orgName: "Hotel Guest", role: { level: 100, name: "viewer", source: "override" } },
+    ])
+    render(<MemoryRouter><OrgProvider><OrgSwitcher /></OrgProvider></MemoryRouter>)
+    await screen.findByRole("button", { name: /organization switcher/i })
+    await openOrgSwitcher(/organization switcher/i)
+
+    const search = await screen.findByLabelText(/find an organization/i)
+    fireEvent.change(search, { target: { value: "golf" } })
+
+    await waitFor(() => expect(screen.getByText("Golf Guest")).toBeInTheDocument())
+    expect(screen.getByText("guest")).toBeInTheDocument()
+    expect(screen.queryByText("Hotel Guest")).not.toBeInTheDocument()
+    expect(screen.queryByText("Alpha Org")).not.toBeInTheDocument()
   })
 
   // AQU-624: returning to a member org from a guest's scoped view is symmetric —
@@ -246,8 +308,9 @@ describe("OrgSwitcher", () => {
     // On the guest-scoped route the trigger already reflects the guest org.
     await waitFor(() => expect(screen.getByRole("button", { name: /guest org/i })).toBeInTheDocument())
 
-    await act(async () => { screen.getByRole("button", { name: /guest org/i }).click() })
-    await act(async () => { screen.getByRole("menuitem", { name: /acme/i }).click() })
+    await openOrgSwitcher(/guest org/i)
+    const acmeItem = await screen.findByRole("menuitem", { name: /acme/i })
+    fireEvent.click(acmeItem)
 
     // Org scope is path-based now, so the overview is `/orgs/1` rather than `/?org=1`.
     await waitFor(() => expect(screen.getByTestId("loc")).toHaveTextContent("/orgs/1"))

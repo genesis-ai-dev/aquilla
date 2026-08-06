@@ -115,18 +115,25 @@ function SyncFreezeOverlay() {
 }
 
 /**
- * Root-path guard: unsigned visitors → marketing homepage; signed-in users
- * resume the last org (`/orgs/$id` or `/orgs/all` from localStorage).
+ * Workspace entry point, mounted at both `/app` and `/`.
  *
- * Client-side defence-in-depth — the aquilla-web Worker does the same cookie
- * check at the edge. Loop-safe: /homepage is a separate entry (homepage.html).
+ * `/` is served as the marketing homepage to every visitor now — the Worker
+ * doesn't branch on a cookie any more (see worker/index.ts), which is what lets
+ * that page be edge-cached. So a fresh load never reaches this component at `/`;
+ * only in-app navigation does. `/app` is the URL that opens the workspace, and
+ * it's where the marketing nav and AppEntryBanner point.
+ *
+ * Signed-out visitors go to /login rather than back to the marketing page:
+ * anyone arriving here clicked something that said "open the app", and bouncing
+ * them to the page they just left would read as a broken link. A user who
+ * completed onboarding counts as signed in — they may be working on local-only
+ * projects without a Frontier account.
+ *
+ * Signed-in visitors resume their last org (`/orgs/$id` or `/orgs/all`).
  */
-function RootRedirect() {
+function AppEntry() {
   const onboarded = localStorage.getItem("codex:onboardingComplete") === "true"
-  if (!hasAuthHintCookie() && !onboarded) {
-    window.location.replace("/homepage")
-    return null
-  }
+  if (!hasAuthHintCookie() && !onboarded) return <Navigate to="/login" replace />
   return <Navigate to={resumeOrgPath()} replace />
 }
 
@@ -175,7 +182,10 @@ function AppRoutes() {
     <Suspense fallback={<RouteLoadingFallback />}>
       <Routes>
         {/* Eager — needed for first paint / sign-in flow */}
-        <Route path="/" element={<RootRedirect />} />
+        <Route path="/" element={<AppEntry />} />
+        {/* The workspace entry. `/` is marketing at the edge, so this is the
+            URL that opens the app — marketing nav + AppEntryBanner point here. */}
+        <Route path="/app" element={<AppEntry />} />
         <Route path="/projects" element={<Navigate to={resumeOrgPath()} replace />} />
         <Route path="/projects/:id" element={<ProjectOverview />} />
         <Route path="/shared" element={<SharedProjectsPage />} />

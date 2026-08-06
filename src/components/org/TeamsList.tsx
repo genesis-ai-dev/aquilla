@@ -22,6 +22,7 @@ import {
   InputGroupInput,
 } from "@/components/ui/input-group"
 import { Page, PageHeader, EmptyState } from "@/components/ui/page"
+import { TeamWithAvatar } from "@/components/TeamWithAvatar"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { listTeams, createTeam, type TeamSummary } from "@/lib/frontier/teams"
@@ -325,7 +326,7 @@ export function TeamsList() {
                   onClick={() => activeOrgId != null && navigate(orgPath(activeOrgId, `/teams/${t.id}`))}
                   className="rounded-2xl border bg-card p-4 text-left transition-colors hover:bg-accent/40"
                 >
-                  <span className="block truncate font-medium text-foreground">{t.name}</span>
+                  <TeamWithAvatar name={t.name} className="w-full" />
                   <span className="mt-1 block text-sm tabular-nums text-muted-foreground">
                     {t.memberCount} members · {t.projectCount} projects
                   </span>

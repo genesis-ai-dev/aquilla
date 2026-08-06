@@ -187,10 +187,11 @@ describe("TeamsList — AQU-166: search + sort", () => {
     render(<MemoryRouter><OrgProvider><TeamsList /></OrgProvider></MemoryRouter>)
     await waitFor(() => expect(screen.getByRole("combobox", { name: /sort teams by/i })).toBeInTheDocument())
     await pickSelectOption(/sort teams by/i, /members \(most first\)/i)
-    const cards = screen.getAllByRole("button").filter((b) => ["Alpha", "beta", "Gamma"].includes(b.querySelector("span")?.textContent ?? ""))
-    expect(cards[0].querySelector("span")?.textContent).toBe("beta")   // 10
-    expect(cards[1].querySelector("span")?.textContent).toBe("Alpha")  // 5
-    expect(cards[2].querySelector("span")?.textContent).toBe("Gamma")  // 3
+    const cardName = (b: HTMLElement) => b.querySelector('[data-slot="team-name"]')?.textContent ?? ""
+    const cards = screen.getAllByRole("button").filter((b) => ["Alpha", "beta", "Gamma"].includes(cardName(b)))
+    expect(cardName(cards[0])).toBe("beta")   // 10
+    expect(cardName(cards[1])).toBe("Alpha")  // 5
+    expect(cardName(cards[2])).toBe("Gamma")  // 3
   })
 
   it("sort by Projects (most first) reorders correctly", async () => {
@@ -198,10 +199,11 @@ describe("TeamsList — AQU-166: search + sort", () => {
     render(<MemoryRouter><OrgProvider><TeamsList /></OrgProvider></MemoryRouter>)
     await waitFor(() => expect(screen.getByRole("combobox", { name: /sort teams by/i })).toBeInTheDocument())
     await pickSelectOption(/sort teams by/i, /projects \(most first\)/i)
-    const cards = screen.getAllByRole("button").filter((b) => ["Alpha", "beta", "Gamma"].includes(b.querySelector("span")?.textContent ?? ""))
-    expect(cards[0].querySelector("span")?.textContent).toBe("Gamma")  // 8
-    expect(cards[1].querySelector("span")?.textContent).toBe("Alpha")  // 2
-    expect(cards[2].querySelector("span")?.textContent).toBe("beta")   // 1
+    const cardName = (b: HTMLElement) => b.querySelector('[data-slot="team-name"]')?.textContent ?? ""
+    const cards = screen.getAllByRole("button").filter((b) => ["Alpha", "beta", "Gamma"].includes(cardName(b)))
+    expect(cardName(cards[0])).toBe("Gamma")  // 8
+    expect(cardName(cards[1])).toBe("Alpha")  // 2
+    expect(cardName(cards[2])).toBe("beta")   // 1
   })
 
   it("no-results state shows message and Clear resets search", async () => {

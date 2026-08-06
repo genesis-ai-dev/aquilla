@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react"
 import { type ColumnDef } from "@tanstack/react-table"
-import { Building2, ChevronRight, ExternalLink, Users } from "lucide-react"
+import { Building2, ChevronRight, ExternalLink } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { DataTable, DataTableColumnHeader } from "@/components/ui/data-table"
 import { DateTooltip } from "@/components/ui/date-tooltip"
@@ -9,6 +9,7 @@ import { TableCell, TableRow } from "@/components/ui/table"
 import { cn } from "@/lib/utils"
 import type { AdminOrg, AdminTeam } from "@/lib/frontier/admin"
 import { OrgWithAvatar } from "@/components/OrgWithAvatar"
+import { TeamWithAvatar } from "@/components/TeamWithAvatar"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 
 /**
@@ -206,16 +207,22 @@ export function AdminTenantsSection({
             <TableCell />
             <TableCell colSpan={7}>
               <ul className="flex flex-col gap-1">
-                {orgTeams.map((t) => (
-                  <li key={t.id} className="flex items-center gap-2 text-xs">
-                    <Users className="size-3 text-muted-foreground" />
-                    <span className="font-medium text-foreground">{relativeTeamPath(t.name)}</span>
-                    <span className="text-muted-foreground">
-                      {t.memberCount} {t.memberCount === 1 ? "member" : "members"} · {t.projectCount}{" "}
-                      {t.projectCount === 1 ? "project" : "projects"}
-                    </span>
-                  </li>
-                ))}
+                {orgTeams.map((t) => {
+                  const local = relativeTeamPath(t.name)
+                  return (
+                    <li key={t.id} className="flex items-center gap-2 text-xs">
+                      <TeamWithAvatar
+                        name={local}
+                        size="xs"
+                        nameClassName="text-xs font-medium"
+                      />
+                      <span className="text-muted-foreground">
+                        {t.memberCount} {t.memberCount === 1 ? "member" : "members"} · {t.projectCount}{" "}
+                        {t.projectCount === 1 ? "project" : "projects"}
+                      </span>
+                    </li>
+                  )
+                })}
               </ul>
             </TableCell>
           </TableRow>

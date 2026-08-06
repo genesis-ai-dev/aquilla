@@ -14,6 +14,7 @@ import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field
 import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
 import { Page, PageHeader, Section, EmptyState } from "@/components/ui/page"
+import { TeamWithAvatar } from "@/components/TeamWithAvatar"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
@@ -299,7 +300,14 @@ export function TeamDetail() {
             <>
               {/* Header / rename / delete */}
               <PageHeader
-                title={team.name}
+                title={
+                  <TeamWithAvatar
+                    name={team.name}
+                    size="default"
+                    nameClassName="font-semibold"
+                    truncate={false}
+                  />
+                }
                 description={team.description || undefined}
                 actions={
                   isAdmin ? (

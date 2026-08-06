@@ -120,6 +120,19 @@ describe("TargetAudioLane — overflow warnings", () => {
     ).toContain("text-red")
   })
 
+  it("the head-overlap NUMBER is masked when the previous chip's width is a guess (SUB-48)", async () => {
+    const first = item() // no duration → fallback width, guessed tail at 20
+    const second = item(
+      { startTime: 20, endTime: 30, metadata: { target_start_ms: 16000 } } as Partial<CellData>,
+      6000,
+      "c2",
+    ) // head at 16, under c1's GUESSED tail
+    renderWithTooltips(<TargetAudioLane {...base} items={[first, second]} />)
+    // The warning prose still fires — but no number derived from a guess.
+    await expectTooltip(screen.getByTestId("tl-target-c2"), /Overlaps the previous dub/)
+    expect(screen.queryByTestId("tl-target-c2-tip-overlap-head")).toBeNull()
+  })
+
   it("the overlong chip's hover states the tail overlap as a red negative number", async () => {
     const first = item({}, 12500) // [10, 22.5] over c2's chip at 20 → −2.5s
     const second = item({ startTime: 20, endTime: 30 } as Partial<CellData>, 4000, "c2")
@@ -210,6 +223,47 @@ describe("TargetAudioLane — trimmed geometry (round 7)", () => {
     // End-based floor would be 20.05 − 15 = 5.05 — but the previous chip
     // starts at 10, and that wins: never leapfrog a neighbour.
     expect(anchor).toBeCloseTo(10)
+  })
+
+  it("…and the FORWARD drag stops at the NEXT chip's start — the rule is symmetric (2026-08-06)", () => {
+    const onRetimeTarget = vi.fn()
+    const first = item({}, 4000) // chip [10, 14] in section 10–20
+    // c2 slid back into c1's section: starts at 16.
+    const second = item(
+      { startTime: 20, endTime: 30, metadata: { target_start_ms: 16000 } } as Partial<CellData>,
+      6000,
+      "c2",
+    )
+    render(<TargetAudioLane {...base} items={[first, second]} onRetimeTarget={onRetimeTarget} />)
+    const chip = screen.getByTestId("tl-target-c1")
+    fireEvent.pointerDown(chip, { clientX: 400, pointerId: 1 }) // start 10s
+    fireEvent.pointerMove(window, { clientX: 800 }) // +10s → would start at 20
+    fireEvent.pointerUp(window, { clientX: 800 })
+    const [, anchor] = onRetimeTarget.mock.calls[0] as [string, number]
+    // The section ceiling alone would allow 19.95 — past c2's start at 16,
+    // leapfrogging it. The next chip's start is the binding ceiling.
+    expect(anchor).toBeCloseTo(16)
+  })
+
+  it("the LEFT trim handle also stops at the previous chip's start (2026-08-06)", () => {
+    const onTrimTarget = vi.fn()
+    const first = item({ metadata: { target_start_ms: 14000 } } as Partial<CellData>, 4000) // [14, 18]
+    // c2: anchor 13, head-trimmed 2s → audible [15, 19], legally after c1's start.
+    const second = item(
+      { startTime: 20, endTime: 30, metadata: { target_start_ms: 13000 } } as Partial<CellData>,
+      6000,
+      "c2",
+      { trimStartMs: 2000 },
+    )
+    render(<TargetAudioLane {...base} items={[first, second]} onTrimTarget={onTrimTarget} />)
+    const handle = screen.getByTestId("tl-target-c2-handle-l")
+    fireEvent.pointerDown(handle, { clientX: 600, pointerId: 1 }) // audible start 15s
+    fireEvent.pointerMove(window, { clientX: 400 }) // −5s → would un-trim to 10
+    fireEvent.pointerUp(window, { clientX: 400 })
+    const [, , trims] = onTrimTarget.mock.calls[0] as [string, string, { trimStartMs?: number }]
+    // The clip could un-trim to its anchor at 13 — but that would put its
+    // audible start before c1's start at 14. The neighbour's start wins.
+    expect(trims.trimStartMs).toBe(1000)
   })
 
   it("END-based bounds: the stored anchor can never go below file zero", () => {

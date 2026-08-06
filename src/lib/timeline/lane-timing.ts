@@ -142,7 +142,9 @@ export function targetDueSec(
  * headSec — how much of this chip's HEAD lies under the PREVIOUS chip's tail
  * (reachable since the end-based drag bounds let a chip begin before its own
  * section). Each is the chip's OWN number, so a hover can state exactly how
- * much of it double-sounds.
+ * much of it double-sounds — both are clamped to the actual INTERSECTION, so
+ * a chip in a degenerate persisted order (starts out of sequence) can never
+ * report more overlap than it has length.
  */
 export function chipOverlaps(
   span: SpanSec,
@@ -151,13 +153,13 @@ export function chipOverlaps(
 ): { headSec: number | null; tailSec: number | null } {
   const tailSec =
     nextChipStartSec != null && span.end > nextChipStartSec + OVERLAP_EPS_SEC
-      ? span.end - nextChipStartSec
+      ? span.end - Math.max(span.start, nextChipStartSec)
       : null
   // The prevChip.start < span.end guard: a chip slid entirely BEFORE the
   // previous chip's box does not intersect it — that is not an overlap.
   const headSec =
     prevChip != null && prevChip.end > span.start + OVERLAP_EPS_SEC && prevChip.start < span.end
-      ? Math.min(prevChip.end, span.end) - span.start
+      ? Math.min(prevChip.end, span.end) - Math.max(span.start, prevChip.start)
       : null
   return { headSec, tailSec }
 }

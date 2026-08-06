@@ -186,6 +186,18 @@ describe("chipOverlaps", () => {
     })
   })
 
+  it("overlap is clamped to the INTERSECTION — never more than the chip has (2026-08-06)", () => {
+    // Degenerate persisted order: this chip starts AFTER the next chip's
+    // start. The naive end-minus-start would report 3s on a 2s chip.
+    expect(chipOverlaps({ start: 9, end: 11 }, null, 8)).toEqual({ headSec: null, tailSec: 2 })
+    // Same on the head side: this chip starts before the PREVIOUS chip does;
+    // only the stretch actually under the previous chip counts.
+    expect(chipOverlaps({ start: 8, end: 11 }, { start: 9.5, end: 12 }, null)).toEqual({
+      headSec: 1.5,
+      tailSec: null,
+    })
+  })
+
   it("sub-perceptual intrusions are NOT overlaps — a '−0.0s' warning is a lie (2026-08-06)", () => {
     // 30ms past the next chip's start: drag maths land within a few ms of an
     // edge; below the 0.1s display resolution nothing should warn.

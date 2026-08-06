@@ -88,17 +88,24 @@ vi.mock("@/lib/metrics/use-post-edit-metrics", () => ({
   usePostEditMetrics: () => ({ metrics: null, isLoading: false, isError: false, revalidate: vi.fn() }),
 }))
 
-function renderPane() {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return render(
+function paneUi(client: QueryClient) {
+  return (
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={[`/project/${PROJECT_ID}/settings/audio-media`]}>
         <Routes>
           <Route path="/project/:id/settings/:section" element={<ProjectSettings />} />
+          {/* Where "Save and close" lands — observable proof of navigation. */}
+          <Route path="/project/:id/editor" element={<div data-testid="editor-route" />} />
         </Routes>
       </MemoryRouter>
-    </QueryClientProvider>,
+    </QueryClientProvider>
   )
+}
+
+function renderPane() {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  const view = render(paneUi(client))
+  return { ...view, rerenderPane: () => view.rerender(paneUi(client)) }
 }
 
 const saveButton = () => screen.getByRole("button", { name: /^Save changes$/ })
@@ -162,6 +169,41 @@ describe("ProjectSettings — timing mode (2026-08-05)", () => {
     await waitFor(() =>
       expect(state.patch).toHaveBeenCalledWith(expect.objectContaining({ audioTimingMode: "audioFirst" })),
     )
+  })
+
+  it("the overlay landing AFTER the page's own fetch still corrects the card (2026-08-06 latch race)", async () => {
+    // Mount in the exact race order: this page's settings fetch has already
+    // confirmed (hasFetched: true in the mock) while the PROJECT record does
+    // not yet carry the audioTimingMode overlay (useProject's separate GET).
+    const view = renderPane()
+    expect(screen.getByTestId("settings-timing-mode")).toHaveAttribute("data-mode", "dubbing")
+    // The overlay lands late with the real value — the card must follow.
+    state.project = makeProject({ audioTimingMode: "audioFirst" }) as unknown as Record<string, unknown>
+    view.rerenderPane()
+    await waitFor(() =>
+      expect(screen.getByTestId("settings-timing-mode")).toHaveAttribute("data-mode", "audioFirst"),
+    )
+  })
+
+  it("Save-and-close intercepted by the video warning still CLOSES after Confirm (2026-08-06)", async () => {
+    state.project = makeProject({
+      files: [{ id: "f1", name: "ep.vtt", type: "usfm", createdAt: "", cellCount: 1, coreMediaUrl: "http://v.test/ep.mp4" }],
+    } as Partial<ProjectRecord>) as unknown as Record<string, unknown>
+    renderPane()
+    fireEvent.click(screen.getByTestId("settings-timing-mode-audioFirst"))
+    // Open the split-button menu and pick "Save and close".
+    const trigger = screen.getByRole("button", { name: /more save options/i })
+    fireEvent.pointerDown(trigger)
+    fireEvent.click(trigger)
+    fireEvent.click(await screen.findByText(/save and close/i))
+    // The warning intercepts the save — Confirm must finish BOTH halves of
+    // the gesture: the patch goes through AND the page closes to the editor.
+    await screen.findByTestId("timing-video-warning")
+    fireEvent.click(screen.getByRole("button", { name: /^Switch to Free timing$/ }))
+    await waitFor(() =>
+      expect(state.patch).toHaveBeenCalledWith(expect.objectContaining({ audioTimingMode: "audioFirst" })),
+    )
+    await screen.findByTestId("editor-route")
   })
 
   it("switching BACK to Original's timing never warns, video or not", async () => {

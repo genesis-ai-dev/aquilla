@@ -359,7 +359,7 @@ export function ProjectWorkspace() {
           : orgHomePath(ALL_ORGS_PARAM),
     )
   }, [activeOrgId, isAllOrgs, navigate])
-  const { project: loadedProject, status, refresh, patchSettings, roleLevel: serverRoleLevel } = useProject(projectId!)
+  const { project: loadedProject, status, refresh, patchSettings, roleLevel: serverRoleLevel, settingsFetched } = useProject(projectId!)
   // Client-local overlays (corpusMarker, originalName, suggestionsDismissedAt,
   // aiSetupSkipped) live in IDB; merge them onto the server-fetched record on
   // load and after each local patch so rename suggestions don't loop on every
@@ -4416,9 +4416,23 @@ export function ProjectWorkspace() {
   // A REMOTE mode change gets an acknowledged heads-up — deferred while the
   // user is in the text view or has the recorder open (a cell transition
   // inside the recorder ends the wait; the take is confirmed by then).
+  // `centerSurface` matters too: the workspace shell stays mounted across
+  // rules/comments/members/…, and `lens` is just a persisted preference — the
+  // modal must only surface where the timeline is actually on screen. And the
+  // mode is only OBSERVABLE once the project record has loaded AND the
+  // settings overlay's fetch has confirmed — before either, `timingMode` is
+  // just the default: reloading a Free-timing project straight into the Media
+  // lens (lens is persisted, the editor route mounts eligible) would baseline
+  // "dubbing" off the not-yet-loaded project and then read its own hydration
+  // as a remote change — a false "Timing mode changed" modal on every reload.
   const timingAck = useTimingModeAck({
     timingMode,
-    eligible: lens === "audio" && recordingCellId === null,
+    eligible:
+      project != null &&
+      settingsFetched &&
+      centerSurface === "editor" &&
+      lens === "audio" &&
+      recordingCellId === null,
   })
   // The transport speaks file seconds in dubbing and programme seconds in
   // audio-first, so it has to know which before anything seeks.

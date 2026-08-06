@@ -276,6 +276,13 @@ let timingMode: AudioTimingMode = "dubbing"
 let programme: Programme | null = null
 /** Index into `programme.slots` — the verse the transport is on. */
 let progIndex = -1
+/** Whether the current PAUSED cue was user-chosen (a click/seek). A paused cue
+ *  builds no gate, so the explicit flag would die here — and the resume that
+ *  re-enters through progPlaySlot must keep AQU-660 parity: an explicitly
+ *  chosen verse whose dub is missing SURFACES that instead of silently
+ *  skipping. Set by the cue-paused branch, consumed (reset) by any live
+ *  slot open. */
+let progCuedExplicit = false
 /** Set while WE quiet an element mid-verse; its onpause must not report the
  *  whole programme as paused. */
 let progSuppressPause = 0
@@ -415,6 +422,10 @@ interface ResolvedAudioSrc {
    *  queue retries once via the full-bytes blob path. */
   streaming: boolean
   frontier: { audioId: string; ext: string } | null
+  /** True when the quality pref swapped this resolve to the lossless WAV
+   *  sibling — retries must then skip the cache write too (fetchFullBlobUrl's
+   *  skipCacheWrite rationale). */
+  swapped: boolean
 }
 
 /** Full-download fallback: fetch all bytes, write through to the OPFS cache,
@@ -465,7 +476,7 @@ async function resolveAudioSrc(
   const parsed = parseFrontierAudioUrl(attachmentUrl)
   if (!parsed) {
     // Direct (blob: / http) URL — the media element streams it natively.
-    return { src: attachmentUrl, objectUrl: null, streaming: false, frontier: null }
+    return { src: attachmentUrl, objectUrl: null, streaming: false, frontier: null, swapped: false }
   }
   if (!session.jwt) throw new Error("Sign in to play audio")
   // Free classification: the attachment key IS `<id>.<ext>`, so equality with
@@ -489,7 +500,7 @@ async function resolveAudioSrc(
     const url = URL.createObjectURL(
       new Blob([cached as BlobPart], { type: audioMimeForExt(frontier.ext) }),
     )
-    return { src: url, objectUrl: url, streaming: false, frontier }
+    return { src: url, objectUrl: url, streaming: false, frontier, swapped }
   }
   const streamUrl = await getCellAudioStreamUrl({
     projectId,
@@ -498,9 +509,9 @@ async function resolveAudioSrc(
     ext: frontier.ext,
     getSyncToken: audioSyncTokenFetcherForSession(session),
   })
-  if (streamUrl) return { src: streamUrl, objectUrl: null, streaming: true, frontier }
+  if (streamUrl) return { src: streamUrl, objectUrl: null, streaming: true, frontier, swapped }
   const url = await fetchFullBlobUrl(frontier, projectId, fileId, session, swapped)
-  return { src: url, objectUrl: url, streaming: false, frontier }
+  return { src: url, objectUrl: url, streaming: false, frontier, swapped }
 }
 
 // ── Programme transport (SUB-53, audio-first only) ──────────────────────────
@@ -1031,7 +1042,9 @@ async function progOpenSource(cell: CellData, atClipSec: number): Promise<"open"
       triedBlobFallback = true
       void (async () => {
         try {
-          const url = await fetchFullBlobUrl(resolved.frontier!, ctx.projectId, cell.fileId, ctx.session)
+          const url = await fetchFullBlobUrl(
+            resolved.frontier!, ctx.projectId, cell.fileId, ctx.session, resolved.swapped,
+          )
           if (seq !== currentSeq) {
             URL.revokeObjectURL(url)
             return
@@ -1136,7 +1149,10 @@ async function progPlaySlot(
 
   if (!autoplay) {
     // Cue paused: position both sides, no gate. Resume re-enters via
-    // resumeQueue (which replays the pool + a still-windowed source).
+    // resumeQueue (which replays the pool + a still-windowed source) —
+    // remember whether the USER chose this verse so that re-entry keeps the
+    // explicit flag a gate would have carried.
+    progCuedExplicit = explicit
     if (dubDue && target) progCueTarget(slot, cell, target, into, null)
     if (sourceDue && slot.sourceWindow) {
       await progOpenSource(cell, slot.sourceWindow.start + into)
@@ -1147,6 +1163,9 @@ async function progPlaySlot(
     progPrefetchNext()
     return
   }
+  // A live start consumes any remembered cue-explicitness — this call's own
+  // `explicit` (already in hand) is the truth from here on.
+  progCuedExplicit = false
 
   if (!dubDue && !sourceDue) {
     // Nothing in this verse can sound from here (both sides already spent,
@@ -2136,7 +2155,9 @@ async function playAt(index: number, opts: { atSeconds?: number; autoplay?: bool
       triedBlobFallback = true
       void (async () => {
         try {
-          const url = await fetchFullBlobUrl(resolved.frontier!, ctx.projectId, cell.fileId, ctx.session)
+          const url = await fetchFullBlobUrl(
+            resolved.frontier!, ctx.projectId, cell.fileId, ctx.session, resolved.swapped,
+          )
           if (seq !== currentSeq) {
             URL.revokeObjectURL(url)
             return
@@ -2428,7 +2449,10 @@ export async function resumeQueue(): Promise<void> {
           currentAudio.readyState >= 3,
       )
       if ((dubDue && !dubReady) || (sourceDue && !sourceReady)) {
-        void progPlaySlot(progIndex, slot.startSec + into, true)
+        // Carry the cue's user-chosen flag: play after clicking a verse whose
+        // dub 404s must SURFACE the missing clip (AQU-660 parity), not treat
+        // the failure as a silent auto-advance.
+        void progPlaySlot(progIndex, slot.startSec + into, true, progCuedExplicit)
         return
       }
     }

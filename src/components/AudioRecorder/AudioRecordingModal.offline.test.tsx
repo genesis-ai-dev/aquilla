@@ -4,7 +4,7 @@
 // saves after reconnect.
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectRecord } from "@/lib/parsers/types"
 
@@ -136,6 +136,27 @@ describe("AudioRecordingModal — offline gate", () => {
     // The Space/Enter path is silently backstopped — no upload attempt.
     fireEvent.keyDown(window, { key: "Enter" })
     expect(uploadSpy).not.toHaveBeenCalled()
+  })
+
+  it("a save that fails MID-UPLOAD bounces back to the preview with the take intact (2026-08-06)", async () => {
+    onlineState.value = true
+    recorderState.value = {
+      kind: "stopped",
+      blob: new Blob(["x"], { type: "audio/webm" }),
+      mimeType: "audio/webm", ext: "webm", durationSec: 2,
+    }
+    uploadSpy.mockRejectedValueOnce(new Error("HTTP 500"))
+    renderModal()
+    fireEvent.keyDown(window, { key: "Enter" })
+    // The failure lands back in PREVIEW — not the dead-end error phase whose
+    // footer has no Save or Retake. The reason shows inline.
+    expect(await screen.findByTestId("rec-save-error")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /Retake/ })).toBeInTheDocument()
+    expect(screen.getByTestId("rec-save")).toBeEnabled()
+    expect(uploadSpy).toHaveBeenCalledTimes(1)
+    // And the retry saves the SAME take — nothing was lost.
+    fireEvent.keyDown(window, { key: "Enter" })
+    await waitFor(() => expect(uploadSpy).toHaveBeenCalledTimes(2))
   })
 
   it("back online: Space reaches the mic probe again", () => {

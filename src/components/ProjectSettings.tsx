@@ -445,6 +445,15 @@ export function ProjectSettings() {
   useEffect(() => {
     if (!project || !baseline || !sharedSettingsFetched) return
     if (timingModeResyncedRef.current) return
+    // `sharedSettingsFetched` is THIS page's settings instance, but the
+    // overlay that puts audioTimingMode on `project` belongs to useProject's
+    // own separate instance — either GET can resolve first. Latching on the
+    // page's fetch alone could lock in the pre-overlay default forever, so
+    // only count the resync as done once the field is actually present. An
+    // absent field either means the overlay hasn't landed yet (keep waiting)
+    // or the project has never set a mode — and then the resolved default
+    // already matches the seeded baseline, so there is nothing to correct.
+    if (project.audioTimingMode == null) return
     timingModeResyncedRef.current = true
     const server = resolveAudioTimingMode(project)
     if (server === baseline.audioTimingMode) return
@@ -544,6 +553,9 @@ export function ProjectSettings() {
   // zero-arg handleSave past the check exactly once.
   const [timingWarningOpen, setTimingWarningOpen] = useState(false)
   const timingSwitchConfirmedRef = useRef(false)
+  // When the Flow-A warning intercepts a SAVE-AND-CLOSE, the dialog's Confirm
+  // must finish the whole gesture — save AND navigate — not just the save.
+  const timingSaveAndCloseRef = useRef(false)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   // Distinct from `saveError`: a shared-settings save blocked by the active
@@ -802,6 +814,9 @@ export function ProjectSettings() {
       return true
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : String(err))
+      // A real failure ends the gesture — don't let a stale save-and-close
+      // intent leak into a later, unrelated warning-dialog Confirm.
+      timingSaveAndCloseRef.current = false
       return false
     } finally {
       setSaving(false)
@@ -818,10 +833,14 @@ export function ProjectSettings() {
   ])
 
   const handleSaveAndClose = useCallback(async () => {
+    // If the Flow-A timing warning intercepts this save, its Confirm reads
+    // this flag to finish the close half of the gesture.
+    timingSaveAndCloseRef.current = true
     const ok = await handleSave()
     // `saveError` from the render closure is stale (set inside handleSave
     // during this same tick); rely on the returned boolean instead.
     if (!ok) return
+    timingSaveAndCloseRef.current = false
     navigate(editorPath)
   }, [handleSave, navigate, editorPath])
 
@@ -2044,14 +2063,31 @@ export function ProjectSettings() {
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setTimingWarningOpen(false)}>Cancel</Button>
+            <Button
+              variant="outline"
+              onClick={() => {
+                timingSaveAndCloseRef.current = false
+                setTimingWarningOpen(false)
+              }}
+            >
+              Cancel
+            </Button>
             <Button
               onClick={() => {
                 timingSwitchConfirmedRef.current = true
                 setTimingWarningOpen(false)
-                void handleSave().finally(() => {
-                  timingSwitchConfirmedRef.current = false
-                })
+                void handleSave()
+                  .then((ok) => {
+                    // Finish an intercepted Save-and-close: the user asked to
+                    // leave the settings page, the warning was only a detour.
+                    if (ok && timingSaveAndCloseRef.current) {
+                      timingSaveAndCloseRef.current = false
+                      navigate(editorPath)
+                    }
+                  })
+                  .finally(() => {
+                    timingSwitchConfirmedRef.current = false
+                  })
               }}
             >
               Switch to Free timing

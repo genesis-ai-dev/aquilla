@@ -33,8 +33,10 @@ import {
   getQueueState,
   MISSING_AUDIO_MESSAGE,
   resetMissingClipsForTests,
+  resumeQueue,
   setQueueTimingMode,
   startQueue,
+  startQueueAtTime,
   stopQueue,
   type PlayContext,
   type QueueState,
@@ -188,6 +190,23 @@ describe("free-timing missing clips (2026-08-05)", () => {
     for (const s of observed) {
       expect(s.kind === "error" ? s.message : "").not.toContain("audio not found")
     }
+  })
+
+  it("play after CLICKING a verse whose dub is missing surfaces it — the paused cue keeps the explicit flag (2026-08-06)", async () => {
+    fetchCellAudio.mockRejectedValue(SENTINEL())
+    const cells = [verseFrontierDub("v1", 0, 3, { source: false }), verseSourceOnly("v2", 3, 6)]
+    // Click-a-verse while nothing plays = an explicit PAUSED cue (no gate) —
+    // the resolve fails quietly while paused, which is correct.
+    startQueueAtTime(ctxFor(cells), 0, { play: false })
+    await settle()
+    expect(getQueueState()).toMatchObject({ kind: "paused" })
+    // Press Play: the re-entry must keep the user's choice — the verse THEY
+    // picked surfaces its missing dub (AQU-660 parity) instead of the
+    // transport silently sliding on to v2.
+    await resumeQueue()
+    await settle()
+    expect(getQueueState()).toMatchObject({ kind: "error", message: MISSING_AUDIO_MESSAGE, cellId: "v1" })
+    expect(getMissingClipCells().has("v1")).toBe(true)
   })
 
   it("auto-advance skips a missing dub-only verse (non-explicit) and still badges it", async () => {

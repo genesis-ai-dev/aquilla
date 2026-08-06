@@ -15,11 +15,17 @@
  * soft projection remove), and the admin file-delete sweeps the whole
  * `.../audio/` prefix, which wipes both. No delete pairing is needed.
  *
- * Presence is memoized per audioId: ids are immutable, so "present"/"missing"
- * are true forever. "unknown" (offline, blip) is deliberately NOT memoized —
- * caching it would turn a one-request blip into a session-long quality
- * downgrade; not caching it costs at most one fast-failing probe per playback
- * start.
+ * Presence is memoized per audioId. "present" is true forever (ids are
+ * immutable and the mark follows a completed upload). "missing" is true
+ * forever with ONE narrow exception: a probe can race another device's
+ * still-in-flight sibling upload (it is fire-and-forget and 14× the
+ * compressed bytes), pinning that listener to compressed for the session —
+ * heals on reload; the generating device itself self-corrects via
+ * markLosslessSiblingPresent. Accepted deliberately: not memoizing "missing"
+ * would instead cost a probe on EVERY playback start of every clip that
+ * genuinely has no sibling (all pre-convention clips, forever). "unknown"
+ * (offline, blip) is deliberately NOT memoized — caching it would turn a
+ * one-request blip into a session-long quality downgrade.
  *
  * NOTE: eligibility (is this attachment a client-synth generated voice?) is
  * the CALLER's job — the convention here assumes it. Callers derive it from

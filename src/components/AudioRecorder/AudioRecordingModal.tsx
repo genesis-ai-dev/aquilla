@@ -440,7 +440,13 @@ export function AudioRecordingModal({
       // A network failure that raced the online flag reads as the same
       // offline story, not a raw fetch error.
       setErrorMessage(!navigator.onLine ? OFFLINE_MESSAGE : e instanceof Error ? e.message : String(e))
-      setPhase("error")
+      // The take is still in hand (the recorder holds the stopped blob), so
+      // go back to the PREVIEW, not the error phase: error's footer has no
+      // Save or Retake, and the preview effect can't re-fire for this blob
+      // (consumedBlobRef already equals it) — the take would be stranded
+      // despite sitting right there. Preview keeps Save offered, so a flap
+      // that struck mid-upload retries with the SAME take after reconnect.
+      setPhase(recorder.state.kind === "stopped" ? "preview" : "error")
     }
   }, [recorder.state, online, session, activeCell, project.id, username, activeIndex, cells, onActiveCellChange, onClose, autoAdvance, recordingTakes])
 
@@ -680,6 +686,15 @@ export function AudioRecordingModal({
               {!online && (
                 <p data-testid="rec-offline-notice" className="text-center text-xs font-medium text-amber-500">
                   {OFFLINE_MESSAGE}
+                </p>
+              )}
+              {/* A save that FAILED bounced back here with its take intact.
+                  The offline story is carried by the notice above (and clears
+                  with the connection); anything else says why, in red, with
+                  Save still offered for the retry. */}
+              {online && errorMessage != null && errorMessage !== OFFLINE_MESSAGE && (
+                <p data-testid="rec-save-error" className="text-center text-xs font-medium text-destructive">
+                  Saving failed — the take is safe, try Save again. ({errorMessage})
                 </p>
               )}
             </div>

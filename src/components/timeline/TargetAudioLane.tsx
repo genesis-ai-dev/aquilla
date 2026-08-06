@@ -103,7 +103,7 @@ function TargetAudioChip({
   chip: ChipGeometry
   /** The PREVIOUS chip's span — a chip can begin before its own section
    *  (end-based drag bounds), so its head can lie under this neighbour. */
-  prevChip: { start: number; end: number } | null
+  prevChip: { start: number; end: number; usingFallback: boolean } | null
   nextChipStartSec: number | null
   /** Higher paints on top — earlier-start chips cover later ones. */
   paintOrder: number
@@ -150,14 +150,16 @@ function TargetAudioChip({
       // START, and its START may not move past the section's END. The epsilon
       // keeps an audible sliver in-section on both edges and scales with the
       // section so tiny sections can't pin the chip (round-7 fix).
-      // 2026-08-06 (Sam): the start also may not pass the PREVIOUS CHIP's
+      // 2026-08-06 (Sam): the start also may not pass EITHER NEIGHBOUR's
       // start — overlapping a neighbour's tail is a borrowable corner, but
       // leapfrogging or fully covering another chip painted as an unreadable
-      // stack and can never be intentional. Hard floor last: audible start ≥
-      // trimStart ⇔ stored anchor ≥ 0, so nothing renders or persists before
-      // file time zero.
+      // stack and can never be intentional. The rule is symmetric: the floor
+      // stops a backward drag at the previous chip's start, the ceiling stops
+      // a forward drag at the next chip's start. Hard floor last: audible
+      // start ≥ trimStart ⇔ stored anchor ≥ 0, so nothing renders or persists
+      // before file time zero.
       const eps = Math.min(0.05, Math.max(0.001, (section.end - section.start) / 2))
-      start = Math.min(start, Math.max(section.start, section.end - eps))
+      start = Math.min(start, Math.max(section.start, section.end - eps), nextChipStartSec ?? Infinity)
       start = Math.max(start, section.start + eps - len, prevChip?.start ?? -Infinity, geom.trimStartSec)
       return { start, end: start + len }
     }
@@ -170,7 +172,9 @@ function TargetAudioChip({
       // may legitimately begin before its section now (end-based bounds), so
       // the left trim handle follows the CLIP, not the section. (In free
       // timing chipSection.start === geom.anchor, so this is identical there.)
-      const lo = geom.anchor
+      // The previous chip's start floors it too — un-trimming a head-trimmed
+      // clip must not leapfrog the neighbour the move clamp just protected.
+      const lo = Math.max(geom.anchor, prevChip?.start ?? -Infinity)
       start = Math.min(Math.max(start, lo), geom.end - MIN_TARGET_LEN_SEC)
       return { start, end: geom.end }
     }
@@ -195,10 +199,14 @@ function TargetAudioChip({
   // Blame the trespasser: a warning belongs to THIS chip only for territory
   // it left its section to claim (mirrors the chipOverflowState rule). The
   // number is masked on fallback chips — never derived from a guessed width.
+  // The head number depends on the PREVIOUS chip's end too, so it is also
+  // masked when THAT width is a guess (starts are always measured, so the
+  // tail number needs no such mask).
   const tailTrespass = overlaps.tailSec != null && span.end > section.end
   const headTrespass = overlaps.headSec != null && span.start < section.start
   const tailOverlapSec = tailTrespass && !geom.usingFallback ? overlaps.tailSec : null
-  const headOverlapSec = headTrespass && !geom.usingFallback ? overlaps.headSec : null
+  const headOverlapSec =
+    headTrespass && !geom.usingFallback && !prevChip?.usingFallback ? overlaps.headSec : null
   const canMove = editable && Boolean(onRetimeTarget)
   // SUB-48: a chip that runs past the next dub is PAINTED short so it can
   // never bury its neighbour (Sam lost a whole take under one). The logical
@@ -595,7 +603,15 @@ export function TargetAudioLane({
           <TargetAudioChip
             key={chip.item.cell.id}
             chip={chip}
-            prevChip={i > 0 ? { start: chips[i - 1].geom.start, end: chips[i - 1].geom.end } : null}
+            prevChip={
+              i > 0
+                ? {
+                    start: chips[i - 1].geom.start,
+                    end: chips[i - 1].geom.end,
+                    usingFallback: chips[i - 1].geom.usingFallback,
+                  }
+                : null
+            }
             nextChipStartSec={chips[i + 1]?.geom.start ?? null}
             paintOrder={chips.length - i}
             audioFirst={Boolean(audioFirst)}

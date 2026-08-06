@@ -188,7 +188,7 @@ export function useProject(projectId: string) {
   // Overlay synced settings (server-authoritative project-wide fields) onto
   // the hydrated record so existing consumers see merged values without any
   // per-callsite changes.
-  const { settings: syncedSettings, patch: patchSettings } = useProjectSettings(projectId, roleLevel)
+  const { settings: syncedSettings, patch: patchSettings, hasFetched: settingsFetched } = useProjectSettings(projectId, roleLevel)
   const overlaid = useMemo(
     () => project ? overlaySettings(project, syncedSettings) : null,
     [project, syncedSettings],
@@ -215,5 +215,10 @@ export function useProject(projectId: string) {
     refresh,
     /** Persist project-wide settings (incl. synced voice profiles) to the server. */
     patchSettings,
+    /** True once the settings overlay's GET has confirmed — before this, the
+     *  overlaid shared fields (audioTimingMode, …) may still be defaults.
+     *  Consumers that COMPARE those fields over time (the timing-mode ack)
+     *  must wait for this, or hydration reads as a remote change. */
+    settingsFetched,
   }
 }

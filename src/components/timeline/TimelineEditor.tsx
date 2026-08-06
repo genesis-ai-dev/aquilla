@@ -399,10 +399,14 @@ export function TimelineEditor({
       next?.start ?? null,
     )
     // Blame the trespasser (same rule as the chip): only territory THIS chip
-    // left its own section to claim counts toward its overlap number.
+    // left its own section to claim counts toward its overlap number. The
+    // head half also depends on the PREVIOUS chip's end, so it is masked when
+    // that width is a guess (SUB-48 — same mask the lane applies).
     const tailTrespass = tailSec != null && typeof endTime === "number" && geom.end > endTime ? tailSec : 0
     const headTrespass =
-      headSec != null && typeof startTime === "number" && geom.start < startTime ? headSec : 0
+      headSec != null && !prev?.usingFallback && typeof startTime === "number" && geom.start < startTime
+        ? headSec
+        : 0
     const overlapSec = tailTrespass + headTrespass
     return {
       kind: "dubbing" as const,

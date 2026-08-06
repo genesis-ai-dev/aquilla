@@ -252,6 +252,40 @@ describe("worker/index — non-canonical host noindex (SEO)", () => {
   })
 })
 
+describe("worker/index — security headers", () => {
+  async function fetchHost(host: string, path = "/") {
+    const { default: worker } = await import("./index")
+    return worker.fetch(new Request(`https://${host}${path}`), makeEnv())
+  }
+
+  // Every route the Worker actually handles must carry the baseline, not just
+  // the ones that happen to build a fresh Response — the invite-meta rewrite
+  // and the marketing bypass each construct their own.
+  it.each(["/", "/homepage", "/beta", "/app", "/project/abc", "/join/xyz"])(
+    "%s carries the baseline headers",
+    async (path) => {
+      const res = await fetchHost("aquilla.app", path)
+      expect(res.headers.get("X-Content-Type-Options")).toBe("nosniff")
+      expect(res.headers.get("X-Frame-Options")).toBe("DENY")
+      expect(res.headers.get("Content-Security-Policy")).toBe("frame-ancestors 'none'")
+      expect(res.headers.get("Referrer-Policy")).toBe("strict-origin-when-cross-origin")
+      expect(res.headers.get("Strict-Transport-Security")).toContain("max-age=31536000")
+    },
+  )
+
+  it("does not disturb the cacheability of /", async () => {
+    const res = await fetchHost("aquilla.app", "/")
+    expect(res.headers.get("Cache-Control")).toContain("s-maxage=600")
+    expect(await res.text()).toBe("served:/homepage.html")
+  })
+
+  it("still adds X-Robots-Tag on non-canonical hosts", async () => {
+    const res = await fetchHost("dev.aquilla.app", "/")
+    expect(res.headers.get("X-Robots-Tag")).toBe("noindex")
+    expect(res.headers.get("X-Frame-Options")).toBe("DENY")
+  })
+})
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Deployment-config contract.
 //
@@ -269,8 +303,10 @@ describe("wrangler.toml — asset router must not preempt the Worker at /", () =
   const assetBlocks = toml.split(/^\[.*assets\]$/m).slice(1)
 
   it("declares an assets block per environment", () => {
-    // top-level + production + development + staging + preview
-    expect(assetBlocks).toHaveLength(5)
+    // top-level + preview + production + development. The staging profile was
+    // retired in AQU-799 (7c2c3b55); the count here still said 5 afterwards
+    // because nothing ran this suite — see the web-worker-tests CI job.
+    expect(assetBlocks).toHaveLength(4)
   })
 
   it("runs the Worker first for / in every environment", () => {

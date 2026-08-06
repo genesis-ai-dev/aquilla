@@ -82,6 +82,10 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
+      # Credential guard (docs/OPSEC.md §5). Runs in `lint` rather than as its
+      # own job so it inherits an existing required check — a secret scan that
+      # can be merged past is decoration.
+      - run: pnpm run scan:secrets
 
   typecheck:
     runs-on: ubuntu-latest
@@ -153,6 +157,22 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm neon:check
+
+  # The SPA-serving Worker (worker/). Its suite is excluded from the root
+  # `pnpm test` run (vite.config.ts) like every other worker package, but —
+  # unlike the others — nothing ever ran it, so it sat red through the AQU-799
+  # staging retirement. It uses only root deps, so it needs no second install.
+  web-worker-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run test:worker
 
   auth-worker-tests:
     needs: changes

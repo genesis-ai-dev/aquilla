@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest"
-import { deploymentEnvironmentError } from "../environment-guard"
+import {
+  deploymentEnvironmentError,
+  isDeployedEnvironment,
+  unauthenticatedBypassError,
+} from "../environment-guard"
 
 describe("deployment environment guard", () => {
   it.each([
@@ -45,5 +49,46 @@ describe("deployment environment guard", () => {
         AUTH_WORKER_URL: "https://api.dev.aquilla.app/identity",
       }),
     ).toBeNull()
+  })
+})
+
+describe("ALLOW_UNAUTHENTICATED guard", () => {
+  it.each(["production", "development"])(
+    "rejects the auth bypass in ENVIRONMENT=%s",
+    (environment) => {
+      expect(
+        unauthenticatedBypassError({ ENVIRONMENT: environment, ALLOW_UNAUTHENTICATED: "true" }),
+      ).toContain("must never be enabled on a deployed worker")
+    },
+  )
+
+  it("allows the bypass in local development", () => {
+    // `pnpm dev` runs sync-worker on the wrangler.toml top-level vars block,
+    // which is ENVIRONMENT="local" — the bypass has to keep working there.
+    expect(
+      unauthenticatedBypassError({ ENVIRONMENT: "local", ALLOW_UNAUTHENTICATED: "true" }),
+    ).toBeNull()
+  })
+
+  it("allows the bypass when ENVIRONMENT is unset", () => {
+    // `[env.e2e]` declares no vars block, and env blocks don't inherit
+    // `[vars]`, so the E2E stack sees ENVIRONMENT unset.
+    expect(unauthenticatedBypassError({ ALLOW_UNAUTHENTICATED: "true" })).toBeNull()
+  })
+
+  it.each([undefined, "false", "1", "TRUE"])(
+    "is a no-op when ALLOW_UNAUTHENTICATED is %s, even in production",
+    (flag) => {
+      expect(
+        unauthenticatedBypassError({ ENVIRONMENT: "production", ALLOW_UNAUTHENTICATED: flag }),
+      ).toBeNull()
+    },
+  )
+
+  it("classifies deployed vs local environments", () => {
+    expect(isDeployedEnvironment({ ENVIRONMENT: "production" })).toBe(true)
+    expect(isDeployedEnvironment({ ENVIRONMENT: "development" })).toBe(true)
+    expect(isDeployedEnvironment({ ENVIRONMENT: "local" })).toBe(false)
+    expect(isDeployedEnvironment({})).toBe(false)
   })
 })

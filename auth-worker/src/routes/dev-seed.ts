@@ -6,10 +6,17 @@
 //
 // HARD-GATED on `WRANGLER_LOCAL=1` exactly like /__test__/reset. Production
 // wrangler.toml does NOT define WRANGLER_LOCAL, so this route surface is
-// invisible in prod even if the worker is reachable. The bypass also never
-// takes a user identifier from the request — it always resolves to the
-// hardcoded `dev` username — so even if the gate ever failed open, an
-// attacker could only log in as a user that does not exist in prod Postgres.
+// invisible in prod even if the worker is reachable.
+//
+// A FAILED-OPEN GATE HERE IS CATASTROPHIC, NOT BENIGN. This comment used to
+// claim the blast radius was "an attacker could only log in as a user that
+// does not exist in prod Postgres" (SEC-8, docs/SECURITY-NOTES-2026-06-10.md).
+// That is false, and the falsehood is the dangerous part: /login calls
+// seedDev() BEFORE minting the JWT, so it *creates* `dev`/`alice`/`bob`
+// (password `dev`) plus an org and projects in whatever database is bound,
+// then hands back a valid token for one of them. The hardcoded username is
+// not a mitigation. Do not let the gate be relaxed on the strength of a
+// reassurance that was never true.
 
 import { Hono } from "hono"
 import type { AuthHonoEnv } from "../middleware/auth"

@@ -16,7 +16,7 @@ export function DateTooltip({
   if (Number.isNaN(t)) return <span className={className}>—</span>
 
   return (
-    <AppTooltip content={fmtLabeledDateTime(t, label)}>
+    <AppTooltip content={fmtLabeledDateTime(t, label)} side="bottom">
       <span className={cn("cursor-default", className)}>{fmtShortCalendarDate(t)}</span>
     </AppTooltip>
   )

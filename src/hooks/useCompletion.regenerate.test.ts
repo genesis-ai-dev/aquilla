@@ -105,6 +105,7 @@ function renderCompletion(commitMock: ReturnType<typeof vi.fn>) {
 describe("completeSingle regenerate (AQU-620)", () => {
   beforeEach(() => {
     vi.unstubAllGlobals()
+    searchMock.mockClear()
   })
 
   it("a plain first draft uses the project's configured temperature", async () => {
@@ -172,5 +173,55 @@ describe("completeSingle regenerate (AQU-620)", () => {
     })
 
     expect(JSON.parse(bodies[0]).temperature).toBe(0.95)
+  })
+
+  it("re-checks the ownership guard after generation and before commit", async () => {
+    const bodies: string[] = []
+    mockFetchCapturing(bodies)
+    const commitMock = vi.fn().mockResolvedValue(undefined)
+    const { result } = renderCompletion(commitMock)
+
+    let stillEligible = true
+    await act(async () => {
+      const promise = result.current.completeSingle(CELL as never, undefined, {
+        mode: "read",
+        commitGuard: () => stillEligible,
+      })
+      stillEligible = false
+      expect(await promise).toBe(false)
+    })
+
+    expect(bodies).toHaveLength(1)
+    expect(commitMock).not.toHaveBeenCalled()
+  })
+
+  it("records translate-as-read evidence in the committed provenance", async () => {
+    const bodies: string[] = []
+    mockFetchCapturing(bodies)
+    searchMock.mockResolvedValueOnce([{
+      cellId: "example-1",
+      fileId: "file-a",
+      source: "Verse one",
+      target: "Verset un",
+      score: 1,
+      matchedTokens: ["verse", "one"],
+      coverageWeight: 1,
+    }])
+    const commitMock = vi.fn().mockResolvedValue(undefined)
+    const { result } = renderCompletion(commitMock)
+
+    await act(async () => {
+      await result.current.completeSingle(CELL as never, undefined, { mode: "read" })
+    })
+
+    expect(commitMock.mock.calls[0][3]).toMatchObject({
+      mode: "read",
+      exampleIds: ["example-1"],
+      projectState: {
+        approvedExampleCount: 1,
+        evidenceCoverage: 2 / 3,
+        evidenceWeight: 0.2,
+      },
+    })
   })
 })

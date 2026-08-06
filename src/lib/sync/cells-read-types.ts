@@ -9,6 +9,8 @@
 // them local — Phase 2's hook migration only depends on the surface
 // described here, not on its physical location.
 
+import type { AiDraftProvenance } from "./outbox-types"
+
 /**
  * File-level rollup row, as returned by GET /api/v1/projects/:projectId/files.
  * `cellCount` / `approvedCount` / `wordCount` / `lastEditAt` are projected
@@ -69,6 +71,8 @@ export interface CellRow {
   validated: boolean
   /** True while the current target head is an untouched machine draft. */
   aiDrafted?: boolean
+  /** Reproducible evidence/model snapshot for the current untouched AI draft. */
+  aiDraft?: AiDraftProvenance | null
   wordCount: number
   endorsementCount?: number
   /** Cue start/end in milliseconds; null for non-subtitle cells. */

@@ -12,6 +12,7 @@ import type { OrderedBy, RuleWaiver } from "@/lib/parsers/types"
 import type { FileProgressResponse, ProgressCounts } from "@/lib/progress/file-progress-resource"
 import { deriveMilestoneNavigation } from "@/lib/milestone-navigation"
 import type { ImportMilestoneKind } from "../../shared/import-contract"
+import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
 
 const EMPTY_STATS: ReadonlyMap<string, CellAuditStats> = new Map()
 const EMPTY_CELL_IDS: readonly string[] = Object.freeze([])
@@ -65,6 +66,7 @@ export interface CellSummary {
   targetEventId?: string
   targetSourceEventId?: string | null
   aiDrafted?: boolean
+  aiDraft?: AiDraftProvenance
   lastEditAt?: number
   startTime?: number
   endTime?: number
@@ -181,6 +183,7 @@ interface PendingOverlay {
   valueHtml?: string
   eventId?: string
   aiDrafted?: boolean
+  aiDraft?: AiDraftProvenance
 }
 
 interface OptimisticEdit extends PendingOverlay {
@@ -547,6 +550,7 @@ export class CellStore {
       targetEventId: view.targetEventId,
       targetSourceEventId: view.targetSourceEventId,
       aiDrafted: view.aiDrafted,
+      aiDraft: view.aiDraft,
       lastEditAt: view.lastEditAt,
       startTime: view.startTime,
       endTime: view.endTime,
@@ -735,7 +739,8 @@ export class CellStore {
       (a, b) => a.value === b.value
         && a.valueHtml === b.valueHtml
         && a.eventId === b.eventId
-        && a.aiDrafted === b.aiDrafted,
+        && a.aiDrafted === b.aiDrafted
+        && a.aiDraft?.generatedAt === b.aiDraft?.generatedAt,
     )
     if (changed.size === 0) return
     this.pendingOverlay = next
@@ -770,7 +775,13 @@ export class CellStore {
 
     const existing = this.targetById.get(cellId)
     if (existing) {
-      this.targetById.set(cellId, { ...existing, value: patch.value, valueHtml: patch.valueHtml ?? null, aiDrafted: patch.aiDrafted ?? false })
+      this.targetById.set(cellId, {
+        ...existing,
+        value: patch.value,
+        valueHtml: patch.valueHtml ?? null,
+        aiDrafted: patch.aiDrafted ?? false,
+        aiDraft: patch.aiDrafted ? patch.aiDraft : undefined,
+      })
     } else {
       const source = this.sourceById.get(cellId)
       // No source row (mid-refetch/reset window): the shadow written above is
@@ -795,6 +806,7 @@ export class CellStore {
         lastEditAt: Date.now(),
         validated: false,
         aiDrafted: patch.aiDrafted ?? false,
+        aiDraft: patch.aiDrafted ? patch.aiDraft : undefined,
         wordCount: patch.value.trim() ? patch.value.trim().split(/\s+/).length : 0,
       })
       if (!this.targetOrder.includes(cellId)) this.targetOrder.push(cellId)
@@ -937,6 +949,7 @@ export class CellStore {
       if (pending.valueHtml !== undefined) cell.translatedHtml = pending.valueHtml
       cell.status = deriveStatus(pending.value, false)
       cell.aiDrafted = pending.aiDrafted ?? false
+      cell.aiDraft = pending.aiDrafted ? pending.aiDraft : undefined
       cell.hasPendingEdit = true
     }
     const optimistic = this.optimisticEdits.get(cell.id)
@@ -949,6 +962,7 @@ export class CellStore {
       cell.translatedHtml = optimistic.valueHtml
       cell.status = deriveStatus(optimistic.value, false)
       cell.aiDrafted = optimistic.aiDrafted ?? false
+      cell.aiDraft = optimistic.aiDrafted ? optimistic.aiDraft : undefined
       cell.hasPendingEdit = true
     }
     if (pending || optimistic) {
@@ -1188,7 +1202,7 @@ export interface UseActiveCellStoreResult {
    * this restores the loading state while no authoritative rows are present. */
   retry: () => void
   revalidateCell: (cellId: string) => void
-  applyOptimisticTargetEdit: (cellId: string, patch: { value: string; valueHtml?: string; aiDrafted?: boolean }) => void
+  applyOptimisticTargetEdit: (cellId: string, patch: { value: string; valueHtml?: string; aiDrafted?: boolean; aiDraft?: AiDraftProvenance }) => void
   /** Bulk version of applyOptimisticTargetEdit — see CellStore.applyOptimisticTargetEdits. */
   applyOptimisticTargetEdits: (patches: { cellId: string; value: string; valueHtml?: string }[]) => void
   isLoading: boolean
@@ -1416,7 +1430,7 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
         if (kind !== "target.cell.commit" && kind !== "target.cell.create") continue
         const cellId = record.event.cellId
         if (!cellId) continue
-        const payload = record.event.payload as { value?: string; valueHtml?: string; ai_suggestion?: true }
+        const payload = record.event.payload as { value?: string; valueHtml?: string; ai_suggestion?: true; ai_draft?: AiDraftProvenance }
         if (failed) {
           if (typeof payload.value === "string") store.clearOptimisticIfValue(cellId, payload.value)
           continue
@@ -1427,6 +1441,7 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
           valueHtml: payload.valueHtml,
           eventId: record.event.id,
           aiDrafted: payload.ai_suggestion === true,
+          aiDraft: payload.ai_suggestion === true ? payload.ai_draft : undefined,
         })
       }
       store.setPendingOverlay(next)
@@ -1524,7 +1539,7 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
   }, [doFetch, refreshCellsCacheFromStore, store])
   revalidateCellRef.current = revalidateCell
 
-  const applyOptimisticTargetEdit = useCallback((cellId: string, patch: { value: string; valueHtml?: string; aiDrafted?: boolean }) => {
+  const applyOptimisticTargetEdit = useCallback((cellId: string, patch: { value: string; valueHtml?: string; aiDrafted?: boolean; aiDraft?: AiDraftProvenance }) => {
     store.applyOptimisticTargetEdit(cellId, patch)
   }, [store])
 

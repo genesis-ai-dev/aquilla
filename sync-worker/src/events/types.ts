@@ -132,11 +132,13 @@ export interface AiDraftProvenance {
   promptVersion: string
   exampleIds: string[]
   generatedAt: number
-  mode: 'single' | 'batch' | 'paragraph' | 'agent'
+  mode: 'single' | 'batch' | 'paragraph' | 'agent' | 'read'
   projectState: {
     sourceLanguage: string
     targetLanguage: string
     approvedExampleCount: number
+    evidenceCoverage?: number
+    evidenceWeight?: number
   }
 }
 

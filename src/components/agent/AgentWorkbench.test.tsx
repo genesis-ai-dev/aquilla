@@ -274,6 +274,32 @@ describe("AgentWorkbench three-pane layout", () => {
     expect(props.workspace?.onOpenHistory).toHaveBeenCalledWith("c2")
   })
 
+  it("reports the target cells visible in the three-pane viewport", () => {
+    const props = workbenchProps()
+    const onVisibleCellIdsChange = vi.fn()
+    props.workspace!.onVisibleCellIdsChange = onVisibleCellIdsChange
+    const view = render(<AgentWorkbench {...props} />)
+
+    const scroll = screen.getByTestId("target-context-scroll")
+    const rows = Array.from(scroll.querySelectorAll<HTMLElement>("article[data-cell-id]"))
+    vi.spyOn(scroll, "getBoundingClientRect").mockReturnValue({ top: 0, bottom: 150 } as DOMRect)
+    vi.spyOn(rows[0], "getBoundingClientRect").mockReturnValue({ top: 0, bottom: 100 } as DOMRect)
+    vi.spyOn(rows[1], "getBoundingClientRect").mockReturnValue({ top: 160, bottom: 260 } as DOMRect)
+
+    fireEvent.scroll(scroll)
+    expect(onVisibleCellIdsChange).toHaveBeenLastCalledWith(["c1"])
+
+    // Streaming/completion state may replace cell objects without changing
+    // the viewport. That must not emit a transient empty viewport and abort
+    // an in-flight translate-as-read request.
+    onVisibleCellIdsChange.mockClear()
+    const updated = workbenchProps()
+    updated.workspace!.onVisibleCellIdsChange = onVisibleCellIdsChange
+    updated.workspace!.cells = updated.workspace!.cells.map((cell) => ({ ...cell }))
+    view.rerender(<AgentWorkbench {...updated} />)
+    expect(onVisibleCellIdsChange).not.toHaveBeenCalledWith([])
+  })
+
   it("uses the editor's real validation control in agent mode", () => {
     const props = workbenchProps()
     render(<AgentWorkbench {...props} />)

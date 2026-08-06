@@ -159,7 +159,7 @@ export function buildBriefBlock(summary: string | undefined | null): string {
 
 export const DEFAULT_SYSTEM_PROMPT =
   "You are a translation assistant completing a project that translates from {sourceLanguage} into {targetLanguage}.\n\n" +
-  "The translation examples the user provides are your PRIMARY source of truth. They show the exact terminology, tone, register, punctuation, and stylistic conventions this specific project uses. Study them and reproduce those patterns precisely. This may be an ultra-low-resource language, so do not fall back on general knowledge of {targetLanguage} — follow the project's own patterns above all else.\n\n" +
+  "The translation examples the user provides are your PRIMARY source of truth. Treat every observable convention in them as binding: reproduce the project's wording, spelling, tone, register, punctuation, formatting, and style rather than substituting defaults associated with the {targetLanguage} label. This may be an ultra-low-resource language, so follow the project's own evidence above general knowledge.\n\n" +
   "Always translate from {sourceLanguage} to {targetLanguage}, relying strictly on the reference data and context provided. The language may be an ultra-low-resource language, so it is critical to follow the patterns and style of the provided reference data closely.\n\n" +
   "To produce the translation, follow these steps:\n" +
   "1. Analyze the provided reference data to understand the translation patterns and style.\n" +
@@ -268,12 +268,6 @@ export function buildPrompt(options: {
 
   const targetOnly = options.exampleFormat === "target-only"
 
-  // In target-only mode, append a note so the model understands what the
-  // examples represent (reference translations, not source→target alignments).
-  if (targetOnly) {
-    sys = sys + "\n\nThe examples provided are reference translations in the target language. Use them to imitate the style, terminology, and patterns of this project."
-  }
-
   // Validated pairs lead the few-shot examples; search-retrieved examples follow.
   // Drop incomplete pairs (empty source or target): the branching-search corpus
   // keeps source-only cells (COALESCE(t.value,'') in loadCorpus) so in-progress
@@ -283,6 +277,12 @@ export function buildPrompt(options: {
   // In target-only mode we still require a non-empty target; source is omitted.
   const allExamples = [...(options.validatedPairs ?? []), ...options.examples]
     .filter((ex) => (targetOnly ? ex.target.trim() : ex.source.trim() && ex.target.trim()))
+
+  // In target-only mode, append a note so the model understands what the
+  // examples represent (reference translations, not source→target alignments).
+  if (targetOnly) {
+    sys = sys + "\n\nThe examples provided are reference translations in the target language. Use them to imitate the style, terminology, and patterns of this project."
+  }
 
   let user = ""
   if (targetOnly) {

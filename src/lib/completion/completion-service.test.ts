@@ -19,6 +19,18 @@ const SESSION: FrontierSession = {
 }
 
 describe("buildPrompt", () => {
+  it("makes all observable example conventions authoritative", () => {
+    const [system] = buildPrompt({
+      sourceLanguage: "English",
+      targetLanguage: "Urdu",
+      systemPrompt: DEFAULT_SYSTEM_PROMPT,
+      sourceText: "Prepare the way",
+      examples: [{ source: "The way", target: "Khudawand ka rasta" }],
+    })
+    expect(system.content).toContain("Treat every observable convention in them as binding")
+    expect(system.content).toContain("rather than substituting defaults associated with the Urdu label")
+  })
+
   it("builds a prompt with examples and source text", () => {
     const messages = buildPrompt({
       sourceLanguage: "English", targetLanguage: "French",

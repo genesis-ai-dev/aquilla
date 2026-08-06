@@ -49,6 +49,7 @@ import { effectiveSourceText } from "@/lib/cell-text"
 import { noteAbAssignment } from "@/lib/ab/feedback"
 import { gatherPrecedingContext, gatherFollowingSource, DEFAULT_DRAFT_CONTEXT, type DraftContextSettings } from "@/lib/completion/draft-context"
 import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
+import { measureTranslationEvidence, type TranslationEvidenceSnapshot } from "@/lib/completion/translate-as-read"
 import {
   idmlCompletionPromptSource,
   idmlCompletionSystemAddendum,
@@ -144,6 +145,21 @@ type SearchPassagesFn = (
   radius?: number,
 ) => Promise<PassageHit[]>
 
+export interface PreparedSingleEvidence {
+  found: ScoredPair[]
+  approvedExamples: ValidatedPair[]
+  precedingContext: { source: string; target: string }[]
+  snapshot: TranslationEvidenceSnapshot
+}
+
+export interface CompleteSingleOptions {
+  regenerate?: boolean
+  mode?: AiDraftProvenance["mode"]
+  preparedEvidence?: PreparedSingleEvidence
+  /** Re-check ownership immediately before persistence after a slow model call. */
+  commitGuard?: () => boolean
+}
+
 export function useCompletion(
   settings: CompletionSettings | undefined,
   sourceLanguage: string,
@@ -199,10 +215,41 @@ export function useCompletion(
     () => typeof allCells === "function" ? allCells() : allCells ?? [],
     [allCells],
   )
+  const prepareSingleEvidence = useCallback(async (cell: CellData): Promise<PreparedSingleEvidence> => {
+    const sourceText = effectiveSourceText(cell)
+    const topK = effectiveSettings.top_k ?? DEFAULT_APPROVED_EXAMPLE_COUNT
+    let found: ScoredPair[] = []
+    try {
+      found = await search(sourceText, topK, cell.id)
+    } catch (err) {
+      console.warn("[useCompletion] few-shot retrieval failed:", err)
+    }
+
+    const corpusCells = getAllCells()
+    const precedingContext = gatherPrecedingContext(
+      corpusCells,
+      cell.id,
+      draftContext.precedingTargetCells,
+    )
+    const approvedExamples = selectApprovedExamples(
+      found,
+      collectValidatedPairs(corpusCells, sourceText, topK * 2),
+      topK,
+      [...precedingContext, { source: sourceText }],
+    )
+    return {
+      found,
+      approvedExamples,
+      precedingContext,
+      snapshot: measureTranslationEvidence(sourceText, approvedExamples),
+    }
+  }, [draftContext.precedingTargetCells, effectiveSettings.top_k, getAllCells, search])
+
   const draftProvenance = useCallback((
     mode: AiDraftProvenance["mode"],
     exampleIds: string[],
     approvedExampleCount: number,
+    evidence?: TranslationEvidenceSnapshot,
   ): AiDraftProvenance => ({
     model: modelName,
     provider,
@@ -214,6 +261,10 @@ export function useCompletion(
       sourceLanguage,
       targetLanguage,
       approvedExampleCount,
+      ...(evidence ? {
+        evidenceCoverage: evidence.coverage,
+        evidenceWeight: evidence.weight,
+      } : {}),
     },
   }), [effectiveSettings.systemPrompt, modelName, provider, sourceLanguage, targetLanguage])
 
@@ -225,7 +276,7 @@ export function useCompletion(
   const completeSingle = useCallback(async (
     cell: CellData,
     signal?: AbortSignal,
-    opts?: { regenerate?: boolean },
+    opts?: CompleteSingleOptions,
   ): Promise<boolean> => {
     if (!isConfigured || !isAvailable) return false
     // SUB-28: media sections speak through their transcript — `original` is
@@ -253,40 +304,12 @@ export function useCompletion(
       return next
     })
     setCompleting((p) => new Map(p).set(cell.id, "searching"))
-    // top_k controls how many approved examples are requested. The injected
-    // search adapter is drafting-specific and enforces validatedOnly=true on
-    // the server; this is not a user-tunable trust boundary.
-    const topK = effectiveSettings.top_k ?? DEFAULT_APPROVED_EXAMPLE_COUNT
-    let found: ScoredPair[] = []
-    try {
-      found = await search(sourceText, topK, cell.id)
-    } catch (err) {
-      console.warn("[useCompletion] few-shot retrieval failed:", err)
-    }
+    const evidence = opts?.preparedEvidence ?? await prepareSingleEvidence(cell)
+    const { found, approvedExamples, precedingContext } = evidence
     setExamples((p) => new Map(p).set(cell.id, found))
     setCompleting((p) => new Map(p).set(cell.id, "generating"))
 
-    const corpusCells = getAllCells()
-
     try {
-      // Left-context = committed target of the preceding cells (D4).
-      const precedingContext = gatherPrecedingContext(
-        corpusCells,
-        cell.id,
-        draftContext.precedingTargetCells,
-      )
-
-      // One total approved-example budget: canonical retrieval wins and the
-      // local validated corpus fills any remaining slots. Immediate context is
-      // kept separate and closest to the live source. Research did not support
-      // source compression, so examples retain their full source and target.
-      const approvedExamples = selectApprovedExamples(
-        found,
-        collectValidatedPairs(corpusCells, sourceText, topK * 2),
-        topK,
-        [...precedingContext, { source: sourceText }],
-      )
-
       // AQU-662: decompose any inline footnote markers into clean base text +
       // a separately-listed footnote block so raw \f...\f* markup is not fed
       // to the model (and echoed back into the target). The output contract
@@ -383,14 +406,20 @@ export function useCompletion(
       // and flows through the validation workflow — no inline accept/reject.
       const llmAuthor = modelName
       const completed = normalizeProtectedCompletion(cell, finalText)
+      if (opts?.commitGuard && !opts.commitGuard()) {
+        setPreviews((p) => { const m = new Map(p); m.delete(cell.id); return m })
+        setCompleting((p) => { const m = new Map(p); m.delete(cell.id); return m })
+        return false
+      }
       await commitCompletedCell?.(
         cell,
         completed.valueHtml ?? completed.value,
         llmAuthor,
         draftProvenance(
-          "single",
+          opts?.mode ?? "single",
           uniqueExampleIds(approvedExamples.map((example) => example.cellId)),
           approvedExamples.length,
+          evidence.snapshot,
         ),
       )
       setPreviews((p) => { const m = new Map(p); m.delete(cell.id); return m })
@@ -413,7 +442,7 @@ export function useCompletion(
       setErrors((p) => new Map(p).set(cell.id, err instanceof Error ? err.message : "Failed"))
       return false
     }
-  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, search, session, provider, modelName, commitCompletedCell, rules, getAllCells, briefSummary, draftContext, draftProvenance])
+  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, session, provider, modelName, commitCompletedCell, rules, briefSummary, draftProvenance, prepareSingleEvidence])
 
   // Segmented batch translation: each small sub-batch goes out as one
   // <vN>-framed prompt and the response is demuxed back to cells. This preserves
@@ -960,5 +989,5 @@ export function useCompletion(
     }
   }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, searchPassages, session, provider, modelName, commitCompletedCell, rules, getAllCells, briefSummary, draftContext, draftProvenance])
 
-  return { completeSingle, completeBatch, completeParagraph, cancelCompletion: cancelBatchCompletion, isConfigured, isAvailable, completing, examples, errors, previews }
+  return { completeSingle, prepareSingleEvidence, completeBatch, completeParagraph, cancelCompletion: cancelBatchCompletion, isConfigured, isAvailable, completing, examples, errors, previews }
 }

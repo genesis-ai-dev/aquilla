@@ -91,11 +91,15 @@ export interface AiDraftProvenance {
   promptVersion: string
   exampleIds: string[]
   generatedAt: number
-  mode: "single" | "batch" | "paragraph" | "agent"
+  mode: "single" | "batch" | "paragraph" | "agent" | "read"
   projectState: {
     sourceLanguage: string
     targetLanguage: string
     approvedExampleCount: number
+    /** Source-token coverage of the examples actually placed in the prompt. */
+    evidenceCoverage?: number
+    /** Independent-example strength, normalized to 0–1. */
+    evidenceWeight?: number
   }
 }
 

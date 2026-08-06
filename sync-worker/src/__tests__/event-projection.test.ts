@@ -190,6 +190,43 @@ describe('buildEventProjectionStmts — target.cell.commit', () => {
     const cellsStmts = recorded.filter(r => !r.sql.includes('cells_fts') && !r.sql.includes('WHERE false'))
     expect(cellsStmts[0].args[7]).toBe(null)
   })
+
+  it('projects AI provenance and clears it on a human commit', () => {
+    const { db, recorded } = makeD1Stub()
+    const provenance = {
+      model: 'gpt-5.6-luna',
+      provider: 'frontier',
+      promptVersion: 'translation-draft-v2',
+      exampleIds: ['e1'],
+      generatedAt: 123,
+      mode: 'read' as const,
+      projectState: {
+        sourceLanguage: 'en', targetLanguage: 'es', approvedExampleCount: 1,
+        evidenceCoverage: 0.5, evidenceWeight: 0.2,
+      },
+    }
+    buildEventProjectionStmts(
+      db,
+      makeEvent('target.cell.commit', {
+        value: 'draft', ai_suggestion: true, ai_draft: provenance,
+      }),
+      [],
+    )
+    const aiStmt = recorded.find((row) => row.sql.includes('INSERT INTO cells'))!
+    expect(aiStmt.sql).toContain('ai_draft')
+    expect(aiStmt.args[12]).toBe(1)
+    expect(JSON.parse(String(aiStmt.args[13]))).toEqual(provenance)
+
+    const human = makeD1Stub()
+    buildEventProjectionStmts(
+      human.db,
+      makeEvent('target.cell.commit', { value: 'human edit' }),
+      [],
+    )
+    const humanStmt = human.recorded.find((row) => row.sql.includes('INSERT INTO cells'))!
+    expect(humanStmt.args[12]).toBe(0)
+    expect(humanStmt.args[13]).toBeNull()
+  })
 })
 
 describe('buildEventProjectionStmts — source.cell.commit', () => {
@@ -381,6 +418,7 @@ describe('buildEventProjectionStmts — cell.validate / cell.unvalidate', () => 
     // AQU-292: ai_drafted cleared before the validated recompute so the
     // file counter reflects the final state correctly.
     expect(recorded[1].sql).toContain('SET ai_drafted = 0')
+    expect(recorded[1].sql).toContain('ai_draft = NULL')
     expect(recorded[2].sql).toContain('UPDATE cells')
     expect(recorded[2].sql).toContain('SET validated')
     // Recompute references event_id (not edit_event_id) per 0012 schema

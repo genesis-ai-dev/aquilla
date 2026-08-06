@@ -660,6 +660,9 @@ interface EditorTableProps {
    *  (e.g. "GEN 1:1"). Drives the parallel-bibles sidebar's auto-tracking.
    *  Null when the visible cell carries no ref. */
   onVisibleRefChange?: (ref: string | null) => void
+  /** Emits the exact virtualized viewport so translate-as-read can remain
+   *  bounded to rows the user can currently see. */
+  onVisibleCellIdsChange?: (cellIds: string[]) => void
   /**
    * RACE-5: ref-backed lock check for commit-time enforcement. Reads the live
    * lock map (updated synchronously on each WS frame) so a commit queued just
@@ -725,6 +728,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   footnotePanelActive,
   footnoteViewMode = "off",
   onVisibleRefChange,
+  onVisibleCellIdsChange,
   onVisibleFootnotesChange,
   onFootnoteCreated,
   chapterNavTrailing,
@@ -1738,6 +1742,60 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
       .sort((a, b) => a - b)
     setViewableIndexes((current) => areNumberArraysEqual(current, next) ? current : next)
   }, [displayCellIds.length])
+
+  useEffect(() => {
+    if (!onVisibleCellIdsChange) return
+
+    // LegendList does not always deliver an initial viewability callback when
+    // it restores a short list whose rows all fit in the viewport. That left
+    // translate-as-read with an empty viewport even though the rows were
+    // visibly mounted. Prefer LegendList's indexes when available, but fall
+    // back to the actual rendered/intersecting rows so the UI itself remains
+    // the source of truth.
+    const report = () => {
+      const indexedIds = viewableIndexes
+        .map((index) => displayCellIds[index])
+        .filter((cellId): cellId is string => Boolean(cellId))
+      if (indexedIds.length > 0) {
+        onVisibleCellIdsChange(indexedIds)
+        return
+      }
+
+      const viewport = parentRef.current ?? listRootRef.current
+      const root = listRootRef.current ?? parentRef.current
+      if (!viewport || !root) {
+        onVisibleCellIdsChange([])
+        return
+      }
+      const viewportRect = viewport.getBoundingClientRect()
+      const renderedRows = Array.from(
+        root.querySelectorAll<HTMLElement>("[data-cell-id][data-index]"),
+      )
+      const renderedIds = renderedRows
+        .filter((row) => {
+          const rect = row.getBoundingClientRect()
+          return rect.bottom > viewportRect.top && rect.top < viewportRect.bottom
+        })
+        .map((row) => row.dataset.cellId)
+        .filter((cellId): cellId is string => Boolean(cellId))
+      onVisibleCellIdsChange(renderedIds)
+    }
+
+    report()
+    const frame = requestAnimationFrame(report)
+    const viewport = parentRef.current ?? listRootRef.current
+    viewport?.addEventListener("scroll", report, { passive: true })
+    const observer = typeof ResizeObserver === "undefined" || !viewport
+      ? null
+      : new ResizeObserver(report)
+    if (observer && viewport) observer.observe(viewport)
+    return () => {
+      cancelAnimationFrame(frame)
+      viewport?.removeEventListener("scroll", report)
+      observer?.disconnect()
+      onVisibleCellIdsChange([])
+    }
+  }, [displayCellIds, onVisibleCellIdsChange, viewableIndexes])
 
   const getFootnoteDetails = useCallback(
     (cellId: string) => cellStore.getCellFootnotes(cellId),

@@ -10,7 +10,7 @@
  * with Stop, plus session controls (new session, back to editor).
  */
 
-import { lazy, Suspense, useCallback, useMemo, useRef, useState } from "react"
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Bot, Minimize2, RotateCcw, Square } from "lucide-react"
 import type { Layout } from "react-resizable-panels"
 import { Button } from "@/components/ui/button"
@@ -89,6 +89,7 @@ export interface AgentWorkbenchProps {
     onClaimCell?: (cellId: string) => void
     onReleaseCell?: (cellId: string) => void
     onTargetPresenceSelection?: (cellId: string, selection: TargetPresenceSelection | null) => void
+    onVisibleCellIdsChange?: (cellIds: string[]) => void
   }
 }
 
@@ -144,6 +145,45 @@ export function AgentWorkbench({ agent, credits, onClose, onJumpToCell, onChoose
       : workspace?.cells ?? [],
     [hasReviewWork, stageRows, workspace?.cells, workspaceCellsById],
   )
+  const contextCellIdsKey = contextCells.map((cell) => cell.cellId).join("\u0000")
+
+  useEffect(() => {
+    const onVisibleCellIdsChange = workspace?.onVisibleCellIdsChange
+    if (!onVisibleCellIdsChange) return
+    if (hasReviewWork) {
+      onVisibleCellIdsChange([])
+      return
+    }
+    const root = targetScrollRef.current
+    if (!root) {
+      onVisibleCellIdsChange([])
+      return
+    }
+    const report = () => {
+      const viewport = root.getBoundingClientRect()
+      const ids = Array.from(root.querySelectorAll<HTMLElement>("article[data-cell-id]"))
+        .filter((row) => {
+          const rect = row.getBoundingClientRect()
+          return rect.bottom > viewport.top && rect.top < viewport.bottom
+        })
+        .map((row) => row.dataset.cellId)
+        .filter((cellId): cellId is string => Boolean(cellId))
+      onVisibleCellIdsChange(ids)
+    }
+    report()
+    const frame = requestAnimationFrame(report)
+    root.addEventListener("scroll", report, { passive: true })
+    const resizeObserver = typeof ResizeObserver !== "undefined"
+      ? new ResizeObserver(report)
+      : null
+    resizeObserver?.observe(root)
+    return () => {
+      cancelAnimationFrame(frame)
+      root.removeEventListener("scroll", report)
+      resizeObserver?.disconnect()
+      onVisibleCellIdsChange([])
+    }
+  }, [contextCellIdsKey, hasReviewWork, workspace?.onVisibleCellIdsChange])
 
   const activeRun = state.runs.find((r) => r.status === "running")
   const progress = activeRun?.progress

@@ -18,7 +18,14 @@ import { useStaleSourceCells } from "@/hooks/useStaleSourceCells"
 import { triggerLinkSync } from "@/lib/sync/archive"
 import { useDebouncedValue } from "@/hooks/useDebouncedValue"
 import { useCompletion, FALLBACK_COMPLETION_SETTINGS } from "@/hooks/useCompletion"
+import { useTranslateAsReadPreference } from "@/hooks/useTranslateAsReadPreference"
 import { DEFAULT_DRAFT_CONTEXT } from "@/lib/completion/draft-context"
+import {
+  hasMateriallyBetterEvidence,
+  translateAsReadAction,
+  translateAsReadAttemptKey,
+  withTranslateAsReadClaim,
+} from "@/lib/completion/translate-as-read"
 import { fetchBranchingSearch } from "@/lib/sync/branching-search-read"
 import { fetchBranchingSearchPassages } from "@/lib/sync/branching-search-passages-read"
 import type { ScoredPair } from "@/lib/search/dual-index"
@@ -714,6 +721,20 @@ export function ProjectWorkspace() {
   // Agent is no longer a route-level takeover or sidebar tab. The old route
   // remains a harmless deep link that opens the integrated middle pane.
   const [agentOpen, setAgentOpen] = useState(legacyAgentRoute)
+  const [translateAsReadEnabled, setTranslateAsReadEnabled] = useTranslateAsReadPreference(projectId)
+  const [translateAsReadActiveCellId, setTranslateAsReadActiveCellId] = useState<string | null>(null)
+  const [visibleCellIds, setVisibleCellIds] = useState<string[]>([])
+  const translateAsReadEnabledRef = useRef(false)
+  translateAsReadEnabledRef.current = translateAsReadEnabled
+  const translateAsReadAttemptsRef = useRef(new Map<string, string>())
+  const translateAsReadRunRef = useRef(0)
+  const handleVisibleCellIdsChange = useCallback((next: string[]) => {
+    setVisibleCellIds((current) => (
+      current.length === next.length && current.every((id, index) => id === next[index])
+        ? current
+        : next
+    ))
+  }, [])
   const [editorHeaderNavTarget, setEditorHeaderNavTarget] = useState<HTMLDivElement | null>(null)
   useEffect(() => {
     if (legacyAgentRoute) setAgentOpen(true)
@@ -1904,6 +1925,7 @@ export function ProjectWorkspace() {
       value: completed.value,
       ...(completed.valueHtml ? { valueHtml: completed.valueHtml } : {}),
       aiDrafted: true,
+      aiDraft: provenance,
     })
     // RACE-3/QW-2: use the pending event id for this cell (last AI-completion
     // commit we enqueued) as parentId, falling back to the projection value.
@@ -2078,7 +2100,7 @@ export function ProjectWorkspace() {
     revalidateCell(cell.id)
   }, [project?.id, historyCellId, getActiveCell, applyOptimisticTargetEdit, activeLane, resolveTargetCommitParentId, rememberPendingTargetCommit, getTokenForProjectFile, currentUsername, refreshOutboxPending, revalidateCellStats, revalidateCell])
 
-  const { completeSingle, completeBatch, completeParagraph, isConfigured, isAvailable: isCompletionAvailable, completing, examples, errors, previews } = useCompletion(
+  const { completeSingle, prepareSingleEvidence, completeBatch, completeParagraph, isConfigured, isAvailable: isCompletionAvailable, completing, examples, errors, previews } = useCompletion(
     // AQU-538/AQU-602: when a non-default lane is active, its tag IS the target
     // language for few-shot/completion; default lane falls back to the file's
     // (then project's) targetLanguage exactly as before. Shares the same
@@ -3603,6 +3625,164 @@ export function ProjectWorkspace() {
   const perms = useProjectPermissions(project)
   const isReadOnly = !perms.canEditContent
 
+  const validatedEvidenceVersion = useMemo(() => (
+    readAtVersion(cellStoreVersion, getActiveCells)
+      .filter((cell) => cell.status === "validated" && cell.translated.trim())
+      .map((cell) => `${cell.id}:${cell.targetEventId ?? cell.lastEditAt ?? ""}`)
+      .join("|")
+  ), [cellStoreVersion, getActiveCells])
+
+  // Completion and store callbacks can legitimately receive new identities as
+  // their hooks update UI state. Translate-as-read must not treat those normal
+  // renders as a reason to abort an in-flight model request, so the queue reads
+  // their latest implementations through refs while its lifecycle remains
+  // keyed only to actual queue inputs below.
+  const translateAsReadGetCellRef = useRef(getActiveCell)
+  const translateAsReadCheckLockRef = useRef(checkLockHolder)
+  const translateAsReadCompleteRef = useRef(completeSingle)
+  const translateAsReadPrepareEvidenceRef = useRef(prepareSingleEvidence)
+  translateAsReadGetCellRef.current = getActiveCell
+  translateAsReadCheckLockRef.current = checkLockHolder
+  translateAsReadCompleteRef.current = completeSingle
+  translateAsReadPrepareEvidenceRef.current = prepareSingleEvidence
+
+  useEffect(() => {
+    translateAsReadAttemptsRef.current.clear()
+  }, [activeFileId, activeLane])
+
+  const translateAsReadViewportCellIds = useMemo(() => (
+    visibleCellIds.length > 0
+      ? visibleCellIds
+      : agentOpen && focusedCellId
+        ? [focusedCellId]
+        : []
+  ), [agentOpen, focusedCellId, visibleCellIds])
+  const translateAsReadViewportStateKey = useMemo(() => (
+    readAtVersion(cellStoreVersion, () => translateAsReadViewportCellIds
+      .map((cellId) => {
+        const cell = getActiveCell(cellId)
+        return cell ? `${cellId}\u0000${translateAsReadAttemptKey(cell)}` : `${cellId}\u0000missing`
+      })
+      .join("\u0001"))
+  ), [cellStoreVersion, getActiveCell, translateAsReadViewportCellIds])
+
+  useEffect(() => {
+    // The standard editor and the integrated Source | Agent | Target workbench
+    // both feed this same viewport queue.
+    const runId = ++translateAsReadRunRef.current
+    const viewportCellIds = translateAsReadViewportCellIds
+    const available = translateAsReadEnabled
+      && lens === "text"
+      && !isReadOnly
+      && isConfigured
+      && isCompletionAvailable
+      && Boolean(activeFileId)
+    if (!available || viewportCellIds.length === 0) {
+      setTranslateAsReadActiveCellId(null)
+      return
+    }
+
+    let stopped = false
+    const controller = new AbortController()
+    const run = async () => {
+      for (const cellId of viewportCellIds) {
+        if (stopped || controller.signal.aborted) break
+        const initial = translateAsReadGetCellRef.current(cellId)
+        if (!initial || translateAsReadCheckLockRef.current(cellId)) continue
+        const action = translateAsReadAction(initial)
+        if (!action) continue
+        // A selected empty row is still eligible. If the user types while the
+        // model is running, the state-key guard below cancels the write. Only
+        // refreshes of existing AI text need to wait for focus to leave.
+        if (action === "refresh" && focusedCellIdRef.current === cellId) continue
+
+        const stateKey = translateAsReadAttemptKey(initial)
+        const attemptKey = action === "refresh"
+          ? `${stateKey}\u0000${validatedEvidenceVersion}`
+          : stateKey
+        if (translateAsReadAttemptsRef.current.get(cellId) === attemptKey) continue
+        translateAsReadAttemptsRef.current.set(cellId, attemptKey)
+        if (translateAsReadRunRef.current === runId) setTranslateAsReadActiveCellId(cellId)
+
+        const claimScope = `${project?.id ?? ""}\u0000${activeFileId ?? ""}\u0000${activeLane}\u0000${cellId}`
+        const claim = await withTranslateAsReadClaim(claimScope, attemptKey, async () => {
+          if (stopped || controller.signal.aborted) {
+            return { remember: false, committed: false }
+          }
+          const claimedInitial = translateAsReadGetCellRef.current(cellId)
+          if (
+            !claimedInitial
+            || translateAsReadAttemptKey(claimedInitial) !== stateKey
+            || translateAsReadAction(claimedInitial) !== action
+            || translateAsReadCheckLockRef.current(cellId)
+          ) {
+            return { remember: true, committed: false }
+          }
+
+          let preparedEvidence
+          if (action === "refresh") {
+            preparedEvidence = await translateAsReadPrepareEvidenceRef.current(claimedInitial)
+            if (stopped || controller.signal.aborted) {
+              return { remember: false, committed: false }
+            }
+            const current = translateAsReadGetCellRef.current(cellId)
+            if (
+              !current
+              || translateAsReadAttemptKey(current) !== stateKey
+              || translateAsReadAction(current) !== "refresh"
+              || focusedCellIdRef.current === cellId
+              || translateAsReadCheckLockRef.current(cellId)
+              || !hasMateriallyBetterEvidence(current.aiDraft, preparedEvidence.snapshot)
+            ) {
+              return { remember: true, committed: false }
+            }
+          }
+
+          const committed = await translateAsReadCompleteRef.current(claimedInitial, controller.signal, {
+            mode: "read",
+            preparedEvidence,
+            commitGuard: () => {
+              const current = translateAsReadGetCellRef.current(cellId)
+              return !stopped
+                && translateAsReadEnabledRef.current
+                && (action === "draft" || focusedCellIdRef.current !== cellId)
+                && !translateAsReadCheckLockRef.current(cellId)
+                && current !== null
+                && translateAsReadAction(current) === action
+                && translateAsReadAttemptKey(current) === stateKey
+            },
+          })
+          return { remember: committed, committed }
+        })
+        if (claim.ran && claim.outcome?.remember === false && !stopped) {
+          // A transient provider/enqueue failure may be retried after the row
+          // leaves and re-enters the viewport; do not create a tight loop.
+          translateAsReadAttemptsRef.current.delete(cellId)
+        }
+        if (translateAsReadRunRef.current === runId) setTranslateAsReadActiveCellId(null)
+      }
+    }
+    void run().finally(() => {
+      if (translateAsReadRunRef.current === runId) setTranslateAsReadActiveCellId(null)
+    })
+    return () => {
+      stopped = true
+      controller.abort()
+    }
+  }, [
+    activeFileId,
+    activeLane,
+    isCompletionAvailable,
+    isConfigured,
+    isReadOnly,
+    lens,
+    project?.id,
+    translateAsReadEnabled,
+    translateAsReadViewportCellIds,
+    translateAsReadViewportStateKey,
+    validatedEvidenceVersion,
+  ])
+
   const commitTrayFootnoteText = useCallback(async (cellId: string, updatedText: string) => {
     if (!project?.id || isReadOnly) return
     if (!canPerform("target.cell.commit", project.syncRole?.level ?? null)) return
@@ -5098,6 +5278,12 @@ export function ProjectWorkspace() {
           }}
         />
       )}
+      translateAsReadEnabled={translateAsReadEnabled}
+      translateAsReadDisabled={!translateAsReadEnabled && (
+        lens !== "text" || isReadOnly || !isConfigured || !isCompletionAvailable
+      )}
+      translateAsReadActive={translateAsReadActiveCellId !== null}
+      onTranslateAsReadChange={setTranslateAsReadEnabled}
     />
   ) : null
 
@@ -5616,6 +5802,7 @@ export function ProjectWorkspace() {
               onClaimCell: handleClaimCell,
               onReleaseCell: handleReleaseCell,
               onTargetPresenceSelection: handleTargetPresenceSelection,
+              onVisibleCellIdsChange: handleVisibleCellIdsChange,
             }}
           />
           ) : (
@@ -5751,6 +5938,7 @@ export function ProjectWorkspace() {
             upstreamStaleCellIds={upstreamStaleCellIds}
             assignmentsByCellId={assignmentsByCellId}
             onVisibleRefChange={setTrackedCellRef}
+            onVisibleCellIdsChange={handleVisibleCellIdsChange}
             chapterNavTrailing={fileChapterToolbar ?? undefined}
             chapterNavPortalTarget={editorHeaderNavTarget}
             onAgentToggle={() => setAgentOpen(true)}

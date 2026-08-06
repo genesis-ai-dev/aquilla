@@ -46,6 +46,7 @@ import {
   type CredentialMode,
   type MintCredentialResult,
 } from "@/lib/sync/credentials"
+import { buildAgentConnectInstructions } from "@/lib/sync/agent-connect-instructions"
 
 const EXPIRY_PRESETS = [
   { id: "30d", label: "30 days", days: 30 },
@@ -220,7 +221,11 @@ export function ApiTokensSection() {
       )}
 
       {mintResult && (
-        <ShowOnceTokenDialog result={mintResult} onClose={() => setMintResult(null)} />
+        <ShowOnceTokenDialog
+          result={mintResult}
+          scope={scopeLabel(mintResult.credential, orgs, projects)}
+          onClose={() => setMintResult(null)}
+        />
       )}
     </div>
   )
@@ -334,20 +339,37 @@ function RevokeCredentialDialog({
 
 /** The plaintext token is rendered exactly once, right after mint. It is
  * never stored client-side — this dialog holds the only in-memory copy, and
- * it's gone once closed. */
+ * it's gone once closed. Alongside the raw token it offers a ready-to-paste
+ * "connect your AI agent" block (AQU-811) so a non-technical user can hand the
+ * token to Claude Cowork / Codex without knowing the endpoints. */
 function ShowOnceTokenDialog({
   result,
+  scope,
   onClose,
 }: {
   result: MintCredentialResult
+  scope: string
   onClose: () => void
 }) {
   const [copied, setCopied] = useState(false)
+  const [copiedInstructions, setCopiedInstructions] = useState(false)
+  // Built once at mint time with the real token embedded — never rendered with
+  // a blank/placeholder token, since this dialog only mounts after a mint.
+  const instructions = useMemo(
+    () => buildAgentConnectInstructions({ result, scope }),
+    [result, scope],
+  )
 
   function copy() {
     void navigator.clipboard.writeText(result.token)
     setCopied(true)
     setTimeout(() => setCopied(false), 1500)
+  }
+
+  function copyInstructions() {
+    void navigator.clipboard.writeText(instructions)
+    setCopiedInstructions(true)
+    setTimeout(() => setCopiedInstructions(false), 1500)
   }
 
   return (
@@ -361,7 +383,7 @@ function ShowOnceTokenDialog({
         <DialogHeader>
           <DialogTitle>Your new API token</DialogTitle>
         </DialogHeader>
-        <DialogBody className="space-y-3">
+        <DialogBody className="space-y-4">
           <p className="text-sm text-muted-foreground" role="alert">
             Copy this now — you will not see it again. If you lose it, revoke this token and
             mint a new one.
@@ -374,6 +396,23 @@ function ShowOnceTokenDialog({
               <Copy className="mr-1 size-3.5" />
               {copied ? "Copied" : "Copy"}
             </Button>
+          </div>
+
+          <div className="space-y-2 border-t pt-3">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-sm font-medium text-foreground">Connect your AI agent</p>
+              <Button size="sm" variant="outline" onClick={copyInstructions}>
+                <Copy className="mr-1 size-3.5" />
+                {copiedInstructions ? "Copied" : "Copy instructions"}
+              </Button>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Paste this into an AI agent (Claude Cowork, OpenAI Codex, or any MCP client) to
+              let it work in your Aquilla projects with your permissions.
+            </p>
+            <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-words rounded bg-muted px-3 py-2 text-[11px] leading-relaxed text-foreground">
+              {instructions}
+            </pre>
           </div>
         </DialogBody>
         <DialogFooter>

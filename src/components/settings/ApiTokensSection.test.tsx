@@ -184,6 +184,15 @@ describe("ApiTokensSection", () => {
     expect(await screen.findByText("aqk_freshplaintext")).toBeInTheDocument()
     expect(screen.getByText(/you will not see it again/i)).toBeInTheDocument()
 
+    // AQU-811: the show-once dialog also offers a paste-able "connect your AI
+    // agent" block, built with the real token embedded (never a placeholder),
+    // plus its own copy button.
+    expect(screen.getByText(/Connect your AI agent/i)).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /Copy instructions/i })).toBeInTheDocument()
+    const instructionsBlock = screen.getByText(/connect to my Aquilla translation workspace/i)
+    expect(instructionsBlock).toHaveTextContent("aqk_freshplaintext")
+    expect(instructionsBlock).toHaveTextContent("/api/v1/external")
+
     // Closing it makes it disappear for good — it isn't reachable again without
     // a fresh mint (the client never stores the plaintext).
     fireEvent.click(screen.getByRole("button", { name: "Done" }))

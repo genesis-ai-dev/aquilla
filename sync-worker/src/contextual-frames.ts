@@ -38,6 +38,7 @@ export interface ContextualSceneFrame {
   sceneBriefId: string
   spanLabel: string
   ambiguityCount: number
+  spanId?: string
 }
 
 export interface ContextualSpanFrame {
@@ -47,12 +48,54 @@ export interface ContextualSpanFrame {
   staged: number
   skipped: number
   verdictSummary: string
+  spanId?: string
 }
+
+/** A span lane opens (before the first model call — kills the start-up dead
+ *  air a wave of spans would otherwise show). */
+export interface ContextualSpanStartFrame {
+  type: "contextual.span.start"
+  runId: string
+  fileId: string
+  spanId: string
+  spanLabel: string
+}
+
+/** Within-lane phase movement. */
+export interface ContextualPhaseFrame {
+  type: "contextual.phase"
+  runId: string
+  spanId: string
+  spanLabel: string
+  phase: ContextualSpanPhase
+}
+
+/** Verified text landing as reviewable drafts — the payload users wait for. */
+export interface ContextualDraftsFrame {
+  type: "contextual.drafts"
+  runId: string
+  fileId: string
+  spanLabel: string
+  drafts: { draftId: string; cellId: string; text: string }[]
+  truncated?: boolean
+}
+
+export type ContextualSpanPhase = "reading" | "drafting" | "checking" | "staging"
+
+const SPAN_PHASES: ReadonlySet<string> = new Set(["reading", "drafting", "checking", "staging"])
+
+/** Ceiling on drafts carried in one frame — mirrors MAX_DRAFTS_PER_FRAME in
+ *  auth-worker/src/lib/contextual/tick.ts. A frame over this is rejected
+ *  rather than fanned out; the client's snapshot refetch is the floor. */
+const MAX_DRAFTS_PER_FRAME = 40
 
 export type ContextualFrame =
   | ContextualRunStateFrame
   | ContextualSceneFrame
   | ContextualSpanFrame
+  | ContextualSpanStartFrame
+  | ContextualPhaseFrame
+  | ContextualDraftsFrame
 
 /**
  * Validate an untrusted JSON body into a ContextualFrame. Returns null on any
@@ -84,12 +127,14 @@ export function parseContextualFrame(value: unknown): ContextualFrame | null {
     if (typeof m.sceneBriefId !== "string") return null
     if (typeof m.spanLabel !== "string") return null
     if (typeof m.ambiguityCount !== "number") return null
+    if (m.spanId !== undefined && typeof m.spanId !== "string") return null
     return {
       type: "contextual.scene",
       runId: m.runId,
       sceneBriefId: m.sceneBriefId,
       spanLabel: m.spanLabel,
       ambiguityCount: m.ambiguityCount,
+      ...(typeof m.spanId === "string" ? { spanId: m.spanId } : {}),
     }
   }
 
@@ -97,6 +142,7 @@ export function parseContextualFrame(value: unknown): ContextualFrame | null {
     if (typeof m.spanLabel !== "string") return null
     if (typeof m.staged !== "number" || typeof m.skipped !== "number") return null
     if (typeof m.verdictSummary !== "string") return null
+    if (m.spanId !== undefined && typeof m.spanId !== "string") return null
     return {
       type: "contextual.span",
       runId: m.runId,
@@ -104,6 +150,58 @@ export function parseContextualFrame(value: unknown): ContextualFrame | null {
       staged: m.staged,
       skipped: m.skipped,
       verdictSummary: m.verdictSummary,
+      ...(typeof m.spanId === "string" ? { spanId: m.spanId } : {}),
+    }
+  }
+
+  if (m.type === "contextual.span.start") {
+    if (typeof m.fileId !== "string") return null
+    if (typeof m.spanId !== "string" || m.spanId.length === 0) return null
+    if (typeof m.spanLabel !== "string") return null
+    return {
+      type: "contextual.span.start",
+      runId: m.runId,
+      fileId: m.fileId,
+      spanId: m.spanId,
+      spanLabel: m.spanLabel,
+    }
+  }
+
+  if (m.type === "contextual.phase") {
+    if (typeof m.spanId !== "string" || m.spanId.length === 0) return null
+    if (typeof m.spanLabel !== "string") return null
+    if (typeof m.phase !== "string" || !SPAN_PHASES.has(m.phase)) return null
+    return {
+      type: "contextual.phase",
+      runId: m.runId,
+      spanId: m.spanId,
+      spanLabel: m.spanLabel,
+      phase: m.phase as ContextualSpanPhase,
+    }
+  }
+
+  if (m.type === "contextual.drafts") {
+    if (typeof m.fileId !== "string") return null
+    if (typeof m.spanLabel !== "string") return null
+    if (!Array.isArray(m.drafts) || m.drafts.length === 0) return null
+    if (m.drafts.length > MAX_DRAFTS_PER_FRAME) return null
+    if (m.truncated !== undefined && typeof m.truncated !== "boolean") return null
+    const drafts: ContextualDraftsFrame["drafts"] = []
+    for (const raw of m.drafts as unknown[]) {
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null
+      const d = raw as Record<string, unknown>
+      if (typeof d.draftId !== "string" || d.draftId.length === 0) return null
+      if (typeof d.cellId !== "string" || d.cellId.length === 0) return null
+      if (typeof d.text !== "string") return null
+      drafts.push({ draftId: d.draftId, cellId: d.cellId, text: d.text })
+    }
+    return {
+      type: "contextual.drafts",
+      runId: m.runId,
+      fileId: m.fileId,
+      spanLabel: m.spanLabel,
+      drafts,
+      ...(m.truncated === true ? { truncated: true } : {}),
     }
   }
 

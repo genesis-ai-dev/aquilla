@@ -15,13 +15,14 @@ test("contextual run pill drives a seeded file to parked with staged drafts", as
   const jwt = await jwtFor("alice")
   const seeded = await seedProjectWithFile(jwt, { name: `Contextual ${Date.now()}` })
 
-  // Enable the device-local flag through the Experimental settings section
-  // (the settings surface renders one section at a time via its side nav).
+  // The device-local flag is ON by default (it gates discovery of the play
+  // button, not spend). Assert that through the real settings UI rather than
+  // assuming it: if the default is ever flipped back, this fails here with an
+  // obvious cause instead of as a missing pill fifty lines down.
   await alice.goto(`/project/${seeded.projectId}/settings`)
   await alice.getByRole("link", { name: /Experimental/ }).click()
   const flagSwitch = alice.getByRole("switch", { name: "Contextual drafting" })
   await expect(flagSwitch).toBeVisible()
-  await flagSwitch.click()
   await expect(flagSwitch).toBeChecked()
 
   // The pill is visible while its server capability snapshot is still

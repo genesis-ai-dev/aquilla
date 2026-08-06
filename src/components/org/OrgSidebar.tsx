@@ -14,10 +14,17 @@ const link = ({ isActive }: { isActive: boolean }) =>
   `block rounded-md px-2 py-1.5 text-sm ${isActive ? "bg-accent font-medium text-foreground" : "text-muted-foreground hover:bg-accent hover:text-foreground"}`
 
 export function OrgSidebar() {
-  const { orgs, activeOrg, activeOrgId, isAllOrgs, accessibleProjects } = useActiveOrg()
+  const { orgs, activeOrg, activeOrgId, activeGuestOrg, isAllOrgs, accessibleProjects } = useActiveOrg()
   const { session } = useFrontierSession()
   const username = session?.username ?? null
-  const isAdmin = !isAllOrgs && (activeOrg?.role.level ?? 0) >= 600
+  // AQU-790: in a guest org the caller has project-level access only — no org
+  // membership. Member-scoped nav (Teams, Assigned, Members, Archived,
+  // Settings) is hidden so nothing links into an org they can't operate on
+  // (previously these rendered for the caller's *owned* active org and silently
+  // switched context on click).
+  const isGuestOrg = activeGuestOrg != null
+  const isMemberOrg = !isAllOrgs && activeOrgId != null && !isGuestOrg
+  const isAdmin = isMemberOrg && (activeOrg?.role.level ?? 0) >= 600
   // Platform-operator (site-wide admin) — separate axis from the org role.
   const { isAdmin: isPlatformAdmin } = usePlatformAdmin()
 
@@ -64,7 +71,7 @@ export function OrgSidebar() {
         >
           Projects
         </NavLink>
-        {!isAllOrgs && activeOrgId != null && <>
+        {isMemberOrg && activeOrgId != null && <>
           <NavLink to={orgPath(activeOrgId, "/teams")} className={link}>Teams</NavLink>
           <NavLink to={orgPath(activeOrgId, "/assigned")} className={link} data-tour="nav-assigned">Assigned to me</NavLink>
         </>}

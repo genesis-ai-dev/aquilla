@@ -38,11 +38,12 @@ vi.mock("@/lib/sync/cloud-projects", () => ({
 }))
 
 function Probe() {
-  const { orgs, activeOrg, isAllOrgs, guestOrgs, setActiveOrg, setAllOrgs } = useActiveOrg()
+  const { orgs, activeOrg, activeGuestOrg, isAllOrgs, guestOrgs, setActiveOrg, setAllOrgs } = useActiveOrg()
   return (
     <div>
       <span data-testid="count">{orgs.length}</span>
       <span data-testid="active">{activeOrg?.id ?? "none"}</span>
+      <span data-testid="guest-active">{activeGuestOrg?.id ?? "none"}</span>
       <span data-testid="all">{isAllOrgs ? "yes" : "no"}</span>
       <span data-testid="guest-count">{guestOrgs.length}</span>
       <span data-testid="guest-names">{guestOrgs.map((g) => g.name ?? `#${g.id}`).join(",")}</span>
@@ -178,6 +179,44 @@ describe("OrgProvider", () => {
       render(<MemoryRouter><OrgProvider><Probe /></OrgProvider></MemoryRouter>)
       await waitFor(() => expect(screen.getByTestId("guest-count").textContent).toBe("1"))
       expect(screen.getByTestId("count").textContent).toBe("1")
+    })
+  })
+
+  // AQU-790: a guest org uses the same path convention as an owned org
+  // (`/orgs/:guestId`). The context surfaces it as `activeGuestOrg` (never as a
+  // membership `activeOrg`), so chrome can describe the guest org without
+  // misrepresenting the caller's role — and a reload keeps them in it.
+  describe("activeGuestOrg (AQU-790)", () => {
+    it("resolves the guest org named by the path without making it a membership", async () => {
+      listMyOrgs.mockResolvedValue([{ id: 1, name: "A", role: { level: 700, name: "owner" } }])
+      fetchAccessibleProjects.mockResolvedValue([
+        { id: "p2", name: "Proj 2", orgId: 2, orgName: "Guest Org", role: { level: 100, name: "viewer", source: "override" } },
+      ])
+      render(
+        <MemoryRouter initialEntries={["/orgs/2"]}>
+          <OrgProvider><Probe /></OrgProvider>
+        </MemoryRouter>,
+      )
+      await waitFor(() => expect(screen.getByTestId("guest-active").textContent).toBe("2"))
+      // Not a membership: activeOrg stays null and isAllOrgs is false.
+      expect(screen.getByTestId("active").textContent).toBe("none")
+      expect(screen.getByTestId("all").textContent).toBe("no")
+      // Persisted, so a reload keeps the caller in the guest org.
+      expect(localStorage.getItem("org:active")).toBe("2")
+    })
+
+    it("stays null when the active path org is a real membership", async () => {
+      listMyOrgs.mockResolvedValue([
+        { id: 1, name: "A", role: { level: 700, name: "owner" } },
+        { id: 2, name: "B", role: { level: 600, name: "maintainer" } },
+      ])
+      render(
+        <MemoryRouter initialEntries={["/orgs/2"]}>
+          <OrgProvider><Probe /></OrgProvider>
+        </MemoryRouter>,
+      )
+      await waitFor(() => expect(screen.getByTestId("active").textContent).toBe("2"))
+      expect(screen.getByTestId("guest-active").textContent).toBe("none")
     })
   })
 

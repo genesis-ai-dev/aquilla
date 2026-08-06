@@ -75,7 +75,11 @@ describe("OrgSwitcher", () => {
 
     const search = screen.getByRole("combobox", { name: /find an organization/i })
     expect(search).toBeInTheDocument()
+    // Empty query: no clear (X) control — Base UI would otherwise show it for the selection.
+    expect(document.querySelector('[data-slot="combobox-clear"]')).toBeNull()
+
     fireEvent.change(search, { target: { value: "zebra" } })
+    expect(document.querySelector('[data-slot="combobox-clear"]')).not.toBeNull()
 
     expect(screen.getByText("Zebra Corp")).toBeInTheDocument()
     expect(screen.queryByText("Come and See")).not.toBeInTheDocument()

@@ -391,7 +391,8 @@ export function OrgSwitcher() {
           <ComboboxInput
             showTrigger={false}
             showSearchIcon
-            showClear
+            // Gate on query text — Base UI Clear stays visible for any selection.
+            showClear={inputValue !== ""}
             placeholder="Find an organization…"
             aria-label="Find an organization"
             className="w-auto rounded-none border-0 bg-transparent shadow-none outline-none ring-0 hover:border-0! focus-within:border-0! has-[[data-slot=input-group-control]:focus-visible]:border-0! has-[[data-slot=input-group-control]:focus-visible]:ring-0! *:data-[slot=input-group-addon]:pl-3"

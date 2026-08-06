@@ -9,7 +9,7 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
 
 /**
  * Agent-mode-v2 journey: ask the agent to draft the open file, watch the
- * draft tool chip land inline in the run timeline, expand to the full-screen
+ * draft tool chip land inline in the run timeline, expand to an editor tab
  * workbench, and accept the staged drafts from the working set — the applied
  * text must reach the editor through the normal outbox path. Then UNDO the
  * applied proposal from its receipt: compensating commits restore each cell's
@@ -45,9 +45,10 @@ test("agent drafts the open file; workbench accept-all lands in the editor; undo
   // card — nothing is written yet.
   await expect(alice.getByText("target.cell.commit").first()).toBeVisible({ timeout: 30_000 })
 
-  // Expand to the full-screen workbench — the SAME session renders there.
-  await alice.getByRole("button", { name: "Open full-screen workbench" }).click()
+  // Expand into an editor tab — the SAME session renders there.
+  await alice.getByRole("button", { name: "Open agent in editor tab" }).click()
   await expect(alice).toHaveURL(/\/agent$/)
+  await expect(alice.getByRole("tablist", { name: "Open files" }).getByRole("tab", { name: "Agent" })).toBeVisible()
 
   // The working set shows the staged drafts as pending rows; accept them all.
   const acceptAll = alice.getByRole("button", { name: /Accept remaining/ })
@@ -65,7 +66,7 @@ test("agent drafts the open file; workbench accept-all lands in the editor; undo
   // Regret it: back in the workbench, the receipt offers Undo. Compensating
   // commits restore the pre-draft (empty) targets through the outbox; the
   // receipt flips to "undone" and the editor no longer shows the draft.
-  await alice.getByRole("button", { name: "Open full-screen workbench" }).click()
+  await alice.getByRole("button", { name: "Open agent in editor tab" }).click()
   const undo = alice.getByRole("button", { name: /Undo applied/ })
   await expect(undo).toBeVisible({ timeout: 10_000 })
   await undo.click()

@@ -34,11 +34,14 @@ export class AgentPage {
     await this.page.getByRole("button", { name: "Agent", exact: true }).click()
   }
 
-  /** Expand the docked agent panel into the full-screen workbench at
+  /** Expand the docked agent panel into an editor tab at
    * `/project/:id/agent`. Mirrors `agent-draft.spec.ts`'s existing pattern. */
   async openFullScreenWorkbench(): Promise<void> {
-    await this.page.getByRole("button", { name: "Open full-screen workbench" }).click()
+    await this.page.getByRole("button", { name: "Open agent in editor tab" }).click()
     await expect(this.page).toHaveURL(/\/agent$/)
+    await expect(
+      this.page.getByRole("tablist", { name: "Open files" }).getByRole("tab", { name: "Agent" }),
+    ).toBeVisible()
   }
 
   async closeFullScreenWorkbench(): Promise<void> {

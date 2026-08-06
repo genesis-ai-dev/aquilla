@@ -18,13 +18,14 @@ import { describe, it, expect } from "vitest"
 // ── Replicate the pure derivation logic from ProjectWorkspace ──────────────
 // Keep in sync with the `centerSurface` derivation in ProjectWorkspace.tsx.
 
-type CenterSurface = "editor" | "rules" | "comments" | "memory" | "terminology"
+type CenterSurface = "editor" | "rules" | "comments" | "memory" | "terminology" | "agent"
 
 function deriveCenterSurface(pathname: string): CenterSurface {
   if (pathname.endsWith("/rules")) return "rules"
   if (pathname.endsWith("/comments")) return "comments"
   if (pathname.endsWith("/memory")) return "memory"
   if (pathname.endsWith("/terminology")) return "terminology"
+  if (pathname.endsWith("/agent")) return "agent"
   return "editor"
 }
 
@@ -34,7 +35,8 @@ function isOverlaySurface(pathname: string): boolean {
     pathname.endsWith("/rules") ||
     pathname.endsWith("/comments") ||
     pathname.endsWith("/memory") ||
-    pathname.endsWith("/terminology")
+    pathname.endsWith("/terminology") ||
+    pathname.endsWith("/agent")
   )
 }
 
@@ -55,6 +57,10 @@ describe("deriveCenterSurface", () => {
 
   it("returns 'terminology' for /project/:id/terminology", () => {
     expect(deriveCenterSurface("/project/proj1/terminology")).toBe("terminology")
+  })
+
+  it("returns 'agent' for /project/:id/agent", () => {
+    expect(deriveCenterSurface("/project/proj1/agent")).toBe("agent")
   })
 
   it("returns 'editor' for the root project path", () => {
@@ -89,6 +95,10 @@ describe("isOverlaySurface (redirect-guard exclusion)", () => {
     expect(isOverlaySurface("/project/proj1/terminology")).toBe(true)
   })
 
+  it("excludes /agent from the redirect", () => {
+    expect(isOverlaySurface("/project/proj1/agent")).toBe(true)
+  })
+
   it("does NOT exclude the root project path (redirect must fire here)", () => {
     expect(isOverlaySurface("/project/proj1/editor")).toBe(false)
   })
@@ -114,9 +124,9 @@ describe("shell-routing: back-nav contract", () => {
     expect(isOverlaySurface("/project/proj1/editor")).toBe(false)
   })
 
-  it("overlay surface derivation covers all AQU-254 subroutes", () => {
-    const fro254Routes = ["/comments", "/memory", "/terminology", "/rules"]
-    for (const suffix of fro254Routes) {
+  it("overlay surface derivation covers all shell overlay subroutes", () => {
+    const overlayRoutes = ["/comments", "/memory", "/terminology", "/rules", "/agent"]
+    for (const suffix of overlayRoutes) {
       const path = `/project/proj1${suffix}`
       expect(deriveCenterSurface(path)).not.toBe("editor")
       expect(isOverlaySurface(path)).toBe(true)
@@ -125,7 +135,7 @@ describe("shell-routing: back-nav contract", () => {
 })
 
 // Keep in sync with `showAudioToolbar` in ProjectWorkspace statusBar.
-function shouldShowAudioToolbar(lens: "text" | "audio", centerSurface: CenterSurface | "agent"): boolean {
+function shouldShowAudioToolbar(lens: "text" | "audio", centerSurface: CenterSurface): boolean {
   return lens === "audio" && centerSurface === "editor"
 }
 

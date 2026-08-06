@@ -4,6 +4,8 @@ import { MoreHorizontal, ChevronRight, Copy, Check, Download, Search, SlidersHor
 import { AppShell } from "@/components/AppShell"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { ExpandableName } from "@/components/ui/expandable-name"
+import { InitialsAvatar } from "@/components/InitialsAvatar"
+import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { ButtonGroup } from "@/components/ui/button-group"
@@ -1624,7 +1626,7 @@ export function ProjectOverview() {
                 <h2 className="mb-2 text-xs font-semibold tracking-wide text-muted-foreground">Project manager</h2>
                 <div className="flex flex-wrap items-center gap-2 text-sm">
                   {pm ? (
-                    <span className="font-medium" data-testid="overview-pm-name">{pm.username}</span>
+                    <UsernameWithAvatar username={pm.username} nameTestId="overview-pm-name" />
                   ) : (
                     <span className="text-muted-foreground" data-testid="overview-pm-name">Unassigned</span>
                   )}
@@ -1692,7 +1694,12 @@ export function ProjectOverview() {
                             <SelectItem value="">Unassigned</SelectItem>
                             {pmCandidates.map((m) => (
                               <SelectItem key={m.userId} value={String(m.userId)}>
-                                {m.username}
+                                <UsernameWithAvatar
+                                  username={m.username}
+                                  size="xs"
+                                  menuSafe
+                                  nameClassName="text-sm font-normal"
+                                />
                               </SelectItem>
                             ))}
                           </SelectGroup>
@@ -1752,7 +1759,13 @@ export function ProjectOverview() {
                           <li key={w.userId} className="flex items-center gap-3 text-sm">
                             {/* AQU-491: click-to-reveal affordance, see file-name cell above. */}
                             <AppTooltip content={w.username ?? String(w.userId)}>
-                              <span className="w-32 shrink-0 font-medium">
+                              <span className="flex w-40 shrink-0 items-center gap-2 font-medium">
+                                <InitialsAvatar
+                                  name={w.username ?? `User ${w.userId}`}
+                                  size="sm"
+                                  singleInitial
+                                  className="shrink-0"
+                                />
                                 <ExpandableName name={w.username ?? `User ${w.userId}`} />
                               </span>
                             </AppTooltip>

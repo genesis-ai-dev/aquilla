@@ -21,7 +21,8 @@ import { Link } from "react-router-dom"
 import { Languages, Plus } from "lucide-react"
 import { projectSettingsPath } from "@/lib/navigation/org-paths"
 import { Button, buttonVariants } from "@/components/ui/button"
-import { Avatar, AvatarFallback, AvatarGroup, AvatarGroupCount } from "@/components/ui/avatar"
+import { AvatarGroup, AvatarGroupCount } from "@/components/ui/avatar"
+import { InitialsAvatar } from "@/components/InitialsAvatar"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { StaffLanePopover } from "@/components/StaffLanePopover"
@@ -78,9 +79,7 @@ function LanePeople({ members }: { members: ProjectMember[] }) {
     <AvatarGroup data-size="sm">
       {shown.map((m) => (
         <AppTooltip key={m.userId} content={m.username}>
-          <Avatar size="sm">
-            <AvatarFallback>{m.username.slice(0, 1).toUpperCase()}</AvatarFallback>
-          </Avatar>
+          <InitialsAvatar name={m.username} size="sm" singleInitial />
         </AppTooltip>
       ))}
       {extra > 0 && <AvatarGroupCount>+{extra}</AvatarGroupCount>}

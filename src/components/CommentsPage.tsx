@@ -26,6 +26,7 @@ import {
   InputGroupInput,
 } from "@/components/ui/input-group"
 import { cn } from "@/lib/utils"
+import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { useComments } from "@/hooks/useComments"
 import type { CommentRecord } from "@/lib/sync/comments-read-types"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
@@ -346,7 +347,11 @@ function CommentBubble({ comment, currentUsername, onEdit, onDelete }: CommentBu
   return (
     <div className={cn("flex flex-col gap-0.5", comment.parentCommentId ? "pl-6" : "")}>
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
-        <span className="font-medium text-foreground">{comment.authorLabel ?? comment.authorId}</span>
+        <UsernameWithAvatar
+          username={comment.authorLabel ?? comment.authorId}
+          size="xs"
+          nameClassName="text-xs font-medium text-foreground"
+        />
         <span>{formatTs(comment.createdAt)}</span>
         {comment.updatedAt !== comment.createdAt && (
           <span className="italic">(edited)</span>

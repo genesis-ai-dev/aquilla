@@ -23,6 +23,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog"
 import { cn } from "@/lib/utils"
+import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
 import { useProjectOrgId } from "@/hooks/useProjectOrgId"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
@@ -172,7 +173,7 @@ export function MembersTab({
         key={m.userId}
         className="flex flex-wrap items-center gap-2 px-4 py-3 text-sm"
       >
-        <span className="font-medium">{m.username}</span>
+        <UsernameWithAvatar username={m.username} />
         <SourceBadge source={m.role.source} />
         <RoleLabel name={m.role.name} className="text-xs text-muted-foreground" />
 

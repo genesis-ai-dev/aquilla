@@ -56,6 +56,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { DatePicker, dateToDeadlineString } from "@/components/ui/date-picker"
+import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { partitionMembers, type ProjectMember } from "@/lib/frontier/members"
 import type { FileReference, FileType } from "@/lib/parsers/types"
 import {
@@ -638,11 +639,24 @@ export function AssignModal({
               </SelectTrigger>
               <SelectContent>
                 <SelectGroup>
-                  {assigneeItems.map((item) => (
-                    <SelectItem key={item.value} value={item.value}>
-                      {item.label}
-                    </SelectItem>
-                  ))}
+                  {assigneeItems.map((item) => {
+                    const member = members.find((m) => String(m.userId) === item.value)
+                    return (
+                      <SelectItem key={item.value || "empty"} value={item.value}>
+                        {member ? (
+                          <UsernameWithAvatar
+                            username={member.username}
+                            label={item.label}
+                            size="xs"
+                            menuSafe
+                            nameClassName="text-sm font-normal"
+                          />
+                        ) : (
+                          item.label
+                        )}
+                      </SelectItem>
+                    )
+                  })}
                 </SelectGroup>
               </SelectContent>
             </Select>

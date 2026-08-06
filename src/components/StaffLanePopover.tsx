@@ -27,6 +27,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Spinner } from "@/components/ui/spinner"
+import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import {
   Select,
   SelectContent,
@@ -231,10 +232,10 @@ export function StaffLanePopover({
                   <li key={m.userId}>
                     <button
                       type="button"
-                      className="block w-full px-2 py-1.5 text-left text-xs hover:bg-muted"
+                      className="flex w-full items-center gap-2 px-2 py-1.5 text-left text-xs hover:bg-muted"
                       onClick={() => setSelected({ userId: m.userId, username: m.username })}
                     >
-                      {m.username}
+                      <UsernameWithAvatar username={m.username} size="xs" nameClassName="text-xs" />
                     </button>
                   </li>
                 ))
@@ -261,7 +262,7 @@ export function StaffLanePopover({
         ) : (
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-medium">{selected.username}</span>
+              <UsernameWithAvatar username={selected.username} size="xs" nameClassName="text-xs" />
               <Button
                 size="sm"
                 variant="ghost"

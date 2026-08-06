@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge"
 import { DataTable, DataTableColumnHeader } from "@/components/ui/data-table"
 import { DateTooltip } from "@/components/ui/date-tooltip"
 import { EmptyState } from "@/components/ui/empty"
+import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import type { AdminUser, AdminAdmin } from "@/lib/frontier/admin"
 
 /**
@@ -29,10 +30,11 @@ export function AdminPeopleSection({ users, admins }: { users: AdminUser[]; admi
         cell: ({ row }) => {
           const u = row.original
           return (
-            <div className="flex items-center gap-2">
-              <span className="font-medium text-foreground">
-                {u.displayName ? `${u.displayName} (${u.username})` : u.username}
-              </span>
+            <div className="flex min-w-0 items-center gap-2">
+              <UsernameWithAvatar
+                username={u.username}
+                label={u.displayName ? `${u.displayName} (${u.username})` : u.username}
+              />
               {adminEmails.has(u.email.trim().toLowerCase()) && (
                 <Badge variant="secondary">
                   <ShieldCheck data-icon="inline-start" />

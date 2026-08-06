@@ -24,6 +24,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 
 /**
  * Manager affordance (project_lead+) on the project overview: assign a book or
@@ -250,13 +251,28 @@ export function AssignWork({
                     members
                       .filter((m) => m.userId === callerUserId)
                       .map((m) => (
-                        <SelectItem key={m.userId} value={String(m.userId)}>{m.username} (you)</SelectItem>
+                        <SelectItem key={m.userId} value={String(m.userId)}>
+                          <UsernameWithAvatar
+                            username={m.username}
+                            label={`${m.username} (you)`}
+                            size="xs"
+                            menuSafe
+                            nameClassName="text-sm font-normal"
+                          />
+                        </SelectItem>
                       ))
                   ) : (
                     <>
                       <SelectItem value="">Select member…</SelectItem>
                       {eligibleMembers.map((m) => (
-                        <SelectItem key={m.userId} value={String(m.userId)}>{m.username}</SelectItem>
+                        <SelectItem key={m.userId} value={String(m.userId)}>
+                          <UsernameWithAvatar
+                            username={m.username}
+                            size="xs"
+                            menuSafe
+                            nameClassName="text-sm font-normal"
+                          />
+                        </SelectItem>
                       ))}
                     </>
                   )}

@@ -8,6 +8,8 @@ import { EmptyState } from "@/components/ui/empty"
 import { TableCell, TableRow } from "@/components/ui/table"
 import { cn } from "@/lib/utils"
 import type { AdminOrg, AdminTeam } from "@/lib/frontier/admin"
+import { OrgWithAvatar } from "@/components/OrgWithAvatar"
+import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 
 /**
  * Tenants — the merge of the old Orgs and Teams tabs. Orgs are the rows;
@@ -80,17 +82,24 @@ export function AdminTenantsSection({
         id: "organization",
         accessorFn: (o) => (o.name ?? `#${o.id}`).toLowerCase(),
         header: ({ column }) => <DataTableColumnHeader column={column} title="Organization" />,
-        cell: ({ row }) => (
-          <span className="font-medium text-foreground">{row.original.name ?? `#${row.original.id}`}</span>
-        ),
+        cell: ({ row }) => {
+          const name = row.original.name ?? `#${row.original.id}`
+          return <OrgWithAvatar name={name} />
+        },
       },
       {
         id: "owner",
         accessorFn: (o) => (o.ownerUsername ?? "").toLowerCase(),
         header: ({ column }) => <DataTableColumnHeader column={column} title="Owner" />,
-        cell: ({ row }) => (
-          <span className="text-muted-foreground">{row.original.ownerUsername ?? "—"}</span>
-        ),
+        cell: ({ row }) =>
+          row.original.ownerUsername ? (
+            <UsernameWithAvatar
+              username={row.original.ownerUsername}
+              nameClassName="font-normal text-muted-foreground"
+            />
+          ) : (
+            <span className="text-muted-foreground">—</span>
+          ),
       },
       {
         accessorKey: "memberCount",

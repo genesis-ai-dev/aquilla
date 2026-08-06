@@ -25,7 +25,7 @@ import {
   Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { InitialsAvatar } from "@/components/InitialsAvatar"
+import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { MemberMultiAddRow } from "@/components/MemberMultiAddRow"
 import { PermissionDeniedAlert } from "@/components/PermissionDeniedAlert"
 import { ConfirmActionDialog } from "@/components/ConfirmActionDialog"
@@ -163,15 +163,11 @@ export function MembersSection({ projectId }: { projectId: string }) {
         cell: ({ row }) => {
           const m = row.original
           return (
-            <div className="flex min-w-0 items-center gap-2">
-              <InitialsAvatar name={m.username} size="sm" singleInitial />
-              <span className="truncate font-medium text-foreground">
-                {m.username}
-              </span>
-              <span className="truncate text-xs text-muted-foreground">
+            <UsernameWithAvatar username={m.username}>
+              <span className="truncate text-xs font-normal text-muted-foreground">
                 {SOURCE_LABELS[m.role.source] ?? m.role.source}
               </span>
-            </div>
+            </UsernameWithAvatar>
           )
         },
       },

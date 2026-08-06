@@ -14,6 +14,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { OrgWithAvatar } from "@/components/OrgWithAvatar"
 
 /**
  * Platform-admin "Compute / Credits" section for the AdminConsole.
@@ -83,11 +84,9 @@ export function AdminCreditsSection({ jwt }: { jwt: string }) {
         accessorFn: (row) => row.orgName ?? `#${row.orgId}`,
         header: "Org",
         cell: ({ row }) => (
-          <div>
-            <div className="min-w-[120px] font-medium">
-              {row.original.orgName ?? `#${row.original.orgId}`}
-            </div>
-            <div className="text-[10px] tabular-nums text-muted-foreground">
+          <div className="min-w-[120px]">
+            <OrgWithAvatar name={row.original.orgName ?? `#${row.original.orgId}`} />
+            <div className="pl-7 text-[10px] tabular-nums text-muted-foreground">
               #{row.original.orgId}
             </div>
           </div>

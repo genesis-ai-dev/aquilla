@@ -5,6 +5,7 @@ import { useNavigate, useParams } from "react-router-dom"
 import { FolderGit2, Users } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { MemberMultiSelect } from "@/components/MemberMultiSelect"
+import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
 import { Button } from "@/components/ui/button"
@@ -511,7 +512,7 @@ export function TeamDetail() {
                     <ul className="space-y-2">
                       {team.members.map((m) => (
                         <li key={m.userId} className="flex items-center justify-between rounded-2xl border px-4 py-2 text-sm">
-                          <span className="font-medium">{m.username}</span>
+                          <UsernameWithAvatar username={m.username} />
                           <div className="flex items-center gap-2">
                             {isOwner ? (
                               /* Owners can change the member's org-level role via the upsert endpoint */

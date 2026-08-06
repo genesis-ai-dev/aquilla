@@ -8,6 +8,7 @@ import {
 } from "@/components/ui/select";
 import { formatRelativeTime, isStale } from "@/lib/time/relative";
 import { RoleLabel } from "@/components/RoleLabel";
+import { UsernameWithAvatar } from "@/components/UsernameWithAvatar";
 import { roleDisplayText } from "@/lib/frontier/roles";
 import { MemberMultiAddRow, type MemberAddOutcome } from "@/components/MemberMultiAddRow";
 import type { UserSearchResult } from "@/hooks/useUserSearch";
@@ -144,7 +145,7 @@ export function MembersPanel({
           return (
             <li key={m.userId} className="flex min-w-0 flex-col gap-2 overflow-x-hidden px-3 py-2">
               <div className="flex min-w-0 items-center gap-3">
-              <span className="min-w-0 truncate font-medium">{m.username}</span>
+              <UsernameWithAvatar username={m.username} className="min-w-0" />
               <RoleLabel name={m.roleName} className="text-xs text-muted-foreground" />
               {m.source === "org" && (
                 <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">via org</span>

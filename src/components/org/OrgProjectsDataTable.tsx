@@ -37,6 +37,7 @@ import { AddLanguagePopover } from "./AddLanguagePopover"
 import { ProjectLaneSubRows } from "./ProjectLaneSubRows"
 import { OrgLaneAssignModal } from "./OrgLaneAssignModal"
 import { displayLanes } from "./project-lanes"
+import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 
 export type OrgProjectRow = PortfolioProject & {
   orgId?: number
@@ -304,7 +305,11 @@ export function OrgProjectsDataTable({
         cell: ({ row }) => {
           const username = row.original.pm?.username
           return username ? (
-            <div className="truncate text-left text-xs text-muted-foreground">{username}</div>
+            <UsernameWithAvatar
+              username={username}
+              size="xs"
+              nameClassName="text-xs font-normal text-muted-foreground"
+            />
           ) : (
             <div className="truncate text-left text-xs text-muted-foreground/60">Unassigned</div>
           )

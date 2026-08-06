@@ -17,6 +17,8 @@ import { ValidatedBar } from "./ValidatedBar"
 import { attentionReasons, attentionScore, validatedFraction } from "@/lib/admin/insights"
 import type { AdminProject } from "@/lib/frontier/admin"
 import { DateTooltip } from "@/components/ui/date-tooltip"
+import { OrgWithAvatar } from "@/components/OrgWithAvatar"
+import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 
 type Lens = "all" | "needs-attention" | "active" | "archived"
 const LENSES: { value: Lens; label: string }[] = [
@@ -68,13 +70,27 @@ export function AdminProjectsSection({ projects }: { projects: AdminProject[] })
         id: "org",
         accessorFn: (p) => (p.orgName ?? "").toLowerCase(),
         header: ({ column }) => <DataTableColumnHeader column={column} title="Org" />,
-        cell: ({ row }) => row.original.orgName ?? "—",
+        cell: ({ row }) =>
+          row.original.orgName ? (
+            <OrgWithAvatar name={row.original.orgName} size="xs" nameClassName="font-normal" />
+          ) : (
+            "—"
+          ),
       },
       {
         id: "creator",
         accessorFn: (p) => (p.creatorUsername ?? "").toLowerCase(),
         header: ({ column }) => <DataTableColumnHeader column={column} title="Creator" />,
-        cell: ({ row }) => row.original.creatorUsername ?? "—",
+        cell: ({ row }) =>
+          row.original.creatorUsername ? (
+            <UsernameWithAvatar
+              username={row.original.creatorUsername}
+              size="xs"
+              nameClassName="font-normal"
+            />
+          ) : (
+            "—"
+          ),
       },
       {
         id: "validated",

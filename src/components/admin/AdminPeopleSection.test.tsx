@@ -22,7 +22,14 @@ const bodyFirstCells = () =>
   screen
     .getAllByRole("row")
     .slice(1)
-    .map((tr) => (within(tr).getAllByRole("cell")[0]?.textContent ?? "").replace(/\s*Platform admin$/i, ""))
+    .map((tr) => {
+      const cell = within(tr).getAllByRole("cell")[0]
+      const name =
+        cell?.querySelector('[data-slot="username"]')?.textContent
+        ?? cell?.textContent
+        ?? ""
+      return name.replace(/\s*Platform admin$/i, "")
+    })
 
 describe("AdminPeopleSection", () => {
   it("badges the allowlisted user (case-insensitive email match)", () => {

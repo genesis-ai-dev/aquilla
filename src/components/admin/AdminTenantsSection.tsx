@@ -59,6 +59,18 @@ export function AdminTenantsSection({
           ),
       },
       {
+        id: "teams",
+        accessorFn: (o) => teamCountByOrg.get(o.id) ?? 0,
+        header: ({ column }) => (
+          <DataTableColumnHeader column={column} title="Teams" className="justify-end" />
+        ),
+        cell: ({ row }) => (
+          <div className="text-right tabular-nums text-muted-foreground">
+            {teamCountByOrg.get(row.original.id) ?? 0}
+          </div>
+        ),
+      },
+      {
         accessorKey: "memberCount",
         header: ({ column }) => (
           <DataTableColumnHeader column={column} title="Members" className="justify-end" />
@@ -74,18 +86,6 @@ export function AdminTenantsSection({
         ),
         cell: ({ row }) => (
           <div className="text-right tabular-nums">{row.original.projectCount}</div>
-        ),
-      },
-      {
-        id: "teams",
-        accessorFn: (o) => teamCountByOrg.get(o.id) ?? 0,
-        header: ({ column }) => (
-          <DataTableColumnHeader column={column} title="Teams" className="justify-end" />
-        ),
-        cell: ({ row }) => (
-          <div className="text-right tabular-nums text-muted-foreground">
-            {teamCountByOrg.get(row.original.id) ?? 0}
-          </div>
         ),
       },
       {

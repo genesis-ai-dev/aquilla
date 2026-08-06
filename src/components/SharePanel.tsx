@@ -76,7 +76,7 @@ export function SharePanel({ open, onOpenChange, projectId, onSharesChanged }: S
             onClick={() => setTab("members")}
             className={`px-3 py-1.5 text-sm ${
               tab === "members"
-                ? "border-b-2 border-primary font-medium"
+                ? "border-b-2 border-foreground font-medium"
                 : "text-muted-foreground"
             }`}
           >
@@ -87,7 +87,7 @@ export function SharePanel({ open, onOpenChange, projectId, onSharesChanged }: S
             onClick={() => setTab("link")}
             className={`px-3 py-1.5 text-sm ${
               tab === "link"
-                ? "border-b-2 border-primary font-medium"
+                ? "border-b-2 border-foreground font-medium"
                 : "text-muted-foreground"
             }`}
           >

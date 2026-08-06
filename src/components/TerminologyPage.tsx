@@ -426,7 +426,7 @@ function TermbaseImportDialog({
               className={cn(
                 "rounded px-3 py-1 capitalize transition-colors",
                 tab === fmt
-                  ? "bg-primary text-primary-foreground"
+                  ? "bg-background text-foreground shadow-sm"
                   : "text-muted-foreground hover:text-foreground",
               )}
             >
@@ -1205,7 +1205,7 @@ export function TerminologyPage() {
                 className={cn(
                   "rounded px-3 py-1 transition-colors",
                   tab === t.key
-                    ? "bg-primary text-primary-foreground"
+                    ? "bg-background text-foreground shadow-sm"
                     : "text-muted-foreground hover:text-foreground",
                 )}
               >

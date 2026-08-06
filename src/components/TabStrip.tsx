@@ -108,7 +108,7 @@ export function TabStrip({ tabs, activeTabId, files, onActivate, onClose, surfac
                 aria-hidden
                 className={cn(
                   "block h-3.5 w-3.5 shrink-0",
-                  active ? "text-primary/80" : "text-muted-foreground/70",
+                  active ? "text-foreground" : "text-muted-foreground/70",
                 )}
               />
               <AppTooltip content={sectionLabel ? `${sectionLabel} · ${name}` : name}>
@@ -141,7 +141,7 @@ export function TabStrip({ tabs, activeTabId, files, onActivate, onClose, surfac
       {surfaceTab && (
         <div role="tab" aria-selected className={tabClasses(true)}>
           <div className="relative flex min-w-0 flex-1 items-center gap-1 overflow-hidden pr-1">
-            <Scale aria-hidden className="block h-3.5 w-3.5 shrink-0 text-primary/80" />
+            <Scale aria-hidden className="block h-3.5 w-3.5 shrink-0 text-foreground" />
             <span className="min-w-0 flex-1 overflow-hidden whitespace-nowrap font-medium leading-none">
               {surfaceTab.label}
             </span>

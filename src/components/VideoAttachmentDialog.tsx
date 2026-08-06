@@ -190,7 +190,7 @@ export function VideoAttachmentDialog({ open, onOpenChange, current, onSave }: V
             onClick={() => setTab("url")}
             className={cn(
               "flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm",
-              tab === "url" ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"
+              tab === "url" ? "border-foreground text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"
             )}
           >
             <LinkIcon className="h-3.5 w-3.5" /> From URL
@@ -200,7 +200,7 @@ export function VideoAttachmentDialog({ open, onOpenChange, current, onSave }: V
             onClick={() => setTab("upload")}
             className={cn(
               "flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm",
-              tab === "upload" ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"
+              tab === "upload" ? "border-foreground text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"
             )}
           >
             <Upload className="h-3.5 w-3.5" /> Upload file

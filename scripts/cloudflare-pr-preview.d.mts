@@ -41,4 +41,5 @@ export function uploadPullRequestPreview(options?: {
   githubOutputPath?: string | null
   run?: CommandRunner
   log?: (message: string) => void
+  verifyArtifacts?: (directory: string) => unknown
 }): Promise<PullRequestPreviewResult>

@@ -395,12 +395,22 @@ describe("worker deployment environment contract", () => {
 
     expect(scripts["verify:live:production"]).toContain("verify-live-environment.mjs production")
     expect(scripts["verify:live:development"]).toContain("verify-live-environment.mjs development")
+    expect(scripts["verify:deployment-artifacts"]).toBe("node scripts/verify-deployment-artifacts.mjs dist")
+    expect(scripts["prepare:pages-deployment-artifacts"])
+      .toBe("node scripts/verify-deployment-artifacts.mjs dist --pages")
     expect(scripts["verify:live:staging"]).toBeUndefined()
     expect(Object.keys(scripts).some((name) => name.includes(":staging"))).toBe(false)
 
     expect(scripts["deploy:aquilla:spa"]).toContain("cloudflare-version-deploy.mjs web production")
     expect(scripts["deploy:aquilla:sync"]).toContain("cloudflare-version-deploy.mjs sync production")
     expect(scripts["deploy:aquilla:auth"]).toContain("cloudflare-version-deploy.mjs identity production")
+
+    for (const brand of ["codex", "honeycomb", "context"]) {
+      const command = scripts[`deploy:${brand}`]
+      expect(command).toContain("pnpm run prepare:pages-deployment-artifacts")
+      expect(command.indexOf("prepare:pages-deployment-artifacts"))
+        .toBeLessThan(command.indexOf("wrangler pages deploy dist"))
+    }
 
     const workersWorkflow = readRepoFile(".github", "workflows", "deploy-workers.yml")
     expect(workersWorkflow).toContain("pnpm run deploy:aquilla:dev:spa")
@@ -413,6 +423,8 @@ describe("worker deployment environment contract", () => {
 
   it("keeps SPA CI builds and PR previews on the same explicit environment", () => {
     const workflow = readRepoFile(".github", "workflows", "ci.yml")
+    const liveDeployer = readRepoFile("scripts", "cloudflare-version-deploy.mjs")
+    const previewDeployer = readRepoFile("scripts", "cloudflare-pr-preview.mjs")
     const buildJobStart = workflow.indexOf("  build:")
     const buildJobHeader = workflow.slice(
       buildJobStart,
@@ -420,6 +432,8 @@ describe("worker deployment environment contract", () => {
     )
 
     expect(workflow).toContain("bash scripts/verify-dist-host.sh \"${{ needs.target.outputs.api_host }}\"")
+    expect(workflow).toContain("node scripts/verify-deployment-artifacts.mjs dist")
+    expect(workflow).toContain("include-hidden-files: true")
     expect(workflow).toContain("run: bash scripts/resolve-deployment-target.sh")
     expect(workflow).not.toContain("node scripts/cloudflare-version-deploy.mjs web")
     expect(workflow).toContain("node scripts/cloudflare-pr-preview.mjs \"${{ github.event.number }}\" \"${{ github.event.pull_request.head.sha }}\"")
@@ -438,6 +452,8 @@ describe("worker deployment environment contract", () => {
     expect(buildJobHeader).toContain("VITE_CHAT_BASE:")
     expect(workflow.match(/VITE_AUTH_BASE:/g)).toHaveLength(1)
     expect(workflow).not.toContain("refs/heads/main' && ' '")
+    expect(liveDeployer).toContain("if (surface === \"web\") verifyArtifacts(join(expectation.directory, \"dist\"))")
+    expect(previewDeployer).toContain("verifyArtifacts(join(cwd, \"dist\"))")
   })
 
   it("builds and tests once, then previews the exact verified artifact", () => {

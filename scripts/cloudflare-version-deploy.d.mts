@@ -41,4 +41,5 @@ export function runVerifiedDeployment(options?: {
   verifyVersion?: (...args: unknown[]) => Promise<string>
   promoteVersion?: (...args: unknown[]) => Promise<void>
   verifyDeployment?: (...args: unknown[]) => Promise<string>
+  verifyArtifacts?: (directory: string) => unknown
 }): Promise<VerifiedDeploymentResult>

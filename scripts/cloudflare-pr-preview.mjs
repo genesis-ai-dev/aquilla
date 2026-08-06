@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { pathToFileURL } from "node:url"
 import { parseWranglerOutput } from "./cloudflare-version-deploy.mjs"
+import { assertSafeDeploymentArtifacts } from "./verify-deployment-artifacts.mjs"
 
 const PREVIEW_WORKER = "aquilla-web-preview"
 const MISSING_WORKER_PATTERN = new RegExp(
@@ -134,11 +135,14 @@ export async function uploadPullRequestPreview({
   githubOutputPath = process.env.GITHUB_OUTPUT,
   run = runCommand,
   log = console.log,
+  verifyArtifacts = assertSafeDeploymentArtifacts,
 } = {}) {
   const alias = pullRequestPreviewAlias(prNumber)
   const source = String(commitSha ?? "").trim()
   if (!source) throw new Error("a pull request commit SHA is required")
   const message = `PR ${String(prNumber).trim()} @ ${source}`
+
+  verifyArtifacts(join(cwd, "dist"))
 
   let entry
   try {

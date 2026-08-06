@@ -36,6 +36,8 @@ import { createFootnoteDecorationExtension, footnoteDecorationPluginKey } from "
 import { UsfmFootnote } from "@/lib/richtext/footnote-node"
 import {
   IDML_SLOT_NODE_NAME,
+  editableIdmlRangesIn,
+  idmlDeletionRange,
   idmlEditableSlotPosition,
   idmlEditableSlotOffsetPosition,
   idmlEditablePlainOffsetPosition,
@@ -45,6 +47,8 @@ import {
   prepareIdmlEditorContent,
   sanitizeIdmlSlotInsertion,
   serializeIdmlEditorDocument,
+  type IdmlDeleteDirection,
+  type IdmlDeleteGranularity,
   type IdmlEditorConfiguration,
 } from "@/lib/richtext/idml-editor"
 import type { IdmlPointerSelection } from "@/lib/richtext/idml-caret"
@@ -177,23 +181,43 @@ function idmlSlotBoundaryChar(
   return resolved.parent.textBetween(offset, offset + 1)
 }
 
-function replaceIdmlSelectionWithPlainText(
-  view: EditorView,
-  text: string,
-  requestedRange?: IdmlInsertedRange,
-  mode: "paste" | "type" = "type",
-): IdmlInsertedRange | null {
+/**
+ * The slot text a write should land in. A selection is cut down to the editable
+ * parts it covers, so text spanning protected anchors is replaced slot by slot
+ * instead of dragging the IDML structure with it.
+ */
+function idmlWriteRanges(view: EditorView, range?: IdmlInsertedRange): IdmlInsertedRange[] {
   const selection = view.state.selection
-  const fallbackPosition = idmlEditableSlotPosition(view.state.doc)
-  const from = requestedRange?.from
-    ?? (isEditableIdmlSelection(selection) ? selection.from : fallbackPosition)
-  const to = requestedRange?.to
-    ?? (isEditableIdmlSelection(selection) ? selection.to : fallbackPosition)
-  if (from === null || to === null) return null
+  const from = range?.from ?? selection.from
+  const to = range?.to ?? selection.to
+  if (from !== to) {
+    const editable = editableIdmlRangesIn(view.state.doc, from, to)
+    if (editable.length > 0) return editable
+  }
+  // A requested range (IME composition) was anchored inside a slot when it was
+  // captured, so a collapsed one is trusted as-is. A stray caret still falls
+  // back to the first editable slot, as insertion always has.
+  if (range !== undefined) return [{ from, to }]
+  const position = isEditableIdmlSelection(selection)
+    ? selection.from
+    : idmlEditableSlotPosition(view.state.doc)
+  return position === null ? [] : [{ from: position, to: position }]
+}
 
-  const before = idmlSlotBoundaryChar(view.state.doc, from, "before")
-  const after = idmlSlotBoundaryChar(view.state.doc, to, "after")
-  const normalized = sanitizeIdmlSlotInsertion(text, before, after, mode).replace(/\r\n?/g, "\n")
+/**
+ * Writes `text` over every editable range, clearing the rest. Ranges are applied
+ * back to front so the earlier positions stay valid, which leaves the caret at
+ * the first range — where the text lands.
+ */
+function replaceIdmlRangesWithPlainText(
+  view: EditorView,
+  ranges: IdmlInsertedRange[],
+  text: string,
+): IdmlInsertedRange | null {
+  const first = ranges[0]
+  if (!first) return null
+
+  const normalized = text.replace(/\r\n?/g, "\n")
   const lines = normalized.split("\n")
   const nodes = lines.flatMap((line, index) => [
     ...(line.length > 0 ? [view.state.schema.text(line)] : []),
@@ -202,18 +226,56 @@ function replaceIdmlSelectionWithPlainText(
       : []),
   ])
   const replacement = Fragment.fromArray(nodes)
+  const transaction = view.state.tr
+  for (let index = ranges.length - 1; index > 0; index -= 1) {
+    const range = ranges[index]
+    if (range) transaction.delete(range.from, range.to)
+  }
+  if (nodes.length > 0) transaction.replaceWith(first.from, first.to, replacement)
+  else if (first.to > first.from) transaction.delete(first.from, first.to)
   // Explicit caret placement: ReplaceStep maps a cursor at `from` with
   // assoc=-1 back to the *start* of the inserted text. Without setSelection
   // here, a desynced native DOM caret (EditorTable's selectNodeContents
   // collapse-to-end on empty IDML slots) keeps inserting at the same offset
   // and typed characters appear in reverse order.
-  const insertEnd = from + replacement.size
-  const transaction = nodes.length > 0
-    ? view.state.tr.replaceWith(from, to, replacement)
-    : view.state.tr.delete(from, to)
-  transaction.setSelection(TextSelection.create(transaction.doc, nodes.length > 0 ? insertEnd : from))
+  const caret = first.from + replacement.size
+  transaction.setSelection(TextSelection.create(transaction.doc, caret))
   view.dispatch(transaction.scrollIntoView())
-  return { from, to: insertEnd }
+  return { from: first.from, to: caret }
+}
+
+function replaceIdmlSelectionWithPlainText(
+  view: EditorView,
+  text: string,
+  requestedRange?: IdmlInsertedRange,
+  mode: "paste" | "type" = "type",
+): IdmlInsertedRange | null {
+  const ranges = idmlWriteRanges(view, requestedRange)
+  const first = ranges[0]
+  if (!first) return null
+  // AQU-758: sanitize against the slot text the insertion actually lands in —
+  // the first range — so a space never doubles against its neighbors.
+  const before = idmlSlotBoundaryChar(view.state.doc, first.from, "before")
+  const after = idmlSlotBoundaryChar(view.state.doc, first.to, "after")
+  return replaceIdmlRangesWithPlainText(view, ranges, sanitizeIdmlSlotInsertion(text, before, after, mode))
+}
+
+/**
+ * AQU-740: Backspace/Delete for a protected IDML cell. The browser's own delete
+ * drops the emptied slot `<span>`, which the round-trip guard has to refuse as
+ * anchor removal — leaving the last character of every slot undeletable — so the
+ * range is computed and applied as a document change instead.
+ */
+function deleteIdmlSelection(
+  view: EditorView,
+  direction: IdmlDeleteDirection,
+  granularity: IdmlDeleteGranularity,
+): void {
+  const range = idmlDeletionRange(view.state.doc, view.state.selection, direction, granularity)
+  if (!range) return
+  const ranges = editableIdmlRangesIn(view.state.doc, range.from, range.to)
+  if (ranges.length === 0) return
+  replaceIdmlRangesWithPlainText(view, ranges, "")
 }
 
 export interface TranslatedEditorHandle {
@@ -876,6 +938,25 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
         ) {
           event.preventDefault()
           replaceIdmlSelectionWithPlainText(view, event.key)
+          return true
+        }
+        // AQU-740: own the delete keys too. Native deletion empties the slot's
+        // DOM node, which the guard must reject as anchor removal, so the last
+        // character of a slot could never be removed. Modifier conventions:
+        // Alt/Ctrl delete a word, Cmd deletes to the line start/end.
+        if (
+          idmlContext
+          && (event.key === "Backspace" || event.key === "Delete")
+          && !event.isComposing
+        ) {
+          event.preventDefault()
+          const direction: IdmlDeleteDirection = event.key === "Backspace" ? "backward" : "forward"
+          const granularity: IdmlDeleteGranularity = event.metaKey
+            ? "line"
+            : event.altKey || event.ctrlKey
+              ? "word"
+              : "character"
+          deleteIdmlSelection(view, direction, granularity)
           return true
         }
         const plain = !event.shiftKey && !event.metaKey && !event.altKey && !event.ctrlKey

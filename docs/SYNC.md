@@ -93,4 +93,4 @@ All live deploys use an explicit named Wrangler profile and end with the public
 environment verifier. The verifier checks DNS/TLS, exact unauthenticated API
 contracts, and the SPA bundle's embedded API targets. See
 [Deployment environments](DEPLOYMENT-ENVIRONMENTS.md) and
-[Cloudflare Workers Builds](runbooks/cloudflare-workers-builds.md).
+[Cloudflare deployment runbook](runbooks/cloudflare-workers-builds.md).

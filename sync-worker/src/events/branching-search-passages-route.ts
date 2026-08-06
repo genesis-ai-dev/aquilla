@@ -111,7 +111,8 @@ export async function handleBranchingSearchPassagesRequest(
     })
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
-    return new Response(`corpus load failed: ${message}`, { status: 500 })
+    console.error('corpus load failed:', message)
+    return new Response('corpus load failed', { status: 500 })
   }
 
   const { results } = branchingSearch(q, corpus.cells, settings)

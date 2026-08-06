@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs"
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { spawnSync } from "node:child_process"
@@ -45,69 +45,87 @@ function environmentSection(config: string, environment: string): string {
 }
 
 describe("worker deployment environment contract", () => {
-  // GitHub Actions no longer deploys. Cloudflare Workers Builds owns every
-  // deploy, one connection per Worker script, with non-production branch builds
-  // disabled so only that connection's own branch can touch its Workers. What
-  // Actions still owns is gating a pull request, on an allowance this repo
-  // exhausts in about a week — so the workflow must stay lean and must not
-  // regrow a deploy path.
-  it("keeps GitHub Actions out of deployment", () => {
-    const workflows = readRepoFile(".github", "workflows", "ci.yml")
+  it("keeps live deployment dispatch explicit and branch resolved", () => {
+    const workflow = readRepoFile(".github", "workflows", "deploy-workers.yml")
+    const triggers = workflow.slice(workflow.indexOf("\non:"), workflow.indexOf("\npermissions:"))
 
-    expect(workflows).not.toContain("wrangler")
-    expect(workflows).not.toContain("CLOUDFLARE_API_TOKEN")
-    expect(workflows).not.toContain("versions upload")
-
-    // pull_request only: a push trigger would re-run checks the PR already
-    // paid for, and Cloudflare re-runs type-check and the worker suites before
-    // it deploys either environment.
-    const triggers = workflows.slice(
-      workflows.indexOf("\non:"),
-      workflows.indexOf("\nconcurrency:"),
-    )
-    expect(triggers).toContain("pull_request:")
+    expect(workflow).toContain("run: bash scripts/resolve-deployment-target.sh")
+    expect(workflow.match(/name: \$\{\{ needs\.target\.outputs\.github_environment \}\}/g))
+      .toHaveLength(3)
+    expect(workflow).toContain("production) pnpm run deploy:aquilla:spa")
+    expect(workflow).toContain("production) pnpm run deploy:aquilla:sync")
+    expect(workflow).toContain("production) pnpm run deploy:aquilla:auth")
+    expect(workflow).toContain("development) pnpm run deploy:aquilla:dev:spa")
+    expect(workflow).toContain("development) pnpm run deploy:aquilla:dev:sync")
+    expect(workflow).toContain("development) pnpm run deploy:aquilla:dev:auth")
+    expect(workflow).toContain("all|web|sync-worker|auth-worker")
+    expect(workflow).not.toContain("|| '--env=development'")
+    expect(triggers).toContain("workflow_dispatch:")
     expect(triggers).not.toContain("push:")
-
-    // A required status check filtered out by a paths filter never reports,
-    // and the PR can never merge.
-    expect(triggers).not.toContain("paths-ignore")
-    expect(triggers).not.toContain("paths:")
-    for (const job of ["  lint:", "  typecheck:", "  unit:", "  build:"]) {
-      expect(workflows).toContain(job)
-    }
   })
 
-  it("retires the workflows Cloudflare replaced", () => {
-    for (const gone of ["deploy.yml", "deploy-workers.yml", "web-ci.yml", "staging-neon-refresh.yml"]) {
-      expect(() => readRepoFile(".github", "workflows", gone)).toThrow()
-    }
-  })
+  it.each([
+    ["workflow_dispatch", "main", "production", "production", "api.aquilla.app"],
+    ["workflow_dispatch", "dev", "development", "development", "api.dev.aquilla.app"],
+    ["pull_request", "123/merge", "preview", "development", "api.dev.aquilla.app"],
+  ])(
+    "resolves %s on %s without an implicit fallback",
+    (eventName, refName, wranglerEnvironment, liveEnvironment, apiHost) => {
+      const result = spawnSync(
+        "bash",
+        [path.join(REPO_ROOT, "scripts", "resolve-deployment-target.sh"), eventName, refName],
+        { encoding: "utf8", env: {} },
+      )
 
-  it("enforces the expected branch inside named production profiles", () => {
-    const tempRepo = mkdtempSync(path.join(tmpdir(), "aquilla-deploy-guard-"))
-    const guard = path.join(REPO_ROOT, "scripts", "verify-deploy-branch.sh")
+      expect(result.status).toBe(0)
+      expect(result.stdout).toContain(`wrangler_environment=${wranglerEnvironment}`)
+      expect(result.stdout).toContain(`live_environment=${liveEnvironment}`)
+      expect(result.stdout).toContain(`api_host=${apiHost}`)
+    },
+  )
 
-    try {
-      expect(spawnSync("git", ["init", "-b", "main"], { cwd: tempRepo }).status).toBe(0)
+  it.each(["feature/example", "development", "staging", "", "release"])(
+    "rejects unauthorized live deployment ref %j",
+    (refName) => {
+      const result = spawnSync(
+        "bash",
+        [path.join(REPO_ROOT, "scripts", "resolve-deployment-target.sh"), "workflow_dispatch", refName],
+        { encoding: "utf8", env: {} },
+      )
 
-      const allowed = spawnSync("bash", [guard, "main"], {
-        cwd: tempRepo,
-        encoding: "utf8",
-        env: { GITHUB_ACTIONS: "true", GITHUB_REF_NAME: "main" },
-      })
-      expect(allowed.status).toBe(0)
+      expect(result.status).not.toBe(0)
+      expect(result.stderr).toContain("ABORT:")
+    },
+  )
 
-      const rejected = spawnSync("bash", [guard, "dev"], {
-        cwd: tempRepo,
-        encoding: "utf8",
-        env: { GITHUB_ACTIONS: "true", GITHUB_REF_NAME: "main" },
-      })
-      expect(rejected.status).not.toBe(0)
-      expect(rejected.stderr).toContain("requires branch 'dev'")
-    } finally {
-      rmSync(tempRepo, { recursive: true, force: true })
-    }
-  })
+  it.each(["main", "dev"])(
+    "enforces the expected %s branch for explicit live deployments",
+    (expectedBranch) => {
+      const tempRepo = mkdtempSync(path.join(tmpdir(), "aquilla-deploy-guard-"))
+      const guard = path.join(REPO_ROOT, "scripts", "verify-deploy-branch.sh")
+
+      try {
+        expect(spawnSync("git", ["init", "-b", expectedBranch], { cwd: tempRepo }).status).toBe(0)
+
+        const allowed = spawnSync("bash", [guard, expectedBranch], {
+          cwd: tempRepo,
+          encoding: "utf8",
+          env: { GITHUB_ACTIONS: "true", GITHUB_REF_NAME: expectedBranch },
+        })
+        expect(allowed.status).toBe(0)
+
+        const rejected = spawnSync("bash", [guard, "feature/example"], {
+          cwd: tempRepo,
+          encoding: "utf8",
+          env: { GITHUB_ACTIONS: "true", GITHUB_REF_NAME: expectedBranch },
+        })
+        expect(rejected.status).not.toBe(0)
+        expect(rejected.stderr).toContain("requires branch 'feature/example'")
+      } finally {
+        rmSync(tempRepo, { recursive: true, force: true })
+      }
+    },
+  )
 
   it("keeps account_id above the first TOML table", () => {
     const config = readRepoFile("sync-worker", "wrangler.toml")
@@ -191,6 +209,18 @@ describe("worker deployment environment contract", () => {
     expect(environment).toContain(`routes = ["${route}"]`)
   })
 
+  it("keeps pull-request previews on a route-free Worker", () => {
+    const config = readRepoFile("wrangler.toml")
+    const preview = tomlBlock(config, "[env.preview]")
+    const previewAssets = tomlBlock(config, "[env.preview.assets]")
+
+    expect(preview).toContain('name = "aquilla-web-preview"')
+    expect(preview).toContain("workers_dev = true")
+    expect(preview).toContain("preview_urls = true")
+    expect(preview).not.toContain("routes")
+    expect(previewAssets).toContain('not_found_handling = "single-page-application"')
+  })
+
   it.each([
     [
       "production",
@@ -228,6 +258,38 @@ describe("worker deployment environment contract", () => {
     },
   )
 
+  it("keeps disconnected Cloudflare Workers Builds from becoming a second deploy owner", () => {
+    const rootPackage = JSON.parse(readRepoFile("package.json")) as {
+      scripts?: Record<string, string>
+    }
+    expect(rootPackage.scripts?.["deploy:workers-build"]).toBeUndefined()
+    expect(rootPackage.scripts?.["build:ci"]).toBeUndefined()
+
+    const workerPackage = JSON.parse(readRepoFile("sync-worker", "package.json")) as {
+      scripts?: Record<string, string>
+    }
+
+    expect(workerPackage.scripts?.["deploy:workers-build"]).toBeUndefined()
+    expect(workerPackage.scripts?.deploy).toBe("pnpm --dir .. run deploy:aquilla:sync")
+
+    const authPackage = JSON.parse(readRepoFile("auth-worker", "package.json")) as {
+      scripts?: Record<string, string>
+    }
+    expect(authPackage.scripts?.["deploy:workers-build"]).toBeUndefined()
+    expect(authPackage.scripts?.deploy).toBe("pnpm --dir .. run deploy:aquilla:auth")
+
+    expect(existsSync(path.join(REPO_ROOT, "scripts", "cloudflare-build-deploy.mjs"))).toBe(false)
+    expect(existsSync(path.join(REPO_ROOT, "scripts", "ci-build.sh"))).toBe(false)
+
+    const agentPackage = JSON.parse(readRepoFile("agent-worker", "package.json")) as {
+      scripts?: Record<string, string>
+    }
+    expect(agentPackage.scripts?.deploy).toContain("verify-deploy-branch.sh main")
+    expect(agentPackage.scripts?.deploy).toContain("--env=production")
+    expect(agentPackage.scripts?.["deploy:staging"]).toBeUndefined()
+    expect(agentPackage.scripts?.["deploy:development"]).toContain("--env=development")
+  })
+
   it("keeps every Wrangler environment synchronized with the canonical manifest", () => {
     const configFiles = {
       web: "wrangler.toml",
@@ -262,6 +324,25 @@ describe("worker deployment environment contract", () => {
     }
   })
 
+  it("keeps retired staging outside the executable deployment contract", () => {
+    for (const file of [
+      "wrangler.toml",
+      "auth-worker/wrangler.toml",
+      "sync-worker/wrangler.toml",
+      "agent-worker/wrangler.toml",
+    ]) {
+      expect(readRepoFile(...file.split("/"))).not.toContain("[env.staging]")
+    }
+
+    for (const surface of Object.values(deploymentManifest.surfaces)) {
+      expect(surface.environments.staging).toBeUndefined()
+    }
+
+    expect(existsSync(path.join(REPO_ROOT, "docs", "STAGING.md"))).toBe(false)
+    expect(existsSync(path.join(REPO_ROOT, ".github", "workflows", "staging-neon-refresh.yml")))
+      .toBe(false)
+  })
+
   it("keeps the documented environment matrix synchronized with the executable contract", () => {
     const matrix = readRepoFile("docs", "DEPLOYMENT-ENVIRONMENTS.md")
 
@@ -272,25 +353,22 @@ describe("worker deployment environment contract", () => {
       expect(matrix).toContain(row)
     }
 
-    // The doc must name every Workers Builds connection, because a connection
-    // is bound to one script and the binding is the only thing stopping a
-    // branch build from writing to the wrong Worker.
-    for (const worker of [
-      "aquilla-web", "aquilla-identity", "aquilla-sync-worker",
-      "aquilla-web-development", "aquilla-dev-identity", "aquilla-sync-worker-dev",
-    ]) {
-      expect(matrix).toContain(`\`${worker}\``)
-    }
-    expect(matrix).toContain("builds for non-production branches disabled")
+    expect(matrix).toContain("`main` -> `production`")
+    expect(matrix).toContain("`dev` -> `development`")
+    expect(matrix).toContain("Cloudflare Workers Builds is not a deployment owner")
+    expect(matrix).toContain("Live Aquilla deployments require an explicit human/operator action")
     expect(matrix).toContain("All unnamed Wrangler profiles are local-only")
+    expect(matrix).toContain("deployment-branch policy")
 
     expect(readRepoFile("README.md")).toContain("docs/DEPLOYMENT-ENVIRONMENTS.md")
     expect(readRepoFile("docs", "runbooks", "cloudflare-workers-builds.md"))
       .toContain("../DEPLOYMENT-ENVIRONMENTS.md")
-    // Two live environments, no more. A reintroduced staging row would
-    // silently diverge from the Wrangler profiles and the manifest.
-    expect(matrix).not.toContain("api.staging.aquilla.app")
-    expect(matrix).not.toContain("--env=staging")
+    expect(readRepoFile("docs", "README.md")).not.toContain("STAGING.md")
+    expect(readRepoFile("AGENTS.md")).not.toContain("deployed by Cloudflare Workers Builds")
+    expect(readRepoFile(".agents", "skills", "swarm-orchestration", "SKILL.md"))
+      .not.toContain("push to staging")
+    expect(readRepoFile("resource-worker", "README.md"))
+      .toContain("This Worker has only production and development")
   })
 
   it("uses explicit environments and live checks in every local deploy command", () => {
@@ -299,9 +377,9 @@ describe("worker deployment environment contract", () => {
     }
     const scripts = rootPackage.scripts ?? {}
 
-    for (const [target, environment] of [
-      ["aquilla", "production"],
-      ["aquilla:dev", "development"],
+    for (const [target, environment, branch] of [
+      ["aquilla", "production", "main"],
+      ["aquilla:dev", "development", "dev"],
     ] as const) {
       for (const [surface, manifestSurface] of [
         ["spa", "web"],
@@ -309,6 +387,7 @@ describe("worker deployment environment contract", () => {
         ["auth", "identity"],
       ] as const) {
         const command = scripts[`deploy:${target}:${surface}`]
+        expect(command).toContain(`bash scripts/verify-deploy-branch.sh ${branch}`)
         expect(command).toContain(`cloudflare-version-deploy.mjs ${manifestSurface} ${environment}`)
         expect(command).toContain(`verify-live-environment.mjs ${environment} --surface=${surface}`)
       }
@@ -316,13 +395,137 @@ describe("worker deployment environment contract", () => {
 
     expect(scripts["verify:live:production"]).toContain("verify-live-environment.mjs production")
     expect(scripts["verify:live:development"]).toContain("verify-live-environment.mjs development")
+    expect(scripts["verify:deployment-artifacts"]).toBe("node scripts/verify-deployment-artifacts.mjs dist")
+    expect(scripts["prepare:pages-deployment-artifacts"])
+      .toBe("node scripts/verify-deployment-artifacts.mjs dist --pages")
+    expect(scripts["verify:live:staging"]).toBeUndefined()
+    expect(Object.keys(scripts).some((name) => name.includes(":staging"))).toBe(false)
 
     expect(scripts["deploy:aquilla:spa"]).toContain("cloudflare-version-deploy.mjs web production")
     expect(scripts["deploy:aquilla:sync"]).toContain("cloudflare-version-deploy.mjs sync production")
     expect(scripts["deploy:aquilla:auth"]).toContain("cloudflare-version-deploy.mjs identity production")
+
+    for (const brand of ["codex", "honeycomb", "context"]) {
+      const command = scripts[`deploy:${brand}`]
+      expect(command).toContain("pnpm run prepare:pages-deployment-artifacts")
+      expect(command.indexOf("prepare:pages-deployment-artifacts"))
+        .toBeLessThan(command.indexOf("wrangler pages deploy dist"))
+    }
+
+    const workersWorkflow = readRepoFile(".github", "workflows", "deploy-workers.yml")
+    expect(workersWorkflow).toContain("pnpm run deploy:aquilla:dev:spa")
+    expect(workersWorkflow).toContain("pnpm run deploy:aquilla:dev:sync")
+    expect(workersWorkflow).toContain("pnpm run deploy:aquilla:dev:auth")
+    expect(workersWorkflow).not.toContain("staging")
+    const webWorkflow = readRepoFile(".github", "workflows", "ci.yml")
+    expect(webWorkflow).not.toContain("node scripts/cloudflare-version-deploy.mjs web")
   })
 
-  it("installs Chromium before running IDML browser conformance", () => {
+  it("keeps SPA CI builds and PR previews on the same explicit environment", () => {
+    const workflow = readRepoFile(".github", "workflows", "ci.yml")
+    const liveDeployer = readRepoFile("scripts", "cloudflare-version-deploy.mjs")
+    const previewDeployer = readRepoFile("scripts", "cloudflare-pr-preview.mjs")
+    const buildJobStart = workflow.indexOf("  build:")
+    const buildJobHeader = workflow.slice(
+      buildJobStart,
+      workflow.indexOf("    steps:", buildJobStart),
+    )
+
+    expect(workflow).toContain("bash scripts/verify-dist-host.sh \"${{ needs.target.outputs.api_host }}\"")
+    expect(workflow).toContain("node scripts/verify-deployment-artifacts.mjs dist")
+    expect(workflow).toContain("include-hidden-files: true")
+    expect(workflow).toContain("run: bash scripts/resolve-deployment-target.sh")
+    expect(workflow).not.toContain("node scripts/cloudflare-version-deploy.mjs web")
+    expect(workflow).toContain("node scripts/cloudflare-pr-preview.mjs \"${{ github.event.number }}\" \"${{ github.event.pull_request.head.sha }}\"")
+    expect(workflow).toContain("verify-live-environment.mjs development --surface=spa --app-origin=\"$PREVIEW_URL\"")
+    expect(workflow).toContain("**Preview:** ${{ steps.deploy_preview.outputs.url }}")
+    expect(workflow).toContain("name: ${{ needs.target.outputs.github_environment }}")
+    expect(workflow).toContain("if: github.event_name == 'pull_request' && github.event.pull_request.draft != true")
+    expect(workflow).not.toContain("steps.decide.outputs")
+    expect(workflow).not.toContain("[preview]")
+    expect(workflow).not.toContain("<workers-subdomain>")
+    expect(workflow).not.toContain("cloudflare/wrangler-action")
+    expect(workflow).not.toContain("|| '--env=development'")
+    expect(buildJobHeader).toContain("env:")
+    expect(buildJobHeader).toContain("VITE_SYNC_WORKER_HOST:")
+    expect(buildJobHeader).toContain("VITE_AUTH_BASE:")
+    expect(buildJobHeader).toContain("VITE_CHAT_BASE:")
+    expect(workflow.match(/VITE_AUTH_BASE:/g)).toHaveLength(1)
+    expect(workflow).not.toContain("refs/heads/main' && ' '")
+    expect(liveDeployer).toContain("if (surface === \"web\") verifyArtifacts(join(expectation.directory, \"dist\"))")
+    expect(previewDeployer).toContain("verifyArtifacts(join(cwd, \"dist\"))")
+  })
+
+  it("builds and tests once, then previews the exact verified artifact", () => {
+    const workflow = readRepoFile(".github", "workflows", "ci.yml")
+    const previewJob = workflow.slice(workflow.indexOf("  preview:"))
+
+    expect(previewJob).toContain("needs: [target, lint, typecheck, unit, build]")
+    expect(previewJob).toContain("actions/download-artifact@v4")
+    expect(previewJob).not.toContain("pnpm run build")
+    expect(previewJob).not.toContain("run: pnpm test")
+    expect(workflow).toContain("actions/upload-artifact@v4")
+    expect(workflow.match(/run: pnpm run build/g)).toHaveLength(1)
+  })
+
+  it("keeps all live deployments off automatic push triggers", () => {
+    const ciWorkflow = readRepoFile(".github", "workflows", "ci.yml")
+    const workerWorkflow = readRepoFile(".github", "workflows", "deploy-workers.yml")
+    const ciTriggers = ciWorkflow.slice(
+      ciWorkflow.indexOf("\non:"),
+      ciWorkflow.indexOf("\nconcurrency:"),
+    )
+    const workerTriggers = workerWorkflow.slice(
+      workerWorkflow.indexOf("\non:"),
+      workerWorkflow.indexOf("\npermissions:"),
+    )
+
+    expect(ciWorkflow).not.toContain("cloudflare-version-deploy.mjs")
+    expect(ciTriggers).not.toContain("push:")
+    expect(ciTriggers).toContain("pull_request:")
+    expect(workerTriggers).not.toContain("push:")
+    expect(workerTriggers).toContain("workflow_dispatch:")
+  })
+
+  it("keeps every required branch-protection check unconditional", () => {
+    const workflow = readRepoFile(".github", "workflows", "ci.yml")
+    const triggers = workflow.slice(workflow.indexOf("\non:"), workflow.indexOf("\nconcurrency:"))
+    const requiredJobs = workflow.slice(workflow.indexOf("  lint:"), workflow.indexOf("  schema-migrations:"))
+
+    expect(triggers).not.toContain("paths-ignore")
+    expect(triggers).not.toContain("paths:")
+    expect(triggers).toContain("ready_for_review")
+    for (const job of ["  lint:", "  typecheck:", "  unit:", "  build:"]) {
+      expect(requiredJobs).toContain(job)
+    }
+    expect(requiredJobs).not.toContain("if:")
+  })
+
+  it("fails worker-suite change detection open for shared deployment inputs", () => {
+    const workflow = readRepoFile(".github", "workflows", "ci.yml")
+    const changesJob = workflow.slice(workflow.indexOf("  changes:"), workflow.indexOf("  lint:"))
+
+    expect(changesJob).toContain("No usable diff base; running every worker suite")
+    expect(changesJob).toContain("node scripts/resolve-worker-test-scope.mjs --all")
+    expect(changesJob).toContain("node scripts/resolve-worker-test-scope.mjs")
+  })
+
+  it("installs root and worker dependencies before deployable worker checks", () => {
+    const workflow = readRepoFile(".github", "workflows", "deploy-workers.yml")
+
+    for (const [worker, nextWorker] of [
+      ["sync-worker", "auth-worker"],
+      ["auth-worker", null],
+    ] as const) {
+      const jobStart = workflow.indexOf(`  ${worker}:`)
+      const nextJob = nextWorker === null ? -1 : workflow.indexOf(`\n  ${nextWorker}:`, jobStart)
+      const job = workflow.slice(jobStart, nextJob === -1 ? undefined : nextJob)
+      expect(job.match(/run: pnpm install --frozen-lockfile/g)).toHaveLength(2)
+      expect(job).toContain(`working-directory: ${worker}`)
+    }
+  })
+
+  it("installs Chromium before running IDML browser conformance in CI", () => {
     const workflow = readRepoFile(".github", "workflows", "ci.yml")
     const installBrowser = workflow.indexOf("pnpm exec playwright install --with-deps chromium")
     const runIdmlTests = workflow.indexOf("pnpm test:idml")

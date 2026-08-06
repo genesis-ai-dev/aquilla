@@ -7,6 +7,25 @@ export interface SpawnedWorker {
   kill: () => Promise<void>
 }
 
+export function wranglerDevArgs(opts: {
+  port: number
+  inspectorPort?: number
+  extraArgs?: string[]
+}): string[] {
+  return [
+    "wrangler",
+    "dev",
+    "--local",
+    "--port",
+    String(opts.port),
+    "--ip",
+    "127.0.0.1",
+    "--inspector-port",
+    String(opts.inspectorPort ?? 0),
+    ...(opts.extraArgs ?? []),
+  ]
+}
+
 /** Kill a process and any descendants. wrangler dev wraps a workerd child
  * that doesn't always die when the npx parent gets SIGTERM, leaving
  * orphans that hold ports across runs. We use `pkill -P` to walk the
@@ -29,6 +48,9 @@ function killTree(pid: number, signal: NodeJS.Signals = "SIGTERM"): void {
 export async function spawnWranglerDev(opts: {
   cwd: string
   port: number
+  /** Inspector port exposed by Wrangler. Zero asks the OS for a free port,
+   * which prevents concurrent dev/E2E stacks from racing on port 9229. */
+  inspectorPort?: number
   label: string
   env?: Record<string, string>
   /** Extra flags appended to the `wrangler dev` invocation, e.g.
@@ -39,7 +61,7 @@ export async function spawnWranglerDev(opts: {
 }): Promise<SpawnedWorker> {
   const child = spawn(
     "npx",
-    ["wrangler", "dev", "--local", "--port", String(opts.port), "--ip", "127.0.0.1", ...(opts.extraArgs ?? [])],
+    wranglerDevArgs(opts),
     {
       cwd: opts.cwd,
       env: { ...process.env, ...opts.env },

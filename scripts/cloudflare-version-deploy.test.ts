@@ -1,6 +1,7 @@
 import { EventEmitter } from "node:events"
 import { writeFileSync } from "node:fs"
 import type { spawn } from "node:child_process"
+import path from "node:path"
 import { describe, expect, it, vi } from "vitest"
 import {
   deploymentVersionTag,
@@ -65,6 +66,23 @@ describe("verified Cloudflare version deployment", () => {
       "promote",
       "verify-deployment",
     ])
+  })
+
+  it("rejects an unsafe SPA artifact before upload", async () => {
+    const upload = vi.fn()
+    const verifyArtifacts = vi.fn(() => {
+      throw new Error("unsafe deployment artifact")
+    })
+
+    await expect(runVerifiedDeployment({
+      surface: "web",
+      environment: "production",
+      upload,
+      verifyArtifacts,
+    })).rejects.toThrow("unsafe deployment artifact")
+
+    expect(verifyArtifacts).toHaveBeenCalledWith(path.resolve(import.meta.dirname, "..", "dist"))
+    expect(upload).not.toHaveBeenCalled()
   })
 
   it("uses the environment-configured Worker name while promoting the captured ID", async () => {

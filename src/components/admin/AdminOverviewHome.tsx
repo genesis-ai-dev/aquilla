@@ -1,8 +1,10 @@
 import { useMemo, useState } from "react"
-import { Link } from "react-router-dom"
+import { useNavigate } from "react-router-dom"
+import { type ColumnDef } from "@tanstack/react-table"
 import { ArrowRight, Building2, ShieldAlert } from "lucide-react"
 import { Section, StatTile } from "@/components/ui/page"
 import { EmptyState } from "@/components/ui/empty"
+import { DataTable, DataTableColumnHeader } from "@/components/ui/data-table"
 import { ProjectStatus } from "@/components/ProjectStatus"
 import { ValidatedBar } from "./ValidatedBar"
 import { AdminActivityTimeline } from "./AdminActivityTimeline"
@@ -11,8 +13,14 @@ import {
   mostActiveOrgs,
   recentSignupCount,
   validatedFraction,
+  type RankedProject,
 } from "@/lib/admin/insights"
 import type { AdminOverview, AdminOrg, AdminUser, AdminProject, AdminActivity } from "@/lib/frontier/admin"
+import { OrgWithAvatar } from "@/components/OrgWithAvatar"
+
+/** Bleed hover slightly into the Section's px-5 while keeping text aligned with the header. */
+const IN_CARD_TABLE_CLASS =
+  "border-0 -mx-2 overflow-visible [&_tr]:border-b-0! [&_tbody_tr]:hover:bg-transparent! [&_tbody_tr:hover>td]:bg-muted/50 [&_tbody_tr:hover>td:first-child]:rounded-l-lg [&_tbody_tr:hover>td:last-child]:rounded-r-lg"
 
 /**
  * The Overview tab, rebuilt as an operator home. Stat tiles carry context via
@@ -39,6 +47,7 @@ export function AdminOverviewHome({
   onViewProjects: () => void
   onViewActivity: () => void
 }) {
+  const navigate = useNavigate()
   const [now] = useState(() => Date.now())
   const atRisk = useMemo(() => projectsNeedingAttention(projects, now, 6), [projects, now])
   const atRiskTotal = useMemo(() => projectsNeedingAttention(projects, now).length, [projects, now])
@@ -48,6 +57,81 @@ export function AdminOverviewHome({
   )
   const newSignups = useMemo(() => recentSignupCount(users, now), [users, now])
   const topOrgs = useMemo(() => mostActiveOrgs(orgs, 5), [orgs])
+
+  const atRiskColumns = useMemo<ColumnDef<RankedProject>[]>(
+    () => [
+      {
+        id: "project",
+        accessorFn: (r) => r.project.name.toLowerCase(),
+        header: ({ column }) => <DataTableColumnHeader column={column} title="Project" />,
+        cell: ({ row }) => (
+          <span className="font-medium text-foreground">{row.original.project.name}</span>
+        ),
+      },
+      {
+        id: "org",
+        accessorFn: (r) => (r.project.orgName ?? "").toLowerCase(),
+        header: ({ column }) => <DataTableColumnHeader column={column} title="Org" />,
+        cell: ({ row }) =>
+          row.original.project.orgName ? (
+            <OrgWithAvatar
+              name={row.original.project.orgName}
+              size="xs"
+              nameClassName="font-normal text-muted-foreground"
+            />
+          ) : (
+            <span className="text-muted-foreground">—</span>
+          ),
+      },
+      {
+        id: "validated",
+        accessorFn: (r) => validatedFraction(r.project),
+        header: ({ column }) => <DataTableColumnHeader column={column} title="Validated" />,
+        cell: ({ row }) => <ValidatedBar fraction={validatedFraction(row.original.project)} />,
+      },
+      {
+        id: "status",
+        accessorFn: (r) => r.score,
+        header: ({ column }) => <DataTableColumnHeader column={column} title="Status" />,
+        cell: ({ row }) => (
+          <ProjectStatus archived={false} reasons={row.original.reasons} />
+        ),
+      },
+    ],
+    [],
+  )
+
+  const orgColumns = useMemo<ColumnDef<AdminOrg>[]>(
+    () => [
+      {
+        id: "organization",
+        accessorFn: (o) => (o.name ?? `#${o.id}`).toLowerCase(),
+        header: ({ column }) => <DataTableColumnHeader column={column} title="Organization" />,
+        cell: ({ row }) => (
+          <OrgWithAvatar name={row.original.name ?? `#${row.original.id}`} />
+        ),
+      },
+      {
+        accessorKey: "projectCount",
+        header: ({ column }) => (
+          <DataTableColumnHeader column={column} title="Projects" className="justify-end" />
+        ),
+        cell: ({ row }) => (
+          <div className="text-right tabular-nums">{row.original.projectCount}</div>
+        ),
+      },
+      {
+        accessorKey: "memberCount",
+        header: ({ column }) => (
+          <DataTableColumnHeader column={column} title="Members" className="justify-end" />
+        ),
+        cell: ({ row }) => (
+          <div className="text-right tabular-nums">{row.original.memberCount}</div>
+        ),
+      },
+    ],
+    [],
+  )
 
   return (
     <div className="space-y-6">
@@ -92,62 +176,48 @@ export function AdminOverviewHome({
           ) : null
         }
       >
-        {atRisk.length === 0 ? (
-          <EmptyState
-            variant="inline"
-            className="py-6"
-            icon={ShieldAlert}
-            title="All clear"
-            description="No active project is overdue, due soon, or stalled right now."
-          />
-        ) : (
-          <ul className="divide-y">
-            {atRisk.map(({ project, reasons }) => (
-              <li key={project.id} className="flex items-center justify-between gap-4 py-2.5 first:pt-0 last:pb-0">
-                <div className="min-w-0">
-                  <Link to={`/projects/${project.id}`} className="font-medium text-primary hover:underline">
-                    {project.name}
-                  </Link>
-                  <p className="truncate text-xs text-muted-foreground">{project.orgName ?? "—"}</p>
-                </div>
-                <div className="flex shrink-0 items-center gap-3">
-                  <ValidatedBar fraction={validatedFraction(project)} />
-                  <ProjectStatus archived={false} reasons={reasons} />
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-      </Section>
-
-      <div className="grid gap-6 lg:grid-cols-2">
-        <Section title="Most active organizations" description="Busiest tenants by project count.">
-          {topOrgs.length === 0 ? (
+        <DataTable
+          columns={atRiskColumns}
+          data={atRisk}
+          getRowId={(r) => r.project.id}
+          onRowClick={(r) => navigate(`/projects/${r.project.id}`)}
+          testId="admin-overview-attention-table"
+          className={IN_CARD_TABLE_CLASS}
+          dense
+          emptyState={
             <EmptyState
               variant="inline"
               className="py-6"
-              icon={Building2}
-              title="No organizations yet"
+              icon={ShieldAlert}
+              title="All clear"
+              description="No active project is overdue, due soon, or stalled right now."
             />
-          ) : (
-            <ul className="divide-y">
-              {topOrgs.map((o) => (
-                <li key={o.id} className="flex items-center justify-between gap-3 py-2.5 first:pt-0 last:pb-0">
-                  <button
-                    type="button"
-                    onClick={() => onOpenOrg(o.id)}
-                    className="min-w-0 truncate text-left text-sm font-medium text-foreground hover:text-primary hover:underline"
-                  >
-                    {o.name ?? `#${o.id}`}
-                  </button>
-                  <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
-                    {o.projectCount} {o.projectCount === 1 ? "project" : "projects"} · {o.memberCount}{" "}
-                    {o.memberCount === 1 ? "member" : "members"}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
+          }
+        />
+      </Section>
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        <Section
+          title="Most active organizations"
+          description="Busiest tenants by project count."
+        >
+          <DataTable
+            columns={orgColumns}
+            data={topOrgs}
+            getRowId={(o) => String(o.id)}
+            onRowClick={(o) => onOpenOrg(o.id)}
+            testId="admin-overview-orgs-table"
+            className={IN_CARD_TABLE_CLASS}
+            dense
+            emptyState={
+              <EmptyState
+                variant="inline"
+                className="py-6"
+                icon={Building2}
+                title="No organizations yet"
+              />
+            }
+          />
         </Section>
 
         <Section

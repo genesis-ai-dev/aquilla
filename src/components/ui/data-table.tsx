@@ -61,6 +61,8 @@ interface DataTableProps<TData, TValue> {
   emptyState?: React.ReactNode
   /** Tighter row/header padding for portfolio-style lists (ReUI DataGrid `dense`). */
   dense?: boolean
+  /** Class on the bordered table wrapper (e.g. `border-0` when nested in a card). */
+  className?: string
 }
 
 function DataTable<TData, TValue>({
@@ -77,6 +79,7 @@ function DataTable<TData, TValue>({
   renderSubRow,
   emptyState,
   dense = false,
+  className,
 }: DataTableProps<TData, TValue>) {
   const [sorting, setSorting] = React.useState<SortingState>(initialSorting)
   const [globalFilter, setGlobalFilter] = React.useState("")
@@ -126,11 +129,14 @@ function DataTable<TData, TValue>({
       {data.length === 0 && emptyState ? (
         emptyState
       ) : (
-        <div className="overflow-hidden rounded-md border" data-testid={testId}>
+        <div
+          className={cn("overflow-hidden rounded-md border", className)}
+          data-testid={testId}
+        >
         <Table>
           <TableHeader>
             {table.getHeaderGroups().map((headerGroup) => (
-              <TableRow key={headerGroup.id}>
+              <TableRow key={headerGroup.id} className="hover:bg-transparent">
                 {headerGroup.headers.map((header) => (
                   <TableHead
                     key={header.id}

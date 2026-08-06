@@ -86,7 +86,7 @@ import {
   buildFileScopedTokenFetcher,
   buildProjectAwareMinter,
 } from "@/lib/sync/cqrs-bridge"
-import { emitTargetCellCommit, emitCellBacktranslationSet, emitFileRename, emitFileDelete, emitFileRestore, emitCellValidate, emitCellRetime, emitFileVideoSet } from "@/lib/sync/events-emit"
+import { emitTargetCellCommit, emitCellBacktranslationSet, emitFileRename, emitFileDelete, emitFileRestore, emitCellValidate, emitCellRetime, emitFileVideoSet, emitSourceCellDelete, emitTargetCellDelete } from "@/lib/sync/events-emit"
 import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
 import { isBulkValidationEligible } from "@/lib/review/review-eligibility"
 import { TimelineEditor, type TimelineDetailActions } from "@/components/timeline/TimelineEditor"
@@ -1036,6 +1036,7 @@ export function ProjectWorkspace() {
     revalidateCell,
     applyOptimisticTargetEdit,
     applyOptimisticTargetEdits,
+    applyOptimisticCellDelete,
     isLoading: cellsLoading,
     isError: cellsError,
   } = useActiveCellStore({
@@ -4350,6 +4351,37 @@ export function ProjectWorkspace() {
     }
   }, [getTokenForProjectFile, rememberPendingTargetCommit, refreshOutboxPending, revalidateAuditStats, revalidateCellStats, revalidateCell, revalidateCells])
 
+  // AQU-803: delete a source cell AND its target rows from the editor. The
+  // affordance (IDML files, project_lead+) is gated in EditorTable; this is the
+  // emit + optimistic-removal + revalidate pipeline. One `source.cell.delete`
+  // plus one `target.cell.delete` per lane ('' default included) so no language
+  // is left with an orphaned translation — the projection removes only the
+  // side+lane each event targets, and a target delete on a lane with no row is a
+  // harmless no-op.
+  const handleDeleteCell = useCallback(async (cellId: string) => {
+    const projectId = project?.id
+    if (!projectId || !activeFileId) return
+    // Drop the row from the view immediately; the freshness floor stamped by
+    // applyOptimisticCellDelete guards it against a racing refetch until the
+    // server projection removes it for good.
+    applyOptimisticCellDelete(cellId)
+    try {
+      await emitSourceCellDelete({ projectId, fileId: activeFileId, cellId, author: currentUsername })
+      for (const lane of availableLanes) {
+        await emitTargetCellDelete({ projectId, fileId: activeFileId, cellId, targetLang: lane, author: currentUsername })
+      }
+      await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+      await refreshOutboxPending()
+      revalidateAuditStats()
+      revalidateCells()
+    } catch (err) {
+      console.error("[delete-cell] failed:", err)
+      // A failed emit must not leave the cell hidden — pull the authoritative
+      // projection back so the row reappears.
+      revalidateCells()
+    }
+  }, [project?.id, activeFileId, currentUsername, availableLanes, applyOptimisticCellDelete, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCells])
+
   // AQU-616: bulk validate/unvalidate from the SelectionBar enqueues N events
   // but has no per-cell commit callback, so without this the events would wait
   // for the ~5s periodic flusher before syncing — the confirmed state lags for
@@ -5536,6 +5568,7 @@ export function ProjectWorkspace() {
             onCellCommitted={handleCellCommitted}
             getPendingTargetEventId={getPendingTargetEventId}
             onOptimisticEdit={applyOptimisticTargetEditWithCapture}
+            onDeleteCell={handleDeleteCell}
             cellLockHolders={cellLockHolders}
             presenceStore={presenceStore}
             cellsWithRemoteChange={cellsWithRemoteChange}

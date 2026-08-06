@@ -5,7 +5,7 @@
 // Tab/Esc accept/reject step. The streaming preview is shown only while
 // generating.
 
-import { useState, useCallback } from "react"
+import { useState, useCallback, useMemo } from "react"
 import type { CompletionSettings } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
 import type { ScoredPair } from "@/lib/search/dual-index"
@@ -26,7 +26,7 @@ type SearchFn = (
   excludeId?: string,
 ) => Promise<ScoredPair[]>
 import type { CellData } from "./useCells"
-import { buildPrompt, buildBatchPrompt, buildParagraphPrompt, complete, resolveProvider, DEFAULT_COMPLETION_MAX_TOKENS, DEFAULT_SYSTEM_PROMPT, collectValidatedPairs, type PassageExample } from "@/lib/completion/completion-service"
+import { buildPrompt, buildBatchPrompt, buildParagraphPrompt, complete, resolveProvider, DEFAULT_COMPLETION_MAX_TOKENS, DEFAULT_SYSTEM_PROMPT, collectValidatedPairs, normalizeCompletionMaxTokens, type PassageExample } from "@/lib/completion/completion-service"
 import { buildFootnoteInstruction, prepareFootnotesForPrompt } from "@/lib/footnotes/completion"
 import { reintegrateFootnotes } from "@/lib/footnotes/reintegrate"
 import { paragraphGroupForCell } from "@/lib/parsers/paragraphs"
@@ -156,7 +156,13 @@ export function useCompletion(
 
   // Missing settings means "Frontier default with in-memory fallback" — we
   // don't persist anything until the user customizes.
-  const effectiveSettings = settings ?? FALLBACK_COMPLETION_SETTINGS
+  // maxTokens is normalized: legacy default snapshots persisted in project
+  // settings (512/4096) would otherwise silently truncate long cells even
+  // after the shipped default was raised.
+  const effectiveSettings = useMemo(() => {
+    const base = settings ?? FALLBACK_COMPLETION_SETTINGS
+    return { ...base, maxTokens: normalizeCompletionMaxTokens(base.maxTokens) }
+  }, [settings])
   // A per-device override (user Settings) always beats the project settings.
   // Mirror the same precedence that complete() applies so isConfigured is
   // consistent with what the request will actually use.

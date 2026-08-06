@@ -34,6 +34,7 @@ export function AdminPeopleSection({ users, admins }: { users: AdminUser[]; admi
               <UsernameWithAvatar
                 username={u.username}
                 label={u.displayName ? `${u.displayName} (${u.username})` : u.username}
+                nameClassName="font-normal"
               />
               {adminEmails.has(u.email.trim().toLowerCase()) && (
                 <Badge variant="secondary">

@@ -40,7 +40,7 @@ export function AdminTenantsSection({
         header: ({ column }) => <DataTableColumnHeader column={column} title="Organization" />,
         cell: ({ row }) => {
           const name = row.original.name ?? `#${row.original.id}`
-          return <OrgWithAvatar name={name} />
+          return <OrgWithAvatar name={name} nameClassName="font-normal" />
         },
       },
       {

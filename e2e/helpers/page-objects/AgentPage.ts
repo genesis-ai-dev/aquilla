@@ -27,7 +27,9 @@ export class AgentPage {
 
   // ── Entry ──────────────────────────────────────────────────────────────
 
-  /** Open the docked "Agent" tab from within an already-open project workspace. */
+  /** Open Agent from the sidebar rail.
+   *  If an editor Agent tab is already open, focuses that tab; otherwise
+   *  opens the compact agent panel inline in the dock. */
   async openAgentTab(): Promise<void> {
     await this.page.getByRole("button", { name: "Agent", exact: true }).click()
   }

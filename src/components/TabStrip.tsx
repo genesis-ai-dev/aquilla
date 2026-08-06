@@ -1,5 +1,5 @@
 import type { ReactNode } from "react"
-import { FileText, Scale, X } from "lucide-react"
+import { FileText, Scale, X, type LucideIcon } from "lucide-react"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { looksLikeUuid } from "@/lib/uuid"
@@ -54,13 +54,23 @@ interface FileMeta {
   originalName?: string
 }
 
+/** Non-file center surface (Rules, Agent, …) shown as a tab beside open files. */
+export interface SurfaceTab {
+  id: string
+  label: string
+  icon?: LucideIcon
+  active: boolean
+  onActivate: () => void
+  onClose: () => void
+}
+
 interface Props {
   tabs: WorkspaceTab[]
   activeTabId: string | null
   files: readonly FileMeta[]
   onActivate: (tabId: string) => void
   onClose: (tabId: string) => void
-  surfaceTab?: { label: string; onClose: () => void } | null
+  surfaceTabs?: readonly SurfaceTab[]
   trailing?: ReactNode
 }
 
@@ -76,13 +86,13 @@ export function fileNameFor(files: readonly FileMeta[], fileId: string): string 
   return "Untitled file"
 }
 
-export function TabStrip({ tabs, activeTabId, files, onActivate, onClose, surfaceTab, trailing }: Props) {
+export function TabStrip({ tabs, activeTabId, files, onActivate, onClose, surfaceTabs = [], trailing }: Props) {
   const visibleTabs = tabs.flatMap((tab) => {
     const name = fileNameFor(files, tab.fileId)
     return name ? [{ tab, name }] : []
   })
 
-  if (visibleTabs.length === 0 && !surfaceTab && !trailing) return null
+  if (visibleTabs.length === 0 && surfaceTabs.length === 0 && !trailing) return null
   return (
     <div
       role="tablist"
@@ -138,27 +148,49 @@ export function TabStrip({ tabs, activeTabId, files, onActivate, onClose, surfac
           </div>
         )
       })}
-      {surfaceTab && (
-        <div role="tab" aria-selected className={tabClasses(true)}>
-          <div className="relative flex min-w-0 flex-1 items-center gap-1 overflow-hidden pr-1">
-            <Scale aria-hidden className="block h-3.5 w-3.5 shrink-0 text-foreground" />
-            <span className="min-w-0 flex-1 overflow-hidden whitespace-nowrap font-medium leading-none">
-              {surfaceTab.label}
-            </span>
-            <span aria-hidden className={tabLabelFadeClasses(true)} />
-            <span aria-hidden className={tabCloseFadeClasses(true)} />
-            <span aria-hidden className={tabCloseSolidClasses(true)} />
-          </div>
-          <button
-            type="button"
-            onClick={surfaceTab.onClose}
-            aria-label={`Close ${surfaceTab.label}`}
-            className="absolute right-1 top-1/2 z-10 flex h-4 w-4 -translate-y-1/2 items-center justify-center rounded text-muted-foreground/70 opacity-0 hover:bg-muted hover:text-foreground group-hover/tab:opacity-100 group-focus-within/tab:opacity-100"
+      {surfaceTabs.map((surfaceTab) => {
+        const Icon = surfaceTab.icon ?? Scale
+        const active = surfaceTab.active
+        return (
+          <div
+            key={surfaceTab.id}
+            role="tab"
+            aria-selected={active}
+            className={tabClasses(active)}
           >
-            <X className="h-3 w-3" />
-          </button>
-        </div>
-      )}
+            <div className="relative flex min-w-0 flex-1 items-center gap-1 overflow-hidden pr-1">
+              <Icon
+                aria-hidden
+                className={cn(
+                  "block h-3.5 w-3.5 shrink-0",
+                  active ? "text-foreground" : "text-muted-foreground/70",
+                )}
+              />
+              <button
+                type="button"
+                onClick={surfaceTab.onActivate}
+                className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden p-0 text-left leading-none"
+              >
+                <span className="whitespace-nowrap font-medium">{surfaceTab.label}</span>
+              </button>
+              <span aria-hidden className={tabLabelFadeClasses(active)} />
+              <span aria-hidden className={tabCloseFadeClasses(active)} />
+              <span aria-hidden className={tabCloseSolidClasses(active)} />
+            </div>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation()
+                surfaceTab.onClose()
+              }}
+              aria-label={`Close ${surfaceTab.label}`}
+              className="absolute right-1 top-1/2 z-10 flex h-4 w-4 -translate-y-1/2 items-center justify-center rounded text-muted-foreground/70 opacity-0 hover:bg-muted hover:text-foreground group-hover/tab:opacity-100 group-focus-within/tab:opacity-100"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          </div>
+        )
+      })}
       {trailing && (
         <div className="ml-auto flex shrink-0 items-center pl-2">{trailing}</div>
       )}

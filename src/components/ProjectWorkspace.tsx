@@ -111,7 +111,7 @@ import { getVoiceLibrary, newVoiceId, VOICE_PALETTE } from "@/lib/audio/voices"
 import { attachMediaFileToTimeline, attachMediaUrlToTimeline } from "@/lib/timeline/attach-media"
 import { useCellsAuditStatsWithOverlay } from "@/hooks/useCellsAuditStatsWithOverlay"
 import { useComments } from "@/hooks/useComments"
-import { Film, Scale, MessagesSquare, Share2, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, BookMarked, BookOpen, Users, UserCheck, ArrowRight, PanelLeftClose, Mic, Plus, Pencil, FolderInput, Download } from "lucide-react"
+import { Film, Scale, Bot, MessagesSquare, Share2, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, BookMarked, BookOpen, Users, UserCheck, ArrowRight, PanelLeftClose, Mic, Plus, Pencil, FolderInput, Download } from "lucide-react"
 import { toast } from "sonner"
 import { AgentDockPanel } from "./AgentDockPanel"
 import { agentSessionStore } from "@/lib/agent/session-store"
@@ -336,6 +336,36 @@ function writePersistedActiveLane(projectId: string, lane: string): void {
   } catch {
     /* storage unavailable (private mode / quota) — lane stays in-memory only */
   }
+}
+
+/** Persist whether the Agent editor tab is open for a project (survives file-tab switches). */
+function agentTabStorageKey(projectId: string): string {
+  return `codex:agent-tab:${projectId}`
+}
+function readAgentTabOpen(projectId: string | undefined): boolean {
+  if (!projectId) return false
+  try {
+    return localStorage.getItem(agentTabStorageKey(projectId)) === "1"
+  } catch {
+    return false
+  }
+}
+function writeAgentTabOpen(projectId: string | undefined, open: boolean): void {
+  if (!projectId) return
+  try {
+    if (open) localStorage.setItem(agentTabStorageKey(projectId), "1")
+    else localStorage.removeItem(agentTabStorageKey(projectId))
+  } catch {
+    /* storage unavailable — tab open-state stays in-memory only */
+  }
+}
+
+/** Sidebar Agent rail click: focus the editor Agent tab when it's open,
+ *  otherwise open the compact agent panel inline in the dock. */
+export function resolveSidebarAgentClick(
+  agentTabOpen: boolean,
+): "activate-editor-tab" | "open-dock" {
+  return agentTabOpen ? "activate-editor-tab" : "open-dock"
 }
 
 export function ProjectWorkspace() {
@@ -727,6 +757,11 @@ export function ProjectWorkspace() {
   const [shareOpen, setShareOpen] = useState(false)
   // FRO-308: left dock active tab (null = collapsed rail only)
   const [dockTab, setDockTab] = useState<DockTab | null>("files")
+  // Agent editor tab stays in the strip until the user closes it — switching
+  // to a file tab only leaves the workbench surface; it does not dismiss Agent.
+  const [agentTabOpen, setAgentTabOpen] = useState(
+    () => centerSurface === "agent" || readAgentTabOpen(projectId),
+  )
   // Agent workbench (agent-mode-v2 §4) is a takeover surface: collapse the
   // dock to the rail on entry (a second agent chat beside the workbench is
   // confusing) and restore the user's tab on exit. Manual reopen still wins —
@@ -745,14 +780,19 @@ export function ProjectWorkspace() {
       // Entry forces the scope picker ("files"), so treat that forced default
       // (or a collapsed rail) as "no manual choice" and restore the saved tab.
       // Any other tab was picked manually mid-takeover — keep it.
-      setDockTab((cur) =>
-        cur === null || cur === "files" ? dockTabBeforeAgentRef.current : cur,
-      )
+      // While the Agent editor tab stays open, don't reopen the dock Agent
+      // panel (same session — use the editor tab / sidebar click instead).
+      setDockTab((cur) => {
+        const restored =
+          cur === null || cur === "files" ? dockTabBeforeAgentRef.current : cur
+        if (restored === "agent" && agentTabOpen) return "files"
+        return restored
+      })
     } else if (centerSurface === "agent" && dockTab === "agent") {
       // Restore/route paths can re-land the agent tab mid-takeover; collapse.
       setDockTab(null)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- dockTab read on transition only
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- dockTab/agentTabOpen read on transition only
   }, [centerSurface])
   // Agent working area (agent-complete follow-up): in the workbench the file
   // explorer doubles as the SCOPE PICKER — clicking a file designates what the
@@ -767,6 +807,29 @@ export function ProjectWorkspace() {
     const id = agentScopeFileId ?? activeFileId
     return id ? projectFiles.find((f) => f.id === id) ?? null : null
   }, [agentScopeFileId, activeFileId, projectFiles])
+
+  useEffect(() => {
+    setAgentTabOpen(centerSurface === "agent" || readAgentTabOpen(projectId))
+  }, [projectId]) // eslint-disable-line react-hooks/exhaustive-deps -- remount open-state per project
+  useEffect(() => {
+    if (centerSurface === "agent") setAgentTabOpen(true)
+  }, [centerSurface])
+  useEffect(() => {
+    writeAgentTabOpen(projectId, agentTabOpen)
+  }, [projectId, agentTabOpen])
+  const openAgentTab = useCallback(() => {
+    setAgentTabOpen(true)
+    if (projectId) navigate(`/project/${projectId}/agent`)
+  }, [navigate, projectId])
+  const closeAgentTab = useCallback(() => {
+    setAgentTabOpen(false)
+    if (centerSurface === "agent" && projectId) {
+      navigate(`/project/${projectId}/editor`)
+    }
+  }, [centerSurface, navigate, projectId])
+  const leaveAgentSurface = useCallback(() => {
+    if (projectId) navigate(`/project/${projectId}/editor`)
+  }, [navigate, projectId])
 
   // A source selection the user sent to the agent via "Ask AI". Opens the
   // Agent dock and is inserted into the composer as a context chip.
@@ -4903,10 +4966,14 @@ export function ProjectWorkspace() {
           <LeftDock
             activeTab={dockTab}
             onActiveTabChange={(t) => {
-              // While the workbench IS the agent surface, the dock's Agent tab
-              // has nothing to show but a pointer back to it — a wide panel of
-              // dead chrome beside the takeover. Make that state unreachable.
-              if (t === "agent" && centerSurface === "agent") return
+              // Agent rail: if the editor Agent tab is already open, focus it;
+              // otherwise open the compact agent panel inline in the sidebar.
+              if (t === "agent") {
+                if (resolveSidebarAgentClick(agentTabOpen) === "activate-editor-tab") {
+                  openAgentTab()
+                  return
+                }
+              }
               setDockTab(t)
               // Opening the Voices tab puts the editor into the Audio lens so
               // the per-line voice controls show alongside the panel.
@@ -5054,7 +5121,7 @@ export function ProjectWorkspace() {
                 pendingChip={pendingChip}
                 onPendingChipConsumed={() => setPendingChip(null)}
                 credits={jwt && projectOrg ? { jwt, orgId: projectOrg.id, orgRoleLevel: projectOrg.role.level } : null}
-                onExpand={() => navigate(`/project/${projectId}/agent`)}
+                onExpand={openAgentTab}
                 expanded={centerSurface === "agent"}
               />
             }
@@ -5113,27 +5180,39 @@ export function ProjectWorkspace() {
           </WorkspaceHeader>
         }
         aboveCard={
-          // Agent workbench is a takeover surface — file tabs stay with the editor.
-          centerSurface === "agent" ? null :
           <TabStrip
             tabs={workspaceTabs.tabs}
-            // While a non-editor surface (Rules) is showing, no file tab is
-            // "active" even though selectedFileId still remembers the last
-            // file — the surface tab is the active one.
+            // While a non-editor surface (Rules / Agent) is showing, no file
+            // tab is "active" even though selectedFileId still remembers the
+            // last file — the surface tab is the active one.
             activeTabId={centerSurface === "editor" ? workspaceTabs.activeTabId : null}
             files={projectFiles}
             onActivate={workspaceTabs.activateTab}
             onClose={handleCloseTab}
-            surfaceTab={
-              centerSurface === "rules" && projectId
-                ? {
+            surfaceTabs={[
+              ...(centerSurface === "rules" && projectId
+                ? [{
+                    id: "rules",
                     label: "Rules",
+                    icon: Scale,
+                    active: true as const,
                     // Navigating to the bare project route lets the
                     // restore-location effect re-open the last active file.
+                    onActivate: () => navigate(`/project/${projectId}/rules`),
                     onClose: () => navigate(`/project/${projectId}/editor`),
-                  }
-                : null
-            }
+                  }]
+                : []),
+              ...(agentTabOpen && projectId
+                ? [{
+                    id: "agent",
+                    label: "Agent",
+                    icon: Bot,
+                    active: centerSurface === "agent",
+                    onActivate: () => navigate(`/project/${projectId}/agent`),
+                    onClose: closeAgentTab,
+                  }]
+                : []),
+            ]}
           />
         }
         beforeMain={
@@ -5393,7 +5472,7 @@ export function ProjectWorkspace() {
               onApplied: handleAgentApplied,
             }}
             credits={jwt && projectOrg ? { jwt, orgId: projectOrg.id, orgRoleLevel: projectOrg.role.level } : null}
-            onClose={() => navigate(`/project/${projectId}/editor`)}
+            onClose={leaveAgentSurface}
             onJumpToCell={(fileId, cellId) =>
               navigate(`/project/${projectId}/editor/file/${fileId}?cellId=${encodeURIComponent(cellId)}`)
             }

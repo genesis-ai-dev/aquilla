@@ -144,3 +144,20 @@ describe("shouldShowAudioToolbar", () => {
     expect(shouldShowAudioToolbar("text", "editor")).toBe(false)
   })
 })
+
+// Keep in sync with `resolveSidebarAgentClick` in ProjectWorkspace.tsx.
+function resolveSidebarAgentClick(
+  agentTabOpen: boolean,
+): "activate-editor-tab" | "open-dock" {
+  return agentTabOpen ? "activate-editor-tab" : "open-dock"
+}
+
+describe("resolveSidebarAgentClick", () => {
+  it("activates the editor Agent tab when that tab is already open", () => {
+    expect(resolveSidebarAgentClick(true)).toBe("activate-editor-tab")
+  })
+
+  it("opens the agent panel inline in the dock when no editor Agent tab is open", () => {
+    expect(resolveSidebarAgentClick(false)).toBe("open-dock")
+  })
+})

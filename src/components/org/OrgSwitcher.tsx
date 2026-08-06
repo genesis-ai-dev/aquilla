@@ -229,7 +229,17 @@ function OrgSwitcherOption({
 }
 
 export function OrgSwitcher() {
-  const { orgs, activeOrg, activeOrgId, isAllOrgs, guestOrgs, setActiveOrg, setAllOrgs, refresh } = useActiveOrg()
+  const {
+    orgs,
+    activeOrg,
+    activeOrgId,
+    isAllOrgs,
+    guestOrgs,
+    setActiveOrg,
+    setAllOrgs,
+    refresh,
+    isLoading,
+  } = useActiveOrg()
   const location = useLocation()
   const navigate = useNavigate()
 
@@ -259,11 +269,12 @@ export function OrgSwitcher() {
   const guestSelected = selectedGuest != null
 
   const showAllOrgs = orgs.length > 1
+  const noMemberOrgs = !isLoading && orgs.length === 0
   const title = guestSelected
     ? selectedGuest.name ?? `Org #${selectedGuest.id}`
     : isAllOrgs
       ? "All organizations"
-      : activeOrg?.name ?? "Workspace"
+      : activeOrg?.name ?? (noMemberOrgs ? "No organization" : "Workspace")
 
   const items = useMemo<OrgSwitcherItem[]>(() => {
     const next: OrgSwitcherItem[] = []
@@ -286,9 +297,10 @@ export function OrgSwitcher() {
     return null
   }, [items, guestSelected, selectedGuestOrgId, isAllOrgs, showAllOrgs, activeOrgId])
 
-  // AQU-473: a project-only invitee has zero member orgs but may still have
-  // guest orgs to switch into — don't hide the whole switcher for them.
-  if (!activeOrg && !isAllOrgs && guestOrgs.length === 0) return null
+  // Keep the switcher (and its Create footer) available for org-less accounts.
+  // Only wait out membership hydration so we don't flash "No organization"
+  // before the first listMyOrgs / accessible-projects result lands.
+  if (isLoading && orgs.length === 0 && guestOrgs.length === 0) return null
 
   function handleOpenChange(nextOpen: boolean) {
     setOpen(nextOpen)

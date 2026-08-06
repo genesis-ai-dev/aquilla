@@ -27,6 +27,7 @@ import { RoleLabel } from "@/components/RoleLabel"
 import { UserError } from "@/lib/errors/user-error"
 import { notifySessionExpired } from "@/lib/errors/session-expired-signal"
 import { ProjectCreateDialog } from "@/components/ProjectCreateDialog"
+import { OrgCreateDialog } from "./OrgCreateDialog"
 import { OrgSetupChecklist } from "./OrgSetupChecklist"
 import { OrgProjectsDataTable } from "./OrgProjectsDataTable"
 import { LaneChips } from "./LaneChips"
@@ -555,12 +556,15 @@ export function OrgHome() {
     accessibleProjects,
     accessibleProjectsLoading,
     isLoading: orgLoading,
+    error: orgError,
     setActiveOrg,
+    refresh,
     refreshAccessibleProjects,
   } = useActiveOrg()
   const { session, loading: sessionLoading } = useFrontierSession()
   const navigate = useNavigate()
   const jwt = session?.jwt ?? null
+  const [createOrgOpen, setCreateOrgOpen] = useState(false)
   const portfolioScopeKey = !jwt || orgLoading
     ? null
     : isAllOrgs
@@ -730,6 +734,80 @@ export function OrgHome() {
       <LoadingOverlay label="Loading dashboard" data-testid="org-home-loading">
         <OrgHomeLoadingTemplate />
       </LoadingOverlay>
+    )
+  }
+
+  // Org-less accounts land on `/orgs/all` (or a stale org resume) with no
+  // activeOrgId and isAllOrgs=false — without a dedicated empty state the page
+  // used to look ready while hiding the only recovery path (create an org).
+  const noOrgs = orgs.length === 0 && jwt != null && orgError == null
+  if (noOrgs) {
+    return (
+      <>
+        <AppShell
+          sidebar={<OrgSidebar />}
+          header={
+            <div className="flex items-center justify-between pr-4">
+              <OrgBreadcrumb section="Projects" />
+              <Button type="button" size="sm" onClick={() => setCreateOrgOpen(true)}>
+                Create organization
+              </Button>
+            </div>
+          }
+          statusBar={null}
+          main={
+            <Page size="wide">
+              {pendingInvites.length > 0 && (
+                <section data-testid="pending-invitations" className="mb-6 space-y-2">
+                  <h2 className="text-sm font-medium text-muted-foreground">Pending invitations</h2>
+                  <div className="rounded-2xl border divide-y">
+                    {pendingInvites.map((inv) => (
+                      <div key={inv.token} className="flex flex-wrap items-center gap-3 p-4">
+                        <div className="flex-1 min-w-0">
+                          <p className="truncate text-sm font-medium">
+                            {inv.projects.map((p) => p.projectName).join(", ")}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            Invited by {inv.createdBy} as <RoleLabel name={inv.role.name} />
+                            {inv.expiresAt ? ` · expires ${new Date(inv.expiresAt).toLocaleDateString()}` : ""}
+                          </p>
+                        </div>
+                        <Link
+                          to={`/join/${inv.token}`}
+                          className={cn(buttonVariants({ size: "sm" }), "shrink-0")}
+                        >
+                          Review &amp; accept
+                        </Link>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              )}
+              <EmptyState
+                icon={Building2}
+                title="Create an organization to get started"
+                description="Organizations hold your projects, members, and settings. Create one to start collaborating."
+                action={
+                  <Button type="button" onClick={() => setCreateOrgOpen(true)}>
+                    Create organization
+                  </Button>
+                }
+              />
+            </Page>
+          }
+        />
+        <OrgCreateDialog
+          open={createOrgOpen}
+          onOpenChange={setCreateOrgOpen}
+          onCreated={(orgId) => {
+            void (async () => {
+              await refresh()
+              setActiveOrg(orgId)
+              navigate(orgHomePath(orgId))
+            })()
+          }}
+        />
+      </>
     )
   }
 

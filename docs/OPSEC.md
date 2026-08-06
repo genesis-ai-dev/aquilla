@@ -123,17 +123,38 @@ routing regressions that unit tests can't see.
 This is a control-effectiveness failure, not a bug: the check existed, was
 well-designed, and was worth nothing because nothing ran it.
 
-A second instance surfaced while verifying this change, and it is the more
-concerning of the two because the suite *does* run in CI: the production case in
+A second instance surfaced while verifying this change: the production case in
 `scripts/verify-live-environment.test.ts` passed a retired `staging.aquilla.app`
 origin to its fetch mock, so it threw `unexpected URL` instead of asserting
 anything — leaving the deploy verifier's production path untested. `pnpm test`
-was therefore red on `dev` before this change. Both are downstream of the same
-AQU-799 staging retirement.
+was red on `dev` because of it (reproduced by stashing this change and running
+the file at `HEAD`). Both instances are downstream of the same AQU-799 staging
+retirement.
 
 **Fixed:** `pnpm run test:worker` + a `web-worker-tests` CI job; both stale
-assertions corrected. **Worth checking separately:** why a red `unit` job on
-`dev` did not block anything.
+assertions corrected.
+
+### V4a — GitHub Actions is not currently producing meaningful results [FACT observation / cause UNVERIFIED]
+
+Noticed while checking this change's own CI, and it matters here because it is
+the delivery mechanism for every control in §5: **no CI run has produced a
+usable result on any branch today.** As of 2026-08-06, every `CI` workflow run
+across `dev` and all feature branches concluded `failure`, with the individual
+jobs failing 2–10 seconds after start — far too fast to have run `pnpm lint` or
+`pnpm test` — and their logs returning HTTP 404. The run opened for this change
+did not appear at all.
+
+Jobs that fail before executing anything, plus unavailable logs, point at the
+Actions environment (quota, billing, or runner availability) rather than at repo
+content. **The cause is not verified from here and should not be assumed.** What
+is verifiable and worth acting on: a required check that fails in two seconds
+for infrastructure reasons is indistinguishable, at the branch-protection layer,
+from one that passed — so for as long as this persists, "CI is green" means
+nothing, including for the credential scan added in V5.
+
+**Not fixed here** — it is an Actions/org-level issue, not a code change. It is
+the first thing to resolve, because it gates whether anything else in §5 is
+actually enforced.
 
 ### V5 — No credential scanning in the toolchain — **FIXED IN THIS CHANGE** [FACT]
 
@@ -217,13 +238,16 @@ Likelihood is over roughly the next year, assuming current practices.
 | V8 | 30-day tokens, partial revocation | Medium | High — one XSS ⇒ a month of access | **Medium-High** | Partial |
 | V2 | No web security headers | Medium | Medium — clickjacking, referrer leak of D5 | **Medium** | Fixed (CSP still open) |
 | V6 | Dependency CVEs | Medium | Low-Medium — DoS, build-time paths | **Medium** | Tracked |
+| V4a | CI producing no meaningful result | **Certain** (currently true) | High — every automated control below is unenforced | **High** | Open |
 | V4 | Tests not running / silently red | **Certain** (already happened, twice) | Medium — silent routing and deploy-verifier regressions | **Medium** | Fixed |
 | V3 | Invite token in console | Low | Medium — one project's membership (D5) | **Low-Medium** | Fixed |
 | V9 | Tokens in URL paths | Medium | Medium — scoped, expiring, revocable | **Low-Medium** | Mitigated |
 
-Note the shape of this table: the two highest-risk rows (V7, V5) are *not*
-sophisticated attacks. One is a documented convenience trade-off, the other was
-an absent routine check. That is the normal distribution of OPSEC failure.
+Note the shape of this table: the highest-risk rows (V4a, V7, V5) are *not*
+sophisticated attacks. One is broken automation, one a documented convenience
+trade-off, one an absent routine check. That is the normal distribution of OPSEC
+failure — and V4a sitting at the top is the point: a control that doesn't run is
+worth exactly as much as one that was never written.
 
 ---
 
@@ -244,6 +268,9 @@ Every one has a test. A control without a test is V4 waiting to happen again.
 
 ### Recommended next, in order
 
+0. **Get CI actually running again (V4a).** Everything in the table above is
+   delivered by a CI check. Until a failing check means "this change is bad"
+   rather than "Actions didn't start", none of it is enforced.
 1. **Split `SECRET_KEY` / `SYNC_SECRET_KEY` per environment (V7).** Highest
    leverage remaining. Replace cross-env token portability with a dev-only test
    fixture — the testing convenience it buys is not worth prod credentials
@@ -331,7 +358,8 @@ Reviewed against what the June audit and the 2026-08-03 pen test put in place.
 | Control | Problem | Action |
 |---|---|---|
 | `worker/` test suite | Existed, never ran, went red unnoticed (V4) | Fixed — CI job added |
-| Root `unit` CI job | Was red on `dev` via a self-neutralising mock (V4) | Fixed — but investigate why a red job didn't block |
+| Root `unit` CI job | Was red on `dev` via a self-neutralising mock (V4) | Fixed |
+| **CI as a whole** | Jobs fail in ~2s before running anything, so no check result is meaningful (V4a) | **Open — resolve first; every §5 control depends on it** |
 | `wrangler.toml` comments as the only guard on `ALLOW_UNAUTHENTICATED` | A comment is not a control (V1) | Fixed — enforced in code |
 | PostHog input masking | Doesn't cover console output (V3) | Fixed at the source; keep console capture off in the PostHog project |
 | Environment separation | Explicitly defeated for signing keys (V7) | Open — recommendation #1 |

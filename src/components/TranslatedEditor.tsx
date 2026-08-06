@@ -463,6 +463,11 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   const [pendingFootnoteDelete, setPendingFootnoteDelete] = useState<PendingFootnoteDelete | null>(null)
   const pendingFootnoteDeleteRef = useRef<PendingFootnoteDelete | null>(null)
   const idmlCompositionRangeRef = useRef<IdmlInsertedRange | null>(null)
+  // AQU-810: the latest composed string seen on `insertCompositionText`
+  // beforeinput. `compositionend`'s own `data` is authoritative in browsers but
+  // absent under some engines (and in the happy-dom test env), so this is the
+  // fallback source for the final text committed on compositionend.
+  const idmlCompositionTextRef = useRef<string>("")
   useEffect(() => {
     pendingFootnoteDeleteRef.current = pendingFootnoteDelete
   }, [pendingFootnoteDelete])
@@ -825,6 +830,9 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
         },
         compositionstart(view) {
           if (!idmlContext) return false
+          // AQU-810: record the editable slot the composition targets so the
+          // final text can be committed there on compositionend. The IME drives
+          // the on-screen composition natively — we do not intercept it.
           const selection = view.state.selection
           const position = idmlEditableSlotPosition(view.state.doc)
           idmlCompositionRangeRef.current = isEditableIdmlSelection(selection)
@@ -832,23 +840,40 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
             : position === null
               ? null
               : { from: position, to: position }
+          idmlCompositionTextRef.current = ""
           return false
         },
-        beforeinput(view, event) {
+        beforeinput(_view, event) {
           if (!idmlContext) return false
           const inputEvent = event as InputEvent
           if (inputEvent.inputType !== "insertCompositionText") return false
-          inputEvent.preventDefault()
-          const range = replaceIdmlSelectionWithPlainText(
-            view,
-            inputEvent.data ?? "",
-            idmlCompositionRangeRef.current ?? undefined,
-          )
-          idmlCompositionRangeRef.current = range
-          return true
+          // AQU-810: do NOT preventDefault or manually insert IME composition
+          // updates. Browsers ignore preventDefault() on the DOM mutations an
+          // active IME performs, so a manual insert here landed *in addition to*
+          // the IME's own text — doubling every composition update and leaving
+          // romaji fragments behind (e.g. "k小日小日子にch子に…"). Let the IME
+          // compose natively; the clean, final text is committed once on
+          // compositionend below. Track the running composition text as the
+          // fallback for engines whose compositionend carries no `data`.
+          idmlCompositionTextRef.current = inputEvent.data ?? ""
+          return false
         },
-        compositionend() {
+        compositionend(view, event) {
+          if (!idmlContext) return false
+          // AQU-810: commit the composed text exactly once, into the slot the
+          // composition targeted. Dispatching this ProseMirror transaction
+          // re-renders the slot from document state, so the IME's transient
+          // composition DOM cannot survive as a duplicate. Returning false lets
+          // ProseMirror clear its own composition state; any deferred DOM read
+          // then diffs against a document that already matches and is a no-op.
+          const range = idmlCompositionRangeRef.current ?? undefined
           idmlCompositionRangeRef.current = null
+          // Prefer compositionend's authoritative `data`; fall back to the last
+          // beforeinput composition text when the engine omits it.
+          const endData = (event as CompositionEvent).data
+          const composed = typeof endData === "string" ? endData : idmlCompositionTextRef.current
+          idmlCompositionTextRef.current = ""
+          replaceIdmlSelectionWithPlainText(view, composed, range)
           return false
         },
         mouseover(view, event) {

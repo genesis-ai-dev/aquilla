@@ -405,6 +405,112 @@ describe("TranslatedEditor — protected IDML mode", () => {
     expect(validateIdmlTranslation(SOURCE_HTML, committed!.valueHtml, METADATA).valid).toBe(true)
   })
 
+  // AQU-810: the corruption came from intercepting the IME's own composition —
+  // calling preventDefault() and manually inserting on each `insertCompositionText`
+  // beforeinput. Browsers ignore preventDefault() on the DOM mutations an active
+  // IME performs, so the manual insert landed *in addition to* the IME's text,
+  // doubling every update and stranding romaji fragments. The editor must leave
+  // the in-progress composition to the browser and only commit the final text on
+  // compositionend.
+  it("does not intercept in-progress IME composition beforeinput (commits only on compositionend)", async () => {
+    const onCommit = vi.fn()
+    const emptyTargetHtml = SOURCE_HTML
+      .replace(">Source</span>", "></span>")
+      .replace(">Second</span>", "></span>")
+    const { container } = render(
+      <TranslatedEditor
+        cellId="idml-ime-passthrough"
+        initialPlain=""
+        initialHtml={emptyTargetHtml}
+        idmlConfiguration={CONFIGURATION}
+        onCommit={onCommit}
+      />,
+    )
+    await act(async () => { await Promise.resolve() })
+    const surface = container.querySelector(".ProseMirror") as EditorSurface
+
+    const composing = new InputEvent("beforeinput", {
+      bubbles: true,
+      cancelable: true,
+      data: "漢",
+      inputType: "insertCompositionText",
+    })
+    act(() => {
+      fireEvent.focus(surface)
+      fireEvent.compositionStart(surface)
+      fireEvent(surface, composing)
+    })
+
+    // The editor must not cancel the IME's own composition update, and must not
+    // eagerly write it into the slot — that manual write is what duplicated the
+    // browser's native insertion.
+    expect(composing.defaultPrevented).toBe(false)
+    expect(surface.querySelector("span[data-idml-slot=\"0\"]")?.textContent).toBe("")
+
+    act(() => {
+      // The browser's final composition update, then the commit.
+      fireEvent(surface, new InputEvent("beforeinput", {
+        bubbles: true,
+        cancelable: true,
+        data: "漢字",
+        inputType: "insertCompositionText",
+      }))
+      fireEvent.compositionEnd(surface, { data: "漢字" })
+      fireEvent.blur(surface)
+    })
+
+    // Exactly one copy of the composed text lands — on compositionend.
+    expect(surface.querySelector("span[data-idml-slot=\"0\"]")?.textContent).toBe("漢字")
+    const committed = onCommit.mock.calls.at(-1)?.[0] as { valueHtml: string } | undefined
+    expect(committed?.valueHtml).toContain(">漢字</span>")
+    expect(validateIdmlTranslation(SOURCE_HTML, committed!.valueHtml, METADATA).valid).toBe(true)
+  })
+
+  it("commits Devanagari IME composition into an IDML slot exactly once", async () => {
+    const onCommit = vi.fn()
+    const emptyTargetHtml = SOURCE_HTML
+      .replace(">Source</span>", "></span>")
+      .replace(">Second</span>", "></span>")
+    const { container } = render(
+      <TranslatedEditor
+        cellId="idml-ime-devanagari"
+        initialPlain=""
+        initialHtml={emptyTargetHtml}
+        idmlConfiguration={CONFIGURATION}
+        onCommit={onCommit}
+      />,
+    )
+    await act(async () => { await Promise.resolve() })
+    const surface = container.querySelector(".ProseMirror") as EditorSurface
+    const composed = "अतुल"
+
+    act(() => {
+      fireEvent.focus(surface)
+      fireEvent.compositionStart(surface)
+      // Intermediate transliteration updates the browser drives itself, ending
+      // with the final composed string on the last composition update.
+      fireEvent(surface, new InputEvent("beforeinput", {
+        bubbles: true,
+        cancelable: true,
+        data: "अत",
+        inputType: "insertCompositionText",
+      }))
+      fireEvent(surface, new InputEvent("beforeinput", {
+        bubbles: true,
+        cancelable: true,
+        data: composed,
+        inputType: "insertCompositionText",
+      }))
+      fireEvent.compositionEnd(surface, { data: composed })
+      fireEvent.blur(surface)
+    })
+
+    expect(surface.querySelector("span[data-idml-slot=\"0\"]")?.textContent).toBe(composed)
+    const committed = onCommit.mock.calls.at(-1)?.[0] as { valueHtml: string } | undefined
+    expect(committed?.valueHtml).toContain(`>${composed}</span>`)
+    expect(validateIdmlTranslation(SOURCE_HTML, committed!.valueHtml, METADATA).valid).toBe(true)
+  })
+
   it("keeps Enter inside the current slot and commits validator-approved HTML", async () => {
     const onCommit = vi.fn()
     const onEscapeToGrid = vi.fn()

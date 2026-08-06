@@ -7,6 +7,7 @@ const orgContext = vi.hoisted(() => ({
   activeOrgId: 7 as number | null,
   isAllOrgs: false,
   orgs: [{ id: 7, name: "Dev Org" }],
+  guestOrgs: [] as { id: number; name: string | null }[],
   setActiveOrg: vi.fn(),
   setAllOrgs: vi.fn(),
 }))
@@ -15,7 +16,7 @@ vi.mock("@/context/OrgContext", () => ({
   useActiveOrg: () => ({
     ...orgContext,
     activeOrg: orgContext.orgs.find((org) => org.id === orgContext.activeOrgId) ?? null,
-    guestOrgs: [],
+    guestOrgs: orgContext.guestOrgs,
     isLoading: false,
     error: null,
     refresh: vi.fn(),
@@ -41,6 +42,7 @@ describe("OrgBreadcrumb", () => {
     orgContext.activeOrgId = 7
     orgContext.isAllOrgs = false
     orgContext.orgs = [{ id: 7, name: "Dev Org" }]
+    orgContext.guestOrgs = []
     orgContext.setActiveOrg.mockClear()
     orgContext.setAllOrgs.mockClear()
   })
@@ -78,6 +80,22 @@ describe("OrgBreadcrumb", () => {
 
     expect(screen.queryByRole("link", { name: "All organizations" })).not.toBeInTheDocument()
     expect(screen.getByText("All organizations")).toHaveAttribute("aria-current", "page")
+  })
+
+  // AQU-790: viewing a guest org (`/orgs/:guestId`), the guest org is a sibling
+  // of "All organizations" — NOT nested under one of the caller's owned orgs.
+  it("renders a guest org as its own crumb, not a descendant of an owned org", () => {
+    orgContext.activeOrgId = 2
+    orgContext.orgs = [{ id: 7, name: "Dev Org" }]
+    orgContext.guestOrgs = [{ id: 2, name: "Guest Org" }]
+
+    renderBreadcrumb(<OrgBreadcrumb section="Projects" />, "/orgs/2")
+
+    // The guest org is the current page, directly under All organizations.
+    expect(screen.getByRole("link", { name: "All organizations" })).toHaveAttribute("href", "/orgs/all")
+    expect(screen.getByText("Guest Org")).toHaveAttribute("aria-current", "page")
+    // The caller's owned org never appears as an ancestor of the guest org.
+    expect(screen.queryByText("Dev Org")).not.toBeInTheDocument()
   })
 
   it("keeps the breadcrumb on one line and scrolls horizontally instead of clipping", () => {

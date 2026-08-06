@@ -28,6 +28,24 @@ const VALID_SURFACES = new Set(["all", "auth", "sync", "spa"])
 // stable route in the App.tsx route table.
 const SPA_SHELL_PATH = "/app"
 
+// Cookie-independent static marketing pages mapped by worker/index.ts
+// STATIC_PAGES. A deploy that publishes the Worker but drops these HTML entries
+// from the asset bundle makes each path miss env.ASSETS.fetch() and fall
+// through the single-page-application not-found handler to the SPA index shell
+// — a silent, partner-facing 404 (the homepage footer links straight here).
+// This is exactly the AQU-798 recurrence.
+//
+// The tell is the served document's og:url: each case-study page hardcodes its
+// own canonical og:url, while the index shell carries the bare-origin og:url
+// (%BRAND_OG_URL% → https://aquilla.app/). If a path served the shell instead
+// of its dedicated document, og:url won't match. The expected og:url is the
+// canonical production URL baked into the source HTML, so it's identical across
+// environments (production/staging/dev/preview all serve the same asset bundle).
+const STATIC_MARKETING_PAGES = [
+  { path: "/case-studies/biblica", ogUrl: "https://aquilla.app/case-studies/biblica" },
+  { path: "/case-studies/come-and-see", ogUrl: "https://aquilla.app/case-studies/come-and-see" },
+]
+
 function delay(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds))
 }
@@ -230,6 +248,45 @@ async function verifySpa(config, options) {
   options.log(`[verify-live] SPA at ${appUrl} targets only the expected live environment`)
 }
 
+// Reads a <meta property="…" content="…"> value. The marketing HTML is
+// hand-authored with a stable attribute order (property before content), and
+// prerender-marketing only injects body content, so a targeted regex is safe.
+function metaContent(html, property) {
+  const escaped = property.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+  const match = html.match(
+    new RegExp(`<meta[^>]+property=["']${escaped}["'][^>]+content=["']([^"']*)["']`, "i"),
+  )
+  return match?.[1]
+}
+
+// AQU-798 regression guard: prove the case-study static pages resolve to their
+// dedicated documents rather than the SPA index-shell fallback. Runs post-deploy
+// as part of the spa surface, so a bundle that silently omits the case-study
+// HTML fails the deploy instead of shipping a partner-facing 404.
+async function verifyStaticPages(config, options) {
+  for (const page of STATIC_MARKETING_PAGES) {
+    const pageUrl = new URL(page.path, config.appOrigin).href
+    await requestWithRetry(
+      pageUrl,
+      { headers: { Accept: "text/html" } },
+      async (response) => {
+        assertResponse(response, 200, `static page ${page.path}`)
+        const html = await response.text()
+        const ogUrl = metaContent(html, "og:url")
+        if (ogUrl !== page.ogUrl) {
+          throw new Error(
+            `${page.path} served the wrong document (og:url ${JSON.stringify(ogUrl)}; `
+            + `expected ${JSON.stringify(page.ogUrl)}). The case-study HTML is likely missing `
+            + `from the deployed asset bundle, so the path fell back to the SPA index shell.`,
+          )
+        }
+      },
+      options,
+    )
+  }
+  options.log(`[verify-live] static marketing pages resolve to their dedicated documents on ${config.appOrigin}`)
+}
+
 function withAppOrigin(config, appOrigin, surface) {
   if (appOrigin === undefined) return config
   if (surface !== "spa") {
@@ -281,6 +338,7 @@ export async function verifyLiveEnvironment(environment, {
   if (surface === "all" || surface === "sync") await verifySync(config, options)
   if (surface === "all" || surface === "spa") {
     await operationWithRetry(config.appOrigin, () => verifySpa(config, options), options)
+    await verifyStaticPages(config, options)
   }
 
   log(`[verify-live] ${environment}/${surface} verification passed`)

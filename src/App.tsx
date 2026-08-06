@@ -2,6 +2,7 @@ import { Suspense, lazy } from "react"
 import { Navigate, Routes, Route } from "react-router-dom"
 import { hasAuthHintCookie } from "@/lib/frontier/session-store"
 import { OrgHome } from "@/components/org/OrgHome"
+import { OrgHomeRoute } from "@/components/org/OrgHomeRoute"
 import { OrgRouteGate } from "@/components/org/OrgRouteGate"
 import { ProductTourProvider } from "@/context/ProductTourContext"
 import { ArchivedProjects } from "@/components/org/ArchivedProjects"
@@ -215,7 +216,8 @@ function AppRoutes() {
         {/* Org shell — path is authoritative for active org. `/orgs/all` is home-only. */}
         <Route path="/orgs/all" element={<OrgHome />} />
         <Route path="/orgs/:orgId" element={<OrgRouteGate />}>
-          <Route index element={<OrgHome />} />
+          {/* AQU-790: member orgs → full dashboard; guest orgs → reduced overview. */}
+          <Route index element={<OrgHomeRoute />} />
           <Route path="assigned" element={<AssignedToMe />} />
           <Route path="archived" element={<ArchivedProjects />} />
           <Route path="teams" element={<TeamsList />} />

@@ -22,6 +22,13 @@ interface OrgContextValue {
   orgs: OrgSummary[]
   activeOrgId: number | null
   activeOrg: OrgSummary | null
+  /**
+   * AQU-790: the guest org currently in scope — the `guestOrgs` entry whose id
+   * matches `activeOrgId` when that org is *not* a membership. Non-null exactly
+   * when the path names a guest org (`/orgs/:guestId`). Lets chrome describe the
+   * guest org without pretending it's a membership (`activeOrg` stays null).
+   */
+  activeGuestOrg: GuestOrg | null
   isAllOrgs: boolean
   /** Orgs reached only through a direct project grant (no org membership). */
   guestOrgs: GuestOrg[]
@@ -230,6 +237,12 @@ export function OrgProvider({ children }: { children: ReactNode }) {
 
   const isAllOrgs = orgs.length > 1 && activeOrgId == null
   const activeOrg = orgs.find((o) => o.id === activeOrgId) ?? null
+  // AQU-790: only a guest org when the active id is not one of the caller's
+  // memberships — a membership always wins (never misrepresent role).
+  const activeGuestOrg =
+    activeOrgId != null && activeOrg == null
+      ? guestOrgs.find((g) => g.id === activeOrgId) ?? null
+      : null
   const orgsReady = !sessionLoading && (jwt == null || resolvedOrgJwt === jwt)
   const projectsReady = !sessionLoading && (jwt == null || resolvedProjectsJwt === jwt)
 
@@ -238,6 +251,7 @@ export function OrgProvider({ children }: { children: ReactNode }) {
       orgs,
       activeOrgId,
       activeOrg,
+      activeGuestOrg,
       isAllOrgs,
       guestOrgs,
       accessibleProjects,

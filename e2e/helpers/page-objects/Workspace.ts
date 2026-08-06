@@ -487,6 +487,165 @@ export class Workspace {
     await this.commitTargetCellEdit(index, expectedText)
   }
 
+  /**
+   * AQU-740: type a draft into an IDML target, then Backspace it away again.
+   * Deleting a slot's final character used to let the browser drop the emptied
+   * slot span, which the round-trip guard refused — the character stuck and
+   * the "protected formatting" banner appeared. The cell must end exactly as
+   * it started (untranslated, no commit), with every protected anchor intact.
+   */
+  async deleteIdmlDraftToEmpty(
+    index: number,
+    draft: string,
+    expectedSlotCount: number,
+  ): Promise<void> {
+    const target = await this.activateTargetCell(index)
+    // Character-style IDs are structural metadata, not translator-facing UI.
+    // Native title attributes used to show a distracting raw InDesign tooltip
+    // whenever the pointer rested over an active slot.
+    await expect(target.locator(".idml-style-boundary[title]")).toHaveCount(0)
+    await expect(target.locator("span[data-idml-slot][data-idml-character-style]"))
+      .toHaveCount(expectedSlotCount)
+    await this.page.keyboard.type(draft)
+    await expect(target).toContainText(draft)
+
+    for (let press = 0; press < draft.length; press += 1) {
+      await this.page.keyboard.press("Backspace")
+    }
+    await expect(target).toHaveText("")
+    // The protected anchors must survive the emptied draft.
+    await expect(target.locator("span[data-idml-slot]")).toHaveCount(expectedSlotCount)
+    await expect(
+      this.page.getByText(/This edit would remove protected InDesign formatting/i),
+    ).toHaveCount(0)
+    await this.page.keyboard.press("Escape")
+    await expect(target).toBeHidden()
+  }
+
+  /**
+   * AQU-740: Option/Ctrl+Backspace at the end of a trailing space must remove
+   * that space and its adjacent word in one operation, not require one press
+   * for whitespace and another for the word.
+   */
+  async deleteIdmlWordPastTrailingSpace(index: number): Promise<void> {
+    const target = await this.activateTargetCell(index)
+    await this.page.keyboard.type("alpha beta ")
+    const slot = target.locator('span[data-idml-slot="0"]')
+    await expect.poll(() => slot.evaluate((element) => element.textContent))
+      .toBe("alpha beta ")
+
+    await this.page.keyboard.press("Alt+Backspace")
+    await expect.poll(() => slot.evaluate((element) => element.textContent))
+      .toBe("alpha ")
+
+    // Restore the original untranslated state without committing a draft.
+    await this.page.keyboard.press("ControlOrMeta+A")
+    await this.page.keyboard.press("Backspace")
+    await expect(target).toHaveText("")
+    await this.page.keyboard.press("Escape")
+    await expect(target).toBeHidden()
+  }
+
+  /**
+   * AQU-740: the cheap read view and ProseMirror must count a rendered <br>
+   * identically. Commit two lines, click after the final character on line two,
+   * and prove the next character appends instead of landing one position early.
+   */
+  async verifyIdmlMultilineReentry(index: number): Promise<void> {
+    let target = await this.activateTargetCell(index)
+    await this.page.keyboard.type("abc")
+    await this.page.keyboard.press("Enter")
+    await this.page.keyboard.type("xyz")
+    const multilineCommitted = this.page.waitForResponse((response) => {
+      if (response.request().method() !== "POST" || !response.ok()) return false
+      try {
+        return new URL(response.url()).pathname.endsWith("/events")
+      } catch {
+        return false
+      }
+    }, { timeout: 20_000 })
+    await this.page.locator("aside").click()
+    await multilineCommitted
+
+    const readView = this.targetReadView(index)
+    await expect(readView).toBeVisible({ timeout: 10_000 })
+    const slot = readView.locator('span[data-idml-slot="0"]')
+    await expect(slot.locator("br")).toHaveCount(1)
+    await expect(slot).toHaveText("abcxyz")
+    const point = await slot.evaluate((element) => {
+      const lastLine = element.lastChild
+      if (!lastLine || lastLine.nodeType !== Node.TEXT_NODE) {
+        throw new Error("IDML second line text node is missing")
+      }
+      const range = element.ownerDocument.createRange()
+      range.setStart(lastLine, lastLine.textContent?.length ?? 0)
+      range.collapse(true)
+      const rect = range.getClientRects()[0] ?? range.getBoundingClientRect()
+      return { x: rect.left, y: rect.top + Math.max(1, rect.height / 2) }
+    })
+
+    await this.page.mouse.click(point.x, point.y)
+    target = this.editableTarget(index)
+    await expect(target).toBeVisible({ timeout: 10_000 })
+    await expect(target).toBeFocused({ timeout: 10_000 })
+    await expect.poll(() => target.evaluate((surface) => {
+      const editor = (surface as HTMLElement & {
+        editor?: { state: { selection: { $from: { parentOffset: number } } } }
+      }).editor
+      return editor?.state.selection.$from.parentOffset ?? -1
+    })).toBe(7)
+
+    await this.page.keyboard.type("q")
+    await expect(target.locator('span[data-idml-slot="0"]')).toHaveText("abcxyzq")
+
+    // Clear both protected slots and persist the untranslated state so this
+    // regression probe cannot affect the artifact assertions later in the test.
+    await this.page.keyboard.press("ControlOrMeta+A")
+    await this.page.keyboard.press("Backspace")
+    await this.commitTargetCellEdit(index, "")
+    await expect(target).toBeHidden()
+  }
+
+  /**
+   * AQU-740: a line break typed at the end of an IDML slot must keep a caret
+   * line box. Without the synthetic trailing-break compensation the empty last
+   * line had no height and the browser parked the visible cursor back at the
+   * cell's first line. Types a draft with a break, asserts the compensation
+   * and the extra line box, then deletes everything back so the cell ends
+   * exactly as it started (untranslated, no commit).
+   */
+  async verifyIdmlTrailingBreakCaret(index: number): Promise<void> {
+    const target = await this.activateTargetCell(index)
+    await this.page.keyboard.type("xy")
+    await expect(target).toContainText("xy")
+    const paragraphHeight = () => target.evaluate((element) => {
+      const paragraph = element.querySelector("p")
+      if (!paragraph) throw new Error("IDML paragraph missing")
+      return paragraph.getBoundingClientRect().height
+    })
+    const heightBefore = await paragraphHeight()
+
+    await this.page.keyboard.press("Enter")
+    await expect(target.locator(".idml-trailing-break")).toHaveCount(1)
+    // The empty new line must own real height — that is the caret's line box.
+    await expect.poll(paragraphHeight).toBeGreaterThan(heightBefore * 1.5)
+
+    // The next character lands after the break and retires the compensation.
+    await this.page.keyboard.type("z")
+    await expect(target.locator(".idml-trailing-break")).toHaveCount(0)
+
+    // x, y, break, z — four presses back to an untranslated cell.
+    for (let press = 0; press < 4; press += 1) {
+      await this.page.keyboard.press("Backspace")
+    }
+    await expect(target).toHaveText("")
+    await expect(
+      this.page.getByText(/This edit would remove protected InDesign formatting/i),
+    ).toHaveCount(0)
+    await this.page.keyboard.press("Escape")
+    await expect(target).toBeHidden()
+  }
+
   /** Replace the complete target value, then wait for its authoritative commit. */
   async replaceCell(index: number, text: string): Promise<void> {
     const target = await this.activateTargetCell(index)

@@ -294,9 +294,15 @@ describe("worker deployment environment contract", () => {
     expect(authPackage.scripts?.deploy).toBe("pnpm --dir .. run deploy:aquilla:auth")
 
     const runbook = readRepoFile("docs", "runbooks", "cloudflare-workers-builds.md")
-    expect(runbook).toContain("Use `/` as the root directory for all")
+    expect(runbook).toContain("Use `/` as the root directory for every")
     expect(runbook).toContain("`pnpm run build:workers-build:identity`")
     expect(runbook).toContain("`pnpm run build:workers-build:sync`")
+    expect(runbook).toContain("Disable builds for non-production branches")
+    expect(runbook).toContain("`aquilla-web-development`")
+    expect(runbook).toContain("`aquilla-dev-identity`")
+    expect(runbook).toContain("`aquilla-sync-worker-dev`")
+    expect(runbook).toContain("pull-request validation is manual")
+    expect(runbook).not.toContain("enable non-production branch builds")
 
     const helper = readRepoFile("scripts", "cloudflare-build-deploy.mjs")
     expect(helper).toContain("promote: false")

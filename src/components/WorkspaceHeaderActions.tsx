@@ -28,12 +28,10 @@ export function WorkspaceHeaderActions({
       </Button>
       {menuItems.length > 0 ? (
         <OverflowMenu
-          inButtonGroup
           items={menuItems}
           triggerVariant="outline"
           triggerSize="icon"
           triggerClassName="bg-card"
-          tooltip="More"
           ariaLabel="More"
           testId="workspace-more-menu"
         />

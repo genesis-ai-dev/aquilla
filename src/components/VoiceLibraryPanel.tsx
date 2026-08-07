@@ -320,22 +320,20 @@ function VoiceRow({
           concern this ticket doesn't touch). */}
       {canEdit && (
         <Popover open={menuOpen} onOpenChange={setMenuOpen}>
-          <AppTooltip content="More">
-            <PopoverTrigger
-              render={
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-xs"
-                  onClick={(e) => e.stopPropagation()}
-                  aria-label="More voice actions"
-                  className="shrink-0 opacity-0 transition-opacity focus:opacity-100 group-hover:opacity-100 data-[popup-open]:opacity-100"
-                >
-                  <MoreHorizontal />
-                </Button>
-              }
-            />
-          </AppTooltip>
+          <PopoverTrigger
+            render={
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                onClick={(e) => e.stopPropagation()}
+                aria-label="More voice actions"
+                className="shrink-0 opacity-0 transition-opacity focus:opacity-100 group-hover:opacity-100 data-[popup-open]:opacity-100"
+              >
+                <MoreHorizontal />
+              </Button>
+            }
+          />
           <PopoverContent align="end" side="bottom" className="w-44 p-1" onClick={(e) => e.stopPropagation()}>
             <MenuItem icon={Pencil} label="Edit" onClick={() => { setMenuOpen(false); onEdit() }} />
             {!isDefault && (

@@ -315,10 +315,12 @@ admin.get("/teams", async (c) => {
               WHERE gm.group_id = g.id AND om.role_level = 500
               ORDER BY LOWER(u.username)
               LIMIT 1) AS project_lead_username,
+            ou.username AS owner_username,
             (SELECT COUNT(*) FROM group_members m WHERE m.group_id = g.id) AS member_count,
             (SELECT COUNT(*) FROM group_project_grants gp WHERE gp.group_id = g.id) AS project_count
        FROM groups g
        LEFT JOIN organizations o ON o.id = g.org_id
+       LEFT JOIN users ou ON ou.id = o.owner_user_id
       ORDER BY o.name, g.name`,
   ).all<{
     id: number
@@ -327,6 +329,7 @@ admin.get("/teams", async (c) => {
     org_id: number
     org_name: string | null
     project_lead_username: string | null
+    owner_username: string | null
     member_count: number
     project_count: number
   }>()
@@ -338,6 +341,7 @@ admin.get("/teams", async (c) => {
       orgId: r.org_id,
       orgName: r.org_name,
       projectLeadUsername: r.project_lead_username,
+      ownerUsername: r.owner_username,
       memberCount: r.member_count,
       projectCount: r.project_count,
     })),

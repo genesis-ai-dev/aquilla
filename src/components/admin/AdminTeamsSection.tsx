@@ -1,6 +1,5 @@
 import { useMemo } from "react"
 import { type ColumnDef } from "@tanstack/react-table"
-import { Users } from "lucide-react"
 import { DataTable, DataTableColumnHeader } from "@/components/ui/data-table"
 import { missingLast, SORT_MISSING_LAST } from "@/components/ui/data-table-missing"
 import { DateTooltip } from "@/components/ui/date-tooltip"
@@ -10,6 +9,7 @@ import { TeamWithAvatar } from "@/components/TeamWithAvatar"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { ADMIN_TABLE_PANEL_CLASS, relativeTeamPath } from "@/components/admin/shared"
 import type { AdminTeam } from "@/lib/frontier/admin"
+import { NAV_PAGE_ICONS } from "@/lib/navigation/page-icons"
 
 /**
  * Teams — flat cross-tenant list of every team. Complements Tenants (orgs with
@@ -109,7 +109,7 @@ export function AdminTeamsSection({
     return (
       <EmptyState
         variant="panel"
-        icon={Users}
+        icon={NAV_PAGE_ICONS.teams}
         title="No teams yet"
         description="Teams appear here as orgs create them."
       />
@@ -132,13 +132,6 @@ export function AdminTeamsSection({
           .toLowerCase()
           .includes(q)
       }}
-      toolbar={(table) => (
-        <span className="ml-auto text-xs tabular-nums text-muted-foreground">
-          {table.getFilteredRowModel().rows.length === teams.length
-            ? `${teams.length}`
-            : `${table.getFilteredRowModel().rows.length} of ${teams.length}`}
-        </span>
-      )}
       testId="admin-teams-table"
       className={ADMIN_TABLE_PANEL_CLASS}
       dense

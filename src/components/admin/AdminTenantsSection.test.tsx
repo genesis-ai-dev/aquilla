@@ -12,7 +12,7 @@ const orgs: AdminOrg[] = [
   { id: 2, name: "Beta", createdAt: "2026-02-01", ownerUsername: "be", memberCount: 1, projectCount: 0 },
 ]
 const teams: AdminTeam[] = [
-  { id: 10, name: "alpha/translators", createdAt: "2026-01-02", orgId: 1, orgName: "Alpha", projectLeadUsername: "al", memberCount: 2, projectCount: 1 },
+  { id: 10, name: "alpha/translators", createdAt: "2026-01-02", orgId: 1, orgName: "Alpha", projectLeadUsername: "al", ownerUsername: "owen", memberCount: 2, projectCount: 1 },
 ]
 
 describe("AdminTenantsSection", () => {

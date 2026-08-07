@@ -99,6 +99,7 @@ describe("/api/v2/admin/* platform-admin gate", () => {
         name: string
         orgName: string
         projectLeadUsername: string | null
+        ownerUsername: string | null
         memberCount: number
         projectCount: number
       }>
@@ -109,6 +110,7 @@ describe("/api/v2/admin/* platform-admin gate", () => {
       name: "CAS/team-a",
       orgName: "CAS",
       projectLeadUsername: "lead",
+      ownerUsername: "wendi",
       memberCount: 2,
       projectCount: 1,
     })

@@ -48,7 +48,7 @@ export function CastGutterVoice({ voice, explicit, castName, editable, voices, o
         !explicit && "opacity-35 outline-dotted outline-1 outline-offset-1 outline-muted-foreground/60",
       )}
     >
-      <VoiceAvatar voice={voice} size={16} />
+      <VoiceAvatar voice={voice} size={32} />
     </span>
   )
   if (!editable) {

@@ -195,7 +195,7 @@ const ESTIMATED_ROW_HEIGHT_PX = 140
 /** The gutter track widens by the character circle's w-6 when the cast
  *  gutter is on (stacked media lens). One shared type keeps the header row,
  *  paragraph bar, and rows in the same template. */
-type EditorGridCols = "grid-cols-[84px_1fr_1fr]" | "grid-cols-[108px_1fr_1fr]"
+type EditorGridCols = "grid-cols-[84px_1fr_1fr]" | "grid-cols-[132px_1fr_1fr]"
 const LEGEND_LIST_DRAW_DISTANCE_PX = 240
 
 /**
@@ -1534,7 +1534,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   // fixed width keeps Source header-aligned. No right gutter; the floating
   // action rail is absolutely positioned. Target reserves pr-9 for the
   // expand chevron.
-  const gridCols: EditorGridCols = castGutter ? "grid-cols-[108px_1fr_1fr]" : "grid-cols-[84px_1fr_1fr]"
+  const gridCols: EditorGridCols = castGutter ? "grid-cols-[132px_1fr_1fr]" : "grid-cols-[84px_1fr_1fr]"
 
   const handleMouseUp = useCallback(() => {
     if (isDragging.current && dragCells.current.size > 1) {
@@ -1892,7 +1892,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
             {/* Pilcrow sits in the number slot of the combined gutter so it
                 stays aligned with line numbers below. */}
             <div className="flex items-center py-1">
-              {castGutter && <div className="w-6 shrink-0" aria-hidden="true" />}
+              {castGutter && <div className="mr-2 w-10 shrink-0" aria-hidden="true" />}
               <div className="w-5 shrink-0" aria-hidden="true" />
               <div className="ml-2 flex min-w-0 flex-1 items-center gap-0.5">
                 <div className="w-5 shrink-0" aria-hidden="true" />
@@ -2107,6 +2107,12 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     [cellStoreVersion, renderListItem],
   )
 
+  // 2026-08-07 (Sam): the segment-range navigator is pure chrome in the
+  // stacked media lens — the timeline, chip clicks, and playback follow do
+  // its job there. Navigation only (the row list is never filtered by it),
+  // so hiding it costs nothing. The Text lens keeps it.
+  const showMilestoneNav = !castGutter && milestoneNavigationItems.length > 0 && Boolean(activeChapterLabel)
+
   return (
     <div className="flex h-full min-h-0 flex-col" onMouseUp={handleMouseUp}>
       <div className="shrink-0 bg-background">
@@ -2117,17 +2123,17 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
             {readOnlyLabel}
           </div>
         )}
-        {(milestoneNavigationItems.length > 0 && activeChapterLabel) || chapterNavTrailing ? (
+        {showMilestoneNav || chapterNavTrailing ? (
           // Below lg: in-flow left picker + end toolbar. lg+: equal flex
           // balancers keep the picker centered without absolute overlay — the
           // old inset-0 layer painted under Text/Audio + ⋯ when space was tight.
           // min-w-24 floors the picker at prev + chevron + next (three size-8s).
           // gap-2 matches FileChapterToolbar's tabs ↔ ⋯ spacing.
           <div className="relative flex items-center gap-2 border-b border-border bg-background/90 py-2 pl-2 pr-2 backdrop-blur-xl">
-            {milestoneNavigationItems.length > 0 && activeChapterLabel ? (
+            {showMilestoneNav ? (
               <div className="hidden min-w-0 flex-1 lg:block" aria-hidden="true" />
             ) : null}
-            {milestoneNavigationItems.length > 0 && activeChapterLabel ? (
+            {showMilestoneNav ? (
               <div
                 data-chapter-nav-slot=""
                 className="mr-auto flex min-w-24 max-w-full flex-1 items-center lg:mr-0 lg:flex-none lg:shrink"
@@ -2145,26 +2151,40 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
             {chapterNavTrailing ? (
               <div
                 className={
-                  milestoneNavigationItems.length > 0 && activeChapterLabel
+                  showMilestoneNav
                     ? "flex shrink-0 items-center lg:flex-1 lg:justify-end"
                     : "ml-auto flex shrink-0 items-center"
                 }
               >
                 {chapterNavTrailing}
               </div>
-            ) : milestoneNavigationItems.length > 0 && activeChapterLabel ? (
+            ) : showMilestoneNav ? (
               <div className="hidden min-w-0 flex-1 lg:block" aria-hidden="true" />
             ) : null}
           </div>
         ) : null}
         <div className={cn("grid gap-2 border-b border-border pl-2.5 pr-4 py-2 text-xs font-medium text-muted-foreground", gridCols)}>
-          {/* Unlabeled track: combined select + badges + number gutter. */}
-          <div aria-hidden="true" />
+          {/* With the character gutter on, the Source label sits over the
+              gutter at the LEFT EDGE (Sam 2026-08-07) instead of floating a
+              gutter-width away from the side; otherwise the track is
+              unlabeled (select + badges + number). */}
+          {castGutter ? (
+            <div data-testid="table-source-header" className="flex items-center gap-2">
+              Source
+              {project.sourceLanguage && (
+                <Badge variant="secondary" className="text-[10px] font-normal normal-case tracking-normal">
+                  {project.sourceLanguage}
+                </Badge>
+              )}
+            </div>
+          ) : (
+            <div aria-hidden="true" />
+          )}
           {/* In Audio mode the left column carries per-line voice controls, not
               source text, so label it "Controls" (no source-language badge). */}
           <div className="flex items-center gap-2 pl-2">
-            {audioLens ? "Controls" : "Source"}
-            {!audioLens && project.sourceLanguage && (
+            {castGutter ? null : audioLens ? "Controls" : "Source"}
+            {!castGutter && !audioLens && project.sourceLanguage && (
               <Badge variant="secondary" className="text-[10px] font-normal normal-case tracking-normal">
                 {project.sourceLanguage}
               </Badge>
@@ -5444,13 +5464,14 @@ function EditorRow({
             gap to the verse number. Fixed track keeps Source header-aligned. */}
         <div className="flex h-full items-start self-stretch py-1.5">
           {castGutter && (
-            <div className="flex w-6 shrink-0 flex-col items-center">
-              <div className="mb-1 h-4 shrink-0" aria-hidden />
-              {/* Same line-box trick as the number pill: the circle rides the
-                  source's first text line at any font size. */}
+            <div className="mr-2 flex w-10 shrink-0 flex-col items-center">
+              {/* 32px circles (Sam 2026-08-07): centered against the row's
+                  whole first-line region (context line + first text line)
+                  rather than boxed to the text line — a circle taller than
+                  one line of text would ride awkwardly high otherwise. */}
               <span
                 className="flex items-center justify-center"
-                style={{ height: `calc(${sourceFontSize}px * 1.6)` }}
+                style={{ height: `calc(20px + ${sourceFontSize}px * 1.6)` }}
               >
                 {gutterVoice && (
                   <CastGutterVoice

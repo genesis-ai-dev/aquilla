@@ -180,7 +180,7 @@ describe("EditorTable — character gutter", () => {
   it("the gutter track widens only when the gutter is on", async () => {
     const { unmount } = renderTable()
     await screen.findByText("Mary's line")
-    expect(rowEl("cell-cast").querySelector("[data-grid-row]")!.className).toContain("grid-cols-[108px_1fr_1fr]")
+    expect(rowEl("cell-cast").querySelector("[data-grid-row]")!.className).toContain("grid-cols-[132px_1fr_1fr]")
     unmount()
     renderTable({ castGutter: false })
     await screen.findByText("Mary's line")

@@ -1,40 +1,39 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { useForm } from "@tanstack/react-form"
 import { type ColumnDef } from "@tanstack/react-table"
-import { z } from "zod"
-import { useNavigate, useParams } from "react-router-dom"
-import { FolderGit2, MoreHorizontal, UserPlus, Users } from "lucide-react"
+import { Link, useNavigate, useParams } from "react-router-dom"
+import { FolderGit2, MoreHorizontal, Settings, UserPlus, Users } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { MemberMultiSelect } from "@/components/MemberMultiSelect"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
 import { ADMIN_TABLE_PANEL_CLASS } from "@/components/admin/shared"
-import { Button } from "@/components/ui/button"
+import { Button, buttonVariants } from "@/components/ui/button"
 import { DataTable, DataTableColumnHeader } from "@/components/ui/data-table"
+import { missingLast, SORT_MISSING_LAST } from "@/components/ui/data-table-missing"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
-import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
+import { toast } from "@/components/ui/toast"
 import { InitialsAvatar } from "@/components/InitialsAvatar"
 import { Page, EmptyState } from "@/components/ui/page"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { useActiveOrg } from "@/context/OrgContext"
+import { useNavHistoryTitle } from "@/context/NavHistoryContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
-import { orgPath } from "@/lib/navigation/org-paths"
+import { orgPath, teamSettingsPath } from "@/lib/navigation/org-paths"
+import { cn } from "@/lib/utils"
 import {
   getTeam,
   addTeamMembers,
   removeTeamMember,
-  deleteTeam,
-  updateTeam,
   attachProject,
   changeProjectRole,
   detachProject,
@@ -42,9 +41,6 @@ import {
 } from "@/lib/frontier/teams"
 import { listOrgMembers, addOrgMember, type OrgMember } from "@/lib/frontier/orgs"
 import { fetchAccessibleProjects, type CloudProjectSummary } from "@/lib/sync/cloud-projects"
-import { isFieldInvalid } from "@/lib/forms/field-state"
-import { optionalString, requiredString } from "@/lib/forms/schemas"
-import { useSubmitError } from "@/lib/forms/submit-error"
 import {
   Select,
   SelectContent,
@@ -64,13 +60,9 @@ import {
   roleName,
 } from "@/lib/frontier/roles"
 
-const editTeamSchema = z.object({
-  name: requiredString("Team name"),
-  description: optionalString,
-})
-
 type TeamTab = "overview" | "projects" | "members"
 type TeamMember = TeamDetailType["members"][number]
+type TeamProject = TeamDetailType["projects"][number]
 
 function roleLabel(roleLevel: number | null | undefined): string {
   if (roleLevel == null) return "Unknown"
@@ -84,6 +76,24 @@ function lockedOrgRoleTooltip(roleLevel: number | null | undefined): string {
   const help = roleLevel != null ? roleHelpText(roleLevel) : ""
   const prefix = help || "This member's org-level role is unknown."
   return `${prefix} This permission is set at the org level and can only be changed by an org owner.`
+}
+
+function CopyEmailButton({ email }: { email: string }) {
+  return (
+    <button
+      type="button"
+      className="max-w-full truncate text-left text-muted-foreground hover:text-foreground"
+      aria-label={`Copy ${email}`}
+      onClick={(e) => {
+        e.stopPropagation()
+        void navigator.clipboard.writeText(email).then(() => {
+          toast.add({ type: "success", title: "Email copied to clipboard" })
+        })
+      }}
+    >
+      {email}
+    </button>
+  )
 }
 
 export function TeamDetail() {
@@ -100,7 +110,8 @@ export function TeamDetail() {
 
   const [team, setTeam] = useState<TeamDetailType | null>(null)
   const [loading, setLoading] = useState(true)
-  const [tab, setTab] = useState<TeamTab>("overview")
+  const [tab, setTab] = useState<TeamTab>("projects")
+  useNavHistoryTitle(team?.name)
 
   // Org members for the add-member picker (admin only)
   const [orgMembers, setOrgMembers] = useState<OrgMember[]>([])
@@ -112,34 +123,6 @@ export function TeamDetail() {
   const [attachingProject, setAttachingProject] = useState(false)
   const [selectedProjectId, setSelectedProjectId] = useState("")
   const [selectedRole, setSelectedRole] = useState<number>(ROLE.VIEWER)
-
-  // Edit state
-  const [editing, setEditing] = useState(false)
-  const { submitError: editSubmitError, setSubmitError: setEditSubmitError, clearSubmitError: clearEditSubmitError } = useSubmitError()
-
-  const editTeamForm = useForm({
-    defaultValues: { name: "", description: "" },
-    validators: { onSubmit: editTeamSchema },
-    onSubmit: async ({ value }) => {
-      if (!jwt || activeOrgId == null || groupIdNum == null) return
-      clearEditSubmitError()
-      const patch: { name: string; description?: string } = { name: value.name.trim() }
-      if (team?.description !== undefined || value.description.trim() !== "") {
-        patch.description = value.description.trim()
-      }
-      try {
-        await updateTeam(jwt, activeOrgId, groupIdNum, patch)
-        setEditing(false)
-        await refetch()
-      } catch (err) {
-        setEditSubmitError(err instanceof Error ? err.message : "Couldn't save team.")
-      }
-    },
-  })
-
-  // Delete confirm state
-  const [confirmDelete, setConfirmDelete] = useState(false)
-  const [deleting, setDeleting] = useState(false)
 
   // Add member UI state — multi-select (AQU-735): stage several org members via
   // MemberMultiSelect (same checkbox combobox as named validators) and grant
@@ -153,6 +136,11 @@ export function TeamDetail() {
   const [roleChangeTarget, setRoleChangeTarget] = useState<TeamMember | null>(null)
   const [roleChangeLevel, setRoleChangeLevel] = useState("")
   const [roleChangeBusy, setRoleChangeBusy] = useState(false)
+
+  // Change team-grant role on an attached project — opened from the projects row menu.
+  const [projectRoleTarget, setProjectRoleTarget] = useState<TeamProject | null>(null)
+  const [projectRoleLevel, setProjectRoleLevel] = useState("")
+  const [projectRoleBusy, setProjectRoleBusy] = useState(false)
 
   const refetch = useCallback(async () => {
     if (!jwt || activeOrgId == null || groupIdNum == null) return
@@ -194,17 +182,6 @@ export function TeamDetail() {
     setAddingMember(false)
     setStagedUsernames([])
     setAddError(null)
-  }
-
-  async function handleDelete() {
-    if (!jwt || activeOrgId == null || groupIdNum == null) return
-    setDeleting(true)
-    try {
-      await deleteTeam(jwt, activeOrgId, groupIdNum)
-      navigate(orgPath(activeOrgId, "/teams"))
-    } finally {
-      setDeleting(false)
-    }
   }
 
   async function handleAddMembers() {
@@ -285,26 +262,103 @@ export function TeamDetail() {
     }
   }
 
+  function openProjectRoleChange(project: TeamProject) {
+    setProjectRoleTarget(project)
+    setProjectRoleLevel(String(project.grantedRoleLevel))
+  }
+
+  function closeProjectRoleChange() {
+    setProjectRoleTarget(null)
+    setProjectRoleLevel("")
+    setProjectRoleBusy(false)
+  }
+
+  async function confirmProjectRoleChange() {
+    if (!projectRoleTarget || !projectRoleLevel) return
+    setProjectRoleBusy(true)
+    try {
+      await handleChangeProjectRole(projectRoleTarget.id, Number(projectRoleLevel))
+      closeProjectRoleChange()
+    } finally {
+      setProjectRoleBusy(false)
+    }
+  }
+
   async function handleDetachProject(projectId: string) {
     if (!jwt || activeOrgId == null || groupIdNum == null) return
     await detachProject(jwt, activeOrgId, groupIdNum, projectId)
     await refetch()
   }
 
-  function handleEditOpenChange(nextOpen: boolean) {
-    if (!nextOpen) {
-      editTeamForm.reset()
-      clearEditSubmitError()
-    }
-    setEditing(nextOpen)
-  }
-
-  function handleEditOpen() {
-    editTeamForm.setFieldValue("name", team?.name ?? "")
-    editTeamForm.setFieldValue("description", team?.description ?? "")
-    clearEditSubmitError()
-    setEditing(true)
-  }
+  const projectColumns = useMemo<ColumnDef<TeamProject>[]>(
+    () => [
+      {
+        id: "name",
+        accessorFn: (p) => p.name.toLowerCase(),
+        header: ({ column }) => <DataTableColumnHeader column={column} title="Name" />,
+        meta: { className: "min-w-0" },
+        cell: ({ row }) => (
+          <span className="block min-w-0 truncate font-medium">{row.original.name}</span>
+        ),
+      },
+      {
+        id: "role",
+        accessorFn: (p) => p.grantedRoleLevel,
+        header: ({ column }) => <DataTableColumnHeader column={column} title="Role" />,
+        meta: { className: "w-[7.5rem] whitespace-nowrap" },
+        cell: ({ row }) => (
+          <span className="text-sm text-foreground">
+            {roleLabel(row.original.grantedRoleLevel)}
+          </span>
+        ),
+      },
+      {
+        id: "actions",
+        enableSorting: false,
+        header: () => <span className="sr-only">Actions</span>,
+        meta: { align: "right" as const, className: "w-10" },
+        cell: ({ row }) => {
+          const p = row.original
+          if (!isAdmin) return null
+          return (
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={
+                  <Button
+                    type="button"
+                    size="icon-sm"
+                    variant="ghost"
+                    className="opacity-0 transition-none group-hover:opacity-100 focus-visible:opacity-100 data-popup-open:opacity-100"
+                    aria-label={`Actions for ${p.name}`}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <MoreHorizontal className="size-4" />
+                  </Button>
+                }
+              />
+              <DropdownMenuContent
+                align="end"
+                className="min-w-40"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <DropdownMenuItem onClick={() => openProjectRoleChange(p)}>
+                  Change role
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  aria-label={`Detach ${p.name}`}
+                  onClick={() => void handleDetachProject(p.id)}
+                >
+                  Detach
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )
+        },
+      },
+    ],
+    [handleDetachProject, isAdmin],
+  )
 
   const memberColumns = useMemo<ColumnDef<TeamMember>[]>(
     () => [
@@ -312,27 +366,30 @@ export function TeamDetail() {
         id: "name",
         accessorFn: (m) => m.username.toLowerCase(),
         header: ({ column }) => <DataTableColumnHeader column={column} title="Name" />,
-        meta: { className: "min-w-0 w-[50%]" },
+        meta: { className: "min-w-0" },
         cell: ({ row }) => (
           <UsernameWithAvatar username={row.original.username} size="xs" nameClassName="font-normal" />
         ),
       },
       {
         id: "email",
-        accessorFn: (m) => (m.email ?? "").toLowerCase(),
+        accessorFn: (m) => missingLast((m.email ?? "").toLowerCase()),
+        sortUndefined: SORT_MISSING_LAST,
         header: ({ column }) => <DataTableColumnHeader column={column} title="Email" />,
-        meta: { className: "min-w-0 w-[35%]" },
-        cell: ({ row }) => (
-          <span className="block truncate text-muted-foreground">
-            {row.original.email?.trim() ? row.original.email : "—"}
-          </span>
-        ),
+        meta: { className: "w-[13rem] max-w-[13rem]" },
+        cell: ({ row }) => {
+          const email = row.original.email?.trim()
+          if (!email) {
+            return <span className="text-muted-foreground">—</span>
+          }
+          return <CopyEmailButton email={email} />
+        },
       },
       {
         id: "role",
         accessorFn: (m) => m.roleLevel ?? 0,
         header: ({ column }) => <DataTableColumnHeader column={column} title="Role" />,
-        meta: { className: "w-0 whitespace-nowrap" },
+        meta: { className: "w-[7.5rem] whitespace-nowrap" },
         cell: ({ row }) => {
           const m = row.original
           if (m.roleLevel == null) {
@@ -374,26 +431,26 @@ export function TeamDetail() {
                 render={
                   <Button
                     type="button"
-                    size="icon-xs"
+                    size="icon-sm"
                     variant="ghost"
-                    className="size-5 opacity-0 transition-none group-hover:opacity-100 focus-visible:opacity-100 data-popup-open:opacity-100"
+                    className="opacity-0 transition-none group-hover:opacity-100 focus-visible:opacity-100 data-popup-open:opacity-100"
                     aria-label={`Actions for ${m.username}`}
                   >
-                    <MoreHorizontal className="size-3.5" />
+                    <MoreHorizontal className="size-4" />
                   </Button>
                 }
               />
               <DropdownMenuContent align="end" className="min-w-40">
                 {isOwner && (
-                  <DropdownMenuItem onClick={() => openRoleChange(m)}>
-                    Change role
-                  </DropdownMenuItem>
+                  <>
+                    <DropdownMenuItem onClick={() => openRoleChange(m)}>
+                      Change role
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                  </>
                 )}
-                <DropdownMenuItem
-                  variant="destructive"
-                  onClick={() => void handleRemoveMember(m.userId)}
-                >
-                  Remove {m.username}
+                <DropdownMenuItem onClick={() => void handleRemoveMember(m.userId)}>
+                  Remove from team
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -403,6 +460,8 @@ export function TeamDetail() {
     ],
     [handleRemoveMember, isAdmin, isOwner],
   )
+
+  const teamDescription = team?.description?.trim() || null
 
   return (
     <AppShell
@@ -422,99 +481,6 @@ export function TeamDetail() {
               <EmptyState title="Team not found." description="This team may have been deleted, or you may not have access to it." />
             ) : (
             <>
-              {isAdmin && (
-                <Dialog open={editing} onOpenChange={handleEditOpenChange}>
-                  <DialogContent className="max-w-md">
-                    <DialogHeader>
-                      <DialogTitle>Edit team</DialogTitle>
-                    </DialogHeader>
-                    <form
-                      id="edit-team-form"
-                      onSubmit={(e) => {
-                        e.preventDefault()
-                        void editTeamForm.handleSubmit()
-                      }}
-                    >
-                      <FieldGroup>
-                        <editTeamForm.Field
-                          name="name"
-                          children={(field) => {
-                            const invalid = isFieldInvalid(field)
-                            return (
-                              <Field data-invalid={invalid}>
-                                <FieldLabel htmlFor="edit-team-name">Team name</FieldLabel>
-                                <Input
-                                  id="edit-team-name"
-                                  name={field.name}
-                                  value={field.state.value}
-                                  onBlur={field.handleBlur}
-                                  onChange={(e) => field.handleChange(e.target.value)}
-                                  placeholder="Team name"
-                                  aria-invalid={invalid}
-                                  autoFocus
-                                />
-                                {invalid && <FieldError errors={field.state.meta.errors} />}
-                              </Field>
-                            )
-                          }}
-                        />
-                        <editTeamForm.Field
-                          name="description"
-                          children={(field) => (
-                            <Field>
-                              <FieldLabel htmlFor="edit-team-desc">Description (optional)</FieldLabel>
-                              <Input
-                                id="edit-team-desc"
-                                name={field.name}
-                                value={field.state.value}
-                                onBlur={field.handleBlur}
-                                onChange={(e) => field.handleChange(e.target.value)}
-                                placeholder="Description (optional)"
-                              />
-                            </Field>
-                          )}
-                        />
-                      </FieldGroup>
-                      {editSubmitError && (
-                        <FieldError role="alert" className="mt-3">
-                          {editSubmitError}
-                        </FieldError>
-                      )}
-                    </form>
-                    <DialogFooter>
-                      <Button type="button" variant="outline" onClick={() => handleEditOpenChange(false)}>
-                        Cancel
-                      </Button>
-                      <Button type="submit" form="edit-team-form">
-                        {editTeamForm.state.isSubmitting && <Spinner data-icon="inline-start" />}
-                        {editTeamForm.state.isSubmitting ? "Saving…" : "Save"}
-                      </Button>
-                    </DialogFooter>
-                  </DialogContent>
-                </Dialog>
-              )}
-
-              {isAdmin && (
-                <Dialog open={confirmDelete} onOpenChange={(o) => { if (!o) setConfirmDelete(false) }}>
-                  <DialogContent className="max-w-md">
-                    <DialogHeader>
-                      <DialogTitle>Delete &apos;{team.name}&apos;?</DialogTitle>
-                    </DialogHeader>
-                    <p className="text-sm text-muted-foreground">
-                      This removes the team and all its grants.
-                    </p>
-                    <DialogFooter>
-                      <Button type="button" variant="outline" onClick={() => setConfirmDelete(false)} disabled={deleting}>
-                        Cancel
-                      </Button>
-                      <Button type="button" variant="destructive" onClick={handleDelete} disabled={deleting}>
-                        {deleting ? "Deleting…" : "Confirm"}
-                      </Button>
-                    </DialogFooter>
-                  </DialogContent>
-                </Dialog>
-              )}
-
               {isOwner && (
                 <Dialog
                   open={roleChangeTarget !== null}
@@ -557,82 +523,119 @@ export function TeamDetail() {
                 </Dialog>
               )}
 
-              {/* Avatar hangs left of the content column so title/description/tabs share one left edge. */}
-              <div className="mb-6 flex items-start justify-between gap-4 sm:mb-8">
-                <div className="-ml-11 flex min-w-0 items-start gap-3">
-                  <span aria-hidden className="mt-0.5 shrink-0">
+              {isAdmin && (
+                <Dialog
+                  open={projectRoleTarget !== null}
+                  onOpenChange={(open) => { if (!open) closeProjectRoleChange() }}
+                >
+                  <DialogContent className="max-w-md">
+                    <DialogHeader>
+                      <DialogTitle>
+                        Change role{projectRoleTarget ? ` for ${projectRoleTarget.name}` : ""}
+                      </DialogTitle>
+                      <DialogDescription>
+                        Team members inherit this role on the project through the team grant.
+                      </DialogDescription>
+                    </DialogHeader>
+                    <RoleSelect
+                      options={ALL_ROLE_OPTIONS}
+                      value={projectRoleLevel ? Number(projectRoleLevel) : null}
+                      onValueChange={(level) => setProjectRoleLevel(String(level))}
+                      className="w-full!"
+                      aria-label={
+                        projectRoleTarget
+                          ? `Role for ${projectRoleTarget.name}`
+                          : "Granted role"
+                      }
+                    />
+                    <DialogFooter>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={closeProjectRoleChange}
+                        disabled={projectRoleBusy}
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        type="button"
+                        onClick={() => void confirmProjectRoleChange()}
+                        disabled={!projectRoleLevel || projectRoleBusy}
+                      >
+                        {projectRoleBusy && <Spinner data-icon="inline-start" />}
+                        {projectRoleBusy ? "Saving…" : "Save"}
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
+              )}
+
+              {/* Avatar hangs left of the content column so title/description/tabs share one left edge.
+                  With no description, omit the <p> entirely and center the title on the avatar. */}
+              <div className="space-y-3">
+              <div
+                className={cn(
+                  "flex justify-between gap-4",
+                  teamDescription ? "items-start" : "items-center",
+                )}
+              >
+                <div
+                  className={cn(
+                    "-ml-11 flex min-w-0 gap-3",
+                    teamDescription ? "items-start" : "items-center",
+                  )}
+                >
+                  <span
+                    aria-hidden
+                    className={cn("shrink-0", teamDescription && "mt-0.5")}
+                  >
                     <InitialsAvatar name={team.name} size="default" />
                   </span>
-                  <div className="min-w-0 space-y-1">
+                  <div className={cn("min-w-0", teamDescription && "space-y-1")}>
                     <h1 className="font-heading text-xl font-semibold tracking-tight text-foreground">
                       {team.name}
                     </h1>
-                    {team.description?.trim() ? (
+                    {teamDescription ? (
                       <p className="max-w-prose text-sm text-muted-foreground whitespace-pre-wrap">
-                        {team.description}
+                        {teamDescription}
                       </p>
                     ) : null}
                   </div>
                 </div>
-                {isAdmin ? (
-                  <div className="flex shrink-0 items-center gap-2">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={handleEditOpen}
-                    >
-                      Edit
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="destructive"
-                      onClick={() => setConfirmDelete(true)}
-                    >
-                      Delete team
-                    </Button>
-                  </div>
+                {isAdmin && activeOrgId != null && groupIdNum != null ? (
+                  <Link
+                    to={teamSettingsPath(activeOrgId, groupIdNum)}
+                    aria-label="Team settings"
+                    className={cn(buttonVariants({ variant: "outline", size: "icon" }), "shrink-0")}
+                  >
+                    <Settings />
+                  </Link>
                 ) : null}
               </div>
 
               <Tabs
                 value={tab}
-                onValueChange={(v) => setTab((v as TeamTab) ?? "overview")}
+                onValueChange={(v) => setTab((v as TeamTab) ?? "projects")}
                 className="gap-4"
               >
                 <TabsList aria-label="Team sections">
-                  <TabsTrigger value="overview">Overview</TabsTrigger>
                   <TabsTrigger value="projects">Projects</TabsTrigger>
                   <TabsTrigger value="members">Members</TabsTrigger>
+                  <TabsTrigger value="overview" disabled>
+                    Overview
+                  </TabsTrigger>
                 </TabsList>
 
                 <TabsContent value="overview" />
 
                 <TabsContent value="projects" className="space-y-4">
-                  <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <h2 className="font-heading text-base font-medium text-foreground">Projects</h2>
                       <p className="text-sm text-muted-foreground">
                         Projects this team can access, and the role granted to members.
                       </p>
                     </div>
-                    {isAdmin && !attachingProject ? (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="shrink-0"
-                        onClick={() => {
-                          const teamProjects = team.projects
-                          const attachableProjects = orgProjects.filter(
-                            (op) => !teamProjects.some((tp) => tp.id === op.id),
-                          )
-                          setSelectedProjectId(attachableProjects[0]?.id ?? "")
-                          setSelectedRole(ROLE.VIEWER)
-                          setAttachingProject(true)
-                        }}
-                      >
-                        Attach project
-                      </Button>
-                    ) : null}
                   </div>
 
                   {isAdmin && attachingProject && (
@@ -675,67 +678,83 @@ export function TeamDetail() {
                   )}
 
                   {team.projects.length === 0 ? (
-                    <EmptyState
-                      variant="inline"
-                      icon={FolderGit2}
-                      title="No projects."
-                      description={isAdmin ? "Attach a project to grant this team access at a chosen role." : undefined}
-                    />
-                  ) : (
-                    <ul className="overflow-hidden rounded-lg border bg-card divide-y">
-                      {team.projects.map((p) => (
-                        <li key={p.id} className="flex items-center justify-between gap-3 px-4 py-2.5 text-sm">
-                          <button
+                    <div className="space-y-4">
+                      {isAdmin && !attachingProject && (
+                        <div className="flex justify-end">
+                          <Button
                             type="button"
-                            className="min-w-0 truncate text-left font-medium hover:underline"
-                            onClick={() => navigate(`/projects/${p.id}`)}
+                            variant="outline"
+                            className="shrink-0"
+                            onClick={() => {
+                              const attachableProjects = orgProjects.filter(
+                                (op) => !team.projects.some((tp) => tp.id === op.id),
+                              )
+                              setSelectedProjectId(attachableProjects[0]?.id ?? "")
+                              setSelectedRole(ROLE.VIEWER)
+                              setAttachingProject(true)
+                            }}
                           >
-                            {p.name}
-                          </button>
-                          <div className="flex shrink-0 items-center gap-2">
-                            {isAdmin ? (
-                              <>
-                                <RoleSelect
-                                  options={ALL_ROLE_OPTIONS}
-                                  value={p.grantedRoleLevel}
-                                  onValueChange={(level) => void handleChangeProjectRole(p.id, level)}
-                                  size="sm"
-                                  className="text-xs"
-                                  aria-label={`Role for ${p.name}`}
-                                />
-                                <button
-                                  type="button"
-                                  className="text-xs text-destructive underline"
-                                  aria-label={`Detach ${p.name}`}
-                                  onClick={() => handleDetachProject(p.id)}
-                                >
-                                  Detach
-                                </button>
-                              </>
-                            ) : (
-                              <span className="text-xs capitalize text-muted-foreground">{roleLabel(p.grantedRoleLevel)}</span>
-                            )}
-                          </div>
-                        </li>
-                      ))}
-                    </ul>
+                            Attach project
+                          </Button>
+                        </div>
+                      )}
+                      <EmptyState
+                        variant="inline"
+                        icon={FolderGit2}
+                        title="No projects."
+                        description={isAdmin ? "Attach a project to grant this team access at a chosen role." : undefined}
+                      />
+                    </div>
+                  ) : (
+                    <DataTable
+                      columns={projectColumns}
+                      data={team.projects}
+                      getRowId={(p) => p.id}
+                      initialSorting={[{ id: "name", desc: false }]}
+                      searchPlaceholder="Search by name"
+                      globalFilterFn={(row, _columnId, filterValue) => {
+                        const q = String(filterValue).trim().toLowerCase()
+                        if (!q) return true
+                        return row.original.name.toLowerCase().includes(q)
+                      }}
+                      toolbar={
+                        isAdmin && !attachingProject ? (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className="ml-auto shrink-0"
+                            onClick={() => {
+                              const attachableProjects = orgProjects.filter(
+                                (op) => !team.projects.some((tp) => tp.id === op.id),
+                              )
+                              setSelectedProjectId(attachableProjects[0]?.id ?? "")
+                              setSelectedRole(ROLE.VIEWER)
+                              setAttachingProject(true)
+                            }}
+                          >
+                            Attach project
+                          </Button>
+                        ) : null
+                      }
+                      rowClassName="group"
+                      onRowClick={(p) => navigate(`/projects/${p.id}`)}
+                      emptyState={
+                        <p className="py-10 text-center text-sm text-muted-foreground">
+                          No projects match this search.
+                        </p>
+                      }
+                      testId="team-projects-table"
+                      className={ADMIN_TABLE_PANEL_CLASS}
+                      dense
+                    />
                   )}
                 </TabsContent>
 
                 <TabsContent value="members" className="space-y-4">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <h2 className="flex items-center gap-1.5 font-heading text-base font-medium text-foreground">
+                      <h2 className="font-heading text-base font-medium text-foreground">
                         Members
-                        <AppTooltip content={ALL_ROLE_LEVELS.map(roleHelpText).join("\n")} className="max-w-xs">
-                          <span
-                            className="inline-flex h-4 w-4 cursor-help items-center justify-center rounded-md border text-[10px] leading-none text-muted-foreground"
-                            aria-label="Access level definitions"
-                            tabIndex={0}
-                          >
-                            ?
-                          </span>
-                        </AppTooltip>
                       </h2>
                       <p className="text-sm text-muted-foreground">
                         People on this team inherit its project grants at their org role.
@@ -857,6 +876,7 @@ export function TeamDetail() {
                   )}
                 </TabsContent>
               </Tabs>
+              </div>
             </>
             )}
           </div>

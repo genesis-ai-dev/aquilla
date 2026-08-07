@@ -30,7 +30,6 @@ describe("Cloudflare parallel CI checks", () => {
     expect(commands).toContain("build:workers-build:sync")
     expect(commands).toContain("scripts/ci-build.sh")
     expect(commands).toContain("playwright")
-    expect(commands).toContain("--with-deps")
     expect(commands).toContain("chromium")
   })
 

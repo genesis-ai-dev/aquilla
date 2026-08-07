@@ -45,6 +45,14 @@ describe("OrgBreadcrumb", () => {
     orgContext.setAllOrgs.mockClear()
   })
 
+  it("renders the organization name as a navigable crumb without a logo", () => {
+    renderBreadcrumb(<OrgBreadcrumb section="Teams" />, "/orgs/7/teams")
+
+    const orgCrumb = screen.getByRole("link", { name: "Dev Org" })
+    expect(orgCrumb).toHaveAttribute("href", "/orgs/7")
+    expect(orgCrumb.querySelector('[aria-hidden="true"]')).toBeNull()
+  })
+
   it("shows a complete, navigable hierarchy in the project workspace", () => {
     renderBreadcrumb(
       <OrgBreadcrumb

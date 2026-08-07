@@ -57,7 +57,7 @@ export function AssignedToMe() {
         // Match Members / Teams: Page size="wide" (max-w-6xl) inside AppShell.
         // data-testid kept on the Page scroll root for the existing scroll helper.
         <Page size="wide" data-testid="assigned-to-me-scroll" className="overscroll-contain">
-          <PageHeader title="Assigned to me" />
+          <PageHeader title="Assigned to me" inset={false} />
           {activeOrgId == null ? (
             <EmptyState
               icon={Building2}

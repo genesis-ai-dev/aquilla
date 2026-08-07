@@ -1176,6 +1176,7 @@ export function ProjectSettings() {
               title={pageTitle}
               description={pageDescription}
               actions={headerActions}
+              inset={pageSize !== "wide"}
               className="mb-0"
             />
 

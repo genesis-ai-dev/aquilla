@@ -27,13 +27,15 @@ type PageSize = "default" | "wide" | "full"
  * `main`. Replaces the repeated
  * `<div className="h-full overflow-y-auto"><div className="p-6">` boilerplate.
  *
- * - `default` (max-w-xl, mx-auto): forms & settings — centered, fills up to
+ * - `default` (max-w-2xl, mx-auto): forms & settings — centered, fills up to
  *   max width. No page insets; headers carry their own left padding.
  * - `wide` (max-w-6xl, mx-auto): list/grid surfaces (Overview, Members, Teams).
  * - `full`: no max width, for surfaces that manage their own width.
  *
  * Vertical rhythm: page pad (`py-18`) is 1.5× the section stack gap (`gap-12` /
  * `space-y-12`). PageHeader's bottom margin matches that same section gap.
+ * AppShell keeps the floating card flush under the header so the card's top
+ * edge still lines up with the org switcher despite this inner pad.
  */
 function Page({
   size = "default",
@@ -50,7 +52,7 @@ function Page({
       <div
         className={cn(
           "mx-auto w-full py-18",
-          size === "default" && "max-w-xl",
+          size === "default" && "max-w-2xl",
           size === "wide" && "max-w-6xl",
           size === "full" && "max-w-none",
           className,
@@ -65,7 +67,12 @@ function Page({
 /**
  * Page-level heading: title + optional description + optional actions. The one
  * shape every surface opens with, so the eye lands in the same place each time.
- * Left padding aligns the title with text inside full-bleed settings cards.
+ *
+ * `inset` (default true) left-pads the title to align with text inside
+ * settings cards (`SettingsGroup` / `SettingsRow`). Table / list surfaces
+ * (`Page size="wide"`) pass `inset={false}` so the title flushes with the
+ * table edge instead of looking like a settings page.
+ *
  * Bottom margin matches the section stack gap (`gap-12`); zero it when the
  * header sits inside a `space-y-12` / `gap-12` parent so the gap isn't doubled.
  */
@@ -73,15 +80,24 @@ function PageHeader({
   title,
   description,
   actions,
+  inset = true,
   className,
 }: {
   title: React.ReactNode
   description?: React.ReactNode
   actions?: React.ReactNode
+  /** Align with settings-card text padding. Off for table / list pages. */
+  inset?: boolean
   className?: string
 }) {
   return (
-    <div className={cn("mb-12 flex items-start justify-between gap-4 pl-4", className)}>
+    <div
+      className={cn(
+        "mb-12 flex items-start justify-between gap-4",
+        inset && "pl-4",
+        className,
+      )}
+    >
       <div className="min-w-0 space-y-1">
         <h1 className="font-heading text-xl font-semibold tracking-tight text-foreground">
           {title}
@@ -91,7 +107,9 @@ function PageHeader({
         ) : null}
       </div>
       {actions ? (
-        <div className="flex shrink-0 items-center gap-2 pr-4">{actions}</div>
+        <div className={cn("flex shrink-0 items-center gap-2", inset && "pr-4")}>
+          {actions}
+        </div>
       ) : null}
     </div>
   )

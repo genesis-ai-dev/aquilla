@@ -232,6 +232,7 @@ export function AdminConsole() {
           <PageHeader
             title="Admin console"
             description="Site-wide, cross-tenant view. Oversight is read-only; the Platform tab is editable."
+            inset={false}
           />
           {body}
         </Page>

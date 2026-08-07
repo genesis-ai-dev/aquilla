@@ -116,8 +116,9 @@ interface Props {
   /** Brand logo mark rendered at the top of the dock rail — passed here so
    * AppShell can stay the single source for the logo placement. */
   logoSlot?: ReactNode
-  /** Rendered to the right of the logo (e.g. the workspace's collapse-sidebar
-   * toggle) so rail controls live in the logo row, not the dock footer. */
+  /** Rendered after history on the far-right chrome cluster (e.g. the
+   * workspace's collapse-sidebar toggle) so rail controls live in the logo
+   * row, not the dock footer. */
   logoAccessory?: ReactNode
   /** When the left dock is collapsed to its icon rail, stack the top chrome
    * (logo, nav history, beta badge) vertically so the rail can stay narrow
@@ -245,23 +246,29 @@ export function AppShell({
       {(resolvedLogo || logoAccessory) && (
         <div
           className={cn(
-            // Vertical/horizontal spacing is owned here so every child aligns by
-            // box-center under items-center — no per-child mt-2 to drift the row.
-            "flex shrink-0 pt-2",
-            railCollapsed ? "flex-col items-center gap-1" : "items-center justify-between px-2",
+            // Align every chrome child on the same vertical midline — no fixed
+            // height; natural content size with items-center.
+            "flex shrink-0 items-center pt-2",
+            railCollapsed
+              ? "flex-col items-center justify-center gap-1 px-2"
+              : "justify-between px-2",
           )}
         >
-          <div className={cn("flex gap-0.5", railCollapsed ? "flex-col items-center" : "items-center")}>
+          <div className="flex items-center">
             {resolvedLogo}
-            {/* Browser-style history + back/forward, top-left chrome. */}
-            <NavHistoryControls />
           </div>
-          {/* BETA + collapse toggle ride together as a right-aligned cluster so the
-              badge hugs the toggle instead of floating in the justify-between middle
-              slot. On org pages / collapsed rail there's no toggle, so it's just the badge. */}
-          <div className="flex items-center gap-2">
+          {/* History cluster, then sidebar collapse on the far right. */}
+          <div
+            className={cn(
+              "flex items-center gap-1.5",
+              railCollapsed && "flex-col",
+            )}
+          >
             <BetaBadge />
-            {logoAccessory && <div className="shrink-0">{logoAccessory}</div>}
+            <NavHistoryControls />
+            {logoAccessory ? (
+              <div className="flex shrink-0 items-center">{logoAccessory}</div>
+            ) : null}
           </div>
         </div>
       )}

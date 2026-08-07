@@ -4960,7 +4960,7 @@ export function ProjectWorkspace() {
         dockStorageKey={projectId}
         logoAccessory={
           dockTab !== null ? (
-            <AppTooltip content="Collapse sidebar" side="right">
+            <AppTooltip content="Collapse sidebar" side="bottom">
               <Button
                 type="button"
                 variant="ghost"

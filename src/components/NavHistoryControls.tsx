@@ -8,8 +8,9 @@
  * Renders nothing when there's no NavHistoryProvider (e.g. in page-level tests).
  */
 import { useState } from "react"
-import { Check, ChevronLeft, ChevronRight, Clock } from "lucide-react"
+import { ChevronLeft, ChevronRight, Clock } from "lucide-react"
 import { useNavHistory, type NavHistoryValue } from "@/context/NavHistoryContext"
+import { deriveNavIcon } from "@/lib/navigation/page-icons"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -43,13 +44,13 @@ function HistoryMenuButton({ nav }: { nav: NavHistoryValue }) {
 
   if (!hasHistory) {
     return (
-      <AppTooltip content="No history" side="bottom" disabled={open}>
+      <AppTooltip content="No previously viewed pages" side="bottom" disabled={open}>
         <Button
           type="button"
           variant="ghost"
           size="icon-xs"
           disabled
-          aria-label="History"
+          aria-label="Previously viewed"
           className="cursor-default text-muted-foreground/30"
         >
           <Clock />
@@ -60,14 +61,14 @@ function HistoryMenuButton({ nav }: { nav: NavHistoryValue }) {
 
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
-      <AppTooltip content="History" side="bottom" disabled={open}>
+      <AppTooltip content="Previously viewed" side="bottom" disabled={open}>
         <DropdownMenuTrigger
           render={
             <Button
               type="button"
               variant="ghost"
               size="icon-xs"
-              aria-label="History"
+              aria-label="Previously viewed"
             >
               <Clock />
             </Button>
@@ -76,9 +77,10 @@ function HistoryMenuButton({ nav }: { nav: NavHistoryValue }) {
       </AppTooltip>
       <DropdownMenuContent align="start" side="bottom" sideOffset={6} className="w-64">
         <DropdownMenuGroup>
-          <DropdownMenuLabel>History</DropdownMenuLabel>
+          <DropdownMenuLabel>Previously viewed</DropdownMenuLabel>
           {list.map(({ entry, target }) => {
             const isCurrent = target === nav.index
+            const Icon = deriveNavIcon(entry.pathname)
             return (
               <DropdownMenuItem
                 key={`${entry.key}-${target}`}
@@ -87,7 +89,7 @@ function HistoryMenuButton({ nav }: { nav: NavHistoryValue }) {
                   if (!isCurrent) nav.go(target)
                 }}
               >
-                {isCurrent ? <Check /> : <Clock />}
+                <Icon />
                 <span className="truncate">{entry.title}</span>
               </DropdownMenuItem>
             )

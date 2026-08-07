@@ -961,10 +961,14 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   const followScrollToCell = useCallback((cellId: string) => {
     const index = displayCellIdsRef.current.indexOf(cellId)
     if (index < 0) return
+    // A range picked in the segment navigator must not stay latched while
+    // playback walks past it — drop it so the trigger quietly tracks the
+    // sounding cell (Sam 2026-08-07), same as scrollToCellId does for jumps.
+    clearChapterNavigationSelection()
     followProgrammaticStampRef.current = performance.now()
     // 0.35: the running row rides high enough to leave reading room below.
     void listRef.current?.scrollToIndex({ index, viewPosition: 0.35, animated: false })
-  }, [])
+  }, [clearChapterNavigationSelection])
 
   // Durable cell audio (AD-2 cell.audio.* grammar). Per-file read; overlay each
   // visible row's attachments + selected clips at render time, rather than

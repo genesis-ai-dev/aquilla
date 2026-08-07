@@ -64,7 +64,9 @@ function StripNavSlot() {
       data-strip-nav-slot=""
       data-chapter-nav-slot=""
       data-testid="tl-strip-nav"
-      className="ml-auto w-56 max-w-[40%] shrink-0 empty:hidden [&_button]:h-7 [&_button]:text-[11px]"
+      // w-72 = the nav's xl-mode width exactly (fixed 224px trigger + two
+      // 32px arrows) — anything narrower and the buttons run off-screen.
+      className="ml-auto w-72 max-w-[45%] shrink-0 empty:hidden [&_button]:h-7 [&_button]:text-[11px]"
     />
   )
 }
@@ -93,9 +95,11 @@ export function TimelineChipStrip({ cell, chipStats, audioMissing }: TimelineChi
         data-cell-id={cell.id}
         className="flex min-w-0 flex-wrap items-center gap-2 text-xs text-muted-foreground"
       >
-        <Pill>
-          <b className="font-semibold text-foreground">{isDialogue ? "Dialogue" : "Subtitle"}</b>
-        </Pill>
+        {/* Same heading treatment as the toolbar's "Timeline" — a section
+            label, not a data pill (Sam 2026-08-07). */}
+        <span className="text-xs font-medium text-muted-foreground">
+          {isDialogue ? "Dialogue" : "Subtitle"}
+        </span>
         {/* Free timing: no ranges — the file clock doesn't match the
             re-flowed track. Durations only (2026-08-06). */}
         {chipStats?.kind === "free" ? (

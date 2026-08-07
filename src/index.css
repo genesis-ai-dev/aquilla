@@ -308,6 +308,29 @@
   }
 }
 
+/* App-chrome: kill drag-select everywhere. Unlayered + * so it wins over
+   @layer base/utilities and doesn't rely on user-select inheritance (which
+   WebKit treats as non-inherited `auto` with special rules). Re-enable only
+   TipTap (.ProseMirror), form fields, and explicit .select-text opt-ins. */
+*,
+*::before,
+*::after {
+  -webkit-user-select: none !important;
+  user-select: none !important;
+}
+
+.ProseMirror,
+.ProseMirror *,
+input:not([type="button"], [type="submit"], [type="reset"], [type="checkbox"], [type="radio"], [type="file"], [type="color"], [type="range"]),
+textarea,
+[contenteditable="true"],
+[contenteditable="true"] *,
+.select-text,
+.select-text * {
+  -webkit-user-select: text !important;
+  user-select: text !important;
+}
+
 .violation-blot {
   text-decoration-line: underline;
   text-decoration-style: wavy;

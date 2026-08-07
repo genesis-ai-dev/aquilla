@@ -4,8 +4,8 @@
  *
  * Chosen via Lucide MCP (`fuzzy_search_icons` / category fit):
  * - Projects → Library (collection of works; Text formatting / Navigation)
- * - Teams → Users (canonical people-group; Accounts & access)
- * - Members → UsersRound (roster; distinct from Teams)
+ * - Teams → SquareUserRound (Accounts & access)
+ * - Members → Users (people-group; Accounts & access)
  * - Assigned → ListTodo (task list)
  * - Archived → Archive (File icons)
  * - Settings → Settings (Accounts & access)
@@ -40,9 +40,9 @@ import {
   ShieldUser,
   SlidersHorizontal,
   SpellCheck,
+  SquareUserRound,
   UserCheck,
   Users,
-  UsersRound,
   Workflow,
 } from "lucide-react"
 import { parseOrgPath, ALL_ORGS_PARAM } from "@/lib/navigation/org-paths"
@@ -50,9 +50,9 @@ import { parseOrgPath, ALL_ORGS_PARAM } from "@/lib/navigation/org-paths"
 /** Canonical icons for the org sidebar destinations. */
 export const NAV_PAGE_ICONS = {
   projects: Library,
-  teams: Users,
+  teams: SquareUserRound,
   assigned: ListTodo,
-  members: UsersRound,
+  members: Users,
   archived: Archive,
   settings: Settings,
   admin: ShieldUser,
@@ -60,7 +60,7 @@ export const NAV_PAGE_ICONS = {
   preferences: SlidersHorizontal,
   organizations: Building2,
   project: FolderOpen,
-  team: Users,
+  team: SquareUserRound,
 } as const satisfies Record<string, LucideIcon>
 
 /** Known breadcrumb / history labels → icon (covers titles that differ slightly). */

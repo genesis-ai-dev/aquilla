@@ -54,7 +54,7 @@ export function AdminTenantsSection({
             <UsernameWithAvatar
               username={row.original.ownerUsername}
               size="xs"
-              nameClassName="font-normal text-muted-foreground"
+              nameClassName="font-normal"
             />
           ) : (
             <span className="text-muted-foreground">—</span>
@@ -67,7 +67,7 @@ export function AdminTenantsSection({
           <DataTableColumnHeader column={column} title="Teams" className="justify-end" />
         ),
         cell: ({ row }) => (
-          <div className="text-right tabular-nums text-muted-foreground">
+          <div className="text-right tabular-nums">
             {teamCountByOrg.get(row.original.id) ?? 0}
           </div>
         ),
@@ -99,7 +99,6 @@ export function AdminTenantsSection({
           <DateTooltip
             value={row.original.createdAt}
             label="Created"
-            className="text-muted-foreground"
           />
         ),
       },

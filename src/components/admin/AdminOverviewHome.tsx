@@ -80,7 +80,7 @@ export function AdminOverviewHome({
             <OrgWithAvatar
               name={row.original.project.orgName}
               size="xs"
-              nameClassName="font-normal text-muted-foreground"
+              nameClassName="font-normal"
             />
           ) : (
             <span className="text-muted-foreground">—</span>

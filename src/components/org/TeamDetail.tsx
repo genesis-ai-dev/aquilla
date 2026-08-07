@@ -9,6 +9,7 @@ import { MemberMultiSelect } from "@/components/MemberMultiSelect"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
+import { ADMIN_TABLE_PANEL_CLASS } from "@/components/admin/shared"
 import { Button } from "@/components/ui/button"
 import { DataTable, DataTableColumnHeader } from "@/components/ui/data-table"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
@@ -373,12 +374,12 @@ export function TeamDetail() {
                 render={
                   <Button
                     type="button"
-                    size="icon-sm"
+                    size="icon-xs"
                     variant="ghost"
-                    className="opacity-0 transition-none group-hover:opacity-100 focus-visible:opacity-100 data-popup-open:opacity-100"
+                    className="size-5 opacity-0 transition-none group-hover:opacity-100 focus-visible:opacity-100 data-popup-open:opacity-100"
                     aria-label={`Actions for ${m.username}`}
                   >
-                    <MoreHorizontal className="size-4" />
+                    <MoreHorizontal className="size-3.5" />
                   </Button>
                 }
               />
@@ -856,6 +857,7 @@ export function TeamDetail() {
                         </p>
                       }
                       testId="team-members-table"
+                      className={ADMIN_TABLE_PANEL_CLASS}
                       dense
                     />
                   )}

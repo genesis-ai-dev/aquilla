@@ -107,7 +107,7 @@ type LinkConsumes = "source" | "target"
 
 const projectSchema = z
   .object({
-    name: requiredString("Project name"),
+    name: requiredString("Project title"),
     sourceLanguage: requiredString("Source language"),
     targetLanguage: optionalString,
     // Self-contained shape only (spec §5): extras beyond the primary target,
@@ -291,6 +291,7 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
         </DialogHeader>
         <form
           id="project-create-form"
+          autoComplete="off"
           onSubmit={(e) => {
             e.preventDefault()
             // Guard the Enter-key path too: a disabled submit button already
@@ -310,10 +311,16 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
                   const invalid = isFieldInvalid(field)
                   return (
                     <Field data-invalid={invalid}>
-                      <FieldLabel htmlFor="name">Project name</FieldLabel>
+                      <FieldLabel htmlFor="project-create-title">Project title</FieldLabel>
                       <Input
-                        id="name"
-                        name={field.name}
+                        id="project-create-title"
+                        // Avoid DOM name="name" — Chrome treats it as a contact
+                        // field and shows Contact Autofill despite autocomplete=off.
+                        name="aquilla-project-title"
+                        autoComplete="off"
+                        autoCorrect="off"
+                        autoCapitalize="none"
+                        spellCheck={false}
                         className={FIELD_CLASS}
                         value={field.state.value}
                         onBlur={field.handleBlur}
@@ -334,12 +341,16 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
                   return (
                     <Field data-invalid={invalid}>
                       <div className="flex items-center gap-1.5">
-                        <FieldLabel htmlFor="source">Source language</FieldLabel>
+                        <FieldLabel htmlFor="project-create-source">Source language</FieldLabel>
                         <LanguageFieldHint />
                       </div>
                       <Input
-                        id="source"
-                        name={field.name}
+                        id="project-create-source"
+                        name="aquilla-project-source-language"
+                        autoComplete="off"
+                        autoCorrect="off"
+                        autoCapitalize="none"
+                        spellCheck={false}
                         className={FIELD_CLASS}
                         value={field.state.value}
                         onBlur={field.handleBlur}
@@ -364,14 +375,18 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
                         return (
                           <Field data-invalid={invalid}>
                             <div className="flex items-center gap-1.5">
-                              <FieldLabel htmlFor="target">
+                              <FieldLabel htmlFor="project-create-target">
                                 {shape === "self-contained" ? "Target language(s)" : "Target language"}
                               </FieldLabel>
                               <LanguageFieldHint />
                             </div>
                             <Input
-                              id="target"
-                              name={field.name}
+                              id="project-create-target"
+                              name="aquilla-project-target-language"
+                              autoComplete="off"
+                              autoCorrect="off"
+                              autoCapitalize="none"
+                              spellCheck={false}
                               className={FIELD_CLASS}
                               value={field.state.value}
                               onBlur={field.handleBlur}
@@ -840,6 +855,11 @@ function ExtraTargetLanguages({
         <div className="flex items-center gap-2">
           <Input
             data-testid="create-extra-lang-input"
+            name="aquilla-project-extra-language"
+            autoComplete="off"
+            autoCorrect="off"
+            autoCapitalize="none"
+            spellCheck={false}
             className={`${FIELD_CLASS} flex-1`}
             value={input}
             onChange={(e) => {

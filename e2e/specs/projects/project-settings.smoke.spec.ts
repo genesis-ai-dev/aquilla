@@ -48,7 +48,7 @@ test("project settings renames the project and saves source language", async ({ 
   // AQU-501: the General pane is expressed via `?section=general`, so match
   // the path prefix rather than anchoring on end-of-string.
   await expect(alice).toHaveURL(new RegExp(`/project/${projectId}/settings(?:/|\\?|$)`), { timeout: 10_000 })
-  await expect(alice.getByText(/Saved: project name, source language/i)).toBeVisible({ timeout: 10_000 })
+  await expect(alice.getByText(/Saved: project title, source language/i)).toBeVisible({ timeout: 10_000 })
   await expect(nameInput).toHaveValue(renamedName, { timeout: 5_000 })
   await expect(sourceLanguage).toHaveValue("English (US)", { timeout: 5_000 })
 

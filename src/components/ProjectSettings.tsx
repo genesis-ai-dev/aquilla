@@ -642,7 +642,7 @@ export function ProjectSettings() {
       const trimmedName = name.trim()
       if (trimmedName !== baseline.name) {
         if (!trimmedName) {
-          setNameError("Enter a project name.")
+          setNameError("Enter a project title.")
           return false
         }
         if (isCloudProject) {
@@ -663,7 +663,7 @@ export function ProjectSettings() {
           }
         }
         localUpdates.name = trimmedName
-        changedFieldLabels.push("project name")
+        changedFieldLabels.push("project title")
       }
       if (username !== baseline.username) { localUpdates.username = username; changedFieldLabels.push("username") }
       if (!decayEqual(decaySettings, baseline.decaySettings)) { localUpdates.decaySettings = decaySettings; changedFieldLabels.push("decay settings") }
@@ -1260,7 +1260,7 @@ export function ProjectSettings() {
             <CardHeader><CardTitle>Project Info</CardTitle></CardHeader>
             <CardContent className="space-y-4">
               <div>
-                <FieldLabel htmlFor="pname">Project Name</FieldLabel>
+                <FieldLabel htmlFor="pname">Project Title</FieldLabel>
                 {/* AQU-765: a synced project's name lives in the server
                     `projects.name` row (the source of truth for the org list,
                     breadcrumbs, portfolio, and search). Renaming now PATCHes

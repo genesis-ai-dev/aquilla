@@ -94,6 +94,7 @@ export function OrgStep({
       </div>
       <form
         id="org-step-form"
+        autoComplete="off"
         onSubmit={(e) => {
           e.preventDefault()
           void form.handleSubmit()
@@ -110,7 +111,12 @@ export function OrgStep({
                   <FieldLabel htmlFor="org-name">Organization name</FieldLabel>
                   <Input
                     id="org-name"
-                    name={field.name}
+                    // Avoid DOM name="name" — Chrome contact autofill heuristic.
+                    name="aquilla-org-name"
+                    autoComplete="off"
+                    autoCorrect="off"
+                    autoCapitalize="none"
+                    spellCheck={false}
                     value={field.state.value}
                     onBlur={field.handleBlur}
                     onChange={(e) => field.handleChange(e.target.value)}
@@ -132,7 +138,13 @@ export function OrgStep({
                 </FieldLabel>
                 <Input
                   id="org-emails"
-                  name={field.name}
+                  name="aquilla-org-invite-emails"
+                  type="text"
+                  inputMode="email"
+                  autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="none"
+                  spellCheck={false}
                   value={field.state.value}
                   onBlur={field.handleBlur}
                   onChange={(e) => field.handleChange(e.target.value)}

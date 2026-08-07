@@ -18,7 +18,7 @@ test("project create dialog shows validation errors when required fields are mis
   await expect(createBtn).toBeEnabled({ timeout: 3_000 })
 
   await createBtn.click()
-  await expect(dialog.getByText(/project name is required/i)).toBeVisible({ timeout: 2_000 })
+  await expect(dialog.getByText(/project title is required/i)).toBeVisible({ timeout: 2_000 })
   await expect(dialog.getByText(/source language is required/i)).toBeVisible({ timeout: 2_000 })
   await expect(dialog.getByText(/target language is required/i)).toBeVisible({ timeout: 2_000 })
 

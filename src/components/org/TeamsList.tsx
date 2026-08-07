@@ -170,6 +170,7 @@ export function TeamsList() {
                 </DialogHeader>
                 <form
                   id="create-team-form"
+                  autoComplete="off"
                   onSubmit={(e) => {
                     e.preventDefault()
                     void createTeamForm.handleSubmit()
@@ -185,7 +186,12 @@ export function TeamsList() {
                             <FieldLabel htmlFor="create-team-name">Team name</FieldLabel>
                             <Input
                               id="create-team-name"
-                              name={field.name}
+                              // Avoid DOM name="name" — Chrome contact autofill heuristic.
+                              name="aquilla-team-name"
+                              autoComplete="off"
+                              autoCorrect="off"
+                              autoCapitalize="none"
+                              spellCheck={false}
                               value={field.state.value}
                               onBlur={field.handleBlur}
                               onChange={(e) => field.handleChange(e.target.value)}
@@ -205,7 +211,8 @@ export function TeamsList() {
                           <FieldLabel htmlFor="create-team-desc">Description (optional)</FieldLabel>
                           <Input
                             id="create-team-desc"
-                            name={field.name}
+                            name="aquilla-team-description"
+                            autoComplete="off"
                             value={field.state.value}
                             onBlur={field.handleBlur}
                             onChange={(e) => field.handleChange(e.target.value)}

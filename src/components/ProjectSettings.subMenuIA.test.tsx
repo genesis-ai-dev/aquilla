@@ -212,10 +212,10 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
     expect(screen.getByText("AI & completion")).toBeTruthy()
     expect(screen.getByText("Validation & health")).toBeTruthy()
 
-    // ...not the controls themselves. Project Name (General) and AI
+    // ...not the controls themselves. Project Title (General) and AI
     // Instructions (AI & completion) must NOT both be in the document at once
     // on the index — proving this isn't still one long scroll.
-    expect(screen.queryByLabelText(/project name/i)).toBeNull()
+    expect(screen.queryByLabelText(/project title/i)).toBeNull()
     expect(screen.queryByLabelText(/username/i)).toBeNull()
   })
 
@@ -225,7 +225,7 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
     fireEvent.click(screen.getByText("General"))
 
     // General's own controls are present...
-    expect(screen.getByLabelText(/project name/i)).toBeTruthy()
+    expect(screen.getByLabelText(/project title/i)).toBeTruthy()
     expect(screen.getByLabelText(/username/i)).toBeTruthy()
 
     // ...but a control that lives in a different group (AI & completion) is
@@ -239,17 +239,17 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
     renderAt(`/project/${PROJECT_ID}/settings/ai`)
 
     expect(screen.getByLabelText(/examples retrieved/i)).toBeTruthy()
-    expect(screen.queryByLabelText(/project name/i)).toBeNull()
+    expect(screen.queryByLabelText(/project title/i)).toBeNull()
   })
 
   it("the Settings breadcrumb returns to the settings index", () => {
     renderAt(`/project/${PROJECT_ID}/settings/general`)
-    expect(screen.getByLabelText(/project name/i)).toBeTruthy()
+    expect(screen.getByLabelText(/project title/i)).toBeTruthy()
 
     fireEvent.click(screen.getByRole("link", { name: /^Settings$/i }))
 
     expect(screen.getByText("AI & completion")).toBeTruthy()
-    expect(screen.queryByLabelText(/project name/i)).toBeNull()
+    expect(screen.queryByLabelText(/project title/i)).toBeNull()
   })
 
   it("search results are grouped under main section headers", () => {
@@ -260,7 +260,7 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
 
     // Matching cards appear under their index section label — not a flat dump.
     expect(screen.getByText("General")).toBeTruthy()
-    expect(screen.getByLabelText(/project name/i)).toBeTruthy()
+    expect(screen.getByLabelText(/project title/i)).toBeTruthy()
     // Unrelated groups that have no keyword match stay out of the document.
     expect(screen.queryByText("AI metrics")).toBeNull()
     expect(screen.queryByText(/approved ai review effort/i)).toBeNull()
@@ -270,12 +270,12 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
   // still reachable through exactly one sub-menu pane.
   it("every settings group renders its expected controls (no section dropped)", () => {
     renderAt(`/project/${PROJECT_ID}/settings/general`)
-    expect(screen.getByLabelText(/project name/i)).toBeTruthy()
+    expect(screen.getByLabelText(/project title/i)).toBeTruthy()
     expect(screen.getByRole("switch", { name: /enable bible resources/i })).toBeTruthy()
     expect(screen.getByLabelText(/username/i)).toBeTruthy()
-    // Form panes stay on Page size="default" (max-w-xl, left-aligned).
-    expect(screen.getByLabelText(/project name/i).closest(".max-w-xl")).toBeTruthy()
-    expect(screen.getByLabelText(/project name/i).closest(".max-w-6xl")).toBeNull()
+    // Form panes stay on Page size="default" (max-w-2xl, left-aligned).
+    expect(screen.getByLabelText(/project title/i).closest(".max-w-2xl")).toBeTruthy()
+    expect(screen.getByLabelText(/project title/i).closest(".max-w-6xl")).toBeNull()
 
     renderAt(`/project/${PROJECT_ID}/settings/members`)
     expect(screen.getByTestId("settings-members-section")).toBeTruthy()

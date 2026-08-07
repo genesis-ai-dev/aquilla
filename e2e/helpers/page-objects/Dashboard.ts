@@ -49,8 +49,8 @@ export class Dashboard {
     // Anchored, case-insensitive labels: the AD-9 "Advanced: project shape"
     // radios carry long descriptions (e.g. the "Source-only" option mentions
     // "target language"), so we anchor with ^...$ to avoid matching those,
-    // while /i tolerates label casing ("Project name" vs "Project Name").
-    await dialog.getByLabel(/^Project name$/i).fill(name)
+    // while /i tolerates label casing ("Project title" vs "Project Title").
+    await dialog.getByLabel(/^Project title$/i).fill(name)
     await dialog.getByLabel(/^Source language$/i).fill(source)
     // Self-contained projects support extra target-language lanes and label
     // the primary field "Target language(s)"; linked-target projects retain

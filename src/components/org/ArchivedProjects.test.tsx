@@ -42,15 +42,24 @@ describe("ArchivedProjects", () => {
     ).toHaveAttribute("aria-busy", "true")
   })
 
-  it("lists archived projects and restores on click", async () => {
+  it("lists archived projects in a table and restores on click", async () => {
     fetchArchivedProjects.mockResolvedValue([
-      { id: "old", name: "Old Project", role: { level: 700, name: "owner", source: "org" } },
+      {
+        id: "old",
+        name: "Old Project",
+        archivedAt: "2026-01-15T12:00:00.000Z",
+        files: [{ id: "f1", name: "a.usfm", type: "usfm", cellCount: 1 }],
+        role: { level: 700, name: "owner", source: "org" },
+      },
     ])
     unarchiveProjectRemote.mockResolvedValue({ kind: "restored" })
     renderArchived()
 
     await waitFor(() => expect(fetchArchivedProjects).toHaveBeenCalledWith("jwt", 1))
-    expect(await screen.findByText("Old Project")).toBeInTheDocument()
+    expect(await screen.findByTestId("org-archived-projects-table")).toBeInTheDocument()
+    expect(screen.getByText("Old Project")).toBeInTheDocument()
+    expect(screen.getByRole("columnheader", { name: /Project/i })).toBeInTheDocument()
+    expect(screen.getByRole("columnheader", { name: /Archived/i })).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole("button", { name: "Restore" }))
     await waitFor(() => expect(unarchiveProjectRemote).toHaveBeenCalledWith("old", "jwt"))

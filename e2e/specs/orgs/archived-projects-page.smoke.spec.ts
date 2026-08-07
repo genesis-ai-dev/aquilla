@@ -5,8 +5,8 @@ import { test, expect, orgRoute } from "../../helpers/multi-user"
  *
  * ArchivedProjects.tsx renders a page with:
  *   - OrgBreadcrumb showing "Archived"
- *   - Either a list of archived projects with "Restore" buttons,
- *     OR "No archived projects." when the list is empty.
+ *   - A searchable DataTable of archived projects (Project / Archived / Files /
+ *     Restore), OR "No archived projects." when the list is empty.
  *
  * Alice has no archived projects, so this verifies the empty-state message.
  */

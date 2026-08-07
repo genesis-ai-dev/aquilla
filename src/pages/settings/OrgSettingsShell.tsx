@@ -16,7 +16,7 @@ export function OrgSettingsShell({
   let body: ReactNode
   if (isLoading) {
     body = (
-      <div className="space-y-6">
+      <div className="flex flex-col gap-12">
         <div className="h-28 animate-pulse rounded-lg border bg-card" />
         <div className="h-40 animate-pulse rounded-lg border bg-card" />
       </div>

@@ -33,7 +33,7 @@ export function OrgSettingsIndex() {
           </>
         }
       />
-      <div className="space-y-6">
+      <div className="flex flex-col gap-12">
         <NavList label="Organization">
           <NavRow to={orgSettingsPath(activeOrgId, "identity")} icon={Building2} title="Identity" hint={activeOrg?.name ?? "Untitled"} />
           <NavRow to={orgSettingsPath(activeOrgId, "export")} icon={Download} title="Export permissions" hint={FLOOR_LABEL[displayedExportMinRole] ?? "Maintainer"} />

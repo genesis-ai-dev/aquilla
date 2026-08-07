@@ -30,7 +30,7 @@ function NavList({
   return (
     <div className={cn("space-y-2", className)}>
       {label ? (
-        <p className="px-1 font-heading text-base font-medium tracking-tight text-foreground">
+        <p className="pl-4 font-heading text-base font-medium tracking-tight text-foreground">
           {label}
         </p>
       ) : null}
@@ -110,7 +110,7 @@ function BackLink({
   className?: string
 }) {
   const classes = cn(
-    "group -ml-1.5 inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-sm text-muted-foreground hover:bg-accent/40 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+    "group -ml-1.5 inline-flex w-fit items-center gap-1 self-start rounded-md py-1 pr-1.5 pl-4 text-sm text-muted-foreground hover:bg-accent/40 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
     className,
   )
   if (onClick) {

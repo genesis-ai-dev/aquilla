@@ -20,7 +20,7 @@ import {
 import { Checkbox } from "@/components/ui/checkbox"
 import { Switch } from "@/components/ui/switch"
 import { Input } from "@/components/ui/input"
-import { Field, FieldDescription, FieldLabel } from "@/components/ui/field"
+import { Field, FieldDescription, FieldLabel, OptionalMark } from "@/components/ui/field"
 import { Slider } from "@/components/ui/slider"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import {
@@ -79,7 +79,7 @@ import { buildFileScopedTokenFetcher } from "@/lib/sync/cqrs-bridge"
 import { useOrg } from "@/hooks/useOrg"
 import { ApiKeyField } from "./ApiKeyField"
 import { SettingsNav, type SettingsSection } from "./ProjectSettings/SettingsNav"
-import { NavList, NavRow, BackLink } from "@/components/ui/nav-list"
+import { NavList, NavRow } from "@/components/ui/nav-list"
 import { readValidationCount, readValidationCountAudio } from "@/lib/progress/read-validation-count"
 import { setUserApiKey, useUserApiKey } from "@/lib/store/user-api-keys"
 import type { ProjectWideSettings } from "@/lib/sync/project-settings"
@@ -1133,6 +1133,7 @@ export function ProjectSettings() {
     </div>
   )
 
+  const onSettingsPane = Boolean(activeGroup && !lowerQuery)
   const breadcrumb = (
     <OrgBreadcrumb
       section={project?.name ?? "Project"}
@@ -1140,7 +1141,10 @@ export function ProjectSettings() {
       orgId={project?.orgId}
       trail={[
         { label: "Editor", onClick: () => requestNavigate(editorPath) },
-        { label: "Settings" },
+        onSettingsPane
+          ? { label: "Settings", to: projectSettingsPath(id!) }
+          : { label: "Settings" },
+        ...(onSettingsPane && activeGroup ? [{ label: activeGroup.label }] : []),
       ]}
     />
   )
@@ -1167,16 +1171,12 @@ export function ProjectSettings() {
       statusBar={null}
       main={
         <Page size={pageSize}>
-          <div className="space-y-6">
-            {!showIndex && (
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                <BackLink to={projectSettingsPath(id!)} label="Settings" />
-              </div>
-            )}
+          <div className="flex flex-col gap-12">
             <PageHeader
               title={pageTitle}
               description={pageDescription}
               actions={headerActions}
+              className="mb-0"
             />
 
             {/* Table panes already have their own search; skip the settings filter. */}
@@ -1710,7 +1710,15 @@ export function ProjectSettings() {
                     {connectionError && <p className="mt-1 flex items-center gap-1 text-xs text-destructive"><XCircle className="h-3 w-3" /> {connectionError}</p>}
                   </div>
                   <ApiKeyField
-                    label={`API key${preset.requiresKey ? " *" : " (optional)"}`}
+                    label={
+                      preset.requiresKey ? (
+                        "API key *"
+                      ) : (
+                        <>
+                          API key <OptionalMark />
+                        </>
+                      )
+                    }
                     placeholder={preset.keyHint ?? (preset.requiresKey ? "Paste your API key" : "Leave blank for no auth")}
                     projectKey={apiKey}
                     userKey={completionUserKey}
@@ -1755,7 +1763,9 @@ export function ProjectSettings() {
 
               {provider === "frontier" && (
                 <div>
-                  <FieldLabel htmlFor="mdl-frontier">Model override (optional)</FieldLabel>
+                  <FieldLabel htmlFor="mdl-frontier">
+                    Model override <OptionalMark />
+                  </FieldLabel>
                   <Input
                     id="mdl-frontier"
                     value={model}

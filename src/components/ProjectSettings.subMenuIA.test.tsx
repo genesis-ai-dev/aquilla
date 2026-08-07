@@ -17,7 +17,7 @@
 //      link-able, not just reachable by clicking through).
 //   4. No section was dropped: every previously-available control is still
 //      reachable through some sub-menu (spot-checks one control per group).
-//   5. The back link returns to the index.
+//   5. The Settings breadcrumb returns to the index.
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, cleanup } from "@testing-library/react"
@@ -30,12 +30,24 @@ vi.mock("@/components/org/OrgSidebar", () => ({
 }))
 vi.mock("@/components/org/OrgBreadcrumb", () => ({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  OrgBreadcrumb: ({ section, trail }: any) => (
-    <div data-testid="org-breadcrumb">
-      {section}
-      {(trail ?? []).map((t: { label: string }) => ` › ${t.label}`).join("")}
-    </div>
-  ),
+  OrgBreadcrumb: ({ section, trail }: any) => {
+    // Lazy require so the mock stays hoist-safe under vitest.
+    const { Link } = require("react-router-dom") as typeof import("react-router-dom")
+    return (
+      <div data-testid="org-breadcrumb">
+        {section}
+        {(trail ?? []).map((t: { label: string; to?: string }) =>
+          t.to ? (
+            <Link key={t.label} to={t.to}>
+              {t.label}
+            </Link>
+          ) : (
+            <span key={t.label}>{` › ${t.label}`}</span>
+          ),
+        )}
+      </div>
+    )
+  },
 }))
 
 import type { ProjectRecord } from "@/lib/parsers/types"
@@ -230,11 +242,11 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
     expect(screen.queryByLabelText(/project name/i)).toBeNull()
   })
 
-  it("the back link returns to the settings index", () => {
+  it("the Settings breadcrumb returns to the settings index", () => {
     renderAt(`/project/${PROJECT_ID}/settings/general`)
     expect(screen.getByLabelText(/project name/i)).toBeTruthy()
 
-    fireEvent.click(screen.getByRole("link", { name: /settings/i }))
+    fireEvent.click(screen.getByRole("link", { name: /^Settings$/i }))
 
     expect(screen.getByText("AI & completion")).toBeTruthy()
     expect(screen.queryByLabelText(/project name/i)).toBeNull()
@@ -261,8 +273,8 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
     expect(screen.getByLabelText(/project name/i)).toBeTruthy()
     expect(screen.getByRole("switch", { name: /enable bible resources/i })).toBeTruthy()
     expect(screen.getByLabelText(/username/i)).toBeTruthy()
-    // Form panes stay on Page size="default" (max-w-3xl).
-    expect(screen.getByLabelText(/project name/i).closest(".max-w-3xl")).toBeTruthy()
+    // Form panes stay on Page size="default" (max-w-xl, left-aligned).
+    expect(screen.getByLabelText(/project name/i).closest(".max-w-xl")).toBeTruthy()
     expect(screen.getByLabelText(/project name/i).closest(".max-w-6xl")).toBeNull()
 
     renderAt(`/project/${PROJECT_ID}/settings/members`)

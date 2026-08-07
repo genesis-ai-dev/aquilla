@@ -3,21 +3,44 @@
 This runbook implements the Cloudflare Builds section of the canonical
 [deployment environment matrix](../DEPLOYMENT-ENVIRONMENTS.md).
 
-Explicit operator commands own production and development deployments. Neither
-GitHub pushes nor Cloudflare Git integrations may automatically deploy live
-traffic. Pull requests may publish only a route-free preview version.
+Explicit operator commands own production and development traffic. Cloudflare
+Workers Builds owns automatic validation and route-free version uploads. GitHub
+provides repository events and displays Cloudflare checks; GitHub-hosted runners
+are not used during ordinary pull-request or push activity.
 
 ## Control-plane state
 
-The Git connections for `aquilla-web`, `aquilla-identity`, and
-`aquilla-sync-worker` are disconnected. `versification-tool` was already
-disconnected. The cutover did not delete or alter the existing Workers, versions,
-bindings, routes, or traffic allocations, and production verification passed
-after the change.
+Connect `aquilla-web`, `aquilla-identity`, and `aquilla-sync-worker` to the
+`genesis-ai-dev/aquilla` repository. Use `/`, `/auth-worker`, and `/sync-worker`
+as their root directories, respectively.
 
-Do not reconnect a Git repository or add a dashboard deploy command. The former
-`deploy:workers-build` helper and Cloudflare-specific build script were removed
-with the connections so they cannot become a second deployment owner later.
+| Worker | Build command | Production and preview deploy command |
+| --- | --- | --- |
+| `aquilla-web` | `pnpm run build:workers-build` | `pnpm run deploy:workers-build` |
+| `aquilla-identity` | `pnpm run build:workers-build` | `pnpm run deploy:workers-build` |
+| `aquilla-sync-worker` | `pnpm run build:workers-build` | `pnpm run deploy:workers-build` |
+
+Set `main` as the production branch and enable non-production branch builds.
+Both dashboard deploy-command fields intentionally use the same repository
+helper. The helper requires Cloudflare's `WORKERS_CI`, `WORKERS_CI_BRANCH`, and
+`WORKERS_CI_COMMIT_SHA` metadata before invoking Wrangler.
+
+`versification-tool` remains disconnected. It has no deployable Wrangler
+application and must not be given a placeholder build command.
+
+## Workers Builds branch policy
+
+| Branch | Binding profile | Operation | Changes live traffic |
+| --- | --- | --- | --- |
+| `main` | `production` | upload and verify exact version | No |
+| `dev` / `development` | `development` | upload and verify exact version | No |
+| Feature branches, including slash names | `development` | upload and verify exact version | No |
+| Retired staging branch names | `development` | upload and verify exact version | No |
+
+Missing build metadata fails closed. No Workers Builds path calls `wrangler
+deploy`, `wrangler versions deploy`, or `wrangler triggers deploy`. Production
+and development routes therefore remain controlled by the explicit operator
+commands below.
 
 ## Explicit deployments
 
@@ -56,28 +79,28 @@ separately in Cloudflare. Any retained Neon branch or R2 data is not deployable
 application infrastructure and requires its own backup/retention decision before
 deletion.
 
-Web pull-request previews continue through GitHub Actions on the route-free
-`aquilla-web-preview` Worker when hosted runners are available.
+`.github/workflows/ci.yml` and `.github/workflows/deploy-workers.yml` are retained
+as explicit `workflow_dispatch` fallbacks. Neither has a `pull_request` or `push`
+trigger. Scheduled Neon/content workflows and tag-triggered Tauri releases are
+separate operational workloads and are not silently reassigned to Workers Builds.
 
 ## Pull-request web previews
 
-Every non-draft web pull request uploads the current commit to the route-free
-`aquilla-web-preview` Worker with the sanitized alias `pr-<number>`. Draft and
-documentation-only pull requests remain excluded. The alias is refreshed on
-every supported pull-request update; no commit-message tag is required.
+Cloudflare's Git integration builds each pushed branch and reports a check to the
+associated pull request. It supplies native commit and stable branch preview
+URLs. The repository does not pass `WORKERS_CI_BRANCH` to `--preview-alias`, so
+slash-named branches cannot fail Wrangler alias validation.
 
-`scripts/cloudflare-pr-preview.mjs` reads Wrangler's structured NDJSON output
-and accepts only a `preview_alias_url` for the expected alias and Worker name.
-It does not scrape a display log or hard-code the account's Workers subdomain.
-If the preview Worker is missing, the helper may bootstrap only the `preview`
-Wrangler profile, which explicitly enables preview URLs and declares no custom
-routes, then retry the version upload.
+Feature-branch web bundles are compiled against development identity, sync, and
+chat hosts. Identity and sync feature versions likewise use their named
+development profiles. Uploads are verified against the canonical deployment
+manifest before Cloudflare reports success and cannot mutate production or
+development route traffic.
 
-Before the URL is posted to the pull request, the live verifier loads `/app`
-through that exact preview origin, crawls the deployed JavaScript graph, and
-requires the development identity, sync, and chat targets. This preview process
-does not promote a version or change production or development route traffic.
-Preview bundles do use development services and data.
+The required GitHub branch-protection contexts are the proven Cloudflare Workers
+Builds checks. Removed GitHub job contexts (`lint`, `typecheck`, `unit`, and
+`build`) must not remain required after the Cloudflare checks have reported on a
+test pull request.
 
 ## Exact-version deployment and verification
 

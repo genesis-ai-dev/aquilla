@@ -61,22 +61,22 @@ schema, build, or deploy step; there is no default environment. Production jobs
 enter the GitHub `production` Environment, whose deployment-branch policy admits
 only `main`.
 
-Cloudflare Workers Builds is not a deployment owner. The Git connections for
-`aquilla-web`, `aquilla-identity`, and `aquilla-sync-worker` are disconnected;
-`versification-tool` also remains disconnected because it has no deployable
-Wrangler application. Existing Workers, versions, bindings, and routes were not
-removed by disconnecting the build connections.
+Cloudflare Workers Builds owns automatic pull-request validation and verified
+version uploads for `aquilla-web`, `aquilla-identity`, and
+`aquilla-sync-worker`. It never promotes a version, reapplies a route, or changes
+live traffic—even for `main` or `dev`. `versification-tool` remains disconnected
+because it has no deployable Wrangler application.
 
-Never paste a branch-selection shell expression into the Cloudflare dashboard and
-never use a bare `wrangler deploy` for a live Aquilla environment.
+The consolidated `.github/workflows/ci.yml` is `workflow_dispatch`-only. Normal
+pull-request and push activity consumes no GitHub-hosted runner minutes. Cloudflare
+receives GitHub repository events, runs the repository-owned build commands, and
+reports its check results and preview links back to GitHub.
 
-The consolidated `.github/workflows/ci.yml` runs pull-request checks (plus
-explicit diagnostic dispatches) but never deploys a live environment. It builds
-the SPA exactly once, verifies its API target, and uploads that exact artifact.
-Non-draft pull requests use the route-free
-`preview` Wrangler profile
-(`aquilla-web-preview`) with development API targets. Preview uploads cannot mutate
-the production or development SPA Workers.
+`main` Workers Builds versions use production bindings; every other branch uses
+development bindings. All versions remain route-free until an operator runs one
+of the explicit live commands above. Cloudflare's native branch aliasing handles
+slash-named branches; repository commands never pass a raw branch name through
+Wrangler's `--preview-alias` option.
 
 The agent sandbox and not-yet-enabled resource proxy follow the same rule: their
 production profiles are main-only, their unnamed profiles have distinct local
@@ -96,11 +96,13 @@ An environment change is one atomic contract change. Update and verify all of:
 
 1. The three Wrangler files and their Worker routes/bindings.
 2. `package.json` deploy and live-verification commands.
-3. `.github/workflows/ci.yml` and the dispatch-only `deploy-workers.yml`.
+3. Cloudflare Workers Builds settings, `.github/workflows/ci.yml`, and the
+   dispatch-only `deploy-workers.yml`.
 4. `config/cloudflare-deployments.json`, `cloudflare-version-deploy.mjs`, and
    `verify-worker-deployment.mjs`.
 5. `scripts/resolve-deployment-target.sh` and `verify-deploy-branch.sh`.
-6. The GitHub `production` Environment branch policy (`main` only).
+6. GitHub branch protection Cloudflare check contexts and the `production`
+   Environment branch policy (`main` only).
 7. This matrix and the Workers Builds runbook.
 8. `scripts/worker-deployment-contract.test.ts` and its targeted test command.
 9. The live verifier for production and development before promotion.

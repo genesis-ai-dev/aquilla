@@ -1,15 +1,11 @@
 name: CI
 
-# AQU-799: checks and route-free PR previews share one workflow so a preview can
-# consume the exact artifact that passed the build/environment gate. Actions
-# gates pull requests only; live environments require an explicit operator
-# deployment. Required check names are pinned by the deployment contract tests.
-# There is deliberately no push trigger: merging a checked PR must not consume
-# another full Actions run or imply authorization to deploy.
+# AQU-564: Cloudflare Workers Builds owns automatic pull-request validation and
+# route-free versions. This workflow is retained only as an explicit fallback;
+# it has no pull-request or push trigger and therefore consumes no hosted runner
+# minutes during ordinary repository activity.
 
 on:
-  pull_request:
-    types: [opened, reopened, ready_for_review, synchronize]
   workflow_dispatch:
 
 concurrency:

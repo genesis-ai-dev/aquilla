@@ -258,28 +258,37 @@ describe("worker deployment environment contract", () => {
     },
   )
 
-  it("keeps disconnected Cloudflare Workers Builds from becoming a second deploy owner", () => {
+  it("keeps Cloudflare Workers Builds preview-only and repository-owned", () => {
     const rootPackage = JSON.parse(readRepoFile("package.json")) as {
       scripts?: Record<string, string>
     }
-    expect(rootPackage.scripts?.["deploy:workers-build"]).toBeUndefined()
-    expect(rootPackage.scripts?.["build:ci"]).toBeUndefined()
+    expect(rootPackage.scripts?.["deploy:workers-build"])
+      .toBe("node scripts/cloudflare-build-deploy.mjs web")
+    expect(rootPackage.scripts?.["build:workers-build"]).toContain("scripts/ci-build.sh")
 
     const workerPackage = JSON.parse(readRepoFile("sync-worker", "package.json")) as {
       scripts?: Record<string, string>
     }
 
-    expect(workerPackage.scripts?.["deploy:workers-build"]).toBeUndefined()
+    expect(workerPackage.scripts?.["build:workers-build"])
+      .toContain("assert-workers-build-env.mjs")
+    expect(workerPackage.scripts?.["deploy:workers-build"])
+      .toBe("node ../scripts/cloudflare-build-deploy.mjs sync")
     expect(workerPackage.scripts?.deploy).toBe("pnpm --dir .. run deploy:aquilla:sync")
 
     const authPackage = JSON.parse(readRepoFile("auth-worker", "package.json")) as {
       scripts?: Record<string, string>
     }
-    expect(authPackage.scripts?.["deploy:workers-build"]).toBeUndefined()
+    expect(authPackage.scripts?.["build:workers-build"])
+      .toContain("assert-workers-build-env.mjs")
+    expect(authPackage.scripts?.["deploy:workers-build"])
+      .toBe("node ../scripts/cloudflare-build-deploy.mjs identity")
     expect(authPackage.scripts?.deploy).toBe("pnpm --dir .. run deploy:aquilla:auth")
 
-    expect(existsSync(path.join(REPO_ROOT, "scripts", "cloudflare-build-deploy.mjs"))).toBe(false)
-    expect(existsSync(path.join(REPO_ROOT, "scripts", "ci-build.sh"))).toBe(false)
+    const helper = readRepoFile("scripts", "cloudflare-build-deploy.mjs")
+    expect(helper).toContain("promote: false")
+    expect(helper).not.toContain("promote: true")
+    expect(existsSync(path.join(REPO_ROOT, "scripts", "ci-build.sh"))).toBe(true)
 
     const agentPackage = JSON.parse(readRepoFile("agent-worker", "package.json")) as {
       scripts?: Record<string, string>
@@ -355,7 +364,7 @@ describe("worker deployment environment contract", () => {
 
     expect(matrix).toContain("`main` -> `production`")
     expect(matrix).toContain("`dev` -> `development`")
-    expect(matrix).toContain("Cloudflare Workers Builds is not a deployment owner")
+    expect(matrix).toContain("Cloudflare Workers Builds owns automatic pull-request validation")
     expect(matrix).toContain("Live Aquilla deployments require an explicit human/operator action")
     expect(matrix).toContain("All unnamed Wrangler profiles are local-only")
     expect(matrix).toContain("deployment-branch policy")
@@ -421,10 +430,11 @@ describe("worker deployment environment contract", () => {
     expect(webWorkflow).not.toContain("node scripts/cloudflare-version-deploy.mjs web")
   })
 
-  it("keeps SPA CI builds and PR previews on the same explicit environment", () => {
+  it("keeps Workers Builds and manual CI on explicit environments", () => {
     const workflow = readRepoFile(".github", "workflows", "ci.yml")
     const liveDeployer = readRepoFile("scripts", "cloudflare-version-deploy.mjs")
-    const previewDeployer = readRepoFile("scripts", "cloudflare-pr-preview.mjs")
+    const workersBuild = readRepoFile("scripts", "cloudflare-build-deploy.mjs")
+    const workersBuildScript = readRepoFile("scripts", "ci-build.sh")
     const buildJobStart = workflow.indexOf("  build:")
     const buildJobHeader = workflow.slice(
       buildJobStart,
@@ -436,36 +446,34 @@ describe("worker deployment environment contract", () => {
     expect(workflow).toContain("include-hidden-files: true")
     expect(workflow).toContain("run: bash scripts/resolve-deployment-target.sh")
     expect(workflow).not.toContain("node scripts/cloudflare-version-deploy.mjs web")
-    expect(workflow).toContain("node scripts/cloudflare-pr-preview.mjs \"${{ github.event.number }}\" \"${{ github.event.pull_request.head.sha }}\"")
-    expect(workflow).toContain("verify-live-environment.mjs development --surface=spa --app-origin=\"$PREVIEW_URL\"")
-    expect(workflow).toContain("**Preview:** ${{ steps.deploy_preview.outputs.url }}")
     expect(workflow).toContain("name: ${{ needs.target.outputs.github_environment }}")
-    expect(workflow).toContain("if: github.event_name == 'pull_request' && github.event.pull_request.draft != true")
-    expect(workflow).not.toContain("steps.decide.outputs")
-    expect(workflow).not.toContain("[preview]")
-    expect(workflow).not.toContain("<workers-subdomain>")
-    expect(workflow).not.toContain("cloudflare/wrangler-action")
-    expect(workflow).not.toContain("|| '--env=development'")
     expect(buildJobHeader).toContain("env:")
     expect(buildJobHeader).toContain("VITE_SYNC_WORKER_HOST:")
     expect(buildJobHeader).toContain("VITE_AUTH_BASE:")
     expect(buildJobHeader).toContain("VITE_CHAT_BASE:")
     expect(workflow.match(/VITE_AUTH_BASE:/g)).toHaveLength(1)
-    expect(workflow).not.toContain("refs/heads/main' && ' '")
     expect(liveDeployer).toContain("if (surface === \"web\") verifyArtifacts(join(expectation.directory, \"dist\"))")
-    expect(previewDeployer).toContain("verifyArtifacts(join(cwd, \"dist\"))")
+    expect(workersBuild).toContain("normalizedBranch === \"main\" ? \"production\" : \"development\"")
+    expect(workersBuild).toContain("promote: false")
+    expect(workersBuildScript).toContain("main) H=api.aquilla.app")
+    expect(workersBuildScript).toContain("*) H=api.dev.aquilla.app")
+    expect(workersBuildScript).toContain("verify-deployment-artifacts.mjs dist")
   })
 
-  it("builds and tests once, then previews the exact verified artifact", () => {
-    const workflow = readRepoFile(".github", "workflows", "ci.yml")
-    const previewJob = workflow.slice(workflow.indexOf("  preview:"))
+  it("runs the former required PR gates on Cloudflare infrastructure", () => {
+    const rootPackage = JSON.parse(readRepoFile("package.json")) as {
+      scripts?: Record<string, string>
+    }
+    const command = rootPackage.scripts?.["build:workers-build"] ?? ""
 
-    expect(previewJob).toContain("needs: [target, lint, typecheck, unit, build]")
-    expect(previewJob).toContain("actions/download-artifact@v4")
-    expect(previewJob).not.toContain("pnpm run build")
-    expect(previewJob).not.toContain("run: pnpm test")
-    expect(workflow).toContain("actions/upload-artifact@v4")
-    expect(workflow.match(/run: pnpm run build/g)).toHaveLength(1)
+    expect(command).toContain("pnpm lint")
+    expect(command).toContain("pnpm test")
+    expect(command).toContain("playwright install --with-deps chromium")
+    expect(command).toContain("pnpm test:idml")
+    expect(command).toContain("pnpm neon:check")
+    expect(command).toContain("npm --prefix agent-worker run type-check")
+    expect(command).toContain("npm --prefix agent-worker test")
+    expect(command).toContain("scripts/ci-build.sh")
   })
 
   it("keeps all live deployments off automatic push triggers", () => {
@@ -482,23 +490,21 @@ describe("worker deployment environment contract", () => {
 
     expect(ciWorkflow).not.toContain("cloudflare-version-deploy.mjs")
     expect(ciTriggers).not.toContain("push:")
-    expect(ciTriggers).toContain("pull_request:")
+    expect(ciTriggers).not.toContain("pull_request:")
+    expect(ciTriggers).toContain("workflow_dispatch:")
     expect(workerTriggers).not.toContain("push:")
     expect(workerTriggers).toContain("workflow_dispatch:")
   })
 
-  it("keeps every required branch-protection check unconditional", () => {
+  it("keeps GitHub CI available only by explicit dispatch", () => {
     const workflow = readRepoFile(".github", "workflows", "ci.yml")
     const triggers = workflow.slice(workflow.indexOf("\non:"), workflow.indexOf("\nconcurrency:"))
-    const requiredJobs = workflow.slice(workflow.indexOf("  lint:"), workflow.indexOf("  schema-migrations:"))
 
     expect(triggers).not.toContain("paths-ignore")
     expect(triggers).not.toContain("paths:")
-    expect(triggers).toContain("ready_for_review")
-    for (const job of ["  lint:", "  typecheck:", "  unit:", "  build:"]) {
-      expect(requiredJobs).toContain(job)
-    }
-    expect(requiredJobs).not.toContain("if:")
+    expect(triggers).not.toContain("pull_request:")
+    expect(triggers).not.toContain("push:")
+    expect(triggers).toContain("workflow_dispatch:")
   })
 
   it("fails worker-suite change detection open for shared deployment inputs", () => {

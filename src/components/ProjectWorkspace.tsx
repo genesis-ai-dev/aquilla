@@ -1630,6 +1630,33 @@ export function ProjectWorkspace() {
     [project?.id, activeFileId, currentUsername, getActiveCells, getTokenForProjectFile],
   )
 
+  // Round 6 (SUB-38), re-homed 2026-08-07: assign a voice/character from the
+  // gutter's picker. PURE assignment (no auto-synthesis — generation stays an
+  // explicit act); apply-to-speaker covers every line sharing the diarized
+  // name. Ref-wrapped below so the context value stays identity-stable.
+  const handleTimelineAssignVoice = useCallback(
+    (cell: CellData, voiceId: string, opts?: { applyToSpeaker?: boolean }) => {
+      const castName =
+        cell.metadata && typeof cell.metadata.cast_name === "string" ? (cell.metadata.cast_name as string) : null
+      if (opts?.applyToSpeaker && castName) {
+        const ids = getActiveCells()
+          .filter((c) => c.metadata && (c.metadata.cast_name as unknown) === castName)
+          .map((c) => c.id)
+        tts.assignCells(ids.length > 0 ? ids : [cell.id], voiceId)
+        return
+      }
+      tts.assignCells([cell.id], voiceId)
+    },
+    [tts, getActiveCells],
+  )
+  const timelineAssignVoiceRef = useRef(handleTimelineAssignVoice)
+  timelineAssignVoiceRef.current = handleTimelineAssignVoice
+  const handleAssignCastVoice = useCallback(
+    (cell: CellData, voiceId: string, opts?: { applyToSpeaker?: boolean }) =>
+      timelineAssignVoiceRef.current(cell, voiceId, opts),
+    [],
+  )
+
   // Round 6: move a section's dub chip → target_start_ms (the clip-zero
   // anchor, absolute file ms). Round 7: applied optimistically first.
   const handleRetimeTarget = useCallback(
@@ -3519,8 +3546,9 @@ export function ProjectWorkspace() {
     onAiSetupNeeded: handleAiSetupNeeded,
     onOpenRecording: handleOpenRecording,
     onMediaRowActivate: handleMediaRowActivate, // 2026-08-07: row click → timeline (stacked lens only)
+    onAssignCastVoice: handleAssignCastVoice, // 2026-08-07: gutter picker (pure assignment)
     myScopes, // AQU-633: per-cell validate scope gate
-  }), [handleInfractionClick, handleOpenComments, handleOpenHistory, handleAiSetupNeeded, handleOpenRecording, handleMediaRowActivate, myScopes])
+  }), [handleInfractionClick, handleOpenComments, handleOpenHistory, handleAiSetupNeeded, handleOpenRecording, handleMediaRowActivate, handleAssignCastVoice, myScopes])
 
   const handleAssignVoice = useCallback(async (cellId: string, voiceId: string) => {
     if (!audioProject || !frontierSession) return
@@ -5709,6 +5737,8 @@ export function ProjectWorkspace() {
             isAnonymous={!frontierSession}
             onJumpToCell={jumpToCellId}
             audioLens={audioLens}
+            castGutter={timelineStacked}
+            ttsSettings={tts.settings}
             orderedBy={activeFile ? fileOrderedBy(activeFile) : undefined}
             onOpenAudioSetup={openAudioSetup}
             onAssignVoice={handleAssignVoice}

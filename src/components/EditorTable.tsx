@@ -58,6 +58,7 @@ import { CellTranscriptPreview } from "./CellTranscriptPreview"
 import { CellTranscribeBadge } from "./CellTranscribeBadge"
 import { CellActionRail, RailButton, isInteractiveTarget } from "./CellActionRail"
 import { useIsMediaCursorCell, useMediaSyncActive } from "@/lib/timeline/media-cursor"
+import { CastGutterVoice } from "@/components/voice/CastGutterVoice"
 import { useIsQueueCurrentCell, useQueueCurrentCellId } from "@/lib/audio/play-queue"
 import { useRailIdleHide } from "@/hooks/useRailIdleHide"
 import {
@@ -108,7 +109,7 @@ import { getUnsupportedReason } from "./CellAudioRecordButton"
 // AQU-513: plain file-picker upload next to the mic — works on mobile too.
 import { CellAudioUploadButton } from "./CellAudioUploadButton"
 import { useMicPermission } from "@/hooks/useMicPermission"
-import { assignedCastVoiceId, findVoice } from "@/lib/audio/voices"
+import { assignedCastVoiceId, findVoice, getVoiceLibrary, resolveCastVoice } from "@/lib/audio/voices"
 import { useNavigate } from "react-router-dom"
 import { cn } from "@/lib/utils"
 import { looksLikeUuid } from "@/lib/uuid"
@@ -190,6 +191,11 @@ import {
 //   window.__perfDumpRowRenders()   → console.table of the same
 const rowRenders = new Map<string, number>()
 const ESTIMATED_ROW_HEIGHT_PX = 140
+
+/** The gutter track widens by the character circle's w-6 when the cast
+ *  gutter is on (stacked media lens). One shared type keeps the header row,
+ *  paragraph bar, and rows in the same template. */
+type EditorGridCols = "grid-cols-[84px_1fr_1fr]" | "grid-cols-[108px_1fr_1fr]"
 const LEGEND_LIST_DRAW_DISTANCE_PX = 240
 
 /**
@@ -637,6 +643,14 @@ interface EditorTableProps {
   onEditTargetLanguage?: () => void
   /** When set, each row shows the Audio-lens strip (speaker chip + generate). */
   audioLens?: AudioLensContext | null
+  /** 2026-08-07: the character gutter — a voice circle per speaking row,
+   *  aligned to the source's first line. On ONLY in the stacked media lens
+   *  (Sam's call: not the Text lens, not the voice-panel table). */
+  castGutter?: boolean
+  /** LIVE cast state for the gutter (useProjectTts's copy — cast assignments
+   *  update through tts.settings, NOT the project settings-overlay snapshot,
+   *  same rule the old detail pane followed). Stable ref between saves. */
+  ttsSettings?: ProjectTtsSettings
   /** Timeline-segment-model: the active file's order lens. When `'time'`, the
    *  Text/Audio toggle becomes a Text-layer / Media-layer switch — the row list
    *  filters by segment `medium` and sorts by timing. Absent or `'sequence'`
@@ -800,7 +814,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   activeCueIndex, onSeekToCue,
   lineNumbersEnabled, cellLabelsEnabled, sourceDirectionMode = "auto", targetDirectionMode = "auto", sourceTextDirection, targetTextDirection,
   isAnonymous, onJumpToCell,
-  audioLens, onOpenAudioSetup,
+  audioLens, castGutter = false, ttsSettings, onOpenAudioSetup,
   onAttachMediaFile, onAttachMediaUrl,
   orderedBy,
   onProjectChanged, onAddConceptFromSelection, addConceptBlockedReason, onAskAiFromSelection, onAssignVoice,
@@ -1520,7 +1534,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   // fixed width keeps Source header-aligned. No right gutter; the floating
   // action rail is absolutely positioned. Target reserves pr-9 for the
   // expand chevron.
-  const gridCols = "grid-cols-[84px_1fr_1fr]"
+  const gridCols: EditorGridCols = castGutter ? "grid-cols-[108px_1fr_1fr]" : "grid-cols-[84px_1fr_1fr]"
 
   const handleMouseUp = useCallback(() => {
     if (isDragging.current && dragCells.current.size > 1) {
@@ -1878,6 +1892,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
             {/* Pilcrow sits in the number slot of the combined gutter so it
                 stays aligned with line numbers below. */}
             <div className="flex items-center py-1">
+              {castGutter && <div className="w-6 shrink-0" aria-hidden="true" />}
               <div className="w-5 shrink-0" aria-hidden="true" />
               <div className="ml-2 flex min-w-0 flex-1 items-center gap-0.5">
                 <div className="w-5 shrink-0" aria-hidden="true" />
@@ -1960,6 +1975,8 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           sourceTextDirection={sourceTextDirection}
           targetTextDirection={targetTextDirection}
           gridCols={gridCols}
+          castGutter={castGutter}
+          ttsSettings={ttsSettings}
           isAnonymous={isAnonymous}
           onJumpToCell={onJumpToCell}
           micDenied={micDenied}
@@ -1999,12 +2016,16 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   }, [
     activeCueIndex,
     activeEditorCellId,
+    castGutter,
+    ttsSettings,
     focusedRailCellId,
     handleRowFocusPin,
     handleRowFocusRelease,
     activeLane,
     audioByCellId,
     audioLens,
+    castGutter,
+    ttsSettings,
     backtranslationByCellId,
     backtranslating,
     backtranslationErrors,
@@ -2482,7 +2503,9 @@ interface MemoizedRowProps {
   targetDirectionMode: DirectionMode
   sourceTextDirection: TextDirection
   targetTextDirection: TextDirection
-  gridCols: "grid-cols-[84px_1fr_1fr]"
+  gridCols: EditorGridCols
+  castGutter: boolean
+  ttsSettings?: ProjectTtsSettings
   isAnonymous?: boolean
   onJumpToCell?: (cellId: string) => void
   micDenied?: boolean
@@ -2538,7 +2561,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
   const {
     cell, examples, completing, errors, previews, healthMap, infractions,
     backtranslating, backtranslationErrors, cellOpenCommentCount,
-    activeCueIndex, rowIndex, contentNumber, gridCols,
+    activeCueIndex, rowIndex, contentNumber, gridCols, castGutter, ttsSettings,
     onDragStart: onDragStartParent, onDragEnter: onDragEnterParent,
     onSelectionPointerDown: onSelectionPointerDownParent,
     onNavigateCell: onNavigateCellParent,
@@ -2716,6 +2739,8 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         sourceTextDirection={sourceTextDirection}
         targetTextDirection={targetTextDirection}
         gridCols={gridCols}
+        castGutter={castGutter}
+        ttsSettings={ttsSettings}
         isAnonymous={isAnonymous}
         onJumpToCell={onJumpToCell}
         micDenied={micDenied}
@@ -2872,7 +2897,9 @@ interface EditorRowProps {
   targetDirectionMode: DirectionMode
   sourceTextDirection: TextDirection
   targetTextDirection: TextDirection
-  gridCols: "grid-cols-[84px_1fr_1fr]"
+  gridCols: EditorGridCols
+  castGutter: boolean
+  ttsSettings?: ProjectTtsSettings
   isAnonymous?: boolean
   onJumpToCell?: (cellId: string) => void
   micDenied?: boolean
@@ -3722,7 +3749,7 @@ function EditorRow({
   isActiveCue: _isActiveCue, onSeekToCue,
   onDragStart, onDragEnter, onSelectionPointerDown, onNavigateCell,
   onEscapeToGrid, onGridRowKeyNav,
-  rowIndex, contentNumber, lineNumbersEnabled, scriptureNumbering, cellLabelsEnabled, sourceDirectionMode, targetDirectionMode, sourceTextDirection, targetTextDirection, gridCols,
+  rowIndex, contentNumber, lineNumbersEnabled, scriptureNumbering, cellLabelsEnabled, sourceDirectionMode, targetDirectionMode, sourceTextDirection, targetTextDirection, gridCols, castGutter, ttsSettings,
   isAnonymous, micDenied,
   audioLens, onOpenAudioSetup, onAssignVoice, onAddConceptFromSelection, addConceptBlockedReason, onAskAiFromSelection,
   onCellCommitted, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, presenceStore, remoteChangedWhileFocused,
@@ -3745,8 +3772,10 @@ function EditorRow({
   // FRO perf cleanup: pure pass-through openers (never consumed by
   // EditorTable/MemoizedRow) come from context instead of the prop chain —
   // keeps them out of MemoizedRow's React.memo compare surface.
-  const { onInfractionClick, onOpenComments, onOpenHistory, onAiSetupNeeded, onOpenRecording, onMediaRowActivate, myScopes } =
-    useEditorActions()
+  const {
+    onInfractionClick, onOpenComments, onOpenHistory, onAiSetupNeeded, onOpenRecording,
+    onMediaRowActivate, onAssignCastVoice, myScopes,
+  } = useEditorActions()
   // AQU-633: a scoped member can only validate cells in their assigned lane/file.
   // Combine the role capability with the per-cell scope check so an out-of-scope
   // cell greys the toggle instead of offering a guaranteed-403 validate. Unscoped
@@ -4863,6 +4892,28 @@ function EditorRow({
     contentNumber,
     displayLabel: importDisplayLabel(cell.metadata),
   })
+  // ── Character gutter (2026-08-07, stacked media lens only) ──────────────
+  // A row "speaks" unless it's structure (paratext/heading) or has no source
+  // text at all — the same set whose number pill is suppressed, so the two
+  // left-edge columns read consistently. The voice resolves through the LIVE
+  // tts settings (castAssignments → per-cell pin → default); "explicit" is
+  // gated through findVoice so an assignment pointing at a DELETED voice
+  // truthfully renders as the faded fallback rather than solid-but-narrator.
+  const gutterSpeaking =
+    castGutter &&
+    cell.type !== "paratext" &&
+    cell.type !== "heading" &&
+    Boolean((cell.original ?? cell.transcription ?? "").trim())
+  const gutterVoice = gutterSpeaking
+    ? resolveCastVoice(ttsSettings, cell.id, cell.ttsSettings?.voiceId)
+    : null
+  const gutterExplicit =
+    gutterSpeaking &&
+    Boolean(findVoice(ttsSettings, assignedCastVoiceId(ttsSettings, cell.id) ?? cell.ttsSettings?.voiceId))
+  const gutterCastName =
+    cell.metadata && typeof cell.metadata.cast_name === "string" ? (cell.metadata.cast_name as string) : null
+  const gutterVoices = useMemo(() => getVoiceLibrary(ttsSettings), [ttsSettings])
+
   const numberPill = numberLabel === null ? null : (
     // Box the digit to the source's first line (fontSize × line-height 1.6,
     // both set on the source well below) and center it, so the number keeps
@@ -5392,6 +5443,28 @@ function EditorRow({
             pl-2.5); ml-2 opens space before the badge stack, then a tight
             gap to the verse number. Fixed track keeps Source header-aligned. */}
         <div className="flex h-full items-start self-stretch py-1.5">
+          {castGutter && (
+            <div className="flex w-6 shrink-0 flex-col items-center">
+              <div className="mb-1 h-4 shrink-0" aria-hidden />
+              {/* Same line-box trick as the number pill: the circle rides the
+                  source's first text line at any font size. */}
+              <span
+                className="flex items-center justify-center"
+                style={{ height: `calc(${sourceFontSize}px * 1.6)` }}
+              >
+                {gutterVoice && (
+                  <CastGutterVoice
+                    voice={gutterVoice}
+                    explicit={gutterExplicit}
+                    castName={gutterCastName}
+                    editable={editable && Boolean(onAssignCastVoice)}
+                    voices={gutterVoices}
+                    onPick={(voiceId, opts) => onAssignCastVoice?.(cell, voiceId, opts)}
+                  />
+                )}
+              </span>
+            </div>
+          )}
           {/* SWARM-TODO(voice-a5): "Voice together" multi-cell selection gives
               no visual feedback and the action bar never appears. Root cause:
               the drag-selection affordance (onPointerDown) uses setSelection()

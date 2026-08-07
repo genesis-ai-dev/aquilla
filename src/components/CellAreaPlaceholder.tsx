@@ -9,8 +9,10 @@ import { EmptyState } from "@/components/ui/page"
 import { Skeleton } from "@/components/ui/skeleton"
 import type { CellAreaState } from "@/lib/editor/cell-area-state"
 
-/** Matches EditorTable's gridCols — keep in sync if the table's columns change. */
-const GRID_COLS = "grid-cols-[56px_1fr_1fr_56px]"
+/** Matches EditorTable's default gridCols (the Text lens shape — the stacked
+ *  media lens widens the gutter, but this skeleton always precedes text
+ *  mode). Keep in sync if the table's columns change. */
+const GRID_COLS = "grid-cols-[84px_1fr_1fr]"
 
 interface CellAreaPlaceholderProps {
   state: CellAreaState

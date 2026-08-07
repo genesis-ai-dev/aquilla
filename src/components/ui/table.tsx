@@ -56,6 +56,9 @@ function TableRow({ className, ...props }: React.ComponentProps<"tr">) {
       data-slot="table-row"
       className={cn(
         "border-b hover:bg-muted/50 has-aria-expanded:bg-muted/50 data-[state=selected]:bg-muted",
+        // Ghost action buttons sit on the row hover wash — keep them chrome-free.
+        "[&_[data-slot=button][data-variant=ghost]]:hover:bg-transparent",
+        "[&_[data-slot=button][data-variant=ghost]]:aria-expanded:bg-transparent",
         className
       )}
       {...props}

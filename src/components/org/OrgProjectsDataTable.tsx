@@ -372,7 +372,7 @@ export function OrgProjectsDataTable({
                     size="icon-sm"
                     variant="ghost"
                     aria-label={`More actions for ${p.name}`}
-                    className="text-muted-foreground hover:bg-accent hover:text-foreground"
+                    className="text-muted-foreground hover:text-foreground"
                     onClick={(e) => e.stopPropagation()}
                   >
                     <MoreHorizontal className="size-4" />

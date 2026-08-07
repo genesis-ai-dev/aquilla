@@ -77,7 +77,7 @@ describe("Preferences", () => {
   it("workspace settings use a right-side layout select and confirm switch", () => {
     renderAt("/preferences/workspace")
     expect(screen.getByRole("heading", { name: "Workspace" })).toBeInTheDocument()
-    expect(screen.getByLabelText("Sidebar tab layout")).toBeInTheDocument()
+    expect(screen.getByLabelText("Editor sidebar tab layout")).toBeInTheDocument()
     expect(screen.getByRole("switch", { name: /Confirm before replacing a translation/i })).toBeInTheDocument()
     expect(screen.queryByRole("tab", { name: /Left rail/i })).not.toBeInTheDocument()
   })

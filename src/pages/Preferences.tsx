@@ -80,7 +80,7 @@ const PROFILE_KEYS: (keyof TranslatorProfile)[] = [
 ]
 
 /**
- * Sidebar tab layout — Files/Chat/Search as a left rail or a top bar.
+ * Editor sidebar tab layout — Files/Chat/Search as a left rail or a top bar.
  * Self-contained so it can render on its own detail page.
  */
 function WorkspaceSection() {
@@ -90,7 +90,7 @@ function WorkspaceSection() {
   return (
     <SettingsGroup label="Workspace">
       <SettingsRow
-        label="Sidebar tab layout"
+        label="Editor sidebar tab layout"
         description="Show Files, Chat, and Search as a vertical rail on the left or a horizontal bar across the top of the sidebar."
         control={
           <Select
@@ -102,7 +102,7 @@ function WorkspaceSection() {
           >
             <SelectTrigger
               id="sidebar-tab-layout"
-              aria-label="Sidebar tab layout"
+              aria-label="Editor sidebar tab layout"
               className="w-36 bg-background"
             >
               <SelectValue />

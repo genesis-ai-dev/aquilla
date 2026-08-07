@@ -97,12 +97,12 @@ Connect only `aquilla-web-preview` to `genesis-ai-dev/aquilla`. Configure:
 
 The build runs root lint/unit/IDML/schema/build gates, both identity and sync
 typecheck/test suites, and the agent-worker typecheck/tests. Independent lanes
-run concurrently in two bounded-memory phases so the complete gate fits both
+run concurrently in three bounded-memory phases so the complete gate fits both
 Cloudflare's build-duration and memory limits; any failed phase prevents later
-phases and fails the whole build. Playwright browsers are not installed because
-this gate does not run E2E tests. The deploy step uploads only a route-free
-`aquilla-web-preview` version. Slash-named branches are normalized and hashed
-into stable lowercase aliases. No preview command can name `aquilla-web`,
+phases and fails the whole build. The IDML browser-conformance phase installs
+Chromium explicitly and runs alone to keep its memory isolated. The deploy step
+uploads only a route-free `aquilla-web-preview` version. Slash-named branches
+are normalized and hashed into stable lowercase aliases. No preview command can name `aquilla-web`,
 `aquilla-web-development`, either identity Worker, or either sync Worker.
 
 GitHub's removed Actions contexts (`lint`, `typecheck`, `unit`, and `build`)

@@ -496,9 +496,9 @@ describe("worker deployment environment contract", () => {
     expect(checks).toContain('["npm", ["ci", "--prefix", "agent-worker"]]')
     expect(checks).toContain('"type-check"')
     expect(checks).toContain('["bash", ["scripts/ci-build.sh"]]')
+    expect(checks).toContain('["pnpm", ["exec", "playwright", "install", "--with-deps", "chromium"]]')
     expect(checks).toContain("CHECK_PHASES")
     expect(checks).toContain("Promise.allSettled")
-    expect(checks).not.toContain("playwright")
   })
 
   it("keeps all live deployments off automatic push triggers", () => {

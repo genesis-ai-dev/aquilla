@@ -8,17 +8,18 @@ const env = {
 }
 
 describe("Cloudflare parallel CI checks", () => {
-  it("keeps every required check in an independent lane and omits unused browser installation", () => {
+  it("keeps every required check in a bounded lane and installs the required browser", () => {
     expect(CHECK_LANES.map(({ name }) => name)).toEqual([
       "root",
       "sync",
-      "release-contracts",
       "agent-worker",
+      "release-contracts",
       "identity",
       "spa",
     ])
     expect(CHECK_PHASES.map(({ lanes }) => lanes.map(({ name }) => name))).toEqual([
-      ["root", "sync", "release-contracts", "agent-worker"],
+      ["root", "sync", "agent-worker"],
+      ["release-contracts"],
       ["identity", "spa"],
     ])
     const commands = JSON.stringify(CHECK_LANES)
@@ -28,7 +29,9 @@ describe("Cloudflare parallel CI checks", () => {
     expect(commands).toContain("build:workers-build:identity")
     expect(commands).toContain("build:workers-build:sync")
     expect(commands).toContain("scripts/ci-build.sh")
-    expect(commands).not.toContain("playwright")
+    expect(commands).toContain("playwright")
+    expect(commands).toContain("--with-deps")
+    expect(commands).toContain("chromium")
   })
 
   it("runs independent lanes concurrently within bounded memory phases", async () => {

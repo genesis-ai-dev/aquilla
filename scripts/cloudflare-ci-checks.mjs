@@ -5,7 +5,14 @@ import { workersBuildMetadata } from "./assert-workers-build-env.mjs"
 const ROOT_LANE = { name: "root", steps: [["pnpm", ["lint"]], ["pnpm", ["test"]]] }
 const IDENTITY_LANE = { name: "identity", steps: [["pnpm", ["run", "build:workers-build:identity"]]] }
 const SYNC_LANE = { name: "sync", steps: [["pnpm", ["run", "build:workers-build:sync"]]] }
-const RELEASE_LANE = { name: "release-contracts", steps: [["pnpm", ["test:idml"]], ["pnpm", ["neon:check"]]] }
+const RELEASE_LANE = {
+  name: "release-contracts",
+  steps: [
+    ["pnpm", ["exec", "playwright", "install", "--with-deps", "chromium"]],
+    ["pnpm", ["test:idml"]],
+    ["pnpm", ["neon:check"]],
+  ],
+}
 const AGENT_LANE = {
   name: "agent-worker",
   steps: [
@@ -16,13 +23,17 @@ const AGENT_LANE = {
 }
 const SPA_LANE = { name: "spa", steps: [["bash", ["scripts/ci-build.sh"]]] }
 
-// Bound peak memory to two heavyweight compiler/test processes. The first
-// phase overlaps the two longest suites; the second overlaps the shorter
-// identity suite with the SPA build.
+// Bound peak memory to two heavyweight compiler/test processes. Browser
+// conformance runs alone so installing and launching Chromium cannot overlap
+// the longest Vitest suites or the SPA compiler.
 export const CHECK_PHASES = [
   {
     name: "core",
-    lanes: [ROOT_LANE, SYNC_LANE, RELEASE_LANE, AGENT_LANE],
+    lanes: [ROOT_LANE, SYNC_LANE, AGENT_LANE],
+  },
+  {
+    name: "browser-contracts",
+    lanes: [RELEASE_LANE],
   },
   {
     name: "final",

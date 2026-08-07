@@ -253,6 +253,96 @@ describe("worker/index — non-canonical host noindex (SEO)", () => {
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Security response headers (SEC-6). Sessions are 30-day JWTs in IndexedDB and
+// user-supplied model API keys sit in localStorage, so these headers are the
+// layer that limits what an injected script can reach. Asserting them here is
+// the only regression guard — nothing else in the build checks response headers.
+describe("worker/index — security response headers", () => {
+  async function fetchHost(host: string, path = "/") {
+    const { default: worker } = await import("./index")
+    return worker.fetch(new Request(`https://${host}${path}`), makeEnv())
+  }
+
+  it("sets the baseline CSP on the marketing homepage", async () => {
+    const csp = (await fetchHost("aquilla.app")).headers.get("Content-Security-Policy")
+    expect(csp).toContain("object-src 'none'")
+    expect(csp).toContain("base-uri 'self'")
+    expect(csp).toContain("frame-ancestors 'none'")
+    expect(csp).toContain("form-action 'self'")
+  })
+
+  it("does not constrain script-src/style-src yet — prerendered pages inline both", async () => {
+    // Guards the documented staging decision: adding these without nonces
+    // would break the prerendered marketing pages (docs/SEO.md). If this test
+    // fails because someone tightened the policy, verify the marketing pages
+    // still render before updating it.
+    const csp = (await fetchHost("aquilla.app")).headers.get("Content-Security-Policy")
+    expect(csp).not.toContain("script-src")
+    expect(csp).not.toContain("style-src")
+  })
+
+  it("denies framing two ways — CSP for modern browsers, XFO for the rest", async () => {
+    const res = await fetchHost("aquilla.app", "/bible-translation")
+    expect(res.headers.get("X-Frame-Options")).toBe("DENY")
+    expect(res.headers.get("Content-Security-Policy")).toContain("frame-ancestors 'none'")
+  })
+
+  it("sets nosniff and a referrer policy", async () => {
+    const res = await fetchHost("aquilla.app", "/app/projects")
+    expect(res.headers.get("X-Content-Type-Options")).toBe("nosniff")
+    expect(res.headers.get("Referrer-Policy")).toBe("strict-origin-when-cross-origin")
+  })
+
+  it("keeps microphone enabled for cell audio recording and denies the rest", async () => {
+    const pp = (await fetchHost("aquilla.app")).headers.get("Permissions-Policy") ?? ""
+    // AudioRecorder/ calls getUserMedia({ audio: true }) — denying this breaks
+    // recording outright, which is why it is `self` and not `()`.
+    expect(pp).toContain("microphone=(self)")
+    expect(pp).toContain("camera=()")
+    expect(pp).toContain("geolocation=()")
+  })
+
+  it("sends HSTS on real hosts", async () => {
+    const res = await fetchHost("aquilla.app")
+    expect(res.headers.get("Strict-Transport-Security")).toBe("max-age=31536000")
+  })
+
+  it("never sends HSTS on localhost — it would pin every local dev server to HTTPS", async () => {
+    expect((await fetchHost("localhost")).headers.get("Strict-Transport-Security")).toBeNull()
+    expect((await fetchHost("app.localhost")).headers.get("Strict-Transport-Security")).toBeNull()
+  })
+
+  it("applies to SPA routes served through the not-found fallback", async () => {
+    const res = await fetchHost("aquilla.app", "/project/abc/edit")
+    expect(res.headers.get("Content-Security-Policy")).toBeTruthy()
+    expect(res.headers.get("X-Frame-Options")).toBe("DENY")
+  })
+
+  it("applies to invite links, whose HTML is rewritten before it is returned", async () => {
+    const { default: worker } = await import("./index")
+    const env = {
+      ASSETS: {
+        fetch: async () =>
+          new Response(SPA_HTML, { status: 200, headers: { "Content-Type": "text/html" } }),
+      },
+    }
+    const res = await worker.fetch(new Request("https://aquilla.app/join/tok123"), env)
+    expect(res.headers.get("Content-Security-Policy")).toContain("frame-ancestors 'none'")
+    expect(await res.text()).toContain("You&#x27;re invited".replace("&#x27;", "'"))
+  })
+
+  it("still serves the right body — headers are additive, not a rewrite", async () => {
+    const res = await fetchHost("aquilla.app", "/beta")
+    expect(await res.text()).toBe("served:/beta.html")
+  })
+
+  it("preserves Cache-Control on the shared-cached homepage", async () => {
+    const res = await fetchHost("aquilla.app")
+    expect(res.headers.get("Cache-Control")).toContain("s-maxage=600")
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Deployment-config contract.
 //
 // The routing tests above call the Worker's `fetch` directly. In production the

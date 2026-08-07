@@ -6,10 +6,21 @@
 //
 // HARD-GATED on `WRANGLER_LOCAL=1` exactly like /__test__/reset. Production
 // wrangler.toml does NOT define WRANGLER_LOCAL, so this route surface is
-// invisible in prod even if the worker is reachable. The bypass also never
-// takes a user identifier from the request — it always resolves to the
-// hardcoded `dev` username — so even if the gate ever failed open, an
-// attacker could only log in as a user that does not exist in prod Postgres.
+// invisible in prod even if the worker is reachable. The var is set only by
+// scripts/dev-stack.ts and scripts/e2e-up.ts, injected on the CLI — it appears
+// in no wrangler.toml, no .env, and no .dev.vars.example. Verified again
+// 2026-08-07.
+//
+// SEC-8 — do NOT relax that gate on the theory that a failure would be
+// harmless. An earlier version of this comment claimed a failed-open gate
+// "could only log in as a user that does not exist in prod Postgres". That is
+// false, and the false reassurance was the actual finding: /__dev__/login
+// calls seedDev(), which CREATES users `dev`/`alice`/`bob` with the password
+// `dev`, plus an org and projects, in whatever database is bound. Against a
+// prod binding that is unauthenticated account creation with a known password,
+// not a no-op. (/__test__/reset is worse still — it truncates every core
+// table.) The gate is the whole defense; treat any config change that could
+// set WRANGLER_LOCAL outside local dev as a production incident.
 
 import { Hono } from "hono"
 import type { AuthHonoEnv } from "../middleware/auth"

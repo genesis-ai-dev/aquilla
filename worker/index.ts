@@ -70,16 +70,87 @@ export function injectInviteMeta(html: string, origin: string): string {
 // with (or leak ahead of) aquilla.app in search results.
 const CANONICAL_HOST = "aquilla.app"
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Security response headers (docs/SECURITY-NOTES-2026-06-10.md SEC-6).
+//
+// The SPA served nothing but X-Robots-Tag: no CSP, no framing control, no
+// nosniff. Session JWTs live in IndexedDB and user-supplied Gemini/completion
+// API keys live in localStorage, so a single XSS hands over both — CSP is the
+// standard second layer and it was absent.
+//
+// The baseline below is deliberately the subset with no realistic false
+// positives, so it can ship without a staged report-only rollout:
+//
+//   object-src 'none'      — no <object>/<embed> anywhere in the app.
+//   base-uri 'self'        — blocks <base> injection redirecting relative URLs.
+//   frame-ancestors 'none' — no iframe embeds exist (grep-verified); pairs
+//                            with X-Frame-Options for pre-CSP2 browsers.
+//   form-action 'self'     — every form submits via fetch to our own origin.
+//
+// Deliberately NOT constrained yet: script-src/style-src/connect-src. The
+// prerendered marketing pages (docs/SEO.md) inline their hydration payload and
+// Tailwind emits runtime inline styles, so those need nonces or a measured
+// allowlist first — tracked as the follow-up in docs/OPSEC-REVIEW-2026-08-07.md.
+const BASELINE_CSP = [
+  "object-src 'none'",
+  "base-uri 'self'",
+  "frame-ancestors 'none'",
+  "form-action 'self'",
+].join("; ")
+
+// Only the features the app actually uses stay enabled. Microphone is `self`
+// because cell audio recording needs getUserMedia (AudioRecorder/); everything
+// else the app never touches, so denying it costs nothing and shrinks the blast
+// radius of injected third-party script.
+const PERMISSIONS_POLICY = [
+  "accelerometer=()",
+  "camera=()",
+  "geolocation=()",
+  "gyroscope=()",
+  "magnetometer=()",
+  "payment=()",
+  "usb=()",
+  "microphone=(self)",
+].join(", ")
+
+// 1 year, no includeSubDomains/preload. The API hosts (api.*.aquilla.app) are
+// Cloudflare-fronted HTTPS today, but includeSubDomains is a zone-wide
+// commitment that belongs in the Cloudflare HSTS setting where it can be
+// rolled back, not pinned into every browser that ever loaded a page here.
+const HSTS = "max-age=31536000"
+
+function isLocalHost(host: string): boolean {
+  return host === "localhost" || host.endsWith(".localhost")
+}
+
+/** Applied to every response this Worker returns. Note the coverage limit:
+ *  Cloudflare's asset router serves hashed bundles and other matching assets
+ *  BEFORE the Worker runs (only `/` is `run_worker_first`), so those responses
+ *  never pass through here. That's acceptable for these headers — all of them
+ *  are document-scoped, and every HTML document does route through the Worker
+ *  (`/` and the static pages explicitly, SPA routes via not_found_handling). */
+function applySecurityHeaders(headers: Headers, host: string): void {
+  headers.set("Content-Security-Policy", BASELINE_CSP)
+  headers.set("X-Content-Type-Options", "nosniff")
+  headers.set("X-Frame-Options", "DENY")
+  headers.set("Referrer-Policy", "strict-origin-when-cross-origin")
+  headers.set("Permissions-Policy", PERMISSIONS_POLICY)
+  // Never on localhost: HSTS there pins the whole loopback origin to HTTPS in
+  // the developer's browser, breaking every other http://localhost:PORT app.
+  if (!isLocalHost(host)) headers.set("Strict-Transport-Security", HSTS)
+}
+
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
     const res = await route(req, env)
     const host = new URL(req.url).hostname
-    if (host !== CANONICAL_HOST && host !== "localhost" && !host.endsWith(".localhost")) {
-      const wrapped = new Response(res.body, res)
+    // Rewrap unconditionally: an ASSETS.fetch() response has immutable headers.
+    const wrapped = new Response(res.body, res)
+    applySecurityHeaders(wrapped.headers, host)
+    if (host !== CANONICAL_HOST && !isLocalHost(host)) {
       wrapped.headers.set("X-Robots-Tag", "noindex")
-      return wrapped
     }
-    return res
+    return wrapped
   },
 }
 

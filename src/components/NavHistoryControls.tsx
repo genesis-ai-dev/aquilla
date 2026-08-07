@@ -1,16 +1,22 @@
 /**
- * NavHistoryControls — browser-style back/forward buttons for the top-left of
- * the app chrome, plus a history menu.
+ * NavHistoryControls — browser-style back/forward plus a previously-viewed
+ * menu of concrete projects, teams, and editor files (max 15).
  *
- * - Clock: open a dropdown of visited pages; click an entry to jump to it.
- * - Click an arrow: go back / forward one step.
+ * - Clock: open recently viewed entities; click to jump.
+ * - Click an arrow: go back / forward one browser-history step.
  *
  * Renders nothing when there's no NavHistoryProvider (e.g. in page-level tests).
  */
 import { useState } from "react"
 import { ChevronLeft, ChevronRight, Clock } from "lucide-react"
+import { InitialsAvatar } from "@/components/InitialsAvatar"
 import { useNavHistory, type NavHistoryValue } from "@/context/NavHistoryContext"
-import { deriveNavIcon } from "@/lib/navigation/page-icons"
+import { NAV_PAGE_ICONS } from "@/lib/navigation/page-icons"
+import {
+  MAX_RECENT_VISITS,
+  RECENT_KIND_LABEL,
+  type RecentEntity,
+} from "@/lib/navigation/recent-visits"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -36,13 +42,10 @@ export function NavHistoryControls() {
 
 function HistoryMenuButton({ nav }: { nav: NavHistoryValue }) {
   const [open, setOpen] = useState(false)
-  const hasHistory = nav.entries.length > 1
-  // Newest stack end first so the current page sits near the top when at the tip.
-  const list = nav.entries
-    .map((entry, target) => ({ entry, target }))
-    .reverse()
+  const list = nav.recent.slice(0, MAX_RECENT_VISITS)
+  const hasRecent = list.length > 0
 
-  if (!hasHistory) {
+  if (!hasRecent) {
     return (
       <AppTooltip content="No previously viewed pages" side="bottom" disabled={open}>
         <Button
@@ -75,28 +78,54 @@ function HistoryMenuButton({ nav }: { nav: NavHistoryValue }) {
           }
         />
       </AppTooltip>
-      <DropdownMenuContent align="start" side="bottom" sideOffset={6} className="w-64">
+      <DropdownMenuContent align="end" side="bottom" sideOffset={4} className="min-w-56 w-max max-w-96 text-sm">
         <DropdownMenuGroup>
-          <DropdownMenuLabel>Previously viewed</DropdownMenuLabel>
-          {list.map(({ entry, target }) => {
-            const isCurrent = target === nav.index
-            const Icon = deriveNavIcon(entry.pathname)
-            return (
-              <DropdownMenuItem
-                key={`${entry.key}-${target}`}
-                disabled={isCurrent}
-                onClick={() => {
-                  if (!isCurrent) nav.go(target)
-                }}
-              >
-                <Icon />
-                <span className="truncate">{entry.title}</span>
-              </DropdownMenuItem>
-            )
-          })}
+          <DropdownMenuLabel className="px-2 py-1 text-sm font-normal">
+            Previously viewed
+          </DropdownMenuLabel>
+          {list.map((entry) => (
+            <RecentItem
+              key={`${entry.kind}-${entry.id}`}
+              entry={entry}
+              onPick={() => {
+                setOpen(false)
+                nav.openRecent(entry.pathname, entry.search)
+              }}
+            />
+          ))}
         </DropdownMenuGroup>
       </DropdownMenuContent>
     </DropdownMenu>
+  )
+}
+
+function RecentItem({ entry, onPick }: { entry: RecentEntity; onPick: () => void }) {
+  const kindLabel = RECENT_KIND_LABEL[entry.kind]
+  const ProjectIcon = NAV_PAGE_ICONS.project
+  const FileIcon = NAV_PAGE_ICONS.file
+  // Color is hashed from the full team title (same as TeamWithAvatar).
+  // `singleInitial` only shrinks the glyph — it does not affect colorFromName.
+  const teamName = entry.title.trim()
+  // Kind and title share the same type size/weight; only color differs.
+  const itemText = "text-sm font-normal leading-5"
+  return (
+    <DropdownMenuItem onClick={onPick} className="gap-2 px-2 py-1.5 text-sm">
+      <span className={`w-14 shrink-0 ${itemText} text-muted-foreground`}>{kindLabel}</span>
+      {entry.kind === "team" ? (
+        <InitialsAvatar
+          name={teamName}
+          size="xs"
+          className="size-4!"
+          menuSafe
+          singleInitial
+        />
+      ) : entry.kind === "file" ? (
+        <FileIcon className="size-4" />
+      ) : (
+        <ProjectIcon className="size-4" />
+      )}
+      <span className={`min-w-0 flex-1 truncate ${itemText}`}>{entry.title}</span>
+    </DropdownMenuItem>
   )
 }
 

@@ -185,18 +185,16 @@ export function FileRow(props: FileRowProps) {
           </div>
         )}
         {!editing && (
-          <AppTooltip content="File actions" side="right">
-            <button
-              className="p-1 rounded-md text-muted-foreground opacity-0 transition-colors hover:text-foreground group-hover:opacity-100 focus-visible:opacity-100"
-              onClick={(e) => {
-                e.stopPropagation()
-                openContextMenuAtPointer(e.currentTarget, e.clientX, e.clientY)
-              }}
-              aria-label="File actions"
-            >
-              <MoreHorizontal className="h-3.5 w-3.5" />
-            </button>
-          </AppTooltip>
+          <button
+            className="p-1 rounded-md text-muted-foreground opacity-0 transition-colors hover:text-foreground group-hover:opacity-100 focus-visible:opacity-100"
+            onClick={(e) => {
+              e.stopPropagation()
+              openContextMenuAtPointer(e.currentTarget, e.clientX, e.clientY)
+            }}
+            aria-label="File actions"
+          >
+            <MoreHorizontal className="h-3.5 w-3.5" />
+          </button>
         )}
         {hasSuggestion && !editing && (
           <AppTooltip content="A cleaner name was detected for this file. Click to apply, or use the Apply button at the top of the sidebar." side="right" className="max-w-xs">

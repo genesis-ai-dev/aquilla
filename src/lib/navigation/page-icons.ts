@@ -14,6 +14,7 @@
  * - Preferences → SlidersHorizontal (Accounts & access)
  * - Organizations → Building2 (Buildings)
  * - Project → FolderOpen (File icons)
+ * - File → FileText (File icons)
  * - Editor → BookOpenText (Text formatting)
  * - Terminology → Languages (Text formatting)
  * - Memory → BrainCircuit (Coding & development)
@@ -61,6 +62,7 @@ export const NAV_PAGE_ICONS = {
   organizations: Building2,
   project: FolderOpen,
   team: SquareUserRound,
+  file: FileText,
 } as const satisfies Record<string, LucideIcon>
 
 /** Known breadcrumb / history labels → icon (covers titles that differ slightly). */

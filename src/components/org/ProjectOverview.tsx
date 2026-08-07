@@ -16,6 +16,7 @@ import { useProject } from "@/hooks/useProject"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useActiveOrg } from "@/context/OrgContext"
+import { useNavHistoryTitle } from "@/context/NavHistoryContext"
 import { ConfirmActionDialog } from "@/components/ConfirmActionDialog"
 import { archiveProjectRemote, unarchiveProjectRemote } from "@/lib/sync/archive"
 import { setProjectDeadline, setProjectPm } from "@/lib/sync/cloud-projects"
@@ -516,6 +517,7 @@ export function ProjectOverview() {
   // `openingOverlay` blocks the rest of the page while the open is in flight.
   const { open: openWorkspace, isPending: openPending, overlay: openingOverlay } = useOpenWorkspace()
   const { project, status, refresh, pm } = useProject(id)
+  useNavHistoryTitle(project?.name)
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
   // AQU-507: candidate PMs = the project's effective members. Only fetched for
@@ -1000,7 +1002,7 @@ export function ProjectOverview() {
                       )}
                     </Button>
                     {isOwner && isArchived && (
-                      <Button size="sm" variant="outline" onClick={handleRestore} disabled={busy}>
+                      <Button variant="outline" onClick={handleRestore} disabled={busy}>
                         Restore
                       </Button>
                     )}

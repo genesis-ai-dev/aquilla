@@ -134,10 +134,14 @@ describe("DataTable", () => {
     expect(icon).toHaveClass("group-hover/sort:opacity-100")
     expect(icon).toHaveClass("lucide-arrow-up") // numbers preview desc
     expect(countHeader).toHaveClass("hover:bg-muted/50")
+    expect(countHeader).toHaveClass("text-muted-foreground")
+    expect(icon).toHaveClass("text-foreground")
 
     const nameHeader = screen.getByRole("button", { name: /Name/i })
+    expect(nameHeader).toHaveClass("text-muted-foreground")
     expect(nameHeader.querySelector('[data-slot="sort-icon"]')).toHaveClass("opacity-100")
     expect(nameHeader.querySelector('[data-slot="sort-icon"]')).toHaveClass("lucide-arrow-down")
+    expect(nameHeader.querySelector('[data-slot="sort-icon"]')).toHaveClass("text-foreground")
 
     fireEvent.click(countHeader) // desc — ArrowUp (high→low), stays visible
     const descIcon = countHeader.querySelector('[data-slot="sort-icon"]')

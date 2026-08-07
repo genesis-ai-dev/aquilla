@@ -43,7 +43,8 @@ export function DataTableColumnHeader<TData, TValue>({
       aria-hidden
       data-slot="sort-icon"
       className={cn(
-        "size-3.5 shrink-0",
+        // Darker than the muted label in both themes so active sort reads clearly.
+        "size-3.5 shrink-0 text-foreground",
         sorted ? "opacity-100" : "opacity-0 group-hover/sort:opacity-100",
       )}
     />
@@ -56,8 +57,9 @@ export function DataTableColumnHeader<TData, TValue>({
         className={cn(
           // Negative margin cancels the padding so the label stays put; hover
           // bg fills the padding and bleeds around the title like a ghost chip.
-          "group/sort -mx-1.5 -my-0.5 inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 font-medium text-foreground",
-          "hover:bg-muted/50 hover:text-foreground",
+          // Label stays muted; only the sort arrow uses foreground contrast.
+          "group/sort -mx-1.5 -my-0.5 inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 font-medium text-muted-foreground",
+          "hover:bg-muted/50",
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
         )}
         onClick={column.getToggleSortingHandler()}

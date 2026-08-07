@@ -38,7 +38,9 @@ export function ProjectMetricHeader({
         )}
       >
         <Icon aria-hidden="true" className="size-4 shrink-0" strokeWidth={2} />
-        {SortIcon ? <SortIcon aria-hidden="true" className="size-3 shrink-0" /> : null}
+        {SortIcon ? (
+          <SortIcon aria-hidden="true" className="size-3 shrink-0 text-foreground" />
+        ) : null}
       </button>
     </AppTooltip>
   )

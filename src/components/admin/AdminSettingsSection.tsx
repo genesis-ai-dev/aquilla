@@ -3,6 +3,14 @@ import { Check } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { FieldLabel } from "@/components/ui/field"
 import { Section } from "@/components/ui/page"
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { ModelListEditor, type ModelListValue } from "./ModelListEditor"
 import { AbResultsPanel } from "./AbResultsPanel"
 import {
@@ -155,22 +163,33 @@ export function AdminSettingsSection({ jwt }: { jwt: string }) {
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1.5">
               <FieldLabel htmlFor="admin-ab-challenger">Challenger model</FieldLabel>
-              <select
-                id="admin-ab-challenger"
+              <Select
+                items={[
+                  { value: "", label: "— choose a model —" },
+                  ...modelList.models
+                    .filter((m) => m !== modelList.chatModel)
+                    .map((m) => ({ value: m, label: m })),
+                ]}
                 value={abChallenger}
-                onChange={(e) => setAbChallenger(e.target.value)}
+                onValueChange={(v) => setAbChallenger(v ?? "")}
                 disabled={!abEnabled}
-                className="w-full rounded-lg border bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
               >
-                <option value="">— choose a model —</option>
-                {modelList.models
-                  .filter((m) => m !== modelList.chatModel)
-                  .map((m) => (
-                    <option key={m} value={m}>
-                      {m}
-                    </option>
-                  ))}
-              </select>
+                <SelectTrigger id="admin-ab-challenger" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    <SelectItem value="">— choose a model —</SelectItem>
+                    {modelList.models
+                      .filter((m) => m !== modelList.chatModel)
+                      .map((m) => (
+                        <SelectItem key={m} value={m}>
+                          {m}
+                        </SelectItem>
+                      ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
               <p className="text-xs text-muted-foreground">
                 Competes against the default chat model ({modelList.chatModel || "unset"}).
               </p>

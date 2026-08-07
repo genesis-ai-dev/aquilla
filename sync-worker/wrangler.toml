@@ -120,8 +120,12 @@ command = "bash ../scripts/verify-deploy-branch.sh main"
 [env.production.observability]
 enabled = true
 
+[env.production.version_metadata]
+binding = "CF_VERSION_METADATA"
+
 [env.production.vars]
 ENVIRONMENT = "production"
+DEPLOYMENT_WORKER_NAME = "aquilla-sync-worker"
 # PostHog *project* token (public — same one shipped in the SPA bundle).
 # Enables 4xx/5xx log shipping to PostHog Logs (src/posthog-logs.ts).
 POSTHOG_KEY = "phc_oTksJRNEdLEaLD4wmdd2XcR4xaR4n52eA5VGDytW55Ln"
@@ -175,8 +179,12 @@ name = "aquilla-sync-worker-dev"
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 routes = ["api.dev.aquilla.app/sync/*"]
 
+[env.development.version_metadata]
+binding = "CF_VERSION_METADATA"
+
 [env.development.vars]
 ENVIRONMENT = "development"
+DEPLOYMENT_WORKER_NAME = "aquilla-sync-worker-dev"
 # Identity worker base for the Monday-integration push nudge (monday-notify.ts).
 AUTH_WORKER_URL = "https://api.dev.aquilla.app/identity"
 

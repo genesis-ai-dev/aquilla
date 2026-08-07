@@ -17,10 +17,11 @@ import {
 } from "@/lib/admin/insights"
 import type { AdminOverview, AdminOrg, AdminUser, AdminProject, AdminActivity } from "@/lib/frontier/admin"
 import { OrgWithAvatar } from "@/components/OrgWithAvatar"
-
-/** Bleed hover slightly into the Section's px-5 while keeping text aligned with the header. */
-const IN_CARD_TABLE_CLASS =
-  "border-0 -mx-2 overflow-visible [&_tr]:border-b-0! [&_tbody_tr]:hover:bg-transparent! [&_tbody_tr:hover>td]:bg-muted/50 [&_tbody_tr:hover>td:first-child]:rounded-l-lg [&_tbody_tr:hover>td:last-child]:rounded-r-lg"
+import {
+  ADMIN_TABLE_CLASS,
+  ADMIN_TABLE_SECTION_CONTENT,
+  ADMIN_TABLE_SECTION_HEADER,
+} from "@/components/admin/shared"
 
 /**
  * The Overview tab, rebuilt as an operator home. Stat tiles carry context via
@@ -94,7 +95,11 @@ export function AdminOverviewHome({
         accessorFn: (r) => r.score,
         header: ({ column }) => <DataTableColumnHeader column={column} title="Status" />,
         cell: ({ row }) => (
-          <ProjectStatus archived={false} reasons={row.original.reasons} />
+          <ProjectStatus
+            archived={false}
+            reasons={row.original.reasons}
+            deadlineAt={row.original.project.deadlineAt}
+          />
         ),
       },
     ],
@@ -164,6 +169,8 @@ export function AdminOverviewHome({
       <Section
         title="Needs attention"
         description="Active projects that are overdue, due soon, or stalled."
+        headerClassName={ADMIN_TABLE_SECTION_HEADER}
+        contentClassName={ADMIN_TABLE_SECTION_CONTENT}
         action={
           atRiskTotal > atRisk.length ? (
             <button
@@ -182,7 +189,7 @@ export function AdminOverviewHome({
           getRowId={(r) => r.project.id}
           onRowClick={(r) => navigate(`/projects/${r.project.id}`)}
           testId="admin-overview-attention-table"
-          className={IN_CARD_TABLE_CLASS}
+          className={ADMIN_TABLE_CLASS}
           dense
           emptyState={
             <EmptyState
@@ -200,6 +207,8 @@ export function AdminOverviewHome({
         <Section
           title="Most active organizations"
           description="Busiest tenants by project count."
+          headerClassName={ADMIN_TABLE_SECTION_HEADER}
+          contentClassName={ADMIN_TABLE_SECTION_CONTENT}
         >
           <DataTable
             columns={orgColumns}
@@ -207,7 +216,7 @@ export function AdminOverviewHome({
             getRowId={(o) => String(o.id)}
             onRowClick={(o) => onOpenOrg(o.id)}
             testId="admin-overview-orgs-table"
-            className={IN_CARD_TABLE_CLASS}
+            className={ADMIN_TABLE_CLASS}
             dense
             emptyState={
               <EmptyState

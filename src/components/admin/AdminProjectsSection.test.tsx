@@ -91,14 +91,14 @@ describe("AdminProjectsSection", () => {
     expect(navigate).not.toHaveBeenCalled()
   })
 
-  it("renders a table-width dashed empty state when there are no projects", () => {
+  it("renders a table-width card empty state when there are no projects", () => {
     render(
       <MemoryRouter>
         <AdminProjectsSection projects={[]} />
       </MemoryRouter>,
     )
     expect(screen.getByLabelText("Search projects…")).toBeInTheDocument()
-    expect(screen.getByTestId("admin-projects-empty")).toHaveClass("border-dashed")
+    expect(screen.getByTestId("admin-projects-empty")).toHaveClass("rounded-lg", "border", "bg-card")
     expect(screen.getByText("No projects")).toBeInTheDocument()
     expect(screen.getByText("Projects appear here as they're created.")).toBeInTheDocument()
   })

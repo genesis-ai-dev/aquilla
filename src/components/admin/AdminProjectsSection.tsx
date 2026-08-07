@@ -19,6 +19,7 @@ import type { AdminProject } from "@/lib/frontier/admin"
 import { DateTooltip } from "@/components/ui/date-tooltip"
 import { OrgWithAvatar } from "@/components/OrgWithAvatar"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
+import { ADMIN_TABLE_PANEL_CLASS } from "@/components/admin/shared"
 
 type Lens = "all" | "needs-attention" | "active" | "archived"
 const LENSES: { value: Lens; label: string }[] = [
@@ -134,7 +135,11 @@ export function AdminProjectsSection({ projects }: { projects: AdminProject[] })
         cell: ({ row }) => {
           const p = row.original
           return (
-            <ProjectStatus archived={p.archived} reasons={attentionReasons(p, now)} />
+            <ProjectStatus
+              archived={p.archived}
+              reasons={attentionReasons(p, now)}
+              deadlineAt={p.deadlineAt}
+            />
           )
         },
       },
@@ -169,7 +174,7 @@ export function AdminProjectsSection({ projects }: { projects: AdminProject[] })
 
   const emptyState = (
     <div
-      className="w-full overflow-hidden rounded-md border border-dashed"
+      className="w-full overflow-hidden rounded-lg border bg-card"
       data-testid="admin-projects-empty"
     >
       <EmptyState
@@ -229,6 +234,7 @@ export function AdminProjectsSection({ projects }: { projects: AdminProject[] })
       )}
       emptyState={emptyState}
       testId="admin-projects-table"
+      className={ADMIN_TABLE_PANEL_CLASS}
       dense
     />
   )

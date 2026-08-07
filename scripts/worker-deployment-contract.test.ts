@@ -485,6 +485,12 @@ describe("worker deployment environment contract", () => {
     }
     const command = rootPackage.scripts?.["build:workers-build"] ?? ""
     const checks = readRepoFile("scripts", "cloudflare-ci-checks.mjs")
+    const browserConformance = readRepoFile(
+      "packages",
+      "idml-roundtrip",
+      "scripts",
+      "run-browser-conformance.ts",
+    )
 
     expect(command).toContain("scripts/cloudflare-ci-checks.mjs")
     expect(checks).toContain('["pnpm", ["lint"]]')
@@ -496,7 +502,10 @@ describe("worker deployment environment contract", () => {
     expect(checks).toContain('["npm", ["ci", "--prefix", "agent-worker"]]')
     expect(checks).toContain('"type-check"')
     expect(checks).toContain('["bash", ["scripts/ci-build.sh"]]')
-    expect(checks).toContain('["pnpm", ["exec", "playwright", "install", "chromium"]]')
+    expect(checks).not.toContain("playwright install")
+    expect(browserConformance).toContain('process.env.WORKERS_CI === "1"')
+    expect(browserConformance).toContain('import("@sparticuz/chromium")')
+    expect(browserConformance).toContain("serverlessChromium.executablePath()")
     expect(checks).toContain("CHECK_PHASES")
     expect(checks).toContain("Promise.allSettled")
   })

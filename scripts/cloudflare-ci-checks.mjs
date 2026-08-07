@@ -9,7 +9,6 @@ const SYNC_LANE = { name: "sync", steps: [["pnpm", ["run", "build:workers-build:
 const RELEASE_LANE = {
   name: "release-contracts",
   steps: [
-    ["pnpm", ["exec", "playwright", "install", "chromium"]],
     ["pnpm", ["test:idml"]],
     ["pnpm", ["neon:check"]],
   ],

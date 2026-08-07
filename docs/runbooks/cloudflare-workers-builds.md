@@ -101,9 +101,10 @@ run concurrently in three bounded-memory phases so the complete gate fits both
 Cloudflare's build-duration and memory limits; any failed phase prevents later
 phases and fails the whole build. The long root and sync Vitest suites run in
 separate phases so they cannot starve each other's asynchronous tests. The IDML
-browser-conformance lane installs Chromium without requiring root access. The
-deploy step uploads only a route-free `aquilla-web-preview` version. Slash-named
-branches are normalized and hashed into stable lowercase aliases. No preview command can name `aquilla-web`,
+browser-conformance lane uses its pinned, serverless Chromium binary without
+requiring root access. The deploy step uploads only a route-free
+`aquilla-web-preview` version. Slash-named branches are normalized and hashed
+into stable lowercase aliases. No preview command can name `aquilla-web`,
 `aquilla-web-development`, either identity Worker, or either sync Worker.
 
 GitHub's removed Actions contexts (`lint`, `typecheck`, `unit`, and `build`)

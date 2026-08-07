@@ -45,6 +45,7 @@ import type { Concept, TermRendering, RenderingStatus } from "@/lib/terminology/
 import { addConcept, updateConcept, deleteConcept, mergeConcepts, approveConcept, rejectConcept } from "@/lib/terminology/store"
 import { importConceptsCsv, exportConceptsCsv } from "@/lib/terminology/csv"
 import { importConceptsTbx, exportConceptsTbx } from "@/lib/terminology/tbx"
+import { canEditTermbase } from "@/lib/terminology/glossary-view"
 import { computeTerminologyStats } from "@/lib/terminology/stats"
 import type { CellPair } from "@/lib/terminology/stats"
 import { cn } from "@/lib/utils"
@@ -686,19 +687,12 @@ function LibraryStatsHeader({ concepts, cells }: LibraryStatsHeaderProps) {
 // ────────────────────────────────────────────────────────────────────────────
 // Role-gating helpers
 // project_lead = 500, maintainer = 600, owner = 700
-// contributor = 400 — may edit cells but NOT termbase definitions
+// contributor = 400 — may edit cells AND curate termbase definitions (AQU-816)
 // viewer/commenter/reviewer = <400 — read-only throughout
+//
+// `canEditTermbase` lives in @/lib/terminology/glossary-view so this page and
+// GlossaryEditor cannot drift apart on the floor.
 // ────────────────────────────────────────────────────────────────────────────
-
-/** Level at which a user may manage termbase definitions (add/edit/delete concepts, import). */
-const TERMBASE_EDIT_LEVEL = 500
-
-/** For local projects with no syncRole, default to full access (owner-equivalent). */
-function canEditTermbase(syncRole?: { level: number } | null, hasOrigin?: boolean): boolean {
-  if (!hasOrigin) return true // local-only project — no cloud role hierarchy
-  if (!syncRole) return true  // no role cached yet — optimistic allow; server will enforce
-  return syncRole.level >= TERMBASE_EDIT_LEVEL
-}
 
 interface GatedButtonProps extends React.ComponentPropsWithoutRef<typeof Button> {
   allowed: boolean
@@ -731,10 +725,10 @@ export function TerminologyPage() {
   // Derive concepts from the project record — single source of truth
   const concepts = project?.terminology ?? []
 
-  // Role-gating: project_lead+ (level >= 500) may manage termbase definitions.
+  // Role-gating: contributor+ (level >= 400) may manage termbase definitions.
   const hasOrigin = Boolean(project?.origin)
   const canManageTermbase = canEditTermbase(project?.syncRole, hasOrigin)
-  const termbaseGateTip = "Requires Project Lead role or higher to manage term base definitions."
+  const termbaseGateTip = "Requires Contributor role or higher to manage term base definitions."
 
   // Cell editing in the drill-down is allowed for contributor+ (level >= 400),
   // or always for local (no-origin) projects.

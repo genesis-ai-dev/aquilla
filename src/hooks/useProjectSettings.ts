@@ -18,6 +18,30 @@ import posthog from "@/lib/posthog"
 // without spec support — do not change without a matching auth-worker update + spec citation.
 export const SETTINGS_EDIT_ROLE_FLOOR = ROLE.MAINTAINER
 
+// AQU-816: the term base is the one settings key a contributor may write.
+// Biblica onboarding (2026-08-06): translators know the right rendering, so
+// they curate terms themselves. Mirrors the auth-worker gate, which admits a
+// settings write below SETTINGS_EDIT_ROLE_FLOOR only when `terminology` is the
+// sole key that changed. Everything else in the blob — system prompt / AI
+// instructions above all — stays at SETTINGS_EDIT_ROLE_FLOOR.
+export const TERMINOLOGY_EDIT_ROLE_FLOOR = ROLE.CONTRIBUTOR
+
+/** Settings keys writable below {@link SETTINGS_EDIT_ROLE_FLOOR}. */
+const TERMINOLOGY_ONLY_KEYS = new Set<string>(["terminology"])
+
+/**
+ * The role level a given partial write requires. A term-base-only patch needs
+ * contributor; any patch that touches another key needs maintainer. An empty
+ * patch is treated as a general write (nothing to relax the floor for).
+ */
+export function settingsEditRoleFloor(partial: ProjectWideSettings): number {
+  const keys = Object.keys(partial)
+  if (keys.length === 0) return SETTINGS_EDIT_ROLE_FLOOR
+  return keys.every((key) => TERMINOLOGY_ONLY_KEYS.has(key))
+    ? TERMINOLOGY_EDIT_ROLE_FLOOR
+    : SETTINGS_EDIT_ROLE_FLOOR
+}
+
 export type CannotEditReason = "offline" | "role" | null
 
 export type PatchOutcome =
@@ -40,7 +64,7 @@ export function describePatchFailure(outcome: PatchOutcome): string | null {
     case "blocked":
       return outcome.reason === "offline"
         ? "You're offline — reconnect to save term base changes."
-        : "You need the Maintainer role or higher to change the term base."
+        : "You need the Contributor role or higher to change the term base."
     case "conflict":
       return "The term base was changed elsewhere. Re-open the concept and try again."
     case "error":
@@ -73,9 +97,11 @@ export interface UseProjectSettings {
   /** Force a re-GET. */
   refresh: () => Promise<ProjectSettingsResponse | null>
   /** Apply a partial settings update. Optimistic local update, server PATCH,
-   *  conflict-snap on 409, returns outcome. Blocked when offline or below
-   *  MAINTAINER (600). Server-forbidden writes are surfaced as blocked and
-   *  the optimistic overlay is rolled back — no silent local divergence. */
+   *  conflict-snap on 409, returns outcome. Blocked when offline or below the
+   *  floor for the keys being written — MAINTAINER (600) in general,
+   *  CONTRIBUTOR (400) for a term-base-only patch (AQU-816). Server-forbidden
+   *  writes are surfaced as blocked and the optimistic overlay is rolled
+   *  back — no silent local divergence. */
   patch: (partial: ProjectWideSettings) => Promise<PatchOutcome>
 }
 
@@ -440,10 +466,12 @@ export function useProjectSettings(
     // 2. Offline → apply locally (preserve work, server reconciles on reconnect).
     // 3. roleLevel === null → unsynced project (server has no record of this
     //    project); apply locally only, no server roundtrip. Same as original.
-    // 4. roleLevel < SETTINGS_EDIT_ROLE_FLOOR → synced project, below floor. DO NOT apply
-    //    locally — this was the root cause of AQU-255 silent divergence. The
-    //    server would reject, leaving stale IDB data the user can't clear.
-    // 5. roleLevel >= SETTINGS_EDIT_ROLE_FLOOR → optimistic local apply happens *after*
+    // 4. roleLevel < the floor for THESE keys → synced project, below floor. DO
+    //    NOT apply locally — this was the root cause of AQU-255 silent
+    //    divergence. The server would reject, leaving stale IDB data the user
+    //    can't clear. The floor is per-write (AQU-816): a term-base-only patch
+    //    needs contributor, anything else needs maintainer.
+    // 5. roleLevel >= that floor → optimistic local apply happens *after*
     //    this block, just before the serialized server write.
 
     if (!projectId || !jwt) return { kind: "error", message: "no session or project" }
@@ -466,7 +494,7 @@ export function useProjectSettings(
       return { kind: "blocked", reason: "role" }
     }
 
-    if (roleLevel < SETTINGS_EDIT_ROLE_FLOOR) {
+    if (roleLevel < settingsEditRoleFloor(partial)) {
       // Synced project below floor — do NOT apply locally; the server will
       // reject and we'd silently diverge (the original AQU-255 bug).
       return { kind: "blocked", reason: "role" }

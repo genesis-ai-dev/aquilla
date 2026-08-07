@@ -6,6 +6,7 @@
  * These helpers derive/update that primary rendering and partition concepts by
  * lifecycle status. No side effects — callers persist via patchSettings.
  */
+import { ROLE } from "@/lib/frontier/roles"
 import type { Concept, TermRendering } from "./types"
 
 /** The rendering shown in the row's target cell: first preferred, else first, else null. */
@@ -53,8 +54,16 @@ export function partitionConcepts(concepts: Concept[]): GlossaryPartition {
   return { active, suggested, archived }
 }
 
-/** Level at which a user may manage termbase definitions. */
-const TERMBASE_EDIT_LEVEL = 500
+/**
+ * Level at which a user may manage termbase definitions.
+ *
+ * AQU-816: contributor (400), lowered from project_lead (500). Translators hold
+ * the knowledge of what a term should render as, so they curate the term base
+ * themselves; reviewer (300) and below stay read-only. This mirrors the
+ * auth-worker gate — a term-base-only settings write needs contributor, every
+ * other settings key still needs maintainer (600).
+ */
+const TERMBASE_EDIT_LEVEL = ROLE.CONTRIBUTOR
 
 /**
  * May the user add/edit/delete/archive concepts? Local projects (no origin)

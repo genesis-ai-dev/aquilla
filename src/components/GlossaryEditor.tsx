@@ -189,7 +189,7 @@ export function GlossaryEditor({ files: workspaceFiles }: GlossaryEditorProps = 
   const guard = () => {
     if (!project) return null
     if (!canManage) {
-      setError("Requires Project Lead role or higher to manage the glossary.")
+      setError("Requires Contributor role or higher to manage the glossary.")
       return null
     }
     return { ...project, terminology: conceptsRef.current }

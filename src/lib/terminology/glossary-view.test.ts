@@ -94,8 +94,16 @@ describe("canEditTermbase", () => {
   it("allows when role not yet cached on a cloud project", () => {
     expect(canEditTermbase(null, true)).toBe(true)
   })
-  it("requires level >= 500 on a cloud project", () => {
-    expect(canEditTermbase({ level: 400 }, true)).toBe(false)
+  // AQU-816 regression guard: the term-base floor is contributor (400), not
+  // project_lead (500) — translators curate terms themselves.
+  it("allows contributor and above on a cloud project", () => {
+    expect(canEditTermbase({ level: 400 }, true)).toBe(true)
     expect(canEditTermbase({ level: 500 }, true)).toBe(true)
+    expect(canEditTermbase({ level: 600 }, true)).toBe(true)
+  })
+  it("keeps reviewer and below read-only on a cloud project", () => {
+    expect(canEditTermbase({ level: 300 }, true)).toBe(false)
+    expect(canEditTermbase({ level: 200 }, true)).toBe(false)
+    expect(canEditTermbase({ level: 100 }, true)).toBe(false)
   })
 })

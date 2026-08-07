@@ -273,6 +273,66 @@ describe("useProjectSettings — write path", () => {
     expect(idbMod.patchProject).not.toHaveBeenCalled()
   })
 
+  // AQU-816: the term base is the one settings key a contributor may write.
+  // Biblica onboarding (2026-08-06) — translators curate terms themselves.
+  it("lets a CONTRIBUTOR write a term-base-only patch through to the server", async () => {
+    mockSettingsFetch({
+      version: 3, updatedAt: "x", updatedBy: { id: 1, username: "ryder" },
+      settings: { sourceLanguage: "en", terminology: [] },
+    })
+    const patchSpy = vi.spyOn(restClient, "patchProjectSettings").mockResolvedValue({
+      kind: "ok",
+      value: {
+        version: 4, updatedAt: "y", updatedBy: { id: 2, username: "translator" },
+        settings: { sourceLanguage: "en", terminology: [{ id: "c1" }] },
+      } as unknown as restClient.ProjectSettingsResponse,
+    })
+    const { result } = renderHook(() => useProjectSettings("p1", 400))
+    await waitFor(() => expect(result.current.hasFetched).toBe(true))
+    let got!: PatchOutcome
+    await act(async () => {
+      got = await result.current.patch({
+        terminology: [{ id: "c1" }] as unknown as NonNullable<
+          restClient.ProjectWideSettings["terminology"]
+        >,
+      })
+    })
+    expect(got.kind).toBe("ok")
+    expect(patchSpy).toHaveBeenCalled()
+  })
+
+  it("still blocks a CONTRIBUTOR who touches any non-term-base key", async () => {
+    const idbMod = await import("@/lib/store/project-index")
+    vi.mocked(idbMod.patchProject).mockClear()
+    mockSettingsFetch(null)
+    const patchSpy = vi.spyOn(restClient, "patchProjectSettings")
+    const { result } = renderHook(() => useProjectSettings("p1", 400))
+    await waitFor(() => expect(result.current.settings.sourceLanguage).toBe("en"))
+    let got!: PatchOutcome
+    await act(async () => {
+      // AI instructions stay maintainer-only — explicitly out of scope on the call.
+      got = await result.current.patch({ systemPrompt: "be terse" })
+    })
+    expect(got.kind).toBe("blocked")
+    if (got.kind === "blocked") expect(got.reason).toBe("role")
+    expect(patchSpy).not.toHaveBeenCalled()
+    expect(idbMod.patchProject).not.toHaveBeenCalled()
+  })
+
+  it("blocks a REVIEWER from a term-base-only patch", async () => {
+    mockSettingsFetch(null)
+    const patchSpy = vi.spyOn(restClient, "patchProjectSettings")
+    const { result } = renderHook(() => useProjectSettings("p1", 300))
+    await waitFor(() => expect(result.current.settings.sourceLanguage).toBe("en"))
+    let got!: PatchOutcome
+    await act(async () => {
+      got = await result.current.patch({ terminology: [] })
+    })
+    expect(got.kind).toBe("blocked")
+    if (got.kind === "blocked") expect(got.reason).toBe("role")
+    expect(patchSpy).not.toHaveBeenCalled()
+  })
+
   it("unsynced project (roleLevel === null) writes locally with no server call", async () => {
     const idbMod = await import("@/lib/store/project-index")
     vi.mocked(idbMod.patchProject).mockClear()
@@ -561,8 +621,9 @@ describe("describePatchFailure", () => {
   })
 
   it("explains a role block", () => {
+    // AQU-816: the term-base floor is contributor, so the message names it.
     const msg = describePatchFailure({ kind: "blocked", reason: "role" })
-    expect(msg).toMatch(/maintainer role or higher/i)
+    expect(msg).toMatch(/contributor role or higher/i)
   })
 
   it("explains an offline block", () => {

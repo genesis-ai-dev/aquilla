@@ -1,7 +1,7 @@
 import { Suspense, lazy, useState, useMemo, useRef, useEffect, useCallback } from "react"
 import { useParams, useNavigate, useSearchParams, useLocation } from "react-router-dom"
 import { useProject } from "@/hooks/useProject"
-import { describePatchFailure, SETTINGS_EDIT_ROLE_FLOOR } from "@/hooks/useProjectSettings"
+import { describePatchFailure, TERMINOLOGY_EDIT_ROLE_FLOOR } from "@/hooks/useProjectSettings"
 import { useNavHistoryTitle } from "@/context/NavHistoryContext"
 import { deriveNavTitle } from "@/lib/navigation/deriveTitle"
 import { deriveCellAreaState } from "@/lib/editor/cell-area-state"
@@ -2511,9 +2511,10 @@ export function ProjectWorkspace() {
   // draft disabled, reason shown, Cancel active) instead of letting them type
   // a draft that patchSettings is guaranteed to reject. serverRoleLevel is the
   // server-resolved role (null = unsynced/local-only project, which saves
-  // locally and must stay writable).
+  // locally and must stay writable). AQU-816: the floor here is the term-base
+  // one (contributor), NOT the general settings floor.
   const addConceptBlockedReason =
-    serverRoleLevel != null && serverRoleLevel < SETTINGS_EDIT_ROLE_FLOOR
+    serverRoleLevel != null && serverRoleLevel < TERMINOLOGY_EDIT_ROLE_FLOOR
       ? describePatchFailure({ kind: "blocked", reason: "role" })
       : null
 

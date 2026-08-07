@@ -9,7 +9,7 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible"
 import { Input } from "@/components/ui/input"
-import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
+import { Field, FieldError, FieldGroup, FieldLabel, OptionalMark } from "@/components/ui/field"
 import { SettingsGroup } from "@/components/ui/page"
 import { isFieldInvalid } from "@/lib/forms/field-state"
 import { optionalString, requiredString } from "@/lib/forms/schemas"
@@ -143,7 +143,7 @@ export function PersonalProviderSection() {
                 children={(field) => (
                   <Field>
                     <FieldLabel htmlFor="prov-model">
-                      Model <span className="text-muted-foreground/70">(optional)</span>
+                      Model <OptionalMark />
                     </FieldLabel>
                     <Input
                       id="prov-model"
@@ -163,7 +163,7 @@ export function PersonalProviderSection() {
                 children={(field) => (
                   <Field>
                     <FieldLabel htmlFor="prov-key">
-                      API key <span className="text-muted-foreground/70">(optional)</span>
+                      API key <OptionalMark />
                     </FieldLabel>
                     <Input
                       id="prov-key"

@@ -21,6 +21,7 @@ import {
   FieldError,
   FieldGroup,
   FieldLabel,
+  OptionalMark,
 } from "@/components/ui/field"
 import {
   InputGroup,
@@ -3208,7 +3209,7 @@ function SdbhPanel({ projectId, username, getToken, onImported }: SdbhPanelProps
           />
         </Button>
         <Button variant="outline" size="sm" nativeButton={false} render={<label />}>
-          {localizedFile ? localizedFile.name : "Choose localized edition (optional)"}
+          {localizedFile ? localizedFile.name : <>Choose localized edition <OptionalMark /></>}
           <input
             type="file"
             className="hidden"

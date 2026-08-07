@@ -10,6 +10,7 @@ import {
   FieldError,
   FieldGroup,
   FieldLabel,
+  OptionalMark,
 } from "@/components/ui/field"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
@@ -222,7 +223,9 @@ export function VideoAttachmentDialog({ open, onOpenChange, current, onSave }: V
               </FieldDescription>
             </Field>
             <Field>
-              <FieldLabel htmlFor="vname">Display name (optional)</FieldLabel>
+              <FieldLabel htmlFor="vname">
+                Display name <OptionalMark />
+              </FieldLabel>
               <Input
                 id="vname"
                 value={fileNameInput}

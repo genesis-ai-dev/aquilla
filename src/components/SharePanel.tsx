@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
-import { FieldLabel } from "@/components/ui/field"
+import { FieldLabel, OptionalMark } from "@/components/ui/field"
 import { Spinner } from "@/components/ui/spinner"
 import {
   Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue,
@@ -418,7 +418,7 @@ function InviteLinkTab({ projectId, onSharesChanged }: InviteLinkTabProps) {
           </div>
           <div className="space-y-1">
             <FieldLabel htmlFor="invite-email" className="text-xs">
-              Recipient email <span className="text-muted-foreground font-normal">(optional)</span>
+              Recipient email <OptionalMark />
             </FieldLabel>
             <Input
               id="invite-email"

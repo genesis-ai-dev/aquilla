@@ -15,7 +15,7 @@
 import { useState, useMemo, useEffect, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Field, FieldError, FieldLabel } from "@/components/ui/field"
+import { Field, FieldError, FieldLabel, OptionalMark } from "@/components/ui/field"
 import { Switch } from "@/components/ui/switch"
 import { X } from "lucide-react"
 import type { TranslationRule, RuleCheck, RuleAutofix } from "@/lib/parsers/types"
@@ -264,7 +264,9 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel, className }: 
           {attempted && nameError && <FieldError>{nameError}</FieldError>}
         </Field>
         <Field>
-          <FieldLabel htmlFor="re-desc" className="text-xs">Description (optional)</FieldLabel>
+          <FieldLabel htmlFor="re-desc" className="text-xs">
+            Description <OptionalMark />
+          </FieldLabel>
           <Input
             id="re-desc"
             value={description}
@@ -441,7 +443,7 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel, className }: 
           onClick={() => setShowAutofix((v) => !v)}
           className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
         >
-          {showAutofix ? "Hide autofix" : "Add autofix (optional)"}
+          {showAutofix ? "Hide autofix" : <>Add autofix <OptionalMark /></>}
         </button>
         {showAutofix && (
           <div className="mt-2 space-y-2 rounded border p-3">

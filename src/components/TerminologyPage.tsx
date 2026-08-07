@@ -31,7 +31,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
-import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
+import { Field, FieldError, FieldGroup, FieldLabel, OptionalMark } from "@/components/ui/field"
 import { Badge } from "@/components/ui/badge"
 import {
   Select,
@@ -310,7 +310,9 @@ function ConceptDialog({ open, onOpenChange, initial, onSave }: ConceptDialogPro
           </Field>
 
           <Field>
-            <FieldLabel htmlFor="concept-notes">Notes (optional)</FieldLabel>
+            <FieldLabel htmlFor="concept-notes">
+              Notes <OptionalMark />
+            </FieldLabel>
             <Input
               id="concept-notes"
               value={notes}

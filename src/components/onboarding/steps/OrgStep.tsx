@@ -7,6 +7,7 @@ import {
   FieldError,
   FieldGroup,
   FieldLabel,
+  OptionalMark,
 } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
@@ -126,7 +127,9 @@ export function OrgStep({
             name="emails"
             children={(field) => (
               <Field>
-                <FieldLabel htmlFor="org-emails">Invite teammates (optional)</FieldLabel>
+                <FieldLabel htmlFor="org-emails">
+                  Invite teammates <OptionalMark />
+                </FieldLabel>
                 <Input
                   id="org-emails"
                   name={field.name}

@@ -36,6 +36,7 @@ import {
   FieldError,
   FieldGroup,
   FieldLabel,
+  OptionalMark,
 } from "@/components/ui/field"
 import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
@@ -669,7 +670,9 @@ export function AssignModal({
           </Field>
 
           <Field>
-            <FieldLabel htmlFor="assign-modal-deadline">Deadline (optional)</FieldLabel>
+            <FieldLabel htmlFor="assign-modal-deadline">
+              Deadline <OptionalMark />
+            </FieldLabel>
             <DatePicker
               id="assign-modal-deadline"
               value={deadlineDate}
@@ -684,7 +687,9 @@ export function AssignModal({
           </Field>
 
           <Field>
-            <FieldLabel htmlFor="assign-modal-note">Note (optional)</FieldLabel>
+            <FieldLabel htmlFor="assign-modal-note">
+              Note <OptionalMark />
+            </FieldLabel>
             <Textarea
               id="assign-modal-note"
               value={note}

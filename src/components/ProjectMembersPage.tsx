@@ -15,7 +15,7 @@ import { Button } from "@/components/ui/button"
 import { LoadingPanel } from "@/components/ui/loading-overlay"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Input } from "@/components/ui/input"
-import { FieldLabel } from "@/components/ui/field"
+import { FieldLabel, OptionalMark } from "@/components/ui/field"
 import {
   Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select"
@@ -711,8 +711,7 @@ export function InviteLinkTab({
         {/* Optional email */}
         <div className="space-y-1">
           <FieldLabel htmlFor="pm-invite-email" className="text-xs">
-            Recipient email{" "}
-            <span className="font-normal text-muted-foreground">(optional)</span>
+            Recipient email <OptionalMark />
           </FieldLabel>
           <Input
             id="pm-invite-email"

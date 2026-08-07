@@ -1,6 +1,6 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
-import { Field, FieldDescription, FieldLabel } from "@/components/ui/field"
+import { Field, FieldDescription, FieldLabel, OptionalMark } from "@/components/ui/field"
 import { Switch } from "@/components/ui/switch"
 import {
   Select,
@@ -205,7 +205,9 @@ export function ValidationSettingsSection({
 
         {/* ── Named-user allowlist ── */}
         <Field data-disabled={disabled || undefined}>
-          <FieldLabel htmlFor="validation-named-users">Named validators (optional)</FieldLabel>
+          <FieldLabel htmlFor="validation-named-users">
+            Named validators <OptionalMark />
+          </FieldLabel>
           <DisabledFieldTooltip disabled={disabled} tooltip={disabledTooltip ?? null}>
             <MemberMultiSelect
               id="validation-named-users"

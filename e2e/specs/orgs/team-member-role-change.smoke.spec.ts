@@ -71,7 +71,7 @@ test("team member role select changes member role", async ({ alice }) => {
 
   const roleSelect = roleDialog.getByRole("combobox", { name: "Role for bob" })
   await expect(roleSelect).toBeVisible({ timeout: 3_000 })
-  await pickSelectOption(alice, roleSelect, "maintainer")
+  await pickSelectOption(alice, roleSelect, /^Maintainer\b/i)
   await expectSelectValue(roleSelect, /Maintainer/i)
   await roleDialog.getByRole("button", { name: /^Save$/i }).click()
 

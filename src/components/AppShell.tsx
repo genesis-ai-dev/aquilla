@@ -291,7 +291,9 @@ export function AppShell({
           </div>
         </div>
       ) : (
-        <div className="m-2 flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border bg-background">
+        // No top margin: the card's top edge should sit on the same baseline as
+        // the org switcher (sidebar content starts right under the logo row).
+        <div className="mx-2 mb-2 flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border bg-background">
           {cardBody}
         </div>
       )}

@@ -6,7 +6,7 @@ import {
   SlidersHorizontal, Link2, BarChart3, ShieldCheck, AudioLines, Plug, FlaskConical,
   Users,
 } from "lucide-react"
-import { toast } from "sonner"
+import { toast } from "@/components/ui/toast"
 import { Button } from "@/components/ui/button"
 import { LoadingPanel } from "@/components/ui/loading-overlay"
 import { ButtonGroup, ButtonGroupSeparator } from "@/components/ui/button-group"
@@ -722,9 +722,10 @@ export function ProjectSettings() {
       if (Object.keys(sharedUpdates).length > 0) {
         const out = await patchShared(sharedUpdates)
         if (out.kind === "conflict") {
-          toast.warning(
-            `Synced settings update from ${out.latest.updatedBy?.username ?? "another collaborator"}.`,
-          )
+          toast.add({
+            type: "warning",
+            title: `Synced settings update from ${out.latest.updatedBy?.username ?? "another collaborator"}.`,
+          })
           setSaveError("Someone else updated shared settings. Refresh to reapply your edits.")
           return false
         }

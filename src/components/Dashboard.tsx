@@ -4,7 +4,7 @@ import { useOpenWorkspace } from "@/hooks/useOpenWorkspace"
 import {
   ChevronRight, Cloud, Settings as SettingsIcon, Trash2, Users, FolderOpen, Filter,
 } from "lucide-react"
-import { toast } from "sonner"
+import { toast } from "@/components/ui/toast"
 import { useActiveOrg } from "@/context/OrgContext"
 import { membersPath, orgSettingsPath } from "@/lib/navigation/org-paths"
 import type { ProjectRecord } from "@/lib/parsers/types"
@@ -131,11 +131,19 @@ export function Dashboard() {
       fallbackUsername: session?.username,
     })
     if (result.remote.kind === "forbidden") {
-      toast.error(result.remote.message || "Only project owners can move a project to Trash.")
+      toast.add({
+        type: "error",
+        priority: "high",
+        title: result.remote.message || "Only project owners can move a project to Trash.",
+      })
       return
     }
     if (result.remote.kind === "error") {
-      toast.error(`Couldn't move to Trash: ${result.remote.message}`)
+      toast.add({
+        type: "error",
+        priority: "high",
+        title: `Couldn't move to Trash: ${result.remote.message}`,
+      })
       return
     }
     if (!result.project) return
@@ -150,11 +158,19 @@ export function Dashboard() {
     if (!project) return
     const result = await restoreProject(project, { jwt: session?.jwt ?? null })
     if (result.remote.kind === "forbidden") {
-      toast.error(result.remote.message || "Only owners can restore a project.")
+      toast.add({
+        type: "error",
+        priority: "high",
+        title: result.remote.message || "Only owners can restore a project.",
+      })
       return
     }
     if (result.remote.kind === "error") {
-      toast.error(`Couldn't restore: ${result.remote.message}`)
+      toast.add({
+        type: "error",
+        priority: "high",
+        title: `Couldn't restore: ${result.remote.message}`,
+      })
       return
     }
     if (!result.project) return
@@ -191,7 +207,11 @@ export function Dashboard() {
         prev.map((p) => p.id === projectId ? { ...p, isActive: nextActive } : p),
       )
     } catch (err) {
-      toast.error(`Couldn't update project status: ${toUserFacingError(err, "project").message}`)
+      toast.add({
+        type: "error",
+        priority: "high",
+        title: `Couldn't update project status: ${toUserFacingError(err, "project").message}`,
+      })
     } finally {
       setPendingLifecycleId(null)
     }

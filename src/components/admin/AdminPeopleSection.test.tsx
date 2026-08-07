@@ -5,11 +5,11 @@
  */
 import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent, within, waitFor } from "@testing-library/react"
-import { toast } from "sonner"
+import { toast } from "@/components/ui/toast"
 import { AdminPeopleSection } from "./AdminPeopleSection"
 
-vi.mock("sonner", () => ({
-  toast: { success: vi.fn() },
+vi.mock("@/components/ui/toast", () => ({
+  toast: { add: vi.fn(), close: vi.fn(), update: vi.fn(), promise: vi.fn() },
 }))
 import type { AdminUser, AdminAdmin } from "@/lib/frontier/admin"
 
@@ -57,7 +57,10 @@ describe("AdminPeopleSection", () => {
     expect(btn).toHaveClass("text-muted-foreground")
     fireEvent.click(btn)
     await waitFor(() => expect(writeText).toHaveBeenCalledWith("casey@example.com"))
-    expect(toast.success).toHaveBeenCalledWith("Email copied to clipboard")
+    expect(toast.add).toHaveBeenCalledWith({
+      type: "success",
+      title: "Email copied to clipboard",
+    })
   })
 
   it("warns about allowlisted emails with no account", () => {

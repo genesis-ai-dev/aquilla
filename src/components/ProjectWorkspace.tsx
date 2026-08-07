@@ -112,7 +112,7 @@ import { attachMediaFileToTimeline, attachMediaUrlToTimeline } from "@/lib/timel
 import { useCellsAuditStatsWithOverlay } from "@/hooks/useCellsAuditStatsWithOverlay"
 import { useComments } from "@/hooks/useComments"
 import { Film, Scale, Bot, MessagesSquare, Share2, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, BookMarked, BookOpen, Users, UserCheck, ArrowRight, PanelLeftClose, Mic, Plus, Pencil, FolderInput, Download } from "lucide-react"
-import { toast } from "sonner"
+import { toast } from "@/components/ui/toast"
 import { AgentDockPanel } from "./AgentDockPanel"
 import { agentSessionStore } from "@/lib/agent/session-store"
 import { AgentWorkbench } from "./agent/AgentWorkbench"
@@ -445,7 +445,7 @@ export function ProjectWorkspace() {
   // X button and "apply" flows actually need.)
   const [suggestionsDismissed, setSuggestionsDismissed] = useState(false)
   // Transient post-action confirmations (label import, direction-role fallback, …)
-  // go through sonner — see toast.* call sites below.
+  // go through toast — see toast.add call sites below.
 
   useEffect(() => {
     optimisticFileIdsRef.current = new Set()
@@ -3809,7 +3809,11 @@ export function ProjectWorkspace() {
       // returned record is discarded — persistence flows through file.rename.
       renameFile(project, fileId, newName)
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Rename failed")
+      toast.add({
+        type: "error",
+        priority: "high",
+        title: e instanceof Error ? e.message : "Rename failed",
+      })
       return
     }
     await applyRenames([{ fileId, name: newName.trim() }])
@@ -3971,16 +3975,21 @@ export function ProjectWorkspace() {
         setClientProject(project)
         void updateProject(project)
         refresh()
-        toast.error(e instanceof Error ? `Rename failed: ${e.message}` : "Rename failed")
+        toast.add({
+          type: "error",
+          priority: "high",
+          title: e instanceof Error ? `Rename failed: ${e.message}` : "Rename failed",
+        })
         return
       }
     }
     refresh()
     const applied = effective
-    toast("Applied renames.", {
-      duration: 10_000,
-      action: {
-        label: "Undo",
+    const toastId = toast.add({
+      title: "Applied renames.",
+      timeout: 10_000,
+      actionProps: {
+        children: "Undo",
         onClick: () => {
           const p = projectForUndoRef.current
           if (!p) return
@@ -4005,6 +4014,7 @@ export function ProjectWorkspace() {
             for (const s of applied) next.delete(s.fileId)
             return next
           })
+          toast.close(toastId)
         },
       },
     })
@@ -4833,9 +4843,10 @@ export function ProjectWorkspace() {
               `[FRO-249] skipping language seed — role ${roleLevel} is below server floor ${serverFloor}. ` +
               "Mismatch note: EDIT_ROLE_FLOOR in useProjectSettings is PROJECT_LEAD(500) but server requires MAINTAINER(600); tracked for follow-up.",
             )
-            toast.warning(
-              "Direction applied locally only — saving project-wide needs a maintainer.",
-            )
+            toast.add({
+              type: "warning",
+              title: "Direction applied locally only — saving project-wide needs a maintainer.",
+            })
           }
         }
       }
@@ -5940,17 +5951,20 @@ export function ProjectWorkspace() {
           excludeFrontMatter={project.importExcludeFrontMatter}
           onLabelsImported={(r) => {
             if (r.applied === 0) {
-              toast.warning(
-                `No labels applied — the CSV doesn't match ${r.fileName}. Re-download the template and try again.`,
-              )
+              toast.add({
+                type: "warning",
+                title: `No labels applied — the CSV doesn't match ${r.fileName}. Re-download the template and try again.`,
+              })
             } else if (r.unmatched > 0) {
-              toast.warning(
-                `Applied ${r.applied} of ${r.applied + r.unmatched} labels to ${r.fileName}.`,
-              )
+              toast.add({
+                type: "warning",
+                title: `Applied ${r.applied} of ${r.applied + r.unmatched} labels to ${r.fileName}.`,
+              })
             } else {
-              toast.success(
-                `Applied ${r.applied} label${r.applied !== 1 ? "s" : ""} to ${r.fileName}.`,
-              )
+              toast.add({
+                type: "success",
+                title: `Applied ${r.applied} label${r.applied !== 1 ? "s" : ""} to ${r.fileName}.`,
+              })
             }
           }}
           patchDcsCursor={async (cursor) => {
@@ -5978,7 +5992,7 @@ export function ProjectWorkspace() {
           />
         </Suspense>
       )}
-      {/* Label-import / direction-role results use sonner (see toast.* above). */}
+      {/* Label-import / direction-role results use toast (see toast.add above). */}
       <Suspense fallback={null}>
         <ExportDialog
           open={exportOpen}
@@ -6273,7 +6287,7 @@ function TrashedProjectScreen({ project, onClose, onRestore }: TrashedProjectScr
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-6">
-        <div className="bg-card max-w-md rounded-2xl p-8 text-center">
+        <div className="bg-card max-w-md rounded-lg p-8 text-center">
         <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-muted">
           <Trash2 className="h-6 w-6 text-muted-foreground" />
         </div>

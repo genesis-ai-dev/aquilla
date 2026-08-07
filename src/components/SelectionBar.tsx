@@ -12,7 +12,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { Languages, Sparkles, Wand2, X } from "lucide-react"
-import { toast } from "sonner"
+import { toast } from "@/components/ui/toast"
 import { Spinner } from "@/components/ui/spinner"
 import type { CellData } from "@/hooks/useCells"
 import { type CellStore, readAtVersion, useCellStoreVersion } from "@/hooks/useActiveCellStore"
@@ -219,7 +219,7 @@ export function SelectionBar({ project, cellStore, username, activeLane, myScope
       const msg = alreadyValidated > 0
         ? `Validated ${validated} cell${validated === 1 ? "" : "s"} (${alreadyValidated} already validated)`
         : `Validated ${validated} cell${validated === 1 ? "" : "s"}`
-      toast.success(msg)
+      toast.add({ type: "success", title: msg })
       // AQU-616: flush the just-enqueued validates now instead of waiting for
       // the ~5s periodic flusher, so the confirmed/synced state lands promptly.
       if (validated > 0) onValidationCommitted?.()
@@ -249,7 +249,10 @@ export function SelectionBar({ project, cellStore, username, activeLane, myScope
         })
         removed++
       }
-      toast.success(`Removed validations from ${removed} cell${removed === 1 ? "" : "s"}`)
+      toast.add({
+        type: "success",
+        title: `Removed validations from ${removed} cell${removed === 1 ? "" : "s"}`,
+      })
       // AQU-616: flush now rather than waiting for the periodic flusher.
       if (removed > 0) onValidationCommitted?.()
     } finally {

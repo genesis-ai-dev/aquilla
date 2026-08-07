@@ -6,7 +6,7 @@ import { DataTable, DataTableColumnHeader } from "@/components/ui/data-table"
 import { DateTooltip } from "@/components/ui/date-tooltip"
 import { EmptyState } from "@/components/ui/empty"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
-import { toast } from "sonner"
+import { toast } from "@/components/ui/toast"
 import type { AdminUser, AdminAdmin } from "@/lib/frontier/admin"
 
 
@@ -19,7 +19,7 @@ function CopyEmailButton({ email }: { email: string }) {
       onClick={(e) => {
         e.stopPropagation()
         void navigator.clipboard.writeText(email).then(() => {
-          toast.success("Email copied to clipboard")
+          toast.add({ type: "success", title: "Email copied to clipboard" })
         })
       }}
     >

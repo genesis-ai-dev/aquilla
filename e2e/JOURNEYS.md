@@ -81,7 +81,7 @@
 | Projects    | Status chip shows Overdue/Due-soon by deadline        | `e2e/specs/projects/project-status-chip.smoke.spec.ts`        |   ✅   |
 | Projects    | Living memory back navigation                         | `e2e/specs/projects/living-memory-back-nav.smoke.spec.ts`     |   ✅   |
 | Orgs        | Members page roster with expandable project access    | `e2e/specs/projects/members-matrix.smoke.spec.ts`             |   ✅   |
-| Orgs        | Team detail access-level help indicator               | `e2e/specs/orgs/team-detail-access-level-help.smoke.spec.ts`  |   ✅   |
+| Orgs        | Team detail access-level help indicator               | intentionally retired — role help moved into Change role dialog / RoleSelect |   —   |
 | Collab      | BT edit locked for reviewer role                      | `e2e/specs/collab/bt-edit-locked-for-reviewer.smoke.spec.ts`  |   ✅   |
 | Orgs        | Pending invite targeted-email chip vs open-link badge | `e2e/specs/orgs/pending-invite-targeted-chip.smoke.spec.ts`   |   ✅   |
 | Comments    | Stale indicator when translation changes after thread  | `e2e/specs/editor/comment-translation-stale-indicator.smoke.spec.ts` | ✅ |
@@ -106,7 +106,7 @@
 | Editor      | Terminology violation shows only the inline blot (no advisory band), live + explained on hover | `e2e/specs/editor/terminology-inline-blot.smoke.spec.ts` | ✅ |
 | Editor      | Manual direction mismatch offers Auto repair and restores content-driven direction | `e2e/specs/editor/rtl-hint-adjust-opens-settings.smoke.spec.ts` | ✅ |
 | Editor      | Workspace "Settings" dropdown item navigates to project settings     | `e2e/specs/editor/workspace-settings-navigate.smoke.spec.ts`   |   ✅   |
-| Projects    | Settings sub-menu link navigates to its pane and back (AQU-501) | `e2e/specs/projects/project-settings-nav-link-click.smoke.spec.ts` | ✅ |
+| Projects    | Settings sub-menu link navigates to its pane and back via breadcrumb (AQU-501) | `e2e/specs/projects/project-settings-nav-link-click.smoke.spec.ts` | ✅ |
 | Editor      | Next unfinished navigation basic flow                 | `e2e/specs/editor/next-unfinished.smoke.spec.ts`              |   ✅   |
 | Editor      | "Next unfinished" button enabled after import; navigates without error | `e2e/specs/editor/next-unfinished-button.smoke.spec.ts` | ✅ |
 | Editor      | Cmd+. keyboard shortcut jumps to next unfinished cell | `e2e/specs/editor/next-unfinished-keyboard-shortcut.smoke.spec.ts` | ✅ |
@@ -150,8 +150,8 @@
 | Projects    | Project settings termbase sharing section             | `e2e/specs/projects/project-settings-termbase-sharing.smoke.spec.ts` | ⏸ hidden |
 | Projects    | Multi-project invite submit from share panel          | `e2e/specs/projects/multi-project-invite-submit.smoke.spec.ts` |   ✅   |
 | Projects    | Multi-select member add on project surfaces (overview Members card + `/project/:id/settings/members` + Share modal suggestions) | `e2e/specs/projects/project-members-add-multiselect.smoke.spec.ts` + `share-invite-username-verified.smoke.spec.ts` | ✅ |
-| Orgs        | Org rename from settings page                         | `e2e/specs/orgs/org-rename.smoke.spec.ts` | ✅ |
-| Orgs        | Org settings page renders and shows rename            | `e2e/specs/orgs/org-settings.smoke.spec.ts` + `org-settings-rename.smoke.spec.ts` | ✅ |
+| Orgs        | Org rename from Identity (inline blur-to-save)        | `e2e/specs/orgs/org-rename.smoke.spec.ts` | ✅ |
+| Orgs        | Org settings page renders; Identity rename round-trip | `e2e/specs/orgs/org-settings.smoke.spec.ts` + `org-settings-rename.smoke.spec.ts` | ✅ |
 | Orgs        | Member access panel expand shows per-project access   | `e2e/specs/orgs/member-access-panel-expand.smoke.spec.ts`     |   ✅   |
 | Orgs        | Assigned to me page shows inbox                       | `e2e/specs/orgs/assigned-to-me-page.smoke.spec.ts` + `assigned.smoke.spec.ts` | ✅ |
 | Orgs        | Preferences page analytics toggle                     | `e2e/specs/orgs/preferences-analytics-toggle.smoke.spec.ts` + `preferences-analytics-disabled-warning.smoke.spec.ts` | ✅ |

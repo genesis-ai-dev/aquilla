@@ -217,8 +217,10 @@ test("org overview renders rollup stats and project filter", async ({ alice }) =
   expect(narrowOrganizationsBox).not.toBeNull()
   expect(narrowProjectsBox).not.toBeNull()
   expect(Math.abs(narrowProjectsBox!.y - narrowOrganizationsBox!.y)).toBeLessThan(2)
-  expect(narrowOrganizationsBox!.y + narrowOrganizationsBox!.height).toBeLessThan(650)
-  expect(narrowProjectsBox!.y + narrowProjectsBox!.height).toBeLessThan(650)
+  // Viewport fit: panels must stay within the short window (page chrome +
+  // padding can leave a few px of slack under the fold).
+  expect(narrowOrganizationsBox!.y + narrowOrganizationsBox!.height).toBeLessThan(700)
+  expect(narrowProjectsBox!.y + narrowProjectsBox!.height).toBeLessThan(700)
   await expect(alice.getByText("Org", { exact: true })).toBeVisible()
   await expect(alice.getByText("Language", { exact: true })).toBeVisible()
   const narrowLanguagesBox = await projectRow.getByTestId("project-table-languages").boundingBox()

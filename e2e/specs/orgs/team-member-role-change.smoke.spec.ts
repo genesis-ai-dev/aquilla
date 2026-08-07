@@ -75,7 +75,10 @@ test("team member role select changes member role", async ({ alice }) => {
   await expectSelectValue(roleSelect, /Maintainer/i)
   await roleDialog.getByRole("button", { name: /^Save$/i }).click()
 
-  // Role column updates to the new label (plain text, not a select).
-  await expect(alice.getByText("Maintainer")).toBeVisible({ timeout: 8_000 })
+  // Wait for the dialog to close, then assert the Role column (avoid matching
+  // leftover select/portal text that also contains "maintainer").
   await expect(alice.getByRole("dialog", { name: /Change role for bob/i })).not.toBeVisible({ timeout: 5_000 })
+  await expect(alice.getByRole("row", { name: /bob/i }).getByText(/^Maintainer$/i)).toBeVisible({
+    timeout: 8_000,
+  })
 })

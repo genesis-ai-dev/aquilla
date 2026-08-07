@@ -65,7 +65,7 @@ function ExpanderNotes({
       aria-label={`Notes for ${concept.sourceTerm}`}
       placeholder="Contextual notes for translators"
       disabled={!canManage}
-      className="min-h-16 resize-y text-sm"
+      className="text-sm"
       onChange={(event) => setDraft(event.target.value)}
       onBlur={() => {
         if (draft !== (concept.notes ?? "")) onCommit(draft)

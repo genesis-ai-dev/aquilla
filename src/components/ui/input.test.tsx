@@ -24,4 +24,13 @@ describe("Textarea autocomplete defaults", () => {
     render(<Textarea aria-label="notes" />)
     expect(screen.getByLabelText("notes")).toHaveAttribute("autocomplete", "off")
   })
+
+  it("is not resizable and scrolls overflow inside a fixed min height", () => {
+    render(<Textarea aria-label="notes" />)
+    const el = screen.getByLabelText("notes")
+    expect(el).toHaveClass("resize-none")
+    expect(el).toHaveClass("overflow-y-auto")
+    expect(el).toHaveClass("min-h-24")
+    expect(el).not.toHaveClass("field-sizing-content")
+  })
 })

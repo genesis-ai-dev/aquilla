@@ -1,17 +1,18 @@
 /**
- * AdminPeopleSection — users with a platform-admin badge and an orphan-admin
- * callout. Verifies the badge is applied by email match and the callout lists
- * allowlisted emails with no account. Also covers TanStack search / sort.
+ * AdminPeopleSection — users with a Role column for platform admins and an
+ * orphan-admin callout. Verifies Role is applied by email match and the callout
+ * lists allowlisted emails with no account. Also covers TanStack search / sort.
  */
 import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent, within, waitFor } from "@testing-library/react"
 import { toast } from "@/components/ui/toast"
 import { AdminPeopleSection } from "./AdminPeopleSection"
+import type { AdminUser, AdminAdmin } from "@/lib/frontier/admin"
 
 vi.mock("@/components/ui/toast", () => ({
   toast: { add: vi.fn(), close: vi.fn(), update: vi.fn(), promise: vi.fn() },
 }))
-import type { AdminUser, AdminAdmin } from "@/lib/frontier/admin"
+
 
 const users: AdminUser[] = [
   { id: 1, username: "ryder", email: "Ryder@example.com", displayName: "Ryder", createdAt: "2026-01-01", orgCount: 2, lastActiveAt: "2026-06-30" },
@@ -29,22 +30,24 @@ const bodyFirstCells = () =>
     .slice(1)
     .map((tr) => {
       const cell = within(tr).getAllByRole("cell")[0]
-      const name =
+      return (
         cell?.querySelector('[data-slot="username"]')?.textContent
         ?? cell?.textContent
         ?? ""
-      return name.replace(/\s*Platform admin$/i, "")
+      )
     })
 
 describe("AdminPeopleSection", () => {
-  it("badges the allowlisted user (case-insensitive email match)", () => {
+  it("shows Platform admin in the Role column for allowlisted users", () => {
     render(<AdminPeopleSection users={users} admins={admins} />)
+    expect(screen.getByRole("columnheader", { name: /^Role$/i })).toBeInTheDocument()
     const ryderRow = screen.getByText(/Ryder \(ryder\)/).closest("tr")!
-    expect(within(ryderRow).getByText(/platform admin/i)).toBeInTheDocument()
+    expect(within(ryderRow).getByText("Platform admin")).toBeInTheDocument()
     const caseyRow = screen.getByText("casey").closest("tr")!
-    expect(within(caseyRow).queryByText(/platform admin/i)).not.toBeInTheDocument()
+    expect(within(caseyRow).queryByText("Platform admin")).not.toBeInTheDocument()
+    const caseyRoleCell = within(caseyRow).getAllByRole("cell")[2]
+    expect(caseyRoleCell).toHaveTextContent("")
   })
-
 
   it("copies email when the muted email button is clicked", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined)

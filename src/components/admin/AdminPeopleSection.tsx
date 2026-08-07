@@ -1,14 +1,13 @@
 import { useMemo } from "react"
 import { type ColumnDef } from "@tanstack/react-table"
-import { AlertTriangle, ShieldCheck, Users } from "lucide-react"
-import { Badge } from "@/components/ui/badge"
+import { AlertTriangle, Users } from "lucide-react"
+import { toast } from "@/components/ui/toast"
 import { DataTable, DataTableColumnHeader } from "@/components/ui/data-table"
 import { DateTooltip } from "@/components/ui/date-tooltip"
 import { EmptyState } from "@/components/ui/empty"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
-import { toast } from "@/components/ui/toast"
+import { ADMIN_TABLE_PANEL_CLASS } from "@/components/admin/shared"
 import type { AdminUser, AdminAdmin } from "@/lib/frontier/admin"
-
 
 function CopyEmailButton({ email }: { email: string }) {
   return (
@@ -30,8 +29,7 @@ function CopyEmailButton({ email }: { email: string }) {
 
 /**
  * People — the merge of the old Users and Admins tabs. Every registered user is
- * a row; the ones whose email is on the ADMIN_EMAILS allowlist wear a "Platform
- * admin" badge (the Admins tab was just this filtered view). Allowlisted emails
+ * a row; allowlisted emails show as Role = Platform admin. Allowlisted emails
  * with no matching account are surfaced as a callout so the list stays auditable.
  */
 export function AdminPeopleSection({ users, admins }: { users: AdminUser[]; admins: AdminAdmin[] }) {
@@ -50,19 +48,11 @@ export function AdminPeopleSection({ users, admins }: { users: AdminUser[]; admi
         cell: ({ row }) => {
           const u = row.original
           return (
-            <div className="flex min-w-0 items-center gap-2">
-              <UsernameWithAvatar
-                username={u.username}
-                label={u.displayName ? `${u.displayName} (${u.username})` : u.username}
-                nameClassName="font-normal"
-              />
-              {adminEmails.has(u.email.trim().toLowerCase()) && (
-                <Badge variant="secondary">
-                  <ShieldCheck data-icon="inline-start" />
-                  Platform admin
-                </Badge>
-              )}
-            </div>
+            <UsernameWithAvatar
+              username={u.username}
+              label={u.displayName ? `${u.displayName} (${u.username})` : u.username}
+              nameClassName="font-normal"
+            />
           )
         },
       },
@@ -70,6 +60,15 @@ export function AdminPeopleSection({ users, admins }: { users: AdminUser[]; admi
         accessorKey: "email",
         header: ({ column }) => <DataTableColumnHeader column={column} title="Email" />,
         cell: ({ row }) => <CopyEmailButton email={row.original.email} />,
+      },
+      {
+        id: "role",
+        accessorFn: (u) => (adminEmails.has(u.email.trim().toLowerCase()) ? 1 : 0),
+        header: ({ column }) => <DataTableColumnHeader column={column} title="Role" />,
+        cell: ({ row }) =>
+          adminEmails.has(row.original.email.trim().toLowerCase()) ? (
+            <span>Platform admin</span>
+          ) : null,
       },
       {
         accessorKey: "orgCount",
@@ -144,7 +143,8 @@ export function AdminPeopleSection({ users, admins }: { users: AdminUser[]; admi
           const q = String(filterValue).trim().toLowerCase()
           if (!q) return true
           const u = row.original
-          return `${u.username} ${u.displayName ?? ""} ${u.email}`.toLowerCase().includes(q)
+          const role = adminEmails.has(u.email.trim().toLowerCase()) ? "platform admin" : ""
+          return `${u.username} ${u.displayName ?? ""} ${u.email} ${role}`.toLowerCase().includes(q)
         }}
         toolbar={(table) => (
           <span className="ml-auto text-xs tabular-nums text-muted-foreground">
@@ -154,6 +154,8 @@ export function AdminPeopleSection({ users, admins }: { users: AdminUser[]; admi
           </span>
         )}
         testId="admin-people-table"
+        className={ADMIN_TABLE_PANEL_CLASS}
+        dense
       />
     </div>
   )

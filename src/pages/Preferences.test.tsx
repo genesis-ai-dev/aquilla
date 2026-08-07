@@ -63,16 +63,32 @@ describe("Preferences", () => {
     expect(screen.queryByText("Share usage data")).not.toBeInTheDocument()
   })
 
-  it("renders the Privacy form on its detail route, with a back link to the index", () => {
+  it("renders the Privacy form on its detail route", () => {
     renderAt("/preferences/privacy")
     expect(screen.getByRole("heading", { name: "Privacy" })).toBeInTheDocument()
     expect(screen.getByText("Share usage data")).toBeInTheDocument()
-    // Both the breadcrumb's parent crumb and the dedicated BackLink render a
-    // "Preferences" link back to the index, so more than one match is expected —
-    // assert at least one of them points at /preferences rather than picking a
-    // single one via getByRole (which throws on ambiguous matches).
-    const preferencesLinks = screen.getAllByRole("link", { name: /Preferences/ })
-    expect(preferencesLinks.some((link) => link.getAttribute("href") === "/preferences")).toBe(true)
+    // Breadcrumb parent crumb links back to the preferences index.
+    expect(screen.getByRole("link", { name: /Preferences/ })).toHaveAttribute(
+      "href",
+      "/preferences",
+    )
+  })
+
+  it("workspace settings use a right-side layout select and confirm switch", () => {
+    renderAt("/preferences/workspace")
+    expect(screen.getByRole("heading", { name: "Workspace" })).toBeInTheDocument()
+    expect(screen.getByLabelText("Sidebar tab layout")).toBeInTheDocument()
+    expect(screen.getByRole("switch", { name: /Confirm before replacing a translation/i })).toBeInTheDocument()
+    expect(screen.queryByRole("tab", { name: /Left rail/i })).not.toBeInTheDocument()
+  })
+
+  it("translator profile renders one settings row per field", () => {
+    renderAt("/preferences/profile")
+    expect(screen.getByRole("heading", { name: "Translator profile" })).toBeInTheDocument()
+    expect(screen.getByLabelText("Assistant language")).toBeInTheDocument()
+    expect(screen.getByLabelText("Age")).toBeInTheDocument()
+    expect(screen.getByLabelText("Other relevant information")).toBeInTheDocument()
+    expect(screen.queryByText("Profile fields")).not.toBeInTheDocument()
   })
 
   it("renders the personal provider section on its detail route", () => {

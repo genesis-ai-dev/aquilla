@@ -5,11 +5,18 @@ import { AppShell } from "@/components/AppShell"
 import { OrgSidebar } from "@/components/org/OrgSidebar"
 import { OrgBreadcrumb } from "@/components/org/OrgBreadcrumb"
 import { Switch } from "@/components/ui/switch"
-import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Page, PageHeader, SettingsGroup, SettingsRow } from "@/components/ui/page"
-import { NavList, NavRow, BackLink } from "@/components/ui/nav-list"
+import { NavList, NavRow } from "@/components/ui/nav-list"
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { useThemeMode, type ThemeMode } from "@/branding/ThemeMode"
 import { useAnalyticsConsent } from "@/hooks/useAnalyticsConsent"
 import { useDockRailPosition } from "@/hooks/useDockRailPosition"
@@ -38,10 +45,11 @@ import {
  *
  * Detail pages match the org-settings layout: page-sized title via PageHeader,
  * then floating SettingsGroup headers with content cards for the controls.
+ * Return to the index via the breadcrumb.
  */
 const RAIL_OPTIONS: { id: DockRailPosition; label: string }[] = [
-  { id: "left", label: "Left rail" },
   { id: "top", label: "Top bar" },
+  { id: "left", label: "Left rail" },
 ]
 
 const THEME_OPTIONS: { id: ThemeMode; label: string }[] = [
@@ -84,22 +92,33 @@ function WorkspaceSection() {
       <SettingsRow
         label="Sidebar tab layout"
         description="Show Files, Chat, and Search as a vertical rail on the left or a horizontal bar across the top of the sidebar."
-        block
-      >
-        <Tabs
-          value={railPosition}
-          onValueChange={(value) => setRailPosition(value as DockRailPosition)}
-          className="gap-0"
-        >
-          <TabsList aria-label="Sidebar tab layout">
-            {RAIL_OPTIONS.map(({ id, label }) => (
-              <TabsTrigger key={id} value={id}>
-                {label}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-        </Tabs>
-      </SettingsRow>
+        control={
+          <Select
+            items={RAIL_OPTIONS.map((opt) => ({ value: opt.id, label: opt.label }))}
+            value={railPosition}
+            onValueChange={(value) => {
+              if (value === "left" || value === "top") setRailPosition(value)
+            }}
+          >
+            <SelectTrigger
+              id="sidebar-tab-layout"
+              aria-label="Sidebar tab layout"
+              className="w-36 bg-background"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                {RAIL_OPTIONS.map(({ id, label }) => (
+                  <SelectItem key={id} value={id}>
+                    {label}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+        }
+      />
       <SettingsRow
         label={
           <label htmlFor="confirm-replace">Confirm before replacing a translation</label>
@@ -196,38 +215,34 @@ function TranslatorProfileSection() {
 
   return (
     <SettingsGroup label="About you">
+      {PROFILE_TEXT_FIELDS.map(({ key, label, placeholder }) => (
+        <SettingsRow
+          key={key}
+          label={<label htmlFor={`profile-${key}`}>{label}</label>}
+          control={
+            <Input
+              id={`profile-${key}`}
+              value={form[key] ?? ""}
+              onChange={(e) => update(key, e.target.value)}
+              placeholder={placeholder}
+              className="w-56 bg-background"
+            />
+          }
+        />
+      ))}
       <SettingsRow
-        label="Profile fields"
-        description="All fields are optional. Stored on this device and sent to the AI to tailor your summaries."
+        label={<label htmlFor="profile-otherInfo">Other relevant information</label>}
+        description="Anything else that should shape the summaries you get. All fields are optional and stored on this device."
         block
       >
-        <FieldGroup className="grid gap-4 sm:grid-cols-2">
-          {PROFILE_TEXT_FIELDS.map(({ key, label, placeholder }) => (
-            <Field key={key}>
-              <FieldLabel htmlFor={`profile-${key}`} className="text-sm font-medium">
-                {label}
-              </FieldLabel>
-              <Input
-                id={`profile-${key}`}
-                value={form[key] ?? ""}
-                onChange={(e) => update(key, e.target.value)}
-                placeholder={placeholder}
-              />
-            </Field>
-          ))}
-        </FieldGroup>
-        <Field className="mt-4">
-          <FieldLabel htmlFor="profile-otherInfo" className="text-sm font-medium">
-            Other relevant information
-          </FieldLabel>
-          <Textarea
-            id="profile-otherInfo"
-            value={form.otherInfo ?? ""}
-            onChange={(e) => update("otherInfo", e.target.value)}
-            placeholder="Anything else that should shape the summaries you get"
-            rows={3}
-          />
-        </Field>
+        <Textarea
+          id="profile-otherInfo"
+          value={form.otherInfo ?? ""}
+          onChange={(e) => update("otherInfo", e.target.value)}
+          placeholder="Anything else that should shape the summaries you get"
+          rows={3}
+          className="bg-background"
+        />
       </SettingsRow>
     </SettingsGroup>
   )
@@ -345,7 +360,7 @@ function PreferencesIndex() {
             title="Preferences"
             description="Personal preferences that apply to you across all projects on this device."
           />
-          <div className="space-y-6">
+          <div className="flex flex-col gap-12">
             {PREFERENCE_GROUPS.map((group) => (
               <NavList key={group} label={group}>
                 {PREFERENCE_SECTIONS.filter((s) => s.group === group).map((s) => (
@@ -377,9 +392,8 @@ function PreferencesDetail({ slug }: { slug: string }) {
       statusBar={null}
       main={
         <Page>
-          <div className="space-y-6">
-            <BackLink to="/preferences" label="Preferences" />
-            <PageHeader title={section.title} description={section.description} />
+          <div className="flex flex-col gap-12">
+            <PageHeader title={section.title} description={section.description} className="mb-0" />
             {section.render()}
           </div>
         </Page>

@@ -9,7 +9,6 @@ import { OrgBreadcrumb } from "./OrgBreadcrumb"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
-import { SegmentTabs } from "@/components/ui/tabs"
 import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
@@ -265,12 +264,24 @@ export function TeamsList() {
                   </SelectGroup>
                 </SelectContent>
               </Select>
-              <SegmentTabs
-                aria-label="Filter teams by visibility"
+              <Select
+                items={VISIBILITY_OPTIONS}
                 value={visibility}
-                onValueChange={setVisibility}
-                options={VISIBILITY_OPTIONS}
-              />
+                onValueChange={(v) => setVisibility((v as Visibility) ?? "internal")}
+              >
+                <SelectTrigger aria-label="Filter teams by visibility">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent align="start">
+                  <SelectGroup>
+                    {VISIBILITY_OPTIONS.map((opt) => (
+                      <SelectItem key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
             </div>
           )}
 

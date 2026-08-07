@@ -3,6 +3,11 @@ export interface CheckLane {
   steps: Array<[command: string, args: string[]]>
 }
 
+export interface CheckPhase {
+  name: string
+  lanes: CheckLane[]
+}
+
 export type CheckRunner = (
   command: string,
   args: string[],
@@ -10,6 +15,7 @@ export type CheckRunner = (
 ) => Promise<void>
 
 export const CHECK_LANES: CheckLane[]
+export const CHECK_PHASES: CheckPhase[]
 
 export function runCommand(
   command: string,
@@ -20,7 +26,7 @@ export function runCommand(
 export function runParallelChecks(options?: {
   env?: NodeJS.ProcessEnv
   cwd?: string
-  lanes?: CheckLane[]
+  phases?: CheckPhase[]
   run?: CheckRunner
   log?: (message: string) => void
 }): Promise<void>

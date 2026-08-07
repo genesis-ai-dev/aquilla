@@ -2,21 +2,35 @@ import { spawn } from "node:child_process"
 import { pathToFileURL } from "node:url"
 import { workersBuildMetadata } from "./assert-workers-build-env.mjs"
 
-export const CHECK_LANES = [
-  { name: "root", steps: [["pnpm", ["lint"]], ["pnpm", ["test"]]] },
-  { name: "identity", steps: [["pnpm", ["run", "build:workers-build:identity"]]] },
-  { name: "sync", steps: [["pnpm", ["run", "build:workers-build:sync"]]] },
-  { name: "release-contracts", steps: [["pnpm", ["test:idml"]], ["pnpm", ["neon:check"]]] },
+const ROOT_LANE = { name: "root", steps: [["pnpm", ["lint"]], ["pnpm", ["test"]]] }
+const IDENTITY_LANE = { name: "identity", steps: [["pnpm", ["run", "build:workers-build:identity"]]] }
+const SYNC_LANE = { name: "sync", steps: [["pnpm", ["run", "build:workers-build:sync"]]] }
+const RELEASE_LANE = { name: "release-contracts", steps: [["pnpm", ["test:idml"]], ["pnpm", ["neon:check"]]] }
+const AGENT_LANE = {
+  name: "agent-worker",
+  steps: [
+    ["npm", ["ci", "--prefix", "agent-worker"]],
+    ["npm", ["--prefix", "agent-worker", "run", "type-check"]],
+    ["npm", ["--prefix", "agent-worker", "test"]],
+  ],
+}
+const SPA_LANE = { name: "spa", steps: [["bash", ["scripts/ci-build.sh"]]] }
+
+// Bound peak memory to two heavyweight compiler/test processes. The first
+// phase overlaps the two longest suites; the second overlaps the shorter
+// identity suite with the SPA build.
+export const CHECK_PHASES = [
   {
-    name: "agent-worker",
-    steps: [
-      ["npm", ["ci", "--prefix", "agent-worker"]],
-      ["npm", ["--prefix", "agent-worker", "run", "type-check"]],
-      ["npm", ["--prefix", "agent-worker", "test"]],
-    ],
+    name: "core",
+    lanes: [ROOT_LANE, SYNC_LANE, RELEASE_LANE, AGENT_LANE],
   },
-  { name: "spa", steps: [["bash", ["scripts/ci-build.sh"]]] },
+  {
+    name: "final",
+    lanes: [IDENTITY_LANE, SPA_LANE],
+  },
 ]
+
+export const CHECK_LANES = CHECK_PHASES.flatMap(({ lanes }) => lanes)
 
 export function runCommand(command, args, { cwd = process.cwd(), env = process.env } = {}) {
   return new Promise((resolve, reject) => {
@@ -32,24 +46,26 @@ export function runCommand(command, args, { cwd = process.cwd(), env = process.e
 export async function runParallelChecks({
   env = process.env,
   cwd = process.cwd(),
-  lanes = CHECK_LANES,
+  phases = CHECK_PHASES,
   run = runCommand,
   log = console.log,
 } = {}) {
   const metadata = workersBuildMetadata(env)
-  log(`[workers-build] running ${lanes.length} independent check lanes for ${metadata.branch}`)
+  log(`[workers-build] running ${CHECK_LANES.length} checks in ${phases.length} bounded phases for ${metadata.branch}`)
 
-  const results = await Promise.allSettled(lanes.map(async ({ name, steps }) => {
-    log(`[workers-build:${name}] started`)
-    for (const [command, args] of steps) await run(command, args, { cwd, env })
-    log(`[workers-build:${name}] passed`)
-  }))
-
-  const failures = results.flatMap((result, index) => result.status === "rejected"
-    ? [`${lanes[index].name}: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`]
-    : [])
-  if (failures.length > 0) {
-    throw new Error(`Cloudflare check lane failure(s):\n${failures.join("\n")}`)
+  for (const phase of phases) {
+    log(`[workers-build:${phase.name}] starting ${phase.lanes.length} lane(s)`)
+    const results = await Promise.allSettled(phase.lanes.map(async ({ name, steps }) => {
+      log(`[workers-build:${name}] started`)
+      for (const [command, args] of steps) await run(command, args, { cwd, env })
+      log(`[workers-build:${name}] passed`)
+    }))
+    const failures = results.flatMap((result, index) => result.status === "rejected"
+      ? [`${phase.lanes[index].name}: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`]
+      : [])
+    if (failures.length > 0) {
+      throw new Error(`Cloudflare check lane failure(s):\n${failures.join("\n")}`)
+    }
   }
 }
 

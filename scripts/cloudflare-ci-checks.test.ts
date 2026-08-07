@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
-import { CHECK_LANES, runParallelChecks } from "./cloudflare-ci-checks.mjs"
+import { CHECK_LANES, CHECK_PHASES, runParallelChecks } from "./cloudflare-ci-checks.mjs"
 
 const env = {
   WORKERS_CI: "1",
@@ -11,11 +11,15 @@ describe("Cloudflare parallel CI checks", () => {
   it("keeps every required check in an independent lane and omits unused browser installation", () => {
     expect(CHECK_LANES.map(({ name }) => name)).toEqual([
       "root",
-      "identity",
       "sync",
       "release-contracts",
       "agent-worker",
+      "identity",
       "spa",
+    ])
+    expect(CHECK_PHASES.map(({ lanes }) => lanes.map(({ name }) => name))).toEqual([
+      ["root", "sync", "release-contracts", "agent-worker"],
+      ["identity", "spa"],
     ])
     const commands = JSON.stringify(CHECK_LANES)
     expect(commands).toContain("lint")
@@ -27,7 +31,7 @@ describe("Cloudflare parallel CI checks", () => {
     expect(commands).not.toContain("playwright")
   })
 
-  it("starts all independent lanes before waiting for any one lane to finish", async () => {
+  it("runs independent lanes concurrently within bounded memory phases", async () => {
     const started: string[] = []
     const releases = new Map<string, () => void>()
     const run = vi.fn((command: string, args: string[]) => new Promise<void>((resolve) => {
@@ -37,9 +41,11 @@ describe("Cloudflare parallel CI checks", () => {
     }))
 
     const promise = runParallelChecks({ env, run, log: vi.fn() })
-    await vi.waitFor(() => expect(started).toHaveLength(CHECK_LANES.length))
+    await vi.waitFor(() => expect(started).toHaveLength(CHECK_PHASES[0].lanes.length))
+    expect(started).not.toContain("pnpm run build:workers-build:identity")
+    expect(started).not.toContain("bash scripts/ci-build.sh")
 
-    while (releases.size > 0) {
+    while (started.length < CHECK_LANES.length || releases.size > 0) {
       const batch = [...releases.values()]
       releases.clear()
       batch.forEach((release) => release())
@@ -55,5 +61,7 @@ describe("Cloudflare parallel CI checks", () => {
 
     await expect(runParallelChecks({ env, run, log: vi.fn() }))
       .rejects.toThrow("sync: sync failed")
+    expect(run.mock.calls.some(([, args]) => args.includes("build:workers-build:identity"))).toBe(false)
+    expect(run.mock.calls.some(([, args]) => args.includes("scripts/ci-build.sh"))).toBe(false)
   })
 })

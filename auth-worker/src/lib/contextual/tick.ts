@@ -90,51 +90,170 @@ export function resolveOpenRouterUrl(env: { OPENROUTER_BASE_URL?: string }): str
     : "https://openrouter.ai/api/v1/chat/completions"
 }
 
+/** One metered model call. `costCents` is 0 against any non-OpenRouter
+ *  upstream (`usage.cost` is an OpenRouter extension — see lib/llm-vendor.ts),
+ *  so the cost meter prices `promptTokens`/`completionTokens` offline instead
+ *  of trusting this field. */
+export interface LlmCallUsage {
+  promptTokens: number
+  completionTokens: number
+  costCents: number
+  /** Pipeline node that issued the call (LlmRequest.label); "" if unlabelled. */
+  label: string
+  /** Span the call belongs to (LlmRequest.spanId); "" outside a span. */
+  spanId: string
+  tier: Tier
+  /** Model actually requested for this tier. */
+  model: string
+  latencyMs: number
+  /** False when the call threw or returned no usage block — a failed call
+   *  still costs wall-clock and still burdens the run's budget. */
+  ok: boolean
+  /** llama.cpp/llama-swap `timings.predicted_per_second`, when the upstream
+   *  reports it. Absent for OpenRouter. */
+  tokensPerSecond?: number
+}
+
+/** Bounded-concurrency gate. `limit <= 0` disables it entirely (no queueing,
+ *  no bookkeeping) so the OpenRouter path behaves exactly as before. */
+function makeGate(limit: number): <T>(fn: () => Promise<T>) => Promise<T> {
+  if (limit <= 0) return (fn) => fn()
+  let active = 0
+  const waiting: (() => void)[] = []
+  return async <T>(fn: () => Promise<T>): Promise<T> => {
+    if (active >= limit) await new Promise<void>((resolve) => waiting.push(resolve))
+    active++
+    try {
+      return await fn()
+    } finally {
+      active--
+      waiting.shift()?.()
+    }
+  }
+}
+
 /** Build the pipeline's LlmCall over the OpenRouter chat-completions API
  *  (non-streaming). Throws on transport/HTTP errors — runSpan's nodes treat a
- *  throw as that call failing, and the tick records the span outcome. */
+ *  throw as that call failing, and the tick records the span outcome.
+ *
+ *  `onUsage` fires exactly once per call, including on failure, so the cost
+ *  meter counts attempts rather than successes: a model that fails a parse and
+ *  forces a retry costs twice, and a ledger that only recorded successes would
+ *  hide that. It must never throw — it is called from the LLM hot path. */
 export function makeLlmCall(cfg: {
   url: string
   apiKey: string
   models: ContextualModels
   signal?: AbortSignal
-  onUsage?: (u: { promptTokens: number; completionTokens: number; costCents: number }) => void
+  onUsage?: (u: LlmCallUsage) => void
+  /** Cap on HTTP requests in flight through THIS LlmCall at any moment.
+   *  0/undefined = uncapped (the OpenRouter default). */
+  maxInFlight?: number
 }): LlmCall {
+  // Span concurrency is not request concurrency: one span fans its verifier
+  // panel out three-wide, so N spans burst to ~3N requests. Against an upstream
+  // with a fixed slot count that burst is rejected outright, and retrying it
+  // just re-collides. Gate here, where every node's call converges, so the
+  // wave width stays a scheduling decision and this stays the hard limit.
+  const gate = makeGate(cfg.maxInFlight ?? 0)
   return async (req) => {
     const model = cfg.models[req.tier as Tier]
-    const res = await fetch(cfg.url, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${cfg.apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model,
-        messages: [
-          { role: "system", content: req.system },
-          { role: "user", content: req.user },
-        ],
-        max_tokens: req.maxTokens,
-        temperature: req.temperature,
-        ...openRouterUsage(cfg.url),
-      }),
-      ...(cfg.signal ? { signal: cfg.signal } : {}),
-    })
-    if (!res.ok) {
-      const text = await res.text()
-      throw new Error(`openrouter_error ${res.status}: ${text.slice(0, 300)}`)
+    // Per-ATTEMPT, so a retry's recorded latency is its own round-trip and not
+    // the backoff it waited through. Reset at the top of each attempt below.
+    let startedAt = Date.now()
+    const report = (
+      u: Omit<LlmCallUsage, "label" | "spanId" | "tier" | "model" | "latencyMs">,
+    ): void => {
+      if (!cfg.onUsage) return
+      try {
+        cfg.onUsage({
+          ...u,
+          label: req.label ?? "",
+          spanId: req.spanId ?? "",
+          tier: req.tier as Tier,
+          model,
+          latencyMs: Date.now() - startedAt,
+        })
+      } catch {
+        /* the meter must never break the run it is measuring */
+      }
     }
-    const body = (await res.json()) as {
+    const failed = { promptTokens: 0, completionTokens: 0, costCents: 0, ok: false }
+
+    // Capacity rejections are NOT model failures. A busy upstream (OpenRouter
+    // rate limit, or a self-hosted server whose slots are all occupied) answers
+    // in milliseconds with no tokens spent, but the pipeline treats a throw as
+    // the node failing — and a rejected `ambiguity` verifier fails its whole
+    // span. Wait for a slot instead. Each attempt is still metered, so
+    // contention stays visible rather than being smoothed away.
+    const requestBody = JSON.stringify({
+      model,
+      messages: [
+        { role: "system", content: req.system },
+        { role: "user", content: req.user },
+      ],
+      max_tokens: req.maxTokens,
+      temperature: req.temperature,
+      ...openRouterUsage(cfg.url),
+    })
+    const RETRIABLE = new Set([429, 500, 502, 503, 504])
+    const MAX_ATTEMPTS = 5
+
+    interface UpstreamBody {
       choices?: { message?: { content?: string | null } }[]
       usage?: { prompt_tokens?: number; completion_tokens?: number; cost?: number }
+      timings?: { predicted_per_second?: number }
     }
-    if (body.usage && cfg.onUsage) {
-      cfg.onUsage({
-        promptTokens: body.usage.prompt_tokens ?? 0,
-        completionTokens: body.usage.completion_tokens ?? 0,
-        costCents: (body.usage.cost ?? 0) * 100,
-      })
+    type Attempt =
+      | { ok: true; body: UpstreamBody }
+      | { ok: false; status: number; text: string }
+
+    let body!: UpstreamBody
+    for (let attempt = 1; ; attempt++) {
+      startedAt = Date.now()
+      let outcome: Attempt
+      try {
+        // The gate holds a slot only for the round-trip, never across the
+        // backoff below — a sleeping retry must not occupy capacity.
+        outcome = await gate<Attempt>(async () => {
+          const res = await fetch(cfg.url, {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${cfg.apiKey}`,
+              "Content-Type": "application/json",
+            },
+            body: requestBody,
+            ...(cfg.signal ? { signal: cfg.signal } : {}),
+          })
+          if (!res.ok) return { ok: false, status: res.status, text: await res.text() }
+          return { ok: true, body: (await res.json()) as UpstreamBody }
+        })
+      } catch (err) {
+        report(failed)
+        throw err
+      }
+      if (outcome.ok) {
+        body = outcome.body
+        break
+      }
+
+      report(failed)
+      if (!RETRIABLE.has(outcome.status) || attempt >= MAX_ATTEMPTS || cfg.signal?.aborted) {
+        throw new Error(`openrouter_error ${outcome.status}: ${outcome.text.slice(0, 300)}`)
+      }
+      // Exponential backoff with jitter — without the jitter every rejected
+      // lane in a wave would wake at the same instant and collide again.
+      const backoffMs = Math.min(1000 * 2 ** (attempt - 1), 8000) * (0.5 + Math.random())
+      await new Promise((r) => setTimeout(r, backoffMs))
     }
+    const tps = body.timings?.predicted_per_second
+    report({
+      promptTokens: body.usage?.prompt_tokens ?? 0,
+      completionTokens: body.usage?.completion_tokens ?? 0,
+      costCents: (body.usage?.cost ?? 0) * 100,
+      ok: body.usage !== undefined,
+      ...(typeof tps === "number" ? { tokensPerSecond: tps } : {}),
+    })
     return body.choices?.[0]?.message?.content ?? ""
   }
 }
@@ -482,7 +601,10 @@ async function processSpan(
       rules: shared.rules,
       ...(shared.ctx.sourceLanguage ? { sourceLanguage: shared.ctx.sourceLanguage } : {}),
       ...(shared.ctx.targetLanguage ? { targetLanguage: shared.ctx.targetLanguage } : {}),
-      llm: deps.llm,
+      // Tag every call this span makes, for cost attribution. A wave runs
+      // several spans concurrently, so the span id must ride the request
+      // rather than live in shared mutable state.
+      llm: (req) => deps.llm({ ...req, spanId: seed.id }),
       onPhase: (phase: SpanPhase) => {
         void notify({
           type: "contextual.phase",

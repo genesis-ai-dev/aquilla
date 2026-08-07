@@ -25,6 +25,7 @@ import { resolveProjectRole } from "../services/project-permissions"
 import { runAiGuard } from "../lib/ai-budget"
 import { getPlatformSettingsCached } from "../lib/platform-settings"
 import { creditGuard } from "../lib/credits"
+import { makeCostMeter } from "../lib/cost-meter"
 import { notifySyncWorkerOfContextualActivity } from "../services/sync-worker-notify"
 import { makePostgres, type AquillaDb } from "../../../db/shim/postgres"
 import {
@@ -69,8 +70,18 @@ const MAX_WAVES_PER_LOOP = 50
 
 /** Total spans one project-wide start may drive at once, across every file.
  *  Per-file wave width is divided down to respect it — the ceiling that
- *  matters is the model provider's rate limit, not any one file's size. */
-const MAX_PROJECT_CONCURRENCY = 12
+ *  matters is the model provider's rate limit, not any one file's size.
+ *
+ *  A span is NOT one concurrent request: a high-risk span fans its verifier
+ *  panel out three-wide (router.ts ALL_VERIFIERS), so peak in-flight requests
+ *  are roughly 3x this number. Sized for OpenRouter by default; a self-hosted
+ *  upstream with N slots needs CONTEXTUAL_MAX_CONCURRENCY <= N/3, or the
+ *  surplus 429s and those retries land in the cost measurement as real work. */
+const DEFAULT_MAX_PROJECT_CONCURRENCY = 12
+function resolveMaxProjectConcurrency(raw: string | undefined): number {
+  const n = Number(raw)
+  return Number.isFinite(n) && n >= 1 ? Math.floor(n) : DEFAULT_MAX_PROJECT_CONCURRENCY
+}
 /** Files a single project-wide start will fan out to. */
 const MAX_PROJECT_FILES = 24
 
@@ -127,12 +138,36 @@ async function selfTickLoop(
   const db: AquillaDb = (shim as unknown as AquillaDb) ?? env.AQUILLA_PG
   const notify = async (frame: ContextualProgressFrame) =>
     notifySyncWorkerOfContextualActivity(env, projectId, frame)
+  // Dev cost meter (AQU pricing exercise): one row per model call, flushed
+  // per wave. Buffered so the ledger write never lands inside the model hot
+  // path and skews the latency it is recording.
+  const meter = makeCostMeter(env, db)
   try {
     const settings = await getPlatformSettingsCached(env)
     const llm = makeLlmCall({
       url: resolveOpenRouterUrl(env),
       apiKey: env.OPENROUTER_API_KEY ?? "",
       models: resolveContextualModels(env, settings),
+      ...(Number(env.CONTEXTUAL_MAX_INFLIGHT) > 0
+        ? { maxInFlight: Math.floor(Number(env.CONTEXTUAL_MAX_INFLIGHT)) }
+        : {}),
+      onUsage: (u) =>
+        meter.add({
+          surface: "autopilot",
+          runId,
+          projectId,
+          kind: "llm",
+          label: u.label,
+          spanId: u.spanId,
+          tier: u.tier,
+          model: u.model,
+          promptTokens: u.promptTokens,
+          completionTokens: u.completionTokens,
+          costCents: u.costCents,
+          latencyMs: u.latencyMs,
+          ok: u.ok,
+          ...(u.tokensPerSecond !== undefined ? { tokensPerSecond: u.tokensPerSecond } : {}),
+        }),
     })
     for (let wave = 0; wave < MAX_WAVES_PER_LOOP; wave++) {
       const result = await runOneTick({
@@ -142,6 +177,7 @@ async function selfTickLoop(
         notify,
         ...(concurrency ? { concurrency } : {}),
       })
+      await meter.flush()
       if (!result.continueRun) return
     }
     // Cap reached with spans still queued. Park (never leave it 'running' with
@@ -159,6 +195,9 @@ async function selfTickLoop(
     }
     console.error(`[contextual] tick loop failed for run ${runId}:`, err)
   } finally {
+    // Drain before the connection closes — a return/throw above skips the
+    // per-wave flush, and those rows are the tail of the run.
+    await meter.flush()
     if (shim) {
       try {
         await shim.close()
@@ -305,7 +344,12 @@ contextual.post(
       }
       // Divide the global ceiling across files so a 24-file fan-out doesn't
       // multiply into 144 concurrent model calls.
-      const perFile = Math.max(1, Math.floor(MAX_PROJECT_CONCURRENCY / candidates.length))
+      const perFile = Math.max(
+        1,
+        Math.floor(
+          resolveMaxProjectConcurrency(c.env.CONTEXTUAL_MAX_CONCURRENCY) / candidates.length,
+        ),
+      )
       const scopeGroup = crypto.randomUUID()
       const started: { runId: string; fileId: string }[] = []
       const skipped: { fileId: string; reason: string }[] = []

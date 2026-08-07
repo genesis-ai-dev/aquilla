@@ -7,12 +7,12 @@ import { addOrgMember, getMyOrg, ROLE } from "../../helpers/frontier-api"
  * TeamDetail — remove a member from a team.
  *
  * TeamDetail.tsx renders each team member row with a three-dot actions menu
- * ("Actions for <username>") whose menu includes "Remove <username>".
+ * ("Actions for <username>") whose menu includes "Remove from team".
  * Choosing it calls removeTeamMember and the row disappears.
  *
  * This spec: seeds bob in alice's org → creates a team → adds bob via the
  * AQU-735 multi-select dialog → opens bob's actions menu → clicks
- * "Remove bob" → verifies bob no longer appears in the members list.
+ * "Remove from team" → verifies bob no longer appears in the members list.
  */
 test("team remove member button removes the member from the team", async ({ alice }) => {
   const aliceSession = await ensureAuthState("alice")
@@ -61,7 +61,7 @@ test("team remove member button removes the member from the team", async ({ alic
   const actionsBtn = alice.getByRole("button", { name: /Actions for bob/i })
   await expect(actionsBtn).toBeVisible({ timeout: 8_000 })
   await actionsBtn.click()
-  const removeItem = alice.getByRole("menuitem", { name: /Remove bob/i })
+  const removeItem = alice.getByRole("menuitem", { name: /Remove from team/i })
   await expect(removeItem).toBeVisible({ timeout: 3_000 })
   await removeItem.click()
 

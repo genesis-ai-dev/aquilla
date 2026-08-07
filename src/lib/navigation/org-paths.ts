@@ -76,6 +76,11 @@ export function orgSettingsPath(orgId: number, section?: string): string {
   return section ? orgPath(orgId, `/settings/${section}`) : orgPath(orgId, "/settings")
 }
 
+export function teamSettingsPath(orgId: number, groupId: number | string, section?: string): string {
+  const base = `/teams/${groupId}/settings`
+  return section ? orgPath(orgId, `${base}/${section}`) : orgPath(orgId, base)
+}
+
 export function projectSettingsPath(projectId: string, section?: string): string {
   return section
     ? `/project/${projectId}/settings/${section}`

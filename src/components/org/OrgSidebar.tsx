@@ -13,7 +13,7 @@ import { AccountSwitcher } from "@/components/AccountSwitcher"
 import { HelpMenu } from "@/components/HelpMenu"
 
 const link = ({ isActive }: { isActive: boolean }) =>
-  `flex items-center gap-2 rounded-md px-2 py-1.5 text-sm ${isActive ? "bg-accent font-medium text-foreground" : "text-muted-foreground hover:bg-accent hover:text-foreground"}`
+  `flex items-center gap-2 rounded-md px-2 py-1.5 text-sm font-normal ${isActive ? "bg-accent text-foreground" : "text-muted-foreground hover:bg-accent hover:text-foreground"}`
 
 function NavIcon({ icon: Icon }: { icon: LucideIcon }) {
   return <Icon className="size-4 shrink-0" aria-hidden />

@@ -5,13 +5,13 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
 /**
  * TeamDetail — detach a project from a team.
  *
- * TeamDetail.tsx renders an `aria-label="Detach ${p.name}"` button next to
- * each attached project. Clicking it removes the project from the team's
- * project list.
+ * TeamDetail.tsx renders each attached project row with a three-dot actions
+ * menu ("Actions for <name>") whose menu includes "Detach". Choosing it
+ * removes the project from the team's project list.
  *
  * This spec: creates a project → creates a team → attaches the project to
- * the team → verifies the project appears in the team's project list →
- * clicks the "Detach" button → verifies the project is removed.
+ * the team → verifies the project appears in the team's project table →
+ * opens the actions menu → clicks Detach → verifies the project is removed.
  */
 test("team detach project removes project from team", async ({ alice }) => {
   // Create a project to attach and then detach.
@@ -55,14 +55,16 @@ test("team detach project removes project from team", async ({ alice }) => {
   await expect(attachBtn).toBeVisible({ timeout: 3_000 })
   await attachBtn.click()
 
-  // The project should appear in the team's projects list.
-  await expect(alice.getByText(projName).first()).toBeVisible({ timeout: 10_000 })
+  // The project should appear in the team's projects table.
+  const actionsBtn = alice.getByRole("button", { name: `Actions for ${projName}` })
+  await expect(actionsBtn).toBeVisible({ timeout: 10_000 })
 
-  // Now click "Detach <projName>" to remove the project.
-  const detachBtn = alice.locator(`[aria-label="Detach ${projName}"]`)
-  await expect(detachBtn).toBeVisible({ timeout: 5_000 })
-  await detachBtn.click()
+  // Open the row menu and detach.
+  await actionsBtn.click()
+  const detachItem = alice.getByRole("menuitem", { name: `Detach ${projName}` })
+  await expect(detachItem).toBeVisible({ timeout: 3_000 })
+  await detachItem.click()
 
   // The project should no longer appear in the list.
-  await expect(alice.locator(`[aria-label="Detach ${projName}"]`)).not.toBeVisible({ timeout: 5_000 })
+  await expect(actionsBtn).not.toBeVisible({ timeout: 5_000 })
 })

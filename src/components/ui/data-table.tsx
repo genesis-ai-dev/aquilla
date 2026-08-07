@@ -218,11 +218,11 @@ function DataTable<TData, TValue>({
                   <React.Fragment key={row.id}>
                     <TableRow
                       data-state={row.getIsSelected() && "selected"}
-                      className={
+                      className={cn(
                         typeof rowClassName === "function"
                           ? rowClassName(row.original)
-                          : rowClassName
-                      }
+                          : rowClassName,
+                      )}
                       onClick={onRowClick ? () => onRowClick(row.original) : undefined}
                     >
                       {row.getVisibleCells().map((cell) => (

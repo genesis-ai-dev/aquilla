@@ -57,6 +57,7 @@ import { CellTtsButton } from "./CellTtsButton"
 import { CellTranscriptPreview } from "./CellTranscriptPreview"
 import { CellTranscribeBadge } from "./CellTranscribeBadge"
 import { CellActionRail, RailButton, isInteractiveTarget } from "./CellActionRail"
+import { useIsMediaCursorCell } from "@/lib/timeline/media-cursor"
 import { useRailIdleHide } from "@/hooks/useRailIdleHide"
 import {
   computeRailPinned,
@@ -3664,12 +3665,17 @@ function EditorRow({
   // FRO perf cleanup: pure pass-through openers (never consumed by
   // EditorTable/MemoizedRow) come from context instead of the prop chain —
   // keeps them out of MemoizedRow's React.memo compare surface.
-  const { onInfractionClick, onOpenComments, onOpenHistory, onAiSetupNeeded, onOpenRecording, myScopes } = useEditorActions()
+  const { onInfractionClick, onOpenComments, onOpenHistory, onAiSetupNeeded, onOpenRecording, onMediaRowActivate, myScopes } =
+    useEditorActions()
   // AQU-633: a scoped member can only validate cells in their assigned lane/file.
   // Combine the role capability with the per-cell scope check so an out-of-scope
   // cell greys the toggle instead of offering a guaranteed-403 validate. Unscoped
   // members (empty scopes) → always in scope, so this is a no-op for them.
   const canValidateThisCell = canValidate && isInMemberScope(myScopes, cell.fileId, activeLane)
+  // 2026-08-07: the timeline's pointed-at cell (media lens only — the store
+  // self-clears when the timeline unmounts). Per-row subscription so a cursor
+  // move re-renders exactly the two affected rows.
+  const isMediaCursorRow = useIsMediaCursorCell(cell.id)
   const remoteCellPresence = useCellPresence(presenceStore, cell.id)
   // A focus lock admits one active writer. Prefer its newest ephemeral draft
   // so the read surface and remote caret advance together between commits.
@@ -4979,6 +4985,10 @@ function EditorRow({
       return
     }
     if (isInteractiveTarget(e.target)) return
+    // 2026-08-07 (wire b): with the timeline stacked above, a plain row click
+    // also points the timeline at this cell (select chip, center, cue paused).
+    // The workspace no-ops this outside the stacked media lens.
+    onMediaRowActivate?.(cell.id)
     // Plain click clears any active multi-selection so the next interaction
     // doesn't surprise the user with a stale bulk action target.
     clearSelection()
@@ -5263,6 +5273,9 @@ function EditorRow({
           openCommentCount > 0 && "ring-1 ring-blue-400/50 ring-inset",
           // Active cue highlight — tinted fill + gold ring.
           _isActiveCue && "bg-primary/5 ring-1 ring-primary/40 ring-inset",
+          // Timeline cursor (media lens): sky ring, same language as the
+          // selected chip's ring.
+          isMediaCursorRow && "bg-sky-500/5 ring-1 ring-sky-500/40 ring-inset",
           // Pulsing while a voice is being generated for this cell. Gives the
           // user a clear "something is happening" signal — drop, translate,
           // and bulk synth all flow through this status key.

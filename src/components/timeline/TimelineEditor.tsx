@@ -21,6 +21,7 @@ import { isInEditableContext, isTopAudioShortcutOwner, pushAudioShortcutOverride
 import { spacebarShouldToggle } from "@/lib/audio/playback-keys"
 import { activeTargetForCell } from "@/lib/audio/track-audio"
 import { loadSnapEnabled, saveSnapEnabled } from "@/lib/timeline/snap"
+import { setMediaCursorCell, setMediaSyncActive } from "@/lib/timeline/media-cursor"
 import { setAudioQualityPref, useAudioQualityPref } from "@/lib/store/audio-quality-pref"
 import { TimelineRuler } from "./TimelineRuler"
 import { TimelineLane } from "./TimelineLane"
@@ -69,6 +70,13 @@ export interface TimelineEditorProps {
   initialSelectedCellId?: string | null
   /** AQU-646 round 3 (media→text trace): mirrors every selection change up. */
   onSelectedCellChange?(cellId: string | null): void
+  /** 2026-08-07 (wire a): fires on USER chip clicks only — the workspace
+   *  scrolls the text table to the matching row. Programmatic selection
+   *  (activateRequest, the mount trace) stays silent to avoid echo loops. */
+  onChipActivated?(cellId: string): void
+  /** 2026-08-07 (wire b): a text-table row click, as a nonce'd request —
+   *  selects the chip and centers/cues exactly like a chip click. */
+  activateRequest?: { cellId: string; nonce: number } | null
   /** SUB-53: which job this project is for. "dubbing" (the default) draws the
    *  track against the imported recording's clock; "audioFirst" lays the
    *  verses out end to end at their real lengths. */
@@ -148,6 +156,8 @@ export function TimelineEditor({
   onOpenRecording,
   initialSelectedCellId,
   onSelectedCellChange,
+  onChipActivated,
+  activateRequest,
   timingMode = "dubbing",
   onOpenTimingSettings,
   project,
@@ -594,22 +604,45 @@ export function TimelineEditor({
     onSelectCell?.(selectedId)
   }, [selectedId, onSelectedCellChange, onSelectCell])
 
-  // AQU-646 round 3: consume the text→media trace once on mount. Reads the
-  // live clientWidth (viewportPx state is still 0 here — it lands via the
-  // measurement useLayoutEffect a beat later) to center the clip; seekTo cues
-  // the queue paused at the clip start and re-engages follow — identical to a
-  // clean card click. Untimed traced cells: selection + pane only.
-  useEffect(() => {
-    const id = initialSelectedCellId
-    if (!id) return
-    const cell = cells.find((c) => c.id === id)
+  // Center the track on a clip and cue playback (paused) at its start —
+  // identical to a clean card click. Reads the live clientWidth (viewportPx
+  // state can still be 0 pre-measurement). Untimed cells: no timecode, no-op.
+  function centerAndCue(cellId: string) {
+    const cell = cells.find((c) => c.id === cellId)
     const at = cell ? layout.seekSecFor(cell) : null
     if (at == null) return
     const viewport = scrollRef.current?.clientWidth ?? 0
     scrollTrackTo(Math.max(0, secToPx(at, pxPerSec) - viewport / 2))
     seekTo(at)
+  }
+
+  // AQU-646 round 3: consume the text→media trace once on mount (the seed
+  // alone already selected the cell via the useState initializer).
+  useEffect(() => {
+    if (initialSelectedCellId) centerAndCue(initialSelectedCellId)
     // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only trace consume
   }, [])
+
+  // 2026-08-07 (wire b): a text-table row click arrives as an activate
+  // request — select the chip and center/cue exactly like a chip click, but
+  // through the PLAIN setter: onChipActivated must not echo back and scroll-
+  // yank the row the user just clicked.
+  useEffect(() => {
+    if (!activateRequest) return
+    setSelectedId(activateRequest.cellId)
+    centerAndCue(activateRequest.cellId)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- consumed per nonce
+  }, [activateRequest?.nonce])
+
+  // 2026-08-07: publish the timeline's presence + chip selection to the media
+  // cursor store — the table's rows highlight the pointed-at cell through it.
+  useEffect(() => {
+    setMediaSyncActive(true)
+    return () => setMediaSyncActive(false)
+  }, [])
+  useEffect(() => {
+    setMediaCursorCell(selectedId)
+  }, [selectedId])
 
   // AQU-646 follow-playhead: page-flip the view when the playhead approaches
   // the right edge (or leaves the left). Reads the element's live scrollLeft —
@@ -627,6 +660,14 @@ export function TimelineEditor({
     if (target != null) scrollTrackTo(target)
   }, [follow, queuePlaying, queueProgress.currentTime, pxPerSec, viewportPx, trackWidthPx])
 
+  // 2026-08-07 (wire a): USER chip selection — as opposed to programmatic
+  // selection from a row click — also notifies the workspace so the text
+  // table scrolls to and flashes the matching row.
+  const selectFromChip = (cellId: string) => {
+    setSelectedId(cellId)
+    onChipActivated?.(cellId)
+  }
+
   const laneProps = {
     layout,
     pxPerSec,
@@ -634,7 +675,7 @@ export function TimelineEditor({
     viewEndSec,
     selectedId,
     editable,
-    onSelect: setSelectedId,
+    onSelect: selectFromChip,
     onRetime: onRetimeSubtitle,
     // Clean card click → navigate playback to the clip's start (both lanes;
     // untimed chips have no timecode to seek to). SUB-53: "the clip's start"
@@ -862,7 +903,7 @@ export function TimelineEditor({
               missingCellIds={missingCellIds}
               editable={editable}
               snapEnabled={snapOn && !audioFirst}
-              onSelect={setSelectedId}
+              onSelect={selectFromChip}
               onSeek={laneProps.onSeek}
               // SUB-53: a chip's position is computed in audio-first, so there
               // is nothing to drag it to. Trimming stays — and re-flows.
@@ -878,7 +919,7 @@ export function TimelineEditor({
                     key={c.id}
                     type="button"
                     data-testid={`tl-untimed-${c.id}`}
-                    onClick={() => setSelectedId(c.id)}
+                    onClick={() => selectFromChip(c.id)}
                     className={cn(
                       "shrink-0 rounded-md border border-dashed border-zinc-400 bg-background px-2 py-1 text-[10px] text-foreground/80 hover:bg-muted dark:border-zinc-600",
                       selectedId === c.id && "ring-2 ring-sky-500",

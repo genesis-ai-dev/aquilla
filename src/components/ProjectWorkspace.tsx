@@ -1270,6 +1270,18 @@ export function ProjectWorkspace() {
    *  rendered text table (one EditorTable instance across both lenses — the
    *  imperative ref, selection singleton, and presence claims stay single). */
   const timelineStacked = lens === "audio" && activeFileTimeOrdered
+  // 2026-08-07 (wire b): a text-table row click points the timeline at that
+  // cell. Nonce'd so repeat clicks on the same row re-center; the callback is
+  // identity-stable (mirror ref) because it rides in editorActionsValue.
+  const [timelineActivateRequest, setTimelineActivateRequest] = useState<{ cellId: string; nonce: number } | null>(null)
+  const timelineStackedRef = useRef(timelineStacked)
+  timelineStackedRef.current = timelineStacked
+  const activateNonceRef = useRef(0)
+  const handleMediaRowActivate = useCallback((cellId: string) => {
+    if (!timelineStackedRef.current) return
+    activateNonceRef.current += 1
+    setTimelineActivateRequest({ cellId, nonce: activateNonceRef.current })
+  }, [])
   const audioLens = useMemo<AudioLensContext | null>(
     () =>
       lens === "audio" && audioProject && !activeFileTimeOrdered
@@ -3506,8 +3518,9 @@ export function ProjectWorkspace() {
     onOpenHistory: handleOpenHistory,
     onAiSetupNeeded: handleAiSetupNeeded,
     onOpenRecording: handleOpenRecording,
+    onMediaRowActivate: handleMediaRowActivate, // 2026-08-07: row click → timeline (stacked lens only)
     myScopes, // AQU-633: per-cell validate scope gate
-  }), [handleInfractionClick, handleOpenComments, handleOpenHistory, handleAiSetupNeeded, handleOpenRecording, myScopes])
+  }), [handleInfractionClick, handleOpenComments, handleOpenHistory, handleAiSetupNeeded, handleOpenRecording, handleMediaRowActivate, myScopes])
 
   const handleAssignVoice = useCallback(async (cellId: string, voiceId: string) => {
     if (!audioProject || !frontierSession) return
@@ -5627,6 +5640,8 @@ export function ProjectWorkspace() {
                     cells={audioMergedCells}
                     initialSelectedCellId={mediaTraceCellId}
                     onSelectedCellChange={handleTimelineSelectedCell}
+                    onChipActivated={jumpToCellId}
+                    activateRequest={timelineActivateRequest}
                     coreMediaUrl={activeFile.coreMediaUrl ?? null}
                     editable={!isReadOnly}
                     fileId={activeFile.id}

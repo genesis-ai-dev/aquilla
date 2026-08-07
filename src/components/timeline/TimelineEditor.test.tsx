@@ -495,6 +495,61 @@ describe("TimelineEditor", () => {
       mockQueueState = { kind: "idle" }
     }
   })
+  // ── 2026-08-07: chip↔row sync wires ──
+
+  it("wire a: a USER chip click fires onChipActivated with the cell id", () => {
+    const onChipActivated = vi.fn()
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={mediaCells}
+        onRetimeSubtitle={() => {}} onChipActivated={onChipActivated}
+      />,
+    )
+    fireEvent.click(screen.getByTestId("tl-card-m2"))
+    expect(onChipActivated).toHaveBeenCalledWith("m2")
+  })
+
+  it("wire b: an activateRequest selects + cues WITHOUT echoing onChipActivated", () => {
+    const onChipActivated = vi.fn()
+    const onSeekToTime = vi.fn()
+    const { rerender } = render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={mediaCells}
+        onRetimeSubtitle={() => {}} onChipActivated={onChipActivated}
+        onSeekToTime={onSeekToTime} activateRequest={null}
+      />,
+    )
+    rerender(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={mediaCells}
+        onRetimeSubtitle={() => {}} onChipActivated={onChipActivated}
+        onSeekToTime={onSeekToTime} activateRequest={{ cellId: "m2", nonce: 1 }}
+      />,
+    )
+    expect(screen.getByTestId("tl-detail")).toHaveAttribute("data-cell-id", "m2")
+    expect(onSeekToTime).toHaveBeenCalledWith(10)
+    expect(onChipActivated).not.toHaveBeenCalled()
+  })
+
+  it("wire b: the same cell re-requested (new nonce) re-cues", () => {
+    const onSeekToTime = vi.fn()
+    const { rerender } = render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={mediaCells}
+        onRetimeSubtitle={() => {}} onSeekToTime={onSeekToTime}
+        activateRequest={{ cellId: "m2", nonce: 1 }}
+      />,
+    )
+    onSeekToTime.mockClear()
+    rerender(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={mediaCells}
+        onRetimeSubtitle={() => {}} onSeekToTime={onSeekToTime}
+        activateRequest={{ cellId: "m2", nonce: 2 }}
+      />,
+    )
+    expect(onSeekToTime).toHaveBeenCalledWith(10)
+  })
 })
 
 // ── SUB-53: audio-first ─────────────────────────────────────────────────────

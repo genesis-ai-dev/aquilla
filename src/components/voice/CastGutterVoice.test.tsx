@@ -18,7 +18,7 @@ describe("CastGutterVoice", () => {
     )
     const trigger = screen.getByTestId("gutter-voice")
     expect(trigger).toHaveAttribute("data-explicit", "true")
-    expect(trigger).toHaveAttribute("aria-label", "Mary — voiced by Mary. Choose a character")
+    expect(trigger).toHaveAttribute("aria-label", "Mary. Choose a character")
     expect(trigger.querySelector(".outline-dotted")).toBeNull()
   })
 
@@ -30,7 +30,7 @@ describe("CastGutterVoice", () => {
     expect(trigger).toHaveAttribute("data-explicit", "false")
     expect(trigger).toHaveAttribute(
       "aria-label",
-      "Voiced by Narrator (default — no one cast yet). Choose a character",
+      "Narrator — default (no one cast yet). Choose a character",
     )
     const faded = trigger.querySelector(".outline-dotted")
     expect(faded).not.toBeNull()

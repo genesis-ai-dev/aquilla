@@ -35,11 +35,13 @@ export interface CastGutterVoiceProps {
 export function CastGutterVoice({ voice, explicit, castName, editable, voices, onPick }: CastGutterVoiceProps) {
   const [open, setOpen] = useState(false)
   const [applyToSpeaker, setApplyToSpeaker] = useState(false)
+  // Hover text leads with the CHARACTER (Sam 2026-08-07) — the voice is the
+  // detail, the name is the answer to "who is this circle?".
   const tooltip = explicit
-    ? castName
+    ? castName && castName !== voice.name
       ? `${castName} — voiced by ${voice.name}`
-      : `Voiced by ${voice.name}`
-    : `Voiced by ${voice.name} (default — no one cast yet)`
+      : voice.name
+    : `${voice.name} — default (no one cast yet)`
   const trigger = (
     <span
       className={cn(

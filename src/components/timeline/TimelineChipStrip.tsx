@@ -53,33 +53,46 @@ function Pill({ children }: { children: React.ReactNode }) {
   )
 }
 
-export function TimelineChipStrip({ cell, chipStats, audioMissing }: TimelineChipStripProps) {
-  if (!cell) {
-    return (
-      <div
-        data-testid="tl-detail-empty"
-        className="flex items-center border-t border-border bg-muted/20 px-4 py-2 text-xs text-muted-foreground"
-      >
-        Select a clip to see its timing.
-      </div>
-    )
-  }
+/** The compact segment-navigator slot on the strip's right (Sam 2026-08-07):
+ *  EditorTable PORTALS its MilestoneNavigator here — the nav's items and
+ *  scroll handlers live in the table, but the strip row is where it sits.
+ *  The data-chapter-nav-slot marker drives the nav's own width-collapse; the
+ *  [&_button] overrides shrink its size-8 buttons to a strip-friendly h-7. */
+function StripNavSlot() {
+  return (
+    <div
+      data-strip-nav-slot=""
+      data-chapter-nav-slot=""
+      data-testid="tl-strip-nav"
+      className="ml-auto w-56 max-w-[40%] shrink-0 empty:hidden [&_button]:h-7 [&_button]:text-[11px]"
+    />
+  )
+}
 
-  const isDialogue = (cell.medium ?? "text") === "media"
-  const start = cell.startTime ?? 0
-  const end = cell.endTime ?? start
+export function TimelineChipStrip({ cell, chipStats, audioMissing }: TimelineChipStripProps) {
+  const isDialogue = (cell?.medium ?? "text") === "media"
+  const start = cell?.startTime ?? 0
+  const end = cell?.endTime ?? start
   const castName =
-    cell.metadata && typeof cell.metadata.cast_name === "string"
+    cell?.metadata && typeof cell.metadata.cast_name === "string"
       ? (cell.metadata.cast_name as string)
       : null
 
+  // ONE shared row in both states: the left side flips between the empty
+  // prompt and the pills, while the nav slot keeps its DOM identity — the
+  // table's portal host must survive selection changes.
   return (
-    <div
-      data-testid="tl-detail"
-      data-cell-id={cell.id}
-      className="border-t border-border bg-muted/20 px-4 py-2"
-    >
-      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+    <div className="flex items-center gap-2 border-t border-border bg-muted/20 px-4 py-1.5">
+      {!cell ? (
+        <div data-testid="tl-detail-empty" className="flex min-w-0 items-center text-xs text-muted-foreground">
+          Select a clip to see its timing.
+        </div>
+      ) : (
+      <div
+        data-testid="tl-detail"
+        data-cell-id={cell.id}
+        className="flex min-w-0 flex-wrap items-center gap-2 text-xs text-muted-foreground"
+      >
         <Pill>
           <b className="font-semibold text-foreground">{isDialogue ? "Dialogue" : "Subtitle"}</b>
         </Pill>
@@ -175,6 +188,8 @@ export function TimelineChipStrip({ cell, chipStats, audioMissing }: TimelineChi
           </Pill>
         )}
       </div>
+      )}
+      <StripNavSlot />
     </div>
   )
 }

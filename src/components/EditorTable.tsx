@@ -1,4 +1,5 @@
 import React, { useEffect, useLayoutEffect, useRef, useCallback, useMemo, useState, forwardRef, useImperativeHandle } from "react"
+import { createPortal } from "react-dom"
 import {
   LegendList,
   type LegendListRef,
@@ -2107,14 +2108,37 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     [cellStoreVersion, renderListItem],
   )
 
-  // 2026-08-07 (Sam): the segment-range navigator is pure chrome in the
-  // stacked media lens — the timeline, chip clicks, and playback follow do
-  // its job there. Navigation only (the row list is never filtered by it),
-  // so hiding it costs nothing. The Text lens keeps it.
+  // 2026-08-07 (Sam): in the stacked media lens the segment-range navigator
+  // leaves its own header row and rides COMPACT on the chip strip's right —
+  // portaled into the strip's slot (the nav's items/scroll handlers live
+  // here, the strip owns the spot). Navigation only either way (the row list
+  // is never filtered by it). The Text lens keeps the classic row.
   const showMilestoneNav = !castGutter && milestoneNavigationItems.length > 0 && Boolean(activeChapterLabel)
+  const showStripNav = castGutter && milestoneNavigationItems.length > 0 && Boolean(activeChapterLabel)
+  const [stripNavSlot, setStripNavSlot] = useState<HTMLElement | null>(null)
+  useEffect(() => {
+    if (!showStripNav) {
+      setStripNavSlot(null)
+      return
+    }
+    // Both the strip (a TimelineEditor child) and this table commit in the
+    // same render pass, so the slot exists by the time effects run.
+    setStripNavSlot(document.querySelector<HTMLElement>("[data-strip-nav-slot]"))
+  }, [showStripNav])
 
   return (
     <div className="flex h-full min-h-0 flex-col" onMouseUp={handleMouseUp}>
+      {showStripNav && stripNavSlot
+        ? createPortal(
+            <MilestoneNavigator
+              items={milestoneNavigationItems}
+              activeKey={activeChapterLabel}
+              activeSubsectionKey={activeSubsectionKey}
+              onSelect={handleChapterSelect}
+            />,
+            stripNavSlot,
+          )
+        : null}
       <div className="shrink-0 bg-background">
         {/* FRO-273: role badge — shown for read-only roles (viewer/commenter/reviewer) */}
         {readOnlyLabel && (
@@ -5465,13 +5489,14 @@ function EditorRow({
         <div className="flex h-full items-start self-stretch py-1.5">
           {castGutter && (
             <div className="mr-2 flex w-10 shrink-0 flex-col items-center">
-              {/* 32px circles (Sam 2026-08-07): centered against the row's
-                  whole first-line region (context line + first text line)
-                  rather than boxed to the text line — a circle taller than
-                  one line of text would ride awkwardly high otherwise. */}
+              <div className="mb-1 h-4 shrink-0" aria-hidden />
+              {/* 32px circles centered ON THE VERSE NUMBER (Sam 2026-08-07):
+                  same spacer + first-line box as the number column, so the
+                  circle's midpoint rides the number's midpoint; the circle
+                  overflows the line box symmetrically. */}
               <span
                 className="flex items-center justify-center"
-                style={{ height: `calc(20px + ${sourceFontSize}px * 1.6)` }}
+                style={{ height: `calc(${sourceFontSize}px * 1.6)` }}
               >
                 {gutterVoice && (
                   <CastGutterVoice

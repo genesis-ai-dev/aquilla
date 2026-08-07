@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react"
+import { useCallback, useMemo, useState, type ReactNode } from "react"
 import { useNavigate } from "react-router-dom"
 import { type ColumnDef } from "@tanstack/react-table"
 import { CircleCheck, FolderOpen, Mic, MoreHorizontal, Sparkles, UserPlus, Users } from "lucide-react"
@@ -92,6 +92,8 @@ export function OrgProjectsDataTable({
   callerUserId = null,
   onLanesChanged,
   onLaneAdded,
+  toolbarLeading,
+  toolbarTrailing,
 }: {
   projects: OrgProjectRow[]
   now: number
@@ -119,6 +121,10 @@ export function OrgProjectsDataTable({
   /** AQU-605: called with (projectId, lane) after a "+ Language" add so the
    * parent can insert the lane in place — no full-table refetch/reload. */
   onLaneAdded?: (projectId: string, lane: string) => void
+  /** Extra controls rendered immediately after the search input (e.g. status filter). */
+  toolbarLeading?: ReactNode
+  /** Extra controls at the end of the toolbar row (e.g. New Project). */
+  toolbarTrailing?: ReactNode
 }) {
   const navigate = useNavigate()
   const [tableNow] = useState(() => now)
@@ -459,13 +465,12 @@ export function OrgProjectsDataTable({
           // "filter by PM" half of the AC without a separate filter control.
           return `${p.name} ${p.orgName ?? ""} ${p.pm?.username ?? ""}`.toLowerCase().includes(q)
         }}
-        toolbar={(table) => (
-          <Badge variant="secondary" className="ml-auto tabular-nums">
-            {table.getFilteredRowModel().rows.length === tableData.length
-              ? `${tableData.length}`
-              : `${table.getFilteredRowModel().rows.length} of ${tableData.length}`}
-          </Badge>
-        )}
+        toolbar={
+          <>
+            {toolbarLeading}
+            {toolbarTrailing}
+          </>
+        }
         renderSubRow={(p) =>
           expanded.has(p.id) ? (
             <ProjectLaneSubRows

@@ -245,7 +245,6 @@ function StatusFilterSelect({
     >
       <SelectTrigger
         aria-label="Project status filter"
-        size="sm"
         className={cn("bg-background", className)}
       >
         <SelectValue className="flex-none" />
@@ -958,24 +957,11 @@ export function OrgHome() {
   return (
     <AppShell
       sidebar={<OrgSidebar />}
-      header={
-        <div className="flex items-center justify-between pr-4">
-          <OrgBreadcrumb section="Projects" />
-          {activeOrgId != null ? (
-            <ProjectCreateDialog
-              orgId={activeOrgId}
-              onCreated={handleCreated}
-              linkableProjects={accessibleProjects}
-            />
-          ) : (
-            <Badge variant="outline">Select an organization to create a project</Badge>
-          )}
-        </div>
-      }
+      header={<OrgBreadcrumb section="Projects" />}
       statusBar={null}
       main={
         <Page size="wide">
-          <PageHeader title={workspaceLabel} />
+          <PageHeader title={workspaceLabel} inset={false} />
           {error ? (
             <p className="text-sm text-destructive">{error}</p>
           ) : (
@@ -1156,10 +1142,7 @@ export function OrgHome() {
                               </InputGroupAddon>
                             )}
                           </InputGroup>
-                          <div className="flex shrink-0 items-center gap-2">
-                            <span className="text-xs font-medium text-muted-foreground">Status</span>
-                            <StatusFilterSelect value={statusFilter} onValueChange={setStatusFilter} />
-                          </div>
+                          <StatusFilterSelect value={statusFilter} onValueChange={setStatusFilter} />
                           <div className="ml-auto flex shrink-0 items-center gap-2" aria-label="Project sort">
                             <span className="text-xs font-medium text-muted-foreground">Sort by</span>
                             <Select
@@ -1233,7 +1216,7 @@ export function OrgHome() {
                     />
                   </div>
 
-                  {/* Status filter + admin-style project table */}
+                  {/* Project table (status filter lives in the table toolbar) */}
                   {projects.length === 0 ? (
                     <EmptyState
                       icon={FolderPlus}
@@ -1258,16 +1241,6 @@ export function OrgHome() {
                       }
                     />
                   ) : (
-                      <div className="flex flex-col gap-3">
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs font-medium text-muted-foreground">Status</span>
-                        <StatusFilterSelect
-                          value={statusFilter}
-                          onValueChange={setStatusFilter}
-                          className="bg-card"
-                        />
-                      </div>
-
                       <OrgProjectsDataTable
                         projects={statusFilteredProjects}
                         now={now}
@@ -1281,6 +1254,24 @@ export function OrgHome() {
                         onLanesChanged={() => setRefreshTick((t) => t + 1)}
                         onLaneAdded={handleLaneAdded}
                         initialLens={statusFilter === "attention" ? "attention" : projectLens}
+                        toolbarLeading={
+                          <StatusFilterSelect
+                            value={statusFilter}
+                            onValueChange={setStatusFilter}
+                            className="bg-card"
+                          />
+                        }
+                        toolbarTrailing={
+                          activeOrgId != null ? (
+                            <div className="ml-auto shrink-0">
+                              <ProjectCreateDialog
+                                orgId={activeOrgId}
+                                onCreated={handleCreated}
+                                linkableProjects={accessibleProjects}
+                              />
+                            </div>
+                          ) : null
+                        }
                         emptyTitle={
                           statusFilter === "stalled"
                             ? "No stalled projects."
@@ -1291,7 +1282,6 @@ export function OrgHome() {
                                 : "No projects yet."
                         }
                       />
-                    </div>
                   )}
                 </>
               )}

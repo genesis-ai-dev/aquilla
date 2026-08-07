@@ -81,11 +81,10 @@ type ProjectShape = "self-contained" | "source-only" | "linked-target"
 
 /**
  * Per-field overrides for this dialog: a touch taller with more horizontal
- * padding so long example placeholders aren't crowded against the edges, and a
- * softer focus ring (the global 3px/50% ring read as a halo that obscured the
- * field text). tailwind-merge lets these win over the base Input classes.
+ * padding so long example placeholders aren't crowded against the edges.
+ * Focus chrome comes from the shared Input (border only).
  */
-const FIELD_CLASS = "h-9 px-3 focus-visible:ring-2 focus-visible:ring-ring/35"
+const FIELD_CLASS = "h-9 px-3"
 
 /** Same cap as LanguagesSection's lane registry (settings.targetLanes entries). */
 const MAX_EXTRA_LANGUAGE_LENGTH = 64

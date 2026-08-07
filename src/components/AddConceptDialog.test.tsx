@@ -130,10 +130,10 @@ describe("AddConceptDialog", () => {
 
   it("surfaces the error and keeps the input mounted when onConfirm rejects", async () => {
     // Mirrors the editor path: onConfirm persists via patchSettings and throws
-    // when the write is rejected (e.g. below Maintainer). The dialog must show
+    // when the write is rejected (e.g. below Contributor). The dialog must show
     // why and stay open, not close as if the concept was saved.
     const onConfirm = vi.fn().mockRejectedValue(
-      new Error("You need the Maintainer role or higher to change the term base."),
+      new Error("You need the Contributor role or higher to change the term base."),
     )
     const onCancel = vi.fn()
     renderDialog({ sourceTerm: "grace", onConfirm, onCancel })
@@ -141,7 +141,7 @@ describe("AddConceptDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: /create draft concept/i }))
 
     await waitFor(() => {
-      expect(screen.getByRole("alert")).toHaveTextContent(/maintainer role or higher/i)
+      expect(screen.getByRole("alert")).toHaveTextContent(/contributor role or higher/i)
     })
     // Dialog is still interactive (input present) and did not auto-cancel.
     expect(screen.getByLabelText(/source term for new concept/i)).toBeInTheDocument()
@@ -171,10 +171,10 @@ describe("AddConceptDialog", () => {
     const onConfirm = vi.fn()
     renderDialog({
       onConfirm,
-      blockedReason: "You need the Maintainer role or higher to change the term base.",
+      blockedReason: "You need the Contributor role or higher to change the term base.",
     })
 
-    expect(screen.getByRole("alert")).toHaveTextContent(/maintainer role or higher/i)
+    expect(screen.getByRole("alert")).toHaveTextContent(/contributor role or higher/i)
     expect(screen.getByLabelText(/source term for new concept/i)).toBeDisabled()
     expect(screen.getByRole("button", { name: /create draft concept/i })).toBeDisabled()
 
@@ -189,7 +189,7 @@ describe("AddConceptDialog", () => {
     const onCancel = vi.fn()
     renderDialog({
       onCancel,
-      blockedReason: "You need the Maintainer role or higher to change the term base.",
+      blockedReason: "You need the Contributor role or higher to change the term base.",
     })
 
     const cancelBtn = screen.getByRole("button", { name: /cancel/i })

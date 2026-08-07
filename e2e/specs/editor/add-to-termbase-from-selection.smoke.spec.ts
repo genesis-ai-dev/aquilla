@@ -81,17 +81,65 @@ test("selecting source text reveals Add to termbase button and creates draft con
 })
 
 /**
- * AQU-754 follow-up: below the termbase write floor (Maintainer 600), the
- * AddConceptDialog opens BLOCKED — role message shown, source-term input and
- * Create draft disabled — instead of accepting input for a save that the
- * server is guaranteed to reject (which previously left the button stuck on
- * "Saving…"). Cancel stays active so the user can dismiss the dialog.
+ * AQU-816: a CONTRIBUTOR (400) may curate the term base. Biblica onboarding
+ * (2026-08-06) — the translator knows the right rendering, so they add the term
+ * themselves rather than asking a lead. The dialog must open WRITABLE for them
+ * and the draft must survive the server round-trip.
  */
-test("below-Maintainer user sees a blocked Add-to-termbase dialog they can cancel", async ({ alice, bob }) => {
+test("contributor can add a term from a source selection", async ({ alice, bob }) => {
+  void alice // fixture must be created first so alice's org/session exists
+  const aliceJwt = await jwtFor("alice")
+  const seeded = await seedProjectWithFile(aliceJwt, { name: `TermbaseContributor ${Date.now()}` })
+  await addProjectMember(aliceJwt, seeded.projectId, "bob", ROLE.CONTRIBUTOR)
+
+  await openSeededProject(bob, seeded)
+
+  const sourceArea = bob.locator('[aria-label="Source text"], .source-text, [data-cell-type="source"]').first()
+  const addBtn = bob.getByRole("button", { name: /Add to term ?base/i })
+  await expect(sourceArea).toBeVisible({ timeout: 10_000 })
+  await sourceArea.click({ clickCount: 3 })
+  await expect(addBtn).toBeVisible({ timeout: 5_000 })
+  await addBtn.click()
+
+  // Dialog opens WRITABLE — no role alert, input and Create draft both live.
+  const dialog = bob.getByRole("dialog", { name: /Add to term base/i })
+  await expect(dialog).toBeVisible({ timeout: 5_000 })
+  const termInput = dialog.getByRole("textbox", { name: /Source term for new concept/i })
+  await expect(termInput).toBeEnabled({ timeout: 10_000 })
+  if (!(await termInput.inputValue()).trim()) {
+    await termInput.fill("contributor term")
+  }
+  const confirmBtn = dialog.getByRole("button", { name: /Create draft concept/i })
+  await expect(confirmBtn).toBeEnabled({ timeout: 3_000 })
+  await confirmBtn.click()
+
+  // The write is a server PUT the contributor is now authorized for, so the
+  // dialog closes rather than re-opening with a role rejection…
+  await expect(dialog).not.toBeVisible({ timeout: 10_000 })
+
+  // …and the concept is really persisted, not just optimistic local state.
+  const glossary = new Glossary(bob)
+  await glossary.goto(seeded.projectId)
+  const pending = bob.locator('[data-testid="glossary-row"][data-status="draft"]').first()
+  await expect(async () => {
+    await bob.reload()
+    await expect(pending).toBeVisible({ timeout: 2_000 })
+  }).toPass({ timeout: 20_000 })
+})
+
+/**
+ * AQU-754 follow-up, re-floored by AQU-816: below the termbase write floor
+ * (now Contributor 400), the AddConceptDialog opens BLOCKED — role message
+ * shown, source-term input and Create draft disabled — instead of accepting
+ * input for a save that the server is guaranteed to reject (which previously
+ * left the button stuck on "Saving…"). Cancel stays active so the user can
+ * dismiss the dialog. Reviewer (300) is the rung immediately below the floor.
+ */
+test("below-Contributor user sees a blocked Add-to-termbase dialog they can cancel", async ({ alice, bob }) => {
   void alice // fixture must be created first so alice's org/session exists
   const aliceJwt = await jwtFor("alice")
   const seeded = await seedProjectWithFile(aliceJwt, { name: `TermbaseBlocked ${Date.now()}` })
-  await addProjectMember(aliceJwt, seeded.projectId, "bob", ROLE.CONTRIBUTOR)
+  await addProjectMember(aliceJwt, seeded.projectId, "bob", ROLE.REVIEWER)
 
   await openSeededProject(bob, seeded)
 
@@ -107,7 +155,7 @@ test("below-Maintainer user sees a blocked Add-to-termbase dialog they can cance
   const dialog = bob.getByRole("dialog", { name: /Add to term base/i })
   await expect(dialog).toBeVisible({ timeout: 5_000 })
   await expect(dialog.getByRole("alert")).toContainText(
-    "You need the Maintainer role or higher to change the term base.",
+    "You need the Contributor role or higher to change the term base.",
     { timeout: 10_000 },
   )
   await expect(dialog.getByRole("textbox", { name: /Source term for new concept/i })).toBeDisabled()

@@ -263,8 +263,12 @@ describe("worker deployment environment contract", () => {
       scripts?: Record<string, string>
     }
     expect(rootPackage.scripts?.["deploy:workers-build"])
-      .toBe("node scripts/cloudflare-build-deploy.mjs web")
+      .toBe("node scripts/cloudflare-pr-preview.mjs --workers-build")
     expect(rootPackage.scripts?.["build:workers-build"]).toContain("scripts/ci-build.sh")
+    expect(rootPackage.scripts?.["build:workers-build"])
+      .toContain("pnpm run build:workers-build:identity")
+    expect(rootPackage.scripts?.["build:workers-build"])
+      .toContain("pnpm run build:workers-build:sync")
     expect(rootPackage.scripts?.["build:workers-build:identity"])
       .toBe("CI=1 pnpm --dir auth-worker install --frozen-lockfile && pnpm --dir auth-worker run build:workers-build")
     expect(rootPackage.scripts?.["build:workers-build:sync"])
@@ -299,8 +303,8 @@ describe("worker deployment environment contract", () => {
     expect(runbook).toContain("`aquilla-sync-worker-dev`")
     expect(runbook).toContain("Keep all six live Workers disconnected from Git")
     expect(runbook).toContain("Production and development builds and deployments are manual only")
-    expect(runbook).toContain("not attached to any live Worker")
-    expect(runbook).toContain("pull-request validation is manual")
+    expect(runbook).toContain("disconnected from every live Worker")
+    expect(runbook).toContain("`aquilla-web-preview` is the only Git-connected Worker")
     expect(runbook).not.toContain("Development auto-deployment")
 
     const helper = readRepoFile("scripts", "cloudflare-build-deploy.mjs")
@@ -473,8 +477,8 @@ describe("worker deployment environment contract", () => {
     expect(liveDeployer).toContain("if (surface === \"web\") verifyArtifacts(join(expectation.directory, \"dist\"))")
     expect(workersBuild).toContain("normalizedBranch === \"main\" ? \"production\" : \"development\"")
     expect(workersBuild).toContain("promote: false")
-    expect(workersBuildScript).toContain("main) H=api.aquilla.app")
-    expect(workersBuildScript).toContain("*) H=api.dev.aquilla.app")
+    expect(workersBuildScript).not.toContain("api.aquilla.app")
+    expect(workersBuildScript).toContain("H=api.dev.aquilla.app")
     expect(workersBuildScript).toContain("verify-deployment-artifacts.mjs dist")
   })
 
@@ -486,6 +490,8 @@ describe("worker deployment environment contract", () => {
 
     expect(command).toContain("pnpm lint")
     expect(command).toContain("pnpm test")
+    expect(command).toContain("pnpm run build:workers-build:identity")
+    expect(command).toContain("pnpm run build:workers-build:sync")
     expect(command).toContain("playwright install --with-deps chromium")
     expect(command).toContain("pnpm test:idml")
     expect(command).toContain("pnpm neon:check")

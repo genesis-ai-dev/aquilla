@@ -61,10 +61,11 @@ schema, build, or deploy step; there is no default environment. Production jobs
 enter the GitHub `production` Environment, whose deployment-branch policy admits
 only `main`.
 
-Cloudflare Workers Builds owns automatic pull-request validation and verified
-version uploads for `aquilla-web`, `aquilla-identity`, and
-`aquilla-sync-worker`. It never promotes a version, reapplies a route, or changes
-live traffic—even for `main` or `dev`. `versification-tool` remains disconnected
+Cloudflare Workers Builds owns automatic pull-request validation through the
+dedicated `aquilla-web-preview` Worker. All six production/development Workers
+remain disconnected from Git. The preview Worker has no custom domain or live
+route, always targets development APIs, and never promotes a version or changes
+production/development traffic. `versification-tool` remains disconnected
 because it has no deployable Wrangler application.
 
 The consolidated `.github/workflows/ci.yml` is `workflow_dispatch`-only. Normal
@@ -72,11 +73,10 @@ pull-request and push activity consumes no GitHub-hosted runner minutes. Cloudfl
 receives GitHub repository events, runs the repository-owned build commands, and
 reports its check results and preview links back to GitHub.
 
-`main` Workers Builds versions use production bindings; every other branch uses
-development bindings. All versions remain route-free until an operator runs one
-of the explicit live commands above. Cloudflare's native branch aliasing handles
-slash-named branches; repository commands never pass a raw branch name through
-Wrangler's `--preview-alias` option.
+Every Workers Builds preview uses development API hosts, including builds of
+`main`. Preview versions remain route-free permanently; they are never promoted
+into a live Worker. Repository code converts slash-named branches into a stable,
+lowercase, hashed preview alias before passing it to Wrangler.
 
 The agent sandbox and not-yet-enabled resource proxy follow the same rule: their
 production profiles are main-only, their unnamed profiles have distinct local

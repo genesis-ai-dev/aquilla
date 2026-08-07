@@ -102,7 +102,7 @@ describe("live deployment environment verification", () => {
           "https://api.aquilla.app/chat",
         ].join(" "))
       }
-      const caseStudy = serveCaseStudies("https://staging.aquilla.app", url)
+      const caseStudy = serveCaseStudies("https://aquilla.app", url)
       if (caseStudy) return caseStudy
       throw new Error(`unexpected URL ${url}`)
     })

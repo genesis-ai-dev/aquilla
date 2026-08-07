@@ -1,19 +1,17 @@
 #!/usr/bin/env bash
-# Build aquilla-web for the environment selected by Cloudflare Workers Builds.
+# Build the route-free PR preview. It always targets development APIs; main,
+# dev, and feature builds must never compile a preview against production.
 set -euo pipefail
 
 node scripts/assert-workers-build-env.mjs
 
-case "$WORKERS_CI_BRANCH" in
-  main) H=api.aquilla.app ;;
-  *) H=api.dev.aquilla.app ;;
-esac
+H=api.dev.aquilla.app
 
 export VITE_SYNC_WORKER_HOST="$H/sync"
 export VITE_AUTH_BASE="https://$H/identity"
 export VITE_CHAT_BASE="https://$H/chat"
 
-echo "ci-build: branch=$WORKERS_CI_BRANCH -> API host $H"
+echo "ci-preview-build: branch=$WORKERS_CI_BRANCH -> API host $H"
 
 pnpm run build
 bash scripts/verify-dist-host.sh "$H"

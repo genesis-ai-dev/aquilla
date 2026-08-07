@@ -222,6 +222,16 @@
     display: none !important;
   }
 
+  /*
+   * WebKit sits capital glyphs high in the em-box inside small avatars
+   * (Geist Variable). Nudge initials down optically; Chromium is already fine.
+   */
+  @supports (-webkit-touch-callout: none) {
+    [data-slot="avatar-initials"] {
+      transform: translateY(0.08em);
+    }
+  }
+
   /* Compact overlays/lists — same fixed-track trick, smaller gutter. */
   .scrollbar-thin {
     scrollbar-width: thin;

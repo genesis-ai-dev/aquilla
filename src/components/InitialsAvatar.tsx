@@ -72,7 +72,6 @@ export function InitialsAvatar({
       <AvatarFallback
         className={cn(
           circle && "rounded-full",
-          textClasses[size],
           usesColoredFallback && !menuSafe && "text-white",
           fallbackClassName,
         )}
@@ -81,7 +80,11 @@ export function InitialsAvatar({
           ...menuSafeStyle(preservedColor),
         }}
       >
-        {children ?? label}
+        {children ?? (
+          <span data-slot="avatar-initials" className={cn("leading-none", textClasses[size])}>
+            {label}
+          </span>
+        )}
       </AvatarFallback>
     </Avatar>
   )

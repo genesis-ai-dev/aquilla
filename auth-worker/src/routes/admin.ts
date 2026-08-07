@@ -308,6 +308,13 @@ admin.get("/teams", async (c) => {
   const { results } = await c.env.AQUILLA_PG.prepare(
     `SELECT g.id, g.name, g.created_at, g.org_id,
             o.name AS org_name,
+            (SELECT u.username
+               FROM group_members gm
+               JOIN users u ON u.id = gm.user_id
+               JOIN org_members om ON om.org_id = g.org_id AND om.user_id = gm.user_id
+              WHERE gm.group_id = g.id AND om.role_level = 500
+              ORDER BY LOWER(u.username)
+              LIMIT 1) AS project_lead_username,
             (SELECT COUNT(*) FROM group_members m WHERE m.group_id = g.id) AS member_count,
             (SELECT COUNT(*) FROM group_project_grants gp WHERE gp.group_id = g.id) AS project_count
        FROM groups g
@@ -319,6 +326,7 @@ admin.get("/teams", async (c) => {
     created_at: string
     org_id: number
     org_name: string | null
+    project_lead_username: string | null
     member_count: number
     project_count: number
   }>()
@@ -329,6 +337,7 @@ admin.get("/teams", async (c) => {
       createdAt: r.created_at,
       orgId: r.org_id,
       orgName: r.org_name,
+      projectLeadUsername: r.project_lead_username,
       memberCount: r.member_count,
       projectCount: r.project_count,
     })),

@@ -73,12 +73,16 @@ describe("/api/v2/admin/* platform-admin gate", () => {
   it("GET /teams lists every group with org + member/grant counts", async () => {
     await seedUser(7, "root")
     await seedUser(1, "wendi")
+    await seedUser(2, "lead")
     await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'CAS', 1)").run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 1, 700, 1), (1, 2, 500, 1)",
+    ).run()
     await env.AQUILLA_PG.prepare(
       "INSERT INTO groups (id, org_id, name, created_by) VALUES (1, 1, 'CAS/team-a', 1)",
     ).run()
     await env.AQUILLA_PG.prepare(
-      "INSERT INTO group_members (group_id, user_id) VALUES (1, 1)",
+      "INSERT INTO group_members (group_id, user_id) VALUES (1, 1), (1, 2)",
     ).run()
     await env.AQUILLA_PG.prepare(
       "INSERT INTO projects (id, name, org_id, created_by) VALUES ('pa', 'John', 1, 1)",
@@ -90,16 +94,42 @@ describe("/api/v2/admin/* platform-admin gate", () => {
     const res = await app.request("/api/v2/admin/teams", { headers: authHeader(await jwtFor("root")) }, env)
     expect(res.status).toBe(200)
     const body = (await res.json()) as {
-      teams: Array<{ id: number; name: string; orgName: string; memberCount: number; projectCount: number }>
+      teams: Array<{
+        id: number
+        name: string
+        orgName: string
+        projectLeadUsername: string | null
+        memberCount: number
+        projectCount: number
+      }>
     }
     expect(body.teams).toHaveLength(1)
     expect(body.teams[0]).toMatchObject({
       id: 1,
       name: "CAS/team-a",
       orgName: "CAS",
-      memberCount: 1,
+      projectLeadUsername: "lead",
+      memberCount: 2,
       projectCount: 1,
     })
+  })
+
+  it("GET /teams leaves projectLeadUsername null when no project_lead is on the team", async () => {
+    await seedUser(7, "root")
+    await seedUser(1, "wendi")
+    await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'CAS', 1)").run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 1, 700, 1)",
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO groups (id, org_id, name, created_by) VALUES (1, 1, 'CAS/team-a', 1)",
+    ).run()
+    await env.AQUILLA_PG.prepare("INSERT INTO group_members (group_id, user_id) VALUES (1, 1)").run()
+
+    const res = await app.request("/api/v2/admin/teams", { headers: authHeader(await jwtFor("root")) }, env)
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { teams: Array<{ projectLeadUsername: string | null }> }
+    expect(body.teams[0]?.projectLeadUsername).toBeNull()
   })
 
   it("GET /projects rolls up cells/words per project across orgs", async () => {

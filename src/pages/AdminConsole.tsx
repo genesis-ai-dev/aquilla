@@ -10,7 +10,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useAdminElevation } from "@/hooks/useAdminElevation"
-import { orgHomePath } from "@/lib/navigation/org-paths"
+import { orgHomePath, orgPath } from "@/lib/navigation/org-paths"
 import {
   getAdminOverview,
   getAdminOrgs,
@@ -30,16 +30,18 @@ import {
 import { projectsNeedingAttention } from "@/lib/admin/insights"
 import { AdminOverviewHome } from "@/components/admin/AdminOverviewHome"
 import { AdminTenantsSection } from "@/components/admin/AdminTenantsSection"
+import { AdminTeamsSection } from "@/components/admin/AdminTeamsSection"
 import { AdminPeopleSection } from "@/components/admin/AdminPeopleSection"
 import { AdminProjectsSection } from "@/components/admin/AdminProjectsSection"
 import { AdminActivityTimeline } from "@/components/admin/AdminActivityTimeline"
 import { AdminPlatformSection } from "@/components/admin/AdminPlatformSection"
 import { AdminElevationGate } from "@/components/admin/AdminElevationGate"
 
-type Tab = "overview" | "tenants" | "people" | "projects" | "activity" | "platform"
+type Tab = "overview" | "tenants" | "teams" | "people" | "projects" | "activity" | "platform"
 const TABS: Array<{ key: Tab; label: string }> = [
   { key: "overview", label: "Overview" },
   { key: "tenants", label: "Tenants" },
+  { key: "teams", label: "Teams" },
   { key: "people", label: "People" },
   { key: "projects", label: "Projects" },
   { key: "activity", label: "Activity" },
@@ -48,11 +50,11 @@ const TABS: Array<{ key: Tab; label: string }> = [
 
 /**
  * Site-wide admin console (/admin). Cross-tenant: read-only oversight
- * (Overview, Tenants, People, Projects, Activity) plus the editable Platform
- * tab (global AI settings + per-org credits). Gated by `useAdminElevation` —
- * UX only; every /api/v2/admin/* call is enforced server-side against the
- * ADMIN_EMAILS allowlist behind the step-up elevation gate. A non-admin who
- * forces the route is redirected to their org overview.
+ * (Overview, Tenants, Teams, People, Projects, Activity) plus the editable
+ * Platform tab (global AI settings + per-org credits). Gated by
+ * `useAdminElevation` — UX only; every /api/v2/admin/* call is enforced
+ * server-side against the ADMIN_EMAILS allowlist behind the step-up elevation
+ * gate. A non-admin who forces the route is redirected to their org overview.
  */
 export function AdminConsole() {
   const { session } = useFrontierSession()
@@ -86,6 +88,14 @@ export function AdminConsole() {
     (orgId: number) => {
       setActiveOrg(orgId)
       navigate(orgHomePath(orgId))
+    },
+    [setActiveOrg, navigate],
+  )
+
+  const openTeam = useCallback(
+    (team: AdminTeam) => {
+      setActiveOrg(team.orgId)
+      navigate(orgPath(team.orgId, `/teams/${team.id}`))
     },
     [setActiveOrg, navigate],
   )
@@ -186,6 +196,10 @@ export function AdminConsole() {
 
           <TabsContent value="tenants">
             <AdminTenantsSection orgs={orgs} teams={teams} onOpenOrg={openOrg} />
+          </TabsContent>
+
+          <TabsContent value="teams">
+            <AdminTeamsSection teams={teams} onOpenTeam={openTeam} />
           </TabsContent>
 
           <TabsContent value="people">

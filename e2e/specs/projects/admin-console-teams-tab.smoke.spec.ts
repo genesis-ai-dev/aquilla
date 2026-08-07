@@ -2,31 +2,28 @@ import { test, expect } from "../../helpers/multi-user"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
 
 /**
- * AdminConsole — nested Teams column.
+ * AdminConsole — Teams tab.
  *
- * AdminConsole.tsx nests teams under the Tenants tab.
+ * AdminConsole.tsx has a Teams tab after Tenants with columns Team,
+ * Organization, Members, Projects (or an empty panel when none exist).
  *
- * This spec: navigate to /admin → click "Tenants" tab → verify the "Teams"
- * column header is visible.
+ * This spec: navigate to /admin → click "Teams" tab → verify the teams
+ * surface is mounted (search toolbar when teams exist, empty copy otherwise).
  */
 test("admin console Teams tab renders Team column header", async ({ alice }) => {
   const dash = new Dashboard(alice)
   await dash.goto()
 
   await alice.goto("/admin")
-  // Verify we are on the admin page.
   await expect(alice.getByRole("heading", { name: /Admin console/i })).toBeVisible({
     timeout: 10_000,
   })
 
-  const tenantsTab = alice.getByRole("tab", { name: /^Tenants$/i })
-  await expect(tenantsTab).toBeVisible({ timeout: 5_000 })
-  await tenantsTab.click()
+  const teamsTab = alice.getByRole("tab", { name: /^Teams$/i })
+  await expect(teamsTab).toBeVisible({ timeout: 5_000 })
+  await teamsTab.click()
 
-  // The Teams table shows "Team" as a column header. Role-scoped + .first():
-  // the table renders one header row per org section, so a bare getByText
-  // trips strict mode.
   await expect(
-    alice.getByRole("columnheader", { name: "Teams" }).first(),
+    alice.getByRole("columnheader", { name: /^Team$/i }).or(alice.getByText("No teams yet")),
   ).toBeVisible({ timeout: 5_000 })
 })

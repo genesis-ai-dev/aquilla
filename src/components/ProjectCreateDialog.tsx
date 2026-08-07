@@ -30,6 +30,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
+import { cn } from "@/lib/utils"
 import { createProject } from "@/lib/store/project-index"
 import { createCloudProject } from "@/lib/sync/cloud-projects"
 import {
@@ -277,6 +278,7 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
   function pickShape(next: ProjectShape) {
     form.setFieldValue("shape", next)
     if (next === "source-only") form.setFieldValue("targetLanguage", "")
+    if (next !== "self-contained") form.setFieldValue("extraLanguages", [])
   }
 
   return (
@@ -380,33 +382,38 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
                               </FieldLabel>
                               <LanguageFieldHint />
                             </div>
-                            <Input
-                              id="project-create-target"
-                              name="aquilla-project-target-language"
-                              autoComplete="off"
-                              autoCorrect="off"
-                              autoCapitalize="none"
-                              spellCheck={false}
-                              className={FIELD_CLASS}
-                              value={field.state.value}
-                              onBlur={field.handleBlur}
-                              onChange={(e) => field.handleChange(e.target.value)}
-                              placeholder="French, conversational Swahili, zh-Hant…"
-                              aria-invalid={invalid}
-                            />
-                            {invalid && <FieldError errors={field.state.meta.errors} />}
-                            {shape === "self-contained" && (
+                            {shape === "self-contained" ? (
                               <form.Field
                                 name="extraLanguages"
                                 children={(extrasField) => (
-                                  <ExtraTargetLanguages
-                                    primaryLanguage={field.state.value}
-                                    languages={extrasField.state.value}
-                                    onChange={extrasField.handleChange}
+                                  <TargetLanguageChips
+                                    // Remount when the dialog reopens so local
+                                    // chip/draft state can't leak across sessions.
+                                    key={open ? "open" : "closed"}
+                                    onPrimaryChange={field.handleChange}
+                                    onExtrasChange={extrasField.handleChange}
+                                    onBlur={field.handleBlur}
+                                    invalid={invalid}
                                   />
                                 )}
                               />
+                            ) : (
+                              <Input
+                                id="project-create-target"
+                                name="aquilla-project-target-language"
+                                autoComplete="off"
+                                autoCorrect="off"
+                                autoCapitalize="none"
+                                spellCheck={false}
+                                className={FIELD_CLASS}
+                                value={field.state.value}
+                                onBlur={field.handleBlur}
+                                onChange={(e) => field.handleChange(e.target.value)}
+                                placeholder="French, conversational Swahili, zh-Hant…"
+                                aria-invalid={invalid}
+                              />
                             )}
+                            {invalid && <FieldError errors={field.state.meta.errors} />}
                           </Field>
                         )
                       }}
@@ -769,17 +776,19 @@ function AddAsLaneRecommendation({
 }
 
 /**
- * AQU-538 creation fix (spec §5): a lightweight tag list for extra target
- * languages on the self-contained shape. The primary target-language input
- * stays put above this — that value remains the project's required
- * targetLanguage; entries added here become settings.targetLanes after
- * create. Validation mirrors ProjectSettings/LanguagesSection.tsx's "add a
- * lane" (trim, <=64 chars, case-insensitive dedupe — including against the
- * primary language, which isn't itself a lane).
+ * AQU-538 creation fix (spec §5): one chips field for all target languages on
+ * the self-contained shape. Type → Enter commits a pill; the first pill is
+ * the project's targetLanguage and the rest become settings.targetLanes after
+ * create. An uncommitted draft still counts as the primary (so create works
+ * without Enter).
+ *
+ * Freeform tags (any label) — not a Combobox suggestion list. Combobox's
+ * controlled inputValue/value dance clears the draft on Enter and raced our
+ * commit, so chips never stuck in the real browser. This field keeps the
+ * ComboboxChips look with plain state instead.
  */
-function validateExtraLanguageDraft(
+function validateTargetLanguageDraft(
   candidate: string,
-  primaryLanguage: string,
   languages: string[],
 ): string | null {
   const trimmed = candidate.trim()
@@ -788,99 +797,142 @@ function validateExtraLanguageDraft(
     return `Must be ${MAX_EXTRA_LANGUAGE_LENGTH} characters or fewer.`
   }
   const lower = trimmed.toLowerCase()
-  if (lower === primaryLanguage.trim().toLowerCase()) {
-    return "This is already the primary target language."
-  }
   if (languages.some((l) => l.toLowerCase() === lower)) {
     return "Already added."
   }
   return null
 }
 
-function ExtraTargetLanguages({
-  primaryLanguage,
-  languages,
-  onChange,
+function TargetLanguageChips({
+  onPrimaryChange,
+  onExtrasChange,
+  onBlur,
+  invalid = false,
 }: {
-  primaryLanguage: string
-  languages: string[]
-  onChange: (next: string[]) => void
+  onPrimaryChange: (next: string) => void
+  onExtrasChange: (next: string[]) => void
+  onBlur?: () => void
+  invalid?: boolean
 }) {
-  const [input, setInput] = useState("")
+  const [chips, setChips] = useState<string[]>([])
+  const [draft, setDraft] = useState("")
   const [error, setError] = useState<string | null>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
 
-  function handleAdd() {
-    const validationError = validateExtraLanguageDraft(input, primaryLanguage, languages)
+  function syncForm(nextChips: string[], nextDraft: string) {
+    onPrimaryChange(nextChips[0] ?? nextDraft)
+    onExtrasChange(nextChips.slice(1))
+  }
+
+  function commitDraft() {
+    const validationError = validateTargetLanguageDraft(draft, chips)
     if (validationError) {
       setError(validationError)
       return
     }
+    const nextChips = [...chips, draft.trim()]
+    setChips(nextChips)
+    setDraft("")
     setError(null)
-    onChange([...languages, input.trim()])
-    setInput("")
+    syncForm(nextChips, "")
   }
 
-  const invalid = error != null
+  function removeChip(lang: string) {
+    const nextChips = chips.filter((l) => l !== lang)
+    setChips(nextChips)
+    setError(null)
+    syncForm(nextChips, draft)
+  }
+
+  const chipInvalid = invalid || error != null
 
   return (
-    <div className="mt-2 flex flex-col gap-2">
+    <div className="flex flex-col gap-2">
       <FieldDescription>
-        Optional — add more target languages for this project (e.g. dialect variants
-        or parallel drafts of the same source).
+        Type a language and press Enter to add it. The first is the primary
+        target; extras become additional lanes.
       </FieldDescription>
-      {languages.length > 0 && (
-        <ul className="flex flex-wrap gap-1.5">
-          {languages.map((lang) => (
-            <li
-              key={lang}
-              data-testid={`create-extra-lang-chip-${lang}`}
+      <div
+        data-testid="create-target-lang-chips"
+        className={cn(
+          // Match ComboboxChips field chrome so this reads as one input.
+          "flex min-h-9 w-full flex-wrap items-center gap-1 rounded-lg border border-input bg-transparent bg-clip-padding px-3 py-1.5 text-sm transition-colors",
+          "focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50",
+          "has-aria-invalid:border-destructive has-aria-invalid:ring-3 has-aria-invalid:ring-destructive/20",
+          "dark:bg-input/30 dark:has-aria-invalid:border-destructive/50 dark:has-aria-invalid:ring-destructive/40",
+          chips.length > 0 && "px-1.5",
+        )}
+        onMouseDown={(event) => {
+          // Clicking the field chrome focuses the input without stealing
+          // clicks from chip remove buttons.
+          if (event.target !== inputRef.current) {
+            const remove = (event.target as HTMLElement).closest("button")
+            if (remove) return
+            event.preventDefault()
+            inputRef.current?.focus()
+          }
+        }}
+      >
+        {chips.map((lang) => (
+          <Badge
+            key={lang}
+            variant="secondary"
+            data-testid={`create-extra-lang-chip-${lang}`}
+            // Match ComboboxChip: muted surface + tighter radius so the pill
+            // separates from dark:bg-input/30 field chrome.
+            className="h-[calc(--spacing(5.25))] gap-1 rounded-sm bg-muted px-1.5 pr-0 text-xs font-medium text-foreground"
+          >
+            {lang}
+            <button
+              type="button"
+              aria-label={`Remove ${lang}`}
+              className="-ml-0.5 inline-flex size-5 items-center justify-center rounded-sm text-muted-foreground opacity-50 hover:opacity-100"
+              onClick={() => removeChip(lang)}
             >
-              <Badge variant="secondary" className="gap-1">
-                {lang}
-                <button
-                  type="button"
-                  aria-label={`Remove ${lang}`}
-                  className="text-muted-foreground hover:text-foreground"
-                  onClick={() => onChange(languages.filter((l) => l !== lang))}
-                >
-                  <X className="h-3 w-3" aria-hidden="true" />
-                </button>
-              </Badge>
-            </li>
-          ))}
-        </ul>
-      )}
-      <Field data-invalid={invalid}>
-        <div className="flex items-center gap-2">
-          <Input
-            data-testid="create-extra-lang-input"
-            name="aquilla-project-extra-language"
-            autoComplete="off"
-            autoCorrect="off"
-            autoCapitalize="none"
-            spellCheck={false}
-            className={`${FIELD_CLASS} flex-1`}
-            value={input}
-            onChange={(e) => {
-              setInput(e.target.value)
-              setError(null)
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault()
-                handleAdd()
-              }
-            }}
-            placeholder="e.g. fr-CA"
-            aria-invalid={invalid}
-          />
-          <Button type="button" variant="secondary" data-testid="create-extra-lang-add" onClick={handleAdd}>
-            <Plus className="mr-1 h-3.5 w-3.5" />
-            Add
-          </Button>
-        </div>
-        {error && <FieldError className="text-xs">{error}</FieldError>}
-      </Field>
+              <X className="size-3" aria-hidden="true" />
+            </button>
+          </Badge>
+        ))}
+        <input
+          ref={inputRef}
+          id="project-create-target"
+          data-testid="create-extra-lang-input"
+          name="aquilla-project-target-language"
+          autoComplete="off"
+          autoCorrect="off"
+          autoCapitalize="none"
+          spellCheck={false}
+          className="min-w-16 flex-1 bg-transparent outline-none placeholder:text-muted-foreground"
+          value={draft}
+          placeholder={
+            chips.length === 0
+              ? "French, conversational Swahili, zh-Hant…"
+              : "Add another…"
+          }
+          aria-invalid={chipInvalid}
+          onBlur={onBlur}
+          onChange={(event) => {
+            const next = event.target.value
+            setDraft(next)
+            setError(null)
+            syncForm(chips, next)
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Backspace" && draft === "" && chips.length > 0) {
+              event.preventDefault()
+              removeChip(chips[chips.length - 1]!)
+              return
+            }
+            if (event.key !== "Enter") return
+            // Always intercept Enter so the dialog form doesn't submit while
+            // committing (or rejecting) a chip.
+            event.preventDefault()
+            event.stopPropagation()
+            commitDraft()
+          }}
+        />
+      </div>
+      {error && <FieldError className="text-xs">{error}</FieldError>}
     </div>
   )
 }

@@ -1,4 +1,5 @@
 import { NavLink } from "react-router-dom"
+import type { LucideIcon } from "lucide-react"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { usePlatformAdmin } from "@/hooks/usePlatformAdmin"
@@ -6,12 +7,17 @@ import { partitionSharedProjects } from "@/lib/frontier/shared-projects"
 import { isProjectNew, readProjectOpenedAt } from "@/lib/frontier/opened-shared-store"
 import { Badge } from "@/components/ui/badge"
 import { orgHomePath, orgPath, ALL_ORGS_PARAM } from "@/lib/navigation/org-paths"
+import { NAV_PAGE_ICONS } from "@/lib/navigation/page-icons"
 import { OrgSwitcher } from "./OrgSwitcher"
 import { AccountSwitcher } from "@/components/AccountSwitcher"
 import { HelpMenu } from "@/components/HelpMenu"
 
 const link = ({ isActive }: { isActive: boolean }) =>
-  `block rounded-md px-2 py-1.5 text-sm ${isActive ? "bg-accent font-medium text-foreground" : "text-muted-foreground hover:bg-accent hover:text-foreground"}`
+  `flex items-center gap-2 rounded-md px-2 py-1.5 text-sm ${isActive ? "bg-accent font-medium text-foreground" : "text-muted-foreground hover:bg-accent hover:text-foreground"}`
+
+function NavIcon({ icon: Icon }: { icon: LucideIcon }) {
+  return <Icon className="size-4 shrink-0" aria-hidden />
+}
 
 export function OrgSidebar() {
   const { orgs, activeOrg, activeOrgId, isAllOrgs, accessibleProjects } = useActiveOrg()
@@ -62,27 +68,47 @@ export function OrgSidebar() {
           className={link}
           data-tour="nav-overview"
         >
+          <NavIcon icon={NAV_PAGE_ICONS.projects} />
           Projects
         </NavLink>
         {!isAllOrgs && activeOrgId != null && <>
-          <NavLink to={orgPath(activeOrgId, "/teams")} className={link}>Teams</NavLink>
-          <NavLink to={orgPath(activeOrgId, "/assigned")} className={link} data-tour="nav-assigned">Assigned to me</NavLink>
+          <NavLink to={orgPath(activeOrgId, "/teams")} className={link}>
+            <NavIcon icon={NAV_PAGE_ICONS.teams} />
+            Teams
+          </NavLink>
+          <NavLink to={orgPath(activeOrgId, "/assigned")} className={link} data-tour="nav-assigned">
+            <NavIcon icon={NAV_PAGE_ICONS.assigned} />
+            Assigned to me
+          </NavLink>
         </>}
         {isAdmin && activeOrgId != null && <>
           <div className="my-1 border-t" />
-          <NavLink to={orgPath(activeOrgId, "/members")} className={link}>Members</NavLink>
-          <NavLink to={orgPath(activeOrgId, "/archived")} className={link}>Archived</NavLink>
-          <NavLink to={orgPath(activeOrgId, "/settings")} className={link} data-tour="nav-settings">Settings</NavLink>
+          <NavLink to={orgPath(activeOrgId, "/members")} className={link}>
+            <NavIcon icon={NAV_PAGE_ICONS.members} />
+            Members
+          </NavLink>
+          <NavLink to={orgPath(activeOrgId, "/archived")} className={link}>
+            <NavIcon icon={NAV_PAGE_ICONS.archived} />
+            Archived
+          </NavLink>
+          <NavLink to={orgPath(activeOrgId, "/settings")} className={link} data-tour="nav-settings">
+            <NavIcon icon={NAV_PAGE_ICONS.settings} />
+            Settings
+          </NavLink>
         </>}
         {isPlatformAdmin && <>
           <div className="my-1 border-t" />
-          <NavLink to="/admin" className={link}>Admin</NavLink>
+          <NavLink to="/admin" className={link}>
+            <NavIcon icon={NAV_PAGE_ICONS.admin} />
+            Admin
+          </NavLink>
         </>}
         {hasSharedProjects && (
           <>
             <div className="my-1 border-t" />
             <NavLink to="/shared" className={link}>
-              <span className="flex items-center justify-between gap-2">
+              <NavIcon icon={NAV_PAGE_ICONS.shared} />
+              <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
                 Shared with you
                 {hasNewSharedProjects && (
                   <Badge className="shrink-0" data-testid="new-shared-nav-badge">

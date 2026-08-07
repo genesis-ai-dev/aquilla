@@ -84,7 +84,7 @@ export function HelpMenu({ compact = false, showTour = true }: HelpMenuProps) {
         <DropdownMenuContent
           className={cn("rounded-lg text-sm", compact ? "w-56" : "w-(--anchor-width)")}
           side="top"
-          align="start"
+          align={compact ? "end" : "start"}
           sideOffset={4}
         >
           <DropdownMenuGroup>

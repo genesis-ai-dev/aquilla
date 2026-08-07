@@ -120,11 +120,11 @@ export function OrgSidebar() {
           </>
         )}
       </nav>
-      <div className="mt-auto pt-2 flex flex-col gap-1">
-        <HelpMenu />
-        <div data-tour="account-switcher">
+      <div className="mt-auto flex items-center gap-1 pt-2">
+        <div className="min-w-0 flex-1" data-tour="account-switcher">
           <AccountSwitcher variant="sidebar" />
         </div>
+        <HelpMenu compact />
       </div>
     </div>
   )

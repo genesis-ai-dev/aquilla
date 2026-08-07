@@ -4,7 +4,7 @@ import {
   Clock,
   Lock,
   Mail,
-  UsersRound,
+  UserPlus,
   X,
 } from "lucide-react"
 import { useLocation, useNavigate } from "react-router-dom"
@@ -190,7 +190,7 @@ function MembersPageContent({ orgId, orgName }: MembersPageContentProps) {
               onClick={() => setMultiInviteOpen(true)}
               disabled={accessibleProjects.length === 0}
             >
-              <UsersRound className="mr-1.5 size-4" />
+              <UserPlus className="mr-1.5 size-4" />
               Add to projects
             </Button>
           </AppTooltip>

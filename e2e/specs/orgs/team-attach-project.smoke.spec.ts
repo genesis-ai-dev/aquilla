@@ -36,6 +36,9 @@ test("team attach project adds project to team project list", async ({ alice }) 
   await alice.waitForURL(/\/teams\/\d+/, { timeout: 10_000 })
   await expect(alice.getByRole("heading", { name: teamName })).toBeVisible({ timeout: 5_000 })
 
+  // Projects live on the Projects tab (Linear-style team page).
+  await alice.getByRole("tab", { name: /^Projects$/i }).click()
+
   // Click "Attach project".
   const attachLink = alice.getByRole("button", { name: /Attach project/i })
     .or(alice.getByText(/Attach project/i).first())

@@ -34,6 +34,9 @@ test("team detail shows Access level definitions help indicator", async ({ alice
   // Should navigate to /teams/:id.
   await alice.waitForURL(/\/teams\/[^/]+$/, { timeout: 10_000 })
 
+  // Members live on the Members tab — the help affordance is next to that heading.
+  await alice.getByRole("tab", { name: /^Members$/i }).click()
+
   // The "Access level definitions" tooltip indicator should be visible.
   const helpSpan = alice.locator('[aria-label="Access level definitions"]')
   await expect(helpSpan).toBeVisible({ timeout: 8_000 })

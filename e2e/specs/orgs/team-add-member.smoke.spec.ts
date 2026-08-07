@@ -26,8 +26,10 @@ test("team add member workflow shows new member in members list", async ({ alice
   await nameInput.fill(teamName)
   await alice.getByRole("button", { name: /^Create$/i }).click()
   await alice.waitForURL(/\/teams\/\d+$/, { timeout: 10_000 })
-  // "Add member" button appears for admin.
-  const addMemberBtn = alice.getByRole("button", { name: /Add member/i })
+  // Members live on the Members tab (Linear-style team page).
+  await alice.getByRole("tab", { name: /^Members$/i }).click()
+  // "Add a member" button appears for admin.
+  const addMemberBtn = alice.getByRole("button", { name: /Add (a )?member/i })
   await expect(addMemberBtn).toBeVisible({ timeout: 5_000 })
   await addMemberBtn.click()
 
@@ -49,6 +51,6 @@ test("team add member workflow shows new member in members list", async ({ alice
   await expect(addBtn).toBeEnabled({ timeout: 3_000 })
   await addBtn.click()
 
-  // Bob appears in the Members list (Remove bob is unique to the member row).
-  await expect(alice.getByRole("button", { name: /Remove bob/i })).toBeVisible({ timeout: 5_000 })
+  // Bob appears in the Members list (row actions menu is unique to the member).
+  await expect(alice.getByRole("button", { name: /Actions for bob/i })).toBeVisible({ timeout: 5_000 })
 })

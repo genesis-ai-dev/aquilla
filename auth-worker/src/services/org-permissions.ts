@@ -654,7 +654,7 @@ export interface OrgGroupDetail {
   id: number
   name: string
   description: string | null
-  members: Array<{ userId: number; username: string; roleLevel: number | null }>
+  members: Array<{ userId: number; username: string; email: string | null; roleLevel: number | null }>
   projects: Array<{ id: string; name: string; grantedRoleLevel: number }>
 }
 
@@ -672,7 +672,7 @@ export async function getOrgGroupDetail(
   if (!group) return null
 
   const members = await env.AQUILLA_PG.prepare(
-    `SELECT gm.user_id AS user_id, u.username AS username, om.role_level AS role_level
+    `SELECT gm.user_id AS user_id, u.username AS username, u.email AS email, om.role_level AS role_level
        FROM group_members gm
        JOIN users u ON u.id = gm.user_id
        LEFT JOIN org_members om ON om.org_id = ? AND om.user_id = gm.user_id
@@ -680,7 +680,7 @@ export async function getOrgGroupDetail(
       ORDER BY LOWER(u.username)`,
   )
     .bind(orgId, groupId)
-    .all<{ user_id: number; username: string; role_level: number | null }>()
+    .all<{ user_id: number; username: string; email: string | null; role_level: number | null }>()
 
   const projects = await env.AQUILLA_PG.prepare(
     `SELECT gpg.project_id AS id, p.name AS name, gpg.role_level AS granted
@@ -696,7 +696,12 @@ export async function getOrgGroupDetail(
     id: group.id,
     name: group.name,
     description: group.description ?? null,
-    members: (members.results ?? []).map((m) => ({ userId: m.user_id, username: m.username, roleLevel: m.role_level })),
+    members: (members.results ?? []).map((m) => ({
+      userId: m.user_id,
+      username: m.username,
+      email: m.email ?? null,
+      roleLevel: m.role_level,
+    })),
     projects: (projects.results ?? []).map((p) => ({ id: p.id, name: p.name, grantedRoleLevel: p.granted })),
   }
 }

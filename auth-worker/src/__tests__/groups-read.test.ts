@@ -64,8 +64,10 @@ describe("GET /api/v2/orgs/:orgId/groups/:groupId", () => {
     await seedGroups()
     const res = await app.request("/api/v2/orgs/1/groups/10", { headers: authHeader(await jwtFor("wendi")) }, env)
     expect(res.status).toBe(200)
-    const body = (await res.json()) as { id: number; name: string; description: string | null; members: Array<{ username: string }>; projects: Array<{ id: string; name: string; grantedRoleLevel: number }> }
+    const body = (await res.json()) as { id: number; name: string; description: string | null; members: Array<{ username: string; email: string | null }>; projects: Array<{ id: string; name: string; grantedRoleLevel: number }> }
     expect(body.members.map((m) => m.username).sort()).toEqual(["anna", "wendi"])
+    // Email comes from the users row (seedUser derives it from the username).
+    expect(body.members.every((m) => typeof m.email === "string" && m.email.includes("@"))).toBe(true)
     expect(body.projects).toEqual([{ id: "pa", name: "Bambara", grantedRoleLevel: 400 }])
     // AQU-264: description must be present in the detail response (null when not set)
     expect(Object.keys(body)).toContain("description")

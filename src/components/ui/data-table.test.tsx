@@ -85,6 +85,23 @@ describe("DataTable", () => {
     expect(bodyNames()).toEqual(unsorted)
   })
 
+  it("keeps an invisible sort arrow until the unsorted header is hovered", () => {
+    render(
+      <DataTable columns={columns} data={rows} getRowId={(r) => String(r.id)} />,
+    )
+    const countHeader = screen.getByRole("button", { name: /Count/i })
+    const icon = countHeader.querySelector('[data-slot="sort-icon"]')
+    expect(icon).toBeTruthy()
+    expect(icon).toHaveClass("opacity-0")
+    expect(icon).toHaveClass("group-hover/sort:opacity-100")
+    expect(countHeader).toHaveClass("hover:bg-muted/50")
+
+    fireEvent.click(countHeader) // desc — arrow stays visible
+    expect(countHeader.querySelector('[data-slot="sort-icon"]')).toHaveClass("opacity-100")
+    fireEvent.click(countHeader) // asc
+    expect(countHeader.querySelector('[data-slot="sort-icon"]')).toHaveClass("opacity-100")
+  })
+
   it("applies dense row padding when dense is set", () => {
     const { container } = render(
       <DataTable columns={columns} data={rows} getRowId={(r) => String(r.id)} dense />,

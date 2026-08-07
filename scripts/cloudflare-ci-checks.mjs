@@ -1,0 +1,64 @@
+import { spawn } from "node:child_process"
+import { pathToFileURL } from "node:url"
+import { workersBuildMetadata } from "./assert-workers-build-env.mjs"
+
+export const CHECK_LANES = [
+  { name: "root", steps: [["pnpm", ["lint"]], ["pnpm", ["test"]]] },
+  { name: "identity", steps: [["pnpm", ["run", "build:workers-build:identity"]]] },
+  { name: "sync", steps: [["pnpm", ["run", "build:workers-build:sync"]]] },
+  { name: "release-contracts", steps: [["pnpm", ["test:idml"]], ["pnpm", ["neon:check"]]] },
+  {
+    name: "agent-worker",
+    steps: [
+      ["npm", ["ci", "--prefix", "agent-worker"]],
+      ["npm", ["--prefix", "agent-worker", "run", "type-check"]],
+      ["npm", ["--prefix", "agent-worker", "test"]],
+    ],
+  },
+  { name: "spa", steps: [["bash", ["scripts/ci-build.sh"]]] },
+]
+
+export function runCommand(command, args, { cwd = process.cwd(), env = process.env } = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { cwd, env, stdio: "inherit" })
+    child.once("error", reject)
+    child.once("exit", (code, signal) => {
+      if (code === 0) return resolve()
+      reject(new Error(`${command} ${args.join(" ")} exited with ${signal ? `signal ${signal}` : `status ${code}`}`))
+    })
+  })
+}
+
+export async function runParallelChecks({
+  env = process.env,
+  cwd = process.cwd(),
+  lanes = CHECK_LANES,
+  run = runCommand,
+  log = console.log,
+} = {}) {
+  const metadata = workersBuildMetadata(env)
+  log(`[workers-build] running ${lanes.length} independent check lanes for ${metadata.branch}`)
+
+  const results = await Promise.allSettled(lanes.map(async ({ name, steps }) => {
+    log(`[workers-build:${name}] started`)
+    for (const [command, args] of steps) await run(command, args, { cwd, env })
+    log(`[workers-build:${name}] passed`)
+  }))
+
+  const failures = results.flatMap((result, index) => result.status === "rejected"
+    ? [`${lanes[index].name}: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`]
+    : [])
+  if (failures.length > 0) {
+    throw new Error(`Cloudflare check lane failure(s):\n${failures.join("\n")}`)
+  }
+}
+
+const isEntrypoint = process.argv[1]
+  && import.meta.url === pathToFileURL(process.argv[1]).href
+
+if (isEntrypoint) {
+  runParallelChecks().catch((error) => {
+    console.error(`[workers-build] ${error instanceof Error ? error.message : String(error)}`)
+    process.exitCode = 1
+  })
+}

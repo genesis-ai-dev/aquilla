@@ -15,7 +15,7 @@
     "predev:context": "node scripts/ensure-port-free.mjs 5173",
     "dev:context": "BRAND=context vite",
     "build": "pnpm idml:gate && tsc -b && vite build && tsx scripts/prerender-marketing.ts aquilla && tsx scripts/check-brand-build.ts aquilla",
-    "build:workers-build": "node scripts/assert-workers-build-env.mjs && pnpm lint && pnpm test && pnpm run build:workers-build:identity && pnpm run build:workers-build:sync && pnpm exec playwright install --with-deps chromium && pnpm test:idml && pnpm neon:check && npm ci --prefix agent-worker && npm --prefix agent-worker run type-check && npm --prefix agent-worker test && bash scripts/ci-build.sh",
+    "build:workers-build": "node scripts/assert-workers-build-env.mjs && node scripts/cloudflare-ci-checks.mjs",
     "build:workers-build:identity": "CI=1 pnpm --dir auth-worker install --frozen-lockfile && pnpm --dir auth-worker run build:workers-build",
     "build:workers-build:sync": "CI=1 pnpm --dir sync-worker install --frozen-lockfile && pnpm --dir sync-worker run build:workers-build",
     "build:codex": "pnpm idml:gate && BRAND=codex tsc -b && BRAND=codex vite build && BRAND=codex tsx scripts/prerender-marketing.ts codex && tsx scripts/check-brand-build.ts codex",

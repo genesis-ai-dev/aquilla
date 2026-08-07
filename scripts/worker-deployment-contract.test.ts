@@ -264,11 +264,8 @@ describe("worker deployment environment contract", () => {
     }
     expect(rootPackage.scripts?.["deploy:workers-build"])
       .toBe("node scripts/cloudflare-pr-preview.mjs --workers-build")
-    expect(rootPackage.scripts?.["build:workers-build"]).toContain("scripts/ci-build.sh")
     expect(rootPackage.scripts?.["build:workers-build"])
-      .toContain("pnpm run build:workers-build:identity")
-    expect(rootPackage.scripts?.["build:workers-build"])
-      .toContain("pnpm run build:workers-build:sync")
+      .toBe("node scripts/assert-workers-build-env.mjs && node scripts/cloudflare-ci-checks.mjs")
     expect(rootPackage.scripts?.["build:workers-build:identity"])
       .toBe("CI=1 pnpm --dir auth-worker install --frozen-lockfile && pnpm --dir auth-worker run build:workers-build")
     expect(rootPackage.scripts?.["build:workers-build:sync"])
@@ -487,17 +484,20 @@ describe("worker deployment environment contract", () => {
       scripts?: Record<string, string>
     }
     const command = rootPackage.scripts?.["build:workers-build"] ?? ""
+    const checks = readRepoFile("scripts", "cloudflare-ci-checks.mjs")
 
-    expect(command).toContain("pnpm lint")
-    expect(command).toContain("pnpm test")
-    expect(command).toContain("pnpm run build:workers-build:identity")
-    expect(command).toContain("pnpm run build:workers-build:sync")
-    expect(command).toContain("playwright install --with-deps chromium")
-    expect(command).toContain("pnpm test:idml")
-    expect(command).toContain("pnpm neon:check")
-    expect(command).toContain("npm --prefix agent-worker run type-check")
-    expect(command).toContain("npm --prefix agent-worker test")
-    expect(command).toContain("scripts/ci-build.sh")
+    expect(command).toContain("scripts/cloudflare-ci-checks.mjs")
+    expect(checks).toContain('["pnpm", ["lint"]]')
+    expect(checks).toContain('["pnpm", ["test"]]')
+    expect(checks).toContain('"build:workers-build:identity"')
+    expect(checks).toContain('"build:workers-build:sync"')
+    expect(checks).toContain('["pnpm", ["test:idml"]]')
+    expect(checks).toContain('["pnpm", ["neon:check"]]')
+    expect(checks).toContain('["npm", ["ci", "--prefix", "agent-worker"]]')
+    expect(checks).toContain('"type-check"')
+    expect(checks).toContain('["bash", ["scripts/ci-build.sh"]]')
+    expect(checks).toContain("Promise.allSettled")
+    expect(checks).not.toContain("playwright")
   })
 
   it("keeps all live deployments off automatic push triggers", () => {

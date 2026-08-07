@@ -2512,7 +2512,8 @@ function dubbingSkipAnchor(): number {
     return state.cellIndex
   }
   if (state.kind === "error" && state.cellId && activeContext) {
-    return activeContext.cells.findIndex((c) => c.id === state.cellId)
+    const erroredCellId = state.cellId
+    return activeContext.cells.findIndex((c) => c.id === erroredCellId)
   }
   return -1
 }
@@ -2618,7 +2619,8 @@ export function updateQueueCells(cells: CellData[]): void {
   // playing section can't shift which cell is "current", and refresh the trim
   // window so retiming the playing section applies to its end-stop.
   if (!activeContext?.snapshot && (state.kind === "playing" || state.kind === "paused" || state.kind === "loading")) {
-    const idx = cells.findIndex((c) => c.id === state.cellId)
+    const anchorCellId = state.cellId
+    const idx = cells.findIndex((c) => c.id === anchorCellId)
     if (idx >= 0) {
       currentIndex = idx
       currentTrim = trimWindowForCell(cells[idx])

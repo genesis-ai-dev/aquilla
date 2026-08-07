@@ -337,7 +337,7 @@ describe("audio-first transport — pausing, seeking and re-flowing", () => {
 
     // Trim v1's take down to 5s — v2 slides left, and we stay on v2.
     const trimmed = [verse("v1", 0, 4, 12_000), verse("v2", 4, 8, 3_000)]
-    const t = trimmed[0].attachments!["audio-v1-1700000000-take.webm"] as Record<string, number>
+    const t = trimmed[0].attachments!["audio-v1-1700000000-take.webm"] as unknown as Record<string, number>
     t.trimStartMs = 1_000
     t.trimEndMs = 6_000
     updateQueueCells(trimmed)
@@ -592,7 +592,7 @@ describe("audio-first fortify — live edits during playback", () => {
     expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "v1" })
 
     const trimmed = [verse("v1", 0, 4, 12_000), verse("v2", 4, 8, 3_000)]
-    const att = trimmed[0].attachments!["audio-v1-1700000000-take.webm"] as Record<string, number>
+    const att = trimmed[0].attachments!["audio-v1-1700000000-take.webm"] as unknown as Record<string, number>
     att.trimEndMs = 6_000
     updateQueueCells(trimmed)
 
@@ -612,7 +612,7 @@ describe("audio-first fortify — live edits during playback", () => {
     dubEl("v1")!.tick(5)
 
     const deleted = [verse("v1", 0, 4, 12_000), verse("v2", 4, 8, 3_000)]
-    const att = deleted[0].attachments!["audio-v1-1700000000-take.webm"] as Record<string, unknown>
+    const att = deleted[0].attachments!["audio-v1-1700000000-take.webm"] as unknown as Record<string, unknown>
     att.isDeleted = true
     updateQueueCells(deleted)
     await settle()

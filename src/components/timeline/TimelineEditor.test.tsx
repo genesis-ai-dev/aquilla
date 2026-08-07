@@ -112,7 +112,7 @@ describe("TimelineEditor", () => {
         coreMediaUrl={null}
         editable
         cells={[cell({ id: "d1", original: "x", medium: "media", startTime: 0, endTime: 2 })]}
-        onRetime={() => {}}
+        onRetimeSubtitle={() => {}}
         onCommitTarget={() => {}}
       />,
     )

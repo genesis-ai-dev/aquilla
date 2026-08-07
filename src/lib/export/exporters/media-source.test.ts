@@ -113,7 +113,7 @@ describe("exports never carry the filename as source text", () => {
   })
 
   it("VTT: same contract", async () => {
-    const text = await exportVtt(CELLS).text()
+    const text = await exportVtt(CELLS, undefined).text()
     expect(text).not.toContain(FILENAME)
     expect(text).toContain("Traduction une")
   })

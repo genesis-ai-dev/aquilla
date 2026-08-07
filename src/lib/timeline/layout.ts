@@ -71,7 +71,7 @@ function dubbingLayout(cells: readonly CellData[]): TimelineLayout {
   }
 }
 
-function audioFirstLayout(cells: readonly CellData[], dialogue: readonly CellData[]): TimelineLayout {
+function audioFirstLayout(_cells: readonly CellData[], dialogue: readonly CellData[]): TimelineLayout {
   const programme = buildProgramme(dialogue)
   const slotOf = (cell: CellData): ProgrammeSlot | null => programme.byCellId.get(cell.id) ?? null
 

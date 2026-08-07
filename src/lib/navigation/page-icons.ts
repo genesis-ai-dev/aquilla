@@ -145,10 +145,7 @@ export function deriveNavIcon(pathname: string): LucideIcon {
       case "members":
         return NAV_PAGE_ICONS.members
       case "teams":
-        if (parts.includes("settings")) {
-          if (parts[parts.length - 1] === "identity") return Building2
-          return NAV_PAGE_ICONS.settings
-        }
+        if (parts.includes("settings")) return NAV_PAGE_ICONS.settings
         return parts.length >= 2 ? NAV_PAGE_ICONS.team : NAV_PAGE_ICONS.teams
       default:
         break

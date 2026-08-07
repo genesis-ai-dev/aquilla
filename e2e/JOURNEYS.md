@@ -157,9 +157,9 @@
 | Orgs        | Preferences page analytics toggle                     | `e2e/specs/orgs/preferences-analytics-toggle.smoke.spec.ts` + `preferences-analytics-disabled-warning.smoke.spec.ts` | ✅ |
 | Orgs        | Preferences AI provider expand/save/clear             | `e2e/specs/orgs/preferences-ai-provider.smoke.spec.ts` + `preferences-ai-provider-expand.smoke.spec.ts` + `preferences-ai-provider-save.smoke.spec.ts` | ✅ |
 | Orgs        | Team create, rename, edit description                 | `e2e/specs/orgs/teams.smoke.spec.ts` + `team-rename.smoke.spec.ts` + `team-edit-description.smoke.spec.ts` | ✅ |
+| Orgs        | Team settings (gear → inline identity + Danger zone delete) | `e2e/specs/orgs/team-delete.smoke.spec.ts` + `team-rename.smoke.spec.ts` + `team-edit-description.smoke.spec.ts` | ✅ |
 | Orgs        | Team add/remove member, change role                   | `e2e/specs/orgs/team-add-member.smoke.spec.ts` + `team-remove-member.smoke.spec.ts` + `team-member-role-change.smoke.spec.ts` | ✅ |
 | Orgs        | Team attach/detach project                            | `e2e/specs/orgs/team-attach-project.smoke.spec.ts` + `team-detach-project.smoke.spec.ts` | ✅ |
-| Orgs        | Team delete dialog                                    | `e2e/specs/orgs/team-delete.smoke.spec.ts`                    |   ✅   |
 | Orgs        | Teams sort and filter                                 | `e2e/specs/orgs/teams-sort-and-filter.smoke.spec.ts`          |   ✅   |
 | Editor      | Cell action popover shows Record audio + Add comment  | `e2e/specs/editor/cell-action-popover.smoke.spec.ts`          |   ✅   |
 | Editor      | Cell details expansion panel tabs (Decay/BT/Footnotes/Issues) | `e2e/specs/editor/cell-details.smoke.spec.ts` + `cell-expansion-bt-tab.smoke.spec.ts` + `cell-expansion-decay-tab.smoke.spec.ts` + `cell-expansion-issues-tab.smoke.spec.ts` | ✅ |

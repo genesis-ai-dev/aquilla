@@ -85,6 +85,9 @@ const TeamsList = lazy(() =>
 const TeamDetail = lazy(() =>
   import("@/components/org/TeamDetail").then((m) => ({ default: m.TeamDetail })),
 )
+const TeamSettingsIndex = lazy(() =>
+  import("@/pages/TeamSettings").then((m) => ({ default: m.TeamSettingsIndex })),
+)
 const AdminConsole = lazy(() =>
   import("@/pages/AdminConsole").then((m) => ({ default: m.AdminConsole })),
 )
@@ -220,6 +223,11 @@ function AppRoutes() {
           <Route path="archived" element={<ArchivedProjects />} />
           <Route path="teams" element={<TeamsList />} />
           <Route path="teams/:groupId" element={<TeamDetail />} />
+          <Route path="teams/:groupId/settings" element={<TeamSettingsIndex />} />
+          <Route
+            path="teams/:groupId/settings/identity"
+            element={<Navigate to=".." replace relative="path" />}
+          />
           <Route path="members" element={<MembersPage />} />
           <Route path="members/matrix" element={<MembersPage />} />
           <Route path="settings" element={<Settings />} />

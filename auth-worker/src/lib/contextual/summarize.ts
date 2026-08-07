@@ -56,6 +56,7 @@ export async function summarizeConstrual(deps: {
     tier: "fast",
     maxTokens: 800,
     temperature: 0,
+    label: "summarize",
   })
   const text = reply.trim()
   if (!text) return { l1Summary: l2.slice(0, L1_MAX_CHARS), fallback: true }

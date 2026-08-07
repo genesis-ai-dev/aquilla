@@ -141,6 +141,7 @@ export async function verifySpan(
     tier,
     maxTokens: 2048,
     temperature: 0,
+    label: `verify:${stanceKey}`,
   })
   const vote = parseVoteReply(reply, stanceKey, deps.draft)
   if (!vote) return { ok: false, error: `${stanceKey} verifier returned no parseable verdict` }

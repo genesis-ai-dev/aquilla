@@ -185,9 +185,29 @@ export async function performSpan(deps: PerformSpanDeps): Promise<PerformSpanRes
     tier: "mid",
     maxTokens: 4096,
     temperature: 0,
+    label: "draft",
   })
   const parsed = parseDraftReply(reply)
   if (parsed.size === 0) {
+    // parseDraftReply swallows the parse error, so re-run it here to surface
+    // WHY. Without this an operator sees only "no parseable array" and cannot
+    // tell a truncated response (raise maxTokens) from a malformed one (the
+    // model emitted a bad character mid-array — one glitch discards the whole
+    // span). Deliberately logs no reply text: these are translation drafts,
+    // and the failure classification is the diagnostic value, not the content.
+    const start = reply.indexOf("[")
+    const end = reply.lastIndexOf("]")
+    let why = end <= start ? "no closing ] (truncated mid-array?)" : "no {i,t} items"
+    if (end > start) {
+      try {
+        JSON.parse(reply.slice(start, end + 1))
+      } catch (err) {
+        why = err instanceof Error ? err.message.slice(0, 120) : "parse failed"
+      }
+    }
+    console.error(
+      `[contextual] draft reply unparseable (${deps.pairs.length} segments, ${reply.length} chars): ${why}`,
+    )
     return { ok: false, error: "drafting model returned no parseable [{i,t}] array" }
   }
 

@@ -11,19 +11,26 @@ are not used during ordinary pull-request or push activity.
 ## Control-plane state
 
 Connect `aquilla-web`, `aquilla-identity`, and `aquilla-sync-worker` to the
-`genesis-ai-dev/aquilla` repository. Use `/`, `/auth-worker`, and `/sync-worker`
-as their root directories, respectively.
+`genesis-ai-dev/aquilla` repository. Use `/` as the root directory for all
+three connections. Identity and sync compile shared source files outside their
+package directories, so package-only installs cannot resolve the repository
+dependencies used by those files.
 
 | Worker | Build command | Production and preview deploy command |
 | --- | --- | --- |
 | `aquilla-web` | `pnpm run build:workers-build` | `pnpm run deploy:workers-build` |
-| `aquilla-identity` | `pnpm run build:workers-build` | `pnpm run deploy:workers-build` |
-| `aquilla-sync-worker` | `pnpm run build:workers-build` | `pnpm run deploy:workers-build` |
+| `aquilla-identity` | `pnpm run build:workers-build:identity` | `pnpm run deploy:workers-build:identity` |
+| `aquilla-sync-worker` | `pnpm run build:workers-build:sync` | `pnpm run deploy:workers-build:sync` |
 
 Set `main` as the production branch and enable non-production branch builds.
 Both dashboard deploy-command fields intentionally use the same repository
 helper. The helper requires Cloudflare's `WORKERS_CI`, `WORKERS_CI_BRANCH`, and
 `WORKERS_CI_COMMIT_SHA` metadata before invoking Wrangler.
+
+The identity and sync build wrappers install their package-local lockfiles only
+after Cloudflare has installed the root lockfile. This two-level install is
+required: their Wrangler entrypoints live in the package directories, while
+their TypeScript graphs include shared root modules.
 
 `versification-tool` remains disconnected. It has no deployable Wrangler
 application and must not be given a placeholder build command.

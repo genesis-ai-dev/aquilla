@@ -265,6 +265,14 @@ describe("worker deployment environment contract", () => {
     expect(rootPackage.scripts?.["deploy:workers-build"])
       .toBe("node scripts/cloudflare-build-deploy.mjs web")
     expect(rootPackage.scripts?.["build:workers-build"]).toContain("scripts/ci-build.sh")
+    expect(rootPackage.scripts?.["build:workers-build:identity"])
+      .toBe("CI=1 pnpm --dir auth-worker install --frozen-lockfile && pnpm --dir auth-worker run build:workers-build")
+    expect(rootPackage.scripts?.["build:workers-build:sync"])
+      .toBe("CI=1 pnpm --dir sync-worker install --frozen-lockfile && pnpm --dir sync-worker run build:workers-build")
+    expect(rootPackage.scripts?.["deploy:workers-build:identity"])
+      .toBe("pnpm --dir auth-worker run deploy:workers-build")
+    expect(rootPackage.scripts?.["deploy:workers-build:sync"])
+      .toBe("pnpm --dir sync-worker run deploy:workers-build")
 
     const workerPackage = JSON.parse(readRepoFile("sync-worker", "package.json")) as {
       scripts?: Record<string, string>
@@ -284,6 +292,11 @@ describe("worker deployment environment contract", () => {
     expect(authPackage.scripts?.["deploy:workers-build"])
       .toBe("node ../scripts/cloudflare-build-deploy.mjs identity")
     expect(authPackage.scripts?.deploy).toBe("pnpm --dir .. run deploy:aquilla:auth")
+
+    const runbook = readRepoFile("docs", "runbooks", "cloudflare-workers-builds.md")
+    expect(runbook).toContain("Use `/` as the root directory for all")
+    expect(runbook).toContain("`pnpm run build:workers-build:identity`")
+    expect(runbook).toContain("`pnpm run build:workers-build:sync`")
 
     const helper = readRepoFile("scripts", "cloudflare-build-deploy.mjs")
     expect(helper).toContain("promote: false")

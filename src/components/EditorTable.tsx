@@ -57,7 +57,8 @@ import { CellTtsButton } from "./CellTtsButton"
 import { CellTranscriptPreview } from "./CellTranscriptPreview"
 import { CellTranscribeBadge } from "./CellTranscribeBadge"
 import { CellActionRail, RailButton, isInteractiveTarget } from "./CellActionRail"
-import { useIsMediaCursorCell } from "@/lib/timeline/media-cursor"
+import { useIsMediaCursorCell, useMediaSyncActive } from "@/lib/timeline/media-cursor"
+import { useIsQueueCurrentCell, useQueueCurrentCellId } from "@/lib/audio/play-queue"
 import { useRailIdleHide } from "@/hooks/useRailIdleHide"
 import {
   computeRailPinned,
@@ -190,6 +191,57 @@ import {
 const rowRenders = new Map<string, number>()
 const ESTIMATED_ROW_HEIGHT_PX = 140
 const LEGEND_LIST_DRAW_DISTANCE_PX = 240
+
+/**
+ * 2026-08-07 (wire c): vertical follow for the stacked media lens — the table
+ * tracks the cell the queue is RUNNING, with the timeline's scroll-truce
+ * mirrored at row granularity. Mounted only while the timeline is stacked
+ * (media-sync active) and renders nothing, so the table root never subscribes
+ * to queue state and playback ticks cost zero table re-renders.
+ */
+export function MediaFollowDriver({
+  isCellDisplayed,
+  scrollToCell,
+  userScrollListenerRef,
+  programmaticStampRef,
+}: {
+  isCellDisplayed: (cellId: string) => boolean
+  scrollToCell: (cellId: string) => void
+  userScrollListenerRef: React.MutableRefObject<(() => void) | null>
+  programmaticStampRef: React.MutableRefObject<number>
+}) {
+  const queueCellId = useQueueCurrentCellId()
+  // Same stale-singleton guard as the timeline: a queue running another
+  // file's cells must not scroll this table.
+  const queueRunning = queueCellId != null && isCellDisplayed(queueCellId)
+  const [follow, setFollow] = useState(true)
+  // Rising edge of running (play, resume) re-engages following — a user who
+  // scrolled away re-opts-in by pressing play, exactly like the track view.
+  useEffect(() => {
+    if (queueRunning) setFollow(true)
+  }, [queueRunning])
+  // A cell boundary IS the page-flip: bring the running row to ~1/3 height.
+  useEffect(() => {
+    if (follow && queueRunning && queueCellId != null) scrollToCell(queueCellId)
+  }, [follow, queueRunning, queueCellId, scrollToCell])
+  // The truce: a scroll more than 250ms after our own programmatic scroll is
+  // the USER moving away — stop following until the next play/resume. 250ms
+  // (vs the track's 150ms) absorbs LegendList's post-scrollToIndex settling
+  // corrections under recycled, estimated-height rows.
+  const runningRef = useRef(queueRunning)
+  runningRef.current = queueRunning
+  useEffect(() => {
+    userScrollListenerRef.current = () => {
+      if (runningRef.current && performance.now() - programmaticStampRef.current > 250) {
+        setFollow(false)
+      }
+    }
+    return () => {
+      userScrollListenerRef.current = null
+    }
+  }, [userScrollListenerRef, programmaticStampRef])
+  return null
+}
 const EMPTY_CONCEPTS: Concept[] = []
 
 interface EditorActivationOptions {
@@ -882,6 +934,23 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
 
   displayCellIdsRef.current = displayCellIds
 
+  // 2026-08-07 (wire c): follow-driver plumbing. The driver itself mounts
+  // only while the timeline is stacked above (media-sync active).
+  const mediaSyncActive = useMediaSyncActive()
+  const followProgrammaticStampRef = useRef(0)
+  const followUserScrollListenerRef = useRef<(() => void) | null>(null)
+  const followIsCellDisplayed = useCallback(
+    (cellId: string) => displayCellIdsRef.current.includes(cellId),
+    [],
+  )
+  const followScrollToCell = useCallback((cellId: string) => {
+    const index = displayCellIdsRef.current.indexOf(cellId)
+    if (index < 0) return
+    followProgrammaticStampRef.current = performance.now()
+    // 0.35: the running row rides high enough to leave reading room below.
+    void listRef.current?.scrollToIndex({ index, viewPosition: 0.35, animated: false })
+  }, [])
+
   // Durable cell audio (AD-2 cell.audio.* grammar). Per-file read; overlay each
   // visible row's attachments + selected clips at render time, rather than
   // cloning the entire active file into audio-enriched CellData objects.
@@ -1003,6 +1072,9 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   }, [firstVisibleIndex, getListQueryRoot])
 
   const handleListScroll = useCallback(() => {
+    // Wire c: every scroll event reaches the follow driver's truce check
+    // (it distinguishes its own programmatic scrolls by the stamp).
+    followUserScrollListenerRef.current?.()
     if (chapterScrollFrameRef.current !== null) return
     chapterScrollFrameRef.current = requestAnimationFrame(() => {
       // Legend List applies its row transforms after the scroll callback.
@@ -2223,6 +2295,14 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           onWheelCapture={clearChapterNavigationSelection}
           onKeyDownCapture={handleChapterListKeyDownCapture}
         >
+          {mediaSyncActive && (
+            <MediaFollowDriver
+              isCellDisplayed={followIsCellDisplayed}
+              scrollToCell={followScrollToCell}
+              userScrollListenerRef={followUserScrollListenerRef}
+              programmaticStampRef={followProgrammaticStampRef}
+            />
+          )}
           <LegendList
             ref={listRef}
             refScrollView={setListScrollElement}
@@ -3676,6 +3756,13 @@ function EditorRow({
   // self-clears when the timeline unmounts). Per-row subscription so a cursor
   // move re-renders exactly the two affected rows.
   const isMediaCursorRow = useIsMediaCursorCell(cell.id)
+  // Wire c: the cell the queue is RUNNING right now (stacked lens only —
+  // gated on the same media-sync flag so bar-driven playback in the Text
+  // lens keeps its existing scroll-and-flash behavior unchanged). Both hooks
+  // run unconditionally; only the combination is conditional.
+  const isQueueCurrentCell = useIsQueueCurrentCell(cell.id)
+  const rowMediaSyncActive = useMediaSyncActive()
+  const isQueueRow = isQueueCurrentCell && rowMediaSyncActive
   const remoteCellPresence = useCellPresence(presenceStore, cell.id)
   // A focus lock admits one active writer. Prefer its newest ephemeral draft
   // so the read surface and remote caret advance together between commits.
@@ -5276,6 +5363,8 @@ function EditorRow({
           // Timeline cursor (media lens): sky ring, same language as the
           // selected chip's ring.
           isMediaCursorRow && "bg-sky-500/5 ring-1 ring-sky-500/40 ring-inset",
+          // Wire c: the row the queue is sounding — gold, like the active cue.
+          isQueueRow && "bg-primary/5 ring-1 ring-primary/40 ring-inset",
           // Pulsing while a voice is being generated for this cell. Gives the
           // user a clear "something is happening" signal — drop, translate,
           // and bulk synth all flow through this status key.

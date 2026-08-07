@@ -2,6 +2,7 @@ import { useMemo } from "react"
 import { type ColumnDef } from "@tanstack/react-table"
 import { Building2 } from "lucide-react"
 import { DataTable, DataTableColumnHeader } from "@/components/ui/data-table"
+import { missingLast, SORT_MISSING_LAST } from "@/components/ui/data-table-missing"
 import { DateTooltip } from "@/components/ui/date-tooltip"
 import { EmptyState } from "@/components/ui/empty"
 import type { AdminOrg, AdminTeam } from "@/lib/frontier/admin"
@@ -45,7 +46,8 @@ export function AdminTenantsSection({
       },
       {
         id: "owner",
-        accessorFn: (o) => (o.ownerUsername ?? "").toLowerCase(),
+        accessorFn: (o) => missingLast((o.ownerUsername ?? "").toLowerCase()),
+        sortUndefined: SORT_MISSING_LAST,
         header: ({ column }) => <DataTableColumnHeader column={column} title="Owner" />,
         cell: ({ row }) =>
           row.original.ownerUsername ? (
@@ -89,7 +91,8 @@ export function AdminTenantsSection({
       },
       {
         id: "created",
-        accessorFn: (o) => o.createdAt,
+        accessorFn: (o) => missingLast(o.createdAt || undefined),
+        sortUndefined: SORT_MISSING_LAST,
         header: ({ column }) => <DataTableColumnHeader column={column} title="Created" />,
         cell: ({ row }) => (
           <DateTooltip
@@ -120,6 +123,7 @@ export function AdminTenantsSection({
       data={orgs}
       getRowId={(o) => String(o.id)}
       onRowClick={(o) => onOpenOrg(o.id)}
+      initialSorting={[{ id: "organization", desc: false }]}
       searchPlaceholder="Search organizations…"
       globalFilterFn={(row, _columnId, filterValue) => {
         const q = String(filterValue).trim().toLowerCase()

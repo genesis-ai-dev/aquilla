@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom"
 import { type ColumnDef } from "@tanstack/react-table"
 import { FolderOpen } from "lucide-react"
 import { DataTable, DataTableColumnHeader } from "@/components/ui/data-table"
+import { missingLast, SORT_MISSING_LAST } from "@/components/ui/data-table-missing"
 import { EmptyState } from "@/components/ui/empty"
 import {
   Select,
@@ -69,7 +70,8 @@ export function AdminProjectsSection({ projects }: { projects: AdminProject[] })
       },
       {
         id: "org",
-        accessorFn: (p) => (p.orgName ?? "").toLowerCase(),
+        accessorFn: (p) => missingLast((p.orgName ?? "").toLowerCase()),
+        sortUndefined: SORT_MISSING_LAST,
         header: ({ column }) => <DataTableColumnHeader column={column} title="Org" />,
         cell: ({ row }) =>
           row.original.orgName ? (
@@ -80,7 +82,8 @@ export function AdminProjectsSection({ projects }: { projects: AdminProject[] })
       },
       {
         id: "creator",
-        accessorFn: (p) => (p.creatorUsername ?? "").toLowerCase(),
+        accessorFn: (p) => missingLast((p.creatorUsername ?? "").toLowerCase()),
+        sortUndefined: SORT_MISSING_LAST,
         header: ({ column }) => <DataTableColumnHeader column={column} title="Creator" />,
         cell: ({ row }) =>
           row.original.creatorUsername ? (
@@ -110,16 +113,9 @@ export function AdminProjectsSection({ projects }: { projects: AdminProject[] })
       },
       {
         id: "edited",
-        accessorFn: (p) => p.lastEditAt ?? null,
+        accessorFn: (p) => missingLast(p.lastEditAt ?? undefined),
+        sortUndefined: SORT_MISSING_LAST,
         header: ({ column }) => <DataTableColumnHeader column={column} title="Last edit" />,
-        sortingFn: (a, b) => {
-          const av = a.original.lastEditAt
-          const bv = b.original.lastEditAt
-          if (av == null && bv == null) return 0
-          if (av == null) return 1
-          if (bv == null) return -1
-          return av < bv ? -1 : av > bv ? 1 : 0
-        },
         cell: ({ row }) => (
           <DateTooltip
             value={row.original.lastEditAt}
@@ -187,15 +183,26 @@ export function AdminProjectsSection({ projects }: { projects: AdminProject[] })
     </div>
   )
 
+  const initialSorting = useMemo(
+    () =>
+      lens === "needs-attention"
+        ? [{ id: "status", desc: true }]
+        : [{ id: "name", desc: false }],
+    [lens],
+  )
+
   return (
     <DataTable
+      // Remount when the lens changes so sort resets to the lens default
+      // (status urgency for needs-attention; name A→Z otherwise).
+      key={lens}
       columns={columns}
       data={data}
       getRowId={(p) => p.id}
       onRowClick={(p) => {
         if (!p.archived) navigate(`/projects/${p.id}`)
       }}
-      initialSorting={[{ id: "status", desc: true }]}
+      initialSorting={initialSorting}
       searchPlaceholder="Search projects…"
       globalFilterFn={(row, _columnId, filterValue) => {
         const q = String(filterValue).trim().toLowerCase()

@@ -2,6 +2,7 @@ import { useMemo } from "react"
 import { type ColumnDef } from "@tanstack/react-table"
 import { Users } from "lucide-react"
 import { DataTable, DataTableColumnHeader } from "@/components/ui/data-table"
+import { missingLast, SORT_MISSING_LAST } from "@/components/ui/data-table-missing"
 import { DateTooltip } from "@/components/ui/date-tooltip"
 import { EmptyState } from "@/components/ui/empty"
 import { OrgWithAvatar } from "@/components/OrgWithAvatar"
@@ -44,12 +45,26 @@ export function AdminTeamsSection({
       },
       {
         id: "projectLead",
-        accessorFn: (t) => (t.projectLeadUsername ?? "").toLowerCase(),
+        accessorFn: (t) => missingLast((t.projectLeadUsername ?? "").toLowerCase()),
+        sortUndefined: SORT_MISSING_LAST,
         header: ({ column }) => <DataTableColumnHeader column={column} title="Project Lead" />,
         cell: ({ row }) =>
           row.original.projectLeadUsername ? (
             <UsernameWithAvatar
               username={row.original.projectLeadUsername}
+              nameClassName="font-normal"
+            />
+          ) : null,
+      },
+      {
+        id: "owner",
+        accessorFn: (t) => missingLast((t.ownerUsername ?? "").toLowerCase()),
+        sortUndefined: SORT_MISSING_LAST,
+        header: ({ column }) => <DataTableColumnHeader column={column} title="Owner" />,
+        cell: ({ row }) =>
+          row.original.ownerUsername ? (
+            <UsernameWithAvatar
+              username={row.original.ownerUsername}
               nameClassName="font-normal"
             />
           ) : null,
@@ -74,7 +89,8 @@ export function AdminTeamsSection({
       },
       {
         id: "created",
-        accessorFn: (t) => t.createdAt,
+        accessorFn: (t) => missingLast(t.createdAt || undefined),
+        sortUndefined: SORT_MISSING_LAST,
         header: ({ column }) => <DataTableColumnHeader column={column} title="Created" />,
         cell: ({ row }) => (
           <DateTooltip
@@ -111,7 +127,7 @@ export function AdminTeamsSection({
         const q = String(filterValue).trim().toLowerCase()
         if (!q) return true
         const t = row.original
-        return `${relativeTeamPath(t.name)} ${t.orgName ?? ""} ${t.projectLeadUsername ?? ""}`
+        return `${relativeTeamPath(t.name)} ${t.orgName ?? ""} ${t.projectLeadUsername ?? ""} ${t.ownerUsername ?? ""}`
           .toLowerCase()
           .includes(q)
       }}

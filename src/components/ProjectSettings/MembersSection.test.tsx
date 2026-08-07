@@ -143,12 +143,12 @@ describe("MembersSection", () => {
       "ascending",
     )
 
-    // Email starts unsorted → desc → asc (DataTable sortDescFirst cycle).
+    // Email starts unsorted → asc → desc (strings auto asc-first).
     const emailHeader = screen.getByRole("button", { name: /^Email$/i })
     fireEvent.click(emailHeader)
-    expect(bodyUsernames()).toEqual(["carol", "bob", "alice"])
-    fireEvent.click(emailHeader)
     expect(bodyUsernames()).toEqual(["alice", "bob", "carol"])
+    fireEvent.click(emailHeader)
+    expect(bodyUsernames()).toEqual(["carol", "bob", "alice"])
   })
 
   it("opens Add a member dialog with members and invite-link tabs", () => {

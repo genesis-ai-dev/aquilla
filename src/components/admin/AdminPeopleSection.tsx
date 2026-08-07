@@ -3,6 +3,7 @@ import { type ColumnDef } from "@tanstack/react-table"
 import { AlertTriangle, Users } from "lucide-react"
 import { toast } from "@/components/ui/toast"
 import { DataTable, DataTableColumnHeader } from "@/components/ui/data-table"
+import { missingLast, SORT_MISSING_LAST } from "@/components/ui/data-table-missing"
 import { DateTooltip } from "@/components/ui/date-tooltip"
 import { EmptyState } from "@/components/ui/empty"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
@@ -81,16 +82,9 @@ export function AdminPeopleSection({ users, admins }: { users: AdminUser[]; admi
       },
       {
         id: "lastActive",
-        accessorFn: (u) => (u.lastActiveAt ? Date.parse(u.lastActiveAt) : null),
+        accessorFn: (u) => missingLast(u.lastActiveAt ? Date.parse(u.lastActiveAt) : undefined),
+        sortUndefined: SORT_MISSING_LAST,
         header: ({ column }) => <DataTableColumnHeader column={column} title="Last active" />,
-        sortingFn: (a, b) => {
-          const av = a.original.lastActiveAt ? Date.parse(a.original.lastActiveAt) : null
-          const bv = b.original.lastActiveAt ? Date.parse(b.original.lastActiveAt) : null
-          if (av == null && bv == null) return 0
-          if (av == null) return 1
-          if (bv == null) return -1
-          return av - bv
-        },
         cell: ({ row }) => (
           <DateTooltip value={row.original.lastActiveAt} label="Last active" />
         ),
@@ -137,7 +131,7 @@ export function AdminPeopleSection({ users, admins }: { users: AdminUser[]; admi
         columns={columns}
         data={users}
         getRowId={(u) => String(u.id)}
-        initialSorting={[{ id: "lastActive", desc: true }]}
+        initialSorting={[{ id: "user", desc: false }]}
         searchPlaceholder="Search people…"
         globalFilterFn={(row, _columnId, filterValue) => {
           const q = String(filterValue).trim().toLowerCase()

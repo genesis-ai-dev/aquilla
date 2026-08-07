@@ -191,6 +191,7 @@ export function AdminCreditsSection({ jwt }: { jwt: string }) {
         columns={columns}
         data={rows}
         getRowId={(row) => String(row.orgId)}
+        initialSorting={[{ id: "org", desc: false }]}
         testId="admin-credits-table"
         rowClassName="align-top"
       />

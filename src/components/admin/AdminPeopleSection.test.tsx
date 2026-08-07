@@ -99,10 +99,11 @@ describe("AdminPeopleSection", () => {
     expect(screen.getAllByText(joined).length).toBeGreaterThanOrEqual(1)
   })
 
-  it("cycles Orgs sort on header click: desc → asc → clear", () => {
+  it("cycles Orgs sort on header click: desc ↔ asc (never clears)", () => {
     render(<AdminPeopleSection users={users} admins={admins} />)
     const orgsHeader = screen.getByRole("button", { name: /Orgs/i })
-    // Default initial sort is lastActive desc — capture names after switching to Orgs.
+    // Default initial sort is user A→Z — capture names after switching to Orgs.
+    // orgCount is numeric → first click descends (highest first).
     fireEvent.click(orgsHeader) // desc by orgCount
     expect(bodyFirstCells()).toEqual([
       "Alpha (alpha)",
@@ -115,11 +116,11 @@ describe("AdminPeopleSection", () => {
       "Ryder (ryder)",
       "Alpha (alpha)",
     ])
-    fireEvent.click(orgsHeader) // clear — falls back to insertion order
+    fireEvent.click(orgsHeader) // desc again — sorting never clears
     expect(bodyFirstCells()).toEqual([
+      "Alpha (alpha)",
       "Ryder (ryder)",
       "casey",
-      "Alpha (alpha)",
     ])
   })
 })

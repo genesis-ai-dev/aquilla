@@ -5,6 +5,7 @@ import { ArrowRight, Building2, ShieldAlert } from "lucide-react"
 import { Section, StatTile } from "@/components/ui/page"
 import { EmptyState } from "@/components/ui/empty"
 import { DataTable, DataTableColumnHeader } from "@/components/ui/data-table"
+import { missingLast, SORT_MISSING_LAST } from "@/components/ui/data-table-missing"
 import { ProjectStatus } from "@/components/ProjectStatus"
 import { ValidatedBar } from "./ValidatedBar"
 import { AdminActivityTimeline } from "./AdminActivityTimeline"
@@ -71,7 +72,8 @@ export function AdminOverviewHome({
       },
       {
         id: "org",
-        accessorFn: (r) => (r.project.orgName ?? "").toLowerCase(),
+        accessorFn: (r) => missingLast((r.project.orgName ?? "").toLowerCase()),
+        sortUndefined: SORT_MISSING_LAST,
         header: ({ column }) => <DataTableColumnHeader column={column} title="Org" />,
         cell: ({ row }) =>
           row.original.project.orgName ? (
@@ -188,6 +190,7 @@ export function AdminOverviewHome({
           data={atRisk}
           getRowId={(r) => r.project.id}
           onRowClick={(r) => navigate(`/projects/${r.project.id}`)}
+          initialSorting={[{ id: "status", desc: true }]}
           testId="admin-overview-attention-table"
           className={ADMIN_TABLE_CLASS}
           dense
@@ -215,6 +218,7 @@ export function AdminOverviewHome({
             data={topOrgs}
             getRowId={(o) => String(o.id)}
             onRowClick={(o) => onOpenOrg(o.id)}
+            initialSorting={[{ id: "projectCount", desc: true }]}
             testId="admin-overview-orgs-table"
             className={ADMIN_TABLE_CLASS}
             dense

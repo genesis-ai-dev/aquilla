@@ -77,6 +77,27 @@ describe("AdminProjectsSection", () => {
     expect(screen.queryByText("Archived One")).not.toBeInTheDocument()
   })
 
+  it("sorts needs-attention by status urgency (most urgent first)", async () => {
+    const soon = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString()
+    render(
+      <MemoryRouter>
+        <AdminProjectsSection
+          projects={[
+            proj({ id: "soon", name: "Due Soon", deadlineAt: soon }),
+            proj({ id: "overdue", name: "Overdue One", deadlineAt: "2020-01-01" }),
+            proj({ id: "healthy", name: "Healthy" }),
+          ]}
+        />
+      </MemoryRouter>,
+    )
+    await pickLens(/needs attention/i)
+    const rows = screen.getAllByRole("row").slice(1)
+    const names = rows.map((tr) => within(tr).getAllByRole("cell")[0]?.textContent)
+    expect(names).toEqual(["Overdue One", "Due Soon"])
+    const statusHeader = screen.getByRole("button", { name: /Status/i })
+    expect(statusHeader).toHaveAttribute("aria-sort", "descending")
+  })
+
   it("navigates when an active project row is clicked", () => {
     navigate.mockClear()
     renderSection()
@@ -117,6 +138,53 @@ describe("AdminProjectsSection", () => {
       day: "numeric",
     })
     expect(screen.getByText(short)).toBeInTheDocument()
+  })
+
+  it("sorts missing last-edit dashes below real dates when descending", () => {
+    const older = Date.now() - 7 * 24 * 60 * 60 * 1000
+    const newer = Date.now()
+    render(
+      <MemoryRouter>
+        <AdminProjectsSection
+          projects={[
+            proj({ id: "none", name: "No Edit", lastEditAt: null }),
+            proj({ id: "old", name: "Older", lastEditAt: older }),
+            proj({ id: "new", name: "Newer", lastEditAt: newer }),
+          ]}
+        />
+      </MemoryRouter>,
+    )
+    const header = screen.getByRole("button", { name: /Last edit/i })
+    fireEvent.click(header) // numeric → desc first (newest first)
+    const names = screen
+      .getAllByRole("row")
+      .slice(1)
+      .map((tr) => within(tr).getAllByRole("cell")[0]?.textContent)
+    expect(names).toEqual(["Newer", "Older", "No Edit"])
+  })
+
+  it("sorts missing creator dashes below real names when descending", () => {
+    render(
+      <MemoryRouter>
+        <AdminProjectsSection
+          projects={[
+            // Lead with a real username so auto first-dir is asc (string), then
+            // a second click reaches desc with missing still last.
+            proj({ id: "c", name: "Gamma", creatorUsername: "anna" }),
+            proj({ id: "b", name: "Beta", creatorUsername: "zoe" }),
+            proj({ id: "a", name: "Alpha", creatorUsername: null }),
+          ]}
+        />
+      </MemoryRouter>,
+    )
+    const header = screen.getByRole("button", { name: /Creator/i })
+    fireEvent.click(header) // asc
+    fireEvent.click(header) // desc
+    const names = screen
+      .getAllByRole("row")
+      .slice(1)
+      .map((tr) => within(tr).getAllByRole("cell")[0]?.textContent)
+    expect(names).toEqual(["Beta", "Gamma", "Alpha"])
   })
 
   it("keeps search visible when the archived lens has no projects", async () => {

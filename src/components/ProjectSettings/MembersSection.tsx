@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { LoadingPanel } from "@/components/ui/loading-overlay"
 import { DataTable, DataTableColumnHeader } from "@/components/ui/data-table"
+import { missingLast, SORT_MISSING_LAST } from "@/components/ui/data-table-missing"
 import {
   Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog"
@@ -173,7 +174,8 @@ export function MembersSection({ projectId }: { projectId: string }) {
       },
       {
         id: "email",
-        accessorFn: (m) => (m.email ?? "").toLowerCase(),
+        accessorFn: (m) => missingLast((m.email ?? "").toLowerCase()),
+        sortUndefined: SORT_MISSING_LAST,
         header: ({ column }) => <DataTableColumnHeader column={column} title="Email" />,
         meta: { className: "min-w-0 w-[35%]" },
         cell: ({ row }) => (

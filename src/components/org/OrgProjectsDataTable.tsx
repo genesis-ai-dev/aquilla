@@ -16,6 +16,7 @@ import { portfolioActivityStatus } from "@/lib/project-status"
 import { ProjectDeadlineStatuses, deadlineStatusTooltip } from "@/components/ProjectStatus"
 import { DateTooltip } from "@/components/ui/date-tooltip"
 import { DataTable, DataTableColumnHeader } from "@/components/ui/data-table"
+import { missingLast, SORT_MISSING_LAST } from "@/components/ui/data-table-missing"
 import {
   Empty,
   EmptyDescription,
@@ -67,8 +68,8 @@ function lensToSorting(lens: ProjectLens) {
     case "name":
       return [{ id: "name", desc: false }] as const
     case "pm":
-      // AQU-507: ascending by PM username; the column's sortingFn keeps
-      // unassigned rows last regardless of direction.
+      // AQU-507: ascending by PM username; unassigned stays last via
+      // sortUndefined: "last" on the column (direction-immune).
       return [{ id: "pm", desc: false }] as const
   }
 }
@@ -145,17 +146,20 @@ export function OrgProjectsDataTable({
     [roleByProjectId],
   )
 
-  const tableData = useMemo(() => {
-    if (initialLens === "attention") {
-      return [...projects].sort((a, b) => attentionRank(b, tableNow) - attentionRank(a, tableNow))
-    }
-    return projects
-  }, [projects, initialLens, tableNow])
+  const tableData = useMemo(() => projects, [projects])
 
   const canAssign = Boolean(jwt && author != null)
 
   const columns = useMemo<ColumnDef<OrgProjectRow>[]>(
     () => [
+      {
+        // Hidden sort key for the attention lens (urgency). Not shown in the UI.
+        id: "attention",
+        accessorFn: (p) => attentionRank(p, tableNow),
+        header: () => null,
+        cell: () => null,
+        meta: { hidden: true },
+      },
       {
         accessorKey: "name",
         header: ({ column }) => <DataTableColumnHeader column={column} title="Name" />,
@@ -303,19 +307,12 @@ export function OrgProjectsDataTable({
         ),
       },
       {
-        // AQU-507: designated Project Manager. Sortable; unassigned rows sort
-        // last (see sortingFn) so scanning "by PM" surfaces owned projects first.
+        // AQU-507: designated Project Manager. Unassigned sorts last in both
+        // directions via sortUndefined (direction-immune).
         id: "pm",
-        accessorFn: (p) => p.pm?.username ?? "",
+        accessorFn: (p) => missingLast(p.pm?.username?.toLowerCase()),
+        sortUndefined: SORT_MISSING_LAST,
         header: ({ column }) => <DataTableColumnHeader column={column} title="PM" />,
-        sortingFn: (a, b) => {
-          const av = a.original.pm?.username ?? null
-          const bv = b.original.pm?.username ?? null
-          if (av && bv) return av.localeCompare(bv)
-          if (av) return -1
-          if (bv) return 1
-          return 0
-        },
         cell: ({ row }) => {
           const username = row.original.pm?.username
           return username ? (
@@ -331,16 +328,9 @@ export function OrgProjectsDataTable({
       },
       {
         id: "edited",
-        accessorFn: (p) => p.lastEditAt ?? null,
+        accessorFn: (p) => missingLast(p.lastEditAt ?? undefined),
+        sortUndefined: SORT_MISSING_LAST,
         header: ({ column }) => <DataTableColumnHeader column={column} title="Updated" />,
-        sortingFn: (a, b) => {
-          const av = a.original.lastEditAt
-          const bv = b.original.lastEditAt
-          if (av == null && bv == null) return 0
-          if (av == null) return 1
-          if (bv == null) return -1
-          return av < bv ? -1 : av > bv ? 1 : 0
-        },
         cell: ({ row }) => {
           const status = portfolioActivityStatus(row.original, tableNow)
           const label = activityLabel(row.original, tableNow)
@@ -428,7 +418,7 @@ export function OrgProjectsDataTable({
     ],
   )
 
-  const colSpan = columns.length
+  const colSpan = columns.filter((c) => !(c.meta as { hidden?: boolean } | undefined)?.hidden).length
 
   const assignProject = assignTarget
     ? projects.find((p) => p.id === assignTarget.projectId) ?? null
@@ -454,13 +444,12 @@ export function OrgProjectsDataTable({
   return (
     <>
       <DataTable
+        key={initialLens}
         columns={columns}
         data={tableData}
         getRowId={(p) => p.id}
         onRowClick={(p) => navigate(`/projects/${p.id}`)}
-        initialSorting={
-          initialLens === "attention" ? [] : [...lensToSorting(initialLens)]
-        }
+        initialSorting={[...lensToSorting(initialLens)]}
         searchPlaceholder="Filter projects by name"
         globalFilterFn={(row, _columnId, filterValue) => {
           const q = String(filterValue).trim().toLowerCase()

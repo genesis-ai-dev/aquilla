@@ -4,13 +4,17 @@ import { ArrowDown, ArrowUp } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 /**
- * Sortable column header — click cycles unsorted → desc → asc → unsorted
- * via TanStack's getToggleSortingHandler (table must set sortDescFirst).
+ * Sortable column header — click toggles asc↔desc (sorting never clears;
+ * DataTable sets enableSortingRemoval: false). Switching to another column
+ * sorts that column instead. First direction is auto: strings ascend
+ * (A→Z / ↓), numbers descend (high→low / ↑), overridable per column with
+ * `sortDescFirst`.
  *
  * Ghost-button hover chrome that bleeds around the title (padding + matching
- * negative margin so the label does not shift). ArrowDown/ArrowUp always
- * occupy layout beside the title. Unsorted: ArrowDown only while hovering.
- * Sorted: icon stays visible.
+ * negative margin so the label does not shift). Sort icons always occupy
+ * layout beside the title. Mapping: ArrowDown = ascending, ArrowUp =
+ * descending. Active sort: icon stays visible. Inactive: previews the
+ * first-click direction on hover.
  */
 interface DataTableColumnHeaderProps<TData, TValue>
   extends React.ComponentProps<"div"> {
@@ -31,7 +35,9 @@ export function DataTableColumnHeader<TData, TValue>({
   }
 
   const sorted = column.getIsSorted()
-  const SortIcon = sorted === "asc" ? ArrowUp : ArrowDown
+  // Preview the next click when unsorted (↓ for strings, ↑ for numbers).
+  const direction = sorted || column.getNextSortingOrder()
+  const SortIcon = direction === "desc" ? ArrowUp : ArrowDown
   const sortIcon = (
     <SortIcon
       aria-hidden

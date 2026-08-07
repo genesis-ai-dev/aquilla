@@ -29,8 +29,44 @@ import { cn } from "@/lib/utils"
 import { Search } from "lucide-react"
 
 function columnMetaClass(meta: unknown) {
-  const m = meta as { align?: "right"; className?: string } | undefined
+  const m = meta as { align?: "right"; className?: string; hidden?: boolean } | undefined
   return cn(m?.align === "right" && "text-right", m?.className)
+}
+
+function columnId<TData, TValue>(col: ColumnDef<TData, TValue>): string | undefined {
+  if (col.id != null) return col.id
+  if (typeof col.accessorKey === "string" || typeof col.accessorKey === "number") {
+    return String(col.accessorKey)
+  }
+  return undefined
+}
+
+/** First sortable *visible* column, ascending — tables are never unsorted. */
+function defaultSorting<TData, TValue>(
+  columns: ColumnDef<TData, TValue>[],
+): SortingState {
+  for (const col of columns) {
+    if (col.enableSorting === false) continue
+    const meta = col.meta as { hidden?: boolean } | undefined
+    if (meta?.hidden) continue
+    const id = columnId(col)
+    if (!id) continue
+    return [{ id, desc: false }]
+  }
+  return []
+}
+
+function hiddenColumnVisibility<TData, TValue>(
+  columns: ColumnDef<TData, TValue>[],
+): Record<string, boolean> {
+  const visibility: Record<string, boolean> = {}
+  for (const col of columns) {
+    const meta = col.meta as { hidden?: boolean } | undefined
+    if (!meta?.hidden) continue
+    const id = columnId(col)
+    if (id) visibility[id] = false
+  }
+  return visibility
 }
 
 /**
@@ -39,6 +75,9 @@ function columnMetaClass(meta: unknown) {
  *
  * Tip from the guide: extract to `components/ui/data-table.tsx` when reused.
  * Callers own column defs and data; this owns the Table chrome + flexRender loop.
+ *
+ * Sorting is always on: headers toggle asc↔desc only (never clear). When
+ * `initialSorting` is omitted, the first sortable column starts ascending.
  */
 interface DataTableProps<TData, TValue> {
   columns: ColumnDef<TData, TValue>[]
@@ -57,8 +96,8 @@ interface DataTableProps<TData, TValue> {
   onRowClick?: (row: TData) => void
   /** Optional detail row rendered under a data row (e.g. expandable tenants). */
   renderSubRow?: (row: TData) => React.ReactNode
-  /** Shown below the toolbar when `data` is empty (lens filters, etc.). Search still renders. */
-  emptyState?: React.ReactNode
+  /** Shown when there are no rows to display (empty data or search/filter miss). */
+  emptyState?: React.ReactNode | ((table: TanStackTable<TData>) => React.ReactNode)
   /** Tighter row/header padding for portfolio-style lists (ReUI DataGrid `dense`). */
   dense?: boolean
   /** Class on the bordered table wrapper (e.g. `border-0` when nested in a card). */
@@ -69,7 +108,7 @@ function DataTable<TData, TValue>({
   columns,
   data,
   getRowId,
-  initialSorting = [],
+  initialSorting,
   searchPlaceholder,
   globalFilterFn,
   toolbar,
@@ -81,16 +120,20 @@ function DataTable<TData, TValue>({
   dense = false,
   className,
 }: DataTableProps<TData, TValue>) {
-  const [sorting, setSorting] = React.useState<SortingState>(initialSorting)
+  const [sorting, setSorting] = React.useState<SortingState>(
+    () => (initialSorting?.length ? initialSorting : defaultSorting(columns)),
+  )
   const [globalFilter, setGlobalFilter] = React.useState("")
+  const [columnVisibility] = React.useState(() => hiddenColumnVisibility(columns))
 
   const table = useReactTable({
     data,
     columns,
     getRowId,
-    // Click cycle: unsorted → desc → asc → clear (matches DataTableColumnHeader).
-    sortDescFirst: true,
-    enableSortingRemoval: true,
+    // Always sorted: header clicks flip asc↔desc only (never clear).
+    // First-click dir on a new column is auto (strings asc / numbers desc)
+    // unless the column sets sortDescFirst.
+    enableSortingRemoval: false,
     enableMultiSort: false,
     onSortingChange: setSorting,
     onGlobalFilterChange: setGlobalFilter,
@@ -101,10 +144,13 @@ function DataTable<TData, TValue>({
     state: {
       sorting,
       globalFilter,
+      columnVisibility,
     },
   })
 
   const toolbarNode = typeof toolbar === "function" ? toolbar(table) : toolbar
+  const emptyStateNode = typeof emptyState === "function" ? emptyState(table) : emptyState
+  const hasRows = table.getRowModel().rows.length > 0
 
   return (
     <div className={cn("flex w-full flex-col", dense ? "gap-2.5" : "gap-3")}>
@@ -126,8 +172,8 @@ function DataTable<TData, TValue>({
           {toolbarNode}
         </div>
       )}
-      {data.length === 0 && emptyState ? (
-        emptyState
+      {!hasRows && emptyStateNode ? (
+        emptyStateNode
       ) : (
         <div
           className={cn("overflow-hidden rounded-md border", className)}
@@ -137,7 +183,9 @@ function DataTable<TData, TValue>({
           <TableHeader>
             {table.getHeaderGroups().map((headerGroup) => (
               <TableRow key={headerGroup.id} className="hover:bg-transparent">
-                {headerGroup.headers.map((header) => (
+                {headerGroup.headers.map((header) => {
+                  if (!header.column.getIsVisible()) return null
+                  return (
                   <TableHead
                     key={header.id}
                     className={cn(
@@ -150,12 +198,13 @@ function DataTable<TData, TValue>({
                       ? null
                       : flexRender(header.column.columnDef.header, header.getContext())}
                   </TableHead>
-                ))}
+                  )
+                })}
               </TableRow>
             ))}
           </TableHeader>
           <TableBody>
-            {table.getRowModel().rows?.length ? (
+            {hasRows ? (
               table.getRowModel().rows.map((row) => {
                 const sub = renderSubRow?.(row.original)
                 return (
@@ -187,7 +236,7 @@ function DataTable<TData, TValue>({
               })
             ) : (
               <TableRow>
-                <TableCell colSpan={columns.length} className="h-24 text-center">
+                <TableCell colSpan={table.getVisibleLeafColumns().length} className="h-24 text-center">
                   No results.
                 </TableCell>
               </TableRow>

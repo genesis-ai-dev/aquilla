@@ -21,7 +21,8 @@ export function ProjectMetricHeader({
   sorted?: false | "asc" | "desc"
   onSort?: (event: unknown) => void
 }) {
-  const SortIcon = sorted === "asc" ? ArrowUp : sorted === "desc" ? ArrowDown : null
+  // Down = A→Z (asc); up = Z→A (desc) — matches DataTableColumnHeader.
+  const SortIcon = sorted === "asc" ? ArrowDown : sorted === "desc" ? ArrowUp : null
 
   return (
     <AppTooltip content={description} delay={0}>

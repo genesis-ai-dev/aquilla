@@ -4,6 +4,11 @@ import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { OrgProvider } from "@/context/OrgContext"
 import { Settings, OrgSettingsIdentity, OrgSettingsExport, OrgSettingsRoster, OrgSettingsAssignment } from "./Settings"
 import { renameOrg, listMyOrgs } from "@/lib/frontier/orgs"
+import { toast } from "@/components/ui/toast"
+
+vi.mock("@/components/ui/toast", () => ({
+  toast: { add: vi.fn(), close: vi.fn(), update: vi.fn(), promise: vi.fn() },
+}))
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const mockPatch = vi.fn<() => Promise<any>>(async () => ({ kind: "ok", value: { orgId: 1, settings: {}, version: 1, updatedAt: null, updatedBy: null } }))
@@ -86,21 +91,25 @@ function renderSettings(path = "/orgs/1/settings") {
 }
 
 describe("Org Settings", () => {
-  it("shows the org name and an owner can rename it", async () => {
+  it("shows the org name and an owner can rename it on blur", async () => {
     renderSettings("/orgs/1/settings/identity")
-    await waitFor(() => expect(screen.getAllByText("Come and See").length).toBeGreaterThan(0))
-    fireEvent.click(screen.getByRole("button", { name: /rename/i }))
-    const input = await screen.findByLabelText(/organization name/i)
+    const input = await screen.findByLabelText(/^Organization name$/i)
+    await waitFor(() => expect(input).toHaveValue("Come and See"))
     fireEvent.change(input, { target: { value: "CAS" } })
-    fireEvent.click(screen.getByRole("button", { name: "Save" }))
+    fireEvent.blur(input)
     await waitFor(() => expect(renameOrg).toHaveBeenCalledWith("jwt", 1, "CAS"))
+    expect(toast.add).toHaveBeenCalledWith({
+      type: "success",
+      title: "Organization name updated",
+    })
   })
 
-  it("hides the rename control for a non-admin", async () => {
+  it("disables the name field for a non-admin", async () => {
     vi.mocked(listMyOrgs).mockResolvedValueOnce([{ id: 1, name: "Come and See", role: { level: 100, name: "viewer" } }])
     renderSettings("/orgs/1/settings/identity")
-    await waitFor(() => expect(screen.getAllByText("Come and See").length).toBeGreaterThan(0))
-    expect(screen.queryByRole("button", { name: /rename/i })).not.toBeInTheDocument()
+    const input = await screen.findByLabelText(/^Organization name$/i)
+    await waitFor(() => expect(input).toHaveValue("Come and See"))
+    expect(input).toBeDisabled()
   })
 })
 

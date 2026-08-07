@@ -98,7 +98,10 @@ interface DataTableProps<TData, TValue> {
   renderSubRow?: (row: TData) => React.ReactNode
   /** Shown when there are no rows to display (empty data or search/filter miss). */
   emptyState?: React.ReactNode | ((table: TanStackTable<TData>) => React.ReactNode)
-  /** Tighter row/header padding for portfolio-style lists (ReUI DataGrid `dense`). */
+  /**
+   * Compact row/header padding for portfolio-style lists (ReUI DataGrid `dense`).
+   * Off = comfortable row height (`py-2.5` / `h-11`); on = tight (`py-1.5` / `h-9`).
+   */
   dense?: boolean
   /** Class on the bordered table wrapper (e.g. `border-0` when nested in a card). */
   className?: string
@@ -189,7 +192,7 @@ function DataTable<TData, TValue>({
                   <TableHead
                     key={header.id}
                     className={cn(
-                      dense && "h-9 py-1.5",
+                      dense ? "h-9 py-1.5" : "h-11",
                       header.column.id === "expand" ? "w-8" : undefined,
                       columnMetaClass(header.column.columnDef.meta),
                     )}
@@ -222,7 +225,7 @@ function DataTable<TData, TValue>({
                         <TableCell
                           key={cell.id}
                           className={cn(
-                            dense && "py-1.5",
+                            dense ? "py-1.5" : "py-2.5",
                             columnMetaClass(cell.column.columnDef.meta),
                           )}
                         >

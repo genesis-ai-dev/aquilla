@@ -337,7 +337,7 @@ export function TeamsList() {
                   onClick={() => activeOrgId != null && navigate(orgPath(activeOrgId, `/teams/${t.id}`))}
                   className="rounded-lg border bg-card p-4 text-left transition-colors hover:bg-accent/40"
                 >
-                  <TeamWithAvatar name={t.name} className="w-full" />
+                  <TeamWithAvatar name={t.name} size="xs" className="w-full" />
                   <span className="mt-1 block text-sm tabular-nums text-muted-foreground">
                     {t.memberCount} members · {t.projectCount} projects
                   </span>

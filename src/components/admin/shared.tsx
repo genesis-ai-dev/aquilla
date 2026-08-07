@@ -8,7 +8,9 @@ export function relativeTeamPath(name: string): string {
 
 /** Shared row chrome for admin DataTables (no row rules, muted rounded hover). */
 const ADMIN_TABLE_ROW_CHROME =
-  "[&_tr]:border-b-0! [&_tbody_tr]:hover:bg-transparent! [&_tbody_tr:hover>td]:bg-muted/50 [&_tbody_tr:hover>td:first-child]:rounded-l-lg [&_tbody_tr:hover>td:last-child]:rounded-r-lg [&_th]:h-8 [&_th]:py-1 [&_td]:py-1 [&_th:first-child]:pl-2! [&_td:first-child]:pl-2! [&_th:last-child]:pr-2! [&_td:last-child]:pr-2!"
+  // Vertical padding matches the first-cell left inset (pl-2) so the hover
+  // wash reads as an even inset on all sides of the bled row.
+  "[&_tr]:border-b-0! [&_tbody_tr]:hover:bg-transparent! [&_tbody_tr:hover>td]:bg-muted/50 [&_tbody_tr:hover>td:first-child]:rounded-l-lg [&_tbody_tr:hover>td:last-child]:rounded-r-lg [&_th]:py-2! [&_td]:py-2! [&_th:first-child]:pl-2! [&_td:first-child]:pl-2! [&_th:last-child]:pr-2! [&_td:last-child]:pr-2!"
 
 /**
  * In-card admin DataTable chrome — borderless, with -mx-2 bleed so hover sits

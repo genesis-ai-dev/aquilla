@@ -312,7 +312,9 @@ export function TeamDetail() {
         accessorFn: (m) => m.username.toLowerCase(),
         header: ({ column }) => <DataTableColumnHeader column={column} title="Name" />,
         meta: { className: "min-w-0 w-[50%]" },
-        cell: ({ row }) => <UsernameWithAvatar username={row.original.username} />,
+        cell: ({ row }) => (
+          <UsernameWithAvatar username={row.original.username} size="xs" nameClassName="font-normal" />
+        ),
       },
       {
         id: "email",

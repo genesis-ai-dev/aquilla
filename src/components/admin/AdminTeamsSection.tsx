@@ -31,7 +31,7 @@ export function AdminTeamsSection({
         header: ({ column }) => <DataTableColumnHeader column={column} title="Team" />,
         cell: ({ row }) => {
           const local = relativeTeamPath(row.original.name)
-          return <TeamWithAvatar name={local} nameClassName="font-normal" />
+          return <TeamWithAvatar name={local} size="xs" nameClassName="font-normal" />
         },
       },
       {
@@ -40,7 +40,7 @@ export function AdminTeamsSection({
         header: ({ column }) => <DataTableColumnHeader column={column} title="Organization" />,
         cell: ({ row }) => {
           const name = row.original.orgName ?? `#${row.original.orgId}`
-          return <OrgWithAvatar name={name} nameClassName="font-normal" />
+          return <OrgWithAvatar name={name} size="xs" nameClassName="font-normal" />
         },
       },
       {
@@ -52,6 +52,7 @@ export function AdminTeamsSection({
           row.original.projectLeadUsername ? (
             <UsernameWithAvatar
               username={row.original.projectLeadUsername}
+              size="xs"
               nameClassName="font-normal"
             />
           ) : null,
@@ -65,6 +66,7 @@ export function AdminTeamsSection({
           row.original.ownerUsername ? (
             <UsernameWithAvatar
               username={row.original.ownerUsername}
+              size="xs"
               nameClassName="font-normal"
             />
           ) : null,
@@ -96,7 +98,6 @@ export function AdminTeamsSection({
           <DateTooltip
             value={row.original.createdAt}
             label="Created"
-            className="text-muted-foreground"
           />
         ),
       },

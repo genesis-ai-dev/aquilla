@@ -52,6 +52,7 @@ export function AdminPeopleSection({ users, admins }: { users: AdminUser[]; admi
             <UsernameWithAvatar
               username={u.username}
               label={u.displayName ? `${u.displayName} (${u.username})` : u.username}
+              size="xs"
               nameClassName="font-normal"
             />
           )

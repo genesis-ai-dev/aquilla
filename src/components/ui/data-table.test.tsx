@@ -159,6 +159,17 @@ describe("DataTable", () => {
     expect(head?.className).toMatch(/h-9/)
   })
 
+  it("uses comfortable row height when dense is off", () => {
+    const { container } = render(
+      <DataTable columns={columns} data={rows} getRowId={(r) => String(r.id)} />,
+    )
+    const cell = container.querySelector('[data-slot="table-cell"]')
+    expect(cell?.className).toMatch(/py-2\.5/)
+    expect(cell?.className).not.toMatch(/py-1\.5/)
+    const head = container.querySelector('[data-slot="table-head"]')
+    expect(head?.className).toMatch(/h-11/)
+  })
+
   it("renders emptyState below the toolbar when data is empty", () => {
     render(
       <DataTable

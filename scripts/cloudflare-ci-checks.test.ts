@@ -11,15 +11,16 @@ describe("Cloudflare parallel CI checks", () => {
   it("keeps every required check in a bounded lane and installs the required browser", () => {
     expect(CHECK_LANES.map(({ name }) => name)).toEqual([
       "root",
-      "sync",
+      "lint",
       "agent-worker",
+      "sync",
       "release-contracts",
       "identity",
       "spa",
     ])
     expect(CHECK_PHASES.map(({ lanes }) => lanes.map(({ name }) => name))).toEqual([
-      ["root", "sync", "agent-worker"],
-      ["release-contracts"],
+      ["root", "lint", "agent-worker"],
+      ["sync", "release-contracts"],
       ["identity", "spa"],
     ])
     const commands = JSON.stringify(CHECK_LANES)
@@ -44,6 +45,7 @@ describe("Cloudflare parallel CI checks", () => {
 
     const promise = runParallelChecks({ env, run, log: vi.fn() })
     await vi.waitFor(() => expect(started).toHaveLength(CHECK_PHASES[0].lanes.length))
+    expect(started).not.toContain("pnpm run build:workers-build:sync")
     expect(started).not.toContain("pnpm run build:workers-build:identity")
     expect(started).not.toContain("bash scripts/ci-build.sh")
 

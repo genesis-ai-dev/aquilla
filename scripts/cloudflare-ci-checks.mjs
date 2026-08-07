@@ -2,7 +2,8 @@ import { spawn } from "node:child_process"
 import { pathToFileURL } from "node:url"
 import { workersBuildMetadata } from "./assert-workers-build-env.mjs"
 
-const ROOT_LANE = { name: "root", steps: [["pnpm", ["lint"]], ["pnpm", ["test"]]] }
+const ROOT_LANE = { name: "root", steps: [["pnpm", ["test"]]] }
+const LINT_LANE = { name: "lint", steps: [["pnpm", ["lint"]]] }
 const IDENTITY_LANE = { name: "identity", steps: [["pnpm", ["run", "build:workers-build:identity"]]] }
 const SYNC_LANE = { name: "sync", steps: [["pnpm", ["run", "build:workers-build:sync"]]] }
 const RELEASE_LANE = {
@@ -23,17 +24,17 @@ const AGENT_LANE = {
 }
 const SPA_LANE = { name: "spa", steps: [["bash", ["scripts/ci-build.sh"]]] }
 
-// Bound peak memory to two heavyweight compiler/test processes. Browser
-// conformance runs alone so installing and launching Chromium cannot overlap
-// the longest Vitest suites or the SPA compiler.
+// Root and sync both contain long, database-heavy Vitest suites. Keep them in
+// separate phases so resource contention cannot strand async UI tests in their
+// loading state. Overlap each with only shorter, bounded checks.
 export const CHECK_PHASES = [
   {
-    name: "core",
-    lanes: [ROOT_LANE, SYNC_LANE, AGENT_LANE],
+    name: "frontend-contracts",
+    lanes: [ROOT_LANE, LINT_LANE, AGENT_LANE],
   },
   {
-    name: "browser-contracts",
-    lanes: [RELEASE_LANE],
+    name: "backend-contracts",
+    lanes: [SYNC_LANE, RELEASE_LANE],
   },
   {
     name: "final",

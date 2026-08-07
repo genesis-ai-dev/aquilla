@@ -748,7 +748,6 @@ function AddAsLaneRecommendation({
       <Button
         type="button"
         variant="secondary"
-        size="sm"
         className="mt-2.5"
         data-testid="add-as-lane-btn"
         disabled={!canAttempt || status === "loading"}
@@ -875,7 +874,7 @@ function ExtraTargetLanguages({
             placeholder="e.g. fr-CA"
             aria-invalid={invalid}
           />
-          <Button type="button" variant="secondary" size="sm" data-testid="create-extra-lang-add" onClick={handleAdd}>
+          <Button type="button" variant="secondary" data-testid="create-extra-lang-add" onClick={handleAdd}>
             <Plus className="mr-1 h-3.5 w-3.5" />
             Add
           </Button>

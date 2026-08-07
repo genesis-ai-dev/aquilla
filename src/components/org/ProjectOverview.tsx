@@ -919,7 +919,6 @@ export function ProjectOverview() {
         </span>
         <Button
           type="button"
-          size="sm"
           onClick={refresh}
           className="shrink-0 bg-amber-800 text-white hover:bg-amber-700 dark:bg-amber-700 dark:hover:bg-amber-600"
         >
@@ -931,7 +930,6 @@ export function ProjectOverview() {
         <p>Sign in to open this project from the cloud.</p>
         <Button
           type="button"
-          size="sm"
           variant="outline"
           className="mt-3"
           onClick={() => navigate(`/login?next=${encodeURIComponent(`/projects/${id}`)}`)}
@@ -988,7 +986,6 @@ export function ProjectOverview() {
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
                     <Button
-                      size="sm"
                       onClick={() => openWorkspace(`/project/${id}/editor`)}
                       disabled={openPending}
                       aria-busy={openPending || undefined}
@@ -1373,7 +1370,6 @@ export function ProjectOverview() {
                         <AppTooltip content="Copy the file list below as CSV">
                           <Button
                             type="button"
-                            size="sm"
                             variant="outline"
                             onClick={() => void handleCopyCsv()}
                             data-testid="export-csv-copy"
@@ -1385,7 +1381,6 @@ export function ProjectOverview() {
                         <AppTooltip content="Download the file list below as a .csv file">
                           <Button
                             type="button"
-                            size="sm"
                             variant="outline"
                             onClick={handleDownloadCsv}
                             data-testid="export-csv-download"
@@ -1553,7 +1548,6 @@ export function ProjectOverview() {
                     <ButtonGroup>
                       <Button
                         type="button"
-                        size="sm"
                         variant="outline"
                         disabled={busy}
                         onClick={() => {
@@ -1566,7 +1560,6 @@ export function ProjectOverview() {
                       {audio?.deadlineAt && (
                         <Button
                           type="button"
-                          size="sm"
                           variant="outline"
                           disabled={busy}
                           onClick={() => saveDeadline(null)}
@@ -1634,7 +1627,6 @@ export function ProjectOverview() {
                     <ButtonGroup>
                       <Button
                         type="button"
-                        size="sm"
                         variant="outline"
                         disabled={busy}
                         data-testid="overview-pm-edit"
@@ -1648,7 +1640,6 @@ export function ProjectOverview() {
                       {pm && (
                         <Button
                           type="button"
-                          size="sm"
                           variant="outline"
                           disabled={busy}
                           onClick={() => savePm(null)}
@@ -1783,7 +1774,6 @@ export function ProjectOverview() {
                               <Button
                                 type="button"
                                 variant="ghost"
-                                size="sm"
                                 className="h-6 shrink-0 px-2 text-xs text-muted-foreground"
                                 aria-label={`View activity for ${w.username}`}
                                 aria-pressed={isSelected}

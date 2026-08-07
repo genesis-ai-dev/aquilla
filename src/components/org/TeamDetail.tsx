@@ -579,7 +579,6 @@ export function TeamDetail() {
                     <Button
                       type="button"
                       variant="outline"
-                      size="sm"
                       onClick={handleEditOpen}
                     >
                       Edit
@@ -587,7 +586,6 @@ export function TeamDetail() {
                     <Button
                       type="button"
                       variant="destructive"
-                      size="sm"
                       onClick={() => setConfirmDelete(true)}
                     >
                       Delete team
@@ -620,7 +618,6 @@ export function TeamDetail() {
                     {isAdmin && !attachingProject ? (
                       <Button
                         type="button"
-                        size="sm"
                         variant="outline"
                         className="shrink-0"
                         onClick={() => {
@@ -666,10 +663,9 @@ export function TeamDetail() {
                         onValueChange={setSelectedRole}
                         aria-label="Granted role"
                       />
-                      <Button type="button" size="sm" onClick={handleAttachProject}>Attach</Button>
+                      <Button type="button" onClick={handleAttachProject}>Attach</Button>
                       <Button
                         type="button"
-                        size="sm"
                         variant="ghost"
                         onClick={() => { setAttachingProject(false); setSelectedProjectId("") }}
                       >
@@ -806,7 +802,6 @@ export function TeamDetail() {
                         <div className="flex justify-end">
                           <Button
                             type="button"
-                            size="sm"
                             className="gap-1.5"
                             onClick={() => { setAddingMember(true); setStagedUsernames([]); setAddError(null) }}
                           >
@@ -841,11 +836,10 @@ export function TeamDetail() {
                       toolbar={
                         isAdmin ? (
                           <Button
-                            size="sm"
                             className="ml-auto shrink-0 gap-1.5"
                             onClick={() => { setAddingMember(true); setStagedUsernames([]); setAddError(null) }}
                           >
-                            <UserPlus className="size-3.5" />
+                            <UserPlus className="size-4" />
                             Add a member
                           </Button>
                         ) : null

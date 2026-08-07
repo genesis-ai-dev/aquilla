@@ -219,7 +219,7 @@ export function AdminProjectsSection({ projects }: { projects: AdminProject[] })
             value={lens}
             onValueChange={(v) => setLens((v as Lens) ?? "all")}
           >
-            <SelectTrigger className="h-8 bg-card" aria-label="Filter projects">
+            <SelectTrigger className="bg-card" aria-label="Filter projects">
               <SelectValue className="flex-none" />
             </SelectTrigger>
             <SelectContent align="start">

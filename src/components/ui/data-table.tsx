@@ -160,7 +160,7 @@ function DataTable<TData, TValue>({
       {(searchPlaceholder || toolbarNode) && (
         <div className="flex flex-wrap items-center gap-3">
           {searchPlaceholder ? (
-            <InputGroup className={cn("max-w-xs bg-card", dense ? "h-8" : "h-9")}>
+            <InputGroup className="max-w-xs bg-card">
               <InputGroupAddon>
                 <Search />
               </InputGroupAddon>

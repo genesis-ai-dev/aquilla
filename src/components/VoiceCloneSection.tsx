@@ -155,7 +155,6 @@ export function VoiceCloneSection({ voice, projectId, fileId, session, onChange,
           />
           <Button
             type="button"
-            size="sm"
             variant="ghost"
             onClick={removeReference}
             className="text-destructive hover:bg-destructive/10 hover:text-destructive"
@@ -164,7 +163,6 @@ export function VoiceCloneSection({ voice, projectId, fileId, session, onChange,
           </Button>
           <Button
             type="button"
-            size="sm"
             variant="outline"
             onClick={() => fileInputRef.current?.click()}
             disabled={status.kind === "uploading"}
@@ -175,13 +173,12 @@ export function VoiceCloneSection({ voice, projectId, fileId, session, onChange,
       ) : (
         <div className="flex flex-wrap items-center gap-2">
           {isRecording ? (
-            <Button type="button" size="sm" variant="destructive" onClick={() => recorder.stop()}>
+            <Button type="button" variant="destructive" onClick={() => recorder.stop()}>
               <Square className="mr-1 h-3.5 w-3.5" /> Stop ({(recorder.elapsedMs / 1000).toFixed(1)}s)
             </Button>
           ) : (
             <Button
               type="button"
-              size="sm"
               onClick={() => void recorder.start()}
               disabled={status.kind === "uploading"}
             >
@@ -190,7 +187,6 @@ export function VoiceCloneSection({ voice, projectId, fileId, session, onChange,
           )}
           <Button
             type="button"
-            size="sm"
             variant="outline"
             onClick={() => fileInputRef.current?.click()}
             disabled={status.kind === "uploading" || isRecording}
@@ -276,7 +272,6 @@ export function ReferencePreview({ projectId, fileId, referenceAudioId, session 
     <AppTooltip content="Preview reference clip">
       <Button
         type="button"
-        size="sm"
         variant="outline"
         onClick={toggle}
         className={cn(state === "error" && "text-destructive")}

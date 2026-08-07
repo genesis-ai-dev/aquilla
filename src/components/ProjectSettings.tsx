@@ -1084,7 +1084,7 @@ export function ProjectSettings() {
     <div className="flex flex-wrap items-center justify-end gap-2">
       {isDirty ? (
         <ButtonGroup>
-          <Button size="sm" onClick={handleSave} disabled={saving}>
+          <Button onClick={handleSave} disabled={saving}>
             {saving ? (
               <Spinner data-icon="inline-start" />
             ) : (
@@ -1698,7 +1698,7 @@ export function ProjectSettings() {
                         placeholder="http://localhost:8000"
                         className="flex-1"
                       />
-                      <Button size="sm" onClick={handleConnect} disabled={connecting}>
+                      <Button onClick={handleConnect} disabled={connecting}>
                         {connecting ? <Spinner /> : "Connect"}
                       </Button>
                     </div>

@@ -281,8 +281,8 @@ export function CombinedBoundaryEditor(props: CombinedBoundaryEditorProps) {
         </ul>
 
         <div className="mt-4 flex items-center justify-end gap-2">
-          <Button type="button" variant="ghost" size="sm" onClick={onClose} disabled={saving}>Cancel</Button>
-          <Button type="button" size="sm" onClick={() => void onSave()} disabled={saving || !cuts}>
+          <Button type="button" variant="ghost" onClick={onClose} disabled={saving}>Cancel</Button>
+          <Button type="button" onClick={() => void onSave()} disabled={saving || !cuts}>
             {saving ? <Spinner className="mr-1 size-3.5" /> : null}
             Save splits
           </Button>

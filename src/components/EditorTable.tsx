@@ -6427,7 +6427,6 @@ function EditorRow({
                         <>
                           <Button
                             type="button"
-                            size="sm"
                             onClick={() => onBacktranslate?.(cell, "read-back")}
                             disabled={!isBacktranslationConfigured || isBacktranslating || visibleTranslated.trim().length === 0}
                           >
@@ -6718,7 +6717,6 @@ function EditorRow({
                       <div className="flex flex-wrap items-center justify-center gap-2">
                         <Button
                           type="button"
-                          size="sm"
                           variant="default"
                           onClick={() => onOpenRecording?.(cell.id)}
                           disabled={!editable || !onOpenRecording}

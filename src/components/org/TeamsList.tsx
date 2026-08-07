@@ -151,7 +151,7 @@ export function TeamsList() {
             description="Group members and grant project access together."
             actions={
               isAdmin ? (
-                <Button size="sm" onClick={() => setCreating(true)}>
+                <Button onClick={() => setCreating(true)}>
                   <Plus className="size-4" />
                   New team
                 </Button>
@@ -328,7 +328,6 @@ export function TeamsList() {
               }
               action={
                 <Button
-                  size="sm"
                   variant="outline"
                   onClick={() => { setQuery(""); setVisibility("all") }}
                 >

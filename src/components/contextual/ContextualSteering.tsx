@@ -134,7 +134,6 @@ export function ContextualSteering({ projectId, fileId, runId, directions }: Ste
         <div className="flex justify-end">
           <Button
             type="button"
-            size="sm"
             disabled={!canSend}
             onClick={() => void handleSend()}
           >

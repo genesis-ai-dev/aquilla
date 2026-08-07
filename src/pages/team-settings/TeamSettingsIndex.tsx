@@ -215,7 +215,6 @@ export function TeamSettingsIndex() {
                   <Button
                     type="button"
                     variant="destructive"
-                    size="sm"
                     onClick={() => setConfirmDelete(true)}
                   >
                     Delete team

@@ -406,7 +406,7 @@ function NewVoiceModalBody({
             {onMakeDefault && !isDefault && (
               <AppTooltip content="Make this the narrator — used for lines without an explicit speaker.">
                 <Button
-                  type="button" size="sm" variant="outline" onClick={onMakeDefault}
+                  type="button" variant="outline" onClick={onMakeDefault}
                 >
                   <Star className="mr-1 h-3.5 w-3.5" /> Make narrator
                 </Button>
@@ -419,7 +419,7 @@ function NewVoiceModalBody({
             )}
             {onDelete && !draft.builtIn && (
               <Button
-                type="button" size="sm" variant="ghost"
+                type="button" variant="ghost"
                 className="text-destructive hover:bg-destructive/10 hover:text-destructive"
                 onClick={() => setDeleteOpen(true)}
               >
@@ -431,8 +431,8 @@ function NewVoiceModalBody({
                 <p className="text-xs text-destructive" role="alert">{takeError}</p>
               )}
               <div className="flex gap-2">
-                <Button type="button" size="sm" variant="ghost" onClick={onClose}>Cancel</Button>
-                <Button type="button" size="sm" onClick={handleSave}>
+                <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
+                <Button type="button" onClick={handleSave}>
                   {isNew ? <><Plus className="mr-1 h-3.5 w-3.5" /> Create voice</> : <><Check className="mr-1 h-3.5 w-3.5" /> Save</>}
                 </Button>
               </div>

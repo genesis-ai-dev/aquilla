@@ -187,7 +187,6 @@ function MembersPageContent({ orgId, orgName }: MembersPageContentProps) {
           <AppTooltip content="Add someone to specific projects without granting org-wide access.">
             <Button
               variant="default"
-              size="sm"
               onClick={() => setMultiInviteOpen(true)}
               disabled={accessibleProjects.length === 0}
             >

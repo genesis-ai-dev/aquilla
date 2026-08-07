@@ -68,7 +68,7 @@ function LoadError({
       description="The file is still safe. Check your connection and try loading it again."
       action={
         onRetryClick ? (
-          <Button size="sm" variant="outline" onClick={onRetryClick}>
+          <Button variant="outline" onClick={onRetryClick}>
             <RefreshCw data-icon="inline-start" />
             Retry loading file
           </Button>
@@ -141,7 +141,7 @@ function NoFileEmpty({
         description="Import a file to get started."
         action={
           onImportClick ? (
-            <Button size="sm" onClick={onImportClick}>
+            <Button onClick={onImportClick}>
               <Upload data-icon="inline-start" />
               Import a file
             </Button>
@@ -177,7 +177,7 @@ function ReadyEmpty({
       description="Import content, or start typing in the first cell."
       action={
         onImportClick ? (
-          <Button size="sm" onClick={onImportClick}>
+          <Button onClick={onImportClick}>
             <Sparkles data-icon="inline-start" />
             Import content
           </Button>

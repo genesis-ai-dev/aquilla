@@ -186,7 +186,7 @@ export function PersonalProviderSection() {
 
             <div className="flex items-center justify-between gap-2 pt-2">
               <div className="flex items-center gap-3">
-                <Button type="submit" form="personal-provider-form" size="sm">
+                <Button type="submit" form="personal-provider-form">
                   {hasOverride ? "Update override" : "Save override"}
                 </Button>
                 {saved && (
@@ -196,7 +196,7 @@ export function PersonalProviderSection() {
                 )}
               </div>
               {hasOverride && (
-                <Button type="button" variant="ghost" size="sm" onClick={handleClear}>
+                <Button type="button" variant="ghost" onClick={handleClear}>
                   Remove override
                 </Button>
               )}

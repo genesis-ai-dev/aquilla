@@ -251,7 +251,6 @@ function SpeedButton({ rate, onChange }: { rate: number; onChange: (r: number) =
           render={
             <Button
               type="button"
-              size="sm"
               variant="ghost"
               className="min-w-9 px-1.5 tabular-nums"
             >

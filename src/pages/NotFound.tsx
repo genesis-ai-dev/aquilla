@@ -24,7 +24,7 @@ export function NotFound() {
         </p>
         <div className="mt-2">
           <Link to="/">
-            <Button size="sm" variant="outline">
+            <Button variant="outline">
               Go home
             </Button>
           </Link>

@@ -243,7 +243,7 @@ export function ProjectCard({
               {project.deletedAt ? ` · ${formatDate(project.deletedAt)}` : ""}
             </span>
             {onRestore && (
-              <Button size="sm" variant="outline" onClick={onRestore}>
+              <Button variant="outline" onClick={onRestore}>
                 <Undo2 className="mr-1 h-3.5 w-3.5" />
                 Restore
               </Button>

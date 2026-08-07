@@ -213,7 +213,6 @@ export function LanguagesSection({
                       </span>
                       <Button
                         variant="destructive"
-                        size="sm"
                         disabled={busyLane === lane}
                         onClick={() => void handleConfirmArchive(lane)}
                       >
@@ -221,7 +220,6 @@ export function LanguagesSection({
                       </Button>
                       <Button
                         variant="ghost"
-                        size="sm"
                         disabled={busyLane === lane}
                         onClick={() => setPendingArchive(null)}
                       >
@@ -272,7 +270,6 @@ export function LanguagesSection({
                   <DisabledFieldTooltip disabled={!canEdit} tooltip={disabledTooltip}>
                     <Button
                       variant="ghost"
-                      size="sm"
                       className="h-7 shrink-0 gap-1"
                       disabled={!canEdit || busyLane === lane}
                       data-testid={`restore-lane-${lane}`}

@@ -381,7 +381,7 @@ function InviteLinkTab({ projectId, onSharesChanged }: InviteLinkTabProps) {
           <div className="flex items-center gap-1">
             <Input value={issuedUrl} readOnly className="text-xs font-mono" />
             <AppTooltip content="Copy URL">
-              <Button size="sm" variant="ghost" onClick={() => copyUrl(issuedUrl)} aria-label="Copy URL">
+              <Button variant="ghost" onClick={() => copyUrl(issuedUrl)} aria-label="Copy URL">
                 <Copy className="h-3.5 w-3.5" />
               </Button>
             </AppTooltip>
@@ -395,7 +395,7 @@ function InviteLinkTab({ projectId, onSharesChanged }: InviteLinkTabProps) {
             a fresh one for the next person.
             To revoke before it is redeemed, use the Active links list below.
           </p>
-          <Button size="sm" variant="outline" onClick={reset} className="w-full">
+          <Button variant="outline" onClick={reset} className="w-full">
             Create another link
           </Button>
         </div>
@@ -477,7 +477,6 @@ function InviteLinkTab({ projectId, onSharesChanged }: InviteLinkTabProps) {
             </p>
           )}
           <Button
-            size="sm"
             onClick={handleCreate}
             disabled={busy || !session?.jwt}
             className="w-full"
@@ -583,7 +582,6 @@ function ActiveInvitesList({ projectId, jwt, version, onRevoked }: ActiveInvites
                   Confirm
                 </label>
                 <Button
-                  size="sm"
                   variant="destructive"
                   className="h-6 px-2 text-[10px]"
                   disabled={!revokeConfirm || revoking}
@@ -592,7 +590,6 @@ function ActiveInvitesList({ projectId, jwt, version, onRevoked }: ActiveInvites
                   {revoking ? "…" : "Revoke"}
                 </Button>
                 <Button
-                  size="sm"
                   variant="ghost"
                   className="h-6 px-1 text-[10px]"
                   onClick={() => { setRevokeTarget(null); setRevokeConfirm(false) }}
@@ -603,7 +600,6 @@ function ActiveInvitesList({ projectId, jwt, version, onRevoked }: ActiveInvites
             ) : (
               <AppTooltip content="Revoke this invite link">
                 <Button
-                  size="sm"
                   variant="ghost"
                   className="h-6 shrink-0 px-1 text-muted-foreground hover:text-destructive"
                   onClick={() => { setRevokeTarget(inv.token); setRevokeConfirm(false) }}

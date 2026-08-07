@@ -174,7 +174,6 @@ export function SourceLinkSection({
           <div className="flex justify-end">
             <Button
               variant="destructive"
-              size="sm"
               disabled={!canDetach || !session}
               onClick={() => {
                 setConfirmInput("")

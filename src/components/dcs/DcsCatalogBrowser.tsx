@@ -210,7 +210,7 @@ export function DcsCatalogBrowser({ onPick, client, defaultLang }: DcsCatalogBro
           aria-label="Custom owner"
           className="h-8 flex-1 text-sm"
         />
-        <Button size="sm" onClick={() => void runSearch()} disabled={loading}>
+        <Button onClick={() => void runSearch()} disabled={loading}>
           {loading ? <Spinner className="size-4" /> : <Search className="size-4" />}
           Search
         </Button>

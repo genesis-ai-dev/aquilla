@@ -256,7 +256,6 @@ export function StaffLanePopover({
             <div className="flex items-center justify-between">
               <UsernameWithAvatar username={selected.username} size="xs" nameClassName="text-xs" />
               <Button
-                size="sm"
                 variant="ghost"
                 className="h-6 px-1.5 text-[11px]"
                 onClick={() => setSelected(null)}
@@ -279,7 +278,7 @@ export function StaffLanePopover({
               aria-label="Role"
             />
 
-            <Button className="w-full" size="sm" onClick={handleConfirm} disabled={busy || !jwt}>
+            <Button className="w-full" onClick={handleConfirm} disabled={busy || !jwt}>
               {busy && <Spinner className="mr-1.5 size-3.5" />}
               Add to {laneLabel}
             </Button>

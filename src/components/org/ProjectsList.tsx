@@ -408,7 +408,7 @@ export function ProjectsList() {
           {activeOrgId != null ? (
             <ProjectCreateDialog orgId={activeOrgId} onCreated={handleCreated} />
           ) : noOrgs ? (
-            <Button type="button" size="sm" onClick={() => setCreateOrgOpen(true)}>
+            <Button type="button" onClick={() => setCreateOrgOpen(true)}>
               Create organization
             </Button>
           ) : (

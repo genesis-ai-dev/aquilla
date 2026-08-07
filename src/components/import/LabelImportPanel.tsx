@@ -293,7 +293,6 @@ export function LabelImportPanel({
         {cellsError && <p className="text-xs text-destructive">{cellsError}</p>}
         <Button
           variant="outline"
-          size="sm"
           className="w-fit"
           onClick={handleDownloadTemplate}
           disabled={refCount === 0}
@@ -357,16 +356,16 @@ export function LabelImportPanel({
 
       {/* Actions */}
       <div className="flex justify-end gap-2">
-        <Button variant="ghost" size="sm" onClick={onCancel}>
+        <Button variant="ghost" onClick={onCancel}>
           Cancel
         </Button>
         {preview && preview.length > 0 && phase === "idle" && (
-          <Button size="sm" onClick={handleImport} disabled={fileCells === null}>
+          <Button onClick={handleImport} disabled={fileCells === null}>
             Import {preview.length} label{preview.length !== 1 ? "s" : ""}
           </Button>
         )}
         {phase === "importing" && (
-          <Button size="sm" disabled>
+          <Button disabled>
             Importing…
           </Button>
         )}

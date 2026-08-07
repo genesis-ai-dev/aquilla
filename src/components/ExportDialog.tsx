@@ -947,7 +947,7 @@ export function ExportDialog({
           {/* SDBH XML skeleton picker — the original MARBLE edition to reinject into. */}
           {format === "sdbh-xml" && (
             <div className="mt-1.5 flex flex-col gap-1">
-              <Button variant="outline" size="sm" nativeButton={false} render={<label className="self-start" />}>
+              <Button variant="outline" nativeButton={false} render={<label className="self-start" />}>
                 {sdbhSkeleton ? sdbhSkeleton.name : "Choose skeleton (SDBH-<lang>.XML)"}
                 <input
                   type="file"
@@ -1224,7 +1224,6 @@ export function ExportDialog({
                 <span className="flex flex-wrap items-center gap-2 pt-1">
                   <Button
                     type="button"
-                    size="sm"
                     variant="outline"
                     onClick={() => {
                       downloadBlob(
@@ -1239,7 +1238,6 @@ export function ExportDialog({
                   </Button>
                   <Button
                     type="button"
-                    size="sm"
                     variant="outline"
                     onClick={() => {
                       handleOpenChange(false)

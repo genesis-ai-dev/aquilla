@@ -404,11 +404,11 @@ export function MondayIntegrationSection({ projectId, orgId, roleLevel }: Props)
               <p className="text-xs text-muted-foreground">{proposal.proposal.notes}</p>
             )}
             <div className="flex items-center gap-2">
-              <Button size="sm" onClick={() => void applyProposal()} disabled={applying}>
+              <Button onClick={() => void applyProposal()} disabled={applying}>
                 {applying && <Spinner data-icon="inline-start" />}
                 Apply
               </Button>
-              <Button variant="ghost" size="sm" onClick={() => setProposal(null)} disabled={applying}>
+              <Button variant="ghost" onClick={() => setProposal(null)} disabled={applying}>
                 Discard
               </Button>
             </div>

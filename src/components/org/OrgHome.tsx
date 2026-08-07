@@ -764,7 +764,7 @@ export function OrgHome() {
           header={
             <div className="flex items-center justify-between pr-4">
               <OrgBreadcrumb section="Projects" />
-              <Button type="button" size="sm" onClick={() => setCreateOrgOpen(true)}>
+              <Button type="button" onClick={() => setCreateOrgOpen(true)}>
                 Create organization
               </Button>
             </div>
@@ -789,7 +789,7 @@ export function OrgHome() {
                         </div>
                         <Link
                           to={`/join/${inv.token}`}
-                          className={cn(buttonVariants({ size: "sm" }), "shrink-0")}
+                          className={cn(buttonVariants(), "shrink-0")}
                         >
                           Review &amp; accept
                         </Link>
@@ -1000,7 +1000,7 @@ export function OrgHome() {
                         </div>
                         <Link
                           to={`/join/${inv.token}`}
-                          className={cn(buttonVariants({ size: "sm" }), "shrink-0")}
+                          className={cn(buttonVariants(), "shrink-0")}
                         >
                           Review &amp; accept
                         </Link>

@@ -215,7 +215,7 @@ export function AssignWork({
 
   if (!open) {
     return (
-      <Button type="button" size="sm" variant="outline" onClick={() => setOpen(true)}>
+      <Button type="button" variant="outline" onClick={() => setOpen(true)}>
         Assign…
       </Button>
     )
@@ -325,7 +325,6 @@ export function AssignWork({
                   <Button
                     type="button"
                     variant="ghost"
-                    size="sm"
                     className="h-auto px-1 py-0 text-xs"
                     disabled={busy}
                     onClick={() =>
@@ -373,7 +372,6 @@ export function AssignWork({
         <div className="flex flex-wrap items-center gap-2">
           <Button
             type="button"
-            size="sm"
             onClick={() => void submit()}
             disabled={busy}
           >
@@ -381,7 +379,6 @@ export function AssignWork({
           </Button>
           <Button
             type="button"
-            size="sm"
             variant="outline"
             onClick={() => { setOpen(false); setError(null) }}
             disabled={busy}

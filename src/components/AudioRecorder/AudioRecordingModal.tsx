@@ -514,7 +514,6 @@ export function AudioRecordingModal({
           <AppTooltip content="Previous cell (←)">
             <Button
               variant="ghost"
-              size="sm"
               disabled={!canNav || activeIndex <= 0}
               onClick={() => gotoIndex(activeIndex - 1)}
             >
@@ -524,7 +523,6 @@ export function AudioRecordingModal({
           <AppTooltip content="Next cell (→)">
             <Button
               variant="ghost"
-              size="sm"
               disabled={!canNav || activeIndex >= cells.length - 1}
               onClick={() => gotoIndex(activeIndex + 1)}
             >
@@ -537,12 +535,12 @@ export function AudioRecordingModal({
           {displayPhase === "preview" && (
             <>
               <AppTooltip content="Retake (Esc)">
-                <Button variant="outline" size="sm" onClick={retake}>
+                <Button variant="outline" onClick={retake}>
                   <RefreshCw className="mr-1 h-4 w-4" /> Retake
                 </Button>
               </AppTooltip>
               <AppTooltip content="Save (Space or Enter)">
-                <Button size="sm" onClick={save}>
+                <Button onClick={save}>
                   <Check className="mr-1 h-4 w-4" /> Save
                 </Button>
               </AppTooltip>
@@ -551,20 +549,20 @@ export function AudioRecordingModal({
 
           {displayPhase === "recording" && (
             <AppTooltip content="Stop (Space or Esc)">
-              <Button variant="destructive" size="sm" onClick={stopRecording}>
+              <Button variant="destructive" onClick={stopRecording}>
                 <Square className="mr-1 h-4 w-4" /> Stop
               </Button>
             </AppTooltip>
           )}
 
           {(displayPhase === "idle" || displayPhase === "error") && (
-            <Button size="sm" onClick={startFlow}>
+            <Button onClick={startFlow}>
               <Play className="mr-1 h-4 w-4" /> Start
             </Button>
           )}
 
           {displayPhase === "counting" && (
-            <Button variant="outline" size="sm" onClick={() => { countdown.cancel(); setPhase("idle") }}>
+            <Button variant="outline" onClick={() => { countdown.cancel(); setPhase("idle") }}>
               Cancel countdown
             </Button>
           )}

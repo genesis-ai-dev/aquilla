@@ -363,7 +363,7 @@ function MemberScopesEditor({
             </fieldset>
           )}
           <div className="flex items-center gap-2">
-            <Button size="sm" onClick={handleSave} disabled={saving}>
+            <Button onClick={handleSave} disabled={saving}>
               {saving ? "Saving…" : "Save scopes"}
             </Button>
             {saveError && <span className="text-destructive">{saveError}</span>}

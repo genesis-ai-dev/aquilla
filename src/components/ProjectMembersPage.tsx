@@ -207,7 +207,6 @@ export function MembersTab({
           {!isLocked && !isSelf && m.role.source === "override" ? (
             <AppTooltip content={`Removes ${m.username}'s direct project access. Access via org, team, or creator status is unaffected.`}>
               <Button
-                size="sm"
                 variant="ghost"
                 className="text-muted-foreground"
                 onClick={() => setRemoveTarget(m)}
@@ -227,7 +226,6 @@ export function MembersTab({
           {session?.jwt && !isSelf && (
             <AppTooltip content="Review every access path this member holds (direct, org, team), then revoke with typed confirmation.">
               <Button
-                size="sm"
                 variant="ghost"
                 className="gap-1 text-destructive/70 hover:text-destructive"
                 onClick={() => setRevokeTarget(m)}
@@ -291,7 +289,6 @@ export function MembersTab({
           </h2>
           <Button
             variant="ghost"
-            size="sm"
             className="gap-1 text-muted-foreground"
             onClick={() => void refresh()}
           >
@@ -659,7 +656,6 @@ export function InviteLinkTab({
           <Input value={issuedUrl} readOnly className="text-xs font-mono" />
           <AppTooltip content="Copy URL">
             <Button
-              size="sm"
               variant="ghost"
               onClick={() => copyUrl(issuedUrl)}
               aria-label="Copy URL"
@@ -674,7 +670,7 @@ export function InviteLinkTab({
           {LINK_ROLE_OPTIONS.find((o) => o.level === inviteRole)?.name ?? "a member"}.
           To revoke later, use Project settings → Members to remove them.
         </p>
-        <Button size="sm" variant="outline" onClick={reset} className="w-full">
+        <Button variant="outline" onClick={reset} className="w-full">
           Create another link
         </Button>
       </div>
@@ -773,7 +769,6 @@ export function InviteLinkTab({
         )}
 
         <Button
-          size="sm"
           onClick={() => void handleCreate()}
           disabled={busy || !session?.jwt}
           className="w-full"

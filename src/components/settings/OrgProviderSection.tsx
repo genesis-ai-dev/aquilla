@@ -128,14 +128,13 @@ export function OrgProviderSection({ orgSettings }: OrgProviderSectionProps) {
 
           {canEditOrgKeys && (
             <div className="flex gap-2">
-              <Button type="submit" form="org-provider-form" size="sm">
+              <Button type="submit" form="org-provider-form">
                 {form.state.isSubmitting && <Spinner data-icon="inline-start" />}
                 {form.state.isSubmitting ? "Saving…" : "Save key"}
               </Button>
               {currentGeminiKey && (
                 <Button
                   type="button"
-                  size="sm"
                   variant="outline"
                   onClick={() => form.setFieldValue("geminiKey", "")}
                 >

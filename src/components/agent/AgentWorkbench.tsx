@@ -240,7 +240,7 @@ export function AgentWorkbench({ agent, credits, onClose, onJumpToCell }: AgentW
         <span className="ml-auto flex items-center gap-1">
           {credits && <CreditsDial {...credits} />}
           {state.isStreaming && (
-            <Button type="button" variant="outline" size="sm" onClick={stop}>
+            <Button type="button" variant="outline" onClick={stop}>
               <Square data-icon="inline-start" />
               Stop
             </Button>

@@ -498,10 +498,9 @@ function CommentThreadCard({
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="ghost" size="sm" onClick={cancelDelete}>Cancel</Button>
+            <Button variant="ghost" onClick={cancelDelete}>Cancel</Button>
             <Button
               variant="destructive"
-              size="sm"
               onClick={confirmDelete}
             >
               Delete
@@ -535,7 +534,6 @@ function CommentThreadCard({
                 return exists ? (
                   <AppTooltip content="Go to cell in editor">
                     <Button
-                      size="sm"
                       variant="ghost"
                       className="h-6 px-2 text-xs"
                       onClick={() => onNavigate(root)}
@@ -547,7 +545,6 @@ function CommentThreadCard({
                 ) : (
                   <AppTooltip content="File has been deleted">
                     <Button
-                      size="sm"
                       variant="ghost"
                       className="h-6 px-2 text-xs cursor-not-allowed opacity-50"
                       disabled
@@ -559,7 +556,6 @@ function CommentThreadCard({
                 )
               })()}
               <Button
-                size="sm"
                 variant="ghost"
                 className="h-6 px-2 text-xs"
                 onClick={() => onResolve(root.commentId, !root.resolved)}
@@ -600,7 +596,6 @@ function CommentThreadCard({
                       />
                       <div className="flex gap-1.5">
                         <Button
-                          size="sm"
                           className="h-6 px-2 text-xs"
                           onClick={saveEdit}
                           disabled={isSavingEdit || !editBody.trim()}
@@ -608,7 +603,6 @@ function CommentThreadCard({
                           {isSavingEdit ? <Spinner className="size-3" /> : "Save"}
                         </Button>
                         <Button
-                          size="sm"
                           variant="ghost"
                           className="h-6 px-2 text-xs"
                           onClick={cancelEdit}
@@ -678,7 +672,6 @@ function FilterControls({ filter, onChange, fileOptions, authorOptions }: Filter
           />
         </InputGroup>
         <Button
-          size="sm"
           variant={expanded ? "secondary" : "outline"}
           className="h-8 gap-1.5 text-xs"
           onClick={() => setExpanded((v) => !v)}
@@ -804,7 +797,6 @@ function FilterControls({ filter, onChange, fileOptions, authorOptions }: Filter
 
           {/* Reset */}
           <Button
-            size="sm"
             variant="ghost"
             className="h-6 px-2 text-xs text-muted-foreground"
             onClick={() => onChange(DEFAULT_FILTER)}
@@ -919,10 +911,10 @@ export function CommentsPage() {
   return (
     <div className="mx-auto max-w-3xl space-y-6 p-8">
       <div className="flex items-center justify-between">
-        <Button variant="ghost" size="sm" onClick={() => navigate(`/project/${projectId}/editor`)}>
+        <Button variant="ghost" onClick={() => navigate(`/project/${projectId}/editor`)}>
           <ArrowLeft className="mr-2 h-4 w-4" /> Back to project
         </Button>
-        <Button variant="outline" size="sm" onClick={refresh} disabled={isLoading}>
+        <Button variant="outline" onClick={refresh} disabled={isLoading}>
           {isLoading ? <Spinner className="size-3.5" /> : "Refresh"}
         </Button>
       </div>
@@ -983,7 +975,7 @@ export function CommentsPage() {
           <CardContent className="flex flex-col items-center gap-3 py-8 text-center">
             <Search className="h-8 w-8 text-muted-foreground" />
             <div className="text-base font-medium">No threads match your filters</div>
-            <Button size="sm" variant="outline" onClick={() => setFilter(DEFAULT_FILTER)}>
+            <Button variant="outline" onClick={() => setFilter(DEFAULT_FILTER)}>
               Clear filters
             </Button>
           </CardContent>

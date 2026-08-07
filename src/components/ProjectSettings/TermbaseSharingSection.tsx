@@ -336,7 +336,6 @@ export function TermbaseSharingSection({ projectId, orgId, roleLevel }: Props) {
                     </span>
                     <Button
                       variant="outline"
-                      size="sm"
                       className="shrink-0"
                       disabled={busy}
                       onClick={() => subscribe(t.projectId)}

@@ -264,7 +264,6 @@ function CredentialRow({
       </div>
       {!revoked && (
         <Button
-          size="sm"
           variant="ghost"
           className="shrink-0 text-muted-foreground hover:text-destructive"
           onClick={onRevoke}
@@ -372,7 +371,7 @@ function ShowOnceTokenDialog({
             <code className="min-w-0 flex-1 truncate rounded bg-muted px-2 py-1.5 text-xs">
               {result.token}
             </code>
-            <Button size="sm" variant="outline" onClick={copy}>
+            <Button variant="outline" onClick={copy}>
               <Copy className="mr-1 size-3.5" />
               {copied ? "Copied" : "Copy"}
             </Button>
@@ -481,7 +480,7 @@ function MintTokenDialog({
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger render={<Button size="sm" />}>New token</DialogTrigger>
+      <DialogTrigger render={<Button />}>New token</DialogTrigger>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>New API token</DialogTitle>

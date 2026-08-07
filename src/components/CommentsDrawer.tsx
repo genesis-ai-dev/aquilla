@@ -142,7 +142,7 @@ export function CommentsDrawer({ project, cell, liveComments, onClose, onNewThre
             rows={2}
             className="resize-none"
           />
-          <Button size="sm" onClick={handleCreate} disabled={!newThreadText.trim()} className="w-full">
+          <Button onClick={handleCreate} disabled={!newThreadText.trim()} className="w-full">
             Post
           </Button>
         </div>

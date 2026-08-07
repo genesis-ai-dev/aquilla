@@ -162,7 +162,6 @@ export function VideoAttachmentDialog({ open, onOpenChange, current, onSave }: V
                 className="h-7 w-24 text-xs"
               />
               <Button
-                size="sm"
                 variant="outline"
                 onClick={() => {
                   onSave({
@@ -262,7 +261,6 @@ export function VideoAttachmentDialog({ open, onOpenChange, current, onSave }: V
                   </p>
                   <Button
                     variant="outline"
-                    size="sm"
                     onClick={() => fileInputRef.current?.click()}
                     className="mt-1"
                   >

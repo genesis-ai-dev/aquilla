@@ -261,7 +261,6 @@ export function RuleImportDialog({ completionSettings, onAdd, projectId }: Props
             render={
               <Button
                 variant="outline"
-                size="sm"
                 disabled={!isConfigured}
               />
             }
@@ -306,7 +305,6 @@ export function RuleImportDialog({ completionSettings, onAdd, projectId }: Props
               </p>
               <Button
                 variant="outline"
-                size="sm"
                 onClick={() => fileInputRef.current?.click()}
               >
                 Browse file

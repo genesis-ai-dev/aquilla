@@ -120,7 +120,6 @@ export function AiProviderStep({ project, onUpdated, onSaved }: AiProviderStepPr
 
       {error && <FieldError>{error}</FieldError>}
       <Button
-        size="sm"
         onClick={handleSave}
         className="w-full"
       >

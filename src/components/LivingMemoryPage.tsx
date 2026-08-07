@@ -242,11 +242,10 @@ function EntryForm({ initialText = "", onSave, onCancel }: EntryFormProps) {
         autoFocus
       />
       <div className="flex gap-2 justify-end">
-        <Button size="sm" variant="ghost" onClick={onCancel}>
+        <Button variant="ghost" onClick={onCancel}>
           Cancel
         </Button>
         <Button
-          size="sm"
           onClick={() => { if (text.trim()) onSave(text) }}
           disabled={!text.trim()}
         >
@@ -327,7 +326,6 @@ function AuthoredEntriesSection({
         </h2>
         {canEdit && (
           <Button
-            size="sm"
             variant="ghost"
             className="h-6 px-2 text-xs gap-1"
             onClick={() => setAdding(true)}
@@ -561,7 +559,6 @@ export function LivingMemoryPage() {
         <div className="flex-1" />
         <Button
           variant="outline"
-          size="sm"
           onClick={() => navigate(`/project/${projectId}/terminology`)}
           aria-label="Go to Terminology page"
         >

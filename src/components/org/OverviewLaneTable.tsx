@@ -215,14 +215,13 @@ export function OverviewLaneTable({
                 <Link
                   to={openTo}
                   data-testid={`overview-lane-open-${tagId}`}
-                  className={cn(buttonVariants({ size: "sm", variant: "outline" }))}
+                  className={cn(buttonVariants({ variant: "outline" }))}
                 >
                   Open
                 </Link>
                 {canManageLanes && (
                   <Button
                     type="button"
-                    size="sm"
                     variant="outline"
                     data-testid={`overview-lane-assign-${tagId}`}
                     onClick={() => setAssignLane(lane.lane)}
@@ -252,7 +251,7 @@ export function OverviewLaneTable({
             to={projectSettingsPath(projectId, "general")}
             data-testid="overview-lane-add-language"
             className={cn(
-              buttonVariants({ size: "sm", variant: "ghost" }),
+              buttonVariants({ variant: "ghost" }),
               "text-xs text-muted-foreground",
             )}
           >

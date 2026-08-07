@@ -165,7 +165,7 @@ export function OrgStep({
           {form.state.isSubmitting ? "Creating…" : "Create organization"}
         </Button>
       </form>
-      <Button variant="ghost" size="sm" onClick={onBack} className="w-full">
+      <Button variant="ghost" onClick={onBack} className="w-full">
         ← Back
       </Button>
     </div>

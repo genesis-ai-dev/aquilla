@@ -79,7 +79,6 @@ export function ArchivedProjects() {
                   <span className="font-medium">{p.name}</span>
                   <Button
                     type="button"
-                    size="sm"
                     variant="outline"
                     onClick={() => void handleRestore(p.id)}
                   >

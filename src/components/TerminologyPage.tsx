@@ -300,7 +300,6 @@ function ConceptDialog({ open, onOpenChange, initial, onSave }: ConceptDialogPro
             </div>
             <Button
               variant="outline"
-              size="sm"
               onClick={handleAddRendering}
               className="mt-1"
             >
@@ -458,7 +457,6 @@ function TermbaseImportDialog({
               </p>
               <Button
                 variant="outline"
-                size="sm"
                 nativeButton={false}
                 render={<label />}
               >
@@ -1107,7 +1105,6 @@ export function TerminologyPage() {
       <header className="flex items-center gap-4 border-b px-4 py-2">
         <Button
           variant="ghost"
-          size="sm"
           onClick={() => navigate(`/project/${id}/editor`)}
         >
           <ArrowLeft className="mr-1 h-4 w-4" />
@@ -1123,7 +1120,6 @@ export function TerminologyPage() {
             allowed={canManageTermbase}
             tip={termbaseGateTip}
             variant="outline"
-            size="sm"
             onClick={handleExportCsv}
             disabled={concepts.length === 0}
             aria-label="Export CSV"
@@ -1135,7 +1131,6 @@ export function TerminologyPage() {
             allowed={canManageTermbase}
             tip={termbaseGateTip}
             variant="outline"
-            size="sm"
             onClick={handleExportTbx}
             disabled={concepts.length === 0}
             aria-label="Export TBX"
@@ -1150,7 +1145,6 @@ export function TerminologyPage() {
           allowed={canManageTermbase}
           tip={termbaseGateTip}
           variant="outline"
-          size="sm"
           onClick={() => setImportOpen(true)}
         >
           <Upload className="mr-1 h-3.5 w-3.5" />
@@ -1161,7 +1155,6 @@ export function TerminologyPage() {
         <GatedButton
           allowed={canManageTermbase}
           tip={termbaseGateTip}
-          size="sm"
           onClick={() => setAddOpen(true)}
         >
           <Plus className="mr-1 h-3.5 w-3.5" />
@@ -1220,7 +1213,6 @@ export function TerminologyPage() {
           {concepts.length >= 2 && canManageTermbase && (
             <Button
               variant="outline"
-              size="sm"
               onClick={() => setMergeOpen(true)}
               aria-label="Merge duplicate concepts"
               data-testid="merge-duplicates-btn"
@@ -1302,7 +1294,6 @@ export function TerminologyPage() {
                   allowed={canManageTermbase}
                   tip={termbaseGateTip}
                   variant="outline"
-                  size="sm"
                   onClick={() => setAddOpen(true)}
                 >
                   <Plus className="mr-1 h-3.5 w-3.5" />

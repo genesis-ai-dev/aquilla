@@ -13,7 +13,7 @@ export function PrivacyPolicy() {
     <div className="min-h-screen bg-background">
       <div className="mx-auto max-w-2xl px-4 py-12">
         <Link to="/">
-          <Button variant="ghost" size="sm" className="mb-8 -ml-2 gap-1.5 text-muted-foreground">
+          <Button variant="ghost" className="mb-8 -ml-2 gap-1.5 text-muted-foreground">
             <ArrowLeft className="h-4 w-4" />
             Back
           </Button>
@@ -175,7 +175,6 @@ export function PrivacyPolicy() {
               </div>
               <Button
                 variant={enabled ? "outline" : "default"}
-                size="sm"
                 onClick={() => setEnabled(!enabled)}
               >
                 {enabled ? "Opt out" : "Opt in"}

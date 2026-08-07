@@ -341,7 +341,7 @@ export function MembersSection({ projectId }: { projectId: string }) {
                   value={accessFilter}
                   onValueChange={(v) => setAccessFilter((v as AccessFilter) ?? "all")}
                 >
-                  <SelectTrigger className="h-8 bg-card" aria-label="Filter members">
+                  <SelectTrigger className="bg-card" aria-label="Filter members">
                     <SelectValue className="flex-none" />
                   </SelectTrigger>
                   <SelectContent align="start">
@@ -353,11 +353,10 @@ export function MembersSection({ projectId }: { projectId: string }) {
                   </SelectContent>
                 </Select>
                 <Button
-                  size="sm"
                   className="ml-auto shrink-0 gap-1.5"
                   onClick={openAddDialog}
                 >
-                  <UserPlus className="size-3.5" />
+                  <UserPlus className="size-4" />
                   Add a member
                 </Button>
               </>

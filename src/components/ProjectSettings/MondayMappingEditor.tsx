@@ -223,14 +223,12 @@ export function MondayMappingEditor({
       <div className="flex items-center gap-2">
         <Button
           variant="outline"
-          size="sm"
           disabled={disabled}
           onClick={() => setRows((prev) => [...prev, { columnId: "", metric: "completion_pct" }])}
         >
           <Plus data-icon="inline-start" /> Add row
         </Button>
         <Button
-          size="sm"
           disabled={disabled || saving || !isDirty || !complete}
           onClick={handleSave}
         >

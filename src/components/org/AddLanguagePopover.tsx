@@ -207,7 +207,7 @@ export function AddLanguagePopover({ projectId, jwt, onAdded }: AddLanguagePopov
               className="h-8 text-xs"
               disabled={busy}
             />
-            <Button size="sm" onClick={() => void handleAdd()} disabled={busy || !snapshot}>
+            <Button onClick={() => void handleAdd()} disabled={busy || !snapshot}>
               {busy ? <Spinner className="mr-1 size-3.5" /> : <Plus className="mr-1 size-3.5" />}
               Add
             </Button>

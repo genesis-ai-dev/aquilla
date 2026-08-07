@@ -4,11 +4,11 @@
  *
  * Why not just lean on the browser? The browser keeps a back/forward stack but
  * refuses (for privacy) to expose the labels of those entries, so we can't show
- * a "hold to see history" popover from it. This context mirrors the browser's
- * own stack — one entry per real history entry — keyed by React Router's
- * `location.key`. Because we move with `navigate(delta)` (a real history POP),
- * our cursor stays in lock-step with the browser, so native back/forward, the
- * Alt+Arrow shortcuts, and trackpad swipes all update our cursor too.
+ * a history dropdown from it. This context mirrors the browser's own stack —
+ * one entry per real history entry — keyed by React Router's `location.key`.
+ * Because we move with `navigate(delta)` (a real history POP), our cursor stays
+ * in lock-step with the browser, so native back/forward, the Alt+Arrow
+ * shortcuts, and trackpad swipes all update our cursor too.
  *
  * Access control: entries are just URLs the user actually visited. Visiting a
  * route already passes whatever on-load access checks that route enforces, and

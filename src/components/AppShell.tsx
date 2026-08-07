@@ -253,7 +253,7 @@ export function AppShell({
         >
           <div className={cn("flex gap-0.5", railCollapsed ? "flex-col items-center" : "items-center")}>
             {resolvedLogo}
-            {/* Browser-style back/forward + history popover, top-left chrome. */}
+            {/* Browser-style history + back/forward, top-left chrome. */}
             <NavHistoryControls />
           </div>
           {/* BETA + collapse toggle ride together as a right-aligned cluster so the

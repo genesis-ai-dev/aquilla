@@ -14,7 +14,7 @@ function CopyEmailButton({ email }: { email: string }) {
   return (
     <button
       type="button"
-      className="max-w-full truncate text-left text-muted-foreground transition-colors hover:text-foreground"
+      className="max-w-full truncate text-left text-muted-foreground hover:text-foreground"
       aria-label={`Copy ${email}`}
       onClick={(e) => {
         e.stopPropagation()

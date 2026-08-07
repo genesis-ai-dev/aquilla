@@ -28,16 +28,8 @@ import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Spinner } from "@/components/ui/spinner"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
-import { RoleLabel } from "@/components/RoleLabel"
-import { ROLE, roleName, roleDisplayText } from "@/lib/frontier/roles"
+import { RoleSelect } from "@/components/RoleSelect"
+import { ROLE, roleName, roleDisplayText, roleDescription } from "@/lib/frontier/roles"
 import { useOrgMembers } from "@/hooks/useOrg"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
@@ -274,28 +266,18 @@ export function StaffLanePopover({
               </Button>
             </div>
 
-            <Select
-              items={STAFFABLE_ROLES.map((level) => ({
-                value: String(level),
-                label: roleDisplayText(roleName(level)),
+            <RoleSelect
+              options={STAFFABLE_ROLES.map((level) => ({
+                level,
+                name: roleName(level),
+                description: roleDescription(level),
               }))}
-              value={String(role)}
-              onValueChange={(v) => setRole(parseInt(v ?? String(ROLE.REVIEWER), 10))}
+              value={role}
+              onValueChange={setRole}
               disabled={busy}
-            >
-              <SelectTrigger size="sm" aria-label="Role">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectGroup>
-                  {STAFFABLE_ROLES.map((level) => (
-                    <SelectItem key={level} value={String(level)}>
-                      <RoleLabel name={roleName(level)} />
-                    </SelectItem>
-                  ))}
-                </SelectGroup>
-              </SelectContent>
-            </Select>
+              size="sm"
+              aria-label="Role"
+            />
 
             <Button className="w-full" size="sm" onClick={handleConfirm} disabled={busy || !jwt}>
               {busy && <Spinner className="mr-1.5 size-3.5" />}

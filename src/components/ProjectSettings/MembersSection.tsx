@@ -40,7 +40,7 @@ import { useActiveOrgOptional } from "@/context/OrgContext"
 import { listOrgMembers, type OrgMember } from "@/lib/frontier/orgs"
 import { partitionMembers, type ProjectMember } from "@/lib/frontier/members"
 import {
-  ROLE, PROJECT_ROLE_OPTIONS, humanRoleName, roleDisplayText,
+  ROLE, PROJECT_ROLE_OPTIONS, humanRoleName, roleDescription, roleDisplayText,
 } from "@/lib/frontier/roles"
 import { toUserFacingError } from "@/lib/errors/user-error"
 import { cn } from "@/lib/utils"
@@ -225,14 +225,22 @@ export function MembersSection({ projectId }: { projectId: string }) {
                     <DropdownMenuSubTrigger>
                       Change role
                     </DropdownMenuSubTrigger>
-                    <DropdownMenuSubContent>
+                    <DropdownMenuSubContent className="min-w-72 max-w-96">
                       {grantableRoles.map((r) => (
                         <DropdownMenuItem
                           key={r.level}
                           onClick={() => void add(m.username, r.level)}
+                          className="items-start"
                         >
-                          <RoleLabel name={r.name} />
-                          {r.level === m.role.level ? " (current)" : ""}
+                          <span className="flex min-w-0 flex-col gap-0.5">
+                            <span>
+                              <RoleLabel name={r.name} className="font-medium" />
+                              {r.level === m.role.level ? " (current)" : ""}
+                            </span>
+                            <span className="text-xs font-normal whitespace-normal text-muted-foreground">
+                              {r.description || roleDescription(r.level)}
+                            </span>
+                          </span>
                         </DropdownMenuItem>
                       ))}
                     </DropdownMenuSubContent>

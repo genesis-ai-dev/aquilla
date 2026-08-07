@@ -40,10 +40,10 @@ import {
   LINK_ROLE_OPTIONS,
   PROJECT_ROLE_OPTIONS,
   humanRoleName,
-  roleDisplayText,
 } from "@/lib/frontier/roles"
 import { ConfirmActionDialog } from "@/components/ConfirmActionDialog"
 import { RoleLabel } from "@/components/RoleLabel"
+import { RoleSelect } from "@/components/RoleSelect"
 import type { ProjectMember } from "@/lib/frontier/members"
 import { toUserFacingError } from "@/lib/errors/user-error"
 
@@ -187,37 +187,20 @@ export function MembersTab({
         <div className="ml-auto flex items-center gap-2">
           {/* Role change dropdown — only for direct grants, not self */}
           {!isLocked && !isSelf && (
-            <Select
-              items={[
-                // Current role may sit above the caller's grantable
-                // cap; include it so the closed trigger renders the
-                // role name instead of the raw level.
-                ...(grantableRoles.some((r) => r.level === m.role.level)
-                  ? []
-                  : [{ value: String(m.role.level), label: roleDisplayText(m.role.name) }]),
-                ...grantableRoles.map((r) => ({
-                  value: String(r.level),
-                  label: roleDisplayText(r.name),
-                })),
-              ]}
-              value={String(m.role.level)}
-              onValueChange={(v) => {
-                void add(m.username, parseInt(v ?? "", 10))
+            <RoleSelect
+              options={grantableRoles}
+              currentOption={
+                grantableRoles.some((r) => r.level === m.role.level)
+                  ? null
+                  : { level: m.role.level, name: m.role.name }
+              }
+              value={m.role.level}
+              onValueChange={(level) => {
+                void add(m.username, level)
               }}
-            >
-              <SelectTrigger size="sm" aria-label="Change role">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectGroup>
-                  {grantableRoles.map((r) => (
-                    <SelectItem key={r.level} value={String(r.level)}>
-                      <RoleLabel name={r.name} />
-                    </SelectItem>
-                  ))}
-                </SelectGroup>
-              </SelectContent>
-            </Select>
+              size="sm"
+              aria-label="Change role"
+            />
           )}
 
           {/* Remove button for direct grants */}
@@ -711,33 +694,18 @@ export function InviteLinkTab({
         {/* Role */}
         <div className="space-y-1">
           <FieldLabel className="text-xs">Role</FieldLabel>
-          <Select
-            items={LINK_ROLE_OPTIONS.map((opt) => ({
-              value: String(opt.level),
-              label: roleDisplayText(opt.name),
-            }))}
-            value={String(inviteRole)}
-            onValueChange={(v) => setInviteRole(Number(v ?? ""))}
+          <RoleSelect
+            options={LINK_ROLE_OPTIONS}
+            value={inviteRole}
+            onValueChange={setInviteRole}
             disabled={!session?.jwt}
-          >
-            <SelectTrigger aria-label="Role">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectGroup>
-                {LINK_ROLE_OPTIONS.map((opt) => (
-                  <SelectItem key={opt.level} value={String(opt.level)}>
-                    <RoleLabel name={opt.name} />
-                  </SelectItem>
-                ))}
-              </SelectGroup>
-            </SelectContent>
-          </Select>
-          <p className="text-[10px] text-muted-foreground">
-            {session?.jwt
-              ? LINK_ROLE_OPTIONS.find((o) => o.level === inviteRole)?.description
-              : "Sign in to create an invite link"}
-          </p>
+            aria-label="Role"
+          />
+          {!session?.jwt && (
+            <p className="text-[10px] text-muted-foreground">
+              Sign in to create an invite link
+            </p>
+          )}
         </div>
 
         {/* Optional email */}

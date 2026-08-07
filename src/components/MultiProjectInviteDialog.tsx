@@ -2,9 +2,6 @@ import { useMemo, useState } from "react"
 import { Check, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field"
-import {
-  Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue,
-} from "@/components/ui/select"
 import { Spinner } from "@/components/ui/spinner"
 import { AppTooltip } from "@/components/ui/tooltip"
 import {
@@ -23,7 +20,7 @@ import { createServerInvite } from "@/lib/sync/invites"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { toUserFacingError } from "@/lib/errors/user-error"
 import { UsernameTypeahead, type RecipientValue } from "@/components/UsernameTypeahead"
-import { RoleLabel } from "@/components/RoleLabel"
+import { RoleSelect } from "@/components/RoleSelect"
 import type { CloudProjectSummary } from "@/lib/sync/cloud-projects"
 
 interface MultiProjectInviteDialogProps {
@@ -295,34 +292,17 @@ export function MultiProjectInviteDialog({
                             <Check className="h-3 w-3" /> {isEmailMode ? "invited" : "added"}
                           </span>
                         ) : isSelected ? (
-                          <Select
-                            items={roleChoices.map((r) => ({
-                              value: String(r.level),
-                              label: roleDisplayText(r.name),
-                            }))}
-                            value={String(selections[p.id])}
-                            onValueChange={(v) =>
-                              setProjectRole(p.id, Number(v ?? "") as RoleLevel)
+                          <RoleSelect
+                            options={roleChoices}
+                            value={selections[p.id]}
+                            onValueChange={(level) =>
+                              setProjectRole(p.id, level as RoleLevel)
                             }
                             disabled={busy}
-                          >
-                            <SelectTrigger
-                              size="sm"
-                              className="shrink-0"
-                              aria-label={`Role for ${p.name}`}
-                            >
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectGroup>
-                                {roleChoices.map((r) => (
-                                  <SelectItem key={r.level} value={String(r.level)}>
-                                    <RoleLabel name={r.name} />
-                                  </SelectItem>
-                                ))}
-                              </SelectGroup>
-                            </SelectContent>
-                          </Select>
+                            size="sm"
+                            className="shrink-0"
+                            aria-label={`Role for ${p.name}`}
+                          />
                         ) : (
                           <span aria-hidden className="w-0" />
                         )}

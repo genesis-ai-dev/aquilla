@@ -42,11 +42,11 @@ test("share invite role select changes the link role", async ({ alice }) => {
   const roleSelect = dialog.getByRole("combobox", { name: "Role", exact: true })
   await expect(roleSelect).toBeVisible({ timeout: 3_000 })
 
-  // Change to viewer (100).
-  await pickSelectOption(alice, roleSelect, /^viewer$/i)
+  // Change to viewer (100). Use ^ so "reviewer" does not also match.
+  await pickSelectOption(alice, roleSelect, /^viewer/i)
   await expectSelectValue(roleSelect, /viewer/i)
 
   // Change to contributor (400).
-  await pickSelectOption(alice, roleSelect, /^contributor$/i)
+  await pickSelectOption(alice, roleSelect, /^contributor/i)
   await expectSelectValue(roleSelect, /contributor/i)
 })

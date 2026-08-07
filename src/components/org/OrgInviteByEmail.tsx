@@ -8,16 +8,9 @@ import {
   FieldLabel,
 } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
+import { RoleSelect } from "@/components/RoleSelect"
 import { createOrgInvite } from "@/lib/frontier/orgs"
-import { ROLE, ORG_ROLE_PICKER, roleName, roleDisplayText } from "@/lib/frontier/roles"
+import { ROLE, ORG_ROLE_OPTIONS } from "@/lib/frontier/roles"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import posthog from "@/lib/posthog"
 import { INVITE_SENT } from "@/lib/event-names"
@@ -99,29 +92,13 @@ export function OrgInviteByEmail({ orgId }: { orgId: number }) {
         </Field>
         <Field>
           <FieldLabel htmlFor="org-invite-role">Org role</FieldLabel>
-          <Select
-            items={ORG_ROLE_PICKER.map((level) => ({
-              value: String(level),
-              label: roleDisplayText(roleName(level)),
-            }))}
-            value={String(role)}
-            onValueChange={(v) => {
-              if (v != null && v !== "") setRole(Number(v))
-            }}
-          >
-            <SelectTrigger id="org-invite-role">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectGroup>
-                {ORG_ROLE_PICKER.map((level) => (
-                  <SelectItem key={level} value={String(level)}>
-                    {roleDisplayText(roleName(level))}
-                  </SelectItem>
-                ))}
-              </SelectGroup>
-            </SelectContent>
-          </Select>
+          <RoleSelect
+            id="org-invite-role"
+            options={ORG_ROLE_OPTIONS}
+            value={role}
+            onValueChange={setRole}
+            aria-label="Org role"
+          />
         </Field>
         <Button size="sm" onClick={submit} disabled={busy}>
           {busy ? "Sending…" : "Send invite"}

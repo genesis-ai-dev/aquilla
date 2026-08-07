@@ -39,9 +39,9 @@ import {
   ROLE,
   LINK_ROLE_OPTIONS,
   PROJECT_ROLE_OPTIONS,
-  roleDisplayText,
 } from "@/lib/frontier/roles"
 import { RoleLabel } from "@/components/RoleLabel"
+import { RoleSelect } from "@/components/RoleSelect"
 
 interface SharePanelProps {
   open: boolean
@@ -403,33 +403,18 @@ function InviteLinkTab({ projectId, onSharesChanged }: InviteLinkTabProps) {
         <div className="space-y-3">
           <div className="space-y-1">
             <FieldLabel className="text-xs">Role</FieldLabel>
-            <Select
-              items={LINK_ROLE_OPTIONS.map((opt) => ({
-                value: String(opt.level),
-                label: roleDisplayText(opt.name),
-              }))}
-              value={String(inviteRole)}
-              onValueChange={(v) => setInviteRole(Number(v ?? ""))}
+            <RoleSelect
+              options={LINK_ROLE_OPTIONS}
+              value={inviteRole}
+              onValueChange={setInviteRole}
               disabled={!session?.jwt}
-            >
-              <SelectTrigger aria-label="Role">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectGroup>
-                  {LINK_ROLE_OPTIONS.map((opt) => (
-                    <SelectItem key={opt.level} value={String(opt.level)}>
-                      <RoleLabel name={opt.name} />
-                    </SelectItem>
-                  ))}
-                </SelectGroup>
-              </SelectContent>
-            </Select>
-            <p className="text-[10px] text-muted-foreground">
-              {session?.jwt
-                ? LINK_ROLE_OPTIONS.find((o) => o.level === inviteRole)?.description
-                : "Sign in to create an invite link"}
-            </p>
+              aria-label="Role"
+            />
+            {!session?.jwt && (
+              <p className="text-[10px] text-muted-foreground">
+                Sign in to create an invite link
+              </p>
+            )}
           </div>
           <div className="space-y-1">
             <FieldLabel htmlFor="invite-email" className="text-xs">

@@ -120,7 +120,7 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
         <div
           className={cn(
             "absolute right-full top-1/2 z-30 mr-2 flex -translate-y-1/2 items-center gap-2 whitespace-nowrap",
-            "rounded-2xl bg-card px-3 py-2 text-xs",
+            "rounded-lg bg-card px-3 py-2 text-xs",
             "animate-in fade-in-0 slide-in-from-right-2 duration-200",
           )}
           role="status"

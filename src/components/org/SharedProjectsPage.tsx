@@ -112,7 +112,7 @@ export function SharedProjectsPage() {
               description="When someone invites you to a project in another organization, it shows up here."
             />
           ) : (
-            <section data-testid="shared-with-you" className="rounded-2xl border divide-y">
+            <section data-testid="shared-with-you" className="rounded-lg border divide-y">
               {sharedProjects.map((p) => {
                 const orgLabel = p.orgName ?? (p.orgId != null ? `Org #${p.orgId}` : null)
                 // AQU-696: new until the user has opened it (recorded on

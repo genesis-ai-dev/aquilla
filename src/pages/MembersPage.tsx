@@ -65,8 +65,8 @@ export function MembersPage() {
         <Page size="wide">
           <PageHeader title="Members" description="People in this organization and their access." />
           <div className="space-y-4">
-            <div className="h-24 animate-pulse rounded-2xl border bg-card" />
-            <div className="h-40 animate-pulse rounded-2xl border bg-card" />
+            <div className="h-24 animate-pulse rounded-lg border bg-card" />
+            <div className="h-40 animate-pulse rounded-lg border bg-card" />
           </div>
         </Page>
       </MembersShell>
@@ -78,7 +78,7 @@ export function MembersPage() {
       <MembersShell>
         <Page size="wide">
           <PageHeader title="Members" description="People in this organization and their access." />
-          <div className="rounded-2xl border border-destructive/30 bg-destructive/5 p-4">
+          <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-4">
             <p className="text-sm font-medium text-destructive">Couldn't load your organization</p>
             <p className="mt-1 text-xs text-muted-foreground">{error}</p>
             <p className="mt-2 text-xs text-muted-foreground">

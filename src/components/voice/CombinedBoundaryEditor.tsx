@@ -176,7 +176,7 @@ export function CombinedBoundaryEditor(props: CombinedBoundaryEditorProps) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal="true">
-      <div className="w-full max-w-2xl rounded-2xl border border-border bg-card p-5">
+      <div className="w-full max-w-2xl rounded-lg border border-border bg-card p-5">
         <div className="mb-1 flex items-center justify-between">
           <h2 className="text-sm font-semibold">Split the combined clip by line</h2>
           <Button

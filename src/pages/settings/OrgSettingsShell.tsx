@@ -17,8 +17,8 @@ export function OrgSettingsShell({
   if (isLoading) {
     body = (
       <div className="space-y-6">
-        <div className="h-28 animate-pulse rounded-2xl border bg-card" />
-        <div className="h-40 animate-pulse rounded-2xl border bg-card" />
+        <div className="h-28 animate-pulse rounded-lg border bg-card" />
+        <div className="h-40 animate-pulse rounded-lg border bg-card" />
       </div>
     )
   } else if (!activeOrg) {

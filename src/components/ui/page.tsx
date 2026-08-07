@@ -14,8 +14,8 @@ import { cn } from "@/lib/utils"
  * - Sections carry an explicit `border` because in dark mode --card, --surface,
  *   and --background resolve to the SAME color, so a borderless bg-card surface
  *   is invisible on these pages. The border is the separator in both themes.
- * - Radius is `rounded-2xl` to match the canonical Card primitive (card.tsx),
- *   not the tighter `rounded-lg` the old hand-rolled sections used.
+ * - Radius is `rounded-lg` to match the canonical Card primitive (card.tsx)
+ *   and the app `--radius` token used by controls/popovers.
  * - Headings use `font-heading` (matching CardTitle) and lean on weight +
  *   color for hierarchy rather than oversized type.
  */
@@ -103,6 +103,7 @@ function Section({
   footer,
   className,
   contentClassName,
+  headerClassName,
   children,
   ...props
 }: Omit<React.ComponentProps<"section">, "title"> & {
@@ -111,15 +112,21 @@ function Section({
   action?: React.ReactNode
   footer?: React.ReactNode
   contentClassName?: string
+  headerClassName?: string
 }) {
   const hasHeader = Boolean(title || description || action)
   return (
     <section
-      className={cn("overflow-hidden rounded-2xl border bg-card", className)}
+      className={cn("overflow-hidden rounded-lg border bg-card", className)}
       {...props}
     >
       {hasHeader ? (
-        <div className="flex items-start justify-between gap-4 px-5 pt-5 pb-4">
+        <div
+          className={cn(
+            "flex items-start justify-between gap-4 px-5 pt-5 pb-4",
+            headerClassName,
+          )}
+        >
           <div className="min-w-0 space-y-1">
             {title ? (
               <h2 className="font-heading text-base leading-snug font-medium text-foreground">
@@ -161,7 +168,7 @@ function StatTile({
   className?: string
 }) {
   return (
-    <div className={cn("rounded-2xl border bg-card px-5 py-4", className)}>
+    <div className={cn("rounded-lg border bg-card px-5 py-4", className)}>
       <div className="text-2xl leading-none font-semibold tracking-normal tabular-nums text-foreground">
         {value}
       </div>
@@ -193,7 +200,7 @@ function SettingsGroup({
           {label}
         </p>
       ) : null}
-      <div className="divide-y overflow-hidden rounded-2xl border bg-card">
+      <div className="divide-y overflow-hidden rounded-lg border bg-card">
         {children}
       </div>
     </div>

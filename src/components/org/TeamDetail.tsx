@@ -291,8 +291,8 @@ export function TeamDetail() {
           <div className="space-y-6">
             {loading ? (
               <>
-                <div className="h-10 w-64 animate-pulse rounded-2xl border bg-card" />
-                <div className="h-40 animate-pulse rounded-2xl border bg-card" />
+                <div className="h-10 w-64 animate-pulse rounded-lg border bg-card" />
+                <div className="h-40 animate-pulse rounded-lg border bg-card" />
               </>
             ) : team == null ? (
               <EmptyState title="Team not found." description="This team may have been deleted, or you may not have access to it." />
@@ -519,7 +519,7 @@ export function TeamDetail() {
                   ) : (
                     <ul className="space-y-2">
                       {team.members.map((m) => (
-                        <li key={m.userId} className="flex items-center justify-between rounded-2xl border px-4 py-2 text-sm">
+                        <li key={m.userId} className="flex items-center justify-between rounded-lg border px-4 py-2 text-sm">
                           <UsernameWithAvatar username={m.username} />
                           <div className="flex items-center gap-2">
                             {isOwner ? (
@@ -665,7 +665,7 @@ export function TeamDetail() {
                     ) : (
                       <ul className="space-y-2">
                         {(team?.projects ?? []).map((p) => (
-                          <li key={p.id} className="flex items-center justify-between rounded-2xl border px-4 py-2 text-sm">
+                          <li key={p.id} className="flex items-center justify-between rounded-lg border px-4 py-2 text-sm">
                             <button
                               type="button"
                               className="text-left font-medium hover:underline"

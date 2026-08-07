@@ -10,7 +10,7 @@ import { cn } from "@/lib/utils"
  * tappable rows — a leading icon tile, a title, an optional right-aligned hint
  * (a count or the current value, e.g. "System", "12", "Maintainer"), and a
  * chevron — that navigate into a focused detail sub-page. Same visual family as
- * the Section primitive in page.tsx: one bordered, rounded-2xl card with the
+ * the Section primitive in page.tsx: one bordered, rounded-lg card with the
  * border carrying the separation in both light and dark themes.
  */
 
@@ -34,7 +34,7 @@ function NavList({
           {label}
         </p>
       ) : null}
-      <div className="divide-y overflow-hidden rounded-2xl border bg-card">
+      <div className="divide-y overflow-hidden rounded-lg border bg-card">
         {children}
       </div>
     </div>

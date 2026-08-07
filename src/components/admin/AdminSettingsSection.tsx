@@ -123,8 +123,8 @@ export function AdminSettingsSection({ jwt }: { jwt: string }) {
   if (loading) {
     return (
       <div className="space-y-6">
-        <div className="h-56 animate-pulse rounded-2xl border bg-card" />
-        <div className="h-40 animate-pulse rounded-2xl border bg-card" />
+        <div className="h-56 animate-pulse rounded-lg border bg-card" />
+        <div className="h-40 animate-pulse rounded-lg border bg-card" />
       </div>
     )
   }

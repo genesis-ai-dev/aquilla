@@ -122,7 +122,7 @@ export function AdminPeopleSection({ users, admins }: { users: AdminUser[]; admi
   return (
     <div className="flex flex-col gap-3">
       {orphanAdmins.length > 0 && (
-        <div className="flex items-start gap-2 rounded-2xl border border-amber-500/30 bg-amber-50/60 px-4 py-3 text-sm dark:bg-amber-950/20">
+        <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-50/60 px-4 py-3 text-sm dark:bg-amber-950/20">
           <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-400" />
           <p className="text-muted-foreground">
             <span className="font-medium text-foreground">

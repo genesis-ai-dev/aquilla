@@ -7,7 +7,7 @@ const emptyStateVariants = cva("", {
   variants: {
     variant: {
       /** Standalone empty beat — solid card on org/account pages. */
-      card: "rounded-2xl border-solid bg-card/40 px-6 py-12",
+      card: "rounded-lg border-solid bg-card/40 px-6 py-12",
       /** Nested inside a Section or panel — no extra chrome. */
       inline: "border-0 bg-transparent",
       /** Dashed panel — table/list surfaces (admin console, data tables). */

@@ -379,7 +379,7 @@ export function CellVoicePanel({
 
   return (
     <div
-      className="group/voice relative rounded-xl border bg-card/50 p-2.5 transition-colors hover:border-primary/30"
+      className="group/voice relative rounded-lg border bg-card/50 p-2.5 transition-colors hover:border-primary/30"
       dir="ltr"
     >
       {/* Voiced: waveform with a centered play/pause + running time. Hover the

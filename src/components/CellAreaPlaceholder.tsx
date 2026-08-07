@@ -89,7 +89,7 @@ function SkeletonRows() {
       <div className="flex h-full min-h-64 flex-col">
         <div className="flex flex-1 flex-col gap-2 overflow-hidden p-4">
           {Array.from({ length: 8 }).map((_, i) => (
-            <div key={i} className={`bg-card grid ${GRID_COLS} items-start gap-3 rounded-2xl px-4 py-3`}>
+            <div key={i} className={`bg-card grid ${GRID_COLS} items-start gap-3 rounded-lg px-4 py-3`}>
               <Skeleton className="h-6 w-10" />
               <Skeleton className="h-16 w-full" />
               <Skeleton className="h-16 w-full" />

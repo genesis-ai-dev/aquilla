@@ -282,9 +282,9 @@ export function TeamsList() {
             />
           ) : loading ? (
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              <div className="h-20 animate-pulse rounded-2xl border bg-card" />
-              <div className="h-20 animate-pulse rounded-2xl border bg-card" />
-              <div className="h-20 animate-pulse rounded-2xl border bg-card" />
+              <div className="h-20 animate-pulse rounded-lg border bg-card" />
+              <div className="h-20 animate-pulse rounded-lg border bg-card" />
+              <div className="h-20 animate-pulse rounded-lg border bg-card" />
             </div>
           ) : teams.length === 0 ? (
             <EmptyState
@@ -324,7 +324,7 @@ export function TeamsList() {
                 <button
                   key={t.id}
                   onClick={() => activeOrgId != null && navigate(orgPath(activeOrgId, `/teams/${t.id}`))}
-                  className="rounded-2xl border bg-card p-4 text-left transition-colors hover:bg-accent/40"
+                  className="rounded-lg border bg-card p-4 text-left transition-colors hover:bg-accent/40"
                 >
                   <TeamWithAvatar name={t.name} className="w-full" />
                   <span className="mt-1 block text-sm tabular-nums text-muted-foreground">

@@ -118,7 +118,7 @@ interface FileRollup {
 function ProjectOverviewSkeleton() {
   return (
     <div className="max-w-5xl space-y-4">
-      <div className="rounded-xl border bg-card shadow-sm p-6 space-y-2">
+      <div className="rounded-lg border bg-card shadow-sm p-6 space-y-2">
         <div className="flex items-center gap-2">
           <Skeleton className="h-6 w-48" />
           <Skeleton className="h-5 w-16 rounded-md" />
@@ -126,7 +126,7 @@ function ProjectOverviewSkeleton() {
         <Skeleton className="h-4 w-32" />
         <Skeleton className="h-4 w-20" />
       </div>
-      <div className="rounded-xl border bg-card shadow-sm p-5 space-y-4">
+      <div className="rounded-lg border bg-card shadow-sm p-5 space-y-4">
         <Skeleton className="h-3 w-20" />
         <div className="flex flex-wrap gap-3">
           {Array.from({ length: 3 }).map((_, i) => (
@@ -139,7 +139,7 @@ function ProjectOverviewSkeleton() {
           ))}
         </div>
       </div>
-      <div className="rounded-xl border bg-card shadow-sm p-5 space-y-3">
+      <div className="rounded-lg border bg-card shadow-sm p-5 space-y-3">
         <Skeleton className="h-3 w-16" />
         {Array.from({ length: 4 }).map((_, i) => (
           <div key={i} className="flex items-center gap-3">
@@ -149,7 +149,7 @@ function ProjectOverviewSkeleton() {
           </div>
         ))}
       </div>
-      <div className="rounded-xl border bg-card shadow-sm p-5 space-y-2">
+      <div className="rounded-lg border bg-card shadow-sm p-5 space-y-2">
         <Skeleton className="h-3 w-20" />
         <Skeleton className="h-4 w-40" />
       </div>
@@ -963,7 +963,7 @@ export function ProjectOverview() {
             ) : (
               <div className="max-w-5xl space-y-4">
               {/* ── Header card ── */}
-              <div className="rounded-xl border bg-card p-6">
+              <div className="rounded-lg border bg-card p-6">
                 <div className="flex items-start justify-between gap-4">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
@@ -1091,7 +1091,7 @@ export function ProjectOverview() {
                * what's missing.
                */}
               {audio && audio.totalCells > 0 && (
-                <div className="rounded-xl border bg-card p-5" data-testid="progress-card">
+                <div className="rounded-lg border bg-card p-5" data-testid="progress-card">
                   <div className="mb-3 flex items-center justify-between gap-2">
                     <h2 className="text-xs font-semibold text-muted-foreground">Progress</h2>
                     <div className="flex items-center gap-1.5">
@@ -1341,7 +1341,7 @@ export function ProjectOverview() {
                 }
 
                 return (
-                  <div className="rounded-xl border bg-card p-5">
+                  <div className="rounded-lg border bg-card p-5">
                     <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                       <h2 className="text-xs font-semibold text-muted-foreground">
                         Files {!showAllFiles && hidden > 0 ? `(top ${FILE_ROW_CAP} of ${sorted.length})` : `(${sorted.length})`}
@@ -1538,7 +1538,7 @@ export function ProjectOverview() {
               })()}
 
               {/* ── Deadline card ── */}
-              <div className="rounded-xl border bg-card p-5">
+              <div className="rounded-lg border bg-card p-5">
                 <h2 className="mb-2 text-xs font-semibold text-muted-foreground">Deadline</h2>
                 <div className="flex flex-wrap items-center gap-2 text-sm">
                   {audio?.deadlineAt ? (
@@ -1622,7 +1622,7 @@ export function ProjectOverview() {
               </Dialog>
 
               {/* ── Project manager card (AQU-507) ── */}
-              <div className="rounded-xl border bg-card p-5">
+              <div className="rounded-lg border bg-card p-5">
                 <h2 className="mb-2 text-xs font-semibold tracking-wide text-muted-foreground">Project manager</h2>
                 <div className="flex flex-wrap items-center gap-2 text-sm">
                   {pm ? (
@@ -1738,7 +1738,7 @@ export function ProjectOverview() {
                 viewerRoleLevel={projectRoleLevel}
                 ready={orgSettings.hasFetched}
               >
-                <div className={cn("relative rounded-xl border bg-card p-5", sectionTintClass(orgSettings.memberProgressViewMinRole))}>
+                <div className={cn("relative rounded-lg border bg-card p-5", sectionTintClass(orgSettings.memberProgressViewMinRole))}>
                   <div className="mb-3 flex items-center justify-between gap-2">
                     <h2 className="text-xs font-semibold text-muted-foreground">Team</h2>
                     <SectionVisibilityBadge
@@ -1835,7 +1835,7 @@ export function ProjectOverview() {
                   ready={orgSettings.hasFetched}
                 >
                   <div
-                    className={cn("relative rounded-xl border bg-card p-5", sectionTintClass(orgSettings.rosterViewMinRole))}
+                    className={cn("relative rounded-lg border bg-card p-5", sectionTintClass(orgSettings.rosterViewMinRole))}
                     data-testid="overview-members-card"
                   >
                     <div className="mb-3 flex items-center justify-between gap-2">

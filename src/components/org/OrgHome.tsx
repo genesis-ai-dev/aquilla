@@ -70,7 +70,7 @@ function DashboardRowTemplate() {
 
 function DashboardPanelTemplate({ rows }: { rows: number }) {
   return (
-    <section className="overflow-hidden rounded-2xl border bg-card">
+    <section className="overflow-hidden rounded-lg border bg-card">
       <div className="flex items-center justify-between gap-4 border-b px-4 py-3">
         <div className="flex flex-col gap-2">
           <Skeleton className="h-5 w-28" />
@@ -125,7 +125,7 @@ function OrgHomeLoadingTemplate() {
                 {Array.from({ length: 6 }).map((_, index) => (
                   <div
                     key={index}
-                    className="flex h-[88px] flex-col gap-2 rounded-2xl border bg-card px-5 py-4"
+                    className="flex h-[88px] flex-col gap-2 rounded-lg border bg-card px-5 py-4"
                   >
                     <Skeleton className="h-6 w-12" />
                     <Skeleton className="h-3 w-20" />
@@ -760,7 +760,7 @@ export function OrgHome() {
               {pendingInvites.length > 0 && (
                 <section data-testid="pending-invitations" className="mb-6 space-y-2">
                   <h2 className="text-sm font-medium text-muted-foreground">Pending invitations</h2>
-                  <div className="rounded-2xl border divide-y">
+                  <div className="rounded-lg border divide-y">
                     {pendingInvites.map((inv) => (
                       <div key={inv.token} className="flex flex-wrap items-center gap-3 p-4">
                         <div className="flex-1 min-w-0">
@@ -971,7 +971,7 @@ export function OrgHome() {
               {pendingInvites.length > 0 && (
                 <section data-testid="pending-invitations" className="space-y-2">
                   <h2 className="text-sm font-medium text-muted-foreground">Pending invitations</h2>
-                  <div className="rounded-2xl border divide-y">
+                  <div className="rounded-lg border divide-y">
                     {pendingInvites.map((inv) => (
                       <div key={inv.token} className="flex flex-wrap items-center gap-3 p-4">
                         <div className="flex-1 min-w-0">
@@ -1025,7 +1025,7 @@ export function OrgHome() {
                   <div className="grid items-start gap-6 lg:grid-cols-[minmax(14rem,1fr)_minmax(30rem,2fr)]">
                     <section
                       data-testid="organizations-panel"
-                      className="self-start overflow-hidden rounded-2xl border bg-card lg:flex lg:max-h-[clamp(16rem,calc(100dvh-24rem),42rem)] lg:flex-col xl:max-h-[clamp(20rem,calc(100dvh-18rem),42rem)]"
+                      className="self-start overflow-hidden rounded-lg border bg-card lg:flex lg:max-h-[clamp(16rem,calc(100dvh-24rem),42rem)] lg:flex-col xl:max-h-[clamp(20rem,calc(100dvh-18rem),42rem)]"
                     >
                       <div className="shrink-0 flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
                         <div>
@@ -1099,7 +1099,7 @@ export function OrgHome() {
 
                     <section
                       data-testid="projects-panel"
-                      className="@container/projects-panel min-w-0 overflow-hidden rounded-2xl border bg-card lg:flex lg:max-h-[clamp(16rem,calc(100dvh-24rem),42rem)] lg:flex-col xl:max-h-[clamp(20rem,calc(100dvh-18rem),42rem)]"
+                      className="@container/projects-panel min-w-0 overflow-hidden rounded-lg border bg-card lg:flex lg:max-h-[clamp(16rem,calc(100dvh-24rem),42rem)] lg:flex-col xl:max-h-[clamp(20rem,calc(100dvh-18rem),42rem)]"
                     >
                       <div className="shrink-0 flex flex-col gap-2 border-b px-4 py-2.5">
                         <div className="flex flex-wrap items-start justify-between gap-3">
@@ -1291,7 +1291,7 @@ export function OrgHome() {
                 >
                   <div
                     className={cn(
-                      "relative rounded-2xl",
+                      "relative rounded-lg",
                       sectionTintClass(orgSettings.memberProgressViewMinRole),
                     )}
                     data-testid="section-team-workload"
@@ -1319,7 +1319,7 @@ export function OrgHome() {
                 >
                   <div
                     className={cn(
-                      "relative rounded-2xl",
+                      "relative rounded-lg",
                       sectionTintClass(orgSettings.memberProgressViewMinRole),
                     )}
                     data-testid="section-team-usage"
@@ -1342,7 +1342,7 @@ export function OrgHome() {
               {jwt && !isAllOrgs && activeOrgId != null && (
                 <SectionVisibilityGate minRole={ROLE.MAINTAINER} viewerRoleLevel={activeOrg?.role?.level ?? null}>
                   <div
-                    className={cn("relative rounded-2xl", sectionTintClass(ROLE.MAINTAINER))}
+                    className={cn("relative rounded-lg", sectionTintClass(ROLE.MAINTAINER))}
                     data-testid="section-credits"
                   >
                     <CreditsPanel

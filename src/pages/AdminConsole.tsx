@@ -238,13 +238,13 @@ function ConsoleSkeleton() {
         <Skeleton className="h-8 w-72 rounded-md" />
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
           {Array.from({ length: 6 }).map((_, i) => (
-            <Skeleton key={i} className="h-20 rounded-2xl border bg-card" />
+            <Skeleton key={i} className="h-20 rounded-lg border bg-card" />
           ))}
         </div>
-        <Skeleton className="h-48 rounded-2xl border bg-card" />
+        <Skeleton className="h-48 rounded-lg border bg-card" />
         <div className="grid gap-6 lg:grid-cols-2">
-          <Skeleton className="h-40 rounded-2xl border bg-card" />
-          <Skeleton className="h-40 rounded-2xl border bg-card" />
+          <Skeleton className="h-40 rounded-lg border bg-card" />
+          <Skeleton className="h-40 rounded-lg border bg-card" />
         </div>
       </div>
     </LoadingTemplate>

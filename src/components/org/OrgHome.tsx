@@ -1137,6 +1137,7 @@ export function OrgHome() {
                               }}
                               placeholder="Filter projects…"
                               aria-label="Filter projects by name"
+                              autoComplete="off"
                               autoCorrect="off"
                               autoCapitalize="none"
                               spellCheck={false}

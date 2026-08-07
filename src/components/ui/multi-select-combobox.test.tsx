@@ -57,6 +57,17 @@ function trigger() {
 }
 
 describe("MultiSelectCombobox", () => {
+  it("defaults contact autocomplete off on the popup search field", async () => {
+    render(<Harness />)
+
+    fireEvent.click(trigger())
+    const search = await screen.findByRole("combobox", { name: "Search fruit" })
+    expect(search).toHaveAttribute("autocomplete", "off")
+    expect(search).toHaveAttribute("autocorrect", "off")
+    expect(search).toHaveAttribute("autocapitalize", "none")
+    expect(search).toHaveAttribute("spellcheck", "false")
+  })
+
   it("shows the placeholder while empty", () => {
     render(<Harness />)
     expect(trigger().textContent).toContain("Pick fruit…")

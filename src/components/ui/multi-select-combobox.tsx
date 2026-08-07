@@ -314,6 +314,10 @@ function MultiSelectComboboxContent({
 function MultiSelectComboboxSearch({
   className,
   showSeparator = true,
+  autoComplete = "off",
+  autoCorrect = "off",
+  autoCapitalize = "none",
+  spellCheck = false,
   ...props
 }: React.ComponentProps<typeof ComboboxInput> & { showSeparator?: boolean }) {
   const { disabled } = useMultiSelectCombobox()
@@ -327,6 +331,10 @@ function MultiSelectComboboxSearch({
         size={1}
         className={cn(POPUP_SEARCH_CLASS, className)}
         {...props}
+        autoComplete={autoComplete}
+        autoCorrect={autoCorrect}
+        autoCapitalize={autoCapitalize}
+        spellCheck={spellCheck}
       />
       {showSeparator && <ComboboxSeparator className="mx-0 my-0" />}
     </>

@@ -54,6 +54,9 @@ function ComboboxInput({
   showTrigger = true,
   showClear = false,
   showSearchIcon = false,
+  // Pickers/filters — not contact or credential entry. Default off so
+  // Chrome/Safari don't inject saved contacts into member/org search.
+  autoComplete = "off",
   ...props
 }: ComboboxPrimitive.Input.Props & {
   showTrigger?: boolean
@@ -70,6 +73,7 @@ function ComboboxInput({
       <ComboboxPrimitive.Input
         render={<InputGroupInput disabled={disabled} />}
         {...props}
+        autoComplete={autoComplete}
       />
       <InputGroupAddon align="inline-end">
         {showTrigger && (
@@ -276,6 +280,7 @@ function ComboboxChip({
 
 function ComboboxChipsInput({
   className,
+  autoComplete = "off",
   ...props
 }: ComboboxPrimitive.Input.Props) {
   return (
@@ -283,6 +288,7 @@ function ComboboxChipsInput({
       data-slot="combobox-chip-input"
       className={cn("min-w-16 flex-1 outline-none", className)}
       {...props}
+      autoComplete={autoComplete}
     />
   )
 }

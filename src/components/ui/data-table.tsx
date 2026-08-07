@@ -169,6 +169,10 @@ function DataTable<TData, TValue>({
                 value={globalFilter}
                 onChange={(event) => setGlobalFilter(event.target.value)}
                 aria-label={searchPlaceholder}
+                autoComplete="off"
+                autoCorrect="off"
+                autoCapitalize="none"
+                spellCheck={false}
               />
             </InputGroup>
           ) : null}

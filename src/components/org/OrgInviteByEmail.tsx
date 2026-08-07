@@ -84,6 +84,8 @@ export function OrgInviteByEmail({ orgId }: { orgId: number }) {
           <Input
             id="org-invite-email"
             type="email"
+            inputMode="email"
+            autoComplete="off"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             placeholder="teammate@example.com (optional)"

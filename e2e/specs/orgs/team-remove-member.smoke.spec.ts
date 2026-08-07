@@ -28,11 +28,12 @@ test("team remove member button removes the member from the team", async ({ alic
   await createBtn.click()
 
   const teamName = `RemoveMember ${Date.now()}`
-  const nameInput = alice.locator('input[placeholder*="name"], input[type="text"]').first()
+  const createDialog = alice.getByRole("dialog")
+  await expect(createDialog).toBeVisible({ timeout: 3_000 })
+  const nameInput = createDialog.getByLabel(/^Team name$/i)
   await expect(nameInput).toBeVisible({ timeout: 3_000 })
   await nameInput.fill(teamName)
-  const saveBtn = alice.getByRole("button", { name: /Save|Create|Confirm/i }).first()
-  await saveBtn.click()
+  await createDialog.getByRole("button", { name: /^Create$/i }).click()
 
   // Creating a team auto-navigates to its detail page (/teams/:id) — no click
   // needed. (A team-name locator would resolve to the breadcrumb "current page"
@@ -52,7 +53,9 @@ test("team remove member button removes the member from the team", async ({ alic
   const memberSelect = dialog.getByRole("combobox", { name: "Members to add" })
   await expect(memberSelect).toBeVisible({ timeout: 3_000 })
   await memberSelect.click()
-  await alice.getByRole("checkbox", { name: "bob" }).check()
+  const bobOption = alice.getByRole("option", { name: "bob" })
+  await expect(bobOption).toBeVisible({ timeout: 3_000 })
+  await bobOption.click()
   const confirmAdd = dialog.getByRole("button", { name: /^Add$/i })
   await expect(confirmAdd).toBeEnabled({ timeout: 3_000 })
   await confirmAdd.click()

@@ -27,10 +27,12 @@ test("team member role select changes member role", async ({ alice }) => {
   await createBtn.click()
 
   const teamName = `RoleTeam ${Date.now()}`
-  const nameInput = alice.locator('input[placeholder*="name"], input[type="text"]').first()
+  const createDialog = alice.getByRole("dialog")
+  await expect(createDialog).toBeVisible({ timeout: 3_000 })
+  const nameInput = createDialog.getByLabel(/^Team name$/i)
   await expect(nameInput).toBeVisible({ timeout: 3_000 })
   await nameInput.fill(teamName)
-  await alice.getByRole("button", { name: /Save|Create|Confirm/i }).first().click()
+  await createDialog.getByRole("button", { name: /^Create$/i }).click()
 
   await alice.waitForURL(/\/teams\/\d+/, { timeout: 10_000 })
   await expect(alice.getByRole("heading", { name: teamName })).toBeVisible({ timeout: 5_000 })
@@ -48,7 +50,9 @@ test("team member role select changes member role", async ({ alice }) => {
   const memberSelect = addDialog.getByRole("combobox", { name: "Members to add" })
   await expect(memberSelect).toBeVisible({ timeout: 3_000 })
   await memberSelect.click()
-  await alice.getByRole("checkbox", { name: "bob" }).check()
+  const bobOption = alice.getByRole("option", { name: "bob" })
+  await expect(bobOption).toBeVisible({ timeout: 3_000 })
+  await bobOption.click()
 
   const addBtn = addDialog.getByRole("button", { name: /^Add$/i })
   await expect(addBtn).toBeEnabled({ timeout: 3_000 })

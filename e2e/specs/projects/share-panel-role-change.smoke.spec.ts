@@ -86,7 +86,11 @@ test("share panel members tab role select changes member's role", async ({ alice
   await expect(listbox).toBeVisible({ timeout: 3_000 })
   const otherOption = alice.getByRole("option").filter({ hasNotText: currentRole }).first()
   await expect(otherOption).toBeVisible({ timeout: 10_000 })
-  const newRole = (await otherOption.textContent())?.trim() ?? ""
+  // Option rows include the capability blurb; the closed trigger only shows the role name.
+  const newRole =
+    (await otherOption.locator(".font-medium").first().textContent())?.trim() ||
+    ((await otherOption.textContent()) ?? "").trim().split(/\s{2,}|\n/)[0]?.trim() ||
+    ""
   await otherOption.click()
   await expect(listbox).toBeHidden({ timeout: 3_000 })
   await expect(roleSelect).toContainText(new RegExp(escapeRegExp(newRole), "i"), { timeout: 3_000 })

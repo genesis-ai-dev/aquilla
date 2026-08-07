@@ -22,13 +22,14 @@ test("project create dialog shows validation errors when required fields are mis
   await expect(dialog.getByText(/source language is required/i)).toBeVisible({ timeout: 2_000 })
   await expect(dialog.getByText(/target language is required/i)).toBeVisible({ timeout: 2_000 })
 
-  const nameInput = dialog.locator("#name")
+  const nameInput = dialog.locator("#project-create-title")
   await nameInput.fill("My Test Project")
-  await dialog.locator("#source").fill("en")
+  await dialog.locator("#project-create-source").fill("en")
   await createBtn.click()
   await expect(dialog.getByText(/target language is required/i)).toBeVisible({ timeout: 2_000 })
 
-  await dialog.locator("#target").fill("fr")
+  // Self-contained shape uses chips; an uncommitted draft still counts as primary.
+  await dialog.locator("#project-create-target").fill("fr")
   await expect(createBtn).toBeEnabled({ timeout: 2_000 })
   await expect(dialog.getByText(/target language is required/i)).toHaveCount(0)
 

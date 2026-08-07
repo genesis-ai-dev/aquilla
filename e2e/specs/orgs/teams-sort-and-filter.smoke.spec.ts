@@ -20,10 +20,12 @@ test("teams list filter and sort controls work", async ({ alice }) => {
   await createBtn.click()
 
   const teamName = `SortFilter ${Date.now()}`
-  const nameInput = alice.locator('input[type="text"], input:not([type])').first()
+  const dialog = alice.getByRole("dialog")
+  await expect(dialog).toBeVisible({ timeout: 3_000 })
+  const nameInput = dialog.getByLabel(/^Team name$/i)
   await expect(nameInput).toBeVisible({ timeout: 3_000 })
   await nameInput.fill(teamName)
-  await alice.getByRole("button", { name: /Create|Save/i }).first().click()
+  await dialog.getByRole("button", { name: /^Create$/i }).click()
 
   // Creating a team navigates straight to its detail page (/teams/:id);
   // return to the list where the search/sort controls live.

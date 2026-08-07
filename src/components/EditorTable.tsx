@@ -5442,7 +5442,9 @@ function EditorRow({
             className={cn(
               // The showcase node IS the text surface so it fills the whole
               // source column. pr-7 clears the floating pencil.
-              "relative flex h-full min-h-[40px] flex-col rounded-lg px-2 py-1.5 pr-7 transition-[colors,opacity]",
+              // select-text: global chrome disables selection; source must stay
+              // selectable for add-to-termbase / Ask AI from selection.
+              "relative flex h-full min-h-[40px] flex-col rounded-lg px-2 py-1.5 pr-7 select-text transition-[colors,opacity]",
               // Match the target well — same muted fill + ring (not a darker
               // primary-tinted edit chrome).
               "focus-within:bg-muted focus-within:ring-1 focus-within:ring-ring/40 focus-within:ring-inset",

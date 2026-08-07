@@ -181,10 +181,12 @@ test("org overview renders rollup stats and project filter", async ({ alice }) =
 
   const deadlineTrigger = projectRow.getByTestId("project-table-deadline-trigger")
   await expect(deadlineTrigger).toBeVisible()
+  // Status chip keeps "Overdue" as sr-only label; tooltip is the calendar due date.
+  await expect(projectRow.getByTestId("project-table-deadline-status")).toContainText("Overdue")
   await deadlineTrigger.hover()
   const deadlineTooltip = alice.getByRole("tooltip")
-  await expect(deadlineTooltip).toContainText("Overdue", { timeout: 250 })
-  await expect(deadlineTooltip).toContainText("Due", { timeout: 250 })
+  await expect(deadlineTooltip).toContainText("Due", { timeout: 2_000 })
+  await expect(deadlineTooltip).toContainText(/\d{4}/, { timeout: 250 })
 
   const organizationsBox = await alice.getByTestId("organizations-panel").boundingBox()
   const projectsBox = await alice.getByTestId("projects-panel").boundingBox()

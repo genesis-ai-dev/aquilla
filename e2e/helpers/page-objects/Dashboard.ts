@@ -30,7 +30,8 @@ export class Dashboard {
   }
 
   organizationSwitcher(): Locator {
-    return this.page.getByRole("button", { name: /^Organization switcher:/i })
+    // OrgSwitcher is a Select trigger (role=combobox), not a plain button.
+    return this.page.getByRole("combobox", { name: /^Organization switcher:/i })
   }
 
   async openOrganizationSwitcher(): Promise<Locator> {

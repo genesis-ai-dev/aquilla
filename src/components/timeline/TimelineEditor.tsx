@@ -26,17 +26,14 @@ import { TimelineRuler } from "./TimelineRuler"
 import { TimelineLane } from "./TimelineLane"
 import { TargetAudioLane, type TargetAudioItem } from "./TargetAudioLane"
 import { TimelinePlayhead } from "./TimelinePlayhead"
-import { TimelineCellDetail, type TimelineDetailActions } from "./TimelineCellDetail"
+import { TimelineChipStrip } from "./TimelineChipStrip"
 import { useTimelineClock } from "./useTimelineClock"
 import { resolveEntryAudio, useClipAudioMissing } from "./useClipAudioMissing"
 import type { CellData } from "@/hooks/useCells"
-import type { Concept } from "@/lib/terminology/types"
-import { AUDIO_TIMING_MODE_LABELS, type AudioTimingMode, type ProjectRecord, type RuleInfraction } from "@/lib/parsers/types"
+import { AUDIO_TIMING_MODE_LABELS, type AudioTimingMode, type ProjectRecord } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
 import type { CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
 import { AppTooltip } from "@/components/ui/tooltip"
-
-export type { TimelineDetailActions } from "./TimelineCellDetail"
 
 export interface TimelineEditorProps {
   cells: CellData[]
@@ -57,22 +54,17 @@ export interface TimelineEditorProps {
    *  paused→resume, idle→start). The editor claims the app-wide audio
    *  shortcut while mounted so a last-played single cell can't steal Space. */
   onTogglePlay?(): void
-  /** `valueHtml` (AQU-659): the detail pane runs the shared editor now, so a
-   *  commit can carry rich text alongside the plain value. */
-  onCommitTarget(cellId: string, value: string, valueHtml?: string): void
   /** When provided, shows a "Link video" control. null clears the link. */
   onLinkVideo?(url: string | null): void
-  /** AQU-646: transcribe a media clip's audio into source text (detail pane). */
-  onTranscribe?(cell: CellData): void
   /** AQU-646: navigate audio playback to a file-timeline second — ruler
    *  clicks and clean card clicks route through this (the workspace decides
    *  whether to jump the live queue or cue a paused one). */
   onSeekToTime?(sec: number): void
-  /** AQU-646 round 3: the text view's cell actions for the detail pane
-   *  (AI translate, comments, history, record, footnote…). Pass-through. */
-  detailActions?: TimelineDetailActions
-  /** AQU-646 round 3 (text→media trace): seeds selection on mount — opens the
-   *  detail pane, centers the track on the clip, and cues playback (paused)
+  /** 2026-08-07: the empty-target chips' hover record button (the one
+   *  detail-pane action that lives on the lanes, not in the table below). */
+  onOpenRecording?(cellId: string): void
+  /** AQU-646 round 3 (text→media trace): seeds selection on mount — fills the
+   *  chip strip, centers the track on the clip, and cues playback (paused)
    *  at its start via onSeekToTime, same semantics as a clean card click. */
   initialSelectedCellId?: string | null
   /** AQU-646 round 3 (media→text trace): mirrors every selection change up. */
@@ -85,12 +77,8 @@ export interface TimelineEditorProps {
    *  navigates there (Audio media group). Absent (focused tests) = the note
    *  renders as plain text with no link. */
   onOpenTimingSettings?(): void
-  /** Forwarded to the clip detail pane so it can resolve/stream source audio. */
+  /** Needed by the missing-audio probe behind the chip strip's badge. */
   project?: ProjectRecord
-  /** Active managed terminology concepts for the detail-pane editor's chips. */
-  terminologyConcepts?: Concept[]
-  /** Per-cell rule infractions (keyed by cell id) for the detail-pane blots. */
-  infractions?: Map<string, RuleInfraction[]>
   /** Fires when the highlighted section changes so a sibling transport (the
    *  bottom playback bar) can start playback from the selected section. */
   onSelectCell?(cellId: string | null): void
@@ -155,18 +143,14 @@ export function TimelineEditor({
   onRetimeTarget,
   onTrimTarget,
   onTogglePlay,
-  onCommitTarget,
   onLinkVideo,
-  onTranscribe,
   onSeekToTime,
-  detailActions,
+  onOpenRecording,
   initialSelectedCellId,
   onSelectedCellChange,
   timingMode = "dubbing",
   onOpenTimingSettings,
   project,
-  terminologyConcepts,
-  infractions,
   onSelectCell,
   session,
   audioByCellId,
@@ -359,9 +343,25 @@ export function TimelineEditor({
   // Before the scroll container is measured (viewportPx 0), fall back to the
   // full track so every card renders — correct, and keeps tests deterministic.
   const viewEndSec = pxToSec(scrollLeft + (viewportPx || trackWidthPx), pxPerSec) + overscanSec
-  const selectedCell = useMemo(
-    () => cells.find((c) => c.id === selectedId) ?? null,
-    [cells, selectedId],
+  // 2026-08-07: the chip strip describes the CURRENT chip — an explicit
+  // selection wins; with nothing selected it follows the cell the queue is
+  // sounding (or holds while paused); after the queue goes idle it keeps the
+  // last one so the strip doesn't blank out mid-thought. Same cellIdSet guard
+  // as the playhead: a stale singleton queue never fills this file's strip.
+  const soundingId =
+    (queueState.kind === "playing" || queueState.kind === "paused" || queueState.kind === "loading") &&
+    cellIdSet.has(queueState.cellId)
+      ? queueState.cellId
+      : null
+  const [lastTouchedId, setLastTouchedId] = useState<string | null>(null)
+  useEffect(() => {
+    const id = selectedId ?? soundingId
+    if (id) setLastTouchedId(id)
+  }, [selectedId, soundingId])
+  const currentCellId = selectedId ?? soundingId ?? lastTouchedId
+  const currentCell = useMemo(
+    () => cells.find((c) => c.id === currentCellId) ?? null,
+    [cells, currentCellId],
   )
   // Meeting note (2026-08-05): the detail readout carries the dub's own
   // numbers — its range, its duration, and ALWAYS the end-to-end difference
@@ -369,28 +369,28 @@ export function TimelineEditor({
   // difference can be intentional) — chip-vs-chip OVERLAP is the warning, a
   // separate number computed with the same trespasser gating the lane uses.
   // Dubbing only, and never from a guessed width (SUB-48).
-  const selectedChipStats = useMemo(() => {
-    if (!selectedCell) return null
+  const currentChipStats = useMemo(() => {
+    if (!currentCell) return null
     // Free timing (2026-08-06, Sam): the file-clock RANGES are meaningless
     // against the re-flowed track — the only honest numbers are durations.
     // Src = the original's window length, Tgt = the dub's measured length.
     if (audioFirst) {
-      const { startTime, endTime } = selectedCell
+      const { startTime, endTime } = currentCell
       const srcDurationSec =
         typeof startTime === "number" && typeof endTime === "number" ? endTime - startTime : null
-      const item = targetItems.find((t) => t.cell.id === selectedCell.id)
+      const item = targetItems.find((t) => t.cell.id === currentCell.id)
       const geom = item ? layout.targetGeom(item.cell, item.cell.attachments?.[item.audioId]) : null
       const tgtDurationSec = geom && !geom.usingFallback ? geom.end - geom.start : null
       if (srcDurationSec == null && tgtDurationSec == null) return null
       return { kind: "free" as const, srcDurationSec, tgtDurationSec }
     }
-    const i = targetItems.findIndex((t) => t.cell.id === selectedCell.id)
+    const i = targetItems.findIndex((t) => t.cell.id === currentCell.id)
     if (i < 0) return null
     const geomOf = (t: (typeof targetItems)[number] | undefined) =>
       t ? layout.targetGeom(t.cell, t.cell.attachments?.[t.audioId]) : null
     const geom = geomOf(targetItems[i])
     if (!geom || geom.usingFallback) return null
-    const { startTime, endTime } = selectedCell
+    const { startTime, endTime } = currentCell
     const prev = geomOf(targetItems[i - 1])
     const next = geomOf(targetItems[i + 1])
     const { headSec, tailSec } = chipOverlaps(
@@ -416,13 +416,13 @@ export function TimelineEditor({
       endDiffSec: typeof endTime === "number" ? endTime - geom.end : null,
       overlapSec: overlapSec > 0 ? overlapSec : null,
     }
-  }, [audioFirst, selectedCell, targetItems, layout])
-  const selectedClipAudio = useMemo(
-    () => (selectedId ? resolveEntryAudio(audioByCellId?.get(selectedId)) : null),
-    [audioByCellId, selectedId],
+  }, [audioFirst, currentCell, targetItems, layout])
+  const currentClipAudio = useMemo(
+    () => (currentCellId ? resolveEntryAudio(audioByCellId?.get(currentCellId)) : null),
+    [audioByCellId, currentCellId],
   )
   const audioMissing = useClipAudioMissing({
-    audio: selectedClipAudio,
+    audio: currentClipAudio,
     projectId: project?.id ?? null,
     fileId,
     session: session ?? null,
@@ -866,7 +866,7 @@ export function TimelineEditor({
               // is nothing to drag it to. Trimming stays — and re-flows.
               onRetimeTarget={audioFirst ? undefined : onRetimeTarget}
               onTrimTarget={onTrimTarget}
-              onOpenRecording={detailActions?.onOpenRecording}
+              onOpenRecording={onOpenRecording}
               emptyCells={emptyTargets}
             />
             {untimed.length > 0 && (
@@ -897,18 +897,7 @@ export function TimelineEditor({
         </div>
       </div>
 
-      <TimelineCellDetail
-        cell={selectedCell}
-        chipStats={selectedChipStats}
-        editable={editable}
-        onCommitTarget={onCommitTarget}
-        onTranscribe={onTranscribe}
-        detailActions={detailActions}
-        project={project}
-        terminologyConcepts={terminologyConcepts}
-        infractions={selectedCell ? infractions?.get(selectedCell.id) : undefined}
-        audioMissing={audioMissing}
-      />
+      <TimelineChipStrip cell={currentCell} chipStats={currentChipStats} audioMissing={audioMissing} />
     </div>
   )
 }

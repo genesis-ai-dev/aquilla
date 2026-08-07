@@ -10,22 +10,15 @@ GitHub-hosted runners are not used during ordinary pull-request or push activity
 
 ## Control-plane state
 
-Connect the six environment-specific Workers below to the
+Keep the three production Workers (`aquilla-web`, `aquilla-identity`, and
+`aquilla-sync-worker`) disconnected from Git. Production builds and deployments
+are manual only.
+
+Connect only the three development Workers below to the
 `genesis-ai-dev/aquilla` repository. Use `/` as the root directory for every
 connection. Identity and sync compile shared source files outside their package
 directories, so package-only installs cannot resolve the repository dependencies
 used by those files.
-
-Production Workers build only `main`. Disable builds for non-production branches
-on all three; a development upload must never target a production Worker object.
-Their deploy commands upload route-free production versions, so live production
-promotion remains an explicit operator action.
-
-| Production Worker | Production branch | Build command | Deploy command |
-| --- | --- | --- | --- |
-| `aquilla-web` | `main` | `pnpm run build:workers-build` | `pnpm run deploy:workers-build` |
-| `aquilla-identity` | `main` | `pnpm run build:workers-build:identity` | `pnpm run deploy:workers-build:identity` |
-| `aquilla-sync-worker` | `main` | `pnpm run build:workers-build:sync` | `pnpm run deploy:workers-build:sync` |
 
 Development Workers build only `dev`. Disable builds for non-production branches
 on these connections too. Their deploy commands intentionally promote only the
@@ -38,9 +31,10 @@ development health checks.
 | `aquilla-dev-identity` | `dev` | `pnpm neon:status:dev && pnpm run build:workers-build:identity` | `cd auth-worker && node ../scripts/cloudflare-version-deploy.mjs identity development && node ../scripts/verify-live-environment.mjs development --surface=auth` |
 | `aquilla-sync-worker-dev` | `dev` | `pnpm neon:status:dev && pnpm run build:workers-build:sync` | `cd sync-worker && node ../scripts/cloudflare-version-deploy.mjs sync development && node ../scripts/verify-live-environment.mjs development --surface=sync` |
 
-The route-free production helpers require Cloudflare's `WORKERS_CI`,
-`WORKERS_CI_BRANCH`, and `WORKERS_CI_COMMIT_SHA` metadata before invoking
-Wrangler.
+The route-free Workers Builds helpers remain fail-closed repository primitives
+and require Cloudflare's `WORKERS_CI`, `WORKERS_CI_BRANCH`, and
+`WORKERS_CI_COMMIT_SHA` metadata before invoking Wrangler. They are not attached
+to the production Workers while production Git connections are disabled.
 
 The identity and sync build wrappers install their package-local lockfiles only
 after Cloudflare has installed the root lockfile. This two-level install is
@@ -54,15 +48,13 @@ application and must not be given a placeholder build command.
 
 | Connection | Branch | Binding profile | Operation | Changes live traffic |
 | --- | --- | --- | --- | --- |
-| Production Workers | `main` | `production` | upload and verify exact version | No |
+| Production Workers | Any | N/A | no automatic build; Git disconnected | No |
 | Development Workers | `dev` | `development` | verify, deploy exact version, and check health | Development only |
 | Any Worker | Feature/development/staging names | N/A | no automatic build | No |
 
-Missing build metadata fails closed on the production connections. No production
-Workers Builds path calls `wrangler deploy`, `wrangler versions deploy`, or
-`wrangler triggers deploy`. Production routes therefore remain controlled by the
-explicit operator commands below. Development auto-deployment is isolated to the
-three development Worker names and the `dev` branch.
+Production routes remain controlled by the explicit operator commands below.
+Development auto-deployment is isolated to the three development Worker names
+and the `dev` branch.
 
 ## Explicit deployments
 

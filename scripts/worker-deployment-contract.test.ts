@@ -295,12 +295,16 @@ describe("worker deployment environment contract", () => {
 
     const runbook = readRepoFile("docs", "runbooks", "cloudflare-workers-builds.md")
     expect(runbook).toContain("Use `/` as the root directory for every")
-    expect(runbook).toContain("`pnpm run build:workers-build:identity`")
-    expect(runbook).toContain("`pnpm run build:workers-build:sync`")
+    expect(runbook).toContain("pnpm run build:workers-build:identity")
+    expect(runbook).toContain("pnpm run build:workers-build:sync")
     expect(runbook).toContain("Disable builds for non-production branches")
     expect(runbook).toContain("`aquilla-web-development`")
     expect(runbook).toContain("`aquilla-dev-identity`")
     expect(runbook).toContain("`aquilla-sync-worker-dev`")
+    expect(runbook).toContain("production Workers (`aquilla-web`, `aquilla-identity`, and")
+    expect(runbook).toContain("disconnected from Git")
+    expect(runbook).toContain("Production builds and deployments")
+    expect(runbook).toContain("are manual only")
     expect(runbook).toContain("pull-request validation is manual")
     expect(runbook).not.toContain("enable non-production branch builds")
 

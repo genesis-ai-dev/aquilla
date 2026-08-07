@@ -2243,7 +2243,10 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           />
         </div>
       ) : isTimeOrdered ? (
-        audioLens && canEdit && onAttachMediaFile && onAttachMediaUrl ? (
+        // 2026-08-07: keyed on isTimeOrdered, not audioLens — the media lens
+        // renders this table in text mode under the timeline now, and an empty
+        // time-ordered file must still offer "attach a clip" there.
+        canEdit && onAttachMediaFile && onAttachMediaUrl ? (
           <div className="flex-1">
             <TimelineAddMedia onAttachFile={onAttachMediaFile} onAttachUrl={onAttachMediaUrl} />
           </div>
@@ -2252,13 +2255,9 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
             <EmptyState
               variant="inline"
               className="h-full py-10"
-              icon={audioLens ? Music : FileText}
-              title={audioLens ? "No media segments yet" : "No text segments in this file"}
-              description={
-                audioLens
-                  ? "Import an audio or video file, or record a take, to populate the media layer."
-                  : undefined
-              }
+              icon={Music}
+              title="No media segments yet"
+              description="Import an audio or video file, or record a take, to populate the media layer."
             />
           </div>
         )

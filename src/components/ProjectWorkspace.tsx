@@ -1260,9 +1260,19 @@ export function ProjectWorkspace() {
     () => (project ? { ...project, ttsSettings: tts.settings } : null),
     [project, tts.settings],
   )
+  // 2026-08-07: on a TIME-ORDERED file the Media lens stacks the timeline over
+  // the plain text table — audioLens (the per-row voice-panel mode) applies
+  // only to sequence-ordered voice-over files now. With it null, useCellIds
+  // serves the full time-sorted list (text mode) under the timeline.
+  const activeFileForLens = activeFileId ? project?.files.find((f) => f.id === activeFileId) : null
+  const activeFileTimeOrdered = Boolean(activeFileForLens && fileOrderedBy(activeFileForLens) === "time")
+  /** Media lens on a time-ordered file = the timeline STACKED over the always-
+   *  rendered text table (one EditorTable instance across both lenses — the
+   *  imperative ref, selection singleton, and presence claims stay single). */
+  const timelineStacked = lens === "audio" && activeFileTimeOrdered
   const audioLens = useMemo<AudioLensContext | null>(
     () =>
-      lens === "audio" && audioProject
+      lens === "audio" && audioProject && !activeFileTimeOrdered
         ? {
             voices: tts.voices,
             settings: tts.settings,
@@ -1298,8 +1308,8 @@ export function ProjectWorkspace() {
           }
         : null,
     [
-      lens, audioProject, tts.voices, tts.settings, tts.defaultVoiceId, tts.assignCells,
-      frontierSession, currentUsername, cellStore, refresh,
+      lens, audioProject, activeFileTimeOrdered, tts.voices, tts.settings, tts.defaultVoiceId,
+      tts.assignCells, frontierSession, currentUsername, cellStore, refresh,
     ],
   )
 
@@ -5600,36 +5610,43 @@ export function ProjectWorkspace() {
                 onSetupNeeded={handleAiSetupNeeded}
               />
             )}
-            {activeFileId && lens === "audio" && activeFile && fileOrderedBy(activeFile) === "time" ? (
+            {timelineStacked ? (
               <div className="relative flex shrink-0 items-center justify-end gap-3 border-b border-border bg-background/90 py-2 pl-2 pr-2 backdrop-blur-xl">
                 {fileChapterToolbar}
               </div>
             ) : null}
             <div className="min-h-0 flex-1">
-              {lens === "audio" && activeFile && fileOrderedBy(activeFile) === "time" ? (
-                <TimelineEditor
-                  cells={audioMergedCells}
-                  initialSelectedCellId={mediaTraceCellId}
-                  onSelectedCellChange={handleTimelineSelectedCell}
-                  coreMediaUrl={activeFile.coreMediaUrl ?? null}
-                  editable={!isReadOnly}
-                  fileId={activeFile.id}
-                  onRetimeSubtitle={handleRetimeSubtitle}
-                  onRetimeTarget={handleRetimeTarget}
-                  onTrimTarget={handleTrimTarget}
-                  onTogglePlay={handleTimelineTogglePlay}
-                  onLinkVideo={handleLinkVideo}
-                  onSeekToTime={handleTimelineSeekToTime}
-                  timingMode={timingMode}
-                  onOpenTimingSettings={() => navigate(`/project/${projectId}/settings/audio-media`)}
-                  onOpenRecording={handleOpenRecording}
-                  project={editorProject ?? project ?? undefined}
-                  onSelectCell={setTimelineSelectedCellId}
-                  session={frontierSession ?? null}
-                  audioByCellId={timelineAudioByCellId}
-                />
-              ) : (
+              {/* 2026-08-07: ONE EditorTable across both lenses; the media lens
+                  stacks the timeline above it. The provider wraps both so the
+                  table's row actions work identically in either position. */}
               <EditorActionsProvider value={editorActionsValue}>
+              <div className="flex h-full min-h-0 flex-col">
+              {timelineStacked && activeFile ? (
+                <div className="shrink-0">
+                  <TimelineEditor
+                    cells={audioMergedCells}
+                    initialSelectedCellId={mediaTraceCellId}
+                    onSelectedCellChange={handleTimelineSelectedCell}
+                    coreMediaUrl={activeFile.coreMediaUrl ?? null}
+                    editable={!isReadOnly}
+                    fileId={activeFile.id}
+                    onRetimeSubtitle={handleRetimeSubtitle}
+                    onRetimeTarget={handleRetimeTarget}
+                    onTrimTarget={handleTrimTarget}
+                    onTogglePlay={handleTimelineTogglePlay}
+                    onLinkVideo={handleLinkVideo}
+                    onSeekToTime={handleTimelineSeekToTime}
+                    timingMode={timingMode}
+                    onOpenTimingSettings={() => navigate(`/project/${projectId}/settings/audio-media`)}
+                    onOpenRecording={handleOpenRecording}
+                    project={editorProject ?? project ?? undefined}
+                    onSelectCell={setTimelineSelectedCellId}
+                    session={frontierSession ?? null}
+                    audioByCellId={timelineAudioByCellId}
+                  />
+                </div>
+              ) : null}
+              <div className="min-h-0 flex-1">
               <EditorTable
             ref={editorRef} project={editorProject ?? project} cellStore={cellStore}
             fileType={activeFile?.type}
@@ -5701,10 +5718,13 @@ export function ProjectWorkspace() {
             upstreamStaleCellIds={upstreamStaleCellIds}
             assignmentsByCellId={assignmentsByCellId}
             onVisibleRefChange={setTrackedCellRef}
-            chapterNavTrailing={fileChapterToolbar ?? undefined}
+            // Stacked mode already shows the toolbar in the media header row
+            // above the timeline — don't render it twice.
+            chapterNavTrailing={timelineStacked ? undefined : fileChapterToolbar ?? undefined}
           />
+              </div>
+              </div>
               </EditorActionsProvider>
-              )}
             </div>
             {footnoteViewMode === "tray" && (
               <FootnotesTray

@@ -647,7 +647,9 @@ export function TimelineEditor({
   }
 
   return (
-    <div data-testid="tl-editor" className="flex h-full min-h-0 flex-col">
+    // 2026-08-07: intrinsic height — the editor stacks above the text table
+    // in a shrink-0 wrapper now, so it must not claim the full column.
+    <div data-testid="tl-editor" className="flex min-h-0 flex-col">
       {/* toolbar */}
       <div className="flex items-center gap-2 border-b border-border bg-muted/30 px-3 py-1.5">
         <span className="text-xs font-medium text-muted-foreground">Timeline</span>

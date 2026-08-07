@@ -447,22 +447,36 @@ describe("OrgHome", () => {
     expect(within(projectsStat).getByText("2")).toBeInTheDocument()
   })
 
-  it("filters to stalled projects via the status chip", async () => {
+  it("filters to stalled projects via the status select", async () => {
     render(<MemoryRouter><OrgProvider><OrgHome /></OrgProvider></MemoryRouter>)
     await waitFor(() => expect(screen.getByText("New Testament")).toBeInTheDocument())
 
-    fireEvent.click(screen.getByRole("tab", { name: "Stalled" }))
+    fireEvent.click(screen.getByRole("combobox", { name: /project status filter/i }))
+    const option = await screen.findByRole("option", { name: "Stalled" })
+    fireEvent.pointerMove(option)
+    fireEvent.mouseMove(option)
+    fireEvent.keyDown(document.activeElement ?? option, { key: "Enter" })
+    await waitFor(() => {
+      expect(screen.queryByRole("listbox")).toBeNull()
+    })
 
     // Legacy Translation is 30 days stale; New Testament was just edited.
     expect(screen.getByText("Legacy Translation")).toBeInTheDocument()
     expect(screen.queryByText("New Testament")).not.toBeInTheDocument()
   })
 
-  it("filters to projects that need attention via the status chip", async () => {
+  it("filters to projects that need attention via the status select", async () => {
     render(<MemoryRouter><OrgProvider><OrgHome /></OrgProvider></MemoryRouter>)
     await waitFor(() => expect(screen.getByText("New Testament")).toBeInTheDocument())
 
-    fireEvent.click(screen.getByRole("tab", { name: "Needs attention" }))
+    fireEvent.click(screen.getByRole("combobox", { name: /project status filter/i }))
+    const option = await screen.findByRole("option", { name: "Needs attention" })
+    fireEvent.pointerMove(option)
+    fireEvent.mouseMove(option)
+    fireEvent.keyDown(document.activeElement ?? option, { key: "Enter" })
+    await waitFor(() => {
+      expect(screen.queryByRole("listbox")).toBeNull()
+    })
 
     // Legacy Translation is overdue + stalled; New Testament is healthy.
     expect(screen.getByText("Legacy Translation")).toBeInTheDocument()

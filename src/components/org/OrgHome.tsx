@@ -51,7 +51,6 @@ import {
   InputGroupInput,
 } from "@/components/ui/input-group"
 import { Page, PageHeader, StatTile, EmptyState } from "@/components/ui/page"
-import { SegmentTabs } from "@/components/ui/tabs"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { FolderPlus, Search, X, Building2, Sparkles, CircleCheck, Mic } from "lucide-react"
@@ -228,6 +227,41 @@ const STATUS_FILTERS: { value: StatusFilter; label: string }[] = [
   { value: "overdue", label: "Overdue" },
   { value: "attention", label: "Needs attention" },
 ]
+
+function StatusFilterSelect({
+  value,
+  onValueChange,
+  className,
+}: {
+  value: StatusFilter
+  onValueChange: (value: StatusFilter) => void
+  className?: string
+}) {
+  return (
+    <Select
+      items={STATUS_FILTERS}
+      value={value}
+      onValueChange={(next) => onValueChange((next as StatusFilter) ?? "all")}
+    >
+      <SelectTrigger
+        aria-label="Project status filter"
+        size="sm"
+        className={cn("bg-background", className)}
+      >
+        <SelectValue className="flex-none" />
+      </SelectTrigger>
+      <SelectContent align="start">
+        <SelectGroup>
+          {STATUS_FILTERS.map((filter) => (
+            <SelectItem key={filter.value} value={filter.value}>
+              {filter.label}
+            </SelectItem>
+          ))}
+        </SelectGroup>
+      </SelectContent>
+    </Select>
+  )
+}
 
 const PROJECT_LENSES: { value: ProjectLens; label: string; description: string; empty: string }[] = [
   {
@@ -1121,14 +1155,9 @@ export function OrgHome() {
                               </InputGroupAddon>
                             )}
                           </InputGroup>
-                          <div className="flex shrink-0 items-center gap-2" aria-label="Project status filter">
+                          <div className="flex shrink-0 items-center gap-2">
                             <span className="text-xs font-medium text-muted-foreground">Status</span>
-                            <SegmentTabs
-                              aria-label="Project status filter"
-                              value={statusFilter}
-                              onValueChange={setStatusFilter}
-                              options={STATUS_FILTERS}
-                            />
+                            <StatusFilterSelect value={statusFilter} onValueChange={setStatusFilter} />
                           </div>
                           <div className="ml-auto flex shrink-0 items-center gap-2" aria-label="Project sort">
                             <span className="text-xs font-medium text-muted-foreground">Sort by</span>
@@ -1229,12 +1258,14 @@ export function OrgHome() {
                     />
                   ) : (
                       <div className="flex flex-col gap-3">
-                      <SegmentTabs
-                        aria-label="Project status filter"
-                        value={statusFilter}
-                        onValueChange={setStatusFilter}
-                        options={STATUS_FILTERS}
-                      />
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-medium text-muted-foreground">Status</span>
+                        <StatusFilterSelect
+                          value={statusFilter}
+                          onValueChange={setStatusFilter}
+                          className="bg-card"
+                        />
+                      </div>
 
                       <OrgProjectsDataTable
                         projects={statusFilteredProjects}

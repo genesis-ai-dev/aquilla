@@ -17,6 +17,14 @@ import { UserError } from "@/lib/errors/user-error"
 import { buttonVariants, Button } from "@/components/ui/button"
 import { RoleLabel } from "@/components/RoleLabel"
 import { Badge } from "@/components/ui/badge"
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { LoadingPanel } from "@/components/ui/loading-overlay"
 import {
   InputGroup,
@@ -468,19 +476,34 @@ export function ProjectsList() {
                 </div>
 
                 {isAllOrgs && (
-                  <div className="flex flex-wrap items-center gap-1 border-b px-4 py-3" aria-label="Project list view">
-                    {PROJECT_LENSES.map((lens) => (
-                      <Button
-                        key={lens.value}
-                        type="button"
-                        size="xs"
-                        variant={projectLens === lens.value ? "default" : "secondary"}
-                        onClick={() => selectProjectLens(lens.value)}
-                        aria-pressed={projectLens === lens.value}
+                  <div className="flex flex-wrap items-center gap-2 border-b px-4 py-3">
+                    <span className="text-xs font-medium text-muted-foreground">View</span>
+                    <Select
+                      items={PROJECT_LENSES.map((lens) => ({ value: lens.value, label: lens.label }))}
+                      value={projectLens}
+                      onValueChange={(v) => {
+                        if (v && PROJECT_LENS_VALUES.includes(v as ProjectLens)) {
+                          selectProjectLens(v as ProjectLens)
+                        }
+                      }}
+                    >
+                      <SelectTrigger
+                        size="sm"
+                        className="bg-background"
+                        aria-label="Project list view"
                       >
-                        {lens.label}
-                      </Button>
-                    ))}
+                        <SelectValue className="flex-none" />
+                      </SelectTrigger>
+                      <SelectContent align="start">
+                        <SelectGroup>
+                          {PROJECT_LENSES.map((lens) => (
+                            <SelectItem key={lens.value} value={lens.value}>
+                              {lens.label}
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
                   </div>
                 )}
 

@@ -21,6 +21,14 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { LoadingTemplate } from "@/components/ui/loading-overlay"
 import { EmptyState } from "@/components/ui/page"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { AccountSwitcher } from "@/components/AccountSwitcher"
 import { OverflowMenu } from "@/components/OverflowMenu"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
@@ -36,6 +44,12 @@ import { toUserFacingError } from "@/lib/errors/user-error"
 import posthog from "@/lib/posthog"
 
 type LifecycleFilter = "active" | "inactive" | "all"
+
+const LIFECYCLE_FILTERS: { value: LifecycleFilter; label: string }[] = [
+  { value: "active", label: "Active" },
+  { value: "inactive", label: "Inactive" },
+  { value: "all", label: "All" },
+]
 
 export function Dashboard() {
   const [projects, setProjects] = useState<ProjectRecord[]>([])
@@ -304,29 +318,29 @@ export function Dashboard() {
             <h2 className="text-sm font-semibold text-muted-foreground">Your projects</h2>
             {/* Three-position lifecycle filter — only shown when any inactive project exists */}
             {hasInactive && (
-              <div
-                className="flex items-center gap-0.5 rounded-lg bg-muted p-0.5 text-xs font-medium"
-                role="group"
-                aria-label="Project status filter"
-                data-testid="lifecycle-filter"
+              <Select
+                items={LIFECYCLE_FILTERS}
+                value={lifecycleFilter}
+                onValueChange={(v) => setLifecycleFilter((v as LifecycleFilter) ?? "active")}
               >
-                {(["active", "inactive", "all"] as LifecycleFilter[]).map((f) => (
-                  <button
-                    key={f}
-                    type="button"
-                    onClick={() => setLifecycleFilter(f)}
-                    className={`rounded-md px-2.5 py-1 capitalize transition-colors ${
-                      lifecycleFilter === f
-                        ? "bg-background text-foreground"
-                        : "text-muted-foreground hover:text-foreground"
-                    }`}
-                    aria-pressed={lifecycleFilter === f}
-                    data-testid={`lifecycle-filter-${f}`}
-                  >
-                    {f}
-                  </button>
-                ))}
-              </div>
+                <SelectTrigger
+                  size="sm"
+                  className="bg-background"
+                  aria-label="Project status filter"
+                  data-testid="lifecycle-filter"
+                >
+                  <SelectValue className="flex-none" />
+                </SelectTrigger>
+                <SelectContent align="end">
+                  <SelectGroup>
+                    {LIFECYCLE_FILTERS.map((f) => (
+                      <SelectItem key={f.value} value={f.value}>
+                        {f.label}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
             )}
           </div>
           {loading && projects.length === 0 ? (

@@ -139,7 +139,7 @@
 | Projects    | Project settings renames the project (AQU-765 server rename) and persists source language | `e2e/specs/projects/project-settings.smoke.spec.ts` | ✅ |
 | Projects    | Project card role badge shows user's role             | `e2e/specs/projects/project-card-role-badge.smoke.spec.ts`    |   ✅   |
 | Projects    | Org home project name filter narrows list             | `e2e/specs/projects/org-home-project-filter.smoke.spec.ts`    |   ✅   |
-| Projects    | Org home status filter (All/Stalled/Overdue/Needs attention)   | `e2e/specs/projects/org-home-status-filter.smoke.spec.ts`     |   ✅   |
+| Projects    | Org home status filter select (All/Stalled/Overdue/Needs attention) | `e2e/specs/projects/org-home-status-filter.smoke.spec.ts`     |   ✅   |
 | Projects    | Project settings user section (username/author)       | `e2e/specs/projects/project-settings-user-section.smoke.spec.ts` |   ✅   |
 | Projects    | Project settings AI instructions textarea             | `e2e/specs/projects/project-settings-ai-instructions.smoke.spec.ts` |   ✅   |
 | Projects    | Project settings context controls section             | `e2e/specs/projects/project-settings-context-controls.smoke.spec.ts` |   ✅   |

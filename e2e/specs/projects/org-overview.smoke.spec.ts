@@ -16,7 +16,7 @@ function isoDateOffset(days: number): string {
  *  - Org name heading (h1)
  *  - Rollup strip: Projects / Avg translated / Avg validated / Avg audio /
  *    Stalled / Overdue tiles
- *  - Filter bar (input + status filter buttons) when projects exist
+ *  - Filter bar (search + status filter select) when projects exist
  *  - Project cards linking to /projects/:id
  *
  * We create a project first so the portfolio API has at least one entry,
@@ -51,11 +51,17 @@ test("org overview renders rollup stats and project filter", async ({ alice }) =
   const filterInput = alice.locator('input[aria-label="Filter projects by name"]')
   await expect(filterInput).toBeVisible({ timeout: 5_000 })
 
-  // 4. Status filter tabs (All / Stalled / Overdue / Needs attention).
-  await expect(alice.getByRole("tab", { name: "All" }).first()).toBeVisible({ timeout: 3_000 })
-  await expect(alice.getByRole("tab", { name: "Stalled" }).first()).toBeVisible({ timeout: 3_000 })
-  await expect(alice.getByRole("tab", { name: "Overdue" }).first()).toBeVisible({ timeout: 3_000 })
-  await expect(alice.getByRole("tab", { name: "Needs attention" }).first()).toBeVisible({ timeout: 3_000 })
+  // 4. Status filter select (All / Stalled / Overdue / Needs attention).
+  const statusFilter = alice.getByRole("combobox", { name: /project status filter/i })
+  await expect(statusFilter).toBeVisible({ timeout: 3_000 })
+  await expect(statusFilter).toContainText(/^All/i)
+  await statusFilter.click()
+  await expect(alice.getByRole("option", { name: "Stalled" })).toBeVisible({ timeout: 3_000 })
+  await expect(alice.getByRole("option", { name: "Overdue" })).toBeVisible({ timeout: 3_000 })
+  await expect(alice.getByRole("option", { name: "Needs attention" })).toBeVisible({ timeout: 3_000 })
+  // Close the listbox before continuing.
+  await alice.keyboard.press("Escape")
+  await expect(alice.getByRole("listbox")).toHaveCount(0)
 
   // 5. The new project's card is visible.
   await expect(alice.getByText(name).first()).toBeVisible({ timeout: 5_000 })

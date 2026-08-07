@@ -11,7 +11,7 @@ import type { OrgSummary } from "@/lib/frontier/orgs"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { getPortfolio, getPortfolios, translatedPct, validatedPct, attentionRank, audioPct, deadlineStatus, languagePairLabel, type PortfolioProject } from "@/lib/frontier/portfolio"
 import { portfolioActivityStatus, portfolioAttentionReasons } from "@/lib/project-status"
-import { ProjectDeadlineStatuses } from "@/components/ProjectStatus"
+import { ProjectDeadlineStatuses, deadlineStatusTooltip } from "@/components/ProjectStatus"
 import { listMyPendingInvites, type MyPendingInvite } from "@/lib/sync/invites"
 import { WorkloadRollup } from "./WorkloadRollup"
 import { UsageRollup } from "./UsageRollup"
@@ -302,26 +302,8 @@ function roleLabel(org: OrgSummary): string {
   return roleDisplayText(org.role.name)
 }
 
-function formatDeadlineDate(value: string): string {
-  const parsed = Date.parse(value)
-  if (!Number.isFinite(parsed)) return value
-  return new Intl.DateTimeFormat(undefined, {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    timeZone: "UTC",
-  }).format(new Date(parsed))
-}
-
 function deadlineTooltip(project: PortfolioProjectRow, status: "overdue" | "soon") {
-  return (
-    <span className="flex flex-col gap-0.5">
-      <span className="font-medium">{status === "overdue" ? "Overdue" : "Due soon"}</span>
-      {project.deadlineAt && (
-        <span className="text-muted-foreground">Due {formatDeadlineDate(project.deadlineAt)}</span>
-      )}
-    </span>
-  )
+  return deadlineStatusTooltip(status, project.deadlineAt)
 }
 
 export function sortProjectsByLens(projects: PortfolioProjectRow[], lens: ProjectLens, now: number): PortfolioProjectRow[] {
@@ -453,8 +435,7 @@ export function ProjectTable({
                       {(dstatus === "overdue" || dstatus === "soon") && (
                         <AppTooltip
                           content={deadlineTooltip(p, dstatus)}
-                          side="top"
-                          delay={0}
+                          side="bottom"
                         >
                           <span
                             tabIndex={0}

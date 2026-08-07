@@ -13,7 +13,7 @@ import {
 } from "@/lib/frontier/portfolio"
 import { ROLE } from "@/lib/frontier/roles"
 import { portfolioActivityStatus } from "@/lib/project-status"
-import { ProjectDeadlineStatuses } from "@/components/ProjectStatus"
+import { ProjectDeadlineStatuses, deadlineStatusTooltip } from "@/components/ProjectStatus"
 import { DateTooltip } from "@/components/ui/date-tooltip"
 import { DataTable, DataTableColumnHeader } from "@/components/ui/data-table"
 import {
@@ -25,6 +25,7 @@ import {
 } from "@/components/ui/empty"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { AppTooltip } from "@/components/ui/tooltip"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -160,6 +161,7 @@ export function OrgProjectsDataTable({
         header: ({ column }) => <DataTableColumnHeader column={column} title="Name" />,
         cell: ({ row }) => {
           const p = row.original
+          const dstatus = deadlineStatus(p, tableNow)
           return (
             <span className="flex min-w-0 items-center gap-2">
               <span className="truncate font-medium">{p.name}</span>
@@ -168,7 +170,19 @@ export function OrgProjectsDataTable({
                   {p.orgName}
                 </Badge>
               )}
-              <ProjectDeadlineStatuses deadline={deadlineStatus(p, tableNow)} className="shrink-0" />
+              {(dstatus === "overdue" || dstatus === "soon") && (
+                <AppTooltip
+                  content={deadlineStatusTooltip(dstatus, p.deadlineAt)}
+                  side="bottom"
+                >
+                  <span
+                    tabIndex={0}
+                    className="shrink-0 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                  >
+                    <ProjectDeadlineStatuses deadline={dstatus} className="shrink-0" />
+                  </span>
+                </AppTooltip>
+              )}
             </span>
           )
         },

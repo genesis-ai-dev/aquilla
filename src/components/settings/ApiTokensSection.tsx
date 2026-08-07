@@ -165,7 +165,7 @@ export function ApiTokensSection() {
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center justify-between gap-4 px-1">
+      <div className="flex items-center justify-between gap-4 pl-4">
         <p className="font-heading text-base font-medium tracking-tight text-foreground">
           Access
         </p>

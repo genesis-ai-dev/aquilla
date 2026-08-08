@@ -150,7 +150,13 @@ export function videoSyncAction(input: VideoSyncInput): VideoSyncAction {
   const drifted = Math.abs(videoSec - tickSec) > videoDriftBarSec(rate)
   if (!discontinuous && !drifted) return { kind: "none" }
 
-  if (lastSeekAt != null && now - lastSeekAt < VIDEO_SEEK_COOLDOWN_MS) return { kind: "none" }
+  // The cooldown exists to stop a pathological clock seek-storming DURING
+  // playback. While paused nothing is storming, and a dropped correction has no
+  // later tick to re-issue it — the picture would simply sit on the wrong frame
+  // for as long as the user stays paused. So paused seeks always land.
+  if (kind === "playing" && lastSeekAt != null && now - lastSeekAt < VIDEO_SEEK_COOLDOWN_MS) {
+    return { kind: "none" }
+  }
   // Correcting pure drift, land on where the sound actually IS rather than on
   // the last tick: the tick is already up to 0.25*rate stale, so seeking to it
   // exactly would leave the picture behind by that much and start the drift

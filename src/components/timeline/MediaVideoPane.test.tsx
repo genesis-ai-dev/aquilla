@@ -15,10 +15,10 @@ let mockQueue: QueueForFile = {
   kind: "idle",
   progress: { currentTime: 0, duration: 0, rate: 1, volume: 1 },
 }
-let mockHasAudio = true
 vi.mock("@/lib/audio/play-queue", () => ({
   useQueueForFile: () => mockQueue,
-  hasAnyPlayableAudio: () => mockHasAudio,
+  // Mirrors the real rule: the queue's clock is file time only for a media cell
+  // backed by the shared source clip.
   queueClockIsFileTime: (c: CellData | undefined | null) =>
     c?.medium === "media" && Boolean(c?.attachments),
 }))
@@ -28,14 +28,17 @@ import { MediaVideoPane, readSubtitleMode } from "./MediaVideoPane"
 const cell = (o: Partial<CellData>): CellData =>
   ({ id: "c1", fileId: "f1", original: "", translated: "", medium: "media", ...o }) as unknown as CellData
 
+// `attachments` present = backed by the shared source clip, i.e. the queue's
+// clock is file-timeline seconds and the pane can be slaved to it.
 const CELLS = [
   cell({
     id: "c1",
     original: "episode-12.mp3",
+    attachments: {},
     transcription: "Let the peace of Christ rule in your hearts.",
     translated: "Que la paz de Cristo reine en sus corazones.",
   }),
-  cell({ id: "c2", original: "episode-12.mp3", translated: "Y sean agradecidos." }),
+  cell({ id: "c2", original: "episode-12.mp3", attachments: {}, translated: "Y sean agradecidos." }),
 ]
 
 function sounding(cellId: string, over: Partial<QueueForFile> = {}) {
@@ -57,7 +60,6 @@ function renderPane(props: Partial<React.ComponentProps<typeof MediaVideoPane>> 
 describe("MediaVideoPane", () => {
   beforeEach(() => {
     localStorage.removeItem("codex:video-subtitle-mode")
-    mockHasAudio = true
     mockQueue = {
       active: false,
       playing: false,
@@ -133,12 +135,20 @@ describe("MediaVideoPane", () => {
     expect(readSubtitleMode()).toBe("target")
   })
 
-  it("hands the video back its controls when the file has no audio at all", () => {
-    // A subtitle file timed against its footage: the queue can never start, so
-    // the video IS the player and reports its own time upward.
-    mockHasAudio = false
+  it("hands the video back its controls when the queue cannot own the clock", () => {
+    // A subtitle file timed against its footage: its cells are text, so the
+    // queue can never produce file-timeline seconds. The video IS the player
+    // and reports its own time upward.
+    //
+    // This is deliberately asserted on a file that DOES carry a dub, because
+    // "has playable audio" was the first thing tried here and is wrong: it says
+    // yes for this file, the pane slaves itself, every tick then fails the
+    // file-time test and pauses — leaving a frozen frame with no controls.
+    const subtitleCells = [
+      cell({ id: "s1", medium: "text", original: "Line one", translated: "Ligne un", attachments: { a1: { url: "blob:x", type: "audio" } } }),
+    ]
     const onVideoTime = vi.fn()
-    renderPane({ onVideoTime })
+    render(<MediaVideoPane src="https://cdn/episode.webm" cells={subtitleCells} onVideoTime={onVideoTime} />)
     const video = screen.getByTestId("video-pane-media") as HTMLVideoElement
     expect(video.controls).toBe(true)
     expect(video.muted).toBe(false)

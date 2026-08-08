@@ -22,7 +22,7 @@ import { Film } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { SegmentTabs } from "@/components/ui/tabs"
 import type { CellData } from "@/hooks/useCells"
-import { hasAnyPlayableAudio, queueClockIsFileTime, useQueueForFile } from "@/lib/audio/play-queue"
+import { queueClockIsFileTime, useQueueForFile } from "@/lib/audio/play-queue"
 import { effectiveSourceText } from "@/lib/cell-text"
 import { resolveTextDirection, type DirectionMode, type TextDirection } from "@/lib/text-direction"
 import { videoSyncAction } from "./video-sync"
@@ -61,8 +61,10 @@ export interface MediaVideoPaneProps {
    *  queue drops seeks in several ordinary cases (no session, scrubbing into
    *  the trailing pad, a gap no section owns) and the picture must still move. */
   seekSec?: { sec: number; nonce: number } | null
-  /** Only called in the no-audio arrangement, where the video owns the clock. */
-  onVideoTime?: (sec: number) => void
+  /** Only called in the standalone arrangement, where the video owns the clock.
+   *  null clears it — the store outlives this component, so a stale position
+   *  would go on driving the playhead. */
+  onVideoTime?: (sec: number | null) => void
   /** Opens the link-video dialog — offered when the source will not load. */
   onChangeVideo?: () => void
   sourceDirectionMode?: DirectionMode
@@ -91,8 +93,18 @@ export function MediaVideoPane({
   /** Bumped by loadedmetadata/durationchange: the media load algorithm resets
    *  playbackRate when the source changes, so rate has to be re-applied. */
   const [mediaEpoch, setMediaEpoch] = useState(0)
+  /** Bumped by "Try again" so the element is rebuilt against the same URL. */
+  const [loadAttempt, setLoadAttempt] = useState(0)
 
-  const slaved = useMemo(() => hasAnyPlayableAudio(cells), [cells])
+  /**
+   * Slaving is only possible when this file's queue can produce FILE-timeline
+   * seconds, which needs a media cell backed by the shared source clip. Asking
+   * "does it have any playable audio?" instead looks equivalent and is not: a
+   * subtitle file whose cells are text, carrying one recorded take, answers yes
+   * — and then every tick fails the file-time test and pauses the picture, so
+   * the user gets a frozen first frame, no controls, and no way to start it.
+   */
+  const slaved = useMemo(() => cells.some((c) => queueClockIsFileTime(c)), [cells])
 
   const setMode = useCallback((next: SubtitleMode) => {
     setModeState(next)
@@ -108,11 +120,28 @@ export function MediaVideoPane({
   const prevTickRef = useRef<{ sec: number; at: number } | null>(null)
   const lastSeekAtRef = useRef<number | null>(null)
   const playFailuresRef = useRef(0)
+  /** Whether the transport still wants the picture running, read by the retry
+   *  below so a rejection that arrives after a pause cannot restart it. */
+  const wantPlayRef = useRef(false)
+  const retryTimerRef = useRef<number | null>(null)
+
+  useEffect(
+    () => () => {
+      if (retryTimerRef.current != null) window.clearTimeout(retryTimerRef.current)
+    },
+    [],
+  )
 
   const requestPlay = useCallback((video: HTMLVideoElement) => {
     const attempt = video.play()
     if (!attempt || typeof attempt.catch !== "function") return
-    attempt.catch(() => {
+    attempt.catch((err: unknown) => {
+      // A pause taken while the element was still opening or seeking rejects
+      // the in-flight play with AbortError. That is not a refusal to autoplay —
+      // it is us, and retrying it would start the picture with the sound
+      // stopped and eventually raise a bogus click-to-play prompt.
+      if (err instanceof Error && err.name === "AbortError") return
+      if (!wantPlayRef.current || videoRef.current !== video) return
       // Muted + playsInline is normally allowed to autoplay, but Safari's
       // "Never Auto-Play" and iOS Low Power Mode refuse it anyway. Retry once
       // on the next tick, then stop asking and offer a click instead.
@@ -121,9 +150,16 @@ export function MediaVideoPane({
         setNeedsGesture(true)
         return
       }
-      window.setTimeout(() => {
-        const retry = videoRef.current?.play()
-        if (retry && typeof retry.catch === "function") retry.catch(() => setNeedsGesture(true))
+      retryTimerRef.current = window.setTimeout(() => {
+        retryTimerRef.current = null
+        if (!wantPlayRef.current || videoRef.current !== video) return
+        const retry = video.play()
+        if (retry && typeof retry.catch === "function") {
+          retry.catch((e: unknown) => {
+            if (e instanceof Error && e.name === "AbortError") return
+            setNeedsGesture(true)
+          })
+        }
       }, 0)
     })
   }, [])
@@ -154,6 +190,7 @@ export function MediaVideoPane({
       // Terminal or unusable: forget the anchor so the next real playback
       // re-anchors instead of predicting from a stale one.
       prevTickRef.current = null
+      wantPlayRef.current = false
       video.pause()
       return
     }
@@ -169,6 +206,7 @@ export function MediaVideoPane({
       }
     }
 
+    wantPlayRef.current = queue.playing
     if (queue.playing) requestPlay(video)
     else video.pause()
   }, [slaved, failed, queue.kind, queue.playing, clockIsFileTime, tickSec, rate, mediaEpoch, requestPlay])
@@ -190,7 +228,11 @@ export function MediaVideoPane({
   useEffect(() => {
     if (seekNonce == null || seekTarget == null) return
     const video = videoRef.current
-    if (!video || !slaved) return
+    // Deliberately NOT gated on `slaved`: in the standalone arrangement this is
+    // the only thing that moves the picture, and a ruler or chip click that
+    // moved the playhead but not the frame would leave the two contradicting
+    // each other on screen.
+    if (!video) return
     try {
       video.currentTime = Math.max(0, seekTarget)
       lastSeekAtRef.current = Date.now()
@@ -198,7 +240,7 @@ export function MediaVideoPane({
     } catch {
       /* not seekable yet */
     }
-  }, [seekNonce, seekTarget, slaved])
+  }, [seekNonce, seekTarget])
 
   // A new source is a fresh element as far as we're concerned.
   useEffect(() => {
@@ -208,6 +250,15 @@ export function MediaVideoPane({
     prevTickRef.current = null
     lastSeekAtRef.current = null
   }, [src])
+
+  // The fallback clock is a module store, so a position left in it would keep
+  // re-writing the playhead long after this pane is gone — on another file, or
+  // on this one once a take arrives and the queue takes over. Clear it whenever
+  // we are not the one driving.
+  useEffect(() => {
+    if (slaved) onVideoTime?.(null)
+    return () => onVideoTime?.(null)
+  }, [slaved, onVideoTime])
 
   const targetText = soundingCell?.translated?.trim() ?? ""
   // `effectiveSourceText` is blank for an untranscribed media segment, which is
@@ -233,11 +284,26 @@ export function MediaVideoPane({
             This video could not be loaded
           </div>
           <p className="break-all text-[11px] leading-snug text-muted-foreground">{src}</p>
-          {onChangeVideo && (
-            <Button size="sm" variant="outline" className="h-7 text-xs" onClick={onChangeVideo}>
-              Change video
+          <div className="flex flex-wrap gap-2">
+            {/* Re-saving the same URL cannot clear this by itself — the address
+                is unchanged, so nothing about the element would differ. The
+                usual reason it now works is that the source was fixed at the
+                other end, so offer the retry directly. */}
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-xs"
+              data-testid="video-pane-retry"
+              onClick={() => { setFailed(false); setLoadAttempt((n) => n + 1) }}
+            >
+              Try again
             </Button>
-          )}
+            {onChangeVideo && (
+              <Button size="sm" variant="outline" className="h-7 text-xs" onClick={onChangeVideo}>
+                Change video
+              </Button>
+            )}
+          </div>
         </div>
       </div>
     )
@@ -252,7 +318,7 @@ export function MediaVideoPane({
       <div className="relative aspect-video max-h-full w-full shrink-0 overflow-hidden rounded-md bg-black">
         <video
           ref={videoRef}
-          key={src}
+          key={`${src}#${loadAttempt}`}
           src={src}
           data-testid="video-pane-media"
           aria-label="Linked video"

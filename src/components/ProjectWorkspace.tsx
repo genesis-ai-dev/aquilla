@@ -4621,6 +4621,10 @@ export function ProjectWorkspace() {
   // no section owns — and in those cases the picture must still move, so the
   // pane cannot infer position from queue progress alone.
   const [videoSeek, setVideoSeek] = useState<{ sec: number; nonce: number } | null>(null)
+  // Dropped when the file changes: the pane remounts and would otherwise open
+  // on the PREVIOUS file's last seek, i.e. minutes into a video it has never
+  // been asked to move.
+  useEffect(() => { setVideoSeek(null) }, [activeFileId])
   const handleTimelineSeekToTime = useCallback((sec: number) => {
     setVideoSeek((prev) => ({ sec: Math.max(0, sec), nonce: (prev?.nonce ?? 0) + 1 }))
     if (!project?.id) return

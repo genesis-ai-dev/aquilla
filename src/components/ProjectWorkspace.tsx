@@ -151,6 +151,7 @@ import {
   readStoredVideoPaneWidth,
   writeStoredVideoPaneWidth,
   VIDEO_PANE_MIN_WIDTH,
+  VIDEO_PANE_MAX_SHARE,
   VIDEO_PANE_TABLE_MIN_WIDTH,
 } from "./timeline/video-pane-layout"
 import { setVideoClockSec } from "@/lib/timeline/video-clock"
@@ -5862,7 +5863,7 @@ export function ProjectWorkspace() {
                     minSize={VIDEO_PANE_MIN_WIDTH}
                     // 2026-08-08 (Sam): let the divider travel well past half —
                     // the table's own pixel floor is what protects legibility.
-                    maxSize="60%"
+                    maxSize={VIDEO_PANE_MAX_SHARE}
                     collapsible
                     collapsedSize={0}
                     groupResizeBehavior="preserve-pixel-size"

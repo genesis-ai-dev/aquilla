@@ -11,9 +11,19 @@ export const VIDEO_PANE_MIN_WIDTH = 220
  *  (and collapsing it outright), so a narrow window loses the picture rather
  *  than crushing the text people are actually editing. 2026-08-08 (Sam):
  *  lowered from 700 so the divider can travel well right when someone wants a
- *  big picture — 520px still leaves each text column ~170px, tight but
- *  readable, and it is a deliberate drag away from the ~290px default. */
-export const VIDEO_PANE_TABLE_MIN_WIDTH = 520
+ *  big picture, then raised by a quarter inch (24px, the CSS definition) when
+ *  the far end proved a touch too far. */
+export const VIDEO_PANE_TABLE_MIN_WIDTH = 544
+/**
+ * How much of the band the picture may take at the far right of the drag.
+ *
+ * Which of the two limits actually stops you depends on the window: this share
+ * binds on a wide one, the table's pixel floor on a narrow one (they cross over
+ * around a 1300px band). Sam asked for the far end to come in about a quarter
+ * inch, so BOTH moved — otherwise the change would be invisible at whichever
+ * width he happened not to be testing.
+ */
+export const VIDEO_PANE_MAX_SHARE = "58%"
 
 const VIDEO_PANE_WIDTH_KEY = "codex:video-pane-width"
 

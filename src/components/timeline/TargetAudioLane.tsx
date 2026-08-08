@@ -3,14 +3,16 @@
 // model (round 7): chips are CLIP-ZERO ANCHORED — width = the recording's
 // trim-aware length, left = anchor + head-trim; the body drag MOVES the clip
 // (anchor), the edge handles TRIM it non-destructively (the remaining audio
-// never moves in time). An overlong chip draws at full length OVER the
-// following chip (earlier chip on top; selected/dragged topmost) — amber when
-// running long, red when overlapping the next dub (both will sound). Length
-// is never clamped.
+// never moves in time) — amber when running long, red when overlapping a
+// neighbour's dub (both will sound). Length is never clamped. At rest the
+// chip AT FAULT is the one drawn short (2026-08-08), cut at the edge of the
+// neighbour it intrudes on — or, when the two intrude on each other, at the
+// source border between them — with an outward chevron on the cut; hover
+// restores the true length.
 
 import { useRef, useState } from "react"
 import type { ReactNode } from "react"
-import { ChevronsRight, CloudUpload, Mic, Sparkles, VolumeX } from "lucide-react"
+import { ChevronsLeft, ChevronsRight, CloudUpload, Mic, Sparkles, VolumeX } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Spinner } from "@/components/ui/spinner"
@@ -20,6 +22,7 @@ import {
   targetChipGeom,
   chipOverflowState,
   chipOverlaps,
+  chipTrespass,
   MIN_TARGET_LEN_SEC,
   type TargetChipGeom,
 } from "@/lib/timeline/lane-timing"
@@ -85,7 +88,9 @@ interface ChipGeometry {
 function TargetAudioChip({
   chip,
   prevChip,
+  prevAtFaultTail,
   nextChipStartSec,
+  nextAtFaultHead,
   paintOrder,
   audioFirst,
   pxPerSec,
@@ -104,7 +109,13 @@ function TargetAudioChip({
   /** The PREVIOUS chip's span — a chip can begin before its own section
    *  (end-based drag bounds), so its head can lie under this neighbour. */
   prevChip: { start: number; end: number; usingFallback: boolean } | null
+  /** 2026-08-08: is the PREVIOUS chip itself trespassing forward into this
+   *  one? Then its end is no place to yield at — both retreat to the source
+   *  border between them instead. */
+  prevAtFaultTail: boolean
   nextChipStartSec: number | null
+  /** …and the mirror: is the NEXT chip trespassing back into this one? */
+  nextAtFaultHead: boolean
   /** Higher paints on top — earlier-start chips cover later ones. */
   paintOrder: number
   /** SUB-53: verses are laid out end to end, so nothing overlaps and nothing
@@ -202,32 +213,44 @@ function TargetAudioChip({
   // The head number depends on the PREVIOUS chip's end too, so it is also
   // masked when THAT width is a guess (starts are always measured, so the
   // tail number needs no such mask).
-  const tailTrespass = overlaps.tailSec != null && span.end > section.end
-  const headTrespass = overlaps.headSec != null && span.start < section.start
+  const { head: headTrespass, tail: tailTrespass } = audioFirst
+    ? { head: false, tail: false }
+    : chipTrespass(span, section, prevChip, nextChipStartSec)
   const tailOverlapSec = tailTrespass && !geom.usingFallback ? overlaps.tailSec : null
   const headOverlapSec =
     headTrespass && !geom.usingFallback && !prevChip?.usingFallback ? overlaps.headSec : null
   const canMove = editable && Boolean(onRetimeTarget)
-  // SUB-48: a chip that runs past the next dub is PAINTED short so it can
-  // never bury its neighbour (Sam lost a whole take under one). The logical
-  // span is untouched — overflow warnings, trims, snapping and playback all
-  // still use the true end. Hovering (or dragging) reveals the full length,
-  // which is exactly when the trim handles appear and must sit on the real
-  // edge. Selection deliberately does NOT expand it: selection is sticky, so
-  // clicking an overlong chip would re-bury the next one for as long as it
-  // stayed selected — the very symptom this fixes.
+  // SUB-48: a chip that buries a neighbour is PAINTED short so it can never
+  // hide one (Sam lost a whole take under one). The logical span is untouched
+  // — overflow warnings, trims, snapping and playback all still use the true
+  // edges. Hovering (or dragging) reveals the full length, which is exactly
+  // when the trim handles appear and must sit on the real edge. Selection
+  // deliberately does NOT expand it: selection is sticky, so clicking an
+  // overlong chip would re-bury the next one for as long as it stayed
+  // selected — the very symptom this fixes.
+  //
+  // 2026-08-08 (Sam): the chip drawn short is the one AT FAULT, on the side
+  // it offends — the same booleans that redden it above, so the paint and the
+  // warning can never disagree about who is to blame. Before backdragging
+  // existed the cut was always "the left chip yields at the next chip's
+  // start", which shortens an innocent neighbour once a chip can be dragged
+  // back into it.
+  //
+  // An offending end yields to the NEIGHBOUR'S OWN EDGE — the least it can
+  // give up and still not bury it. When both chips of a pair trespass, each
+  // one's edge lies inside the other, so neither is a valid place to stop:
+  // they retreat to the source-audio border between them and meet there back
+  // to back (»|«). Either way the painted boxes end up disjoint, and an
+  // innocent chip always paints its true length.
+  // SUB-53: inert in audio-first (verses are laid out end to end).
   const engaged = hovered || drag !== null
-  const paintedEnd =
-    // `nextChipStartSec >= span.start` matters: a chip dragged to sit BEFORE
-    // its predecessor would otherwise clamp to its own start and collapse to
-    // a sliver. Nothing is buried in that case anyway — it starts first. At
-    // EXACT equality (snap can land there) this chip clamps to the min-width
-    // sliver + chevron so the mover underneath stays reachable.
-    // SUB-53: inert in audio-first (chips never overlap), but harmless.
-    !audioFirst && !engaged && nextChipStartSec != null && nextChipStartSec >= span.start && span.end > nextChipStartSec
-      ? nextChipStartSec
-      : span.end
-  const truncated = paintedEnd < span.end - 0.0005
+  const headCutSec = headTrespass ? (prevAtFaultTail ? section.start : prevChip?.end ?? section.start) : null
+  const tailCutSec = tailTrespass ? (nextAtFaultHead ? section.end : nextChipStartSec ?? section.end) : null
+  const paintedStart = !engaged && headCutSec != null ? headCutSec : span.start
+  const paintedEnd = !engaged && tailCutSec != null ? tailCutSec : span.end
+  const truncatedHead = paintedStart > span.start + 0.0005
+  const truncatedTail = paintedEnd < span.end - 0.0005
+  const truncated = truncatedHead || truncatedTail
   const canResize =
     editable && Boolean(onTrimTarget) && chip.resizable &&
     secToPx(geom.end - geom.start, pxPerSec) >= 24
@@ -274,7 +297,7 @@ function TargetAudioChip({
 
   const Icon = chip.item.kind === "take" ? Mic : Sparkles
   const overflowSec = span.end - section.end
-  const paintedPx = Math.max(10, secToPx(paintedEnd - span.start, pxPerSec))
+  const paintedPx = Math.max(10, secToPx(paintedEnd - paintedStart, pxPerSec))
   const fullPx = secToPx(geom.end - geom.start, pxPerSec)
   // The top-left corner is a single PRIORITY slot — one glyph at a time:
   // missing (permanent, actionable) beats loading (transient seconds) beats
@@ -337,7 +360,20 @@ function TargetAudioChip({
   // SUB-48: never let a guessed width read as a measured one.
   if (geom.usingFallback) tipLines.push(<div key="fallback" className="text-muted-foreground">Length unknown — re-record or re-upload to fix</div>)
   if (pendingSync) tipLines.push(<div key="saving" className="text-muted-foreground">Saving — kept safe on this device until it syncs</div>)
-  if (truncated) tipLines.push(<div key="truncated" className="text-muted-foreground">Drawn short so the next dub stays reachable — hover for full length</div>)
+  // NOTE (2026-08-08): keyed on the CUTS, not on the painted state — hovering
+  // is what opens this tooltip and hovering is also what restores full length,
+  // so a line keyed on `truncated` could never actually be read.
+  if (headCutSec != null || tailCutSec != null) {
+    const who =
+      headCutSec != null && tailCutSec != null
+        ? "the neighbouring dubs stay"
+        : headCutSec != null
+          ? "the previous dub stays"
+          : "the next dub stays"
+    tipLines.push(
+      <div key="truncated" className="text-muted-foreground">{`Drawn short at rest so ${who} reachable`}</div>,
+    )
+  }
   const tooltipContent = <div className="flex flex-col gap-0.5">{tipLines}</div>
 
   return (
@@ -354,7 +390,13 @@ function TargetAudioChip({
       {...(pendingSync ? { "data-pending-sync": "true" } : {})}
       {...(missing ? { "data-missing": "true" } : {})}
       {...(loading ? { "data-loading": "true" } : {})}
-      {...(truncated ? { "data-truncated": "true" } : {})}
+      {...(truncated
+        ? { "data-truncated": truncatedHead && truncatedTail ? "both" : truncatedHead ? "start" : "end" }
+        : {})}
+      // The LOGICAL span, unaffected by any rest-state cut — verification
+      // reads these, never the painted box.
+      data-span-start={span.start.toFixed(3)}
+      data-span-end={span.end.toFixed(3)}
       {...(chip.ratio != null ? { "data-ratio": chip.ratio.toFixed(2) } : {})}
       onClick={() => {
         onSelect(cell.id)
@@ -367,8 +409,8 @@ function TargetAudioChip({
       onBlur={() => setHovered(false)}
       onPointerDown={(e) => beginDrag("move", e)}
       style={{
-        left: `${secToPx(span.start, pxPerSec)}px`,
-        width: `${Math.max(10, secToPx(paintedEnd - span.start, pxPerSec))}px`,
+        left: `${secToPx(paintedStart, pxPerSec)}px`,
+        width: `${paintedPx}px`,
         zIndex: (drag ? 2000 : selected || hovered ? 1000 : 0) + paintOrder,
       }}
       className={cn(
@@ -467,7 +509,21 @@ function TargetAudioChip({
       {/* SUB-48: the cut edge of a chip drawn short — the audio really does
           keep going past here, and the amber/red ring still tells you it
           collides. Hovering restores the full-length paint. */}
-      {truncated && (
+      {truncatedHead && (
+        <span
+          aria-hidden
+          data-testid={`tl-target-${cell.id}-overflow-head`}
+          className={cn(
+            "absolute inset-y-0 left-0 flex w-[6px] items-center justify-center",
+            overflow === "overlap"
+              ? "bg-red-500/25 text-red-700 dark:text-red-300"
+              : "bg-amber-400/25 text-amber-700 dark:text-amber-300",
+          )}
+        >
+          <ChevronsLeft className="h-3 w-3" />
+        </span>
+      )}
+      {truncatedTail && (
         <span
           aria-hidden
           data-testid={`tl-target-${cell.id}-overflow`}
@@ -571,6 +627,19 @@ export function TargetAudioLane({
         })
       : []
 
+  // 2026-08-08: every chip's fault flags, resolved once. A chip needs its
+  // NEIGHBOUR's flag as well as its own: when both trespass on each other,
+  // neither's edge is a valid place to stop, so they meet at the source
+  // border between them instead of at each other's (invalid) edges.
+  const trespass = chips.map((c, i) =>
+    chipTrespass(
+      { start: c.geom.start, end: c.geom.end },
+      c.section,
+      i > 0 ? { start: chips[i - 1].geom.start, end: chips[i - 1].geom.end } : null,
+      chips[i + 1]?.geom.start ?? null,
+    ),
+  )
+
   return (
     // `isolate`: chip z-indexes stack within the lane — never over the playhead.
     <div data-testid="tl-target-lane" className="isolate relative h-[66px] border-b border-border">
@@ -612,7 +681,9 @@ export function TargetAudioLane({
                   }
                 : null
             }
+            prevAtFaultTail={trespass[i - 1]?.tail ?? false}
             nextChipStartSec={chips[i + 1]?.geom.start ?? null}
+            nextAtFaultHead={trespass[i + 1]?.head ?? false}
             paintOrder={chips.length - i}
             audioFirst={Boolean(audioFirst)}
             pxPerSec={pxPerSec}

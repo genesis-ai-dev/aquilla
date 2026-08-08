@@ -182,10 +182,32 @@ export function chipOverflowState(
   prevChip: SpanSec | null,
   nextChipStartSec: number | null,
 ): "none" | "soft" | "overlap" {
-  const o = chipOverlaps(span, prevChip, nextChipStartSec)
-  const tailTrespass = o.tailSec != null && span.end > section.end
-  const headTrespass = o.headSec != null && span.start < section.start
-  if (tailTrespass || headTrespass) return "overlap"
+  const t = chipTrespass(span, section, prevChip, nextChipStartSec)
+  if (t.head || t.tail) return "overlap"
   if (span.end > section.end + OVERFLOW_SOFT_SEC) return "soft"
   return "none"
+}
+
+/**
+ * WHICH END of a chip is trespassing — the blame rule above, as booleans.
+ * An end counts only when it BOTH left this chip's own section AND actually
+ * reaches a neighbour's chip: an in-bounds chip is never blamed for a
+ * neighbour intruding on it, and leaving your section over empty space is
+ * "soft", not a collision.
+ *
+ * 2026-08-08: the paint reads this too — the chip drawn short at rest is the
+ * one at fault, on the side it offends — so a warning and a shortened chip
+ * can never disagree about who is to blame.
+ */
+export function chipTrespass(
+  span: SpanSec,
+  section: SpanSec,
+  prevChip: SpanSec | null,
+  nextChipStartSec: number | null,
+): { head: boolean; tail: boolean } {
+  const o = chipOverlaps(span, prevChip, nextChipStartSec)
+  return {
+    head: o.headSec != null && span.start < section.start,
+    tail: o.tailSec != null && span.end > section.end,
+  }
 }

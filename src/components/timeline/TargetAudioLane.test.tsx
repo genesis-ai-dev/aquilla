@@ -310,17 +310,25 @@ describe("TargetAudioLane — trimmed geometry (round 7)", () => {
     expect(trims.trimStartMs).toBeUndefined() // back at the clip edge = cleared
   })
 
-  it("at EXACT start equality the covered chip collapses to a reachable sliver", () => {
-    const first = item({}, 12000) // [10, 22]
+  it("a chip persisted entirely before its verse collapses to a reachable sliver — and its innocent neighbour does not", () => {
+    // 2026-08-08: c2's whole clip sits inside c1's verse, so c2 is the
+    // trespasser and the one drawn short; before the at-fault rule the SLIVER
+    // landed on c1, which had merely been arrived at.
+    const first = item({}, 12000) // verse [10,20], clip [10,22] — runs long
     const second = item(
       { startTime: 20, endTime: 30, metadata: { target_start_ms: 10000 } } as Partial<CellData>,
       6000,
       "c2",
-    ) // slid to exactly 10 — same start as c1
+    ) // verse [20,30] but the clip is [10,16] — entirely in c1's territory
     render(<TargetAudioLane {...base} items={[first, second]} />)
+    const c2 = screen.getByTestId("tl-target-c2")
+    expect(c2).toHaveAttribute("data-truncated", "start")
+    expect(parseFloat(c2.style.width)).toBe(10) // the min-width sliver
+    expect(parseFloat(c2.style.left)).toBeCloseTo(20 * 40) // parked at its verse
+    // c1 is cut only at its own verse end, never down to a sliver.
     const c1 = screen.getByTestId("tl-target-c1")
-    expect(c1).toHaveAttribute("data-truncated", "true")
-    expect(parseFloat(c1.style.width)).toBe(10) // the min-width sliver
+    expect(c1).toHaveAttribute("data-truncated", "end")
+    expect(parseFloat(c1.style.width)).toBeCloseTo(10 * 40)
   })
 
   it("moving a head-trimmed chip commits the ANCHOR, not the visual left", () => {
@@ -549,7 +557,7 @@ describe("TargetAudioLane — buried chips stay reachable (SUB-48)", () => {
     render(<TargetAudioLane {...base} items={longLongShort()} />)
     // c1 runs to 30s but c2 starts at 20s → painted 10s wide, not 20s.
     expect(parseFloat(screen.getByTestId("tl-target-c1").style.width)).toBeCloseTo(10 * 40)
-    expect(screen.getByTestId("tl-target-c1")).toHaveAttribute("data-truncated", "true")
+    expect(screen.getByTestId("tl-target-c1")).toHaveAttribute("data-truncated", "end")
   })
 
   it("every chip in the long/long/short pile has real estate of its own", () => {
@@ -578,7 +586,7 @@ describe("TargetAudioLane — buried chips stay reachable (SUB-48)", () => {
     // stayed selected — reinstating the exact bug this fixes.
     render(<TargetAudioLane {...base} items={longLongShort()} selectedId="c1" />)
     expect(parseFloat(screen.getByTestId("tl-target-c1").style.width)).toBeCloseTo(10 * 40)
-    expect(screen.getByTestId("tl-target-c1")).toHaveAttribute("data-truncated", "true")
+    expect(screen.getByTestId("tl-target-c1")).toHaveAttribute("data-truncated", "end")
   })
 
   it("hovering restores full length too, then releases it", () => {
@@ -588,6 +596,151 @@ describe("TargetAudioLane — buried chips stay reachable (SUB-48)", () => {
     expect(parseFloat(chip.style.width)).toBeCloseTo(20 * 40)
     fireEvent.pointerLeave(chip)
     expect(parseFloat(chip.style.width)).toBeCloseTo(10 * 40)
+  })
+
+  // ── 2026-08-08 (Sam): the chip AT FAULT is the one drawn short ──────────
+  // Before this, the cut was always "the left chip yields at the next chip's
+  // start", so a chip dragged BACK into its neighbour shortened the innocent
+  // neighbour instead of itself.
+
+  /** L fills its verse [10,20]; R's verse is [20,30] but its clip is dragged
+   *  back to start at 17 — R is the trespasser. */
+  const backdragged = () => [
+    item({ startTime: 10, endTime: 20 }, 10_000, "c1"), // [10,20] — in bounds
+    item(
+      { startTime: 20, endTime: 30, metadata: { target_start_ms: 17_000 } } as Partial<CellData>,
+      10_000,
+      "c2",
+    ), // [17,27] — head inside c1's verse
+  ]
+
+  it("a chip dragged BACK into its neighbour is the one drawn short — the neighbour keeps full width", () => {
+    render(<TargetAudioLane {...base} items={backdragged()} />)
+    const c2 = screen.getByTestId("tl-target-c2")
+    expect(c2).toHaveAttribute("data-truncated", "start")
+    // Cut at its own verse border: left 20s, and the tail keeps its full reach.
+    expect(parseFloat(c2.style.left)).toBeCloseTo(20 * 40)
+    expect(parseFloat(c2.style.width)).toBeCloseTo(7 * 40)
+    expect(screen.getByTestId("tl-target-c2-overflow-head")).toBeInTheDocument()
+    // The innocent chip is untouched — the whole point.
+    const c1 = screen.getByTestId("tl-target-c1")
+    expect(c1).not.toHaveAttribute("data-truncated")
+    expect(parseFloat(c1.style.width)).toBeCloseTo(10 * 40)
+  })
+
+  it("the logical span is still the truth behind a head cut", () => {
+    render(<TargetAudioLane {...base} items={backdragged()} />)
+    const c2 = screen.getByTestId("tl-target-c2")
+    expect(c2).toHaveAttribute("data-span-start", "17.000")
+    expect(c2).toHaveAttribute("data-span-end", "27.000")
+  })
+
+  it("hovering a head-cut chip restores its true left edge, then releases it", () => {
+    render(<TargetAudioLane {...base} items={backdragged()} />)
+    const c2 = screen.getByTestId("tl-target-c2")
+    fireEvent.pointerEnter(c2)
+    expect(parseFloat(c2.style.left)).toBeCloseTo(17 * 40)
+    expect(parseFloat(c2.style.width)).toBeCloseTo(10 * 40)
+    expect(screen.queryByTestId("tl-target-c2-overflow-head")).toBeNull()
+    fireEvent.pointerLeave(c2)
+    expect(parseFloat(c2.style.left)).toBeCloseTo(20 * 40)
+  })
+
+  it("a single offender yields at the NEIGHBOUR'S edge, not at the verse border", () => {
+    // c1 stops early inside its verse, so c2 only has to retreat to c1's end
+    // (18s) — retreating all the way to the verse border would hide 2s of c2
+    // for no one's benefit.
+    render(
+      <TargetAudioLane
+        {...base}
+        items={[
+          item({ startTime: 10, endTime: 20 }, 8_000, "c1"), // [10,18] — in bounds
+          item(
+            { startTime: 20, endTime: 30, metadata: { target_start_ms: 17_000 } } as Partial<CellData>,
+            10_000,
+            "c2",
+          ), // [17,27] — head under c1
+        ]}
+      />,
+    )
+    const c2 = screen.getByTestId("tl-target-c2")
+    expect(c2).toHaveAttribute("data-truncated", "start")
+    expect(parseFloat(c2.style.left)).toBeCloseTo(18 * 40)
+    expect(parseFloat(c2.style.width)).toBeCloseTo(9 * 40)
+  })
+
+  it("the tail keeps the original rule: cut at the next chip's start, even when it begins late", () => {
+    render(
+      <TargetAudioLane
+        {...base}
+        items={[
+          item({ startTime: 10, endTime: 20 }, 20_000, "c1"), // [10,30] — runs long
+          item(
+            { startTime: 20, endTime: 30, metadata: { target_start_ms: 22_000 } } as Partial<CellData>,
+            10_000,
+            "c2",
+          ), // [22,32] — starts late, inside its own verse: innocent
+        ]}
+      />,
+    )
+    const c1 = screen.getByTestId("tl-target-c1")
+    expect(c1).toHaveAttribute("data-truncated", "end")
+    expect(parseFloat(c1.style.width)).toBeCloseTo(12 * 40) // to 22s, not to the 20s border
+    expect(screen.getByTestId("tl-target-c2")).not.toHaveAttribute("data-truncated")
+  })
+
+  it("two chips intruding on each other are BOTH cut at the border between them", () => {
+    render(
+      <TargetAudioLane
+        {...base}
+        items={[
+          item({ startTime: 10, endTime: 20 }, 14_000, "c1"), // [10,24] — runs past 20
+          item(
+            { startTime: 20, endTime: 30, metadata: { target_start_ms: 17_000 } } as Partial<CellData>,
+            10_000,
+            "c2",
+          ), // [17,27] — starts before 20
+        ]}
+      />,
+    )
+    const c1 = screen.getByTestId("tl-target-c1")
+    const c2 = screen.getByTestId("tl-target-c2")
+    expect(c1).toHaveAttribute("data-truncated", "end")
+    expect(c2).toHaveAttribute("data-truncated", "start")
+    // Back to back at the shared verse border (20s), with outward chevrons.
+    const c1End = parseFloat(c1.style.left) + parseFloat(c1.style.width)
+    expect(c1End).toBeCloseTo(20 * 40)
+    expect(parseFloat(c2.style.left)).toBeCloseTo(20 * 40)
+    expect(screen.getByTestId("tl-target-c1-overflow")).toBeInTheDocument()
+    expect(screen.getByTestId("tl-target-c2-overflow-head")).toBeInTheDocument()
+  })
+
+  it("starting early with nobody underneath is not truncated", () => {
+    render(
+      <TargetAudioLane
+        {...base}
+        items={[
+          item({ startTime: 10, endTime: 20 }, 4_000, "c1"), // [10,14] — ends well before
+          item(
+            { startTime: 20, endTime: 30, metadata: { target_start_ms: 18_000 } } as Partial<CellData>,
+            10_000,
+            "c2",
+          ), // [18,28] — early, but reaches nothing
+        ]}
+      />,
+    )
+    const c2 = screen.getByTestId("tl-target-c2")
+    expect(c2).not.toHaveAttribute("data-truncated")
+    expect(parseFloat(c2.style.left)).toBeCloseTo(18 * 40)
+  })
+
+  it("the drawn-short tooltip names the neighbour it is protecting", async () => {
+    const { unmount } = renderWithTooltips(<TargetAudioLane {...base} items={backdragged()} />)
+    await expectTooltip(screen.getByTestId("tl-target-c2"), /previous dub stays reachable/)
+    unmount()
+
+    renderWithTooltips(<TargetAudioLane {...base} items={longLongShort()} />)
+    await expectTooltip(screen.getByTestId("tl-target-c1"), /next dub stays reachable/)
   })
 
   it("a chip with no chip after it is never truncated", () => {

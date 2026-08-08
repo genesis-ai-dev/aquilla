@@ -158,6 +158,28 @@ describe("MediaVideoPane", () => {
     expect(onVideoTime).toHaveBeenCalled()
   })
 
+  it("heads its column with a Video label and the linked file's name", () => {
+    renderPane()
+    const header = screen.getByTestId("video-pane-header")
+    expect(header).toHaveTextContent("Video")
+    expect(header).toHaveTextContent("episode.webm")
+    // Never the full URL — the pill is a name, not an address.
+    expect(header).not.toHaveTextContent("https://")
+  })
+
+  it("keeps the caption toggle on the picture, revealed while playback starts", () => {
+    const { rerender } = renderPane()
+    const overlay = screen.getByTestId("video-pane-mode-overlay")
+    // At rest it is faded out AND pointer-inert, so a click near the corner
+    // hits the video rather than an invisible control.
+    expect(overlay.className).toContain("opacity-0")
+    expect(overlay.className).toContain("pointer-events-none")
+
+    sounding("c1")
+    rerender(<MediaVideoPane src="https://cdn/episode.webm" cells={CELLS} />)
+    expect(screen.getByTestId("video-pane-mode-overlay").className).toContain("opacity-100")
+  })
+
   it("says so when the source will not load, and offers a way to fix it", () => {
     const onChangeVideo = vi.fn()
     renderPane({ onChangeVideo })

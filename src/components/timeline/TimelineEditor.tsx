@@ -5,6 +5,7 @@
 // the text table as MediaVideoPane (AQU-646).
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { createPortal } from "react-dom"
 import { AudioLines, Film, LocateFixed, Magnet, Minus, Plus, Volume2, VolumeX, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { deriveLanes } from "@/lib/timeline/lanes"
@@ -23,6 +24,7 @@ import { activeTargetForCell } from "@/lib/audio/track-audio"
 import { loadSnapEnabled, saveSnapEnabled } from "@/lib/timeline/snap"
 import { setMediaCursorCell, setMediaSyncActive } from "@/lib/timeline/media-cursor"
 import { useVideoClockSec } from "@/lib/timeline/video-clock"
+import { useUiSlot } from "@/lib/ui-slots"
 import { setAudioQualityPref, useAudioQualityPref } from "@/lib/store/audio-quality-pref"
 import { useBatchProgress } from "@/lib/audio/batch-audio"
 import { useOnline } from "@/hooks/useOnline"
@@ -210,6 +212,7 @@ export function TimelineEditor({
    *  events within 150ms of a stamp as our own, not a user disengage. */
   const lastProgrammaticScrollAt = useRef(0)
   const clock = useTimelineClock()
+  const chipStripSlot = useUiSlot("media-chip-strip")
 
   // AQU-646: bridge the audio play-queue into the timeline clock. Progress is
   // file-timeline seconds for imported media (one shared clip); the cellIdSet
@@ -1044,7 +1047,18 @@ export function TimelineEditor({
         </div>
       </div>
 
-      <TimelineChipStrip cell={currentCell} chipStats={currentChipStats} audioMissing={audioMissing} />
+      {/* 2026-08-08 (Sam): the strip heads the TEXT column of the band below,
+          not the full editor width — the video column carries its own header.
+          The slot is owned by the workspace; portal when it exists, render
+          inline when this editor is mounted alone (tests). */}
+      {chipStripSlot ? (
+        createPortal(
+          <TimelineChipStrip cell={currentCell} chipStats={currentChipStats} audioMissing={audioMissing} />,
+          chipStripSlot,
+        )
+      ) : (
+        <TimelineChipStrip cell={currentCell} chipStats={currentChipStats} audioMissing={audioMissing} />
+      )}
     </div>
   )
 }

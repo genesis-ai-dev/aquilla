@@ -59,6 +59,7 @@ import { CellTranscriptPreview } from "./CellTranscriptPreview"
 import { CellTranscribeBadge } from "./CellTranscribeBadge"
 import { CellActionRail, RailButton, isInteractiveTarget } from "./CellActionRail"
 import { useIsMediaCursorCell, useMediaSyncActive } from "@/lib/timeline/media-cursor"
+import { useUiSlot } from "@/lib/ui-slots"
 import { CastGutterVoice } from "@/components/voice/CastGutterVoice"
 import { useIsQueueCurrentCell, useQueueCurrentCellId } from "@/lib/audio/play-queue"
 import { useRailIdleHide } from "@/hooks/useRailIdleHide"
@@ -2241,16 +2242,10 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   // is never filtered by it). The Text lens keeps the classic row.
   const showMilestoneNav = !castGutter && milestoneNavigationItems.length > 0 && Boolean(activeChapterLabel)
   const showStripNav = castGutter && milestoneNavigationItems.length > 0 && Boolean(activeChapterLabel)
-  const [stripNavSlot, setStripNavSlot] = useState<HTMLElement | null>(null)
-  useEffect(() => {
-    if (!showStripNav) {
-      setStripNavSlot(null)
-      return
-    }
-    // Both the strip (a TimelineEditor child) and this table commit in the
-    // same render pass, so the slot exists by the time effects run.
-    setStripNavSlot(document.querySelector<HTMLElement>("[data-strip-nav-slot]"))
-  }, [showStripNav])
+  // The strip registers its slot by name — it is itself portaled into the
+  // media band (one commit after this table), so the old one-shot
+  // querySelector in a mount effect would run too early and never retry.
+  const stripNavSlot = useUiSlot("strip-nav")
 
   return (
     <div className="flex h-full min-h-0 flex-col" onMouseUp={handleMouseUp}>

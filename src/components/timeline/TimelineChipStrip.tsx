@@ -9,6 +9,7 @@ import { VolumeX } from "lucide-react"
 import { fmtClock } from "./format"
 import { MISSING_AUDIO_MESSAGE } from "@/lib/audio/play-queue"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { uiSlotRef } from "@/lib/ui-slots"
 import type { CellData } from "@/hooks/useCells"
 
 /** The current dub chip's own numbers, computed by TimelineEditor (this
@@ -78,6 +79,10 @@ function Pill({ children }: { children: React.ReactNode }) {
 function StripNavSlot() {
   return (
     <div
+      // Registered as a named slot: the strip is itself portaled into the
+      // media band now, so it commits AFTER the table — a querySelector in the
+      // table's mount effect would run before this exists and never retry.
+      ref={uiSlotRef("strip-nav")}
       data-strip-nav-slot=""
       data-chapter-nav-slot=""
       data-testid="tl-strip-nav"

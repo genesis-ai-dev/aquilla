@@ -154,6 +154,7 @@ import {
   VIDEO_PANE_TABLE_MIN_WIDTH,
 } from "./timeline/video-pane-layout"
 import { setVideoClockSec } from "@/lib/timeline/video-clock"
+import { uiSlotRef } from "@/lib/ui-slots"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { TimingModeChangedDialog } from "./timeline/TimingModeChangedDialog"
 import { useTimingModeAck } from "@/hooks/useTimingModeAck"
@@ -5859,7 +5860,9 @@ export function ProjectWorkspace() {
                     id="media-video"
                     defaultSize={readStoredVideoPaneWidth()}
                     minSize={VIDEO_PANE_MIN_WIDTH}
-                    maxSize="45%"
+                    // 2026-08-08 (Sam): let the divider travel well past half —
+                    // the table's own pixel floor is what protects legibility.
+                    maxSize="60%"
                     collapsible
                     collapsedSize={0}
                     groupResizeBehavior="preserve-pixel-size"
@@ -5883,8 +5886,13 @@ export function ProjectWorkspace() {
                   <ResizableHandle withHandle />
                 </>
               ) : null}
-              <ResizablePanel id="media-table" minSize={VIDEO_PANE_TABLE_MIN_WIDTH}>
-              <div className="h-full min-h-0 min-w-0">
+              <ResizablePanel id="media-table" minSize={timelineStacked ? VIDEO_PANE_TABLE_MIN_WIDTH : undefined}>
+              <div className="flex h-full min-h-0 min-w-0 flex-col">
+              {/* 2026-08-08 (Sam): the chip strip heads the TEXT column only —
+                  TimelineEditor portals it here, and the video column carries
+                  its own "Video" header at the same height. */}
+              {timelineStacked ? <div ref={uiSlotRef("media-chip-strip")} className="shrink-0 empty:hidden" /> : null}
+              <div className="min-h-0 min-w-0 flex-1">
               <EditorTable
             ref={editorRef} project={editorProject ?? project} cellStore={cellStore}
             fileType={activeFile?.type}
@@ -5962,6 +5970,7 @@ export function ProjectWorkspace() {
             // above the timeline — don't render it twice.
             chapterNavTrailing={timelineStacked ? undefined : fileChapterToolbar ?? undefined}
           />
+              </div>
               </div>
               </ResizablePanel>
               </ResizablePanelGroup>

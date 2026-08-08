@@ -9,8 +9,11 @@ export const VIDEO_PANE_DEFAULT_WIDTH = 288
 export const VIDEO_PANE_MIN_WIDTH = 220
 /** The table's floor. The group honours this by squeezing the VIDEO panel
  *  (and collapsing it outright), so a narrow window loses the picture rather
- *  than crushing the text people are actually editing. */
-export const VIDEO_PANE_TABLE_MIN_WIDTH = 700
+ *  than crushing the text people are actually editing. 2026-08-08 (Sam):
+ *  lowered from 700 so the divider can travel well right when someone wants a
+ *  big picture — 520px still leaves each text column ~170px, tight but
+ *  readable, and it is a deliberate drag away from the ~290px default. */
+export const VIDEO_PANE_TABLE_MIN_WIDTH = 520
 
 const VIDEO_PANE_WIDTH_KEY = "codex:video-pane-width"
 

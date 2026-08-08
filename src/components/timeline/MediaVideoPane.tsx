@@ -21,6 +21,7 @@ import { Film } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { SegmentTabs } from "@/components/ui/tabs"
+import { cn } from "@/lib/utils"
 import type { CellData } from "@/hooks/useCells"
 import { queueClockIsFileTime, useQueueForFile } from "@/lib/audio/play-queue"
 import { effectiveSourceText } from "@/lib/cell-text"
@@ -52,6 +53,29 @@ function writeSubtitleMode(mode: SubtitleMode): void {
   } catch {
     /* ignore persistence failures */
   }
+}
+
+/** The video column's header — the same row the chip strip provides for the
+ *  text column (2026-08-08, Sam's sketch): identical chrome so the two read as
+ *  one line split by the divider. The pill carries the linked file's name. */
+function PaneHeader({ src }: { src: string }) {
+  let basename = src
+  try {
+    basename = decodeURIComponent(new URL(src).pathname.split("/").pop() || src)
+  } catch {
+    /* not a parseable URL — show it raw */
+  }
+  return (
+    <div
+      data-testid="video-pane-header"
+      className="flex shrink-0 items-center gap-2 border-t border-border bg-muted/20 px-4 py-1.5"
+    >
+      <span className="text-xs font-medium text-muted-foreground">Video</span>
+      <span className="inline-flex min-w-0 items-center rounded-md border border-border bg-background px-2 py-0.5 text-[11px] text-foreground/80">
+        <span className="truncate font-mono">{basename}</span>
+      </span>
+    </div>
+  )
 }
 
 export interface MediaVideoPaneProps {
@@ -95,6 +119,18 @@ export function MediaVideoPane({
   const [mediaEpoch, setMediaEpoch] = useState(0)
   /** Bumped by "Try again" so the element is rebuilt against the same URL. */
   const [loadAttempt, setLoadAttempt] = useState(0)
+  /** The caption toggle rides faded on the picture; this shows it briefly when
+   *  playback starts so the control is discoverable without hovering. */
+  const [modeRevealed, setModeRevealed] = useState(false)
+  useEffect(() => {
+    if (!queue.playing) {
+      setModeRevealed(false)
+      return
+    }
+    setModeRevealed(true)
+    const t = window.setTimeout(() => setModeRevealed(false), 2500)
+    return () => window.clearTimeout(t)
+  }, [queue.playing])
 
   /**
    * Slaving is only possible when this file's queue can produce FILE-timeline
@@ -276,9 +312,10 @@ export function MediaVideoPane({
       <div
         data-testid="tl-video-pane"
         data-video-state="error"
-        className="flex h-full min-h-0 flex-col gap-2 overflow-hidden border-r border-border p-2"
+        className="flex h-full min-h-0 flex-col overflow-hidden border-r border-border"
       >
-        <div className="flex min-h-0 flex-1 flex-col items-start justify-center gap-2 rounded-md border border-dashed border-border bg-muted/30 p-3">
+        <PaneHeader src={src} />
+        <div className="m-2 flex min-h-0 flex-col items-start gap-2 rounded-md border border-dashed border-border bg-muted/30 p-3">
           <div className="flex items-center gap-1.5 text-xs font-medium text-foreground">
             <Film className="h-3.5 w-3.5 shrink-0" />
             This video could not be loaded
@@ -313,9 +350,11 @@ export function MediaVideoPane({
     <div
       data-testid="tl-video-pane"
       data-video-state={slaved ? "slaved" : "standalone"}
-      className="flex h-full min-h-0 flex-col gap-2 overflow-hidden border-r border-border p-2"
+      className="flex h-full min-h-0 flex-col overflow-hidden border-r border-border"
     >
-      <div className="relative aspect-video max-h-full w-full shrink-0 overflow-hidden rounded-md bg-black">
+      <PaneHeader src={src} />
+      <div className="flex min-h-0 flex-1 flex-col p-2">
+      <div className="group relative aspect-video max-h-full w-full shrink-0 overflow-hidden rounded-md bg-black">
         <video
           ref={videoRef}
           key={`${src}#${loadAttempt}`}
@@ -374,6 +413,32 @@ export function MediaVideoPane({
             )}
           </div>
         )}
+        {/* 2026-08-08 (Sam): the caption choice rides ON the picture, faded —
+            visible while hovering, and for a moment when playback starts so
+            you learn it exists. Hidden it is also pointer-inert, so a stray
+            click near the corner hits the video, not an invisible control. */}
+        <div
+          data-testid="video-pane-mode-overlay"
+          className={cn(
+            "absolute right-2 top-2 z-30 transition-opacity duration-300",
+            modeRevealed
+              ? "opacity-100"
+              : "pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100",
+          )}
+        >
+          <SegmentTabs<SubtitleMode>
+            value={mode}
+            onValueChange={setMode}
+            aria-label="Subtitle text"
+            options={[
+              { label: "Target", value: "target" },
+              { label: "Source", value: "source" },
+              { label: "Both", value: "both" },
+              { label: "Off", value: "off" },
+            ]}
+            listClassName="h-7 border-0 bg-black/55 backdrop-blur-sm [&_button]:h-6 [&_button]:px-2 [&_button]:text-[11px] [&_button]:text-white/70 [&_button:hover]:text-white [&_button[data-active]]:!bg-white/25 [&_button[data-active]]:!text-white [&_button[data-active]]:!border-transparent [&_button[data-active]]:shadow-none"
+          />
+        </div>
         {needsGesture && (
           <button
             type="button"
@@ -390,19 +455,6 @@ export function MediaVideoPane({
           </button>
         )}
       </div>
-      <div className="flex shrink-0 items-center justify-between gap-2">
-        <SegmentTabs<SubtitleMode>
-          value={mode}
-          onValueChange={setMode}
-          aria-label="Subtitle text"
-          options={[
-            { label: "Target", value: "target" },
-            { label: "Source", value: "source" },
-            { label: "Both", value: "both" },
-            { label: "Off", value: "off" },
-          ]}
-          listClassName="h-7 [&_button]:h-6 [&_button]:px-2 [&_button]:text-[11px]"
-        />
       </div>
     </div>
   )

@@ -212,6 +212,7 @@ export function MediaFollowDriver({
   userScrollListenerRef,
   programmaticStampRef,
   followCommand,
+  onFollowRest,
 }: {
   isCellDisplayed: (cellId: string) => boolean
   scrollToCell: (cellId: string) => void
@@ -220,6 +221,9 @@ export function MediaFollowDriver({
   /** Explicit intent from user gestures: chip/row clicks ENGAGE, inspection
    *  jumps RELEASE. seq-keyed so repeats of the same intent still apply. */
   followCommand: { seq: number; intent: "engage" | "release" } | null
+  /** Fired when the queue stops running (and on unmount) — the table lifts
+   *  its follow-hover lock. */
+  onFollowRest: () => void
 }) {
   const queueCellId = useQueueCurrentCellId()
   // Same stale-singleton guard as the timeline: a queue running another
@@ -228,9 +232,13 @@ export function MediaFollowDriver({
   const [follow, setFollow] = useState(true)
   // Rising edge of running (play, resume) re-engages following — a user who
   // scrolled away re-opts-in by pressing play, exactly like the track view.
+  // The falling edge (pause/stop) lets the table lift its hover lock so a
+  // parked cursor gets normal hover back without needing to move.
   useEffect(() => {
     if (queueRunning) setFollow(true)
-  }, [queueRunning])
+    else onFollowRest()
+  }, [queueRunning, onFollowRest])
+  useEffect(() => () => onFollowRest(), [onFollowRest])
   // Explicit intents win over the truce in both directions.
   const appliedCommandSeqRef = useRef(0)
   useEffect(() => {
@@ -1013,9 +1021,45 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     },
     [issueFollowCommand],
   )
+  // 2026-08-08 hover quarantine: Chromium re-evaluates :hover AND re-fires
+  // mouseenter after every programmatic scroll, so during playback-follow the
+  // row shade and action rail "drift" onto whatever slides under a PARKED
+  // cursor. Each follow step arms a lock attribute on the list root; the row
+  // styles and mouseenter handler stand down under it. Any GENUINE pointer
+  // gesture — movement with an actual coordinate delta, a wheel tick, a press
+  // — lifts it instantly (the browser's synthetic re-fires keep identical
+  // coordinates, so they never unlock). Attribute-only: no React state, no
+  // row re-renders, hover feels native the moment the mouse is really used.
+  const setFollowHoverLock = useCallback((locked: boolean) => {
+    const el = listRootRef.current
+    if (!el) return
+    if (locked) el.setAttribute("data-follow-hover-lock", "")
+    else el.removeAttribute("data-follow-hover-lock")
+  }, [])
+  useEffect(() => {
+    const el = listRootRef.current
+    if (!el) return
+    let last: { x: number; y: number } | null = null
+    const onMove = (e: PointerEvent) => {
+      const moved = last != null && Math.abs(e.clientX - last.x) + Math.abs(e.clientY - last.y) > 1
+      last = { x: e.clientX, y: e.clientY }
+      if (moved) setFollowHoverLock(false)
+    }
+    const unlock = () => setFollowHoverLock(false)
+    el.addEventListener("pointermove", onMove, { capture: true, passive: true })
+    el.addEventListener("wheel", unlock, { capture: true, passive: true })
+    el.addEventListener("pointerdown", unlock, { capture: true, passive: true })
+    return () => {
+      el.removeEventListener("pointermove", onMove, { capture: true } as EventListenerOptions)
+      el.removeEventListener("wheel", unlock, { capture: true } as EventListenerOptions)
+      el.removeEventListener("pointerdown", unlock, { capture: true } as EventListenerOptions)
+    }
+  }, [setFollowHoverLock])
+  const handleFollowRest = useCallback(() => setFollowHoverLock(false), [setFollowHoverLock])
   const followScrollToCell = useCallback((cellId: string) => {
     const index = displayCellIdsRef.current.indexOf(cellId)
     if (index < 0) return
+    setFollowHoverLock(true)
     // A range picked in the segment navigator must not stay latched while
     // playback walks past it — drop it so the trigger quietly tracks the
     // sounding cell (Sam 2026-08-07), same as scrollToCellId does for jumps.
@@ -1023,7 +1067,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     // 0.35: the running row rides high enough to leave reading room below.
     // Animated (Sam 2026-08-08): the follow glides instead of teleporting.
     programmaticListScroll(index, { viewPosition: 0.35, animated: true })
-  }, [clearChapterNavigationSelection, programmaticListScroll])
+  }, [clearChapterNavigationSelection, programmaticListScroll, setFollowHoverLock])
 
   // Durable cell audio (AD-2 cell.audio.* grammar). Per-file read; overlay each
   // visible row's attachments + selected clips at render time, rather than
@@ -2429,6 +2473,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
               userScrollListenerRef={followUserScrollListenerRef}
               programmaticStampRef={followProgrammaticStampRef}
               followCommand={followCommand}
+              onFollowRest={handleFollowRest}
             />
           )}
           <LegendList
@@ -5192,6 +5237,10 @@ function EditorRow({
 
   // Stable rail handlers
   const handleRowMouseEnter = () => {
+    // 2026-08-08: under the playback-follow hover lock this "enter" is the
+    // browser re-firing hover as content slides beneath a parked cursor —
+    // summoning the rail from it made the rail drift row-to-row.
+    if (rowRef.current?.closest("[data-follow-hover-lock]")) return
     setIsHovering(true)
     // AQU-354: a fresh hover re-summons the rail if it had idle-collapsed.
     registerRailActivity()
@@ -5508,8 +5557,10 @@ function EditorRow({
           // Keyboard-focus ring for the grid row (only when focused directly,
           // not via a child element — :focus-visible + :not(:focus-within:not(:focus))).
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-inset",
-          // Hover/active well via a subtle background overlay.
-          "hover:bg-muted/50",
+          // Hover/active well via a subtle background overlay. The :not()
+          // stands the shade down under the playback-follow hover lock —
+          // synthetic hover from content sliding under a parked cursor.
+          "[&:hover:not([data-follow-hover-lock]_*)]:bg-muted/50",
           expanded && "bg-muted/50",
           audioController.isPlaying && "bg-muted/40",
           // Multi-select: tinted fill + a subtle gold inset ring.
@@ -5604,7 +5655,7 @@ function EditorRow({
                   "focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-2",
                   isMultiSelected
                     ? "border-transparent bg-primary text-primary-foreground opacity-100"
-                    : "border-border bg-card text-muted-foreground/70 opacity-60 hover:text-primary group-hover:opacity-100",
+                    : "border-border bg-card text-muted-foreground/70 opacity-60 hover:text-primary [.group:hover:not([data-follow-hover-lock]_*)_&]:opacity-100",
                 )}
               >
                 {isMultiSelected ? (
@@ -5746,7 +5797,7 @@ function EditorRow({
                     "absolute right-1 top-1 z-10 shrink-0",
                     sourceEditing
                       ? "bg-primary/10 text-primary"
-                      : "text-muted-foreground/50 opacity-0 hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100",
+                      : "text-muted-foreground/50 opacity-0 hover:text-foreground focus-visible:opacity-100 [.group:hover:not([data-follow-hover-lock]_*)_&]:opacity-100",
                   )}
                 >
                   <Pencil />
@@ -5759,7 +5810,7 @@ function EditorRow({
               <AppTooltip content={sourceReadOnlyReasonForCell} className="max-w-xs">
                 <span
                   aria-label="Source is locked"
-                  className="absolute right-1 top-1 z-10 inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground/50 opacity-0 focus-visible:opacity-100 group-hover:opacity-100"
+                  className="absolute right-1 top-1 z-10 inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground/50 opacity-0 focus-visible:opacity-100 [.group:hover:not([data-follow-hover-lock]_*)_&]:opacity-100"
                 >
                   <Lock className="size-3" />
                 </span>

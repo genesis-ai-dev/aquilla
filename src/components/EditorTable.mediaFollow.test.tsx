@@ -48,6 +48,7 @@ function makeHarness(displayed: string[] = ["a", "b", "c"]) {
     programmaticStampRef.current = performance.now()
     scrolled.push(cellId)
   })
+  const onFollowRest = vi.fn()
   const uiWith = (followCommand: { seq: number; intent: "engage" | "release" } | null) => (
     <MediaFollowDriver
       isCellDisplayed={(id) => displayed.includes(id)}
@@ -55,10 +56,11 @@ function makeHarness(displayed: string[] = ["a", "b", "c"]) {
       userScrollListenerRef={userScrollListenerRef}
       programmaticStampRef={programmaticStampRef}
       followCommand={followCommand}
+      onFollowRest={onFollowRest}
     />
   )
   const ui = uiWith(null)
-  return { ui, uiWith, userScrollListenerRef, programmaticStampRef, scrolled, scrollToCell }
+  return { ui, uiWith, userScrollListenerRef, programmaticStampRef, scrolled, scrollToCell, onFollowRest }
 }
 
 describe("MediaFollowDriver", () => {
@@ -156,6 +158,15 @@ describe("MediaFollowDriver", () => {
     // …while a fresh seq applies again — here flipping to engage mid-run.
     view.rerender(h.uiWith({ seq: 2, intent: "engage" }))
     expect(h.scrolled).toEqual(["a", "c"]) // snap to current on engage
+  })
+
+  it("the falling edge of running fires onFollowRest (hover lock lifts on pause/stop)", () => {
+    const h = makeHarness()
+    render(h.ui)
+    setRunning("a")
+    h.onFollowRest.mockClear()
+    setRunning(null) // pause/stop
+    expect(h.onFollowRest).toHaveBeenCalled()
   })
 
   it("a scroll while the queue is quiet never breaks the next session's follow", () => {

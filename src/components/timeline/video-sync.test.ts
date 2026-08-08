@@ -12,6 +12,7 @@ function input(over: Partial<VideoSyncInput> = {}): VideoSyncInput {
     kind: "playing",
     clockIsFileTime: true,
     tickSec: 10.25,
+    videoSec: 10.25,
     prevTickSec: 10,
     prevTickAt: 1000,
     now: 1250,
@@ -89,6 +90,27 @@ describe("videoSyncAction", () => {
     expect(videoSyncAction(paused)).toEqual({ kind: "seek", sec: 10.2 })
     // ...but a clock sitting still does not.
     expect(videoSyncAction({ ...paused, tickSec: 10 })).toEqual({ kind: "none" })
+  })
+
+  it("catches a video freewheeling away from the sound", () => {
+    // Measured at 2x on the live stack: the queue's clock advanced ~1.76x while
+    // the video ran a true 2x, so the picture pulled 2.4s ahead with the
+    // tick-to-tick test seeing nothing wrong — every tick landed exactly where
+    // the previous one predicted.
+    const healthyTicks = { prevTickSec: 10, prevTickAt: 1000, now: 1250, tickSec: 10.5, rate: 2 }
+    expect(videoSyncAction(input({ ...healthyTicks, videoSec: 10.5 }))).toEqual({ kind: "none" })
+    const drifting = videoSyncAction(input({ ...healthyTicks, videoSec: 12.9 }))
+    if (drifting.kind !== "seek") throw new Error("expected a corrective seek")
+    expect(drifting.sec).toBeGreaterThan(10.5)
+  })
+
+  it("ignores the structural lag that a naive drift bar would chase", () => {
+    // Ticks are published on a ~250ms timeupdate, so a perfectly synced video
+    // is ALWAYS slightly ahead of the last published tick — by up to 0.25*rate.
+    // That is not drift, and correcting it would drag the picture behind.
+    expect(
+      videoSyncAction(input({ rate: 2, prevTickSec: 10, prevTickAt: 1000, now: 1250, tickSec: 10.5, videoSec: 11.0 })),
+    ).toEqual({ kind: "none" })
   })
 
   it("never seeks to a negative position", () => {

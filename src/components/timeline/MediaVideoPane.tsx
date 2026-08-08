@@ -141,6 +141,7 @@ export function MediaVideoPane({
       kind: queue.kind,
       clockIsFileTime,
       tickSec,
+      videoSec: video.currentTime,
       prevTickSec: prev?.sec ?? null,
       prevTickAt: prev?.at ?? null,
       now,
@@ -173,7 +174,9 @@ export function MediaVideoPane({
   }, [slaved, failed, queue.kind, queue.playing, clockIsFileTime, tickSec, rate, mediaEpoch, requestPlay])
 
   // Playback speed. Set both, because `defaultPlaybackRate` is what survives a
-  // load, and re-apply whenever the element reloads.
+  // load, and re-apply whenever the element reloads. This is the STARTING
+  // point; the transport effect above then trims it towards what the sound is
+  // measurably doing. Changing the nominal rate discards the old measurement.
   useEffect(() => {
     const video = videoRef.current
     if (!video || !slaved) return

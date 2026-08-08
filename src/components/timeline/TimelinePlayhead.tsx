@@ -7,7 +7,7 @@
 // directly (no React state, no re-renders); each `currentSec` prop change
 // re-anchors the interpolation so drift can't accumulate.
 
-import { useEffect, useRef } from "react"
+import { useEffect, useLayoutEffect, useRef } from "react"
 import { secToPx } from "@/lib/timeline/scale"
 
 export interface TimelinePlayheadProps {
@@ -52,11 +52,14 @@ export function TimelinePlayhead({ currentSec, pxPerSec, playing = false, rate =
   /** The last second this component actually PAINTED — the monotonic floor. */
   const renderedSecRef = useRef<number | null>(null)
 
-  // Paused/idle: the JSX left below follows the clock exactly — keep the
-  // floor in sync so the next play starts clamping from the true position.
-  useEffect(() => {
-    if (!playing) renderedSecRef.current = currentSec
-  }, [playing, currentSec])
+  // Sync the floor with what THIS commit's JSX just painted — synchronously,
+  // before any rAF frame can fire. Without this, a forward anchor written by
+  // React outruns the rAF-owned floor and the OLD loop's next frame pulls
+  // the head back for one frame (the residual 1-frame bounce the live pass
+  // caught). While paused, monotonicSec passes currentSec through exactly.
+  useLayoutEffect(() => {
+    renderedSecRef.current = monotonicSec(renderedSecRef.current, currentSec, playing)
+  })
 
   useEffect(() => {
     if (!playing) return

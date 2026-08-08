@@ -2007,6 +2007,11 @@ async function playAt(index: number, opts: { atSeconds?: number; autoplay?: bool
   disposeCurrent()
   const seq = ++currentSeq
   setState({ kind: "loading", cellIndex: index, cellId: cell.id })
+  // 2026-08-08 (bounce forensics): disposeCurrent just reset progress to 0 —
+  // on a cross-clip mid-play jump that 0 painted the playhead at x=0 for the
+  // whole network resolve. Re-seed the intended start synchronously (the same
+  // value the post-resolve code sets) so the readout never sees the reset.
+  setProgress({ currentTime: opts.atSeconds ?? trimWindowForCell(cell)?.start ?? 0, duration: 0 })
   ctx.onCellChange?.(index, cell.id)
 
   const surfaceMissing = (missingCellId: string): void => {

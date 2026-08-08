@@ -16,7 +16,23 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
  * type "English" → at least one result appears → clear to "xxxnotacode" →
  * results collapse to empty.
  */
+// The eBible corpus panel fetches its translation list live from
+// raw.githubusercontent.com (see src/lib/parsers/ebible.ts CORPUS_BASE) —
+// intentional for production (no server-side proxy needed), but it makes
+// this smoke test depend on outbound network reachability to a third-party
+// host, which some sandboxed/offline CI runners don't have. Stub it with a
+// tiny fixture so the test verifies our own filtering logic hermetically.
+const FIXTURE_TRANSLATIONS_CSV = [
+  "languageCode,translationId,languageName,languageNameInEnglish,title,description,Copyright,Redistributable,downloadable,homeDomain,OTbooks,NTbooks,textDirection,UpdateDate",
+  "eng,engweb,English,English,World English Bible,,Public Domain,True,True,ebible.org,39,27,ltr,2020-01-01",
+  "fra,frasbl,français,French,Segond 21,,Public Domain,True,True,ebible.org,39,27,ltr,2020-01-01",
+].join("\n")
+
 test("eBible corpus search input filters translation list", async ({ alice }) => {
+  await alice.route("**/raw.githubusercontent.com/BibleNLP/ebible/main/metadata/translations.csv", (route) =>
+    route.fulfill({ status: 200, contentType: "text/csv", body: FIXTURE_TRANSLATIONS_CSV }),
+  )
+
   const dash = new Dashboard(alice)
   await dash.goto()
   const name = `EBibleSearch ${Date.now()}`

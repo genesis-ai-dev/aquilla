@@ -16,6 +16,14 @@ export interface LlmRequest {
   tier: Tier
   maxTokens: number
   temperature: number
+  /** Which pipeline node issued this call ("construe", "summarize", "draft",
+   *  "verify"). Cost-meter attribution only — no node reads it. Optional so
+   *  scripted test LlmCalls stay unchanged. */
+  label?: string
+  /** Span this call belongs to (SpanSeed.id), injected by the tick's per-span
+   *  wrapper. Cost-meter attribution only. Waves run several spans at once, so
+   *  this cannot be a mutable "current span" — it rides the request. */
+  spanId?: string
 }
 
 /** The ONLY way any node reaches a model. Injected; tests script it. */
@@ -180,6 +188,14 @@ export interface SkippedCell {
 }
 
 export type ClosureExit = "model-closed" | "fixpoint" | "window-exhausted" | "max-iterations" | "budget"
+
+/**
+ * Coarse progress phase within one span, reported for live UI only — never a
+ * control signal. A span always moves reading → drafting → checking → staging,
+ * but may exit at any of them (budget, barrier, quorum), so consumers must
+ * treat every phase as potentially terminal.
+ */
+export type SpanPhase = "reading" | "drafting" | "checking" | "staging"
 
 export interface SpanReport {
   spanId: string

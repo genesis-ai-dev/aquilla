@@ -20,11 +20,13 @@ import {
   getRun,
   confirmPause,
   parkRun,
-  recordSpanOutcome,
+  recordWaveOutcome,
   setSpanCursor,
+  touchRun,
   readUnconsumedSteering,
   markSteeringConsumed,
   insertDrafts,
+  findOccupiedCells,
   type ContextualRun,
   type SpanCursor,
   type StoredSpanSeed,
@@ -36,14 +38,15 @@ import {
   getSceneBrief,
 } from "../../../../db/shared/scene-briefs"
 import { selectCellPairs, type CellPair } from "../agent/tools/select-cells"
-import { loadLintRules, type LintRule } from "../agent/lint"
+import { type LintRule } from "../agent/lint"
+import { loadProjectContext, type ProjectContext } from "./project-context"
 import { openRouterUsage } from "../llm-vendor"
 import { deriveSpanSeeds } from "./segment"
 import { lintSpanDraft } from "./lint-node"
 import { runSpan, EXAMPLES_TARGET } from "./pipeline"
 import type { ExamplePair } from "./draft"
 import type { NeighborBrief, LayerAboveBlock } from "./closure"
-import type { LlmCall, SpanSeed, SpanReport, Tier } from "./types"
+import type { LlmCall, SpanSeed, SpanPhase, SpanReport, Tier } from "./types"
 
 // ── Model + endpoint resolution ─────────────────────────────────────────────
 
@@ -87,51 +90,170 @@ export function resolveOpenRouterUrl(env: { OPENROUTER_BASE_URL?: string }): str
     : "https://openrouter.ai/api/v1/chat/completions"
 }
 
+/** One metered model call. `costCents` is 0 against any non-OpenRouter
+ *  upstream (`usage.cost` is an OpenRouter extension — see lib/llm-vendor.ts),
+ *  so the cost meter prices `promptTokens`/`completionTokens` offline instead
+ *  of trusting this field. */
+export interface LlmCallUsage {
+  promptTokens: number
+  completionTokens: number
+  costCents: number
+  /** Pipeline node that issued the call (LlmRequest.label); "" if unlabelled. */
+  label: string
+  /** Span the call belongs to (LlmRequest.spanId); "" outside a span. */
+  spanId: string
+  tier: Tier
+  /** Model actually requested for this tier. */
+  model: string
+  latencyMs: number
+  /** False when the call threw or returned no usage block — a failed call
+   *  still costs wall-clock and still burdens the run's budget. */
+  ok: boolean
+  /** llama.cpp/llama-swap `timings.predicted_per_second`, when the upstream
+   *  reports it. Absent for OpenRouter. */
+  tokensPerSecond?: number
+}
+
+/** Bounded-concurrency gate. `limit <= 0` disables it entirely (no queueing,
+ *  no bookkeeping) so the OpenRouter path behaves exactly as before. */
+function makeGate(limit: number): <T>(fn: () => Promise<T>) => Promise<T> {
+  if (limit <= 0) return (fn) => fn()
+  let active = 0
+  const waiting: (() => void)[] = []
+  return async <T>(fn: () => Promise<T>): Promise<T> => {
+    if (active >= limit) await new Promise<void>((resolve) => waiting.push(resolve))
+    active++
+    try {
+      return await fn()
+    } finally {
+      active--
+      waiting.shift()?.()
+    }
+  }
+}
+
 /** Build the pipeline's LlmCall over the OpenRouter chat-completions API
  *  (non-streaming). Throws on transport/HTTP errors — runSpan's nodes treat a
- *  throw as that call failing, and the tick records the span outcome. */
+ *  throw as that call failing, and the tick records the span outcome.
+ *
+ *  `onUsage` fires exactly once per call, including on failure, so the cost
+ *  meter counts attempts rather than successes: a model that fails a parse and
+ *  forces a retry costs twice, and a ledger that only recorded successes would
+ *  hide that. It must never throw — it is called from the LLM hot path. */
 export function makeLlmCall(cfg: {
   url: string
   apiKey: string
   models: ContextualModels
   signal?: AbortSignal
-  onUsage?: (u: { promptTokens: number; completionTokens: number; costCents: number }) => void
+  onUsage?: (u: LlmCallUsage) => void
+  /** Cap on HTTP requests in flight through THIS LlmCall at any moment.
+   *  0/undefined = uncapped (the OpenRouter default). */
+  maxInFlight?: number
 }): LlmCall {
+  // Span concurrency is not request concurrency: one span fans its verifier
+  // panel out three-wide, so N spans burst to ~3N requests. Against an upstream
+  // with a fixed slot count that burst is rejected outright, and retrying it
+  // just re-collides. Gate here, where every node's call converges, so the
+  // wave width stays a scheduling decision and this stays the hard limit.
+  const gate = makeGate(cfg.maxInFlight ?? 0)
   return async (req) => {
     const model = cfg.models[req.tier as Tier]
-    const res = await fetch(cfg.url, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${cfg.apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model,
-        messages: [
-          { role: "system", content: req.system },
-          { role: "user", content: req.user },
-        ],
-        max_tokens: req.maxTokens,
-        temperature: req.temperature,
-        ...openRouterUsage(cfg.url),
-      }),
-      ...(cfg.signal ? { signal: cfg.signal } : {}),
-    })
-    if (!res.ok) {
-      const text = await res.text()
-      throw new Error(`openrouter_error ${res.status}: ${text.slice(0, 300)}`)
+    // Per-ATTEMPT, so a retry's recorded latency is its own round-trip and not
+    // the backoff it waited through. Reset at the top of each attempt below.
+    let startedAt = Date.now()
+    const report = (
+      u: Omit<LlmCallUsage, "label" | "spanId" | "tier" | "model" | "latencyMs">,
+    ): void => {
+      if (!cfg.onUsage) return
+      try {
+        cfg.onUsage({
+          ...u,
+          label: req.label ?? "",
+          spanId: req.spanId ?? "",
+          tier: req.tier as Tier,
+          model,
+          latencyMs: Date.now() - startedAt,
+        })
+      } catch {
+        /* the meter must never break the run it is measuring */
+      }
     }
-    const body = (await res.json()) as {
+    const failed = { promptTokens: 0, completionTokens: 0, costCents: 0, ok: false }
+
+    // Capacity rejections are NOT model failures. A busy upstream (OpenRouter
+    // rate limit, or a self-hosted server whose slots are all occupied) answers
+    // in milliseconds with no tokens spent, but the pipeline treats a throw as
+    // the node failing — and a rejected `ambiguity` verifier fails its whole
+    // span. Wait for a slot instead. Each attempt is still metered, so
+    // contention stays visible rather than being smoothed away.
+    const requestBody = JSON.stringify({
+      model,
+      messages: [
+        { role: "system", content: req.system },
+        { role: "user", content: req.user },
+      ],
+      max_tokens: req.maxTokens,
+      temperature: req.temperature,
+      ...openRouterUsage(cfg.url),
+    })
+    const RETRIABLE = new Set([429, 500, 502, 503, 504])
+    const MAX_ATTEMPTS = 5
+
+    interface UpstreamBody {
       choices?: { message?: { content?: string | null } }[]
       usage?: { prompt_tokens?: number; completion_tokens?: number; cost?: number }
+      timings?: { predicted_per_second?: number }
     }
-    if (body.usage && cfg.onUsage) {
-      cfg.onUsage({
-        promptTokens: body.usage.prompt_tokens ?? 0,
-        completionTokens: body.usage.completion_tokens ?? 0,
-        costCents: (body.usage.cost ?? 0) * 100,
-      })
+    type Attempt =
+      | { ok: true; body: UpstreamBody }
+      | { ok: false; status: number; text: string }
+
+    let body!: UpstreamBody
+    for (let attempt = 1; ; attempt++) {
+      startedAt = Date.now()
+      let outcome: Attempt
+      try {
+        // The gate holds a slot only for the round-trip, never across the
+        // backoff below — a sleeping retry must not occupy capacity.
+        outcome = await gate<Attempt>(async () => {
+          const res = await fetch(cfg.url, {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${cfg.apiKey}`,
+              "Content-Type": "application/json",
+            },
+            body: requestBody,
+            ...(cfg.signal ? { signal: cfg.signal } : {}),
+          })
+          if (!res.ok) return { ok: false, status: res.status, text: await res.text() }
+          return { ok: true, body: (await res.json()) as UpstreamBody }
+        })
+      } catch (err) {
+        report(failed)
+        throw err
+      }
+      if (outcome.ok) {
+        body = outcome.body
+        break
+      }
+
+      report(failed)
+      if (!RETRIABLE.has(outcome.status) || attempt >= MAX_ATTEMPTS || cfg.signal?.aborted) {
+        throw new Error(`openrouter_error ${outcome.status}: ${outcome.text.slice(0, 300)}`)
+      }
+      // Exponential backoff with jitter — without the jitter every rejected
+      // lane in a wave would wake at the same instant and collide again.
+      const backoffMs = Math.min(1000 * 2 ** (attempt - 1), 8000) * (0.5 + Math.random())
+      await new Promise((r) => setTimeout(r, backoffMs))
     }
+    const tps = body.timings?.predicted_per_second
+    report({
+      promptTokens: body.usage?.prompt_tokens ?? 0,
+      completionTokens: body.usage?.completion_tokens ?? 0,
+      costCents: (body.usage?.cost ?? 0) * 100,
+      ok: body.usage !== undefined,
+      ...(typeof tps === "number" ? { tokensPerSecond: tps } : {}),
+    })
     return body.choices?.[0]?.message?.content ?? ""
   }
 }
@@ -154,6 +276,8 @@ export interface ContextualSceneFrame {
   sceneBriefId: string
   spanLabel: string
   ambiguityCount: number
+  /** Which lane this belongs to (a wave runs several spans at once). */
+  spanId?: string
 }
 
 export interface ContextualSpanFrame {
@@ -163,12 +287,53 @@ export interface ContextualSpanFrame {
   staged: number
   skipped: number
   verdictSummary: string
+  spanId?: string
+}
+
+/** A lane OPENS. Emitted before any model call, so the UI never shows dead air
+ *  while the closure loop reads context (the slowest phase of a span). */
+export interface ContextualSpanStartFrame {
+  type: "contextual.span.start"
+  runId: string
+  fileId: string
+  spanId: string
+  spanLabel: string
+}
+
+/** Within-lane phase movement — decoration only, never a control signal. */
+export interface ContextualPhaseFrame {
+  type: "contextual.phase"
+  runId: string
+  spanId: string
+  spanLabel: string
+  phase: SpanPhase
+}
+
+/** THE payload the user is waiting for: text that just cleared verification
+ *  and landed as a reviewable draft. Batched per span (a wave stages tens of
+ *  cells at once) and capped — the client refetches the tail from
+ *  GET …/contextual/drafts when `truncated` is set. */
+export interface ContextualDraftsFrame {
+  type: "contextual.drafts"
+  runId: string
+  fileId: string
+  spanLabel: string
+  drafts: { draftId: string; cellId: string; text: string }[]
+  truncated?: boolean
 }
 
 export type ContextualProgressFrame =
   | ContextualRunStateFrame
   | ContextualSceneFrame
   | ContextualSpanFrame
+  | ContextualSpanStartFrame
+  | ContextualPhaseFrame
+  | ContextualDraftsFrame
+
+/** Frame-size guards: a draft burst must not turn one span into a megabyte of
+ *  WebSocket traffic. Beyond these the client refetches the authoritative list. */
+export const MAX_DRAFTS_PER_FRAME = 40
+export const MAX_DRAFT_TEXT_CHARS = 2000
 
 export function runStateFrame(run: ContextualRun): ContextualRunStateFrame {
   return {
@@ -180,6 +345,49 @@ export function runStateFrame(run: ContextualRun): ContextualRunStateFrame {
     total: run.totalSpans,
     failed: run.failedSpans,
   }
+}
+
+// ── Wave sizing + ordering ──────────────────────────────────────────────────
+
+/** Ceiling on spans a single run drives concurrently. */
+export const MAX_WAVE_CONCURRENCY = 6
+/** Below this many remaining spans a run stays serial: a graph pays scheduling
+ *  and burst-rate overhead a chain does not, and on small files that overhead
+ *  is the whole cost. Wide work is where fan-out pays. */
+const SPANS_PER_LANE = 8
+
+/** How many spans to run at once, given how much work is left. */
+export function waveSize(spansRemaining: number, cap: number = MAX_WAVE_CONCURRENCY): number {
+  if (spansRemaining <= 1) return 1
+  const ceiling = Math.max(1, Math.min(cap, MAX_WAVE_CONCURRENCY))
+  return Math.max(1, Math.min(ceiling, Math.ceil(spansRemaining / SPANS_PER_LANE)))
+}
+
+/**
+ * Rotate the seed list so the span covering `anchorCellId` runs FIRST, with
+ * document order preserved from there and wrapping to the top.
+ *
+ * Coverage is identical — every seed still runs exactly once — but the first
+ * results land where the user is already looking instead of at the top of a
+ * file they may be nowhere near. Perceived latency is the product metric here;
+ * total latency is unchanged.
+ */
+export function orderSeedsFromAnchor(
+  seeds: StoredSpanSeed[],
+  anchorCellId: string | null | undefined,
+  pairs: CellPair[],
+): StoredSpanSeed[] {
+  if (!anchorCellId || seeds.length < 2) return seeds
+  const order = new Map(pairs.map((p, i) => [p.cellId, i]))
+  const anchorPos = order.get(anchorCellId)
+  if (anchorPos === undefined) return seeds
+  const hit = seeds.findIndex((s) => {
+    const start = order.get(s.startCellId)
+    const end = order.get(s.endCellId)
+    return start !== undefined && end !== undefined && anchorPos >= start && anchorPos <= end
+  })
+  if (hit <= 0) return seeds
+  return [...seeds.slice(hit), ...seeds.slice(0, hit)]
 }
 
 // ── Span label ("LUK 1:1–1:8") — display only, never authoritative ──────────
@@ -197,32 +405,12 @@ function spanLabel(seed: StoredSpanSeed, pairs: CellPair[]): string {
 }
 
 // ── Context assembly ────────────────────────────────────────────────────────
-
-interface ProjectContext {
-  sourceLanguage?: string
-  targetLanguage?: string
-  projectBriefL1?: string
-}
-
-async function loadProjectContext(db: AquillaDb, projectId: string): Promise<ProjectContext> {
-  try {
-    const row = await db
-      .prepare(
-        `SELECT source_language, target_language,
-                settings::jsonb -> 'translationBrief' ->> 'l1Summary' AS brief_summary
-           FROM project_settings WHERE project_id = ?`,
-      )
-      .bind(projectId)
-      .first<{ source_language: string | null; target_language: string | null; brief_summary: string | null }>()
-    return {
-      sourceLanguage: row?.source_language ?? undefined,
-      targetLanguage: row?.target_language ?? undefined,
-      projectBriefL1: row?.brief_summary ?? undefined,
-    }
-  } catch {
-    return {}
-  }
-}
+//
+// Project context now comes from lib/contextual/project-context.ts, which
+// reads the whole settings blob rather than just the brief's L1 summary. That
+// is where the project's TERMINOLOGY lives — key-term decisions that used to
+// be compiled to rules client-side only, so no server-side draft or lint ever
+// saw them.
 
 /** Approved briefs adjacent to the seed, sided by document position. */
 async function loadNeighborBriefs(
@@ -321,67 +509,56 @@ export interface TickDeps {
   /** Best-effort progress notification (sync-worker DO fan-out). */
   notify?: (frame: ContextualProgressFrame) => Promise<void>
   signal?: AbortSignal
+  /** Spans to drive concurrently this wave. Defaults to `waveSize()` over the
+   *  remaining spans; pass 1 to force the original strictly-serial behaviour. */
+  concurrency?: number
 }
 
 export interface TickResult {
   continueRun: boolean
   status: string
+  /** The wave's LAST span report — kept singular for callers written against
+   *  the one-span-per-tick contract. `reports` carries the whole wave. */
+  report?: SpanReport
+  reports?: SpanReport[]
+}
+
+/** Shared per-run context, loaded ONCE per wave rather than once per span. */
+interface RunContext {
+  ctx: ProjectContext
+  rules: LintRule[]
+  pairs: CellPair[]
+  layerAbove: LayerAboveBlock[]
+  scope: {
+    projectId: string
+    fileId: string
+    targetLang: string
+    orderedCellIds: string[]
+    untranslatedCellIds: string[]
+    fileKind: string
+  }
+}
+
+interface SpanOutcome {
+  outcome: "done" | "failed"
+  lastError: string | null
   report?: SpanReport
 }
 
-/** Process at most ONE span of the run, then return whether the caller's loop
- *  should continue. All state round-trips through Postgres — a crash between
- *  ticks loses at most the in-flight span's tokens, never its position. */
-export async function runOneTick(deps: TickDeps): Promise<TickResult> {
-  const { db, runId } = deps
-  const notify = deps.notify ?? (async () => {})
-  const run = await getRun(db, runId)
-  if (!run) return { continueRun: false, status: "not_found" }
-
-  // Pause/terminate honoured at the span edge — never mid-span.
-  if (run.status === "pausing") {
-    const t = await confirmPause(db, runId)
-    if (t.status === "ok") await notify(runStateFrame(t.run))
-    return { continueRun: false, status: "paused" }
-  }
-  if (run.status !== "running") {
-    return { continueRun: false, status: run.status }
-  }
-
-  // Scope + cursor. Pairs are re-read every tick (cells move under the run);
-  // seeds are pinned in the cursor so segmentation never shifts mid-run.
-  const pairs = await selectCellPairs(db, run.projectId, { fileId: run.fileId })
-  let cursor = run.spanCursor
-  if (!cursor) {
-    const seeds = deriveSpanSeeds(run.fileId, pairs)
-    cursor = { seeds, nextIndex: 0 }
-    const updated = await setSpanCursor(db, runId, cursor)
-    if (updated) await notify(runStateFrame(updated))
-  }
-
-  // Steering (directions + refresh_span re-enqueues) before picking the span.
-  const steering = await consumeSteering(db, run, cursor)
-  if (steering.refreshedSeeds.length > 0) {
-    cursor = { seeds: [...cursor.seeds, ...steering.refreshedSeeds], nextIndex: cursor.nextIndex }
-    await setSpanCursor(db, runId, cursor)
-  }
-
-  if (cursor.nextIndex >= cursor.seeds.length) {
-    // Spans exhausted → parked (steering or resume can wake the run). Queued
-    // directions are deliberately NOT consumed here — they stay visible and
-    // apply when a span next exists (refresh, new cells, or re-run).
-    const t = await parkRun(db, runId)
-    if (t.status === "ok") await notify(runStateFrame(t.run))
-    return { continueRun: false, status: t.status === "ok" ? "parked" : run.status }
-  }
-
-  // A span WILL run this tick — the queued directions now take effect, so
-  // consume them (exactly-once across ticks).
-  if (steering.directionIds.length > 0) {
-    await markSteeringConsumed(db, steering.directionIds)
-  }
-
-  const storedSeed = cursor.seeds[cursor.nextIndex]
+/**
+ * Drive ONE span end to end, emitting live frames as it goes. Pure with
+ * respect to the run row — the caller records every outcome in one guarded
+ * write, so a wave's spans never race each other on the counters.
+ */
+async function processSpan(
+  deps: TickDeps,
+  run: ContextualRun,
+  shared: RunContext,
+  storedSeed: StoredSpanSeed,
+  steeringDirections: string[],
+  notify: (frame: ContextualProgressFrame) => Promise<void>,
+): Promise<SpanOutcome> {
+  const { db } = deps
   const seed: SpanSeed = {
     id: storedSeed.id,
     fileId: storedSeed.fileId,
@@ -390,28 +567,19 @@ export async function runOneTick(deps: TickDeps): Promise<TickResult> {
     endCellId: storedSeed.endCellId,
     seedSource: storedSeed.seedSource as SpanSeed["seedSource"],
   }
-  const label = spanLabel(storedSeed, pairs)
+  const label = spanLabel(storedSeed, shared.pairs)
 
-  const ctx = await loadProjectContext(db, run.projectId)
-  const neighborBriefs = await loadNeighborBriefs(db, run.projectId, run.fileId, storedSeed, pairs)
-  const layerAbove: LayerAboveBlock[] = ctx.projectBriefL1
-    ? [{ ref: "project-brief", text: ctx.projectBriefL1 }]
-    : []
-  let rules: LintRule[] = []
-  try {
-    rules = await loadLintRules(db, run.projectId)
-  } catch {
-    /* lint is best-effort — never blocks the span */
-  }
-
-  const scope = {
-    projectId: run.projectId,
+  // The lane opens BEFORE the closure loop's first model call — otherwise the
+  // UI shows nothing at all through the slowest phase of the span.
+  await notify({
+    type: "contextual.span.start",
+    runId: run.id,
     fileId: run.fileId,
-    targetLang: run.targetLang,
-    orderedCellIds: pairs.map((p) => p.cellId),
-    untranslatedCellIds: pairs.filter((p) => !p.target.trim()).map((p) => p.cellId),
-    fileKind: "",
-  }
+    spanId: seed.id,
+    spanLabel: label,
+  })
+
+  const neighborBriefs = await loadNeighborBriefs(db, run.projectId, run.fileId, storedSeed, shared.pairs)
 
   let outcome: "done" | "failed" = "done"
   let lastError: string | null = null
@@ -419,17 +587,33 @@ export async function runOneTick(deps: TickDeps): Promise<TickResult> {
   try {
     report = await runSpan({
       seed,
-      scope,
-      pairs,
+      scope: shared.scope,
+      pairs: shared.pairs,
       neighborBriefs,
-      layerAbove,
-      examples: validatedExamples(pairs),
-      ...(ctx.projectBriefL1 ? { projectBriefL1: ctx.projectBriefL1 } : {}),
-      ...(steering.directions.length > 0 ? { steeringDirections: steering.directions } : {}),
-      rules,
-      ...(ctx.sourceLanguage ? { sourceLanguage: ctx.sourceLanguage } : {}),
-      ...(ctx.targetLanguage ? { targetLanguage: ctx.targetLanguage } : {}),
-      llm: deps.llm,
+      layerAbove: shared.layerAbove,
+      examples: validatedExamples(shared.pairs),
+      ...(shared.ctx.projectBriefL1 ? { projectBriefL1: shared.ctx.projectBriefL1 } : {}),
+      // The brief's own answers carry when nobody generated an L1 summary, and
+      // the concepts get scoped to this span's source text inside runSpan.
+      briefParameters: shared.ctx.briefParameters,
+      ...(shared.ctx.concepts.length > 0 ? { concepts: shared.ctx.concepts } : {}),
+      ...(steeringDirections.length > 0 ? { steeringDirections } : {}),
+      rules: shared.rules,
+      ...(shared.ctx.sourceLanguage ? { sourceLanguage: shared.ctx.sourceLanguage } : {}),
+      ...(shared.ctx.targetLanguage ? { targetLanguage: shared.ctx.targetLanguage } : {}),
+      // Tag every call this span makes, for cost attribution. A wave runs
+      // several spans concurrently, so the span id must ride the request
+      // rather than live in shared mutable state.
+      llm: (req) => deps.llm({ ...req, spanId: seed.id }),
+      onPhase: (phase: SpanPhase) => {
+        void notify({
+          type: "contextual.phase",
+          runId: run.id,
+          spanId: seed.id,
+          spanLabel: label,
+          phase,
+        }).catch(() => {})
+      },
       persistBrief: async (brief) => {
         const proposed = await proposeSceneBrief(db, {
           projectId: run.projectId,
@@ -457,17 +641,32 @@ export async function runOneTick(deps: TickDeps): Promise<TickResult> {
           sceneBriefId: proposed.brief.id,
           spanLabel: label,
           ambiguityCount: brief.ambiguityRegister.length,
+          spanId: seed.id,
         })
         return proposed.brief.id
       },
-      lint: async (draft) => lintSpanDraft(rules, pairs, draft),
+      lint: async (draft) => lintSpanDraft(shared.rules, shared.pairs, draft, shared.ctx.concepts),
       stage: async (draft) => {
+        // Anti-clobber, checked as late as possible: a human may have typed
+        // into one of these cells while the span was running. `pairs` is a
+        // snapshot from wave start, so re-read the live targets and drop any
+        // cell that gained one. Drafts are proposals, never commits — but a
+        // proposal over someone's fresh work is still noise they must dismiss.
+        const occupied = await findOccupiedCells(db, {
+          projectId: run.projectId,
+          fileId: run.fileId,
+          cellIds: draft.cells.map((c) => c.cellId),
+        })
+        const fresh = draft.cells.filter((c) => !occupied.has(c.cellId))
+        if (fresh.length === 0) {
+          return { proposalId: "", spanId: draft.spanId, stagedCellIds: [], verdicts: {} }
+        }
         const staged = await insertDrafts(db, {
           runId: run.id,
           projectId: run.projectId,
           fileId: run.fileId,
           sceneBriefId: draft.sceneBriefId,
-          drafts: draft.cells.map((c) => ({
+          drafts: fresh.map((c) => ({
             cellId: c.cellId,
             text: c.text,
             provenance: {
@@ -477,6 +676,22 @@ export async function runOneTick(deps: TickDeps): Promise<TickResult> {
             },
           })),
         })
+        // The moment that makes the feature legible: verified text, streamed
+        // to every open editor on this project.
+        if (staged.length > 0) {
+          await notify({
+            type: "contextual.drafts",
+            runId: run.id,
+            fileId: run.fileId,
+            spanLabel: label,
+            drafts: staged.slice(0, MAX_DRAFTS_PER_FRAME).map((d) => ({
+              draftId: d.id,
+              cellId: d.cellId,
+              text: d.text.slice(0, MAX_DRAFT_TEXT_CHARS),
+            })),
+            ...(staged.length > MAX_DRAFTS_PER_FRAME ? { truncated: true } : {}),
+          })
+        }
         return {
           proposalId: staged[0]?.id ?? crypto.randomUUID(),
           spanId: draft.spanId,
@@ -494,16 +709,6 @@ export async function runOneTick(deps: TickDeps): Promise<TickResult> {
     lastError = (err instanceof Error ? err.message : String(err)).slice(0, 2000)
   }
 
-  const advanced: SpanCursor = { seeds: cursor.seeds, nextIndex: cursor.nextIndex + 1 }
-  const after = await recordSpanOutcome(db, runId, {
-    cursor: advanced,
-    outcome,
-    unitsUsed: report?.unitsUsed ?? 0,
-    callsUsed: report?.callsUsed ?? 0,
-    lastError,
-    steeringCursor: new Date().toISOString(),
-  })
-
   await notify({
     type: "contextual.span",
     runId: run.id,
@@ -516,19 +721,158 @@ export async function runOneTick(deps: TickDeps): Promise<TickResult> {
         : report?.incomplete
           ? `partial: ${report.incompleteReasons.join("; ")}`
           : "complete",
+    spanId: seed.id,
+  })
+
+  return { outcome, lastError, ...(report ? { report } : {}) }
+}
+
+/**
+ * Process ONE WAVE of the run — up to `concurrency` spans driven at the same
+ * time — then return whether the caller's loop should continue.
+ *
+ * Spans are independent by construction: the only cross-span edge is
+ * `loadNeighborBriefs`, which reads APPROVED briefs only, so nothing a wave
+ * produces feeds anything else in the same wave. Ordering them was buying
+ * nothing but wall-clock.
+ *
+ * Durability is unchanged: the cursor advances past the whole wave in ONE
+ * guarded write, so a crash mid-wave replays that wave's spans (re-proposing
+ * drafts is idempotent per cell) and never skips one.
+ */
+export async function runOneTick(deps: TickDeps): Promise<TickResult> {
+  const { db, runId } = deps
+  const notify = deps.notify ?? (async () => {})
+  const run = await getRun(db, runId)
+  if (!run) return { continueRun: false, status: "not_found" }
+
+  // Pause/terminate honoured at the span edge — never mid-span.
+  if (run.status === "pausing") {
+    const t = await confirmPause(db, runId)
+    if (t.status === "ok") await notify(runStateFrame(t.run))
+    return { continueRun: false, status: "paused" }
+  }
+  if (run.status !== "running") {
+    return { continueRun: false, status: run.status }
+  }
+
+  // Scope + cursor. Pairs are re-read every wave (cells move under the run);
+  // seeds are pinned in the cursor so segmentation never shifts mid-run.
+  const pairs = await selectCellPairs(db, run.projectId, { fileId: run.fileId })
+  let cursor = run.spanCursor
+  if (!cursor) {
+    // First wave: derive the segmentation, then rotate it so work starts where
+    // the user was last looking (run.anchorCellId, set at start).
+    const seeds = orderSeedsFromAnchor(deriveSpanSeeds(run.fileId, pairs), run.anchorCellId, pairs)
+    cursor = { seeds, nextIndex: 0 }
+    const updated = await setSpanCursor(db, runId, cursor)
+    if (updated) await notify(runStateFrame(updated))
+  }
+
+  // Steering (directions + refresh_span re-enqueues) before picking the wave.
+  const steering = await consumeSteering(db, run, cursor)
+  if (steering.refreshedSeeds.length > 0) {
+    cursor = { seeds: [...cursor.seeds, ...steering.refreshedSeeds], nextIndex: cursor.nextIndex }
+    await setSpanCursor(db, runId, cursor)
+  }
+
+  if (cursor.nextIndex >= cursor.seeds.length) {
+    // Spans exhausted → parked (steering or resume can wake the run). Queued
+    // directions are deliberately NOT consumed here — they stay visible and
+    // apply when a span next exists (refresh, new cells, or re-run).
+    const t = await parkRun(db, runId)
+    if (t.status === "ok") await notify(runStateFrame(t.run))
+    return { continueRun: false, status: t.status === "ok" ? "parked" : run.status }
+  }
+
+  // Spans WILL run this wave — the queued directions now take effect, so
+  // consume them (exactly-once across waves).
+  if (steering.directionIds.length > 0) {
+    await markSteeringConsumed(db, steering.directionIds)
+  }
+
+  // Per-run context is loaded ONCE and shared by every span in the wave
+  // (it was re-fetched per span before, which was pure overhead).
+  const ctx = await loadProjectContext(db, run.projectId)
+  const layerAbove: LayerAboveBlock[] = ctx.projectBriefL1
+    ? [{ ref: "project-brief", text: ctx.projectBriefL1 }]
+    : []
+  const rules: LintRule[] = ctx.authoredRules
+  const shared: RunContext = {
+    ctx,
+    rules,
+    pairs,
+    layerAbove,
+    scope: {
+      projectId: run.projectId,
+      fileId: run.fileId,
+      targetLang: run.targetLang,
+      orderedCellIds: pairs.map((p) => p.cellId),
+      untranslatedCellIds: pairs.filter((p) => !p.target.trim()).map((p) => p.cellId),
+      fileKind: "",
+    },
+  }
+
+  const remaining = cursor.seeds.length - cursor.nextIndex
+  const width = Math.max(1, Math.min(deps.concurrency ?? waveSize(remaining), remaining))
+  const wave = cursor.seeds.slice(cursor.nextIndex, cursor.nextIndex + width)
+
+  // Heartbeat before a long wave so the stranded-run sweeper doesn't mistake
+  // work in flight for a dead driver.
+  await touchRun(db, runId)
+
+  // One lane's unexpected throw must cost exactly one span. Without this
+  // catch a single rejection takes down `Promise.all`, so the wave's other
+  // spans lose their work AND the cursor never advances — the run would
+  // replay the same failing wave forever instead of recording the failure and
+  // moving on. `processSpan` already handles pipeline errors; this covers the
+  // paths outside it (a throwing progress reporter, a dropped connection).
+  const outcomes = await Promise.all(
+    wave.map((storedSeed) =>
+      processSpan(deps, run, shared, storedSeed, steering.directions, notify).catch(
+        (err: unknown): SpanOutcome => ({
+          outcome: "failed",
+          lastError: (err instanceof Error ? err.message : String(err)).slice(0, 2000),
+        }),
+      ),
+    ),
+  )
+
+  const reports = outcomes.flatMap((o) => (o.report ? [o.report] : []))
+  const doneCount = outcomes.filter((o) => o.outcome === "done").length
+  const failedCount = outcomes.length - doneCount
+  const lastError = outcomes.filter((o) => o.lastError).map((o) => o.lastError).pop() ?? null
+
+  const advanced: SpanCursor = { seeds: cursor.seeds, nextIndex: cursor.nextIndex + wave.length }
+  const after = await recordWaveOutcome(db, runId, {
+    cursor: advanced,
+    doneCount,
+    failedCount,
+    unitsUsed: reports.reduce((n, r) => n + r.unitsUsed, 0),
+    callsUsed: reports.reduce((n, r) => n + r.callsUsed, 0),
+    lastError,
+    steeringCursor: new Date().toISOString(),
   })
   if (after) await notify(runStateFrame(after))
 
+  const lastReport = reports[reports.length - 1]
+  const result = (continueRun: boolean, status: string): TickResult => ({
+    continueRun,
+    status,
+    ...(lastReport ? { report: lastReport } : {}),
+    ...(reports.length > 0 ? { reports } : {}),
+  })
+
   // Continue only while the run is STILL running (a pause/terminate landed
-  // mid-span loses nothing — the next tick honours it) and spans remain.
+  // mid-wave loses nothing — the next wave honours it) and spans remain.
   const fresh = after ?? (await getRun(db, runId))
   if (fresh?.status === "running" && advanced.nextIndex >= advanced.seeds.length) {
-    // That was the last span — park immediately so the run never idles as
+    // That was the last wave — park immediately so the run never idles as
     // 'running' with an exhausted cursor.
     const t = await parkRun(db, runId)
     if (t.status === "ok") await notify(runStateFrame(t.run))
-    return { continueRun: false, status: "parked", ...(report ? { report } : {}) }
+    return result(false, "parked")
   }
   const more = fresh !== null && fresh.status === "running"
-  return { continueRun: more, status: fresh?.status ?? "not_found", ...(report ? { report } : {}) }
+  return result(more, fresh?.status ?? "not_found")
 }

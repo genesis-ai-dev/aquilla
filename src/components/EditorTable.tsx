@@ -55,6 +55,7 @@ import { DenoiseButton } from "./audio/DenoiseButton"
 import { TimelineAddMedia } from "./TimelineAddMedia"
 import { CellTtsButton } from "./CellTtsButton"
 import { CellTranscriptPreview } from "./CellTranscriptPreview"
+import { ContextualDraftCard } from "./contextual/ContextualDraftCard"
 import { CellTranscribeBadge } from "./CellTranscribeBadge"
 import { CellActionRail, RailButton, isInteractiveTarget } from "./CellActionRail"
 import { useRailIdleHide } from "@/hooks/useRailIdleHide"
@@ -140,6 +141,7 @@ import { isInMemberScope } from "@/lib/sync/member-scopes"
 import { AddConceptDialog } from "./AddConceptDialog"
 import { SourceSelectionToolbar } from "./SourceSelectionToolbar"
 import { buildSourceChip, type ContextChip } from "@/lib/agent/context-chip"
+import { parseTimestampRange } from "@/lib/video/vtt-generator"
 import { FootnoteInline } from "./footnotes/FootnoteInline"
 import {
   AddFootnoteDialog,
@@ -4536,6 +4538,13 @@ function EditorRow({
   const showFormattingLossWarning =
     sourceHasFormatting && !targetHasFormatting && visibleTranslated.trim().length > 0
 
+  // AQU-800: timeline-ordered cells carry a timecode range as their context
+  // (e.g. "00:00:00.000 --> 00:00:03.970"). Left-align that line so the
+  // timecodes sit above the left edge of the source text; other context
+  // (scripture verse refs like "GEN 1:1", empty) stays centered. Reuse the
+  // existing timestamp-range parser rather than inventing a second rule.
+  const contextIsTimecode = Boolean(cell.context && parseTimestampRange(cell.context))
+
   const healthValue = health ?? (cell.status === "validated" ? 100 : 0)
 
   const selectedAudio = cell.selectedAudioId ? cell.attachments?.[cell.selectedAudioId] : undefined
@@ -5478,7 +5487,7 @@ function EditorRow({
                 20px above its translation — the target lane can't be made
                 conditional to match, because it also reserves the strip the
                 floating action rail occupies. */}
-            <div data-testid="source-context-line" className="mb-1 flex h-4 items-center justify-center gap-1 text-center text-xs text-muted-foreground" dir="ltr">
+            <div data-testid="source-context-line" data-context-kind={contextIsTimecode ? "timecode" : undefined} className={cn("mb-1 flex h-4 items-center gap-1 text-xs text-muted-foreground", contextIsTimecode ? "justify-start text-left" : "justify-center text-center")} dir="ltr">
               <span>{cell.context}</span>
               {showFormattingLossWarning && (
                 <AppTooltip content="Source has inline formatting that the target does not preserve. Formatting will be lost on export." className="max-w-xs">
@@ -5777,6 +5786,21 @@ function EditorRow({
                     </div>
                   )}
                 </div>
+              )}
+              {/* Pending autopilot draft — verified text a contextual run
+                  staged for this cell. Only rendered while the target is
+                  still empty AND the cell is not being edited: a suggestion
+                  must never cover work that exists, nor sit under a caret.
+                  Accepting routes through handleEditorCommit, so it lands as
+                  an ordinary human edit with every normal guard applied. */}
+              {!hasTranslatedText && !showCompletionOverlay && !isEditorActive && (
+                <ContextualDraftCard
+                  cellId={cell.id}
+                  projectId={project.id}
+                  editable={editable}
+                  dir={targetCellDirection}
+                  onAccept={(text) => handleEditorCommit({ value: text, valueHtml: text })}
+                />
               )}
             </div>
             </div>

@@ -107,7 +107,7 @@ function renderCrumbItem(crumb: Crumb, key: string) {
 }
 
 export function OrgBreadcrumb({ parent, section, sectionTo, orgId, trail = [] }: OrgBreadcrumbProps) {
-  const { activeOrgId, isAllOrgs, orgs, setActiveOrg, setAllOrgs } = useActiveOrg()
+  const { activeOrgId, isAllOrgs, orgs, guestOrgs, setActiveOrg, setAllOrgs } = useActiveOrg()
   const location = useLocation()
   const scrollRef = useRef<HTMLOListElement | null>(null)
   const [canScrollLeft, setCanScrollLeft] = useState(false)
@@ -115,15 +115,28 @@ export function OrgBreadcrumb({ parent, section, sectionTo, orgId, trail = [] }:
   const showSection = section !== "Projects" || parent != null
   const resolvedOrgId = orgId ?? (!isAllOrgs ? activeOrgId : null)
   const resolvedOrg = resolvedOrgId == null ? null : orgs.find((org) => org.id === resolvedOrgId) ?? null
+  // AQU-790: a guest org (`/orgs/:guestId`) is not a membership, so it isn't in
+  // `orgs`. Resolve it from `guestOrgs` and render it as its own top-level
+  // crumb — never as a descendant of one of the caller's owned orgs.
+  const resolvedGuestOrg =
+    resolvedOrg == null && resolvedOrgId != null
+      ? guestOrgs.find((g) => g.id === resolvedOrgId) ?? null
+      : null
   const parsed = parseOrgPath(location.pathname)
   const isRootLanding =
-    parsed?.orgKey === ALL_ORGS_PARAM && !showSection && resolvedOrg == null
+    parsed?.orgKey === ALL_ORGS_PARAM && !showSection && resolvedOrg == null && resolvedGuestOrg == null
   const isOrgLanding =
     typeof parsed?.orgKey === "number" &&
     parsed.rest === "" &&
     !showSection &&
     resolvedOrg != null &&
     parsed.orgKey === resolvedOrg.id
+  const isGuestOrgLanding =
+    typeof parsed?.orgKey === "number" &&
+    parsed.rest === "" &&
+    !showSection &&
+    resolvedGuestOrg != null &&
+    parsed.orgKey === resolvedGuestOrg.id
 
   function handleAllOrgs() {
     setAllOrgs()
@@ -143,6 +156,14 @@ export function OrgBreadcrumb({ parent, section, sectionTo, orgId, trail = [] }:
       to: isOrgLanding ? undefined : orgHomePath(resolvedOrg.id),
       onClick: isOrgLanding ? undefined : () => setActiveOrg(resolvedOrg.id),
       isCurrent: isOrgLanding,
+    })
+  } else if (resolvedGuestOrg) {
+    // AQU-790: link only (no setActiveOrg onClick) — the path drives the guest
+    // scope; navigation keeps it a sibling of "All organizations".
+    crumbs.push({
+      label: resolvedGuestOrg.name ?? "Organization",
+      to: isGuestOrgLanding ? undefined : orgHomePath(resolvedGuestOrg.id),
+      isCurrent: isGuestOrgLanding,
     })
   }
 

@@ -1,9 +1,11 @@
 import { spawn } from "node:child_process"
+import { createHash } from "node:crypto"
 import { appendFileSync, mkdtempSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { pathToFileURL } from "node:url"
 import { parseWranglerOutput } from "./cloudflare-version-deploy.mjs"
+import { workersBuildMetadata } from "./assert-workers-build-env.mjs"
 import { assertSafeDeploymentArtifacts } from "./verify-deployment-artifacts.mjs"
 
 const PREVIEW_WORKER = "aquilla-web-preview"
@@ -18,6 +20,19 @@ export function pullRequestPreviewAlias(prNumber) {
     throw new Error(`invalid pull request number ${JSON.stringify(prNumber)}`)
   }
   return `pr-${value}`
+}
+
+export function workersBuildPreviewAlias(branch) {
+  const value = String(branch ?? "").trim()
+  if (!value) throw new Error("a Workers Builds branch is required")
+  const slug = value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 30)
+    .replace(/-+$/g, "") || "branch"
+  const hash = createHash("sha256").update(value).digest("hex").slice(0, 8)
+  return `ci-${slug}-${hash}`
 }
 
 export function previewUrlFromUpload(entry, { alias, workerName = PREVIEW_WORKER }) {
@@ -128,25 +143,27 @@ async function bootstrapPreviewWorker({ cwd, run }) {
   )
 }
 
-export async function uploadPullRequestPreview({
-  prNumber,
-  commitSha,
+export async function uploadRouteFreePreview({
+  alias,
+  message,
   cwd = process.cwd(),
   githubOutputPath = process.env.GITHUB_OUTPUT,
   run = runCommand,
   log = console.log,
   verifyArtifacts = assertSafeDeploymentArtifacts,
 } = {}) {
-  const alias = pullRequestPreviewAlias(prNumber)
-  const source = String(commitSha ?? "").trim()
-  if (!source) throw new Error("a pull request commit SHA is required")
-  const message = `PR ${String(prNumber).trim()} @ ${source}`
+  const safeAlias = String(alias ?? "").trim()
+  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(safeAlias)) {
+    throw new Error(`invalid preview alias ${JSON.stringify(alias)}`)
+  }
+  const uploadMessage = String(message ?? "").trim()
+  if (!uploadMessage) throw new Error("a preview upload message is required")
 
   verifyArtifacts(join(cwd, "dist"))
 
   let entry
   try {
-    entry = await uploadPreviewVersion({ alias, message, cwd, run })
+    entry = await uploadPreviewVersion({ alias: safeAlias, message: uploadMessage, cwd, run })
   } catch (error) {
     const output = error instanceof Error && "output" in error ? String(error.output) : ""
     if (!MISSING_WORKER_PATTERN.test(`${error instanceof Error ? error.message : String(error)}\n${output}`)) {
@@ -154,23 +171,51 @@ export async function uploadPullRequestPreview({
     }
     log(`[cloudflare-preview] ${PREVIEW_WORKER} is missing; bootstrapping the route-free preview Worker`)
     await bootstrapPreviewWorker({ cwd, run })
-    entry = await uploadPreviewVersion({ alias, message, cwd, run })
+    entry = await uploadPreviewVersion({ alias: safeAlias, message: uploadMessage, cwd, run })
   }
 
-  const url = previewUrlFromUpload(entry, { alias })
+  const url = previewUrlFromUpload(entry, { alias: safeAlias })
   if (githubOutputPath) appendFileSync(githubOutputPath, `url=${url}\n`)
-  log(`[cloudflare-preview] worker=${PREVIEW_WORKER} version=${entry.version_id} alias=${alias} url=${url}`)
-  return { alias, url, versionId: entry.version_id, workerName: PREVIEW_WORKER }
+  log(`[cloudflare-preview] worker=${PREVIEW_WORKER} version=${entry.version_id} alias=${safeAlias} url=${url}`)
+  return { alias: safeAlias, url, versionId: entry.version_id, workerName: PREVIEW_WORKER }
+}
+
+export async function uploadPullRequestPreview(options = {}) {
+  const alias = pullRequestPreviewAlias(options.prNumber)
+  const source = String(options.commitSha ?? "").trim()
+  if (!source) throw new Error("a pull request commit SHA is required")
+  return uploadRouteFreePreview({
+    ...options,
+    alias,
+    message: `PR ${String(options.prNumber).trim()} @ ${source}`,
+  })
+}
+
+export async function uploadWorkersBuildPreview({
+  env = process.env,
+  ...options
+} = {}) {
+  const { branch, commitSha } = workersBuildMetadata(env)
+  const alias = workersBuildPreviewAlias(branch)
+  const buildId = env.WORKERS_CI_BUILD_UUID?.trim() || "unknown-build"
+  return uploadRouteFreePreview({
+    ...options,
+    alias,
+    message: `workers-build:${branch}:${buildId} @ ${commitSha}`,
+  })
 }
 
 const isEntrypoint = process.argv[1]
   && import.meta.url === pathToFileURL(process.argv[1]).href
 
 if (isEntrypoint) {
-  uploadPullRequestPreview({
-    prNumber: process.argv[2],
-    commitSha: process.argv[3],
-  }).catch((error) => {
+  const operation = process.argv[2] === "--workers-build"
+    ? uploadWorkersBuildPreview()
+    : uploadPullRequestPreview({
+        prNumber: process.argv[2],
+        commitSha: process.argv[3],
+      })
+  operation.catch((error) => {
     console.error(`[cloudflare-preview] ${error instanceof Error ? error.message : String(error)}`)
     process.exitCode = 1
   })

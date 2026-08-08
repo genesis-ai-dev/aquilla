@@ -1,14 +1,17 @@
-// Master-clock transport for the timeline editor. When a linked video is
-// present the <video> element drives `setCurrentSec` via onTimeUpdate, and
-// `seekTo` is mirrored onto the element by the editor. With no video the clock
-// is just a draggable position cursor. Pure state; no timers here.
+// Position cursor for the timeline editor. Pure state; no timers here.
+//
+// AQU-646: the play queue is the master clock and drives `setCurrentSec` while
+// it is active. A file with a linked video but NO audio at all can never start
+// the queue, and there the video pane drives this instead — so there are two
+// possible writers, and which one is in charge is decided by whether the queue
+// is active, never by both writing at once (which is what used to happen).
 
 import { useCallback, useState } from "react"
 
 export interface TimelineClock {
   currentSec: number
   playing: boolean
-  /** Driven by the video element's timeupdate (no clamping needed there). */
+  /** Driven by whichever transport owns the clock (no clamping needed there). */
   setCurrentSec(sec: number): void
   /** User seek (ruler scrub / keyboard). Clamps to >= 0. */
   seekTo(sec: number): void

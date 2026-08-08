@@ -142,11 +142,40 @@ describe("TimelineEditor", () => {
     await waitFor(() => expect(width()).toBeGreaterThan(0))
   })
 
-  it("shows the video preview only when a core media url is linked", () => {
-    const { rerender } = render(
-      <TimelineEditor fileId="f2" coreMediaUrl={null} editable cells={[]} onRetimeSubtitle={() => {}} />,
+  it("no longer renders the video itself — the pane beside the table owns it", () => {
+    // AQU-646: the old preview band lived here, wrote the same clock the queue
+    // wrote, and played its own soundtrack over the dub. It is now MediaVideoPane,
+    // mounted next to the text table. A linked url must add nothing here.
+    render(
+      <TimelineEditor
+        fileId="f2"
+        coreMediaUrl="https://cdn/v.mp4"
+        editable
+        cells={[]}
+        onRetimeSubtitle={() => {}}
+      />,
     )
     expect(screen.queryByTestId("tl-video")).toBeNull()
+    expect(document.querySelector("video")).toBeNull()
+  })
+
+  it("offers the link-video control, and disables it below contributor", () => {
+    const onRequestLinkVideo = vi.fn()
+    const { rerender } = render(
+      <TimelineEditor
+        fileId="f2"
+        coreMediaUrl={null}
+        editable
+        cells={[]}
+        onRetimeSubtitle={() => {}}
+        onRequestLinkVideo={onRequestLinkVideo}
+      />,
+    )
+    const button = screen.getByTestId("tl-link-video")
+    expect(button).toHaveTextContent("Link video")
+    fireEvent.click(button)
+    expect(onRequestLinkVideo).toHaveBeenCalledTimes(1)
+
     rerender(
       <TimelineEditor
         fileId="f2"
@@ -154,10 +183,13 @@ describe("TimelineEditor", () => {
         editable
         cells={[]}
         onRetimeSubtitle={() => {}}
-       
+        onRequestLinkVideo={onRequestLinkVideo}
+        canLinkVideo={false}
       />,
     )
-    expect(screen.getByTestId("tl-video")).toBeInTheDocument()
+    const gated = screen.getByTestId("tl-link-video")
+    expect(gated).toHaveTextContent("Change video")
+    expect(gated).toBeDisabled()
   })
 
   // ── AQU-646: playhead follows the audio queue; clicks navigate playback ──

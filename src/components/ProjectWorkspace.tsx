@@ -93,6 +93,7 @@ import { isBulkValidationEligible } from "@/lib/review/review-eligibility"
 import { TimelineEditor } from "@/components/timeline/TimelineEditor"
 import { applyPresenceFrame, applyLockClaimed, applyLockReleased } from "@/lib/sync/cell-lock-state"
 import { canPerform, canOpenAssignUi } from "@/lib/sync/role-policy"
+import { denialMessage } from "@/lib/permissions/denial"
 import { useFocusLock } from "@/hooks/useFocusLock"
 import type { WsReconciler } from "@/lib/sync/ws-reconciler"
 import {
@@ -143,6 +144,17 @@ import { SuggestionBanner } from "./SuggestionBanner"
 import { ConfirmActionDialog } from "./ConfirmActionDialog"
 import { LinkVideoTimingDialog } from "./timeline/LinkVideoTimingDialog"
 import { TimingVideoWarningDialog } from "./timeline/TimingVideoWarningDialog"
+import { LinkVideoUrlDialog } from "./timeline/LinkVideoUrlDialog"
+import { MediaVideoPane } from "./timeline/MediaVideoPane"
+import {
+  shouldShowVideoPane,
+  readStoredVideoPaneWidth,
+  writeStoredVideoPaneWidth,
+  VIDEO_PANE_MIN_WIDTH,
+  VIDEO_PANE_TABLE_MIN_WIDTH,
+} from "./timeline/video-pane-layout"
+import { setVideoClockSec } from "@/lib/timeline/video-clock"
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { TimingModeChangedDialog } from "./timeline/TimingModeChangedDialog"
 import { useTimingModeAck } from "@/hooks/useTimingModeAck"
 import { PeerPresence } from "./PeerPresence"
@@ -1683,21 +1695,34 @@ export function ProjectWorkspace() {
     [project?.id, activeFileId, currentUsername, applyOptimisticCellTiming, getTokenForProjectFile, revalidateCells],
   )
 
-  // Timeline editor: set/clear the file's core video URL (preview master clock).
-  // coreMediaUrl lives on the file row, so refresh the project (not just cells).
+  // Timeline editor: set/clear the file's core video URL. coreMediaUrl lives on
+  // the file row, so refresh the project (not just cells). `file.video.set`
+  // needs contributor access and the emit THROWS on refusal, so surface that
+  // rather than letting the dialog close on a write that never happened.
   const applyLinkVideo = useCallback(
     async (url: string | null) => {
       if (!project?.id || !activeFileId) return
-      await emitFileVideoSet({
-        projectId: project.id,
-        fileId: activeFileId,
-        coreMediaUrl: url,
-        author: currentUsername,
-      })
-      await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
-      refresh()
+      try {
+        await emitFileVideoSet({
+          projectId: project.id,
+          fileId: activeFileId,
+          coreMediaUrl: url,
+          author: currentUsername,
+        })
+        await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+        refresh()
+      } catch (e) {
+        const level = project.syncRole?.level ?? null
+        toast.error(
+          canPerform("file.video.set", level)
+            ? e instanceof Error
+              ? e.message
+              : "Could not save the video link."
+            : denialMessage(ROLE.CONTRIBUTOR, level),
+        )
+      }
     },
-    [project?.id, activeFileId, currentUsername, getTokenForProjectFile, refresh],
+    [project, activeFileId, currentUsername, getTokenForProjectFile, refresh],
   )
   // Flow B (2026-08-05): linking a video while in Free timing prompts to
   // switch back (declinable, with the video-stays-hidden warning). NOTE the
@@ -1705,6 +1730,9 @@ export function ProjectWorkspace() {
   // below this callback (a temporal-dead-zone hazard in the deps). Pre-merge
   // round: the mode is per-FILE now, resolved off the active file.
   const [pendingVideoUrl, setPendingVideoUrl] = useState<string | null>(null)
+  /** The URL dialog lives here rather than in the timeline toolbar, because the
+   *  video pane offers the same action from its could-not-load state. */
+  const [linkVideoOpen, setLinkVideoOpen] = useState(false)
   const handleLinkVideo = useCallback(
     (url: string | null) => {
       if (url && resolveFileTimingMode(activeFile, project ?? undefined) === "audioFirst") {
@@ -4462,6 +4490,11 @@ export function ProjectWorkspace() {
   // warning was raised for, not a bare flag, so the confirm can only ever
   // apply to that file.
   const [timingVideoWarnFor, setTimingVideoWarnFor] = useState<string | null>(null)
+  const showVideoPane = shouldShowVideoPane({
+    timelineStacked,
+    coreMediaUrl: activeFile?.coreMediaUrl,
+    timingMode,
+  })
   // A REMOTE mode change gets an acknowledged heads-up — deferred while the
   // user is in the text view or has the recorder open (a cell transition
   // inside the recorder ends the wait; the take is confirmed by then).
@@ -4582,7 +4615,14 @@ export function ProjectWorkspace() {
   // queue in file-timeline seconds. Live queue → jump preserving play/pause;
   // idle queue → CUE paused at the position (Sam's decision: clicking while
   // paused positions only — pressing play then starts exactly there).
+  // AQU-646: the linked video is repositioned by every explicit seek, stamped
+  // BEFORE the queue gets a look at it. The queue legitimately declines some
+  // seeks — no session to mint tokens, or a target inside the trailing pad that
+  // no section owns — and in those cases the picture must still move, so the
+  // pane cannot infer position from queue progress alone.
+  const [videoSeek, setVideoSeek] = useState<{ sec: number; nonce: number } | null>(null)
   const handleTimelineSeekToTime = useCallback((sec: number) => {
+    setVideoSeek((prev) => ({ sec: Math.max(0, sec), nonce: (prev?.nonce ?? 0) + 1 }))
     if (!project?.id) return
     const qs = getQueueState()
     const activeForThisFile =
@@ -5782,7 +5822,8 @@ export function ProjectWorkspace() {
                     onRetimeTarget={handleRetimeTarget}
                     onTrimTarget={handleTrimTarget}
                     onTogglePlay={handleTimelineTogglePlay}
-                    onLinkVideo={handleLinkVideo}
+                    onRequestLinkVideo={() => setLinkVideoOpen(true)}
+                    canLinkVideo={canPerform("file.video.set", project?.syncRole?.level ?? null)}
                     onSeekToTime={handleTimelineSeekToTime}
                     timingMode={timingMode}
                     onChangeTimingMode={canEditTimingMode ? handleChangeTimingMode : undefined}
@@ -5803,7 +5844,43 @@ export function ProjectWorkspace() {
                   />
                 </div>
               ) : null}
-              <div className="min-h-0 flex-1">
+              {/* AQU-646: in the media lens a linked video docks to the LEFT of
+                  the table, under the chip strip. Dragging the divider shut is
+                  how you hide it; the table carries a pixel floor so a narrow
+                  window collapses the picture rather than crushing the text. */}
+              <ResizablePanelGroup orientation="horizontal" className="min-h-0 flex-1">
+              {showVideoPane && activeFile?.coreMediaUrl ? (
+                <>
+                  <ResizablePanel
+                    id="media-video"
+                    defaultSize={readStoredVideoPaneWidth()}
+                    minSize={VIDEO_PANE_MIN_WIDTH}
+                    maxSize="45%"
+                    collapsible
+                    collapsedSize={0}
+                    groupResizeBehavior="preserve-pixel-size"
+                    onResize={(size) => {
+                      if (size.inPixels >= VIDEO_PANE_MIN_WIDTH) writeStoredVideoPaneWidth(size.inPixels)
+                    }}
+                  >
+                    <MediaVideoPane
+                      key={activeFile.id}
+                      src={activeFile.coreMediaUrl}
+                      cells={audioMergedCells}
+                      seekSec={videoSeek}
+                      onVideoTime={setVideoClockSec}
+                      onChangeVideo={() => setLinkVideoOpen(true)}
+                      sourceDirectionMode={fileMeta.sourceDirectionMode}
+                      targetDirectionMode={fileMeta.targetDirectionMode}
+                      sourceTextDirection={fileMeta.sourceTextDirection}
+                      targetTextDirection={fileMeta.targetTextDirection}
+                    />
+                  </ResizablePanel>
+                  <ResizableHandle withHandle />
+                </>
+              ) : null}
+              <ResizablePanel id="media-table" minSize={VIDEO_PANE_TABLE_MIN_WIDTH}>
+              <div className="h-full min-h-0 min-w-0">
               <EditorTable
             ref={editorRef} project={editorProject ?? project} cellStore={cellStore}
             fileType={activeFile?.type}
@@ -5882,6 +5959,8 @@ export function ProjectWorkspace() {
             chapterNavTrailing={timelineStacked ? undefined : fileChapterToolbar ?? undefined}
           />
               </div>
+              </ResizablePanel>
+              </ResizablePanelGroup>
               </div>
               </EditorActionsProvider>
             </div>
@@ -6299,6 +6378,17 @@ export function ProjectWorkspace() {
       {/* Flow B (2026-08-05, simplified 2026-08-06): linking a video under
           Free timing warns that it will stay hidden. Mode changes stay in
           Project Settings only — no combined switch-and-link action. */}
+      <LinkVideoUrlDialog
+        open={linkVideoOpen}
+        currentUrl={activeFile?.coreMediaUrl ?? null}
+        onCancel={() => setLinkVideoOpen(false)}
+        onSave={(url) => {
+          // Close FIRST: on the Free-timing path handleLinkVideo opens a second
+          // dialog, which would otherwise mount over this one's focus trap.
+          setLinkVideoOpen(false)
+          handleLinkVideo(url)
+        }}
+      />
       <LinkVideoTimingDialog
         open={pendingVideoUrl !== null}
         onCancel={() => setPendingVideoUrl(null)}

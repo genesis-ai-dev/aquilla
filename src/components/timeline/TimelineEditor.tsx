@@ -1,8 +1,8 @@
-// The timeline editor: composes the lanes, ruler, playhead, video preview, and
-// detail pane into the Media-lens surface. Owns zoom (persisted per file),
-// horizontal scroll/windowing, selection, and the master clock. Hand-rolled;
-// the only "media" dependency is a native <video> element for the linked-URL
-// preview (the remote host serves Range — no streaming work needed here).
+// The timeline editor: composes the lanes, ruler, playhead and chip strip into
+// the top of the Media-lens surface. Owns zoom (persisted per file), horizontal
+// scroll/windowing, and selection. Hand-rolled, with no media dependency of its
+// own — the play queue is the master clock, and the linked video lives beside
+// the text table as MediaVideoPane (AQU-646).
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { AudioLines, Film, LocateFixed, Magnet, Minus, Plus, Volume2, VolumeX, X } from "lucide-react"
@@ -22,6 +22,7 @@ import { spacebarShouldToggle } from "@/lib/audio/playback-keys"
 import { activeTargetForCell } from "@/lib/audio/track-audio"
 import { loadSnapEnabled, saveSnapEnabled } from "@/lib/timeline/snap"
 import { setMediaCursorCell, setMediaSyncActive } from "@/lib/timeline/media-cursor"
+import { useVideoClockSec } from "@/lib/timeline/video-clock"
 import { setAudioQualityPref, useAudioQualityPref } from "@/lib/store/audio-quality-pref"
 import { useBatchProgress } from "@/lib/audio/batch-audio"
 import { useOnline } from "@/hooks/useOnline"
@@ -57,8 +58,13 @@ export interface TimelineEditorProps {
    *  paused→resume, idle→start). The editor claims the app-wide audio
    *  shortcut while mounted so a last-played single cell can't steal Space. */
   onTogglePlay?(): void
-  /** When provided, shows a "Link video" control. null clears the link. */
-  onLinkVideo?(url: string | null): void
+  /** When provided, shows a "Link video" control that opens the workspace's
+   *  link dialog. The dialog lives up there because the video pane offers the
+   *  same action from its could-not-load state. */
+  onRequestLinkVideo?(): void
+  /** False disables the control — `file.video.set` needs contributor access,
+   *  and the emit throws rather than failing quietly. */
+  canLinkVideo?: boolean
   /** AQU-646: navigate audio playback to a file-timeline second — ruler
    *  clicks and clean card clicks route through this (the workspace decides
    *  whether to jump the live queue or cue a paused one). */
@@ -163,7 +169,8 @@ export function TimelineEditor({
   onRetimeTarget,
   onTrimTarget,
   onTogglePlay,
-  onLinkVideo,
+  onRequestLinkVideo,
+  canLinkVideo = true,
   onSeekToTime,
   onOpenRecording,
   initialSelectedCellId,
@@ -198,7 +205,6 @@ export function TimelineEditor({
   const [scrollLeft, setScrollLeft] = useState(0)
   const [viewportPx, setViewportPx] = useState(0)
   const [follow, setFollow] = useState(true)
-  const videoRef = useRef<HTMLVideoElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   /** Programmatic scrolls stamp this; the onScroll handler treats scroll
    *  events within 150ms of a stamp as our own, not a user disengage. */
@@ -227,6 +233,15 @@ export function TimelineEditor({
     if (queueActive) clock.setCurrentSec(queueProgress.currentTime)
     // eslint-disable-next-line react-hooks/exhaustive-deps -- clock setters are stable
   }, [queueActive, queueProgress.currentTime])
+  // The other driver: a file with a linked video but NO audio can never start
+  // the queue, so the video plays itself and owns the playhead. Strictly gated
+  // on the queue being idle, so the two writers can never overlap — which is
+  // exactly what used to happen when the <video> lived in this component.
+  const videoClockSec = useVideoClockSec()
+  useEffect(() => {
+    if (!queueActive && videoClockSec != null) clock.setCurrentSec(videoClockSec)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- clock setters are stable
+  }, [queueActive, videoClockSec])
   useEffect(() => {
     if (queuePlaying) clock.play()
     else clock.pause()
@@ -617,14 +632,11 @@ export function TimelineEditor({
 
   function seekTo(sec: number) {
     clock.seekTo(sec)
-    if (videoRef.current) {
-      try {
-        videoRef.current.currentTime = Math.max(0, sec)
-      } catch {
-        /* not seekable yet */
-      }
-    }
     // AQU-646: explicit seeks drive the audio queue too, and re-engage follow.
+    // The linked video rides along on this same call — the workspace stamps a
+    // seek for the pane before deciding what the queue can do with it, because
+    // the queue legitimately drops some seeks (no session, a gap no section
+    // owns) and the picture must move regardless.
     onSeekToTime?.(Math.max(0, sec))
     setFollow(true)
   }
@@ -848,18 +860,19 @@ export function TimelineEditor({
               <LocateFixed className="h-3.5 w-3.5" />
             </button>
           </AppTooltip>
-          {onLinkVideo && (
-            <button
-              type="button"
-              onClick={() => {
-                const u = window.prompt("Core video URL (leave blank to clear)", coreMediaUrl ?? "")
-                if (u !== null) onLinkVideo(u.trim() || null)
-              }}
-              className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground/80 hover:bg-muted"
-            >
-              <Film className="h-3.5 w-3.5 text-muted-foreground" />
-              {coreMediaUrl ? "Change video" : "Link video"}
-            </button>
+          {onRequestLinkVideo && (
+            <AppTooltip content="Requires at least contributor access" disabled={canLinkVideo}>
+              <button
+                type="button"
+                data-testid="tl-link-video"
+                disabled={!canLinkVideo}
+                onClick={onRequestLinkVideo}
+                className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground/80 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Film className="h-3.5 w-3.5 text-muted-foreground" />
+                {coreMediaUrl ? "Change video" : "Link video"}
+              </button>
+            </AppTooltip>
           )}
           <div className="inline-flex items-center rounded-md border border-border">
             <button
@@ -885,21 +898,11 @@ export function TimelineEditor({
         </div>
       </div>
 
-      {/* linked-URL video preview (master clock). SUB-53: a video runs on the
-          original recording's clock, so it cannot follow a re-flowed track —
-          say so rather than let it drift silently against the audio. */}
-      {coreMediaUrl && !audioFirst && (
-        <div className="flex justify-center border-b border-border bg-black">
-          <video
-            ref={videoRef}
-            src={coreMediaUrl}
-            controls
-            data-testid="tl-video"
-            onTimeUpdate={(e) => clock.setCurrentSec(e.currentTarget.currentTime)}
-            className="max-h-[240px] w-auto"
-          />
-        </div>
-      )}
+      {/* SUB-53: a video runs on the original recording's clock, so it cannot
+          follow a re-flowed track — say so rather than let it drift silently
+          against the audio. In Original's timing the video renders beside the
+          text table instead (MediaVideoPane), which is why only the note is
+          left here. */}
       {coreMediaUrl && audioFirst && (
         <div
           data-testid="tl-video-hidden-note"

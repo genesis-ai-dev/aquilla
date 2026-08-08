@@ -80,6 +80,14 @@ export interface ProjectWideSettings {
    */
   bibleResourcesEnabled?: boolean
   /**
+   * Knowledge base drafting toggle (spec docs/superpowers/specs/2026-08-07-knowledge-base-design.md).
+   * When true, translation generation + predictions inject KB string-search
+   * snippets into draft prompts. Agent access to the KB is NOT gated by this.
+   * Default false. Read server-side by the draft tool via
+   * auth-worker/src/lib/knowledge/gate.ts.
+   */
+  knowledgeBaseEnabled?: boolean
+  /**
    * DCS (Door43) external-upstream cursor (spec §8). Present when this project is
    * a DCS-linked source/"adapter" project — pins it to a Door43 release so the
    * freshness/delta engine can ask "am I out of date?". Written by the Door43

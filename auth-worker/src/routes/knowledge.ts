@@ -57,6 +57,22 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
   return Array.from(new Uint8Array(hash), (b) => b.toString(16).padStart(2, "0")).join("")
 }
 
+/** Content type stored/served for the original blob, keyed on the validated extension.
+ *  The client-sent Content-Type header is never trusted here: /original serves this
+ *  value with Content-Disposition: inline, so a caller could otherwise upload a .md/.txt
+ *  file with Content-Type: text/html and get stored XSS served from the worker origin. */
+const KB_CONTENT_TYPE_BY_EXTENSION: Record<string, string> = {
+  ".md": "text/markdown",
+  ".txt": "text/plain",
+  ".pdf": "application/pdf",
+  ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+}
+
+function kbContentTypeForExtension(fileName: string): string {
+  const ext = kbExtension(fileName)
+  return (ext && KB_CONTENT_TYPE_BY_EXTENSION[ext]) ?? "application/octet-stream"
+}
+
 type ExtractResult =
   | { ok: true; text: string }
   | { ok: false; code: ErrorCode; message: string; status: ContentfulStatusCode }
@@ -134,7 +150,12 @@ async function handleUpload(
     return c.json(body, status)
   }
 
-  const contentType = c.req.header("content-type") ?? null
+  // The request's Content-Type header is ignored for storage: it is client-controlled
+  // and, since /original serves it back with Content-Disposition: inline, trusting it
+  // would let an uploader mislabel bytes (e.g. name x.md, Content-Type: text/html) and
+  // get them rendered as HTML for any viewer who opens the original. Derive it instead
+  // from the extension we already validated above.
+  const contentType = kbContentTypeForExtension(fileName)
   const bytes = new Uint8Array(await c.req.arrayBuffer())
   if (bytes.byteLength === 0) {
     const { body, status } = errorJson("validation_failed", "uploaded file is empty", 400)

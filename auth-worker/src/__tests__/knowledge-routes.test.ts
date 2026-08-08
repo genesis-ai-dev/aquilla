@@ -154,6 +154,42 @@ describe("knowledge routes — project upload floor", () => {
     expect(row!.r2_key).toBe(out.doc.r2Key)
     expect(bucket.store.has(out.doc.r2Key)).toBe(true)
   })
+
+  it("ignores a spoofed Content-Type header; stored/served type derives from the extension", async () => {
+    await seedUser(1, "owner")
+    await seedUser(2, "lead")
+    await seedProject(PROJECT, 1)
+    await grant(PROJECT, 2, ROLE.PROJECT_LEAD)
+    const jwt = await jwtFor("lead")
+    stubIndexingFetch()
+    const bucket = new FakeBucket()
+
+    const res = await app.request(
+      `/api/v2/projects/${PROJECT}/knowledge`,
+      {
+        method: "POST",
+        headers: { ...authHeader(jwt), "x-doc-name": "guide.md", "content-type": "text/html" },
+        body: new TextEncoder().encode("# Guide\nhello"),
+      },
+      testEnvWith(bucket, { OPENROUTER_API_KEY: "k" }),
+    )
+    expect(res.status).toBe(201)
+    const out = (await res.json()) as { doc: { id: string; contentType: string | null } }
+    expect(out.doc.contentType).toBe("text/markdown")
+
+    const row = await env.AQUILLA_PG.prepare("SELECT content_type FROM knowledge_docs WHERE id = ?")
+      .bind(out.doc.id)
+      .first<{ content_type: string | null }>()
+    expect(row!.content_type).toBe("text/markdown")
+
+    const originalRes = await app.request(
+      `/api/v2/projects/${PROJECT}/knowledge/${out.doc.id}/original`,
+      { headers: authHeader(jwt) },
+      testEnvWith(bucket),
+    )
+    expect(originalRes.status).toBe(200)
+    expect(originalRes.headers.get("content-type")).toContain("text/markdown")
+  })
 })
 
 describe("knowledge routes — viewer reads", () => {

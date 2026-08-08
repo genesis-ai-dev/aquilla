@@ -16,7 +16,7 @@ import { secToPx, pxToSec, ZOOM_MIN, ZOOM_MAX, ZOOM_DEFAULT } from "@/lib/timeli
 // workspace (onSeekToTime), keeping this component testable with a spy prop.
 // Round 5 exception: the per-track speaker buttons drive setQueueAudibility
 // directly — muting is a pure element-level concern with no workspace state.
-import { useQueueProgress, useQueueState, useMissingClipCells, setQueueAudibility, type TrackAudibility } from "@/lib/audio/play-queue"
+import { useQueueForFile, useMissingClipCells, setQueueAudibility, type TrackAudibility } from "@/lib/audio/play-queue"
 import { isInEditableContext, isTopAudioShortcutOwner, pushAudioShortcutOverride } from "@/lib/audio/audio-coordinator"
 import { spacebarShouldToggle } from "@/lib/audio/playback-keys"
 import { activeTargetForCell } from "@/lib/audio/track-audio"
@@ -209,25 +209,19 @@ export function TimelineEditor({
   // file-timeline seconds for imported media (one shared clip); the cellIdSet
   // guard keeps a stale singleton queue (playing another file) from hijacking
   // this timeline's playhead.
-  const queueState = useQueueState()
-  const queueProgress = useQueueProgress()
   const cellIdSet = useMemo(() => new Set(cells.map((c) => c.id)), [cells])
-  const queueActive =
-    (queueState.kind === "playing" || queueState.kind === "paused" || queueState.kind === "loading") &&
-    cellIdSet.has(queueState.cellId)
-  const queuePlaying = queueState.kind === "playing" && cellIdSet.has(queueState.cellId)
-  // Smooth-playback round: the readiness gate flips playing→loading→playing at
-  // a cold verse boundary. `queuePlaying` stays STRICT (the playhead's rAF
-  // interpolation must park during a gate — that's the whole point), but the
-  // follow re-engage below keys on running-or-loading, or every cold boundary
-  // would re-yank a user who deliberately scrolled away mid-playback.
-  const queueRunning =
-    (queueState.kind === "playing" || queueState.kind === "loading") && cellIdSet.has(queueState.cellId)
+  // `queueRunning` (playing OR loading) exists because the readiness gate flips
+  // playing→loading→playing at a cold verse boundary. `playing` stays STRICT
+  // (the playhead's rAF interpolation must park during a gate — that's the
+  // whole point), but the follow re-engage below keys on running, or every cold
+  // boundary would re-yank a user who deliberately scrolled away mid-playback.
+  const queue = useQueueForFile(cellIdSet)
+  const queueProgress = queue.progress
+  const { active: queueActive, playing: queuePlaying, running: queueRunning } = queue
   // Decision 2026-08-05: the verse being WAITED ON shows a small spinner on
   // its chip ("loading" is exactly the parked-gate/cold-load state and
   // carries the cellId), and a definitively 404'd dub shows a missing badge.
-  const loadingCellId =
-    queueState.kind === "loading" && cellIdSet.has(queueState.cellId) ? queueState.cellId : null
+  const loadingCellId = queue.kind === "loading" ? queue.cellId : null
   const missingCellIds = useMissingClipCells()
   useEffect(() => {
     if (queueActive) clock.setCurrentSec(queueProgress.currentTime)
@@ -378,13 +372,9 @@ export function TimelineEditor({
   // 2026-08-07: the chip strip describes the CURRENT chip — an explicit
   // selection wins; with nothing selected it follows the cell the queue is
   // sounding (or holds while paused); after the queue goes idle it keeps the
-  // last one so the strip doesn't blank out mid-thought. Same cellIdSet guard
-  // as the playhead: a stale singleton queue never fills this file's strip.
-  const soundingId =
-    (queueState.kind === "playing" || queueState.kind === "paused" || queueState.kind === "loading") &&
-    cellIdSet.has(queueState.cellId)
-      ? queueState.cellId
-      : null
+  // last one so the strip doesn't blank out mid-thought. Same file guard as the
+  // playhead: a stale singleton queue never fills this file's strip.
+  const soundingId = queueActive ? queue.cellId : null
   const [lastTouchedId, setLastTouchedId] = useState<string | null>(null)
   useEffect(() => {
     const id = selectedId ?? soundingId

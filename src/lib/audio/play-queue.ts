@@ -4,7 +4,7 @@
 // callback so the queue stays decoupled from useCellAudio's complex
 // per-cell state machine.
 
-import { useSyncExternalStore } from "react"
+import { useMemo, useSyncExternalStore } from "react"
 import type { CellData } from "@/hooks/useCells"
 import { fetchCellAudio, getCellAudioStreamUrl, parseFrontierAudioUrl, audioIdSeededWith, probeCellAudioPresent } from "./upload"
 import { activeTargetForCell, sourceClipAudioForCell } from "./track-audio"
@@ -19,6 +19,9 @@ import { getAudioQualityPref, type AudioQuality } from "@/lib/store/audio-qualit
 import { audioMimeForExt } from "./mime"
 import type { FrontierSession } from "@/lib/frontier/types"
 import { setActiveAudio, clearActiveAudioIf, getActiveAudio, type ActiveAudioController } from "./audio-coordinator"
+import { selectQueueForFile, type QueueForFile } from "./queue-scope"
+
+export type { QueueForFile }
 
 export type QueueState =
   | { kind: "idle" }
@@ -194,6 +197,14 @@ export function useQueueProgress(): QueueProgress {
 }
 
 export function getQueueProgress(): QueueProgress { return progress }
+
+/** Subscribe to the whole transport, scoped to one file's cells. The scoping
+ *  rule itself lives in `./queue-scope` — see the note there. (AQU-646) */
+export function useQueueForFile(cellIds: ReadonlySet<string>): QueueForFile {
+  const s = useQueueState()
+  const p = useQueueProgress()
+  return useMemo(() => selectQueueForFile(s, p, cellIds), [s, p, cellIds])
+}
 
 // ── Track audibility (round 5: per-track speaker buttons) ───────────────────
 // The SOURCE track is the master element; the TARGET track is the dub overlay.
@@ -436,6 +447,17 @@ function masterAudioForCell(cell: CellData): { audioId: string; url: string } | 
     if (src) return src
   }
   return pickPlayableAudio(cell)
+}
+
+/**
+ * True when the master element for this cell is the shared source clip — i.e.
+ * when `progress.currentTime` is FILE-timeline seconds. On the fallback branch
+ * above it is a per-take clock that restarts at 0, which no consumer may treat
+ * as a position on the file. Deliberately adjacent to `masterAudioForCell` so
+ * the two can never drift apart. (AQU-646)
+ */
+export function queueClockIsFileTime(cell: CellData | undefined | null): boolean {
+  return cell?.medium === "media" && sourceClipAudioForCell(cell) != null
 }
 
 interface ResolvedAudioSrc {
@@ -1673,6 +1695,7 @@ export function getDubDebugSnapshot(): {
 if (import.meta.env.DEV && typeof window !== "undefined") {
   ;(window as unknown as Record<string, unknown>).__aqDubDebugSnapshot = getDubDebugSnapshot
   ;(window as unknown as Record<string, unknown>).__aqQueueState = getQueueState
+  ;(window as unknown as Record<string, unknown>).__aqQueueProgress = getQueueProgress
 }
 
 /** Execute an overlay plan. Overlay failures are non-fatal — a dub that can't

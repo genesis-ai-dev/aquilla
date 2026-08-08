@@ -4,6 +4,7 @@ import { expectTooltip, renderWithTooltips } from "@/test-utils/tooltip"
 import { TimelineEditor } from "./TimelineEditor"
 import type { CellData } from "@/hooks/useCells"
 import type { QueueState, QueueProgress } from "@/lib/audio/play-queue"
+import { selectQueueForFile } from "@/lib/audio/queue-scope"
 
 // AQU-646: the editor subscribes to the play-queue (read-only) for playhead
 // tracking. Mock the two hooks with mutable stubs so tests can simulate
@@ -17,6 +18,10 @@ const mockMissingCells: ReadonlySet<string> = new Set()
 vi.mock("@/lib/audio/play-queue", () => ({
   useQueueState: () => mockQueueState,
   useQueueProgress: () => mockProgress,
+  // Uses the REAL scoping rule (a side-effect-free module) so this stub cannot
+  // drift from the guard that keeps one file's queue out of another's timeline.
+  useQueueForFile: (cellIds: ReadonlySet<string>) =>
+    selectQueueForFile(mockQueueState, mockProgress, cellIds),
   useMissingClipCells: () => mockMissingCells,
   MISSING_AUDIO_MESSAGE: "This clip's audio is missing.",
   setQueueAudibility: (a: { source: boolean; target: boolean }) => {

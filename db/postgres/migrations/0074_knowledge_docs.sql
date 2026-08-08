@@ -1,7 +1,7 @@
 -- Knowledge base documents (spec: docs/superpowers/specs/2026-08-07-knowledge-base-design.md).
 -- Org XOR project scoped context documents; originals in R2 (kb/ prefix),
 -- extracted text + PageIndex-style tree here.
-CREATE TABLE knowledge_docs (
+CREATE TABLE IF NOT EXISTS knowledge_docs (
     id UUID PRIMARY KEY,
     org_id BIGINT REFERENCES organizations(id) ON DELETE CASCADE,
     project_id TEXT,
@@ -20,5 +20,5 @@ CREATE TABLE knowledge_docs (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     CHECK ((org_id IS NULL) <> (project_id IS NULL))
 );
-CREATE INDEX knowledge_docs_project ON knowledge_docs (project_id) WHERE project_id IS NOT NULL;
-CREATE INDEX knowledge_docs_org ON knowledge_docs (org_id) WHERE org_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS knowledge_docs_project ON knowledge_docs (project_id) WHERE project_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS knowledge_docs_org ON knowledge_docs (org_id) WHERE org_id IS NOT NULL;

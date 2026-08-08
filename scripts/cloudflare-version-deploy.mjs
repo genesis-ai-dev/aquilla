@@ -6,6 +6,7 @@ import { pathToFileURL } from "node:url"
 import { randomUUID } from "node:crypto"
 import { deploymentExpectation } from "./cloudflare-deployment-manifest.mjs"
 import { assertSafeDeploymentArtifacts } from "./verify-deployment-artifacts.mjs"
+import { verifyLiveEnvironment } from "./verify-live-environment.mjs"
 import {
   verifyActiveDeployment,
   verifyWorkerVersion,
@@ -39,6 +40,47 @@ export function parseWranglerOutput(contents, expectedType) {
     throw new Error(`Wrangler output must contain exactly one ${expectedType} entry`)
   }
   return matches[0]
+}
+
+export function versionPreviewOrigin(entry, workerName) {
+  const versionId = entry.version_id
+  if (typeof versionId !== "string" || !versionId) {
+    throw new Error("Wrangler version-upload output did not contain a version_id")
+  }
+  if (entry.worker_name !== workerName) {
+    throw new Error(`Wrangler uploaded ${entry.worker_name ?? "an unknown Worker"}; expected ${workerName}`)
+  }
+  if (typeof entry.preview_url !== "string" || !entry.preview_url) {
+    throw new Error("Wrangler version-upload output did not contain a preview_url")
+  }
+
+  const previewUrl = new URL(entry.preview_url)
+  const expectedPrefix = `${versionId.slice(0, 8)}-${workerName}.`
+  if (
+    previewUrl.protocol !== "https:"
+    || !previewUrl.hostname.startsWith(expectedPrefix)
+    || !previewUrl.hostname.endsWith(".workers.dev")
+    || previewUrl.username
+    || previewUrl.password
+    || previewUrl.pathname !== "/"
+    || previewUrl.search
+    || previewUrl.hash
+  ) {
+    throw new Error(
+      `Wrangler returned preview URL ${entry.preview_url}; expected https://${expectedPrefix}<account>.workers.dev`,
+    )
+  }
+  return previewUrl.origin
+}
+
+async function verifyImmutableWebVersion(environment, previewOrigin) {
+  await verifyLiveEnvironment(environment, {
+    surface: "spa",
+    appOrigin: previewOrigin,
+    attempts: 30,
+    retryAssetFallbacks: false,
+  })
+  console.log(`[cloudflare-deploy] immutable web assets verified at ${previewOrigin}`)
 }
 
 async function uploadWorkerVersion({
@@ -78,7 +120,12 @@ async function uploadWorkerVersion({
     if (entry.worker_name !== workerName) {
       throw new Error(`Wrangler uploaded ${entry.worker_name ?? "an unknown Worker"}; expected ${workerName}`)
     }
-    return versionId
+    return {
+      versionId,
+      previewOrigin: expectation.surface === "web"
+        ? versionPreviewOrigin(entry, workerName)
+        : undefined,
+    }
   } finally {
     rmSync(outputDirectory, { recursive: true, force: true })
   }
@@ -144,6 +191,7 @@ export async function runVerifiedDeployment({
   promoteVersion = promoteWorkerVersion,
   verifyDeployment = verifyActiveDeployment,
   verifyArtifacts = assertSafeDeploymentArtifacts,
+  verifyWebPreview = verifyImmutableWebVersion,
 } = {}) {
   const expectation = deploymentExpectation(surface, environment)
   const workerName = expectedWorker ?? expectation.worker
@@ -154,14 +202,23 @@ export async function runVerifiedDeployment({
   const tag = deploymentVersionTag(workerName, environment, sourceId)
   const message = `${sourceLabel} ${tag}`
 
-  const versionId = await upload({
+  const uploadResult = await upload({
     expectation,
     workerName,
     tag,
     message,
     spawnCommand,
   })
+  const versionId = typeof uploadResult === "string" ? uploadResult : uploadResult.versionId
+  const previewOrigin = typeof uploadResult === "string" ? undefined : uploadResult.previewOrigin
   await verifyVersion(surface, environment, versionId, { workerName })
+
+  if (surface === "web") {
+    if (!previewOrigin) {
+      throw new Error("refusing to promote web version without its immutable preview URL")
+    }
+    await verifyWebPreview(environment, previewOrigin)
+  }
 
   if (promote) {
     await promoteVersion({

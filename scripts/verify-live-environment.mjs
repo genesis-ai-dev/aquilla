@@ -26,6 +26,8 @@ const DEFAULT_MAX_JAVASCRIPT_ASSETS = 10_000
 const DEFAULT_ATTEMPTS = 90
 const DEFAULT_RETRY_DELAY_MS = 2_000
 
+class NonRetryableVerificationError extends Error {}
+
 // The bare origin serves the prerendered marketing homepage (worker/index.ts),
 // whose small JS graph never imports the sync client or the chat completion
 // service — crawling it can't prove the SPA targets the right environment
@@ -78,8 +80,10 @@ async function requestWithRetry(url, init, verify, options) {
       return
     } catch (error) {
       lastError = error
+      if (error instanceof NonRetryableVerificationError) throw error
       if (attempt < attempts) {
-        log(`[verify-live] retrying ${url} (${attempt}/${attempts})`)
+        const reason = error instanceof Error ? error.message : String(error)
+        log(`[verify-live] retrying ${url} after ${reason} (${attempt}/${attempts})`)
         await delay(retryDelayMs)
       }
     }
@@ -96,8 +100,10 @@ async function operationWithRetry(description, operation, options) {
       return await operation()
     } catch (error) {
       lastError = error
+      if (error instanceof NonRetryableVerificationError) throw error
       if (attempt < options.attempts) {
-        options.log(`[verify-live] retrying ${description} (${attempt}/${options.attempts})`)
+        const reason = error instanceof Error ? error.message : String(error)
+        options.log(`[verify-live] retrying ${description} after ${reason} (${attempt}/${options.attempts})`)
         await delay(options.retryDelayMs)
       }
     }
@@ -243,10 +249,12 @@ async function fetchJavascriptGraph(appOrigin, entrySources, options) {
           contentType.includes("text/html")
           || /^\s*(?:<!doctype\s+html|<html\b)/i.test(source)
         ) {
-          throw new Error(
+          const message =
             `SPA asset ${parsed.pathname} returned HTML instead of JavaScript; `
-            + "the deployed asset is missing or fell back to the SPA shell",
-          )
+            + "the deployed asset is missing or fell back to the SPA shell"
+          throw options.retryAssetFallbacks
+            ? new Error(message)
+            : new NonRetryableVerificationError(message)
         }
         return { url, source }
       }, options)
@@ -377,6 +385,7 @@ export async function verifyLiveEnvironment(environment, {
   attempts = DEFAULT_ATTEMPTS,
   retryDelayMs = DEFAULT_RETRY_DELAY_MS,
   maxJavascriptAssets = DEFAULT_MAX_JAVASCRIPT_ASSETS,
+  retryAssetFallbacks = true,
   log = console.log,
 } = {}) {
   const environmentConfig = ENVIRONMENTS[environment]
@@ -391,7 +400,15 @@ export async function verifyLiveEnvironment(environment, {
   }
   const config = withAppOrigin(environmentConfig, appOrigin, surface)
 
-  const options = { fetchImpl, lookup, attempts, retryDelayMs, maxJavascriptAssets, log }
+  const options = {
+    fetchImpl,
+    lookup,
+    attempts,
+    retryDelayMs,
+    maxJavascriptAssets,
+    retryAssetFallbacks,
+    log,
+  }
   if (surface === "all" || surface === "auth" || surface === "sync") {
     await verifyApiDns(config, options)
   }

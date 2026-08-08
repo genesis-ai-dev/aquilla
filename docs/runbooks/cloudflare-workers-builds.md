@@ -56,8 +56,11 @@ current remote branch:
 
 The branch guard fails before Wrangler if the checkout is dirty, on the wrong
 branch, or not at the current `origin/<branch>` commit. The deployer uploads one
-version, validates its exact bindings, promotes that exact ID to 100%, reapplies
-routes/triggers, verifies traffic, and then checks public health.
+version and validates its exact bindings. For web, it then crawls the complete
+SPA JavaScript graph on that version's immutable `preview_url`; a missing chunk
+or HTML fallback aborts before traffic changes. Only a verified version is
+promoted to 100%, after which the deployer reapplies routes/triggers, verifies
+traffic, and checks public health.
 
 Before any SPA version upload, `public/.assetsignore` tells Wrangler to exclude
 workstation metadata such as `.DS_Store`, AppleDouble files, `Thumbs.db`, and
@@ -115,9 +118,12 @@ the same requirement to `main` only when this configuration reaches `main`.
 ## Exact-version deployment and verification
 
 The repository deployer writes Wrangler's structured NDJSON output to a temporary
-file and extracts the exact uploaded version ID. It validates that version's
-bindings before production promotion, promotes only that ID to 100%, applies the
-profile's routes and cron triggers, and then requires the same ID at 100% traffic.
+file and extracts the exact uploaded version ID and immutable preview URL. It
+validates that version's bindings before production promotion. Web deployments
+also verify the immutable preview's SPA and static assets before any
+`wrangler versions deploy` or trigger command can run. It then promotes only
+that ID to 100%, applies the profile's routes and cron triggers, and requires the
+same ID at 100% traffic.
 Run the read-only production checks independently with:
 
 ```sh
@@ -148,7 +154,9 @@ Worker and its asset manifest a bounded three-minute convergence window. It
 retries only the lagging SPA document or JavaScript asset rather than restarting
 the complete graph crawl. Persistent HTML fallbacks still fail the deployment;
 transient route propagation no longer turns a successful upload into a false
-terminal error.
+terminal error. Immutable preview verification does not retry an HTML fallback:
+an immutable version cannot acquire a chunk that was absent from its uploaded
+asset manifest, so the deploy fails closed before production traffic changes.
 
 Identity and sync versions also carry a version-metadata binding. First-party
 requests require the version tag's actual Worker namespace to agree with the

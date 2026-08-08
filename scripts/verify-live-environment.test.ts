@@ -219,6 +219,40 @@ describe("live deployment environment verification", () => {
     })).rejects.toThrow("returned HTML instead of JavaScript")
   })
 
+  it("does not retry a missing asset on an immutable version preview", async () => {
+    const previewOrigin = "https://a66aa4e6-aquilla-web.blue-darkness-7674.workers.dev"
+    let missingAssetRequests = 0
+    const log = vi.fn()
+    const fetchImpl = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input)
+      if (url === `${previewOrigin}/app`) {
+        return response('<script type="module" src="/assets/index.js"></script>', 200, "text/html")
+      }
+      if (url === `${previewOrigin}/assets/index.js`) {
+        return response('import "./missing.js"')
+      }
+      if (url === `${previewOrigin}/assets/missing.js`) {
+        missingAssetRequests += 1
+        return response("<!doctype html><html></html>", 200, "text/html")
+      }
+      throw new Error(`unexpected URL ${url}`)
+    })
+
+    await expect(verifyLiveEnvironment("production", {
+      surface: "spa",
+      appOrigin: previewOrigin,
+      fetchImpl,
+      lookup,
+      attempts: 90,
+      retryDelayMs: 0,
+      retryAssetFallbacks: false,
+      log,
+    })).rejects.toThrow("returned HTML instead of JavaScript")
+
+    expect(missingAssetRequests).toBe(1)
+    expect(log).not.toHaveBeenCalledWith(expect.stringContaining("retrying SPA asset"))
+  })
+
   it("waits through transient HTML asset fallbacks while a Worker promotion propagates", async () => {
     let assetAttempts = 0
     let entryAttempts = 0

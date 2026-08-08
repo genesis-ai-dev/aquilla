@@ -12,6 +12,7 @@ export interface LiveVerificationOptions {
   attempts?: number
   retryDelayMs?: number
   maxJavascriptAssets?: number
+  retryAssetFallbacks?: boolean
   log?: (message: string) => void
 }
 

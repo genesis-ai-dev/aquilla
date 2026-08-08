@@ -369,6 +369,45 @@ describe("live deployment environment verification", () => {
     expect(fetchImpl.mock.calls.flat().map(String)).not.toContain("https://dev.aquilla.app/app")
   })
 
+  it("verifies immutable marketing documents without relying on custom-domain rewrites", async () => {
+    const previewOrigin = "https://4d61d571-aquilla-web-development.blue-darkness-7674.workers.dev"
+    const fetchImpl = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input)
+      if (url === `${previewOrigin}/app`) {
+        return response('<script type="module" src="/assets/index.js"></script>', 200, "text/html")
+      }
+      if (url === `${previewOrigin}/assets/index.js`) {
+        return response([
+          "https://api.dev.aquilla.app/identity",
+          "api.dev.aquilla.app/sync",
+          "https://api.dev.aquilla.app/chat",
+        ].join(" "))
+      }
+      if (url === `${previewOrigin}/case-study-biblica`) {
+        return response(caseStudyHtml("https://aquilla.app/case-studies/biblica"), 200, "text/html")
+      }
+      if (url === `${previewOrigin}/case-study`) {
+        return response(caseStudyHtml("https://aquilla.app/case-studies/come-and-see"), 200, "text/html")
+      }
+      throw new Error(`unexpected URL ${url}`)
+    })
+
+    await expect(verifyLiveEnvironment("development", {
+      surface: "spa",
+      appOrigin: previewOrigin,
+      fetchImpl,
+      lookup,
+      attempts: 1,
+      staticAssetPaths: true,
+      log: vi.fn(),
+    })).resolves.toBeUndefined()
+
+    const requestedUrls = fetchImpl.mock.calls.map(([input]) => String(input))
+    expect(requestedUrls).toContain(`${previewOrigin}/case-study-biblica`)
+    expect(requestedUrls).toContain(`${previewOrigin}/case-study`)
+    expect(requestedUrls).not.toContain(`${previewOrigin}/case-studies/biblica`)
+  })
+
   it("retries only the preview entrypoint while a new alias propagates", async () => {
     const previewOrigin = "https://pr-274-aquilla-web-preview.blue-darkness-7674.workers.dev"
     let entryAttempts = 0

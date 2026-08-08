@@ -79,6 +79,7 @@ async function verifyImmutableWebVersion(environment, previewOrigin) {
     appOrigin: previewOrigin,
     attempts: 30,
     retryAssetFallbacks: false,
+    staticAssetPaths: true,
   })
   console.log(`[cloudflare-deploy] immutable web assets verified at ${previewOrigin}`)
 }

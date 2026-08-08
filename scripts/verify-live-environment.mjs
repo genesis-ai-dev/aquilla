@@ -50,8 +50,16 @@ const SPA_SHELL_PATH = "/app"
 // canonical production URL baked into the source HTML, so it's identical across
 // environments (production/staging/dev/preview all serve the same asset bundle).
 const STATIC_MARKETING_PAGES = [
-  { path: "/case-studies/biblica", ogUrl: "https://aquilla.app/case-studies/biblica" },
-  { path: "/case-studies/come-and-see", ogUrl: "https://aquilla.app/case-studies/come-and-see" },
+  {
+    path: "/case-studies/biblica",
+    assetPath: "/case-study-biblica",
+    ogUrl: "https://aquilla.app/case-studies/biblica",
+  },
+  {
+    path: "/case-studies/come-and-see",
+    assetPath: "/case-study",
+    ogUrl: "https://aquilla.app/case-studies/come-and-see",
+  },
 ]
 
 function delay(milliseconds) {
@@ -330,7 +338,12 @@ function metaContent(html, property) {
 // HTML fails the deploy instead of shipping a partner-facing 404.
 async function verifyStaticPages(config, options) {
   for (const page of STATIC_MARKETING_PAGES) {
-    const pageUrl = new URL(page.path, config.appOrigin).href
+    // Version-preview hosts run behind Cloudflare's asset router and do not
+    // exercise custom-domain Worker rewrites consistently. Before promotion,
+    // verify the immutable uploaded document itself; after promotion, verify
+    // the canonical public route and its Worker mapping.
+    const requestPath = options.staticAssetPaths ? page.assetPath : page.path
+    const pageUrl = new URL(requestPath, config.appOrigin).href
     await requestWithRetry(
       pageUrl,
       { headers: { Accept: "text/html" } },
@@ -386,6 +399,7 @@ export async function verifyLiveEnvironment(environment, {
   retryDelayMs = DEFAULT_RETRY_DELAY_MS,
   maxJavascriptAssets = DEFAULT_MAX_JAVASCRIPT_ASSETS,
   retryAssetFallbacks = true,
+  staticAssetPaths = false,
   log = console.log,
 } = {}) {
   const environmentConfig = ENVIRONMENTS[environment]
@@ -407,6 +421,7 @@ export async function verifyLiveEnvironment(environment, {
     retryDelayMs,
     maxJavascriptAssets,
     retryAssetFallbacks,
+    staticAssetPaths,
     log,
   }
   if (surface === "all" || surface === "auth" || surface === "sync") {

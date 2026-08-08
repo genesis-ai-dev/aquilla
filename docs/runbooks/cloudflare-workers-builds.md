@@ -57,8 +57,9 @@ current remote branch:
 The branch guard fails before Wrangler if the checkout is dirty, on the wrong
 branch, or not at the current `origin/<branch>` commit. The deployer uploads one
 version and validates its exact bindings. For web, it then crawls the complete
-SPA JavaScript graph on that version's immutable `preview_url`; a missing chunk
-or HTML fallback aborts before traffic changes. Only a verified version is
+SPA JavaScript graph and underlying static marketing documents on that version's
+immutable `preview_url`; a missing chunk, document, or HTML fallback aborts
+before traffic changes. Only a verified version is
 promoted to 100%, after which the deployer reapplies routes/triggers, verifies
 traffic, and checks public health.
 
@@ -157,6 +158,11 @@ transient route propagation no longer turns a successful upload into a false
 terminal error. Immutable preview verification does not retry an HTML fallback:
 an immutable version cannot acquire a chunk that was absent from its uploaded
 asset manifest, so the deploy fails closed before production traffic changes.
+Version-preview hosts do not consistently exercise the custom-domain Worker's
+marketing-route rewrites, so this pre-promotion gate checks the immutable
+underlying documents (`/case-study` and `/case-study-biblica`). The
+post-promotion public check remains responsible for proving that
+`/case-studies/come-and-see` and `/case-studies/biblica` route to those documents.
 
 Identity and sync versions also carry a version-metadata binding. First-party
 requests require the version tag's actual Worker namespace to agree with the

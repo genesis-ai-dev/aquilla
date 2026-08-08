@@ -216,7 +216,7 @@ export function MediaFollowDriver({
 }: {
   isCellDisplayed: (cellId: string) => boolean
   scrollToCell: (cellId: string) => void
-  userScrollListenerRef: React.MutableRefObject<(() => void) | null>
+  userScrollListenerRef: React.MutableRefObject<((opts?: { force?: boolean }) => void) | null>
   programmaticStampRef: React.MutableRefObject<number>
   /** Explicit intent from user gestures: chip/row clicks ENGAGE, inspection
    *  jumps RELEASE. seq-keyed so repeats of the same intent still apply. */
@@ -239,8 +239,11 @@ export function MediaFollowDriver({
     else onFollowRest()
   }, [queueRunning, onFollowRest])
   useEffect(() => () => onFollowRest(), [onFollowRest])
-  // Explicit intents win over the truce in both directions.
-  const appliedCommandSeqRef = useRef(0)
+  // Explicit intents win over the truce in both directions. The ref seeds
+  // from the CURRENT command so anything issued while this driver was
+  // unmounted (text-lens jumps default to "release") is dead on arrival —
+  // replaying it here silently killed following after a lens round-trip.
+  const appliedCommandSeqRef = useRef(followCommand?.seq ?? 0)
   useEffect(() => {
     if (!followCommand || followCommand.seq === appliedCommandSeqRef.current) return
     appliedCommandSeqRef.current = followCommand.seq
@@ -257,8 +260,12 @@ export function MediaFollowDriver({
   const runningRef = useRef(queueRunning)
   runningRef.current = queueRunning
   useEffect(() => {
-    userScrollListenerRef.current = () => {
-      if (runningRef.current && performance.now() - programmaticStampRef.current > 250) {
+    userScrollListenerRef.current = (opts) => {
+      if (!runningRef.current) return
+      // force: a WHEEL is unambiguously the user — it must escape follow even
+      // while one of our smooth glides is streaming (self-re-stamping) scroll
+      // events; without it, dense boundaries could chain glides into a wall.
+      if (opts?.force || performance.now() - programmaticStampRef.current > 250) {
         setFollow(false)
       }
     }
@@ -975,7 +982,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   // only while the timeline is stacked above (media-sync active).
   const mediaSyncActive = useMediaSyncActive()
   const followProgrammaticStampRef = useRef(0)
-  const followUserScrollListenerRef = useRef<(() => void) | null>(null)
+  const followUserScrollListenerRef = useRef<((opts?: { force?: boolean }) => void) | null>(null)
   const followIsCellDisplayed = useCallback(
     (cellId: string) => displayCellIdsRef.current.includes(cellId),
     [],
@@ -1036,6 +1043,10 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     if (locked) el.setAttribute("data-follow-hover-lock", "")
     else el.removeAttribute("data-follow-hover-lock")
   }, [])
+  // Re-runs when the list root first renders (it is conditional on having
+  // rows) — binding once on mount left the listeners unattached for the whole
+  // session when the table mounted empty, making the lock un-liftable.
+  const hasListRows = displayCellIds.length > 0
   useEffect(() => {
     const el = listRootRef.current
     if (!el) return
@@ -1046,15 +1057,21 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
       if (moved) setFollowHoverLock(false)
     }
     const unlock = () => setFollowHoverLock(false)
+    const onWheel = () => {
+      setFollowHoverLock(false)
+      // Wheel is the one gesture the scroll-event truce can't attribute while
+      // our own glide is streaming events — force the disengage directly.
+      followUserScrollListenerRef.current?.({ force: true })
+    }
     el.addEventListener("pointermove", onMove, { capture: true, passive: true })
-    el.addEventListener("wheel", unlock, { capture: true, passive: true })
+    el.addEventListener("wheel", onWheel, { capture: true, passive: true })
     el.addEventListener("pointerdown", unlock, { capture: true, passive: true })
     return () => {
       el.removeEventListener("pointermove", onMove, { capture: true } as EventListenerOptions)
-      el.removeEventListener("wheel", unlock, { capture: true } as EventListenerOptions)
+      el.removeEventListener("wheel", onWheel, { capture: true } as EventListenerOptions)
       el.removeEventListener("pointerdown", unlock, { capture: true } as EventListenerOptions)
     }
-  }, [setFollowHoverLock])
+  }, [setFollowHoverLock, hasListRows])
   const handleFollowRest = useCallback(() => setFollowHoverLock(false), [setFollowHoverLock])
   const followScrollToCell = useCallback((cellId: string) => {
     const index = displayCellIdsRef.current.indexOf(cellId)
@@ -1242,7 +1259,9 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     const targetId = list[index]
     clearChapterNavigationSelection()
     handleActivateEditor(targetId)
-    programmaticListScroll(index, { viewPosition: 0.5, animated: false })
+    // Navigating to EDIT a cell releases follow — playback must not yank the
+    // row out from under the caret (pre-round behavior, now explicit).
+    programmaticListScroll(index, { viewPosition: 0.5, animated: false, follow: "release" })
 
     let attempts = 0
     const focusWhenMounted = () => {
@@ -1359,7 +1378,8 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     if (index < 0 || index >= list.length) return
     const targetId = list[index]
     clearChapterNavigationSelection()
-    programmaticListScroll(index, { viewPosition: 0.5, animated: false })
+    // Grid-focus navigation is editing intent too — release follow.
+    programmaticListScroll(index, { viewPosition: 0.5, animated: false, follow: "release" })
     let attempts = 0
     const focusWhenMounted = () => {
       const root = getListQueryRoot()
@@ -5245,6 +5265,15 @@ function EditorRow({
     // AQU-354: a fresh hover re-summons the rail if it had idle-collapsed.
     registerRailActivity()
   }
+  const handleRowMouseMove = () => {
+    // After an in-place hover-lock lift the browser never re-fires mouseenter
+    // (the cursor hasn't crossed a row boundary) — the first REAL movement
+    // inside the row re-summons the rail instead.
+    if (isHovering) return
+    if (rowRef.current?.closest("[data-follow-hover-lock]")) return
+    setIsHovering(true)
+    registerRailActivity()
+  }
   const handleRowMouseLeave = () => {
     // Clear immediately. A grace timer lets the previous hovered row overlap
     // the next one, producing three rails when an editor is also focused.
@@ -5590,6 +5619,7 @@ function EditorRow({
           gridCols,
         )}
         onMouseEnter={handleRowMouseEnter}
+        onMouseMove={handleRowMouseMove}
         onMouseLeave={handleRowMouseLeave}
         onFocusCapture={handleRowFocusCapture}
         onBlurCapture={handleRowBlurCapture}

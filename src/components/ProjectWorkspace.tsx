@@ -2812,6 +2812,13 @@ export function ProjectWorkspace() {
   const jumpToCellIdFollowing = useCallback((cellId: string) => {
     editorRef.current?.scrollToCellId(cellId, { flash: true, follow: "engage" })
   }, [])
+  // The bottom bar's per-advance jump: startQueue captures this ONCE, but the
+  // lens can change mid-run — so the "driver owns follow while stacked" gate
+  // must be evaluated per call (ref), not baked in at render time.
+  const handleBarActiveCell = useCallback((cellId: string) => {
+    if (timelineStackedRef.current) return
+    editorRef.current?.scrollToCellId(cellId, { flash: true })
+  }, [])
 
   // ── AQU-646 round 3: two-way cell tracing across the Text/Media switch ────
   // timelineSelectedCellIdRef mirrors TimelineEditor's local selection (a ref,
@@ -5927,7 +5934,7 @@ export function ProjectWorkspace() {
                   projectId={project.id}
                   session={frontierSession ?? null}
                   settings={tts.settings}
-                  onActiveCell={timelineStacked ? undefined : jumpToCellId}
+                  onActiveCell={handleBarActiveCell}
                   startCellId={timelineSelectedCellId}
                   below={
                     <>

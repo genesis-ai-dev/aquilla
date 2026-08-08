@@ -40,7 +40,7 @@ const setRunning = (cellId: string | null) => {
 }
 
 function makeHarness(displayed: string[] = ["a", "b", "c"]) {
-  const userScrollListenerRef: MutableRefObject<(() => void) | null> = { current: null }
+  const userScrollListenerRef: MutableRefObject<((opts?: { force?: boolean }) => void) | null> = { current: null }
   const programmaticStampRef: MutableRefObject<number> = { current: 0 }
   const scrolled: string[] = []
   const scrollToCell = vi.fn((cellId: string) => {
@@ -158,6 +158,25 @@ describe("MediaFollowDriver", () => {
     // …while a fresh seq applies again — here flipping to engage mid-run.
     view.rerender(h.uiWith({ seq: 2, intent: "engage" }))
     expect(h.scrolled).toEqual(["a", "c"]) // snap to current on engage
+  })
+
+  it("a command issued BEFORE mount is dead on arrival (lens round-trip must not replay a stale release)", () => {
+    const h = makeHarness()
+    // The driver mounts with a stale release already in table state (issued
+    // while it was unmounted in the Text lens) and the queue ALREADY running.
+    render(h.uiWith({ seq: 7, intent: "release" }))
+    setRunning("a")
+    setRunning("b")
+    expect(h.scrolled).toEqual(["a", "b"]) // still following — stale command skipped
+  })
+
+  it("a forced user-scroll signal (wheel) disengages even inside the stamp window", () => {
+    const h = makeHarness()
+    render(h.ui)
+    setRunning("a") // scrollToCell stamps fresh
+    act(() => h.userScrollListenerRef.current?.({ force: true }))
+    setRunning("b")
+    expect(h.scrolled).toEqual(["a"]) // wheel escaped mid-glide
   })
 
   it("the falling edge of running fires onFollowRest (hover lock lifts on pause/stop)", () => {

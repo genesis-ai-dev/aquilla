@@ -143,7 +143,7 @@ This gives "human provenance" a precise, two-tier meaning rather than a vague cl
 
 Trusted provenance never lives solely inside caller-controlled business payloads. The
 server stamps an envelope on every externally-originated event
-(`events.provenance` JSONB on Postgres; JSON column via the shim on D1):
+(`events.provenance` JSONB on Postgres):
 
 ```json
 {
@@ -332,12 +332,9 @@ passable: an agent must be able to learn what it may do before trying to do it.
 
 ### Storage decisions
 
-- **Changesets, jobs, credentials → Postgres (Neon).** These are greenfield tables:
-  starting them on Postgres avoids a later migration and D1's single-writer ceiling
-  for large plans and job bookkeeping. Dependency note: if the Postgres migration
-  isn't production-ready when AQU-533 builds, the identical schema runs through the
-  existing D1-compatible shim (`db/shim/d1-postgres.ts`) as a stopgap — this decision
-  must not silently block the API on the migration finishing.
+- **Changesets, jobs, credentials → Postgres (Neon).** These are greenfield tables,
+  avoiding a later migration off D1's single-writer ceiling for large plans and job
+  bookkeeping.
 - **Uploaded source artifacts and large immutable manifests → R2** (object storage),
   referenced by digest.
 
@@ -442,7 +439,7 @@ path.
 | D6 | Provenance is a server-stamped envelope; verified vs caller-declared fields are distinguished |
 | D7 | Reads and agent telemetry go to a bounded-retention audit ledger, not the event log |
 | D8 | v1 event-provenance promise limited to event-backed operations; non-event ops get receipts + audit coverage |
-| D9 | Changesets/jobs/credentials on Postgres (D1-shim fallback if migration timing forces it); artifacts/manifests on R2 |
+| D9 | Changesets/jobs/credentials on Postgres; artifacts/manifests on R2 |
 | D10 | Binary transfer via signed URLs, never MCP message bodies |
 | D11 | Ingestion is an explicit workflow with mapping recipes; no magical server-side `import_file` |
 | D12 | PATs for developer preview; OAuth 2.1 for remote MCP distribution |

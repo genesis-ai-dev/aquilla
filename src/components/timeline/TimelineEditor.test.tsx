@@ -495,6 +495,38 @@ describe("TimelineEditor", () => {
       mockQueueState = { kind: "idle" }
     }
   })
+  // ── 2026-08-08: duration Diff + split overlap, end to end through the memo ──
+
+  it("a dub spilling at BOTH ends reports its full length difference and two overlaps", () => {
+    // Verse 10–20 (10.0s) whose dub is anchored at 9.0 and runs 12.0s, so it
+    // starts 1.0s inside the previous verse's dub and ends 1.0s inside the
+    // next one's — the case the old end-only Diff was blind to.
+    const dub = (id: string, start: number, end: number, durationMs: number, anchorMs?: number): CellData => {
+      const takeId = `audio-${id}-1700000000-take.webm`
+      return cell({
+        id, medium: "media", startTime: start, endTime: end, original: id,
+        selectedAudioId: takeId,
+        ...(anchorMs != null ? { metadata: { target_start_ms: anchorMs } } : {}),
+        attachments: {
+          [takeId]: { type: "audio", url: "frontier-audio://take", durationMs },
+          [SOURCE_ID]: { type: "audio", url: "frontier-audio://src" },
+        },
+      } as unknown as Partial<CellData>)
+    }
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable
+        cells={[dub("v1", 0, 10, 10_000), dub("v2", 10, 20, 12_000, 9_000), dub("v3", 20, 30, 10_000)]}
+        onRetimeSubtitle={() => {}} initialSelectedCellId="v2"
+      />,
+    )
+    // Source 10.0s − target 12.0s = −2.0s (start −1.0 + end −1.0).
+    expect(screen.getByTestId("tl-detail-diff")).toHaveTextContent("Diff: −2.0s")
+    expect(screen.getByTestId("tl-detail-overlap-start")).toHaveTextContent("Start overlap: −1.0s")
+    expect(screen.getByTestId("tl-detail-overlap-end")).toHaveTextContent("End overlap: −1.0s")
+    expect(screen.queryByTestId("tl-detail-overlap")).toBeNull()
+  })
+
   // ── 2026-08-08: an automatic playback advance clears the selection ──
 
   const editorAt = (onSelectCell: (id: string | null) => void) => (

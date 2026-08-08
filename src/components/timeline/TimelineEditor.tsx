@@ -426,19 +426,29 @@ export function TimelineEditor({
     // left its own section to claim counts toward its overlap number. The
     // head half also depends on the PREVIOUS chip's end, so it is masked when
     // that width is a guess (SUB-48 — same mask the lane applies).
+    // 2026-08-08 (Sam): the two halves stay SEPARATE — a chip that spills at
+    // both ends reads as two labeled numbers, not one meaningless sum.
     const tailTrespass = tailSec != null && typeof endTime === "number" && geom.end > endTime ? tailSec : 0
     const headTrespass =
       headSec != null && !prev?.usingFallback && typeof startTime === "number" && geom.start < startTime
         ? headSec
         : 0
-    const overlapSec = tailTrespass + headTrespass
+    // 2026-08-08 (Sam): Diff is the whole DURATION difference now. The old
+    // end-only number missed a target that also starts before its verse:
+    // start + end diffs sum to (source duration − target duration), positive
+    // exactly when the target is shorter. The halves survive in the hover.
+    const startDiffSec = typeof startTime === "number" ? geom.start - startTime : null
+    const endDiffSec = typeof endTime === "number" ? endTime - geom.end : null
     return {
       kind: "dubbing" as const,
       startSec: geom.start,
       endSec: geom.end,
       durationSec: geom.end - geom.start,
-      endDiffSec: typeof endTime === "number" ? endTime - geom.end : null,
-      overlapSec: overlapSec > 0 ? overlapSec : null,
+      startDiffSec,
+      endDiffSec,
+      durationDiffSec: startDiffSec != null && endDiffSec != null ? startDiffSec + endDiffSec : null,
+      headOverlapSec: headTrespass > 0 ? headTrespass : null,
+      tailOverlapSec: tailTrespass > 0 ? tailTrespass : null,
     }
   }, [audioFirst, currentCell, targetItems, layout])
   const currentClipAudio = useMemo(

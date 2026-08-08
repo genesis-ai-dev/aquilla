@@ -8,24 +8,34 @@
 import { VolumeX } from "lucide-react"
 import { fmtClock } from "./format"
 import { MISSING_AUDIO_MESSAGE } from "@/lib/audio/play-queue"
+import { AppTooltip } from "@/components/ui/tooltip"
 import type { CellData } from "@/hooks/useCells"
 
 /** The current dub chip's own numbers, computed by TimelineEditor (this
- *  component never reads lane geometry). Null when there is no measured dub.
- *  `endDiffSec` = original end − dub end: negative exactly when the dub
- *  outruns its verse. */
+ *  component never reads lane geometry). Null when there is no measured dub. */
 export type ChipStats =
   | {
       kind: "dubbing"
       startSec: number
       endSec: number
       durationSec: number
-      /** Src end − Tgt end. INFORMATIONAL (2026-08-06): a difference can be
-       *  intentional — never styled as a warning. */
+      /** Dub start − original start: negative when the dub begins BEFORE its
+       *  verse. Shown only in the Diff pill's hover. */
+      startDiffSec: number | null
+      /** Original end − dub end: negative when the dub outruns its verse.
+       *  Shown only in the Diff pill's hover. */
       endDiffSec: number | null
-      /** How much of this chip double-sounds over its NEIGHBOURS' chips
-       *  (trespasser-gated). Overlap is ALWAYS a problem — shown red. */
-      overlapSec: number | null
+      /** 2026-08-08 (Sam): the headline Diff — source duration − target
+       *  duration (= startDiff + endDiff), positive exactly when the target
+       *  is shorter. INFORMATIONAL (2026-08-06): a difference can be
+       *  intentional — never styled as a warning. */
+      durationDiffSec: number | null
+      /** How much this chip double-sounds over the PREVIOUS chip
+       *  (trespasser-gated, masked when that width is a guess). */
+      headOverlapSec: number | null
+      /** …and over the NEXT one. Overlap is ALWAYS a problem — shown red;
+       *  both sides at once render as two labeled pills. */
+      tailOverlapSec: number | null
     }
   | {
       /** Free timing (2026-08-06): file-clock ranges are meaningless
@@ -43,6 +53,13 @@ export interface TimelineChipStripProps {
   /** The current clip's stored recording is permanently gone (404). Shows a
    *  compact red pill — the chip's corner badge and the transport agree. */
   audioMissing?: boolean
+}
+
+/** One-decimal, explicitly signed seconds (− is the typographic minus so the
+ *  readouts match the rest of the strip). */
+function signedSec(sec: number): string {
+  const tenths = Math.round(sec * 10) / 10
+  return `${tenths < 0 ? "−" : "+"}${Math.abs(tenths).toFixed(1)}s`
 }
 
 function Pill({ children }: { children: React.ReactNode }) {
@@ -139,36 +156,68 @@ export function TimelineChipStrip({ cell, chipStats, audioMissing }: TimelineChi
           </Pill>
         )}
         {chipStats?.kind === "dubbing" &&
-          chipStats.endDiffSec != null &&
+          chipStats.durationDiffSec != null &&
           (() => {
             // One-decimal display; the sign follows the DISPLAYED value.
-            // INFORMATIONAL by decision (2026-08-06): an end difference can
-            // be intentional — chip OVERLAP below is the warning.
-            const tenths = Math.round(chipStats.endDiffSec * 10) / 10
+            // INFORMATIONAL by decision (2026-08-06): a length difference can
+            // be intentional — chip OVERLAP below is the warning. The hover
+            // keeps the halves for anyone who needs to know WHERE it differs
+            // (2026-08-08).
+            const parts = [
+              chipStats.startDiffSec != null ? `Start: ${signedSec(chipStats.startDiffSec)}` : null,
+              chipStats.endDiffSec != null ? `End: ${signedSec(chipStats.endDiffSec)}` : null,
+            ].filter(Boolean)
             return (
               <Pill>
-                <span
-                  data-testid="tl-detail-enddiff"
-                  title="Src end − Tgt end: negative means the target audio ends after its verse"
-                  className="font-mono tabular-nums"
+                <AppTooltip
+                  content={`Source duration − target duration${parts.length > 0 ? ` · ${parts.join(" · ")}` : ""}`}
                 >
-                  Diff: {tenths < 0 ? "−" : "+"}
-                  {Math.abs(tenths).toFixed(1)}s
-                </span>
+                  <span data-testid="tl-detail-diff" className="font-mono tabular-nums">
+                    Diff: {signedSec(chipStats.durationDiffSec)}
+                  </span>
+                </AppTooltip>
               </Pill>
             )
           })()}
-        {chipStats?.kind === "dubbing" && chipStats.overlapSec != null && (
-          <Pill>
-            <span
-              data-testid="tl-detail-overlap"
-              title="This target audio sounds over a neighbouring verse's target audio"
-              className="font-mono tabular-nums font-semibold text-red-600 dark:text-red-400"
-            >
-              Overlap: −{chipStats.overlapSec.toFixed(1)}s
-            </span>
-          </Pill>
-        )}
+        {/* Overlap: one side → one plain pill (today's shape); BOTH sides →
+            two labeled pills, because a single summed number would say
+            nothing about where the collision is (Sam 2026-08-08). */}
+        {chipStats?.kind === "dubbing" &&
+          chipStats.headOverlapSec != null &&
+          chipStats.tailOverlapSec != null && (
+            <>
+              <Pill>
+                <span
+                  data-testid="tl-detail-overlap-start"
+                  title="This target audio starts over the PREVIOUS verse's target audio"
+                  className="font-mono tabular-nums font-semibold text-red-600 dark:text-red-400"
+                >
+                  Start overlap: −{chipStats.headOverlapSec.toFixed(1)}s
+                </span>
+              </Pill>
+              <Pill>
+                <span
+                  data-testid="tl-detail-overlap-end"
+                  title="This target audio runs over the NEXT verse's target audio"
+                  className="font-mono tabular-nums font-semibold text-red-600 dark:text-red-400"
+                >
+                  End overlap: −{chipStats.tailOverlapSec.toFixed(1)}s
+                </span>
+              </Pill>
+            </>
+          )}
+        {chipStats?.kind === "dubbing" &&
+          (chipStats.headOverlapSec == null) !== (chipStats.tailOverlapSec == null) && (
+            <Pill>
+              <span
+                data-testid="tl-detail-overlap"
+                title="This target audio sounds over a neighbouring verse's target audio"
+                className="font-mono tabular-nums font-semibold text-red-600 dark:text-red-400"
+              >
+                Overlap: −{(chipStats.headOverlapSec ?? chipStats.tailOverlapSec ?? 0).toFixed(1)}s
+              </span>
+            </Pill>
+          )}
         {audioMissing && (
           <Pill>
             <span

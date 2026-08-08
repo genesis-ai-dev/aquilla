@@ -20,6 +20,10 @@ const ENVIRONMENTS = {
 
 const VALID_SURFACES = new Set(["all", "auth", "sync", "spa"])
 const DEFAULT_MAX_JAVASCRIPT_ASSETS = 10_000
+// A newly promoted Worker and its asset manifest can reach Cloudflare edges a
+// few seconds apart. Keep verification fail-closed, but allow enough time for
+// the exact promoted version to settle before declaring a healthy deploy bad.
+const DEFAULT_ATTEMPTS = 30
 
 // The bare origin serves the prerendered marketing homepage (worker/index.ts),
 // whose small JS graph never imports the sync client or the chat completion
@@ -225,7 +229,12 @@ async function fetchJavascriptGraph(appOrigin, entrySources, options) {
       if (parsed.origin !== appOrigin || !parsed.pathname.endsWith(".js")) {
         throw new Error(`refusing to inspect unexpected script URL ${url}`)
       }
-      const response = await options.fetchImpl(url)
+      const response = await options.fetchImpl(url, {
+        headers: {
+          Accept: "application/javascript, text/javascript;q=0.9, */*;q=0.1",
+          "Cache-Control": "no-cache",
+        },
+      })
       assertResponse(response, 200, `SPA asset ${parsed.pathname}`)
       const contentType = response.headers.get("content-type")?.toLowerCase() ?? ""
       const source = await response.text()
@@ -361,7 +370,7 @@ export async function verifyLiveEnvironment(environment, {
   appOrigin,
   fetchImpl = fetch,
   lookup = dnsLookup,
-  attempts = 5,
+  attempts = DEFAULT_ATTEMPTS,
   retryDelayMs = 1_000,
   maxJavascriptAssets = DEFAULT_MAX_JAVASCRIPT_ASSETS,
   log = console.log,

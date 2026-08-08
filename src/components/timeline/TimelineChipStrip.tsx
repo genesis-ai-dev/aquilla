@@ -100,7 +100,12 @@ function StripNavSlot() {
       data-testid="tl-strip-nav"
       // w-72 = the nav's xl-mode width exactly (fixed 224px trigger + two
       // 32px arrows) — anything narrower and the buttons run off-screen.
-      className="ml-auto w-72 max-w-[45%] shrink-0 empty:hidden [&_button]:h-7 [&_button]:text-[11px]"
+      // The 45% cap that used to sit here was written for the full-width strip;
+      // once this header became the TEXT COLUMN's alone, 45% fell below 288px
+      // and squeezed a control that cannot shrink (its xl sizing is keyed to
+      // the viewport, not this box), leaving it scrolling inside its own slot.
+      // The header has room for it at every width the table is allowed to be.
+      className="ml-auto w-72 max-w-full shrink-0 empty:hidden [&_button]:h-7 [&_button]:text-[11px]"
     />
   )
 }

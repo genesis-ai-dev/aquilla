@@ -168,17 +168,29 @@ describe("MediaVideoPane", () => {
     expect(header).not.toHaveTextContent("https://")
   })
 
-  it("keeps the caption toggle on the picture, revealed while playback starts", () => {
+  it("keeps the caption controls on the picture, revealed while playback starts", () => {
     const { rerender } = renderPane()
-    const overlay = screen.getByTestId("video-pane-mode-overlay")
-    // At rest it is faded out AND pointer-inert, so a click near the corner
+    const controls = screen.getByTestId("video-pane-controls")
+    // At rest they are faded out AND pointer-inert, so a click near a corner
     // hits the video rather than an invisible control.
-    expect(overlay.className).toContain("opacity-0")
-    expect(overlay.className).toContain("pointer-events-none")
+    expect(controls.className).toContain("opacity-0")
+    expect(controls.className).toContain("pointer-events-none")
 
     sounding("c1")
     rerender(<MediaVideoPane src="https://cdn/episode.webm" cells={CELLS} />)
-    expect(screen.getByTestId("video-pane-mode-overlay").className).toContain("opacity-100")
+    expect(screen.getByTestId("video-pane-controls").className).toContain("opacity-100")
+  })
+
+  it("lays the two caption controls out so they cannot cross", () => {
+    // Positioned independently (one pinned left, one right) they overlapped by
+    // 34px at the default pane width, and the later-painted one swallowed
+    // clicks meant for the other — a press on "Target" toggled "In bar". One
+    // row that wraps cannot do that at any width.
+    renderPane()
+    const controls = screen.getByTestId("video-pane-controls")
+    expect(controls.className).toContain("flex-wrap")
+    expect(controls.contains(screen.getByTestId("video-pane-placement-overlay"))).toBe(true)
+    expect(controls.contains(screen.getByTestId("video-pane-mode-overlay"))).toBe(true)
   })
 
   it("puts the caption on the picture, not in the bars, by default", () => {

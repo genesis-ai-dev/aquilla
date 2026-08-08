@@ -44,7 +44,11 @@ const CAPTION_PLACEMENT_KEY = "codex:video-caption-placement"
 /** Shared look for the two controls that ride on the picture: dark, translucent
  *  and legible over any frame, with the active tab picked out in white. */
 const OVERLAY_TABS_CLASS =
-  "h-7 border-0 bg-black/55 backdrop-blur-sm [&_button]:h-6 [&_button]:px-2 [&_button]:text-[11px] [&_button]:text-white/70 [&_button:hover]:text-white [&_button[data-active]]:!bg-white/25 [&_button[data-active]]:!text-white [&_button[data-active]]:!border-transparent [&_button[data-active]]:shadow-none"
+  // `flex-none` on the buttons matters: TabsTrigger is flex-1 by default, so a
+  // list left to itself claims (widest label × tab count) and cannot give any
+  // of it back. Sized to their own content, the two controls fit side by side
+  // far sooner.
+  "h-7 border-0 bg-black/55 backdrop-blur-sm [&_button]:h-6 [&_button]:flex-none [&_button]:px-2 [&_button]:text-[11px] [&_button]:text-white/70 [&_button:hover]:text-white [&_button[data-active]]:!bg-white/25 [&_button[data-active]]:!text-white [&_button[data-active]]:!border-transparent [&_button[data-active]]:shadow-none"
 
 /** Read the persisted caption preference. Deliberately global rather than
  *  per-project: it expresses how someone likes to watch, not anything about the
@@ -520,12 +524,20 @@ export function MediaVideoPane({
           className="pointer-events-none absolute bottom-2 left-1/2 z-10 flex -translate-x-1/2 flex-col items-center gap-1 px-2 text-center"
           style={{ maxWidth: "92%" }}
         >
+          {/* Keeps the same translucent plate as the on-picture variant. It is
+              invisible against a real black bar, and it is what saves the line
+              when there IS no bar — a tall-enough field, or any video shaped
+              taller than the pane, leaves the picture height-bound and this
+              caption sitting straight on the image. */}
           {captionTarget && (
             <span
               data-testid="video-pane-caption-target"
               dir={resolveTextDirection(targetDirectionMode, captionTarget, targetTextDirection)}
               className="inline-block whitespace-pre-wrap rounded px-2 py-1 text-xs font-medium leading-tight text-white"
-              style={{ textShadow: "1px 1px 2px rgba(0, 0, 0, 0.9)" }}
+              style={{
+                backgroundColor: "rgba(0, 0, 0, 0.75)",
+                textShadow: "1px 1px 2px rgba(0, 0, 0, 0.9)",
+              }}
             >
               {captionTarget}
             </span>
@@ -535,7 +547,10 @@ export function MediaVideoPane({
               data-testid="video-pane-caption-source"
               dir={resolveTextDirection(sourceDirectionMode, captionSource, sourceTextDirection)}
               className="inline-block whitespace-pre-wrap rounded px-2 py-1 text-[11px] leading-tight text-white/80"
-              style={{ textShadow: "1px 1px 2px rgba(0, 0, 0, 0.9)" }}
+              style={{
+                backgroundColor: "rgba(0, 0, 0, 0.65)",
+                textShadow: "1px 1px 2px rgba(0, 0, 0, 0.9)",
+              }}
             >
               {captionSource}
             </span>
@@ -547,51 +562,55 @@ export function MediaVideoPane({
           learn they exist. Hidden they are also pointer-inert, so a stray click
           near a corner hits the video, not an invisible control. They sit on
           the FIELD rather than the picture so they keep their corners when the
-          picture is letterboxed down to a small box. */}
+          picture is letterboxed down to a small box.
+          ONE wrapping row rather than two free-floating corners: laid out
+          independently they simply overlapped at the default pane width — 34px
+          of intersection, measured, with the later-painted control swallowing
+          clicks meant for the other one (a press on "Target" toggled "In bar").
+          Side by side while there is room, stacked when there is not; either
+          way they cannot cross. */}
       <div
-        data-testid="video-pane-mode-overlay"
+        data-testid="video-pane-controls"
         className={cn(
-          "absolute right-2 top-2 z-30 transition-opacity duration-300",
+          "absolute inset-x-2 top-2 z-30 flex flex-wrap items-start justify-between gap-2 transition-opacity duration-300",
           modeRevealed
             ? "opacity-100"
             : "pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100",
         )}
       >
-        <SegmentTabs<SubtitleMode>
-          value={mode}
-          onValueChange={setMode}
-          aria-label="Subtitle text"
-          options={[
-            { label: "Target", value: "target" },
-            { label: "Source", value: "source" },
-            { label: "Both", value: "both" },
-            { label: "Off", value: "off" },
-          ]}
-          listClassName={OVERLAY_TABS_CLASS}
-        />
-      </div>
-      {mode !== "off" && (
-        <div
-          data-testid="video-pane-placement-overlay"
-          className={cn(
-            "absolute left-2 top-2 z-30 transition-opacity duration-300",
-            modeRevealed
-              ? "opacity-100"
-              : "pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100",
-          )}
-        >
-          <SegmentTabs<CaptionPlacement>
-            value={placement}
-            onValueChange={setPlacement}
-            aria-label="Subtitle position"
+        {mode !== "off" ? (
+          <div data-testid="video-pane-placement-overlay">
+            <SegmentTabs<CaptionPlacement>
+              value={placement}
+              onValueChange={setPlacement}
+              aria-label="Subtitle position"
+              options={[
+                { label: "On video", value: "picture" },
+                { label: "In bar", value: "bar" },
+              ]}
+              listClassName={OVERLAY_TABS_CLASS}
+            />
+          </div>
+        ) : (
+          // Holds the right-hand slot so the text control keeps its corner
+          // instead of sliding left when the position control goes away.
+          <span aria-hidden />
+        )}
+        <div data-testid="video-pane-mode-overlay">
+          <SegmentTabs<SubtitleMode>
+            value={mode}
+            onValueChange={setMode}
+            aria-label="Subtitle text"
             options={[
-              { label: "On video", value: "picture" },
-              { label: "In bar", value: "bar" },
+              { label: "Target", value: "target" },
+              { label: "Source", value: "source" },
+              { label: "Both", value: "both" },
+              { label: "Off", value: "off" },
             ]}
             listClassName={OVERLAY_TABS_CLASS}
           />
         </div>
-      )}
+      </div>
       </div>
     </div>
   )

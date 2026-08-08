@@ -228,6 +228,67 @@ describe("stale-source route — content-aware source revisions", () => {
       await t.close()
     }
   })
+
+  it("marks a corrected TRANSCRIPT stale, though the stored value never moves (AQU-646)", async () => {
+    // An imported media segment stores the audio FILENAME as its value; the
+    // transcript is what anyone actually translates. Correcting the transcript
+    // therefore leaves `value` identical on both sides of the comparison, and a
+    // value-only check filtered the row out — the translator was never told the
+    // source text they worked from had changed.
+    const t = await makeTestDb()
+    try {
+      await t.pg.query(`INSERT INTO projects (id, name, created_by) VALUES ($1, 'B', 1)`, [PROJECT])
+      await apply(t, {
+        id: nextId(), schemaVersion: 1, projectId: PROJECT, fileId: FILE, cellId: null, parentId: null,
+        kind: "file.create", author: "importer", payload: { name: "F", fileType: "audio" }, clientTs: 1, serverTs: 1, serverSeq: 1,
+      })
+      const sourceEventId = nextId()
+      const createPayload = {
+        cellId: "cell-1",
+        value: "episode-12.mp3",
+        medium: "media",
+        transcription: "let the peace of Christ rule",
+      }
+      await apply(t, {
+        id: sourceEventId, schemaVersion: 1, projectId: PROJECT, fileId: FILE, cellId: "cell-1", parentId: null,
+        kind: "source.cell.create", author: "importer", payload: createPayload,
+        clientTs: 1, serverTs: 1, serverSeq: 2,
+      })
+      await t.pg.query(
+        `INSERT INTO events (
+           id, schema_version, project_id, file_id, cell_id, kind, author,
+           payload, client_ts, server_ts, parent_id, server_seq
+         ) VALUES ($1, 1, $2, $3, 'cell-1', 'source.cell.create', 'importer', $4, 1, 1, NULL, 2)`,
+        [sourceEventId, PROJECT, FILE, JSON.stringify(createPayload)],
+      )
+      await apply(t, {
+        id: nextId(), schemaVersion: 1, projectId: PROJECT, fileId: FILE, cellId: "cell-1", parentId: sourceEventId,
+        kind: "target.cell.commit", author: "translator",
+        payload: { value: "que la paix règne", sourceEventId }, clientTs: 1, serverTs: 1, serverSeq: 3,
+      })
+
+      // Nothing is stale yet — the transcript is exactly what was pinned.
+      const before = await (await request(t, PROJECT, FILE, await makeToken())).json() as { staleCellIds: string[] }
+      expect(before.staleCellIds).not.toContain("cell-1")
+
+      // The transcript is corrected. `value` stays "episode-12.mp3" throughout.
+      await apply(t, {
+        id: nextId(), schemaVersion: 1, projectId: PROJECT, fileId: FILE, cellId: "cell-1", parentId: sourceEventId,
+        kind: "source.cell.commit", author: "lead",
+        payload: { transcription: "let the peace of Christ rule your hearts" },
+        clientTs: 2, serverTs: 2, serverSeq: 4,
+      })
+
+      const after = await (await request(t, PROJECT, FILE, await makeToken())).json() as { staleCellIds: string[] }
+      expect(after.staleCellIds).toContain("cell-1")
+      const row = await t.pg.query<{ value: string }>(
+        `SELECT value FROM cells WHERE cell_id = 'cell-1' AND side = 'source'`,
+      )
+      expect(row.rows[0].value).toBe("episode-12.mp3")
+    } finally {
+      await t.close()
+    }
+  })
 })
 
 describe("stale-source route — behindSeq lane-relevance", () => {

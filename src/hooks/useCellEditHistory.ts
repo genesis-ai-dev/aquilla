@@ -110,11 +110,15 @@ function mapEventsToEntries(
   const indexByCommitId = new Map<string, number>()
   for (const e of [...events].reverse()) {
     if (e.kind === "target.cell.commit" || e.kind === "source.cell.commit") {
-      const payload = e.payload as { value?: string; valueHtml?: string } | null
+      // AQU-646: a source commit on a MEDIA cell carries `transcription` and no
+      // `value` — its stored value is the import filename and must not change.
+      // Reading `value` alone rendered every transcript correction as a blank
+      // history entry.
+      const payload = e.payload as { value?: string; valueHtml?: string; transcription?: string } | null
       const idx = entries.length
       entries.push({
         timestamp: new Date(e.serverTs).toISOString(),
-        value: payload?.value ?? "",
+        value: payload?.transcription ?? payload?.value ?? "",
         ...(payload?.valueHtml !== undefined ? { valueHtml: payload.valueHtml } : {}),
         source: "human",
         author: e.author,
@@ -142,10 +146,17 @@ function mapOutboxToEntries(records: OutboxRecord[]): CellHistoryEntry[] {
   for (const record of records) {
     const event = record.event
     if (event.kind !== "target.cell.commit" && event.kind !== "source.cell.commit") continue
-    const payload = event.payload as { value?: string; valueHtml?: string; ai_suggestion?: true }
+    const payload = event.payload as {
+      value?: string
+      valueHtml?: string
+      transcription?: string
+      ai_suggestion?: true
+    }
     entries.push({
       timestamp: new Date(event.clientTs || record.enqueuedAt).toISOString(),
-      value: payload.value ?? "",
+      // See the projected twin above: a media source commit carries only a
+      // transcription.
+      value: payload.transcription ?? payload.value ?? "",
       ...(payload.valueHtml !== undefined ? { valueHtml: payload.valueHtml } : {}),
       source: payload.ai_suggestion ? "llm" : "human",
       author: event.author,

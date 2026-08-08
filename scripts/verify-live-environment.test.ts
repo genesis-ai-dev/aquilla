@@ -219,6 +219,39 @@ describe("live deployment environment verification", () => {
     })).rejects.toThrow("returned HTML instead of JavaScript")
   })
 
+  it("waits through transient HTML asset fallbacks while a Worker promotion propagates", async () => {
+    let assetAttempts = 0
+    const fetchImpl = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input)
+      if (url === "https://aquilla.app/app") {
+        return response('<script type="module" src="/assets/index.js"></script>', 200, "text/html")
+      }
+      if (url === "https://aquilla.app/assets/index.js") {
+        assetAttempts += 1
+        if (assetAttempts <= 6) {
+          return response('<!doctype html><script src="/assets/index.js"></script>', 200, "text/html")
+        }
+        return response([
+          "https://api.aquilla.app/identity",
+          "api.aquilla.app/sync",
+          "https://api.aquilla.app/chat",
+        ].join(" "))
+      }
+      const caseStudy = serveCaseStudies("https://aquilla.app", url)
+      if (caseStudy) return caseStudy
+      throw new Error(`unexpected URL ${url}`)
+    })
+
+    await expect(verifyLiveEnvironment("production", {
+      surface: "spa",
+      fetchImpl,
+      lookup,
+      retryDelayMs: 0,
+      log: vi.fn(),
+    })).resolves.toBeUndefined()
+    expect(assetAttempts).toBe(7)
+  })
+
   it("fails closed when the genuine JavaScript import graph exceeds its limit", async () => {
     const fetchImpl = vi.fn(async (input: string | URL | Request) => {
       const url = String(input)

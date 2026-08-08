@@ -19,6 +19,11 @@ const ENVIRONMENTS = {
 }
 
 const VALID_SURFACES = new Set(["all", "auth", "sync", "spa"])
+const DEFAULT_MAX_JAVASCRIPT_ASSETS = 10_000
+// A newly promoted Worker and its asset manifest can reach Cloudflare edges a
+// few seconds apart. Keep verification fail-closed, but allow enough time for
+// the exact promoted version to settle before declaring a healthy deploy bad.
+const DEFAULT_ATTEMPTS = 30
 
 // The bare origin serves the prerendered marketing homepage (worker/index.ts),
 // whose small JS graph never imports the sync client or the chat completion
@@ -169,28 +174,80 @@ function scriptSources(html) {
   return [...html.matchAll(/<script[^>]+src=["']([^"']+\.js)["']/gi)].map((match) => match[1])
 }
 
-function javascriptReferences(source) {
-  return [...source.matchAll(/["'`]([^"'`]+\.js)["'`]/g)].map((match) => match[1])
+export function javascriptReferences(source) {
+  const references = new Set()
+  const collect = (pattern) => {
+    for (const match of source.matchAll(pattern)) references.add(match[2])
+  }
+
+  // Follow executable ESM edges, not every quoted string ending in `.js`.
+  // Large dependencies (notably Transformers.js) embed hundreds of source
+  // module filenames as data; treating those as imports made a healthy 142-
+  // chunk production build look like an unbounded graph (AQU-824).
+  collect(/\bimport\s*\(\s*(["'`])([^"'`]+\.js)\1\s*\)/g)
+  collect(/\bfrom\s*(["'])([^"']+\.js)\1/g)
+  collect(/\bimport\s*(["'])([^"']+\.js)\1/g)
+
+  // Vite's __vite__mapDeps preload table is data by design, but each entry is
+  // a real deployed chunk that the application may load. Inspect only the
+  // table initializer—not arbitrary assets/*.js strings elsewhere in bundles.
+  for (const table of source.matchAll(
+    /__vite__mapDeps\s*=\s*\([^[]*?\[([\s\S]*?)\]\s*\)\s*\)/g,
+  )) {
+    for (const match of table[1].matchAll(/(["'`])(assets\/[^"'`]+\.js)\1/g)) {
+      references.add(match[2])
+    }
+  }
+
+  return [...references]
 }
 
 async function fetchJavascriptGraph(appOrigin, entrySources, options) {
-  const pending = entrySources.map((source) => new URL(source, appOrigin).href)
-  const visited = new Set()
+  const pending = []
+  const discovered = new Set()
   const bodies = []
 
+  const schedule = (url) => {
+    if (discovered.has(url)) return
+    discovered.add(url)
+    if (discovered.size > options.maxJavascriptAssets) {
+      throw new Error(
+        `SPA references more than ${options.maxJavascriptAssets} JavaScript assets; `
+        + "refusing an unbounded crawl",
+      )
+    }
+    pending.push(url)
+  }
+
+  entrySources.forEach((source) => schedule(new URL(source, appOrigin).href))
+
   while (pending.length > 0) {
-    const batch = pending.splice(0, 12).filter((url) => !visited.has(url))
-    if (batch.length === 0) continue
-    batch.forEach((url) => visited.add(url))
+    const batch = pending.splice(0, 12)
 
     const results = await Promise.all(batch.map(async (url) => {
       const parsed = new URL(url)
       if (parsed.origin !== appOrigin || !parsed.pathname.endsWith(".js")) {
         throw new Error(`refusing to inspect unexpected script URL ${url}`)
       }
-      const response = await options.fetchImpl(url)
+      const response = await options.fetchImpl(url, {
+        headers: {
+          Accept: "application/javascript, text/javascript;q=0.9, */*;q=0.1",
+          "Cache-Control": "no-cache",
+        },
+      })
       assertResponse(response, 200, `SPA asset ${parsed.pathname}`)
-      return { url, source: await response.text() }
+      const contentType = response.headers.get("content-type")?.toLowerCase() ?? ""
+      const source = await response.text()
+      if (
+        contentType.includes("text/html")
+        || /^\s*(?:<!doctype\s+html|<html\b)/i.test(source)
+      ) {
+        throw new Error(
+          `SPA asset ${parsed.pathname} returned HTML instead of JavaScript; `
+          + "the deployed asset is missing or fell back to the SPA shell",
+        )
+      }
+      return { url, source }
     }))
 
     for (const { url, source } of results) {
@@ -204,13 +261,9 @@ async function fetchJavascriptGraph(appOrigin, entrySources, options) {
           ? new URL(`/${reference}`, appOrigin)
           : new URL(reference, url)
         if (referencedUrl.origin === appOrigin && referencedUrl.pathname.endsWith(".js")) {
-          pending.push(referencedUrl.href)
+          schedule(referencedUrl.href)
         }
       }
-    }
-
-    if (visited.size > 300) {
-      throw new Error("SPA references more than 300 JavaScript assets; refusing an unbounded crawl")
     }
   }
 
@@ -317,8 +370,9 @@ export async function verifyLiveEnvironment(environment, {
   appOrigin,
   fetchImpl = fetch,
   lookup = dnsLookup,
-  attempts = 5,
+  attempts = DEFAULT_ATTEMPTS,
   retryDelayMs = 1_000,
+  maxJavascriptAssets = DEFAULT_MAX_JAVASCRIPT_ASSETS,
   log = console.log,
 } = {}) {
   const environmentConfig = ENVIRONMENTS[environment]
@@ -328,9 +382,12 @@ export async function verifyLiveEnvironment(environment, {
   if (!VALID_SURFACES.has(surface)) {
     throw new Error(`unknown surface ${JSON.stringify(surface)}; expected all, auth, sync, or spa`)
   }
+  if (!Number.isInteger(maxJavascriptAssets) || maxJavascriptAssets < 1) {
+    throw new Error("maxJavascriptAssets must be a positive integer")
+  }
   const config = withAppOrigin(environmentConfig, appOrigin, surface)
 
-  const options = { fetchImpl, lookup, attempts, retryDelayMs, log }
+  const options = { fetchImpl, lookup, attempts, retryDelayMs, maxJavascriptAssets, log }
   if (surface === "all" || surface === "auth" || surface === "sync") {
     await verifyApiDns(config, options)
   }

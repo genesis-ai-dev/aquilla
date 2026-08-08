@@ -11,8 +11,11 @@ export interface LiveVerificationOptions {
   ) => Promise<Array<{ address: string; family: number }>>
   attempts?: number
   retryDelayMs?: number
+  maxJavascriptAssets?: number
   log?: (message: string) => void
 }
+
+export function javascriptReferences(source: string): string[]
 
 export function verifyLiveEnvironment(
   environment: LiveEnvironment | string,

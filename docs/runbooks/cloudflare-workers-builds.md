@@ -137,6 +137,17 @@ deployed SPA bundle's environment targets. A `503` with an
 environment-mismatch message means the custom hostname and bindings do not
 match.
 
+SPA bundle verification follows only executable ESM imports and Vite's
+generated preload table. It deduplicates cycles before scheduling requests and
+rejects HTML returned for a JavaScript URL, so package-internal `.js` filenames
+and single-page-application fallbacks cannot inflate or poison the crawl. A
+high emergency asset ceiling remains configurable for deterministic tests and
+still fails closed if a genuinely unbounded import graph is encountered.
+The live crawl bypasses stale edge-cache entries and allows up to 30 attempts
+for a newly promoted Worker and its asset manifest to converge. Persistent HTML
+fallbacks still fail the deployment; transient route propagation no longer
+turns a successful upload into a false terminal error.
+
 Identity and sync versions also carry a version-metadata binding. First-party
 requests require the version tag's actual Worker namespace to agree with the
 environment's `DEPLOYMENT_WORKER_NAME` before opening Hyperdrive. Identity's

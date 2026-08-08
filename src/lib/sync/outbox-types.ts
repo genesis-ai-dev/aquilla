@@ -123,8 +123,12 @@ export interface OutboxEventPayloads {
     cameraState?: string
   }
   "source.cell.commit": {
-    value: string
+    value?: string
     valueHtml?: string
+    /** AQU-646: correction to a media cell's transcription (its translatable
+     *  source text). When present the stored value — the import filename — is
+     *  left untouched; the chain head still advances (targets go stale). */
+    transcription?: string
   }
   "source.cell.delete": Record<string, never>
   "source.cell.reorder": {

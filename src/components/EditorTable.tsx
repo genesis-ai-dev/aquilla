@@ -4009,6 +4009,13 @@ function EditorRow({
   // machinery in useCells) shown until the projection round-trips.
   const [sourceEditing, setSourceEditing] = useState(false)
   const [sourceDraft, setSourceDraft] = useState<{ value: string; valueHtml: string } | null>(null)
+  // AQU-646: a media cell's editable source text is its TRANSCRIPTION. The
+  // stored value is the import FILENAME — an import record, not prose — so for
+  // these cells the editor opens on the transcript (blank when untranscribed,
+  // never the filename) and commits land on `transcription`, leaving the
+  // filename intact. Before this, editing surfaced the filename and saving it
+  // replaced the transcript on screen permanently.
+  const sourceIsTranscript = (cell.medium ?? "text") === "media"
   // Tracks the newest source.cell.commit this row enqueued whose projection
   // head hasn't caught up yet, as { eventId, parentId }. Successive source edits
   // chain onto `eventId`; the reconciling effect below clears it once the
@@ -4083,8 +4090,18 @@ function EditorRow({
   const hasTranslatedText = Boolean(visibleTranslated?.trim())
   const showCompletionOverlay = isLoading && !hasTranslatedText
   const sourceCellDirection = useMemo(
-    () => resolveTextDirection(sourceDirectionMode, cell.originalHtml ?? cell.original, sourceTextDirection),
-    [sourceDirectionMode, sourceTextDirection, cell.originalHtml, cell.original],
+    () =>
+      resolveTextDirection(
+        sourceDirectionMode,
+        // Media cells read direction off the TRANSCRIPT — their stored value is
+        // the import filename, whose Latin script would force LTR on an RTL
+        // transcript.
+        cell.medium === "media" && cell.transcription?.trim()
+          ? cell.transcription
+          : (cell.originalHtml ?? cell.original),
+        sourceTextDirection,
+      ),
+    [sourceDirectionMode, sourceTextDirection, cell.originalHtml, cell.original, cell.medium, cell.transcription],
   )
   const targetCellDirection = useMemo(
     () => resolveTextDirection(
@@ -4445,8 +4462,9 @@ function EditorRow({
       fileId: cell.fileId,
       cellId: cell.id,
       parentId,
-      value,
-      valueHtml,
+      // Media cells: the edit is a transcript correction — the stored value
+      // (the import filename) must not be touched.
+      ...(sourceIsTranscript ? { transcription: value } : { value, valueHtml }),
       author: username,
     }).then((eventId) => {
       pendingSourceCommitRef.current = { eventId, parentId }
@@ -4457,7 +4475,7 @@ function EditorRow({
       setWriteError(msg)
       setSourceDraft(null)
     })
-  }, [canEditSourceForCell, project.id, project.syncRole?.level, cell.fileId, cell.id, cell.sourceEventId, username, onCellCommitted])
+  }, [canEditSourceForCell, project.id, project.syncRole?.level, cell.fileId, cell.id, cell.sourceEventId, sourceIsTranscript, username, onCellCommitted])
 
   // Reconcile the pending source head against the projection — the mirror of
   // ProjectWorkspace's target-side pendingTargetCommitHeadsRef reconciliation.
@@ -4476,10 +4494,13 @@ function EditorRow({
     )
   }, [cell.sourceEventId])
 
-  // Clear the optimistic source draft once the server projection carries it.
+  // Clear the optimistic source draft once the server projection carries it —
+  // for a media cell the commit landed on `transcription`, so that is the
+  // field that round-trips.
   useEffect(() => {
-    if (sourceDraft && (cell.original ?? "") === sourceDraft.value) setSourceDraft(null)
-  }, [cell.original, sourceDraft])
+    const projected = sourceIsTranscript ? cell.transcription : cell.original
+    if (sourceDraft && (projected ?? "") === sourceDraft.value) setSourceDraft(null)
+  }, [cell.original, cell.transcription, sourceIsTranscript, sourceDraft])
 
   // Force-close an OPEN source editor when canEditSource flips false mid-edit
   // (e.g. a settings revalidate delivers a DCS cursor). Without this the editor
@@ -5863,8 +5884,17 @@ function EditorRow({
             {sourceEditing ? (
               <TranslatedEditor
                 cellId={`${cell.id}::source`}
-                initialPlain={sourceDraft?.value ?? cell.original}
-                initialHtml={sourceDraft?.valueHtml ?? cell.originalHtml}
+                // Media cells edit their TRANSCRIPT — opening on cell.original
+                // here is how the import filename used to appear in the editor
+                // and, once saved, replace the transcript on screen for good.
+                // An untranscribed cell opens blank: typing creates the first
+                // transcription, and the filename stays an import record.
+                initialPlain={
+                  sourceIsTranscript
+                    ? (sourceDraft?.value ?? cell.transcription ?? "")
+                    : (sourceDraft?.value ?? cell.original)
+                }
+                initialHtml={sourceIsTranscript ? undefined : (sourceDraft?.valueHtml ?? cell.originalHtml)}
                 onCommit={handleSourceCommit}
                 onBlur={() => setSourceEditing(false)}
                 editable
@@ -5875,16 +5905,23 @@ function EditorRow({
                 placeholder="Source text…"
                 className="w-full !px-0"
               />
-            ) : (sourceDraft?.valueHtml || cell.originalHtml) ? (
+            ) : !sourceIsTranscript && (sourceDraft?.valueHtml || cell.originalHtml) ? (
+              // Media cells never take this rich-HTML branch: their stored
+              // value/valueHtml is the import filename, and this branch winning
+              // over the transcript below is exactly how an edited filename
+              // used to take over the row permanently.
               <SanitizedRichHtml html={sourceDraft?.valueHtml || cell.originalHtml || ""} />
             ) : (
               <UsfmSourceText
                 // AQU-646: an imported media segment's stored `value` is the
                 // filename; once transcribed, the ASR transcript IS the source
-                // text users translate. Non-media cells are unaffected.
+                // text users translate — and a source edit on such a cell is a
+                // transcript correction (sourceDraft holds the pending one).
+                // The filename shows only as a placeholder while untranscribed.
+                // Non-media cells are unaffected.
                 text={
-                  cell.medium === "media" && cell.transcription?.trim()
-                    ? cell.transcription
+                  sourceIsTranscript
+                    ? (sourceDraft?.value ?? (cell.transcription?.trim() ? cell.transcription : cell.original))
                     : (sourceDraft?.value ?? cell.original)
                 }
                 highlights={highlights}

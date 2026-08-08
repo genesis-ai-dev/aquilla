@@ -900,8 +900,18 @@ export interface SourceCellCommitInput {
   /** Current chain-head event_id for this source cell row (the parent this
    *  commit chains on — from `cells.event_id`). */
   parentId: string | null
-  value: string
+  value?: string
   valueHtml?: string
+  /**
+   * AQU-646: a correction to a media cell's TRANSCRIPTION — its translatable
+   * source text. For imported media the stored `value` is the audio filename,
+   * which is an import record, not prose; a source edit on such a cell must
+   * land here instead, or the filename replaces the transcript on screen.
+   * When present, `value`/`valueHtml` are omitted from the payload and the
+   * stored value is left untouched. The chain head still advances, so
+   * downstream targets are correctly flagged stale.
+   */
+  transcription?: string
   /** Pre-generated event id (deterministic uuidv5 for the DCS delta path so a
    *  re-run dedupes idempotently). Defaults to a fresh UUIDv7. */
   id?: string
@@ -929,10 +939,13 @@ export async function emitSourceCellCommit(input: SourceCellCommitInput): Promis
     cellId: input.cellId,
     parentId: input.parentId ?? null,
     author: input.author,
-    payload: {
-      value: input.value,
-      ...(input.valueHtml !== undefined ? { valueHtml: input.valueHtml } : {}),
-    },
+    payload:
+      input.transcription !== undefined
+        ? { transcription: input.transcription }
+        : {
+            value: input.value ?? "",
+            ...(input.valueHtml !== undefined ? { valueHtml: input.valueHtml } : {}),
+          },
     ...(input.id !== undefined ? { id: input.id } : {}),
     clientTs: input.clientTs,
   })

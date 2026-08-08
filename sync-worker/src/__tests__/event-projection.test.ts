@@ -206,6 +206,30 @@ describe('buildEventProjectionStmts — source.cell.commit', () => {
     expect(sql).toContain('UPDATE cells SET')
     expect(sql).not.toContain('source_event_id =')
   })
+
+  it('a transcription commit lands ONLY the transcript, advancing the chain head (AQU-646)', () => {
+    // For imported media the stored value is the audio filename — an import
+    // record. A transcript correction must not touch it (or its html/word
+    // count), but MUST advance event_id: the text translators work from
+    // changed, so downstream targets go stale exactly like a value edit.
+    const { db, recorded } = makeD1Stub()
+    const stmts: AquillaStatement[] = []
+    buildEventProjectionStmts(
+      db,
+      makeEvent('source.cell.commit', { transcription: 'let the peace of Christ rule' }),
+      stmts,
+    )
+    const cellsStmts = recorded.filter(r => !r.sql.includes('cells_fts') && !r.sql.includes('WHERE false'))
+    expect(cellsStmts).toHaveLength(1)
+    const { sql, args } = cellsStmts[0]
+    expect(sql).toContain('UPDATE cells SET')
+    expect(sql).toContain('transcription = ?')
+    expect(sql).toContain('event_id')
+    expect(sql).toContain("side = 'source'")
+    expect(sql).not.toContain('value')
+    expect(sql).not.toContain('word_count')
+    expect(args[0]).toBe('let the peace of Christ rule')
+  })
 })
 
 describe('buildEventProjectionStmts — source.cell.metadata.patch', () => {

@@ -239,6 +239,86 @@ describe("EditorTable — source-edit affordance", () => {
   })
 })
 
+describe("EditorTable — media source edits are transcript corrections (AQU-646)", () => {
+  // For imported media the stored source VALUE is the audio filename — an
+  // import record, not prose. The display already preferred the transcript,
+  // but the editor used to open on the raw value: the filename appeared in the
+  // edit box, and saving it (now with valueHtml attached) flipped the display
+  // onto the rich-HTML branch permanently — the transcript was gone from
+  // screen for good. These pin the editor half; the payload/projection halves
+  // live in events-emit.test and the sync-worker's event-projection.test.
+  function renderMedia(over: Partial<CellRow> = {}) {
+    const project = withRole(ROLE.PROJECT_LEAD)
+    const store = new CellStore()
+    store.setRuntime({
+      projectId: project.id,
+      fileId: "file-1",
+      username: "lead",
+      requiredValidations: 1,
+      auditStats: new Map(),
+    })
+    store.replaceRows(
+      [
+        {
+          cellId: "m1", side: "source", value: "episode-12.mp3", valueHtml: null, type: "text",
+          canonicalRef: null, anchorCellId: null, eventId: "m1-source", sourceEventId: null,
+          lastEditor: null, lastEditAt: 1, validated: false, wordCount: 1,
+          medium: "media", transcription: "let the peace of Christ rule",
+          ...over,
+        } as CellRow,
+        {
+          cellId: "m1", side: "target", value: "que la paix règne", valueHtml: null, type: "text",
+          canonicalRef: null, anchorCellId: null, eventId: "m1-target", sourceEventId: "m1-source",
+          lastEditor: "lead", lastEditAt: 2, validated: false, wordCount: 4,
+        } as CellRow,
+      ],
+      { full: true, maxServerSeq: 1 },
+    )
+    const qc = new QueryClient()
+    return render(
+      <QueryClientProvider client={qc}>
+        <EditorActionsProvider value={{}}>
+          <EditorTable
+            project={project}
+            cellStore={store}
+            username="lead"
+            isCompletionConfigured={false}
+            isCompletionAvailable={false}
+            completing={new Map()}
+            examples={new Map()}
+            errors={new Map()}
+            previews={new Map()}
+            onCompleteSingle={() => {}}
+            onCompleteBatch={() => {}}
+            healthMap={new Map()}
+            lineNumbersEnabled={false}
+            cellLabelsEnabled={false}
+            sourceTextDirection="ltr"
+            targetTextDirection="ltr"
+          />
+        </EditorActionsProvider>
+      </QueryClientProvider>,
+    )
+  }
+
+  it("the editor opens on the transcript — never the filename", async () => {
+    renderMedia()
+    fireEvent.click(await screen.findByRole("button", { name: "Edit source text" }))
+    const editor = await screen.findByRole("textbox", { name: "Edit source text" })
+    await waitFor(() => expect(editor.textContent).toContain("let the peace of Christ rule"))
+    expect(editor.textContent).not.toContain("episode-12.mp3")
+  })
+
+  it("an untranscribed cell opens BLANK — typing creates the first transcript", async () => {
+    // The filename placeholder is display-only. Putting it in the editor would
+    // invite exactly the overwrite this guards against.
+    renderMedia({ transcription: null })
+    fireEvent.click(await screen.findByRole("button", { name: "Edit source text" }))
+    const editor = await screen.findByRole("textbox", { name: "Edit source text" })
+    await waitFor(() => expect(editor.textContent ?? "").not.toContain("episode-12.mp3"))
+  })
+})
+
 describe("EditorTable — DCS source lockdown (AQU-615)", () => {
   it("hides the pencil while the linked-state is unknown (loading = default-locked)", async () => {
     dcsState = { cursor: null, loading: true }

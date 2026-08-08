@@ -520,6 +520,40 @@ export function buildEventProjectionStmts(
       if (!event.fileId || !event.cellId) {
         throw new Error(`${event.kind} event ${event.id} is missing fileId or cellId`)
       }
+      // AQU-646: a source commit may carry a media cell's TRANSCRIPTION — its
+      // translatable source text — instead of a value. For imported media the
+      // stored value is the audio FILENAME (an import record, not prose), so
+      // this variant leaves value/value_html/word_count untouched and lands
+      // only the transcript. The chain head still advances, which is what
+      // flags downstream targets stale (AD-9) — the text translators work
+      // from has changed.
+      if (event.kind === 'source.cell.commit') {
+        const sp = p as EventPayloads['source.cell.commit']
+        if (typeof sp.transcription === 'string') {
+          stmts.push(
+            db
+              .prepare(
+                `UPDATE cells SET
+                  transcription = ?,
+                  event_id      = ?,
+                  last_editor   = ?,
+                  last_edit_at  = ?
+                WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'source'${gateAnd}`,
+              )
+              .bind(
+                sp.transcription,
+                event.id,
+                event.author,
+                event.serverTs,
+                event.projectId,
+                event.fileId,
+                event.cellId,
+                ...gateBinds,
+              ),
+          )
+          return ['cells']
+        }
+      }
       const value = p.value ?? ''
       const valueHtml = p.valueHtml ?? null
       const hash = contentHash(value)

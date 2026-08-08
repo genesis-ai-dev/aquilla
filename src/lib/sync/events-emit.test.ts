@@ -273,6 +273,28 @@ describe("events-emit", () => {
       expect((ev.payload as Record<string, unknown>).sourceEventId).toBeUndefined()
     })
 
+    it("a transcription correction carries ONLY the transcript — never a value", async () => {
+      // AQU-646: for imported media the stored value is the audio FILENAME.
+      // A source edit on such a cell is a transcript correction; sending a
+      // value alongside would overwrite the filename with prose (or worse,
+      // the old bug: the filename with edits).
+      await emitSourceCellCommit({
+        projectId: "p",
+        fileId: "f",
+        cellId: "c",
+        parentId: "src-head-1",
+        transcription: "let the peace of Christ rule",
+        author: "lead",
+      })
+      const peek = await peekOutboxBatch(10)
+      const ev = peek[0].event as unknown as OutboxRawEvent<"source.cell.commit">
+      expect(ev.kind).toBe("source.cell.commit")
+      expect(ev.parentId).toBe("src-head-1")
+      expect(ev.payload.transcription).toBe("let the peace of Christ rule")
+      expect(ev.payload.value).toBeUndefined()
+      expect(ev.payload.valueHtml).toBeUndefined()
+    })
+
     it("refuses to enqueue below the PROJECT_LEAD (500) floor — never reaches the outbox", async () => {
       setCqrsOutboxBridge({ projectId: "p", activeFileId: "f", username: "u", roleLevel: ROLE.CONTRIBUTOR })
       try {

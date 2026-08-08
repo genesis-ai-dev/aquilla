@@ -89,6 +89,7 @@ import agentMemoryRoutes from "./routes/agent-memory"
 import sceneBriefRoutes from "./routes/scene-briefs"
 import contextualRoutes from "./routes/contextual"
 import agentArtifactsRoutes from "./routes/agent-artifacts"
+import { projectKnowledge, orgKnowledge } from "./routes/knowledge"
 import mondayRoutes from "./routes/monday"
 import contactRoutes from "./routes/contact"
 import { flushDirtyLinks } from "./lib/monday/push"
@@ -220,6 +221,7 @@ app.route("/api/v2/orgs", orgSettingsRoutes)
 // termbase/*. The two path-spaces are disjoint so one router serves both.
 app.route("/api/v2/orgs", termbaseSubscriptionRoutes)
 app.route("/api/v2/orgs", orgsRoutes)
+app.route("/api/v2/orgs", orgKnowledge)
 // Platform-operator (site-wide admin) surface — cross-tenant.
 // Gated by the ADMIN_EMAILS allowlist via requirePlatformAdmin (see
 // routes/admin.ts); no-op for everyone not on the list.
@@ -248,6 +250,10 @@ app.route("/api/v2/projects", contextualRoutes)
 // composer; proxies bytes into the shared artifacts table + SNAPSHOTS R2 so
 // the harness load_artifact tool can read them (routes/agent-artifacts.ts).
 app.route("/api/v2/projects", agentArtifactsRoutes)
+// Knowledge base — project + org document upload/extract/index/read/search
+// (routes/knowledge.ts). Org router mounted below with the other /api/v2/orgs
+// sub-routers.
+app.route("/api/v2/projects", projectKnowledge)
 app.route("/api/v2/projects", projectsRoutes)
 // Multi-project invite surface.
 app.route("/api/v2/invites", invitesRoutes)

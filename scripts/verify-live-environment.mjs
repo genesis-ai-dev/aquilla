@@ -20,10 +20,11 @@ const ENVIRONMENTS = {
 
 const VALID_SURFACES = new Set(["all", "auth", "sync", "spa"])
 const DEFAULT_MAX_JAVASCRIPT_ASSETS = 10_000
-// A newly promoted Worker and its asset manifest can reach Cloudflare edges a
-// few seconds apart. Keep verification fail-closed, but allow enough time for
-// the exact promoted version to settle before declaring a healthy deploy bad.
-const DEFAULT_ATTEMPTS = 30
+// A newly promoted Worker and its asset manifest can reach Cloudflare edges
+// more than a minute apart. Retry only the lagging request for a bounded
+// three-minute window before declaring a healthy deploy bad (AQU-824).
+const DEFAULT_ATTEMPTS = 90
+const DEFAULT_RETRY_DELAY_MS = 2_000
 
 // The bare origin serves the prerendered marketing homepage (worker/index.ts),
 // whose small JS graph never imports the sync client or the chat completion
@@ -92,8 +93,7 @@ async function operationWithRetry(description, operation, options) {
 
   for (let attempt = 1; attempt <= options.attempts; attempt += 1) {
     try {
-      await operation()
-      return
+      return await operation()
     } catch (error) {
       lastError = error
       if (attempt < options.attempts) {
@@ -229,25 +229,27 @@ async function fetchJavascriptGraph(appOrigin, entrySources, options) {
       if (parsed.origin !== appOrigin || !parsed.pathname.endsWith(".js")) {
         throw new Error(`refusing to inspect unexpected script URL ${url}`)
       }
-      const response = await options.fetchImpl(url, {
-        headers: {
-          Accept: "application/javascript, text/javascript;q=0.9, */*;q=0.1",
-          "Cache-Control": "no-cache",
-        },
-      })
-      assertResponse(response, 200, `SPA asset ${parsed.pathname}`)
-      const contentType = response.headers.get("content-type")?.toLowerCase() ?? ""
-      const source = await response.text()
-      if (
-        contentType.includes("text/html")
-        || /^\s*(?:<!doctype\s+html|<html\b)/i.test(source)
-      ) {
-        throw new Error(
-          `SPA asset ${parsed.pathname} returned HTML instead of JavaScript; `
-          + "the deployed asset is missing or fell back to the SPA shell",
-        )
-      }
-      return { url, source }
+      return operationWithRetry(`SPA asset ${parsed.pathname}`, async () => {
+        const response = await options.fetchImpl(url, {
+          headers: {
+            Accept: "application/javascript, text/javascript;q=0.9, */*;q=0.1",
+            "Cache-Control": "no-cache",
+          },
+        })
+        assertResponse(response, 200, `SPA asset ${parsed.pathname}`)
+        const contentType = response.headers.get("content-type")?.toLowerCase() ?? ""
+        const source = await response.text()
+        if (
+          contentType.includes("text/html")
+          || /^\s*(?:<!doctype\s+html|<html\b)/i.test(source)
+        ) {
+          throw new Error(
+            `SPA asset ${parsed.pathname} returned HTML instead of JavaScript; `
+            + "the deployed asset is missing or fell back to the SPA shell",
+          )
+        }
+        return { url, source }
+      }, options)
     }))
 
     for (const { url, source } of results) {
@@ -272,11 +274,13 @@ async function fetchJavascriptGraph(appOrigin, entrySources, options) {
 
 async function verifySpa(config, options) {
   const appUrl = new URL(SPA_SHELL_PATH, config.appOrigin).href
-  const response = await options.fetchImpl(appUrl, {
-    headers: { Accept: "text/html" },
-  })
-  assertResponse(response, 200, "SPA entrypoint")
-  const html = await response.text()
+  const html = await operationWithRetry(appUrl, async () => {
+    const response = await options.fetchImpl(appUrl, {
+      headers: { Accept: "text/html" },
+    })
+    assertResponse(response, 200, "SPA entrypoint")
+    return response.text()
+  }, options)
   const entries = scriptSources(html)
   if (entries.length === 0) {
     throw new Error("SPA entrypoint contains no JavaScript module")
@@ -371,7 +375,7 @@ export async function verifyLiveEnvironment(environment, {
   fetchImpl = fetch,
   lookup = dnsLookup,
   attempts = DEFAULT_ATTEMPTS,
-  retryDelayMs = 1_000,
+  retryDelayMs = DEFAULT_RETRY_DELAY_MS,
   maxJavascriptAssets = DEFAULT_MAX_JAVASCRIPT_ASSETS,
   log = console.log,
 } = {}) {
@@ -394,7 +398,7 @@ export async function verifyLiveEnvironment(environment, {
   if (surface === "all" || surface === "auth") await verifyAuth(config, options)
   if (surface === "all" || surface === "sync") await verifySync(config, options)
   if (surface === "all" || surface === "spa") {
-    await operationWithRetry(config.appOrigin, () => verifySpa(config, options), options)
+    await verifySpa(config, options)
     await verifyStaticPages(config, options)
   }
 

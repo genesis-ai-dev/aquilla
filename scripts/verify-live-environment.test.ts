@@ -221,14 +221,17 @@ describe("live deployment environment verification", () => {
 
   it("waits through transient HTML asset fallbacks while a Worker promotion propagates", async () => {
     let assetAttempts = 0
+    let entryAttempts = 0
     const fetchImpl = vi.fn(async (input: string | URL | Request) => {
       const url = String(input)
       if (url === "https://aquilla.app/app") {
+        entryAttempts += 1
         return response('<script type="module" src="/assets/index.js"></script>', 200, "text/html")
       }
       if (url === "https://aquilla.app/assets/index.js") {
         assetAttempts += 1
-        if (assetAttempts <= 6) {
+        // Production has taken well over the old 30-second window to converge.
+        if (assetAttempts <= 60) {
           return response('<!doctype html><script src="/assets/index.js"></script>', 200, "text/html")
         }
         return response([
@@ -249,7 +252,8 @@ describe("live deployment environment verification", () => {
       retryDelayMs: 0,
       log: vi.fn(),
     })).resolves.toBeUndefined()
-    expect(assetAttempts).toBe(7)
+    expect(assetAttempts).toBe(61)
+    expect(entryAttempts).toBe(1)
   })
 
   it("fails closed when the genuine JavaScript import graph exceeds its limit", async () => {
@@ -331,7 +335,7 @@ describe("live deployment environment verification", () => {
     expect(fetchImpl.mock.calls.flat().map(String)).not.toContain("https://dev.aquilla.app/app")
   })
 
-  it("retries the complete preview crawl while a new alias propagates", async () => {
+  it("retries only the preview entrypoint while a new alias propagates", async () => {
     const previewOrigin = "https://pr-274-aquilla-web-preview.blue-darkness-7674.workers.dev"
     let entryAttempts = 0
     const fetchImpl = vi.fn(async (input: string | URL | Request) => {

@@ -143,10 +143,12 @@ rejects HTML returned for a JavaScript URL, so package-internal `.js` filenames
 and single-page-application fallbacks cannot inflate or poison the crawl. A
 high emergency asset ceiling remains configurable for deterministic tests and
 still fails closed if a genuinely unbounded import graph is encountered.
-The live crawl bypasses stale edge-cache entries and allows up to 30 attempts
-for a newly promoted Worker and its asset manifest to converge. Persistent HTML
-fallbacks still fail the deployment; transient route propagation no longer
-turns a successful upload into a false terminal error.
+The live crawl bypasses stale edge-cache entries and gives a newly promoted
+Worker and its asset manifest a bounded three-minute convergence window. It
+retries only the lagging SPA document or JavaScript asset rather than restarting
+the complete graph crawl. Persistent HTML fallbacks still fail the deployment;
+transient route propagation no longer turns a successful upload into a false
+terminal error.
 
 Identity and sync versions also carry a version-metadata binding. First-party
 requests require the version tag's actual Worker namespace to agree with the

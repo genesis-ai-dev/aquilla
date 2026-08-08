@@ -211,11 +211,15 @@ export function MediaFollowDriver({
   scrollToCell,
   userScrollListenerRef,
   programmaticStampRef,
+  followCommand,
 }: {
   isCellDisplayed: (cellId: string) => boolean
   scrollToCell: (cellId: string) => void
   userScrollListenerRef: React.MutableRefObject<(() => void) | null>
   programmaticStampRef: React.MutableRefObject<number>
+  /** Explicit intent from user gestures: chip/row clicks ENGAGE, inspection
+   *  jumps RELEASE. seq-keyed so repeats of the same intent still apply. */
+  followCommand: { seq: number; intent: "engage" | "release" } | null
 }) {
   const queueCellId = useQueueCurrentCellId()
   // Same stale-singleton guard as the timeline: a queue running another
@@ -227,6 +231,13 @@ export function MediaFollowDriver({
   useEffect(() => {
     if (queueRunning) setFollow(true)
   }, [queueRunning])
+  // Explicit intents win over the truce in both directions.
+  const appliedCommandSeqRef = useRef(0)
+  useEffect(() => {
+    if (!followCommand || followCommand.seq === appliedCommandSeqRef.current) return
+    appliedCommandSeqRef.current = followCommand.seq
+    setFollow(followCommand.intent === "engage")
+  }, [followCommand])
   // A cell boundary IS the page-flip: bring the running row to ~1/3 height.
   useEffect(() => {
     if (follow && queueRunning && queueCellId != null) scrollToCell(queueCellId)
@@ -566,7 +577,10 @@ export interface EditorTableHandle {
   /** AQU-646: scroll to a cell by id in DISPLAY space (lens-sorted — correct
    *  for time-ordered files, where store order ≠ display order), optionally
    *  flashing it. Returns false when the id is not currently displayable. */
-  scrollToCellId: (cellId: string, opts?: { flash?: boolean }) => boolean
+  scrollToCellId: (cellId: string, opts?: { flash?: boolean; follow?: "engage" | "release" }) => boolean
+  /** 2026-08-08: command the media-lens playback follow directly (wire b —
+   *  a row click doesn't scroll the table but must re-engage following). */
+  setMediaFollow: (intent: "engage" | "release") => void
   focusCellEditorIndex: (index: number) => void
   getCurrentIndex?: () => number
   /** Briefly outline a cell after a "Go to cell" so the user sees where the search landed. */
@@ -958,6 +972,47 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     (cellId: string) => displayCellIdsRef.current.includes(cellId),
     [],
   )
+  // 2026-08-08: explicit follow intents. A chip/row click is "watch this" —
+  // it ENGAGES following even if the user had scrolled away; inspection jumps
+  // (search, presence, the segment navigator) RELEASE it deliberately instead
+  // of depending on racy stamp timing. Commands ride table state (rare, one
+  // per user gesture) into the driver.
+  const [followCommand, setFollowCommand] = useState<{ seq: number; intent: "engage" | "release" } | null>(null)
+  const followCommandSeqRef = useRef(0)
+  const issueFollowCommand = useCallback((intent: "engage" | "release") => {
+    followCommandSeqRef.current += 1
+    setFollowCommand({ seq: followCommandSeqRef.current, intent })
+  }, [])
+  /** >0 while a code-driven scroll (possibly a native SMOOTH animation that
+   *  emits events for hundreds of ms) is in flight — handleListScroll
+   *  re-stamps the truce for every event that arrives inside the window. */
+  const programmaticInFlightRef = useRef(0)
+  /** EVERY code-driven list scroll goes through here. Stamping only inside
+   *  one caller left the rest (navigator picks, focus scrolls, jumps) reading
+   *  as user scrolls — which silently killed following (2026-08-08 forensics). */
+  const programmaticListScroll = useCallback(
+    (index: number, opts: { viewPosition: number; animated: boolean; follow?: "engage" | "release" }) => {
+      followProgrammaticStampRef.current = performance.now()
+      if (opts.follow) issueFollowCommand(opts.follow)
+      programmaticInFlightRef.current += 1
+      const done = listRef.current?.scrollToIndex({
+        index,
+        viewPosition: opts.viewPosition,
+        animated: opts.animated,
+      })
+      // The promise resolves on scrollend (80ms-idle fallback where scrollend
+      // is missing); +150ms grace absorbs LegendList's settling corrections
+      // under recycled, estimated-height rows.
+      void Promise.resolve(done)
+        .catch(() => {})
+        .then(() => {
+          window.setTimeout(() => {
+            programmaticInFlightRef.current = Math.max(0, programmaticInFlightRef.current - 1)
+          }, 150)
+        })
+    },
+    [issueFollowCommand],
+  )
   const followScrollToCell = useCallback((cellId: string) => {
     const index = displayCellIdsRef.current.indexOf(cellId)
     if (index < 0) return
@@ -965,10 +1020,10 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     // playback walks past it — drop it so the trigger quietly tracks the
     // sounding cell (Sam 2026-08-07), same as scrollToCellId does for jumps.
     clearChapterNavigationSelection()
-    followProgrammaticStampRef.current = performance.now()
     // 0.35: the running row rides high enough to leave reading room below.
-    void listRef.current?.scrollToIndex({ index, viewPosition: 0.35, animated: false })
-  }, [clearChapterNavigationSelection])
+    // Animated (Sam 2026-08-08): the follow glides instead of teleporting.
+    programmaticListScroll(index, { viewPosition: 0.35, animated: true })
+  }, [clearChapterNavigationSelection, programmaticListScroll])
 
   // Durable cell audio (AD-2 cell.audio.* grammar). Per-file read; overlay each
   // visible row's attachments + selected clips at render time, rather than
@@ -1091,6 +1146,12 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   }, [firstVisibleIndex, getListQueryRoot])
 
   const handleListScroll = useCallback(() => {
+    // A native smooth animation emits scroll events far past any single
+    // stamp — while one of OUR scrolls is in flight, every event renews the
+    // stamp so the truce can't misread the animation as the user leaving.
+    if (programmaticInFlightRef.current > 0) {
+      followProgrammaticStampRef.current = performance.now()
+    }
     // Wire c: every scroll event reaches the follow driver's truce check
     // (it distinguishes its own programmatic scrolls by the stamp).
     followUserScrollListenerRef.current?.()
@@ -1137,11 +1198,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     const targetId = list[index]
     clearChapterNavigationSelection()
     handleActivateEditor(targetId)
-    void listRef.current?.scrollToIndex({
-      index,
-      viewPosition: 0.5,
-      animated: false,
-    })
+    programmaticListScroll(index, { viewPosition: 0.5, animated: false })
 
     let attempts = 0
     const focusWhenMounted = () => {
@@ -1175,7 +1232,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
       }
     }
     focusWhenMounted()
-  }, [clearChapterNavigationSelection, getListQueryRoot, handleActivateEditor])
+  }, [clearChapterNavigationSelection, getListQueryRoot, handleActivateEditor, programmaticListScroll])
 
   // AQU-646 round 3: shared flash body — scroll-by-id and the legacy flashCell
   // both defer to the next frame (the list may still be scrolling, so the DOM
@@ -1195,11 +1252,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     scrollToCellIndex(index: number) {
       if (index >= 0 && index < displayCellIds.length) {
         clearChapterNavigationSelection()
-        void listRef.current?.scrollToIndex({
-          index,
-          viewPosition: 0.5,
-          animated: false,
-        })
+        programmaticListScroll(index, { viewPosition: 0.5, animated: false })
       }
     },
     scrollToCellId(cellId, opts) {
@@ -1210,9 +1263,19 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
       const index = displayCellIdsRef.current.indexOf(cellId)
       if (index < 0) return false
       clearChapterNavigationSelection()
-      void listRef.current?.scrollToIndex({ index, viewPosition: 0.5, animated: false })
+      // Default "release": a jump the user is INSPECTING (search, presence,
+      // findings) must not have playback yank the table back a beat later.
+      // Wire a (chip clicks) passes "engage" — that jump means "watch this".
+      programmaticListScroll(index, {
+        viewPosition: 0.5,
+        animated: false,
+        follow: opts?.follow ?? "release",
+      })
       if (opts?.flash) flashCellDom(cellId)
       return true
+    },
+    setMediaFollow(intent: "engage" | "release") {
+      issueFollowCommand(intent)
     },
     focusCellEditorIndex: focusCellEditorByIndex,
     getCurrentIndex: () => {
@@ -1242,7 +1305,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     flashCell(cellId, _searchTerm) {
       flashCellDom(cellId)
     },
-  }), [clearChapterNavigationSelection, displayCellIds.length, cellStore, focusCellEditorByIndex, getListQueryRoot, flashCellDom])
+  }), [clearChapterNavigationSelection, displayCellIds.length, cellStore, focusCellEditorByIndex, getListQueryRoot, flashCellDom, programmaticListScroll, issueFollowCommand])
 
   // FRO-297: Focus the grid-row wrapper div (not TipTap) at `index`.
   // Used for Esc-to-grid and arrow-key navigation while NOT in edit mode.
@@ -1252,11 +1315,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     if (index < 0 || index >= list.length) return
     const targetId = list[index]
     clearChapterNavigationSelection()
-    void listRef.current?.scrollToIndex({
-      index,
-      viewPosition: 0.5,
-      animated: false,
-    })
+    programmaticListScroll(index, { viewPosition: 0.5, animated: false })
     let attempts = 0
     const focusWhenMounted = () => {
       const root = getListQueryRoot()
@@ -1274,7 +1333,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
       rowEl.focus()
     }
     focusWhenMounted()
-  }, [clearChapterNavigationSelection, getListQueryRoot])
+  }, [clearChapterNavigationSelection, getListQueryRoot, programmaticListScroll])
 
   // Resolve a navigation request from a cell editor (Up/Down/Tab) to the
   // adjacent cell and focus it. Out-of-range steps (top/bottom edge) no-op.
@@ -1770,12 +1829,11 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     })
     setFirstVisibleIndex(index)
     setChapterVisibleIndex(index)
-    void listRef.current?.scrollToIndex({
-      index,
-      viewPosition: 0,
-      animated: true,
-    })
-  }, [audioFileId, milestoneNavigation])
+    // Picking a range mid-playback is deliberate navigation AWAY — release
+    // following (its long smooth scroll used to trip the truce as a fake
+    // "user scroll" and kill follow as a side effect; now it's explicit).
+    programmaticListScroll(index, { viewPosition: 0, animated: true, follow: "release" })
+  }, [audioFileId, milestoneNavigation, programmaticListScroll])
 
   // Parallel-bibles sidebar tracking: report the first visible row's canonical
   // ref as the user scrolls. Keyed on the derived ref string
@@ -2370,6 +2428,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
               scrollToCell={followScrollToCell}
               userScrollListenerRef={followUserScrollListenerRef}
               programmaticStampRef={followProgrammaticStampRef}
+              followCommand={followCommand}
             />
           )}
           <LegendList

@@ -1281,6 +1281,9 @@ export function ProjectWorkspace() {
     if (!timelineStackedRef.current) return
     activateNonceRef.current += 1
     setTimelineActivateRequest({ cellId, nonce: activateNonceRef.current })
+    // 2026-08-08: pointing playback somewhere is "watch this" — re-engage the
+    // table's playback follow even if an earlier scroll had released it.
+    editorRef.current?.setMediaFollow?.("engage")
   }, [])
   const audioLens = useMemo<AudioLensContext | null>(
     () =>
@@ -2803,6 +2806,11 @@ export function ProjectWorkspace() {
   // path could land on the wrong row there.
   const jumpToCellId = useCallback((cellId: string) => {
     editorRef.current?.scrollToCellId(cellId, { flash: true })
+  }, [])
+  // 2026-08-08 (wire a): a chip click is "watch this" — same jump, but it
+  // ENGAGES the playback follow instead of the inspection default (release).
+  const jumpToCellIdFollowing = useCallback((cellId: string) => {
+    editorRef.current?.scrollToCellId(cellId, { flash: true, follow: "engage" })
   }, [])
 
   // ── AQU-646 round 3: two-way cell tracing across the Text/Media switch ────
@@ -5668,7 +5676,7 @@ export function ProjectWorkspace() {
                     cells={audioMergedCells}
                     initialSelectedCellId={mediaTraceCellId}
                     onSelectedCellChange={handleTimelineSelectedCell}
-                    onChipActivated={jumpToCellId}
+                    onChipActivated={jumpToCellIdFollowing}
                     activateRequest={timelineActivateRequest}
                     coreMediaUrl={activeFile.coreMediaUrl ?? null}
                     editable={!isReadOnly}
@@ -5919,7 +5927,7 @@ export function ProjectWorkspace() {
                   projectId={project.id}
                   session={frontierSession ?? null}
                   settings={tts.settings}
-                  onActiveCell={jumpToCellId}
+                  onActiveCell={timelineStacked ? undefined : jumpToCellId}
                   startCellId={timelineSelectedCellId}
                   below={
                     <>

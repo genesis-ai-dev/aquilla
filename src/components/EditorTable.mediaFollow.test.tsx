@@ -48,15 +48,17 @@ function makeHarness(displayed: string[] = ["a", "b", "c"]) {
     programmaticStampRef.current = performance.now()
     scrolled.push(cellId)
   })
-  const ui = (
+  const uiWith = (followCommand: { seq: number; intent: "engage" | "release" } | null) => (
     <MediaFollowDriver
       isCellDisplayed={(id) => displayed.includes(id)}
       scrollToCell={scrollToCell}
       userScrollListenerRef={userScrollListenerRef}
       programmaticStampRef={programmaticStampRef}
+      followCommand={followCommand}
     />
   )
-  return { ui, userScrollListenerRef, programmaticStampRef, scrolled, scrollToCell }
+  const ui = uiWith(null)
+  return { ui, uiWith, userScrollListenerRef, programmaticStampRef, scrolled, scrollToCell }
 }
 
 describe("MediaFollowDriver", () => {
@@ -113,6 +115,47 @@ describe("MediaFollowDriver", () => {
     setRunning(null) // pause/stop
     setRunning("c") // resume — rising edge
     expect(h.scrolled).toEqual(["a", "c"])
+  })
+
+  it("an ENGAGE command revives following after a truce disengage — snapping to the current cell", () => {
+    const h = makeHarness()
+    const view = render(h.ui)
+    setRunning("a")
+    h.programmaticStampRef.current = performance.now() - 1000
+    act(() => h.userScrollListenerRef.current?.())
+    setRunning("b")
+    expect(h.scrolled).toEqual(["a"]) // disengaged
+    view.rerender(h.uiWith({ seq: 1, intent: "engage" }))
+    // Re-engaging brings the CURRENT running cell into view immediately…
+    expect(h.scrolled).toEqual(["a", "b"])
+    setRunning("c")
+    // …and the follow keeps walking from there.
+    expect(h.scrolled).toEqual(["a", "b", "c"])
+  })
+
+  it("a RELEASE command stops following without any scroll involved", () => {
+    const h = makeHarness()
+    const view = render(h.ui)
+    setRunning("a")
+    view.rerender(h.uiWith({ seq: 1, intent: "release" }))
+    setRunning("b")
+    expect(h.scrolled).toEqual(["a"]) // released by intent, not by truce
+  })
+
+  it("a seq is applied once; a fresh seq re-applies even an identical intent", () => {
+    const h = makeHarness()
+    const view = render(h.ui)
+    setRunning("a") // rising edge → following
+    view.rerender(h.uiWith({ seq: 1, intent: "release" }))
+    setRunning("b")
+    expect(h.scrolled).toEqual(["a"]) // released
+    // Re-rendering with the SAME seq must not re-apply (no state churn)…
+    view.rerender(h.uiWith({ seq: 1, intent: "release" }))
+    setRunning("c")
+    expect(h.scrolled).toEqual(["a"])
+    // …while a fresh seq applies again — here flipping to engage mid-run.
+    view.rerender(h.uiWith({ seq: 2, intent: "engage" }))
+    expect(h.scrolled).toEqual(["a", "c"]) // snap to current on engage
   })
 
   it("a scroll while the queue is quiet never breaks the next session's follow", () => {

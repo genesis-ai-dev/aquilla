@@ -495,6 +495,92 @@ describe("TimelineEditor", () => {
       mockQueueState = { kind: "idle" }
     }
   })
+  // ── 2026-08-08: an automatic playback advance clears the selection ──
+
+  const editorAt = (onSelectCell: (id: string | null) => void) => (
+    <TimelineEditor
+      fileId="f1" coreMediaUrl={null} editable cells={mediaCells}
+      onRetimeSubtitle={() => {}} onSelectCell={onSelectCell}
+    />
+  )
+
+  it("playback walking past the selected cell drops the selection", () => {
+    const onSelectCell = vi.fn()
+    mockQueueState = { kind: "playing", cellIndex: 0, cellId: "m1" }
+    try {
+      const { rerender } = render(editorAt(onSelectCell))
+      fireEvent.click(screen.getByTestId("tl-card-m1"))
+      expect(onSelectCell).toHaveBeenLastCalledWith("m1")
+      mockQueueState = { kind: "playing", cellIndex: 1, cellId: "m2" }
+      rerender(editorAt(onSelectCell))
+      expect(onSelectCell).toHaveBeenLastCalledWith(null)
+      // The strip falls back to the sounding cell — follows playback.
+      expect(screen.getByTestId("tl-detail")).toHaveAttribute("data-cell-id", "m2")
+    } finally {
+      mockQueueState = { kind: "idle" }
+    }
+  })
+
+  it("a selection made DURING playback survives its own seek landing", () => {
+    const onSelectCell = vi.fn()
+    mockQueueState = { kind: "playing", cellIndex: 0, cellId: "m1" }
+    try {
+      const { rerender } = render(editorAt(onSelectCell))
+      fireEvent.click(screen.getByTestId("tl-card-m2")) // click-then-jump
+      expect(onSelectCell).toHaveBeenLastCalledWith("m2")
+      // The queue lands on the clicked cell — m1→m2 departs m1, not m2.
+      mockQueueState = { kind: "playing", cellIndex: 1, cellId: "m2" }
+      rerender(editorAt(onSelectCell))
+      expect(onSelectCell).toHaveBeenLastCalledWith("m2")
+      // Only the NEXT automatic advance clears.
+      mockQueueState = { kind: "playing", cellIndex: 0, cellId: "m1" }
+      rerender(editorAt(onSelectCell))
+      expect(onSelectCell).toHaveBeenLastCalledWith(null)
+    } finally {
+      mockQueueState = { kind: "idle" }
+    }
+  })
+
+  it("an untimed selection survives playback advances", () => {
+    const onSelectCell = vi.fn()
+    const cells = [...mediaCells, cell({ id: "u1", original: "Untimed", medium: "text" })]
+    const ui = () => (
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={cells}
+        onRetimeSubtitle={() => {}} onSelectCell={onSelectCell}
+      />
+    )
+    mockQueueState = { kind: "playing", cellIndex: 0, cellId: "m1" }
+    try {
+      const { rerender } = render(ui())
+      fireEvent.click(screen.getByTestId("tl-untimed-u1"))
+      expect(onSelectCell).toHaveBeenLastCalledWith("u1")
+      mockQueueState = { kind: "playing", cellIndex: 1, cellId: "m2" }
+      rerender(ui())
+      expect(onSelectCell).toHaveBeenLastCalledWith("u1")
+    } finally {
+      mockQueueState = { kind: "idle" }
+    }
+  })
+
+  it("pausing or stopping never clears the selection", () => {
+    const onSelectCell = vi.fn()
+    mockQueueState = { kind: "playing", cellIndex: 1, cellId: "m2" }
+    try {
+      const { rerender } = render(editorAt(onSelectCell))
+      fireEvent.click(screen.getByTestId("tl-card-m2"))
+      expect(onSelectCell).toHaveBeenLastCalledWith("m2")
+      mockQueueState = { kind: "paused", cellIndex: 1, cellId: "m2" }
+      rerender(editorAt(onSelectCell))
+      expect(onSelectCell).toHaveBeenLastCalledWith("m2")
+      mockQueueState = { kind: "idle" }
+      rerender(editorAt(onSelectCell))
+      expect(onSelectCell).toHaveBeenLastCalledWith("m2")
+    } finally {
+      mockQueueState = { kind: "idle" }
+    }
+  })
+
   // ── 2026-08-07: chip↔row sync wires ──
 
   it("wire a: a USER chip click fires onChipActivated with the cell id", () => {

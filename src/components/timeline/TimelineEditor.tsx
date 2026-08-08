@@ -368,6 +368,20 @@ export function TimelineEditor({
     const id = selectedId ?? soundingId
     if (id) setLastTouchedId(id)
   }, [selectedId, soundingId])
+  // 2026-08-08 (Sam): an AUTOMATIC playback advance clears the selection —
+  // one pointer, one moving light. EDGE-triggered on the sounding cell's
+  // transitions: only when the queue moves from A to B (both non-null) and
+  // the departed A was the selected cell does the selection drop. A fresh
+  // click-then-jump is race-proof by construction (its selection ≠ the
+  // departed cell), untimed selections survive (they never sound), and
+  // pause/idle produce no transition, so nothing clears.
+  const prevSoundingRef = useRef<string | null>(null)
+  useEffect(() => {
+    const prev = prevSoundingRef.current
+    prevSoundingRef.current = soundingId
+    if (prev == null || soundingId == null || soundingId === prev) return
+    setSelectedId((sel) => (sel === prev ? null : sel))
+  }, [soundingId])
   const currentCellId = selectedId ?? soundingId ?? lastTouchedId
   const currentCell = useMemo(
     () => cells.find((c) => c.id === currentCellId) ?? null,

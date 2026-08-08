@@ -41,10 +41,19 @@ export function interpolatedSec(baseSec: number, baseT: number, now: number, rat
  *  rendering always follows the clock exactly. */
 export const MAX_REGRESSION_SEC = 0.5
 
-/** Pure monotonic clamp (exported for tests). */
-export function monotonicSec(prevRenderedSec: number | null, nextSec: number, playing: boolean): number {
+/** Pure monotonic clamp (exported for tests). The pass-through bound must
+ *  cover the worst extrapolation overshoot, which scales with playback RATE
+ *  (interpolatedSec caps at MAX_EXTRAPOLATION_SEC * rate) — a fixed bound
+ *  re-opened the backward snap at 1.25x+ after a mid-verse stall. */
+export function monotonicSec(
+  prevRenderedSec: number | null,
+  nextSec: number,
+  playing: boolean,
+  rate = 1,
+): number {
   if (!playing || prevRenderedSec == null || nextSec >= prevRenderedSec) return nextSec
-  return prevRenderedSec - nextSec < MAX_REGRESSION_SEC ? prevRenderedSec : nextSec
+  const bound = Math.max(MAX_REGRESSION_SEC, MAX_EXTRAPOLATION_SEC * rate + 0.05)
+  return prevRenderedSec - nextSec < bound ? prevRenderedSec : nextSec
 }
 
 export function TimelinePlayhead({ currentSec, pxPerSec, playing = false, rate = 1 }: TimelinePlayheadProps) {
@@ -58,7 +67,7 @@ export function TimelinePlayhead({ currentSec, pxPerSec, playing = false, rate =
   // the head back for one frame (the residual 1-frame bounce the live pass
   // caught). While paused, monotonicSec passes currentSec through exactly.
   useLayoutEffect(() => {
-    renderedSecRef.current = monotonicSec(renderedSecRef.current, currentSec, playing)
+    renderedSecRef.current = monotonicSec(renderedSecRef.current, currentSec, playing, rate)
   })
 
   useEffect(() => {
@@ -69,7 +78,7 @@ export function TimelinePlayhead({ currentSec, pxPerSec, playing = false, rate =
     const baseT = performance.now()
     let raf = 0
     const step = () => {
-      const sec = monotonicSec(renderedSecRef.current, interpolatedSec(baseSec, baseT, performance.now(), rate), true)
+      const sec = monotonicSec(renderedSecRef.current, interpolatedSec(baseSec, baseT, performance.now(), rate), true, rate)
       renderedSecRef.current = sec
       el.style.left = `${secToPx(sec, pxPerSec)}px`
       raf = requestAnimationFrame(step)
@@ -83,7 +92,7 @@ export function TimelinePlayhead({ currentSec, pxPerSec, playing = false, rate =
       ref={elRef}
       data-testid="tl-playhead"
       className="pointer-events-none absolute inset-y-0 z-20 w-px bg-red-500"
-      style={{ left: `${secToPx(monotonicSec(renderedSecRef.current, currentSec, playing), pxPerSec)}px` }}
+      style={{ left: `${secToPx(monotonicSec(renderedSecRef.current, currentSec, playing, rate), pxPerSec)}px` }}
     >
       <span className="absolute -left-[5px] -top-px h-0 w-0 border-[5px] border-transparent border-t-red-500 motion-safe:animate-pulse" />
     </div>

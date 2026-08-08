@@ -30,6 +30,16 @@ describe("monotonicSec", () => {
     expect(monotonicSec(60, 5, true)).toBe(5)
   })
 
+  it("the pass-through bound scales with playback rate (review finding)", () => {
+    // At 2x the extrapolation cap is 0.9s — a stall-then-resume regression of
+    // ~0.9s is still overshoot, not a seek, and must HOLD.
+    expect(monotonicSec(10.9, 10.05, true, 2)).toBe(10.9)
+    // Beyond the scaled bound it is a genuine backward seek.
+    expect(monotonicSec(10.9, 9.9, true, 2)).toBe(9.9)
+    // At 1x the bound stays MAX_REGRESSION_SEC.
+    expect(monotonicSec(10.9, 10.35, true, 1)).toBe(10.35)
+  })
+
   it("paused rendering follows the clock exactly — even backwards", () => {
     expect(monotonicSec(10.2, 10.11, false)).toBe(10.11)
     expect(monotonicSec(null, 3, true)).toBe(3)

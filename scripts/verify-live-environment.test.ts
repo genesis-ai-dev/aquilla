@@ -93,7 +93,9 @@ describe("live deployment environment verification", () => {
         return response('<script type="module" src="/assets/index.js"></script>', 200, "text/html")
       }
       if (url === "https://aquilla.app/assets/index.js") {
-        return response('const deps = ["assets/chunk.js"]; import "./chunk.js"')
+        return response(
+          'const __vite__mapDeps=(i,m=__vite__mapDeps,d=(m.f||(m.f=["assets/chunk.js"])))=>i.map(i=>d[i])',
+        )
       }
       if (url === "https://aquilla.app/assets/chunk.js") {
         return response([
@@ -119,6 +121,124 @@ describe("live deployment environment verification", () => {
     expect(requestedUrls).toContain("https://aquilla.app/app")
     expect(requestedUrls).not.toContain("https://aquilla.app")
     expect(requestedUrls).not.toContain("https://aquilla.app/")
+  })
+
+  it("ignores quoted package filenames that are not JavaScript imports", async () => {
+    const misleadingReferences = Array.from(
+      { length: 500 },
+      (_, index) => `"../../transformers/model-${index}.js"`,
+    ).join(",")
+    const fetchImpl = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input)
+      if (url === "https://aquilla.app/app") {
+        return response('<script type="module" src="/assets/index.js"></script>', 200, "text/html")
+      }
+      if (url === "https://aquilla.app/assets/index.js") {
+        return response([
+          `const packageModules = [${misleadingReferences}]`,
+          "https://api.aquilla.app/identity",
+          "api.aquilla.app/sync",
+          "https://api.aquilla.app/chat",
+        ].join(" "))
+      }
+      const caseStudy = serveCaseStudies("https://aquilla.app", url)
+      if (caseStudy) return caseStudy
+      throw new Error(`unexpected URL ${url}`)
+    })
+
+    await expect(verifyLiveEnvironment("production", {
+      surface: "spa",
+      fetchImpl,
+      lookup,
+      attempts: 1,
+      log: vi.fn(),
+    })).resolves.toBeUndefined()
+
+    expect(fetchImpl).not.toHaveBeenCalledWith(
+      "https://aquilla.app/transformers/model-0.js",
+    )
+  })
+
+  it("deduplicates cyclic JavaScript imports", async () => {
+    const fetchImpl = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input)
+      if (url === "https://aquilla.app/app") {
+        return response('<script type="module" src="/assets/index.js"></script>', 200, "text/html")
+      }
+      if (url === "https://aquilla.app/assets/index.js") {
+        return response('import "./chunk.js"')
+      }
+      if (url === "https://aquilla.app/assets/chunk.js") {
+        return response([
+          'export { value } from "./index.js"',
+          "https://api.aquilla.app/identity",
+          "api.aquilla.app/sync",
+          "https://api.aquilla.app/chat",
+        ].join(" "))
+      }
+      const caseStudy = serveCaseStudies("https://aquilla.app", url)
+      if (caseStudy) return caseStudy
+      throw new Error(`unexpected URL ${url}`)
+    })
+
+    await expect(verifyLiveEnvironment("production", {
+      surface: "spa",
+      fetchImpl,
+      lookup,
+      attempts: 1,
+      log: vi.fn(),
+    })).resolves.toBeUndefined()
+
+    const indexRequests = fetchImpl.mock.calls
+      .map(([input]) => String(input))
+      .filter((url) => url === "https://aquilla.app/assets/index.js")
+    expect(indexRequests).toHaveLength(1)
+  })
+
+  it("rejects a missing JavaScript asset that falls back to the SPA shell", async () => {
+    const fetchImpl = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input)
+      if (url === "https://aquilla.app/app") {
+        return response('<script type="module" src="/assets/index.js"></script>', 200, "text/html")
+      }
+      if (url === "https://aquilla.app/assets/index.js") {
+        return response('import "./missing.js"')
+      }
+      if (url === "https://aquilla.app/assets/missing.js") {
+        return response('<!doctype html><script src="/assets/index.js"></script>', 200, "text/html")
+      }
+      throw new Error(`unexpected URL ${url}`)
+    })
+
+    await expect(verifyLiveEnvironment("production", {
+      surface: "spa",
+      fetchImpl,
+      lookup,
+      attempts: 1,
+      log: vi.fn(),
+    })).rejects.toThrow("returned HTML instead of JavaScript")
+  })
+
+  it("fails closed when the genuine JavaScript import graph exceeds its limit", async () => {
+    const fetchImpl = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input)
+      if (url === "https://aquilla.app/app") {
+        return response('<script type="module" src="/assets/index.js"></script>', 200, "text/html")
+      }
+      if (url === "https://aquilla.app/assets/index.js") {
+        return response('import "./one.js"; import "./two.js"')
+      }
+      throw new Error(`unexpected URL ${url}`)
+    })
+
+    await expect(verifyLiveEnvironment("production", {
+      surface: "spa",
+      fetchImpl,
+      lookup,
+      attempts: 1,
+      maxJavascriptAssets: 2,
+      log: vi.fn(),
+    })).rejects.toThrow("more than 2 JavaScript assets")
   })
 
   it("rejects a production bundle that also contains a development target", async () => {

@@ -1,9 +1,21 @@
-// The slim per-chip stats strip under the timeline lanes (2026-08-07 design):
-// one line of pills describing the CURRENT chip — the selected one, else the
-// one currently sounding, else the last one touched. The old full detail pane
-// is gone; the real text table renders below this strip, so the strip carries
-// only what is chip-specific: kind, timings, Diff, Overlap, Speaker/Camera,
-// and the missing-audio badge.
+// What the CURRENT chip is — the selected one, else the one sounding, else the
+// last one touched — split across the two columns of the media band.
+//
+// 2026-08-07 this was one strip spanning the whole width. 2026-08-08 the band
+// below it split at the divider (video | text), the strip's header moved with
+// the text column, and the timing pills came along for the ride — which was
+// wrong: Source/Target/Diff/Overlap describe the CHIPS ON THE TIMELINE, not the
+// dialogue list beneath. So the two halves now live where their subject does:
+//
+//   TimelineTimingRow — the numbers, full width at the bottom of the timeline
+//     block, ending that section (Sam: "those times are then just listed down
+//     there at the bottom").
+//   MediaTextHeader   — the section label, the line's Speaker/Camera, and the
+//     segment navigator, heading the text column opposite the Video header.
+//
+// The timing row keeps every `tl-detail*` testid: three browser passes read
+// them (media-table-sync, overlap-backdrag, sub53) and none of them care which
+// component does the rendering.
 
 import { VolumeX } from "lucide-react"
 import { fmtClock } from "./format"
@@ -93,20 +105,16 @@ function StripNavSlot() {
   )
 }
 
-export function TimelineChipStrip({ cell, chipStats, audioMissing }: TimelineChipStripProps) {
-  const isDialogue = (cell?.medium ?? "text") === "media"
+/**
+ * The timeline's own bottom row: what the current chip measures. Full width
+ * under the lanes, closing the timeline section off from the band below.
+ */
+export function TimelineTimingRow({ cell, chipStats, audioMissing }: TimelineChipStripProps) {
   const start = cell?.startTime ?? 0
   const end = cell?.endTime ?? start
-  const castName =
-    cell?.metadata && typeof cell.metadata.cast_name === "string"
-      ? (cell.metadata.cast_name as string)
-      : null
 
-  // ONE shared row in both states: the left side flips between the empty
-  // prompt and the pills, while the nav slot keeps its DOM identity — the
-  // table's portal host must survive selection changes.
   return (
-    <div className="flex items-center gap-2 border-t border-border bg-muted/20 px-4 py-1.5">
+    <div className="flex items-center gap-2 border-t border-border px-4 py-2">
       {!cell ? (
         <div data-testid="tl-detail-empty" className="flex min-w-0 items-center text-xs text-muted-foreground">
           Select a clip to see its timing.
@@ -117,11 +125,6 @@ export function TimelineChipStrip({ cell, chipStats, audioMissing }: TimelineChi
         data-cell-id={cell.id}
         className="flex min-w-0 flex-wrap items-center gap-2 text-xs text-muted-foreground"
       >
-        {/* Same heading treatment as the toolbar's "Timeline" — a section
-            label, not a data pill (Sam 2026-08-07). */}
-        <span className="text-xs font-medium text-muted-foreground">
-          {isDialogue ? "Dialogue" : "Subtitle"}
-        </span>
         {/* Free timing: no ranges — the file clock doesn't match the
             re-flowed track. Durations only (2026-08-06). */}
         {chipStats?.kind === "free" ? (
@@ -235,17 +238,49 @@ export function TimelineChipStrip({ cell, chipStats, audioMissing }: TimelineChi
             </span>
           </Pill>
         )}
-        {castName && (
-          <Pill>
-            Speaker <b className="font-semibold text-foreground">{castName}</b>
-          </Pill>
-        )}
-        {isDialogue && cell.cameraState && (
-          <Pill>
-            Camera <b className="font-semibold text-foreground">{cell.cameraState}</b>
-          </Pill>
-        )}
       </div>
+      )}
+    </div>
+  )
+}
+
+/**
+ * The text column's header, opposite the video pane's. Carries the section
+ * label, whatever the current line says about ITSELF (who speaks it, how it is
+ * shot) and the segment navigator — deliberately NOT the timings, which belong
+ * to the timeline, and deliberately still the navigator, which walks this list.
+ */
+export function MediaTextHeader({ cell }: { cell: CellData | null }) {
+  const isDialogue = (cell?.medium ?? "media") === "media"
+  const castName =
+    cell?.metadata && typeof cell.metadata.cast_name === "string"
+      ? (cell.metadata.cast_name as string)
+      : null
+
+  // ONE shared row in every state: the nav slot must keep its DOM identity
+  // across selection changes, because the table portals into it.
+  return (
+    <div
+      data-testid="tl-dialogue-header"
+      className="flex items-center gap-2 border-t border-border bg-muted/20 px-4 py-1.5"
+    >
+      {/* Same heading treatment as the toolbar's "Timeline" and the video
+          pane's "Video" — a section label, not a data pill. It still names the
+          KIND of the current chip (a subtitle chip reads "Subtitle"), and falls
+          back to the section's own name when nothing is selected so the header
+          doesn't blink in and out. */}
+      <span className="shrink-0 text-xs font-medium text-muted-foreground">
+        {isDialogue ? "Dialogue" : "Subtitle"}
+      </span>
+      {castName && (
+        <Pill>
+          Speaker <b className="font-semibold text-foreground">{castName}</b>
+        </Pill>
+      )}
+      {cell && isDialogue && cell.cameraState && (
+        <Pill>
+          Camera <b className="font-semibold text-foreground">{cell.cameraState}</b>
+        </Pill>
       )}
       <StripNavSlot />
     </div>

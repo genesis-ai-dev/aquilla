@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest"
 import { render, screen } from "@testing-library/react"
 
 import { expectTooltip, renderWithTooltips } from "@/test-utils/tooltip"
-import { TimelineChipStrip } from "./TimelineChipStrip"
+import { MediaTextHeader, TimelineTimingRow } from "./TimelineChipStrip"
 import { MISSING_AUDIO_MESSAGE } from "@/lib/audio/play-queue"
 import type { CellData } from "@/hooks/useCells"
 
@@ -12,10 +12,10 @@ const cell = (o: Partial<CellData>): CellData =>
 // Ported from TimelineCellDetail.test.tsx when the pane became this strip
 // (2026-08-07): the pill row's copy and styling are the contract several
 // browser passes read — testids and wording must not drift.
-describe("TimelineChipStrip", () => {
+describe("TimelineTimingRow", () => {
   it("labels the pills Source/Target/Diff and shows range + duration for both sides", () => {
     render(
-      <TimelineChipStrip
+      <TimelineTimingRow
         cell={cell({ original: "x", startTime: 10, endTime: 15 })}
         chipStats={{
           kind: "dubbing", startSec: 10, endSec: 14.3, durationSec: 4.3,
@@ -34,7 +34,7 @@ describe("TimelineChipStrip", () => {
   // end-only number was blind to a dub that also starts before its verse.
   it("Diff counts BOTH ends: a dub starting early and ending late reads its full extra length", () => {
     render(
-      <TimelineChipStrip
+      <TimelineTimingRow
         cell={cell({ original: "x", startTime: 10, endTime: 15 })}
         // Verse 10–15 (5.0s); dub 9.4–15.8 (6.4s) → 1.4s longer overall.
         chipStats={{
@@ -49,7 +49,7 @@ describe("TimelineChipStrip", () => {
 
   it("the Diff hover breaks the difference into its start and end halves", async () => {
     renderWithTooltips(
-      <TimelineChipStrip
+      <TimelineTimingRow
         cell={cell({ original: "x", startTime: 10, endTime: 15 })}
         chipStats={{
           kind: "dubbing", startSec: 9.4, endSec: 15.8, durationSec: 6.4,
@@ -63,7 +63,7 @@ describe("TimelineChipStrip", () => {
 
   it("a negative Diff is INFORMATIONAL — labeled, never red (2026-08-06)", () => {
     render(
-      <TimelineChipStrip
+      <TimelineTimingRow
         cell={cell({ original: "x", startTime: 10, endTime: 15 })}
         chipStats={{
           kind: "dubbing", startSec: 11, endSec: 15.8, durationSec: 4.8,
@@ -78,7 +78,7 @@ describe("TimelineChipStrip", () => {
 
   it("chip-vs-chip OVERLAP gets its own red pill — the real warning", () => {
     render(
-      <TimelineChipStrip
+      <TimelineTimingRow
         cell={cell({ original: "x", startTime: 10, endTime: 15 })}
         chipStats={{
           kind: "dubbing", startSec: 9, endSec: 14, durationSec: 5,
@@ -99,7 +99,7 @@ describe("TimelineChipStrip", () => {
 
   it("tail-only overlap uses the same single pill", () => {
     render(
-      <TimelineChipStrip
+      <TimelineTimingRow
         cell={cell({ original: "x", startTime: 10, endTime: 15 })}
         chipStats={{
           kind: "dubbing", startSec: 10, endSec: 16.2, durationSec: 6.2,
@@ -115,7 +115,7 @@ describe("TimelineChipStrip", () => {
   // single sum would say nothing about where the collision is.
   it("overlap on BOTH sides splits into labeled start/end pills", () => {
     render(
-      <TimelineChipStrip
+      <TimelineTimingRow
         cell={cell({ original: "x", startTime: 10, endTime: 15 })}
         chipStats={{
           kind: "dubbing", startSec: 9.3, endSec: 16.1, durationSec: 6.8,
@@ -136,7 +136,7 @@ describe("TimelineChipStrip", () => {
 
   it("no overlap pill when the chip doesn't collide", () => {
     render(
-      <TimelineChipStrip
+      <TimelineTimingRow
         cell={cell({ original: "x", startTime: 10, endTime: 15 })}
         chipStats={{
           kind: "dubbing", startSec: 10, endSec: 14, durationSec: 4,
@@ -152,7 +152,7 @@ describe("TimelineChipStrip", () => {
 
   it("FREE TIMING: durations only — the file-clock range never renders (2026-08-06)", () => {
     render(
-      <TimelineChipStrip
+      <TimelineTimingRow
         cell={cell({ original: "x", startTime: 13.8, endTime: 15.4 })}
         chipStats={{ kind: "free", srcDurationSec: 1.6, tgtDurationSec: 4.6 }}
       />,
@@ -168,7 +168,7 @@ describe("TimelineChipStrip", () => {
 
   it("FREE TIMING: an unmeasured dub shows only the source duration", () => {
     render(
-      <TimelineChipStrip
+      <TimelineTimingRow
         cell={cell({ original: "x", startTime: 13.8, endTime: 15.4 })}
         chipStats={{ kind: "free", srcDurationSec: 1.6, tgtDurationSec: null }}
       />,
@@ -178,7 +178,7 @@ describe("TimelineChipStrip", () => {
   })
 
   it("shows no dub numbers without chipStats (no measured dub / free timing)", () => {
-    render(<TimelineChipStrip cell={cell({ original: "x", startTime: 1, endTime: 3 })} />)
+    render(<TimelineTimingRow cell={cell({ original: "x", startTime: 1, endTime: 3 })} />)
     expect(screen.queryByTestId("tl-detail-dub-range")).toBeNull()
     expect(screen.queryByTestId("tl-detail-diff")).toBeNull()
     // A chip-less cell's range pill stays unlabeled — nothing to contrast with.
@@ -186,29 +186,63 @@ describe("TimelineChipStrip", () => {
   })
 
   it("renders an empty state with no current chip", () => {
-    render(<TimelineChipStrip cell={null} />)
+    render(<TimelineTimingRow cell={null} />)
     expect(screen.getByTestId("tl-detail-empty")).toBeInTheDocument()
   })
 
   it("carries the current cell's id for selection proofs", () => {
-    render(<TimelineChipStrip cell={cell({ id: "d7", startTime: 1, endTime: 3 })} />)
+    render(<TimelineTimingRow cell={cell({ id: "d7", startTime: 1, endTime: 3 })} />)
     expect(screen.getByTestId("tl-detail")).toHaveAttribute("data-cell-id", "d7")
   })
 
   it("missing audio joins the pill row as a compact red pill", () => {
-    render(<TimelineChipStrip cell={cell({ startTime: 1, endTime: 3 })} audioMissing />)
+    render(<TimelineTimingRow cell={cell({ startTime: 1, endTime: 3 })} audioMissing />)
     const badge = screen.getByTestId("tl-detail-audio-missing")
     expect(badge).toHaveTextContent(MISSING_AUDIO_MESSAGE)
     expect(badge.className).toContain("text-red-600")
   })
 
+})
+
+// 2026-08-08: the header half. It says what SECTION and what LINE — never what
+// the chip measures, which is the timeline's business one row up.
+describe("MediaTextHeader", () => {
   it("shows Speaker and Camera context pills when the cell carries them", () => {
     render(
-      <TimelineChipStrip
+      <MediaTextHeader
         cell={cell({ startTime: 1, endTime: 3, metadata: { cast_name: "Mary" }, cameraState: "on" })}
       />,
     )
     expect(screen.getByText("Mary")).toBeInTheDocument()
     expect(screen.getByText("on")).toBeInTheDocument()
+  })
+
+  it("labels the section, and keeps labelling it with nothing selected", () => {
+    const { rerender } = render(<MediaTextHeader cell={cell({ startTime: 1, endTime: 3 })} />)
+    expect(screen.getByTestId("tl-dialogue-header")).toHaveTextContent("Dialogue")
+    // A subtitle chip renames it; an empty selection falls back to the section
+    // name rather than blinking the label out of existence.
+    rerender(<MediaTextHeader cell={cell({ medium: "text", startTime: 1, endTime: 3 })} />)
+    expect(screen.getByTestId("tl-dialogue-header")).toHaveTextContent("Subtitle")
+    rerender(<MediaTextHeader cell={null} />)
+    expect(screen.getByTestId("tl-dialogue-header")).toHaveTextContent("Dialogue")
+  })
+
+  it("carries no timings — those measure the chips, not this list", () => {
+    render(
+      <MediaTextHeader cell={cell({ startTime: 10, endTime: 15, metadata: { cast_name: "Mary" } })} />,
+    )
+    expect(screen.queryByTestId("tl-detail")).toBeNull()
+    expect(screen.queryByText(/^Source:/)).toBeNull()
+    expect(screen.queryByText(/Diff:/)).toBeNull()
+  })
+
+  it("hosts the segment navigator's portal slot in every state", () => {
+    const { rerender } = render(<MediaTextHeader cell={null} />)
+    const slot = screen.getByTestId("tl-strip-nav")
+    rerender(<MediaTextHeader cell={cell({ startTime: 1, endTime: 3 })} />)
+    // Same node across a selection change — the table portals into it, and a
+    // remount would tear that portal down.
+    expect(screen.getByTestId("tl-strip-nav")).toBe(slot)
   })
 })

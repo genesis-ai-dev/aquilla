@@ -32,7 +32,7 @@ import { TimelineRuler } from "./TimelineRuler"
 import { TimelineLane } from "./TimelineLane"
 import { TargetAudioLane, type TargetAudioItem } from "./TargetAudioLane"
 import { TimelinePlayhead } from "./TimelinePlayhead"
-import { TimelineChipStrip } from "./TimelineChipStrip"
+import { MediaTextHeader, TimelineTimingRow } from "./TimelineChipStrip"
 import { useTimelineClock } from "./useTimelineClock"
 import { resolveEntryAudio, useClipAudioMissing } from "./useClipAudioMissing"
 import type { CellData } from "@/hooks/useCells"
@@ -1047,18 +1047,17 @@ export function TimelineEditor({
         </div>
       </div>
 
-      {/* 2026-08-08 (Sam): the strip heads the TEXT column of the band below,
-          not the full editor width — the video column carries its own header.
+      {/* 2026-08-08 (Sam): the NUMBERS stay with the timeline — they measure
+          the chips above, not the dialogue below — and close this section off
+          at its bottom edge. */}
+      <TimelineTimingRow cell={currentCell} chipStats={currentChipStats} audioMissing={audioMissing} />
+      {/* The section label, the line's own context and the segment navigator
+          head the TEXT column of the band below, opposite the Video header.
           The slot is owned by the workspace; portal when it exists, render
           inline when this editor is mounted alone (tests). */}
-      {chipStripSlot ? (
-        createPortal(
-          <TimelineChipStrip cell={currentCell} chipStats={currentChipStats} audioMissing={audioMissing} />,
-          chipStripSlot,
-        )
-      ) : (
-        <TimelineChipStrip cell={currentCell} chipStats={currentChipStats} audioMissing={audioMissing} />
-      )}
+      {chipStripSlot
+        ? createPortal(<MediaTextHeader cell={currentCell} />, chipStripSlot)
+        : <MediaTextHeader cell={currentCell} />}
     </div>
   )
 }

@@ -27,11 +27,24 @@ import { queueClockIsFileTime, useQueueForFile } from "@/lib/audio/play-queue"
 import { effectiveSourceText } from "@/lib/cell-text"
 import { resolveTextDirection, type DirectionMode, type TextDirection } from "@/lib/text-direction"
 import { videoSyncAction } from "./video-sync"
+import { DEFAULT_VIDEO_ASPECT, fitPictureRect, intrinsicAspect } from "./video-frame"
 
 export type SubtitleMode = "target" | "source" | "both" | "off"
+/** Where the burned-in caption sits. "picture" is the default and the honest
+ *  one: the exported video has no black bars, so that is where the line will
+ *  really be. "bar" keeps the image completely clear for anyone reviewing the
+ *  picture itself. (Sam, 2026-08-08) */
+export type CaptionPlacement = "picture" | "bar"
 
 const SUBTITLE_MODES: readonly SubtitleMode[] = ["target", "source", "both", "off"]
 const SUBTITLE_MODE_KEY = "codex:video-subtitle-mode"
+const CAPTION_PLACEMENTS: readonly CaptionPlacement[] = ["picture", "bar"]
+const CAPTION_PLACEMENT_KEY = "codex:video-caption-placement"
+
+/** Shared look for the two controls that ride on the picture: dark, translucent
+ *  and legible over any frame, with the active tab picked out in white. */
+const OVERLAY_TABS_CLASS =
+  "h-7 border-0 bg-black/55 backdrop-blur-sm [&_button]:h-6 [&_button]:px-2 [&_button]:text-[11px] [&_button]:text-white/70 [&_button:hover]:text-white [&_button[data-active]]:!bg-white/25 [&_button[data-active]]:!text-white [&_button[data-active]]:!border-transparent [&_button[data-active]]:shadow-none"
 
 /** Read the persisted caption preference. Deliberately global rather than
  *  per-project: it expresses how someone likes to watch, not anything about the
@@ -50,6 +63,25 @@ function writeSubtitleMode(mode: SubtitleMode): void {
   if (typeof window === "undefined") return
   try {
     window.localStorage.setItem(SUBTITLE_MODE_KEY, mode)
+  } catch {
+    /* ignore persistence failures */
+  }
+}
+
+export function readCaptionPlacement(): CaptionPlacement {
+  if (typeof window === "undefined") return "picture"
+  try {
+    const raw = window.localStorage.getItem(CAPTION_PLACEMENT_KEY)
+    return CAPTION_PLACEMENTS.includes(raw as CaptionPlacement) ? (raw as CaptionPlacement) : "picture"
+  } catch {
+    return "picture"
+  }
+}
+
+function writeCaptionPlacement(placement: CaptionPlacement): void {
+  if (typeof window === "undefined") return
+  try {
+    window.localStorage.setItem(CAPTION_PLACEMENT_KEY, placement)
   } catch {
     /* ignore persistence failures */
   }
@@ -112,6 +144,7 @@ export function MediaVideoPane({
   const cellIdSet = useMemo(() => new Set(cells.map((c) => c.id)), [cells])
   const queue = useQueueForFile(cellIdSet)
   const [mode, setModeState] = useState<SubtitleMode>(() => readSubtitleMode())
+  const [placement, setPlacementState] = useState<CaptionPlacement>(() => readCaptionPlacement())
   const [failed, setFailed] = useState(false)
   const [needsGesture, setNeedsGesture] = useState(false)
   /** Bumped by loadedmetadata/durationchange: the media load algorithm resets
@@ -146,6 +179,29 @@ export function MediaVideoPane({
     setModeState(next)
     writeSubtitleMode(next)
   }, [])
+
+  const setPlacement = useCallback((next: CaptionPlacement) => {
+    setPlacementState(next)
+    writeCaptionPlacement(next)
+  }, [])
+
+  // ── The picture rect. The black field fills the pane; the picture is centred
+  // inside it at the video's own proportions, and the caption anchors to the
+  // PICTURE rather than the field so it cannot drift into a bar on resize.
+  const fieldRef = useRef<HTMLDivElement>(null)
+  const [fieldSize, setFieldSize] = useState<{ w: number; h: number }>({ w: 0, h: 0 })
+  const [aspect, setAspect] = useState<number>(DEFAULT_VIDEO_ASPECT)
+  useEffect(() => {
+    const el = fieldRef.current
+    if (!el) return
+    const measure = () => setFieldSize({ w: el.clientWidth, h: el.clientHeight })
+    measure()
+    if (typeof ResizeObserver === "undefined") return // happy-dom
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [failed])
+  const picture = fitPictureRect(fieldSize.w, fieldSize.h, aspect)
 
   const soundingCell = useMemo(
     () => (queue.cellId != null ? cells.find((c) => c.id === queue.cellId) : undefined),
@@ -280,6 +336,7 @@ export function MediaVideoPane({
 
   // A new source is a fresh element as far as we're concerned.
   useEffect(() => {
+    setAspect(DEFAULT_VIDEO_ASPECT)
     setFailed(false)
     setNeedsGesture(false)
     playFailuresRef.current = 0
@@ -353,8 +410,22 @@ export function MediaVideoPane({
       className="flex h-full min-h-0 flex-col overflow-hidden border-r border-border"
     >
       <PaneHeader src={src} />
-      <div className="flex min-h-0 flex-1 flex-col p-2">
-      <div className="group relative aspect-video max-h-full w-full shrink-0 overflow-hidden rounded-md bg-black">
+      {/* The black field fills everything under the header, and the picture is
+          centred in it at the video's own proportions — leftover space becomes
+          cinema bars instead of blank page. */}
+      <div
+        ref={fieldRef}
+        data-testid="video-pane-field"
+        className="group relative flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-black"
+      >
+      {/* The picture, sized in real pixels so the caption has an edge to anchor
+          to. Falls back to a plain 16:9 box before the field has been measured
+          (and in any environment without layout, e.g. the test DOM). */}
+      <div
+        data-testid="video-pane-picture"
+        className={cn("relative", picture ? "" : "aspect-video w-full")}
+        style={picture ? { width: `${picture.width}px`, height: `${picture.height}px` } : undefined}
+      >
         <video
           ref={videoRef}
           key={`${src}#${loadAttempt}`}
@@ -369,16 +440,26 @@ export function MediaVideoPane({
           muted={slaved}
           controls={!slaved}
           onError={() => setFailed(true)}
-          onLoadedMetadata={() => setMediaEpoch((n) => n + 1)}
+          onLoadedMetadata={(e) => {
+            setMediaEpoch((n) => n + 1)
+            // The element now knows its real shape — letterbox against THAT
+            // rather than the assumed 16:9.
+            const real = intrinsicAspect(e.currentTarget.videoWidth, e.currentTarget.videoHeight)
+            if (real != null) setAspect(real)
+          }}
           onDurationChange={() => setMediaEpoch((n) => n + 1)}
           onTimeUpdate={
             slaved ? undefined : (e) => onVideoTime?.(e.currentTarget.currentTime)
           }
         />
-        {hasCaption && (
+        {hasCaption && placement === "picture" && (
           // aria-hidden on purpose: this repeats the row the table has already
           // scrolled to and marked as sounding. Announcing it again would read
           // every line twice.
+          //
+          // Anchored to the PICTURE, not the black field: the exported video
+          // has no bars, so this is where the line really lives — and it can
+          // never drift into a bar as the pane is resized.
           <div
             aria-hidden="true"
             data-testid="video-pane-caption"
@@ -413,32 +494,6 @@ export function MediaVideoPane({
             )}
           </div>
         )}
-        {/* 2026-08-08 (Sam): the caption choice rides ON the picture, faded —
-            visible while hovering, and for a moment when playback starts so
-            you learn it exists. Hidden it is also pointer-inert, so a stray
-            click near the corner hits the video, not an invisible control. */}
-        <div
-          data-testid="video-pane-mode-overlay"
-          className={cn(
-            "absolute right-2 top-2 z-30 transition-opacity duration-300",
-            modeRevealed
-              ? "opacity-100"
-              : "pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100",
-          )}
-        >
-          <SegmentTabs<SubtitleMode>
-            value={mode}
-            onValueChange={setMode}
-            aria-label="Subtitle text"
-            options={[
-              { label: "Target", value: "target" },
-              { label: "Source", value: "source" },
-              { label: "Both", value: "both" },
-              { label: "Off", value: "off" },
-            ]}
-            listClassName="h-7 border-0 bg-black/55 backdrop-blur-sm [&_button]:h-6 [&_button]:px-2 [&_button]:text-[11px] [&_button]:text-white/70 [&_button:hover]:text-white [&_button[data-active]]:!bg-white/25 [&_button[data-active]]:!text-white [&_button[data-active]]:!border-transparent [&_button[data-active]]:shadow-none"
-          />
-        </div>
         {needsGesture && (
           <button
             type="button"
@@ -455,6 +510,88 @@ export function MediaVideoPane({
           </button>
         )}
       </div>
+      {hasCaption && placement === "bar" && (
+        // The other choice: keep the image itself completely clear and put the
+        // line in the black below it. Anchored to the FIELD, so it lands in the
+        // bar when there is one.
+        <div
+          aria-hidden="true"
+          data-testid="video-pane-caption"
+          className="pointer-events-none absolute bottom-2 left-1/2 z-10 flex -translate-x-1/2 flex-col items-center gap-1 px-2 text-center"
+          style={{ maxWidth: "92%" }}
+        >
+          {captionTarget && (
+            <span
+              data-testid="video-pane-caption-target"
+              dir={resolveTextDirection(targetDirectionMode, captionTarget, targetTextDirection)}
+              className="inline-block whitespace-pre-wrap rounded px-2 py-1 text-xs font-medium leading-tight text-white"
+              style={{ textShadow: "1px 1px 2px rgba(0, 0, 0, 0.9)" }}
+            >
+              {captionTarget}
+            </span>
+          )}
+          {captionSource && (
+            <span
+              data-testid="video-pane-caption-source"
+              dir={resolveTextDirection(sourceDirectionMode, captionSource, sourceTextDirection)}
+              className="inline-block whitespace-pre-wrap rounded px-2 py-1 text-[11px] leading-tight text-white/80"
+              style={{ textShadow: "1px 1px 2px rgba(0, 0, 0, 0.9)" }}
+            >
+              {captionSource}
+            </span>
+          )}
+        </div>
+      )}
+      {/* 2026-08-08 (Sam): both caption controls ride ON the picture, faded —
+          visible while hovering, and for a moment when playback starts so you
+          learn they exist. Hidden they are also pointer-inert, so a stray click
+          near a corner hits the video, not an invisible control. They sit on
+          the FIELD rather than the picture so they keep their corners when the
+          picture is letterboxed down to a small box. */}
+      <div
+        data-testid="video-pane-mode-overlay"
+        className={cn(
+          "absolute right-2 top-2 z-30 transition-opacity duration-300",
+          modeRevealed
+            ? "opacity-100"
+            : "pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100",
+        )}
+      >
+        <SegmentTabs<SubtitleMode>
+          value={mode}
+          onValueChange={setMode}
+          aria-label="Subtitle text"
+          options={[
+            { label: "Target", value: "target" },
+            { label: "Source", value: "source" },
+            { label: "Both", value: "both" },
+            { label: "Off", value: "off" },
+          ]}
+          listClassName={OVERLAY_TABS_CLASS}
+        />
+      </div>
+      {mode !== "off" && (
+        <div
+          data-testid="video-pane-placement-overlay"
+          className={cn(
+            "absolute left-2 top-2 z-30 transition-opacity duration-300",
+            modeRevealed
+              ? "opacity-100"
+              : "pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100",
+          )}
+        >
+          <SegmentTabs<CaptionPlacement>
+            value={placement}
+            onValueChange={setPlacement}
+            aria-label="Subtitle position"
+            options={[
+              { label: "On video", value: "picture" },
+              { label: "In bar", value: "bar" },
+            ]}
+            listClassName={OVERLAY_TABS_CLASS}
+          />
+        </div>
+      )}
       </div>
     </div>
   )

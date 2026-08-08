@@ -23,7 +23,7 @@ vi.mock("@/lib/audio/play-queue", () => ({
     c?.medium === "media" && Boolean(c?.attachments),
 }))
 
-import { MediaVideoPane, readSubtitleMode } from "./MediaVideoPane"
+import { MediaVideoPane, readCaptionPlacement, readSubtitleMode } from "./MediaVideoPane"
 
 const cell = (o: Partial<CellData>): CellData =>
   ({ id: "c1", fileId: "f1", original: "", translated: "", medium: "media", ...o }) as unknown as CellData
@@ -60,6 +60,7 @@ function renderPane(props: Partial<React.ComponentProps<typeof MediaVideoPane>> 
 describe("MediaVideoPane", () => {
   beforeEach(() => {
     localStorage.removeItem("codex:video-subtitle-mode")
+    localStorage.removeItem("codex:video-caption-placement")
     mockQueue = {
       active: false,
       playing: false,
@@ -178,6 +179,40 @@ describe("MediaVideoPane", () => {
     sounding("c1")
     rerender(<MediaVideoPane src="https://cdn/episode.webm" cells={CELLS} />)
     expect(screen.getByTestId("video-pane-mode-overlay").className).toContain("opacity-100")
+  })
+
+  it("puts the caption on the picture, not in the bars, by default", () => {
+    // The exported video has no black bars, so the picture is where the line
+    // really lives (Sam, 2026-08-08). Anchoring to the picture layer is also
+    // what stops it drifting into a bar as the pane is resized.
+    sounding("c1")
+    renderPane()
+    const caption = screen.getByTestId("video-pane-caption")
+    const picture = screen.getByTestId("video-pane-picture")
+    expect(picture.contains(caption)).toBe(true)
+  })
+
+  it("moves the caption off the picture when asked, and remembers", () => {
+    sounding("c1")
+    renderPane()
+    fireEvent.click(screen.getByRole("tab", { name: "In bar" }))
+    const caption = screen.getByTestId("video-pane-caption")
+    expect(screen.getByTestId("video-pane-picture").contains(caption)).toBe(false)
+    expect(screen.getByTestId("video-pane-field").contains(caption)).toBe(true)
+    expect(localStorage.getItem("codex:video-caption-placement")).toBe("bar")
+    expect(readCaptionPlacement()).toBe("bar")
+
+    localStorage.setItem("codex:video-caption-placement", "sideways")
+    expect(readCaptionPlacement()).toBe("picture")
+  })
+
+  it("hides the position control when captions are off — it would steer nothing", () => {
+    renderPane()
+    expect(screen.getByTestId("video-pane-placement-overlay")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("tab", { name: "Off" }))
+    expect(screen.queryByTestId("video-pane-placement-overlay")).toBeNull()
+    // ...and the control that turns them back on stays.
+    expect(screen.getByTestId("video-pane-mode-overlay")).toBeInTheDocument()
   })
 
   it("says so when the source will not load, and offers a way to fix it", () => {

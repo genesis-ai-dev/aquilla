@@ -89,7 +89,18 @@ decision, or a product trade-off is recommended below, not done unilaterally.
    every other path is answered by the static-asset router. A parity test
    asserts they agree, so the two cannot drift.
    Headers: `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`,
-   `Cross-Origin-Opener-Policy`, `Permissions-Policy`.
+   `Permissions-Policy`.
+
+   **Two headers were deliberately left off.** `Strict-Transport-Security`
+   belongs at the Cloudflare zone, where `includeSubDomains` can be decided for
+   every `*.aquilla.app` host at once. `Cross-Origin-Opener-Policy: same-origin`
+   was dropped after checking the Monday OAuth flow: the popup is opened
+   *without* `noopener` on purpose because the code needs the handle to navigate
+   it (`OrgSettingsMonday.tsx:114`). COOP severs that browsing-context group
+   once the popup goes cross-origin, and the severance timing relative to the
+   `popup.location.href` assignment can't be settled without driving a real
+   browser through a real consent screen. Small gain, real risk to a working
+   flow — a regression test now pins its absence with that reasoning.
 2. **CSP, split by risk** — `frame-ancestors 'none'` is *enforced* (verified
    zero-risk: there is no `<iframe>` anywhere in `src/` or any marketing page).
    The full policy ships **Report-Only**, because enforcing it today would break

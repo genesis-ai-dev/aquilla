@@ -89,6 +89,16 @@ export const REPORT_ONLY_CSP = [
  * HSTS at the zone level, and `includeSubDomains` from a Worker would reach
  * every *.aquilla.app subdomain — a change that must be made deliberately at
  * the zone, not as a side effect of a headers refactor.
+ *
+ * Cross-Origin-Opener-Policy is intentionally NOT set either. The Monday OAuth
+ * flow opens a popup deliberately WITHOUT `noopener` because it needs the live
+ * handle to navigate it (`src/pages/settings/OrgSettingsMonday.tsx:114` — the
+ * comment there is explicit). `same-origin` severs the browsing-context group
+ * when that popup goes cross-origin, and the exact severance timing relative to
+ * the `popup.location.href` assignment is not something we can verify without
+ * driving a real browser through a real Monday consent screen. COOP is a small
+ * gain next to the rest of this policy; risking a working OAuth flow for it is
+ * a bad trade. Revisit with a browser test, not by reasoning about the spec.
  */
 export const SECURITY_HEADERS: Readonly<Record<string, string>> = Object.freeze({
   "Content-Security-Policy": ENFORCED_CSP,
@@ -96,7 +106,6 @@ export const SECURITY_HEADERS: Readonly<Record<string, string>> = Object.freeze(
   "X-Content-Type-Options": "nosniff",
   "X-Frame-Options": "DENY",
   "Referrer-Policy": "strict-origin-when-cross-origin",
-  "Cross-Origin-Opener-Policy": "same-origin",
   "Permissions-Policy": [
     "accelerometer=()",
     "autoplay=(self)",

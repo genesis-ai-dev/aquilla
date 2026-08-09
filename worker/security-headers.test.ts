@@ -103,6 +103,14 @@ describe("policy shape", () => {
     }
   })
 
+  // OrgSettingsMonday opens its OAuth popup without `noopener` on purpose,
+  // because it needs the handle to navigate it. COOP severs that browsing
+  // context group once the popup goes cross-origin. Don't re-add this header
+  // without driving the real flow in a browser first.
+  it("does not set Cross-Origin-Opener-Policy — it endangers the Monday OAuth popup", () => {
+    expect(SECURITY_HEADERS["Cross-Origin-Opener-Policy"]).toBeUndefined()
+  })
+
   it("allows wasm and blob workers — onnxruntime/whisper need both", () => {
     expect(REPORT_ONLY_CSP).toContain("'wasm-unsafe-eval'")
     expect(REPORT_ONLY_CSP).toContain("worker-src 'self' blob:")

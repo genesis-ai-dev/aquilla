@@ -1,0 +1,24 @@
+# Baseline security headers for every statically-served path.
+#
+# Why this file AND worker/security-headers.ts: `run_worker_first = ["/"]` in
+# wrangler.toml means the Worker runs for the bare root only. Every other path —
+# the SPA shell at /app, /project/*, the marketing pages, hashed assets — is
+# answered by Cloudflare's static-asset router before the Worker executes, so
+# this file is what covers them. worker/security-headers.test.ts asserts the two
+# stay in sync; update both or the test fails.
+#
+# Unlike `_redirects` (which the deploy scripts delete from dist/ because the
+# SPA rule trips Workers' asset parser, error 100324), `_headers` is supported
+# by Workers static assets and is left in place at deploy time.
+#
+# See docs/SECURITY-REVIEW-2026-08-09.md for the rationale, and for why the full
+# CSP ships Report-Only rather than enforced.
+
+/*
+  Content-Security-Policy: frame-ancestors 'none'
+  Content-Security-Policy-Report-Only: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob: https:; media-src 'self' data: blob: https:; connect-src 'self' https://*.aquilla.app wss://*.aquilla.app https://*.posthog.com https://generativelanguage.googleapis.com https://openrouter.ai https://api.openai.com https://git.door43.org https://cdn.door43.org https://bible.helloao.org https://*.modal.run; manifest-src 'self'; upgrade-insecure-requests
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+  Referrer-Policy: strict-origin-when-cross-origin
+  Cross-Origin-Opener-Policy: same-origin
+  Permissions-Policy: accelerometer=(), autoplay=(self), camera=(), display-capture=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(self), payment=(), usb=()

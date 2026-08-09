@@ -6,10 +6,17 @@
 //
 // HARD-GATED on `WRANGLER_LOCAL=1` exactly like /__test__/reset. Production
 // wrangler.toml does NOT define WRANGLER_LOCAL, so this route surface is
-// invisible in prod even if the worker is reachable. The bypass also never
-// takes a user identifier from the request — it always resolves to the
-// hardcoded `dev` username — so even if the gate ever failed open, an
-// attacker could only log in as a user that does not exist in prod Postgres.
+// invisible in prod even if the worker is reachable.
+//
+// DO NOT treat "it only ever logs in as the hardcoded `dev` user" as a second
+// layer of safety — it isn't. `/__dev__/login` runs `seedDev()` first, which
+// CREATES that user (plus an org and projects) in whatever database is bound,
+// then mints a real JWT for it. A config mistake that ever sets WRANGLER_LOCAL
+// in a deployed environment is therefore a full authentication bypass against
+// live data, not a login as a nonexistent account. `WRANGLER_LOCAL` must stay
+// injected only by scripts/dev-stack.ts and scripts/e2e-up.ts at the CLI.
+// (Corrects the false reassurance flagged as SEC-8 in
+// docs/SECURITY-NOTES-2026-06-10.md.)
 
 import { Hono } from "hono"
 import type { AuthHonoEnv } from "../middleware/auth"

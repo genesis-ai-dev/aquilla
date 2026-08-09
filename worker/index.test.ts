@@ -269,8 +269,10 @@ describe("wrangler.toml — asset router must not preempt the Worker at /", () =
   const assetBlocks = toml.split(/^\[.*assets\]$/m).slice(1)
 
   it("declares an assets block per environment", () => {
-    // top-level + production + development + staging + preview
-    expect(assetBlocks).toHaveLength(5)
+    // top-level + preview + production + development. There is no staging
+    // environment for this Worker — wrangler.toml and
+    // docs/DEPLOYMENT-ENVIRONMENTS.md both stop at development.
+    expect(assetBlocks).toHaveLength(4)
   })
 
   it("runs the Worker first for / in every environment", () => {

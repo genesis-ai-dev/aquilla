@@ -30,6 +30,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:idml": "pnpm --filter @aquilla/idml-roundtrip test",
+    "test:web-worker": "vitest run --root worker",
     "build:idml": "pnpm --filter @aquilla/idml-roundtrip build",
     "idml:gate": "tsx scripts/assert-idml-release-gate.ts",
     "idml:adobe": "tsx scripts/idml-adobe-validation.ts",

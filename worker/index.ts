@@ -19,6 +19,8 @@
 // See docs/superpowers/specs/2026-05-30-bare-domain-routing-design.md
 //     docs/superpowers/specs/2026-06-22-homepage-beta-strip-and-page-design.md
 
+import { withSecurityHeaders } from "./security-headers"
+
 // Standalone marketing pages: request path → static asset to serve. Each
 // bypasses the aq_hint cookie check so it's shareable and crawlable regardless
 // of session state.
@@ -72,12 +74,14 @@ const CANONICAL_HOST = "aquilla.app"
 
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
-    const res = await route(req, env)
+    // Security headers go on every response this Worker serves. Note this only
+    // covers paths where the Worker actually runs (`run_worker_first = ["/"]`);
+    // `public/_headers` covers everything the asset router answers directly.
+    const res = withSecurityHeaders(await route(req, env))
     const host = new URL(req.url).hostname
     if (host !== CANONICAL_HOST && host !== "localhost" && !host.endsWith(".localhost")) {
-      const wrapped = new Response(res.body, res)
-      wrapped.headers.set("X-Robots-Tag", "noindex")
-      return wrapped
+      res.headers.set("X-Robots-Tag", "noindex")
+      return res
     }
     return res
   },

@@ -4,12 +4,19 @@
 //   POST /__dev__/seed   — idempotent upsert of a known user/org/project.
 //   POST /__dev__/login  — runs seed, then mints a JWT for the dev user.
 //
-// HARD-GATED on `WRANGLER_LOCAL=1` exactly like /__test__/reset. Production
-// wrangler.toml does NOT define WRANGLER_LOCAL, so this route surface is
-// invisible in prod even if the worker is reachable. The bypass also never
-// takes a user identifier from the request — it always resolves to the
-// hardcoded `dev` username — so even if the gate ever failed open, an
-// attacker could only log in as a user that does not exist in prod Postgres.
+// HARD-GATED on `WRANGLER_LOCAL=1` exactly like /__test__/reset. The var is
+// defined in no wrangler.toml, .dev.vars.example or CI env — it is injected
+// only by scripts/dev-stack.ts and scripts/e2e-up.ts on the command line — so
+// this route surface is invisible in prod even if the worker is reachable.
+//
+// The gate is the WHOLE control. Do not weaken it on the theory that the
+// blast radius is small: a previous version of this comment claimed that a
+// failed-open gate could "only log in as a user that does not exist in prod",
+// which is false. `seedDev()` below CREATES the `dev` user (password `dev`)
+// plus an org and projects in whatever database is bound, so a failed-open
+// gate is authenticated access to prod, not a no-op — and the sibling
+// /__test__/reset deletes every row in every core table. If you ever need to
+// change this gate, treat it as a production auth change.
 
 import { Hono } from "hono"
 import type { AuthHonoEnv } from "../middleware/auth"

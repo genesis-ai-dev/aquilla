@@ -182,7 +182,11 @@ export function TimelineEditor({
   const [pxPerSec, setPxPerSec] = useState(() => loadZoom(fileId))
   // Dismissal is per-visit on purpose: while unmeasured takes remain, the
   // notice returns next time the timeline mounts — quiet, but not forgotten.
-  const [measureNoteDismissed, setMeasureNoteDismissed] = useState(false)
+  // It is keyed by FILE because this component is not remounted on a file
+  // switch (same subtree, no key), so a bare boolean would have silenced the
+  // notice for every other file in the session.
+  const [measureDismissedFor, setMeasureDismissedFor] = useState<string | null>(null)
+  const measureNoteDismissed = measureDismissedFor === fileId
   const online = useOnline()
   const batchProgress = useBatchProgress()
   const [audibility, setAudibility] = useState<TrackAudibility>(() => loadAudibility(fileId))
@@ -953,7 +957,7 @@ export function TimelineEditor({
             type="button"
             aria-label="Dismiss for now"
             data-testid="tl-measure-dismiss"
-            onClick={() => setMeasureNoteDismissed(true)}
+            onClick={() => setMeasureDismissedFor(fileId)}
             className="rounded p-0.5 text-muted-foreground hover:bg-muted"
           >
             <X className="h-3 w-3" />

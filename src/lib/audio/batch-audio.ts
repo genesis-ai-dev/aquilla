@@ -240,14 +240,38 @@ import {
 /**
  * A take needs its length measured when nothing recorded one at attach time
  * (pre-duration-capture recordings; their chips draw at fallback width and
- * Free timing cannot lay them out). The imported SOURCE clip legitimately has
- * no duration of its own — its length is the section span — so fileId-seeded
- * ids never count. Shared by the timeline notice's count and the batch.
+ * Free timing cannot lay them out).
+ *
+ * The hard part is NOT-measuring the SHARED clips, whose per-cell length comes
+ * from each cell's trim window rather than from the object — writing the whole
+ * object's length onto them would stretch every participating chip across the
+ * entire clip, and the fill-only projection makes that permanent. There are
+ * two such objects and they hide in different ways:
+ *
+ *   - the imported source clip, seeded with the FILE id and attached to every
+ *     media section;
+ *   - the combined "voice together" generation, seeded with the FIRST chosen
+ *     cell's id (combined-voice.ts) and attached untrimmed to all of them —
+ *     so on cells 2..N it looks like an ordinary foreign-seeded take, and on
+ *     cell 1 it looks like that cell's own take.
+ *
+ * So a take qualifies only when it is seeded with its OWN cell's id AND no
+ * other cell in the file carries the same object. Legacy ids that predate the
+ * seeding convention fail the first test and are simply left alone: a chip
+ * that keeps its guessed width is a far better outcome than one measured
+ * wrong and unfixable.
  */
-export function attachmentNeedsMeasure(fileId: string, att: AudioAttachmentOut): boolean {
+export function attachmentNeedsMeasure(
+  fileId: string,
+  cellId: string,
+  att: AudioAttachmentOut,
+  isSharedAcrossCells: (audioId: string) => boolean,
+): boolean {
   if (att.durationMs != null) return false
   if (att.pendingSync) return false
-  return !audioIdSeededWith(att.audioId, fileId)
+  if (audioIdSeededWith(att.audioId, fileId)) return false
+  if (!audioIdSeededWith(att.audioId, cellId)) return false
+  return !isSharedAcrossCells(att.audioId)
 }
 
 export interface MeasureTarget {
@@ -261,10 +285,19 @@ export function takesNeedingMeasure(
   fileId: string,
   byCellId: ReadonlyMap<string, CellAudioEntry>,
 ): MeasureTarget[] {
+  // How many cells carry each object: >1 means a shared clip (see above).
+  const cellsPerAudioId = new Map<string, number>()
+  for (const entry of byCellId.values()) {
+    for (const audioId of Object.keys(entry.attachments)) {
+      cellsPerAudioId.set(audioId, (cellsPerAudioId.get(audioId) ?? 0) + 1)
+    }
+  }
+  const isShared = (audioId: string) => (cellsPerAudioId.get(audioId) ?? 0) > 1
+
   const out: MeasureTarget[] = []
   for (const [cellId, entry] of byCellId) {
     for (const att of Object.values(entry.attachments)) {
-      if (attachmentNeedsMeasure(fileId, att)) out.push({ cellId, att })
+      if (attachmentNeedsMeasure(fileId, cellId, att, isShared)) out.push({ cellId, att })
     }
   }
   return out
@@ -296,6 +329,11 @@ export async function runMeasureAll(args: MeasureAllArgs): Promise<MeasureAllRes
   const targets = takesNeedingMeasure(fileId, byCellId)
   const result: MeasureAllResult = { measured: 0, failed: 0 }
   if (targets.length === 0) return result
+  // One progress slot, three batch kinds: starting on top of a running batch
+  // would make both write and clear it (and the banner's Cancel would target
+  // whichever happened to be displayed). The button is disabled while one
+  // runs; this closes the gap between that render and the click.
+  if (getBatchProgress() != null) return result
 
   _measureCancelFlag = false
 
@@ -329,7 +367,11 @@ export async function runMeasureAll(args: MeasureAllArgs): Promise<MeasureAllRes
           return
         }
         const rounded = Math.round(durationMs)
-        const eventId = emitCellAudioMeasure({
+        // AWAIT the emit: it rejects when the account is below the event's
+        // role floor (and on an IDB write failure), and an unawaited promise
+        // would let every such take count as measured — a run that saved
+        // nothing would report full success.
+        const eventId = await emitCellAudioMeasure({
           projectId,
           fileId,
           cellId,

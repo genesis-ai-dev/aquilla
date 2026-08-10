@@ -961,7 +961,7 @@ export function ProjectSettings() {
     {
       id: "audio-media",
       label: "Audio media",
-      description: "Timing mode and how audio is fetched from storage",
+      description: "How audio is fetched from storage",
       icon: AudioLines,
       sectionIds: ["section-audio-media"],
     },

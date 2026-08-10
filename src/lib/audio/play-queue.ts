@@ -805,7 +805,15 @@ function progStartSides(gate: ProgGate): void {
   const dubEl = gate.dueTarget
     ? (overlayPool.find((e) => e.cellId === gate.cellId)?.element ?? null)
     : null
-  const srcEl = gate.dueSource && currentAudio ? currentAudio : null
+  // A DEAD source counts as no source. Normally progCueSource is watching and
+  // strikes the side off via progGateSideFailed, but a seamless advance
+  // deliberately never cues (the element is already in position), so nothing
+  // observes it — and a `srcEl` that can't play would defeat the
+  // nothing-left-to-play advance below and leave the transport "playing" in
+  // silence with no clock to move it on.
+  const srcAlive = currentAudio != null && currentAudio.error == null
+  const srcEl = gate.dueSource && srcAlive ? currentAudio : null
+  if (gate.dueSource && !srcAlive) gate.dueSource = false
 
   if (!gate.wantPlay) {
     setState({ kind: "paused", ...progStateCell() })

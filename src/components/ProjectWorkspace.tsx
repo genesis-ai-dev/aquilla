@@ -4458,8 +4458,10 @@ export function ProjectWorkspace() {
   // the active mode as a plain label.
   const canEditTimingMode = (serverRoleLevel ?? project?.syncRole?.level ?? 0) >= ROLE.MAINTAINER
   // Flow A (file-scoped): switching a file that HAS a linked video to Free
-  // timing hides the video — confirm before emitting.
-  const [timingVideoWarnOpen, setTimingVideoWarnOpen] = useState(false)
+  // timing hides the video — confirm before emitting. Holds the FILE the
+  // warning was raised for, not a bare flag, so the confirm can only ever
+  // apply to that file.
+  const [timingVideoWarnFor, setTimingVideoWarnFor] = useState<string | null>(null)
   // A REMOTE mode change gets an acknowledged heads-up — deferred while the
   // user is in the text view or has the recorder open (a cell transition
   // inside the recorder ends the wait; the take is confirmed by then).
@@ -4482,35 +4484,54 @@ export function ProjectWorkspace() {
       lens === "audio" &&
       recordingCellId === null,
   })
-  // Apply THIS FILE's mode: stamp it as our own seen mode first (the changer
-  // must never get the "timing mode changed" modal for their own click),
+  // Apply THIS FILE's mode: register the change as our own first (so the
+  // changer never gets the "timing mode changed" modal for their own click),
   // then emit + flush + refresh — the same shape as applyLinkVideo, and the
   // same files.meta home. Collaborators get it live off the file.* WS frame.
+  // On failure the own-write registration is withdrawn: leaving it standing
+  // would make the abandoned attempt resurface later as somebody else's.
   const applyTimingMode = useCallback(
-    async (mode: AudioTimingMode) => {
-      if (!project?.id || !activeFileId) return
+    async (mode: AudioTimingMode, forFileId: string) => {
+      if (!project?.id) return
       timingAck.noteOwnWrite(mode)
-      await emitFileTimingSet({
-        projectId: project.id,
-        fileId: activeFileId,
-        timingMode: mode,
-        author: currentUsername,
-      })
-      await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
-      refresh()
+      try {
+        await emitFileTimingSet({
+          projectId: project.id,
+          fileId: forFileId,
+          timingMode: mode,
+          author: currentUsername,
+        })
+        await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+        refresh()
+      } catch (e) {
+        timingAck.clearOwnWrite()
+        toast.error(
+          e instanceof Error ? `Couldn't change the timing mode: ${e.message}` : "Couldn't change the timing mode.",
+        )
+      }
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- timingAck.noteOwnWrite is stable (useCallback([]))
-    [project?.id, activeFileId, currentUsername, getTokenForProjectFile, refresh, timingAck.noteOwnWrite],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the ack callbacks are stable (useCallback([]))
+    [project?.id, currentUsername, getTokenForProjectFile, refresh, timingAck.noteOwnWrite, timingAck.clearOwnWrite],
   )
   const handleChangeTimingMode = useCallback(
     (mode: AudioTimingMode) => {
-      if (mode === "audioFirst" && activeFile?.coreMediaUrl) {
-        setTimingVideoWarnOpen(true)
+      if (!activeFileId) return
+      // The mode rides the outbox, so offline it would sit queued while the
+      // toolbar kept reading the old value — say so instead of half-doing it.
+      if (!navigator.onLine) {
+        toast.error("The timing mode can't be changed while offline.")
         return
       }
-      void applyTimingMode(mode)
+      if (mode === "audioFirst" && activeFile?.coreMediaUrl) {
+        // Bind the warning to the file it was raised for: the dialog can
+        // outlive the active file (history navigation is not blocked by the
+        // modal overlay), and confirming must never switch a different file.
+        setTimingVideoWarnFor(activeFileId)
+        return
+      }
+      void applyTimingMode(mode, activeFileId)
     },
-    [activeFile?.coreMediaUrl, applyTimingMode],
+    [activeFileId, activeFile?.coreMediaUrl, applyTimingMode],
   )
   // The transport speaks file seconds in dubbing and programme seconds in
   // audio-first, so it has to know which before anything seeks.
@@ -5771,7 +5792,11 @@ export function ProjectWorkspace() {
                     session={frontierSession ?? null}
                     audioByCellId={timelineAudioByCellId}
                     legacyMeasure={
-                      legacyMeasureCount > 0
+                      // Measuring emits contributor-level events, so a viewer
+                      // or reviewer must not even be offered it — the emit
+                      // would reject per take and the run would report a
+                      // success that saved nothing.
+                      legacyMeasureCount > 0 && !isReadOnly
                         ? { count: legacyMeasureCount, onMeasure: handleMeasureLegacy }
                         : undefined
                     }
@@ -6286,11 +6311,14 @@ export function ProjectWorkspace() {
       {/* Flow A (file-scoped): switching a video-bearing file to Free timing
           hides the video — confirm before the mode changes. */}
       <TimingVideoWarningDialog
-        open={timingVideoWarnOpen}
-        onCancel={() => setTimingVideoWarnOpen(false)}
+        // Only while the warned-about file is still the open one — navigating
+        // away answers the question by abandoning it.
+        open={timingVideoWarnFor != null && timingVideoWarnFor === activeFileId}
+        onCancel={() => setTimingVideoWarnFor(null)}
         onConfirm={() => {
-          setTimingVideoWarnOpen(false)
-          void applyTimingMode("audioFirst")
+          const target = timingVideoWarnFor
+          setTimingVideoWarnFor(null)
+          if (target) void applyTimingMode("audioFirst", target)
         }}
       />
       {/* FRO-272: "Recently deleted" trash list — opened from the sidebar's

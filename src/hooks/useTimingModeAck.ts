@@ -24,8 +24,15 @@
 //     modal.
 //   - The changer no longer leaves the workspace to make the change (the
 //     control is the timeline toolbar, not the Project Settings route), so
-//     own-write suppression must be explicit: `noteOwnWrite(mode)` stamps
-//     the new mode as already seen BEFORE the emit's refresh lands.
+//     own-write suppression must be explicit. `noteOwnWrite(mode)` records a
+//     PENDING INTENT rather than stamping the mode as seen: the hook simply
+//     stays quiet about that file until the intent resolves. Stamping
+//     outright was wrong — an own write that never lands (offline, so the
+//     event sits in the outbox; or a rejected one) would leave "seen" holding
+//     a mode the file never took, which is exactly the mismatch this hook
+//     reads as a remote change — and it would announce it backwards. The
+//     intent resolves when the observed mode matches it, and the caller
+//     clears it on failure.
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import type { AudioTimingMode } from "@/lib/parsers/types"
@@ -44,11 +51,17 @@ export function useTimingModeAck(args: {
   ack: TimingModeAck | null
   acknowledge(): void
   surfaceNow(): void
-  /** Own-write suppression: the local user changed the mode themselves. */
+  /** Own-write suppression: the local user is changing the mode themselves.
+   *  Stays pending — and keeps this file silent — until the change is
+   *  observed or the caller gives up on it. */
   noteOwnWrite(mode: AudioTimingMode): void
+  /** The own write failed or was abandoned: forget the intent and re-baseline
+   *  on whatever the file actually reads as now. */
+  clearOwnWrite(): void
 } {
   const { timingMode, fileId, eligible } = args
   const seenByFileRef = useRef<Map<string, AudioTimingMode>>(new Map())
+  const pendingOwnRef = useRef<Map<string, AudioTimingMode>>(new Map())
   const [ack, setAck] = useState<TimingModeAck | null>(null)
   const modeRef = useRef(timingMode)
   modeRef.current = timingMode
@@ -60,6 +73,16 @@ export function useTimingModeAck(args: {
       // No file on screen: nothing to compare, and any open modal about a
       // file that just went away is moot.
       if (ack) setAck(null)
+      return
+    }
+    // An own write is in flight for this file: say nothing about it. When the
+    // observed mode catches up, the intent resolves into the baseline.
+    const intent = pendingOwnRef.current.get(fileId)
+    if (intent != null) {
+      if (timingMode === intent) {
+        pendingOwnRef.current.delete(fileId)
+        seenByFileRef.current.set(fileId, timingMode)
+      }
       return
     }
     const seen = seenByFileRef.current.get(fileId) ?? null
@@ -85,20 +108,31 @@ export function useTimingModeAck(args: {
    *  waiting even though the recorder is still open. */
   const surfaceNow = useCallback(() => {
     if (fileRef.current == null) return
+    if (pendingOwnRef.current.has(fileRef.current)) return
     const seen = seenByFileRef.current.get(fileRef.current) ?? null
     if (seen != null && modeRef.current !== seen) {
       setAck((prev) => prev ?? { from: seen, to: modeRef.current })
     }
   }, [])
 
-  /** The local user changed the mode from the toolbar: stamp it as seen
-   *  immediately (synchronously, before the emit/refresh round-trip), so
-   *  their own change can never read as a remote one. */
+  /** The local user is changing the mode from the toolbar. Recorded as an
+   *  intent, not a fait accompli: until the file actually reads as `mode`,
+   *  this hook says nothing about it either way. */
   const noteOwnWrite = useCallback((mode: AudioTimingMode) => {
     if (fileRef.current == null) return
-    seenByFileRef.current.set(fileRef.current, mode)
+    pendingOwnRef.current.set(fileRef.current, mode)
     setAck(null)
   }, [])
 
-  return { ack, acknowledge, surfaceNow, noteOwnWrite }
+  /** The own write failed (or is never coming): drop the intent and treat
+   *  whatever the file reads as now as the baseline, so the abandoned attempt
+   *  can never surface as somebody else's change. */
+  const clearOwnWrite = useCallback(() => {
+    if (fileRef.current == null) return
+    pendingOwnRef.current.delete(fileRef.current)
+    seenByFileRef.current.set(fileRef.current, modeRef.current)
+    setAck(null)
+  }, [])
+
+  return { ack, acknowledge, surfaceNow, noteOwnWrite, clearOwnWrite }
 }

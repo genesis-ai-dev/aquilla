@@ -51,6 +51,7 @@ import {
   clearOptimisticShadows,
   injectOptimisticAudioAttachment,
   injectOptimisticAudioRemove,
+  notifyAudioAttachmentsChanged,
 } from "@/lib/audio/audio-attachments-bus"
 
 const LONG: AudioAttachmentOut = {
@@ -541,5 +542,75 @@ describe("optimistic overlay — plumbing", () => {
       }],
     ])
     expect(mergeCellsWithAudio(base, synced)[0].attachments?.[SHORT.audioId]?.pendingSync).toBeUndefined()
+  })
+})
+
+// Pre-merge round: the measure batch paints with claimSelection:false, and it
+// runs for minutes while the user keeps working. A metadata-only paint must
+// therefore be NON-DESTRUCTIVE — it cannot resurrect a take the user just
+// deleted, and it cannot demote a take they just selected.
+describe("non-claiming optimistic paint (duration measure backfill)", () => {
+  const measured = { ...SHORT, durationMs: 3210 }
+
+  it("does NOT resurrect a take with a delete already pending", async () => {
+    fetchMock.mockResolvedValue(serverLongSelected())
+    const { result } = mount()
+    await waitFor(() => expect(entryOf(result)?.attachments[SHORT.audioId]).toBeTruthy())
+
+    queued("evt-remove")
+    act(() => injectOptimisticAudioRemove("f1", "c1", SHORT.audioId, "recording", "evt-remove"))
+    expect(entryOf(result)?.attachments[SHORT.audioId]).toBeUndefined()
+
+    // The batch reaches this take: its bytes are still fetchable (the delete
+    // is a soft one), so it measures and paints. The delete must win.
+    queued("evt-measure")
+    act(() =>
+      injectOptimisticAudioAttachment("f1", "c1", measured, "evt-measure", { claimSelection: false }),
+    )
+    expect(entryOf(result)?.attachments[SHORT.audioId]).toBeUndefined()
+  })
+
+  it("does NOT steal the selection from a take picked mid-batch", async () => {
+    fetchMock.mockResolvedValue(serverLongSelected())
+    const { result } = mount()
+    await waitFor(() => expect(entryOf(result)?.selectedAudioId).toBe(LONG.audioId))
+
+    // The user picks SHORT while the batch runs.
+    queued("evt-select")
+    act(() => injectOptimisticAudioAttachment("f1", "c1", SHORT, "evt-select"))
+    expect(entryOf(result)?.selectedAudioId).toBe(SHORT.audioId)
+
+    // The batch measures that same take. It must keep the claim AND gain the
+    // duration — a replacement shadow would have dropped the selection back
+    // to the server's stale value.
+    queued("evt-measure")
+    act(() =>
+      injectOptimisticAudioAttachment("f1", "c1", measured, "evt-measure", { claimSelection: false }),
+    )
+    // The damage only shows on the next READ: shadows are re-applied from the
+    // server base in order, so a claim lost at inject time surfaces here. The
+    // select is still queued, so its claim must still be governing.
+    act(() => notifyAudioAttachmentsChanged("f1"))
+    await waitFor(() => expect(entryOf(result)?.attachments[SHORT.audioId]?.durationMs).toBe(3210))
+    expect(entryOf(result)?.selectedAudioId).toBe(SHORT.audioId)
+  })
+
+  it("keeps a mid-batch trim rather than repainting the pre-batch geometry", async () => {
+    fetchMock.mockResolvedValue(serverLongSelected())
+    const { result } = mount()
+    await waitFor(() => expect(entryOf(result)?.attachments[SHORT.audioId]).toBeTruthy())
+
+    queued("evt-trim")
+    act(() =>
+      injectOptimisticAudioAttachment("f1", "c1", { ...SHORT, trimStartMs: 500, trimEndMs: 1500 }, "evt-trim"),
+    )
+    queued("evt-measure")
+    act(() =>
+      injectOptimisticAudioAttachment("f1", "c1", measured, "evt-measure", { claimSelection: false }),
+    )
+    const painted = entryOf(result)?.attachments[SHORT.audioId]
+    expect(painted?.trimStartMs).toBe(500)
+    expect(painted?.trimEndMs).toBe(1500)
+    expect(painted?.durationMs).toBe(3210)
   })
 })

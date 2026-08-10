@@ -211,8 +211,17 @@ function withoutViewFlags(att: AudioAttachmentOut): AudioAttachmentOut {
  *
  * `opts.claimSelection: false` paints the attachment's data without touching
  * which take is active — for metadata-only updates (the duration measure
- * backfill), where promoting an arbitrary take would be a real bug. A
- * non-claiming inject also leaves every other shadow's claim alone.
+ * backfill), where promoting an arbitrary take would be a real bug.
+ *
+ * A non-claiming inject is also deliberately NON-DESTRUCTIVE, because it can
+ * land in the middle of a long batch while the user is doing things:
+ *   - it never cancels a pending DELETE of the same clip (a metadata write is
+ *     no reason to resurrect a take the user just removed);
+ *   - it never supersedes a live intent for the same clip — it stamps its
+ *     fields onto that intent instead, so a selection or trim made mid-batch
+ *     keeps its claim and its own values.
+ * A claiming inject keeps the original supersede-outright semantics: it
+ * represents a NEW user intent, which really should win.
  */
 export function injectOptimisticAudioAttachment(
   fileId: string,
@@ -225,6 +234,23 @@ export function injectOptimisticAudioAttachment(
   const attachment = withoutViewFlags(incoming)
   const byCell = cellMap(fileId)
   const list = byCell.get(cellId) ?? []
+
+  if (!claimSelection) {
+    // The user's delete outranks a metadata write — drop this paint entirely.
+    if (list.some((s) => s.kind === "remove" && s.audioId === attachment.audioId)) return
+    const live = list.find(
+      (s) => s.kind === "attach" && s.att.audioId === attachment.audioId && s.att.slot === attachment.slot,
+    )
+    if (live && live.kind === "attach") {
+      // Merge onto the live intent: keep ITS values (a mid-batch trim/select),
+      // take only the measured duration this inject exists to deliver.
+      live.att = { ...live.att, durationMs: attachment.durationMs }
+      attachEventBinding(fileId, live, eventId)
+      broadcast(fileId, cellId, live)
+      return
+    }
+  }
+
   const kept = list.filter(
     (s) =>
       // Same clip + slot: this injection supersedes the older one outright.

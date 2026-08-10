@@ -144,17 +144,3 @@ export function parseObsStories(markdown: string, fileName?: string): Translatab
 
   return frames
 }
-
-/**
- * Multi-file convenience: parse several OBS story markdown files into one flat
- * list of frame cells, in the given order. Used by the door43 import path.
- */
-export function parseObsStoriesMulti(
-  files: Array<{ name: string; content: string }>,
-): TranslatableString[] {
-  const out: TranslatableString[] = []
-  for (const file of files) {
-    out.push(...parseObsStories(file.content, file.name))
-  }
-  return out
-}

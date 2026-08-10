@@ -78,8 +78,7 @@ import { useCellLabelsPreference } from "@/hooks/useCellLabelsPreference"
 import { useProjectPermissions } from "@/hooks/useProjectPermissions"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { eagerlyPrefetchPeaks } from "@/lib/audio/eager-peaks"
-import { runTranscribeAll as runBatchTranscribeAll, runSynthAll as runBatchSynthAll, needsTranscription, needsSynthesis, isSourceSegmentSelected } from "@/lib/audio/batch-audio"
-import { transcribeCell } from "@/lib/audio/transcribe"
+import { runTranscribeAll as runBatchTranscribeAll, runSynthAll as runBatchSynthAll, needsTranscription, needsSynthesis } from "@/lib/audio/batch-audio"
 import { injectOptimisticAudioAttachment, notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
 import { useOutbox } from "@/context/OutboxContext"
 import { useReconcileOnDrain } from "@/hooks/useReconcileOnDrain"
@@ -91,7 +90,7 @@ import {
 import { emitTargetCellCommit, emitCellBacktranslationSet, emitFileRename, emitFileDelete, emitFileRestore, emitCellValidate, emitCellRetime, emitCellLaneRetime, emitCellAudioAttach, emitFileVideoSet } from "@/lib/sync/events-emit"
 import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
 import { isBulkValidationEligible } from "@/lib/review/review-eligibility"
-import { TimelineEditor, type TimelineDetailActions } from "@/components/timeline/TimelineEditor"
+import { TimelineEditor } from "@/components/timeline/TimelineEditor"
 import { applyPresenceFrame, applyLockClaimed, applyLockReleased } from "@/lib/sync/cell-lock-state"
 import { canPerform, canOpenAssignUi } from "@/lib/sync/role-policy"
 import { useFocusLock } from "@/hooks/useFocusLock"
@@ -1261,9 +1260,34 @@ export function ProjectWorkspace() {
     () => (project ? { ...project, ttsSettings: tts.settings } : null),
     [project, tts.settings],
   )
+  // 2026-08-07: on a TIME-ORDERED file the Media lens stacks the timeline over
+  // the plain text table — audioLens (the per-row voice-panel mode) applies
+  // only to sequence-ordered voice-over files now. With it null, useCellIds
+  // serves the full time-sorted list (text mode) under the timeline.
+  const activeFileForLens = activeFileId ? project?.files.find((f) => f.id === activeFileId) : null
+  const activeFileTimeOrdered = Boolean(activeFileForLens && fileOrderedBy(activeFileForLens) === "time")
+  /** Media lens on a time-ordered file = the timeline STACKED over the always-
+   *  rendered text table (one EditorTable instance across both lenses — the
+   *  imperative ref, selection singleton, and presence claims stay single). */
+  const timelineStacked = lens === "audio" && activeFileTimeOrdered
+  // 2026-08-07 (wire b): a text-table row click points the timeline at that
+  // cell. Nonce'd so repeat clicks on the same row re-center; the callback is
+  // identity-stable (mirror ref) because it rides in editorActionsValue.
+  const [timelineActivateRequest, setTimelineActivateRequest] = useState<{ cellId: string; nonce: number } | null>(null)
+  const timelineStackedRef = useRef(timelineStacked)
+  timelineStackedRef.current = timelineStacked
+  const activateNonceRef = useRef(0)
+  const handleMediaRowActivate = useCallback((cellId: string) => {
+    if (!timelineStackedRef.current) return
+    activateNonceRef.current += 1
+    setTimelineActivateRequest({ cellId, nonce: activateNonceRef.current })
+    // 2026-08-08: pointing playback somewhere is "watch this" — re-engage the
+    // table's playback follow even if an earlier scroll had released it.
+    editorRef.current?.setMediaFollow?.("engage")
+  }, [])
   const audioLens = useMemo<AudioLensContext | null>(
     () =>
-      lens === "audio" && audioProject
+      lens === "audio" && audioProject && !activeFileTimeOrdered
         ? {
             voices: tts.voices,
             settings: tts.settings,
@@ -1299,8 +1323,8 @@ export function ProjectWorkspace() {
           }
         : null,
     [
-      lens, audioProject, tts.voices, tts.settings, tts.defaultVoiceId, tts.assignCells,
-      frontierSession, currentUsername, cellStore, refresh,
+      lens, audioProject, activeFileTimeOrdered, tts.voices, tts.settings, tts.defaultVoiceId,
+      tts.assignCells, frontierSession, currentUsername, cellStore, refresh,
     ],
   )
 
@@ -1609,9 +1633,10 @@ export function ProjectWorkspace() {
     [project?.id, activeFileId, currentUsername, getActiveCells, getTokenForProjectFile],
   )
 
-  // Round 6 (SUB-38): assign a voice/character from a source card's picker.
-  // PURE assignment (no auto-synthesis — generation stays an explicit act);
-  // the apply-to-speaker option covers every line sharing the diarized name.
+  // Round 6 (SUB-38), re-homed 2026-08-07: assign a voice/character from the
+  // gutter's picker. PURE assignment (no auto-synthesis — generation stays an
+  // explicit act); apply-to-speaker covers every line sharing the diarized
+  // name. Ref-wrapped below so the context value stays identity-stable.
   const handleTimelineAssignVoice = useCallback(
     (cell: CellData, voiceId: string, opts?: { applyToSpeaker?: boolean }) => {
       const castName =
@@ -1626,6 +1651,13 @@ export function ProjectWorkspace() {
       tts.assignCells([cell.id], voiceId)
     },
     [tts, getActiveCells],
+  )
+  const timelineAssignVoiceRef = useRef(handleTimelineAssignVoice)
+  timelineAssignVoiceRef.current = handleTimelineAssignVoice
+  const handleAssignCastVoice = useCallback(
+    (cell: CellData, voiceId: string, opts?: { applyToSpeaker?: boolean }) =>
+      timelineAssignVoiceRef.current(cell, voiceId, opts),
+    [],
   )
 
   // Round 6: move a section's dub chip → target_start_ms (the clip-zero
@@ -1648,46 +1680,6 @@ export function ProjectWorkspace() {
       revalidateCells()
     },
     [project?.id, activeFileId, currentUsername, applyOptimisticCellTiming, getTokenForProjectFile, revalidateCells],
-  )
-
-  // Timeline editor detail pane: commit a target edit (same path as the table).
-  const handleTimelineCommitTarget = useCallback(
-    async (cellId: string, value: string, valueHtml?: string) => {
-      if (!project?.id) return
-      const cell = cellStore.getCellView(cellId)
-      if (!cell) return
-      // AQU-659: carry the rich-text form so media-pane edits persist
-      // identically to the main table (footnotes, marks, violation blots).
-      applyOptimisticTargetEdit(cellId, valueHtml !== undefined ? { value, valueHtml } : { value })
-      const parentId = resolveTargetCommitParentId(cell)
-      const eventId = await emitTargetCellCommit({
-        projectId: project.id,
-        fileId: cell.fileId,
-        cellId,
-        parentId,
-        sourceEventId: cell.sourceEventId ?? null,
-        value,
-        ...(valueHtml !== undefined ? { valueHtml } : {}),
-        author: currentUsername,
-        targetLang: activeLane, // AQU-538: '' omitted on the wire by the emit
-      })
-      rememberPendingTargetCommit(cellId, eventId, parentId)
-      await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
-      await refreshOutboxPending()
-      revalidateCell(cellId)
-    },
-    [
-      project?.id,
-      cellStore,
-      applyOptimisticTargetEdit,
-      currentUsername,
-      activeLane,
-      resolveTargetCommitParentId,
-      rememberPendingTargetCommit,
-      getTokenForProjectFile,
-      refreshOutboxPending,
-      revalidateCell,
-    ],
   )
 
   // Timeline editor: set/clear the file's core video URL (preview master clock).
@@ -2815,6 +2807,18 @@ export function ProjectWorkspace() {
   const jumpToCellId = useCallback((cellId: string) => {
     editorRef.current?.scrollToCellId(cellId, { flash: true })
   }, [])
+  // 2026-08-08 (wire a): a chip click is "watch this" — same jump, but it
+  // ENGAGES the playback follow instead of the inspection default (release).
+  const jumpToCellIdFollowing = useCallback((cellId: string) => {
+    editorRef.current?.scrollToCellId(cellId, { flash: true, follow: "engage" })
+  }, [])
+  // The bottom bar's per-advance jump: startQueue captures this ONCE, but the
+  // lens can change mid-run — so the "driver owns follow while stacked" gate
+  // must be evaluated per call (ref), not baked in at render time.
+  const handleBarActiveCell = useCallback((cellId: string) => {
+    if (timelineStackedRef.current) return
+    editorRef.current?.scrollToCellId(cellId, { flash: true })
+  }, [])
 
   // ── AQU-646 round 3: two-way cell tracing across the Text/Media switch ────
   // timelineSelectedCellIdRef mirrors TimelineEditor's local selection (a ref,
@@ -3556,37 +3560,10 @@ export function ProjectWorkspace() {
     onOpenHistory: handleOpenHistory,
     onAiSetupNeeded: handleAiSetupNeeded,
     onOpenRecording: handleOpenRecording,
+    onMediaRowActivate: handleMediaRowActivate, // 2026-08-07: row click → timeline (stacked lens only)
+    onAssignCastVoice: handleAssignCastVoice, // 2026-08-07: gutter picker (pure assignment)
     myScopes, // AQU-633: per-cell validate scope gate
-  }), [handleInfractionClick, handleOpenComments, handleOpenHistory, handleAiSetupNeeded, handleOpenRecording, myScopes])
-
-  // AQU-646 round 3: the media detail pane's action bundle — the same
-  // handlers/state the text rail uses, grouped as one prop instead of ten.
-  // Identity changes as completions stream; the timeline subtree is small and
-  // un-memoized, so that's fine.
-  const timelineDetailActions = useMemo<TimelineDetailActions | null>(() => project ? {
-    isCompletionConfigured: isConfigured,
-    isCompletionAvailable,
-    isAnonymous: !frontierSession,
-    completing,
-    previews,
-    errors,
-    onCompleteSingle: handleCompleteSingle,
-    onAiSetupNeeded: handleAiSetupNeeded,
-    onOpenComments: handleOpenComments,
-    onOpenHistory: handleOpenHistory,
-    onOpenRecording: handleOpenRecording,
-    openCommentCounts: liveCellOpenCommentCount,
-    projectId: project.id,
-    sourceLanguage: project.sourceLanguage,
-    targetLanguage: project.targetLanguage,
-    // Round 8: the pane's voice picker reads the LIVE tts settings (cast
-    // assignments update through tts.settings, not the project snapshot).
-    projectTtsSettings: tts.settings,
-    username: currentUsername,
-    onAssignVoice: handleTimelineAssignVoice,
-  } : null, [project, isConfigured, isCompletionAvailable, frontierSession, completing, previews, errors,
-    handleCompleteSingle, handleAiSetupNeeded, handleOpenComments, handleOpenHistory,
-    handleOpenRecording, liveCellOpenCommentCount, tts.settings, handleTimelineAssignVoice, currentUsername])
+  }), [handleInfractionClick, handleOpenComments, handleOpenHistory, handleAiSetupNeeded, handleOpenRecording, handleMediaRowActivate, handleAssignCastVoice, myScopes])
 
   const handleAssignVoice = useCallback(async (cellId: string, voiceId: string) => {
     if (!audioProject || !frontierSession) return
@@ -5689,51 +5666,45 @@ export function ProjectWorkspace() {
                 onSetupNeeded={handleAiSetupNeeded}
               />
             )}
-            {activeFileId && lens === "audio" && activeFile && fileOrderedBy(activeFile) === "time" ? (
+            {timelineStacked ? (
               <div className="relative flex shrink-0 items-center justify-end gap-3 border-b border-border bg-background/90 py-2 pl-2 pr-2 backdrop-blur-xl">
                 {fileChapterToolbar}
               </div>
             ) : null}
             <div className="min-h-0 flex-1">
-              {lens === "audio" && activeFile && fileOrderedBy(activeFile) === "time" ? (
-                <TimelineEditor
-                  cells={audioMergedCells}
-                  detailActions={timelineDetailActions ?? undefined}
-                  initialSelectedCellId={mediaTraceCellId}
-                  onSelectedCellChange={handleTimelineSelectedCell}
-                  coreMediaUrl={activeFile.coreMediaUrl ?? null}
-                  editable={!isReadOnly}
-                  fileId={activeFile.id}
-                  onRetimeSubtitle={handleRetimeSubtitle}
-                  onRetimeTarget={handleRetimeTarget}
-                  onTrimTarget={handleTrimTarget}
-                  onTogglePlay={handleTimelineTogglePlay}
-                  onCommitTarget={handleTimelineCommitTarget}
-                  onLinkVideo={handleLinkVideo}
-                  onSeekToTime={handleTimelineSeekToTime}
-                  timingMode={timingMode}
-                  onOpenTimingSettings={() => navigate(`/project/${projectId}/settings/audio-media`)}
-                  // AQU-646/SUB-29: transcribe from the detail pane — language by
-                  // attachment provenance (source segment → source language;
-                  // a dub take on a media cell → target language).
-                  onTranscribe={(cell) => {
-                    if (!project) return
-                    void transcribeCell({
-                      cell,
-                      session: frontierSession ?? null,
-                      projectId: project.id,
-                      language: isSourceSegmentSelected(cell) ? project.sourceLanguage : project.targetLanguage,
-                    })
-                  }}
-                  project={editorProject ?? project ?? undefined}
-                  terminologyConcepts={(editorProject ?? project)?.terminology ?? []}
-                  infractions={infractions}
-                  onSelectCell={setTimelineSelectedCellId}
-                  session={frontierSession ?? null}
-                  audioByCellId={timelineAudioByCellId}
-                />
-              ) : (
+              {/* 2026-08-07: ONE EditorTable across both lenses; the media lens
+                  stacks the timeline above it. The provider wraps both so the
+                  table's row actions work identically in either position. */}
               <EditorActionsProvider value={editorActionsValue}>
+              <div className="flex h-full min-h-0 flex-col">
+              {timelineStacked && activeFile ? (
+                <div className="shrink-0">
+                  <TimelineEditor
+                    cells={audioMergedCells}
+                    initialSelectedCellId={mediaTraceCellId}
+                    onSelectedCellChange={handleTimelineSelectedCell}
+                    onChipActivated={jumpToCellIdFollowing}
+                    activateRequest={timelineActivateRequest}
+                    coreMediaUrl={activeFile.coreMediaUrl ?? null}
+                    editable={!isReadOnly}
+                    fileId={activeFile.id}
+                    onRetimeSubtitle={handleRetimeSubtitle}
+                    onRetimeTarget={handleRetimeTarget}
+                    onTrimTarget={handleTrimTarget}
+                    onTogglePlay={handleTimelineTogglePlay}
+                    onLinkVideo={handleLinkVideo}
+                    onSeekToTime={handleTimelineSeekToTime}
+                    timingMode={timingMode}
+                    onOpenTimingSettings={() => navigate(`/project/${projectId}/settings/audio-media`)}
+                    onOpenRecording={handleOpenRecording}
+                    project={editorProject ?? project ?? undefined}
+                    onSelectCell={setTimelineSelectedCellId}
+                    session={frontierSession ?? null}
+                    audioByCellId={timelineAudioByCellId}
+                  />
+                </div>
+              ) : null}
+              <div className="min-h-0 flex-1">
               <EditorTable
             ref={editorRef} project={editorProject ?? project} cellStore={cellStore}
             fileType={activeFile?.type}
@@ -5781,6 +5752,8 @@ export function ProjectWorkspace() {
             isAnonymous={!frontierSession}
             onJumpToCell={jumpToCellId}
             audioLens={audioLens}
+            castGutter={timelineStacked}
+            ttsSettings={tts.settings}
             orderedBy={activeFile ? fileOrderedBy(activeFile) : undefined}
             onOpenAudioSetup={openAudioSetup}
             onAssignVoice={handleAssignVoice}
@@ -5805,10 +5778,13 @@ export function ProjectWorkspace() {
             upstreamStaleCellIds={upstreamStaleCellIds}
             assignmentsByCellId={assignmentsByCellId}
             onVisibleRefChange={setTrackedCellRef}
-            chapterNavTrailing={fileChapterToolbar ?? undefined}
+            // Stacked mode already shows the toolbar in the media header row
+            // above the timeline — don't render it twice.
+            chapterNavTrailing={timelineStacked ? undefined : fileChapterToolbar ?? undefined}
           />
+              </div>
+              </div>
               </EditorActionsProvider>
-              )}
             </div>
             {footnoteViewMode === "tray" && (
               <FootnotesTray
@@ -5958,7 +5934,7 @@ export function ProjectWorkspace() {
                   projectId={project.id}
                   session={frontierSession ?? null}
                   settings={tts.settings}
-                  onActiveCell={jumpToCellId}
+                  onActiveCell={handleBarActiveCell}
                   startCellId={timelineSelectedCellId}
                   below={
                     <>

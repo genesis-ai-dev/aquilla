@@ -41,15 +41,6 @@ vi.mock("@/lib/audio/audio-coordinator", () => ({
     return Boolean(el && typeof el.tagName === "string" && (el.tagName === "INPUT" || el.tagName === "TEXTAREA"))
   },
 }))
-// The detail pane's audio components need session/query providers — out of
-// scope here (covered by TimelineCellDetail.test.tsx with the same mocks).
-vi.mock("@/components/CellTtsButton", () => ({
-  CellTtsButton: () => <button type="button" data-testid="mock-tts" />,
-}))
-vi.mock("@/components/CellAudioUploadButton", () => ({
-  CellAudioUploadButton: () => <button type="button" data-testid="mock-upload" />,
-}))
-
 const cell = (o: Partial<CellData>): CellData =>
   ({ fileId: "f1", original: "", translated: "", ...o }) as unknown as CellData
 
@@ -57,7 +48,7 @@ describe("TimelineEditor", () => {
   // The timeline is the innermost shortcut claimant unless a test says otherwise.
   beforeEach(() => { topOwner.value = 1 })
 
-  it("renders subtitle + dialogue lanes and an untimed chip; selecting a card fills the detail pane", () => {
+  it("renders subtitle + dialogue lanes and an untimed chip; selecting a card fills the chip strip", () => {
     render(
       <TimelineEditor
         fileId="f1"
@@ -69,17 +60,17 @@ describe("TimelineEditor", () => {
           cell({ id: "u1", original: "Untimed line", medium: "text" }), // no timing
         ]}
         onRetimeSubtitle={() => {}}
-        onCommitTarget={() => {}}
+       
       />,
     )
     expect(document.querySelector('[data-variant="subtitle"]')).toBeTruthy()
     expect(document.querySelector('[data-variant="dialogue"]')).toBeTruthy()
     expect(screen.getByTestId("tl-untimed-u1")).toBeInTheDocument()
 
-    // Detail pane is empty until something is selected.
+    // The chip strip is empty until something is selected.
     expect(screen.getByTestId("tl-detail-empty")).toBeInTheDocument()
     fireEvent.click(screen.getByTestId("tl-card-d1"))
-    expect(screen.getByTestId("tl-detail-source")).toHaveTextContent("Dia line")
+    expect(screen.getByTestId("tl-detail")).toHaveAttribute("data-cell-id", "d1")
   })
 
   it("zoom-in widens the cards", () => {
@@ -94,7 +85,7 @@ describe("TimelineEditor", () => {
         editable
         cells={[cell({ id: "d1", original: "x", medium: "media", startTime: 0, endTime: 2 })]}
         onRetimeSubtitle={() => {}}
-        onCommitTarget={() => {}}
+       
       />,
     )
     const before = parseFloat(screen.getByTestId("tl-card-d1").style.width)
@@ -113,7 +104,7 @@ describe("TimelineEditor", () => {
         editable
         cells={[cell({ id: "d1", original: "x", medium: "media", startTime: 0, endTime: 2 })]}
         onRetimeSubtitle={() => {}}
-        onCommitTarget={() => {}}
+       
       />,
     )
     const scroll = screen.getByTestId("tl-scroll")
@@ -148,7 +139,7 @@ describe("TimelineEditor", () => {
 
   it("shows the video preview only when a core media url is linked", () => {
     const { rerender } = render(
-      <TimelineEditor fileId="f2" coreMediaUrl={null} editable cells={[]} onRetimeSubtitle={() => {}} onCommitTarget={() => {}} />,
+      <TimelineEditor fileId="f2" coreMediaUrl={null} editable cells={[]} onRetimeSubtitle={() => {}} />,
     )
     expect(screen.queryByTestId("tl-video")).toBeNull()
     rerender(
@@ -158,7 +149,7 @@ describe("TimelineEditor", () => {
         editable
         cells={[]}
         onRetimeSubtitle={() => {}}
-        onCommitTarget={() => {}}
+       
       />,
     )
     expect(screen.getByTestId("tl-video")).toBeInTheDocument()
@@ -176,7 +167,7 @@ describe("TimelineEditor", () => {
     mockProgress = { currentTime: 12, duration: 20, rate: 1, volume: 1 }
     try {
       render(
-        <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} onCommitTarget={() => {}} />,
+        <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} />,
       )
       const playhead = screen.getByTestId("tl-playhead")
       // 12s at the default 38 px/s zoom.
@@ -192,26 +183,28 @@ describe("TimelineEditor", () => {
     mockProgress = { currentTime: 12, duration: 20, rate: 1, volume: 1 }
     try {
       render(
-        <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} onCommitTarget={() => {}} />,
+        <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} />,
       )
       expect(parseFloat(screen.getByTestId("tl-playhead").style.left)).toBe(0)
+      // …and the strip never fills from a foreign file's queue either.
+      expect(screen.getByTestId("tl-detail-empty")).toBeInTheDocument()
     } finally {
       mockQueueState = { kind: "idle" }
       mockProgress = { currentTime: 0, duration: 0, rate: 1, volume: 1 }
     }
   })
 
-  it("a clean card click seeks playback to the clip start AND opens the detail pane", () => {
+  it("a clean card click seeks playback to the clip start AND fills the chip strip", () => {
     const onSeekToTime = vi.fn()
     render(
       <TimelineEditor
         fileId="f1" coreMediaUrl={null} editable cells={mediaCells}
-        onRetimeSubtitle={() => {}} onCommitTarget={() => {}} onSeekToTime={onSeekToTime}
+        onRetimeSubtitle={() => {}} onSeekToTime={onSeekToTime}
       />,
     )
     fireEvent.click(screen.getByTestId("tl-card-m2"))
     expect(onSeekToTime).toHaveBeenCalledWith(10)
-    expect(screen.getByTestId("tl-detail-source")).toHaveTextContent("Two")
+    expect(screen.getByTestId("tl-detail")).toHaveAttribute("data-cell-id", "m2")
   })
 
   it("an untimed chip selects but never seeks", () => {
@@ -220,12 +213,12 @@ describe("TimelineEditor", () => {
       <TimelineEditor
         fileId="f1" coreMediaUrl={null} editable
         cells={[...mediaCells, cell({ id: "u1", original: "Untimed", medium: "text" })]}
-        onRetimeSubtitle={() => {}} onCommitTarget={() => {}} onSeekToTime={onSeekToTime}
+        onRetimeSubtitle={() => {}} onSeekToTime={onSeekToTime}
       />,
     )
     fireEvent.click(screen.getByTestId("tl-untimed-u1"))
     expect(onSeekToTime).not.toHaveBeenCalled()
-    expect(screen.getByTestId("tl-detail-source")).toHaveTextContent("Untimed")
+    expect(screen.getByTestId("tl-detail")).toHaveAttribute("data-cell-id", "u1")
   })
 
   // ── Round 7 (SUB-44): transport keys ──
@@ -235,7 +228,7 @@ describe("TimelineEditor", () => {
     render(
       <TimelineEditor
         fileId="f1" coreMediaUrl={null} editable cells={mediaCells}
-        onRetimeSubtitle={() => {}} onCommitTarget={() => {}} onTogglePlay={onTogglePlay}
+        onRetimeSubtitle={() => {}} onTogglePlay={onTogglePlay}
       />,
     )
     fireEvent.keyDown(document.body, { key: " " })
@@ -256,7 +249,7 @@ describe("TimelineEditor", () => {
     render(
       <TimelineEditor
         fileId="f1" coreMediaUrl={null} editable cells={mediaCells}
-        onRetimeSubtitle={() => {}} onCommitTarget={() => {}} onTogglePlay={onTogglePlay}
+        onRetimeSubtitle={() => {}} onTogglePlay={onTogglePlay}
       />,
     )
     fireEvent.keyDown(document.body, { key: " " })
@@ -276,7 +269,7 @@ describe("TimelineEditor", () => {
     render(
       <TimelineEditor
         fileId="f1" coreMediaUrl={null} editable cells={mediaCells}
-        onRetimeSubtitle={() => {}} onCommitTarget={() => {}} onSeekToTime={onSeekToTime}
+        onRetimeSubtitle={() => {}} onSeekToTime={onSeekToTime}
       />,
     )
     fireEvent.keyDown(document.body, { key: "Enter", metaKey: true })
@@ -287,7 +280,7 @@ describe("TimelineEditor", () => {
     pushOverride.mockClear()
     releaseOverride.mockClear()
     const { unmount } = render(
-      <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} onCommitTarget={() => {}} />,
+      <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} />,
     )
     expect(pushOverride).toHaveBeenCalled()
     unmount()
@@ -297,7 +290,7 @@ describe("TimelineEditor", () => {
   it("round 6: the snap magnet is on by default, toggles, and persists globally", () => {
     localStorage.removeItem("codex:timelineSnap")
     render(
-      <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} onCommitTarget={() => {}} />,
+      <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} />,
     )
     const btn = screen.getByTestId("tl-snap-toggle")
     expect(btn).toHaveAttribute("aria-pressed", "true")
@@ -309,7 +302,7 @@ describe("TimelineEditor", () => {
 
   it("renders the follow toggle, pressed by default, and it toggles", () => {
     render(
-      <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} onCommitTarget={() => {}} />,
+      <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} />,
     )
     const btn = screen.getByLabelText("Follow playhead")
     expect(btn).toHaveAttribute("aria-pressed", "true")
@@ -319,16 +312,16 @@ describe("TimelineEditor", () => {
 
   // ── AQU-646 round 3: text→media trace seed + media→text selection mirror ──
 
-  it("initialSelectedCellId opens the detail pane and cues playback at the clip start", () => {
+  it("initialSelectedCellId fills the chip strip and cues playback at the clip start", () => {
     const onSeekToTime = vi.fn()
     render(
       <TimelineEditor
         fileId="f1" coreMediaUrl={null} editable cells={mediaCells}
-        onRetimeSubtitle={() => {}} onCommitTarget={() => {}}
+        onRetimeSubtitle={() => {}}
         onSeekToTime={onSeekToTime} initialSelectedCellId="m2"
       />,
     )
-    expect(screen.getByTestId("tl-detail-source")).toHaveTextContent("Two")
+    expect(screen.getByTestId("tl-detail")).toHaveAttribute("data-cell-id", "m2")
     expect(onSeekToTime).toHaveBeenCalledWith(10)
   })
 
@@ -337,7 +330,7 @@ describe("TimelineEditor", () => {
     render(
       <TimelineEditor
         fileId="f1" coreMediaUrl={null} editable cells={mediaCells}
-        onRetimeSubtitle={() => {}} onCommitTarget={() => {}}
+        onRetimeSubtitle={() => {}}
         initialSelectedCellId="m1" onSelectedCellChange={onSelectedCellChange}
       />,
     )
@@ -376,14 +369,14 @@ describe("TimelineEditor", () => {
 
   it("SUB-37: the Untimed row exists only when something is untimed", () => {
     const { rerender } = render(
-      <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} onCommitTarget={() => {}} />,
+      <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} />,
     )
     expect(screen.queryByText("Untimed")).toBeNull()
     rerender(
       <TimelineEditor
         fileId="f1" coreMediaUrl={null} editable
         cells={[...mediaCells, cell({ id: "u9", original: "Loose line", medium: "text" })]}
-        onRetimeSubtitle={() => {}} onCommitTarget={() => {}}
+        onRetimeSubtitle={() => {}}
       />,
     )
     expect(screen.getByText("Untimed")).toBeInTheDocument()
@@ -392,7 +385,7 @@ describe("TimelineEditor", () => {
 
   it("renames the lane headers to Subtitles / Source audio / Target audio", () => {
     render(
-      <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} onCommitTarget={() => {}} />,
+      <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} />,
     )
     expect(screen.getByText("Subtitles")).toBeInTheDocument()
     expect(screen.getByText("Source audio")).toBeInTheDocument()
@@ -401,7 +394,7 @@ describe("TimelineEditor", () => {
 
   it("shows a Target-track chip only for sections with dub audio, kinded and positioned at the section", () => {
     render(
-      <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={dubbedCells} onRetimeSubtitle={() => {}} onCommitTarget={() => {}} />,
+      <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={dubbedCells} onRetimeSubtitle={() => {}} />,
     )
     // m1 has only the source clip — no chip.
     expect(screen.queryByTestId("tl-target-m1")).toBeNull()
@@ -419,19 +412,19 @@ describe("TimelineEditor", () => {
     render(
       <TimelineEditor
         fileId="f1" coreMediaUrl={null} editable cells={dubbedCells}
-        onRetimeSubtitle={() => {}} onCommitTarget={() => {}} onSeekToTime={onSeekToTime}
+        onRetimeSubtitle={() => {}} onSeekToTime={onSeekToTime}
       />,
     )
     fireEvent.click(screen.getByTestId("tl-target-m2"))
     expect(onSeekToTime).toHaveBeenCalledWith(10)
-    expect(screen.getByTestId("tl-detail-source")).toHaveTextContent("Two")
+    expect(screen.getByTestId("tl-detail")).toHaveAttribute("data-cell-id", "m2")
   })
 
   it("speaker buttons start audible, push audibility into the queue, toggle, and persist per file", () => {
     localStorage.removeItem("codex:timelineAudibility:spkfile")
     lastAudibility = null
     render(
-      <TimelineEditor fileId="spkfile" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} onCommitTarget={() => {}} />,
+      <TimelineEditor fileId="spkfile" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} />,
     )
     // Mount pushes the default (both audible).
     expect(lastAudibility).toEqual({ source: true, target: true })
@@ -453,28 +446,227 @@ describe("TimelineEditor", () => {
     localStorage.setItem("codex:timelineAudibility:persistfile", JSON.stringify({ source: false, target: true }))
     lastAudibility = null
     render(
-      <TimelineEditor fileId="persistfile" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} onCommitTarget={() => {}} />,
+      <TimelineEditor fileId="persistfile" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} />,
     )
     expect(screen.getByTestId("tl-speaker-source")).toHaveAttribute("aria-pressed", "false")
     expect(lastAudibility).toEqual({ source: false, target: true })
   })
 
-  it("passes detailActions through to the detail pane", () => {
+  // ── 2026-08-07: the chip strip follows the CURRENT chip, not just clicks ──
+
+  it("with nothing selected, the strip follows the cell the queue is sounding", () => {
+    mockQueueState = { kind: "playing", cellIndex: 1, cellId: "m2" }
+    try {
+      render(
+        <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} />,
+      )
+      expect(screen.getByTestId("tl-detail")).toHaveAttribute("data-cell-id", "m2")
+    } finally {
+      mockQueueState = { kind: "idle" }
+    }
+  })
+
+  it("an explicit selection beats the sounding cell", () => {
+    mockQueueState = { kind: "playing", cellIndex: 1, cellId: "m2" }
+    try {
+      render(
+        <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} />,
+      )
+      fireEvent.click(screen.getByTestId("tl-card-m1"))
+      expect(screen.getByTestId("tl-detail")).toHaveAttribute("data-cell-id", "m1")
+    } finally {
+      mockQueueState = { kind: "idle" }
+    }
+  })
+
+  it("after the queue goes idle the strip keeps the last cell it showed", () => {
+    mockQueueState = { kind: "playing", cellIndex: 1, cellId: "m2" }
+    try {
+      const { rerender } = render(
+        <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} />,
+      )
+      expect(screen.getByTestId("tl-detail")).toHaveAttribute("data-cell-id", "m2")
+      mockQueueState = { kind: "idle" }
+      rerender(
+        <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} />,
+      )
+      expect(screen.getByTestId("tl-detail")).toHaveAttribute("data-cell-id", "m2")
+    } finally {
+      mockQueueState = { kind: "idle" }
+    }
+  })
+  // ── 2026-08-08: duration Diff + split overlap, end to end through the memo ──
+
+  it("a dub spilling at BOTH ends reports its full length difference and two overlaps", () => {
+    // Verse 10–20 (10.0s) whose dub is anchored at 9.0 and runs 12.0s, so it
+    // starts 1.0s inside the previous verse's dub and ends 1.0s inside the
+    // next one's — the case the old end-only Diff was blind to.
+    const dub = (id: string, start: number, end: number, durationMs: number, anchorMs?: number): CellData => {
+      const takeId = `audio-${id}-1700000000-take.webm`
+      return cell({
+        id, medium: "media", startTime: start, endTime: end, original: id,
+        selectedAudioId: takeId,
+        ...(anchorMs != null ? { metadata: { target_start_ms: anchorMs } } : {}),
+        attachments: {
+          [takeId]: { type: "audio", url: "frontier-audio://take", durationMs },
+          [SOURCE_ID]: { type: "audio", url: "frontier-audio://src" },
+        },
+      } as unknown as Partial<CellData>)
+    }
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable
+        cells={[dub("v1", 0, 10, 10_000), dub("v2", 10, 20, 12_000, 9_000), dub("v3", 20, 30, 10_000)]}
+        onRetimeSubtitle={() => {}} initialSelectedCellId="v2"
+      />,
+    )
+    // Source 10.0s − target 12.0s = −2.0s (start −1.0 + end −1.0).
+    expect(screen.getByTestId("tl-detail-diff")).toHaveTextContent("Diff: −2.0s")
+    expect(screen.getByTestId("tl-detail-overlap-start")).toHaveTextContent("Start overlap: −1.0s")
+    expect(screen.getByTestId("tl-detail-overlap-end")).toHaveTextContent("End overlap: −1.0s")
+    expect(screen.queryByTestId("tl-detail-overlap")).toBeNull()
+  })
+
+  // ── 2026-08-08: an automatic playback advance clears the selection ──
+
+  const editorAt = (onSelectCell: (id: string | null) => void) => (
+    <TimelineEditor
+      fileId="f1" coreMediaUrl={null} editable cells={mediaCells}
+      onRetimeSubtitle={() => {}} onSelectCell={onSelectCell}
+    />
+  )
+
+  it("playback walking past the selected cell drops the selection", () => {
+    const onSelectCell = vi.fn()
+    mockQueueState = { kind: "playing", cellIndex: 0, cellId: "m1" }
+    try {
+      const { rerender } = render(editorAt(onSelectCell))
+      fireEvent.click(screen.getByTestId("tl-card-m1"))
+      expect(onSelectCell).toHaveBeenLastCalledWith("m1")
+      mockQueueState = { kind: "playing", cellIndex: 1, cellId: "m2" }
+      rerender(editorAt(onSelectCell))
+      expect(onSelectCell).toHaveBeenLastCalledWith(null)
+      // The strip falls back to the sounding cell — follows playback.
+      expect(screen.getByTestId("tl-detail")).toHaveAttribute("data-cell-id", "m2")
+    } finally {
+      mockQueueState = { kind: "idle" }
+    }
+  })
+
+  it("a selection made DURING playback survives its own seek landing", () => {
+    const onSelectCell = vi.fn()
+    mockQueueState = { kind: "playing", cellIndex: 0, cellId: "m1" }
+    try {
+      const { rerender } = render(editorAt(onSelectCell))
+      fireEvent.click(screen.getByTestId("tl-card-m2")) // click-then-jump
+      expect(onSelectCell).toHaveBeenLastCalledWith("m2")
+      // The queue lands on the clicked cell — m1→m2 departs m1, not m2.
+      mockQueueState = { kind: "playing", cellIndex: 1, cellId: "m2" }
+      rerender(editorAt(onSelectCell))
+      expect(onSelectCell).toHaveBeenLastCalledWith("m2")
+      // Only the NEXT automatic advance clears.
+      mockQueueState = { kind: "playing", cellIndex: 0, cellId: "m1" }
+      rerender(editorAt(onSelectCell))
+      expect(onSelectCell).toHaveBeenLastCalledWith(null)
+    } finally {
+      mockQueueState = { kind: "idle" }
+    }
+  })
+
+  it("an untimed selection survives playback advances", () => {
+    const onSelectCell = vi.fn()
+    const cells = [...mediaCells, cell({ id: "u1", original: "Untimed", medium: "text" })]
+    const ui = () => (
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={cells}
+        onRetimeSubtitle={() => {}} onSelectCell={onSelectCell}
+      />
+    )
+    mockQueueState = { kind: "playing", cellIndex: 0, cellId: "m1" }
+    try {
+      const { rerender } = render(ui())
+      fireEvent.click(screen.getByTestId("tl-untimed-u1"))
+      expect(onSelectCell).toHaveBeenLastCalledWith("u1")
+      mockQueueState = { kind: "playing", cellIndex: 1, cellId: "m2" }
+      rerender(ui())
+      expect(onSelectCell).toHaveBeenLastCalledWith("u1")
+    } finally {
+      mockQueueState = { kind: "idle" }
+    }
+  })
+
+  it("pausing or stopping never clears the selection", () => {
+    const onSelectCell = vi.fn()
+    mockQueueState = { kind: "playing", cellIndex: 1, cellId: "m2" }
+    try {
+      const { rerender } = render(editorAt(onSelectCell))
+      fireEvent.click(screen.getByTestId("tl-card-m2"))
+      expect(onSelectCell).toHaveBeenLastCalledWith("m2")
+      mockQueueState = { kind: "paused", cellIndex: 1, cellId: "m2" }
+      rerender(editorAt(onSelectCell))
+      expect(onSelectCell).toHaveBeenLastCalledWith("m2")
+      mockQueueState = { kind: "idle" }
+      rerender(editorAt(onSelectCell))
+      expect(onSelectCell).toHaveBeenLastCalledWith("m2")
+    } finally {
+      mockQueueState = { kind: "idle" }
+    }
+  })
+
+  // ── 2026-08-07: chip↔row sync wires ──
+
+  it("wire a: a USER chip click fires onChipActivated with the cell id", () => {
+    const onChipActivated = vi.fn()
     render(
       <TimelineEditor
         fileId="f1" coreMediaUrl={null} editable cells={mediaCells}
-        onRetimeSubtitle={() => {}} onCommitTarget={() => {}}
-        initialSelectedCellId="m1"
-        detailActions={{
-          isCompletionConfigured: true, isCompletionAvailable: true, isAnonymous: false,
-          completing: new Map(), previews: new Map(),
-          onCompleteSingle: async () => {}, onAiSetupNeeded: () => {},
-          onOpenComments: () => {}, onOpenHistory: () => {}, onOpenRecording: () => {},
-          projectId: "p1", username: "tester",
-        }}
+        onRetimeSubtitle={() => {}} onChipActivated={onChipActivated}
       />,
     )
-    expect(screen.getByTestId("tl-detail-actions")).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("tl-card-m2"))
+    expect(onChipActivated).toHaveBeenCalledWith("m2")
+  })
+
+  it("wire b: an activateRequest selects + cues WITHOUT echoing onChipActivated", () => {
+    const onChipActivated = vi.fn()
+    const onSeekToTime = vi.fn()
+    const { rerender } = render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={mediaCells}
+        onRetimeSubtitle={() => {}} onChipActivated={onChipActivated}
+        onSeekToTime={onSeekToTime} activateRequest={null}
+      />,
+    )
+    rerender(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={mediaCells}
+        onRetimeSubtitle={() => {}} onChipActivated={onChipActivated}
+        onSeekToTime={onSeekToTime} activateRequest={{ cellId: "m2", nonce: 1 }}
+      />,
+    )
+    expect(screen.getByTestId("tl-detail")).toHaveAttribute("data-cell-id", "m2")
+    expect(onSeekToTime).toHaveBeenCalledWith(10)
+    expect(onChipActivated).not.toHaveBeenCalled()
+  })
+
+  it("wire b: the same cell re-requested (new nonce) re-cues", () => {
+    const onSeekToTime = vi.fn()
+    const { rerender } = render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={mediaCells}
+        onRetimeSubtitle={() => {}} onSeekToTime={onSeekToTime}
+        activateRequest={{ cellId: "m2", nonce: 1 }}
+      />,
+    )
+    onSeekToTime.mockClear()
+    rerender(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={mediaCells}
+        onRetimeSubtitle={() => {}} onSeekToTime={onSeekToTime}
+        activateRequest={{ cellId: "m2", nonce: 2 }}
+      />,
+    )
+    expect(onSeekToTime).toHaveBeenCalledWith(10)
   })
 })
 
@@ -512,7 +704,7 @@ describe("TimelineEditor — audio-first mode", () => {
       <TimelineEditor
         fileId="af1" coreMediaUrl={null} editable cells={verses}
         timingMode={mode}
-        onRetimeSubtitle={() => {}} onCommitTarget={() => {}}
+        onRetimeSubtitle={() => {}}
         onRetimeTarget={() => {}} onTrimTarget={() => {}}
         {...extra}
       />,
@@ -590,7 +782,7 @@ describe("TimelineEditor — audio-first mode", () => {
     render(
       <TimelineEditor
         fileId="af2" coreMediaUrl="http://v.test/a.mp4" editable cells={verses}
-        timingMode="audioFirst" onRetimeSubtitle={() => {}} onCommitTarget={() => {}}
+        timingMode="audioFirst" onRetimeSubtitle={() => {}}
       />,
     )
     expect(screen.queryByTestId("tl-video")).toBeNull()

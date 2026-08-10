@@ -67,6 +67,30 @@ export function useQueueState(): QueueState {
   return useSyncExternalStore(subscribe, () => state, () => IDLE)
 }
 
+// ── Current-cell selectors (2026-08-07) ─────────────────────────────────────
+// The stacked media lens highlights and follows the RUNNING cell in the text
+// table. Selector-shaped subscriptions on the same store: the per-cell hook
+// re-renders exactly the two rows affected by a cell boundary, and the id
+// hook gives the follow driver one primitive value instead of state objects.
+
+function runningCellId(): string | null {
+  return state.kind === "playing" || state.kind === "loading" ? state.cellId : null
+}
+
+/** True while the queue is RUNNING (playing/loading) this exact cell. */
+export function useIsQueueCurrentCell(cellId: string | undefined): boolean {
+  return useSyncExternalStore(
+    subscribe,
+    () => (cellId != null ? runningCellId() === cellId : false),
+    () => false,
+  )
+}
+
+/** The running cell's id, null when idle/paused/errored. */
+export function useQueueCurrentCellId(): string | null {
+  return useSyncExternalStore(subscribe, runningCellId, () => null)
+}
+
 // ── Missing-clip registry (decision 2026-08-05) ─────────────────────────────
 // Lines whose dub audio DEFINITIVELY 404'd (deleted, or an upload that never
 // completed) — the timeline paints a per-chip badge from this, so the user is

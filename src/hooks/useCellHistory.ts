@@ -16,7 +16,6 @@
 // (or audit log) can render it directly.
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import type { CellHistoryEntry } from "@/lib/parsers/types"
 import { fetchCellHistory } from "@/lib/sync/history-read"
 import type { CellHistoryEvent } from "@/lib/sync/history-read-types"
 
@@ -136,29 +135,4 @@ export function useCellHistory(opts: UseCellHistoryOptions): UseCellHistoryResul
   }, [doFetch])
 
   return { events, revalidate, isLoading, isError }
-}
-
-/**
- * Map a raw event chain to the legacy `CellHistoryEntry` shape used by
- * HistoryDrawer. Used for callers that don't want to migrate their
- * rendering; pulls `value` from the payload, `author` and `serverTs`
- * from the envelope. Anything the events log doesn't carry (validated
- * flag, examples) comes back defaulted.
- */
-export function eventsToHistoryEntries(events: CellHistoryEvent[]): CellHistoryEntry[] {
-  // Server returns newest-first; HistoryDrawer's groupHistory() expects
-  // oldest-first — reverse here so consumers don't have to.
-  const entries: CellHistoryEntry[] = []
-  for (const e of [...events].reverse()) {
-    const payload = e.payload as { value?: string; valueHtml?: string } | null
-    entries.push({
-      timestamp: new Date(e.serverTs).toISOString(),
-      value: payload?.value ?? "",
-      ...(payload?.valueHtml !== undefined ? { valueHtml: payload.valueHtml } : {}),
-      source: "human",
-      author: e.author,
-      validated: false,
-    })
-  }
-  return entries
 }

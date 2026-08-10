@@ -32,8 +32,6 @@ export const PRESET_VOICES: readonly Voice[] = [
   },
 ] as const
 
-export const DEFAULT_VOICE_ID = PRESET_VOICES[0].id
-
 // Voice accent colors. Leads with calm slate / steel-blue / teal / amber tones —
 // deliberately NOT purple-forward (the cliché AI-voice violet is pushed to the
 // very end and only surfaces once a project has many voices).
@@ -96,14 +94,4 @@ export function assignedCastVoiceId(
 
 export function newVoiceId(): string {
   return globalThis.crypto?.randomUUID?.() ?? `voice-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-}
-
-/** Fork a built-in voice into a user-editable copy. */
-export function forkVoice(voice: Voice, name?: string): Voice {
-  return {
-    ...voice,
-    id: newVoiceId(),
-    name: name ?? `${voice.name} (copy)`,
-    builtIn: false,
-  }
 }

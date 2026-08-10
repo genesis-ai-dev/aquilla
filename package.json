@@ -29,6 +29,7 @@
     "parity:corpus": "tsx parity/corpus/generate.ts",
     "preview": "vite preview",
     "test": "vitest run",
+    "test:worker": "vitest run --config worker/vitest.config.ts --dir worker",
     "test:idml": "pnpm --filter @aquilla/idml-roundtrip test",
     "build:idml": "pnpm --filter @aquilla/idml-roundtrip build",
     "idml:gate": "tsx scripts/assert-idml-release-gate.ts",

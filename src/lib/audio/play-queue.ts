@@ -1744,6 +1744,15 @@ function executeFire(plan: Extract<TargetOverlayPlan, { kind: "fire" }>): void {
  * half-loaded dub can never self-start while the source is held). `media` is
  * either a resolved src (fresh element) or an ADOPTED prefetched element.
  */
+/** How far off an adopted prefetch element may already be and still be left
+ *  alone. Skipping the write costs desync: the dub starts at its stash-time
+ *  position while the source is `into` seconds past the verse start, so the
+ *  bar bounds how far the two sides can drift apart. The boundary poll runs
+ *  at 60ms, so a normal `into` is under that; 120ms covers it with margin and
+ *  keeps the worst case under the ~150ms where a listener starts hearing two
+ *  voices as separate rather than together. */
+const ADOPT_SEEK_SLOP_SEC = 0.12
+
 function wireOverlayElement(
   entry: OverlayEntry,
   media: { resolved: ResolvedAudioSrc } | { element: HTMLAudioElement; objectUrl: string | null },
@@ -1767,16 +1776,15 @@ function wireOverlayElement(
     // prefetch pre-seek may be stale after a re-flow — and clear any old
     // pre-seek handler so it can't fire later with a stale offset.
     //
-    // Pre-merge round: SKIP the write when the element already sits within a
-    // couple hundred ms of the target. A currentTime write momentarily drops
-    // readyState below HAVE_FUTURE_DATA even on a fully-buffered element, so
-    // re-seeking a correctly pre-seeked stash by the boundary poll's tiny
-    // overshoot turned every warm dub adoption asynchronous — one "loading"
-    // flip and a parked source per dubbed boundary, for a position change
-    // nobody could hear. A genuinely stale pre-seek (re-flowed trim) is well
-    // past the bar and still seeks.
+    // Pre-merge round: SKIP the write when the element already sits within
+    // ADOPT_SEEK_SLOP_SEC of the target. A currentTime write momentarily
+    // drops readyState below HAVE_FUTURE_DATA even on a fully-buffered
+    // element, so re-seeking a correctly pre-seeked stash by the boundary
+    // poll's tiny overshoot turned every warm dub adoption asynchronous — one
+    // "loading" flip and a parked source per dubbed boundary. A genuinely
+    // stale pre-seek (a re-flowed trim) is well past the bar and still seeks.
     audio.onloadedmetadata = null
-    if (Math.abs(audio.currentTime - startAtClipSec) > 0.2) applySeek()
+    if (Math.abs(audio.currentTime - startAtClipSec) > ADOPT_SEEK_SLOP_SEC) applySeek()
   } else if ("element" in media || startAtClipSec > 0.05) {
     // Join the clip at the offset. Safari rejects pre-metadata seeks (same
     // trick as the master's pendingStartSeconds). FORTIFY: an ADOPTED element

@@ -600,7 +600,12 @@ export function resolveFileTimingMode(
   file: Pick<FileReference, "timingMode"> | null | undefined,
   project: Pick<ProjectRecord, "audioTimingMode"> | null | undefined,
 ): AudioTimingMode {
-  return file?.timingMode ?? project?.audioTimingMode ?? "dubbing"
+  if (file?.timingMode === "audioFirst" || file?.timingMode === "dubbing") return file.timingMode
+  // Only "audioFirst" opts out of the original behaviour — anything else,
+  // including a value the settings blob happens to carry (the server accepts
+  // arbitrary top-level keys), reads as Original timing. Same normalization
+  // as resolveAudioTimingMode, inlined to keep this module import-free.
+  return project?.audioTimingMode === "audioFirst" ? "audioFirst" : "dubbing"
 }
 
 export interface ProjectMember {

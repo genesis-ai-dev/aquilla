@@ -102,11 +102,9 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm test
-      # The root suite excludes worker packages, so the aquilla-web Worker's
-      # own suite (routing, invite-meta rewriting, security headers, and the
-      # wrangler.toml deployment-config guards) ran nowhere in CI — a stale
-      # assertion in it had been failing on dev unnoticed. See
-      # docs/OPSEC-REVIEW-2026-08-10.md (OPS-4).
+      # Mirrors the spa lane in scripts/cloudflare-ci-checks.mjs, which is the
+      # gate that actually runs on pull requests (this workflow is
+      # workflow_dispatch-only). Keep the two in step. OPS-4.
       - run: pnpm test:worker
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm test:idml

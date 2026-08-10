@@ -209,6 +209,32 @@ Initial command set:
   pinned to `sourceEventId`, parented on the prior target event)
 - `LinkMedia` (attach audio/alignment relationships)
 
+### Multi-language projects: target-language lanes
+
+A project can hold several target languages at once via AQU-538 **lanes** — a lane is
+a language tag (e.g. `es`, `pt`) registered in the project settings array
+`settings.targetLanes`; every cell keeps one shared source plus one independent
+target row/chain per lane. The external surface is lane-aware end to end:
+
+1. **Register lanes** (once): `UpdateProjectSettings` writing `settings.targetLanes:
+   ["es", "pt"]` (merge into the existing blob; pass the live `ifMatchVersion`).
+2. **Write per lane**: `SetTranslation` takes an optional `laneId` — the compiled
+   `target.cell.commit` is stamped `payload.targetLang` and lands on that lane's row
+   and chain slot. An unregistered `laneId` is rejected at prepare
+   (`validation_failed`). Omitted `laneId` = the default lane (unchanged behavior).
+3. **Read per lane**: `GET .../files/:fileId/cells?lane=es` (and the MCP
+   `read_content` `lane` argument) filters target cells to one lane; source cells are
+   always included. Without `lane`, every lane's targets are returned, each carrying
+   its `targetLang`.
+4. **Import several lanes at once**: each `PlanImport` cell takes
+   `variants: [{ laneId, languageTag?, content, contentHtml? }]` sharing that cell's
+   source.
+
+Preconditions and drift are lane-scoped — the same cell edited concurrently in two
+different lanes never triggers `plan_stale` across lanes. The self-discovery
+surfaces teach this workflow: `GET /api/v1/external` (`multiLanguage` section) and
+the MCP `get_capabilities` tool (`multiLanguage` field).
+
 ### Changesets: immutable execution plans
 
 A changeset is not a bag of proposed writes; it is an **immutable execution plan**:

@@ -5,21 +5,23 @@
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
+    "build:workers-build": "node ../scripts/assert-workers-build-env.mjs && pnpm run type-check && pnpm test",
+    "deploy:workers-build": "node ../scripts/cloudflare-build-deploy.mjs sync",
     "deploy": "pnpm --dir .. run deploy:aquilla:sync",
     "type-check": "tsc --noEmit",
     "test": "vitest run"
   },
   "dependencies": {
-    "hono": "^4.12.14",
-    "partyserver": "^0.5.2",
+    "hono": "^4.12.33",
+    "partyserver": "^0.5.9",
     "postgres": "^3.4.9"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20241218.0",
+    "@cloudflare/workers-types": "^5.20260801.1",
     "@electric-sql/pglite": "^0.5.1",
-    "@types/node": "^25.7.0",
-    "typescript": "^5.6.0",
+    "@types/node": "^26.1.2",
+    "typescript": "^7.0.2",
     "vitest": "^4.1.4",
-    "wrangler": "^3.78.12"
+    "wrangler": "^4.118.0"
   }
 }

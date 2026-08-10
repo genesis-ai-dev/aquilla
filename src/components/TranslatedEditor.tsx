@@ -36,15 +36,21 @@ import { createFootnoteDecorationExtension, footnoteDecorationPluginKey } from "
 import { UsfmFootnote } from "@/lib/richtext/footnote-node"
 import {
   IDML_SLOT_NODE_NAME,
+  editableIdmlRangesIn,
+  idmlDeletionRange,
   idmlEditableSlotPosition,
   idmlEditableSlotOffsetPosition,
   idmlEditablePlainOffsetPosition,
+  idmlCompositionSentinelRanges,
   idmlDiagnosticMessage,
   idmlEditorExtensions,
+  IDML_COMPOSITION_SENTINEL,
   isEditableIdmlSelection,
   prepareIdmlEditorContent,
   sanitizeIdmlSlotInsertion,
   serializeIdmlEditorDocument,
+  type IdmlDeleteDirection,
+  type IdmlDeleteGranularity,
   type IdmlEditorConfiguration,
 } from "@/lib/richtext/idml-editor"
 import type { IdmlPointerSelection } from "@/lib/richtext/idml-caret"
@@ -177,23 +183,37 @@ function idmlSlotBoundaryChar(
   return resolved.parent.textBetween(offset, offset + 1)
 }
 
-function replaceIdmlSelectionWithPlainText(
-  view: EditorView,
-  text: string,
-  requestedRange?: IdmlInsertedRange,
-  mode: "paste" | "type" = "type",
-): IdmlInsertedRange | null {
+/**
+ * The slot text a write should land in. A selection is cut down to the editable
+ * parts it covers, so text spanning protected anchors is replaced slot by slot
+ * instead of dragging the IDML structure with it.
+ */
+function idmlWriteRanges(view: EditorView): IdmlInsertedRange[] {
   const selection = view.state.selection
-  const fallbackPosition = idmlEditableSlotPosition(view.state.doc)
-  const from = requestedRange?.from
-    ?? (isEditableIdmlSelection(selection) ? selection.from : fallbackPosition)
-  const to = requestedRange?.to
-    ?? (isEditableIdmlSelection(selection) ? selection.to : fallbackPosition)
-  if (from === null || to === null) return null
+  if (selection.from !== selection.to) {
+    const editable = editableIdmlRangesIn(view.state.doc, selection.from, selection.to)
+    if (editable.length > 0) return editable
+  }
+  const position = isEditableIdmlSelection(selection)
+    ? selection.from
+    : idmlEditableSlotPosition(view.state.doc)
+  return position === null ? [] : [{ from: position, to: position }]
+}
 
-  const before = idmlSlotBoundaryChar(view.state.doc, from, "before")
-  const after = idmlSlotBoundaryChar(view.state.doc, to, "after")
-  const normalized = sanitizeIdmlSlotInsertion(text, before, after, mode).replace(/\r\n?/g, "\n")
+/**
+ * Writes `text` over every editable range, clearing the rest. Ranges are applied
+ * back to front so the earlier positions stay valid, which leaves the caret at
+ * the first range — where the text lands.
+ */
+function replaceIdmlRangesWithPlainText(
+  view: EditorView,
+  ranges: IdmlInsertedRange[],
+  text: string,
+): IdmlInsertedRange | null {
+  const first = ranges[0]
+  if (!first) return null
+
+  const normalized = text.replace(/\r\n?/g, "\n")
   const lines = normalized.split("\n")
   const nodes = lines.flatMap((line, index) => [
     ...(line.length > 0 ? [view.state.schema.text(line)] : []),
@@ -202,18 +222,55 @@ function replaceIdmlSelectionWithPlainText(
       : []),
   ])
   const replacement = Fragment.fromArray(nodes)
+  const transaction = view.state.tr
+  for (let index = ranges.length - 1; index > 0; index -= 1) {
+    const range = ranges[index]
+    if (range) transaction.delete(range.from, range.to)
+  }
+  if (nodes.length > 0) transaction.replaceWith(first.from, first.to, replacement)
+  else if (first.to > first.from) transaction.delete(first.from, first.to)
   // Explicit caret placement: ReplaceStep maps a cursor at `from` with
   // assoc=-1 back to the *start* of the inserted text. Without setSelection
   // here, a desynced native DOM caret (EditorTable's selectNodeContents
   // collapse-to-end on empty IDML slots) keeps inserting at the same offset
   // and typed characters appear in reverse order.
-  const insertEnd = from + replacement.size
-  const transaction = nodes.length > 0
-    ? view.state.tr.replaceWith(from, to, replacement)
-    : view.state.tr.delete(from, to)
-  transaction.setSelection(TextSelection.create(transaction.doc, nodes.length > 0 ? insertEnd : from))
+  const caret = first.from + replacement.size
+  transaction.setSelection(TextSelection.create(transaction.doc, caret))
   view.dispatch(transaction.scrollIntoView())
-  return { from, to: insertEnd }
+  return { from: first.from, to: caret }
+}
+
+function replaceIdmlSelectionWithPlainText(
+  view: EditorView,
+  text: string,
+  mode: "paste" | "type" = "type",
+): IdmlInsertedRange | null {
+  const ranges = idmlWriteRanges(view)
+  const first = ranges[0]
+  if (!first) return null
+  // AQU-758: sanitize against the slot text the insertion actually lands in —
+  // the first range — so a space never doubles against its neighbors.
+  const before = idmlSlotBoundaryChar(view.state.doc, first.from, "before")
+  const after = idmlSlotBoundaryChar(view.state.doc, first.to, "after")
+  return replaceIdmlRangesWithPlainText(view, ranges, sanitizeIdmlSlotInsertion(text, before, after, mode))
+}
+
+/**
+ * AQU-740: Backspace/Delete for a protected IDML cell. The browser's own delete
+ * drops the emptied slot `<span>`, which the round-trip guard has to refuse as
+ * anchor removal — leaving the last character of every slot undeletable — so the
+ * range is computed and applied as a document change instead.
+ */
+function deleteIdmlSelection(
+  view: EditorView,
+  direction: IdmlDeleteDirection,
+  granularity: IdmlDeleteGranularity,
+): void {
+  const range = idmlDeletionRange(view.state.doc, view.state.selection, direction, granularity)
+  if (!range) return
+  const ranges = editableIdmlRangesIn(view.state.doc, range.from, range.to)
+  if (ranges.length === 0) return
+  replaceIdmlRangesWithPlainText(view, ranges, "")
 }
 
 export interface TranslatedEditorHandle {
@@ -400,7 +457,14 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   const initialIdmlSelectionRef = useRef(initialIdmlSelection)
   const [pendingFootnoteDelete, setPendingFootnoteDelete] = useState<PendingFootnoteDelete | null>(null)
   const pendingFootnoteDeleteRef = useRef<PendingFootnoteDelete | null>(null)
-  const idmlCompositionRangeRef = useRef<IdmlInsertedRange | null>(null)
+  // AQU-810: while the OS input method is composing (Japanese romaji→kana,
+  // Devanagari transliteration, …) every keystroke and DOM mutation belongs to
+  // the IME, not to the IDML slot-redirect handlers. The flag spans from
+  // compositionstart until one macrotask after compositionend, because
+  // ProseMirror reads the composed text out of the DOM in a microtask *after*
+  // the compositionend event and that read must still see "composing".
+  const idmlComposingRef = useRef(false)
+  const idmlCompositionResetRef = useRef<number | undefined>(undefined)
   useEffect(() => {
     pendingFootnoteDeleteRef.current = pendingFootnoteDelete
   }, [pendingFootnoteDelete])
@@ -496,8 +560,11 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   }, [])
 
   const snapshotEditor = useCallback((editorInstance: TiptapEditor): TranslatedEditorCommit | null => {
-    const value = editorInstance.getText()
-    if (!idmlContext) return { value, valueHtml: editorInstance.getHTML() }
+    if (!idmlContext) return { value: editorInstance.getText(), valueHtml: editorInstance.getHTML() }
+    // An idle or blur commit can fire while a composition sentinel is still in
+    // the slot; the serializer strips it from the HTML, and the plain value
+    // must match (AQU-810).
+    const value = editorInstance.getText().replace(new RegExp(IDML_COMPOSITION_SENTINEL, "g"), "")
     const valueHtml = serializeIdmlEditorDocument(editorInstance.state.doc)
     if (valueHtml === null) {
       reportIdmlError("This edit changed the protected IDML document structure. Undo it or re-import the IDML.")
@@ -649,6 +716,11 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
       },
       handleTextInput(view, _from, _to, text) {
         if (!idmlContext) return false
+        // AQU-810: composed text is applied by ProseMirror's native DOM-change
+        // path, which the click handlers have already anchored inside an
+        // editable slot. Redirecting it here would dispatch during the
+        // composition and double-commit every IME update.
+        if (idmlComposingRef.current || view.composing) return false
         replaceIdmlSelectionWithPlainText(view, text)
         return true
       },
@@ -662,7 +734,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
         event.preventDefault()
         // AQU-758: paste mode strips leading/trailing/doubled spaces so a paste
         // never injects the spurious whitespace the health check later flags.
-        replaceIdmlSelectionWithPlainText(view, plainText, undefined, "paste")
+        replaceIdmlSelectionWithPlainText(view, plainText, "paste")
         return true
       },
       handleDoubleClick(view, pos, event) {
@@ -761,32 +833,84 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
           placeDomCaretAtProseMirrorPosition(view, position)
           return true
         },
+        // AQU-810: composition input must be left entirely to the browser and
+        // to ProseMirror's DOM-change reader. The previous handler intercepted
+        // `insertCompositionText` beforeinput events and dispatched its own
+        // transaction — but that event is not cancelable during an active
+        // composition, so the IME's DOM text landed *in addition to* the
+        // manual insert, and each dispatch redrew the slot mid-composition,
+        // aborting the IME session. The result was doubled characters
+        // interleaved with leftover romaji. ProseMirror applies composed text
+        // itself (tagged so the redraw preserves the live composition node);
+        // these handlers only track the composing window for handleTextInput
+        // and handleKeyDown.
         compositionstart(view) {
           if (!idmlContext) return false
+          window.clearTimeout(idmlCompositionResetRef.current)
+          idmlComposingRef.current = true
+          // An empty slot span gives the caret no editable text box, so the
+          // browser would compose into the paragraph instead — outside the
+          // protected structure. Seed the slot with a zero-width sentinel
+          // before the IME picks its insertion point, and bind the DOM caret
+          // inside the new text node. The sentinel is deleted when the
+          // composition ends and stripped from every commit besides.
           const selection = view.state.selection
-          const position = idmlEditableSlotPosition(view.state.doc)
-          idmlCompositionRangeRef.current = isEditableIdmlSelection(selection)
-            ? { from: selection.from, to: selection.to }
-            : position === null
-              ? null
-              : { from: position, to: position }
+          if (
+            selection.empty
+            && isEditableIdmlSelection(selection)
+            && selection.$from.parent.content.size === 0
+          ) {
+            const transaction = view.state.tr
+              .insertText(IDML_COMPOSITION_SENTINEL, selection.from)
+              .setMeta("addToHistory", false)
+            transaction.setSelection(TextSelection.create(transaction.doc, selection.from + 1))
+            view.dispatch(transaction)
+            placeDomCaretAtProseMirrorPosition(view, selection.from + 1)
+          }
           return false
         },
-        beforeinput(view, event) {
+        compositionupdate() {
           if (!idmlContext) return false
-          const inputEvent = event as InputEvent
-          if (inputEvent.inputType !== "insertCompositionText") return false
-          inputEvent.preventDefault()
-          const range = replaceIdmlSelectionWithPlainText(
-            view,
-            inputEvent.data ?? "",
-            idmlCompositionRangeRef.current ?? undefined,
-          )
-          idmlCompositionRangeRef.current = range
-          return true
+          idmlComposingRef.current = true
+          return false
         },
-        compositionend() {
-          idmlCompositionRangeRef.current = null
+        compositionend(view) {
+          if (!idmlContext) return false
+          window.clearTimeout(idmlCompositionResetRef.current)
+          // ProseMirror absorbs the final composition text through deferred
+          // reads (a microtask flush plus a 20ms compose-end pass). Deleting
+          // the sentinel dispatches a transaction that redraws the slot from
+          // state, so doing it while a read is still pending would wipe the
+          // tail of the composition. Wait until the DOM and the document
+          // agree on their text (bounded retries), then clean up.
+          const settled = () => {
+            const domText = (view.dom.textContent ?? "").replace(new RegExp(IDML_COMPOSITION_SENTINEL, "g"), "")
+            const docText = view.state.doc
+              .textBetween(0, view.state.doc.content.size)
+              .replace(new RegExp(IDML_COMPOSITION_SENTINEL, "g"), "")
+            return domText === docText
+          }
+          const cleanup = (attempt: number) => {
+            idmlCompositionResetRef.current = window.setTimeout(() => {
+              // The editor may have been torn down (blur commits swap the
+              // cell back to its read view) since compositionend fired.
+              if (!view.dom.isConnected) return
+              if (attempt < 5 && (view.composing || !settled())) {
+                cleanup(attempt + 1)
+                return
+              }
+              idmlComposingRef.current = false
+              const sentinels = idmlCompositionSentinelRanges(view.state.doc)
+              if (sentinels.length === 0) return
+              const transaction = view.state.tr.setMeta("addToHistory", false)
+              for (let index = sentinels.length - 1; index >= 0; index -= 1) {
+                const range = sentinels[index]
+                if (range) transaction.delete(range.from, range.to)
+              }
+              view.dispatch(transaction)
+            }, 32)
+          }
+          cleanup(0)
           return false
         },
         mouseover(view, event) {
@@ -873,9 +997,34 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
           && !event.altKey
           && !event.ctrlKey
           && !event.isComposing
+          // AQU-810: the keydown that *starts* an IME composition still
+          // reports isComposing === false; keyCode 229 is the only signal
+          // that the raw character ("k" of an eventual "か") belongs to the
+          // IME, not the document. preventDefault would not stop the IME, so
+          // handling it here used to leak stray romaji into the slot.
+          && event.keyCode !== 229
         ) {
           event.preventDefault()
           replaceIdmlSelectionWithPlainText(view, event.key)
+          return true
+        }
+        // AQU-740: own the delete keys too. Native deletion empties the slot's
+        // DOM node, which the guard must reject as anchor removal, so the last
+        // character of a slot could never be removed. Modifier conventions:
+        // Alt/Ctrl delete a word, Cmd deletes to the line start/end.
+        if (
+          idmlContext
+          && (event.key === "Backspace" || event.key === "Delete")
+          && !event.isComposing
+        ) {
+          event.preventDefault()
+          const direction: IdmlDeleteDirection = event.key === "Backspace" ? "backward" : "forward"
+          const granularity: IdmlDeleteGranularity = event.metaKey
+            ? "line"
+            : event.altKey || event.ctrlKey
+              ? "word"
+              : "character"
+          deleteIdmlSelection(view, direction, granularity)
           return true
         }
         const plain = !event.shiftKey && !event.metaKey && !event.altKey && !event.ctrlKey

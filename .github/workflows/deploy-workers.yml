@@ -1,0 +1,236 @@
+name: Manual Deploy Workers
+
+# This workflow has no push trigger. A human must select the authorized branch
+# and explicitly dispatch it. The same deployment is available locally through
+# package.json and is the usable path while GitHub-hosted runners are unavailable.
+#
+# Branch → environment mapping for an explicit dispatch:
+#   main    → production
+#   dev     → development
+#
+# DEVEX-1: deploy steps are ordered after their test steps in the same job,
+# so tests must pass before wrangler deploy runs.
+
+on:
+  workflow_dispatch:
+    inputs:
+      worker:
+        description: 'Which Worker to deploy'
+        required: true
+        type: choice
+        options:
+          - all
+          - web
+          - sync-worker
+          - auth-worker
+        default: 'all'
+
+# Least-privilege default: deploys authenticate to Cloudflare via the
+# CLOUDFLARE_API_TOKEN secret, not GITHUB_TOKEN — this workflow never needs
+# to write back to the repo.
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-workers-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  target:
+    runs-on: ubuntu-latest
+    outputs:
+      wrangler_environment: ${{ steps.resolve.outputs.wrangler_environment }}
+      live_environment: ${{ steps.resolve.outputs.live_environment }}
+      github_environment: ${{ steps.resolve.outputs.github_environment }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: resolve
+        name: Resolve authorized deployment target
+        run: bash scripts/resolve-deployment-target.sh
+
+  # The operator selects the exact worker set. There is deliberately no diff
+  # inference here: a manual deployment must never silently skip a requested
+  # surface because a push payload or comparison range is incomplete.
+  detect:
+    needs: target
+    runs-on: ubuntu-latest
+    outputs:
+      web: ${{ steps.f.outputs.web }}
+      sync: ${{ steps.f.outputs.sync }}
+      auth: ${{ steps.f.outputs.auth }}
+    steps:
+      - id: f
+        run: |
+          w="${{ github.event.inputs.worker }}"
+          case "$w" in
+            all|web|sync-worker|auth-worker) ;;
+            *) echo "::error::Unknown Worker selection '$w'"; exit 1 ;;
+          esac
+          [ "$w" = "all" ] || [ "$w" = "web" ] && echo "web=true" >> "$GITHUB_OUTPUT" || echo "web=false" >> "$GITHUB_OUTPUT"
+          [ "$w" = "all" ] || [ "$w" = "sync-worker" ] && echo "sync=true" >> "$GITHUB_OUTPUT" || echo "sync=false" >> "$GITHUB_OUTPUT"
+          [ "$w" = "all" ] || [ "$w" = "auth-worker" ] && echo "auth=true" >> "$GITHUB_OUTPUT" || echo "auth=false" >> "$GITHUB_OUTPUT"
+
+  # Worker deploys are blocked until the target Neon schema is current — the
+  # recurring 500 class (AQU-135/150/158, projects.is_active/source_link_*) was
+  # worker code referencing columns whose migration was never applied to Neon.
+  # `neon-migrate status` is read-only: it checks the schema_migrations ledger
+  # and diffs db/postgres/schema.sql against live information_schema. On a
+  # failure, apply pending migrations from a laptop (npm run neon:apply) and
+  # re-run the deploy. Requires target-specific NEON_*_PG_* repo secrets for
+  # dev and NEON_PG_* for production; fails closed if they're missing.
+  schema-guard:
+    needs: [target, detect]
+    if: needs.detect.outputs.sync == 'true' || needs.detect.outputs.auth == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Check target Neon schema is current
+        env:
+          NEON_PG_HOST: ${{ secrets.NEON_PG_HOST }}
+          NEON_PG_DB: ${{ secrets.NEON_PG_DB }}
+          NEON_PG_ROLE: ${{ secrets.NEON_PG_ROLE }}
+          NEON_PG_PASSWORD: ${{ secrets.NEON_PG_PASSWORD }}
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+          NEON_PROJECT_ID: sweet-paper-88472094
+          NEON_PRODUCTION_BRANCH: production
+          NEON_DEV_BRANCH: dev
+          NEON_DEV_PG_HOST: ${{ secrets.NEON_DEV_PG_HOST }}
+          NEON_DEV_PG_DB: ${{ secrets.NEON_DEV_PG_DB }}
+          NEON_DEV_PG_ROLE: ${{ secrets.NEON_DEV_PG_ROLE }}
+          NEON_DEV_PG_PASSWORD: ${{ secrets.NEON_DEV_PG_PASSWORD }}
+        run: |
+          case "${{ needs.target.outputs.live_environment }}" in
+            production) pnpm neon:status:prod ;;
+            development) pnpm neon:status:dev ;;
+            *) echo "::error::Unknown deployment target"; exit 1 ;;
+          esac
+
+  web:
+    needs: [target, detect]
+    if: needs.detect.outputs.web == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ needs.target.outputs.github_environment }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Build, deploy, and verify aquilla-web
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: 6a80496d1e59948a9cbaa3c643ba81d7
+        run: |
+          case "${{ needs.target.outputs.live_environment }}" in
+            production) pnpm run deploy:aquilla:spa ;;
+            development) pnpm run deploy:aquilla:dev:spa ;;
+            *) echo "::error::Unknown deployment target"; exit 1 ;;
+          esac
+
+  sync-worker:
+    # !failure() && !cancelled(): run only when schema-guard passed, never when
+    # it failed or was cancelled.
+    needs: [target, detect, schema-guard]
+    if: ${{ !failure() && !cancelled() && needs.detect.outputs.sync == 'true' }}
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ needs.target.outputs.github_environment }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            sync-worker/pnpm-lock.yaml
+
+      # Shared db shims live outside the worker dir and resolve their own bare imports from the repo root.
+      - run: pnpm install --frozen-lockfile
+
+      # Worker-local install keeps worker package dependencies explicit before type-check/test/deploy.
+      - run: pnpm install --frozen-lockfile
+        working-directory: sync-worker
+
+      - name: Type-check sync-worker
+        run: pnpm run type-check
+        working-directory: sync-worker
+
+      # TEST-1/QW-5: sync-worker tests gate the deploy (DEVEX-1: tests before deploy)
+      - name: Test sync-worker
+        run: pnpm test
+        working-directory: sync-worker
+
+      - name: Deploy sync-worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: 6a80496d1e59948a9cbaa3c643ba81d7
+        run: |
+          case "${{ needs.target.outputs.live_environment }}" in
+            production) pnpm run deploy:aquilla:sync ;;
+            development) pnpm run deploy:aquilla:dev:sync ;;
+            *) echo "::error::Unknown deployment target"; exit 1 ;;
+          esac
+
+  auth-worker:
+    needs: [target, detect, schema-guard]
+    if: ${{ !failure() && !cancelled() && needs.detect.outputs.auth == 'true' }}
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ needs.target.outputs.github_environment }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            auth-worker/pnpm-lock.yaml
+
+      # Shared db shims live outside the worker dir and resolve their own bare imports from the repo root.
+      - run: pnpm install --frozen-lockfile
+
+      # Worker-local install keeps worker package dependencies explicit before type-check/test/deploy.
+      - run: pnpm install --frozen-lockfile
+        working-directory: auth-worker
+
+      - name: Type-check auth-worker
+        run: pnpm run type-check
+        working-directory: auth-worker
+
+      # DEVEX-1: tests run before deploy, gating it
+      - name: Test auth-worker
+        run: pnpm test
+        working-directory: auth-worker
+
+      # NOTE: Postgres (Neon) is the only datastore — the D1→Neon cutover is
+      # complete. Schema changes are applied by hand against Neon, NOT in CI
+      # (npm run neon:apply, which records them in the schema_migrations
+      # ledger). The schema-guard job above fails this deploy if the target
+      # schema is behind db/postgres/migrations/.
+      - name: Deploy auth-worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: 6a80496d1e59948a9cbaa3c643ba81d7
+        run: |
+          case "${{ needs.target.outputs.live_environment }}" in
+            production) pnpm run deploy:aquilla:auth ;;
+            development) pnpm run deploy:aquilla:dev:auth ;;
+            *) echo "::error::Unknown deployment target"; exit 1 ;;
+          esac

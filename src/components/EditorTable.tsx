@@ -62,6 +62,7 @@ import { DenoiseButton } from "./audio/DenoiseButton"
 import { TimelineAddMedia } from "./TimelineAddMedia"
 import { CellTtsButton } from "./CellTtsButton"
 import { CellTranscriptPreview } from "./CellTranscriptPreview"
+import { ContextualDraftCard } from "./contextual/ContextualDraftCard"
 import { CellTranscribeBadge } from "./CellTranscribeBadge"
 import { CellActionRail, RailButton, isInteractiveTarget } from "./CellActionRail"
 import { useRailIdleHide } from "@/hooks/useRailIdleHide"
@@ -106,7 +107,6 @@ import { categorizeAiError } from "@/lib/audio/ai-error"
 import { CellAiStatusPopover } from "./CellAiStatusPopover"
 import { CellNumberPill } from "./cell/CellNumberPill"
 import {
-  EditorSourceCellSurface,
   EditorTargetCellColumn,
   EditorTargetCellWell,
   EditorTargetReadSurface,
@@ -160,6 +160,7 @@ import { isInMemberScope } from "@/lib/sync/member-scopes"
 import { AddConceptDialog } from "./AddConceptDialog"
 import { SourceSelectionToolbar } from "./SourceSelectionToolbar"
 import { buildSourceChip, type ContextChip } from "@/lib/agent/context-chip"
+import { parseTimestampRange } from "@/lib/video/vtt-generator"
 import { FootnoteInline } from "./footnotes/FootnoteInline"
 import {
   AddFootnoteDialog,
@@ -2095,6 +2096,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 activeKey={activeChapterLabel!}
                 activeSubsectionKey={activeSubsectionKey}
                 onSelect={handleChapterSelect}
+                compact={portaled}
               />
             </div>
           </div>
@@ -4524,6 +4526,13 @@ function EditorRow({
   const healthValue = healthRibbonPoint.rawScore
   const smoothedHealthValue = healthRibbonPoint.smoothedScore
 
+  // AQU-800: timeline-ordered cells carry a timecode range as their context
+  // (e.g. "00:00:00.000 --> 00:00:03.970"). Left-align that line so the
+  // timecodes sit above the left edge of the source text; other context
+  // (scripture verse refs like "GEN 1:1", empty) stays centered. Reuse the
+  // existing timestamp-range parser rather than inventing a second rule.
+  const contextIsTimecode = Boolean(cell.context && parseTimestampRange(cell.context))
+
   const selectedAudio = cell.selectedAudioId ? cell.attachments?.[cell.selectedAudioId] : undefined
   const hasAudio = Boolean(selectedAudio && !selectedAudio.isDeleted)
   // SUB-29: the mic/upload gate counts recorded TAKES — the imported source
@@ -5187,17 +5196,88 @@ function EditorRow({
             />
           </div>
         ) : (
-          <EditorSourceCellSurface
+          <div
             data-showcase="editor.source"
             ref={sourceColRef}
+            className={cn(
+              // The showcase node IS the text surface so it fills the whole
+              // source column. pr-7 clears the floating pencil.
+              "relative flex h-full min-h-[40px] flex-col rounded-lg px-2 py-1.5 pr-7 transition-[colors,opacity]",
+              // Match the target well — same muted fill + ring (not a darker
+              // primary-tinted edit chrome).
+              "focus-within:bg-muted focus-within:ring-1 focus-within:ring-ring/40 focus-within:ring-inset",
+              sourceEditing && "bg-muted ring-1 ring-ring/40 ring-inset",
+              isSynthBusy && "opacity-70",
+            )}
             dir={sourceCellDirection}
             aria-label="Source text"
-            fontSize={sourceFontSize}
-            editing={sourceEditing}
-            busy={isSynthBusy}
+            data-editor-cell-surface="source"
+            data-cell-type="source"
+            style={{ fontSize: `${sourceFontSize}px`, lineHeight: "1.6" }}
             onMouseUp={(!sourceEditing && (onAddConceptFromSelection || onAskAiFromSelection)) ? handleSourceMouseUp : undefined}
-            header={(
-              <>
+          >
+            {/* Source-selection toolbar. Appears when source text is selected:
+                "Ask AI" pushes the selection into the agent as a context chip,
+                "Add to terms" promotes it to a DRAFT concept, and a "View term"
+                button appears when the selection matches an active concept. */}
+            {sourceSelection && (
+              <SourceSelectionToolbar
+                sourceSelection={sourceSelection}
+                concepts={terminologyConcepts}
+                onAskAi={handleAskAiFromSelection}
+                onAddToTermbase={onAddConceptFromSelection ? handleAddSelectionToTermbase : undefined}
+                onTermApply={handleTermApply}
+                onToolbarMouseDown={handleToolbarMouseDown}
+                onToolbarMouseUp={handleToolbarMouseUp}
+              />
+            )}
+            {/* Source-edit affordance (project_lead+, non-live projects). Emits
+                source.cell.commit — the template-owner correction that propagates
+                downstream. Read-only source stays the default; editing is explicit.
+                Floated to the column's top-right so it costs no layout, rather
+                than taking a slot in the context line below — that line is
+                reserved for column alignment and is usually empty, so it has no
+                room to spare. */}
+            {canEditSourceForCell ? (
+              <AppTooltip content={sourceEditing ? "Done editing source" : "Edit source text"}>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  aria-label={sourceEditing ? "Done editing source" : "Edit source text"}
+                  aria-pressed={sourceEditing}
+                  onClick={() => setSourceEditing((v) => !v)}
+                  className={cn(
+                    "absolute right-1 top-1 z-10 shrink-0",
+                    sourceEditing
+                      ? "bg-primary/10 text-primary"
+                      : "text-muted-foreground/50 opacity-0 hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100",
+                  )}
+                >
+                  <Pencil />
+                </Button>
+              </AppTooltip>
+            ) : sourceReadOnlyReasonForCell ? (
+              // Force-locked source lane (DCS pin): keep an explained
+              // affordance where the pencil would be instead of letting it
+              // silently vanish (AQU-615 review nit).
+              <AppTooltip content={sourceReadOnlyReasonForCell} className="max-w-xs">
+                <span
+                  aria-label="Source is locked"
+                  className="absolute right-1 top-1 z-10 inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground/50 opacity-0 focus-visible:opacity-100 group-hover:opacity-100"
+                >
+                  <Lock className="size-3" />
+                </span>
+              </AppTooltip>
+            ) : null}
+            {/* Context line. Rendered even when empty: its 20px (h-4 + mb-1)
+                mirrors the target column's header lane, and that mirror is what
+                puts the two columns' first text lines on the same baseline. Drop
+                it for context-free cells and every such row's source text rides
+                20px above its translation — the target lane can't be made
+                conditional to match, because it also reserves the strip the
+                floating action rail occupies. */}
+            <div data-testid="source-context-line" data-context-kind={contextIsTimecode ? "timecode" : undefined} className={cn("mb-1 flex h-4 items-center gap-1 text-xs text-muted-foreground", contextIsTimecode ? "justify-start text-left" : "justify-center text-center")} dir="ltr">
               <span>{cell.context}</span>
               {showFormattingLossWarning && (
                 <AppTooltip content="Source has inline formatting that the target does not preserve. Formatting will be lost on export." className="max-w-xs">
@@ -5207,53 +5287,7 @@ function EditorRow({
                   </span>
                 </AppTooltip>
               )}
-              </>
-            )}
-            overlay={(
-              <>
-                {sourceSelection && (
-                  <SourceSelectionToolbar
-                    sourceSelection={sourceSelection}
-                    concepts={terminologyConcepts}
-                    onAskAi={handleAskAiFromSelection}
-                    onAddToTermbase={onAddConceptFromSelection ? handleAddSelectionToTermbase : undefined}
-                    onTermApply={handleTermApply}
-                    onToolbarMouseDown={handleToolbarMouseDown}
-                    onToolbarMouseUp={handleToolbarMouseUp}
-                  />
-                )}
-                {canEditSourceForCell ? (
-                  <AppTooltip content={sourceEditing ? "Done editing source" : "Edit source text"}>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon-xs"
-                      aria-label={sourceEditing ? "Done editing source" : "Edit source text"}
-                      aria-pressed={sourceEditing}
-                      onClick={() => setSourceEditing((v) => !v)}
-                      className={cn(
-                        "absolute right-1 top-1 z-10 shrink-0",
-                        sourceEditing
-                          ? "bg-primary/10 text-primary"
-                          : "text-muted-foreground/50 opacity-0 hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100",
-                      )}
-                    >
-                      <Pencil />
-                    </Button>
-                  </AppTooltip>
-                ) : sourceReadOnlyReasonForCell ? (
-                  <AppTooltip content={sourceReadOnlyReasonForCell} className="max-w-xs">
-                    <span
-                      aria-label="Source is locked"
-                      className="absolute right-1 top-1 z-10 inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground/50 opacity-0 focus-visible:opacity-100 group-hover:opacity-100"
-                    >
-                      <Lock className="size-3" />
-                    </span>
-                  </AppTooltip>
-                ) : null}
-              </>
-            )}
-          >
+            </div>
             <SourceReferenceAttachments metadata={cell.metadata} />
             {sourceEditing ? (
               <TranslatedEditor
@@ -5299,7 +5333,7 @@ function EditorRow({
                 onExpandedChange={setExamplesExpanded}
               />
             )}
-          </EditorSourceCellSurface>
+          </div>
         )}
 
         {/* Target column — TipTap is inline so typing is unchanged. Everything
@@ -5532,6 +5566,21 @@ function EditorRow({
                     </div>
                   )}
                 </div>
+              )}
+              {/* Pending autopilot draft — verified text a contextual run
+                  staged for this cell. Only rendered while the target is
+                  still empty AND the cell is not being edited: a suggestion
+                  must never cover work that exists, nor sit under a caret.
+                  Accepting routes through handleEditorCommit, so it lands as
+                  an ordinary human edit with every normal guard applied. */}
+              {!hasTranslatedText && !showCompletionOverlay && !isEditorActive && (
+                <ContextualDraftCard
+                  cellId={cell.id}
+                  projectId={project.id}
+                  editable={editable}
+                  dir={targetCellDirection}
+                  onAccept={(text) => handleEditorCommit({ value: text, valueHtml: text })}
+                />
               )}
             </EditorTargetCellWell>
             </div>

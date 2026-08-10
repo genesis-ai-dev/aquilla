@@ -27,20 +27,16 @@ export class AgentPage {
 
   // ── Entry ──────────────────────────────────────────────────────────────
 
-  /** Open the docked "Agent" tab from within an already-open project workspace. */
+  /** Open the integrated Agent pane between Source and Target. */
   async openAgentTab(): Promise<void> {
-    await this.page.getByRole("button", { name: "Agent", exact: true }).click()
+    await this.page.getByRole("button", { name: "Open Agent between source and target" }).click()
+    await expect(this.page.getByRole("textbox", { name: "Ask the agent" })).toBeVisible()
   }
 
-  /** Expand the docked agent panel into the full-screen workbench at
-   * `/project/:id/agent`. Mirrors `agent-draft.spec.ts`'s existing pattern. */
-  async openFullScreenWorkbench(): Promise<void> {
-    await this.page.getByRole("button", { name: "Open full-screen workbench" }).click()
-    await expect(this.page).toHaveURL(/\/agent$/)
-  }
-
-  async closeFullScreenWorkbench(): Promise<void> {
-    await this.page.getByRole("button", { name: "Close workbench" }).click()
+  /** Collapse the integrated three-pane Agent workspace back to the editor. */
+  async closeAgentPane(): Promise<void> {
+    await this.page.getByRole("button", { name: "Minimize Agent" }).click()
+    await expect(this.page.getByRole("button", { name: "Open Agent between source and target" })).toBeVisible()
   }
 
   // ── Session + attachment ──────────────────────────────────────────────
@@ -51,7 +47,9 @@ export class AgentPage {
     const composer = this.page.getByRole("textbox", { name: "Ask the agent" })
     await composer.click()
     await composer.pressSequentially(prompt)
-    await this.page.keyboard.press("Enter")
+    const send = this.page.getByRole("button", { name: "Send" })
+    await expect(send).toBeEnabled()
+    await send.click()
   }
 
   /**

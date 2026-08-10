@@ -1,29 +1,19 @@
 #!/usr/bin/env bash
-# Cloudflare Workers Builds — SPA (aquilla-web) build for all branches.
-#
-# The same build command runs for every branch (Workers Builds only varies the
-# DEPLOY command between production/non-production, not the build command), so
-# the branch → API-host mapping lives here, keyed off $WORKERS_CI_BRANCH:
-#   main    → api.aquilla.app          (prod backend)
-#   *       → api.dev.aquilla.app      (dev backend; PR/preview builds land here)
-#
-# Baking the right VITE_* hosts is load-bearing: a bare build shipped
-# dev-API-pointing bundles to aquilla.app once (see .github/workflows/deploy.yml).
-# dist/_redirects is stripped because Workers' static-assets parser rejects the
-# SPA `/* /index.html 200` rule (error 100324); wrangler.toml handles SPA
-# fallback via not_found_handling instead.
+# Build the route-free PR preview. It always targets development APIs; main,
+# dev, and feature builds must never compile a preview against production.
 set -euo pipefail
 
-case "${WORKERS_CI_BRANCH:-}" in
-  main)    H=api.aquilla.app ;;
-  *)       H=api.dev.aquilla.app ;;
-esac
+node scripts/assert-workers-build-env.mjs
+
+H=api.dev.aquilla.app
 
 export VITE_SYNC_WORKER_HOST="$H/sync"
 export VITE_AUTH_BASE="https://$H/identity"
 export VITE_CHAT_BASE="https://$H/chat"
 
-echo "ci-build: branch=${WORKERS_CI_BRANCH:-<unset>} → API host $H"
+echo "ci-preview-build: branch=$WORKERS_CI_BRANCH -> API host $H"
 
 pnpm run build
+bash scripts/verify-dist-host.sh "$H"
 rm -f dist/_redirects
+node scripts/verify-deployment-artifacts.mjs dist

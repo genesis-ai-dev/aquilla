@@ -97,7 +97,7 @@ function OrgMark({
 }
 
 export function OrgSwitcher() {
-  const { orgs, activeOrg, activeOrgId, isAllOrgs, guestOrgs, setActiveOrg, setAllOrgs, refresh } = useActiveOrg()
+  const { orgs, activeOrg, activeOrgId, activeGuestOrg, isAllOrgs, guestOrgs, setActiveOrg, setAllOrgs, refresh } = useActiveOrg()
   const location = useLocation()
   const navigate = useNavigate()
 
@@ -117,20 +117,13 @@ export function OrgSwitcher() {
     queueMicrotask(() => searchInputRef.current?.focus())
   }, [open])
 
-  // AQU-624: a guest org isn't a membership, so it can't become the `activeOrg`
-  // without misrepresenting the caller's role (AQU-473). Instead we treat the
-  // scoped shared-projects route (`/shared?org=<id>`) as the guest org's
-  // "selected" state: derive it from the URL so it survives reload/back-forward
-  // and drives the checkmark + trigger label below.
-  const guestScopeParam =
-    location.pathname === "/shared"
-      ? new URLSearchParams(location.search).get("org")
-      : null
-  const selectedGuestOrgId =
-    guestScopeParam != null && Number.isFinite(Number(guestScopeParam))
-      ? Number(guestScopeParam)
-      : null
-  const selectedGuest = guestOrgs.find((g) => g.id === selectedGuestOrgId) ?? null
+  // AQU-790: a guest org now uses the same path convention as an owned org
+  // (`/orgs/<id>`). It still isn't a membership, so it never becomes `activeOrg`
+  // (that would misrepresent the caller's role — AQU-473/AQU-624); instead the
+  // context derives `activeGuestOrg` from the active id, which survives
+  // reload/back-forward and drives the checkmark + trigger label below.
+  const selectedGuest = activeGuestOrg
+  const selectedGuestOrgId = activeGuestOrg?.id ?? null
   const guestSelected = selectedGuest != null
 
   const showAllOrgs = orgs.length > 1
@@ -170,22 +163,22 @@ export function OrgSwitcher() {
   function handleActiveOrg(orgId: number) {
     setActiveOrg(orgId)
     setOpen(false)
-    // `|| guestSelected`: returning to a member org from a guest's scoped
-    // shared view (`/shared?org=<id>`) must navigate to that org's overview,
-    // symmetric with picking a guest org (AQU-624). swapOrgInPath falls back
-    // to the org home when the current path isn't org-scoped (e.g. /shared).
-    if (isOrgScopedRoute(location.pathname) || location.pathname === "/" || guestSelected) {
+    // A guest org overview (`/orgs/<guestId>`) is itself an org-scoped route, so
+    // swapOrgInPath swaps to the picked member org's overview — symmetric with
+    // picking a guest org, and no special-casing needed.
+    if (isOrgScopedRoute(location.pathname) || location.pathname === "/") {
       navigate(swapOrgInPath(location.pathname, orgId))
     }
   }
 
-  // AQU-473/AQU-624: guest orgs are not activatable (no org membership, so
-  // setActiveOrg/org:active would misrepresent the caller's role) — clicking
-  // one navigates to that org's scoped shared-projects overview
-  // (`/shared?org=<id>`), which also drives the switcher's selected state.
+  // AQU-790: guest orgs use the same path convention as owned orgs
+  // (`/orgs/<id>`). Selecting one records it as the active scope (persisted for
+  // reload, which drives `activeGuestOrg`) and navigates to that org's overview
+  // — no longer the divergent `/shared?org=<id>` query param.
   function handleGuestOrg(org: GuestOrg) {
+    setActiveOrg(org.id)
     setOpen(false)
-    navigate({ pathname: "/shared", search: `?org=${org.id}` })
+    navigate(orgHomePath(org.id))
   }
 
   async function handleCreated(orgId: number) {

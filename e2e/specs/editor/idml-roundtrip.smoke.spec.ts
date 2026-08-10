@@ -102,6 +102,39 @@ test("IDML import, protected edit, and strict artifact export preserve original 
     alice.getByText(/This edit would remove protected InDesign formatting/i),
   ).toHaveCount(0)
 
+  // AQU-810: IME composition (Japanese romaji → kanji) must land exactly
+  // once. The regression echoed every intermediate update and leaked raw
+  // romaji ("k小日小日子にch子にc…") because the editor intercepted
+  // non-cancelable insertCompositionText events and re-dispatched their text.
+  // Driven through Chromium's real IME pipeline; ends untranslated.
+  // The update sequence mirrors a real IME session: romaji keystrokes build
+  // the kana reading and Enter commits it (kana commits without kanji
+  // conversion are an everyday Japanese flow). Kanji candidate replacement is
+  // covered at the unit level — CDP's synthetic IME cannot reproduce a real
+  // IME's candidate-swap event timing.
+  await ws.composeIdmlImeDraft(
+    1,
+    ["k", "か", "かn", "かん", "かんし", "かんしゃ"],
+    "かんしゃ",
+  )
+  // AQU-740: deleting a slot's final character must not trip the protected-
+  // formatting guard (native deletion used to drop the emptied slot span).
+  // The second cell is typed into and backspaced empty again, ending exactly
+  // as it started — untranslated — so the export assertions below still hold.
+  await ws.deleteIdmlDraftToEmpty(1, "xy", 2)
+  // AQU-740: a line break typed at a slot's end keeps a caret line box, so the
+  // cursor no longer parks at the cell's first line after Enter. Also ends
+  // with the cell untranslated.
+  await ws.verifyIdmlTrailingBreakCaret(1)
+  // AQU-740 manual QA found that word deletion stopped at trailing whitespace,
+  // requiring a second keypress for the word itself. One modifier press owns
+  // both pieces and the probe restores the untranslated state.
+  await ws.deleteIdmlWordPastTrailingSpace(1)
+  // A committed hard break must count as one position when the cheap read view
+  // hands a line-two click to ProseMirror. The appended character proves the
+  // caret did not land between the final two existing characters.
+  await ws.verifyIdmlMultilineReentry(1)
+
   // A lossless re-import can advance the source event for IDML structure while
   // retaining exactly the same translatable source text. That must preserve
   // the target without raising the source-changed warning (AQU-741).

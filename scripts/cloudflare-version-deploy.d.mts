@@ -17,6 +17,11 @@ export function parseWranglerOutput(
   expectedType: string,
 ): Record<string, unknown>
 
+export function versionPreviewOrigin(
+  entry: Record<string, unknown>,
+  workerName: string,
+): string
+
 export function deploymentVersionTag(
   workerName: string,
   environment: DeploymentEnvironment,
@@ -37,8 +42,10 @@ export function runVerifiedDeployment(options?: {
     tag: string
     message: string
     spawnCommand: typeof spawn
-  }) => Promise<string>
+  }) => Promise<string | { versionId: string; previewOrigin?: string }>
   verifyVersion?: (...args: unknown[]) => Promise<string>
   promoteVersion?: (...args: unknown[]) => Promise<void>
   verifyDeployment?: (...args: unknown[]) => Promise<string>
+  verifyArtifacts?: (directory: string) => unknown
+  verifyWebPreview?: (environment: DeploymentEnvironment, previewOrigin: string) => Promise<void>
 }): Promise<VerifiedDeploymentResult>

@@ -12,9 +12,8 @@ profile or fall back from an unknown branch.
 | Development | `dev` | `development` | `https://dev.aquilla.app` | `api.dev.aquilla.app` | `aquilla-web-development` | `aquilla-dev-identity` | `aquilla-sync-worker-dev` | `dev` | `aquilla-snapshots-dev` |
 
 Each API host exposes `/identity/*` and `/chat/*` through the identity Worker and
-`/sync/*` through the sync Worker. There are exactly two live environments.
-Staging was retired on 2026-08-05: it tracked a branch nobody pushed to, and
-`dev.aquilla.app` already covers pre-production integration testing.
+`/sync/*` through the sync Worker. Staging is retired from the deployable
+application contract; development is the only non-production live environment.
 
 `config/cloudflare-deployments.json` is the machine-readable source for Worker
 names, routes, environment-selecting variables, Hyperdrive IDs, R2 buckets, and
@@ -29,64 +28,67 @@ projection state lives only in Neon Postgres.
 | Production | `pnpm run deploy:aquilla` | `pnpm run verify:live:production` |
 | Development | `pnpm run deploy:aquilla:dev` | `pnpm run verify:live:development` |
 
-The production deploy scripts refuse to run from any branch except `main`. Every
-surface selects `production` or `development` explicitly. The shared deployer uploads a version, validates its
-exact ID and bindings, promotes it, reapplies routes/triggers, and confirms the
-same ID owns 100% traffic before public verification. Identity and sync deploys
-also run the target Neon schema guard before publishing.
+Production and development deploy scripts refuse to run from any branch except
+`main` and `dev`, respectively. Every surface selects `production` or
+`development` explicitly. The shared deployer uploads
+a version, validates its exact ID and bindings, promotes it, reapplies
+routes/triggers, and confirms the same ID owns 100% traffic before public
+verification. Identity and sync deploys also run the target Neon schema guard
+before publishing.
 
 All unnamed Wrangler profiles are local-only, including the SPA, identity, sync,
 agent sandbox, and resource proxy Workers. A bare
-`wrangler deploy` therefore cannot target a production Worker. The production
-named profile also runs the branch guard as a Wrangler custom-build hook,
-covering accidental direct `wrangler deploy --env=...` calls. Local live deploys
+`wrangler deploy` therefore cannot target a production Worker. Production named
+profiles also run the branch guard as a Wrangler custom-build hook, covering
+accidental direct `wrangler deploy --env=production` calls. Local live deploys
 additionally require a clean worktree whose HEAD matches the current remote branch.
 
-## Automation policy
+## Deployment ownership
 
-**Cloudflare Workers Builds performs every deploy.** GitHub Actions deploys
-nothing: this repository exhausts its Actions allowance in roughly a week, and
-Cloudflare already holds the credentials (`NEON_API_KEY`) the schema guard needs.
+Live Aquilla deployments require an explicit human/operator action. No push to
+GitHub and no Cloudflare Git integration is authorized to deploy live traffic.
+The canonical full-environment entrypoints are the local commands above, run from
+a clean checkout whose HEAD exactly matches the corresponding remote branch:
 
-There is one Workers Builds connection per Worker script — six in total, because
-a connection is bound to a single script and cannot deploy a differently-named
-one. Attempting it produces `Failed to match Worker name ...` and silently
-uploads to the bound script instead, which is how feature-branch versions once
-landed on the production SPA Worker.
+- `main` -> `production`
+- `dev` -> `development`
 
-| Connection's script | Production branch | Root | Deploy command |
-| --- | --- | --- | --- |
-| `aquilla-web` | `main` | `/` | `npx wrangler deploy --env=production` |
-| `aquilla-identity` | `main` | `/auth-worker` | `npx wrangler deploy --env=production` |
-| `aquilla-sync-worker` | `main` | `/sync-worker` | `npx wrangler deploy --env=production` |
-| `aquilla-web-development` | `dev` | `/` | `npx wrangler deploy --env=development` |
-| `aquilla-dev-identity` | `dev` | `/auth-worker` | `npx wrangler deploy --env=development` |
-| `aquilla-sync-worker-dev` | `dev` | `/sync-worker` | `npx wrangler deploy --env=development` |
+The optional `.github/workflows/deploy-workers.yml` workflow is
+`workflow_dispatch`-only. It provides the same explicit, verified web,
+identity, and sync path once GitHub-hosted runners are available, and resolves its selected branch
+through `scripts/resolve-deployment-target.sh`. Unsupported refs fail before any
+schema, build, or deploy step; there is no default environment. Production jobs
+enter the GitHub `production` Environment, whose deployment-branch policy admits
+only `main`.
 
-Every connection has **builds for non-production branches disabled** and an empty
-non-production deploy command. That is the control that keeps `main` the only
-thing able to touch a production Worker, and `dev` the only thing able to touch a
-QA Worker. No other branch builds at all.
+Cloudflare Workers Builds owns automatic pull-request validation through the
+dedicated `aquilla-web-preview` Worker. All six production/development Workers
+remain disconnected from Git. The preview Worker has no custom domain or live
+route, always targets development APIs, and never promotes a version or changes
+production/development traffic. `versification-tool` remains disconnected
+because it has no deployable Wrangler application.
 
-The identity and sync build commands run `pnpm neon:status:prod` (production) or
-`pnpm neon:status:dev` (QA) before the worker's own type-check and tests, so a
-schema behind `db/postgres/migrations/` fails the build instead of shipping code
-that queries missing columns. Both need `NEON_API_KEY` as a build secret.
+The consolidated `.github/workflows/ci.yml` is `workflow_dispatch`-only. Normal
+pull-request and push activity consumes no GitHub-hosted runner minutes. Cloudflare
+receives GitHub repository events, runs the repository-owned build commands, and
+reports its check results and preview links back to GitHub.
 
-Never paste a branch-selection shell expression into the Cloudflare dashboard;
-branch logic belongs in `scripts/ci-build.sh` and the Wrangler profiles, where it
-is version-controlled and covered by contract tests. Never use a bare
-`wrangler deploy` for a live Aquilla environment.
+Every Workers Builds preview uses development API hosts, including builds of
+`main`. Preview versions remain route-free permanently; they are never promoted
+into a live Worker. Repository code converts slash-named branches into a stable,
+lowercase, hashed preview alias before passing it to Wrangler.
 
-GitHub Actions runs `.github/workflows/ci.yml` on pull requests only: lint,
-typecheck, unit, build, the migration lint, and the three worker suites when
-their package changed. It holds no Cloudflare credentials and there is no
-push trigger — a merge would only re-run checks the pull request already paid
-for, and Cloudflare re-runs type-check and the worker suites before deploying.
+The agent sandbox and not-yet-enabled resource proxy follow the same rule: their
+production profiles are main-only, their unnamed profiles have distinct local
+names, and the agent package's deploy scripts always select a named environment.
 
-The agent sandbox and not-yet-enabled resource proxy are deployed by hand: their
-production profiles are main-only and their unnamed profiles have distinct local
-names.
+The Cloudflare API token is currently a repository secret, because GitHub cannot
+copy an existing secret value into an Environment. For credential-level isolation,
+an administrator must re-enter it as `CLOUDFLARE_API_TOKEN` in the `production`
+Environment and replace the repository-level token with a non-production-scoped
+token. The branch policy, fail-closed resolver, local-only default Worker names,
+and Wrangler branch hooks protect deployments independently of that final token
+split.
 
 ## Change checklist
 
@@ -94,14 +96,16 @@ An environment change is one atomic contract change. Update and verify all of:
 
 1. The three Wrangler files and their Worker routes/bindings.
 2. `package.json` deploy and live-verification commands.
-3. The six Cloudflare Workers Builds connections (deploy command, build command,
-   root directory, production branch, non-production builds disabled).
-4. `config/cloudflare-deployments.json`, `scripts/cloudflare-version-deploy.mjs`,
-   and `verify-worker-deployment.mjs`.
-5. `scripts/ci-build.sh` and `verify-deploy-branch.sh`.
-6. This matrix and the Workers Builds runbook.
-7. `scripts/worker-deployment-contract.test.ts` and its targeted test command.
-8. The live verifier for production and development before promotion.
+3. Cloudflare Workers Builds settings, `.github/workflows/ci.yml`, and the
+   dispatch-only `deploy-workers.yml`.
+4. `config/cloudflare-deployments.json`, `cloudflare-version-deploy.mjs`, and
+   `verify-worker-deployment.mjs`.
+5. `scripts/resolve-deployment-target.sh` and `verify-deploy-branch.sh`.
+6. GitHub branch protection Cloudflare check contexts and the `production`
+   Environment branch policy (`main` only).
+7. This matrix and the Workers Builds runbook.
+8. `scripts/worker-deployment-contract.test.ts` and its targeted test command.
+9. The live verifier for production and development before promotion.
 
 Do not reset a Neon branch or clear an R2 bucket to repair a routing problem. First
 identify the Worker version, named profile, Hyperdrive binding, and bucket binding,

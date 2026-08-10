@@ -173,7 +173,22 @@ export const DEFAULT_SYSTEM_PROMPT =
   "- Output ONLY the {targetLanguage} translation of the final source line — nothing else.\n" +
   "- No commentary, explanations, labels, headers, markdown, language names, or restated source text. Just the translated text."
 
-export const DEFAULT_COMPLETION_MAX_TOKENS = 4096
+export const DEFAULT_COMPLETION_MAX_TOKENS = 16384
+
+// Former defaults (512 pre-2026-07-29, then 4096). Saving any project setting
+// snapshots the whole CompletionSettings object, so projects carry these as
+// persisted values that override a raised default — indistinguishable from a
+// deliberate choice. Drafting treats them as "never customized" (see
+// normalizeCompletionMaxTokens); a hand-set value other than these is kept.
+const LEGACY_COMPLETION_MAX_TOKENS = new Set([512, 4096])
+
+/** Effective drafting output budget: legacy default snapshots (and unset) map
+ * to the current default; any other stored value is respected as-is. */
+export function normalizeCompletionMaxTokens(value: number | undefined): number {
+  return !value || LEGACY_COMPLETION_MAX_TOKENS.has(value)
+    ? DEFAULT_COMPLETION_MAX_TOKENS
+    : value
+}
 
 // VITE_CHAT_BASE points at the chat-completion proxy. Since 2026-05-26 this
 // is the aquilla-identity worker (mounted at api.aquilla.app/chat — the

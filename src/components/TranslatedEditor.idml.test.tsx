@@ -4,7 +4,10 @@ import { act, cleanup, fireEvent, render } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { validateIdmlTranslation, type IdmlFormatMetadataV2 } from "@aquilla/idml-roundtrip"
 import { TranslatedEditor } from "./TranslatedEditor"
-import type { IdmlEditorConfiguration } from "@/lib/richtext/idml-editor"
+import {
+  serializeIdmlEditorDocument,
+  type IdmlEditorConfiguration,
+} from "@/lib/richtext/idml-editor"
 
 const SOURCE_HTML =
   `<p data-idml-version="2">`
@@ -31,6 +34,17 @@ const CONFIGURATION: IdmlEditorConfiguration = {
 }
 
 type EditorSurface = HTMLElement & { editor?: Editor }
+
+/**
+ * Slot text without the zero-width composition sentinel (AQU-810): an empty
+ * slot is seeded with one on compositionstart so the browser has an editable
+ * text node to compose inside. It is deleted when the composition ends and
+ * stripped from every commit, so content assertions ignore it.
+ */
+function slotVisibleText(surface: HTMLElement, slot: number): string | undefined {
+  return surface.querySelector(`span[data-idml-slot="${slot}"]`)
+    ?.textContent?.replace(/\u200b/g, "")
+}
 
 function positionOf(editor: Editor, name: string): number {
   let position = -1
@@ -360,7 +374,13 @@ describe("TranslatedEditor — protected IDML mode", () => {
     expect(validateIdmlTranslation(SOURCE_HTML, committed!.valueHtml, METADATA).valid).toBe(true)
   })
 
-  it("replaces in-progress IME composition text instead of duplicating it", async () => {
+  // AQU-810: in a real browser, `insertCompositionText` beforeinput events are
+  // NOT cancelable — the IME mutates the DOM regardless, and ProseMirror
+  // applies the composed text itself through its DOM-change reader. The IDML
+  // handlers must therefore stay out of the way for the whole composition:
+  // intercepting these events used to double every update and leak the raw
+  // romaji keystrokes ("k小日小日子にch子にc…").
+  it("leaves IME composition to the browser and applies composed text once (AQU-810)", async () => {
     const onCommit = vi.fn()
     const emptyTargetHtml = SOURCE_HTML
       .replace(">Source</span>", "></span>")
@@ -376,29 +396,122 @@ describe("TranslatedEditor — protected IDML mode", () => {
     )
     await act(async () => { await Promise.resolve() })
     const surface = container.querySelector(".ProseMirror") as EditorSurface
+    const editor = surface.editor!
+    const slotText = () => slotVisibleText(surface, 0)
 
     act(() => {
       fireEvent.focus(surface)
+      fireEvent.click(surface)
+    })
+
+    // The keydown that *starts* a composition reports keyCode 229 and
+    // isComposing === false. It belongs to the IME: it must not be redirected
+    // into the slot (that leaked a literal "k") nor be preventDefault-ed.
+    let notPrevented = false
+    act(() => {
+      notPrevented = fireEvent.keyDown(surface, { key: "k", keyCode: 229 })
       fireEvent.compositionStart(surface)
+    })
+    expect(notPrevented).toBe(true)
+    expect(slotText()).toBe("")
+    // The empty slot was seeded with the zero-width composition sentinel, so
+    // the browser has an editable text node inside the span to compose into.
+    expect(surface.querySelector("span[data-idml-slot=\"0\"]")?.textContent).toBe("\u200b")
+
+    // Mid-composition the browser announces the IME's own DOM write with a
+    // non-cancelable beforeinput. The editor must not insert anything itself.
+    act(() => {
       fireEvent(surface, new InputEvent("beforeinput", {
         bubbles: true,
-        cancelable: true,
-        data: "漢",
+        cancelable: false,
+        data: "感",
         inputType: "insertCompositionText",
       }))
-      fireEvent(surface, new InputEvent("beforeinput", {
-        bubbles: true,
-        cancelable: true,
-        data: "漢字",
-        inputType: "insertCompositionText",
-      }))
-      fireEvent.compositionEnd(surface, { data: "漢字" })
+    })
+    expect(slotText()).toBe("")
+
+    // ProseMirror's DOM-change reader applies the composed text as a plain
+    // insert at the caret (already anchored inside the editable slot).
+    act(() => {
+      editor.view.dispatch(editor.view.state.tr.insertText("感謝"))
+      fireEvent.compositionEnd(surface, { data: "感謝" })
+    })
+    // ProseMirror reads the final DOM state in a microtask *after*
+    // compositionend — handleTextInput must still defer to the native insert
+    // in that window instead of dispatching a second copy.
+    const deferredDuringFlush = editor.view.someProp(
+      "handleTextInput",
+      (handler) => handler(editor.view, 2, 2, "謝", () => editor.view.state.tr),
+    )
+    expect(deferredDuringFlush).toBeFalsy()
+    expect(slotText()).toBe("感謝")
+
+    // Once the composition settles (the cleanup waits for ProseMirror's
+    // deferred reads before touching the slot), the composing window closes,
+    // the sentinel is deleted, and ordinary typing returns to the
+    // slot-redirect path.
+    await act(async () => {
+      await new Promise((resolve) => { setTimeout(resolve, 120) })
+    })
+    expect(surface.querySelector("span[data-idml-slot=\"0\"]")?.textContent).toBe("感謝")
+    act(() => {
+      fireEvent.keyDown(surface, { key: "!" })
       fireEvent.blur(surface)
     })
 
-    expect(surface.querySelector("span[data-idml-slot=\"0\"]")?.textContent).toBe("漢字")
+    expect(slotText()).toBe("感謝!")
+    const committed = onCommit.mock.calls[0]?.[0] as { value: string, valueHtml: string } | undefined
+    expect(committed?.value).toContain("感謝!")
+    expect(committed?.value).not.toMatch(/[a-z]/)
+    expect(committed?.valueHtml).toContain(">感謝!</span>")
+    expect(committed?.valueHtml.match(/感謝/g)).toHaveLength(1)
+    expect(validateIdmlTranslation(SOURCE_HTML, committed!.valueHtml, METADATA).valid).toBe(true)
+  })
+
+  it("composes Devanagari transliteration without doubling it (AQU-810)", async () => {
+    const onCommit = vi.fn()
+    const emptyTargetHtml = SOURCE_HTML
+      .replace(">Source</span>", "></span>")
+      .replace(">Second</span>", "></span>")
+    const { container } = render(
+      <TranslatedEditor
+        cellId="idml-ime-devanagari"
+        initialPlain=""
+        initialHtml={emptyTargetHtml}
+        idmlConfiguration={CONFIGURATION}
+        onCommit={onCommit}
+      />,
+    )
+    await act(async () => { await Promise.resolve() })
+    const surface = container.querySelector(".ProseMirror") as EditorSurface
+    const editor = surface.editor!
+
+    act(() => {
+      fireEvent.focus(surface)
+      fireEvent.click(surface)
+      fireEvent.keyDown(surface, { key: "a", keyCode: 229 })
+      fireEvent.compositionStart(surface)
+      fireEvent(surface, new InputEvent("beforeinput", {
+        bubbles: true,
+        cancelable: false,
+        data: "अ",
+        inputType: "insertCompositionText",
+      }))
+    })
+    expect(slotVisibleText(surface, 0)).toBe("")
+
+    act(() => {
+      editor.view.dispatch(editor.view.state.tr.insertText("अतुल"))
+      fireEvent.compositionEnd(surface, { data: "अतुल" })
+    })
+    await act(async () => {
+      await new Promise((resolve) => { setTimeout(resolve, 120) })
+    })
+    act(() => { fireEvent.blur(surface) })
+
+    expect(surface.querySelector("span[data-idml-slot=\"0\"]")?.textContent).toBe("अतुल")
     const committed = onCommit.mock.calls[0]?.[0] as { valueHtml: string } | undefined
-    expect(committed?.valueHtml).toContain(">漢字</span>")
+    expect(committed?.valueHtml).toContain(">अतुल</span>")
     expect(validateIdmlTranslation(SOURCE_HTML, committed!.valueHtml, METADATA).valid).toBe(true)
   })
 
@@ -429,13 +542,174 @@ describe("TranslatedEditor — protected IDML mode", () => {
     expect(onEscapeToGrid).not.toHaveBeenCalled()
     expect(surface.querySelectorAll("p[data-idml-version=\"2\"]")).toHaveLength(1)
     expect(surface.querySelector("span[data-idml-slot=\"0\"] br")).toBeTruthy()
-    expect(
-      (surface.querySelector("span[data-idml-slot=\"1\"]") as HTMLElement).style.fontWeight,
-    ).toBe("700")
+    const styledSlot = surface.querySelector("span[data-idml-slot=\"1\"]") as HTMLElement
+    expect(styledSlot.style.fontWeight).toBe("700")
+    expect(styledSlot.getAttribute("data-idml-character-style"))
+      .toBe("CharacterStyle/Bold")
+    expect(styledSlot.hasAttribute("title")).toBe(false)
 
     act(() => fireEvent.blur(surface))
     expect(onCommit).toHaveBeenCalledTimes(1)
     const committed = onCommit.mock.calls[0][0] as { valueHtml: string }
+    expect(validateIdmlTranslation(SOURCE_HTML, committed.valueHtml, METADATA).valid).toBe(true)
+  })
+
+  // AQU-740: the browser's own delete drops the emptied slot span, which the
+  // guard has to refuse as anchor removal — so a slot's last character could
+  // never be deleted, and the cell was left showing the "protected formatting"
+  // banner with one stubborn character in it.
+  it("deletes a slot down to empty, keeping every protected anchor", async () => {
+    const onCommit = vi.fn()
+    const onIdmlValidationError = vi.fn()
+    const emptyTargetHtml = SOURCE_HTML
+      .replace(">Source</span>", "></span>")
+      .replace(">Second</span>", "></span>")
+    const { container } = render(
+      <TranslatedEditor
+        cellId="idml-delete-to-empty"
+        initialPlain=""
+        initialHtml={emptyTargetHtml}
+        idmlConfiguration={CONFIGURATION}
+        onCommit={onCommit}
+        onIdmlValidationError={onIdmlValidationError}
+      />,
+    )
+    await act(async () => { await Promise.resolve() })
+    const surface = container.querySelector(".ProseMirror") as EditorSurface
+    const editor = surface.editor!
+
+    act(() => {
+      fireEvent.focus(surface)
+      for (const character of "abc") fireEvent.keyDown(surface, { key: character })
+      for (let press = 0; press < 3; press += 1) {
+        fireEvent.keyDown(surface, { key: "Backspace" })
+      }
+    })
+
+    expect(slotVisibleText(surface, 0)).toBe("")
+    expect(surface.querySelector("[data-idml-token=\"0\"]")).toBeTruthy()
+    expect(surface.querySelectorAll("span[data-idml-slot]")).toHaveLength(2)
+    expect(onIdmlValidationError).not.toHaveBeenCalledWith(
+      expect.stringMatching(/protected InDesign formatting/i),
+    )
+
+    // A further Backspace at the slot start has nothing to take but structure.
+    act(() => { fireEvent.keyDown(surface, { key: "Backspace" }) })
+    expect(serializeIdmlEditorDocument(editor.state.doc)).toBe(emptyTargetHtml)
+    expect(onIdmlValidationError).not.toHaveBeenCalledWith(
+      expect.stringMatching(/protected InDesign formatting/i),
+    )
+  })
+
+  it("deletes a trailing space and its adjacent word in one modifier keypress", async () => {
+    const onIdmlValidationError = vi.fn()
+    const emptyTargetHtml = SOURCE_HTML
+      .replace(">Source</span>", "></span>")
+      .replace(">Second</span>", "></span>")
+    const { container } = render(
+      <TranslatedEditor
+        cellId="idml-delete-word"
+        initialPlain=""
+        initialHtml={emptyTargetHtml}
+        idmlConfiguration={CONFIGURATION}
+        onCommit={vi.fn()}
+        onIdmlValidationError={onIdmlValidationError}
+      />,
+    )
+    await act(async () => { await Promise.resolve() })
+    const surface = container.querySelector(".ProseMirror") as EditorSurface
+
+    act(() => {
+      fireEvent.focus(surface)
+      for (const character of "alpha beta ") fireEvent.keyDown(surface, { key: character })
+      fireEvent.keyDown(surface, { key: "Backspace", altKey: true })
+    })
+
+    expect(surface.querySelector("span[data-idml-slot=\"0\"]")?.textContent).toBe("alpha ")
+    expect(onIdmlValidationError).not.toHaveBeenCalledWith(
+      expect.stringMatching(/protected InDesign formatting/i),
+    )
+  })
+
+  // AQU-740: a trailing hard break inside an inline slot has no layout box, so
+  // the visible caret fell back to the cell's first line until the next
+  // keystroke. The view compensates with a synthetic trailing <br> widget.
+  it("gives a trailing line break a caret box without serializing it", async () => {
+    const onCommit = vi.fn()
+    const emptyTargetHtml = SOURCE_HTML
+      .replace(">Source</span>", "></span>")
+      .replace(">Second</span>", "></span>")
+    const { container } = render(
+      <TranslatedEditor
+        cellId="idml-trailing-break"
+        initialPlain=""
+        initialHtml={emptyTargetHtml}
+        idmlConfiguration={CONFIGURATION}
+        onCommit={onCommit}
+      />,
+    )
+    await act(async () => { await Promise.resolve() })
+    const surface = container.querySelector(".ProseMirror") as EditorSurface
+
+    act(() => {
+      fireEvent.focus(surface)
+      for (const character of "ab") fireEvent.keyDown(surface, { key: character })
+      fireEvent.keyDown(surface, { key: "Enter" })
+    })
+    expect(surface.querySelector("span[data-idml-slot=\"0\"] br")).toBeTruthy()
+    expect(surface.querySelector(".idml-trailing-break")).toBeTruthy()
+
+    act(() => { fireEvent.keyDown(surface, { key: "c" }) })
+    expect(surface.querySelector(".idml-trailing-break")).toBeNull()
+
+    act(() => fireEvent.blur(surface))
+    const committed = onCommit.mock.calls[0]?.[0] as { value: string; valueHtml: string }
+    expect(committed.value).toBe("ab\nc\t")
+    expect(committed.valueHtml.match(/<br>/g)).toHaveLength(1)
+    expect(validateIdmlTranslation(SOURCE_HTML, committed.valueHtml, METADATA).valid).toBe(true)
+  })
+
+  it("clears every editable slot on a select-all delete", async () => {
+    const onCommit = vi.fn()
+    const onIdmlValidationError = vi.fn()
+    const { container } = render(
+      <TranslatedEditor
+        cellId="idml-select-all-delete"
+        initialPlain="Source\tSecond"
+        initialHtml={SOURCE_HTML}
+        idmlConfiguration={CONFIGURATION}
+        onCommit={onCommit}
+        onIdmlValidationError={onIdmlValidationError}
+      />,
+    )
+    await act(async () => { await Promise.resolve() })
+    const surface = container.querySelector(".ProseMirror") as EditorSurface
+    const editor = surface.editor!
+
+    act(() => {
+      fireEvent.focus(surface)
+      editor.commands.selectAll()
+      fireEvent.keyDown(surface, { key: "Backspace" })
+    })
+
+    expect(slotVisibleText(surface, 0)).toBe("")
+    expect(slotVisibleText(surface, 1)).toBe("")
+    expect(surface.querySelector("[data-idml-token=\"0\"]")).toBeTruthy()
+    expect(onIdmlValidationError).not.toHaveBeenCalledWith(
+      expect.stringMatching(/protected InDesign formatting/i),
+    )
+
+    // Typing over the same selection replaces the slots rather than prepending.
+    // The trailing tab is the protected token: the committed plain value still
+    // renders protected structure as its whitespace.
+    act(() => {
+      editor.commands.selectAll()
+      for (const character of "neuf") fireEvent.keyDown(surface, { key: character })
+      fireEvent.blur(surface)
+    })
+    expect(surface.querySelector("span[data-idml-slot=\"0\"]")?.textContent).toBe("neuf")
+    const committed = onCommit.mock.calls.at(-1)?.[0] as { value: string; valueHtml: string }
+    expect(committed.value).toBe("neuf\t")
     expect(validateIdmlTranslation(SOURCE_HTML, committed.valueHtml, METADATA).valid).toBe(true)
   })
 

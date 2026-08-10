@@ -30,6 +30,7 @@ import {
   REGISTER_MAX_PER_IP,
   RESET_REQUEST_MAX_PER_IDENTIFIER,
 } from "../utils/rate-limit"
+import { revokeToken } from "../utils/token-revocation"
 import {
   LegacyUserMigrationError,
   migrateLegacyUserCandidate,
@@ -528,6 +529,30 @@ auth.get("/me", authMiddleware, async (c) => {
     email: user.email,
     preferences: user.preferences,
   })
+})
+
+// [Pen test] Auth & session mgmt (2026-08-03): there was previously no
+// server-side logout at all — the frontend only deleted the token locally
+// (session-store.ts clearSession), so a stolen/leaked access token kept
+// authenticating for up to its full 30-day lifetime after the user logged
+// out. This denylists the caller's own token by `jti`; see
+// utils/token-revocation.ts and migration 0073. Tokens minted before this
+// change carry no `jti` and can't be individually revoked — logging out
+// with one is still a no-op locally, same as before.
+auth.post("/logout", authMiddleware, async (c) => {
+  const user = c.get("user")
+  const payload = c.get("tokenPayload")
+
+  if (payload.jti) {
+    try {
+      await revokeToken(c.env.AQUILLA_PG, payload.jti, user.id, payload.exp)
+    } catch (err) {
+      console.error("[auth] logout revoke failed:", err)
+      return c.json({ error: "Failed to log out" }, 500)
+    }
+  }
+
+  return c.json({ success: true })
 })
 
 // AQU-436: Self-update gate for the authenticated user.

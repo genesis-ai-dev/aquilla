@@ -1,12 +1,17 @@
 import { EventEmitter } from "node:events"
 import { writeFileSync } from "node:fs"
 import type { spawn } from "node:child_process"
+import path from "node:path"
 import { describe, expect, it, vi } from "vitest"
 import {
   deploymentVersionTag,
   parseWranglerOutput,
   runVerifiedDeployment,
+  versionPreviewOrigin,
 } from "./cloudflare-version-deploy.mjs"
+
+const WEB_VERSION_ID = "a66aa4e6-55ec-4ee3-9c44-af741fe2b0eb"
+const WEB_PREVIEW_ORIGIN = "https://a66aa4e6-aquilla-web.blue-darkness-7674.workers.dev"
 
 describe("verified Cloudflare version deployment", () => {
   it("parses the exact version ID from Wrangler structured output", () => {
@@ -28,6 +33,81 @@ describe("verified Cloudflare version deployment", () => {
     expect(
       deploymentVersionTag("aquilla-identity", "development", "abcdef1234567890"),
     ).toBe("aquilla-identity-development-abcdef123456")
+  })
+
+  it("accepts only the immutable preview URL for the uploaded Worker version", () => {
+    expect(versionPreviewOrigin({
+      worker_name: "aquilla-web",
+      version_id: WEB_VERSION_ID,
+      preview_url: WEB_PREVIEW_ORIGIN,
+    }, "aquilla-web")).toBe(WEB_PREVIEW_ORIGIN)
+
+    expect(() => versionPreviewOrigin({
+      worker_name: "aquilla-web",
+      version_id: WEB_VERSION_ID,
+      preview_url: "https://different-aquilla-web.blue-darkness-7674.workers.dev",
+    }, "aquilla-web")).toThrow("expected https://a66aa4e6-aquilla-web")
+  })
+
+  it("verifies immutable web assets before promoting traffic", async () => {
+    const order: string[] = []
+    await runVerifiedDeployment({
+      surface: "web",
+      environment: "production",
+      sourceId: "abcdef123456",
+      upload: vi.fn(async () => {
+        order.push("upload")
+        return { versionId: WEB_VERSION_ID, previewOrigin: WEB_PREVIEW_ORIGIN }
+      }),
+      verifyVersion: vi.fn(async () => {
+        order.push("verify-bindings")
+        return WEB_VERSION_ID
+      }),
+      verifyWebPreview: vi.fn(async () => {
+        order.push("verify-immutable-assets")
+      }),
+      promoteVersion: vi.fn(async () => {
+        order.push("promote")
+      }),
+      verifyDeployment: vi.fn(async () => {
+        order.push("verify-traffic")
+        return WEB_VERSION_ID
+      }),
+      verifyArtifacts: vi.fn(),
+    })
+
+    expect(order).toEqual([
+      "upload",
+      "verify-bindings",
+      "verify-immutable-assets",
+      "promote",
+      "verify-traffic",
+    ])
+  })
+
+  it("leaves production traffic untouched when immutable web assets are incomplete", async () => {
+    const promoteVersion = vi.fn()
+    const verifyDeployment = vi.fn()
+
+    await expect(runVerifiedDeployment({
+      surface: "web",
+      environment: "production",
+      sourceId: "abcdef123456",
+      upload: vi.fn().mockResolvedValue({
+        versionId: WEB_VERSION_ID,
+        previewOrigin: WEB_PREVIEW_ORIGIN,
+      }),
+      verifyVersion: vi.fn().mockResolvedValue(WEB_VERSION_ID),
+      verifyWebPreview: vi.fn().mockRejectedValue(
+        new Error("SPA asset /assets/missing.js returned HTML instead of JavaScript"),
+      ),
+      promoteVersion,
+      verifyDeployment,
+      verifyArtifacts: vi.fn(),
+    })).rejects.toThrow("returned HTML instead of JavaScript")
+
+    expect(promoteVersion).not.toHaveBeenCalled()
+    expect(verifyDeployment).not.toHaveBeenCalled()
   })
 
   it("verifies the exact production version before promotion and again after", async () => {
@@ -65,6 +145,23 @@ describe("verified Cloudflare version deployment", () => {
       "promote",
       "verify-deployment",
     ])
+  })
+
+  it("rejects an unsafe SPA artifact before upload", async () => {
+    const upload = vi.fn()
+    const verifyArtifacts = vi.fn(() => {
+      throw new Error("unsafe deployment artifact")
+    })
+
+    await expect(runVerifiedDeployment({
+      surface: "web",
+      environment: "production",
+      upload,
+      verifyArtifacts,
+    })).rejects.toThrow("unsafe deployment artifact")
+
+    expect(verifyArtifacts).toHaveBeenCalledWith(path.resolve(import.meta.dirname, "..", "dist"))
+    expect(upload).not.toHaveBeenCalled()
   })
 
   it("uses the environment-configured Worker name while promoting the captured ID", async () => {

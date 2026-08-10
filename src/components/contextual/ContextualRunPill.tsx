@@ -8,7 +8,7 @@
 // here are plain user words (ui-jargon-guard.test.ts bans spec ids).
 
 import { useEffect } from "react"
-import { AlertTriangle, Eye, Pause, Play, X } from "lucide-react"
+import { AlertTriangle, Eye, Pause, Play, Sparkles, X } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -24,6 +24,7 @@ import {
   useContextualRunProgress,
   useContextualRunState,
 } from "@/lib/contextual/run-store"
+import { useContextualDraftsSummary } from "@/lib/contextual/drafts-store"
 import { installContextualTransport } from "@/lib/contextual/transport"
 import { ContextualSteering } from "./ContextualSteering"
 
@@ -35,6 +36,9 @@ interface PillProps {
   onSetupNeeded?: () => void
   /** Clicking the span label jumps the editor to that passage. */
   onSpanClick?: (spanLabel: string) => void
+  /** Cell the user is looking at. Sent on start so the first wave begins
+   *  there — same total work, but the first results land on screen. */
+  anchorCellId?: string | null
 }
 
 const PILL_BASE =
@@ -53,11 +57,51 @@ function ProgressBar({ done, total }: { done: number; total: number }) {
   )
 }
 
-export function ContextualRunPill({ projectId, fileId, onSetupNeeded, onSpanClick }: PillProps) {
+export function ContextualRunPill({
+  projectId,
+  fileId,
+  onSetupNeeded,
+  onSpanClick,
+  anchorCellId,
+}: PillProps) {
   const state = useContextualRunState()
   const progress = useContextualRunProgress()
+  const drafts = useContextualDraftsSummary()
 
-  const { available, status, phase, spanLabel, runId, activeDirections } = state
+  const { available, status, phase, spanLabel, runId, activeDirections, lanes } = state
+
+  // Drafts waiting on a human are the run's RESULT, so they outrank its
+  // machinery: a translator wants "12 ready for you", not a span count.
+  const pendingChip =
+    drafts.pending > 0 ? (
+      <AppTooltip content="Suggestions waiting in your cells">
+        <span
+          data-testid="contextual-pending-drafts"
+          className="flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-primary"
+        >
+          <Sparkles className="h-3 w-3" aria-hidden />
+          <span className="tabular-nums">{drafts.pending}</span>
+          <span className="sr-only"> suggestions ready to review</span>
+        </span>
+      </AppTooltip>
+    ) : null
+
+  // A wave runs several passages at once. Naming one of them as "the" passage
+  // would be a lie that flickers; report the width instead.
+  const laneReadout =
+    lanes.length > 1 ? (
+      <span data-testid="contextual-lanes" className="text-muted-foreground">
+        {lanes.length} passages
+      </span>
+    ) : spanLabel ? (
+      <button
+        type="button"
+        className="max-w-40 truncate underline-offset-2 hover:underline"
+        onClick={() => onSpanClick?.(spanLabel)}
+      >
+        {spanLabel}
+      </button>
+    ) : null
 
   // "Direct the run" popover — only meaningful while a run exists to steer
   // (running/pausing/paused/parked); idle, starting, failed and terminated
@@ -94,7 +138,7 @@ export function ContextualRunPill({ projectId, fileId, onSetupNeeded, onSpanClic
           aria-label="Contextual draft"
           onClick={() => {
             if (!available) { onSetupNeeded?.(); return }
-            void startContextualRun(projectId, fileId)
+            void startContextualRun(projectId, fileId, anchorCellId ?? undefined)
           }}
         >
           <Play className="h-3.5 w-3.5" />
@@ -130,6 +174,7 @@ export function ContextualRunPill({ projectId, fileId, onSetupNeeded, onSpanClic
           </Button>
         </AppTooltip>
         <span className="text-muted-foreground">Paused</span>
+        {pendingChip}
         {progress.total > 0 && (
           <span className="tabular-nums text-muted-foreground">
             {progress.done}/{progress.total}
@@ -155,6 +200,7 @@ export function ContextualRunPill({ projectId, fileId, onSetupNeeded, onSpanClic
       <>
         <Eye className="h-3.5 w-3.5 text-muted-foreground" />
         <span className="text-muted-foreground">Watching for changes</span>
+        {pendingChip}
       </>
     )
     trailing = (
@@ -212,21 +258,14 @@ export function ContextualRunPill({ projectId, fileId, onSetupNeeded, onSpanClic
           </Button>
         </AppTooltip>
         <ProgressBar done={progress.done} total={progress.total} />
-        {(phase || spanLabel) && (
-          <span className="max-w-48 truncate text-muted-foreground">
+        {(phase || laneReadout) && (
+          <span className="flex max-w-56 items-center gap-1 truncate text-muted-foreground">
             {phase}
-            {phase && spanLabel ? " · " : ""}
-            {spanLabel && (
-              <button
-                type="button"
-                className="underline-offset-2 hover:underline"
-                onClick={() => onSpanClick?.(spanLabel)}
-              >
-                {spanLabel}
-              </button>
-            )}
+            {phase && laneReadout ? " · " : ""}
+            {laneReadout}
           </span>
         )}
+        {pendingChip}
         <span className="tabular-nums text-muted-foreground">
           {progress.done}/{progress.total}
         </span>
@@ -248,10 +287,11 @@ export function ContextualRunPill({ projectId, fileId, onSetupNeeded, onSpanClic
  * and wires span-label clicks to the editor's scroll request. Must render
  * inside EditorScrollProvider (it does — the editor viewport wrapper is).
  */
-export function ContextualRunPillMount({ projectId, fileId, onSetupNeeded }: {
+export function ContextualRunPillMount({ projectId, fileId, onSetupNeeded, anchorCellId }: {
   projectId: string
   fileId: string
   onSetupNeeded?: () => void
+  anchorCellId?: string | null
 }) {
   const { requestScrollToSection } = useEditorScroll()
 
@@ -267,6 +307,7 @@ export function ContextualRunPillMount({ projectId, fileId, onSetupNeeded }: {
       projectId={projectId}
       fileId={fileId}
       onSetupNeeded={onSetupNeeded}
+      anchorCellId={anchorCellId}
       onSpanClick={(label) => requestScrollToSection(label, fileId)}
     />
   )

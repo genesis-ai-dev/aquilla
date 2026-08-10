@@ -145,7 +145,7 @@ Status pipeline:
 | **Dispatched** | Dev/AI has **begun work** on the task | set when you pick the issue up |
 | **Fixed** | Dev/AI has fixed it, **not deployed yet** | set the moment the fix is committed |
 | **Dev Verification Needed** | Fix deployed to the **dev branch**, awaiting dev-team validation | set after deploying to dev |
-| **Ready for QA** | Functionality is on **staging**; QA can test against it and merge to main | dev→QA hand-off |
+| **Ready for QA** | Dev validation passed; QA can test the deployed `dev` environment and merge to main | dev→QA hand-off |
 | **Deployed** / **Done** | QA validated and **merged the ticket into `main`** | set by QA as part of the merge |
 | **Canceled** / **Duplicate** | invalid / superseded | as needed |
 
@@ -154,8 +154,8 @@ Rules:
 1. **Pick up work from `Todo`** → assign it to your name and set **`Dispatched`** (work begun).
 2. When the fix is committed but not yet deployed → **`Fixed`**.
 3. When the fix is deployed to the **dev branch** for dev-team validation → **`Dev Verification Needed`**.
-4. Once the functionality is on **staging** and testable → **`Ready for QA`**. This is the
-   dev→QA hand-off. **QA owns the merge to `main`** and advances the ticket to
+4. Once development validation passes and the functionality remains testable on
+   **`dev`** → **`Ready for QA`**. This is the dev→QA hand-off. **QA owns the merge to `main`** and advances the ticket to
    `Deployed`/`Done` as part of that merge. Don't set `Deployed`/`Done` yourself unless you
    are the one doing the QA merge.
 5. **Every commit must carry its `AQU-###`.** Linear auto-suggests a branch name, and the
@@ -164,7 +164,7 @@ Rules:
    reference — a ticketless `fix`/`feat` commit is invisible to that process.
    `chore`/`docs`/`polish` commits may go ticketless.
 6. **Prototyping fast-path:** while prototyping we sometimes merge straight to `main` with
-   `--no-verify`, skipping the staging/QA gates. Allowed — but the commit **still needs its
+   `--no-verify`, skipping the dev/QA gates. Allowed — but the commit **still needs its
    `AQU-###`** so the ticket stays traceable to the merge.
 
 ### One ticket = one branch = one worktree
@@ -190,7 +190,8 @@ makes the work impossible to review or revert cleanly.
 > traceable merge, and commits that landed without a ticket. Read-only; never moves the board.
 
 > **Pre-production** is `https://dev.aquilla.app` (API `api.dev.aquilla.app`), backed by
-> the Neon `dev` branch and deployed by Cloudflare Workers Builds on every push to `dev`.
+> the Neon `dev` branch. A push does not deploy it; an operator must explicitly deploy
+> from a clean checkout at the current `origin/dev` commit.
 > Staging was retired 2026-08-05; see [`docs/DEPLOYMENT-ENVIRONMENTS.md`](docs/DEPLOYMENT-ENVIRONMENTS.md).
 
 ## Useful slash commands

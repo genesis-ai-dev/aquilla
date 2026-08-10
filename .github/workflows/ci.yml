@@ -1,35 +1,13 @@
 name: CI
 
-# GitHub Actions no longer deploys anything. Cloudflare Workers Builds owns
-# every deploy, one connection per Worker script:
-#
-#   main → aquilla-web / aquilla-identity / aquilla-sync-worker   (production)
-#   dev  → aquilla-web-development / aquilla-dev-identity /
-#          aquilla-sync-worker-dev                                (QA)
-#
-# Each connection has "builds for non-production branches" disabled, so only
-# its own branch can ever touch its Workers. That is enforced in the Cloudflare
-# dashboard, not here — see docs/DEPLOYMENT-ENVIRONMENTS.md.
-#
-# What is left for Actions is the one thing Cloudflare cannot do: gate a pull
-# request before it merges. This repo exhausts its Actions allowance in about a
-# week, so this workflow is deliberately frugal:
-#
-#   * pull_request only. No push trigger — a merge to dev or main would just
-#     re-run checks the PR already ran, and Cloudflare re-runs type-check and
-#     the worker suites before it deploys either environment.
-#   * The three worker suites (~22 min combined) run only when their package
-#     changed.
-#
-# DELIBERATELY NOT path-ignored: lint, typecheck, unit and build are required
-# status checks on main and dev. GitHub never reports a job filtered out by a
-# paths filter, so a docs-only PR would wait forever on a check that cannot run.
+# AQU-564: Cloudflare Workers Builds owns automatic pull-request validation and
+# route-free versions. This workflow is retained only as an explicit fallback;
+# it has no pull-request or push trigger and therefore consumes no hosted runner
+# minutes during ordinary repository activity.
 
 on:
-  pull_request:
   workflow_dispatch:
 
-# Supersede in-flight runs for the same PR rather than paying for both.
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
@@ -38,53 +16,57 @@ permissions:
   contents: read
 
 jobs:
-  # Which worker packages did this PR touch? Same git-diff approach the old
-  # deploy-workers.yml used, because the github.event.commits payload is
-  # unreliable on merge and batch pushes.
+  target:
+    runs-on: ubuntu-latest
+    outputs:
+      wrangler_environment: ${{ steps.resolve.outputs.wrangler_environment }}
+      live_environment: ${{ steps.resolve.outputs.live_environment }}
+      github_environment: ${{ steps.resolve.outputs.github_environment }}
+      api_host: ${{ steps.resolve.outputs.api_host }}
+      sync_worker_host: ${{ steps.resolve.outputs.sync_worker_host }}
+      auth_base: ${{ steps.resolve.outputs.auth_base }}
+      chat_base: ${{ steps.resolve.outputs.chat_base }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: resolve
+        name: Resolve authorized deployment target
+        run: bash scripts/resolve-deployment-target.sh
+
+  # Worker suites are not required branch-protection contexts, so they may be
+  # skipped when irrelevant. Detection fails open for an unreadable diff and
+  # for every shared input that can affect more than one Worker.
   changes:
     runs-on: ubuntu-latest
     outputs:
-      auth: ${{ steps.f.outputs.auth }}
-      sync: ${{ steps.f.outputs.sync }}
-      agent: ${{ steps.f.outputs.agent }}
+      auth: ${{ steps.filter.outputs.auth }}
+      sync: ${{ steps.filter.outputs.sync }}
+      agent: ${{ steps.filter.outputs.agent }}
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - id: f
+      - id: filter
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
-          # Fail OPEN: an undiffable base, or a change to shared root deps,
-          # runs every suite. A skipped suite costs a broken deploy; a
-          # redundant one costs nine minutes.
           base="$BASE_SHA"
           if [ -z "$base" ] || ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
             echo "::notice::No usable diff base; running every worker suite."
-            for w in auth sync agent; do echo "$w=true" >> "$GITHUB_OUTPUT"; done
+            node scripts/resolve-worker-test-scope.mjs --all
             exit 0
           fi
 
-          changed=$(git diff --name-only "$base" "$HEAD_SHA")
+          if ! changed=$(git diff --name-only "$base" "$HEAD_SHA"); then
+            echo "::notice::Diff failed; running every worker suite."
+            node scripts/resolve-worker-test-scope.mjs --all
+            exit 0
+          fi
           echo "$changed"
+          printf '%s\n' "$changed" | node scripts/resolve-worker-test-scope.mjs
 
-          if echo "$changed" | grep -qE '^(pnpm-lock\.yaml|package\.json|db/)'; then
-            echo "::notice::Shared root dependency changed; running every worker suite."
-            for w in auth sync agent; do echo "$w=true" >> "$GITHUB_OUTPUT"; done
-            exit 0
-          fi
-
-          echo "$changed" | grep -q '^auth-worker/'  && echo "auth=true"  >> "$GITHUB_OUTPUT" || echo "auth=false"  >> "$GITHUB_OUTPUT"
-          echo "$changed" | grep -q '^sync-worker/'  && echo "sync=true"  >> "$GITHUB_OUTPUT" || echo "sync=false"  >> "$GITHUB_OUTPUT"
-          echo "$changed" | grep -q '^agent-worker/' && echo "agent=true" >> "$GITHUB_OUTPUT" || echo "agent=false" >> "$GITHUB_OUTPUT"
-
-  # ---------------------------------------------------------------------------
-  # Required status checks: lint, typecheck, unit, build.
-  # Branch protection on main and dev requires these exact context names.
-  # Renaming one stops it reporting and makes every PR unmergeable — rename
-  # only together with the protection settings.
-  # ---------------------------------------------------------------------------
+  # Required branch-protection checks. Do not rename or add conditions without
+  # updating the main/dev protection rules in the same control-plane change.
   lint:
     runs-on: ubuntu-latest
     steps:
@@ -95,7 +77,6 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      # QW-6/TEST-6: lint enforced in CI
       - run: pnpm lint
 
   typecheck:
@@ -124,11 +105,16 @@ jobs:
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm test:idml
 
-  # AQU-219: must stay `pnpm run build` (the tsc -b chain), never
-  # `tsc --noEmit` — a plain noEmit does NOT catch project-reference /
-  # erasableSyntaxOnly violations (AQU-213 reached main before this existed).
+  # The repository build is the CI gate (tsc -b && vite build). It compiles
+  # once with the resolved target, verifies that target, and publishes the
+  # exact dist/ directory consumed by deploy.
   build:
+    needs: target
     runs-on: ubuntu-latest
+    env:
+      VITE_SYNC_WORKER_HOST: ${{ needs.target.outputs.sync_worker_host }}
+      VITE_AUTH_BASE: ${{ needs.target.outputs.auth_base }}
+      VITE_CHAT_BASE: ${{ needs.target.outputs.chat_base }}
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
@@ -138,6 +124,19 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build
+      - name: Verify built API environment
+        run: bash scripts/verify-dist-host.sh "${{ needs.target.outputs.api_host }}"
+      - name: Strip dist/_redirects (Workers static assets rejects it)
+        run: rm -f dist/_redirects
+      - name: Verify deployment artifact exclusion policy
+        run: node scripts/verify-deployment-artifacts.mjs dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aquilla-web-${{ needs.target.outputs.live_environment }}-${{ github.sha }}
+          path: dist
+          include-hidden-files: true
+          retention-days: 3
+          if-no-files-found: error
 
   schema-migrations:
     runs-on: ubuntu-latest
@@ -149,17 +148,8 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      # Static check: every table in schema.sql must have a CREATE TABLE in
-      # db/postgres/migrations/ (or be in the pre-migration baseline set). No DB
-      # connection required. Catches the ai_usage_daily class of drift, and is
-      # the only place that runs before a Cloudflare build hits neon:status.
       - run: pnpm neon:check
 
-  # ---------------------------------------------------------------------------
-  # Worker suites — path-filtered. Not required status checks, so a skip here
-  # cannot wedge a PR. Cloudflare re-runs these before it deploys either
-  # environment; running them here catches breakage before the merge instead.
-  # ---------------------------------------------------------------------------
   auth-worker-tests:
     needs: changes
     if: needs.changes.outputs.auth == 'true'
@@ -174,10 +164,7 @@ jobs:
           cache-dependency-path: |
             pnpm-lock.yaml
             auth-worker/pnpm-lock.yaml
-      # Shared db shims live outside the worker dir and resolve their own bare
-      # imports from the repo root.
       - run: pnpm install --frozen-lockfile
-      # Worker-local install proves the worker package owns its direct deps.
       - run: pnpm install --frozen-lockfile
         working-directory: auth-worker
       - run: pnpm run type-check
@@ -204,7 +191,6 @@ jobs:
         working-directory: sync-worker
       - run: pnpm run type-check
         working-directory: sync-worker
-      # TEST-1: sync-worker tests run in CI
       - run: pnpm test
         working-directory: sync-worker
 
@@ -219,16 +205,64 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: agent-worker/package-lock.json
-      # Agent route tests inject a fake Sandbox binding, so PR validation does
-      # not require Docker or another local container engine.
       - run: npm ci
         working-directory: agent-worker
       - run: npm run type-check
         working-directory: agent-worker
       - run: npm test
         working-directory: agent-worker
-      # The route suite deliberately needs no container engine. Deployment does
-      # build this image, though, so CI must prove the pinned SDK base and the
-      # Python package layer still resolve.
       - run: docker build --tag aquilla-agent-sandbox:ci .
         working-directory: agent-worker
+
+  preview:
+    needs: [target, lint, typecheck, unit, build]
+    if: github.event_name == 'pull_request' && github.event.pull_request.draft != true
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ needs.target.outputs.github_environment }}
+    permissions:
+      contents: read
+      deployments: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/download-artifact@v4
+        with:
+          name: aquilla-web-${{ needs.target.outputs.live_environment }}-${{ github.sha }}
+          path: dist
+
+      - name: Upload aquilla-web preview (PR)
+        id: deploy_preview
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: 6a80496d1e59948a9cbaa3c643ba81d7
+        run: node scripts/cloudflare-pr-preview.mjs "${{ github.event.number }}" "${{ github.event.pull_request.head.sha }}"
+
+      - name: Verify aquilla-web preview environment
+        env:
+          PREVIEW_URL: ${{ steps.deploy_preview.outputs.url }}
+        run: node scripts/verify-live-environment.mjs development --surface=spa --app-origin="$PREVIEW_URL"
+
+      - name: Comment preview URL on PR
+        uses: marocchino/sticky-pull-request-comment@v3
+        with:
+          header: pages-preview
+          message: |
+            **Preview:** ${{ steps.deploy_preview.outputs.url }}
+
+            | | |
+            | --- | --- |
+            | Commit | `${{ github.event.pull_request.head.sha }}` |
+            | API | `api.dev.aquilla.app` (development) |
+
+            This route-free preview is refreshed for each non-draft PR update.
+            It targets development identity, sync, and chat services and cannot
+            alter production or development route traffic.
+
+            Draft PRs do not build a preview; mark the PR ready for review.

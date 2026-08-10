@@ -136,6 +136,32 @@ describe("worker/index — routing", () => {
     expect(await res.text()).toBe("served:/project/abc")
   })
 
+  // AQU-795 (returning-user entry): /app is where AppEntryBanner and the
+  // marketing nav's "Open app" link point. It must reach the SPA shell, not be
+  // shadowed by a marketing page — otherwise the one-step path back into the
+  // workspace leads nowhere. It is deliberately NOT in STATIC_PAGES.
+  it("GET /app passes through to ASSETS (SPA shell), not marketing", async () => {
+    const res = await fetchWorker("/app")
+    expect(await res.text()).toBe("served:/app")
+  })
+
+  it("GET /app is served the SPA shell even when signed in (aq_hint=1)", async () => {
+    const res = await fetchWorker("/app", "aq_hint=1")
+    expect(await res.text()).toBe("served:/app")
+  })
+
+  // AQU-795 / AQU-719 regression guard: a previously Google-indexed interior URL
+  // must resolve to the SPA shell (not_found_handling = single-page-application
+  // rewrites it to index.html) so React Router opens the page directly — never
+  // bounced to marketing and never the old "page not found until you navigate
+  // from home" symptom. Only "/" (and the explicit STATIC_PAGES) serve marketing.
+  it("GET interior deep links pass through to ASSETS (SPA shell), not marketing", async () => {
+    for (const path of ["/orgs/abc", "/project/abc/editor", "/shared", "/settings"]) {
+      const res = await fetchWorker(path)
+      expect(await res.text(), `${path} must reach the SPA shell`).toBe(`served:${path}`)
+    }
+  })
+
   it("GET /join/xyz passes through to ASSETS (non-HTML body unchanged)", async () => {
     const res = await fetchWorker("/join/xyz")
     expect(await res.text()).toBe("served:/join/xyz")

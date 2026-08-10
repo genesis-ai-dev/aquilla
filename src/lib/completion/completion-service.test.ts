@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { buildPrompt, buildBatchPrompt, complete, fetchModels, normalizeOpenAIBaseUrl, resolveProvider, DEFAULT_APPROVED_EXAMPLE_COUNT, DEFAULT_SYSTEM_PROMPT, FRONTIER_CHAT_URL, collectValidatedPairs, selectApprovedExamples, buildRulesBlock, buildBriefBlock, activeProjectIdFromPath } from "./completion-service"
+import { buildPrompt, buildBatchPrompt, complete, fetchModels, normalizeOpenAIBaseUrl, resolveProvider, DEFAULT_APPROVED_EXAMPLE_COUNT, DEFAULT_COMPLETION_MAX_TOKENS, DEFAULT_SYSTEM_PROMPT, FRONTIER_CHAT_URL, collectValidatedPairs, selectApprovedExamples, buildRulesBlock, buildBriefBlock, activeProjectIdFromPath, normalizeCompletionMaxTokens } from "./completion-service"
 import type { CompletionSettings, TranslationRule } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
 
@@ -17,6 +17,24 @@ const SESSION: FrontierSession = {
   username: "tester",
   createdAt: new Date().toISOString(),
 }
+
+describe("normalizeCompletionMaxTokens", () => {
+  // Projects that saved settings under an older default carry that number as a
+  // persisted value that overrides any raised shipped default — which is how
+  // long cells (BGP: ~2.2k chars) kept truncating after the 4k bump. Legacy
+  // default snapshots must upgrade; deliberate custom values must survive.
+  it("upgrades unset and legacy default snapshots to the current default", () => {
+    expect(normalizeCompletionMaxTokens(undefined)).toBe(DEFAULT_COMPLETION_MAX_TOKENS)
+    expect(normalizeCompletionMaxTokens(0)).toBe(DEFAULT_COMPLETION_MAX_TOKENS)
+    expect(normalizeCompletionMaxTokens(512)).toBe(DEFAULT_COMPLETION_MAX_TOKENS)
+    expect(normalizeCompletionMaxTokens(4096)).toBe(DEFAULT_COMPLETION_MAX_TOKENS)
+  })
+
+  it("respects deliberately customized values", () => {
+    expect(normalizeCompletionMaxTokens(2048)).toBe(2048)
+    expect(normalizeCompletionMaxTokens(32768)).toBe(32768)
+  })
+})
 
 describe("buildPrompt", () => {
   it("makes all observable example conventions authoritative", () => {

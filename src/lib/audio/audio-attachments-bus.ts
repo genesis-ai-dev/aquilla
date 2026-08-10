@@ -207,13 +207,21 @@ function withoutViewFlags(att: AudioAttachmentOut): AudioAttachmentOut {
   return rest
 }
 
-/** Optimistically surface a just-created/selected attachment for one cell. */
+/** Optimistically surface a just-created/selected attachment for one cell.
+ *
+ * `opts.claimSelection: false` paints the attachment's data without touching
+ * which take is active — for metadata-only updates (the duration measure
+ * backfill), where promoting an arbitrary take would be a real bug. A
+ * non-claiming inject also leaves every other shadow's claim alone.
+ */
 export function injectOptimisticAudioAttachment(
   fileId: string,
   cellId: string,
   incoming: AudioAttachmentOut,
   eventId?: string | Promise<string>,
+  opts?: { claimSelection?: boolean },
 ): void {
+  const claimSelection = opts?.claimSelection ?? true
   const attachment = withoutViewFlags(incoming)
   const byCell = cellMap(fileId)
   const list = byCell.get(cellId) ?? []
@@ -224,9 +232,11 @@ export function injectOptimisticAudioAttachment(
       // A pending delete of this very clip is contradicted by re-attaching it.
       !(s.kind === "remove" && s.audioId === attachment.audioId),
   )
-  // Older intents in this slot keep their attachment but surrender the claim.
-  for (const s of kept) {
-    if (s.kind === "attach" && s.att.slot === attachment.slot) s.claimsSelection = false
+  if (claimSelection) {
+    // Older intents in this slot keep their attachment but surrender the claim.
+    for (const s of kept) {
+      if (s.kind === "attach" && s.att.slot === attachment.slot) s.claimsSelection = false
+    }
   }
   const shadow: OptimisticShadow = {
     key: nextShadowKey++,
@@ -235,7 +245,7 @@ export function injectOptimisticAudioAttachment(
     graceStartedAt: Date.now(),
     kind: "attach",
     att: attachment,
-    claimsSelection: true,
+    claimsSelection: claimSelection,
   }
   byCell.set(cellId, [...kept, shadow])
   attachEventBinding(fileId, shadow, eventId)

@@ -39,6 +39,7 @@ export type OutboxEventKind =
   | "cell.audio.select"
   | "cell.audio.remove"
   | "cell.audio.rename"
+  | "cell.audio.measure"
   // Back-translation (contributor-level; non-chain-mutating).
   | "cell.backtranslation.set"
   // File lifecycle.
@@ -272,6 +273,13 @@ export interface OutboxEventPayloads {
   "cell.audio.rename": {
     audioId: string
     label: string | null
+  }
+  // Duration backfill for takes that predate duration capture. The server
+  // fills only a NULL duration_ms — never selection/url/slot/trims — so
+  // measuring an arbitrary take can never change which take is active.
+  "cell.audio.measure": {
+    audioId: string
+    durationMs: number
   }
 
   /**

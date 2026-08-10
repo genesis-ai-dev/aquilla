@@ -5,7 +5,7 @@
 // preview (the remote host serves Range — no streaming work needed here).
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react"
-import { AudioLines, Film, LocateFixed, Magnet, Minus, Plus, Volume2, VolumeX } from "lucide-react"
+import { AudioLines, Film, LocateFixed, Magnet, Minus, Plus, Volume2, VolumeX, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { deriveLanes } from "@/lib/timeline/lanes"
 import { chipOverlaps } from "@/lib/timeline/lane-timing"
@@ -23,6 +23,8 @@ import { activeTargetForCell } from "@/lib/audio/track-audio"
 import { loadSnapEnabled, saveSnapEnabled } from "@/lib/timeline/snap"
 import { setMediaCursorCell, setMediaSyncActive } from "@/lib/timeline/media-cursor"
 import { setAudioQualityPref, useAudioQualityPref } from "@/lib/store/audio-quality-pref"
+import { useBatchProgress } from "@/lib/audio/batch-audio"
+import { useOnline } from "@/hooks/useOnline"
 import { TimelineRuler } from "./TimelineRuler"
 import { TimelineLane } from "./TimelineLane"
 import { TargetAudioLane, type TargetAudioItem } from "./TargetAudioLane"
@@ -97,6 +99,16 @@ export interface TimelineEditorProps {
    *  cells carry no attachments, so the probe resolves the selected clip's take
    *  from this map. Absent → no badge. */
   audioByCellId?: Map<string, CellAudioEntry>
+  /** Pre-merge round: recordings that predate duration capture draw at
+   *  fallback width and break Free timing's layout. When any exist in this
+   *  file, a notice row offers a deliberate, user-initiated fix (never
+   *  silent). Absent (focused tests) → no notice. */
+  legacyMeasure?: {
+    /** Takes in the file with no measured length. 0 = no notice. */
+    count: number
+    /** Kick the measure-all batch (progress rides AudioBulkProgressBanner). */
+    onMeasure(): void
+  }
 }
 
 const zoomKey = (fileId: string) => `codex:timelineZoom:${fileId}`
@@ -164,9 +176,15 @@ export function TimelineEditor({
   onSelectCell,
   session,
   audioByCellId,
+  legacyMeasure,
 }: TimelineEditorProps) {
   const audioFirst = timingMode === "audioFirst"
   const [pxPerSec, setPxPerSec] = useState(() => loadZoom(fileId))
+  // Dismissal is per-visit on purpose: while unmeasured takes remain, the
+  // notice returns next time the timeline mounts — quiet, but not forgotten.
+  const [measureNoteDismissed, setMeasureNoteDismissed] = useState(false)
+  const online = useOnline()
+  const batchProgress = useBatchProgress()
   const [audibility, setAudibility] = useState<TrackAudibility>(() => loadAudibility(fileId))
   const [snapOn, setSnapOn] = useState(loadSnapEnabled)
   const audioQuality = useAudioQualityPref()
@@ -875,6 +893,52 @@ export function TimelineEditor({
           className="border-b border-border bg-muted/30 px-3 py-1.5 text-[11px] text-muted-foreground"
         >
           The linked video is hidden here — it plays on the original recording's timing, which this view no longer follows.
+        </div>
+      )}
+
+      {/* Pre-merge round: recordings from before duration capture have no
+          measured length — their chips draw at guessed widths, and Free
+          timing cannot lay them out. The fix is deliberate (a button), never
+          silent: measuring downloads and decodes each recording, then saves
+          only the length. */}
+      {legacyMeasure && legacyMeasure.count > 0 && !measureNoteDismissed && (
+        <div
+          data-testid="tl-measure-note"
+          className="flex items-center gap-2 border-b border-border bg-amber-500/10 px-3 py-1.5 text-[11px] text-muted-foreground"
+        >
+          <span className="min-w-0 flex-1">
+            {legacyMeasure.count === 1
+              ? "1 recording has no measured length — its chip is drawn at a guessed width."
+              : `${legacyMeasure.count} recordings have no measured length — their chips are drawn at guessed widths.`}
+          </span>
+          <AppTooltip
+            content={
+              !online
+                ? "Measuring downloads each recording — connect to the internet first."
+                : batchProgress != null
+                  ? "Another batch is running — wait for it to finish."
+                  : "Download each recording, measure its real length, and fix the chips. Nothing else about the takes changes."
+            }
+          >
+            <button
+              type="button"
+              data-testid="tl-measure-run"
+              disabled={!online || batchProgress != null}
+              onClick={legacyMeasure.onMeasure}
+              className="rounded border border-border bg-background px-2 py-0.5 font-medium text-foreground/80 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Measure now
+            </button>
+          </AppTooltip>
+          <button
+            type="button"
+            aria-label="Dismiss for now"
+            data-testid="tl-measure-dismiss"
+            onClick={() => setMeasureNoteDismissed(true)}
+            className="rounded p-0.5 text-muted-foreground hover:bg-muted"
+          >
+            <X className="h-3 w-3" />
+          </button>
         </div>
       )}
 

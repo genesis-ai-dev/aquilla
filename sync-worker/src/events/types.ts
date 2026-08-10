@@ -45,6 +45,10 @@ export type EventKind =
   | 'cell.audio.select'
   | 'cell.audio.remove'
   | 'cell.audio.rename'
+  // Backfill a measured duration onto a take that predates duration capture.
+  // Fills only a NULL duration_ms — never selects, never touches url/slot/
+  // trims (a re-attach would re-select the clip and plain-assign trims).
+  | 'cell.audio.measure'
   // Audio validation (reviewer-level). Non-chain-mutating — approves/withdraws
   // approval of a cell's selected clip; does not move cells.event_id. Distinct
   // from cell.validate, which is text-side (cells.validated / cell_validators).
@@ -350,6 +354,13 @@ export interface EventPayloads {
   'cell.audio.rename': {
     audioId: string
     label: string | null
+  }
+  // Measured duration for a take that predates duration capture. Fills only
+  // a NULL duration_ms; a repeat delivery or a race with a real re-attach is
+  // a no-op, so the event is idempotent and can never overwrite fresher data.
+  'cell.audio.measure': {
+    audioId: string
+    durationMs: number
   }
   'cell.audio.remove': {
     audioId: string

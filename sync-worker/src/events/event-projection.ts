@@ -1067,6 +1067,28 @@ case 'cell.audio.attach': {
       return ['cell_audio']
     }
 
+    case 'cell.audio.measure': {
+      // Duration backfill for takes that predate duration capture. COALESCE
+      // makes it fill-only: a row that already knows its length keeps it, so
+      // replays and races with a genuine re-attach are no-ops. Selection,
+      // url, slot, trims, timings: untouched by design (the attach UPSERT
+      // re-selects and plain-assigns trims — exactly what a backfill of an
+      // arbitrary, possibly non-selected take must never do).
+      const p = event.payload as EventPayloads['cell.audio.measure']
+      if (!event.fileId || !event.cellId) {
+        throw new Error(`cell.audio.measure event ${event.id} is missing fileId or cellId`)
+      }
+      stmts.push(
+        db
+          .prepare(
+            `UPDATE cell_audio SET duration_ms = COALESCE(duration_ms, ?)
+              WHERE project_id = ? AND file_id = ? AND cell_id = ? AND audio_id = ?`,
+          )
+          .bind(p.durationMs, event.projectId, event.fileId, event.cellId, p.audioId),
+      )
+      return ['cell_audio']
+    }
+
     case 'cell.audio.remove': {
       const p = event.payload as EventPayloads['cell.audio.remove']
       if (!event.fileId || !event.cellId) {

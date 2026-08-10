@@ -82,6 +82,7 @@ export function dispatchEvent(
     case 'cell.audio.select':
     case 'cell.audio.remove':
     case 'cell.audio.rename':
+    case 'cell.audio.measure':
     case 'cell.audio.validate':
     case 'cell.audio.unvalidate':
       return {

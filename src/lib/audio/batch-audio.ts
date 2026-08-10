@@ -16,7 +16,7 @@ import { useSyncExternalStore } from "react"
 // Progress store
 // ---------------------------------------------------------------------------
 
-export type BatchKind = "transcribe" | "synth"
+export type BatchKind = "transcribe" | "synth" | "measure"
 
 export interface BatchProgress {
   kind: BatchKind
@@ -115,6 +115,7 @@ import type { ProjectRecord } from "@/lib/parsers/types"
 
 let _transcribeCancelFlag = false
 let _synthCancelFlag = false
+let _measureCancelFlag = false
 
 export function cancelBatchTranscribe() {
   _transcribeCancelFlag = true
@@ -122,6 +123,10 @@ export function cancelBatchTranscribe() {
 
 export function cancelBatchSynth() {
   _synthCancelFlag = true
+}
+
+export function cancelBatchMeasure() {
+  _measureCancelFlag = true
 }
 
 export interface TranscribeAllArgs {
@@ -215,6 +220,149 @@ export interface SynthAllArgs {
  *  generated voice yet. Shared by runSynthAll and the workspace menu count. */
 export function needsSynthesis(c: CellData): boolean {
   return Boolean(c.translated?.trim()) && !c.selectedGeneratedVoiceAudioId
+}
+
+// ---------------------------------------------------------------------------
+// Measure-all (duration backfill for takes that predate duration capture)
+// ---------------------------------------------------------------------------
+
+import type { AudioAttachmentOut, CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
+import { parseFrontierAudioUrl, fetchCellAudio } from "./upload"
+import { audioCacheGet, audioCachePut } from "./bytes-cache"
+import { makeAudioSyncTokenFetcher } from "./sync-token-fetcher"
+import { probeDurationMsSafe } from "@/lib/import"
+import { emitCellAudioMeasure } from "@/lib/sync/events-emit"
+import {
+  injectOptimisticAudioAttachment,
+  notifyAudioAttachmentsChanged,
+} from "./audio-attachments-bus"
+
+/**
+ * A take needs its length measured when nothing recorded one at attach time
+ * (pre-duration-capture recordings; their chips draw at fallback width and
+ * Free timing cannot lay them out). The imported SOURCE clip legitimately has
+ * no duration of its own — its length is the section span — so fileId-seeded
+ * ids never count. Shared by the timeline notice's count and the batch.
+ */
+export function attachmentNeedsMeasure(fileId: string, att: AudioAttachmentOut): boolean {
+  if (att.durationMs != null) return false
+  if (att.pendingSync) return false
+  return !audioIdSeededWith(att.audioId, fileId)
+}
+
+export interface MeasureTarget {
+  cellId: string
+  att: AudioAttachmentOut
+}
+
+/** Every take in the file that `attachmentNeedsMeasure` — the banner's count
+ *  and the batch's work-list come from the same enumeration. */
+export function takesNeedingMeasure(
+  fileId: string,
+  byCellId: ReadonlyMap<string, CellAudioEntry>,
+): MeasureTarget[] {
+  const out: MeasureTarget[] = []
+  for (const [cellId, entry] of byCellId) {
+    for (const att of Object.values(entry.attachments)) {
+      if (attachmentNeedsMeasure(fileId, att)) out.push({ cellId, att })
+    }
+  }
+  return out
+}
+
+export interface MeasureAllArgs {
+  projectId: string
+  fileId: string
+  byCellId: ReadonlyMap<string, CellAudioEntry>
+  session: FrontierSession | null
+  username: string
+}
+
+export interface MeasureAllResult {
+  measured: number
+  /** Bytes missing (404) or undecodable — these can only be re-recorded. */
+  failed: number
+}
+
+/**
+ * Download, decode, and record the real length of every legacy take in the
+ * file. Deliberately user-initiated (the timeline notice's button) — never
+ * silent. Each measurement is a narrow `cell.audio.measure` event: fill-only
+ * on the server, so it can never overwrite fresher data, and it never touches
+ * selection — measuring a non-selected take must not promote it.
+ */
+export async function runMeasureAll(args: MeasureAllArgs): Promise<MeasureAllResult> {
+  const { projectId, fileId, byCellId, session, username } = args
+  const targets = takesNeedingMeasure(fileId, byCellId)
+  const result: MeasureAllResult = { measured: 0, failed: 0 }
+  if (targets.length === 0) return result
+
+  _measureCancelFlag = false
+
+  await runBatch(
+    targets,
+    async ({ cellId, att }) => {
+      try {
+        const frontier = parseFrontierAudioUrl(att.url)
+        if (!frontier) {
+          result.failed++
+          return
+        }
+        // Local-first, like transcribe: a take's bytes may live in the OPFS
+        // cache; only the network fallback needs a session.
+        let bytes = await audioCacheGet(frontier.audioId, frontier.ext)
+        if (!bytes) {
+          bytes = await fetchCellAudio({
+            projectId,
+            fileId,
+            audioId: frontier.audioId,
+            ext: frontier.ext,
+            getSyncToken: makeAudioSyncTokenFetcher(() => session),
+          })
+          void audioCachePut(frontier.audioId, frontier.ext, bytes)
+        }
+        const durationMs = await probeDurationMsSafe(
+          new Blob([bytes as BlobPart], { type: att.mimeType ?? "audio/webm" }),
+        )
+        if (durationMs == null || !(durationMs > 0)) {
+          result.failed++
+          return
+        }
+        const rounded = Math.round(durationMs)
+        const eventId = emitCellAudioMeasure({
+          projectId,
+          fileId,
+          cellId,
+          audioId: att.audioId,
+          durationMs: rounded,
+          author: username,
+        })
+        // Paint immediately, WITHOUT claiming selection — the whole point of
+        // the measure event is that fixing an arbitrary take never changes
+        // which take is active.
+        injectOptimisticAudioAttachment(
+          fileId,
+          cellId,
+          { ...att, durationMs: rounded },
+          eventId,
+          { claimSelection: false },
+        )
+        notifyAudioAttachmentsChanged(fileId)
+        result.measured++
+      } catch {
+        // 404 / network / decode failure: the take keeps its fallback-width
+        // chip; the caller reports the count.
+        result.failed++
+      }
+    },
+    {
+      kind: "measure",
+      isCancelled: () => _measureCancelFlag,
+      onItemDone: () => { /* the notice's count shrinks via the bus */ },
+    },
+  )
+
+  return result
 }
 
 /**

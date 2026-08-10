@@ -474,6 +474,36 @@ export async function emitCellAudioRename(input: CellAudioRenameInput): Promise<
   return eventId
 }
 
+export interface CellAudioMeasureInput {
+  projectId: string
+  fileId: string
+  cellId: string
+  audioId: string
+  /** The clip's decoded length. The server fills only a NULL duration. */
+  durationMs: number
+  author: string
+  clientTs?: number
+}
+
+/**
+ * Emit a `cell.audio.measure` — duration backfill only; never touches
+ * selection/url/slot/trims, so it is safe for non-selected takes (a
+ * re-attach would promote them).
+ */
+export async function emitCellAudioMeasure(input: CellAudioMeasureInput): Promise<string> {
+  const { eventId } = await enqueueEvent({
+    kind: "cell.audio.measure",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    cellId: input.cellId,
+    parentId: null,
+    author: input.author,
+    payload: { audioId: input.audioId, durationMs: input.durationMs },
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
 export interface CellAudioSelectInput {
   projectId: string
   fileId: string

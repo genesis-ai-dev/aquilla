@@ -78,7 +78,7 @@ import { useCellLabelsPreference } from "@/hooks/useCellLabelsPreference"
 import { useProjectPermissions } from "@/hooks/useProjectPermissions"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { eagerlyPrefetchPeaks } from "@/lib/audio/eager-peaks"
-import { runTranscribeAll as runBatchTranscribeAll, runSynthAll as runBatchSynthAll, needsTranscription, needsSynthesis } from "@/lib/audio/batch-audio"
+import { runTranscribeAll as runBatchTranscribeAll, runSynthAll as runBatchSynthAll, needsTranscription, needsSynthesis, takesNeedingMeasure, runMeasureAll } from "@/lib/audio/batch-audio"
 import { injectOptimisticAudioAttachment, notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
 import { useOutbox } from "@/context/OutboxContext"
 import { useReconcileOnDrain } from "@/hooks/useReconcileOnDrain"
@@ -4397,6 +4397,33 @@ export function ProjectWorkspace() {
     project?.id ?? null,
     timelineEditorVisible ? activeFileId : null,
   )
+  // Pre-merge round: takes that predate duration capture (duration_ms NULL).
+  // The timeline shows a deliberate fix-it notice; the count and the batch's
+  // work-list come from the same enumeration.
+  const legacyMeasureCount = useMemo(
+    () => (activeFileId ? takesNeedingMeasure(activeFileId, timelineAudioByCellId).length : 0),
+    [activeFileId, timelineAudioByCellId],
+  )
+  const handleMeasureLegacy = useCallback(() => {
+    const pid = project?.id
+    if (!pid || !activeFileId) return
+    void runMeasureAll({
+      projectId: pid,
+      fileId: activeFileId,
+      byCellId: timelineAudioByCellId,
+      session: frontierSession ?? null,
+      username: currentUsername,
+    }).then((r) => {
+      if (r.failed > 0) {
+        toast.warning(
+          `Measured ${r.measured} recording${r.measured === 1 ? "" : "s"}; ${r.failed} could not be measured — re-record to fix those.`,
+        )
+      } else if (r.measured > 0) {
+        toast.success(`Measured ${r.measured} recording${r.measured === 1 ? "" : "s"}.`)
+      }
+    })
+  }, [project?.id, activeFileId, timelineAudioByCellId, frontierSession, currentUsername])
+
   const legacyCellsNeeded =
     centerSurface === "rules" ||
     dockTab === "voices" ||
@@ -5701,6 +5728,11 @@ export function ProjectWorkspace() {
                     onSelectCell={setTimelineSelectedCellId}
                     session={frontierSession ?? null}
                     audioByCellId={timelineAudioByCellId}
+                    legacyMeasure={
+                      legacyMeasureCount > 0
+                        ? { count: legacyMeasureCount, onMeasure: handleMeasureLegacy }
+                        : undefined
+                    }
                   />
                 </div>
               ) : null}

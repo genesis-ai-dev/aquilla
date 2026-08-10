@@ -1,7 +1,7 @@
-// Flow B (2026-08-05, simplified 2026-08-06): linking a video under Free
-// timing warns it will stay hidden — link anyway or cancel. Mode changes live
-// in Project Settings only (no combined switch-and-link action: keeps the
-// privilege story simple for this release).
+// Flow B (2026-08-05, simplified 2026-08-06; file-scoped in the pre-merge
+// round): linking a video under Free timing warns it will stay hidden — link
+// anyway or cancel. No combined switch-and-link action: keeps the privilege
+// story simple for this release.
 import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
 import { LinkVideoTimingDialog } from "./LinkVideoTimingDialog"
@@ -27,9 +27,9 @@ describe("LinkVideoTimingDialog", () => {
     expect(h.onLinkAnyway).not.toHaveBeenCalled()
   })
 
-  it("offers NO mode-switch action — that authority lives in Project Settings", () => {
+  it("offers NO mode-switch action — that authority is the toolbar control's", () => {
     renderDialog()
     expect(screen.queryByTestId("link-video-switch")).toBeNull()
-    expect(screen.getByText(/a maintainer can\s+change that any time in Project Settings/)).toBeInTheDocument()
+    expect(screen.getByText(/a maintainer can change\s+that any time with the timing control in the Media timeline/)).toBeInTheDocument()
   })
 })

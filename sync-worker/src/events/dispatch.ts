@@ -18,6 +18,7 @@ import { handleCellEvent, type CellEventKind } from './handlers/cell-events'
 import { handleFileCreate } from './handlers/file-create'
 import { handleFileRename } from './handlers/file-rename'
 import { handleFileVideoSet } from './handlers/file-video-set'
+import { handleFileTimingSet } from './handlers/file-timing-set'
 import { handleFileDelete, handleFileRestore } from './handlers/file-delete-restore'
 import { handleCommentEvent, type CommentEventKind } from './handlers/comment-events'
 import { handleAssignmentEvent, type AssignmentEventKind } from './handlers/assignment-events'
@@ -141,6 +142,16 @@ export function dispatchEvent(
         result: handleFileVideoSet(
           db,
           authed as AuthorizedEvent<'file.video.set'>,
+          serverTs,
+        ),
+      }
+
+    case 'file.timing.set':
+      return {
+        ok: true,
+        result: handleFileTimingSet(
+          db,
+          authed as AuthorizedEvent<'file.timing.set'>,
           serverTs,
         ),
       }

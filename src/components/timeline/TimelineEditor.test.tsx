@@ -759,23 +759,34 @@ describe("TimelineEditor — audio-first mode", () => {
     expect(px(screen.getByTestId("tl-target-v1"), "left")).toBe(0)
   })
 
-  it("hides the snap toggle and shows the mode as a NOTE pointing at Project Settings", () => {
-    // 2026-08-05: the mode CONTROL moved into Project Settings — the toolbar
-    // shows which mode is active (wrapper keeps data-mode for the browser
-    // passes) and, when wired, a link to the settings page.
-    const onOpen = vi.fn()
-    const { unmount } = renderAt("audioFirst")
+  it("hides the snap toggle, and below the floor shows the mode as a plain label", () => {
+    // Pre-merge round: the mode is FILE-level and its control is back in the
+    // toolbar. Without `onChangeTimingMode` (below the maintainer floor) only
+    // the ACTIVE mode renders, as a span — same testid, so browser passes
+    // read the mode identically either way.
+    renderAt("audioFirst")
     expect(screen.queryByTestId("tl-snap-toggle")).toBeNull()
     expect(screen.getByTestId("tl-timing-mode")).toHaveAttribute("data-mode", "audioFirst")
-    expect(screen.getByText("Free timing")).toBeInTheDocument()
-    // No per-mode buttons anymore, and no link without the callback.
+    const label = screen.getByTestId("tl-timing-mode-audioFirst")
+    expect(label.tagName).toBe("SPAN")
+    expect(label).toHaveTextContent("Free timing")
+    expect(label).toHaveAttribute("title", expect.stringContaining("Only a maintainer can change this."))
+    // The inactive mode renders nothing at all below the floor.
     expect(screen.queryByTestId("tl-timing-mode-dubbing")).toBeNull()
-    expect(screen.queryByTestId("tl-timing-mode-settings-link")).toBeNull()
-    unmount()
+  })
 
-    renderAt("audioFirst", { onOpenTimingSettings: onOpen })
-    fireEvent.click(screen.getByTestId("tl-timing-mode-settings-link"))
-    expect(onOpen).toHaveBeenCalledTimes(1)
+  it("above the floor the mode is a two-button control that changes THIS file", () => {
+    const onChange = vi.fn()
+    renderAt("audioFirst", { onChangeTimingMode: onChange })
+    const active = screen.getByTestId("tl-timing-mode-audioFirst")
+    const other = screen.getByTestId("tl-timing-mode-dubbing")
+    expect(active).toHaveAttribute("aria-pressed", "true")
+    expect(other).toHaveAttribute("aria-pressed", "false")
+    // Clicking the active mode is a no-op; clicking the other requests it.
+    fireEvent.click(active)
+    expect(onChange).not.toHaveBeenCalled()
+    fireEvent.click(other)
+    expect(onChange).toHaveBeenCalledWith("dubbing")
   })
 
   it("hides a linked video and says why — it runs on the original's timing", () => {

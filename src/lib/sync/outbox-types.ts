@@ -69,6 +69,7 @@ export type OutboxEventKind =
   | "cell.lane.retime"
   // Timeline editor: set/clear a file's core video URL (stored in files.meta).
   | "file.video.set"
+  | "file.timing.set"
   // AQU-478: "accept upstream change as-is" (repin). Non-chain-mutating —
   // updates ONLY the target row's source_event_id; validated/endorsement
   // state and value are untouched. Guarded server-side by
@@ -394,6 +395,12 @@ export interface OutboxEventPayloads {
     subtitleStartMs?: number | null
     subtitleEndMs?: number | null
     targetStartMs?: number | null
+  }
+  // The file's audio timing mode (Original vs Free); null clears back to the
+  // project-level default. Maintainer floor — structural, like the setting
+  // it replaces in Project Settings.
+  "file.timing.set": {
+    timingMode: "dubbing" | "audioFirst" | null
   }
   // Timeline editor: set/clear a file's core video URL (timeline preview).
   "file.video.set": {

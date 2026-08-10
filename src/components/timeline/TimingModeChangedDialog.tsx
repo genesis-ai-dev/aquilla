@@ -28,7 +28,7 @@ export function TimingModeChangedDialog({ ack, onAcknowledge }: Props) {
         <DialogHeader>
           <DialogTitle>Timing mode changed</DialogTitle>
           <DialogDescription>
-            Someone with settings access switched this project from{" "}
+            Someone with settings access switched this file from{" "}
             <b>{AUDIO_TIMING_MODE_LABELS[ack.from].name}</b> to{" "}
             <b>{AUDIO_TIMING_MODE_LABELS[ack.to].name}</b>. The Media timeline
             now lays out on the new mode — recordings and timing data are

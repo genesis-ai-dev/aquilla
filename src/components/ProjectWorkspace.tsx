@@ -35,7 +35,7 @@ import { completionBatchSizeFor, workspaceActions, getVisibleActions } from "@/l
 import type { WorkspaceAction } from "@/lib/workspace-actions/types"
 import type { FileReference } from "@/lib/parsers/types"
 import { fileHasSections, fileOrderedBy, isMediaFileType, projectHasScriptureFiles, resolveBibleResourcesEnabled } from "@/lib/parsers/types"
-import { resolveAudioTimingMode } from "@/lib/sync/project-settings"
+import { resolveFileTimingMode, type AudioTimingMode } from "@/lib/parsers/types"
 import { isFlagEnabled } from "@/lib/features/flags"
 import { isDiscourseFile } from "@/lib/contextual/discourse-file"
 import { applyRemoteFrame as applyContextualFrame } from "@/lib/contextual/run-store"
@@ -87,7 +87,7 @@ import {
   buildFileScopedTokenFetcher,
   buildProjectAwareMinter,
 } from "@/lib/sync/cqrs-bridge"
-import { emitTargetCellCommit, emitCellBacktranslationSet, emitFileRename, emitFileDelete, emitFileRestore, emitCellValidate, emitCellRetime, emitCellLaneRetime, emitCellAudioAttach, emitFileVideoSet } from "@/lib/sync/events-emit"
+import { emitTargetCellCommit, emitCellBacktranslationSet, emitFileRename, emitFileDelete, emitFileRestore, emitCellValidate, emitCellRetime, emitCellLaneRetime, emitCellAudioAttach, emitFileVideoSet, emitFileTimingSet } from "@/lib/sync/events-emit"
 import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
 import { isBulkValidationEligible } from "@/lib/review/review-eligibility"
 import { TimelineEditor } from "@/components/timeline/TimelineEditor"
@@ -142,6 +142,7 @@ import { SidebarProjectSection } from "./SidebarProjectSection"
 import { SuggestionBanner } from "./SuggestionBanner"
 import { ConfirmActionDialog } from "./ConfirmActionDialog"
 import { LinkVideoTimingDialog } from "./timeline/LinkVideoTimingDialog"
+import { TimingVideoWarningDialog } from "./timeline/TimingVideoWarningDialog"
 import { TimingModeChangedDialog } from "./timeline/TimingModeChangedDialog"
 import { useTimingModeAck } from "@/hooks/useTimingModeAck"
 import { PeerPresence } from "./PeerPresence"
@@ -1701,17 +1702,18 @@ export function ProjectWorkspace() {
   // Flow B (2026-08-05): linking a video while in Free timing prompts to
   // switch back (declinable, with the video-stays-hidden warning). NOTE the
   // mode is computed INLINE — the `timingMode` const is declared ~2,700 lines
-  // below this callback (a temporal-dead-zone hazard in the deps).
+  // below this callback (a temporal-dead-zone hazard in the deps). Pre-merge
+  // round: the mode is per-FILE now, resolved off the active file.
   const [pendingVideoUrl, setPendingVideoUrl] = useState<string | null>(null)
   const handleLinkVideo = useCallback(
     (url: string | null) => {
-      if (url && resolveAudioTimingMode(project ?? undefined) === "audioFirst") {
+      if (url && resolveFileTimingMode(activeFile, project ?? undefined) === "audioFirst") {
         setPendingVideoUrl(url)
         return
       }
       void applyLinkVideo(url) // clearing never prompts
     },
-    [project, applyLinkVideo],
+    [activeFile, project, applyLinkVideo],
   )
 
   const [videoDialogOpen, setVideoDialogOpen] = useState(false)
@@ -4445,10 +4447,19 @@ export function ProjectWorkspace() {
     [legacyCells, workspaceAudioByCellId],
   )
 
-  // AQU-646 SUB-53: which job the Media lens is for. Absent means dubbing —
-  // the behaviour every project had before this. Changed in Project Settings
-  // only (2026-08-06) — the timeline shows a note, never a control.
-  const timingMode = resolveAudioTimingMode(project ?? undefined)
+  // AQU-646 SUB-53 / pre-merge round: which job THIS FILE is for. The mode is
+  // file-level (files.meta via file.timing.set); a file with no mode of its
+  // own inherits the legacy project-level value (so projects that chose Free
+  // timing in Project Settings keep it), else Original timing.
+  const timingMode = resolveFileTimingMode(activeFile, project ?? undefined)
+  // Pre-merge round: the control returned to the timeline toolbar, gated by
+  // the same clearance the setting had in Project Settings (maintainer). The
+  // gate is "don't pass the callback": below the floor the toolbar renders
+  // the active mode as a plain label.
+  const canEditTimingMode = (serverRoleLevel ?? project?.syncRole?.level ?? 0) >= ROLE.MAINTAINER
+  // Flow A (file-scoped): switching a file that HAS a linked video to Free
+  // timing hides the video — confirm before emitting.
+  const [timingVideoWarnOpen, setTimingVideoWarnOpen] = useState(false)
   // A REMOTE mode change gets an acknowledged heads-up — deferred while the
   // user is in the text view or has the recorder open (a cell transition
   // inside the recorder ends the wait; the take is confirmed by then).
@@ -4463,6 +4474,7 @@ export function ProjectWorkspace() {
   // as a remote change — a false "Timing mode changed" modal on every reload.
   const timingAck = useTimingModeAck({
     timingMode,
+    fileId: activeFileId,
     eligible:
       project != null &&
       settingsFetched &&
@@ -4470,6 +4482,36 @@ export function ProjectWorkspace() {
       lens === "audio" &&
       recordingCellId === null,
   })
+  // Apply THIS FILE's mode: stamp it as our own seen mode first (the changer
+  // must never get the "timing mode changed" modal for their own click),
+  // then emit + flush + refresh — the same shape as applyLinkVideo, and the
+  // same files.meta home. Collaborators get it live off the file.* WS frame.
+  const applyTimingMode = useCallback(
+    async (mode: AudioTimingMode) => {
+      if (!project?.id || !activeFileId) return
+      timingAck.noteOwnWrite(mode)
+      await emitFileTimingSet({
+        projectId: project.id,
+        fileId: activeFileId,
+        timingMode: mode,
+        author: currentUsername,
+      })
+      await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+      refresh()
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- timingAck.noteOwnWrite is stable (useCallback([]))
+    [project?.id, activeFileId, currentUsername, getTokenForProjectFile, refresh, timingAck.noteOwnWrite],
+  )
+  const handleChangeTimingMode = useCallback(
+    (mode: AudioTimingMode) => {
+      if (mode === "audioFirst" && activeFile?.coreMediaUrl) {
+        setTimingVideoWarnOpen(true)
+        return
+      }
+      void applyTimingMode(mode)
+    },
+    [activeFile?.coreMediaUrl, applyTimingMode],
+  )
   // The transport speaks file seconds in dubbing and programme seconds in
   // audio-first, so it has to know which before anything seeks.
   useEffect(() => {
@@ -5722,7 +5764,7 @@ export function ProjectWorkspace() {
                     onLinkVideo={handleLinkVideo}
                     onSeekToTime={handleTimelineSeekToTime}
                     timingMode={timingMode}
-                    onOpenTimingSettings={() => navigate(`/project/${projectId}/settings/audio-media`)}
+                    onChangeTimingMode={canEditTimingMode ? handleChangeTimingMode : undefined}
                     onOpenRecording={handleOpenRecording}
                     project={editorProject ?? project ?? undefined}
                     onSelectCell={setTimelineSelectedCellId}
@@ -6239,6 +6281,16 @@ export function ProjectWorkspace() {
           const u = pendingVideoUrl
           setPendingVideoUrl(null)
           if (u) void applyLinkVideo(u)
+        }}
+      />
+      {/* Flow A (file-scoped): switching a video-bearing file to Free timing
+          hides the video — confirm before the mode changes. */}
+      <TimingVideoWarningDialog
+        open={timingVideoWarnOpen}
+        onCancel={() => setTimingVideoWarnOpen(false)}
+        onConfirm={() => {
+          setTimingVideoWarnOpen(false)
+          void applyTimingMode("audioFirst")
         }}
       />
       {/* FRO-272: "Recently deleted" trash list — opened from the sidebar's

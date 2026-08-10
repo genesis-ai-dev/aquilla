@@ -117,6 +117,10 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
   // Timeline editor: linking a core video to a file — contributor-level, like
   // file.rename (normal editing flow, not a structural change to the inventory).
   'file.video.set': ROLE.CONTRIBUTOR,
+  // The timing mode changes how the whole file lays out and plays for
+  // everyone — structural, so it keeps the clearance the setting had when it
+  // lived in Project Settings (the shared-settings maintainer floor).
+  'file.timing.set': ROLE.MAINTAINER,
 
   // AQU-476: mirror-engine kinds are server-emitted only (link-sync.ts calls
   // buildEventProjectionStmts directly in-process — never through the client

@@ -16,9 +16,16 @@
 //     so the wait ends there even though the recorder stays open.
 //   - Back-and-forth flips cancel out: if the mode returns to "seen" before
 //     surfacing, there is nothing to say.
-//   - The changer never sees their own modal: Project Settings is a separate
-//     route, so the workspace (and this hook's memory) unmounts while they
-//     are there and re-baselines on return.
+//
+// Pre-merge round: the mode is FILE-level now, which changes two things.
+//   - "seen" is remembered PER FILE: switching files changes the observed
+//     mode with no remote change having happened, so each file baselines
+//     silently on its own first eligibility — navigation never opens the
+//     modal.
+//   - The changer no longer leaves the workspace to make the change (the
+//     control is the timeline toolbar, not the Project Settings route), so
+//     own-write suppression must be explicit: `noteOwnWrite(mode)` stamps
+//     the new mode as already seen BEFORE the emit's refresh lands.
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import type { AudioTimingMode } from "@/lib/parsers/types"
@@ -28,19 +35,34 @@ export interface TimingModeAck {
   to: AudioTimingMode
 }
 
-export function useTimingModeAck(args: { timingMode: AudioTimingMode; eligible: boolean }): {
+export function useTimingModeAck(args: {
+  timingMode: AudioTimingMode
+  /** The open file the mode belongs to; null while no file is active. */
+  fileId: string | null
+  eligible: boolean
+}): {
   ack: TimingModeAck | null
   acknowledge(): void
   surfaceNow(): void
+  /** Own-write suppression: the local user changed the mode themselves. */
+  noteOwnWrite(mode: AudioTimingMode): void
 } {
-  const { timingMode, eligible } = args
-  const seenRef = useRef<AudioTimingMode | null>(null)
+  const { timingMode, fileId, eligible } = args
+  const seenByFileRef = useRef<Map<string, AudioTimingMode>>(new Map())
   const [ack, setAck] = useState<TimingModeAck | null>(null)
   const modeRef = useRef(timingMode)
   modeRef.current = timingMode
+  const fileRef = useRef(fileId)
+  fileRef.current = fileId
 
   useEffect(() => {
-    const seen = seenRef.current
+    if (fileId == null) {
+      // No file on screen: nothing to compare, and any open modal about a
+      // file that just went away is moot.
+      if (ack) setAck(null)
+      return
+    }
+    const seen = seenByFileRef.current.get(fileId) ?? null
     if (ack) {
       // Already showing: a flip BACK makes it moot; a further flip retargets.
       if (timingMode === seen) setAck(null)
@@ -48,25 +70,35 @@ export function useTimingModeAck(args: { timingMode: AudioTimingMode; eligible: 
       return
     }
     if (seen == null) {
-      if (eligible) seenRef.current = timingMode
+      if (eligible) seenByFileRef.current.set(fileId, timingMode)
       return
     }
     if (timingMode !== seen && eligible) setAck({ from: seen, to: timingMode })
-  }, [timingMode, eligible, ack])
+  }, [timingMode, fileId, eligible, ack])
 
   const acknowledge = useCallback(() => {
-    seenRef.current = modeRef.current
+    if (fileRef.current != null) seenByFileRef.current.set(fileRef.current, modeRef.current)
     setAck(null)
   }, [])
 
   /** The recorder's cell-transition pulse — the take is confirmed, stop
    *  waiting even though the recorder is still open. */
   const surfaceNow = useCallback(() => {
-    const seen = seenRef.current
+    if (fileRef.current == null) return
+    const seen = seenByFileRef.current.get(fileRef.current) ?? null
     if (seen != null && modeRef.current !== seen) {
       setAck((prev) => prev ?? { from: seen, to: modeRef.current })
     }
   }, [])
 
-  return { ack, acknowledge, surfaceNow }
+  /** The local user changed the mode from the toolbar: stamp it as seen
+   *  immediately (synchronously, before the emit/refresh round-trip), so
+   *  their own change can never read as a remote one. */
+  const noteOwnWrite = useCallback((mode: AudioTimingMode) => {
+    if (fileRef.current == null) return
+    seenByFileRef.current.set(fileRef.current, mode)
+    setAck(null)
+  }, [])
+
+  return { ack, acknowledge, surfaceNow, noteOwnWrite }
 }

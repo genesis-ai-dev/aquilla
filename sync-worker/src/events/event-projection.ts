@@ -1579,6 +1579,17 @@ case 'cell.audio.attach': {
       return ['files']
     }
 
+    case 'file.timing.set': {
+      // File-level timing mode — rebuild path; the dispatch path
+      // (handlers/file-timing-set.ts) uses the same shared SQL builder.
+      const p = event.payload as EventPayloads['file.timing.set']
+      if (!event.fileId) {
+        throw new Error(`file.timing.set event ${event.id} is missing fileId`)
+      }
+      stmts.push(buildFileTimingSetStmt(db, event.projectId, event.fileId, event.id, p.timingMode))
+      return ['files']
+    }
+
     case 'source.cell.mirror': {
       // AQU-476: advance a downstream source cell to match the upstream.
       // UPSERT (the target.cell.commit INSERT…ON CONFLICT shape), NOT the
@@ -1818,6 +1829,41 @@ case 'cell.audio.attach': {
       )
     }
   }
+}
+
+/**
+ * Shared meta-merge for the file's audio timing mode. Same shape as
+ * buildFileVideoSetStmt below (one files.meta JSON key, merged or removed);
+ * used by both the live handler (handlers/file-timing-set.ts) and the rebuild
+ * projection case. Null clears the key — the file falls back to the
+ * project-level default.
+ */
+export function buildFileTimingSetStmt(
+  db: AquillaDb,
+  projectId: string,
+  fileId: string,
+  eventId: string,
+  timingMode: 'dubbing' | 'audioFirst' | null,
+): AquillaStatement {
+  const NOW = "(extract(epoch from now()) * 1000)::bigint"
+  if (timingMode == null) {
+    return db
+      .prepare(
+        `UPDATE files
+            SET meta = (COALESCE(NULLIF(meta, ''), '{}')::jsonb - 'timingMode')::text,
+                event_id = ?, updated_at = ${NOW}
+          WHERE id = ? AND project_id = ?`,
+      )
+      .bind(eventId, fileId, projectId)
+  }
+  return db
+    .prepare(
+      `UPDATE files
+          SET meta = (COALESCE(NULLIF(meta, ''), '{}')::jsonb || jsonb_build_object('timingMode', ?::text))::text,
+              event_id = ?, updated_at = ${NOW}
+        WHERE id = ? AND project_id = ?`,
+    )
+    .bind(timingMode, eventId, fileId, projectId)
 }
 
 /**

@@ -96,6 +96,11 @@ export type EventKind =
   // Timeline editor: set/clear a file's core video URL (timeline preview master
   // clock), stored in files.meta JSON. Non-chain-mutating; file-level.
   | 'file.video.set'
+  // Pre-merge round: the file's audio timing mode (Original vs Free), stored
+  // in files.meta JSON. A FILE-level distinction — the video link it interacts
+  // with is per-file too. Non-chain-mutating; maintainer floor (structural,
+  // same clearance as project settings).
+  | 'file.timing.set'
   // AQU-476: live source links — mirror engine. Server-emitted only (the
   // mirror sync engine in link-sync.ts; never a client outbox kind). Mirror
   // events replicate an ordering the UPSTREAM already arbitrated, so they
@@ -555,6 +560,12 @@ export interface EventPayloads {
   // in files.meta JSON; null clears it. File-level.
   'file.video.set': {
     coreMediaUrl: string | null
+  }
+  // Set/clear the file's audio timing mode, stored in files.meta JSON; null
+  // clears it back to the project-level default (legacy
+  // ProjectWideSettings.audioTimingMode, else "dubbing").
+  'file.timing.set': {
+    timingMode: 'dubbing' | 'audioFirst' | null
   }
 
   // ── AQU-476: live source links — mirror engine (server-emitted) ────────

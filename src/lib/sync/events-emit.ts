@@ -622,6 +622,31 @@ export async function emitFileVideoSet(input: FileVideoSetInput): Promise<string
   return eventId
 }
 
+export interface FileTimingSetInput {
+  projectId: string
+  fileId: string
+  /** The file's audio timing mode; null clears back to the project default. */
+  timingMode: "dubbing" | "audioFirst" | null
+  author: string
+  clientTs?: number
+}
+
+/** Emit a `file.timing.set` — the file's audio timing mode (Original vs
+ *  Free). Stored in files.meta JSON, like the video link it interacts with.
+ *  Maintainer floor: the server rejects lower roles. */
+export async function emitFileTimingSet(input: FileTimingSetInput): Promise<string> {
+  const { eventId } = await enqueueEvent({
+    kind: "file.timing.set",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    parentId: null,
+    author: input.author,
+    payload: { timingMode: input.timingMode },
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
 export interface CellAudioRemoveInput {
   projectId: string
   fileId: string

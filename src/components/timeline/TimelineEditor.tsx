@@ -79,14 +79,14 @@ export interface TimelineEditorProps {
   /** 2026-08-07 (wire b): a text-table row click, as a nonce'd request —
    *  selects the chip and centers/cues exactly like a chip click. */
   activateRequest?: { cellId: string; nonce: number } | null
-  /** SUB-53: which job this project is for. "dubbing" (the default) draws the
-   *  track against the imported recording's clock; "audioFirst" lays the
-   *  verses out end to end at their real lengths. */
+  /** SUB-53: which job this FILE is for (pre-merge round: per-file, resolved
+   *  via resolveFileTimingMode). "dubbing" (the default) draws the track
+   *  against the imported recording's clock; "audioFirst" lays the verses out
+   *  end to end at their real lengths. */
   timingMode?: AudioTimingMode
-  /** 2026-08-05: the mode control lives in Project Settings now — this
-   *  navigates there (Audio media group). Absent (focused tests) = the note
-   *  renders as plain text with no link. */
-  onOpenTimingSettings?(): void
+  /** Pre-merge round: change THIS FILE's mode (file.timing.set). Absent = the
+   *  control is read-only (the server requires maintainer to write it). */
+  onChangeTimingMode?(mode: AudioTimingMode): void
   /** Needed by the missing-audio probe behind the chip strip's badge. */
   project?: ProjectRecord
   /** Fires when the highlighted section changes so a sibling transport (the
@@ -171,7 +171,7 @@ export function TimelineEditor({
   onChipActivated,
   activateRequest,
   timingMode = "dubbing",
-  onOpenTimingSettings,
+  onChangeTimingMode,
   project,
   onSelectCell,
   session,
@@ -736,28 +736,47 @@ export function TimelineEditor({
       {/* toolbar */}
       <div className="flex items-center gap-2 border-b border-border bg-muted/30 px-3 py-1.5">
         <span className="text-xs font-medium text-muted-foreground">Timeline</span>
-        {/* Decision 2026-08-05: the mode CONTROL moved into Project Settings
-            (it changes the project's structure — settings-level authority);
-            this is the note that says which mode is active and where to
-            change it. The wrapper keeps its testid + data-mode so browser
-            passes read the mode exactly as before. */}
+        {/* Pre-merge round: the mode is FILE-level again (the video link it
+            interacts with is per-file), so the control returns to the
+            toolbar. Same clearance as before: `onChangeTimingMode` absent =
+            below the maintainer floor = the active mode renders as a plain
+            label instead of buttons. The wrapper keeps its testid +
+            data-mode so browser passes read the mode exactly as before. */}
         <div
           data-testid="tl-timing-mode"
           data-mode={timingMode}
-          className="ml-2 inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[11px] text-foreground/70"
+          className="ml-2 inline-flex items-center overflow-hidden rounded-md border border-border text-[11px]"
         >
-          <AppTooltip content={AUDIO_TIMING_MODE_LABELS[timingMode].description}>
-            <span>{AUDIO_TIMING_MODE_LABELS[timingMode].name}</span>
-          </AppTooltip>
-          {onOpenTimingSettings && (
-            <button
-              type="button"
-              data-testid="tl-timing-mode-settings-link"
-              onClick={onOpenTimingSettings}
-              className="text-muted-foreground underline-offset-2 hover:underline"
-            >
-              · set in Project Settings
-            </button>
+          {(["dubbing", "audioFirst"] as const).map((mode) =>
+            onChangeTimingMode ? (
+              <button
+                key={mode}
+                type="button"
+                data-testid={`tl-timing-mode-${mode}`}
+                aria-pressed={timingMode === mode}
+                title={AUDIO_TIMING_MODE_LABELS[mode].description}
+                onClick={() => {
+                  if (timingMode !== mode) onChangeTimingMode(mode)
+                }}
+                className={cn(
+                  "px-2 py-1",
+                  timingMode === mode
+                    ? "bg-sky-100 font-medium text-sky-700 dark:bg-sky-950 dark:text-sky-300"
+                    : "bg-background text-foreground/60 hover:bg-muted",
+                )}
+              >
+                {AUDIO_TIMING_MODE_LABELS[mode].name}
+              </button>
+            ) : timingMode === mode ? (
+              <span
+                key={mode}
+                data-testid={`tl-timing-mode-${mode}`}
+                title={`${AUDIO_TIMING_MODE_LABELS[mode].description} Only a maintainer can change this.`}
+                className="px-2 py-1 text-foreground/70"
+              >
+                {AUDIO_TIMING_MODE_LABELS[mode].name}
+              </span>
+            ) : null,
           )}
         </div>
         <div className="ml-auto flex items-center gap-1.5">

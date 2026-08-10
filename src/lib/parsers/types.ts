@@ -573,6 +573,13 @@ export interface FileReference {
    * files.meta JSON (set via the `file.video.set` event). Absent ⇒ no video.
    */
   coreMediaUrl?: string | null
+  /**
+   * The file's audio timing mode (pre-merge round: a FILE-level distinction —
+   * the video link it interacts with is per-file too). Stored in files.meta
+   * JSON (set via the `file.timing.set` event). Absent ⇒ the project-level
+   * default applies (see `resolveFileTimingMode`).
+   */
+  timingMode?: AudioTimingMode | null
 }
 
 /** Which key is authoritative for ordering a file's segments. */
@@ -581,6 +588,19 @@ export type OrderedBy = "time" | "sequence"
 /** Resolve a file's order lens, defaulting absent → 'sequence'. */
 export function fileOrderedBy(file: Pick<FileReference, "orderedBy">): OrderedBy {
   return file.orderedBy ?? "sequence"
+}
+
+/**
+ * Resolve a file's audio timing mode: the file's own choice, else the
+ * project-level value (the legacy Project Settings field, kept as a read-only
+ * fallback so pre-existing projects keep the mode they had chosen), else
+ * Original timing. Mixed-mode projects are allowed by design.
+ */
+export function resolveFileTimingMode(
+  file: Pick<FileReference, "timingMode"> | null | undefined,
+  project: Pick<ProjectRecord, "audioTimingMode"> | null | undefined,
+): AudioTimingMode {
+  return file?.timingMode ?? project?.audioTimingMode ?? "dubbing"
 }
 
 export interface ProjectMember {

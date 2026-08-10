@@ -9,10 +9,6 @@ export function ExamplePanel({
 }: {
   examples: ScoredPair[]
   globalColorOffset?: number
-  /** @deprecated No longer used — popover manages its own open state */
-  expanded?: boolean
-  /** @deprecated No longer used — popover manages its own open state */
-  onExpandedChange?: (expanded: boolean) => void
 }) {
   if (examples.length === 0) return null
 

@@ -1,0 +1,123 @@
+import { describe, it, expect } from "vitest"
+import {
+  CATALOG_CONTEXT,
+  MESSAGE_KEYS,
+  catalogContextIssues,
+  namespaceOf,
+  placeholdersIn,
+  resolveKeyContext,
+} from "./context"
+import { SCREENSHOTS, isScreenshotId, screenshotPath } from "./screenshots"
+import { en } from "./messages/en"
+
+/**
+ * AQU-832 — the context sidecar's coverage check.
+ *
+ * `catalogContextIssues()` is the lint that makes the standard enforceable, and
+ * this suite is where CI runs it: adding a message key without a context entry
+ * fails `pnpm test`, which is the whole new-key workflow (see
+ * `docs/I18N-CONTEXT-CATALOG.md`). Keep the "no issues" assertion first and
+ * unconditional — the narrower cases below exist to explain a failure, not to
+ * replace it.
+ */
+describe("catalog context coverage (AQU-832)", () => {
+  it("reports no coverage or consistency issues for the en catalog", () => {
+    expect(catalogContextIssues()).toEqual([])
+  })
+
+  it("resolves a non-empty surface and description for every message key", () => {
+    const uncovered = MESSAGE_KEYS.filter((key) => {
+      const ctx = resolveKeyContext(key)
+      return ctx.surface.trim() === "" || ctx.description.trim() === ""
+    })
+    expect(uncovered).toEqual([])
+  })
+
+  it("documents every placeholder the English strings use", () => {
+    for (const key of MESSAGE_KEYS) {
+      const ctx = resolveKeyContext(key)
+      for (const name of placeholdersIn(en[key])) {
+        expect(
+          ctx.placeholders[name],
+          `${key} uses {${name}} but does not document it`,
+        ).toBeTruthy()
+      }
+    }
+  })
+
+  it("references only declared screenshot surfaces", () => {
+    for (const key of MESSAGE_KEYS) {
+      const shot = resolveKeyContext(key).screenshot
+      if (shot) expect(isScreenshotId(shot), `${key} → ${shot}`).toBe(true)
+    }
+  })
+
+  it("covers each major surface — nav, editor, dialogs, settings, errors", () => {
+    const linked = new Set(
+      MESSAGE_KEYS.map((key) => resolveKeyContext(key).screenshot).filter(Boolean),
+    )
+    for (const surface of SCREENSHOTS) {
+      expect(linked.has(surface.id), `no key links screenshot "${surface.id}"`).toBe(true)
+    }
+  })
+})
+
+describe("context resolution", () => {
+  it("layers the per-key entry over the namespace context", () => {
+    const ctx = resolveKeyContext("nav.projects")
+    expect(ctx.namespace).toBe("nav")
+    // Surface note comes from the namespace, the description from the key entry.
+    expect(ctx.surface).toBe(CATALOG_CONTEXT.nav._context.description)
+    expect(ctx.description).toBe(CATALOG_CONTEXT.nav.keys?.["nav.projects"]?.description)
+    // Screenshot and length constraint are inherited.
+    expect(ctx.screenshot).toBe("workspace-nav")
+    expect(ctx.maxLength).toBe(CATALOG_CONTEXT.nav._context.maxLength)
+  })
+
+  it("lets a per-key entry override the namespace screenshot", () => {
+    // "Loading…" is shared chrome but is shown in the editor, not a dialog.
+    expect(resolveKeyContext("common.loading").screenshot).toBe("cell-editor")
+    expect(resolveKeyContext("common.save").screenshot).toBe("confirm-dialog")
+  })
+
+  it("falls back to the namespace description when a key has no entry of its own", () => {
+    const nsOnly = MESSAGE_KEYS.filter((key) => {
+      const block = CATALOG_CONTEXT[namespaceOf(key)]
+      return block?.keys?.[key] === undefined
+    })
+    for (const key of nsOnly) {
+      const ctx = resolveKeyContext(key)
+      expect(ctx.description).toBe(ctx.surface)
+    }
+  })
+
+  it("merges placeholder documentation, per-key winning", () => {
+    const ctx = resolveKeyContext("language.switchTo")
+    expect(Object.keys(ctx.placeholders)).toEqual(["language"])
+    expect(ctx.placeholders.language).toMatch(/endonym/i)
+  })
+
+  it("does not throw for a key whose namespace has no block", () => {
+    // `resolveKeyContext` is used while linting, so it must survive the very
+    // state the lint exists to report.
+    const ctx = resolveKeyContext("nav.projects")
+    expect(() => resolveKeyContext(ctx.key)).not.toThrow()
+  })
+})
+
+describe("helpers", () => {
+  it("namespaceOf takes the segment before the first dot", () => {
+    expect(namespaceOf("error.generic.title")).toBe("error")
+    expect(namespaceOf("standalone")).toBe("standalone")
+  })
+
+  it("placeholdersIn finds each placeholder once", () => {
+    expect(placeholdersIn("Switch language to {language}")).toEqual(["language"])
+    expect(placeholdersIn("{a} then {b} then {a}")).toEqual(["a", "b"])
+    expect(placeholdersIn("no placeholders")).toEqual([])
+  })
+
+  it("screenshotPath is stable and derived from the id", () => {
+    expect(screenshotPath("workspace-nav")).toBe("src/lib/i18n/screenshots/workspace-nav.png")
+  })
+})

@@ -625,14 +625,21 @@ function progFinish(): void {
   setState(IDLE)
 }
 
-/** The clocking side reached the end of its verse — on to the next. */
+/** The clocking side reached the end of its verse — on to the next.
+ *
+ * Pre-merge round: this is the ONE caller that passes `seamless` — an
+ * automatic advance is the only situation where "play straight on without a
+ * seek" can be correct, and planFreeSourceAdvance's position check keeps
+ * every funneled-in case honest (early-ending dubs, gate-timeout parks,
+ * gaps). Skips, seeks, resume re-entries and updateQueueCells all keep the
+ * full cue path — a user's navigation always seeks. */
 function progAdvance(): void {
   const next = progNextPlayable(progIndex + 1)
   if (next < 0) {
     progFinish()
     return
   }
-  void progPlaySlot(next, null, true)
+  void progPlaySlot(next, null, true, false, /* seamless */ true)
 }
 
 // ── The readiness gate (smooth-playback round) ──────────────────────────────
@@ -645,6 +652,15 @@ function progAdvance(): void {
 // are CUED, the state says "loading" while anything is cold (the playhead
 // parks honestly), and the moment the last side reports ready they start as
 // one. Prefetch + the warmed byte-cache make the cold case rare.
+//
+// Pre-merge round (Matthew's review): during CONTINUOUS playback the engine
+// never seeks — pause/unpause only. An automatic advance whose source element
+// already sits at the next verse's window start (contiguous windows into the
+// one imported file) leaves a playing element completely alone and bare-
+// play()s a parked one (planFreeSourceAdvance); the warm no-dub/prefetched
+// boundary completes synchronously with no "loading" flash at all. Seeks
+// remain for explicit navigation, clip changes, gaps, and cold cueing of a
+// fresh dub element.
 
 /** How long a cold side may keep the verse parked before we start without it —
  *  mirrors progEffectiveClock's dead-dub fallback. */
@@ -1129,6 +1145,7 @@ async function progPlaySlot(
   atProgrammeSec: number | null,
   autoplay: boolean,
   explicit = false,
+  seamless = false,
 ): Promise<void> {
   const ctx = activeContext
   const prog = programme
@@ -1144,12 +1161,34 @@ async function progPlaySlot(
     return
   }
 
+  // Pre-merge round: on an automatic advance, ask whether the source element
+  // is ALREADY exactly where this verse begins (contiguous windows into the
+  // one imported file — the common case). If so, it is never seeked and never
+  // re-cued: "continue" leaves a playing element completely alone, "wake"
+  // bare-play()s a parked one. The flag AND the position check must both
+  // hold — a skip pressed exactly at a boundary still seeks.
+  const srcPlan: FreeSourceAdvancePlan =
+    seamless && autoplay && atProgrammeSec == null
+      ? planFreeSourceAdvance(
+          slot.sourceWindow,
+          sourceClipAudioForCell(cell)?.url ?? null,
+          currentAttachmentUrl,
+          currentAudio,
+        )
+      : { kind: "cue" }
+  const seamlessSrc = srcPlan.kind !== "cue"
+
   progIndex = index
   progStartEndStop() // idempotent; killed on finish/stop
-  const at = Math.max(
-    slot.startSec,
-    Math.min(atProgrammeSec ?? slot.startSec, slot.startSec + slot.slotLenSec - 0.001),
-  )
+  // The overshoot a seamless advance accepts (audio already heard past the
+  // boundary) becomes the landing offset, so progress stays continuous and
+  // monotonic across the seam — and it doubles as the dub's join offset.
+  const at = seamlessSrc
+    ? slot.startSec + Math.min(srcPlan.intoSec, Math.max(0, slot.slotLenSec - 0.001))
+    : Math.max(
+        slot.startSec,
+        Math.min(atProgrammeSec ?? slot.startSec, slot.startSec + slot.slotLenSec - 0.001),
+      )
   const into = at - slot.startSec
 
   // A newer slot open orphans any pending gate (and its timeout — a stale
@@ -1214,19 +1253,36 @@ async function progPlaySlot(
     explicit,
   }
   if (dubDue) gate.pending.add("target")
-  if (sourceDue) gate.pending.add("source")
+  // A seamless source is NOT pending — the element is already in position
+  // (playing or parked). It stays `dueSource` so progStartSides' bare play()
+  // is the wake, and strike bookkeeping stays coherent for dub-only gates.
+  if (sourceDue && !seamlessSrc) gate.pending.add("source")
   progGate = gate
 
   if (dubDue && target) progCueTarget(slot, cell, target, into, gate)
   if (sourceDue && slot.sourceWindow) {
-    progCueSource(cell, slot.sourceWindow.start + into, gate)
+    // Seamless: never progCueSource — progOpenSource's same-clip branch is an
+    // unconditional seek (backward by the overshoot: an audible replay) plus
+    // a pause of the still-playing element. Those two lines ARE the jump.
+    if (!seamlessSrc) progCueSource(cell, slot.sourceWindow.start + into, gate)
   } else {
     progQuiet(currentAudio)
   }
 
+  // Everything already in position/ready (a seamless source with no dub, or
+  // the dub adopted synchronously from prefetch before this line) → start
+  // now. Today's cue paths can never leave pending empty here (progOpenSource
+  // is async), so this is the seamless path's start call.
+  if (progGate === gate && gate.pending.size === 0) {
+    progStartSides(gate)
+    return
+  }
   // Still pending after the synchronous cue round → genuinely cold. Say so
-  // (parks the playhead) and bound the wait.
+  // (parks the playhead) and bound the wait. A seamlessly-continuing source
+  // must not keep sounding into a verse whose dub is still loading — park it
+  // IN PLACE (pause, never seek); the gate's bare play() resumes it.
   if (progGate === gate && gate.pending.size > 0) {
+    if (seamlessSrc) progQuiet(currentAudio)
     setState({ kind: "loading", ...progStateCell() })
     gate.timer = setTimeout(() => progGateTimeout(gate), GATE_TIMEOUT_MS)
   }
@@ -1416,6 +1472,65 @@ export function planAdvance(
     next = findNextPlayable(cells, next + 1)
   }
   return { kind: "stop" }
+}
+
+/** Free timing's seamless-advance tolerance: how far the source element may
+ *  sit PAST the next verse's window start and still count as "already there".
+ *  Overshoot is ≤60ms (the boundary poll) normally, up to one ~250ms
+ *  timeupdate tick when the interval is starved — same bar and same rationale
+ *  as REWIND_EPSILON_SEC. Note the accepted delta is audio ALREADY HEARD (the
+ *  element played through the contiguous boundary), so a generous bound only
+ *  mislabels which verse heard it. */
+export const PROG_CONTIG_EPSILON_SEC = REWIND_EPSILON_SEC
+
+export type FreeSourceAdvancePlan =
+  | { kind: "cue" }
+  | { kind: "continue"; intoSec: number }
+  | { kind: "wake"; intoSec: number }
+
+/**
+ * Pre-merge round (Matthew's review): free timing was audibly jumpy at EVERY
+ * verse boundary, because each automatic advance re-cued the source — an
+ * unconditional seek (backward, by the boundary poll's overshoot, so the last
+ * few tens of ms audibly REPLAYED) plus a pause/play cycle plus a fresh async
+ * readiness gate, on an element that was already sitting exactly where the
+ * next verse begins. Verse source windows are exactly contiguous by
+ * construction (import tiles sections into an exhaustive partition), so
+ * during continuous playback the engine never needs to seek at all.
+ *
+ * This classifies the SOURCE side of an AUTOMATIC advance by ELEMENT
+ * POSITION, not window adjacency:
+ *
+ *   - "continue": the element is playing at the next window's start (plus
+ *     accepted overshoot) — touch NOTHING; only bookkeeping moves.
+ *   - "wake": the element is parked there (a dub-clocked verse quieted it at
+ *     its window end) — bare play(), never a currentTime write.
+ *   - "cue": everything else (no window/element/url, a different clip, the
+ *     element ended, a gap, an early-ending dub that advanced before the
+ *     source reached the boundary, or runaway overshoot under throttled
+ *     timers) — today's full open/seek path, which is correct there.
+ *
+ * The position check is what makes every hostile case degrade safely: a plan
+ * is only "continue"/"wake" when playing on from here is EXACTLY right.
+ * Explicit navigation never reaches this planner (the seamless flag is passed
+ * only by progAdvance), so a user's seek always seeks.
+ */
+export function planFreeSourceAdvance(
+  nextSourceWindow: { start: number; end: number } | null,
+  nextSourceUrl: string | null,
+  currentUrl: string | null,
+  el: { currentTime: number; paused: boolean; ended: boolean } | null,
+): FreeSourceAdvancePlan {
+  if (!nextSourceWindow || !nextSourceUrl || !el || el.ended) return { kind: "cue" }
+  if (currentUrl == null || nextSourceUrl !== currentUrl) return { kind: "cue" }
+  const delta = el.currentTime - nextSourceWindow.start
+  // Behind the window start (early-ending dub advanced first, or a legacy
+  // gap-y import whose next window starts ahead): playing on from here would
+  // sound the WRONG verse — cue normally.
+  if (delta < -0.05) return { kind: "cue" }
+  if (delta > PROG_CONTIG_EPSILON_SEC) return { kind: "cue" }
+  const intoSec = Math.max(0, delta)
+  return el.paused ? { kind: "wake", intoSec } : { kind: "continue", intoSec }
 }
 
 // ── Target overlay planner + executor (round 5) ─────────────────────────────
@@ -1651,8 +1766,17 @@ function wireOverlayElement(
     // Metadata already loaded (adopted element): position it NOW — its
     // prefetch pre-seek may be stale after a re-flow — and clear any old
     // pre-seek handler so it can't fire later with a stale offset.
+    //
+    // Pre-merge round: SKIP the write when the element already sits within a
+    // couple hundred ms of the target. A currentTime write momentarily drops
+    // readyState below HAVE_FUTURE_DATA even on a fully-buffered element, so
+    // re-seeking a correctly pre-seeked stash by the boundary poll's tiny
+    // overshoot turned every warm dub adoption asynchronous — one "loading"
+    // flip and a parked source per dubbed boundary, for a position change
+    // nobody could hear. A genuinely stale pre-seek (re-flowed trim) is well
+    // past the bar and still seeks.
     audio.onloadedmetadata = null
-    applySeek()
+    if (Math.abs(audio.currentTime - startAtClipSec) > 0.2) applySeek()
   } else if ("element" in media || startAtClipSec > 0.05) {
     // Join the clip at the offset. Safari rejects pre-metadata seeks (same
     // trick as the master's pendingStartSeconds). FORTIFY: an ADOPTED element

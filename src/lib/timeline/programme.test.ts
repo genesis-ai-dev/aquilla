@@ -236,3 +236,21 @@ describe("targetRatio — the honest replacement for the overflow warnings", () 
     expect(targetRatio(prog.slots[0])).toBeNull()
   })
 })
+
+describe("source-window contiguity (pre-merge round)", () => {
+  it("adjacent tiled cells produce EXACTLY contiguous source windows — no rounding", () => {
+    // The seek-free boundary advance (planFreeSourceAdvance) relies on this:
+    // during continuous playback the source element ends verse N sitting
+    // exactly where verse N+1's window begins, so no seek is ever needed.
+    // buildProgramme must keep copying startTime/endTime verbatim.
+    const cells = [
+      verse("v1", 0, 6.123456789),
+      verse("v2", 6.123456789, 10.5),
+      verse("v3", 10.5, 16.000000001),
+    ]
+    const prog = buildProgramme(cells)
+    for (let i = 0; i < prog.slots.length - 1; i++) {
+      expect(prog.slots[i].sourceWindow!.end).toBe(prog.slots[i + 1].sourceWindow!.start)
+    }
+  })
+})

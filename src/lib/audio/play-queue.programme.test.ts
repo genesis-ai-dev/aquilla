@@ -34,7 +34,21 @@ class FakeAudio {
    *  (readyState 0, no metadata, play() held) until `makeReady()` is called —
    *  a clip still crossing the network. Default: everything ready instantly. */
   static deferSrc: (src: string) => boolean = () => false
-  currentTime = 0
+  /** Every ENGINE write to currentTime (a seek). `tick()` — the element's own
+   *  playback progress — bypasses this. The seek-free boundary work (pre-merge
+   *  round) asserts on it: an automatic contiguous advance must record ZERO
+   *  seeks. */
+  seekLog: number[] = []
+  /** Engine-initiated pauses (progQuiet and friends). */
+  pauseCount = 0
+  private _t = 0
+  get currentTime(): number {
+    return this._t
+  }
+  set currentTime(v: number) {
+    this.seekLog.push(v)
+    this._t = v
+  }
   duration = 600
   paused = true
   ended = false
@@ -74,6 +88,7 @@ class FakeAudio {
   }
   pause(): void {
     if (this.paused) return
+    this.pauseCount++
     this.paused = true
     this.onpause?.()
   }
@@ -96,9 +111,10 @@ class FakeAudio {
     this.onerror?.()
     this.emit("error")
   }
-  /** Drive a timeupdate tick, the way a real element would ~4×/second. */
+  /** Drive a timeupdate tick, the way a real element would ~4×/second.
+   *  Writes the backing field directly — playback progress is not a seek. */
   tick(t: number): void {
-    this.currentTime = t
+    this._t = t
     this.ontimeupdate?.()
   }
   // Listener support for the gate's source-readiness watch (canplay/seeked/
@@ -211,14 +227,20 @@ describe("audio-first transport — both sides start together", () => {
     setQueueTimingMode("audioFirst")
     startQueue(ctxFor(cells), 0)
     await settle()
-    sourceEl()!.tick(6) // original done
+    sourceEl()!.tick(6) // original done — parked exactly at v2's window start
 
     // The dub reaching its end ends the verse.
+    const seeksBefore = sourceEl()!.seekLog.length
     dubEl("v1")!.tick(11)
     await settle()
     expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "v2" })
-    // v2's original starts at file second 6 — the shared element seeks there.
+    // Pre-merge round: v2's original starts at file second 6, where the
+    // element is ALREADY parked — the hand-off is a bare play(), never a
+    // seek (this assertion used to pin the old re-cue's seek to 6; the
+    // position is the same, the mechanism must not be).
     expect(sourceEl()!.currentTime).toBe(6)
+    expect(sourceEl()!.seekLog.length).toBe(seeksBefore)
+    expect(sourceEl()!.paused).toBe(false)
     expect(dubEl("v2")?.paused).toBe(false)
   })
 
@@ -783,5 +805,144 @@ describe("audio-first fortify — plain content falls back to the dubbing path",
     el.onended?.()
     await settle()
     expect(getQueueState().kind).toBe("idle")
+  })
+})
+
+// ── Pre-merge round: seek-free automatic advance ────────────────────────────
+// During continuous playback the engine never seeks — a contiguous boundary
+// leaves a playing source element completely alone ("continue") or bare-
+// play()s a parked one ("wake"). Seeks remain for explicit navigation,
+// non-contiguous windows, and cold dub cueing. FakeAudio's seekLog is the
+// instrument: every engine write to currentTime is recorded.
+
+import { planFreeSourceAdvance, PROG_CONTIG_EPSILON_SEC } from "./play-queue"
+
+describe("audio-first seamless advance (no seeks in continuous playback)", () => {
+  it("a source-clocked contiguous boundary touches the element NOT AT ALL", async () => {
+    // No dubs anywhere: the source plays straight through both verses.
+    const cells = [verse("v1", 0, 6), verse("v2", 6, 16)]
+    setQueueTimingMode("audioFirst")
+    startQueue(ctxFor(cells), 0)
+    await settle()
+    const el = sourceEl()!
+    expect(el.paused).toBe(false)
+    const seeksBefore = el.seekLog.length
+    const pausesBefore = el.pauseCount
+
+    el.tick(6.05) // ≤60ms poll overshoot past the boundary
+    await settle()
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "v2" })
+    expect(el.seekLog.length).toBe(seeksBefore)
+    expect(el.pauseCount).toBe(pausesBefore)
+    expect(el.paused).toBe(false)
+    // Progress landed at the overshoot — continuous, no snap-back.
+    expect(getQueueProgress().currentTime).toBeCloseTo(6.05, 6)
+  })
+
+  it("the accepted overshoot becomes the dub's JOIN OFFSET", async () => {
+    // v1 has no dub; v2 does. Crossing at 6.2 means v2's dub joins 0.2 in.
+    const cells = [verse("v1", 0, 6), verse("v2", 6, 16, 8_000)]
+    setQueueTimingMode("audioFirst")
+    startQueue(ctxFor(cells), 0)
+    await settle()
+    const el = sourceEl()!
+    const seeksBefore = el.seekLog.length
+
+    el.tick(6.2)
+    await settle()
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "v2" })
+    expect(el.seekLog.length).toBe(seeksBefore) // source: still zero seeks
+    // The dub is a COLD element — positioning it is allowed, and it must
+    // land at the join offset, not the verse top (no double-audio there).
+    expect(dubEl("v2")!.currentTime).toBeCloseTo(0.2, 6)
+    expect(dubEl("v2")!.paused).toBe(false)
+  })
+
+  it("a cold dub parks the source IN PLACE (pause, never seek) and resumes seek-free", async () => {
+    FakeAudio.deferSrc = (src) => src.includes("/v2.webm")
+    const cells = [verse("v1", 0, 6), verse("v2", 6, 16, 8_000)]
+    setQueueTimingMode("audioFirst")
+    startQueue(ctxFor(cells), 0)
+    await settle()
+    const el = sourceEl()!
+    const seeksBefore = el.seekLog.length
+
+    el.tick(6.05)
+    await settle()
+    // Honest park: the dub is still crossing the network.
+    expect(getQueueState().kind).toBe("loading")
+    expect(el.paused).toBe(true)
+    expect(el.seekLog.length).toBe(seeksBefore)
+    expect(el.currentTime).toBeCloseTo(6.05, 6) // frozen where it was
+
+    dubEl("v2")!.makeReady()
+    await settle()
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "v2" })
+    expect(el.paused).toBe(false)
+    expect(el.seekLog.length).toBe(seeksBefore) // resume was a bare play()
+    expect(dubEl("v2")!.currentTime).toBeCloseTo(0.05, 6)
+  })
+
+  it("explicit navigation still seeks (skip mid-verse)", async () => {
+    const cells = [verse("v1", 0, 6), verse("v2", 6, 16)]
+    setQueueTimingMode("audioFirst")
+    startQueue(ctxFor(cells), 0)
+    await settle()
+    const el = sourceEl()!
+    el.tick(2) // mid-verse
+    const seeksBefore = el.seekLog.length
+
+    skipForward()
+    await settle()
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "v2" })
+    // A user's skip is a jump — the element must be repositioned.
+    expect(el.seekLog.length).toBeGreaterThan(seeksBefore)
+    expect(el.seekLog[el.seekLog.length - 1]).toBe(6)
+  })
+
+  it("a NON-contiguous boundary (legacy gap-y import) still cues with a seek", async () => {
+    // v1 ends at 5, v2 begins at 6 — a 1s hole in the file.
+    const cells = [verse("v1", 0, 5), verse("v2", 6, 16)]
+    setQueueTimingMode("audioFirst")
+    startQueue(ctxFor(cells), 0)
+    await settle()
+    const el = sourceEl()!
+    const seeksBefore = el.seekLog.length
+
+    el.tick(5.02)
+    await settle()
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "v2" })
+    // Playing on from 5.02 would sound the hole — the engine must seek to 6.
+    expect(el.seekLog.length).toBeGreaterThan(seeksBefore)
+    expect(el.seekLog[el.seekLog.length - 1]).toBe(6)
+  })
+})
+
+describe("planFreeSourceAdvance (pure)", () => {
+  const win = { start: 6, end: 16 }
+  const el = (t: number, paused = false, ended = false) => ({ currentTime: t, paused, ended })
+
+  it("continue/wake at the boundary, with the overshoot as the landing offset", () => {
+    expect(planFreeSourceAdvance(win, "u", "u", el(6))).toEqual({ kind: "continue", intoSec: 0 })
+    expect(planFreeSourceAdvance(win, "u", "u", el(6.2))).toEqual({ kind: "continue", intoSec: expect.closeTo(0.2, 6) })
+    expect(planFreeSourceAdvance(win, "u", "u", el(6, true))).toEqual({ kind: "wake", intoSec: 0 })
+  })
+
+  it("cues on anything that makes playing-on wrong", () => {
+    expect(planFreeSourceAdvance(null, "u", "u", el(6))).toEqual({ kind: "cue" }) // no window
+    expect(planFreeSourceAdvance(win, null, "u", el(6))).toEqual({ kind: "cue" }) // no next url
+    expect(planFreeSourceAdvance(win, "u", null, el(6))).toEqual({ kind: "cue" }) // nothing open
+    expect(planFreeSourceAdvance(win, "u", "other", el(6))).toEqual({ kind: "cue" }) // clip change
+    expect(planFreeSourceAdvance(win, "u", "u", null)).toEqual({ kind: "cue" }) // no element
+    expect(planFreeSourceAdvance(win, "u", "u", el(6, false, true))).toEqual({ kind: "cue" }) // ended
+    expect(planFreeSourceAdvance(win, "u", "u", el(5.5))).toEqual({ kind: "cue" }) // behind (gap / early dub end)
+    expect(planFreeSourceAdvance(win, "u", "u", el(6 + PROG_CONTIG_EPSILON_SEC + 0.01))).toEqual({ kind: "cue" }) // runaway overshoot
+  })
+
+  it("tolerates sub-epsilon float noise on either side", () => {
+    const shy = planFreeSourceAdvance(win, "u", "u", el(5.96)) // −40ms: same boundary, not a gap
+    expect(shy.kind).toBe("continue")
+    expect(shy.kind === "continue" ? shy.intoSec : -1).toBe(0) // …but never a negative landing
+    expect(planFreeSourceAdvance(win, "u", "u", el(6 + PROG_CONTIG_EPSILON_SEC)).kind).toBe("continue")
   })
 })

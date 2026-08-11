@@ -258,16 +258,20 @@ export function AppShell({
         </div>
       )}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">{dockContent}</div>
-      {!leftDock && (
-        <div className="flex shrink-0 items-center gap-2">
+      {/* Sidebar footer. The version tag is org-chrome only, but the language
+          switcher rides in both layouts: ProjectWorkspace (the `leftDock` case)
+          is the screen a translator spends the whole day on, so making them
+          leave it to change UI language would defeat the point. */}
+      <div className={cn("flex shrink-0 items-center gap-2", leftDock && "justify-end px-2 pb-2")}>
+        {!leftDock && (
           <div className="min-w-0 flex-1">
             <VersionTag />
           </div>
-          {i18n && (
-            <LanguageSwitcher className="h-6 shrink-0 rounded-md border border-border/50 bg-transparent px-1 text-xs" />
-          )}
-        </div>
-      )}
+        )}
+        {i18n && (
+          <LanguageSwitcher className="h-6 shrink-0 rounded-md border border-border/50 bg-transparent px-1 text-xs" />
+        )}
+      </div>
     </aside>
   )
 

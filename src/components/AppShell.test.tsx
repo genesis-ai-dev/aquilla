@@ -9,6 +9,7 @@
 import { describe, it, expect } from "vitest"
 import { MemoryRouter, useLocation, useNavigate } from "react-router-dom"
 import { render, screen, fireEvent } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { AppShell } from "./AppShell"
 import { I18nProvider } from "@/lib/i18n/I18nProvider"
 
@@ -126,13 +127,14 @@ describe("AppShell main-content error containment", () => {
       </MemoryRouter>,
     )
     // Distinct from the Preferences page's own switcher (finding 8) so a
-    // screen reader never announces "Language, combo box" twice with nothing
-    // to tell the two apart.
-    const select = await screen.findByLabelText("Quick language switch")
-    expect(select).toBeInTheDocument()
-    // The switcher must list endonyms, not English names — a Burmese speaker
+    // screen reader never announces the same name twice with nothing to tell
+    // the two apart.
+    const trigger = await screen.findByRole("button", { name: "Quick language switch" })
+    expect(trigger).toBeInTheDocument()
+    // The picker must list endonyms, not English names — a Burmese speaker
     // looking for their language will not scan for the word "Burmese".
-    expect(screen.getByRole("option", { name: "မြန်မာ" })).toBeInTheDocument()
+    await userEvent.click(trigger)
+    expect(await screen.findByRole("menuitemradio", { name: /မြန်မာ/ })).toBeInTheDocument()
   })
 
   it("keeps the language control reachable in the leftDock (project workspace) layout", async () => {
@@ -151,6 +153,8 @@ describe("AppShell main-content error containment", () => {
     // ProjectWorkspace is the only caller that passes leftDock, and it is the
     // screen a translator works in all day. If the switcher only rendered in the
     // org-chrome layout, changing UI language would mean leaving your work.
-    expect(await screen.findByLabelText("Quick language switch")).toBeInTheDocument()
+    expect(
+      await screen.findByRole("button", { name: "Quick language switch" }),
+    ).toBeInTheDocument()
   })
 })

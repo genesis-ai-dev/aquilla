@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { render, screen, waitFor, fireEvent } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { MemoryRouter, Routes, Route } from "react-router-dom"
 import { JoinPage, InviteSummary } from "./JoinPage"
 import { acceptServerInvite, previewMultiInvite, acceptMultiInvite, previewServerInvite } from "@/lib/sync/invites"
@@ -560,7 +561,7 @@ describe("JoinPage error messages follow a language switch (AQU-511 finding 7)",
     window.localStorage.clear()
   })
 
-  it("re-resolves the invalid-link error into the newly chosen language", () => {
+  it("re-resolves the invalid-link error into the newly chosen language", async () => {
     CATALOGS.my = { "auth.join.invalidInviteLink": "MY invalid invite link" }
     render(
       <I18nProvider>
@@ -574,7 +575,9 @@ describe("JoinPage error messages follow a language switch (AQU-511 finding 7)",
     )
     expect(screen.getByText("Invalid invite link")).toBeInTheDocument()
 
-    fireEvent.change(screen.getByRole("combobox"), { target: { value: "my" } })
+    // Open the globe menu and pick Burmese by its endonym.
+    await userEvent.click(screen.getByRole("button", { name: "Language" }))
+    await userEvent.click(await screen.findByRole("menuitemradio", { name: /မြန်မာ/ }))
 
     expect(screen.getByText("MY invalid invite link")).toBeInTheDocument()
     expect(screen.queryByText("Invalid invite link")).not.toBeInTheDocument()

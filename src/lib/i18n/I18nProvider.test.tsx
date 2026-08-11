@@ -1,8 +1,23 @@
 import { describe, it, expect, beforeEach } from "vitest"
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { I18nProvider, useT } from "./I18nProvider"
 import { LanguageSwitcher } from "./LanguageSwitcher"
 import { readStoredLocale } from "./store"
+
+/**
+ * Drive the real switcher: open the globe menu, then choose a locale by its
+ * endonym. Endonym rather than code on purpose — that is what a speaker of the
+ * language actually sees and scans for.
+ */
+async function pickLanguage(endonym: string) {
+  await userEvent.click(screen.getByRole("button", { name: "Language" }))
+  await userEvent.click(
+    // Regex: the item's accessible name is "Switch language to <endonym>",
+    // so match on the endonym rather than pinning the whole phrase.
+    await screen.findByRole("menuitemradio", { name: new RegExp(endonym) }),
+  )
+}
 
 function Probe() {
   const t = useT()
@@ -32,17 +47,17 @@ describe("I18nProvider + LanguageSwitcher", () => {
     expect(document.documentElement.dir).toBe("ltr")
   })
 
-  it("switching to an RTL locale mirrors <html dir> and persists the choice", () => {
+  it("switching to an RTL locale mirrors <html dir> and persists the choice", async () => {
     render(<Harness />)
-    fireEvent.change(screen.getByRole("combobox"), { target: { value: "ar" } })
+    await pickLanguage("العربية")
     expect(document.documentElement.dir).toBe("rtl")
     expect(document.documentElement.lang).toBe("ar")
     expect(readStoredLocale()).toBe("ar")
   })
 
-  it("an untranslated locale still shows English text, never a raw key", () => {
+  it("an untranslated locale still shows English text, never a raw key", async () => {
     render(<Harness />)
-    fireEvent.change(screen.getByRole("combobox"), { target: { value: "my" } })
+    await pickLanguage("မြန်မာ")
     // `my` catalog is empty today → English fallback, not the key.
     expect(screen.getByTestId("label")).toHaveTextContent("Projects")
     expect(document.documentElement.dir).toBe("ltr")

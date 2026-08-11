@@ -19,15 +19,18 @@ export const language = defineNamespace({
     keys: {
       "language.label": {
         description:
-          "Default accessible label for the language switcher control, used only when " +
-          "a single instance of the switcher is on the page. Read aloud by screen " +
-          "readers; also the visible form label beside the control.",
+          "Default accessible label for the language switcher, used only when a single " +
+          "instance of it is on the page. The switcher is a globe icon button with no " +
+          "visible text, so this is read by screen readers and shown as its tooltip — " +
+          "it is never seen as a form label.",
         maxLength: 20,
       },
       "language.switchTo": {
         description:
-          "Accessible description of a single option in the language switcher, naming " +
-          "the language that option selects.",
+          "Accessible name of one row in the language menu, naming the language that " +
+          "row selects. The row's visible text is just the endonym, so this is the only " +
+          "place a screen-reader user is told what choosing it does — keep it a full, " +
+          "self-contained action.",
         placeholders: {
           language:
             "Name of the target UI language, already written in that language's own " +

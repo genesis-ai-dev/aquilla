@@ -1,15 +1,19 @@
 import { describe, expect, it } from "vitest"
-import { wranglerDevArgs } from "./spawn-worker"
+import { inspectorPortForWorkerPort, wranglerDevArgs } from "./spawn-worker"
 
 describe("managed Wrangler dev command", () => {
-  it("asks the OS for an inspector port for every concurrent stack", () => {
-    const identity = wranglerDevArgs({ port: 8787 })
-    const sync = wranglerDevArgs({ port: 8788 })
+  it("derives stable, collision-free inspector ports for concurrent stacks", () => {
+    const workerPorts = [8787, 8788, 8887, 8888, 8987, 8988]
+    const inspectorPorts = workerPorts.map((port) => {
+      const args = wranglerDevArgs({ port })
 
-    for (const args of [identity, sync]) {
       expect(args).toContain("--inspector-port")
-      expect(args[args.indexOf("--inspector-port") + 1]).toBe("0")
-    }
+      return Number(args[args.indexOf("--inspector-port") + 1])
+    })
+
+    expect(inspectorPorts).toEqual(workerPorts.map(inspectorPortForWorkerPort))
+    expect(new Set(inspectorPorts).size).toBe(workerPorts.length)
+    expect(inspectorPorts).not.toContain(0)
   })
 
   it("preserves explicit inspector and extra Wrangler arguments", () => {

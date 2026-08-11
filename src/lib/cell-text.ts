@@ -46,8 +46,11 @@ export interface SourceTextCell {
  * which is never legitimate source text, so an untranscribed section has NO
  * source text (empty string; callers' existing trim guards skip it). Every
  * AI/semantic consumer (completion prompts + example corpus + search index,
- * TTS prompt context, source-pattern rules/checks) reads through this.
- * Display code deliberately does NOT — the filename is a useful placeholder.
+ * TTS prompt context, source-pattern rules/checks) reads through this, and so
+ * does every EXPORTER (a document leaving the app must never carry a filename
+ * as source text — decision 2026-08-05: transcription when present, blank
+ * when not). Display code deliberately does NOT — on screen the filename is
+ * a useful placeholder.
  */
 export function effectiveSourceText(cell: SourceTextCell): string {
   if ((cell.medium ?? "text") !== "media") return cell.original

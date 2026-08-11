@@ -40,6 +40,8 @@ export interface ProjectStateResponse {
   name: string
   gitlabProjectId: number | null
   orgId: number | null
+  /** AQU-822: the org's effective termbase-edit floor (absent on older servers). */
+  termbaseEditMinRole?: number | null
   archivedAt: string | null
   archivedBy: { id: number; username: string } | null
   /** Active/inactive lifecycle (migration 0033). Absent = active (compat). */

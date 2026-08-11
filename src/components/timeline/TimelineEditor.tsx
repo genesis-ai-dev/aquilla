@@ -4,30 +4,39 @@
 // the only "media" dependency is a native <video> element for the linked-URL
 // preview (the remote host serves Range — no streaming work needed here).
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
-import { Film, LocateFixed, Minus, Plus } from "lucide-react"
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { AudioLines, Film, LocateFixed, Magnet, Minus, Plus, Volume2, VolumeX, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { deriveLanes } from "@/lib/timeline/lanes"
-import { timelineBounds } from "@/lib/timeline/derive"
+import { chipOverlaps } from "@/lib/timeline/lane-timing"
+import { buildTimelineLayout, type TimelineLayout } from "@/lib/timeline/layout"
 import { computeFollowScroll } from "@/lib/timeline/follow"
 import { secToPx, pxToSec, ZOOM_MIN, ZOOM_MAX, ZOOM_DEFAULT } from "@/lib/timeline/scale"
 // Read-only queue subscriptions only — playback COMMANDS stay in the
 // workspace (onSeekToTime), keeping this component testable with a spy prop.
-import { useQueueProgress, useQueueState } from "@/lib/audio/play-queue"
+// Round 5 exception: the per-track speaker buttons drive setQueueAudibility
+// directly — muting is a pure element-level concern with no workspace state.
+import { useQueueProgress, useQueueState, useMissingClipCells, setQueueAudibility, type TrackAudibility } from "@/lib/audio/play-queue"
+import { isInEditableContext, isTopAudioShortcutOwner, pushAudioShortcutOverride } from "@/lib/audio/audio-coordinator"
+import { spacebarShouldToggle } from "@/lib/audio/playback-keys"
+import { activeTargetForCell } from "@/lib/audio/track-audio"
+import { loadSnapEnabled, saveSnapEnabled } from "@/lib/timeline/snap"
+import { setMediaCursorCell, setMediaSyncActive } from "@/lib/timeline/media-cursor"
+import { setAudioQualityPref, useAudioQualityPref } from "@/lib/store/audio-quality-pref"
+import { useBatchProgress } from "@/lib/audio/batch-audio"
+import { useOnline } from "@/hooks/useOnline"
 import { TimelineRuler } from "./TimelineRuler"
 import { TimelineLane } from "./TimelineLane"
+import { TargetAudioLane, type TargetAudioItem } from "./TargetAudioLane"
 import { TimelinePlayhead } from "./TimelinePlayhead"
-import { TimelineCellDetail, type TimelineDetailActions } from "./TimelineCellDetail"
+import { TimelineChipStrip } from "./TimelineChipStrip"
 import { useTimelineClock } from "./useTimelineClock"
 import { resolveEntryAudio, useClipAudioMissing } from "./useClipAudioMissing"
 import type { CellData } from "@/hooks/useCells"
-import type { Concept } from "@/lib/terminology/types"
-import type { ProjectRecord, RuleInfraction } from "@/lib/parsers/types"
+import { AUDIO_TIMING_MODE_LABELS, type AudioTimingMode, type ProjectRecord } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
 import type { CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
 import { AppTooltip } from "@/components/ui/tooltip"
-
-export type { TimelineDetailActions } from "./TimelineCellDetail"
 
 export interface TimelineEditorProps {
   cells: CellData[]
@@ -35,31 +44,51 @@ export interface TimelineEditorProps {
   editable: boolean
   /** Used to scope the persisted zoom preference. */
   fileId: string
-  onRetime(cellId: string, startSec: number, endSec: number): void
-  onCommitTarget(cellId: string, value: string, valueHtml?: string): void
+  /** Round 6 (SUB-36): retiming exists ONLY on the subtitle row — the source
+   *  split is frozen at import. Media cells get an independent subtitle span;
+   *  text cells' own timing IS their subtitle timing (the workspace routes).
+   *  (Renamed from `onRetime` when the source row was frozen.) */
+  onRetimeSubtitle(cellId: string, startSec: number, endSec: number): void
+  /** Round 6/7: move a section's dub chip — its clip-zero anchor (file sec). */
+  onRetimeTarget?(cellId: string, anchorSec: number): void
+  /** Round 7: trim a dub chip — complete trim state (undefined clears). */
+  onTrimTarget?(cellId: string, audioId: string, trims: { trimStartMs?: number; trimEndMs?: number }): void
+  /** Round 7 (SUB-44): Space — toggle queue playback (playing→pause,
+   *  paused→resume, idle→start). The editor claims the app-wide audio
+   *  shortcut while mounted so a last-played single cell can't steal Space. */
+  onTogglePlay?(): void
   /** When provided, shows a "Link video" control. null clears the link. */
   onLinkVideo?(url: string | null): void
-  /** AQU-646: transcribe a media clip's audio into source text (detail pane). */
-  onTranscribe?(cell: CellData): void
   /** AQU-646: navigate audio playback to a file-timeline second — ruler
    *  clicks and clean card clicks route through this (the workspace decides
    *  whether to jump the live queue or cue a paused one). */
   onSeekToTime?(sec: number): void
-  /** AQU-646 round 3: the text view's cell actions for the detail pane
-   *  (AI translate, comments, history, record, footnote…). Pass-through. */
-  detailActions?: TimelineDetailActions
-  /** AQU-646 round 3 (text→media trace): seeds selection on mount — opens the
-   *  detail pane, centers the track on the clip, and cues playback (paused)
+  /** 2026-08-07: the empty-target chips' hover record button (the one
+   *  detail-pane action that lives on the lanes, not in the table below). */
+  onOpenRecording?(cellId: string): void
+  /** AQU-646 round 3 (text→media trace): seeds selection on mount — fills the
+   *  chip strip, centers the track on the clip, and cues playback (paused)
    *  at its start via onSeekToTime, same semantics as a clean card click. */
   initialSelectedCellId?: string | null
   /** AQU-646 round 3 (media→text trace): mirrors every selection change up. */
   onSelectedCellChange?(cellId: string | null): void
-  /** Forwarded to the clip detail pane so it can resolve/stream source audio. */
+  /** 2026-08-07 (wire a): fires on USER chip clicks only — the workspace
+   *  scrolls the text table to the matching row. Programmatic selection
+   *  (activateRequest, the mount trace) stays silent to avoid echo loops. */
+  onChipActivated?(cellId: string): void
+  /** 2026-08-07 (wire b): a text-table row click, as a nonce'd request —
+   *  selects the chip and centers/cues exactly like a chip click. */
+  activateRequest?: { cellId: string; nonce: number } | null
+  /** SUB-53: which job this FILE is for (pre-merge round: per-file, resolved
+   *  via resolveFileTimingMode). "dubbing" (the default) draws the track
+   *  against the imported recording's clock; "audioFirst" lays the verses out
+   *  end to end at their real lengths. */
+  timingMode?: AudioTimingMode
+  /** Pre-merge round: change THIS FILE's mode (file.timing.set). Absent = the
+   *  control is read-only (the server requires maintainer to write it). */
+  onChangeTimingMode?(mode: AudioTimingMode): void
+  /** Needed by the missing-audio probe behind the chip strip's badge. */
   project?: ProjectRecord
-  /** Active managed terminology concepts for the detail-pane editor's chips. */
-  terminologyConcepts?: Concept[]
-  /** Per-cell rule infractions (keyed by cell id) for the detail-pane blots. */
-  infractions?: Map<string, RuleInfraction[]>
   /** Fires when the highlighted section changes so a sibling transport (the
    *  bottom playback bar) can start playback from the selected section. */
   onSelectCell?(cellId: string | null): void
@@ -70,6 +99,16 @@ export interface TimelineEditorProps {
    *  cells carry no attachments, so the probe resolves the selected clip's take
    *  from this map. Absent → no badge. */
   audioByCellId?: Map<string, CellAudioEntry>
+  /** Pre-merge round: recordings that predate duration capture draw at
+   *  fallback width and break Free timing's layout. When any exist in this
+   *  file, a notice row offers a deliberate, user-initiated fix (never
+   *  silent). Absent (focused tests) → no notice. */
+  legacyMeasure?: {
+    /** Takes in the file with no measured length. 0 = no notice. */
+    count: number
+    /** Kick the measure-all batch (progress rides AudioBulkProgressBanner). */
+    onMeasure(): void
+  }
 }
 
 const zoomKey = (fileId: string) => `codex:timelineZoom:${fileId}`
@@ -83,14 +122,34 @@ function loadZoom(fileId: string): number {
   }
 }
 
-function LaneLabel({ name, sub, dot }: { name: string; sub: string; dot: string }) {
+// Round 5: which tracks are AUDIBLE, persisted per file like zoom. Both-on is
+// the default; the queue itself only ever sees element.muted flags.
+const audibilityKey = (fileId: string) => `codex:timelineAudibility:${fileId}`
+
+function loadAudibility(fileId: string): TrackAudibility {
+  try {
+    const parsed: unknown = JSON.parse(localStorage.getItem(audibilityKey(fileId)) ?? "")
+    if (parsed && typeof parsed === "object") {
+      const p = parsed as Partial<TrackAudibility>
+      return { source: p.source !== false, target: p.target !== false }
+    }
+  } catch {
+    /* unset / private mode */
+  }
+  return { source: true, target: true }
+}
+
+function LaneLabel({ name, sub, dot, trailing }: { name: string; sub: string; dot: string; trailing?: ReactNode }) {
   return (
-    <div className="flex h-[66px] flex-col justify-center gap-0.5 border-b border-border px-3">
-      <span className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
-        <span className={cn("h-1.5 w-1.5 rounded-sm", dot)} />
-        {name}
-      </span>
-      <span className="text-[10px] text-muted-foreground">{sub}</span>
+    <div className="flex h-[66px] items-center justify-between gap-1 border-b border-border px-3">
+      <div className="flex min-w-0 flex-col gap-0.5">
+        <span className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
+          <span className={cn("h-1.5 w-1.5 rounded-sm", dot)} />
+          {name}
+        </span>
+        <span className="text-[10px] text-muted-foreground">{sub}</span>
+      </div>
+      {trailing}
     </div>
   )
 }
@@ -100,22 +159,39 @@ export function TimelineEditor({
   coreMediaUrl,
   editable,
   fileId,
-  onRetime,
-  onCommitTarget,
+  onRetimeSubtitle,
+  onRetimeTarget,
+  onTrimTarget,
+  onTogglePlay,
   onLinkVideo,
-  onTranscribe,
   onSeekToTime,
-  detailActions,
+  onOpenRecording,
   initialSelectedCellId,
   onSelectedCellChange,
+  onChipActivated,
+  activateRequest,
+  timingMode = "dubbing",
+  onChangeTimingMode,
   project,
-  terminologyConcepts,
-  infractions,
   onSelectCell,
   session,
   audioByCellId,
+  legacyMeasure,
 }: TimelineEditorProps) {
+  const audioFirst = timingMode === "audioFirst"
   const [pxPerSec, setPxPerSec] = useState(() => loadZoom(fileId))
+  // Dismissal is per-visit on purpose: while unmeasured takes remain, the
+  // notice returns next time the timeline mounts — quiet, but not forgotten.
+  // It is keyed by FILE because this component is not remounted on a file
+  // switch (same subtree, no key), so a bare boolean would have silenced the
+  // notice for every other file in the session.
+  const [measureDismissedFor, setMeasureDismissedFor] = useState<string | null>(null)
+  const measureNoteDismissed = measureDismissedFor === fileId
+  const online = useOnline()
+  const batchProgress = useBatchProgress()
+  const [audibility, setAudibility] = useState<TrackAudibility>(() => loadAudibility(fileId))
+  const [snapOn, setSnapOn] = useState(loadSnapEnabled)
+  const audioQuality = useAudioQualityPref()
   // Seeded by the text→media trace (AQU-646 round 3): the seed alone opens
   // the detail pane and rings the card.
   const [selectedId, setSelectedId] = useState<string | null>(() => initialSelectedCellId ?? null)
@@ -140,20 +216,34 @@ export function TimelineEditor({
     (queueState.kind === "playing" || queueState.kind === "paused" || queueState.kind === "loading") &&
     cellIdSet.has(queueState.cellId)
   const queuePlaying = queueState.kind === "playing" && cellIdSet.has(queueState.cellId)
+  // Smooth-playback round: the readiness gate flips playing→loading→playing at
+  // a cold verse boundary. `queuePlaying` stays STRICT (the playhead's rAF
+  // interpolation must park during a gate — that's the whole point), but the
+  // follow re-engage below keys on running-or-loading, or every cold boundary
+  // would re-yank a user who deliberately scrolled away mid-playback.
+  const queueRunning =
+    (queueState.kind === "playing" || queueState.kind === "loading") && cellIdSet.has(queueState.cellId)
+  // Decision 2026-08-05: the verse being WAITED ON shows a small spinner on
+  // its chip ("loading" is exactly the parked-gate/cold-load state and
+  // carries the cellId), and a definitively 404'd dub shows a missing badge.
+  const loadingCellId =
+    queueState.kind === "loading" && cellIdSet.has(queueState.cellId) ? queueState.cellId : null
+  const missingCellIds = useMissingClipCells()
   useEffect(() => {
     if (queueActive) clock.setCurrentSec(queueProgress.currentTime)
     // eslint-disable-next-line react-hooks/exhaustive-deps -- clock setters are stable
   }, [queueActive, queueProgress.currentTime])
   useEffect(() => {
-    if (queuePlaying) {
-      clock.play()
-      // Starting playback is an explicit "watch this" — re-engage follow.
-      setFollow(true)
-    } else {
-      clock.pause()
-    }
+    if (queuePlaying) clock.play()
+    else clock.pause()
     // eslint-disable-next-line react-hooks/exhaustive-deps -- clock setters are stable
   }, [queuePlaying])
+  useEffect(() => {
+    // Starting playback is an explicit "watch this" — re-engage follow. Keyed
+    // on running (playing OR loading) so a gate's brief "loading" dip doesn't
+    // count as a fresh start.
+    if (queueRunning) setFollow(true)
+  }, [queueRunning])
 
   // Measure the scroll viewport before first paint + on resizes — the
   // windowing math and follow-scroll both need a real clientWidth.
@@ -167,9 +257,115 @@ export function TimelineEditor({
     return () => ro.disconnect()
   }, [])
 
+  // Round 5: keep the queue's element muting in lockstep with the speaker
+  // buttons (mount + every toggle).
+  useEffect(() => {
+    setQueueAudibility(audibility)
+  }, [audibility])
+
+  // Round 7 (SUB-44): transport keys while the timeline is on screen.
+  // Space = play/pause the QUEUE; Cmd/Ctrl+Enter = back to the very start.
+  // The editor claims the app-wide audio shortcut for its lifetime so the
+  // global handler (which may target a last-played single cell) yields.
+  const onTogglePlayRef = useRef(onTogglePlay)
+  onTogglePlayRef.current = onTogglePlay
+  const onSeekToTimeRef = useRef(onSeekToTime)
+  onSeekToTimeRef.current = onSeekToTime
+  useEffect(() => {
+    const releaseOverride = pushAudioShortcutOverride()
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (isInEditableContext(e.target)) return
+      // SUB-52: the timeline holds this claim for as long as it is mounted,
+      // and the recording modal opens on top of it without unmounting it —
+      // so Space was starting playback here at the same time as it started
+      // the recording. Stand down whenever something has claimed above us.
+      if (!isTopAudioShortcutOwner(releaseOverride.owner)) return
+      // FORTIFY: the shared predicate also refuses Space when focus sits on a
+      // button/slider/menu item — with only the editable-context check, Space
+      // on a focused control (mute button, an open dialog's default button)
+      // toggled the transport underneath instead of activating the control.
+      if (spacebarShouldToggle(e)) {
+        e.preventDefault() // keep Space from scrolling the page
+        onTogglePlayRef.current?.()
+        return
+      }
+      if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey) {
+        e.preventDefault()
+        onSeekToTimeRef.current?.(0)
+        const el = scrollRef.current
+        if (el) {
+          lastProgrammaticScrollAt.current = performance.now()
+          el.scrollLeft = 0
+          setScrollLeft(0)
+        }
+        setFollow(true)
+      }
+    }
+    document.addEventListener("keydown", onKeyDown)
+    return () => {
+      document.removeEventListener("keydown", onKeyDown)
+      releaseOverride()
+    }
+  }, [])
+
+  function toggleTrackAudible(track: keyof TrackAudibility) {
+    setAudibility((prev) => {
+      const next = { ...prev, [track]: !prev[track] }
+      try {
+        localStorage.setItem(audibilityKey(fileId), JSON.stringify(next))
+      } catch {
+        /* private mode — just won't persist */
+      }
+      return next
+    })
+  }
+
+  function speakerToggle(track: keyof TrackAudibility, name: string) {
+    const audible = audibility[track]
+    return (
+      <button
+        type="button"
+        data-testid={`tl-speaker-${track}`}
+        aria-label={audible ? `Mute ${name}` : `Unmute ${name}`}
+        aria-pressed={audible}
+        title={audible ? `${name} is audible — click to mute` : `${name} is muted — click to unmute`}
+        onClick={() => toggleTrackAudible(track)}
+        className={cn(
+          "inline-flex shrink-0 items-center rounded-md border border-border p-1",
+          audible
+            ? "bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300"
+            : "bg-background text-foreground/50 hover:bg-muted",
+        )}
+      >
+        {audible ? <Volume2 className="h-3.5 w-3.5" /> : <VolumeX className="h-3.5 w-3.5" />}
+      </button>
+    )
+  }
+
   const { subtitle, dialogue, untimed } = useMemo(() => deriveLanes(cells), [cells])
-  const bounds = useMemo(() => timelineBounds(cells), [cells])
-  const durationSec = (bounds?.end ?? 0) + 2
+  // SUB-53: the single answer to "where does this go on the track?". Dubbing
+  // returns the pre-SUB-53 geometry verbatim; audio-first returns the laid-out
+  // programme. Everything below reads positions through this.
+  const layout = useMemo<TimelineLayout>(
+    () => buildTimelineLayout(timingMode, cells, dialogue),
+    [timingMode, cells, dialogue],
+  )
+  // Round 5: the Target-audio track's chips — one per section with dub audio.
+  const targetItems = useMemo<TargetAudioItem[]>(
+    () =>
+      dialogue.flatMap((c) => {
+        const target = activeTargetForCell(c)
+        return target ? [{ cell: c, kind: target.kind, audioId: target.audioId }] : []
+      }),
+    [dialogue],
+  )
+  // SUB-51: the complement — sections still waiting for a dub. Their empty
+  // space in the Target row offers a record button on hover.
+  const emptyTargets = useMemo(
+    () => dialogue.filter((c) => !activeTargetForCell(c)),
+    [dialogue],
+  )
+  const durationSec = layout.totalSec
   const trackWidthPx = secToPx(durationSec, pxPerSec)
   // SUB-18: overscan the visibility window by ~240px each side so cards at the
   // edges don't pop in/out during zoom glides and fast scrolls (windowing was
@@ -179,16 +375,110 @@ export function TimelineEditor({
   // Before the scroll container is measured (viewportPx 0), fall back to the
   // full track so every card renders — correct, and keeps tests deterministic.
   const viewEndSec = pxToSec(scrollLeft + (viewportPx || trackWidthPx), pxPerSec) + overscanSec
-  const selectedCell = useMemo(
-    () => cells.find((c) => c.id === selectedId) ?? null,
-    [cells, selectedId],
+  // 2026-08-07: the chip strip describes the CURRENT chip — an explicit
+  // selection wins; with nothing selected it follows the cell the queue is
+  // sounding (or holds while paused); after the queue goes idle it keeps the
+  // last one so the strip doesn't blank out mid-thought. Same cellIdSet guard
+  // as the playhead: a stale singleton queue never fills this file's strip.
+  const soundingId =
+    (queueState.kind === "playing" || queueState.kind === "paused" || queueState.kind === "loading") &&
+    cellIdSet.has(queueState.cellId)
+      ? queueState.cellId
+      : null
+  const [lastTouchedId, setLastTouchedId] = useState<string | null>(null)
+  useEffect(() => {
+    const id = selectedId ?? soundingId
+    if (id) setLastTouchedId(id)
+  }, [selectedId, soundingId])
+  // 2026-08-08 (Sam): an AUTOMATIC playback advance clears the selection —
+  // one pointer, one moving light. EDGE-triggered on the sounding cell's
+  // transitions: only when the queue moves from A to B (both non-null) and
+  // the departed A was the selected cell does the selection drop. A fresh
+  // click-then-jump is race-proof by construction (its selection ≠ the
+  // departed cell), untimed selections survive (they never sound), and
+  // pause/idle produce no transition, so nothing clears.
+  const prevSoundingRef = useRef<string | null>(null)
+  useEffect(() => {
+    const prev = prevSoundingRef.current
+    prevSoundingRef.current = soundingId
+    if (prev == null || soundingId == null || soundingId === prev) return
+    setSelectedId((sel) => (sel === prev ? null : sel))
+  }, [soundingId])
+  const currentCellId = selectedId ?? soundingId ?? lastTouchedId
+  const currentCell = useMemo(
+    () => cells.find((c) => c.id === currentCellId) ?? null,
+    [cells, currentCellId],
   )
-  const selectedClipAudio = useMemo(
-    () => (selectedId ? resolveEntryAudio(audioByCellId?.get(selectedId)) : null),
-    [audioByCellId, selectedId],
+  // Meeting note (2026-08-05): the detail readout carries the dub's own
+  // numbers — its range, its duration, and ALWAYS the end-to-end difference
+  // (original end − dub end). 2026-08-06 (Sam): the diff is INFORMATIONAL (a
+  // difference can be intentional) — chip-vs-chip OVERLAP is the warning, a
+  // separate number computed with the same trespasser gating the lane uses.
+  // Dubbing only, and never from a guessed width (SUB-48).
+  const currentChipStats = useMemo(() => {
+    if (!currentCell) return null
+    // Free timing (2026-08-06, Sam): the file-clock RANGES are meaningless
+    // against the re-flowed track — the only honest numbers are durations.
+    // Src = the original's window length, Tgt = the dub's measured length.
+    if (audioFirst) {
+      const { startTime, endTime } = currentCell
+      const srcDurationSec =
+        typeof startTime === "number" && typeof endTime === "number" ? endTime - startTime : null
+      const item = targetItems.find((t) => t.cell.id === currentCell.id)
+      const geom = item ? layout.targetGeom(item.cell, item.cell.attachments?.[item.audioId]) : null
+      const tgtDurationSec = geom && !geom.usingFallback ? geom.end - geom.start : null
+      if (srcDurationSec == null && tgtDurationSec == null) return null
+      return { kind: "free" as const, srcDurationSec, tgtDurationSec }
+    }
+    const i = targetItems.findIndex((t) => t.cell.id === currentCell.id)
+    if (i < 0) return null
+    const geomOf = (t: (typeof targetItems)[number] | undefined) =>
+      t ? layout.targetGeom(t.cell, t.cell.attachments?.[t.audioId]) : null
+    const geom = geomOf(targetItems[i])
+    if (!geom || geom.usingFallback) return null
+    const { startTime, endTime } = currentCell
+    const prev = geomOf(targetItems[i - 1])
+    const next = geomOf(targetItems[i + 1])
+    const { headSec, tailSec } = chipOverlaps(
+      { start: geom.start, end: geom.end },
+      prev ? { start: prev.start, end: prev.end } : null,
+      next?.start ?? null,
+    )
+    // Blame the trespasser (same rule as the chip): only territory THIS chip
+    // left its own section to claim counts toward its overlap number. The
+    // head half also depends on the PREVIOUS chip's end, so it is masked when
+    // that width is a guess (SUB-48 — same mask the lane applies).
+    // 2026-08-08 (Sam): the two halves stay SEPARATE — a chip that spills at
+    // both ends reads as two labeled numbers, not one meaningless sum.
+    const tailTrespass = tailSec != null && typeof endTime === "number" && geom.end > endTime ? tailSec : 0
+    const headTrespass =
+      headSec != null && !prev?.usingFallback && typeof startTime === "number" && geom.start < startTime
+        ? headSec
+        : 0
+    // 2026-08-08 (Sam): Diff is the whole DURATION difference now. The old
+    // end-only number missed a target that also starts before its verse:
+    // start + end diffs sum to (source duration − target duration), positive
+    // exactly when the target is shorter. The halves survive in the hover.
+    const startDiffSec = typeof startTime === "number" ? geom.start - startTime : null
+    const endDiffSec = typeof endTime === "number" ? endTime - geom.end : null
+    return {
+      kind: "dubbing" as const,
+      startSec: geom.start,
+      endSec: geom.end,
+      durationSec: geom.end - geom.start,
+      startDiffSec,
+      endDiffSec,
+      durationDiffSec: startDiffSec != null && endDiffSec != null ? startDiffSec + endDiffSec : null,
+      headOverlapSec: headTrespass > 0 ? headTrespass : null,
+      tailOverlapSec: tailTrespass > 0 ? tailTrespass : null,
+    }
+  }, [audioFirst, currentCell, targetItems, layout])
+  const currentClipAudio = useMemo(
+    () => (currentCellId ? resolveEntryAudio(audioByCellId?.get(currentCellId)) : null),
+    [audioByCellId, currentCellId],
   )
   const audioMissing = useClipAudioMissing({
-    audio: selectedClipAudio,
+    audio: currentClipAudio,
     projectId: project?.id ?? null,
     fileId,
     session: session ?? null,
@@ -360,21 +650,45 @@ export function TimelineEditor({
     onSelectCell?.(selectedId)
   }, [selectedId, onSelectedCellChange, onSelectCell])
 
-  // AQU-646 round 3: consume the text→media trace once on mount. Reads the
-  // live clientWidth (viewportPx state is still 0 here — it lands via the
-  // measurement useLayoutEffect a beat later) to center the clip; seekTo cues
-  // the queue paused at the clip start and re-engages follow — identical to a
-  // clean card click. Untimed traced cells: selection + pane only.
-  useEffect(() => {
-    const id = initialSelectedCellId
-    if (!id) return
-    const cell = cells.find((c) => c.id === id)
-    if (!cell || typeof cell.startTime !== "number" || !Number.isFinite(cell.startTime)) return
+  // Center the track on a clip and cue playback (paused) at its start —
+  // identical to a clean card click. Reads the live clientWidth (viewportPx
+  // state can still be 0 pre-measurement). Untimed cells: no timecode, no-op.
+  function centerAndCue(cellId: string) {
+    const cell = cells.find((c) => c.id === cellId)
+    const at = cell ? layout.seekSecFor(cell) : null
+    if (at == null) return
     const viewport = scrollRef.current?.clientWidth ?? 0
-    scrollTrackTo(Math.max(0, secToPx(cell.startTime, pxPerSec) - viewport / 2))
-    seekTo(cell.startTime)
+    scrollTrackTo(Math.max(0, secToPx(at, pxPerSec) - viewport / 2))
+    seekTo(at)
+  }
+
+  // AQU-646 round 3: consume the text→media trace once on mount (the seed
+  // alone already selected the cell via the useState initializer).
+  useEffect(() => {
+    if (initialSelectedCellId) centerAndCue(initialSelectedCellId)
     // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only trace consume
   }, [])
+
+  // 2026-08-07 (wire b): a text-table row click arrives as an activate
+  // request — select the chip and center/cue exactly like a chip click, but
+  // through the PLAIN setter: onChipActivated must not echo back and scroll-
+  // yank the row the user just clicked.
+  useEffect(() => {
+    if (!activateRequest) return
+    setSelectedId(activateRequest.cellId)
+    centerAndCue(activateRequest.cellId)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- consumed per nonce
+  }, [activateRequest?.nonce])
+
+  // 2026-08-07: publish the timeline's presence + chip selection to the media
+  // cursor store — the table's rows highlight the pointed-at cell through it.
+  useEffect(() => {
+    setMediaSyncActive(true)
+    return () => setMediaSyncActive(false)
+  }, [])
+  useEffect(() => {
+    setMediaCursorCell(selectedId)
+  }, [selectedId])
 
   // AQU-646 follow-playhead: page-flip the view when the playhead approaches
   // the right edge (or leaves the left). Reads the element's live scrollLeft —
@@ -392,30 +706,132 @@ export function TimelineEditor({
     if (target != null) scrollTrackTo(target)
   }, [follow, queuePlaying, queueProgress.currentTime, pxPerSec, viewportPx, trackWidthPx])
 
+  // 2026-08-07 (wire a): USER chip selection — as opposed to programmatic
+  // selection from a row click — also notifies the workspace so the text
+  // table scrolls to and flashes the matching row.
+  const selectFromChip = (cellId: string) => {
+    setSelectedId(cellId)
+    onChipActivated?.(cellId)
+  }
+
   const laneProps = {
+    layout,
     pxPerSec,
     viewStartSec,
     viewEndSec,
     selectedId,
     editable,
-    onSelect: setSelectedId,
-    onRetime,
+    onSelect: selectFromChip,
+    onRetime: onRetimeSubtitle,
     // Clean card click → navigate playback to the clip's start (both lanes;
-    // untimed chips have no timecode to seek to).
+    // untimed chips have no timecode to seek to). SUB-53: "the clip's start"
+    // is a programme second in audio-first mode, so the layout resolves it.
     onSeek: (cellId: string) => {
       const cell = cells.find((c) => c.id === cellId)
-      if (cell && typeof cell.startTime === "number" && Number.isFinite(cell.startTime)) {
-        seekTo(cell.startTime)
-      }
+      const at = cell ? layout.seekSecFor(cell) : null
+      if (at != null) seekTo(at)
     },
   }
 
   return (
-    <div data-testid="tl-editor" className="flex h-full min-h-0 flex-col">
+    // 2026-08-07: intrinsic height — the editor stacks above the text table
+    // in a shrink-0 wrapper now, so it must not claim the full column.
+    <div data-testid="tl-editor" className="flex min-h-0 flex-col">
       {/* toolbar */}
       <div className="flex items-center gap-2 border-b border-border bg-muted/30 px-3 py-1.5">
         <span className="text-xs font-medium text-muted-foreground">Timeline</span>
+        {/* Pre-merge round: the mode is FILE-level again (the video link it
+            interacts with is per-file), so the control returns to the
+            toolbar. Same clearance as before: `onChangeTimingMode` absent =
+            below the maintainer floor = the active mode renders as a plain
+            label instead of buttons. The wrapper keeps its testid +
+            data-mode so browser passes read the mode exactly as before. */}
+        <div
+          data-testid="tl-timing-mode"
+          data-mode={timingMode}
+          className="ml-2 inline-flex items-center overflow-hidden rounded-md border border-border text-[11px]"
+        >
+          {(["dubbing", "audioFirst"] as const).map((mode) =>
+            onChangeTimingMode ? (
+              <button
+                key={mode}
+                type="button"
+                data-testid={`tl-timing-mode-${mode}`}
+                aria-pressed={timingMode === mode}
+                title={AUDIO_TIMING_MODE_LABELS[mode].description}
+                onClick={() => {
+                  if (timingMode !== mode) onChangeTimingMode(mode)
+                }}
+                className={cn(
+                  "px-2 py-1",
+                  timingMode === mode
+                    ? "bg-sky-100 font-medium text-sky-700 dark:bg-sky-950 dark:text-sky-300"
+                    : "bg-background text-foreground/60 hover:bg-muted",
+                )}
+              >
+                {AUDIO_TIMING_MODE_LABELS[mode].name}
+              </button>
+            ) : timingMode === mode ? (
+              <span
+                key={mode}
+                data-testid={`tl-timing-mode-${mode}`}
+                title={`${AUDIO_TIMING_MODE_LABELS[mode].description} Only a maintainer can change this.`}
+                className="px-2 py-1 text-foreground/70"
+              >
+                {AUDIO_TIMING_MODE_LABELS[mode].name}
+              </span>
+            ) : null,
+          )}
+        </div>
         <div className="ml-auto flex items-center gap-1.5">
+          {/* Meeting 2026-08-05: generated voices default to compressed
+              playback; fast connections can opt into the original WAV. Mic
+              recordings have no lossless form — the tooltip says so. */}
+          <AppTooltip
+            content={
+              audioQuality === "original"
+                ? "Original quality (WAV) for generated voices — larger downloads. Recordings are always compressed."
+                : "Compressed playback (smaller, faster). Toggle for original-quality generated voices."
+            }
+          >
+            <button
+              type="button"
+              aria-label="Play generated voices at original quality"
+              aria-pressed={audioQuality === "original"}
+              data-testid="tl-quality-toggle"
+              onClick={() => setAudioQualityPref(audioQuality === "original" ? "compressed" : "original")}
+              className={cn(
+                "inline-flex items-center rounded-md border border-border px-1.5 py-1",
+                audioQuality === "original"
+                  ? "bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300"
+                  : "bg-background text-foreground/70 hover:bg-muted",
+              )}
+            >
+              <AudioLines className="h-3.5 w-3.5" />
+            </button>
+          </AppTooltip>
+          {/* SUB-53: nothing to snap to when positions are computed. */}
+          {!audioFirst && (
+          <AppTooltip content={snapOn ? "Snapping on — edges magnet to neighbors" : "Snapping off"}>
+            <button
+              type="button"
+              aria-label="Snap to neighboring edges"
+              aria-pressed={snapOn}
+              data-testid="tl-snap-toggle"
+              onClick={() => {
+                const next = !snapOn
+                setSnapOn(next)
+                saveSnapEnabled(next)
+              }}
+              className={cn(
+                "inline-flex items-center rounded-md border border-border px-1.5 py-1",
+                snapOn ? "bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300" : "bg-background text-foreground/70 hover:bg-muted",
+              )}
+            >
+              <Magnet className="h-3.5 w-3.5" />
+            </button>
+          </AppTooltip>
+          )}
           <AppTooltip content="Follow playhead">
             <button
               type="button"
@@ -479,8 +895,10 @@ export function TimelineEditor({
         </div>
       </div>
 
-      {/* linked-URL video preview (master clock) */}
-      {coreMediaUrl && (
+      {/* linked-URL video preview (master clock). SUB-53: a video runs on the
+          original recording's clock, so it cannot follow a re-flowed track —
+          say so rather than let it drift silently against the audio. */}
+      {coreMediaUrl && !audioFirst && (
         <div className="flex justify-center border-b border-border bg-black">
           <video
             ref={videoRef}
@@ -492,17 +910,76 @@ export function TimelineEditor({
           />
         </div>
       )}
+      {coreMediaUrl && audioFirst && (
+        <div
+          data-testid="tl-video-hidden-note"
+          className="border-b border-border bg-muted/30 px-3 py-1.5 text-[11px] text-muted-foreground"
+        >
+          The linked video is hidden here — it plays on the original recording's timing, which this view no longer follows.
+        </div>
+      )}
+
+      {/* Pre-merge round: recordings from before duration capture have no
+          measured length — their chips draw at guessed widths, and Free
+          timing cannot lay them out. The fix is deliberate (a button), never
+          silent: measuring downloads and decodes each recording, then saves
+          only the length. */}
+      {legacyMeasure && legacyMeasure.count > 0 && !measureNoteDismissed && (
+        <div
+          data-testid="tl-measure-note"
+          className="flex items-center gap-2 border-b border-border bg-amber-500/10 px-3 py-1.5 text-[11px] text-muted-foreground"
+        >
+          <span className="min-w-0 flex-1">
+            {legacyMeasure.count === 1
+              ? "1 recording has no measured length — its chip is drawn at a guessed width."
+              : `${legacyMeasure.count} recordings have no measured length — their chips are drawn at guessed widths.`}
+          </span>
+          <AppTooltip
+            content={
+              !online
+                ? "Measuring downloads each recording — connect to the internet first."
+                : batchProgress != null
+                  ? "Another batch is running — wait for it to finish."
+                  : "Download each recording, measure its real length, and fix the chips. Nothing else about the takes changes."
+            }
+          >
+            <button
+              type="button"
+              data-testid="tl-measure-run"
+              disabled={!online || batchProgress != null}
+              onClick={legacyMeasure.onMeasure}
+              className="rounded border border-border bg-background px-2 py-0.5 font-medium text-foreground/80 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Measure now
+            </button>
+          </AppTooltip>
+          <button
+            type="button"
+            aria-label="Dismiss for now"
+            data-testid="tl-measure-dismiss"
+            onClick={() => setMeasureDismissedFor(fileId)}
+            className="rounded p-0.5 text-muted-foreground hover:bg-muted"
+          >
+            <X className="h-3 w-3" />
+          </button>
+        </div>
+      )}
 
       {/* timeline */}
       <div className="grid min-h-0 grid-cols-[128px_1fr]">
         <div className="border-r border-border bg-muted/20">
           <div className="h-7 border-b border-border" />
-          <LaneLabel name="Subtitle" sub="text · reading" dot="bg-zinc-400 dark:bg-zinc-600" />
-          <LaneLabel name="Dialogue" sub="audio · recording" dot="bg-sky-600" />
-          <div className="flex h-12 flex-col justify-center px-3">
-            <span className="text-xs font-semibold text-foreground">Untimed</span>
-            <span className="text-[10px] text-muted-foreground">no timecode</span>
-          </div>
+          <LaneLabel name="Subtitles" sub="text · reading" dot="bg-zinc-400 dark:bg-zinc-600" />
+          <LaneLabel name="Source audio" sub="original speech" dot="bg-sky-600" trailing={speakerToggle("source", "source audio")} />
+          <LaneLabel name="Target audio" sub="takes · generated" dot="bg-emerald-600" trailing={speakerToggle("target", "target audio")} />
+          {/* SUB-37: the untimed parking strip only exists when something is
+              actually untimed — an always-on empty row read as a mystery. */}
+          {untimed.length > 0 && (
+            <div className="flex h-12 flex-col justify-center px-3">
+              <span className="text-xs font-semibold text-foreground">Untimed</span>
+              <span className="text-[10px] text-muted-foreground">no timecode yet</span>
+            </div>
+          )}
         </div>
         <div
           ref={scrollRef}
@@ -521,18 +998,39 @@ export function TimelineEditor({
         >
           <div className="relative" style={{ width: `${trackWidthPx}px` }}>
             <TimelineRuler durationSec={durationSec} pxPerSec={pxPerSec} onScrub={seekTo} />
-            <TimelineLane cells={subtitle} variant="subtitle" {...laneProps} />
-            <TimelineLane cells={dialogue} variant="dialogue" {...laneProps} />
-            <div className="flex h-12 items-center gap-2 overflow-x-auto border-b border-border px-3">
-              {untimed.length === 0 ? (
-                <span className="text-[10px] text-muted-foreground">No untimed clips.</span>
-              ) : (
-                untimed.map((c) => (
+            {/* SUB-53: a subtitle span is expressed against the original's
+                clock, so it can't be dragged on a re-flowed track. */}
+            <TimelineLane cells={subtitle} variant="subtitle" retimable={!audioFirst} snapEnabled={snapOn} {...laneProps} />
+            {/* Round 6: the source split is FROZEN at import — never retimable. */}
+            <TimelineLane cells={dialogue} variant="dialogue" retimable={false} {...laneProps} />
+            <TargetAudioLane
+              items={targetItems}
+              layout={layout}
+              pxPerSec={pxPerSec}
+              viewStartSec={viewStartSec}
+              viewEndSec={viewEndSec}
+              selectedId={selectedId}
+              loadingCellId={loadingCellId}
+              missingCellIds={missingCellIds}
+              editable={editable}
+              snapEnabled={snapOn && !audioFirst}
+              onSelect={selectFromChip}
+              onSeek={laneProps.onSeek}
+              // SUB-53: a chip's position is computed in audio-first, so there
+              // is nothing to drag it to. Trimming stays — and re-flows.
+              onRetimeTarget={audioFirst ? undefined : onRetimeTarget}
+              onTrimTarget={onTrimTarget}
+              onOpenRecording={onOpenRecording}
+              emptyCells={emptyTargets}
+            />
+            {untimed.length > 0 && (
+              <div className="flex h-12 items-center gap-2 overflow-x-auto border-b border-border px-3">
+                {untimed.map((c) => (
                   <button
                     key={c.id}
                     type="button"
                     data-testid={`tl-untimed-${c.id}`}
-                    onClick={() => setSelectedId(c.id)}
+                    onClick={() => selectFromChip(c.id)}
                     className={cn(
                       "shrink-0 rounded-md border border-dashed border-zinc-400 bg-background px-2 py-1 text-[10px] text-foreground/80 hover:bg-muted dark:border-zinc-600",
                       selectedId === c.id && "ring-2 ring-sky-500",
@@ -540,9 +1038,9 @@ export function TimelineEditor({
                   >
                     {(c.original || c.transcription || c.cellLabel || "untimed").slice(0, 36)}
                   </button>
-                ))
-              )}
-            </div>
+                ))}
+              </div>
+            )}
             <TimelinePlayhead
               currentSec={clock.currentSec}
               pxPerSec={pxPerSec}
@@ -553,17 +1051,7 @@ export function TimelineEditor({
         </div>
       </div>
 
-      <TimelineCellDetail
-        cell={selectedCell}
-        editable={editable}
-        onCommitTarget={onCommitTarget}
-        onTranscribe={onTranscribe}
-        detailActions={detailActions}
-        project={project}
-        terminologyConcepts={terminologyConcepts}
-        infractions={selectedCell ? infractions?.get(selectedCell.id) : undefined}
-        audioMissing={audioMissing}
-      />
+      <TimelineChipStrip cell={currentCell} chipStats={currentChipStats} audioMissing={audioMissing} />
     </div>
   )
 }

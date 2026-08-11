@@ -43,6 +43,8 @@ const REQUIRED_ROLE: Record<string, number> = {
   "cell.audio.attach": ROLE.CONTRIBUTOR,
   "cell.audio.select": ROLE.CONTRIBUTOR,
   "cell.audio.remove": ROLE.CONTRIBUTOR,
+  "cell.audio.rename": ROLE.CONTRIBUTOR,
+  "cell.audio.measure": ROLE.CONTRIBUTOR,
 
   "file.create": ROLE.PROJECT_LEAD,
   "file.rename": ROLE.CONTRIBUTOR,
@@ -62,7 +64,10 @@ const REQUIRED_ROLE: Record<string, number> = {
 
   // Timeline editor (mirrors server).
   "cell.retime": ROLE.CONTRIBUTOR,
+  "cell.lane.retime": ROLE.CONTRIBUTOR,
   "file.video.set": ROLE.CONTRIBUTOR,
+  // Structural — keeps the clearance the setting had in Project Settings.
+  "file.timing.set": ROLE.MAINTAINER,
 
   // AQU-478: repin ("accept upstream change as-is") — same authority bar
   // as validating (spec §12). Bulk repin is gated higher (project_lead 500)

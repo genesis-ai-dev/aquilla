@@ -541,3 +541,146 @@ describe('changesets — commit replay (crash-retry idempotency)', () => {
     expect(cs[0].status).toBe('committed')
   })
 })
+
+// ── target-language lanes (AQU-538) ─────────────────────────────────────────
+// A lane is a language tag registered in settings.targetLanes; SetTranslation's
+// optional laneId writes that lane's independent target row/chain. These pin:
+//   1. unregistered lane → rejected at prepare (teaches UpdateProjectSettings)
+//   2. two lanes on one cell in one changeset → two lane rows, lane-stamped events
+//   3. preconditions are lane-scoped — a sibling-lane write never stales a plan
+
+describe('changesets — target-language lanes', () => {
+  async function registerLanes(lanes: string[]): Promise<void> {
+    await tdb.pg.query(
+      `INSERT INTO project_settings (project_id, settings, version) VALUES ($1, $2::jsonb, 1)`,
+      [PROJECT, JSON.stringify({ targetLanes: lanes })],
+    )
+  }
+
+  it('rejects a SetTranslation naming an unregistered lane at prepare', async () => {
+    const env = makeEnv(tdb.db)
+    const token = await credToken(tdb, contributorCred())
+    await registerLanes(['es'])
+
+    const { res, body } = await prepare(env, token, [
+      { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'olá', laneId: 'pt' },
+    ])
+    expect(res.status).toBe(400)
+    expect(body.error.code).toBe('validation_failed')
+    expect(body.error.message).toContain('unregistered lane "pt"')
+    expect(body.error.message).toContain('UpdateProjectSettings')
+  })
+
+  it('two lanes on one cell in one changeset land two independent lane rows', async () => {
+    const env = makeEnv(tdb.db)
+    const token = await credToken(tdb, contributorCred())
+    await registerLanes(['es', 'pt'])
+
+    const { body: prep } = await prepare(env, token, [
+      { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'hola', laneId: 'es' },
+      { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'olá', laneId: 'pt' },
+    ])
+    // Same cell, different lanes = two independent slots, not a duplicate.
+    expect(prep.summary.warnings).toEqual([])
+    expect(prep.summary.translationsAdded).toBe(2)
+
+    const res = (await handleExternalChangesetsRequest(commitReq(token, prep.changeset.id), env))!
+    expect(res.status).toBe(200)
+    expect(((await res.json()) as any).receipt.appliedCount).toBe(2)
+
+    // Compiled events carry the lane in their payload.
+    const commits = (await tdb.rows<{ kind: string; payload: string }>('events'))
+      .filter((e) => e.kind === 'target.cell.commit')
+      .map((e) => (typeof e.payload === 'string' ? JSON.parse(e.payload) : e.payload))
+    expect(commits.map((p) => p.targetLang).sort()).toEqual(['es', 'pt'])
+
+    // Projection: one target row per lane, source pin intact; no default-lane row.
+    const targets = (await tdb.rows<{ side: string; target_lang: string; value: string; source_event_id: string | null }>('cells'))
+      .filter((c) => c.side === 'target')
+    expect(targets.map((t) => [t.target_lang, t.value]).sort()).toEqual([
+      ['es', 'hola'],
+      ['pt', 'olá'],
+    ])
+    for (const t of targets) expect(t.source_event_id).toBe('src-evt-1')
+  })
+
+  it('a sibling-lane write between prepare and commit does not stale the plan', async () => {
+    const env = makeEnv(tdb.db)
+    const token = await credToken(tdb, contributorCred())
+    await registerLanes(['es', 'pt'])
+
+    const { body: prep } = await prepare(env, token, [
+      { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'hola', laneId: 'es' },
+    ])
+
+    // Interleave a direct commit on the SAME cell in the pt lane.
+    const seedTok = await makeTestToken(SECRET, { projectId: PROJECT, fileId: FILE, userId: 1, username: 'alice', role: 400 })
+    const interleave: RawEvent<'target.cell.commit'> = {
+      id: 'interleave-pt-1', schemaVersion: 1, kind: 'target.cell.commit',
+      projectId: PROJECT, fileId: FILE, cellId: 'cell-1', parentId: null,
+      author: 'alice', payload: { value: 'olá direto', targetLang: 'pt' }, clientTs: 5,
+    }
+    await handleEventsWriteRequest(
+      new Request('https://w/events', {
+        method: 'POST', headers: { Authorization: `Bearer ${seedTok}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ events: [interleave] }),
+      }),
+      makeEnv(tdb.db),
+    )
+
+    // The es-lane plan is untouched by the pt write: commit succeeds.
+    const res = (await handleExternalChangesetsRequest(commitReq(token, prep.changeset.id), env))!
+    expect(res.status).toBe(200)
+
+    const targets = (await tdb.rows<{ side: string; target_lang: string; value: string }>('cells'))
+      .filter((c) => c.side === 'target')
+    expect(targets.map((t) => [t.target_lang, t.value]).sort()).toEqual([
+      ['es', 'hola'],
+      ['pt', 'olá direto'],
+    ])
+  })
+
+  it('a same-lane write between prepare and commit still yields plan_stale', async () => {
+    const env = makeEnv(tdb.db)
+    const token = await credToken(tdb, contributorCred())
+    await registerLanes(['es'])
+
+    const { body: prep } = await prepare(env, token, [
+      { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'hola', laneId: 'es' },
+    ])
+
+    const seedTok = await makeTestToken(SECRET, { projectId: PROJECT, fileId: FILE, userId: 1, username: 'alice', role: 400 })
+    const interleave: RawEvent<'target.cell.commit'> = {
+      id: 'interleave-es-1', schemaVersion: 1, kind: 'target.cell.commit',
+      projectId: PROJECT, fileId: FILE, cellId: 'cell-1', parentId: null,
+      author: 'alice', payload: { value: 'hola directa', targetLang: 'es' }, clientTs: 5,
+    }
+    await handleEventsWriteRequest(
+      new Request('https://w/events', {
+        method: 'POST', headers: { Authorization: `Bearer ${seedTok}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ events: [interleave] }),
+      }),
+      makeEnv(tdb.db),
+    )
+
+    const res = (await handleExternalChangesetsRequest(commitReq(token, prep.changeset.id), env))!
+    expect(res.status).toBe(409)
+    expect(((await res.json()) as any).error.code).toBe('plan_stale')
+  })
+})
+
+// ── approvalUrl is always absolute ──────────────────────────────────────────
+// Observed in the field: an env without BASE_URL handed agents a relative
+// "/approve/:id" they could not open. The fallback keeps the deep link
+// absolute (production SPA host) even when BASE_URL is unset or empty.
+
+describe('changesets — approvalUrl', () => {
+  it('falls back to the production app host when BASE_URL is unset', async () => {
+    const env = { AQUILLA_PG: tdb.db, SYNC_SECRET_KEY: SECRET } as ReturnType<typeof makeEnv>
+    const token = await credToken(tdb, contributorCred())
+    const { body: prep } = await prepare(env, token, [
+      { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'hello' },
+    ])
+    expect(prep.approvalUrl).toBe(`https://aquilla.app/approve/${prep.changeset.id}`)
+  })
+})

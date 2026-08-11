@@ -19,6 +19,14 @@ const ENVIRONMENTS = {
 }
 
 const VALID_SURFACES = new Set(["all", "auth", "sync", "spa"])
+const DEFAULT_MAX_JAVASCRIPT_ASSETS = 10_000
+// A newly promoted Worker and its asset manifest can reach Cloudflare edges
+// more than a minute apart. Retry only the lagging request for a bounded
+// three-minute window before declaring a healthy deploy bad (AQU-824).
+const DEFAULT_ATTEMPTS = 90
+const DEFAULT_RETRY_DELAY_MS = 2_000
+
+class NonRetryableVerificationError extends Error {}
 
 // The bare origin serves the prerendered marketing homepage (worker/index.ts),
 // whose small JS graph never imports the sync client or the chat completion
@@ -42,8 +50,16 @@ const SPA_SHELL_PATH = "/app"
 // canonical production URL baked into the source HTML, so it's identical across
 // environments (production/staging/dev/preview all serve the same asset bundle).
 const STATIC_MARKETING_PAGES = [
-  { path: "/case-studies/biblica", ogUrl: "https://aquilla.app/case-studies/biblica" },
-  { path: "/case-studies/come-and-see", ogUrl: "https://aquilla.app/case-studies/come-and-see" },
+  {
+    path: "/case-studies/biblica",
+    assetPath: "/case-study-biblica",
+    ogUrl: "https://aquilla.app/case-studies/biblica",
+  },
+  {
+    path: "/case-studies/come-and-see",
+    assetPath: "/case-study",
+    ogUrl: "https://aquilla.app/case-studies/come-and-see",
+  },
 ]
 
 function delay(milliseconds) {
@@ -72,8 +88,10 @@ async function requestWithRetry(url, init, verify, options) {
       return
     } catch (error) {
       lastError = error
+      if (error instanceof NonRetryableVerificationError) throw error
       if (attempt < attempts) {
-        log(`[verify-live] retrying ${url} (${attempt}/${attempts})`)
+        const reason = error instanceof Error ? error.message : String(error)
+        log(`[verify-live] retrying ${url} after ${reason} (${attempt}/${attempts})`)
         await delay(retryDelayMs)
       }
     }
@@ -87,12 +105,13 @@ async function operationWithRetry(description, operation, options) {
 
   for (let attempt = 1; attempt <= options.attempts; attempt += 1) {
     try {
-      await operation()
-      return
+      return await operation()
     } catch (error) {
       lastError = error
+      if (error instanceof NonRetryableVerificationError) throw error
       if (attempt < options.attempts) {
-        options.log(`[verify-live] retrying ${description} (${attempt}/${options.attempts})`)
+        const reason = error instanceof Error ? error.message : String(error)
+        options.log(`[verify-live] retrying ${description} after ${reason} (${attempt}/${options.attempts})`)
         await delay(options.retryDelayMs)
       }
     }
@@ -169,28 +188,84 @@ function scriptSources(html) {
   return [...html.matchAll(/<script[^>]+src=["']([^"']+\.js)["']/gi)].map((match) => match[1])
 }
 
-function javascriptReferences(source) {
-  return [...source.matchAll(/["'`]([^"'`]+\.js)["'`]/g)].map((match) => match[1])
+export function javascriptReferences(source) {
+  const references = new Set()
+  const collect = (pattern) => {
+    for (const match of source.matchAll(pattern)) references.add(match[2])
+  }
+
+  // Follow executable ESM edges, not every quoted string ending in `.js`.
+  // Large dependencies (notably Transformers.js) embed hundreds of source
+  // module filenames as data; treating those as imports made a healthy 142-
+  // chunk production build look like an unbounded graph (AQU-824).
+  collect(/\bimport\s*\(\s*(["'`])([^"'`]+\.js)\1\s*\)/g)
+  collect(/\bfrom\s*(["'])([^"']+\.js)\1/g)
+  collect(/\bimport\s*(["'])([^"']+\.js)\1/g)
+
+  // Vite's __vite__mapDeps preload table is data by design, but each entry is
+  // a real deployed chunk that the application may load. Inspect only the
+  // table initializer—not arbitrary assets/*.js strings elsewhere in bundles.
+  for (const table of source.matchAll(
+    /__vite__mapDeps\s*=\s*\([^[]*?\[([\s\S]*?)\]\s*\)\s*\)/g,
+  )) {
+    for (const match of table[1].matchAll(/(["'`])(assets\/[^"'`]+\.js)\1/g)) {
+      references.add(match[2])
+    }
+  }
+
+  return [...references]
 }
 
 async function fetchJavascriptGraph(appOrigin, entrySources, options) {
-  const pending = entrySources.map((source) => new URL(source, appOrigin).href)
-  const visited = new Set()
+  const pending = []
+  const discovered = new Set()
   const bodies = []
 
+  const schedule = (url) => {
+    if (discovered.has(url)) return
+    discovered.add(url)
+    if (discovered.size > options.maxJavascriptAssets) {
+      throw new Error(
+        `SPA references more than ${options.maxJavascriptAssets} JavaScript assets; `
+        + "refusing an unbounded crawl",
+      )
+    }
+    pending.push(url)
+  }
+
+  entrySources.forEach((source) => schedule(new URL(source, appOrigin).href))
+
   while (pending.length > 0) {
-    const batch = pending.splice(0, 12).filter((url) => !visited.has(url))
-    if (batch.length === 0) continue
-    batch.forEach((url) => visited.add(url))
+    const batch = pending.splice(0, 12)
 
     const results = await Promise.all(batch.map(async (url) => {
       const parsed = new URL(url)
       if (parsed.origin !== appOrigin || !parsed.pathname.endsWith(".js")) {
         throw new Error(`refusing to inspect unexpected script URL ${url}`)
       }
-      const response = await options.fetchImpl(url)
-      assertResponse(response, 200, `SPA asset ${parsed.pathname}`)
-      return { url, source: await response.text() }
+      return operationWithRetry(`SPA asset ${parsed.pathname}`, async () => {
+        const response = await options.fetchImpl(url, {
+          headers: {
+            Accept: "application/javascript, text/javascript;q=0.9, */*;q=0.1",
+            "Cache-Control": "no-cache",
+          },
+        })
+        assertResponse(response, 200, `SPA asset ${parsed.pathname}`)
+        const contentType = response.headers.get("content-type")?.toLowerCase() ?? ""
+        const source = await response.text()
+        if (
+          contentType.includes("text/html")
+          || /^\s*(?:<!doctype\s+html|<html\b)/i.test(source)
+        ) {
+          const message =
+            `SPA asset ${parsed.pathname} returned HTML instead of JavaScript; `
+            + "the deployed asset is missing or fell back to the SPA shell"
+          throw options.retryAssetFallbacks
+            ? new Error(message)
+            : new NonRetryableVerificationError(message)
+        }
+        return { url, source }
+      }, options)
     }))
 
     for (const { url, source } of results) {
@@ -204,13 +279,9 @@ async function fetchJavascriptGraph(appOrigin, entrySources, options) {
           ? new URL(`/${reference}`, appOrigin)
           : new URL(reference, url)
         if (referencedUrl.origin === appOrigin && referencedUrl.pathname.endsWith(".js")) {
-          pending.push(referencedUrl.href)
+          schedule(referencedUrl.href)
         }
       }
-    }
-
-    if (visited.size > 300) {
-      throw new Error("SPA references more than 300 JavaScript assets; refusing an unbounded crawl")
     }
   }
 
@@ -219,11 +290,13 @@ async function fetchJavascriptGraph(appOrigin, entrySources, options) {
 
 async function verifySpa(config, options) {
   const appUrl = new URL(SPA_SHELL_PATH, config.appOrigin).href
-  const response = await options.fetchImpl(appUrl, {
-    headers: { Accept: "text/html" },
-  })
-  assertResponse(response, 200, "SPA entrypoint")
-  const html = await response.text()
+  const html = await operationWithRetry(appUrl, async () => {
+    const response = await options.fetchImpl(appUrl, {
+      headers: { Accept: "text/html" },
+    })
+    assertResponse(response, 200, "SPA entrypoint")
+    return response.text()
+  }, options)
   const entries = scriptSources(html)
   if (entries.length === 0) {
     throw new Error("SPA entrypoint contains no JavaScript module")
@@ -265,7 +338,12 @@ function metaContent(html, property) {
 // HTML fails the deploy instead of shipping a partner-facing 404.
 async function verifyStaticPages(config, options) {
   for (const page of STATIC_MARKETING_PAGES) {
-    const pageUrl = new URL(page.path, config.appOrigin).href
+    // Version-preview hosts run behind Cloudflare's asset router and do not
+    // exercise custom-domain Worker rewrites consistently. Before promotion,
+    // verify the immutable uploaded document itself; after promotion, verify
+    // the canonical public route and its Worker mapping.
+    const requestPath = options.staticAssetPaths ? page.assetPath : page.path
+    const pageUrl = new URL(requestPath, config.appOrigin).href
     await requestWithRetry(
       pageUrl,
       { headers: { Accept: "text/html" } },
@@ -317,8 +395,11 @@ export async function verifyLiveEnvironment(environment, {
   appOrigin,
   fetchImpl = fetch,
   lookup = dnsLookup,
-  attempts = 5,
-  retryDelayMs = 1_000,
+  attempts = DEFAULT_ATTEMPTS,
+  retryDelayMs = DEFAULT_RETRY_DELAY_MS,
+  maxJavascriptAssets = DEFAULT_MAX_JAVASCRIPT_ASSETS,
+  retryAssetFallbacks = true,
+  staticAssetPaths = false,
   log = console.log,
 } = {}) {
   const environmentConfig = ENVIRONMENTS[environment]
@@ -328,16 +409,28 @@ export async function verifyLiveEnvironment(environment, {
   if (!VALID_SURFACES.has(surface)) {
     throw new Error(`unknown surface ${JSON.stringify(surface)}; expected all, auth, sync, or spa`)
   }
+  if (!Number.isInteger(maxJavascriptAssets) || maxJavascriptAssets < 1) {
+    throw new Error("maxJavascriptAssets must be a positive integer")
+  }
   const config = withAppOrigin(environmentConfig, appOrigin, surface)
 
-  const options = { fetchImpl, lookup, attempts, retryDelayMs, log }
+  const options = {
+    fetchImpl,
+    lookup,
+    attempts,
+    retryDelayMs,
+    maxJavascriptAssets,
+    retryAssetFallbacks,
+    staticAssetPaths,
+    log,
+  }
   if (surface === "all" || surface === "auth" || surface === "sync") {
     await verifyApiDns(config, options)
   }
   if (surface === "all" || surface === "auth") await verifyAuth(config, options)
   if (surface === "all" || surface === "sync") await verifySync(config, options)
   if (surface === "all" || surface === "spa") {
-    await operationWithRetry(config.appOrigin, () => verifySpa(config, options), options)
+    await verifySpa(config, options)
     await verifyStaticPages(config, options)
   }
 

@@ -103,11 +103,11 @@ const DISTINCT_MEANING: Record<string, string> = {
     "Names a queued operation in the outbox feed (noun-phrase register, like its " +
     "siblings). comments.composer.editPlaceholder is prompt text inside a textarea " +
     "and carries the continuation mark; an operation name must not.",
-  "auth.join.projectLabel":
-    "A field label rendered with its own separator before the project name. Label " +
-    "punctuation is language-specific (French spaces the colon, some scripts use a " +
-    "different mark or none), so the separator has to be translatable with the " +
-    "word — which common.project, a standalone noun, cannot carry.",
+  // `auth.join.projectLabel` was excused here until the invite summary became
+  // whole-sentence keys (AQU-511 wave-4b, finding 3). The label and its separator
+  // now live inside `auth.join.summarySingle`, which no longer collides with
+  // `common.project`, and this test's third case rejects a stale exception — so it
+  // was removed rather than left to rot.
   "audio.newVoice.mmsLanguageLabel":
     "Names the spoken language the MMS engine should synthesize. common.language " +
     "labels the switcher that changes the language of the interface itself. Two " +

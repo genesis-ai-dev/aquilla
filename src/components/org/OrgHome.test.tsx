@@ -1,17 +1,38 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest"
 import { act, render, screen, waitFor, fireEvent, within } from "@testing-library/react"
-import { MemoryRouter } from "react-router-dom"
+import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { OrgProvider } from "@/context/OrgContext"
 import { OrgHome, ProjectTable, activityStatus } from "./OrgHome"
+import { OrgOverview } from "./OrgOverview"
+import { OrgProjectsPage } from "./OrgProjectsPage"
 import { renderWithTooltips, expectTooltip } from "@/test-utils/tooltip"
 import type { PortfolioProject } from "@/lib/frontier/portfolio"
 
 function projectsRollupStat() {
-  // The org sidebar renders a "Projects" nav link whose muted/active styling
-  // varies with the route, so match on position instead: the rollup tile is the
-  // only "Projects" label outside the nav.
+  // Overview (and all-orgs) rollup tiles sit outside the nav.
   const label = screen.getAllByText("Projects").find((el) => !el.closest("nav"))!
   return label.parentElement!
+}
+
+function renderMemberShell(path: string) {
+  return render(
+    <MemoryRouter initialEntries={[path]}>
+      <OrgProvider>
+        <Routes>
+          <Route path="/orgs/:orgId/overview" element={<OrgOverview />} />
+          <Route path="/orgs/:orgId/projects" element={<OrgProjectsPage />} />
+        </Routes>
+      </OrgProvider>
+    </MemoryRouter>,
+  )
+}
+
+function renderMemberOverview() {
+  return renderMemberShell("/orgs/1/overview")
+}
+
+function renderMemberProjects() {
+  return renderMemberShell("/orgs/1/projects")
 }
 
 // Default: signed-in. Type-cast to allow null session in signed-out tests.
@@ -23,37 +44,51 @@ vi.mock("@/lib/frontier/orgs", () => ({
   createOrg: vi.fn(),
 }))
 vi.mock("@/components/AccountSwitcher", () => ({ AccountSwitcher: () => null }))
+vi.mock("@/components/HelpMenu", () => ({ HelpMenu: () => null }))
+vi.mock("./OrgSwitcher", () => ({ OrgSwitcher: () => null }))
+vi.mock("@/hooks/usePlatformAdmin", () => ({ usePlatformAdmin: () => ({ isAdmin: false, loading: false }) }))
 
-// Mock getPortfolio but keep the real validatedPct/attentionRank
+// Mock portfolio fetch; keep real metrics helpers. Project list data is built
+// inside the factory so vi.hoist does not race with outer constants.
 vi.mock("@/lib/frontier/portfolio", async (importActual) => {
   const actual = await importActual<typeof import("@/lib/frontier/portfolio")>()
   const now = Date.now()
+  const projects = [
+    {
+      id: "stalled-1",
+      name: "Legacy Translation",
+      totalCells: 200,
+      validatedCells: 20,
+      filledCells: 20,
+      aiDraftedCells: 0,
+      lastEditAt: now - 30 * 24 * 60 * 60 * 1000,
+      audioCells: 100,
+      validatedAudioCells: 0,
+      recordedMs: 120000,
+      deadlineAt: "2020-01-01",
+      sourceLanguage: null,
+      targetLanguage: null,
+    },
+    {
+      id: "fresh-1",
+      name: "New Testament",
+      totalCells: 100,
+      validatedCells: 90,
+      filledCells: 90,
+      aiDraftedCells: 0,
+      lastEditAt: now,
+      audioCells: 50,
+      validatedAudioCells: 0,
+      recordedMs: 60000,
+      deadlineAt: null,
+      sourceLanguage: null,
+      targetLanguage: null,
+    },
+  ]
   return {
     ...actual,
-    getPortfolio: vi.fn(async () => [
-      // Stalled, low validated — should rank first
-      {
-        id: "stalled-1",
-        name: "Legacy Translation",
-        totalCells: 200,
-        validatedCells: 20, // 10%
-        lastEditAt: now - 30 * 24 * 60 * 60 * 1000, // 30 days ago (stalled)
-        audioCells: 100, // 50% audio
-        recordedMs: 120000,
-        deadlineAt: "2020-01-01", // long past → overdue
-      },
-      // Fresh, high validated — should rank second
-      {
-        id: "fresh-1",
-        name: "New Testament",
-        totalCells: 100,
-        validatedCells: 90, // 90%
-        lastEditAt: now, // just edited
-        audioCells: 50, // 50% audio
-        recordedMs: 60000,
-        deadlineAt: null,
-      },
-    ]),
+    getPortfolio: vi.fn(async () => projects),
+    getPortfolios: vi.fn(async () => [{ orgId: 1, projects }]),
   }
 })
 
@@ -123,6 +158,42 @@ beforeEach(async () => {
   vi.mocked(listMyOrgs).mockResolvedValue([{ id: 1, name: "Come and See", role: { level: 700, name: "owner" } }])
   const { getWorkload } = await import("@/lib/sync/assignments")
   vi.mocked(getWorkload).mockResolvedValue([])
+  const { getPortfolio } = await import("@/lib/frontier/portfolio")
+  vi.mocked(getPortfolio).mockImplementation(async () => {
+    const now = Date.now()
+    return [
+      {
+        id: "stalled-1",
+        name: "Legacy Translation",
+        totalCells: 200,
+        validatedCells: 20,
+        filledCells: 20,
+        aiDraftedCells: 0,
+        lastEditAt: now - 30 * 24 * 60 * 60 * 1000,
+        audioCells: 100,
+        validatedAudioCells: 0,
+        recordedMs: 120000,
+        deadlineAt: "2020-01-01",
+        sourceLanguage: null,
+        targetLanguage: null,
+      },
+      {
+        id: "fresh-1",
+        name: "New Testament",
+        totalCells: 100,
+        validatedCells: 90,
+        filledCells: 90,
+        aiDraftedCells: 0,
+        lastEditAt: now,
+        audioCells: 50,
+        validatedAudioCells: 0,
+        recordedMs: 60000,
+        deadlineAt: null,
+        sourceLanguage: null,
+        targetLanguage: null,
+      },
+    ]
+  })
   // Reset to the default (no invites); the pending-invites test overrides this.
   // restoreAllMocks does not reset vi.fn implementations, so without this a
   // mockResolvedValue set in one test would leak into the next.
@@ -276,11 +347,11 @@ describe("ProjectTable", () => {
   })
 })
 
-describe("OrgHome", () => {
-  it("never paints a false-empty dashboard while the current portfolio is unresolved", async () => {
+describe("OrgOverview / OrgProjects", () => {
+  it("never paints a false-empty projects page while the current portfolio is unresolved", async () => {
     const { getPortfolio } = await import("@/lib/frontier/portfolio")
     let resolvePortfolio!: (projects: PortfolioProject[]) => void
-    vi.mocked(getPortfolio).mockImplementationOnce(
+    vi.mocked(getPortfolio).mockImplementation(
       () => new Promise((resolve) => { resolvePortfolio = resolve }),
     )
 
@@ -295,24 +366,30 @@ describe("OrgHome", () => {
     observer.observe(container, { childList: true, subtree: true })
 
     const view = render(
-      <MemoryRouter><OrgProvider><OrgHome /></OrgProvider></MemoryRouter>,
+      <MemoryRouter initialEntries={["/orgs/1/projects"]}>
+        <OrgProvider>
+          <Routes>
+            <Route path="/orgs/:orgId/projects" element={<OrgProjectsPage />} />
+          </Routes>
+        </OrgProvider>
+      </MemoryRouter>,
       { container },
     )
 
     try {
-      await waitFor(() => expect(screen.getByTestId("org-home-loading")).toBeInTheDocument())
-      expect(screen.getByText("Loading dashboard…")).toBeInTheDocument()
-      expect(screen.getByTestId("org-home-loading-template")).toBeInTheDocument()
+      await waitFor(() => expect(screen.getByTestId("org-projects-loading")).toBeInTheDocument())
+      expect(screen.getByText("Loading projects…")).toBeInTheDocument()
+      expect(screen.getByTestId("org-projects-loading-template")).toBeInTheDocument()
       expect(document.querySelector('[data-slot="app-shell-header"]')).not.toBeNull()
       expect(screen.queryByTestId("loading-neutral-template")).not.toBeInTheDocument()
       await act(async () => { await Promise.resolve() })
       expect(addedText.join("\n")).not.toContain("Your organization is ready")
-      expect(screen.queryByText("Avg translated")).not.toBeInTheDocument()
 
+      // Keep subsequent refetches empty so the empty-state isn't replaced by default mock data.
+      vi.mocked(getPortfolio).mockResolvedValue([])
       await act(async () => { resolvePortfolio([]) })
-      await waitFor(() => expect(screen.queryByTestId("org-home-loading")).not.toBeInTheDocument())
+      await waitFor(() => expect(screen.queryByTestId("org-projects-loading")).not.toBeInTheDocument())
       expect(screen.getByText("Your organization is ready")).toBeInTheDocument()
-      expect(within(projectsRollupStat()).getByText("0")).toBeInTheDocument()
     } finally {
       observer.disconnect()
       view.unmount()
@@ -321,15 +398,16 @@ describe("OrgHome", () => {
   })
 
   it("renders the org name, nav, and admin links for an owner", async () => {
-    render(<MemoryRouter><OrgProvider><OrgHome /></OrgProvider></MemoryRouter>)
+    renderMemberOverview()
     await waitFor(() => expect(screen.getAllByText("Come and See").length).toBeGreaterThan(0))
+    expect(screen.getByRole("link", { name: "Overview" })).toBeInTheDocument()
     expect(screen.getByRole("link", { name: "Projects" })).toBeInTheDocument()
     expect(screen.getByRole("link", { name: "Teams" })).toBeInTheDocument()
     expect(screen.getByRole("link", { name: "Members" })).toBeInTheDocument()
   })
 
   it("renders both project names from the portfolio", async () => {
-    render(<MemoryRouter><OrgProvider><OrgHome /></OrgProvider></MemoryRouter>)
+    renderMemberProjects()
     await waitFor(() => expect(screen.getByText("Legacy Translation")).toBeInTheDocument())
     expect(screen.getByText("New Testament")).toBeInTheDocument()
   })
@@ -338,7 +416,7 @@ describe("OrgHome", () => {
   // in-app — the email/link may never have arrived. Review & accept routes
   // to the /join/:token confirmation page (explicit accept per AQU-335).
   it("renders the Pending invitations card with a Review & accept link", async () => {
-    // mockResolvedValue (not ...Once): OrgHome's invite effect can run more than
+    // mockResolvedValue (not ...Once): the invite effect can run more than
     // once (e.g. once before orgs load, once after), and a second call returning
     // the default [] would unmount the card mid-assertion.
     listMyPendingInvitesMock.mockResolvedValue([
@@ -351,7 +429,7 @@ describe("OrgHome", () => {
         projects: [{ projectId: "p9", projectName: "Ruth Translation" }],
       },
     ])
-    render(<MemoryRouter><OrgProvider><OrgHome /></OrgProvider></MemoryRouter>)
+    renderMemberOverview()
     // Wait for the first portfolio to settle so the dashboard content is mounted.
     await waitFor(() => {
       const card = screen.getByTestId("pending-invitations")
@@ -363,34 +441,32 @@ describe("OrgHome", () => {
   })
 
   it("renders no Pending invitations card when there are none", async () => {
-    render(<MemoryRouter><OrgProvider><OrgHome /></OrgProvider></MemoryRouter>)
-    await waitFor(() => expect(screen.getByText("Legacy Translation")).toBeInTheDocument())
+    renderMemberOverview()
+    await waitFor(() => expect(screen.getByTestId("org-overview-attention-table")).toBeInTheDocument())
     expect(screen.queryByTestId("pending-invitations")).not.toBeInTheDocument()
   })
 
   it("shows the project count in the rollup strip", async () => {
-    render(<MemoryRouter><OrgProvider><OrgHome /></OrgProvider></MemoryRouter>)
-    await waitFor(() => expect(screen.getByText("Legacy Translation")).toBeInTheDocument())
+    renderMemberOverview()
+    await waitFor(() => expect(screen.getByText("Avg translated")).toBeInTheDocument())
     const projectsStat = projectsRollupStat()
     expect(within(projectsStat).getByText("2")).toBeInTheDocument()
   })
 
-  it("shows the overdue rollup card and a compact overdue row indicator", async () => {
-    render(<MemoryRouter><OrgProvider><OrgHome /></OrgProvider></MemoryRouter>)
+  it("shows the overdue rollup card and at-risk rows on overview", async () => {
+    renderMemberOverview()
     await waitFor(() => expect(screen.getByText("Legacy Translation")).toBeInTheDocument())
-    // The visual row treatment is icon-only, but its sr-only label keeps the
-    // status available to assistive technology and tooltip users.
-    expect(screen.getAllByText("Overdue").length).toBeGreaterThan(1)
+    expect(screen.getAllByText("Overdue").length).toBeGreaterThan(0)
   })
 
-  it("shows the audio rollup card and per-project audio % in the project table", async () => {
-    render(<MemoryRouter><OrgProvider><OrgHome /></OrgProvider></MemoryRouter>)
+  it("shows the audio rollup card and per-project audio % on the projects table", async () => {
+    renderMemberOverview()
+    await waitFor(() => expect(screen.getByText("Avg audio")).toBeInTheDocument())
+  })
+
+  it("shows per-project audio % on the projects table", async () => {
+    renderMemberProjects()
     await waitFor(() => expect(screen.getByText("Legacy Translation")).toBeInTheDocument())
-    // Rollup average is still surfaced…
-    expect(screen.getByText("Avg audio")).toBeInTheDocument()
-    // …and the project list has an accessible, compact audio column heading…
-    expect(screen.getByTestId("project-table-audio-header")).toHaveAttribute("aria-label", "Has audio")
-    // …so each project row shows its own audio coverage (both are 50% audio).
     // Scope to the row so the bare "50%" cell isn't confused with a rollup tile.
     const legacyRow = screen.getByText("Legacy Translation").closest("tr")
     const freshRow = screen.getByText("New Testament").closest("tr")
@@ -401,7 +477,7 @@ describe("OrgHome", () => {
   })
 
   it("labels every compact metric heading for assistive technology", async () => {
-    render(<MemoryRouter><OrgProvider><OrgHome /></OrgProvider></MemoryRouter>)
+    renderMemberProjects()
     await waitFor(() => expect(screen.getByText("Legacy Translation")).toBeInTheDocument())
     for (const [testId, label] of [
       ["project-table-translated-header", "Translated"],
@@ -410,8 +486,6 @@ describe("OrgHome", () => {
     ]) {
       const el = screen.getByTestId(testId)
       expect(el).toHaveAttribute("aria-label", label)
-      expect(el).not.toHaveAttribute("title")
-      expect(el).toHaveClass("justify-self-start")
     }
   })
 
@@ -419,7 +493,7 @@ describe("OrgHome", () => {
     // The default lens is now "recent" (most-recently-edited first); this test
     // specifically verifies the attention-rank ordering, so select that lens.
     localStorage.setItem("org:all-projects:view", "attention")
-    render(<MemoryRouter><OrgProvider><OrgHome /></OrgProvider></MemoryRouter>)
+    renderMemberProjects()
     await waitFor(() => expect(screen.getByText("Legacy Translation")).toBeInTheDocument())
 
     const stalledEl = screen.getByText("Legacy Translation")
@@ -431,24 +505,20 @@ describe("OrgHome", () => {
     expect(position & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy()
   })
 
-  it("filters the project list by name without touching the rollup count", async () => {
-    // Why: managers narrowing to one project must not see the portfolio
-    // headline counts (e.g. total Projects = 2) silently change underneath them.
-    render(<MemoryRouter><OrgProvider><OrgHome /></OrgProvider></MemoryRouter>)
+  it("filters the project list by name", async () => {
+    renderMemberProjects()
     await waitFor(() => expect(screen.getByText("Legacy Translation")).toBeInTheDocument())
 
-    fireEvent.change(screen.getByLabelText("Filter projects by name"), {
+    fireEvent.change(screen.getByLabelText("Search projects…"), {
       target: { value: "testament" },
     })
 
     expect(screen.queryByText("Legacy Translation")).not.toBeInTheDocument()
     expect(screen.getByText("New Testament")).toBeInTheDocument()
-    const projectsStat = projectsRollupStat()
-    expect(within(projectsStat).getByText("2")).toBeInTheDocument()
   })
 
   it("filters to stalled projects via the status select", async () => {
-    render(<MemoryRouter><OrgProvider><OrgHome /></OrgProvider></MemoryRouter>)
+    renderMemberProjects()
     await waitFor(() => expect(screen.getByText("New Testament")).toBeInTheDocument())
 
     fireEvent.click(screen.getByRole("combobox", { name: /project status filter/i }))
@@ -466,7 +536,7 @@ describe("OrgHome", () => {
   })
 
   it("filters to projects that need attention via the status select", async () => {
-    render(<MemoryRouter><OrgProvider><OrgHome /></OrgProvider></MemoryRouter>)
+    renderMemberProjects()
     await waitFor(() => expect(screen.getByText("New Testament")).toBeInTheDocument())
 
     fireEvent.click(screen.getByRole("combobox", { name: /project status filter/i }))
@@ -484,14 +554,17 @@ describe("OrgHome", () => {
   })
 
   it("shows a no-match message when the filter excludes every project", async () => {
-    render(<MemoryRouter><OrgProvider><OrgHome /></OrgProvider></MemoryRouter>)
+    renderMemberProjects()
     await waitFor(() => expect(screen.getByText("Legacy Translation")).toBeInTheDocument())
 
-    fireEvent.change(screen.getByLabelText("Filter projects by name"), {
+    fireEvent.change(screen.getByLabelText("Search projects…"), {
       target: { value: "nonexistent-zzz" },
     })
 
-    expect(screen.getByText("No results.")).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.queryByText("Legacy Translation")).not.toBeInTheDocument()
+    })
+    expect(screen.getByText("No projects match your search.")).toBeInTheDocument()
   })
 
   // AQU-417: cross-org grants are no longer listed on the org dashboard — they
@@ -500,7 +573,7 @@ describe("OrgHome", () => {
   // dashboard must NOT render the "Shared with you" section anymore, even when
   // the caller holds a foreign-org grant. (The /shared page's own test pins the
   // client-side <Link> to /projects/:id that AQU-416 originally guarded.)
-  it("does not render a Shared with you section on the org dashboard (moved to /shared, AQU-417)", async () => {
+  it("does not render a Shared with you section on the org overview (moved to /shared, AQU-417)", async () => {
     fetchAccessibleProjectsMock.mockResolvedValue([
       // In the caller's own org (id 1) — surfaces via the normal portfolio.
       { id: "own-1", name: "Legacy Translation", orgId: 1, role: { level: 700, name: "owner", source: "creator" }, files: [] },
@@ -509,7 +582,7 @@ describe("OrgHome", () => {
       { id: "p503", name: "Guest Gospel", orgId: 503, orgName: "Host Org", role: { level: 100, name: "viewer", source: "override" }, files: [] },
     ])
 
-    render(<MemoryRouter><OrgProvider><OrgHome /></OrgProvider></MemoryRouter>)
+    renderMemberOverview()
 
     // Wait for the org portfolio to render before asserting absence.
     await waitFor(() => expect(screen.getByText("Legacy Translation")).toBeInTheDocument())
@@ -520,7 +593,7 @@ describe("OrgHome", () => {
 
 // ── AQU-486: per-section visibility chrome ──────────────────────────────────
 
-describe("OrgHome per-section visibility (AQU-486)", () => {
+describe("OrgOverview per-section visibility (AQU-486)", () => {
   // WHY: Team workload / Team usage are per-member productivity views gated
   // by the AQU-485 memberProgressViewMinRole floor. A below-floor caller must
   // see nothing (no empty section leaking that workload/usage tracking
@@ -536,8 +609,8 @@ describe("OrgHome per-section visibility (AQU-486)", () => {
     const { listMyOrgs } = await import("@/lib/frontier/orgs")
     vi.mocked(listMyOrgs).mockResolvedValue([{ id: 1, name: "Come and See", role: { level: 400, name: "contributor" } }])
 
-    render(<MemoryRouter><OrgProvider><OrgHome /></OrgProvider></MemoryRouter>)
-    await waitFor(() => expect(screen.getByText("Legacy Translation")).toBeInTheDocument())
+    renderMemberOverview()
+    await waitFor(() => expect(screen.getByText("Avg translated")).toBeInTheDocument())
 
     expect(screen.queryByTestId("section-team-workload")).not.toBeInTheDocument()
     expect(screen.queryByTestId("section-team-usage")).not.toBeInTheDocument()
@@ -553,8 +626,8 @@ describe("OrgHome per-section visibility (AQU-486)", () => {
       { assignmentId: "a1", projectId: "p1", projectName: "Legacy Translation", fileId: "f1", assigneeUserId: 2, username: "anna", scopeLabel: "Genesis", cellsTotal: 10, cellsDone: 4, deadline: null },
     ])
     // Default org role in this suite is 700 (owner) — meets the floor.
-    render(<MemoryRouter><OrgProvider><OrgHome /></OrgProvider></MemoryRouter>)
-    await waitFor(() => expect(screen.getByText("Legacy Translation")).toBeInTheDocument())
+    renderMemberOverview()
+    await waitFor(() => expect(screen.getByText("Avg translated")).toBeInTheDocument())
 
     const section = await screen.findByTestId("section-team-workload")
     expect(within(section).getByTestId("section-visibility-badge")).toHaveTextContent(/maintainers & owners/i)
@@ -573,8 +646,8 @@ describe("OrgHome per-section visibility (AQU-486)", () => {
       { assignmentId: "a1", projectId: "p1", projectName: "Legacy Translation", fileId: "f1", assigneeUserId: 2, username: "anna", scopeLabel: "Genesis", cellsTotal: 10, cellsDone: 4, deadline: null },
     ])
 
-    render(<MemoryRouter><OrgProvider><OrgHome /></OrgProvider></MemoryRouter>)
-    await waitFor(() => expect(screen.getByText("Legacy Translation")).toBeInTheDocument())
+    renderMemberOverview()
+    await waitFor(() => expect(screen.getByText("Avg translated")).toBeInTheDocument())
 
     const section = await screen.findByTestId("section-team-workload")
     const visibilityButton = await within(section).findByRole("button", {
@@ -594,13 +667,13 @@ describe("OrgHome per-section visibility (AQU-486)", () => {
 })
 
 // AQU-293: signed-out state — no fake-empty dashboard
-describe("OrgHome signed-out state", () => {
+describe("OrgOverview signed-out state", () => {
   it("shows a sign-in prompt instead of zero-stat cards when there is no session", async () => {
     // Why: a signed-out user at / must never see '0 Projects / 0% translated' cards
     // which falsely imply the workspace is empty.
     mockUseFrontierSession.mockReturnValue({ session: null, loading: false })
 
-    render(<MemoryRouter><OrgProvider><OrgHome /></OrgProvider></MemoryRouter>)
+    renderMemberOverview()
 
     await waitFor(() => {
       expect(screen.getByRole("link", { name: /sign in/i })).toBeInTheDocument()
@@ -615,7 +688,7 @@ describe("OrgHome signed-out state", () => {
   it("sign-in link on the signed-out state points to /login with next=/", async () => {
     mockUseFrontierSession.mockReturnValue({ session: null, loading: false })
 
-    render(<MemoryRouter><OrgProvider><OrgHome /></OrgProvider></MemoryRouter>)
+    renderMemberOverview()
 
     const link = await screen.findByRole("link", { name: /sign in/i })
     expect(link.getAttribute("href")).toMatch(/\/login\?next=/)

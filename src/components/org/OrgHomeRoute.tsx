@@ -1,15 +1,14 @@
+import { Navigate } from "react-router-dom"
 import { useActiveOrg } from "@/context/OrgContext"
-import { OrgHome } from "./OrgHome"
 import { GuestOrgHome } from "./GuestOrgHome"
 
 /**
- * AQU-790: the index element for `/orgs/:orgId`. Owned orgs get the full member
- * dashboard (OrgHome); a guest org — one the caller reaches only via a project
- * grant — gets the reduced guest overview (GuestOrgHome). OrgRouteGate has
- * already resolved the org list (members *and* guest orgs) before this mounts,
- * so `activeGuestOrg` is decided by the time we branch.
+ * Index element for `/orgs/:orgId`.
+ * - Guest org → reduced project list (GuestOrgHome)
+ * - Member org → redirect to `/overview` (stats + rollups)
  */
 export function OrgHomeRoute() {
   const { activeGuestOrg } = useActiveOrg()
-  return activeGuestOrg ? <GuestOrgHome /> : <OrgHome />
+  if (activeGuestOrg) return <GuestOrgHome />
+  return <Navigate to="overview" replace />
 }

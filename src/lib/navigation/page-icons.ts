@@ -3,6 +3,7 @@
  * history menu both read from here so a page keeps one glyph.
  *
  * Chosen via Lucide MCP (`fuzzy_search_icons` / category fit):
+ * - Overview → LayoutDashboard (org home / operator surface)
  * - Projects → Library (collection of works; Text formatting / Navigation)
  * - Teams → SquareUserRound (Accounts & access)
  * - Members → Users (people-group; Accounts & access)
@@ -32,6 +33,7 @@ import {
   FolderOpen,
   KeyRound,
   Languages,
+  LayoutDashboard,
   Library,
   ListTodo,
   MessageSquare,
@@ -50,6 +52,7 @@ import { parseOrgPath, ALL_ORGS_PARAM } from "@/lib/navigation/org-paths"
 
 /** Canonical icons for the org sidebar destinations. */
 export const NAV_PAGE_ICONS = {
+  overview: LayoutDashboard,
   projects: Library,
   teams: SquareUserRound,
   assigned: ListTodo,
@@ -68,6 +71,7 @@ export const NAV_PAGE_ICONS = {
 /** Known breadcrumb / history labels → icon (covers titles that differ slightly). */
 const LABEL_ICONS: Record<string, LucideIcon> = {
   "All organizations": NAV_PAGE_ICONS.organizations,
+  Overview: NAV_PAGE_ICONS.overview,
   Projects: NAV_PAGE_ICONS.projects,
   Teams: NAV_PAGE_ICONS.teams,
   Team: NAV_PAGE_ICONS.team,
@@ -132,6 +136,10 @@ export function deriveNavIcon(pathname: string): LucideIcon {
     const rest = org.rest.replace(/^\//, "")
     const parts = rest.split("/").filter(Boolean)
     switch (parts[0]) {
+      case "overview":
+        return NAV_PAGE_ICONS.overview
+      case "projects":
+        return NAV_PAGE_ICONS.projects
       case "archived":
         return NAV_PAGE_ICONS.archived
       case "assigned":

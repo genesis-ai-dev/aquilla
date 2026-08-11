@@ -3,6 +3,8 @@ import { Navigate, Routes, Route } from "react-router-dom"
 import { hasAuthHintCookie } from "@/lib/frontier/session-store"
 import { OrgHome } from "@/components/org/OrgHome"
 import { OrgHomeRoute } from "@/components/org/OrgHomeRoute"
+import { OrgOverview } from "@/components/org/OrgOverview"
+import { OrgProjectsPage } from "@/components/org/OrgProjectsPage"
 import { OrgRouteGate } from "@/components/org/OrgRouteGate"
 import { ProductTourProvider } from "@/context/ProductTourContext"
 import { ArchivedProjects } from "@/components/org/ArchivedProjects"
@@ -219,8 +221,10 @@ function AppRoutes() {
         {/* Org shell — path is authoritative for active org. `/orgs/all` is home-only. */}
         <Route path="/orgs/all" element={<OrgHome />} />
         <Route path="/orgs/:orgId" element={<OrgRouteGate />}>
-          {/* AQU-790: member orgs → full dashboard; guest orgs → reduced overview. */}
+          {/* AQU-790: index → guest list or redirect to overview; overview/projects split for members. */}
           <Route index element={<OrgHomeRoute />} />
+          <Route path="overview" element={<OrgOverview />} />
+          <Route path="projects" element={<OrgProjectsPage />} />
           <Route path="assigned" element={<AssignedToMe />} />
           <Route path="archived" element={<ArchivedProjects />} />
           <Route path="teams" element={<TeamsList />} />

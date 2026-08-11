@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
+import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import { Link, useNavigate } from "react-router-dom"
 import { AppShell } from "@/components/AppShell"
 import { LoadingOverlay } from "@/components/ui/loading-overlay"
@@ -6,34 +6,23 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
 import { useActiveOrg } from "@/context/OrgContext"
-import { membersPath, orgHomePath } from "@/lib/navigation/org-paths"
+import { orgHomePath } from "@/lib/navigation/org-paths"
 import type { OrgSummary } from "@/lib/frontier/orgs"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
-import { getPortfolio, getPortfolios, translatedPct, validatedPct, attentionRank, audioPct, deadlineStatus, languagePairLabel, type PortfolioProject } from "@/lib/frontier/portfolio"
+import { getPortfolios, translatedPct, validatedPct, attentionRank, audioPct, deadlineStatus, languagePairLabel, type PortfolioProject } from "@/lib/frontier/portfolio"
 import { portfolioActivityStatus, portfolioAttentionReasons } from "@/lib/project-status"
 import { ProjectDeadlineStatuses, deadlineStatusTooltip } from "@/components/ProjectStatus"
 import { listMyPendingInvites, type MyPendingInvite } from "@/lib/sync/invites"
-import { WorkloadRollup } from "./WorkloadRollup"
-import { UsageRollup } from "./UsageRollup"
-import { CreditsPanel } from "./CreditsPanel"
-import {
-  SectionVisibilityBadge,
-  SectionVisibilityGate,
-  sectionTintClass,
-} from "./SectionVisibilityBadge"
-import { useOrgSettings, canEditRosterProgressFloor } from "@/hooks/useOrgSettings"
-import { ROLE, roleDisplayText } from "@/lib/frontier/roles"
+import { roleDisplayText } from "@/lib/frontier/roles"
 import { RoleLabel } from "@/components/RoleLabel"
 import { UserError } from "@/lib/errors/user-error"
 import { notifySessionExpired } from "@/lib/errors/session-expired-signal"
-import { ProjectCreateDialog } from "@/components/ProjectCreateDialog"
 import { OrgCreateDialog } from "./OrgCreateDialog"
-import { OrgSetupChecklist } from "./OrgSetupChecklist"
-import { OrgProjectsDataTable } from "./OrgProjectsDataTable"
 import { LaneChips } from "./LaneChips"
 import { ProjectMetricHeader } from "./ProjectMetricHeader"
-import { displayLanes, withOptimisticLane } from "./project-lanes"
-import type { ProjectRecord } from "@/lib/parsers/types"
+import { displayLanes } from "./project-lanes"
+import { ProjectStatusFilter } from "./ProjectStatusFilter"
+import type { StatusFilter } from "@/hooks/useOrgPortfolio"
 import {
   Select,
   SelectContent,
@@ -151,8 +140,6 @@ export function activityStatus(p: PortfolioProject, now: number): ActivityStatus
   return portfolioActivityStatus(p, now)
 }
 
-type StatusFilter = "all" | "stalled" | "attention" | "overdue"
-
 type ProjectLens = "recent" | "attention" | "least-translated" | "most-progress" | "name" | "pm"
 
 const PROJECT_LENS_STORAGE_KEY = "org:all-projects:view"
@@ -219,47 +206,6 @@ type OrgPortfolioSummary = {
   avgAudioPct: number
   stalledCount: number
   overdueCount: number
-}
-
-const STATUS_FILTERS: { value: StatusFilter; label: string }[] = [
-  { value: "all", label: "All" },
-  { value: "stalled", label: "Stalled" },
-  { value: "overdue", label: "Overdue" },
-  { value: "attention", label: "Needs attention" },
-]
-
-function StatusFilterSelect({
-  value,
-  onValueChange,
-  className,
-}: {
-  value: StatusFilter
-  onValueChange: (value: StatusFilter) => void
-  className?: string
-}) {
-  return (
-    <Select
-      items={STATUS_FILTERS}
-      value={value}
-      onValueChange={(next) => onValueChange((next as StatusFilter) ?? "all")}
-    >
-      <SelectTrigger
-        aria-label="Project status filter"
-        className={cn("bg-background", className)}
-      >
-        <SelectValue className="flex-none" />
-      </SelectTrigger>
-      <SelectContent align="start">
-        <SelectGroup>
-          {STATUS_FILTERS.map((filter) => (
-            <SelectItem key={filter.value} value={filter.value}>
-              {filter.label}
-            </SelectItem>
-          ))}
-        </SelectGroup>
-      </SelectContent>
-    </Select>
-  )
 }
 
 const PROJECT_LENSES: { value: ProjectLens; label: string; description: string; empty: string }[] = [
@@ -563,17 +509,12 @@ export function ProjectTable({
 
 export function OrgHome() {
   const {
-    activeOrg,
-    activeOrgId,
-    isAllOrgs,
     orgs,
-    accessibleProjects,
     accessibleProjectsLoading,
     isLoading: orgLoading,
     error: orgError,
     setActiveOrg,
     refresh,
-    refreshAccessibleProjects,
   } = useActiveOrg()
   const { session, loading: sessionLoading } = useFrontierSession()
   const navigate = useNavigate()
@@ -581,21 +522,7 @@ export function OrgHome() {
   const [createOrgOpen, setCreateOrgOpen] = useState(false)
   const portfolioScopeKey = !jwt || orgLoading
     ? null
-    : isAllOrgs
-      ? `all:${orgs.map((org) => org.id).sort((a, b) => a - b).join(",")}`
-      : activeOrgId == null
-        ? null
-        : `org:${activeOrgId}`
-
-  // AQU-486: per-section visibility chrome for Team workload / Team usage
-  // (both gated by the AQU-485 memberProgressViewMinRole floor — they're both
-  // per-member productivity views) and the credits panel (a static
-  // maintainer-only floor hardcoded in CreditsPanel; no org-setting backs it
-  // yet, so its badge is informational only, with no advanced toggle).
-  const orgSettings = useOrgSettings(activeOrgId, activeOrg?.role?.level)
-  const canEditVisibility = canEditRosterProgressFloor(activeOrg?.role?.level)
-  const memberProgressReady = orgSettings.hasFetched
-  const memberProgressViewerRole = activeOrg?.role?.level ?? null
+    : `all:${orgs.map((org) => org.id).sort((a, b) => a - b).join(",")}`
 
   const [projects, setProjects] = useState<PortfolioProjectRow[]>([])
   // AQU-326: unredeemed invites addressed to the caller's email — without
@@ -610,19 +537,6 @@ export function OrgHome() {
   const [orgQuery, setOrgQuery] = useState("")
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all")
   const [projectLens, setProjectLens] = useState<ProjectLens>(readProjectLens)
-  // AQU-538 §3.2: bumped after a lane action (add language / assign / staff) to
-  // refetch the portfolio so per-lane rollups reflect the change.
-  const [refreshTick, setRefreshTick] = useState(0)
-
-  // AQU-605: adding a language lane updates just that project's row in place
-  // (optimistic chip insert) rather than bumping refreshTick, which refetched
-  // the whole portfolio and blanked the table behind a loading state. Assign /
-  // staff actions still refetch (their per-lane rollups genuinely change).
-  const handleLaneAdded = useCallback((projectId: string, lane: string) => {
-    setProjects((prev) =>
-      prev.map((p) => (p.id === projectId ? withOptimisticLane(p, lane) : p)),
-    )
-  }, [])
 
   useEffect(() => {
     if (!jwt) {
@@ -630,59 +544,27 @@ export function OrgHome() {
       setResolvedPortfolioScopeKey(null)
       return
     }
-    if (isAllOrgs) {
-      if (orgLoading) return
-      if (orgs.length === 0) {
-        setError(null)
-        setProjects([])
-        setResolvedPortfolioScopeKey(portfolioScopeKey)
-        return
-      }
-      let cancelled = false
-      setError(null)
-      const orgById = new Map(orgs.map((org) => [org.id, org]))
-      getPortfolios(jwt, orgs.map((org) => org.id))
-        .then((portfolios) => {
-          if (!cancelled) setProjects(portfolios.flatMap(({ orgId, projects: list }) => {
-            const org = orgById.get(orgId)
-            if (!org) return []
-            return list.map((project) => ({
-              ...project,
-              orgId: org.id,
-              orgName: org.name ?? "Workspace",
-            }))
-          }))
-        })
-        .catch((err) => {
-          if (!cancelled) {
-            if (err instanceof UserError && err.category === "session-expired") {
-              notifySessionExpired()
-            }
-            setError(err instanceof Error ? err.message : String(err))
-          }
-        })
-        .finally(() => {
-          if (!cancelled) setResolvedPortfolioScopeKey(portfolioScopeKey)
-        })
-      return () => { cancelled = true }
-    }
-    if (activeOrgId == null) {
+    if (orgLoading) return
+    if (orgs.length === 0) {
       setError(null)
       setProjects([])
-      setResolvedPortfolioScopeKey(null)
+      setResolvedPortfolioScopeKey(portfolioScopeKey)
       return
     }
     let cancelled = false
     setError(null)
-    getPortfolio(jwt, activeOrgId)
-      .then((list) => {
-        if (!cancelled) {
-          setProjects(list.map((project) => ({
+    const orgById = new Map(orgs.map((org) => [org.id, org]))
+    getPortfolios(jwt, orgs.map((org) => org.id))
+      .then((portfolios) => {
+        if (!cancelled) setProjects(portfolios.flatMap(({ orgId, projects: list }) => {
+          const org = orgById.get(orgId)
+          if (!org) return []
+          return list.map((project) => ({
             ...project,
-            orgId: activeOrgId,
-            orgName: activeOrg?.name ?? "Workspace",
-          })))
-        }
+            orgId: org.id,
+            orgName: org.name ?? "Workspace",
+          }))
+        }))
       })
       .catch((err) => {
         if (!cancelled) {
@@ -696,7 +578,7 @@ export function OrgHome() {
         if (!cancelled) setResolvedPortfolioScopeKey(portfolioScopeKey)
       })
     return () => { cancelled = true }
-  }, [jwt, activeOrgId, activeOrg?.name, isAllOrgs, orgLoading, orgs, portfolioScopeKey, refreshTick])
+  }, [jwt, orgLoading, orgs, portfolioScopeKey])
 
   // AQU-326: received-invites surface. Org-independent (matched by email).
   useEffect(() => {
@@ -738,7 +620,7 @@ export function OrgHome() {
     || orgLoading
     || accessibleProjectsLoading
     || (portfolioScopeKey != null && resolvedPortfolioScopeKey !== portfolioScopeKey)
-  const workspaceLabel = isAllOrgs ? "All organizations" : activeOrg?.name ?? "Workspace"
+  const workspaceLabel = "All organizations"
 
   // Keep cold-start data atomic while preserving the destination's geometry.
   // The template is intentionally disconnected from partial org/project state:
@@ -837,39 +719,15 @@ export function OrgHome() {
       : 0
   const stalledCount = projects.filter((p) => activityStatus(p, now) === "stalled").length
   const overdueCount = projects.filter((p) => deadlineStatus(p, now) === "overdue").length
-  const avgAudioPct =
-    projects.length > 0 ? projects.reduce((sum, p) => sum + audioPct(p), 0) / projects.length : 0
-  const roleByProjectId = new Map(accessibleProjects.map((project) => [project.id, project.role]))
+
   // AQU-507: the portfolio feed (which backs these rows) has no PM dimension;
-  // merge it in from the accessible-projects feed (the list endpoint), keyed by
-  // project id — the same join the Role column already relies on. A project not
-  // in the feed keeps whatever the row already had (typically absent ⇒
-  // unassigned), never crashing.
-  const pmByProjectId = new Map(
-    accessibleProjects.map((project) => [project.id, project.pm ?? null]),
-  )
-  const projectsWithPm: PortfolioProjectRow[] = projects.map((project) =>
-    pmByProjectId.has(project.id)
-      ? { ...project, pm: pmByProjectId.get(project.id) ?? null }
-      : project,
-  )
+  // merge it in from the accessible-projects feed when available — here we rely
+  // only on portfolio rows (all-orgs table).
+  const projectsWithPm: PortfolioProjectRow[] = projects
   // AQU-538 §3.2: the '' (default) lane chip is labeled with the project's
-  // target language. The accessible-projects feed joins per-file language hints;
-  // take the first non-empty target language as the project's default. Absent →
-  // the chip falls back to a generic "Default" label (see laneChipLabel).
-  const defaultLaneLabelByProjectId = new Map(
-    accessibleProjects.map((project) => [
-      project.id,
-      project.files?.find((f) => f.targetLanguage)?.targetLanguage ?? "",
-    ]),
-  )
-  // AQU-538 §3.2: files per project, for the lane sub-row "Assign…" (books scope).
-  const filesByProjectId = new Map(
-    accessibleProjects.map((project) => [
-      project.id,
-      (project.files ?? []).map((f) => ({ id: f.id, name: f.name })),
-    ]),
-  )
+  // target language — portfolio alone doesn't join file languages; empty map
+  // falls back to generic "Default" labels.
+  const defaultLaneLabelByProjectId = new Map<string, string>()
 
   const orgSummaries: OrgPortfolioSummary[] = orgs
     .map((org) => {
@@ -906,11 +764,6 @@ export function OrgHome() {
     selectProjectLens(value)
   }
 
-  function handleCreated(project: ProjectRecord) {
-    void refreshAccessibleProjects()
-    navigate(`/projects/${project.id}`)
-  }
-
   // Project lists
   const currentProjectLens = PROJECT_LENSES.find((lens) => lens.value === projectLens) ?? PROJECT_LENSES[0]
 
@@ -940,19 +793,6 @@ export function OrgHome() {
     statusFilter === "attention" ? "attention" : projectLens,
     now,
   )
-
-  const statusFilteredProjects = projectsWithPm.filter((p) => {
-    switch (statusFilter) {
-      case "stalled":
-        return activityStatus(p, now) === "stalled"
-      case "attention":
-        return portfolioAttentionReasons(p, now).length > 0
-      case "overdue":
-        return deadlineStatus(p, now) === "overdue"
-      default:
-        return true
-    }
-  })
 
   return (
     <AppShell
@@ -996,367 +836,195 @@ export function OrgHome() {
                 </section>
               )}
 
-              {!isAllOrgs && activeOrgId != null && (
-                <OrgSetupChecklist
-                  orgId={activeOrgId}
-                  projectCount={projects.length}
-                  onProjectCreated={handleCreated}
-                  linkableProjects={accessibleProjects}
+              <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-6">
+                <StatTile label="Organizations" value={orgs.length} />
+                <StatTile label="Projects" value={projects.length} />
+                <StatTile label="Avg translated" value={`${Math.round(avgTranslatedPct * 100)}%`} />
+                <StatTile label="Avg validated" value={`${Math.round(avgValidatedPct * 100)}%`} />
+                <StatTile label="Stalled" value={stalledCount} />
+                <StatTile
+                  label="Overdue"
+                  value={
+                    <span className={overdueCount > 0 ? "text-destructive" : undefined}>
+                      {overdueCount}
+                    </span>
+                  }
                 />
-              )}
+              </div>
 
-              {isAllOrgs ? (
-                <>
-                  <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-6">
-                    <StatTile label="Organizations" value={orgs.length} />
-                    <StatTile label="Projects" value={projects.length} />
-                    <StatTile label="Avg translated" value={`${Math.round(avgTranslatedPct * 100)}%`} />
-                    <StatTile label="Avg validated" value={`${Math.round(avgValidatedPct * 100)}%`} />
-                    <StatTile label="Stalled" value={stalledCount} />
-                    <StatTile
-                      label="Overdue"
-                      value={
-                        <span className={overdueCount > 0 ? "text-destructive" : undefined}>
-                          {overdueCount}
-                        </span>
-                      }
-                    />
+              <div className="grid items-start gap-6 lg:grid-cols-[minmax(14rem,1fr)_minmax(30rem,2fr)]">
+                <section
+                  data-testid="organizations-panel"
+                  className="self-start overflow-hidden rounded-lg border bg-card lg:flex lg:max-h-[clamp(16rem,calc(100dvh-24rem),42rem)] lg:flex-col xl:max-h-[clamp(20rem,calc(100dvh-18rem),42rem)]"
+                >
+                  <div className="shrink-0 flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
+                    <div>
+                      <h2 className="text-base font-semibold">Organizations</h2>
+                      <p className="text-xs text-muted-foreground">
+                        {visibleOrgSummaries.length} of {orgSummaries.length}
+                      </p>
+                    </div>
+                    {orgSummaries.length > 0 && (
+                      <InputGroup className="h-9 w-full sm:w-56">
+                        <InputGroupAddon>
+                          <Search />
+                        </InputGroupAddon>
+                        <InputGroupInput
+                          type="search"
+                          value={orgQuery}
+                          onChange={(e) => setOrgQuery(e.target.value)}
+                          placeholder="Filter organizations…"
+                          aria-label="Filter organizations by name"
+                        />
+                      </InputGroup>
+                    )}
                   </div>
 
-                  <div className="grid items-start gap-6 lg:grid-cols-[minmax(14rem,1fr)_minmax(30rem,2fr)]">
-                    <section
-                      data-testid="organizations-panel"
-                      className="self-start overflow-hidden rounded-lg border bg-card lg:flex lg:max-h-[clamp(16rem,calc(100dvh-24rem),42rem)] lg:flex-col xl:max-h-[clamp(20rem,calc(100dvh-18rem),42rem)]"
-                    >
-                      <div className="shrink-0 flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
-                        <div>
-                          <h2 className="text-base font-semibold">Organizations</h2>
-                          <p className="text-xs text-muted-foreground">
-                            {visibleOrgSummaries.length} of {orgSummaries.length}
-                          </p>
-                        </div>
-                        {orgSummaries.length > 0 && (
-                          <InputGroup className="h-9 w-full sm:w-56">
-                            <InputGroupAddon>
-                              <Search />
-                            </InputGroupAddon>
-                            <InputGroupInput
-                              type="search"
-                              value={orgQuery}
-                              onChange={(e) => setOrgQuery(e.target.value)}
-                              placeholder="Filter organizations…"
-                              aria-label="Filter organizations by name"
-                            />
-                          </InputGroup>
-                        )}
-                      </div>
-
-                      <div
-                        data-testid="organizations-scroll"
-                        className="min-h-0 overscroll-contain lg:overflow-y-auto"
-                      >
-                        {orgSummaries.length === 0 ? (
-                          <EmptyState
-                            variant="inline"
-                            className="py-10"
-                            icon={Building2}
-                            title="No organizations yet."
-                          />
-                        ) : visibleOrgSummaries.length === 0 ? (
-                          <EmptyState
-                            variant="inline"
-                            className="py-10"
-                            icon={Search}
-                            title="No matching organizations."
-                          />
-                        ) : (
-                          <div className="divide-y">
-                            {visibleOrgSummaries.map((summary) => (
-                              <button
-                                key={summary.org.id}
-                                type="button"
-                                onClick={() => openOrg(summary.org.id)}
-                                className="flex w-full items-center gap-4 p-4 text-left transition-colors hover:bg-muted/50"
-                              >
-                                <div className="min-w-0 flex-1">
-                                  <div className="flex flex-wrap items-center gap-2">
-                                    <p className="truncate font-medium">{orgDisplayName(summary.org)}</p>
-                                    <Badge variant="secondary" className="shrink-0">
-                                      {roleLabel(summary.org)}
-                                    </Badge>
-                                  </div>
-                                  <div className="mt-2 grid grid-cols-3 gap-2 text-xs text-muted-foreground">
-                                    <span>{summary.projectCount} project{summary.projectCount === 1 ? "" : "s"}</span>
-                                    <span>{Math.round(summary.avgTranslatedPct * 100)}% translated</span>
-                                    <span>{Math.round(summary.avgValidatedPct * 100)}% validated</span>
-                                  </div>
-                                </div>
-                              </button>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    </section>
-
-                    <section
-                      data-testid="projects-panel"
-                      className="@container/projects-panel min-w-0 overflow-hidden rounded-lg border bg-card lg:flex lg:max-h-[clamp(16rem,calc(100dvh-24rem),42rem)] lg:flex-col xl:max-h-[clamp(20rem,calc(100dvh-18rem),42rem)]"
-                    >
-                      <div className="shrink-0 flex flex-col gap-2 border-b px-4 py-2.5">
-                        <div className="flex flex-wrap items-start justify-between gap-3">
-                          <div>
-                            <h2 className="text-base font-semibold">Projects</h2>
-                            <p className="text-xs text-muted-foreground">{currentProjectLens.description}</p>
-                          </div>
-                        </div>
-                        <div className="flex w-full flex-wrap items-center gap-2">
-                          <InputGroup className="h-8 w-40 max-w-full shrink-0 transition-[width] duration-150 focus-within:w-52">
-                            <InputGroupAddon>
-                              <Search />
-                            </InputGroupAddon>
-                            <InputGroupInput
-                              type="text"
-                              value={projectQuery}
-                              onChange={(e) => setProjectQuery(e.target.value)}
-                              onKeyDown={(e) => {
-                                if (e.key === "Escape") e.currentTarget.blur()
-                              }}
-                              placeholder="Filter projects…"
-                              aria-label="Filter projects by name"
-                              autoComplete="off"
-                              autoCorrect="off"
-                              autoCapitalize="none"
-                              spellCheck={false}
-                            />
-                            {projectQuery && (
-                              <InputGroupAddon align="inline-end">
-                                <InputGroupButton
-                                  type="button"
-                                  size="icon-xs"
-                                  aria-label="Clear project filter"
-                                  onMouseDown={(e) => e.preventDefault()}
-                                  onClick={() => setProjectQuery("")}
-                                >
-                                  <X />
-                                </InputGroupButton>
-                              </InputGroupAddon>
-                            )}
-                          </InputGroup>
-                          <StatusFilterSelect value={statusFilter} onValueChange={setStatusFilter} />
-                          <div className="ml-auto flex shrink-0 items-center gap-2" aria-label="Project sort">
-                            <span className="text-xs font-medium text-muted-foreground">Sort by</span>
-                            <Select
-                              items={PROJECT_LENSES.map((lens) => ({ value: lens.value, label: lens.label }))}
-                              value={projectLens}
-                              onValueChange={handleProjectLensChange}
-                            >
-                              <SelectTrigger aria-label="Sort projects" size="sm" className="bg-background">
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectGroup>
-                                  {PROJECT_LENSES.map((lens) => (
-                                    <SelectItem key={lens.value} value={lens.value}>
-                                      {lens.label}
-                                    </SelectItem>
-                                  ))}
-                                </SelectGroup>
-                              </SelectContent>
-                            </Select>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div
-                        data-testid="projects-scroll"
-                        className="min-h-0 overscroll-contain lg:overflow-y-auto"
-                      >
-                        {projects.length === 0 ? (
-                          <EmptyState
-                            variant="inline"
-                            className="py-10"
-                            icon={FolderPlus}
-                            title="No projects yet."
-                          />
-                        ) : visible.length === 0 ? (
-                          <EmptyState
-                            variant="inline"
-                            className="py-10"
-                            icon={Search}
-                            title={projectQuery ? "No matching projects." : currentProjectLens.empty}
-                          />
-                        ) : (
-                          <ProjectTable
-                            projects={visible}
-                            now={now}
-                            showOrg
-                            defaultLaneLabelByProjectId={defaultLaneLabelByProjectId}
-                          />
-                        )}
-                      </div>
-                    </section>
-                  </div>
-                </>
-              ) : (
-                <>
-                  {/* Rollup strip */}
-                  <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-6">
-                    <StatTile label="Projects" value={projects.length} />
-                    <StatTile label="Avg translated" value={`${Math.round(avgTranslatedPct * 100)}%`} />
-                    <StatTile label="Avg validated" value={`${Math.round(avgValidatedPct * 100)}%`} />
-                    <StatTile label="Avg audio" value={`${Math.round(avgAudioPct * 100)}%`} />
-                    <StatTile label="Stalled" value={stalledCount} />
-                    <StatTile
-                      label="Overdue"
-                      value={
-                        <span className={overdueCount > 0 ? "text-destructive" : undefined}>
-                          {overdueCount}
-                        </span>
-                      }
-                    />
-                  </div>
-
-                  {/* Project table (status filter lives in the table toolbar) */}
-                  {projects.length === 0 ? (
-                    <EmptyState
-                      icon={FolderPlus}
-                      title="Your organization is ready"
-                      description="Start a translation project, or bring your team in first — Aquilla is built for people working together."
-                      action={
-                        <div className="flex flex-wrap items-center justify-center gap-2">
-                          {activeOrgId != null && (
-                            <ProjectCreateDialog
-                              orgId={activeOrgId}
-                              onCreated={handleCreated}
-                              linkableProjects={accessibleProjects}
-                            />
-                          )}
-                          <Button
-                            variant="outline"
-                            onClick={() => activeOrgId != null && navigate(membersPath(activeOrgId))}
-                          >
-                            Invite your team
-                          </Button>
-                        </div>
-                      }
-                    />
-                  ) : (
-                      <OrgProjectsDataTable
-                        projects={statusFilteredProjects}
-                        now={now}
-                        roleByProjectId={roleByProjectId}
-                        defaultLaneLabelByProjectId={defaultLaneLabelByProjectId}
-                        filesByProjectId={filesByProjectId}
-                        orgId={activeOrgId}
-                        jwt={jwt}
-                        author={session?.username}
-                        allowSelfAssignment={orgSettings.allowSelfAssignment}
-                        onLanesChanged={() => setRefreshTick((t) => t + 1)}
-                        onLaneAdded={handleLaneAdded}
-                        initialLens={statusFilter === "attention" ? "attention" : projectLens}
-                        toolbarLeading={
-                          <StatusFilterSelect
-                            value={statusFilter}
-                            onValueChange={setStatusFilter}
-                            className="bg-card"
-                          />
-                        }
-                        toolbarTrailing={
-                          activeOrgId != null ? (
-                            <div className="ml-auto shrink-0">
-                              <ProjectCreateDialog
-                                orgId={activeOrgId}
-                                onCreated={handleCreated}
-                                linkableProjects={accessibleProjects}
-                              />
-                            </div>
-                          ) : null
-                        }
-                        emptyTitle={
-                          statusFilter === "stalled"
-                            ? "No stalled projects."
-                            : statusFilter === "attention"
-                              ? "No projects need attention."
-                              : statusFilter === "overdue"
-                                ? "No overdue projects."
-                                : "No projects yet."
-                        }
+                  <div
+                    data-testid="organizations-scroll"
+                    className="min-h-0 overscroll-contain lg:overflow-y-auto"
+                  >
+                    {orgSummaries.length === 0 ? (
+                      <EmptyState
+                        variant="inline"
+                        className="py-10"
+                        icon={Building2}
+                        title="No organizations yet."
                       />
-                  )}
-                </>
-              )}
+                    ) : visibleOrgSummaries.length === 0 ? (
+                      <EmptyState
+                        variant="inline"
+                        className="py-10"
+                        icon={Search}
+                        title="No matching organizations."
+                      />
+                    ) : (
+                      <div className="divide-y">
+                        {visibleOrgSummaries.map((summary) => (
+                          <button
+                            key={summary.org.id}
+                            type="button"
+                            onClick={() => openOrg(summary.org.id)}
+                            className="flex w-full items-center gap-4 p-4 text-left transition-colors hover:bg-muted/50"
+                          >
+                            <div className="min-w-0 flex-1">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <p className="truncate font-medium">{orgDisplayName(summary.org)}</p>
+                                <Badge variant="secondary" className="shrink-0">
+                                  {roleLabel(summary.org)}
+                                </Badge>
+                              </div>
+                              <div className="mt-2 grid grid-cols-3 gap-2 text-xs text-muted-foreground">
+                                <span>{summary.projectCount} project{summary.projectCount === 1 ? "" : "s"}</span>
+                                <span>{Math.round(summary.avgTranslatedPct * 100)}% translated</span>
+                                <span>{Math.round(summary.avgValidatedPct * 100)}% validated</span>
+                              </div>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </section>
 
-              {jwt && !isAllOrgs && activeOrgId != null && (
-                <SectionVisibilityGate
-                  minRole={orgSettings.memberProgressViewMinRole}
-                  viewerRoleLevel={memberProgressViewerRole}
-                  ready={memberProgressReady}
+                <section
+                  data-testid="projects-panel"
+                  className="@container/projects-panel min-w-0 overflow-hidden rounded-lg border bg-card lg:flex lg:max-h-[clamp(16rem,calc(100dvh-24rem),42rem)] lg:flex-col xl:max-h-[clamp(20rem,calc(100dvh-18rem),42rem)]"
                 >
-                  <div
-                    className={cn(
-                      "relative rounded-lg",
-                      sectionTintClass(orgSettings.memberProgressViewMinRole),
-                    )}
-                    data-testid="section-team-workload"
-                  >
-                    <WorkloadRollup
-                      jwt={jwt}
-                      orgId={activeOrgId}
-                      action={(
-                        <SectionVisibilityBadge
-                          minRole={orgSettings.memberProgressViewMinRole}
-                          canEdit={canEditVisibility}
-                          onChangeMinRole={async (next) => { await orgSettings.patch({ memberProgressViewMinRole: next }) }}
-                          description="Who can see each teammate's assignment progress on this org's overview."
+                  <div className="shrink-0 flex flex-col gap-2 border-b px-4 py-2.5">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <h2 className="text-base font-semibold">Projects</h2>
+                        <p className="text-xs text-muted-foreground">{currentProjectLens.description}</p>
+                      </div>
+                    </div>
+                    <div className="flex w-full flex-wrap items-center gap-2">
+                      <InputGroup className="h-8 w-40 max-w-full shrink-0 transition-[width] duration-150 focus-within:w-52">
+                        <InputGroupAddon>
+                          <Search />
+                        </InputGroupAddon>
+                        <InputGroupInput
+                          type="text"
+                          value={projectQuery}
+                          onChange={(e) => setProjectQuery(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Escape") e.currentTarget.blur()
+                          }}
+                          placeholder="Filter projects…"
+                          aria-label="Filter projects by name"
+                          autoComplete="off"
+                          autoCorrect="off"
+                          autoCapitalize="none"
+                          spellCheck={false}
                         />
-                      )}
-                    />
+                        {projectQuery && (
+                          <InputGroupAddon align="inline-end">
+                            <InputGroupButton
+                              type="button"
+                              size="icon-xs"
+                              aria-label="Clear project filter"
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={() => setProjectQuery("")}
+                            >
+                              <X />
+                            </InputGroupButton>
+                          </InputGroupAddon>
+                        )}
+                      </InputGroup>
+                      <ProjectStatusFilter value={statusFilter} onValueChange={setStatusFilter} />
+                      <div className="ml-auto flex shrink-0 items-center gap-2" aria-label="Project sort">
+                        <span className="text-xs font-medium text-muted-foreground">Sort by</span>
+                        <Select
+                          items={PROJECT_LENSES.map((lens) => ({ value: lens.value, label: lens.label }))}
+                          value={projectLens}
+                          onValueChange={handleProjectLensChange}
+                        >
+                          <SelectTrigger aria-label="Sort projects" size="sm" className="bg-background">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectGroup>
+                              {PROJECT_LENSES.map((lens) => (
+                                <SelectItem key={lens.value} value={lens.value}>
+                                  {lens.label}
+                                </SelectItem>
+                              ))}
+                            </SelectGroup>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
                   </div>
-                </SectionVisibilityGate>
-              )}
-              {jwt && !isAllOrgs && activeOrgId != null && (
-                <SectionVisibilityGate
-                  minRole={orgSettings.memberProgressViewMinRole}
-                  viewerRoleLevel={memberProgressViewerRole}
-                  ready={memberProgressReady}
-                >
+
                   <div
-                    className={cn(
-                      "relative rounded-lg",
-                      sectionTintClass(orgSettings.memberProgressViewMinRole),
+                    data-testid="projects-scroll"
+                    className="min-h-0 overscroll-contain lg:overflow-y-auto"
+                  >
+                    {projects.length === 0 ? (
+                      <EmptyState
+                        variant="inline"
+                        className="py-10"
+                        icon={FolderPlus}
+                        title="No projects yet."
+                      />
+                    ) : visible.length === 0 ? (
+                      <EmptyState
+                        variant="inline"
+                        className="py-10"
+                        icon={Search}
+                        title={projectQuery ? "No matching projects." : currentProjectLens.empty}
+                      />
+                    ) : (
+                      <ProjectTable
+                        projects={visible}
+                        now={now}
+                        showOrg
+                        defaultLaneLabelByProjectId={defaultLaneLabelByProjectId}
+                      />
                     )}
-                    data-testid="section-team-usage"
-                  >
-                    <UsageRollup
-                      jwt={jwt}
-                      orgId={activeOrgId}
-                      action={(
-                        <SectionVisibilityBadge
-                          minRole={orgSettings.memberProgressViewMinRole}
-                          canEdit={canEditVisibility}
-                          onChangeMinRole={async (next) => { await orgSettings.patch({ memberProgressViewMinRole: next }) }}
-                          description="Who can see each teammate's usage on this org's overview."
-                        />
-                      )}
-                    />
                   </div>
-                </SectionVisibilityGate>
-              )}
-              {jwt && !isAllOrgs && activeOrgId != null && (
-                <SectionVisibilityGate minRole={ROLE.MAINTAINER} viewerRoleLevel={activeOrg?.role?.level ?? null}>
-                  <div
-                    className={cn("relative rounded-lg", sectionTintClass(ROLE.MAINTAINER))}
-                    data-testid="section-credits"
-                  >
-                    <CreditsPanel
-                      jwt={jwt}
-                      orgId={activeOrgId}
-                      orgRoleLevel={activeOrg?.role.level ?? 0}
-                      action={<SectionVisibilityBadge minRole={ROLE.MAINTAINER} />}
-                    />
-                  </div>
-                </SectionVisibilityGate>
-              )}
+                </section>
+              </div>
             </div>
           )}
         </Page>

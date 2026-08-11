@@ -6,7 +6,13 @@ import { usePlatformAdmin } from "@/hooks/usePlatformAdmin"
 import { partitionSharedProjects } from "@/lib/frontier/shared-projects"
 import { isProjectNew, readProjectOpenedAt } from "@/lib/frontier/opened-shared-store"
 import { Badge } from "@/components/ui/badge"
-import { orgHomePath, orgPath, ALL_ORGS_PARAM } from "@/lib/navigation/org-paths"
+import {
+  orgHomePath,
+  orgPath,
+  orgOverviewPath,
+  orgProjectsPath,
+  ALL_ORGS_PARAM,
+} from "@/lib/navigation/org-paths"
 import { NAV_PAGE_ICONS } from "@/lib/navigation/page-icons"
 import { OrgSwitcher } from "./OrgSwitcher"
 import { AccountSwitcher } from "@/components/AccountSwitcher"
@@ -56,7 +62,7 @@ export function OrgSidebar() {
       isProjectNew(p.grantedAt, readProjectOpenedAt(username, p.id)),
     )
 
-  const homeTo = isAllOrgs
+  const portfolioHomeTo = isAllOrgs
     ? orgHomePath(ALL_ORGS_PARAM)
     : activeOrgId != null
       ? orgHomePath(activeOrgId)
@@ -68,16 +74,48 @@ export function OrgSidebar() {
         <OrgSwitcher />
       </div>
       <nav className="mt-2 flex flex-1 flex-col gap-0.5">
-        {/* FRO-243: data-tour anchors for product tour steps */}
-        <NavLink
-          to={homeTo}
-          end
-          className={link}
-          data-tour="nav-overview"
-        >
-          <NavIcon icon={NAV_PAGE_ICONS.projects} />
-          Projects
-        </NavLink>
+        {/* Guest org: single project list at org index. Member: Overview + Projects. */}
+        {isGuestOrg && activeOrgId != null ? (
+          <NavLink
+            to={orgHomePath(activeOrgId)}
+            end
+            className={link}
+            data-tour="nav-overview"
+          >
+            <NavIcon icon={NAV_PAGE_ICONS.projects} />
+            Projects
+          </NavLink>
+        ) : isMemberOrg && activeOrgId != null ? (
+          <>
+            <NavLink
+              to={orgOverviewPath(activeOrgId)}
+              end
+              className={link}
+              data-tour="nav-overview"
+            >
+              <NavIcon icon={NAV_PAGE_ICONS.overview} />
+              Overview
+            </NavLink>
+            <NavLink
+              to={orgProjectsPath(activeOrgId)}
+              className={link}
+              data-tour="nav-projects"
+            >
+              <NavIcon icon={NAV_PAGE_ICONS.projects} />
+              Projects
+            </NavLink>
+          </>
+        ) : (
+          <NavLink
+            to={portfolioHomeTo}
+            end
+            className={link}
+            data-tour="nav-overview"
+          >
+            <NavIcon icon={NAV_PAGE_ICONS.projects} />
+            Projects
+          </NavLink>
+        )}
         {isMemberOrg && activeOrgId != null && <>
           <NavLink to={orgPath(activeOrgId, "/teams")} className={link}>
             <NavIcon icon={NAV_PAGE_ICONS.teams} />

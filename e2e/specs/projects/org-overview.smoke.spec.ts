@@ -10,17 +10,20 @@ function isoDateOffset(days: number): string {
 }
 
 /**
- * Org overview (OrgHome at "/").
+ * Org overview + projects split.
  *
- * The page shows:
+ * Overview (`/orgs/:id/overview`, landing after `/`):
  *  - Org name heading (h1)
  *  - Rollup strip: Projects / Avg translated / Avg validated / Avg audio /
  *    Stalled / Overdue tiles
+ *  - Needs attention table
+ *
+ * Projects (`/orgs/:id/projects`):
  *  - Filter bar (search + status filter select) when projects exist
- *  - Project cards linking to /projects/:id
+ *  - Project rows linking to /projects/:id
  *
  * We create a project first so the portfolio API has at least one entry,
- * guaranteeing the filter bar renders.
+ * guaranteeing the filter bar and attention surfaces can render.
  */
 test("org overview renders rollup stats and project filter", async ({ alice }) => {
   const dash = new Dashboard(alice)
@@ -37,18 +40,24 @@ test("org overview renders rollup stats and project filter", async ({ alice }) =
   await alice.getByRole("button", { name: /^Save$/i }).click()
   await expect(alice.locator('[data-testid="status-chip"]')).toHaveText(/Overdue/i)
 
-  // Navigate to the org home.
+  // Navigate to the org home (redirects member orgs to /overview).
   await alice.goto("/")
   // 1. Org name heading (h1) renders.
   await expect(alice.locator("h1").first()).toBeVisible({ timeout: 10_000 })
+  await expect(alice).toHaveURL(/\/orgs\/\d+\/overview/)
 
   // 2. Rollup stats strip — each tile has a label in a small paragraph.
   for (const label of ["Projects", "Avg translated", "Avg validated", "Avg audio"]) {
     await expect(alice.getByText(label).first()).toBeVisible({ timeout: 5_000 })
   }
 
-  // 3. Filter bar — visible when projects exist.
-  const filterInput = alice.locator('input[aria-label="Filter projects by name"]')
+  // 3. Projects page — filter bar when projects exist.
+  await alice.getByRole("link", { name: "Projects" }).click()
+  await expect(alice).toHaveURL(/\/orgs\/\d+\/projects/)
+  const filterInput = alice.locator('input[aria-label="Search projects…"]')
+    .or(alice.getByRole("textbox", { name: /Search projects/i }))
+    .or(alice.locator('input[aria-label="Filter projects by name"]'))
+    .first()
   await expect(filterInput).toBeVisible({ timeout: 5_000 })
 
   // 4. Status filter select (All / Stalled / Overdue / Needs attention).
@@ -63,7 +72,7 @@ test("org overview renders rollup stats and project filter", async ({ alice }) =
   await alice.keyboard.press("Escape")
   await expect(alice.getByRole("listbox")).toHaveCount(0)
 
-  // 5. The new project's card is visible.
+  // 5. The new project's row is visible.
   await expect(alice.getByText(name).first()).toBeVisible({ timeout: 5_000 })
 
   // 6. In the all-organizations table, project and org identity remain useful

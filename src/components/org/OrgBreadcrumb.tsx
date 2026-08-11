@@ -103,7 +103,12 @@ export function OrgBreadcrumb({ parent, section, sectionTo, orgId, trail = [] }:
   const { activeOrgId, isAllOrgs, orgs, guestOrgs, setActiveOrg, setAllOrgs } = useActiveOrg()
   const location = useLocation()
   const scrollRef = useRef<HTMLOListElement | null>(null)
-  const showSection = section !== "Projects" || parent != null
+  // "Overview" is the member-org landing: omit the trailing section crumb so
+  // the org name is current (same idea as the old Projects-on-index hide).
+  // "Projects" on /orgs/all (portfolio) also omits unless a parent forces it.
+  const isOverviewSection = section === "Overview"
+  const showSection =
+    (section !== "Projects" && !isOverviewSection) || parent != null
   const resolvedOrgId = orgId ?? (!isAllOrgs ? activeOrgId : null)
   const resolvedOrg = resolvedOrgId == null ? null : orgs.find((org) => org.id === resolvedOrgId) ?? null
   // AQU-790: a guest org (`/orgs/:guestId`) is not a membership, so it isn't in
@@ -116,9 +121,10 @@ export function OrgBreadcrumb({ parent, section, sectionTo, orgId, trail = [] }:
   const parsed = parseOrgPath(location.pathname)
   const isRootLanding =
     parsed?.orgKey === ALL_ORGS_PARAM && !showSection && resolvedOrg == null && resolvedGuestOrg == null
+  // Member org "home" is `/overview` (or bare index redirecting there).
   const isOrgLanding =
     typeof parsed?.orgKey === "number" &&
-    parsed.rest === "" &&
+    (parsed.rest === "" || parsed.rest === "/overview") &&
     !showSection &&
     resolvedOrg != null &&
     parsed.orgKey === resolvedOrg.id

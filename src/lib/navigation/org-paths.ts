@@ -34,6 +34,16 @@ export function orgHomePath(orgKey: OrgPathKey): string {
   return `/orgs/${orgKey}`
 }
 
+/** Member-org default landing — stats + rollups (not the project table). */
+export function orgOverviewPath(orgId: number): string {
+  return orgPath(orgId, "/overview")
+}
+
+/** Teams-style project list for a concrete org. */
+export function orgProjectsPath(orgId: number): string {
+  return orgPath(orgId, "/projects")
+}
+
 export function orgPath(orgKey: OrgPathKey, rest = ""): string {
   const suffix = rest.startsWith("/") ? rest : rest ? `/${rest}` : ""
   // `/orgs/all` is home-only — never attach nested tools.

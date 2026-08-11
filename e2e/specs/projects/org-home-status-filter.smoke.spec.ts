@@ -2,20 +2,15 @@ import { test, expect } from "../../helpers/multi-user"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
 
 /**
- * OrgHome — project status filter select.
+ * Org projects page — status filter select.
  *
- * OrgHome.tsx renders a shadcn Select (aria-label="Project status filter") for:
+ * OrgProjectsPage renders a shadcn Select (aria-label="Project status filter") for:
  *   All, Stalled, Overdue, Needs attention
  * The "All" filter is selected by default.
  * Choosing a filter option updates the trigger and filters the project list.
  *
- * OrgHome renders at "/" (org Overview) — /projects is the ProjectsList,
- * which has no status pills — and the select only renders once the org has
- * at least one project, so this spec creates one first.
- *
- * This spec: creates a project → navigates to the org home ("/") →
- * verifies "All" is selected → picks "Needs attention" → verifies the trigger
- * updates → picks "All" to restore.
+ * Landing `/` is Overview; status filter lives on Projects. The select only
+ * renders once the org has at least one project, so this spec creates one first.
  */
 test("org home status filter select changes active value", async ({ alice }) => {
   const dash = new Dashboard(alice)
@@ -23,6 +18,8 @@ test("org home status filter select changes active value", async ({ alice }) => 
   await dash.createProject({ name: `StatusFilter ${Date.now()}` })
 
   await alice.goto("/")
+  await alice.getByRole("link", { name: "Projects" }).click()
+  await expect(alice).toHaveURL(/\/orgs\/\d+\/projects/)
   const statusFilter = alice.getByRole("combobox", { name: /project status filter/i })
   await expect(statusFilter).toBeVisible({ timeout: 10_000 })
   await expect(statusFilter).toContainText(/^All/i)

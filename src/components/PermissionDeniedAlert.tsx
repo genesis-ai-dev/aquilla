@@ -6,6 +6,7 @@ import { AccountSwitcher } from "@/components/AccountSwitcher"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { RichMessage } from "@/lib/i18n/RichMessage"
 
 // AQU-623: link denials to the docs page describing permission levels, so a
 // blocked user can learn what each role can do and how to get a higher one.
@@ -59,9 +60,11 @@ export function PermissionDeniedAlert({ action, requiredRole, currentRole, class
   const requiredRoleNote = requiredRole
     ? t("error.permissionDenied.requiredRoleNote", { requiredRole })
     : ""
-  const message = currentRole
-    ? t("error.permissionDenied.messageWithRole", { account, role: currentRole, action, requiredRoleNote })
-    : t("error.permissionDenied.messageWithoutRole", { account, action, requiredRoleNote })
+  // AQU-511 wave-3 finding 4: the account name and the role are the two facts
+  // this alert exists to convey — restore font-medium on both so they stay
+  // visually distinct from the surrounding prose instead of flattening into
+  // plain text, as they were before RichMessage.
+  const accountNode = <span className="font-medium">{account}</span>
 
   return (
     <div
@@ -71,7 +74,24 @@ export function PermissionDeniedAlert({ action, requiredRole, currentRole, class
         className,
       )}
     >
-      <p className="text-destructive">{message}</p>
+      <p className="text-destructive">
+        {currentRole ? (
+          <RichMessage
+            k="error.permissionDenied.messageWithRole"
+            values={{
+              account: accountNode,
+              role: <span className="font-medium">{currentRole}</span>,
+              action,
+              requiredRoleNote,
+            }}
+          />
+        ) : (
+          <RichMessage
+            k="error.permissionDenied.messageWithoutRole"
+            values={{ account: accountNode, action, requiredRoleNote }}
+          />
+        )}
+      </p>
       <a
         href={PERMISSION_DOCS_URL}
         target="_blank"

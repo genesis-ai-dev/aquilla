@@ -39,12 +39,15 @@ export const error = defineNamespace({
         description:
           "Full sentence in the permission-denied alert shown when the signed-in " +
           "account is blocked from an action AND the caller knows the account's role " +
-          "on this project. Reads as a plain paragraph (no inline styling); reassuring, " +
-          "not clinical — it explains why the action is blocked, not that the user did " +
-          "something wrong. Used instead of messageWithoutRole when a role is known.",
+          "on this project. Rendered with <RichMessage> (AQU-511): the account name " +
+          "and role are the two facts the user needs from this sentence, so the call " +
+          "site wraps each in a font-medium span to keep them visually distinct from " +
+          "the surrounding prose. Otherwise reassuring, not clinical — it explains why " +
+          "the action is blocked, not that the user did something wrong. Used instead " +
+          "of messageWithoutRole when a role is known.",
         placeholders: {
-          account: "The signed-in account's display name, optionally followed by its email in parentheses (already formatted by the app, do not add more punctuation around it).",
-          role: "The account's role label on this project, e.g. 'Viewer' or 'Translator'.",
+          account: "The signed-in account's display name, optionally followed by its email in parentheses (already formatted by the app, do not add more punctuation around it). Rendered as a font-medium span by the call site — do not add your own emphasis markup around the placeholder.",
+          role: "The account's role label on this project, e.g. 'Viewer' or 'Translator'. Rendered as a font-medium span by the call site — do not add your own emphasis markup around the placeholder.",
           action: "Bare verb phrase naming what was blocked, e.g. 'change shared settings'. Lowercase, no trailing punctuation.",
           requiredRoleNote: "Either empty, or the rendered error.permissionDenied.requiredRoleNote string — insert exactly as given, do not add extra spacing.",
         },
@@ -52,9 +55,10 @@ export const error = defineNamespace({
       "error.permissionDenied.messageWithoutRole": {
         description:
           "Same permission-denied sentence as messageWithRole, used when the caller's " +
-          "role on this project isn't known/resolved, so the role clause is omitted.",
+          "role on this project isn't known/resolved, so the role clause is omitted. " +
+          "Also rendered with <RichMessage>: the account name is a font-medium span.",
         placeholders: {
-          account: "The signed-in account's display name, optionally followed by its email in parentheses (already formatted by the app).",
+          account: "The signed-in account's display name, optionally followed by its email in parentheses (already formatted by the app). Rendered as a font-medium span by the call site — do not add your own emphasis markup around the placeholder.",
           action: "Bare verb phrase naming what was blocked, e.g. 'add members to this project'. Lowercase, no trailing punctuation.",
           requiredRoleNote: "Either empty, or the rendered error.permissionDenied.requiredRoleNote string — insert exactly as given.",
         },

@@ -17,7 +17,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { Checkbox } from "@/components/ui/checkbox"
 import { Switch } from "@/components/ui/switch"
 import { Input } from "@/components/ui/input"
 import { OptionalMark } from "@/components/ui/field"
@@ -1646,7 +1645,7 @@ export function ProjectSettings() {
                 label={<label htmlFor="validated-only">Approved examples only</label>}
                 description="Drafting always retrieves human-validated project translations. Raw machine drafts never enter the trusted example pool."
                 control={
-                  <Checkbox
+                  <Switch
                     id="validated-only"
                     checked
                     disabled
@@ -2092,7 +2091,7 @@ export function ProjectSettings() {
                 description="Interval is floored at 1 minute. Sync will only push when there are local changes."
                 control={
                   <div className="flex items-center gap-2">
-                    <Checkbox
+                    <Switch
                       id="auto-sync"
                       checked={autoSyncEnabled}
                       onCheckedChange={(checked) => setAutoSyncEnabled(checked)}

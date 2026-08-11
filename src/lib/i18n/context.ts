@@ -39,10 +39,20 @@
 import { en, type MessageKey } from "./messages/en"
 import { NAMESPACES } from "./namespaces"
 import type { ContextEntry } from "./namespaces/types"
+import {
+  isPluralMessage,
+  PLURAL_CATEGORIES,
+  type PluralCategory,
+  type PluralMessage,
+} from "./plurals"
 import { isScreenshotId, SCREENSHOTS } from "./screenshots"
 
-/** Version of the sidecar interchange format emitted by `catalog-export.ts`. */
-export const CONTEXT_SCHEMA_VERSION = 1
+/**
+ * Version of the sidecar interchange format emitted by `catalog-export.ts`.
+ * v2 adds the `plurals` section — which categories each target locale needs for
+ * each count-governed key, and which placeholder governs the selection.
+ */
+export const CONTEXT_SCHEMA_VERSION = 2
 
 /** Minimum useful description length — a one-word note is not context. */
 const MIN_DESCRIPTION_LENGTH = 12
@@ -79,12 +89,53 @@ export function placeholdersIn(template: string): string[] {
   return [...found]
 }
 
+/**
+ * The count-governed forms of a key, or `undefined` for a plain string key.
+ * The one place the rest of the i18n code asks "is this key a plural?".
+ */
+export function pluralMessageFor(key: MessageKey): PluralMessage | undefined {
+  const value = en[key]
+  return isPluralMessage(value) ? value : undefined
+}
+
+/**
+ * Every English string a key contributes — one for a plain key, one per authored
+ * category for a plural key. The duplicate-English guard and the placeholder
+ * lint both work over this, so a plural form cannot smuggle in a duplicate or an
+ * undocumented placeholder.
+ */
+export function englishFormsFor(key: MessageKey): string[] {
+  const value = en[key]
+  if (!isPluralMessage(value)) return [value]
+  return PLURAL_CATEGORIES.flatMap((c) => {
+    const form = value.forms[c]
+    return form === undefined ? [] : [form]
+  })
+}
+
+/**
+ * The single English string that represents a key — the `other` form for a
+ * plural key, since that is the form every locale defines and the one a
+ * translator reads first.
+ */
+export function englishSourceFor(key: MessageKey): string {
+  const value = en[key]
+  if (!isPluralMessage(value)) return value
+  return value.forms.other ?? englishFormsFor(key)[0] ?? ""
+}
+
 /** Fully resolved context for one message key: per-key entry over namespace. */
 export interface ResolvedContext {
   key: MessageKey
   namespace: string
-  /** The English source string, for reference. */
+  /** The English source string, for reference (`other` form when plural). */
   source: string
+  /**
+   * Present when the key is count-governed: the placeholder that selects the
+   * form, and the authored English forms. Translators need both — the category
+   * set they must fill depends on their language, not on English.
+   */
+  plural?: { countVar: string; forms: Partial<Record<PluralCategory, string>> }
   /** Namespace-level description of the surrounding surface. */
   surface: string
   /** Per-key description when present, otherwise the surface description. */
@@ -105,10 +156,12 @@ export function resolveKeyContext(key: MessageKey): ResolvedContext {
   const block = CATALOG_CONTEXT[namespace]
   const nsContext = block?._context
   const entry = block?.keys?.[key]
+  const plural = pluralMessageFor(key)
   return {
     key,
     namespace,
-    source: en[key],
+    source: englishSourceFor(key),
+    ...(plural ? { plural: { countVar: plural.countVar, forms: plural.forms } } : {}),
     surface: nsContext?.description ?? "",
     description: entry?.description ?? nsContext?.description ?? "",
     screenshot: entry?.screenshot ?? nsContext?.screenshot,
@@ -169,7 +222,36 @@ export function catalogContextIssues(): string[] {
       )
     }
 
-    const used = placeholdersIn(en[key])
+    const plural = pluralMessageFor(key)
+    if (plural) {
+      const forms = englishFormsFor(key)
+      if (!plural.forms.other || plural.forms.other.trim().length === 0) {
+        issues.push(
+          `${key}: plural message has no \`other\` form — it is the last form every ` +
+            `locale defines and the end of every fallback chain, so it is required`,
+        )
+      }
+      for (const [category, form] of Object.entries(plural.forms)) {
+        if (form.trim().length === 0) {
+          issues.push(`${key}: plural form "${category}" is empty`)
+        }
+      }
+      // Every form must interpolate the same things, or the rendered sentence
+      // silently loses a number in whichever category the count happens to hit.
+      const signature = (s: string) => placeholdersIn(s).sort().join(",")
+      const first = signature(forms[0] ?? "")
+      for (const form of forms) {
+        if (signature(form) !== first) {
+          issues.push(
+            `${key}: plural forms disagree on placeholders ` +
+              `("${first}" vs "${signature(form)}") — every form must use the same set`,
+          )
+          break
+        }
+      }
+    }
+
+    const used = [...new Set(englishFormsFor(key).flatMap((form) => placeholdersIn(form)))]
     for (const name of used) {
       if (!resolved.placeholders[name]) {
         issues.push(

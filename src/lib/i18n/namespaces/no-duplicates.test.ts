@@ -1,8 +1,30 @@
 import { describe, expect, it } from "vitest"
 import { NAMESPACES } from "./index"
 import { common } from "./common"
+import { isPluralMessage, PLURAL_CATEGORIES, type MessageValue } from "../plurals"
 
 const normalize = (s: string) => s.trim().toLowerCase().replace(/[…:]+$/, "")
+
+/**
+ * Every English string a catalog value contributes. A count-governed key holds
+ * one string per plural category, and a duplicate hiding in the `other` form is
+ * still a duplicate a translator pays for.
+ */
+const stringsOf = (value: MessageValue): string[] =>
+  isPluralMessage(value)
+    ? PLURAL_CATEGORIES.flatMap((c) => {
+        const form = value.forms[c]
+        return form === undefined ? [] : [form]
+      })
+    : [value]
+
+/** (key, string) pairs for every namespace, flattening plural forms. */
+const allEntries = (): Array<[string, string]> =>
+  NAMESPACES.flatMap((ns) =>
+    Object.entries(ns.keys).flatMap(([key, value]) =>
+      stringsOf(value).map((s) => [key, s] as [string, string]),
+    ),
+  )
 
 /**
  * Same-English-different-meaning exceptions.
@@ -30,16 +52,19 @@ const DISTINCT_MEANING: Record<string, string> = {
 
 describe("catalog has no duplicate English strings (AQU-511)", () => {
   it("does not re-key a string that common.* already provides", () => {
-    const shared = new Map(
-      Object.entries(common.keys).map(([key, value]) => [normalize(value), key]),
-    )
+    const shared = new Map<string, string>()
+    for (const [key, value] of Object.entries(common.keys)) {
+      for (const s of stringsOf(value)) shared.set(normalize(s), key)
+    }
     const offenders: string[] = []
     for (const ns of NAMESPACES) {
       if (ns === common) continue
       for (const [key, value] of Object.entries(ns.keys)) {
         if (key in DISTINCT_MEANING) continue
-        const existing = shared.get(normalize(value))
-        if (existing) offenders.push(`${key} duplicates ${existing} ("${value}")`)
+        for (const s of stringsOf(value)) {
+          const existing = shared.get(normalize(s))
+          if (existing) offenders.push(`${key} duplicates ${existing} ("${s}")`)
+        }
       }
     }
     // Every unjustified duplicate is a string a human translator is asked to
@@ -50,15 +75,15 @@ describe("catalog has no duplicate English strings (AQU-511)", () => {
 
   it("keeps every documented exception real and justified", () => {
     const allKeys = new Set(NAMESPACES.flatMap((ns) => Object.keys(ns.keys)))
-    const sharedValues = new Set(Object.values(common.keys).map((v) => normalize(v)))
+    const sharedValues = new Set(
+      Object.values(common.keys).flatMap((v) => stringsOf(v).map(normalize)),
+    )
     for (const [key, reason] of Object.entries(DISTINCT_MEANING)) {
       // A stale exception silently re-opens the hole it was granted for, so an
       // entry for a key that no longer exists — or no longer collides — is a
       // failure, not a harmless leftover.
       expect(allKeys, `exception for missing key ${key}`).toContain(key)
-      const value = NAMESPACES.flatMap((ns) => Object.entries(ns.keys)).find(
-        ([k]) => k === key,
-      )?.[1]
+      const value = allEntries().find(([k]) => k === key)?.[1]
       expect(sharedValues, `${key} no longer collides — drop its exception`).toContain(
         normalize(value ?? ""),
       )

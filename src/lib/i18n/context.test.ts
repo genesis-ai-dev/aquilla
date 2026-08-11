@@ -5,12 +5,12 @@ import {
   CATALOG_CONTEXT,
   MESSAGE_KEYS,
   catalogContextIssues,
+  englishFormsFor,
   namespaceOf,
   placeholdersIn,
   resolveKeyContext,
 } from "./context"
 import { SCREENSHOTS, isScreenshotId, screenshotPath } from "./screenshots"
-import { en } from "./messages/en"
 // `../../../scripts/i18n-shots` would resolve to the capture CLI, which runs on
 // import; the driver registry is the `index` module inside the directory.
 import { SURFACE_DRIVER_IDS } from "../../../scripts/i18n-shots/index"
@@ -41,7 +41,9 @@ describe("catalog context coverage (AQU-832)", () => {
   it("documents every placeholder the English strings use", () => {
     for (const key of MESSAGE_KEYS) {
       const ctx = resolveKeyContext(key)
-      for (const name of placeholdersIn(en[key])) {
+      for (const name of englishFormsFor(key).flatMap((form: string) =>
+        placeholdersIn(form),
+      )) {
         expect(
           ctx.placeholders[name],
           `${key} uses {${name}} but does not document it`,

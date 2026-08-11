@@ -1,7 +1,8 @@
 /**
  * I18nProvider + hooks (AQU-511).
  *
- * Holds the active locale, persists changes, exposes a type-safe `t(key, vars)`,
+ * Holds the active locale, persists changes, exposes a type-safe `t(key, vars)`
+ * that resolves count-governed keys through the active locale's plural rules,
  * and mirrors the locale onto `<html lang>` / `<html dir>` so RTL locales flip
  * layout direction. Behaviour is neutral for the default English/LTR locale, so
  * mounting the provider at the app root is a no-op until a locale is chosen.
@@ -69,7 +70,9 @@ export function I18nProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const t = useCallback<TFunction>(
-    (key, vars) => translate(CATALOGS[locale] ?? CATALOGS[DEFAULT_LOCALE], key, vars),
+    // The locale is passed as well as the catalog: plural-category selection is
+    // a property of the language, not of which strings happen to be translated.
+    (key, vars) => translate(CATALOGS[locale] ?? CATALOGS[DEFAULT_LOCALE], key, vars, locale),
     [locale],
   )
 
@@ -100,7 +103,7 @@ const FALLBACK_CONTEXT: I18nContextValue = Object.freeze<I18nContextValue>({
   dir: directionFor(DEFAULT_LOCALE),
   locales: LOCALES,
   setLocale: () => {},
-  t: (key, vars) => translate(CATALOGS[DEFAULT_LOCALE], key, vars),
+  t: (key, vars) => translate(CATALOGS[DEFAULT_LOCALE], key, vars, DEFAULT_LOCALE),
 })
 
 export function useI18n(): I18nContextValue {

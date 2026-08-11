@@ -8,7 +8,15 @@
  * `ContextEntry.screenshot` is `string` rather than `ScreenshotId` for the same
  * reason — the id union is derived from every namespace's surfaces. Undeclared
  * ids are still rejected at test time by `catalogContextIssues()`.
+ *
+ * `plural()` is re-exported here so a namespace module needs a single import for
+ * everything it authors. It lives in `../plurals.ts`, which is also a leaf.
  */
+
+import type { MessageValue } from "../plurals"
+
+export { plural } from "../plurals"
+export type { MessageValue, PluralCategory, PluralMessage } from "../plurals"
 
 export interface ContextEntry {
   /**
@@ -54,7 +62,12 @@ export interface ScreenshotSurface {
  * a compile error rather than a lint failure.
  */
 export interface NamespaceModule<K extends string> {
-  keys: Record<K, string>
+  /**
+   * The namespace's English strings. A value is either a plain string or a
+   * `plural({ … })` record of CLDR category → string for a count-governed
+   * message; see `../plurals.ts`.
+   */
+  keys: Record<K, MessageValue>
   context: {
     _context: ContextEntry
     keys?: Partial<Record<K, ContextEntry>>

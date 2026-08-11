@@ -12,8 +12,11 @@
  * `../namespaces/index.ts` and spreading it here.
  *
  * The modules are imported and spread individually on purpose — reducing over
- * `NAMESPACES` widens the result to `Record<string, string>`, which destroys the
- * `MessageKey` literal union every `t()` call is checked against.
+ * `NAMESPACES` widens the result to `Record<string, MessageValue>`, which
+ * destroys the `MessageKey` literal union every `t()` call is checked against.
+ *
+ * A value is either a plain string or a `plural({ … })` record of CLDR plural
+ * category → string; `translate()` selects the category for the active locale.
  */
 
 import { common } from "../namespaces/common"
@@ -26,6 +29,7 @@ import { comments } from "../namespaces/comments"
 import { auth } from "../namespaces/auth"
 import { search } from "../namespaces/search"
 import { audio } from "../namespaces/audio"
+import type { MessageValue } from "../plurals"
 
 export const en = {
   ...common.keys,
@@ -42,5 +46,11 @@ export const en = {
 
 export type MessageKey = keyof typeof en
 
-/** A translated catalog: any subset of the base keys; missing keys fall back. */
-export type Catalog = Partial<Record<MessageKey, string>>
+/**
+ * A translated catalog: any subset of the base keys; missing keys fall back.
+ *
+ * Values are `MessageValue` rather than `string` so a locale can supply its own
+ * plural forms for a count-governed key — Arabic needs six where English wrote
+ * two, so the translated value is not always the same shape as a plain string.
+ */
+export type Catalog = Partial<Record<MessageKey, MessageValue>>

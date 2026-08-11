@@ -11,6 +11,9 @@ import {
 } from "./context"
 import { SCREENSHOTS, isScreenshotId, screenshotPath } from "./screenshots"
 import { en } from "./messages/en"
+// `../../../scripts/i18n-shots` would resolve to the capture CLI, which runs on
+// import; the driver registry is the `index` module inside the directory.
+import { SURFACE_DRIVER_IDS } from "../../../scripts/i18n-shots/index"
 
 /**
  * AQU-832 — the context sidecar's coverage check.
@@ -133,5 +136,19 @@ describe("helpers", () => {
       (s) => !existsSync(path.join(repoRoot, screenshotPath(s.id))),
     ).map((s) => s.id)
     expect(missing).toEqual([])
+  })
+})
+
+describe("screenshot drivers (AQU-511 fan-out)", () => {
+  it("has a capture driver for every declared surface", () => {
+    const missing = SCREENSHOTS.map((s) => s.id).filter((id) => !SURFACE_DRIVER_IDS.includes(id))
+    // A surface without a driver is never captured, so its context would point
+    // translators at a screenshot that does not exist.
+    expect(missing).toEqual([])
+  })
+
+  it("has no driver for a surface nobody declares", () => {
+    const declared = SCREENSHOTS.map((s) => s.id)
+    expect(SURFACE_DRIVER_IDS.filter((id) => !declared.includes(id))).toEqual([])
   })
 })

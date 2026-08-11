@@ -31,6 +31,33 @@ describe("GET /api/v2/orgs/:orgId/groups", () => {
     expect(res.status).toBe(403)
   })
 
+  // AQU-789: the Teams list must agree with the detail visibility gate (AQU-748).
+  // A non-maintainer must NOT see, in the list, a team they aren't a member of —
+  // that was the "phantom membership" bug (a team shows in the list but its
+  // detail 404s). Maintainers+ still see every team.
+  it("AQU-789: a non-maintainer only sees teams they belong to (no phantom teams)", async () => {
+    await seedGroups()
+    // Second team that anna (role 100) is NOT a member of.
+    await env.AQUILLA_PG.prepare("INSERT INTO groups (id, org_id, name, created_by) VALUES (11, 1, 'East Africa', 1)").run()
+    const res = await app.request("/api/v2/orgs/1/groups", { headers: authHeader(await jwtFor("anna")) }, env)
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { groups: Array<{ id: number; name: string }> }
+    // anna is a member of team 10 only — team 11 must be absent from her list.
+    expect(body.groups.map((g) => g.id)).toEqual([10])
+  })
+
+  it("AQU-789: a maintainer sees every team in the org, even ones they aren't in", async () => {
+    await seedGroups()
+    // wendi is org owner (700) but a member of team 10 only.
+    await env.AQUILLA_PG.prepare("INSERT INTO groups (id, org_id, name, created_by) VALUES (11, 1, 'East Africa', 1)").run()
+    const res = await app.request("/api/v2/orgs/1/groups", { headers: authHeader(await jwtFor("wendi")) }, env)
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { groups: Array<{ id: number; viewerIsMember: boolean }> }
+    // Both teams present; the not-a-member team is flagged, not dropped.
+    expect(body.groups.map((g) => g.id).sort()).toEqual([10, 11])
+    expect(body.groups.find((g) => g.id === 11)?.viewerIsMember).toBe(false)
+  })
+
   // Regression: AQU-158 — GET /orgs/:id/groups returned 500 after the Postgres
   // cutover because the is_internal column was missing from the live Neon DB.
   // This test verifies: (a) the endpoint returns 200 (not 500), (b) is_internal /

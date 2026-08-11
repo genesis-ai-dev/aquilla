@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react"
+import { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { useParams, useNavigate } from "react-router-dom"
 import { MoreHorizontal, ChevronRight, Copy, Check, Download, Search, SlidersHorizontal } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
@@ -27,6 +27,7 @@ import { downloadProjectBundle } from "@/lib/sync/export-bundle"
 import { AssignWork } from "./AssignWork"
 import { MembersTab } from "@/components/ProjectMembersPage"
 import { MemberActivityPanel } from "./MemberActivityPanel"
+import { ProjectAutopilotPanel } from "./ProjectAutopilotPanel"
 import { getPortfolio, translatedPct, validatedPct, aiDraftedPct, audioPct, recordedMinutes, deadlineStatus, laneTranslatedPct, laneValidatedPct, type PortfolioProject, type PortfolioLane } from "@/lib/frontier/portfolio"
 import { OverviewLaneTable } from "./OverviewLaneTable"
 import { fetchProjectFiles, type FileSummary } from "@/lib/sync/cells-read"
@@ -542,6 +543,12 @@ export function ProjectOverview() {
   const [archiveConfirmOpen, setArchiveConfirmOpen] = useState(false)
   const [audio, setAudio] = useState<PortfolioProject | null>(null)
   const [files, setFiles] = useState<FileSummary[]>([])
+  // fileId → display name for the autopilot panel, which knows runs by file id
+  // only (its rollup comes from the run table, not the file list).
+  const autopilotFileNames = useMemo(
+    () => new Map(files.map((f) => [f.fileId, f.name])),
+    [files],
+  )
   const [deadlineDialogOpen, setDeadlineDialogOpen] = useState(false)
   const [deadlineDate, setDeadlineDate] = useState<Date | undefined>(undefined)
   // AQU-507: PM assignment dialog. `pmSelection` holds the picker value (a
@@ -1304,6 +1311,18 @@ export function ProjectOverview() {
                   onChanged={handleAssigned}
                 />
               )}
+
+              {/* ── Autopilot (PM observability) ──
+                  Every other autopilot surface is scoped to one open file and
+                  dies with the editor. A PM does not open files; this is the
+                  only place that answers "what is drafting, and how much is
+                  waiting on my team". Renders nothing when the backend isn't
+                  deployed for this environment. */}
+              <ProjectAutopilotPanel
+                projectId={id}
+                fileNames={autopilotFileNames}
+                canStart={(project?.syncRole?.level ?? 0) >= ROLE.CONTRIBUTOR}
+              />
 
               {/* ── Per-file rows (always fully visible per user decision) ── */}
               {files.length > 0 && (() => {

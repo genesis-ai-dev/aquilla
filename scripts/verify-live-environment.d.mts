@@ -3,6 +3,7 @@ export type LiveSurface = "all" | "auth" | "sync" | "spa"
 
 export interface LiveVerificationOptions {
   surface?: LiveSurface
+  appOrigin?: string
   fetchImpl?: typeof fetch
   lookup?: (
     hostname: string,
@@ -10,8 +11,13 @@ export interface LiveVerificationOptions {
   ) => Promise<Array<{ address: string; family: number }>>
   attempts?: number
   retryDelayMs?: number
+  maxJavascriptAssets?: number
+  retryAssetFallbacks?: boolean
+  staticAssetPaths?: boolean
   log?: (message: string) => void
 }
+
+export function javascriptReferences(source: string): string[]
 
 export function verifyLiveEnvironment(
   environment: LiveEnvironment | string,

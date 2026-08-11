@@ -7,6 +7,34 @@ export interface SpawnedWorker {
   kill: () => Promise<void>
 }
 
+const INSPECTOR_PORT_OFFSET = 10_000
+
+/** Derive a stable inspector port from the worker's already-isolated HTTP port.
+ * This keeps concurrent E2E shards collision-free without relying on Wrangler's
+ * unstable `--inspector-port 0` proxy path. */
+export function inspectorPortForWorkerPort(workerPort: number): number {
+  return workerPort + INSPECTOR_PORT_OFFSET
+}
+
+export function wranglerDevArgs(opts: {
+  port: number
+  inspectorPort?: number
+  extraArgs?: string[]
+}): string[] {
+  return [
+    "wrangler",
+    "dev",
+    "--local",
+    "--port",
+    String(opts.port),
+    "--ip",
+    "127.0.0.1",
+    "--inspector-port",
+    String(opts.inspectorPort ?? inspectorPortForWorkerPort(opts.port)),
+    ...(opts.extraArgs ?? []),
+  ]
+}
+
 /** Kill a process and any descendants. wrangler dev wraps a workerd child
  * that doesn't always die when the npx parent gets SIGTERM, leaving
  * orphans that hold ports across runs. We use `pkill -P` to walk the
@@ -29,6 +57,9 @@ function killTree(pid: number, signal: NodeJS.Signals = "SIGTERM"): void {
 export async function spawnWranglerDev(opts: {
   cwd: string
   port: number
+  /** Inspector port exposed by Wrangler. By default this is derived from the
+   * worker's HTTP port so concurrent dev/E2E stacks cannot collide. */
+  inspectorPort?: number
   label: string
   env?: Record<string, string>
   /** Extra flags appended to the `wrangler dev` invocation, e.g.
@@ -39,7 +70,7 @@ export async function spawnWranglerDev(opts: {
 }): Promise<SpawnedWorker> {
   const child = spawn(
     "npx",
-    ["wrangler", "dev", "--local", "--port", String(opts.port), "--ip", "127.0.0.1", ...(opts.extraArgs ?? [])],
+    wranglerDevArgs(opts),
     {
       cwd: opts.cwd,
       env: { ...process.env, ...opts.env },

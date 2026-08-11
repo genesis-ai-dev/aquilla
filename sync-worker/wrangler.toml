@@ -19,19 +19,22 @@ ENVIRONMENT = "local"
 # Identity worker base URL for the Monday-integration push nudge
 # (src/monday-notify.ts). Local dev stack runs identity on 8788.
 AUTH_WORKER_URL = "http://127.0.0.1:8788"
+# SPA host for the ask-mode approval deep link (external/prepare.ts
+# approvalUrlFor). Local dev stack serves the SPA via Vite on 5173.
+BASE_URL = "http://localhost:5173"
 
 # =============================================================================
 # ROUTE / ENV CONVENTION — same pattern as auth-worker
 # =============================================================================
-# Routes live in `[env.production]` and `[env.staging]` below. This file is
+# Routes live in `[env.production]` and `[env.development]` below. This file is
 # the source of truth — don't add or remove routes via the Cloudflare
-# dashboard. GitHub Actions always passes an explicit named environment.
-# Cloudflare Workers Builds calls `pnpm run deploy:workers-build`, which
-# promotes `main` with production bindings and uploads preview-only versions
-# for every other branch. Routes can also be applied by a LOCAL deploy:
+# dashboard. Live deployments are explicit operator actions. The local package
+# commands and optional dispatch-only GitHub workflow always pass a named
+# environment; neither a Git push nor Cloudflare Git integration deploys. Routes
+# are applied by the matching deploy command:
 #
 #   pnpm run deploy:aquilla:sync        # = wrangler deploy --env=production
-#   (cd sync-worker && wrangler deploy --env=staging)
+#   (cd sync-worker && wrangler deploy --env=development)
 #
 # To change a route: edit `routes` in the relevant `[env.<name>]`, run the
 # deploy command, commit the wrangler.toml change. See
@@ -120,13 +123,19 @@ command = "bash ../scripts/verify-deploy-branch.sh main"
 [env.production.observability]
 enabled = true
 
+[env.production.version_metadata]
+binding = "CF_VERSION_METADATA"
+
 [env.production.vars]
 ENVIRONMENT = "production"
+DEPLOYMENT_WORKER_NAME = "aquilla-sync-worker"
 # PostHog *project* token (public — same one shipped in the SPA bundle).
 # Enables 4xx/5xx log shipping to PostHog Logs (src/posthog-logs.ts).
 POSTHOG_KEY = "phc_oTksJRNEdLEaLD4wmdd2XcR4xaR4n52eA5VGDytW55Ln"
 # Identity worker base for the Monday-integration push nudge (monday-notify.ts).
 AUTH_WORKER_URL = "https://api.aquilla.app/identity"
+# SPA host for the ask-mode approval deep link (external/prepare.ts).
+BASE_URL = "https://aquilla.app"
 
 [[env.production.durable_objects.bindings]]
 name = "ProjectSync"
@@ -175,10 +184,16 @@ name = "aquilla-sync-worker-dev"
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 routes = ["api.dev.aquilla.app/sync/*"]
 
+[env.development.version_metadata]
+binding = "CF_VERSION_METADATA"
+
 [env.development.vars]
 ENVIRONMENT = "development"
+DEPLOYMENT_WORKER_NAME = "aquilla-sync-worker-dev"
 # Identity worker base for the Monday-integration push nudge (monday-notify.ts).
 AUTH_WORKER_URL = "https://api.dev.aquilla.app/identity"
+# SPA host for the ask-mode approval deep link (external/prepare.ts).
+BASE_URL = "https://dev.aquilla.app"
 
 [[env.development.durable_objects.bindings]]
 name = "ProjectSync"
@@ -218,65 +233,6 @@ id = "53581197ff7a4202a5ed0ef08537d4a6"
 
 [[env.development.send_email]]
 name = "EMAIL"
-
-# ---------------------------------------------------------------------------
-# Staging environment — for the staging branch, deployed to api.staging.aquilla.app
-# Pre-production QA environment. Physically separate R2, DO namespace. Auth model
-# unchanged: same SYNC_SECRET_KEY as prod. A logged-in user can use the staging
-# frontend and their writes land in aquilla-snapshots-staging, leaving prod
-# data untouched.
-#
-# Deploy: `wrangler deploy --env staging` (CI does this on push to staging).
-# Secrets: after first deploy, copy SYNC_SECRET_KEY from prod with
-#   `wrangler secret put SYNC_SECRET_KEY --env staging`
-# ---------------------------------------------------------------------------
-[env.staging]
-name = "aquilla-sync-worker-staging"
-account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
-routes = ["api.staging.aquilla.app/sync/*"]
-
-[env.staging.build]
-command = "bash ../scripts/verify-deploy-branch.sh staging"
-
-[env.staging.vars]
-ENVIRONMENT = "staging"
-# Identity worker base for the Monday-integration push nudge (monday-notify.ts).
-AUTH_WORKER_URL = "https://api.staging.aquilla.app/identity"
-
-[[env.staging.durable_objects.bindings]]
-name = "ProjectSync"
-class_name = "ProjectSync"
-
-[[env.staging.migrations]]
-tag = "v1"
-new_sqlite_classes = ["FileSync"]
-
-[[env.staging.migrations]]
-tag = "v2"
-new_sqlite_classes = ["ProjectSync"]
-
-[[env.staging.r2_buckets]]
-binding = "SNAPSHOTS"
-bucket_name = "aquilla-snapshots-staging"
-
-# Staging runs on Neon (Postgres) to mirror prod. index.ts builds AQUILLA_PG
-# from the Postgres shim (db/shim/postgres.ts) over Hyperdrive → the Neon
-# `staging` branch. Caching disabled so live edits aren't served stale (same as prod).
-[[env.staging.hyperdrive]]
-binding = "HYPERDRIVE"
-id = "822231ade4da4db5b1955702e13d1ac3"
-
-[[env.staging.send_email]]
-name = "EMAIL"
-
-# ---------------------------------------------------------------------------
-# e2e test environment. Local e2e (scripts/e2e-up.ts) runs `wrangler dev` on
-# the DEFAULT profile and points Hyperdrive at a local Postgres via
-# WRANGLER_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE — so it boots on
-# Postgres, not D1. This [env.e2e] block only matters for a deployed
-# `wrangler deploy --env e2e`; it needs its own Hyperdrive binding (Postgres is
-# the only datastore now).
-# ---------------------------------------------------------------------------
 [env.e2e]
 name = "aquilla-sync-worker-e2e"
 

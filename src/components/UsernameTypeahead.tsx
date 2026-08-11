@@ -11,6 +11,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { useUserSearch, type UserSearchResult } from "@/hooks/useUserSearch"
+import { useExactUserLookup } from "@/hooks/useExactUserLookup"
 
 /**
  * AQU-734: multi-select wiring. When passed, each search result renders as a
@@ -169,6 +170,18 @@ export function UsernameTypeahead({
     trimmedRaw.length === 0 &&
     matchingSuggestions.length === 0 &&
     emptySuggestionsHint != null
+  // AQU-781: when the scoped search settles with no match, resolve the exact
+  // typed username against the unscoped lookup so a miss isn't reported as
+  // "no such user" when the account merely lies outside the caller's scope.
+  const exactLookup = useExactUserLookup(
+    value.mode === "username" ? trimmedRaw : "",
+    canShowSettledEmptyState && lastFetchOk,
+  )
+  const exactLookupCurrent = exactLookup.forUsername === trimmedRaw
+  const exactUser =
+    exactLookupCurrent && exactLookup.status === "found" ? exactLookup.user : null
+  const exactAlreadyAdded = exactUser != null && excludedUserIdSet.has(exactUser.id)
+  const exactFoundUser = exactUser && !exactAlreadyAdded ? exactUser : null
   const showSuggestions =
     value.mode === "username" &&
     open &&
@@ -365,39 +378,91 @@ export function UsernameTypeahead({
             </p>
           )}
 
-          {/* Only claim "no user named X" when the search actually
-              succeeded (lastFetchOk). When the search endpoint isn't
-              deployed yet (404) or the network errored, we'd otherwise
-              be lying about the user's existence — suppress the
-              false-negative and render a softer fallback hint. */}
+          {/* AQU-781: the scoped search (AQU-321) only sees people who share an
+              org/project with the caller, so a settled miss is NOT proof the
+              account doesn't exist. Resolve the exact typed username against the
+              unscoped lookup (useExactUserLookup) and branch on the truth:
+                - checking  → don't assert anything yet
+                - found     → offer an exact-match add (out-of-scope but real)
+                - notfound  → the definitive "no such user" state
+                - error     → soft fallback; verify by exact username on submit
+              Only claim non-existence when the search itself succeeded
+              (lastFetchOk); the `!lastFetchOk` branch below handles a search
+              that couldn't run. */}
           {canShowSettledEmptyState && lastFetchOk && (
             <div className="px-3 py-2">
-              <p className="text-[11px] text-muted-foreground">
-                {multiSelect && scopedSearch
-                  ? // Scoped search only sees org/project-overlap users
-                    // (AQU-321), so a miss is NOT proof the account doesn't
-                    // exist — don't claim it is.
-                    `No match among people who share an org or project with you.`
-                  : `No Aquilla user named "${trimmedRaw}".`}
-              </p>
-              {multiSelect && (
-                <button
-                  type="button"
-                  onClick={() => multiSelect.onStageTyped()}
-                  className="mt-1 inline-flex items-center gap-1 text-[10px] text-primary hover:underline"
-                >
-                  Add "{trimmedRaw}" by exact username
-                </button>
-              )}
-              {showModeToggle && (
-                <button
-                  type="button"
-                  onClick={() => handleSwitchMode("email")}
-                  className="mt-1 inline-flex items-center gap-1 text-[10px] text-primary hover:underline"
-                >
-                  <AtSign className="h-3 w-3" />
-                  Invite by email instead
-                </button>
+              {!exactLookupCurrent || exactLookup.status === "checking" ? (
+                <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                  <Spinner className="size-3" /> Checking for an exact match…
+                </p>
+              ) : exactFoundUser ? (
+                <>
+                  <p className="text-[11px] text-muted-foreground">
+                    Not among people who share an org or project with you, but{" "}
+                    <span className="font-medium text-foreground">
+                      {exactFoundUser.username}
+                    </span>{" "}
+                    is an Aquilla user.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      multiSelect
+                        ? multiSelect.onToggleResult(exactFoundUser)
+                        : handlePick(exactFoundUser)
+                    }
+                    className="mt-1 inline-flex items-center gap-1 text-[11px] text-primary hover:underline"
+                  >
+                    <Check className="h-3 w-3" /> Add {exactFoundUser.username}
+                  </button>
+                </>
+              ) : exactAlreadyAdded ? (
+                <p className="text-[11px] text-muted-foreground">
+                  {exactUser?.username} is already a member.
+                </p>
+              ) : exactLookup.status === "notfound" ? (
+                <>
+                  <p className="text-[11px] text-muted-foreground">
+                    No Aquilla user named "{trimmedRaw}".
+                  </p>
+                  {showModeToggle && (
+                    <button
+                      type="button"
+                      onClick={() => handleSwitchMode("email")}
+                      className="mt-1 inline-flex items-center gap-1 text-[10px] text-primary hover:underline"
+                    >
+                      <AtSign className="h-3 w-3" />
+                      Invite by email instead
+                    </button>
+                  )}
+                </>
+              ) : (
+                // Lookup couldn't confirm (network/endpoint error) — never
+                // dead-end; let the exact username be resolved on submit.
+                <>
+                  <p className="text-[11px] text-muted-foreground">
+                    No match among people who share an org or project with you.
+                  </p>
+                  {multiSelect && (
+                    <button
+                      type="button"
+                      onClick={() => multiSelect.onStageTyped()}
+                      className="mt-1 inline-flex items-center gap-1 text-[10px] text-primary hover:underline"
+                    >
+                      Add "{trimmedRaw}" by exact username
+                    </button>
+                  )}
+                  {showModeToggle && (
+                    <button
+                      type="button"
+                      onClick={() => handleSwitchMode("email")}
+                      className="mt-1 inline-flex items-center gap-1 text-[10px] text-primary hover:underline"
+                    >
+                      <AtSign className="h-3 w-3" />
+                      Invite by email instead
+                    </button>
+                  )}
+                </>
               )}
             </div>
           )}

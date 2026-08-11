@@ -50,7 +50,7 @@ import { Page, PageHeader } from "@/components/ui/page"
 import { useProject } from "@/hooks/useProject"
 import { useProjectSettings } from "@/hooks/useProjectSettings"
 import { getProject, updateProject } from "@/lib/store/project-index"
-import { DEFAULT_COMPLETION_MAX_TOKENS, fetchModels, resolveProvider } from "@/lib/completion/completion-service"
+import { DEFAULT_COMPLETION_MAX_TOKENS, fetchModels, normalizeCompletionMaxTokens, resolveProvider } from "@/lib/completion/completion-service"
 import { buildCompletionSettings, DEFAULT_SYSTEM_PROMPT } from "@/hooks/useCompletionSettings"
 import { MAX_BATCH_COMPLETIONS } from "@/lib/workspace-actions/registry"
 import type {
@@ -185,7 +185,9 @@ function buildBaseline(project: ProjectRecord): Baseline {
     endpoint: project.completionSettings?.endpoint ?? "",
     apiKey: project.completionSettings?.apiKey ?? "",
     model: project.completionSettings?.model ?? "",
-    maxTokens: project.completionSettings?.maxTokens ?? DEFAULT_COMPLETION_MAX_TOKENS,
+    // Normalized so the field shows what drafting will actually send — legacy
+    // default snapshots (512/4096) are upgraded to the current default.
+    maxTokens: normalizeCompletionMaxTokens(project.completionSettings?.maxTokens),
     temperature: project.completionSettings?.temperature ?? 0.3,
     systemPrompt: project.completionSettings?.systemPrompt || DEFAULT_SYSTEM_PROMPT,
     llmHealthPenalty: project.completionSettings?.llmHealthPenalty ?? 0.1,

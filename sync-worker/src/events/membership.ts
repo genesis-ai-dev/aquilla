@@ -18,10 +18,15 @@
 //     admin notification (see member-removed.ts / project-do.ts).
 //
 // Grant paths mirror auth-worker/src/services/project-permissions.ts
-// (AD-12): direct project_members, org_members via projects.org_id, group
-// grants, creator. Platform operators (ADMIN_EMAILS) have no membership
-// rows — their tokens carry `src: "platform"` and callers skip this check
-// (the documented platform-admin exemption).
+// (AD-12): direct project_members, org_members via projects.org_id (gated at
+// ROLE.MAINTAINER — AQU-435: a sub-maintainer org_members row is not a grant
+// path, so demoting a Maintainer below the floor revokes their org-path
+// write access on the next flush, not just full org removal), group grants,
+// creator. Platform operators (ADMIN_EMAILS) have no membership rows — their
+// tokens carry `src: "platform"` and callers skip this check (the documented
+// platform-admin exemption).
+
+import { ROLE } from "./role-policy"
 
 interface MembershipRow {
   project_exists: boolean | number
@@ -58,7 +63,7 @@ export async function checkProjectMembership(
              UNION ALL
              SELECT 1 FROM org_members om
                JOIN projects p ON p.org_id = om.org_id
-              WHERE p.id = ? AND om.user_id = ?
+              WHERE p.id = ? AND om.user_id = ? AND om.role_level >= ${ROLE.MAINTAINER}
              UNION ALL
              SELECT 1 FROM group_members gm
                JOIN group_project_grants gpg ON gpg.group_id = gm.group_id

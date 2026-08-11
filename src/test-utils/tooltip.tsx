@@ -16,7 +16,8 @@
  * depend on the tooltip opening, never on elapsed time.
  */
 import { expect } from "vitest"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { render, screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import type { ReactElement } from "react"
 
 import { TooltipProvider } from "@/components/ui/tooltip"
@@ -33,8 +34,11 @@ export function renderWithTooltips(ui: ReactElement) {
  * a gated control's "why is this disabled?" explanation reachable.
  */
 export async function expectTooltip(trigger: Element, expected: string | RegExp) {
-  fireEvent.pointerEnter(trigger, { pointerType: "mouse" })
-  fireEvent.mouseEnter(trigger)
+  // Await the complete browser hover sequence (pointerover/enter/move plus
+  // mouseover/enter/move) inside React's async boundary. Manually firing only
+  // the two enter events intermittently left Base UI's delay group unopened
+  // when the full Cloudflare suite was under load (AQU-824).
+  await userEvent.setup().hover(trigger)
   await waitFor(() => {
     expect(screen.getByRole("tooltip")).toHaveTextContent(expected)
   })

@@ -51,6 +51,25 @@ describe("IDML read-surface pointer selection", () => {
     }, root)).toEqual({ kind: "plain", offset: 5 })
   })
 
+  it("counts a rendered line break when mapping a click on a later IDML line", () => {
+    document.body.innerHTML =
+      `<span data-idml-slot="3" data-idml-protected="slot">abc<br>xyz</span>`
+    const slot = document.querySelector<HTMLElement>("[data-idml-slot]")!
+    const secondLine = slot.lastChild!
+    const caret = document.createRange()
+    caret.setStart(secondLine, 3)
+    caret.collapse(true)
+    ;(
+      document as Document & { caretRangeFromPoint?: (x: number, y: number) => Range | null }
+    ).caretRangeFromPoint = () => caret
+
+    expect(idmlPointerSelectionFromPoint({
+      clientX: 1,
+      clientY: 1,
+      target: slot,
+    })).toEqual({ kind: "slot", slot: 3, offset: 7 })
+  })
+
   it("does not create a pointer selection for a protected slot", () => {
     document.body.innerHTML =
       `<span data-idml-slot="2" data-idml-protected="slot" contenteditable="false">LOCK</span>`

@@ -72,6 +72,11 @@ function roleLabel(roleLevel: number | null | undefined): string {
     : humanRoleName(roleLevel)
 }
 
+// AQU-789: removing a team member is a maintainer+ (600) action. Non-maintainers
+// who can view a team see this on a disabled Remove control instead of nothing.
+const REMOVE_REQUIRES_MAINTAINER_TOOLTIP =
+  "Only maintainers and org owners can remove members from a team. Ask a maintainer to remove someone."
+
 function lockedOrgRoleTooltip(roleLevel: number | null | undefined): string {
   const help = roleLevel != null ? roleHelpText(roleLevel) : ""
   const prefix = help || "This member's org-level role is unknown."
@@ -424,7 +429,23 @@ export function TeamDetail() {
         meta: { align: "right" as const, className: "w-10" },
         cell: ({ row }) => {
           const m = row.original
-          if (!isAdmin) return null
+          if (!isAdmin) {
+            /* AQU-789: removing a team member is a maintainer+ action. Show a
+               disabled control with the reason rather than omitting it, so it
+               doesn't read as a missing feature. */
+            return (
+              <AppTooltip content={REMOVE_REQUIRES_MAINTAINER_TOOLTIP} className="max-w-xs">
+                <span
+                  tabIndex={0}
+                  aria-disabled="true"
+                  aria-label={`Remove ${m.username} — maintainers only`}
+                  className="inline-flex cursor-not-allowed items-center text-xs text-muted-foreground/70 underline decoration-dotted"
+                >
+                  Remove
+                </span>
+              </AppTooltip>
+            )
+          }
           return (
             <DropdownMenu>
               <DropdownMenuTrigger

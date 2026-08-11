@@ -248,10 +248,10 @@ describe("OrgSwitcher", () => {
     await waitFor(() => expect(screen.getByTestId("loc")).toHaveTextContent("/orgs/42"))
   })
 
-  // AQU-624: clicking a guest org must actually switch — navigate to that org's
-  // scoped shared-projects overview and reflect the selection (checkmark +
-  // trigger label), instead of silently doing nothing.
-  it("guest org: click navigates to its scoped /shared overview and marks it selected", async () => {
+  // AQU-790: clicking a guest org switches to it using the SAME path convention
+  // as an owned org (`/orgs/<id>`, not the divergent `/shared?org=<id>`), and
+  // reflects the selection (checkmark + trigger label).
+  it("guest org: click navigates to its /orgs/:id overview and marks it selected", async () => {
     listMyOrgs.mockResolvedValue([
       { id: 1, name: "Acme", role: { level: 700, name: "owner" } },
     ])
@@ -267,8 +267,8 @@ describe("OrgSwitcher", () => {
     await waitFor(() => expect(screen.getByTestId("guest-orgs")).toBeInTheDocument())
     await act(async () => { screen.getByRole("option", { name: /guest org/i }).click() })
 
-    // Lands on the guest org's scoped shared view…
-    await waitFor(() => expect(screen.getByTestId("loc")).toHaveTextContent("/shared?org=2"))
+    // Lands on the guest org's path overview — same shape as an owned org…
+    await waitFor(() => expect(screen.getByTestId("loc")).toHaveTextContent("/orgs/2"))
     // …and the trigger now names the guest org as the current scope.
     expect(screen.getByRole("combobox", { name: /guest org/i })).toBeInTheDocument()
 
@@ -340,8 +340,9 @@ describe("OrgSwitcher", () => {
     expect(screen.queryByText("Alpha Org")).not.toBeInTheDocument()
   })
 
-  // AQU-624: returning to a member org from a guest's scoped view is symmetric —
-  // it navigates to that member org's overview.
+  // AQU-790: returning to a member org from a guest org view is symmetric — from
+  // the guest org's own path route (`/orgs/<guestId>`) it swaps to the member
+  // org's overview, exactly like switching between two owned orgs.
   it("guest org → member org: selecting a member org navigates back to its overview", async () => {
     listMyOrgs.mockResolvedValue([
       { id: 1, name: "Acme", role: { level: 700, name: "owner" } },
@@ -351,17 +352,17 @@ describe("OrgSwitcher", () => {
     ])
 
     render(
-      <MemoryRouter initialEntries={["/shared?org=2"]}>
+      <MemoryRouter initialEntries={["/orgs/2"]}>
         <OrgProvider><OrgSwitcher /><LocationProbe /></OrgProvider>
       </MemoryRouter>,
     )
-    // On the guest-scoped route the trigger already reflects the guest org.
+    // On the guest org's path route the trigger already reflects the guest org.
     await waitFor(() => expect(screen.getByRole("combobox", { name: /guest org/i })).toBeInTheDocument())
 
     await act(async () => { screen.getByRole("combobox", { name: /guest org/i }).click() })
     await act(async () => { screen.getByRole("option", { name: /acme/i }).click() })
 
-    // Org scope is path-based now, so the overview is `/orgs/1` rather than `/?org=1`.
+    // Org scope is path-based for both, so the overview is `/orgs/1`.
     await waitFor(() => expect(screen.getByTestId("loc")).toHaveTextContent("/orgs/1"))
   })
 })

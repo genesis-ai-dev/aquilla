@@ -16,8 +16,14 @@
 // Marketing pages are statically-served, standalone HTML documents (their own
 // build entry + this route). Adding one = a vite input + a STATIC_PAGES line.
 //
+// Every response also carries the security headers from ./security-headers.
+//
 // See docs/superpowers/specs/2026-05-30-bare-domain-routing-design.md
 //     docs/superpowers/specs/2026-06-22-homepage-beta-strip-and-page-design.md
+//     docs/OPSEC-REVIEW-2026-08-10.md (OPS-1 — why the CSP is split
+//       enforced/report-only)
+
+import { isLocalHost, withSecurityHeaders } from "./security-headers"
 
 // Standalone marketing pages: request path → static asset to serve. Each
 // bypasses the aq_hint cookie check so it's shareable and crawlable regardless
@@ -74,12 +80,13 @@ export default {
   async fetch(req: Request, env: Env): Promise<Response> {
     const res = await route(req, env)
     const host = new URL(req.url).hostname
-    if (host !== CANONICAL_HOST && host !== "localhost" && !host.endsWith(".localhost")) {
-      const wrapped = new Response(res.body, res)
+    // withSecurityHeaders already clones (asset-binding responses have
+    // immutable headers), so X-Robots-Tag rides along on the same clone.
+    const wrapped = withSecurityHeaders(res, host)
+    if (host !== CANONICAL_HOST && !isLocalHost(host)) {
       wrapped.headers.set("X-Robots-Tag", "noindex")
-      return wrapped
     }
-    return res
+    return wrapped
   },
 }
 

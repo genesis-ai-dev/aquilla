@@ -15,7 +15,7 @@ import type { ExternalErrorCode } from './errors'
 import { ROLE } from '../events/role-policy'
 import { assertCredentialScope } from './token-bridge'
 import { loadChangeset } from './store'
-import { CHANGESET_TTL_MS } from './prepare'
+import { approvalUrlFor, CHANGESET_TTL_MS } from './prepare'
 import { PLAN_IMPORT_MAX_CELLS } from './commands'
 import { MAX_ARTIFACT_BYTES } from './artifacts-route'
 import { handleExternalReadRequest } from './read-routes'
@@ -144,6 +144,23 @@ function getCapabilities(cred: ApiCredentialContext): McpToolResult {
         'prepare_translations\'s `commands` argument. Multiple LinkMedia commands may share ' +
         'one changeset; LinkMedia cannot mix with any other command kind.',
     },
+    multiLanguage: {
+      note:
+        'A project can hold MULTIPLE target languages at once via target-language lanes. A ' +
+        'lane is a language tag (e.g. "es", "pt") registered in the project\'s ' +
+        'settings.targetLanes array; every cell keeps one shared source plus one independent ' +
+        'target per lane. Omitting the lane everywhere uses the default lane (the project\'s ' +
+        'single targetLanguage) — existing single-language callers need no changes.',
+      workflow: [
+        '1. Register the lanes once: stage UpdateProjectSettings with settings.targetLanes: ["es", "pt"] (merge into the existing settings blob — the write replaces it — and pass the live ifMatchVersion).',
+        '2. Write per lane: each SetTranslation entry takes an optional laneId ("es" or "pt"). An unregistered laneId is rejected at prepare with validation_failed.',
+        '3. Read per lane: read_content takes an optional lane argument — target cells are filtered to that lane (source cells are always included). Omit it to get every lane (each target row carries its targetLang).',
+        '4. Importing a file can seed several lanes at once: PlanImport cells take variants: [{ laneId, content }] (REST-only).',
+      ],
+      preconditionScope:
+        'Preconditions and drift (plan_stale) are lane-scoped: concurrent edits to the SAME ' +
+        'cell in DIFFERENT lanes never invalidate each other\'s changesets.',
+    },
     limits: {
       changesetExpirySeconds: CHANGESET_TTL_MS / 1000,
       // Wave-1 validateCommands enforces no hard per-changeset command cap.
@@ -257,6 +274,9 @@ async function readContent(
   if (typeof args.limit === 'number') params.set('limit', String(args.limit))
   const cursor = str(args, 'cursor')
   if (cursor) params.set('cursor', cursor)
+  // AQU-538: optional target-language lane filter, forwarded to the cells read.
+  const lane = str(args, 'lane')
+  if (lane) params.set('lane', lane)
   const qs = params.toString() ? `?${params.toString()}` : ''
   const fileId = str(args, 'fileId')
   const path = fileId
@@ -308,6 +328,7 @@ async function prepareTranslations(
         cellId: t?.cellId,
         value: t?.value,
         ...(t?.valueHtml !== undefined ? { valueHtml: t.valueHtml } : {}),
+        ...(t?.laneId !== undefined ? { laneId: t.laneId } : {}),
       })),
     )
   }
@@ -439,7 +460,7 @@ async function confirmChangeset(
   const parsed = JSON.parse(errResult.content[0].text) as { error: { code: string } }
   if (parsed.error.code === 'confirmation_required') {
     return fail('confirmation_required', 'ask-mode changeset requires a human approval first', {
-      approvalUrl: `${env.BASE_URL ?? ''}/approve/${changesetId}`,
+      approvalUrl: approvalUrlFor(env, changesetId),
     })
   }
   return errResult

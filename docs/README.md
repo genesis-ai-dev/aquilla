@@ -11,9 +11,8 @@ design and audit material.
 - [System specification](SPEC.md) — current product and system boundaries.
 - [Sync architecture](SYNC.md) — current event, projection, realtime, and blob
   ownership.
-- [Staging](STAGING.md) — staging provisioning, refresh, deploy, and verification.
-- [Cloudflare Workers Builds](runbooks/cloudflare-workers-builds.md) — safe
-  repository-owned branch selection for the Cloudflare Git integration.
+- [Cloudflare Workers Builds](runbooks/cloudflare-workers-builds.md) — disconnected
+  build integrations, explicit deployment ownership, previews, and verification.
 - [E2E](../e2e/README.md) — local integration and smoke-test environment.
 - [RLS rollout](RLS-ROLLOUT.md) — Postgres row-level-security operations.
 

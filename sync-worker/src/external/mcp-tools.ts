@@ -99,8 +99,12 @@ export const MCP_TOOLS: McpToolDef[] = [
       'Read project content. Omit fileId to LIST the project\'s files; provide fileId to ' +
       'READ that file\'s cells (source + target). Supports incremental reads: pass since ' +
       '(a server sequence) to fetch only changed cells, and limit/cursor for pagination. ' +
-      'Returns { data, nextCursor, ... }. Use this together with search_project to gather ' +
-      'context before staging translations.',
+      'Multi-language projects: a cell can carry one target per LANE (a language tag ' +
+      'registered in the project\'s settings.targetLanes, e.g. "es", "pt" — see ' +
+      'get_capabilities.multiLanguage). Pass lane to filter target cells to one lane ' +
+      '(source cells are always included); omit it to get every lane — each target row ' +
+      'carries its targetLang. Returns { data, nextCursor, ... }. Use this together with ' +
+      'search_project to gather context before staging translations.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -109,6 +113,11 @@ export const MCP_TOOLS: McpToolDef[] = [
         since: { type: 'number', description: 'Only cells changed after this server seq (delta read).' },
         limit: { type: 'number', description: 'Page size.' },
         cursor: { type: 'string', description: 'Opaque pagination cursor from a prior nextCursor.' },
+        lane: {
+          type: 'string',
+          description:
+            'Target-language lane filter (e.g. "es"). Only target cells in this lane are returned; omit for all lanes.',
+        },
       },
       required: ['projectId'],
       additionalProperties: false,
@@ -177,7 +186,12 @@ export const MCP_TOOLS: McpToolDef[] = [
         changesetId: { type: 'string', description: 'Optional client-supplied UUIDv7 for idempotency.' },
         translations: {
           type: 'array',
-          description: 'SetTranslation entries to stage.',
+          description:
+            'SetTranslation entries to stage. Each may name a target-language lane via ' +
+            'laneId to write one of a multi-language project\'s targets (e.g. "es", "pt"); ' +
+            'omit laneId for the default lane. The lane must already be registered in the ' +
+            'project\'s settings.targetLanes (via UpdateProjectSettings) or prepare returns ' +
+            'validation_failed — see get_capabilities.multiLanguage for the full workflow.',
           items: {
             type: 'object',
             properties: {
@@ -185,6 +199,11 @@ export const MCP_TOOLS: McpToolDef[] = [
               fileId: { type: 'string' },
               value: { type: 'string', description: 'Plain-text translation value.' },
               valueHtml: { type: 'string', description: 'Optional rich-text HTML value.' },
+              laneId: {
+                type: 'string',
+                description:
+                  'Target-language lane (a registered settings.targetLanes tag, e.g. "es"). Omit for the default lane.',
+              },
             },
             required: ['cellId', 'fileId', 'value'],
             additionalProperties: false,

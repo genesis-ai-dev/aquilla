@@ -59,7 +59,7 @@ vi.mock("@/lib/completion/batch-completion", () => ({
 
 import type { CompletionSettings } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
-import { DEFAULT_SYSTEM_PROMPT } from "@/lib/completion/completion-service"
+import { DEFAULT_COMPLETION_MAX_TOKENS, DEFAULT_SYSTEM_PROMPT } from "@/lib/completion/completion-service"
 import { createUsfmFootnoteMarker } from "@/lib/footnotes/insert"
 import { renderHook, act } from "@testing-library/react"
 import { useCompletion } from "./useCompletion"
@@ -223,5 +223,32 @@ describe("completeSingle on a footnoted source cell", () => {
     expect(commitMock).not.toHaveBeenCalled()
     expect(result.current.completing.get("cell-1")).toBe("error")
     expect(result.current.errors.get("cell-1")).toBeTruthy()
+  })
+})
+
+// BGP long-cell truncation (2026-08): saving any project setting snapshots the
+// whole CompletionSettings object, so projects that saved under an older
+// default carry maxTokens 512 (or 4096) as a persisted value that overrides a
+// raised shipped default — and ~2.2k-char cells came back cut off. The hook
+// must treat those legacy default snapshots as "never customized" and send the
+// current default budget.
+describe("legacy maxTokens snapshot upgrade", () => {
+  beforeEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it("sends the current default budget when project settings carry the old 512 default", async () => {
+    const fetchMock = mockFetchOk("Verset un")
+    const commitMock = vi.fn().mockResolvedValue(undefined)
+    const { result } = renderCompletion(commitMock, PLAIN_CELL)
+
+    await act(async () => {
+      await result.current.completeSingle(PLAIN_CELL as never)
+    })
+
+    const requestInit = fetchMock.mock.calls[0]![1] as { body: string }
+    const body = JSON.parse(requestInit.body) as { max_tokens: number }
+    // SETTINGS above pins maxTokens: 512 — the pre-2026-07-29 default.
+    expect(body.max_tokens).toBe(DEFAULT_COMPLETION_MAX_TOKENS)
   })
 })

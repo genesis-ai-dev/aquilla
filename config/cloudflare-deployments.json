@@ -1,0 +1,166 @@
+{
+  "schemaVersion": 1,
+  "surfaces": {
+    "web": {
+      "directory": ".",
+      "requiredSecrets": [],
+      "requiredBindings": {
+        "ASSETS": "assets"
+      },
+      "environments": {
+        "production": {
+          "worker": "aquilla-web",
+          "routes": [
+            "aquilla.app/*"
+          ],
+          "requiredSecrets": [
+            "DIARIZATION_MODAL_URL",
+            "DIARIZATION_PUBLIC_BASE"
+          ],
+          "plainText": {},
+          "hyperdrives": {},
+          "r2Buckets": {}
+        },
+        "development": {
+          "worker": "aquilla-web-development",
+          "routes": [
+            "dev.aquilla.app/*"
+          ],
+          "requiredSecrets": [],
+          "plainText": {},
+          "hyperdrives": {},
+          "r2Buckets": {}
+        }
+      }
+    },
+    "identity": {
+      "directory": "auth-worker",
+      "requiredSecrets": [
+        "OPENROUTER_API_KEY",
+        "RESEND_API_KEY",
+        "SECRET_KEY",
+        "SYNC_SECRET_KEY"
+      ],
+      "requiredBindings": {
+        "CF_VERSION_METADATA": "version_metadata",
+        "EMAIL": "send_email"
+      },
+      "environments": {
+        "production": {
+          "worker": "aquilla-identity",
+          "apiHost": "api.aquilla.app",
+          "routes": [
+            "api.aquilla.app/identity/*",
+            "api.aquilla.app/chat/*"
+          ],
+          "requiredSecrets": [
+            "FRONTIER_D1_API_TOKEN",
+            "FRONTIER_D1_DATABASE_ID",
+            "GITLAB_ADMIN_TOKEN",
+            "MONDAY_CLIENT_SECRET",
+            "MONDAY_SIGNING_SECRET"
+          ],
+          "plainText": {
+            "ENVIRONMENT": "production",
+            "BASE_URL": "https://aquilla.app",
+            "SYNC_WORKER_URL": "https://api.aquilla.app/sync",
+            "DEPLOYMENT_WORKER_NAME": "aquilla-identity"
+          },
+          "hyperdrives": {
+            "HYPERDRIVE": "69bcc10e67464f2eaf4fe91a9141e7cd"
+          },
+          "r2Buckets": {
+            "SNAPSHOTS": "aquilla-snapshots"
+          }
+        },
+        "development": {
+          "worker": "aquilla-dev-identity",
+          "apiHost": "api.dev.aquilla.app",
+          "routes": [
+            "api.dev.aquilla.app/identity/*",
+            "api.dev.aquilla.app/chat/*"
+          ],
+          "requiredSecrets": [
+            "FRONTIER_D1_API_TOKEN",
+            "FRONTIER_D1_DATABASE_ID",
+            "GITLAB_ADMIN_TOKEN"
+          ],
+          "plainText": {
+            "ENVIRONMENT": "development",
+            "BASE_URL": "https://dev.aquilla.app",
+            "SYNC_WORKER_URL": "https://api.dev.aquilla.app/sync",
+            "DEPLOYMENT_WORKER_NAME": "aquilla-dev-identity"
+          },
+          "hyperdrives": {
+            "HYPERDRIVE": "53581197ff7a4202a5ed0ef08537d4a6"
+          },
+          "r2Buckets": {
+            "SNAPSHOTS": "aquilla-snapshots-dev"
+          }
+        }
+      }
+    },
+    "sync": {
+      "directory": "sync-worker",
+      "requiredSecrets": [
+        "SYNC_SECRET_KEY"
+      ],
+      "requiredBindings": {
+        "CF_VERSION_METADATA": "version_metadata",
+        "EMAIL": "send_email",
+        "ProjectSync": "durable_object_namespace"
+      },
+      "environments": {
+        "production": {
+          "worker": "aquilla-sync-worker",
+          "apiHost": "api.aquilla.app",
+          "routes": [
+            "api.aquilla.app/sync/*"
+          ],
+          "requiredSecrets": [
+            "DIARIZATION_MODAL_URL",
+            "DIARIZATION_PUBLIC_BASE",
+            "DIARIZATION_SHARED_SECRET",
+            "OMNIVOICE_TOKEN",
+            "OMNIVOICE_URL",
+            "SEED_VC_TOKEN",
+            "SEED_VC_URL"
+          ],
+          "plainText": {
+            "ENVIRONMENT": "production",
+            "AUTH_WORKER_URL": "https://api.aquilla.app/identity",
+            "DEPLOYMENT_WORKER_NAME": "aquilla-sync-worker",
+            "POSTHOG_KEY": "phc_oTksJRNEdLEaLD4wmdd2XcR4xaR4n52eA5VGDytW55Ln"
+          },
+          "hyperdrives": {
+            "HYPERDRIVE": "69bcc10e67464f2eaf4fe91a9141e7cd"
+          },
+          "r2Buckets": {
+            "LFS_SRC": "codex-attachments-v1-1",
+            "SNAPSHOTS": "aquilla-snapshots"
+          }
+        },
+        "development": {
+          "worker": "aquilla-sync-worker-dev",
+          "apiHost": "api.dev.aquilla.app",
+          "routes": [
+            "api.dev.aquilla.app/sync/*"
+          ],
+          "requiredSecrets": [],
+          "plainText": {
+            "ENVIRONMENT": "development",
+            "AUTH_WORKER_URL": "https://api.dev.aquilla.app/identity",
+            "DEPLOYMENT_WORKER_NAME": "aquilla-sync-worker-dev"
+          },
+          "hyperdrives": {
+            "HYPERDRIVE": "53581197ff7a4202a5ed0ef08537d4a6"
+          },
+          "r2Buckets": {
+            "LFS_SRC": "codex-attachments-v1-1",
+            "SNAPSHOTS": "aquilla-snapshots-dev"
+          }
+        }
+      }
+    }
+  }
+}

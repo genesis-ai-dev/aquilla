@@ -5,7 +5,7 @@ import path from "node:path"
 import { fileURLToPath } from "node:url"
 import process from "node:process"
 
-type Target = "production" | "staging" | "dev"
+type Target = "production" | "dev"
 type Command = "status" | "apply" | "baseline" | "backfill-progress"
 type PgKey = "HOST" | "DB" | "ROLE" | "PASSWORD"
 
@@ -15,19 +15,15 @@ const TARGET_ALIASES: Record<string, Target> = {
   main: "production",
   prod: "production",
   production: "production",
-  staging: "staging",
-  stage: "staging",
   dev: "dev",
   development: "dev",
 }
 const TARGET_BRANCH_DEFAULTS: Record<Target, string> = {
   production: "production",
-  staging: "staging",
   dev: "dev",
 }
 const TARGET_ENV_NAMES: Record<Target, string[]> = {
   production: ["PRODUCTION", "PROD"],
-  staging: ["STAGING"],
   dev: ["DEV", "DEVELOPMENT"],
 }
 
@@ -38,7 +34,7 @@ const DEFAULTS: Partial<Record<PgKey, string>> = {
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 
 function usage(): never {
-  console.error("usage: tsx scripts/neon-target.ts <production|staging|dev> <status|apply|baseline|backfill-progress>")
+  console.error("usage: tsx scripts/neon-target.ts <production|dev> <status|apply|baseline|backfill-progress>")
   process.exit(1)
 }
 

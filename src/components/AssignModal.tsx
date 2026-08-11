@@ -399,21 +399,20 @@ export function AssignModal({
 
     if (scopeKind === "selection" || scopeKind === "verses") {
       if (!activeFileId) { setError("No file open."); return }
-      const file = projectFiles.find((f) => f.id === activeFileId)
-      const fileName = file?.name ?? activeFileId
       scope = [{ fileId: activeFileId }]
+      // File identity rides `fileId` (and the Assigned-to-me File column) —
+      // keep scopeLabel as the work description only, not "… in <fileName>".
       scopeLabel = scopeKind === "selection"
-        ? `${selectedCellIds.size} ${segmentNoun}(s) in ${fileName}`
+        ? `${selectedCellIds.size} ${segmentNoun}(s)`
         : isScripture
-          ? `All verses in ${fileName}`
-          : `Entire ${fileName}`
+          ? "All verses"
+          : "Entire file"
       apiScopeKind = "books"
     } else if (scopeKind === "chapters") {
       if (!activeFileId) { setError("No file open."); return }
       if (selectedChapters.size === 0) { setError(`Select at least one ${sectionSingularLower}.`); return }
-      const file = projectFiles.find((f) => f.id === activeFileId)
       scope = Array.from(selectedChapters).map((ch) => ({ fileId: activeFileId, chapter: ch }))
-      scopeLabel = `${Array.from(selectedChapters).join(", ")} in ${file?.name ?? activeFileId}`
+      scopeLabel = Array.from(selectedChapters).join(", ")
       apiScopeKind = "chapters"
     }
 

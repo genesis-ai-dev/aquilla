@@ -206,7 +206,7 @@ describe("verses scope", () => {
     const args = mockCreate.mock.calls[0][0]
     expect(args.scopeKind).toBe("books")
     expect(args.scope).toEqual([{ fileId: "file-1" }])
-    expect(args.scopeLabel).toContain("Genesis")
+    expect(args.scopeLabel).toBe("All verses")
     expect(args.assigneeUserId).toBe(42)
     expect(args.jwt).toBe("test-jwt")
     expect(args.author).toBe("wendi")
@@ -227,7 +227,7 @@ describe("selection scope", () => {
     await waitFor(() => expect(mockCreate).toHaveBeenCalledTimes(1))
     const args = mockCreate.mock.calls[0][0]
     expect(args.scopeKind).toBe("books")
-    expect(args.scopeLabel).toContain("3 verse(s)")
+    expect(args.scopeLabel).toBe("3 verse(s)")
     expect(args.assigneeUserId).toBe(99)
   })
 })
@@ -358,6 +358,8 @@ describe("chapters scope", () => {
     ])
     expect(args.scopeLabel).toContain("GEN 1")
     expect(args.scopeLabel).toContain("GEN 2")
+    expect(args.scopeLabel).not.toContain("Genesis")
+    expect(args.scopeLabel).toBe("GEN 1, GEN 2")
   })
 })
 
@@ -427,7 +429,7 @@ describe("non-scripture unit copy (AQU-658)", () => {
     await pickSelectOption(/assign to/i, /anna/)
     fireEvent.click(screen.getByRole("button", { name: /^assign$/i }))
     await waitFor(() => expect(mockCreate).toHaveBeenCalledTimes(1))
-    expect(mockCreate.mock.calls[0][0].scopeLabel).toContain("2 segment(s)")
+    expect(mockCreate.mock.calls[0][0].scopeLabel).toBe("2 segment(s)")
     expect(mockCreate.mock.calls[0][0].scopeLabel).not.toContain("verse")
   })
 })

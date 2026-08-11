@@ -1,8 +1,15 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { render, screen, waitFor } from "@testing-library/react"
+import { render, screen, waitFor, fireEvent } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
 import { OrgProvider } from "@/context/OrgContext"
+import { fmtShortCalendarDate } from "@/lib/format-date"
 import { AssignedToMe } from "./AssignedToMe"
+
+const navigate = vi.fn()
+vi.mock("react-router-dom", async () => {
+  const actual = await vi.importActual<typeof import("react-router-dom")>("react-router-dom")
+  return { ...actual, useNavigate: () => navigate }
+})
 
 vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({ session: { jwt: "jwt", username: "anna", createdAt: "x" }, loading: false }),
@@ -25,6 +32,7 @@ const mockGetMy = vi.mocked(getMyAssignmentsForOrg)
 beforeEach(() => {
   localStorage.clear()
   vi.clearAllMocks()
+  navigate.mockClear()
 })
 afterEach(() => vi.restoreAllMocks())
 
@@ -39,49 +47,53 @@ function renderInbox() {
 }
 
 describe("AssignedToMe", () => {
-  it("shows explicit progress while assignments are unresolved", async () => {
+  it("shows a loading skeleton while assignments are unresolved", async () => {
     mockGetMy.mockImplementationOnce(() => new Promise(() => {}))
     renderInbox()
 
-    expect(
-      await screen.findByRole("status", { name: "Loading assignments" }),
-    ).toHaveAttribute("aria-busy", "true")
+    // Match TeamsList: pulse card shell while the org inbox loads.
+    await waitFor(() => expect(document.querySelector(".animate-pulse")).toBeTruthy())
   })
 
   it("aggregates the caller's open assignments across projects with progress", async () => {
     // One org-level request (GET /orgs/:orgId/assignments/mine) replaces the
     // old per-project fan-out — rows arrive with projectName attached.
     mockGetMy.mockResolvedValue([
-      { assignmentId: "a1", projectId: "pa", projectName: "John", fileId: "f1", scopeKind: "books", scopeLabel: "John", targetLang: "", deadline: "2026-06-30", note: null, cellsTotal: 10, cellsDone: 4, createdAt: 200 },
-      { assignmentId: "a2", projectId: "pb", projectName: "Mark", fileId: "f2", scopeKind: "chapters", scopeLabel: "Mark · MRK 1", targetLang: "", deadline: null, note: null, cellsTotal: 5, cellsDone: 5, createdAt: 100 },
+      { assignmentId: "a1", projectId: "pa", projectName: "John", fileId: "f1", fileName: "01-JHN.usfm", scopeKind: "books", scopeLabel: "John", targetLang: "", deadline: "2026-06-30", note: null, cellsTotal: 10, cellsDone: 4, createdAt: 200 },
+      { assignmentId: "a2", projectId: "pb", projectName: "Mark", fileId: "f2", fileName: "02-MRK.usfm", scopeKind: "chapters", scopeLabel: "Mark · MRK 1", targetLang: "", deadline: null, note: null, cellsTotal: 5, cellsDone: 5, createdAt: 100 },
     ])
     renderInbox()
 
-    await waitFor(() => expect(screen.getAllByText("John").length).toBeGreaterThan(0))
+    await waitFor(() => expect(screen.getByTestId("org-assigned-table")).toBeInTheDocument())
     expect(screen.getByText("Mark · MRK 1")).toBeInTheDocument()
+    expect(screen.getByText("01-JHN.usfm")).toBeInTheDocument()
+    expect(screen.getByText("02-MRK.usfm")).toBeInTheDocument()
     expect(screen.getByText("4/10 cells · 40%")).toBeInTheDocument()
     expect(screen.getByText("5/5 cells · 100%")).toBeInTheDocument()
-    expect(screen.getByText("Due 2026-06-30")).toBeInTheDocument()
+    // Admin-console DateTooltip short calendar label (not raw ISO).
+    expect(screen.getByText(fmtShortCalendarDate("2026-06-30"))).toBeInTheDocument()
     expect(mockGetMy).toHaveBeenCalledWith("jwt", 1)
   })
 
   // AQU-538 (§3.5): a lane-pinned assignment shows a lane chip and deep-links
   // into the project at that lane (?lane=<tag>); the default lane ('') does not.
-  it("renders a lane chip and appends ?lane= for a lane-pinned assignment", async () => {
+  // AQU-690: when fileId is present, open that file in the editor.
+  it("renders a lane chip and navigates with ?lane= for a lane-pinned assignment", async () => {
     mockGetMy.mockResolvedValue([
-      { assignmentId: "a1", projectId: "pa", projectName: "John", fileId: "f1", scopeKind: "books", scopeLabel: "John scope", targetLang: "es", deadline: null, note: null, cellsTotal: 10, cellsDone: 4, createdAt: 200 },
-      { assignmentId: "a2", projectId: "pb", projectName: "Mark", fileId: "f2", scopeKind: "books", scopeLabel: "Mark scope", targetLang: "", deadline: null, note: null, cellsTotal: 5, cellsDone: 1, createdAt: 100 },
+      { assignmentId: "a1", projectId: "pa", projectName: "John", fileId: "f1", fileName: "01-JHN.usfm", scopeKind: "books", scopeLabel: "John scope", targetLang: "es", deadline: null, note: null, cellsTotal: 10, cellsDone: 4, createdAt: 200 },
+      { assignmentId: "a2", projectId: "pb", projectName: "Mark", fileId: "f2", fileName: "02-MRK.usfm", scopeKind: "books", scopeLabel: "Mark scope", targetLang: "", deadline: null, note: null, cellsTotal: 5, cellsDone: 1, createdAt: 100 },
     ])
     renderInbox()
 
     await waitFor(() => expect(screen.getByText("John scope")).toBeInTheDocument())
     // The lane chip renders the tag for the pinned lane only.
     expect(screen.getByText("es")).toBeInTheDocument()
-    // The pinned assignment's link carries ?lane=es; the default-lane one doesn't.
-    const esLink = screen.getByText("John scope").closest("a")
-    expect(esLink?.getAttribute("href")).toContain("?lane=es")
-    const defLink = screen.getByText("Mark scope").closest("a")
-    expect(defLink?.getAttribute("href")).not.toContain("lane=")
+
+    fireEvent.click(screen.getByText("John scope"))
+    expect(navigate).toHaveBeenCalledWith("/project/pa/editor/file/f1?lane=es")
+
+    fireEvent.click(screen.getByText("Mark scope"))
+    expect(navigate).toHaveBeenCalledWith("/project/pb/editor/file/f2")
   })
 
   it("shows an empty state when there are no assignments", async () => {
@@ -118,11 +130,28 @@ describe("AssignedToMe", () => {
       { assignmentId: "a1", projectId: "pa", projectName: "John", fileId: "f1", scopeKind: "books", scopeLabel: "John", targetLang: "", deadline: null, note: null, cellsTotal: 10, cellsDone: 4, createdAt: 200 },
     ])
     renderInbox()
-    await waitFor(() => expect(screen.getAllByText("John").length).toBeGreaterThan(0))
+    await waitFor(() => expect(screen.getByTestId("org-assigned-table")).toBeInTheDocument())
 
     const scrollContainer = screen.getByTestId("assigned-to-me-scroll")
     expect(scrollContainer.className).toMatch(/\bh-full\b/)
     expect(scrollContainer.className).toMatch(/\boverflow-y-auto\b/)
     expect(scrollContainer.className).not.toMatch(/overflow-hidden/)
+  })
+
+  it("search narrows the table by scope, project, or file name", async () => {
+    mockGetMy.mockResolvedValue([
+      { assignmentId: "a1", projectId: "pa", projectName: "John", fileId: "f1", fileName: "01-JHN.usfm", scopeKind: "books", scopeLabel: "John scope", targetLang: "", deadline: null, note: null, cellsTotal: 10, cellsDone: 4, createdAt: 200 },
+      { assignmentId: "a2", projectId: "pb", projectName: "Mark", fileId: "f2", fileName: "02-MRK.usfm", scopeKind: "chapters", scopeLabel: "Mark · MRK 1", targetLang: "", deadline: null, note: null, cellsTotal: 5, cellsDone: 1, createdAt: 100 },
+    ])
+    renderInbox()
+    await waitFor(() => expect(screen.getByText("John scope")).toBeInTheDocument())
+
+    fireEvent.change(screen.getByPlaceholderText("Search assignments…"), { target: { value: "MRK" } })
+    await waitFor(() => expect(screen.getByText("Mark · MRK 1")).toBeInTheDocument())
+    expect(screen.queryByText("John scope")).toBeNull()
+
+    fireEvent.change(screen.getByPlaceholderText("Search assignments…"), { target: { value: "01-JHN" } })
+    await waitFor(() => expect(screen.getByText("John scope")).toBeInTheDocument())
+    expect(screen.queryByText("Mark · MRK 1")).toBeNull()
   })
 })

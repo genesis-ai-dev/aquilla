@@ -52,3 +52,31 @@ listed here.
   bundling with smaller deletions. Proof needed: zero importers/JSX usage
   (component + string route matches), and confirm `OrgHome.tsx` covers the same
   surface before deleting.
+
+## 2026-08-11 — comment/doc drift (chore/code-health-2026-08-11-comments)
+
+Note: an open PR (#316, unmerged as of this run) also targets several items in the
+dead-code list above — re-check zero-importer status against current `dev` before
+acting on those entries, in case #316 lands first.
+
+This run fixed the small, already-scoped "frontier-server" drift candidate (4 files:
+`src/lib/sync/file-projection.ts`, `src/lib/sync/archive.ts`,
+`src/lib/store/project-index.ts`, `src/lib/parsers/types.ts` — comments describing
+current request routing said "frontier-server," a retired service; the current
+backend is auth-worker/aquilla-identity). Comment-only, done.
+
+Left for a future run:
+
+- **"D1 is the live datastore" comment drift** — systemic, 500+ hits across dozens of
+  files (sampled: `src/hooks/useCells.ts:1`, `src/components/HistoryDrawer.tsx:20`,
+  `src/components/EditorTable.tsx:697,4816`). Comments describe D1 as the live
+  datastore/audit source; the D1→Postgres (Neon/Hyperdrive) cutover is complete per
+  CLAUDE.md. Too large for one ≤300-line/≤8-file PR — scope a future run to one
+  directory at a time (e.g. `src/hooks/` first), and confirm each hit is genuinely
+  describing D1 as *currently* live (not "migrated from D1" framing, which is already
+  correct and should be left alone) before editing it.
+- Other "frontier-server" mentions in `sync-worker/src/cors.ts:4` and
+  `sync-worker/src/admin.ts:24` describe current auth flow in similar present-tense
+  terms and are good candidates too, but touching `sync-worker/` requires running its
+  own test suite (`cd sync-worker && npm test`) per the routine — bundle with a
+  sync-worker-scoped pass rather than this src/-only one.

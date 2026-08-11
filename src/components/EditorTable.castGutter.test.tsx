@@ -116,6 +116,12 @@ function makeStore(): CellStore {
       row("cell-heading", "target", "", "paratext"),
       row("cell-empty", "source", ""),
       row("cell-empty", "target", ""),
+      // A transcribed media cell whose stored `value` is the import filename:
+      // the second row the old text rule quietly dropped. (It dropped this one
+      // even though the rule appeared to fall back to `transcription` — the
+      // `??` never fired, because cell.original is always a string.)
+      { ...row("cell-transcribed", "source", "episode-03.mp3"), transcription: "spoken words" } as CellRow,
+      row("cell-transcribed", "target", ""),
     ],
     { full: true, maxServerSeq: 1 },
   )
@@ -158,13 +164,32 @@ function renderTable(opts: {
 const rowEl = (cellId: string) => document.querySelector(`[data-cell-id="${cellId}"]`) as HTMLElement
 
 describe("EditorTable — character gutter", () => {
-  it("speaking rows get a circle; structure and empty rows get none", async () => {
+  it("only STRUCTURE rows go without a circle", async () => {
     renderTable()
     await screen.findByText("Mary's line")
     expect(within(rowEl("cell-cast")).getByTestId("gutter-voice")).toBeInTheDocument()
     expect(within(rowEl("cell-plain")).getByTestId("gutter-voice")).toBeInTheDocument()
     expect(within(rowEl("cell-heading")).queryByTestId("gutter-voice")).toBeNull()
-    expect(within(rowEl("cell-empty")).queryByTestId("gutter-voice")).toBeNull()
+  })
+
+  // AQU-646 round 8: this assertion is INVERTED from what it said before. The
+  // rule used to require source text, which meant a line someone had just added
+  // into a silence — blank by definition, because nobody has written it yet —
+  // had no way to be given a character at all. The 40px gutter column is
+  // reserved unconditionally, so it read as a missing control, not a missing
+  // column.
+  it("a line nobody has written yet still offers a character, unassigned", async () => {
+    renderTable()
+    await screen.findByText("Mary's line")
+    const circle = within(rowEl("cell-empty")).getByTestId("gutter-voice")
+    expect(circle).toBeInTheDocument()
+    expect(circle).toHaveAttribute("data-explicit", "false")
+  })
+
+  it("...and so does a transcribed clip whose source text is a filename", async () => {
+    renderTable()
+    await screen.findByText("Mary's line")
+    expect(within(rowEl("cell-transcribed")).getByTestId("gutter-voice")).toBeInTheDocument()
   })
 
   it("explicit casting is solid; unassigned AND dangling assignments read as fallback", async () => {

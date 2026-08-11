@@ -434,6 +434,12 @@ export function TimelineEditor({
     [seekTo, onRevealGap, sourceRegions],
   )
 
+  // AQU-646 round 8: in this workflow every cell is a text cell, so the header
+  // read "Subtitle" and changed as you clicked around. Sam asked for it to stay
+  // "Dialogue" for now — pinned, so it reads the same with a chip selected and
+  // with none.
+  const textHeadingLabel = drawsSourceBand ? "Dialogue" : undefined
+
   // Stretches of film that no cell covers — where a line can still be added.
   // Derived from the same sweep the Source track draws, so the two can never
   // disagree about where there is room.
@@ -1221,8 +1227,8 @@ export function TimelineEditor({
           The slot is owned by the workspace; portal when it exists, render
           inline when this editor is mounted alone (tests). */}
       {chipStripSlot
-        ? createPortal(<MediaTextHeader cell={currentCell} />, chipStripSlot)
-        : <MediaTextHeader cell={currentCell} />}
+        ? createPortal(<MediaTextHeader cell={currentCell} headingLabel={textHeadingLabel} />, chipStripSlot)
+        : <MediaTextHeader cell={currentCell} headingLabel={textHeadingLabel} />}
     </div>
   )
 }

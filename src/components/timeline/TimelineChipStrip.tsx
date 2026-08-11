@@ -255,7 +255,24 @@ export function TimelineTimingRow({ cell, chipStats, audioMissing }: TimelineChi
  * shot) and the segment navigator — deliberately NOT the timings, which belong
  * to the timeline, and deliberately still the navigator, which walks this list.
  */
-export function MediaTextHeader({ cell }: { cell: CellData | null }) {
+export function MediaTextHeader({
+  cell,
+  headingLabel,
+}: {
+  cell: CellData | null
+  /**
+   * AQU-646 round 8: pin the section label instead of deriving it from the
+   * selected chip. In the VTT-plus-footage workflow every cell is a text cell,
+   * so the heading read "Subtitle" and changed under you as you clicked around
+   * — Sam asked for it to stay "Dialogue" for now, in BOTH states, since with a
+   * chip selected and with none it is the same heading to the eye.
+   *
+   * A separate value on purpose: `isDialogue` below also gates the Camera pill,
+   * which is correctly hidden for text cells, so the two must not be the same
+   * boolean.
+   */
+  headingLabel?: string
+}) {
   const isDialogue = (cell?.medium ?? "media") === "media"
   const castName =
     cell?.metadata && typeof cell.metadata.cast_name === "string"
@@ -275,7 +292,7 @@ export function MediaTextHeader({ cell }: { cell: CellData | null }) {
           back to the section's own name when nothing is selected so the header
           doesn't blink in and out. */}
       <span className="shrink-0 text-xs font-medium text-muted-foreground">
-        {isDialogue ? "Dialogue" : "Subtitle"}
+        {headingLabel ?? (isDialogue ? "Dialogue" : "Subtitle")}
       </span>
       {castName && (
         <Pill>

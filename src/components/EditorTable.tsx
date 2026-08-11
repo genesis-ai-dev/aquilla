@@ -5220,17 +5220,26 @@ function EditorRow({
     displayLabel: importDisplayLabel(cell.metadata),
   })
   // ── Character gutter (2026-08-07, stacked media lens only) ──────────────
-  // A row "speaks" unless it's structure (paratext/heading) or has no source
-  // text at all — the same set whose number pill is suppressed, so the two
-  // left-edge columns read consistently. The voice resolves through the LIVE
-  // tts settings (castAssignments → per-cell pin → default); "explicit" is
-  // gated through findVoice so an assignment pointing at a DELETED voice
-  // truthfully renders as the faded fallback rather than solid-but-narrator.
+  // A row "speaks" unless it's STRUCTURE (paratext/heading) — the same set
+  // whose number pill is suppressed, so the two left-edge columns read
+  // consistently. The voice resolves through the LIVE tts settings
+  // (castAssignments → per-cell pin → default); "explicit" is gated through
+  // findVoice so an assignment pointing at a DELETED voice truthfully renders
+  // as the faded fallback rather than solid-but-narrator.
+  //
+  // AQU-646 round 8: the rule used to ALSO require source text, which is what
+  // the comment above has always claimed the number pill does — and it does
+  // not. Two rows lost their circle to that: a line someone just added into a
+  // silence, which has no text yet by definition, and a transcribed media cell
+  // whose stored `value` is the import filename. (Reaching for `??` there
+  // never helped either: cell.original is decodeHtmlEntities(value ?? ""), so
+  // it is always a string and never nullish, and cell.transcription was never
+  // consulted.) The 40px gutter column is reserved unconditionally, so a
+  // missing circle read as a missing CONTROL rather than a missing column.
   const gutterSpeaking =
     castGutter &&
     cell.type !== "paratext" &&
-    cell.type !== "heading" &&
-    Boolean((cell.original ?? cell.transcription ?? "").trim())
+    cell.type !== "heading"
   const gutterVoice = gutterSpeaking
     ? resolveCastVoice(ttsSettings, cell.id, cell.ttsSettings?.voiceId)
     : null

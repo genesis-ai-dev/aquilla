@@ -228,6 +228,31 @@ describe("MediaTextHeader", () => {
     expect(screen.getByTestId("tl-dialogue-header")).toHaveTextContent("Dialogue")
   })
 
+  // AQU-646 round 8: in the VTT-plus-footage workflow every cell is a text
+  // cell, so the derived label read "Subtitle" and changed under you as you
+  // clicked around. Sam asked for it to stay "Dialogue" for now — in BOTH
+  // states, since with a chip selected and with none it is the same heading.
+  it("a pinned label overrides the derived one, in both states", () => {
+    const { rerender } = render(
+      <MediaTextHeader cell={cell({ medium: "text", startTime: 1, endTime: 3 })} headingLabel="Dialogue" />,
+    )
+    expect(screen.getByTestId("tl-dialogue-header")).toHaveTextContent("Dialogue")
+    rerender(<MediaTextHeader cell={null} headingLabel="Dialogue" />)
+    expect(screen.getByTestId("tl-dialogue-header")).toHaveTextContent("Dialogue")
+  })
+
+  it("pinning the label does NOT bring back the Camera pill for a text cell", () => {
+    // The label became its own value precisely so it could stop being derived
+    // from `isDialogue`, which still (correctly) gates this pill.
+    render(
+      <MediaTextHeader
+        cell={cell({ medium: "text", startTime: 1, endTime: 3, cameraState: "on" })}
+        headingLabel="Dialogue"
+      />,
+    )
+    expect(screen.queryByText("on")).toBeNull()
+  })
+
   it("carries no timings — those measure the chips, not this list", () => {
     render(
       <MediaTextHeader cell={cell({ startTime: 10, endTime: 15, metadata: { cast_name: "Mary" } })} />,

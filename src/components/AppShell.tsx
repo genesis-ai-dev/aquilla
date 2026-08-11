@@ -313,7 +313,7 @@ export function AppShell({
   // card's main column (alongside any right aside) so they stay aligned with
   // the editor shell on both edges.
   return (
-    <div className="flex h-screen min-w-0 bg-sidebar">
+    <div className="flex h-screen min-w-0 overflow-hidden bg-sidebar">
       {useDockResize ? (
         <ResizablePanelGroup orientation="horizontal" className="h-full w-full">
           <ResizablePanel

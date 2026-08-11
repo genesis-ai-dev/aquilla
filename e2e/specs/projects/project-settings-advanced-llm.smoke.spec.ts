@@ -37,6 +37,18 @@ test("project settings Advanced LLM section expands and Custom endpoint radio to
   const frontierRadio = radios.first()
   await expect(frontierRadio).toBeVisible({ timeout: 3_000 })
 
+  // Base UI radio native inputs are position:absolute; without a positioned
+  // ancestor they inflate document scroll past AppShell. Inner Page scroll is
+  // fine — the window itself must not be scrollable.
+  await expect
+    .poll(async () => {
+      return alice.evaluate(() => {
+        const doc = document.documentElement
+        return doc.scrollHeight - doc.clientHeight + window.scrollY
+      })
+    })
+    .toBe(0)
+
   // The "Custom endpoint" label text is visible.
   const customLabel = alice.getByText(/Custom endpoint/i).first()
   await expect(customLabel).toBeVisible({ timeout: 3_000 })

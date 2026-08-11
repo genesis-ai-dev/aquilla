@@ -493,7 +493,7 @@ function BibleResourcesPanel({
               void runSearch(q)
             }}
             placeholder={t("search.bible.searchPlaceholder")}
-            aria-label={t("search.bible.searchPlaceholder")}
+            aria-label={t("search.bible.searchAriaLabel")}
             className="text-xs"
           />
         </div>

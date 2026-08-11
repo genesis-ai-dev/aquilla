@@ -302,7 +302,7 @@ function ReplaceSection({ query, results, isReadOnly, onAfterReplace, t }: Repla
         value={replaceValue}
         onChange={(e) => setReplaceValue(e.target.value)}
         className="h-9 text-sm"
-        aria-label={t("search.replace.placeholder")}
+        aria-label={t("search.replace.ariaLabel")}
         disabled={isReadOnly || applying}
       />
 
@@ -549,6 +549,20 @@ export function ParallelPassagesPanel(props: ParallelPassagesPanelProps) {
           ? t("search.dialog.placeholderScoped", { scope: scopeLabel.toLowerCase() })
           : t("search.placeholderProject")
 
+  // Distinct from inputPlaceholder: the placeholder keys above end in an
+  // ellipsis ("…"), which must not be read aloud as part of the field's
+  // accessible name (AQU-511 wave-3 finding 6).
+  const inputAriaLabel =
+    mode === "passages"
+      ? t("search.dialog.ariaLabelPassages")
+      : mode === "replace"
+        ? scope === "file"
+          ? t("search.dialog.ariaLabelReplaceScoped", { scope: scopeLabel.toLowerCase() })
+          : t("search.dialog.ariaLabelReplaceProject")
+        : scope === "file"
+          ? t("search.dialog.ariaLabelScoped", { scope: scopeLabel.toLowerCase() })
+          : t("search.ariaLabelProject")
+
   return (
     <CommandDialog
       open={open}
@@ -610,7 +624,7 @@ export function ParallelPassagesPanel(props: ParallelPassagesPanelProps) {
             value={query}
             onValueChange={handleQueryChange}
             onKeyDown={handleSearchKeyDown}
-            aria-label={inputPlaceholder}
+            aria-label={inputAriaLabel}
             aria-busy={loading}
           />
           {scope === "file" && !activeFileId && (

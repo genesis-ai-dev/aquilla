@@ -19,7 +19,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { MISSING_AUDIO_MESSAGE } from "@/lib/audio/play-queue"
 import { TimelineSlotButton } from "./TimelineSlotButton"
 import { MIN_SLOT_PX, useHotSlot } from "./slot-hover"
-import { isVisible, secToPx, pxToSec } from "@/lib/timeline/scale"
+import { isVisible, secToPx, pxToSec, chipRadiusPx } from "@/lib/timeline/scale"
 import {
   targetChipGeom,
   chipOverflowState,
@@ -417,10 +417,12 @@ function TargetAudioChip({
       style={{
         left: `${secToPx(paintedStart, pxPerSec)}px`,
         width: `${paintedPx}px`,
+        // Same rule as every other chip, its own smaller cap (was rounded-md).
+        borderRadius: `${chipRadiusPx(paintedPx, 6)}px`,
         zIndex: (drag ? 2000 : selected || hovered ? 1000 : 0) + paintOrder,
       }}
       className={cn(
-        "group/chip absolute top-2.5 flex h-[46px] touch-none select-none items-center justify-center overflow-hidden rounded-md border",
+        "group/chip absolute top-2.5 flex h-[46px] touch-none select-none items-center justify-center overflow-hidden border",
         chip.item.kind === "take"
           ? "border-emerald-500/60 bg-emerald-100/80 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300"
           : "border-violet-500/60 bg-violet-100/80 text-violet-800 dark:bg-violet-950/70 dark:text-violet-300",

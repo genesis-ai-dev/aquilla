@@ -6,6 +6,7 @@ import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
 import { expectTooltip, renderWithTooltips } from "@/test-utils/tooltip"
 import { TargetAudioLane, type TargetAudioItem } from "./TargetAudioLane"
+import { chipRadiusPx } from "@/lib/timeline/scale"
 import type { CellData } from "@/hooks/useCells"
 
 const SOURCE_ID = "audio-f1-1690000000-shared.mp3"
@@ -1036,5 +1037,22 @@ describe("TargetAudioLane — which record slot is hot", () => {
     fireEvent.pointerEnter(screen.getByTestId("tl-target-add-1"))
     fireEvent.pointerLeave(screen.getByTestId("tl-target-add-1"))
     expect(lit()).toBe(0)
+  })
+})
+
+// Round 9b: the dub chip follows the same corner rule as every other chip, with
+// its own smaller cap (it was rounded-md, not rounded-lg).
+describe("TargetAudioLane — chip corners", () => {
+  it("a wide dub chip keeps its 6px corner; a narrow one sharpens", () => {
+    const { unmount } = render(<TargetAudioLane {...base} items={[item({}, 4000)]} />)
+    // 4s at 40px/s = 160px, well past where the full corner is affordable.
+    expect(parseFloat(screen.getByTestId("tl-target-c1").style.borderRadius)).toBe(6)
+    unmount()
+
+    // The same take at 4px/s = 16px wide. Same ramp, its own smaller cap.
+    render(<TargetAudioLane {...base} pxPerSec={4} items={[item({}, 4000)]} />)
+    const narrow = parseFloat(screen.getByTestId("tl-target-c1").style.borderRadius)
+    expect(narrow).toBeCloseTo(chipRadiusPx(16, 6), 3)
+    expect(narrow).toBeLessThan(6)
   })
 })

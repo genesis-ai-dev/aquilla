@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
 import { TimelineCard } from "./TimelineCard"
+import { chipRadiusPx } from "@/lib/timeline/scale"
 import type { CellData } from "@/hooks/useCells"
 
 const cell = (o: Partial<CellData> = {}): CellData =>
@@ -371,6 +372,39 @@ describe("TimelineCard", () => {
       expect(card.textContent).toBe("")
       // The X is 16px on a 20px card — it covered the whole chip.
       expect(screen.queryByTestId("tl-card-c1-remove")).toBeNull()
+    })
+
+    it("its corner sharpens as it narrows, and the accent bar follows", () => {
+      // Asserts the WIRING, not the curve — scale.test.ts owns the maths, so a
+      // future tweak to the ramp does not have to be re-typed here. The accent
+      // bar is a separate absolutely-positioned span; with a fixed radius it
+      // would poke out of a sharpened corner.
+      const radii = (w: number) => {
+        const { unmount } = atWidth(w)
+        const card = screen.getByTestId("tl-card-c1")
+        const bar = card.querySelector("span.absolute.inset-y-0.left-0") as HTMLElement
+        const out = {
+          card: parseFloat(card.style.borderRadius),
+          barTop: parseFloat(bar.style.borderTopLeftRadius),
+          barBottom: parseFloat(bar.style.borderBottomLeftRadius),
+        }
+        unmount()
+        return out
+      }
+
+      const wide = radii(200)
+      expect(wide.card).toBeCloseTo(chipRadiusPx(200), 3)
+      expect(wide.card).toBe(8) // unchanged from the rounded-lg it replaced
+
+      const narrow = radii(20)
+      expect(narrow.card).toBeCloseTo(chipRadiusPx(20), 3)
+      expect(narrow.card).toBeLessThan(wide.card)
+
+      // The bar tracks the card in both states, or it overhangs the corner.
+      expect(wide.barTop).toBe(wide.card)
+      expect(wide.barBottom).toBe(wide.card)
+      expect(narrow.barTop).toBe(narrow.card)
+      expect(narrow.barBottom).toBe(narrow.card)
     })
 
     it("a card being DRAGGED keeps its text however narrow it is", () => {

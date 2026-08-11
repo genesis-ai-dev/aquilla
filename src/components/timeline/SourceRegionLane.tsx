@@ -13,7 +13,7 @@
 // not invent its own.
 
 import { memo } from "react"
-import { secToPx, isVisible } from "@/lib/timeline/scale"
+import { secToPx, isVisible, chipRadiusPx } from "@/lib/timeline/scale"
 import { MIN_ADDABLE_SPAN_SEC } from "@/lib/timeline/lane-timing"
 import { fmtClock } from "./format"
 import { MIN_CARD_META_PX, TimelineCard } from "./TimelineCard"
@@ -77,7 +77,9 @@ function SourceRegionLaneImpl({
 
   return (
     <div data-testid="tl-source-regions" data-variant="source-band" className="relative h-[66px] border-b border-border">
-      {visibleGaps.map((g) => (
+      {visibleGaps.map((g) => {
+        const widthPx = secToPx(g.endSec - g.startSec, pxPerSec)
+        return (
         <div
           key={g.startSec}
           data-testid="tl-source-gap"
@@ -88,10 +90,14 @@ function SourceRegionLaneImpl({
           // TimelineCard's geometry and radius, dashed and unfilled — the
           // established "slot with nothing in it yet" treatment (the untimed
           // strip's chips are the precedent), kept in the lane's sky family.
-          className="absolute top-2.5 h-[46px] cursor-pointer overflow-hidden rounded-lg border border-dashed border-sky-300 bg-sky-50/30 transition-colors hover:bg-sky-100/40 dark:border-sky-900 dark:bg-sky-950/20 dark:hover:bg-sky-950/40"
+          className="absolute top-2.5 h-[46px] cursor-pointer overflow-hidden border border-dashed border-sky-300 bg-sky-50/30 transition-colors hover:bg-sky-100/40 dark:border-sky-900 dark:bg-sky-950/20 dark:hover:bg-sky-950/40"
+          // The radius shrinks with the chip. A narrow silence flush against a
+          // solid-walled cue is exactly where the two used to read as one
+          // interlocked shape.
           style={{
             left: `${secToPx(g.startSec, pxPerSec)}px`,
-            width: `${secToPx(g.endSec - g.startSec, pxPerSec)}px`,
+            width: `${widthPx}px`,
+            borderRadius: `${chipRadiusPx(widthPx)}px`,
           }}
         >
           {/* Round 9: only when there is room for it, and never wrapping.
@@ -102,13 +108,14 @@ function SourceRegionLaneImpl({
               read as time ranges bleeding across neighbouring chips. Same
               threshold as a card's own clock line — it is the same question,
               "is there room for a clock string here". */}
-          {secToPx(g.endSec - g.startSec, pxPerSec) >= MIN_CARD_META_PX && (
+          {widthPx >= MIN_CARD_META_PX && (
             <span className="absolute bottom-1 left-2.5 font-mono text-[9px] tabular-nums whitespace-nowrap text-muted-foreground">
               {fmtClock(g.startSec, true)}–{fmtClock(g.endSec, true)}
             </span>
           )}
         </div>
-      ))}
+        )
+      })}
       {visibleCells.map((c) => (
         <TimelineCard
           key={c.id}

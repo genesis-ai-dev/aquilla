@@ -13,7 +13,7 @@
 import { useRef, useState } from "react"
 import { X } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { secToPx, pxToSec, clampRange } from "@/lib/timeline/scale"
+import { secToPx, pxToSec, clampRange, chipRadiusPx } from "@/lib/timeline/scale"
 import { subtitleMirrorText } from "@/lib/timeline/lanes"
 import { subtitleSpanSec } from "@/lib/timeline/lane-timing"
 import { snapSpan, SNAP_THRESHOLD_PX } from "@/lib/timeline/snap"
@@ -157,6 +157,11 @@ export function TimelineCard({
     secToPx(MIN_DUR_SEC, pxPerSec),
   )
 
+  // Round 9b: the corner shrinks with the chip. A constant 8px radius on a 26px
+  // chip is a third of its width, and against a dashed neighbour that reads as
+  // two shapes interlocking. See chipRadiusPx.
+  const radiusPx = chipRadiusPx(width)
+
   // Round 9: what there is room to SAY at this width. A dragging card always
   // shows its text — you are looking straight at it, and its own drag chip is
   // the readout that matters.
@@ -240,7 +245,7 @@ export function TimelineCard({
       }}
       onPointerDown={(e) => beginDrag("move", e)}
       className={cn(
-        "group absolute top-2.5 flex h-[46px] touch-none select-none flex-col justify-center gap-0.5 rounded-lg border px-2.5 transition-colors",
+        "group absolute top-2.5 flex h-[46px] touch-none select-none flex-col justify-center gap-0.5 border px-2.5 transition-colors",
         // SUB-11: the drag chip renders above the card bounds, so overflow can't
         // be hidden mid-drag; inner text stays contained by its own `truncate`s.
         drag ? "z-20 overflow-visible" : "overflow-hidden",
@@ -255,7 +260,7 @@ export function TimelineCard({
         selected && "z-10 ring-2 ring-sky-500 ring-offset-1 ring-offset-background",
         !selected && !drag && "hover:z-10 hover:bg-muted/30",
       )}
-      style={{ left: `${left}px`, width: `${width}px` }}
+      style={{ left: `${left}px`, width: `${width}px`, borderRadius: `${radiusPx}px` }}
     >
       {drag && (
         // SUB-11: live millisecond readout while dragging — anchored to the
@@ -275,9 +280,11 @@ export function TimelineCard({
       )}
       <span
         className={cn(
-          "absolute inset-y-0 left-0 w-[3px] rounded-l-lg",
+          "absolute inset-y-0 left-0 w-[3px]",
           isDialogue ? "bg-sky-600" : "bg-zinc-400 dark:bg-zinc-600",
         )}
+        // Follows the card's own corner or it pokes out of a sharpened one.
+        style={{ borderTopLeftRadius: `${radiusPx}px`, borderBottomLeftRadius: `${radiusPx}px` }}
       />
       {onRemove && showsText && (
         // Same manners as the slot buttons: nothing at rest, faint on the

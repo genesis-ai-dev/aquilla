@@ -9,6 +9,7 @@ import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
 import { SourceRegionLane } from "./SourceRegionLane"
 import { deriveSourceRegions } from "@/lib/timeline/source-regions"
+import { chipRadiusPx } from "@/lib/timeline/scale"
 import type { CellData } from "@/hooks/useCells"
 
 const cell = (id: string, startTime: number, endTime: number, original = id): CellData =>
@@ -152,5 +153,22 @@ describe("SourceRegionLane", () => {
     const wide = screen.getAllByTestId("tl-source-gap").find((g) => g.textContent !== "")!
     expect(wide.textContent).toContain("–")
     expect(wide.querySelector("span")!.className).toContain("whitespace-nowrap")
+  })
+
+  // Round 9b: the illusion Sam reported lived exactly here — a narrow silence
+  // flush against a solid-walled cue, both carrying an 8px corner, reading as
+  // one interlocked shape with a solid wall and a dashed wall.
+  it("a narrow silence sharpens its corners; a wide one keeps them", () => {
+    const cs = [cell("a", 0, 5), cell("b", 6, 10), cell("c", 30, 34)]
+    const m = deriveSourceRegions(cs, 34)
+    renderLane({ map: m, cells: cs, pxPerSec: 20, viewStartSec: 0, viewEndSec: 34 })
+    const gaps = screen.getAllByTestId("tl-source-gap")
+    const byStart = (start: string) => gaps.find((g) => g.getAttribute("data-region-start") === start)!
+    // 5→6s = 1s at 20px/s = 20px wide; 10→30s = 400px wide.
+    const narrow = parseFloat(byStart("5").style.borderRadius)
+    const wide = parseFloat(byStart("10").style.borderRadius)
+    expect(narrow).toBeCloseTo(chipRadiusPx(20), 3)
+    expect(wide).toBe(8)
+    expect(narrow).toBeLessThan(wide)
   })
 })

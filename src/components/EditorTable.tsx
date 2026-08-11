@@ -16,9 +16,12 @@ import {
   Lock,
   Pilcrow,
   PilcrowRight,
+  X,
+  Plus,
+  ArrowUp,
+  ArrowDown,
 } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
-import { SLOT_GROUP, TimelineSlotButton } from "@/components/timeline/TimelineSlotButton"
 import { Button } from "@/components/ui/button"
 import { Badge, badgeVariants } from "@/components/ui/badge"
 import { EmptyState } from "@/components/ui/page"
@@ -2046,9 +2049,13 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           const paragraphGroupInfo = cell.paragraphStart === true
             ? paragraphGroupInfoByCellId.get(cell.id)
             : undefined
-          // AQU-646 round 8: the row's STRUCTURAL controls — add a line into
-          // the silence after it, take an empty added line back. One map lookup
-          // and one predicate call per row; no scans.
+          // AQU-646: the row's STRUCTURAL controls — add a line into the
+          // silence after it, take an empty added line back. One map lookup and
+          // one predicate call per row; no scans.
+          //
+          // `insertAbove` reaches only the first row, because that is the only
+          // row with a silence in front of it — everywhere else "above me" is
+          // "below my predecessor", which that row already offers.
           const insertBelow = sourceLineEditing?.afterCell.get(cell.id) ?? null
           const insertAbove = index === 0 ? (sourceLineEditing?.head ?? null) : null
           const canRemoveLine = Boolean(sourceLineEditing?.canRemove(cell))
@@ -2068,19 +2075,11 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           showParagraphBoundary && "mt-3",
         )}
       >
-        {insertAbove && sourceLineEditing && (
-          <RowStructureStrip
-            edge="top"
-            testId="row-insert-above"
-            insert={insertAbove}
-            onAddLine={sourceLineEditing.onAddLine}
-          />
-        )}
-        {(insertBelow || canRemoveLine) && sourceLineEditing && (
-          <RowStructureStrip
-            edge="bottom"
+        {sourceLineEditing && (
+          <RowStructureCorner
             testId={`row-structure-${cell.id}`}
-            insert={insertBelow}
+            insertBelow={insertBelow}
+            insertAbove={insertAbove}
             onAddLine={sourceLineEditing.onAddLine}
             onRemove={canRemoveLine ? () => sourceLineEditing.onRemoveLine(cell.id) : undefined}
             removeTestId={`row-remove-${cell.id}`}
@@ -2613,76 +2612,133 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
 })
 
 /**
- * AQU-646 round 8: the row's structural controls — "add a line into the silence
- * here" and "take this line back" — as ONE strip rather than Remove joining the
- * eleven-button action rail (Sam, 2026-08-11). They are the same kind of thing:
- * they change which rows exist, not what a row says.
+ * AQU-646: the row's structural controls — "add a line into the silence here"
+ * and "take this line back" — as a PAIR in the row's bottom-right corner.
  *
- * Absolutely positioned on the row's edge so a thousand rows gain no height,
- * and revealed by CSS on the row's hover group — no per-row state, so hovering
- * never re-renders anything.
+ * Round 9 rewrote this twice-over, and both mistakes are worth keeping written
+ * down. First cut hung a hover-revealed strip 12px BELOW the row so it would
+ * straddle the divider: the virtualised list wraps every row in a container
+ * carrying `contain: content`, which implies PAINT containment, so the 12px
+ * outside the row was simply clipped away and the control was invisible in a
+ * real browser. Unit tests cannot catch that — happy-dom has no layout engine,
+ * so a clipped element still measures as present. Second cut moved it inside
+ * the row but left it centred and hover-only, which read as a stray pencil
+ * floating in the middle of the row; Sam could not tell what it was.
  *
- * INSIDE the row's box, deliberately. The first cut hung it 12px outside
- * (-bottom-3) so it would straddle the divider between rows, and it was
- * invisible in a real browser: the virtualised list wraps every row in a
- * container carrying `contain: content`, which implies PAINT containment and
- * clips anything outside that box. Unit tests could not catch it — happy-dom
- * has no layout engine, so a clipped element still measures as present.
+ * What it is now, per Sam's markup: two SQUARES in the bottom-right corner,
+ * `[x][+]` — remove on the left, insert on the right. Always visible at half
+ * opacity so the affordance is discoverable without hunting, full opacity when
+ * the pointer is anywhere on the row.
  *
- * The button is literally the timeline's slot button, so "insert a line here"
- * looks and behaves the same on both surfaces.
+ * The corner is chosen, not incidental. The row's TOP-right is already the
+ * action rail's (`absolute right-2 top-0.5 z-20`) with its always-on chevron
+ * and attention dot, and the target column reserves `pr-9` for that lane. The
+ * bottom-right is the only free corner, and it is out of the text's way.
+ *
+ * Deliberately NOT the timeline's round slot button. That one is a hover-only
+ * affordance over an empty stretch of track; this is persistent row chrome. The
+ * two surfaces asking the same question does not make them the same control.
  */
-function RowStructureStrip({
-  edge,
+function RowStructureCorner({
   testId,
-  insert,
+  /** The silence after this row. Null = no room, so no `+` AT ALL — never a
+   *  disabled one. The same "no room, no add" rule the timeline's pencil obeys. */
+  insertBelow,
+  /** The silence before the FIRST cue. Only ever passed to the first row. */
+  insertAbove,
   onAddLine,
   onRemove,
   removeTestId,
 }: {
-  edge: "top" | "bottom"
   testId: string
-  /** Null when this row has no room after it — then no insert is offered AT
-   *  ALL, never a disabled one. Same rule as the timeline's pencil. */
-  insert: { startSec: number; endSec: number } | null
+  insertBelow: { startSec: number; endSec: number } | null
+  insertAbove: { startSec: number; endSec: number } | null
   onAddLine(startSec: number, endSec: number): void
   onRemove?: () => void
   removeTestId?: string
 }) {
+  if (!insertBelow && !insertAbove && !onRemove) return null
+  // Both directions available (only ever the first row, and only while the
+  // file still opens on a silence) — the button has to ask which. One
+  // direction available: just do it. A one-item menu is a click for nothing.
+  const needsMenu = Boolean(insertAbove && insertBelow)
+  const square =
+    "flex h-6 w-6 items-center justify-center rounded-md border border-border bg-background text-muted-foreground shadow-sm transition-colors hover:bg-accent hover:text-foreground"
   return (
     <div
       data-testid={testId}
       className={cn(
-        SLOT_GROUP,
-        "pointer-events-none absolute inset-x-0 z-20 flex justify-center gap-1",
-        "opacity-0 transition-opacity group-hover/rowstrip:opacity-100 focus-within:opacity-100",
-        edge === "top" ? "top-0" : "bottom-0",
+        "absolute right-2 bottom-1 z-20 flex items-center gap-1",
+        // Half-visible at rest; the whole row is the hover target, so reaching
+        // for the corner lights it before you arrive.
+        "opacity-50 transition-opacity group-hover/rowstrip:opacity-100 focus-within:opacity-100",
       )}
     >
-      {/* Pointer events follow the opacity. Without that, an invisible button
-          sits in the space between every pair of rows and swallows clicks
-          meant for the row. Keyboard reach is unaffected — tabbing to the
-          button fires focus-within, which turns both back on. */}
-      <div className="pointer-events-none flex items-center gap-1 group-hover/rowstrip:pointer-events-auto focus-within:pointer-events-auto">
-        {insert && (
-          <TimelineSlotButton
-            testId={`${testId}-add`}
-            label={edge === "top" ? "Add a line above" : "Add a line below"}
-            onClick={() => onAddLine(insert.startSec, insert.endSec)}
+      {onRemove && (
+        <button
+          type="button"
+          title="Remove this line"
+          aria-label="Remove this line"
+          data-testid={removeTestId ?? `${testId}-remove`}
+          className={square}
+          onClick={(e) => {
+            e.stopPropagation()
+            onRemove()
+          }}
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+      )}
+      {(insertBelow || insertAbove) &&
+        (needsMenu ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <button
+                  type="button"
+                  title="Add a line"
+                  aria-label="Add a line"
+                  data-testid={`${testId}-add`}
+                  className={square}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                </button>
+              }
+            />
+            <DropdownMenuContent align="end" className="min-w-[9rem]">
+              <DropdownMenuItem
+                data-testid="row-insert-above"
+                onClick={() => onAddLine(insertAbove!.startSec, insertAbove!.endSec)}
+              >
+                <ArrowUp className="mr-2 h-3.5 w-3.5" />
+                Insert above
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                data-testid="row-insert-below"
+                onClick={() => onAddLine(insertBelow!.startSec, insertBelow!.endSec)}
+              >
+                <ArrowDown className="mr-2 h-3.5 w-3.5" />
+                Insert below
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : (
+          <button
+            type="button"
+            title={insertAbove ? "Add a line above" : "Add a line below"}
+            aria-label={insertAbove ? "Add a line above" : "Add a line below"}
+            data-testid={`${testId}-add`}
+            className={square}
+            onClick={(e) => {
+              e.stopPropagation()
+              const span = insertBelow ?? insertAbove!
+              onAddLine(span.startSec, span.endSec)
+            }}
           >
-            <Pencil className="h-3.5 w-3.5" />
-          </TimelineSlotButton>
-        )}
-        {onRemove && (
-          <TimelineSlotButton
-            testId={removeTestId ?? `${testId}-remove`}
-            label="Remove this line"
-            onClick={onRemove}
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-          </TimelineSlotButton>
-        )}
-      </div>
+            <Plus className="h-3.5 w-3.5" />
+          </button>
+        ))}
     </div>
   )
 }

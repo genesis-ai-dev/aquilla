@@ -1,18 +1,25 @@
 /**
- * AQU-646 round 8: adding and removing lines from the TEXT TABLE, alongside the
+ * AQU-646: adding and removing lines from the TEXT TABLE, alongside the
  * gestures the timeline already offers (Sam, 2026-08-11).
  *
  * The load-bearing rules, and why each is pinned here:
  *   - A row with no room after it gets NO insert control, rather than a
  *     disabled one. One rule with the timeline's pencil, so the two surfaces
  *     can never disagree about where a line will fit.
- *   - Insert-above exists once per file, on the first row, for the silence
- *     before the first cue.
+ *   - The FIRST row is the only one that can insert in two directions, because
+ *     it is the only row with a silence in front of it. Its + asks which; every
+ *     other + acts immediately. A one-item menu would be a click for nothing.
  *   - Remove appears only on a line someone added that is still empty — the
  *     workspace owns that predicate and hands it in, exactly as it does to the
  *     timeline lane.
  *   - With the prop absent NOTHING renders. That is how every other workflow
  *     (audio-first, text-first) stays untouched, so it is asserted, not assumed.
+ *
+ * One test asserts CLASSES, which is normally a smell. It is here because the
+ * bug this round fixed was purely positional — the control was correct in every
+ * behavioural sense and invisible on screen — and happy-dom has no layout
+ * engine to catch that. The real guard is the geometric leg in
+ * browser-verify-source-band; this is the cheap sentinel beside it.
  */
 
 import { describe, it, expect, vi } from "vitest"
@@ -179,9 +186,22 @@ describe("EditorTable — the row's structural controls", () => {
   it("renders nothing at all when the workflow is off", async () => {
     renderTable()
     await screen.findByText("First cue")
-    expect(screen.queryByTestId("row-insert-above")).toBeNull()
     expect(screen.queryByTestId("row-structure-cue-a")).toBeNull()
     expect(screen.queryByTestId("row-remove-added")).toBeNull()
+  })
+
+  it("sits in the row's bottom-right corner, half-visible at rest", async () => {
+    // The placement IS the fix: two earlier cuts put this control outside the
+    // row (clipped away by the list's paint containment) and then floating in
+    // the middle of it. Bottom-right is the row's only free corner — the action
+    // rail owns the top-right.
+    renderTable({ sourceLineEditing: editing() })
+    await screen.findByText("First cue")
+    const corner = within(rowEl("cue-a")).getByTestId("row-structure-cue-a")
+    expect(corner.className).toContain("right-2")
+    expect(corner.className).toContain("bottom-1")
+    expect(corner.className).toContain("opacity-50")
+    expect(corner.className).toContain("group-hover/rowstrip:opacity-100")
   })
 
   it("offers an insert on a row with room after it", async () => {
@@ -197,25 +217,16 @@ describe("EditorTable — the row's structural controls", () => {
     expect(within(rowEl("cue-b")).queryByTestId("row-structure-cue-b-add")).toBeNull()
   })
 
-  it("insert-above appears once, on the first row only", async () => {
-    renderTable({ sourceLineEditing: editing() })
-    await screen.findByText("First cue")
-    expect(screen.getAllByTestId("row-insert-above")).toHaveLength(1)
-    expect(within(rowEl("cue-a")).getByTestId("row-insert-above")).toBeInTheDocument()
-  })
-
-  it("no insert-above when the file has no leading silence", async () => {
-    renderTable({ sourceLineEditing: editing({ head: null }) })
-    await screen.findByText("First cue")
-    expect(screen.queryByTestId("row-insert-above")).toBeNull()
-  })
-
   it("hands the exact silence to the workspace, not the row's own times", async () => {
+    // A NON-first row: its + has only one direction to offer, so it acts
+    // immediately. (The first row's + opens a menu — covered below.) The row
+    // itself spans 25–28s; the silence after it is 28–40s, and it is the
+    // SILENCE that must travel.
     const onAddLine = vi.fn()
     renderTable({ sourceLineEditing: editing({ onAddLine }) })
     await screen.findByText("First cue")
-    fireEvent.click(within(rowEl("cue-a")).getByTestId("row-structure-cue-a-add"))
-    expect(onAddLine).toHaveBeenCalledWith(20, 25)
+    fireEvent.click(within(rowEl("added")).getByTestId("row-structure-added-add"))
+    expect(onAddLine).toHaveBeenCalledWith(28, 40)
   })
 
   it("Remove appears on an empty added line and nowhere else", async () => {
@@ -232,5 +243,41 @@ describe("EditorTable — the row's structural controls", () => {
     await screen.findByText("First cue")
     fireEvent.click(within(rowEl("added")).getByTestId("row-remove-added"))
     expect(onRemoveLine).toHaveBeenCalledWith("added")
+  })
+
+  // The first row is the only one with a silence in FRONT of it, so it is the
+  // only one whose + has to ask which direction. Everywhere else "above me" is
+  // "below my predecessor", which that row already offers.
+  describe("the first row's two directions", () => {
+    it("+ opens a menu offering both, and each hands over its own silence", async () => {
+      const onAddLine = vi.fn()
+      renderTable({ sourceLineEditing: editing({ onAddLine }) })
+      await screen.findByText("First cue")
+      fireEvent.click(within(rowEl("cue-a")).getByTestId("row-structure-cue-a-add"))
+
+      const above = await screen.findByTestId("row-insert-above")
+      fireEvent.click(above)
+      expect(onAddLine).toHaveBeenCalledWith(0, 10)
+
+      fireEvent.click(within(rowEl("cue-a")).getByTestId("row-structure-cue-a-add"))
+      fireEvent.click(await screen.findByTestId("row-insert-below"))
+      expect(onAddLine).toHaveBeenLastCalledWith(20, 25)
+    })
+
+    it("with no leading silence the + just inserts below — no one-item menu", async () => {
+      const onAddLine = vi.fn()
+      renderTable({ sourceLineEditing: editing({ head: null, onAddLine }) })
+      await screen.findByText("First cue")
+      fireEvent.click(within(rowEl("cue-a")).getByTestId("row-structure-cue-a-add"))
+      expect(onAddLine).toHaveBeenCalledWith(20, 25)
+      expect(screen.queryByTestId("row-insert-above")).toBeNull()
+    })
+
+    it("no other row is ever offered the above direction", async () => {
+      renderTable({ sourceLineEditing: editing() })
+      await screen.findByText("First cue")
+      fireEvent.click(within(rowEl("added")).getByTestId("row-structure-added-add"))
+      expect(screen.queryByTestId("row-insert-above")).toBeNull()
+    })
   })
 })

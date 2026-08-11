@@ -8,6 +8,7 @@
 import { render, screen } from "@testing-library/react"
 import { describe, it, expect, vi } from "vitest"
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu"
+import { I18nProvider } from "@/lib/i18n/I18nProvider"
 import { FileActionMenu } from "./FileActionMenu"
 
 // The menu is built on the shadcn ContextMenu (Base UI), which portals to
@@ -15,14 +16,16 @@ import { FileActionMenu } from "./FileActionMenu"
 
 function renderMenu(onDelete?: () => void) {
   return render(
-    <ContextMenu open>
-      <ContextMenuTrigger>trigger</ContextMenuTrigger>
-      <FileActionMenu
-        onRename={vi.fn()}
-        onMove={vi.fn()}
-        onDelete={onDelete}
-      />
-    </ContextMenu>,
+    <I18nProvider>
+      <ContextMenu open>
+        <ContextMenuTrigger>trigger</ContextMenuTrigger>
+        <FileActionMenu
+          onRename={vi.fn()}
+          onMove={vi.fn()}
+          onDelete={onDelete}
+        />
+      </ContextMenu>
+    </I18nProvider>,
   )
 }
 

@@ -11,16 +11,39 @@
  */
 
 export interface ContextEntry {
+  /**
+   * What the string does: element type (button / label / toast / tooltip /
+   * heading), the action it triggers, and any wording constraint. Written for
+   * someone who cannot see the code.
+   */
   description: string
+  /** Surface screenshot this string appears in; see `screenshots.ts`. */
   screenshot?: string
+  /**
+   * Soft ceiling in characters, where the layout genuinely constrains the
+   * translation (narrow nav column, button in a row of buttons). Omit when the
+   * string has room to grow.
+   */
   maxLength?: number
+  /**
+   * Semantics of each `{placeholder}` in the string, keyed by placeholder name
+   * without braces. Required for every placeholder the English string uses —
+   * `catalogContextIssues()` enforces both directions.
+   */
   placeholders?: Record<string, string>
 }
 
 export interface ScreenshotSurface {
+  /** Stable id; also the PNG basename. Kebab-case, no locale suffix. */
   id: string
+  /** Human title shown to translators alongside the image. */
   title: string
+  /**
+   * Route the capture driver navigates to, in the seeded E2E project.
+   * `:projectId` is substituted with the seeded project's id at capture time.
+   */
   route: string
+  /** What a translator should look for in this shot. */
   notes: string
 }
 

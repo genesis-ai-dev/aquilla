@@ -5,22 +5,27 @@
  * type-checked and other locales are `Partial` catalogs that fall back here.
  * Keep keys namespaced (`area.thing`) and values English; translated catalogs
  * live alongside in `messages/` and only override the keys they cover.
+ *
+ * This file is a barrel: the strings themselves are authored one namespace at a
+ * time under `../namespaces/`, alongside that namespace's context block and
+ * screenshot surfaces. Add a namespace by adding its module to
+ * `../namespaces/index.ts` and spreading it here.
+ *
+ * The modules are imported and spread individually on purpose — reducing over
+ * `NAMESPACES` widens the result to `Record<string, string>`, which destroys the
+ * `MessageKey` literal union every `t()` call is checked against.
  */
 
+import { common } from "../namespaces/common"
+import { nav } from "../namespaces/nav"
+import { error } from "../namespaces/error"
+import { language } from "../namespaces/language"
+
 export const en = {
-  "common.save": "Save",
-  "common.cancel": "Cancel",
-  "common.close": "Close",
-  "common.delete": "Delete",
-  "common.dismiss": "Dismiss",
-  "common.retry": "Retry",
-  "common.loading": "Loading…",
-  "nav.projects": "Projects",
-  "nav.settings": "Settings",
-  "nav.search": "Search",
-  "error.generic.title": "Something went wrong",
-  "language.label": "Language",
-  "language.switchTo": "Switch language to {language}",
+  ...common.keys,
+  ...nav.keys,
+  ...error.keys,
+  ...language.keys,
 } as const
 
 export type MessageKey = keyof typeof en

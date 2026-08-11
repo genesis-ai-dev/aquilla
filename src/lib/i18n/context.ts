@@ -24,14 +24,22 @@
  * This module is the authored source of the standard; the JSON interchange
  * sidecar shipped to translators is generated from it verbatim by
  * `catalog-export.ts`. Authoring in TypeScript rather than JSON buys
- * compile-time checking: an entry for a key that doesn't exist, or a screenshot
- * id that isn't declared in `screenshots.ts`, fails `tsc`.
+ * compile-time checking: an entry for a key that doesn't exist, or one filed
+ * under the wrong namespace, fails `tsc`.
+ *
+ * This file is a barrel: each namespace's block is authored in its own module
+ * under `namespaces/`, next to that namespace's keys and its screenshot
+ * surfaces, and collected here. Screenshot ids are checked by this module's lint
+ * and by `context.test.ts` rather than by `tsc` — see `namespaces/types.ts` for
+ * why keeping them a compile-time union would reinstate an import cycle.
  *
  * See `docs/I18N-CONTEXT-CATALOG.md` for the standard and the new-key workflow.
  */
 
 import { en, type MessageKey } from "./messages/en"
-import { isScreenshotId, SCREENSHOTS, type ScreenshotId } from "./screenshots"
+import { NAMESPACES } from "./namespaces"
+import type { ContextEntry } from "./namespaces/types"
+import { isScreenshotId, SCREENSHOTS } from "./screenshots"
 
 /** Version of the sidecar interchange format emitted by `catalog-export.ts`. */
 export const CONTEXT_SCHEMA_VERSION = 1
@@ -39,28 +47,8 @@ export const CONTEXT_SCHEMA_VERSION = 1
 /** Minimum useful description length — a one-word note is not context. */
 const MIN_DESCRIPTION_LENGTH = 12
 
-export interface ContextEntry {
-  /**
-   * What the string does: element type (button / label / toast / tooltip /
-   * heading), the action it triggers, and any wording constraint. Written for
-   * someone who cannot see the code.
-   */
-  description: string
-  /** Surface screenshot this string appears in; see `screenshots.ts`. */
-  screenshot?: ScreenshotId
-  /**
-   * Soft ceiling in characters, where the layout genuinely constrains the
-   * translation (narrow nav column, button in a row of buttons). Omit when the
-   * string has room to grow.
-   */
-  maxLength?: number
-  /**
-   * Semantics of each `{placeholder}` in the string, keyed by placeholder name
-   * without braces. Required for every placeholder the English string uses —
-   * `catalogContextIssues()` enforces both directions.
-   */
-  placeholders?: Record<string, string>
-}
+/** Re-exported so consumers keep importing the entry shape from here. */
+export type { ContextEntry } from "./namespaces/types"
 
 export interface NamespaceBlock {
   /** Surface-level context inherited by every key in the namespace. */
@@ -74,130 +62,9 @@ export interface NamespaceBlock {
  * first `.` of a message key. Keys inside `keys` are full message keys so that
  * multi-segment keys (`error.generic.title`) stay unambiguous.
  */
-export const CATALOG_CONTEXT: Record<string, NamespaceBlock> = {
-  common: {
-    _context: {
-      description:
-        "Shared action verbs and status text reused across the whole app — mostly " +
-        "buttons in dialog footers and toolbars, so they sit side by side with other " +
-        "actions and must stay short and imperative.",
-      screenshot: "confirm-dialog",
-      maxLength: 20,
-    },
-    keys: {
-      "common.save": {
-        description:
-          "Primary button that commits the changes in the current dialog or panel. " +
-          "Imperative verb, not a noun ('Save', not 'Saving' or 'Saved').",
-      },
-      "common.cancel": {
-        description:
-          "Secondary button that closes a dialog and discards the changes made in it. " +
-          "Pairs with Save; the two sit next to each other.",
-      },
-      "common.close": {
-        description:
-          "Button that dismisses a panel or dialog that has nothing to commit. Unlike " +
-          "Cancel it does not imply discarding work.",
-      },
-      "common.delete": {
-        description:
-          "Destructive button that permanently removes the selected item. Should read " +
-          "as clearly destructive in the target language.",
-      },
-      "common.dismiss": {
-        description:
-          "Button on a toast or inline notice that hides the message. It only hides the " +
-          "notice; it does not undo or resolve whatever the notice reported.",
-      },
-      "common.retry": {
-        description:
-          "Button offered after a failed operation that attempts the same operation again.",
-      },
-      "common.loading": {
-        description:
-          "Placeholder status text shown while content is being fetched. The trailing " +
-          "character is a single ellipsis glyph (…), not three periods; keep whatever " +
-          "continuation mark is conventional in the target language.",
-        screenshot: "cell-editor",
-      },
-    },
-  },
-
-  nav: {
-    _context: {
-      description:
-        "Top-level workspace navigation — links and controls in the left sidebar and " +
-        "app header that move the user between major areas. Rendered in a narrow " +
-        "fixed-width column, so long translations wrap or clip.",
-      screenshot: "workspace-nav",
-      maxLength: 24,
-    },
-    keys: {
-      "nav.projects": {
-        description:
-          "Sidebar link to the list of translation projects the user belongs to. Plural " +
-          "noun naming a destination, not an action.",
-      },
-      "nav.settings": {
-        description:
-          "Sidebar link to the settings area. Plural noun naming a destination.",
-      },
-      "nav.search": {
-        description:
-          "Control that opens search across the project's cells. Noun or verb depending " +
-          "on what reads naturally as a nav label in the target language.",
-      },
-    },
-  },
-
-  error: {
-    _context: {
-      description:
-        "Failure surfaces — the error boundary and failed-load states. Wording is " +
-        "reassuring and non-technical: it tells the user something broke without " +
-        "blaming them and without exposing internals.",
-      screenshot: "error-state",
-    },
-    keys: {
-      "error.generic.title": {
-        description:
-          "Heading of the generic failure panel shown when an unexpected error is " +
-          "caught. A short sentence, not a button; sentence case, no trailing period.",
-      },
-    },
-  },
-
-  language: {
-    _context: {
-      description:
-        "UI-language switcher in settings and the app chrome, which changes the " +
-        "language of the interface itself (not the language being translated in the " +
-        "project). These strings are read by someone who may not yet understand the " +
-        "current UI language.",
-      screenshot: "project-settings",
-    },
-    keys: {
-      "language.label": {
-        description:
-          "Accessible label for the language switcher control. Read aloud by screen " +
-          "readers; also the visible form label beside the control.",
-        maxLength: 20,
-      },
-      "language.switchTo": {
-        description:
-          "Accessible description of a single option in the language switcher, naming " +
-          "the language that option selects.",
-        placeholders: {
-          language:
-            "Name of the target UI language, already written in that language's own " +
-            "script (its endonym) — e.g. 'ไทย', 'العربية'. Do not translate the " +
-            "substituted value.",
-        },
-      },
-    },
-  },
-}
+export const CATALOG_CONTEXT: Record<string, NamespaceBlock> = Object.fromEntries(
+  NAMESPACES.map((ns) => [namespaceOf(Object.keys(ns.keys)[0]), ns.context]),
+)
 
 /** Namespace of a message key: everything before the first `.`. */
 export function namespaceOf(key: string): string {

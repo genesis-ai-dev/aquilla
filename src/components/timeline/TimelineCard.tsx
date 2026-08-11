@@ -163,14 +163,22 @@ export function TimelineCard({
   // AQU-646: a media cell rendered in the SUBTITLE lane is the mirror card of
   // an audio block — it shows the translation once translated, else the
   // transcript (never the filename-ish `original`).
-  const label =
-    (isDialogue
+  const labelText =
+    isDialogue
       ? cell.transcription || cell.original
       : (cell.medium ?? "text") === "media"
         ? subtitleMirrorText(cell)
-        : cell.original) ||
-    cell.cellLabel ||
-    "—"
+        : cell.original
+  // AQU-646: a cell that exists but has nothing written in it yet. Dotted means
+  // a different thing in each track — on the SUBTITLE track it is exactly this:
+  // the cell is real, the words are not here yet. (Source audio uses dotted for
+  // the opposite, audio with no cell; the target track only ever uses it to say
+  // something is wrong.) A blank chip carries no placeholder text either — an
+  // em dash would read as content.
+  const blank = !labelText?.trim() && !cell.translated?.trim()
+  // The em-dash placeholder reads as content. A line nobody has written yet
+  // shows its timecode and nothing else, in either track.
+  const label = blank ? "" : labelText || cell.cellLabel || "—"
   const castName =
     cell.metadata && typeof cell.metadata.cast_name === "string"
       ? (cell.metadata.cast_name as string)
@@ -198,6 +206,11 @@ export function TimelineCard({
         isDialogue
           ? "border-sky-200 bg-sky-50 text-sky-900 dark:border-sky-900 dark:bg-sky-950/50 dark:text-sky-200"
           : "border-border bg-card text-foreground",
+        // Dotted means a different thing in each track (Sam, 2026-08-11). In
+        // SUBTITLES it is this: the cell is real, the words are not here yet.
+        // The Source track reserves it for the opposite — audio with no cell —
+        // so a blank cell there is an ordinary chip with nothing written on it.
+        blank && !isDialogue && "border-dashed bg-transparent",
         selected && "z-10 ring-2 ring-sky-500 ring-offset-1 ring-offset-background",
         !selected && !drag && "hover:z-10 hover:bg-muted/30",
       )}

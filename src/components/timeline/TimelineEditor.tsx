@@ -22,7 +22,7 @@ import { secToPx, pxToSec, ZOOM_MIN, ZOOM_MAX, ZOOM_DEFAULT } from "@/lib/timeli
 import { useQueueForFile, useMissingClipCells, setQueueAudibility, queueClockIsFileTime, type TrackAudibility } from "@/lib/audio/play-queue"
 import { isInEditableContext, isTopAudioShortcutOwner, pushAudioShortcutOverride } from "@/lib/audio/audio-coordinator"
 import { spacebarShouldToggle } from "@/lib/audio/playback-keys"
-import { activeTargetForCell } from "@/lib/audio/track-audio"
+import { activeTargetForCell, resolveTargetAudio } from "@/lib/audio/track-audio"
 import { loadSnapEnabled, saveSnapEnabled } from "@/lib/timeline/snap"
 import { setMediaCursorCell, setMediaSyncActive } from "@/lib/timeline/media-cursor"
 import { useVideoClockSec, useVideoClockPlaying } from "@/lib/timeline/video-clock"
@@ -67,6 +67,15 @@ export interface TimelineEditorProps {
    *  link dialog. The dialog lives up there because the video pane offers the
    *  same action from its could-not-load state. */
   onRequestLinkVideo?(): void
+  /**
+   * AQU-646: add a line over a stretch of the film that has no cell of its own
+   * — the "T" in the Subtitles track, and the mic in the Target audio track
+   * (which creates the same blank line and then opens the recorder). Resolves
+   * to the new cell's id, or null if it could not be made.
+   */
+  onAddLine?(startSec: number, endSec: number, opts?: { thenRecord?: boolean }): Promise<string | null>
+  /** Whether this user may create cells at all (source.* is PROJECT_LEAD+). */
+  canAddLine?: boolean
   /** False disables the control — `file.video.set` needs contributor access,
    *  and the emit throws rather than failing quietly. */
   canLinkVideo?: boolean
@@ -175,6 +184,8 @@ export function TimelineEditor({
   onTrimTarget,
   onTogglePlay,
   onRequestLinkVideo,
+  onAddLine,
+  canAddLine,
   canLinkVideo = true,
   onSeekToTime,
   onOpenRecording,
@@ -396,20 +407,35 @@ export function TimelineEditor({
     () => (drawsSourceBand ? deriveSourceRegions(cells, videoDurationSec) : EMPTY_SOURCE_REGIONS),
     [drawsSourceBand, cells, videoDurationSec],
   )
+  // Stretches of film that no cell covers — where a line can still be added.
+  // Derived from the same sweep the Source track draws, so the two can never
+  // disagree about where there is room.
+  const addableSpans = useMemo(
+    () =>
+      sourceRegions.regions
+        .filter((r) => r.kind === "gap")
+        .map((r) => ({ startSec: r.startSec, endSec: r.endSec })),
+    [sourceRegions],
+  )
   // Round 5: the Target-audio track's chips — one per section with dub audio.
+  // AQU-646: in the VTT-plus-footage arrangement the takes hang off TEXT cells
+  // — there are no media cells to hang them on — so the Target track resolves
+  // them without the medium gate. Everywhere else it is exactly as before.
+  const targetSource = drawsSourceBand ? subtitle : dialogue
+  const resolveTarget = drawsSourceBand ? resolveTargetAudio : activeTargetForCell
   const targetItems = useMemo<TargetAudioItem[]>(
     () =>
-      dialogue.flatMap((c) => {
-        const target = activeTargetForCell(c)
+      targetSource.flatMap((c) => {
+        const target = resolveTarget(c)
         return target ? [{ cell: c, kind: target.kind, audioId: target.audioId }] : []
       }),
-    [dialogue],
+    [targetSource, resolveTarget],
   )
   // SUB-51: the complement — sections still waiting for a dub. Their empty
   // space in the Target row offers a record button on hover.
   const emptyTargets = useMemo(
-    () => dialogue.filter((c) => !activeTargetForCell(c)),
-    [dialogue],
+    () => targetSource.filter((c) => !resolveTarget(c)),
+    [targetSource, resolveTarget],
   )
   const durationSec = layout.totalSec
   const trackWidthPx = secToPx(durationSec, pxPerSec)
@@ -1046,7 +1072,18 @@ export function TimelineEditor({
             />
             {/* SUB-53: a subtitle span is expressed against the original's
                 clock, so it can't be dragged on a re-flowed track. */}
-            <TimelineLane cells={subtitle} variant="subtitle" retimable={!audioFirst} snapEnabled={snapOn} {...laneProps} />
+            <TimelineLane
+              cells={subtitle}
+              variant="subtitle"
+              retimable={!audioFirst}
+              snapEnabled={snapOn}
+              {...laneProps}
+              // AQU-646: the stretches of film with no line of their own. Only
+              // this arrangement offers them — everywhere else the lane is
+              // exactly as it was.
+              emptySpans={addableSpans}
+              onAddLine={canAddLine && onAddLine ? (s, e) => void onAddLine(s, e) : undefined}
+            />
             {/* AQU-646: a file with footage and no media cells of its own gets
                 the video's audio as source chips — the same cards an mp3
                 import's source row draws, broken at the VTT timestamps, with a
@@ -1088,6 +1125,13 @@ export function TimelineEditor({
               onTrimTarget={onTrimTarget}
               onOpenRecording={onOpenRecording}
               emptyCells={emptyTargets}
+              // AQU-646: the mic over a stretch with no cell at all creates the
+              // blank line first, then opens the recorder — same line the "T"
+              // above would have made.
+              emptySpans={addableSpans}
+              onAddLineAndRecord={
+                canAddLine && onAddLine ? (s, e) => void onAddLine(s, e, { thenRecord: true }) : undefined
+              }
             />
             {untimed.length > 0 && (
               <div className="flex h-12 items-center gap-2 overflow-x-auto border-b border-border px-3">

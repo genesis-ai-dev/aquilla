@@ -87,7 +87,9 @@ import {
   buildFileScopedTokenFetcher,
   buildProjectAwareMinter,
 } from "@/lib/sync/cqrs-bridge"
-import { emitTargetCellCommit, emitCellBacktranslationSet, emitFileRename, emitFileDelete, emitFileRestore, emitCellValidate, emitCellRetime, emitCellLaneRetime, emitCellAudioAttach, emitFileVideoSet, emitFileTimingSet } from "@/lib/sync/events-emit"
+import { emitTargetCellCommit, emitCellBacktranslationSet, emitFileRename, emitFileDelete, emitFileRestore, emitCellValidate, emitCellRetime, emitCellLaneRetime, emitCellAudioAttach, emitFileVideoSet, emitFileTimingSet, emitSourceCellCreate } from "@/lib/sync/events-emit"
+import { v7 as uuidv7 } from "uuid"
+import { sequenceBetween } from "@/lib/timeline/derive"
 import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
 import { isBulkValidationEligible } from "@/lib/review/review-eligibility"
 import { TimelineEditor } from "@/components/timeline/TimelineEditor"
@@ -3577,6 +3579,72 @@ export function ProjectWorkspace() {
     setRecordingCellId(cellId)
   }, [])
 
+  /**
+   * AQU-646: add a line over a stretch of film that no cell covers — the "T" in
+   * the Subtitles track, and the mic in the Target audio track, which creates
+   * the same blank line and then opens the recorder.
+   *
+   * ONE event: source.cell.create, blank on both sides. The target row appears
+   * by itself when someone first types, because target.cell.commit upserts.
+   * Chained on the cell that ends before this stretch so the anchor order keeps
+   * matching the clock, with a fractional sequenceIndex between its neighbours
+   * so nothing has to be renumbered.
+   */
+  const handleAddLine = useCallback(
+    async (startSec: number, endSec: number, opts?: { thenRecord?: boolean }): Promise<string | null> => {
+      if (!project?.id || !activeFileId) return null
+      const startMs = Math.round(startSec * 1000)
+      const endMs = Math.round(endSec * 1000)
+      if (endMs <= startMs) return null
+      // Neighbours by TIME — the anchor chain and the clock agree for a file
+      // nobody has retimed, and where they disagree the clock is what the user
+      // is looking at.
+      const byTime = getActiveCells()
+        .filter((c) => typeof c.startTime === "number" && typeof c.endTime === "number")
+        .sort((a, b) => (a.startTime ?? 0) - (b.startTime ?? 0))
+      const before = [...byTime].reverse().find((c) => (c.endTime ?? 0) <= startSec) ?? null
+      const after = byTime.find((c) => (c.startTime ?? 0) >= endSec) ?? null
+      const cellId = uuidv7()
+      await emitSourceCellCreate({
+        projectId: project.id,
+        fileId: activeFileId,
+        cellId,
+        anchorCellId: before?.id ?? null,
+        value: "",
+        startMs,
+        endMs,
+        sequenceIndex: sequenceBetween(before?.sequenceIndex, after?.sequenceIndex),
+        // The one durable signal that a person made this line rather than an
+        // import. Inferring it from the ABSENCE of an import envelope would be
+        // wrong — that also describes every pre-normalized-manifest file.
+        metadata: { aquillaOrigin: { version: 1, kind: "user-insert", createdAt: Date.now() } },
+        author: currentUsername,
+      })
+      await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+      revalidateCells()
+      // Land on it exactly as clicking its row would: ring the chip, centre the
+      // track, scroll the table there. No editor is opened — the line is yours
+      // to do what you like with (Sam, 2026-08-11). The revalidate above has to
+      // have landed first or there is no row to scroll to yet.
+      setTimelineSelectedCellId(cellId)
+      handleMediaRowActivate(cellId)
+      jumpToCellIdFollowing(cellId)
+      if (opts?.thenRecord) handleOpenRecording(cellId)
+      return cellId
+    },
+    [
+      project?.id,
+      activeFileId,
+      currentUsername,
+      getActiveCells,
+      getTokenForProjectFile,
+      revalidateCells,
+      jumpToCellIdFollowing,
+      handleOpenRecording,
+      handleMediaRowActivate,
+    ],
+  )
+
   // FRO perf cleanup: the five openers above are pure pass-throughs through
   // EditorTable -> MemoizedRow -> EditorRow with no intermediate consumer, so
   // they've been moved off the row prop bag into EditorActionsContext. All
@@ -5843,6 +5911,11 @@ export function ProjectWorkspace() {
                     onTrimTarget={handleTrimTarget}
                     onTogglePlay={handleTimelineTogglePlay}
                     onRequestLinkVideo={() => setLinkVideoOpen(true)}
+                    onAddLine={handleAddLine}
+                    // Creating a cell is a source.* write, PROJECT_LEAD+ on the
+                    // server. Offering the button below that bar would mint a
+                    // guaranteed 403 and wedge the outbox.
+                    canAddLine={canPerform("source.cell.create", project?.syncRole?.level ?? null)}
                     canLinkVideo={canPerform("file.video.set", project?.syncRole?.level ?? null)}
                     onSeekToTime={handleTimelineSeekToTime}
                     timingMode={timingMode}

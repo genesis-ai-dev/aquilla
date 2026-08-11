@@ -32,7 +32,16 @@ export interface TimelineLaneProps {
   onRetime(id: string, startSec: number, endSec: number): void
   /** AQU-646: clean click on a card navigates playback to it. */
   onSeek?(id: string): void
+  /** AQU-646: stretches with no cell of their own, where a line could be added.
+   *  Only the VTT-plus-footage arrangement passes these. */
+  emptySpans?: readonly { startSec: number; endSec: number }[]
+  /** Clicking the "add a line" button over one of those stretches. */
+  onAddLine?(startSec: number, endSec: number): void
 }
+
+/** Below this a round button has nowhere to sit, so none is offered — zoom in
+ *  and it appears. Matches the target lane's own floor. */
+const MIN_BUTTON_PX = 24
 
 export function TimelineLane({
   cells,
@@ -48,6 +57,8 @@ export function TimelineLane({
   onSelect,
   onRetime,
   onSeek,
+  emptySpans,
+  onAddLine,
 }: TimelineLaneProps) {
   const spanOf = (c: CellData): { start: number; end: number } => {
     if (layout) {
@@ -85,8 +96,47 @@ export function TimelineLane({
     return out
   }
 
+  // AQU-646: "there is room for a line here". Faint at rest rather than
+  // invisible (Sam, 2026-08-11) so the affordance can be found without hunting
+  // for it, and gone entirely when the stretch is too narrow to hold a button.
+  const addLine = onAddLine
+  const addSlots =
+    editable && addLine
+      ? (emptySpans ?? [])
+          .filter((s) => isVisible(s.startSec, s.endSec, viewStartSec, viewEndSec))
+          .map((s) => ({
+            span: s,
+            leftPx: s.startSec * pxPerSec,
+            widthPx: (s.endSec - s.startSec) * pxPerSec,
+          }))
+          .filter((s) => s.widthPx >= MIN_BUTTON_PX)
+      : []
+
   return (
     <div data-testid="tl-lane" data-variant={variant} className="relative h-[66px] border-b border-border">
+      {addSlots.map(({ span, leftPx, widthPx }) => (
+        <div
+          key={`add-${span.startSec}`}
+          data-testid={`tl-add-line-${span.startSec}`}
+          style={{ left: `${leftPx}px`, width: `${widthPx}px` }}
+          className="group/add absolute top-2.5 flex h-[46px] items-center justify-center"
+        >
+          <button
+            type="button"
+            title="Add a line here"
+            aria-label="Add a line here"
+            data-testid={`tl-add-line-${span.startSec}-button`}
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation()
+              addLine?.(span.startSec, span.endSec)
+            }}
+            className="flex h-7 w-7 items-center justify-center rounded-full bg-background/90 text-xs font-semibold opacity-25 shadow-sm ring-1 ring-border transition-opacity hover:bg-background group-hover/add:opacity-100 focus-visible:opacity-100"
+          >
+            T
+          </button>
+        </div>
+      ))}
       {visible.map((c) => (
         <TimelineCard
           key={c.id}

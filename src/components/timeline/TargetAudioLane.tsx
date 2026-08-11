@@ -70,6 +70,10 @@ export interface TargetAudioLaneProps {
    *  row reveals a record button on hover, so starting a line doesn't need a
    *  trip to the detail pane. */
   emptyCells?: CellData[]
+  /** AQU-646: stretches of film with no cell at all. The mic here creates the
+   *  blank line first and then opens the recorder. */
+  emptySpans?: readonly { startSec: number; endSec: number }[]
+  onAddLineAndRecord?(startSec: number, endSec: number): void
 }
 
 type ChipDragMode = "move" | "resize-l" | "resize-r"
@@ -569,6 +573,8 @@ export function TargetAudioLane({
   onTrimTarget,
   onOpenRecording,
   emptyCells,
+  emptySpans,
+  onAddLineAndRecord,
 }: TargetAudioLaneProps) {
   const audioFirst = layout?.mode === "audioFirst"
   // Resolve every chip first — overflow needs the NEXT chip's start, and
@@ -643,6 +649,37 @@ export function TargetAudioLane({
   return (
     // `isolate`: chip z-indexes stack within the lane — never over the playhead.
     <div data-testid="tl-target-lane" className="isolate relative h-[66px] border-b border-border">
+      {(emptySpans ?? []).map((span) => {
+        const leftPx = secToPx(span.startSec, pxPerSec)
+        const widthPx = secToPx(span.endSec - span.startSec, pxPerSec)
+        // Same floor as a section's own slot — below this the button has
+        // nowhere to sit, so none is offered until you zoom in.
+        if (!editable || !onAddLineAndRecord || widthPx < 24) return null
+        if (!isVisible(span.startSec, span.endSec, viewStartSec, viewEndSec)) return null
+        return (
+          <div
+            key={`addrec-${span.startSec}`}
+            data-testid={`tl-target-add-${span.startSec}`}
+            style={{ left: `${leftPx}px`, width: `${widthPx}px` }}
+            className="group/addrec absolute top-2.5 flex h-[46px] items-center justify-center"
+          >
+            <button
+              type="button"
+              title="Record over this stretch"
+              aria-label="Record over this stretch"
+              data-testid={`tl-target-add-${span.startSec}-record`}
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation()
+                onAddLineAndRecord(span.startSec, span.endSec)
+              }}
+              className="flex h-7 w-7 items-center justify-center rounded-full bg-background/90 opacity-25 shadow-sm ring-1 ring-border transition-opacity hover:bg-background group-hover/addrec:opacity-100 focus-visible:opacity-100"
+            >
+              <Mic className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        )
+      })}
       {emptySlots.map(({ cell, leftPx, widthPx }) => (
         <div
           key={`empty-${cell.id}`}
@@ -661,7 +698,10 @@ export function TargetAudioLane({
               onSelect(cell.id)
               onOpenRecording?.(cell.id)
             }}
-            className="flex h-7 w-7 items-center justify-center rounded-full bg-background/90 opacity-0 shadow-sm ring-1 ring-border transition-opacity hover:bg-background group-hover/empty:opacity-100 focus-visible:opacity-100"
+            // Faint at rest rather than invisible (Sam, 2026-08-11): you should
+            // be able to see that recording is offered here without discovering
+            // it by accident.
+            className="flex h-7 w-7 items-center justify-center rounded-full bg-background/90 opacity-25 shadow-sm ring-1 ring-border transition-opacity hover:bg-background group-hover/empty:opacity-100 focus-visible:opacity-100"
           >
             <Mic className="h-3.5 w-3.5" />
           </button>

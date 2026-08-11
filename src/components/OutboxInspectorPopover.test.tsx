@@ -26,6 +26,46 @@ function makeRecord(i: number): OutboxRecord {
   } as unknown as OutboxRecord
 }
 
+describe("OutboxInspectorPopover queue summary (AQU-511)", () => {
+  it("states each pending count exactly once", async () => {
+    render(
+      <OutboxInspectorPopover
+        trigger={<button type="button">open inspector</button>}
+        records={Array.from({ length: 3 }, (_, i) => makeRecord(i))}
+        pendingCount={3}
+      />,
+    )
+    fireEvent.click(screen.getByRole("button", { name: /open inspector/i }))
+
+    // Asserted on the region's full text, not via getByText: the count sits in
+    // its own styled child span, and the default matcher only sees an element's
+    // direct text nodes.
+    //
+    // The count has that styled span, so the noun key must not interpolate it as
+    // well. String extraction briefly swapped the bare noun for a
+    // "{count} {noun}" template while leaving the span in place, rendering
+    // "3 3 text edits" — an unexplainable number in the one surface whose whole
+    // job is telling the user what is still unsaved.
+    const summary = await screen.findByLabelText("Pending changes")
+    expect(summary.textContent).toContain("3 text edits")
+    expect(summary.textContent).not.toContain("3 3 text edits")
+  })
+
+  it("uses the singular noun for a queue of one", async () => {
+    render(
+      <OutboxInspectorPopover
+        trigger={<button type="button">open inspector</button>}
+        records={[makeRecord(0)]}
+        pendingCount={1}
+      />,
+    )
+    fireEvent.click(screen.getByRole("button", { name: /open inspector/i }))
+    const summary = await screen.findByLabelText("Pending changes")
+    expect(summary.textContent).toContain("1 text edit")
+    expect(summary.textContent).not.toContain("1 text edits")
+  })
+})
+
 describe("OutboxInspectorPopover volume guard", () => {
   it("caps the rendered record list at DISPLAY_CAP and shows the true overflow from pendingCount", async () => {
     // 150 records in hand, but the true queue is 5000 (records is capped upstream).

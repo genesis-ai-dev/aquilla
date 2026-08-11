@@ -330,11 +330,11 @@ export function OutboxInspectorPopover({ trigger, records, pendingCount, onRetry
             <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
               {summary.edits > 0 && (
                 <span>
+                  {/* The count is rendered by the styled span above, so this key
+                      contributes the noun only — interpolating {count} here too
+                      printed it twice ("3 3 text edits"). */}
                   <span className="font-medium tabular-nums text-foreground">{summary.edits}</span>{" "}
-                  {t("nav.outbox.countedItem", {
-                    count: summary.edits,
-                    noun: t(summary.edits === 1 ? "nav.outbox.editsSingular" : "nav.outbox.editsPlural"),
-                  })}
+                  {t(summary.edits === 1 ? "nav.outbox.editsSingular" : "nav.outbox.editsPlural")}
                 </span>
               )}
               {summary.validation > 0 && (
@@ -346,10 +346,7 @@ export function OutboxInspectorPopover({ trigger, records, pendingCount, onRetry
               {summary.comments > 0 && (
                 <span>
                   <span className="font-medium tabular-nums text-foreground">{summary.comments}</span>{" "}
-                  {t("nav.outbox.countedItem", {
-                    count: summary.comments,
-                    noun: t(summary.comments === 1 ? "nav.outbox.commentsSingular" : "nav.outbox.commentsPlural"),
-                  })}
+                  {t(summary.comments === 1 ? "nav.outbox.commentsSingular" : "nav.outbox.commentsPlural")}
                 </span>
               )}
               {summary.other > 0 && (

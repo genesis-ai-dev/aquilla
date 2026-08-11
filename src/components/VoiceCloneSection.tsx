@@ -6,6 +6,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Mic, Pause, Play, Sparkles, Square, Trash2, Upload } from "lucide-react"
+import { useT } from "@/lib/i18n/I18nProvider"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Badge } from "@/components/ui/badge"
@@ -41,6 +42,7 @@ type Status =
 const MAX_REFERENCE_BYTES = 8 * 1024 * 1024 // 8 MB — Seed-VC only needs a few seconds.
 
 export function VoiceCloneSection({ voice, projectId, fileId, session, onChange, focusSignal }: Props) {
+  const t = useT()
   const recorder = useAudioRecorder()
   const [status, setStatus] = useState<Status>({ kind: "idle" })
   const consumedBlobRef = useRef<Blob | null>(null)
@@ -64,11 +66,11 @@ export function VoiceCloneSection({ voice, projectId, fileId, session, onChange,
   const upload = useCallback(
     async (blob: Blob, ext: string) => {
       if (!projectId || !fileId) {
-        setStatus({ kind: "error", message: "No project context for upload." })
+        setStatus({ kind: "error", message: t("audio.clone.errorNoContext") })
         return
       }
       if (blob.size > MAX_REFERENCE_BYTES) {
-        setStatus({ kind: "error", message: "Reference clip too large (max 8 MB). Use a few seconds." })
+        setStatus({ kind: "error", message: t("audio.clone.errorTooLarge") })
         return
       }
       setStatus({ kind: "uploading" })
@@ -87,7 +89,7 @@ export function VoiceCloneSection({ voice, projectId, fileId, session, onChange,
         setStatus({ kind: "error", message: e instanceof Error ? e.message : String(e) })
       }
     },
-    [projectId, fileId, session, onChange],
+    [projectId, fileId, session, onChange, t],
   )
 
   // When a recording stops, auto-upload the captured blob exactly once.
@@ -131,18 +133,16 @@ export function VoiceCloneSection({ voice, projectId, fileId, session, onChange,
       )}
     >
       <div className="mb-1 flex items-center gap-2 text-sm font-medium">
-        <Sparkles className="h-3.5 w-3.5 text-muted-foreground" /> Voice profile (clone)
-        {voice.referenceAudioId && <Badge variant="secondary">Active</Badge>}
+        <Sparkles className="h-3.5 w-3.5 text-muted-foreground" /> {t("audio.clone.title")}
+        {voice.referenceAudioId && <Badge variant="secondary">{t("audio.clone.activeBadge")}</Badge>}
       </div>
       <p className="mb-3 text-xs text-muted-foreground">
-        Record or upload a short reference clip (5–15s of one clear speaker). This voice's
-        generated audio is then re-voiced into that timbre via Seed-VC — so the whole project
-        can speak in a single, consistent voice.
+        {t("audio.clone.description")}
       </p>
 
       {!hasContext ? (
         <p className="text-xs text-muted-foreground">
-          Open this from a project workspace to record or upload a reference clip.
+          {t("audio.clone.needsContext")}
         </p>
       ) : voice.referenceAudioId ? (
         <div className="flex flex-wrap items-center gap-2">
@@ -160,7 +160,7 @@ export function VoiceCloneSection({ voice, projectId, fileId, session, onChange,
             onClick={removeReference}
             className="text-destructive hover:bg-destructive/10 hover:text-destructive"
           >
-            <Trash2 className="mr-1 h-3.5 w-3.5" /> Remove clone
+            <Trash2 className="mr-1 h-3.5 w-3.5" /> {t("audio.clone.removeButton")}
           </Button>
           <Button
             type="button"
@@ -169,14 +169,14 @@ export function VoiceCloneSection({ voice, projectId, fileId, session, onChange,
             onClick={() => fileInputRef.current?.click()}
             disabled={status.kind === "uploading"}
           >
-            <Upload className="mr-1 h-3.5 w-3.5" /> Replace
+            <Upload className="mr-1 h-3.5 w-3.5" /> {t("audio.clone.replaceButton")}
           </Button>
         </div>
       ) : (
         <div className="flex flex-wrap items-center gap-2">
           {isRecording ? (
             <Button type="button" size="sm" variant="destructive" onClick={() => recorder.stop()}>
-              <Square className="mr-1 h-3.5 w-3.5" /> Stop ({(recorder.elapsedMs / 1000).toFixed(1)}s)
+              <Square className="mr-1 h-3.5 w-3.5" /> {t("audio.clone.stopRecordingButton", { seconds: (recorder.elapsedMs / 1000).toFixed(1) })}
             </Button>
           ) : (
             <Button
@@ -185,7 +185,7 @@ export function VoiceCloneSection({ voice, projectId, fileId, session, onChange,
               onClick={() => void recorder.start()}
               disabled={status.kind === "uploading"}
             >
-              <Mic className="mr-1 h-3.5 w-3.5" /> Record reference
+              <Mic className="mr-1 h-3.5 w-3.5" /> {t("audio.clone.recordButton")}
             </Button>
           )}
           <Button
@@ -195,11 +195,11 @@ export function VoiceCloneSection({ voice, projectId, fileId, session, onChange,
             onClick={() => fileInputRef.current?.click()}
             disabled={status.kind === "uploading" || isRecording}
           >
-            <Upload className="mr-1 h-3.5 w-3.5" /> Upload audio
+            <Upload className="mr-1 h-3.5 w-3.5" /> {t("audio.clone.uploadButton")}
           </Button>
           {status.kind === "uploading" && (
             <span className="flex items-center gap-1 text-xs text-muted-foreground">
-              <Spinner className="size-3.5" /> Uploading…
+              <Spinner className="size-3.5" /> {t("audio.uploadingStatus")}
             </span>
           )}
         </div>
@@ -231,6 +231,7 @@ interface PreviewProps {
 
 /** Fetch the reference clip from R2 and play it back. */
 export function ReferencePreview({ projectId, fileId, referenceAudioId, session }: PreviewProps) {
+  const t = useT()
   const [state, setState] = useState<"idle" | "loading" | "playing" | "error">("idle")
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const urlRef = useRef<string | null>(null)
@@ -273,7 +274,7 @@ export function ReferencePreview({ projectId, fileId, referenceAudioId, session 
   }, [state, projectId, fileId, referenceAudioId, session, cleanup])
 
   return (
-    <AppTooltip content="Preview reference clip">
+    <AppTooltip content={t("audio.clone.previewTooltip")}>
       <Button
         type="button"
         size="sm"
@@ -288,7 +289,7 @@ export function ReferencePreview({ projectId, fileId, referenceAudioId, session 
       ) : (
         <Play className="mr-1 h-3.5 w-3.5" />
       )}
-      {state === "error" ? "Preview failed" : "Preview"}
+      {state === "error" ? t("audio.clone.previewFailed") : t("audio.clone.previewButton")}
     </Button>
     </AppTooltip>
   )

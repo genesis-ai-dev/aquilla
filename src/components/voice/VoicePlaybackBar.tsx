@@ -8,6 +8,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react
 import {
   Pause, Play, SkipBack, SkipForward, Volume2, VolumeX,
 } from "lucide-react"
+import { useT } from "@/lib/i18n/I18nProvider"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -53,6 +54,7 @@ function fmtTime(s: number): string {
 export function VoicePlaybackBar({
   cells: rawCells, projectId, session, settings, onActiveCell, startCellId, below,
 }: Props) {
+  const t = useT()
   const queue = useQueueState()
   const { currentTime, duration, rate, volume } = useQueueProgress()
 
@@ -135,14 +137,14 @@ export function VoicePlaybackBar({
             {activeVoice && <VoiceAvatar voice={activeVoice} size={26} />}
             <div className="min-w-0">
               <div className="truncate text-xs font-medium leading-tight">
-                {activeCell ? (activeCell.cellLabel || "Line") : "Nothing playing"}
+                {activeCell ? (activeCell.cellLabel || t("audio.playbackBar.lineFallback")) : t("audio.playbackBar.nothingPlaying")}
               </div>
               <div className="truncate text-[10px] leading-tight text-muted-foreground">
                 {queue.kind === "error"
                   ? queue.message
                   : activeVoice
                     ? activeVoice.name
-                    : canPlay ? "Press play to listen" : "No voiced lines yet"}
+                    : canPlay ? t("audio.playbackBar.pressPlayToListen") : t("audio.playbackBar.noVoicedLines")}
               </div>
             </div>
           </div>
@@ -152,23 +154,23 @@ export function VoicePlaybackBar({
         {/* Transport */}
         <div className="flex shrink-0 items-center gap-0.5 self-center">
           <SpeedButton rate={rate} onChange={setQueueRate} />
-          <IconButton title="Previous line" disabled={!canPlay} onClick={skipBack}>
+          <IconButton title={t("audio.playbackBar.previousLine")} disabled={!canPlay} onClick={skipBack}>
             <SkipBack className="h-4 w-4" />
           </IconButton>
-          <AppTooltip content={isPlaying ? "Pause" : "Play all"}>
+          <AppTooltip content={isPlaying ? t("audio.playbackBar.pause") : t("audio.playbackBar.playAll")}>
             <Button
               type="button"
               size="icon"
               variant="default"
               onClick={onPlayPause}
               disabled={!canPlay}
-              aria-label={isPlaying ? "Pause" : "Play all"}
+              aria-label={isPlaying ? t("audio.playbackBar.pause") : t("audio.playbackBar.playAll")}
               className="bg-foreground text-background hover:bg-foreground/90"
             >
               {isLoading ? <Spinner /> : isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4 translate-x-px" />}
             </Button>
           </AppTooltip>
-          <IconButton title="Next line" disabled={!canPlay} onClick={skipForward}>
+          <IconButton title={t("audio.playbackBar.nextLine")} disabled={!canPlay} onClick={skipForward}>
             <SkipForward className="h-4 w-4" />
           </IconButton>
           <span className="ml-1.5 shrink-0 text-[11px] tabular-nums text-muted-foreground">
@@ -215,6 +217,7 @@ function BarScrubber({ fraction, onSeek, disabled }: {
   onSeek: (f: number) => void
   disabled: boolean
 }) {
+  const t = useT()
   const fracFromEvent = (e: React.PointerEvent<HTMLDivElement>): number => {
     const r = e.currentTarget.getBoundingClientRect()
     return Math.max(0, Math.min(1, (e.clientX - r.left) / Math.max(1, r.width)))
@@ -222,7 +225,7 @@ function BarScrubber({ fraction, onSeek, disabled }: {
   return (
     <div
       role="slider"
-      aria-label="Seek"
+      aria-label={t("audio.playbackBar.seek")}
       aria-valuemin={0}
       aria-valuemax={100}
       aria-valuenow={Math.round(fraction * 100)}
@@ -243,10 +246,11 @@ function BarScrubber({ fraction, onSeek, disabled }: {
 }
 
 function SpeedButton({ rate, onChange }: { rate: number; onChange: (r: number) => void }) {
+  const t = useT()
   const [open, setOpen] = useState(false)
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <AppTooltip content="Playback speed">
+      <AppTooltip content={t("audio.playbackBar.playbackSpeed")}>
         <PopoverTrigger
           render={
             <Button
@@ -280,15 +284,16 @@ function SpeedButton({ rate, onChange }: { rate: number; onChange: (r: number) =
 }
 
 function VolumeControl({ volume, onChange }: { volume: number; onChange: (v: number) => void }) {
+  const t = useT()
   const muted = volume === 0
   return (
     <div className="flex items-center gap-2">
-      <AppTooltip content={muted ? "Unmute" : "Mute"}>
+      <AppTooltip content={muted ? t("audio.playbackBar.unmute") : t("audio.playbackBar.mute")}>
         <Button
           type="button"
           size="icon-sm"
           variant="ghost"
-          aria-label={muted ? "Unmute" : "Mute"}
+          aria-label={muted ? t("audio.playbackBar.unmute") : t("audio.playbackBar.mute")}
           onClick={() => onChange(muted ? 1 : 0)}
         >
           {muted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
@@ -300,7 +305,7 @@ function VolumeControl({ volume, onChange }: { volume: number; onChange: (v: num
         step={0.01}
         value={[volume]}
         onValueChange={(next) => onChange(Array.isArray(next) ? next[0] : next)}
-        aria-label="Volume"
+        aria-label={t("audio.playbackBar.volume")}
         className="hidden w-24 sm:block"
       />
     </div>

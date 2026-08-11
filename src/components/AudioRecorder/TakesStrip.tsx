@@ -5,6 +5,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Bird, Check, Pause, Play, RotateCcw, Trash2 } from "lucide-react"
+import { useT } from "@/lib/i18n/I18nProvider"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -27,6 +28,7 @@ interface Props {
 }
 
 export function TakesStrip({ projectId, fileId, cellId, takes, selectedAudioId, author, session }: Props) {
+  const t = useT()
   const [playingId, setPlayingId] = useState<string | null>(null)
   const [loadingId, setLoadingId] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
@@ -150,9 +152,11 @@ export function TakesStrip({ projectId, fileId, cellId, takes, selectedAudioId, 
     return [...cleaned, ...originals].map((att) => ({
       att,
       isCleaned: isDenoisedAudioId(att.audioId),
-      label: isDenoisedAudioId(att.audioId) ? "Cleaned" : `Take ${number.get(att.audioId)}`,
+      label: isDenoisedAudioId(att.audioId)
+        ? t("audio.takesStrip.cleanedLabel")
+        : t("audio.takesStrip.takeLabel", { number: number.get(att.audioId) ?? 0 }),
     }))
-  }, [takes])
+  }, [takes, t])
 
   if (takes.length === 0) return null
 
@@ -161,7 +165,7 @@ export function TakesStrip({ projectId, fileId, cellId, takes, selectedAudioId, 
   return (
     <div className="border-t px-5 py-3">
       <div className="mb-2 text-xs text-muted-foreground/60">
-        Takes ({takes.length})
+        {t("audio.takesStrip.heading", { count: takes.length })}
       </div>
       <div className="flex flex-wrap gap-1.5">
         {ordered.map(({ att, isCleaned, label }) => {
@@ -190,13 +194,13 @@ export function TakesStrip({ projectId, fileId, cellId, takes, selectedAudioId, 
                     : "border-border bg-muted/30",
               )}
             >
-              <AppTooltip content={isPlaying ? "Stop" : "Play take"}>
+              <AppTooltip content={isPlaying ? t("audio.takesStrip.stopTooltip") : t("audio.takesStrip.playTakeTooltip")}>
                 <Button
                   type="button"
                   variant="ghost"
                   size="icon-xs"
                   onClick={() => void play(att)}
-                  aria-label={isPlaying ? "Stop" : "Play take"}
+                  aria-label={isPlaying ? t("audio.takesStrip.stopTooltip") : t("audio.takesStrip.playTakeTooltip")}
                   className="rounded-md hover:bg-background"
                 >
                   {isLoading ? <Spinner className="size-3.5" />
@@ -212,14 +216,14 @@ export function TakesStrip({ projectId, fileId, cellId, takes, selectedAudioId, 
                 )}
               </span>
               {!isCleaned && (
-                <AppTooltip content="Remove noise (adds a cleaned take)">
+                <AppTooltip content={t("audio.takesStrip.removeNoiseTooltip")}>
                   <Button
                     type="button"
                     variant="ghost"
                     size="icon-xs"
                     onClick={() => void denoise(att)}
                     disabled={!session?.jwt || denoisingId !== null}
-                    aria-label="Remove noise (adds a cleaned take)"
+                    aria-label={t("audio.takesStrip.removeNoiseTooltip")}
                     className="rounded-md text-muted-foreground/60 hover:bg-background"
                   >
                     {isDenoising ? <Spinner className="size-3.5" /> : <Bird className="h-3.5 w-3.5" />}
@@ -227,28 +231,28 @@ export function TakesStrip({ projectId, fileId, cellId, takes, selectedAudioId, 
                 </AppTooltip>
               )}
               {canRevert && (
-                <AppTooltip content="Revert to the original recording">
+                <AppTooltip content={t("audio.takesStrip.revertTooltip")}>
                   <Button
                     type="button"
                     variant="ghost"
                     size="icon-xs"
                     onClick={() => void circle(revertTo)}
                     disabled={isSelectInFlight}
-                    aria-label="Revert to the original recording"
+                    aria-label={t("audio.takesStrip.revertTooltip")}
                     className="rounded-md text-muted-foreground/60 hover:bg-background"
                   >
                     <RotateCcw className="h-3.5 w-3.5" />
                   </Button>
                 </AppTooltip>
               )}
-              <AppTooltip content={isCircled ? "Active take" : "Use this take"}>
+              <AppTooltip content={isCircled ? t("audio.takesStrip.activeTakeTooltip") : t("audio.takesStrip.useTakeTooltip")}>
                 <Button
                   type="button"
                   variant="ghost"
                   size="icon-xs"
                   onClick={() => void circle(att.audioId)}
                   disabled={isSelectInFlight || isCircled}
-                  aria-label={isCircled ? "Active take" : "Use this take"}
+                  aria-label={isCircled ? t("audio.takesStrip.activeTakeTooltip") : t("audio.takesStrip.useTakeTooltip")}
                   className={cn(
                     "rounded-md hover:bg-background",
                     isCircled ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground/60",
@@ -257,14 +261,14 @@ export function TakesStrip({ projectId, fileId, cellId, takes, selectedAudioId, 
                   {isBusy ? <Spinner className="size-3.5" /> : <Check className="h-3.5 w-3.5" />}
                 </Button>
               </AppTooltip>
-              <AppTooltip content="Delete take">
+              <AppTooltip content={t("audio.takesStrip.deleteTakeTooltip")}>
                 <Button
                   type="button"
                   variant="ghost"
                   size="icon-xs"
                   onClick={() => void remove(att.audioId)}
                   disabled={isBusy}
-                  aria-label="Delete take"
+                  aria-label={t("audio.takesStrip.deleteTakeTooltip")}
                   className="rounded-md text-muted-foreground/50 hover:bg-destructive/10 hover:text-destructive"
                 >
                   <Trash2 className="h-3.5 w-3.5" />

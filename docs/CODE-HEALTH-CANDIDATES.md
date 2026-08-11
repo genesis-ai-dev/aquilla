@@ -45,3 +45,18 @@ a later run completes.
 - **`src/lib/sync/projects-read.ts`**, `projects-read-types.ts`, and their test (220 lines)
   — unused Phase 2b wrapper. Grep precise paths/exports before deleting: a different,
   live `fetchAccessibleProjects` exists in `cloud-projects.ts`.
+
+## Prior candidates retained from the 2026-08-10/11 runs
+
+- **`src/components/CellActionsMenu.tsx`**, `ProgressDot.tsx`, and
+  `useSubscribedConcepts.ts` — re-check zero importers before deletion.
+- **`src/lib/sync/settings-read.ts`** / `settings-read-types.ts` and
+  **`src/lib/timeline/diarization-loader.ts`** — deferred from the 2026-08-11 survey;
+  confirm no newer feature path introduced a caller.
+- **`src/lib/sync/sync-debug.ts`**, the deprecated `EditorScrollContext` compatibility
+  fields, and the deprecated `ExamplePanel` prop pass-through were recorded as candidates
+  in the earlier run; verify the current source before taking further action.
+
+The 2026-08-10 run also recorded an E2E limitation in the Claude Code web sandbox: its
+Docker/Wrangler setup was not reliable enough to complete the smoke suite. This is an
+environment note, not a product regression.

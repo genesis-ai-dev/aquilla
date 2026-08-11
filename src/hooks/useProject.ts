@@ -185,7 +185,14 @@ export function useProject(projectId: string) {
   // Overlay synced settings (server-authoritative project-wide fields) onto
   // the hydrated record so existing consumers see merged values without any
   // per-callsite changes.
-  const { settings: syncedSettings, patch: patchSettings } = useProjectSettings(projectId, roleLevel)
+  // AQU-822: the org's termbase-edit floor rides along on the project record,
+  // so a terminology-only patch can be permitted below the maintainer settings
+  // floor without any extra fetch here.
+  const { settings: syncedSettings, patch: patchSettings } = useProjectSettings(
+    projectId,
+    roleLevel,
+    { termbaseEditMinRole: project?.termbaseEditMinRole },
+  )
   const overlaid = useMemo(
     () => project ? overlaySettings(project, syncedSettings) : null,
     [project, syncedSettings],

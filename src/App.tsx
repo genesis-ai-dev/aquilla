@@ -77,6 +77,9 @@ const MondayOAuthCallback = lazy(() =>
 const OrgSettingsRoster = lazy(() =>
   import("@/pages/Settings").then((m) => ({ default: m.OrgSettingsRoster })),
 )
+const OrgSettingsTerminology = lazy(() =>
+  import("@/pages/Settings").then((m) => ({ default: m.OrgSettingsTerminology })),
+)
 const OrgSettingsAssignment = lazy(() =>
   import("@/pages/Settings").then((m) => ({ default: m.OrgSettingsAssignment })),
 )
@@ -229,6 +232,7 @@ function AppRoutes() {
           <Route path="settings/export" element={<OrgSettingsExport />} />
           <Route path="settings/roster" element={<OrgSettingsRoster />} />
           <Route path="settings/assignment" element={<OrgSettingsAssignment />} />
+          <Route path="settings/terminology" element={<OrgSettingsTerminology />} />
           <Route path="settings/providers" element={<OrgSettingsProviders />} />
           <Route path="settings/monday" element={<OrgSettingsMonday />} />
         </Route>

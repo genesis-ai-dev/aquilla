@@ -273,6 +273,66 @@ describe("useProjectSettings — write path", () => {
     expect(idbMod.patchProject).not.toHaveBeenCalled()
   })
 
+  // AQU-822: terminology is the one key whose floor is org-configurable. The
+  // hook-wide MAINTAINER floor must keep applying to every other key, and to
+  // terminology itself once the org floor is above the caller.
+  describe("terminology-only carve-out (AQU-822)", () => {
+    it("lets a contributor write terminology when the org floor is 400", async () => {
+      mockSettingsFetch({
+        version: 1, updatedAt: "x", updatedBy: null,
+        settings: { sourceLanguage: "en" },
+      })
+      const patchSpy = vi.spyOn(restClient, "patchProjectSettings").mockResolvedValue({
+        kind: "ok",
+        value: { version: 2, updatedAt: "y", updatedBy: null, settings: { terminology: [] } },
+      })
+      const { result } = renderHook(() =>
+        useProjectSettings("p1", 400, { termbaseEditMinRole: 400 }),
+      )
+      await waitFor(() => expect(result.current.hasFetched).toBe(true))
+      let got!: PatchOutcome
+      await act(async () => {
+        got = await result.current.patch({ terminology: [] })
+      })
+      expect(got.kind).toBe("ok")
+      expect(patchSpy).toHaveBeenCalled()
+    })
+
+    it("still blocks a contributor's terminology write at the default floor (500)", async () => {
+      mockSettingsFetch(null)
+      const patchSpy = vi.spyOn(restClient, "patchProjectSettings")
+      const { result } = renderHook(() => useProjectSettings("p1", 400))
+      await waitFor(() => expect(result.current.hasFetched).toBe(true))
+      let got!: PatchOutcome
+      await act(async () => {
+        got = await result.current.patch({ terminology: [] })
+      })
+      expect(got.kind).toBe("blocked")
+      if (got.kind === "blocked") expect(got.reason).toBe("role")
+      expect(patchSpy).not.toHaveBeenCalled()
+    })
+
+    it("does NOT widen any other key when the floor is lowered", async () => {
+      mockSettingsFetch(null)
+      const patchSpy = vi.spyOn(restClient, "patchProjectSettings")
+      const { result } = renderHook(() =>
+        useProjectSettings("p1", 400, { termbaseEditMinRole: 400 }),
+      )
+      await waitFor(() => expect(result.current.settings.sourceLanguage).toBe("en"))
+      let sameCall!: PatchOutcome
+      let mixedCall!: PatchOutcome
+      await act(async () => {
+        sameCall = await result.current.patch({ sourceLanguage: "fr" })
+        // A patch that bundles terminology with another key is NOT
+        // terminology-only — it keeps the maintainer floor.
+        mixedCall = await result.current.patch({ terminology: [], sourceLanguage: "fr" })
+      })
+      expect(sameCall.kind).toBe("blocked")
+      expect(mixedCall.kind).toBe("blocked")
+      expect(patchSpy).not.toHaveBeenCalled()
+    })
+  })
+
   it("unsynced project (roleLevel === null) writes locally with no server call", async () => {
     const idbMod = await import("@/lib/store/project-index")
     vi.mocked(idbMod.patchProject).mockClear()

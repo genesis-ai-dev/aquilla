@@ -21,7 +21,20 @@ const AGENT_LANE = {
     ["npm", ["--prefix", "agent-worker", "test"]],
   ],
 }
-const SPA_LANE = { name: "spa", steps: [["bash", ["scripts/ci-build.sh"]]] }
+// `pnpm test` (ROOT_LANE) excludes every worker package, so the aquilla-web
+// Worker's own suite — routing, invite-meta rewriting, security headers, and
+// the wrangler.toml deployment-config guards — ran in no lane at all. A stale
+// assertion in it had been failing on dev unnoticed as a result. It costs
+// ~0.3s and it gates the same artifact this lane builds, so it runs first:
+// a broken deployment-config contract should fail before the SPA build does.
+// See docs/OPSEC-REVIEW-2026-08-10.md (OPS-4).
+const SPA_LANE = {
+  name: "spa",
+  steps: [
+    ["pnpm", ["test:worker"]],
+    ["bash", ["scripts/ci-build.sh"]],
+  ],
+}
 
 // Root and sync both contain long, database-heavy Vitest suites. Keep them in
 // separate phases so resource contention cannot strand async UI tests in their

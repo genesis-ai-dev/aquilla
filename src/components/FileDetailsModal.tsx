@@ -3,6 +3,7 @@ import type { FileReference } from "@/lib/parsers/types"
 import { fileOrderedBy } from "@/lib/parsers/types"
 import { ROLE } from "@/lib/frontier/roles"
 import { canExportSourceFile, EXPORTABLE_SOURCE_FILE_TYPES } from "@/lib/file-source-export"
+import { useT } from "@/lib/i18n/I18nProvider"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -81,6 +82,7 @@ export function FileDetailsModal({
   file, open, onOpenChange, progress, roleLevel, canExportByOrgPolicy,
   onRename, onMove, onExportSource, onDelete,
 }: FileDetailsModalProps) {
+  const t = useT()
   if (!file) return null
 
   const translatedPct = progress && progress.total > 0
@@ -92,14 +94,14 @@ export function FileDetailsModal({
   const exportDisabledReason = canExport
     ? undefined
     : !EXPORTABLE_SOURCE_FILE_TYPES.has(file.type)
-      ? "Only USFM files support round-trip source export."
-      : "Source export is disabled by your organization's export policy."
+      ? t("fileDetails.exportDisabledType")
+      : t("fileDetails.exportDisabledPolicy")
 
   // AQU-271: delete requires project_lead (500) or above.
   const canDelete = roleLevel >= ROLE.PROJECT_LEAD
   const deleteDisabledReason = canDelete
     ? undefined
-    : "Deleting files requires the Project Lead role or above."
+    : t("fileDetails.deleteRequiresRole")
 
   const languages = [file.sourceLanguage, file.targetLanguage].filter(Boolean).join(" → ")
 
@@ -109,40 +111,44 @@ export function FileDetailsModal({
         <DialogHeader>
           <DialogTitle className="truncate pr-8">{file.name}</DialogTitle>
           {file.originalName && file.originalName !== file.name && (
-            <DialogDescription>Imported as {file.originalName}</DialogDescription>
+            <DialogDescription>{t("fileDetails.importedAs", { name: file.originalName })}</DialogDescription>
           )}
         </DialogHeader>
         <DialogBody>
           <dl className="divide-y divide-border/50 text-[13px]">
-            <DetailRow label="Type">{file.type.toUpperCase()}</DetailRow>
-            {file.corpusMarker && <DetailRow label="Corpus">{file.corpusMarker}</DetailRow>}
-            {file.bookCode && <DetailRow label="Book code">{file.bookCode}</DetailRow>}
-            <DetailRow label="Segments">{String(file.cellCount)}</DetailRow>
-            <DetailRow label="Ordering">
-              {fileOrderedBy(file) === "time" ? "Timeline (timecodes)" : "Sequence"}
+            <DetailRow label={t("fileDetails.type")}>{file.type.toUpperCase()}</DetailRow>
+            {file.corpusMarker && <DetailRow label={t("fileDetails.corpus")}>{file.corpusMarker}</DetailRow>}
+            {file.bookCode && <DetailRow label={t("fileDetails.bookCode")}>{file.bookCode}</DetailRow>}
+            <DetailRow label={t("fileDetails.segments")}>{String(file.cellCount)}</DetailRow>
+            <DetailRow label={t("fileDetails.ordering")}>
+              {fileOrderedBy(file) === "time"
+                ? t("fileDetails.orderingTimeline")
+                : t("fileDetails.orderingSequence")}
             </DetailRow>
-            {languages && <DetailRow label="Languages">{languages}</DetailRow>}
-            <DetailRow label="Imported">
+            {languages && <DetailRow label={t("fileDetails.languages")}>{languages}</DetailRow>}
+            <DetailRow label={t("fileDetails.imported")}>
               {new Date(file.createdAt).toLocaleDateString(undefined, {
                 year: "numeric", month: "short", day: "numeric",
               })}
             </DetailRow>
-            {translatedPct !== null && (
-              <DetailRow label="Progress">{`${translatedPct}% translated · ${validatedPct}% validated`}</DetailRow>
+            {translatedPct !== null && validatedPct !== null && (
+              <DetailRow label={t("fileDetails.progress")}>
+                {t("fileDetails.progressValue", { translated: translatedPct, validated: validatedPct })}
+              </DetailRow>
             )}
           </dl>
           <div className="mt-4 flex flex-col gap-1.5">
-            <ActionButton icon={<Pencil />} label="Rename" onClick={onRename} />
-            <ActionButton icon={<FolderInput />} label="Move to corpus…" onClick={onMove} />
+            <ActionButton icon={<Pencil />} label={t("fileDetails.rename")} onClick={onRename} />
+            <ActionButton icon={<FolderInput />} label={t("fileDetails.moveToCorpus")} onClick={onMove} />
             <ActionButton
               icon={<Download />}
-              label="Export source (.SFM)"
+              label={t("fileDetails.exportSource")}
               onClick={onExportSource}
               disabledReason={exportDisabledReason}
             />
             <ActionButton
               icon={<Trash2 />}
-              label="Delete"
+              label={t("common.delete")}
               onClick={onDelete}
               disabledReason={deleteDisabledReason}
               destructive

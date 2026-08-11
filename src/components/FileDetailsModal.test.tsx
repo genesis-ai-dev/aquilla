@@ -12,6 +12,7 @@ import { render, screen, fireEvent } from "@testing-library/react"
 import { describe, it, expect, vi } from "vitest"
 import type { FileReference } from "@/lib/parsers/types"
 import { ROLE } from "@/lib/frontier/roles"
+import { I18nProvider } from "@/lib/i18n/I18nProvider"
 import { FileDetailsModal } from "./FileDetailsModal"
 
 const usfmFile: FileReference = {
@@ -29,15 +30,17 @@ function renderModal(overrides: Partial<Parameters<typeof FileDetailsModal>[0]> 
     onRename: vi.fn(), onMove: vi.fn(), onExportSource: vi.fn(), onDelete: vi.fn(),
   }
   render(
-    <FileDetailsModal
-      file={usfmFile}
-      open
-      onOpenChange={vi.fn()}
-      roleLevel={ROLE.OWNER}
-      canExportByOrgPolicy
-      {...handlers}
-      {...overrides}
-    />,
+    <I18nProvider>
+      <FileDetailsModal
+        file={usfmFile}
+        open
+        onOpenChange={vi.fn()}
+        roleLevel={ROLE.OWNER}
+        canExportByOrgPolicy
+        {...handlers}
+        {...overrides}
+      />
+    </I18nProvider>,
   )
   return handlers
 }

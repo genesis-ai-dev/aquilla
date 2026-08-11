@@ -1,4 +1,5 @@
 import { Pencil, FolderInput, Trash2, Download, Info } from "lucide-react"
+import { useT } from "@/lib/i18n/I18nProvider"
 import {
   ContextMenuContent,
   ContextMenuGroup,
@@ -25,12 +26,13 @@ interface FileActionMenuProps {
 export function FileActionMenu({
   onShowDetails, onRename, onMove, onDelete, onExportSource,
 }: FileActionMenuProps) {
+  const t = useT()
   return (
     <ContextMenuContent side="bottom" align="start" alignOffset={0} sideOffset={4} className="w-44">
       <ContextMenuGroup>
         {onShowDetails && (
           <ContextMenuItem onClick={onShowDetails}>
-            <Info /> File details
+            <Info /> {t("fileDetails.menuItem")}
           </ContextMenuItem>
         )}
         <ContextMenuItem onClick={onRename}>

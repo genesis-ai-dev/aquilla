@@ -1,36 +1,29 @@
 import { useCallback, useMemo, useState, type ReactNode } from "react"
 import { useNavigate } from "react-router-dom"
 import { type ColumnDef } from "@tanstack/react-table"
-import { CircleCheck, FolderOpen, Mic, Sparkles, UserPlus, Users } from "lucide-react"
+import { UserPlus, Users } from "lucide-react"
 import type { CloudProjectSummary } from "@/lib/sync/cloud-projects"
 import {
   attentionRank,
   audioPct,
-  deadlineStatus,
   translatedPct,
   validatedPct,
   type PortfolioProject,
 } from "@/lib/frontier/portfolio"
 import { ROLE } from "@/lib/frontier/roles"
-import { portfolioActivityStatus } from "@/lib/project-status"
-import { ProjectDeadlineStatuses, deadlineStatusTooltip } from "@/components/ProjectStatus"
+import { portfolioAttentionReasons } from "@/lib/project-status"
+import { ProjectStatus } from "@/components/ProjectStatus"
+import { ADMIN_TABLE_PANEL_CLASS } from "@/components/admin/shared"
+import { RoleLabel } from "@/components/RoleLabel"
 import { DateTooltip } from "@/components/ui/date-tooltip"
 import { DataTable, DataTableColumnHeader, DataTableRowActionsButton } from "@/components/ui/data-table"
 import { missingLast, SORT_MISSING_LAST } from "@/components/ui/data-table-missing"
-import {
-  Empty,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle,
-} from "@/components/ui/empty"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { AppTooltip } from "@/components/ui/tooltip"
+import { EmptyState } from "@/components/ui/page"
 import { MenuItem } from "@/components/ui/menu-parts"
+import { NAV_PAGE_ICONS } from "@/lib/navigation/page-icons"
 import { LaneChips } from "./LaneChips"
-import { ProjectMetricHeader } from "./ProjectMetricHeader"
-import { AddLanguagePopover } from "./AddLanguagePopover"
 import { ProjectLaneSubRows } from "./ProjectLaneSubRows"
 import { OrgLaneAssignModal } from "./OrgLaneAssignModal"
 import { displayLanes } from "./project-lanes"
@@ -41,13 +34,6 @@ export type OrgProjectRow = PortfolioProject & {
   orgName?: string | null
 }
 
-function activityLabel(project: PortfolioProject, now: number): string | null {
-  const status = portfolioActivityStatus(project, now)
-  if (status === "not-started") return "Not started"
-  if (status === "stalled") return "Stalled"
-  return null
-}
-
 type ProjectLens = "recent" | "attention" | "least-translated" | "most-progress" | "name" | "pm"
 
 function lensToSorting(lens: ProjectLens) {
@@ -55,7 +41,7 @@ function lensToSorting(lens: ProjectLens) {
     case "recent":
       return [{ id: "edited", desc: true }] as const
     case "attention":
-      return [{ id: "attention", desc: true }] as const
+      return [{ id: "status", desc: true }] as const
     case "least-translated":
       return [{ id: "translated", desc: false }] as const
     case "most-progress":
@@ -86,7 +72,6 @@ export function OrgProjectsDataTable({
   allowSelfAssignment = false,
   callerUserId = null,
   onLanesChanged,
-  onLaneAdded,
   toolbarLeading,
   toolbarTrailing,
 }: {
@@ -104,7 +89,7 @@ export function OrgProjectsDataTable({
   filesByProjectId?: Map<string, { id: string; name: string }[]>
   /** The active org id — threaded to StaffLanePopover / AssignModal. */
   orgId?: number | null
-  /** JWT — required to enable the "+ Language" and "Assign…" lane actions. */
+  /** JWT — required to enable assign/staff lane actions. */
   jwt?: string | null
   /** Current username — stamped as the assignment event author. */
   author?: string
@@ -113,9 +98,6 @@ export function OrgProjectsDataTable({
   /** Called after an assign/staff lane action, so the parent can refetch the
    * portfolio (per-lane rollups changed). */
   onLanesChanged?: () => void
-  /** AQU-605: called with (projectId, lane) after a "+ Language" add so the
-   * parent can insert the lane in place — no full-table refetch/reload. */
-  onLaneAdded?: (projectId: string, lane: string) => void
   /** Extra controls rendered immediately after the search input (e.g. status filter). */
   toolbarLeading?: ReactNode
   /** Extra controls at the end of the toolbar row (e.g. New Project). */
@@ -137,16 +119,6 @@ export function OrgProjectsDataTable({
     })
   }, [])
 
-  const canAddLanguage = useCallback(
-    (projectId: string) => {
-      const level = roleByProjectId?.get(projectId)?.level
-      // §3.2: enabled for maintainer 600+; when the row's role is unknown, show
-      // it anyway and let the PATCH 403 surface gracefully.
-      return level == null || level >= ROLE.MAINTAINER
-    },
-    [roleByProjectId],
-  )
-
   const tableData = useMemo(() => projects, [projects])
 
   const canAssign = Boolean(jwt && author != null)
@@ -154,41 +126,21 @@ export function OrgProjectsDataTable({
   const columns = useMemo<ColumnDef<OrgProjectRow>[]>(
     () => [
       {
-        // Hidden sort key for the attention lens (urgency). Not shown in the UI.
-        id: "attention",
-        accessorFn: (p) => attentionRank(p, tableNow),
-        header: () => null,
-        cell: () => null,
-        meta: { hidden: true },
-      },
-      {
-        accessorKey: "name",
-        header: ({ column }) => <DataTableColumnHeader column={column} title="Name" />,
+        id: "name",
+        accessorFn: (p) => p.name.toLowerCase(),
+        header: ({ column }) => <DataTableColumnHeader column={column} title="Project" />,
+        meta: { className: "min-w-0" },
         cell: ({ row }) => {
           const p = row.original
-          const dstatus = deadlineStatus(p, tableNow)
           return (
-            <span className="flex min-w-0 items-center gap-2">
-              <span className="truncate font-medium">{p.name}</span>
+            <div className="flex min-w-0 items-center gap-2">
+              <span className="block min-w-0 truncate font-medium">{p.name}</span>
               {showOrg && p.orgName && (
-                <Badge variant="secondary" className="max-w-[8rem] shrink-0 truncate">
+                <Badge variant="secondary" className="max-w-32 shrink-0 truncate">
                   {p.orgName}
                 </Badge>
               )}
-              {(dstatus === "overdue" || dstatus === "soon") && (
-                <AppTooltip
-                  content={deadlineStatusTooltip(dstatus, p.deadlineAt)}
-                  side="bottom"
-                >
-                  <span
-                    tabIndex={0}
-                    className="shrink-0 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-                  >
-                    <ProjectDeadlineStatuses deadline={dstatus} className="shrink-0" />
-                  </span>
-                </AppTooltip>
-              )}
-            </span>
+            </div>
           )
         },
       },
@@ -196,25 +148,16 @@ export function OrgProjectsDataTable({
         id: "languages",
         enableSorting: false,
         header: ({ column }) => <DataTableColumnHeader column={column} title="Language" />,
+        meta: { className: "min-w-0" },
         cell: ({ row }) => {
           const p = row.original
           return (
-            <div className="flex min-w-0 items-center gap-1.5 overflow-hidden">
-              <LaneChips
-                projectId={p.id}
-                lanes={displayLanes(p)}
-                defaultLaneLabel={defaultLaneLabelByProjectId?.get(p.id) ?? ""}
-                onOverflowClick={() => toggleExpand(p.id)}
-                className="flex-1"
-              />
-              {jwt && canAddLanguage(p.id) && (
-                <AddLanguagePopover
-                  projectId={p.id}
-                  jwt={jwt}
-                  onAdded={(lane) => onLaneAdded?.(p.id, lane)}
-                />
-              )}
-            </div>
+            <LaneChips
+              projectId={p.id}
+              lanes={displayLanes(p)}
+              defaultLaneLabel={defaultLaneLabelByProjectId?.get(p.id) ?? ""}
+              onOverflowClick={() => toggleExpand(p.id)}
+            />
           )
         },
       },
@@ -222,21 +165,15 @@ export function OrgProjectsDataTable({
         id: "translated",
         accessorFn: (p) => translatedPct(p),
         header: ({ column }) => (
-          <ProjectMetricHeader
-            label="Translated"
-            description="Translated: percentage of cells with target-language content filled in."
-            icon={Sparkles}
-            testId="project-table-translated-header"
-            sorted={column.getIsSorted()}
-            onSort={column.getToggleSortingHandler()}
-          />
+          <DataTableColumnHeader column={column} title="Translated" className="justify-end" />
         ),
+        meta: { align: "right", className: "w-[6.5rem]" },
         cell: ({ row }) => {
           const pct = Math.round(translatedPct(row.original) * 100)
           return (
             <div
               data-testid="project-table-translated-value"
-              className="text-left font-medium tabular-nums text-foreground"
+              className="text-right tabular-nums text-muted-foreground"
               aria-label={`${pct}% translated`}
             >
               {pct}%
@@ -248,21 +185,15 @@ export function OrgProjectsDataTable({
         id: "validated",
         accessorFn: (p) => validatedPct(p),
         header: ({ column }) => (
-          <ProjectMetricHeader
-            label="Validated"
-            description="Validated: percentage of cells marked validated by a reviewer."
-            icon={CircleCheck}
-            testId="project-table-validated-header"
-            sorted={column.getIsSorted()}
-            onSort={column.getToggleSortingHandler()}
-          />
+          <DataTableColumnHeader column={column} title="Validated" className="justify-end" />
         ),
+        meta: { align: "right", className: "w-[6.5rem]" },
         cell: ({ row }) => {
           const pct = Math.round(validatedPct(row.original) * 100)
           return (
             <div
               data-testid="project-table-validated-value"
-              className="text-left tabular-nums text-muted-foreground"
+              className="text-right tabular-nums text-muted-foreground"
               aria-label={`${pct}% validated`}
             >
               {pct}%
@@ -274,21 +205,15 @@ export function OrgProjectsDataTable({
         id: "audio",
         accessorFn: (p) => audioPct(p),
         header: ({ column }) => (
-          <ProjectMetricHeader
-            label="Has audio"
-            description="Audio: percentage of cells with at least one recording attached."
-            icon={Mic}
-            testId="project-table-audio-header"
-            sorted={column.getIsSorted()}
-            onSort={column.getToggleSortingHandler()}
-          />
+          <DataTableColumnHeader column={column} title="Audio" className="justify-end" />
         ),
+        meta: { align: "right", className: "w-[6.5rem]" },
         cell: ({ row }) => {
           const pct = Math.round(audioPct(row.original) * 100)
           return (
             <div
               data-testid="project-table-audio-value"
-              className="text-left tabular-nums text-muted-foreground"
+              className="text-right tabular-nums text-muted-foreground"
               aria-label={`${pct}% audio`}
             >
               {pct}%
@@ -301,11 +226,18 @@ export function OrgProjectsDataTable({
         accessorFn: (p) => roleByProjectId?.get(p.id)?.name ?? "",
         enableSorting: false,
         header: ({ column }) => <DataTableColumnHeader column={column} title="Role" />,
-        cell: ({ row }) => (
-          <div className="truncate text-left text-xs text-muted-foreground">
-            {roleByProjectId?.get(row.original.id)?.name.replace(/_/g, " ") ?? "—"}
-          </div>
-        ),
+        meta: { className: "w-[7.5rem] whitespace-nowrap" },
+        cell: ({ row }) => {
+          const name = roleByProjectId?.get(row.original.id)?.name
+          if (!name) {
+            return <span className="text-sm text-muted-foreground">—</span>
+          }
+          return (
+            <span className="text-sm text-foreground">
+              <RoleLabel name={name} />
+            </span>
+          )
+        },
       },
       {
         // AQU-507: designated Project Manager. Unassigned sorts last in both
@@ -314,16 +246,32 @@ export function OrgProjectsDataTable({
         accessorFn: (p) => missingLast(p.pm?.username?.toLowerCase()),
         sortUndefined: SORT_MISSING_LAST,
         header: ({ column }) => <DataTableColumnHeader column={column} title="PM" />,
+        meta: { className: "min-w-0 w-[9rem]" },
         cell: ({ row }) => {
           const username = row.original.pm?.username
-          return username ? (
+          if (!username) return null
+          return (
             <UsernameWithAvatar
               username={username}
               size="xs"
-              nameClassName="text-xs font-normal text-muted-foreground"
+              nameClassName="font-normal"
             />
-          ) : (
-            <div className="truncate text-left text-xs text-muted-foreground/60">Unassigned</div>
+          )
+        },
+      },
+      {
+        id: "status",
+        accessorFn: (p) => attentionRank(p, tableNow),
+        header: ({ column }) => <DataTableColumnHeader column={column} title="Status" />,
+        meta: { className: "w-[9.5rem] whitespace-nowrap" },
+        cell: ({ row }) => {
+          const p = row.original
+          return (
+            <ProjectStatus
+              archived={false}
+              reasons={portfolioAttentionReasons(p, tableNow)}
+              deadlineAt={p.deadlineAt}
+            />
           )
         },
       },
@@ -332,41 +280,27 @@ export function OrgProjectsDataTable({
         accessorFn: (p) => missingLast(p.lastEditAt ?? undefined),
         sortUndefined: SORT_MISSING_LAST,
         header: ({ column }) => <DataTableColumnHeader column={column} title="Updated" />,
-        cell: ({ row }) => {
-          const status = portfolioActivityStatus(row.original, tableNow)
-          const label = activityLabel(row.original, tableNow)
-          if (label) {
-            return (
-              <div
-                className={`truncate text-left text-xs ${
-                  status === "stalled" ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"
-                }`}
-              >
-                {label}
-              </div>
-            )
-          }
-          return (
-            <div className="truncate text-left text-xs text-muted-foreground">
-              <DateTooltip
-                value={row.original.lastEditAt}
-                label="Updated"
-                className="text-muted-foreground"
-              />
-            </div>
-          )
-        },
+        meta: { className: "w-[7.5rem] whitespace-nowrap" },
+        cell: ({ row }) => (
+          <DateTooltip
+            value={row.original.lastEditAt}
+            label="Updated"
+            className="text-sm text-muted-foreground"
+          />
+        ),
       },
       {
         id: "actions",
         enableSorting: false,
         header: () => <span className="sr-only">Project actions</span>,
+        meta: { align: "right" as const, className: "w-10" },
         cell: ({ row }) => {
           const p = row.original
           return (
             <DataTableRowActionsButton
               label={`More actions for ${p.name}`}
               data-testid={`project-row-actions-${p.id}`}
+              revealOnHover
             />
           )
         },
@@ -377,10 +311,7 @@ export function OrgProjectsDataTable({
       showOrg,
       tableNow,
       toggleExpand,
-      canAddLanguage,
       defaultLaneLabelByProjectId,
-      jwt,
-      onLaneAdded,
       canAssign,
     ],
   )
@@ -391,21 +322,6 @@ export function OrgProjectsDataTable({
     ? projects.find((p) => p.id === assignTarget.projectId) ?? null
     : null
 
-  const emptyState = (
-    <Empty
-      className="flex-none rounded-none border-0 bg-transparent py-12"
-      data-testid="org-projects-empty"
-    >
-      <EmptyHeader>
-        <EmptyMedia variant="icon">
-          <FolderOpen />
-        </EmptyMedia>
-        <EmptyTitle>{emptyTitle}</EmptyTitle>
-        {emptyDescription ? <EmptyDescription>{emptyDescription}</EmptyDescription> : null}
-      </EmptyHeader>
-    </Empty>
-  )
-
   return (
     <>
       <DataTable
@@ -413,9 +329,10 @@ export function OrgProjectsDataTable({
         columns={columns}
         data={tableData}
         getRowId={(p) => p.id}
+        rowClassName="group"
         onRowClick={(p) => navigate(`/projects/${p.id}`)}
         initialSorting={[...lensToSorting(initialLens)]}
-        searchPlaceholder="Filter projects by name"
+        searchPlaceholder="Search projects…"
         globalFilterFn={(row, _columnId, filterValue) => {
           const q = String(filterValue).trim().toLowerCase()
           if (!q) return true
@@ -461,8 +378,32 @@ export function OrgProjectsDataTable({
             </MenuItem>
           </>
         )}
-        emptyState={emptyState}
+        emptyState={(table) => {
+          const search = String(table.getState().globalFilter ?? "").trim()
+          if (search) {
+            return (
+              <div className="flex flex-col items-center gap-3 py-10">
+                <p className="text-center text-sm text-muted-foreground">
+                  No projects match your search.
+                </p>
+                <Button variant="outline" onClick={() => table.setGlobalFilter("")}>
+                  Clear
+                </Button>
+              </div>
+            )
+          }
+          return (
+            <EmptyState
+              variant="inline"
+              className="flex-none py-12"
+              icon={NAV_PAGE_ICONS.projects}
+              title={emptyTitle}
+              description={emptyDescription}
+            />
+          )
+        }}
         testId={testId}
+        className={ADMIN_TABLE_PANEL_CLASS}
         dense
       />
       {assignTarget && assignProject && jwt && author != null && (

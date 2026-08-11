@@ -3,6 +3,7 @@ import { deriveNavIcon, navIconForLabel, NAV_PAGE_ICONS } from "./page-icons"
 
 describe("navIconForLabel", () => {
   it("maps sidebar page labels", () => {
+    expect(navIconForLabel("Overview")).toBe(NAV_PAGE_ICONS.overview)
     expect(navIconForLabel("Projects")).toBe(NAV_PAGE_ICONS.projects)
     expect(navIconForLabel("Teams")).toBe(NAV_PAGE_ICONS.teams)
     expect(navIconForLabel("Assigned to me")).toBe(NAV_PAGE_ICONS.assigned)
@@ -18,6 +19,7 @@ describe("deriveNavIcon", () => {
   it("mirrors org-shell routes used by the sidebar", () => {
     expect(deriveNavIcon("/orgs/all")).toBe(NAV_PAGE_ICONS.projects)
     expect(deriveNavIcon("/orgs/7")).toBe(NAV_PAGE_ICONS.projects)
+    expect(deriveNavIcon("/orgs/7/overview")).toBe(NAV_PAGE_ICONS.overview)
     expect(deriveNavIcon("/orgs/7/teams")).toBe(NAV_PAGE_ICONS.teams)
     expect(deriveNavIcon("/orgs/7/assigned")).toBe(NAV_PAGE_ICONS.assigned)
     expect(deriveNavIcon("/orgs/7/members")).toBe(NAV_PAGE_ICONS.members)

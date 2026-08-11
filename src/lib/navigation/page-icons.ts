@@ -3,7 +3,7 @@
  * history menu both read from here so a page keeps one glyph.
  *
  * Chosen via Lucide MCP (`fuzzy_search_icons` / category fit):
- * - Overview → LayoutDashboard (org home / operator surface)
+ * - Overview → House (org home / operator surface; Buildings / Home)
  * - Projects → Library (collection of works; Text formatting / Navigation)
  * - Teams → SquareUserRound (Accounts & access)
  * - Members → Users (people-group; Accounts & access)
@@ -31,9 +31,9 @@ import {
   EyeOff,
   FileText,
   FolderOpen,
+  House,
   KeyRound,
   Languages,
-  LayoutDashboard,
   Library,
   ListTodo,
   MessageSquare,
@@ -52,7 +52,7 @@ import { parseOrgPath, ALL_ORGS_PARAM } from "@/lib/navigation/org-paths"
 
 /** Canonical icons for the org sidebar destinations. */
 export const NAV_PAGE_ICONS = {
-  overview: LayoutDashboard,
+  overview: House,
   projects: Library,
   teams: SquareUserRound,
   assigned: ListTodo,

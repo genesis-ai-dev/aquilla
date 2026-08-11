@@ -1,8 +1,8 @@
-import type { BrandData, BrandId } from "../types"
-import { aquillaData } from "./aquilla.data"
-import { codexData } from "./codex.data"
-import { honeycombData } from "./honeycomb.data"
-import { contextData } from "./context.data"
+import type { BrandData, BrandId } from "../types.ts"
+import { aquillaData } from "./aquilla.data.ts"
+import { codexData } from "./codex.data.ts"
+import { honeycombData } from "./honeycomb.data.ts"
+import { contextData } from "./context.data.ts"
 
 export const BRAND_DATA: Record<BrandId, BrandData> = {
   aquilla: aquillaData,

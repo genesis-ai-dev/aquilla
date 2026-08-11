@@ -170,6 +170,29 @@ export function regionAfterCell(map: SourceRegionMap, cellId: string): SourceReg
   return map.regions[lastOwned + 1] ?? null
 }
 
+/**
+ * Which cell covers this second on the file clock, or null in a silence.
+ *
+ * The burned-in caption needs this when the linked VIDEO is the transport: the
+ * play queue answers "what is sounding" everywhere it runs, and it cannot run
+ * at all for a subtitle file with no audio attachments, so there is nothing to
+ * ask. Half-open [start, end) so a cue that ends exactly where the next begins
+ * hands over cleanly instead of both matching.
+ *
+ * First match wins on overlapping cues — two speakers at once still burns one
+ * line, which is the honest limit of a single caption slot.
+ */
+export function cellIdAtSec(segments: readonly RegionSegment[], sec: number): string | null {
+  if (!Number.isFinite(sec)) return null
+  for (const s of segments) {
+    const { startTime, endTime } = s
+    if (typeof startTime !== "number" || !Number.isFinite(startTime)) continue
+    if (typeof endTime !== "number" || !Number.isFinite(endTime)) continue
+    if (sec >= startTime && sec < endTime) return s.id
+  }
+  return null
+}
+
 /** The stretch immediately BEFORE this cell — what "insert above" would claim. */
 export function regionBeforeCell(map: SourceRegionMap, cellId: string): SourceRegion | null {
   for (let i = 0; i < map.regions.length; i++) {

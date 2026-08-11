@@ -23,6 +23,7 @@ import type { CellData } from "@/hooks/useCells"
 import { queueClockIsFileTime, useQueueAudibility, useQueueForFile } from "@/lib/audio/play-queue"
 import { effectiveSourceText } from "@/lib/cell-text"
 import type { DirectionMode, TextDirection } from "@/lib/text-direction"
+import { cellIdAtSec } from "@/lib/timeline/source-regions"
 import { videoSyncAction } from "./video-sync"
 import { DEFAULT_VIDEO_ASPECT, fitPictureRect, intrinsicAspect } from "./video-frame"
 import { VideoPaneHeader } from "./VideoPaneHeader"
@@ -54,6 +55,11 @@ export interface MediaVideoPaneProps {
    *  queue drops seeks in several ordinary cases (no session, scrubbing into
    *  the trailing pad, a gap no section owns) and the picture must still move. */
   seekSec?: { sec: number; nonce: number } | null
+  /** A nonce-keyed play/pause from the timeline (Space). Deliberately a TOGGLE
+   *  rather than a desired state: the picture keeps its native controls in the
+   *  standalone arrangement, so anything stateful would drift out of step with
+   *  them. Toggling against the element's own `paused` cannot. */
+  togglePlay?: { nonce: number } | null
   /** Only called in the standalone arrangement, where the video owns the clock.
    *  null clears it — the store outlives this component, so a stale position
    *  would go on driving the playhead. */
@@ -79,6 +85,7 @@ export function MediaVideoPane({
   src,
   cells,
   seekSec,
+  togglePlay,
   onVideoTime,
   onVideoPlaying,
   onVideoDuration,
@@ -154,10 +161,24 @@ export function MediaVideoPane({
   }, [failed])
   const picture = fitPictureRect(fieldSize.w, fieldSize.h, aspect)
 
-  const soundingCell = useMemo(
-    () => (queue.cellId != null ? cells.find((c) => c.id === queue.cellId) : undefined),
-    [cells, queue.cellId],
-  )
+  /**
+   * Which line the picture is on, when the picture is the transport. The queue
+   * answers this everywhere it runs and cannot run at all here, so there is
+   * nothing to ask — the element's own clock is the only source. Held as the
+   * cell ID rather than the second so this re-renders on a line CHANGE, not on
+   * every one of `timeupdate`'s ~4 ticks a second.
+   */
+  const [standaloneCellId, setStandaloneCellId] = useState<string | null>(null)
+  useEffect(() => {
+    if (slaved) setStandaloneCellId(null)
+  }, [slaved])
+  const soundingCell = useMemo(() => {
+    // The queue wins whenever it is running, unconditionally — today's exact
+    // rule, so nothing about the dubbing arrangement changes.
+    if (queue.cellId != null) return cells.find((c) => c.id === queue.cellId)
+    if (slaved || standaloneCellId == null) return undefined
+    return cells.find((c) => c.id === standaloneCellId)
+  }, [cells, queue.cellId, slaved, standaloneCellId])
   const clockIsFileTime = queueClockIsFileTime(soundingCell)
 
   const prevTickRef = useRef<{ sec: number; at: number } | null>(null)
@@ -285,6 +306,26 @@ export function MediaVideoPane({
     }
   }, [seekNonce, seekTarget])
 
+  // Space from the timeline. Only in the STANDALONE arrangement: when the queue
+  // is the transport it owns play/pause, and two writers would fight. Toggling
+  // against the element's own `paused` means the app and the picture's native
+  // controls can never disagree about what "pause" meant.
+  const toggleNonce = togglePlay?.nonce
+  useEffect(() => {
+    if (toggleNonce == null || slaved) return
+    const video = videoRef.current
+    if (!video) return
+    if (video.paused) {
+      wantPlayRef.current = true
+      requestPlay(video)
+    } else {
+      wantPlayRef.current = false
+      video.pause()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the NONCE is the
+    // command; re-running on `slaved`/`requestPlay` would replay a stale press.
+  }, [toggleNonce])
+
   // A new source is a fresh element as far as we're concerned.
   useEffect(() => {
     setAspect(DEFAULT_VIDEO_ASPECT)
@@ -401,7 +442,15 @@ export function MediaVideoPane({
             onVideoDuration?.(src, e.currentTarget.duration)
           }}
           onTimeUpdate={
-            slaved ? undefined : (e) => onVideoTime?.(e.currentTarget.currentTime)
+            slaved
+              ? undefined
+              : (e) => {
+                  const sec = e.currentTarget.currentTime
+                  onVideoTime?.(sec)
+                  // Setting the same id is a no-op re-render in React, so the
+                  // caption only repaints when the line actually changes.
+                  setStandaloneCellId(cellIdAtSec(cells, sec))
+                }
           }
           // Standalone only: the queue is idle here, so it cannot tell the
           // playhead whether anything is running. `ended` is included because

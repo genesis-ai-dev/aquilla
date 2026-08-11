@@ -59,7 +59,7 @@ import { FootnotesTray } from "./footnotes/FootnoteInline"
 import { AudioRecordingModal } from "./AudioRecorder/AudioRecordingModal"
 import { VoiceSidebar } from "./voice/VoiceSidebar"
 import { VoicePlaybackBar } from "./voice/VoicePlaybackBar"
-import { startQueue, getQueueState, seekQueueToTime, setQueueTimingMode, startQueueAtTime, pauseQueue, pauseAllPlayback, resumeQueue } from "@/lib/audio/play-queue"
+import { startQueue, getQueueState, seekQueueToTime, setQueueTimingMode, startQueueAtTime, pauseQueue, pauseAllPlayback, resumeQueue, queueClockIsFileTime } from "@/lib/audio/play-queue"
 import { generateCombinedVoice, type CombinedVoiceResult } from "@/lib/audio/combined-voice"
 import { generateCellVoice } from "@/lib/audio/voice-generate-helpers"
 import { CombinedBoundaryEditor } from "./voice/CombinedBoundaryEditor"
@@ -4624,6 +4624,10 @@ export function ProjectWorkspace() {
   // no section owns — and in those cases the picture must still move, so the
   // pane cannot infer position from queue progress alone.
   const [videoSeek, setVideoSeek] = useState<{ sec: number; nonce: number } | null>(null)
+  /** Space, when the picture is the transport. A nonce rather than a desired
+   *  state: the picture keeps its native controls, and only a toggle against
+   *  the element's own `paused` can stay in step with them. */
+  const [videoToggle, setVideoToggle] = useState<{ nonce: number } | null>(null)
   // Dropped when the file changes: the pane remounts and would otherwise open
   // on the PREVIOUS file's last seek, i.e. minutes into a video it has never
   // been asked to move.
@@ -4651,6 +4655,15 @@ export function ProjectWorkspace() {
   // toggle against the QUEUE: playing → pause, paused → resume, idle → start
   // cued-at-zero-then-play (so Space from cold plays from the beginning).
   const handleTimelineTogglePlay = useCallback(() => {
+    // AQU-646: a subtitle file timed against footage has no audio attachments,
+    // so the queue can never start and Space did nothing at all. There the
+    // PICTURE is the transport — hand it the press. Gated on the same test the
+    // pane uses to decide it is standalone, so a file whose queue can run is
+    // untouched.
+    if (activeFile?.coreMediaUrl && !audioMergedCells.some((c) => queueClockIsFileTime(c))) {
+      setVideoToggle((prev) => ({ nonce: (prev?.nonce ?? 0) + 1 }))
+      return
+    }
     if (!project?.id) return
     const qs = getQueueState()
     const activeForThisFile =
@@ -4675,7 +4688,7 @@ export function ProjectWorkspace() {
     const ctx = { cells: audioMergedCells, projectId: project.id, session: frontierSession }
     if (from >= 0) startQueue(ctx, from, true)
     else startQueueAtTime(ctx, 0, { play: true })
-  }, [project?.id, audioMergedCells, frontierSession, timelineSelectedCellId])
+  }, [project?.id, audioMergedCells, frontierSession, timelineSelectedCellId, activeFile?.coreMediaUrl])
 
   // AQU-654: count outstanding (non-waived) LQA/validation infractions on the
   // active file. Export never hard-blocks on these — the count only drives a
@@ -5877,6 +5890,7 @@ export function ProjectWorkspace() {
                       src={activeFile.coreMediaUrl}
                       cells={audioMergedCells}
                       seekSec={videoSeek}
+                      togglePlay={videoToggle}
                       onVideoTime={setVideoClockSec}
                       onVideoPlaying={setVideoClockPlaying}
                       onVideoDuration={setVideoDurationSec}

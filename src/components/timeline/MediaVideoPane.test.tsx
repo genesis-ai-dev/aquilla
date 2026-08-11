@@ -76,6 +76,82 @@ describe("MediaVideoPane", () => {
     mockAudibility = { source: true, target: true }
   })
 
+  // AQU-646 2026-08-11: when the picture is the transport, the queue is idle,
+  // so everything that used to ask it "what is sounding" and "is it playing"
+  // got nothing. Both are now answered by the element itself.
+  describe("the picture as the transport", () => {
+    const subs = [
+      cell({ id: "s1", medium: "text", original: "Line one", translated: "Ligne un", startTime: 0, endTime: 5 }),
+      cell({ id: "s2", medium: "text", original: "Line two", translated: "Ligne deux", startTime: 10, endTime: 15 }),
+    ]
+    const renderStandalone = (props = {}) =>
+      render(<MediaVideoPane src="https://cdn/episode.webm" cells={subs} {...props} />)
+
+    /** happy-dom has no media pipeline, so currentTime has to be planted. */
+    const tickTo = (video: HTMLVideoElement, sec: number) => {
+      Object.defineProperty(video, "currentTime", { value: sec, configurable: true })
+      fireEvent.timeUpdate(video)
+    }
+
+    it("burns the line the picture is actually on", () => {
+      renderStandalone()
+      const video = screen.getByTestId("video-pane-media") as HTMLVideoElement
+      expect(screen.queryByTestId("video-pane-caption")).not.toBeInTheDocument()
+      tickTo(video, 2)
+      expect(screen.getByTestId("video-pane-caption-target")).toHaveTextContent("Ligne un")
+    })
+
+    it("changes the line as the picture crosses into the next one", () => {
+      renderStandalone()
+      const video = screen.getByTestId("video-pane-media") as HTMLVideoElement
+      tickTo(video, 2)
+      expect(screen.getByTestId("video-pane-caption-target")).toHaveTextContent("Ligne un")
+      tickTo(video, 12)
+      expect(screen.getByTestId("video-pane-caption-target")).toHaveTextContent("Ligne deux")
+    })
+
+    it("clears the caption in a silence — there is no line to burn", () => {
+      renderStandalone()
+      const video = screen.getByTestId("video-pane-media") as HTMLVideoElement
+      tickTo(video, 2)
+      expect(screen.getByTestId("video-pane-caption")).toBeInTheDocument()
+      tickTo(video, 7) // between the two cues
+      expect(screen.queryByTestId("video-pane-caption")).not.toBeInTheDocument()
+    })
+
+    it("plays on a Space press, and pauses on the next one", () => {
+      const play = vi.spyOn(window.HTMLMediaElement.prototype, "play").mockResolvedValue(undefined)
+      const pause = vi.spyOn(window.HTMLMediaElement.prototype, "pause").mockImplementation(() => {})
+      try {
+        const { rerender } = renderStandalone({ togglePlay: { nonce: 0 } })
+        const video = screen.getByTestId("video-pane-media") as HTMLVideoElement
+        Object.defineProperty(video, "paused", { value: true, configurable: true })
+        rerender(<MediaVideoPane src="https://cdn/episode.webm" cells={subs} togglePlay={{ nonce: 1 }} />)
+        expect(play).toHaveBeenCalled()
+
+        Object.defineProperty(video, "paused", { value: false, configurable: true })
+        rerender(<MediaVideoPane src="https://cdn/episode.webm" cells={subs} togglePlay={{ nonce: 2 }} />)
+        expect(pause).toHaveBeenCalled()
+      } finally {
+        play.mockRestore()
+        pause.mockRestore()
+      }
+    })
+
+    it("ignores Space when the QUEUE is the transport — two writers would fight", () => {
+      const play = vi.spyOn(window.HTMLMediaElement.prototype, "play").mockResolvedValue(undefined)
+      try {
+        // renderPane()'s CELLS are media cells with the shared clip → slaved.
+        const { rerender } = render(<MediaVideoPane src="https://cdn/episode.webm" cells={CELLS} togglePlay={{ nonce: 0 }} />)
+        play.mockClear()
+        rerender(<MediaVideoPane src="https://cdn/episode.webm" cells={CELLS} togglePlay={{ nonce: 1 }} />)
+        expect(play).not.toHaveBeenCalled()
+      } finally {
+        play.mockRestore()
+      }
+    })
+  })
+
   // AQU-646 2026-08-11: when the source chips come from a linked video, the
   // video IS the source audio — so the timeline's Source-track speaker button
   // has to reach it. Muting the original while listening back to a take is the

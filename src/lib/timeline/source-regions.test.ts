@@ -12,6 +12,7 @@ import {
   findRegionAt,
   regionAfterCell,
   regionBeforeCell,
+  cellIdAtSec,
   type RegionSegment,
 } from "./source-regions"
 
@@ -175,5 +176,44 @@ describe("regionAfterCell / regionBeforeCell", () => {
     const flush = deriveSourceRegions([seg("only", 0, 10)], 10)
     expect(regionBeforeCell(flush, "only")).toBeNull()
     expect(regionAfterCell(flush, "only")).toBeNull()
+  })
+})
+
+// The burned-in caption needs this when the linked VIDEO is the transport: the
+// play queue answers "what is sounding" everywhere it runs, and it cannot run
+// at all for a subtitle file with no audio, so there is nothing to ask.
+describe("cellIdAtSec", () => {
+  const subs = [seg("a", 10, 12), seg("b", 20, 22)]
+
+  it("finds the line covering a second", () => {
+    expect(cellIdAtSec(subs, 11)).toBe("a")
+    expect(cellIdAtSec(subs, 21.5)).toBe("b")
+  })
+
+  it("is null in the silences — the caption clears between lines", () => {
+    expect(cellIdAtSec(subs, 0)).toBeNull()
+    expect(cellIdAtSec(subs, 15)).toBeNull()
+    expect(cellIdAtSec(subs, 99)).toBeNull()
+  })
+
+  it("is half-open, so a cue ending where the next starts hands over cleanly", () => {
+    const touching = [seg("a", 0, 5), seg("b", 5, 10)]
+    expect(cellIdAtSec(touching, 5)).toBe("b")
+    expect(cellIdAtSec(touching, 4.999)).toBe("a")
+  })
+
+  it("includes the first frame of a line and excludes the last", () => {
+    expect(cellIdAtSec(subs, 10)).toBe("a")
+    expect(cellIdAtSec(subs, 12)).toBeNull()
+  })
+
+  it("burns one line when two overlap — a single caption slot cannot say more", () => {
+    expect(cellIdAtSec([seg("a", 0, 6), seg("b", 4, 10)], 5)).toBe("a")
+  })
+
+  it("ignores untimed cells and rubbish input", () => {
+    expect(cellIdAtSec([{ id: "untimed" }, seg("a", 1, 2)], 1.5)).toBe("a")
+    expect(cellIdAtSec(subs, NaN)).toBeNull()
+    expect(cellIdAtSec([], 5)).toBeNull()
   })
 })

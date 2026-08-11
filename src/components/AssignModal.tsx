@@ -57,6 +57,7 @@ import {
 } from "@/components/ui/select"
 import { DatePicker, dateToDeadlineString } from "@/components/ui/date-picker"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { RichMessage } from "@/lib/i18n/RichMessage"
 import { partitionMembers, type ProjectMember } from "@/lib/frontier/members"
 import type { FileReference, FileType } from "@/lib/parsers/types"
 import {
@@ -578,7 +579,17 @@ export function AssignModal({
                   </SelectGroup>
                 </SelectContent>
               </Select>
-              <FieldDescription>{t("dialog.assign.laneDescription")}</FieldDescription>
+              <FieldDescription>
+                {/* AQU-511 wave-3 finding 4: the italic on "can" is what distinguishes
+                    assigning work (this field) from gating who may edit a lane
+                    (staffing, elsewhere) — flattening it turned the sentence into a
+                    truism. RichMessage keeps the emphasis while leaving the
+                    translator in control of sentence/word order. */}
+                <RichMessage
+                  k="dialog.assign.laneDescription"
+                  values={{ can: <em>can</em> }}
+                />
+              </FieldDescription>
             </Field>
           )}
 

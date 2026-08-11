@@ -18,8 +18,8 @@ export const dialog = defineNamespace({
     "dialog.assign.laneLabel": "Language lane",
     "dialog.assign.defaultLaneFallback": "Default language",
     "dialog.assign.laneDescription":
-      "Routes this work to a language lane. Restricting who can edit a lane is separate " +
-      "(staffing).",
+      "Routes this work to a language lane. Restricting who {can} edit a lane is " +
+      "separate (staffing).",
     "dialog.assign.filesLabel": "Files / books",
     "dialog.assign.filesDescription":
       "Files sharing a season/testament are grouped — use \"Select all\" to assign a " +
@@ -119,8 +119,23 @@ export const dialog = defineNamespace({
         description:
           "Helper text under the language-lane selector, clarifying that choosing a " +
           "lane here only routes the WORK to that lane — it does not control who is " +
-          "allowed to edit it (that's a separate staffing setting).",
+          "allowed to edit it (that's a separate staffing setting). Rendered with " +
+          "RichMessage: the emphasis on the modal verb is the entire point of the " +
+          "sentence — it distinguishes 'assigning work' from 'gating edit rights', and " +
+          "without it the sentence reads as a truism ('restricting who edits is " +
+          "separate from restricting who edits').",
         screenshot: "assign-modal",
+        placeholders: {
+          can: "Unusual placeholder: NOT a data value. It stands for the word 'can' " +
+            "itself, always rendered in English inside <em> by the call site (the app " +
+            "does not have a per-locale translation of just this one word). When " +
+            "translating the surrounding sentence, place {can} at the point in your " +
+            "own sentence where the permission/ability concept falls — the emphasis " +
+            "will visually land there even though its literal text stays English. If " +
+            "your language's grammar makes that placement awkward, {can} may be " +
+            "omitted; the sentence still reads correctly without it, just without the " +
+            "emphasis.",
+        },
       },
       "dialog.assign.filesLabel": {
         description:

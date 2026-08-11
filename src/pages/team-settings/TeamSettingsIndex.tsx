@@ -61,7 +61,7 @@ export function TeamSettingsIndex() {
   }, [refetch])
 
   const savePatch = useCallback(
-    async (patch: { name?: string; description?: string }, successTitle: string) => {
+    async (patch: { name?: string; description?: string }, successTitle?: string) => {
       if (!jwt || activeOrgId == null || groupIdNum == null || !canEdit) return
       clearSubmitError()
       try {
@@ -73,7 +73,8 @@ export function TeamSettingsIndex() {
         )
         setName(updated.name)
         setDescription(updated.description ?? "")
-        toast.add({ type: "success", title: successTitle })
+        // Identity-level renames get a toast; routine field saves stay silent.
+        if (successTitle) toast.add({ type: "success", title: successTitle })
       } catch (err) {
         setSubmitError(err instanceof Error ? err.message : "Couldn't save team.")
       }
@@ -99,7 +100,7 @@ export function TeamSettingsIndex() {
     const trimmed = description.trim()
     const current = team.description ?? ""
     if (trimmed === current) return
-    await savePatch({ description: trimmed }, "Description updated")
+    await savePatch({ description: trimmed })
   }
 
   async function handleDelete() {

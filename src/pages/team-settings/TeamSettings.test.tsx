@@ -103,10 +103,8 @@ describe("TeamSettingsIndex", () => {
     await waitFor(() =>
       expect(updateTeam).toHaveBeenCalledWith("jwt", 1, 10, { description: "Updated" }),
     )
-    expect(toast.add).toHaveBeenCalledWith({
-      type: "success",
-      title: "Description updated",
-    })
+    // Routine description saves stay silent — only identity renames toast.
+    expect(toast.add).not.toHaveBeenCalled()
   })
 
   it("does not save when the blurred value is unchanged", async () => {

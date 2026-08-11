@@ -7,9 +7,8 @@
 // Precedence at synthesis time:
 //   project key > user (localStorage) key > org key (this section)
 
-import { useEffect, useState } from "react"
+import { useEffect } from "react"
 import { useForm } from "@tanstack/react-form"
-import { Check } from "lucide-react"
 import { RevealableInput } from "@/components/ui/revealable-input"
 import { Button } from "@/components/ui/button"
 import { Field, FieldError, FieldGroup } from "@/components/ui/field"
@@ -34,7 +33,6 @@ export function OrgProviderSection({ orgSettings }: OrgProviderSectionProps) {
 
   const keys = orgProviderKeys ?? {}
   const currentGeminiKey = keys["gemini-tts"] ?? ""
-  const [saved, setSaved] = useState(false)
   const { submitError, setSubmitError, clearSubmitError } = useSubmitError()
 
   const form = useForm({
@@ -50,10 +48,7 @@ export function OrgProviderSection({ orgSettings }: OrgProviderSectionProps) {
           "gemini-tts": trimmed || undefined,
         },
       })
-      if (result.kind === "ok") {
-        setSaved(true)
-        setTimeout(() => setSaved(false), 2500)
-      } else if (result.kind === "blocked" || result.kind === "forbidden") {
+      if (result.kind === "blocked" || result.kind === "forbidden") {
         setSubmitError("Only org maintainers and owners can set org-level API keys.")
       } else if (result.kind === "error") {
         setSubmitError(result.message ?? "Save failed")
@@ -145,11 +140,6 @@ export function OrgProviderSection({ orgSettings }: OrgProviderSectionProps) {
           )}
           {submitError && (
             <FieldError className="text-xs">{submitError}</FieldError>
-          )}
-          {saved && (
-            <p className="flex items-center gap-1 text-xs text-green-600 dark:text-green-400" role="status" data-testid="org-key-saved">
-              <Check className="size-3.5" /> Saved
-            </p>
           )}
         </form>
       </SettingsRow>

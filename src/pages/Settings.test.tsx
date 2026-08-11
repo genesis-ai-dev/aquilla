@@ -113,29 +113,28 @@ describe("Org Settings", () => {
   })
 })
 
-describe("Export policy saved acknowledgment", () => {
-  it("shows Saved after a successful export-role change", async () => {
+describe("Export policy silent auto-save", () => {
+  it("patches on change without a Saved acknowledgment", async () => {
     mockPatch.mockResolvedValueOnce({ kind: "ok", value: { orgId: 1, settings: {}, version: 2, updatedAt: null, updatedBy: null } })
     renderSettings("/orgs/1/settings/export")
-    // Wait for the export permissions section to appear.
     await waitFor(() => expect(screen.getByLabelText(/who can export/i)).toBeDefined())
 
     await pickSelectOption(/who can export/i, /contributor \(400\)/i)
 
-    await waitFor(() => expect(screen.getByTestId("export-role-saved")).toBeDefined())
-    expect(screen.getByTestId("export-role-saved").textContent).toContain("Saved")
+    await waitFor(() => expect(mockPatch).toHaveBeenCalledWith({ exportMinRole: 400 }))
+    expect(screen.queryByText(/^Saved$/i)).toBeNull()
+    expect(toast.add).not.toHaveBeenCalled()
   })
 
-  it("does not show Saved when the save fails", async () => {
+  it("surfaces a server error when the save fails", async () => {
     mockPatch.mockResolvedValueOnce({ kind: "error" as const, status: 500, message: "Server error" })
     renderSettings("/orgs/1/settings/export")
     await waitFor(() => expect(screen.getByLabelText(/who can export/i)).toBeDefined())
 
     await pickSelectOption(/who can export/i, /contributor \(400\)/i)
 
-    // The server error must surface, and the Saved acknowledgment must not.
     expect(await screen.findByText(/server error/i)).toBeDefined()
-    expect(screen.queryByTestId("export-role-saved")).toBeNull()
+    expect(screen.queryByText(/^Saved$/i)).toBeNull()
   })
 })
 
@@ -147,16 +146,16 @@ describe("Roster & member-progress visibility settings (AQU-485)", () => {
     expect(screen.getByLabelText(/who can view member progress/i)).toBeDefined()
   })
 
-  it("shows Saved after successfully changing the roster floor, independent of the progress floor", async () => {
+  it("silently patches the roster floor without a Saved acknowledgment", async () => {
     mockPatch.mockResolvedValueOnce({ kind: "ok", value: { orgId: 1, settings: { rosterViewMinRole: 400 }, version: 2, updatedAt: null, updatedBy: null } })
     renderSettings("/orgs/1/settings/roster")
     await waitFor(() => expect(screen.getByLabelText(/who can view the roster/i)).toBeDefined())
 
     await pickSelectOption(/who can view the roster/i, /contributor \(400\)/i)
 
-    await waitFor(() => expect(screen.getByTestId("roster-role-saved")).toBeDefined())
-    // Changing the roster floor must not touch the progress floor's ack state.
-    expect(screen.queryByTestId("progress-role-saved")).toBeNull()
+    await waitFor(() => expect(mockPatch).toHaveBeenCalledWith({ rosterViewMinRole: 400 }))
+    expect(screen.queryByText(/^Saved$/i)).toBeNull()
+    expect(toast.add).not.toHaveBeenCalled()
   })
 
   it("surfaces a server error for the member-progress floor without a false Saved", async () => {
@@ -167,6 +166,6 @@ describe("Roster & member-progress visibility settings (AQU-485)", () => {
     await pickSelectOption(/who can view member progress/i, /owner \(700\)/i)
 
     expect(await screen.findByText(/server error/i)).toBeDefined()
-    expect(screen.queryByTestId("progress-role-saved")).toBeNull()
+    expect(screen.queryByText(/^Saved$/i)).toBeNull()
   })
 })

@@ -1,48 +1,60 @@
-# Code Health Candidates
+# Code Health Candidate Ledger
 
-Opportunities found during `/code-health` runs that exceeded that run's budget
-(~300 changed lines, ~8 files). Logged here instead of actioned. Prune entries
-a later run completes.
+Bigger opportunities spotted during `/code-health` runs that exceeded that run's budget
+(≤ ~300 changed lines / ≤ ~8 files) or needed a product/ownership decision before touching.
+Prune entries once a later run completes them.
 
-## 2026-08-11 — dead code deletion run
+## 2026-08-09 run (chore/code-health-2026-08-09, theme: dead code deletion)
 
-Found via exhaustive repo-wide grep (`src/`, `auth-worker/`, `sync-worker/`,
-`agent-worker/`, `worker/`, `e2e/`, `scripts/`) during a dead-code sweep. This
-run's budget was spent on `CellActionsMenu.tsx`, `ProgressDot.tsx`,
-`NextUnfinishedButton.tsx`, `commit-message.ts`, and the deprecated
-`pendingGroup`/`pendingSection` fields in `EditorScrollContext.tsx`
-(~260 lines, 5 files). The following were verified dead (zero importers) but
-didn't fit:
+- **`src/components/Dashboard.tsx`** (466 lines) — zero importers found (`grep -rn
+  "components/Dashboard\""` outside the file hits only stale planning docs). The live router
+  (`src/App.tsx`) routes org pages to `src/components/org/OrgHome.tsx` instead. Alone this is
+  close to/over a single run's line budget, so it wasn't bundled with the smaller deletions in
+  this run. Note: `e2e/helpers/page-objects/Dashboard.ts` is a *different*, unrelated Playwright
+  page object with the same name — don't confuse the two when verifying. Proof needed: same as
+  this run (grep for zero importers across src/, all worker packages, e2e/, scripts/, then
+  `pnpm build` + `pnpm test` green-to-green with the file removed).
 
-- **`src/lib/sync/settings-read.ts` + `src/lib/sync/settings-read-types.ts`**
-  (~106 lines). Header comment describes it as an alias layer for
-  `useProjectSettings`, but that hook imports directly from
-  `@/lib/sync/project-settings` and never touches this file. Zero importers
-  of `fetchProjectSettings`/`writeProjectSettings`/`SettingsReadError`
-  anywhere. Proof needed: same grep sweep, re-verify against any new callers
-  added since this note.
-- **`src/lib/sync/sync-debug.ts`** (~125 lines). Exports
-  `isSyncDebugEnabled`, `attachSyncDebug`, `logEffectShortCircuit` — zero
-  references outside its own definition.
-- **`src/lib/timeline/diarization-loader.ts`** (~122 lines). Exports
-  `loadDiarizer`, `DIARIZATION_ASSET_BASE`, `Diarizer`/`DiarizeOptions` —
-  zero references; diarization/waveform code elsewhere in `src/lib/timeline/`
-  and `src/lib/audio/` doesn't call it.
+- **Matecat-parity scaffolding cluster** (`src/lib/workflow/`, `src/lib/analysis/buckets.ts`,
+  `src/lib/analysis/payable.ts`, `src/lib/qa/checks.ts`, `src/lib/qa/glossary.ts`,
+  `src/lib/qa/termbase.ts`, `src/lib/entitlements/`, `src/lib/global-tm/`,
+  `src/lib/export/fidelity.ts`, `src/lib/import/xliff-reimport.ts`) — every file is
+  self-labeled "(Matecat-parity run)" and several explicitly say "INERT until wired... nothing
+  existing imports this module yet" or "behind the `batchApi` feature flag, default off." Zero
+  importers, but this reads as deliberate pre-built scaffolding for a planned feature, not
+  accretion cruft. **Not a code-health deletion candidate** — flagging only so a human can
+  confirm whether it's still on the roadmap or should be removed. If abandoned, it would need a
+  product decision, not just a grep-based dead-code proof.
 
-These three alone are ~350 lines / 3 files — a full budget on their own for a
-future run. Re-verify deadness with a fresh grep before deleting (time may
-have passed).
+- **Stale "D1" wording in comments on live (Postgres-backed) code paths** — e.g.
+  `src/hooks/useCells.ts:1,440` ("D1 audit history" / "D1 is the load path"),
+  `src/components/HistoryDrawer.tsx:20,24,198`, `src/lib/audio/transcribe.ts:3`. CLAUDE.md
+  confirms the D1→Postgres/Neon cutover is complete, so these comments are drift. Trap: some
+  "D1" hits in `src/lib/parsers/*.ts` are a false-positive — they refer to a design-doc rule
+  label ("D1: true on the first cell of a paragraph block"), not the database; don't
+  blanket-replace. This is comment-only (zero behavior change) but touches enough files to be
+  its own themed run (theme 6, "Comment/doc drift") rather than bundled with a dead-code-deletion
+  run. Proof needed: full gate green (comment-only diff can't change test outcomes, but the
+  routine still requires it) + `git diff` shows only comment lines changed.
 
-## Lower-priority: unwired shadcn UI primitives
+ - **Lower-confidence zero-importer exports, needs product/ownership call, not blind deletion**:
+  - `src/lib/frontier/orgs.ts:164,170` `listOrgInvites`/`revokeOrgInvite` — reads like an
+    unbuilt "manage pending org invites" admin UI rather than abandoned code.
+  - `src/lib/audio/voices.ts:35,102` `DEFAULT_VOICE_ID`/`forkVoice` — `forkVoice` ("fork a
+    built-in voice into a user-editable copy") reads like a planned feature hook.
+  - `src/lib/sync/cells-read.ts:159` `fetchFile`, `src/lib/sync/comments-read.ts:39`
+   `fetchCommentsForCell`, `src/lib/sync/cells-cache.ts:247` `deleteCellsCache`,
+   `src/lib/sync/commit-message.ts` (whole file) `buildCommitMessage` — typed client wrappers
+   matching sync-worker REST routes with zero current callers; may be intentional API-surface
+   completeness rather than dead debris.
 
-Not confirmed-abandoned features, just scaffolding that was never wired up —
-lower confidence than the above, so lower priority. Zero imports/JSX
-references anywhere in `src/` as of 2026-08-11:
+## 2026-08-11 verified-dead candidates
 
-- `src/components/ui/toggle-group.tsx` (~89 lines)
-- `src/components/ui/item.tsx` (~201 lines)
-- `src/components/ui/attachment.tsx` (~207 lines)
-
-Proof needed: re-grep for imports/JSX usage; confirm still unreferenced
-across all four brands (`aquilla`, `codex`, `honeycomb`, `context`) before
-deleting, since shadcn primitives are sometimes brand-gated.
+- **`src/lib/sync/settings-read.ts`** and `settings-read-types.ts` (~106 lines) — the
+  project-settings hook imports the underlying module directly; re-verify the zero-importer
+  result before deletion.
+- **`src/lib/sync/sync-debug.ts`** (~125 lines) — no references outside its definition.
+- **`src/lib/timeline/diarization-loader.ts`** (~122 lines) — no references; re-check that
+  no feature flag still needs the in-browser diarizer before removing it.
+- **Unwired shadcn primitives:** `toggle-group.tsx`, `item.tsx`, and `attachment.tsx`.
+  These are lower confidence: confirm zero imports across every brand before deletion.

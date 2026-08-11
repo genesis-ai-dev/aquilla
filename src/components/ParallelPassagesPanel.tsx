@@ -22,6 +22,8 @@ import { SegmentTabs } from "@/components/ui/tabs"
 import { cn } from "@/lib/utils"
 import type { WorkspaceSearchResult, SearchOptions } from "@/lib/search/workspace-index"
 import { computeReplaceDiffs, type CellReplaceDiff } from "@/lib/search/replace-action"
+import { useT } from "@/lib/i18n/I18nProvider"
+import type { TFunction } from "@/lib/i18n/I18nProvider"
 
 export type ParallelPanelMode = "search" | "passages" | "replace"
 export type ParallelPanelScope = "file" | "project"
@@ -133,10 +135,12 @@ function DiffPreviewRow({
   diff,
   selected,
   onToggle,
+  t,
 }: {
   diff: CellReplaceDiff
   selected: boolean
   onToggle: (cellId: string) => void
+  t: TFunction
 }) {
   return (
     <label
@@ -150,11 +154,11 @@ function DiffPreviewRow({
         checked={selected}
         onCheckedChange={() => onToggle(diff.cellId)}
         className="mt-0.5 shrink-0"
-        aria-label={`Include cell ${diff.cellId} in replace`}
+        aria-label={t("search.replace.includeCellAriaLabel", { cellId: diff.cellId })}
       />
       <div className="min-w-0 flex-1">
         <div className="text-[10px] text-muted-foreground mb-1 truncate">
-          {diff.fileId} · cell {diff.cellId}
+          {t("search.replace.cellLocation", { fileId: diff.fileId, cellId: diff.cellId })}
         </div>
         <div className="text-xs line-through text-red-600 dark:text-red-400 leading-snug">
           {diff.before}
@@ -164,7 +168,7 @@ function DiffPreviewRow({
         </div>
         {diff.matchCount > 1 && (
           <div className="mt-0.5 text-[10px] text-muted-foreground">
-            {diff.matchCount} replacements in this cell
+            {t("search.replace.matchCount", { count: diff.matchCount })}
           </div>
         )}
       </div>
@@ -175,8 +179,10 @@ function DiffPreviewRow({
 // ---------------------------------------------------------------------------
 // Result row content (search mode — rendered inside CommandItem)
 // ---------------------------------------------------------------------------
-function SearchResultContent({ result }: { result: WorkspaceSearchResult }) {
-  const columnLabel = result.original ? "source" : "target"
+function SearchResultContent({ result, t }: { result: WorkspaceSearchResult; t: TFunction }) {
+  const columnLabel = result.original
+    ? t("search.result.columnSource")
+    : t("search.result.columnTarget")
   return (
     <>
       <div className="flex w-full items-center justify-between gap-2 mb-1">
@@ -205,9 +211,9 @@ function SearchResultContent({ result }: { result: WorkspaceSearchResult }) {
 // ---------------------------------------------------------------------------
 // Loading skeletons
 // ---------------------------------------------------------------------------
-function ResultsLoadingSkeleton() {
+function ResultsLoadingSkeleton({ t }: { t: TFunction }) {
   return (
-    <div role="status" aria-label="Searching…">
+    <div role="status" aria-label={t("search.searching")}>
       {Array.from({ length: 4 }).map((_, i) => (
         <div key={i} className="px-3 py-2.5 space-y-2">
           <Skeleton className="h-2.5 w-1/3" />
@@ -215,7 +221,7 @@ function ResultsLoadingSkeleton() {
           <Skeleton className="h-3.5 w-2/3" />
         </div>
       ))}
-      <span className="sr-only">Searching…</span>
+      <span className="sr-only">{t("search.searching")}</span>
     </div>
   )
 }
@@ -228,9 +234,10 @@ interface ReplaceSectionProps {
   results: WorkspaceSearchResult[]
   isReadOnly: boolean
   onAfterReplace?: (payload: ReplaceAllPayload) => Promise<void> | void
+  t: TFunction
 }
 
-function ReplaceSection({ query, results, isReadOnly, onAfterReplace }: ReplaceSectionProps) {
+function ReplaceSection({ query, results, isReadOnly, onAfterReplace, t }: ReplaceSectionProps) {
   const [replaceValue, setReplaceValue] = useState("")
   const [applying, setApplying] = useState(false)
   const [lastResult, setLastResult] = useState<{ replaced: number; skipped: number } | null>(null)
@@ -291,31 +298,44 @@ function ReplaceSection({ query, results, isReadOnly, onAfterReplace }: ReplaceS
     <div className="flex flex-col gap-2">
       {/* Replace input */}
       <Input
-        placeholder="Replacement text…"
+        placeholder={t("search.replace.placeholder")}
         value={replaceValue}
         onChange={(e) => setReplaceValue(e.target.value)}
         className="h-9 text-sm"
-        aria-label="Replacement text"
+        aria-label={t("search.replace.placeholder")}
         disabled={isReadOnly || applying}
       />
 
       {/* Honest copy: replacing text advances the cell head, dropping prior validations per Q25. */}
       <p className="text-xs text-muted-foreground" role="note">
-        Replacing text clears validation — it must be re-reviewed.
+        {t("search.replace.clearsValidation")}
       </p>
 
       {/* Skipped count notice */}
       {totalSkipped > 0 && (
         <p className="text-xs text-amber-600 dark:text-amber-400" role="note">
-          {totalSkipped} match{totalSkipped !== 1 ? "es" : ""} skipped — spans HTML tag boundary.
+          {t(totalSkipped === 1 ? "search.replace.skippedNoticeOne" : "search.replace.skippedNoticeOther", {
+            count: totalSkipped,
+          })}
         </p>
       )}
 
       {/* Last apply result toast-like message */}
       {lastResult && (
         <p className="text-xs text-green-700 dark:text-green-400" role="status" aria-live="polite">
-          Replaced {lastResult.replaced} cell{lastResult.replaced !== 1 ? "s" : ""}
-          {lastResult.skipped > 0 ? ` (${lastResult.skipped} skipped — HTML boundary)` : ""}.
+          {lastResult.skipped > 0
+            ? t(
+                lastResult.replaced === 1
+                  ? "search.replace.appliedResultWithSkippedOne"
+                  : "search.replace.appliedResultWithSkippedOther",
+                { count: lastResult.replaced, skipped: lastResult.skipped },
+              )
+            : t(
+                lastResult.replaced === 1
+                  ? "search.replace.appliedResultOne"
+                  : "search.replace.appliedResultOther",
+                { count: lastResult.replaced },
+              )}
         </p>
       )}
 
@@ -323,31 +343,40 @@ function ReplaceSection({ query, results, isReadOnly, onAfterReplace }: ReplaceS
       {diffs.length > 0 && (
         <>
           <div className="flex items-center justify-between text-xs text-muted-foreground px-1">
-            <span>{diffs.length} cell{diffs.length !== 1 ? "s" : ""} affected</span>
+            <span>
+              {t(diffs.length === 1 ? "search.replace.affectedCountOne" : "search.replace.affectedCountOther", {
+                count: diffs.length,
+              })}
+            </span>
             <div className="flex gap-2">
               <button
                 type="button"
                 className="underline"
                 onClick={() => setSelected(new Set(diffs.map((d) => d.cellId)))}
               >
-                Select all
+                {t("search.replace.selectAll")}
               </button>
               <button
                 type="button"
                 className="underline"
                 onClick={() => setSelected(new Set())}
               >
-                Select none
+                {t("search.replace.selectNone")}
               </button>
             </div>
           </div>
-          <div className="flex flex-col gap-0.5 max-h-48 overflow-y-auto rounded-lg border border-border bg-background" role="list" aria-label="Cells to replace">
+          <div
+            className="flex flex-col gap-0.5 max-h-48 overflow-y-auto rounded-lg border border-border bg-background"
+            role="list"
+            aria-label={t("search.replace.cellListAriaLabel")}
+          >
             {diffs.map((diff) => (
               <DiffPreviewRow
                 key={diff.cellId}
                 diff={diff}
                 selected={selected.has(diff.cellId)}
                 onToggle={toggleCell}
+                t={t}
               />
             ))}
           </div>
@@ -358,9 +387,9 @@ function ReplaceSection({ query, results, isReadOnly, onAfterReplace }: ReplaceS
       <AppTooltip
         content={
           isReadOnly
-            ? "Replace requires contributor access on these files"
+            ? t("search.replace.readOnlyTooltip")
             : !onAfterReplace
-              ? "Replace is not yet wired"
+              ? t("search.replace.notWiredTooltip")
               : ""
         }
         className="max-w-xs"
@@ -377,7 +406,11 @@ function ReplaceSection({ query, results, isReadOnly, onAfterReplace }: ReplaceS
             )}
             aria-busy={applying}
           >
-            {applying ? "Applying…" : `Replace ${selectedDiffs.length > 0 ? selectedDiffs.length : "All"}`}
+            {applying
+              ? t("search.replace.applying")
+              : selectedDiffs.length > 0
+                ? t("search.replace.applyButtonCount", { count: selectedDiffs.length })
+                : t("search.replace.applyButtonAll")}
           </button>
         </span>
       </AppTooltip>
@@ -391,6 +424,7 @@ function ReplaceSection({ query, results, isReadOnly, onAfterReplace }: ReplaceS
 const DEBOUNCE_MS = 250
 
 export function ParallelPassagesPanel(props: ParallelPassagesPanelProps) {
+  const t = useT()
   const {
     open,
     onOpenChange,
@@ -499,24 +533,32 @@ export function ParallelPassagesPanel(props: ParallelPassagesPanelProps) {
   }
 
   const dialogTitle =
-    mode === "passages" ? "Parallel passages" : mode === "replace" ? "Search and Replace" : "Search"
+    mode === "passages"
+      ? t("search.dialog.titlePassages")
+      : mode === "replace"
+        ? t("search.dialog.titleReplace")
+        : t("nav.search")
 
   const scopeLabel =
     scope === "file"
       ? activeFileName
-        ? `File: ${activeFileName}`
-        : "Current file"
-      : "Entire project"
+        ? t("search.dialog.scopeFile", { fileName: activeFileName })
+        : t("search.dialog.scopeCurrentFile")
+      : t("search.dialog.scopeEntireProject")
 
   const isEmpty = !loading && results.length === 0 && query.trim() !== ""
   const isIdle = !loading && results.length === 0 && query.trim() === ""
 
   const inputPlaceholder =
     mode === "passages"
-      ? "Search parallel passages across all projects…"
+      ? t("search.dialog.placeholderPassages")
       : mode === "replace"
-      ? `Find in ${scope === "file" ? scopeLabel.toLowerCase() : "project"}…`
-      : `Search ${scope === "file" ? scopeLabel.toLowerCase() : "project"}…`
+        ? scope === "file"
+          ? t("search.dialog.placeholderReplaceScoped", { scope: scopeLabel.toLowerCase() })
+          : t("search.dialog.placeholderReplaceProject")
+        : scope === "file"
+          ? t("search.dialog.placeholderScoped", { scope: scopeLabel.toLowerCase() })
+          : t("search.placeholderProject")
 
   return (
     <CommandDialog
@@ -534,15 +576,15 @@ export function ParallelPassagesPanel(props: ParallelPassagesPanelProps) {
         {/* Controls row — pr-10 reserves clearance for the absolute-positioned X close button */}
         <div
           className="flex shrink-0 flex-wrap items-center gap-3 pb-3 pl-4 pr-10 pt-4"
-          aria-label="Panel controls"
+          aria-label={t("search.dialog.controlsAriaLabel")}
         >
           <SegmentTabs<ParallelPanelScope>
             value={scope}
-            aria-label="Search scope"
+            aria-label={t("search.scope.label")}
             options={[
-              { label: "Project", value: "project" },
+              { label: t("search.scope.project"), value: "project" },
               {
-                label: scope === "file" && activeFileName ? activeFileName : "File",
+                label: scope === "file" && activeFileName ? activeFileName : t("search.scope.file"),
                 value: "file",
                 disabled: !activeFileId,
               },
@@ -551,22 +593,22 @@ export function ParallelPassagesPanel(props: ParallelPassagesPanelProps) {
           />
           <SegmentTabs<ParallelPanelMode>
             value={mode}
-            aria-label="Search mode"
+            aria-label={t("search.dialog.modeLabel")}
             options={[
-              { label: "Search", value: "search" },
-              { label: "Passages", value: "passages" },
-              { label: "Replace", value: "replace" },
+              { label: t("nav.search"), value: "search" },
+              { label: t("search.mode.passages"), value: "passages" },
+              { label: t("search.mode.replace"), value: "replace" },
             ]}
             onValueChange={handleModeChange}
           />
           {mode !== "replace" && (
             <SegmentTabs<ParallelPanelSide>
               value={side}
-              aria-label="Content side"
+              aria-label={t("search.dialog.contentSideLabel")}
               options={[
-                { label: "Both", value: "both" },
-                { label: "Source", value: "source" },
-                { label: "Target", value: "target" },
+                { label: t("search.side.both"), value: "both" },
+                { label: t("search.side.source"), value: "source" },
+                { label: t("search.side.target"), value: "target" },
               ]}
               onValueChange={handleSideChange}
             />
@@ -584,41 +626,44 @@ export function ParallelPassagesPanel(props: ParallelPassagesPanelProps) {
           />
           {scope === "file" && !activeFileId && (
             <p className="text-xs text-muted-foreground" role="note">
-              Open a file to enable file-scoped search.
+              {t("search.dialog.openFileHint")}
             </p>
           )}
 
           {mode === "replace" && (
             <div className="flex flex-col gap-3 rounded-xl border border-border bg-muted/20 px-3 py-3">
               <div className="text-xs font-medium text-muted-foreground">
-                Replace (target cells only)
+                {t("search.dialog.replaceSectionHeading")}
               </div>
               <ReplaceSection
                 query={query}
                 results={results}
                 isReadOnly={isReadOnly as boolean}
                 onAfterReplace={replaceHandler}
+                t={t}
               />
             </div>
           )}
         </div>
 
         <CommandList className="max-h-none min-h-0 flex-1 overflow-y-auto overscroll-contain border-t border-border px-2 py-2">
-          {loading && <ResultsLoadingSkeleton />}
+          {loading && <ResultsLoadingSkeleton t={t} />}
 
           {!loading && isIdle && (
             <CommandEmpty aria-live="polite">
               {mode === "passages"
-                ? "Type to find parallel passages — results show source and target side by side."
+                ? t("search.dialog.idlePassages")
                 : mode === "replace"
-                ? "Type a search term above to find target cells for replacement."
-                : `Type to search across ${scope === "file" ? "the open file" : "the project"}.`}
+                  ? t("search.dialog.idleReplace")
+                  : scope === "file"
+                    ? t("search.dialog.idleSearchFile")
+                    : t("search.dialog.idleSearchProject")}
             </CommandEmpty>
           )}
 
           {!loading && isEmpty && (
             <CommandEmpty aria-live="polite">
-              No results for{" "}
+              {t("search.dialog.noResultsFor")}{" "}
               <span className="font-medium text-foreground">&ldquo;{query}&rdquo;</span>.
             </CommandEmpty>
           )}
@@ -626,7 +671,9 @@ export function ParallelPassagesPanel(props: ParallelPassagesPanelProps) {
           {!loading && results.length > 0 && (
             <CommandGroup>
               {results.map((r) => {
-                const columnLabel = r.original ? "source" : "target"
+                const columnLabel = r.original
+                  ? t("search.result.columnSource")
+                  : t("search.result.columnTarget")
                 const itemKey = `${r.fileId}:${r.cellId}:${r.original ? "src" : "tgt"}`
                 return (
                   <CommandItem
@@ -636,7 +683,7 @@ export function ParallelPassagesPanel(props: ParallelPassagesPanelProps) {
                     className="flex flex-col items-start rounded-xl px-3 py-2.5"
                     onSelect={() => onSelect?.(r, query)}
                   >
-                    <SearchResultContent result={r} />
+                    <SearchResultContent result={r} t={t} />
                   </CommandItem>
                 )
               })}
@@ -647,10 +694,12 @@ export function ParallelPassagesPanel(props: ParallelPassagesPanelProps) {
         {!loading && results.length > 0 && (
           <div className="flex shrink-0 items-center justify-between border-t border-border bg-muted/20 px-4 py-2.5">
             <span className="text-xs tabular-nums text-muted-foreground">
-              {results.length.toLocaleString()} result{results.length !== 1 ? "s" : ""}
+              {t(results.length === 1 ? "search.resultCountOne" : "search.resultCountOther", {
+                count: results.length.toLocaleString(),
+              })}
             </span>
             <span className="max-w-[60%] truncate text-right text-xs text-muted-foreground">
-              {mode === "passages" ? "Parallel passages" : scopeLabel}
+              {mode === "passages" ? t("search.dialog.titlePassages") : scopeLabel}
             </span>
           </div>
         )}

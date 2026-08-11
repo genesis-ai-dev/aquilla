@@ -16,6 +16,7 @@ import { EmptyState } from "@/components/ui/page"
 import { cn } from "@/lib/utils"
 import { MarkedSnippet } from "@/components/search/MarkedSnippet"
 import type { WorkspaceSearchResult } from "@/lib/search/workspace-index"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 export interface SearchResultsViewProps {
   query: string
@@ -66,6 +67,7 @@ export function SearchResultsView({
   onJumpToResult,
   onClose,
 }: SearchResultsViewProps) {
+  const t = useT()
   const groups = useMemo<FileGroup[]>(() => {
     const map = new Map<string, FileGroup>()
     for (const r of results) {
@@ -85,22 +87,28 @@ export function SearchResultsView({
       <div className="flex items-center gap-2 border-b px-4 py-2 shrink-0">
         <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
         <span className="text-sm font-medium flex-1 truncate">
-          Search Results
+          {t("search.expanded.header")}
           {query && (
             <span className="ml-2 text-xs font-normal text-muted-foreground">
-              for &ldquo;{query}&rdquo;
+              {t("search.expanded.forQueryPrefix")} &ldquo;{query}&rdquo;
             </span>
           )}
         </span>
         <span className="text-xs text-muted-foreground shrink-0">
-          {results.length} result{results.length !== 1 ? "s" : ""} in {groups.length} file{groups.length !== 1 ? "s" : ""}
+          {t(results.length === 1 ? "search.resultCountOne" : "search.resultCountOther", {
+            count: results.length,
+          })}{" "}
+          {t("search.expanded.countsJoiner")}{" "}
+          {t(groups.length === 1 ? "search.expanded.fileCountOne" : "search.expanded.fileCountOther", {
+            count: groups.length,
+          })}
         </span>
         <Button
           type="button"
           variant="ghost"
           size="icon-sm"
           onClick={onClose}
-          aria-label="Close search results"
+          aria-label={t("search.expanded.close")}
         >
           <X />
         </Button>
@@ -113,7 +121,7 @@ export function SearchResultsView({
             variant="inline"
             className="h-full"
             icon={Search}
-            title="No results"
+            title={t("search.noResults")}
           />
         ) : (
           <div className="py-2">

@@ -193,87 +193,87 @@ function DataTable<TData, TValue>({
           {toolbarNode}
         </div>
       )}
-      {!hasRows && emptyStateNode ? (
-        emptyStateNode
-      ) : (
-        <div
-          className={cn("overflow-hidden rounded-md border", className)}
-          data-testid={testId}
-        >
-        <Table>
-          <TableHeader>
-            {table.getHeaderGroups().map((headerGroup) => (
-              <TableRow key={headerGroup.id} className="hover:bg-transparent">
-                {headerGroup.headers.map((header) => {
-                  if (!header.column.getIsVisible()) return null
+      <div
+        className={cn("overflow-hidden rounded-md border", className)}
+        data-testid={testId}
+      >
+        {!hasRows && emptyStateNode ? (
+          emptyStateNode
+        ) : (
+          <Table>
+            <TableHeader>
+              {table.getHeaderGroups().map((headerGroup) => (
+                <TableRow key={headerGroup.id} className="hover:bg-transparent">
+                  {headerGroup.headers.map((header) => {
+                    if (!header.column.getIsVisible()) return null
+                    return (
+                    <TableHead
+                      key={header.id}
+                      className={cn(
+                        dense ? "h-9 py-1.5" : "h-11",
+                        header.column.id === "expand" ? "w-8" : undefined,
+                        columnMetaClass(header.column.columnDef.meta),
+                      )}
+                    >
+                      {header.isPlaceholder
+                        ? null
+                        : flexRender(header.column.columnDef.header, header.getContext())}
+                    </TableHead>
+                    )
+                  })}
+                </TableRow>
+              ))}
+            </TableHeader>
+            <TableBody>
+              {hasRows ? (
+                table.getRowModel().rows.map((row) => {
+                  const sub = renderSubRow?.(row.original)
+                  const contextMenu = renderRowContextMenu?.(row.original) ?? null
+                  const cells = row.getVisibleCells().map((cell) => (
+                    <TableCell
+                      key={cell.id}
+                      className={cn(
+                        dense ? "py-1.5" : "py-2.5",
+                        columnMetaClass(cell.column.columnDef.meta),
+                      )}
+                    >
+                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                    </TableCell>
+                  ))
+                  const rowProps = {
+                    "data-state": row.getIsSelected() && "selected",
+                    className: cn(
+                      contextMenu && "group",
+                      typeof rowClassName === "function"
+                        ? rowClassName(row.original)
+                        : rowClassName,
+                    ),
+                    onClick: onRowClick ? () => onRowClick(row.original) : undefined,
+                  } as const
                   return (
-                  <TableHead
-                    key={header.id}
-                    className={cn(
-                      dense ? "h-9 py-1.5" : "h-11",
-                      header.column.id === "expand" ? "w-8" : undefined,
-                      columnMetaClass(header.column.columnDef.meta),
-                    )}
-                  >
-                    {header.isPlaceholder
-                      ? null
-                      : flexRender(header.column.columnDef.header, header.getContext())}
-                  </TableHead>
+                    <React.Fragment key={row.id}>
+                      {contextMenu ? (
+                        <DataTableContextMenuRow rowProps={rowProps} menu={contextMenu}>
+                          {cells}
+                        </DataTableContextMenuRow>
+                      ) : (
+                        <TableRow {...rowProps}>{cells}</TableRow>
+                      )}
+                      {sub}
+                    </React.Fragment>
                   )
-                })}
-              </TableRow>
-            ))}
-          </TableHeader>
-          <TableBody>
-            {hasRows ? (
-              table.getRowModel().rows.map((row) => {
-                const sub = renderSubRow?.(row.original)
-                const contextMenu = renderRowContextMenu?.(row.original) ?? null
-                const cells = row.getVisibleCells().map((cell) => (
-                  <TableCell
-                    key={cell.id}
-                    className={cn(
-                      dense ? "py-1.5" : "py-2.5",
-                      columnMetaClass(cell.column.columnDef.meta),
-                    )}
-                  >
-                    {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                })
+              ) : (
+                <TableRow>
+                  <TableCell colSpan={table.getVisibleLeafColumns().length} className="h-24 text-center">
+                    No results.
                   </TableCell>
-                ))
-                const rowProps = {
-                  "data-state": row.getIsSelected() && "selected",
-                  className: cn(
-                    contextMenu && "group",
-                    typeof rowClassName === "function"
-                      ? rowClassName(row.original)
-                      : rowClassName,
-                  ),
-                  onClick: onRowClick ? () => onRowClick(row.original) : undefined,
-                } as const
-                return (
-                  <React.Fragment key={row.id}>
-                    {contextMenu ? (
-                      <DataTableContextMenuRow rowProps={rowProps} menu={contextMenu}>
-                        {cells}
-                      </DataTableContextMenuRow>
-                    ) : (
-                      <TableRow {...rowProps}>{cells}</TableRow>
-                    )}
-                    {sub}
-                  </React.Fragment>
-                )
-              })
-            ) : (
-              <TableRow>
-                <TableCell colSpan={table.getVisibleLeafColumns().length} className="h-24 text-center">
-                  No results.
-                </TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        )}
       </div>
-      )}
     </div>
   )
 }

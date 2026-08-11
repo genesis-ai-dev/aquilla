@@ -10,8 +10,11 @@ const emptyStateVariants = cva("", {
       card: "rounded-lg border-solid bg-card/40 px-6 py-12",
       /** Nested inside a Section or panel — no extra chrome. */
       inline: "border-0 bg-transparent",
-      /** Dashed panel — table/list surfaces (admin console, data tables). */
-      panel: "",
+      /**
+       * Table/list empty beat — same layout as `card`, but `bg-card` so it
+       * matches DataTable / ADMIN_TABLE_PANEL_CLASS surfaces.
+       */
+      panel: "rounded-lg border-solid bg-card px-6 py-12",
     },
   },
   defaultVariants: {

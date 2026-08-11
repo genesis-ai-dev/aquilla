@@ -92,6 +92,9 @@ describe("ArchivedProjects", () => {
 
     await waitFor(() => expect(fetchArchivedProjects).toHaveBeenCalledWith("jwt", 1))
     expect(await screen.findByText("No archived projects.")).toBeInTheDocument()
+    const panel = screen.getByTestId("org-archived-projects-table")
+    expect(panel).toHaveClass("border", "bg-card")
+    expect(screen.queryByRole("table")).not.toBeInTheDocument()
   })
 
   // AQU-366: guard against the list clipping instead of scrolling — see

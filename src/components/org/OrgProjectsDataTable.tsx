@@ -395,20 +395,18 @@ export function OrgProjectsDataTable({
     : null
 
   const emptyState = (
-    <div
-      className="w-full overflow-hidden rounded-md border border-dashed"
+    <Empty
+      className="flex-none rounded-none border-0 bg-transparent py-12"
       data-testid="org-projects-empty"
     >
-      <Empty className="flex-none rounded-none border-0 bg-transparent py-12">
-        <EmptyHeader>
-          <EmptyMedia variant="icon">
-            <FolderOpen />
-          </EmptyMedia>
-          <EmptyTitle>{emptyTitle}</EmptyTitle>
-          {emptyDescription ? <EmptyDescription>{emptyDescription}</EmptyDescription> : null}
-        </EmptyHeader>
-      </Empty>
-    </div>
+      <EmptyHeader>
+        <EmptyMedia variant="icon">
+          <FolderOpen />
+        </EmptyMedia>
+        <EmptyTitle>{emptyTitle}</EmptyTitle>
+        {emptyDescription ? <EmptyDescription>{emptyDescription}</EmptyDescription> : null}
+      </EmptyHeader>
+    </Empty>
   )
 
   return (

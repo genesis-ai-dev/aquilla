@@ -119,7 +119,8 @@ describe("AdminProjectsSection", () => {
       </MemoryRouter>,
     )
     expect(screen.getByLabelText("Search projects…")).toBeInTheDocument()
-    expect(screen.getByTestId("admin-projects-empty")).toHaveClass("rounded-lg", "border", "bg-card")
+    const panel = screen.getByTestId("admin-projects-table")
+    expect(panel).toHaveClass("border", "bg-card")
     expect(screen.getByText("No projects")).toBeInTheDocument()
     expect(screen.getByText("Projects appear here as they're created.")).toBeInTheDocument()
   })
@@ -196,6 +197,7 @@ describe("AdminProjectsSection", () => {
     await pickLens(/^archived$/i)
     expect(screen.getByLabelText("Search projects…")).toBeInTheDocument()
     expect(screen.getByText("No archived projects")).toBeInTheDocument()
-    expect(screen.queryByTestId("admin-projects-table")).not.toBeInTheDocument()
+    expect(screen.getByTestId("admin-projects-table")).toBeInTheDocument()
+    expect(screen.queryByRole("table")).not.toBeInTheDocument()
   })
 })

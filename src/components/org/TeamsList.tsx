@@ -334,6 +334,8 @@ export function TeamsList() {
                 if (teams.length === 0) {
                   return (
                     <EmptyState
+                      variant="inline"
+                      className="flex-none py-12"
                       icon={NAV_PAGE_ICONS.teams}
                       title="No teams in this org yet."
                       description={
@@ -347,6 +349,8 @@ export function TeamsList() {
                 if (visibleTeams.length === 0 && !search) {
                   return (
                     <EmptyState
+                      variant="inline"
+                      className="flex-none py-12"
                       icon={NAV_PAGE_ICONS.teams}
                       title={
                         visibility === "public"

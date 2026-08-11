@@ -205,6 +205,8 @@ export function AssignedToMe() {
                 if (rows.length === 0) {
                   return (
                     <EmptyState
+                      variant="inline"
+                      className="flex-none py-12"
                       icon={NAV_PAGE_ICONS.assigned}
                       title="You have no open assignments."
                       description="When a manager assigns you a book or chapter, it will show up here."
@@ -214,6 +216,8 @@ export function AssignedToMe() {
                 if (!search) {
                   return (
                     <EmptyState
+                      variant="inline"
+                      className="flex-none py-12"
                       icon={NAV_PAGE_ICONS.assigned}
                       title="No assignments match your filters"
                     />

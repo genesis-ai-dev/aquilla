@@ -15,6 +15,7 @@ import {
   ContextMenuContent,
   ContextMenuItem,
 } from "@/components/ui/context-menu"
+import { Button } from "@/components/ui/button"
 import { Page, PageHeader, EmptyState } from "@/components/ui/page"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
@@ -160,12 +161,6 @@ export function ArchivedProjects() {
               aria-busy="true"
               aria-label="Loading archived projects"
             />
-          ) : projects.length === 0 ? (
-            <EmptyState
-              icon={NAV_PAGE_ICONS.archived}
-              title="No archived projects."
-              description="When you archive a project, it shows up here until you restore it."
-            />
           ) : (
             <DataTable
               columns={columns}
@@ -196,13 +191,32 @@ export function ArchivedProjects() {
                   </ContextMenuItem>
                 </ContextMenuContent>
               )}
-              emptyState={
-                <div className="flex flex-col items-center gap-3 py-10">
-                  <p className="text-center text-sm text-muted-foreground">
-                    No archived projects match your search.
-                  </p>
-                </div>
-              }
+              emptyState={(table) => {
+                if (projects.length === 0) {
+                  return (
+                    <EmptyState
+                      variant="inline"
+                      className="flex-none py-12"
+                      icon={NAV_PAGE_ICONS.archived}
+                      title="No archived projects."
+                      description="When you archive a project, it shows up here until you restore it."
+                    />
+                  )
+                }
+                return (
+                  <div className="flex flex-col items-center gap-3 py-10">
+                    <p className="text-center text-sm text-muted-foreground">
+                      No archived projects match your search.
+                    </p>
+                    <Button
+                      variant="outline"
+                      onClick={() => table.setGlobalFilter("")}
+                    >
+                      Clear
+                    </Button>
+                  </div>
+                )
+              }}
               testId="org-archived-projects-table"
               className={ADMIN_TABLE_PANEL_CLASS}
               dense

@@ -174,18 +174,21 @@ describe("DataTable", () => {
     expect(head?.className).toMatch(/h-11/)
   })
 
-  it("renders emptyState below the toolbar when data is empty", () => {
+  it("renders emptyState inside the table panel when data is empty", () => {
     render(
       <DataTable
         columns={columns}
         data={[]}
         searchPlaceholder="Search…"
         emptyState={<div data-testid="custom-empty">Nothing here</div>}
+        testId="empty-table"
+        className="bg-card"
       />,
     )
     expect(screen.getByLabelText("Search…")).toBeInTheDocument()
     expect(screen.getByTestId("custom-empty")).toBeInTheDocument()
     expect(screen.queryByRole("table")).not.toBeInTheDocument()
+    expect(screen.getByTestId("empty-table")).toHaveClass("border", "bg-card")
   })
 
   it("opens renderRowContextMenu from row right-click and from the ⋯ button", async () => {

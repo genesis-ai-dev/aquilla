@@ -169,18 +169,13 @@ export function AdminProjectsSection({ projects }: { projects: AdminProject[] })
   }, [lens])
 
   const emptyState = (
-    <div
-      className="w-full overflow-hidden rounded-lg border bg-card"
-      data-testid="admin-projects-empty"
-    >
-      <EmptyState
-        variant="inline"
-        className="flex-none py-12"
-        icon={FolderOpen}
-        title={emptyCopy.title}
-        description={emptyCopy.description}
-      />
-    </div>
+    <EmptyState
+      variant="inline"
+      className="flex-none py-12"
+      icon={FolderOpen}
+      title={emptyCopy.title}
+      description={emptyCopy.description}
+    />
   )
 
   const initialSorting = useMemo(

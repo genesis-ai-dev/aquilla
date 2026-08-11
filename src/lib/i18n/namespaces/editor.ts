@@ -13,6 +13,78 @@
 
 import { defineNamespace, plural } from "./types"
 
+/**
+ * Shared halves of the milestone-navigator context notes.
+ *
+ * The navigator keys one sentence per kind of division (chapters, slides,
+ * stories…) so the noun is written into the sentence instead of being poured
+ * into a frame — see the comment over those keys. That makes eight near-identical
+ * notes per sentence, so the part describing the control is written once here and
+ * each entry appends the clause naming which kind of file it serves. Every entry
+ * is still an explicit literal key, so `tsc` keeps rejecting a note for a key
+ * that does not exist.
+ */
+const MILESTONE_MOVE_BETWEEN =
+  "Screen-reader name of the button group holding the previous/next arrows and " +
+  "the division picker, in the editor header. Used when "
+const MILESTONE_PREVIOUS =
+  "Screen-reader name of the left-arrow button; it steps back one division (or " +
+  "one cell range within a split division). Icon-only, so this string is the " +
+  "only name it has. Used when "
+const MILESTONE_NEXT =
+  "Screen-reader name of the right-arrow button; it steps forward one division. " +
+  "Icon-only, so this string is the only name it has. Used when "
+const MILESTONE_CURRENT =
+  "Screen-reader name of the picker button between the two arrows. It does " +
+  "double duty: it states where the user currently is, then says what the button " +
+  "does. Keep both halves. Used when "
+const MILESTONE_CURRENT_WITH_CELLS =
+  "The same picker name, for a division split into cell ranges, naming the range " +
+  "the user is inside. Used when "
+const MILESTONE_FIND_PLACEHOLDER =
+  "Placeholder in the search field inside the open division picker. Ends with an " +
+  "ellipsis glyph (…). It prompts typing, so it should read as an invitation " +
+  "rather than a label. Used when "
+const MILESTONE_FIND =
+  "Screen-reader name of that same search field — the placeholder without its " +
+  "trailing ellipsis, which a screen reader would otherwise announce as " +
+  "punctuation. Used when "
+const MILESTONE_EMPTY =
+  "Message inside the picker when the typed query matches no division. Full " +
+  "sentence with a period. Used when "
+
+const MILESTONE_LABEL_PLACEHOLDER =
+  "The division's own display label ('Matthew 1', a slide title). Content, so " +
+  "never translate the substituted value."
+const MILESTONE_CELLS_PLACEHOLDER =
+  "The cell range within the division, already formatted, e.g. '101–117'. " +
+  "Numbers only — do not translate."
+const MILESTONE_RANGE_PLACEHOLDER =
+  "The inclusive range as already formatted by the app, e.g. '101–117' (en " +
+  "dash). Numbers only — do not translate."
+
+/** Which kind of file each vocabulary serves, appended to the notes above. */
+const MILESTONE_KIND_CHAPTER =
+  "the file is scripture divided into the chapters of a book."
+const MILESTONE_KIND_SLIDE =
+  "the file is presentation-shaped and divided into slides."
+const MILESTONE_KIND_STORY =
+  "the file is an oral-Bible or story set divided into stories."
+const MILESTONE_KIND_SECTION =
+  "the file is a document divided into titled sections, the " +
+  "chapter-equivalent for non-scripture."
+const MILESTONE_KIND_TIME_RANGE =
+  "the file is audio or video divided into spans of time on the " +
+  "timeline."
+const MILESTONE_KIND_PART =
+  "the file is divided into numbered parts."
+const MILESTONE_KIND_GROUP =
+  "the divisions are arbitrary groupings of cells with no more specific " +
+  "name."
+const MILESTONE_KIND_MILESTONE =
+  "the file mixes several kinds of division, so the catch-all word is " +
+  "used."
+
 export const editor = defineNamespace({
   keys: {
     // — Lens switch (text vs audio/media) ————————————————————————————
@@ -170,34 +242,111 @@ export const editor = defineNamespace({
     "editor.footnote.previewEmptyCell": "Empty cell",
 
     // — Milestone (chapter / slide / story / …) navigator in the header ——
+    //
+    // Every label this navigator renders names the file's kind of division, and
+    // the first pass keyed them as frames with the noun poured in ("Previous
+    // {singular}" + a separately translated "chapter"). No translator can fix
+    // that: Arabic has to agree the noun with the frame around it, Burmese puts
+    // it somewhere else in the sentence, and the app was lower-casing a
+    // translated word with toLocaleLowerCase on top. So each sentence is keyed
+    // once PER KIND with the noun written in, and the count of keys is the price
+    // of sentences that can actually be translated.
+    //
+    // The plural heading a kind uses is still `vocab.<kind>Plural` below — those
+    // keys are standalone nouns (a picker group heading, an assignment scope
+    // option), so they interpolate into nothing and are shared with dialog.assign.
     "editor.milestone.region": "Milestone navigation",
-    "editor.milestone.moveBetween": "Move between {plural}",
-    "editor.milestone.previous": "Previous {singular}",
-    "editor.milestone.next": "Next {singular}",
-    "editor.milestone.current": "Current {singular}: {label}. Choose {singular}",
-    "editor.milestone.currentWithCells":
-      "Current {singular}: {label}, cells {cells}. Choose {singular}",
-    "editor.milestone.findPlaceholder": "Find a {singular}…",
-    "editor.milestone.find": "Find a {singular}",
-    "editor.milestone.empty": "No {plural} found.",
     "editor.milestone.cellRange": "Cells {range}",
     "editor.milestone.percentTranslated": "{percent}% translated",
     "editor.milestone.percentValidated": "{percent}% validated",
-    "editor.milestone.vocab.chapter": "chapter",
+
+    "editor.milestone.chapter.moveBetween": "Move between chapters",
+    "editor.milestone.chapter.previous": "Previous chapter",
+    "editor.milestone.chapter.next": "Next chapter",
+    "editor.milestone.chapter.current": "Current chapter: {label}. Choose chapter",
+    "editor.milestone.chapter.currentWithCells":
+      "Current chapter: {label}, cells {cells}. Choose chapter",
+    "editor.milestone.chapter.findPlaceholder": "Find a chapter…",
+    "editor.milestone.chapter.find": "Find a chapter",
+    "editor.milestone.chapter.empty": "No chapters found.",
+
+    "editor.milestone.slide.moveBetween": "Move between slides",
+    "editor.milestone.slide.previous": "Previous slide",
+    "editor.milestone.slide.next": "Next slide",
+    "editor.milestone.slide.current": "Current slide: {label}. Choose slide",
+    "editor.milestone.slide.currentWithCells":
+      "Current slide: {label}, cells {cells}. Choose slide",
+    "editor.milestone.slide.findPlaceholder": "Find a slide…",
+    "editor.milestone.slide.find": "Find a slide",
+    "editor.milestone.slide.empty": "No slides found.",
+
+    "editor.milestone.story.moveBetween": "Move between stories",
+    "editor.milestone.story.previous": "Previous story",
+    "editor.milestone.story.next": "Next story",
+    "editor.milestone.story.current": "Current story: {label}. Choose story",
+    "editor.milestone.story.currentWithCells":
+      "Current story: {label}, cells {cells}. Choose story",
+    "editor.milestone.story.findPlaceholder": "Find a story…",
+    "editor.milestone.story.find": "Find a story",
+    "editor.milestone.story.empty": "No stories found.",
+
+    "editor.milestone.section.moveBetween": "Move between sections",
+    "editor.milestone.section.previous": "Previous section",
+    "editor.milestone.section.next": "Next section",
+    "editor.milestone.section.current": "Current section: {label}. Choose section",
+    "editor.milestone.section.currentWithCells":
+      "Current section: {label}, cells {cells}. Choose section",
+    "editor.milestone.section.findPlaceholder": "Find a section…",
+    "editor.milestone.section.find": "Find a section",
+    "editor.milestone.section.empty": "No sections found.",
+
+    "editor.milestone.timeRange.moveBetween": "Move between time ranges",
+    "editor.milestone.timeRange.previous": "Previous time range",
+    "editor.milestone.timeRange.next": "Next time range",
+    "editor.milestone.timeRange.current": "Current time range: {label}. Choose time range",
+    "editor.milestone.timeRange.currentWithCells":
+      "Current time range: {label}, cells {cells}. Choose time range",
+    "editor.milestone.timeRange.findPlaceholder": "Find a time range…",
+    "editor.milestone.timeRange.find": "Find a time range",
+    "editor.milestone.timeRange.empty": "No time ranges found.",
+
+    "editor.milestone.part.moveBetween": "Move between parts",
+    "editor.milestone.part.previous": "Previous part",
+    "editor.milestone.part.next": "Next part",
+    "editor.milestone.part.current": "Current part: {label}. Choose part",
+    "editor.milestone.part.currentWithCells":
+      "Current part: {label}, cells {cells}. Choose part",
+    "editor.milestone.part.findPlaceholder": "Find a part…",
+    "editor.milestone.part.find": "Find a part",
+    "editor.milestone.part.empty": "No parts found.",
+
+    "editor.milestone.group.moveBetween": "Move between groups",
+    "editor.milestone.group.previous": "Previous group",
+    "editor.milestone.group.next": "Next group",
+    "editor.milestone.group.current": "Current group: {label}. Choose group",
+    "editor.milestone.group.currentWithCells":
+      "Current group: {label}, cells {cells}. Choose group",
+    "editor.milestone.group.findPlaceholder": "Find a group…",
+    "editor.milestone.group.find": "Find a group",
+    "editor.milestone.group.empty": "No groups found.",
+
+    "editor.milestone.milestone.moveBetween": "Move between milestones",
+    "editor.milestone.milestone.previous": "Previous milestone",
+    "editor.milestone.milestone.next": "Next milestone",
+    "editor.milestone.milestone.current": "Current milestone: {label}. Choose milestone",
+    "editor.milestone.milestone.currentWithCells":
+      "Current milestone: {label}, cells {cells}. Choose milestone",
+    "editor.milestone.milestone.findPlaceholder": "Find a milestone…",
+    "editor.milestone.milestone.find": "Find a milestone",
+    "editor.milestone.milestone.empty": "No milestones found.",
+
     "editor.milestone.vocab.chapterPlural": "Chapters",
-    "editor.milestone.vocab.slide": "slide",
     "editor.milestone.vocab.slidePlural": "Slides",
-    "editor.milestone.vocab.story": "story",
     "editor.milestone.vocab.storyPlural": "Stories",
-    "editor.milestone.vocab.section": "section",
     "editor.milestone.vocab.sectionPlural": "Sections",
-    "editor.milestone.vocab.timeRange": "time range",
     "editor.milestone.vocab.timeRangePlural": "Time ranges",
-    "editor.milestone.vocab.part": "part",
     "editor.milestone.vocab.partPlural": "Parts",
-    "editor.milestone.vocab.group": "group",
     "editor.milestone.vocab.groupPlural": "Groups",
-    "editor.milestone.vocab.milestone": "milestone",
     "editor.milestone.vocab.milestonePlural": "Milestones",
 
     // — Column names, reused wherever the two sides are named ——————————
@@ -1297,7 +1446,9 @@ export const editor = defineNamespace({
         placeholders: {
           ref:
             "Scripture reference of the cell, e.g. 'MAT 3:16'. Book codes and numbers " +
-            "come from the project's data — do not translate the substituted value.",
+            "come from the project's data — do not translate the substituted value. " +
+            "The app renders it monospaced and a shade darker than the rest of the " +
+            "line, so it must stay a placeholder.",
         },
         screenshot: "cell-editor",
       },
@@ -1326,94 +1477,10 @@ export const editor = defineNamespace({
       "editor.milestone.region": {
         description:
           "Screen-reader name of the prev / picker / next control group in the " +
-          "editor header that moves between the file's major divisions. It is " +
+          "editor header that moves between the file's major divisions. It stays " +
           "generic because the divisions differ by file type (chapters, slides, " +
-          "stories…); the specific words come from the editor.milestone.vocab.* keys.",
-      },
-      "editor.milestone.moveBetween": {
-        description:
-          "Screen-reader name of the button group holding the previous/next arrows " +
-          "and the picker.",
-        placeholders: {
-          plural:
-            "Lower-cased plural noun for this file's divisions, from " +
-            "editor.milestone.vocab.*Plural — e.g. 'chapters', 'slides'.",
-        },
-      },
-      "editor.milestone.previous": {
-        description:
-          "Screen-reader name of the left-arrow button; it steps back one division " +
-          "(or one cell range within a split division). Icon-only, so this string " +
-          "is the only name it has.",
-        placeholders: {
-          singular:
-            "Singular noun for this file's divisions, from editor.milestone.vocab.* " +
-            "— e.g. 'chapter', 'slide'.",
-        },
-      },
-      "editor.milestone.next": {
-        description:
-          "Screen-reader name of the right-arrow button; it steps forward one " +
-          "division. Icon-only, so this string is the only name it has.",
-        placeholders: {
-          singular:
-            "Singular noun for this file's divisions, from editor.milestone.vocab.* " +
-            "— e.g. 'chapter', 'slide'.",
-        },
-      },
-      "editor.milestone.current": {
-        description:
-          "Screen-reader name of the picker button between the two arrows. It does " +
-          "double duty: it states where the user currently is, then says what the " +
-          "button does. Keep both halves.",
-        placeholders: {
-          singular:
-            "Singular noun for this file's divisions — e.g. 'chapter', 'slide'.",
-          label:
-            "The division's own display label ('Matthew 1', a slide title). Content, " +
-            "so never translate the substituted value.",
-        },
-      },
-      "editor.milestone.currentWithCells": {
-        description:
-          "Same picker name as editor.milestone.current, for a division that is " +
-          "split into cell ranges, naming the range the user is inside.",
-        placeholders: {
-          singular:
-            "Singular noun for this file's divisions — e.g. 'chapter', 'slide'.",
-          label: "The division's own display label. Content — do not translate.",
-          cells:
-            "The cell range within the division, already formatted, e.g. '101–117'. " +
-            "Numbers only — do not translate.",
-        },
-      },
-      "editor.milestone.findPlaceholder": {
-        description:
-          "Placeholder in the search field inside the open division picker. Ends " +
-          "with an ellipsis glyph (…). It prompts typing, so it should read as an " +
-          "invitation rather than a label.",
-        placeholders: {
-          singular:
-            "Singular noun for this file's divisions — e.g. 'chapter', 'slide'.",
-        },
-      },
-      "editor.milestone.find": {
-        description:
-          "Screen-reader name of that same search field — the placeholder without " +
-          "its trailing ellipsis.",
-        placeholders: {
-          singular:
-            "Singular noun for this file's divisions — e.g. 'chapter', 'slide'.",
-        },
-      },
-      "editor.milestone.empty": {
-        description:
-          "Message inside the picker when the typed query matches no division. Full " +
-          "sentence with a period.",
-        placeholders: {
-          plural:
-            "Lower-cased plural noun for this file's divisions — e.g. 'chapters'.",
-        },
+          "stories…); each kind's own labels are keyed under " +
+          "editor.milestone.<kind>.*, with the noun written into the sentence.",
       },
       "editor.milestone.cellRange": {
         description:
@@ -1421,9 +1488,7 @@ export const editor = defineNamespace({
           "same row's text value. 'Cells' are the numbered translation units; the " +
           "range is inclusive.",
         placeholders: {
-          range:
-            "The inclusive range as already formatted by the app, e.g. '101–117' " +
-            "(en dash). Numbers only — do not translate.",
+          range: MILESTONE_RANGE_PLACEHOLDER,
         },
       },
       "editor.milestone.percentTranslated": {
@@ -1447,90 +1512,303 @@ export const editor = defineNamespace({
           percent: "Whole-number percentage, already rounded, without the % sign.",
         },
       },
-      "editor.milestone.vocab.chapter": {
-        description:
-          "Singular noun for a division of a scripture file: a chapter of a biblical book. " +
-          "Substituted into the milestone navigator's labels and used wherever a single " +
-          "chapter is named mid-sentence. Lower-case in English because it appears " +
-          "mid-sentence ('Previous chapter').",
+      "editor.milestone.chapter.moveBetween": {
+        description: MILESTONE_MOVE_BETWEEN + MILESTONE_KIND_CHAPTER,
+      },
+      "editor.milestone.chapter.previous": {
+        description: MILESTONE_PREVIOUS + MILESTONE_KIND_CHAPTER,
+      },
+      "editor.milestone.chapter.next": {
+        description: MILESTONE_NEXT + MILESTONE_KIND_CHAPTER,
+      },
+      "editor.milestone.chapter.current": {
+        description: MILESTONE_CURRENT + MILESTONE_KIND_CHAPTER,
+        placeholders: {
+          label: MILESTONE_LABEL_PLACEHOLDER,
+        },
+      },
+      "editor.milestone.chapter.currentWithCells": {
+        description: MILESTONE_CURRENT_WITH_CELLS + MILESTONE_KIND_CHAPTER,
+        placeholders: {
+          label: MILESTONE_LABEL_PLACEHOLDER,
+          cells: MILESTONE_CELLS_PLACEHOLDER,
+        },
+      },
+      "editor.milestone.chapter.findPlaceholder": {
+        description: MILESTONE_FIND_PLACEHOLDER + MILESTONE_KIND_CHAPTER,
+      },
+      "editor.milestone.chapter.find": {
+        description: MILESTONE_FIND + MILESTONE_KIND_CHAPTER,
+      },
+      "editor.milestone.chapter.empty": {
+        description: MILESTONE_EMPTY + MILESTONE_KIND_CHAPTER,
+      },
+      "editor.milestone.slide.moveBetween": {
+        description: MILESTONE_MOVE_BETWEEN + MILESTONE_KIND_SLIDE,
+      },
+      "editor.milestone.slide.previous": {
+        description: MILESTONE_PREVIOUS + MILESTONE_KIND_SLIDE,
+      },
+      "editor.milestone.slide.next": {
+        description: MILESTONE_NEXT + MILESTONE_KIND_SLIDE,
+      },
+      "editor.milestone.slide.current": {
+        description: MILESTONE_CURRENT + MILESTONE_KIND_SLIDE,
+        placeholders: {
+          label: MILESTONE_LABEL_PLACEHOLDER,
+        },
+      },
+      "editor.milestone.slide.currentWithCells": {
+        description: MILESTONE_CURRENT_WITH_CELLS + MILESTONE_KIND_SLIDE,
+        placeholders: {
+          label: MILESTONE_LABEL_PLACEHOLDER,
+          cells: MILESTONE_CELLS_PLACEHOLDER,
+        },
+      },
+      "editor.milestone.slide.findPlaceholder": {
+        description: MILESTONE_FIND_PLACEHOLDER + MILESTONE_KIND_SLIDE,
+      },
+      "editor.milestone.slide.find": {
+        description: MILESTONE_FIND + MILESTONE_KIND_SLIDE,
+      },
+      "editor.milestone.slide.empty": {
+        description: MILESTONE_EMPTY + MILESTONE_KIND_SLIDE,
+      },
+      "editor.milestone.story.moveBetween": {
+        description: MILESTONE_MOVE_BETWEEN + MILESTONE_KIND_STORY,
+      },
+      "editor.milestone.story.previous": {
+        description: MILESTONE_PREVIOUS + MILESTONE_KIND_STORY,
+      },
+      "editor.milestone.story.next": {
+        description: MILESTONE_NEXT + MILESTONE_KIND_STORY,
+      },
+      "editor.milestone.story.current": {
+        description: MILESTONE_CURRENT + MILESTONE_KIND_STORY,
+        placeholders: {
+          label: MILESTONE_LABEL_PLACEHOLDER,
+        },
+      },
+      "editor.milestone.story.currentWithCells": {
+        description: MILESTONE_CURRENT_WITH_CELLS + MILESTONE_KIND_STORY,
+        placeholders: {
+          label: MILESTONE_LABEL_PLACEHOLDER,
+          cells: MILESTONE_CELLS_PLACEHOLDER,
+        },
+      },
+      "editor.milestone.story.findPlaceholder": {
+        description: MILESTONE_FIND_PLACEHOLDER + MILESTONE_KIND_STORY,
+      },
+      "editor.milestone.story.find": {
+        description: MILESTONE_FIND + MILESTONE_KIND_STORY,
+      },
+      "editor.milestone.story.empty": {
+        description: MILESTONE_EMPTY + MILESTONE_KIND_STORY,
+      },
+      "editor.milestone.section.moveBetween": {
+        description: MILESTONE_MOVE_BETWEEN + MILESTONE_KIND_SECTION,
+      },
+      "editor.milestone.section.previous": {
+        description: MILESTONE_PREVIOUS + MILESTONE_KIND_SECTION,
+      },
+      "editor.milestone.section.next": {
+        description: MILESTONE_NEXT + MILESTONE_KIND_SECTION,
+      },
+      "editor.milestone.section.current": {
+        description: MILESTONE_CURRENT + MILESTONE_KIND_SECTION,
+        placeholders: {
+          label: MILESTONE_LABEL_PLACEHOLDER,
+        },
+      },
+      "editor.milestone.section.currentWithCells": {
+        description: MILESTONE_CURRENT_WITH_CELLS + MILESTONE_KIND_SECTION,
+        placeholders: {
+          label: MILESTONE_LABEL_PLACEHOLDER,
+          cells: MILESTONE_CELLS_PLACEHOLDER,
+        },
+      },
+      "editor.milestone.section.findPlaceholder": {
+        description: MILESTONE_FIND_PLACEHOLDER + MILESTONE_KIND_SECTION,
+      },
+      "editor.milestone.section.find": {
+        description: MILESTONE_FIND + MILESTONE_KIND_SECTION,
+      },
+      "editor.milestone.section.empty": {
+        description: MILESTONE_EMPTY + MILESTONE_KIND_SECTION,
+      },
+      "editor.milestone.timeRange.moveBetween": {
+        description: MILESTONE_MOVE_BETWEEN + MILESTONE_KIND_TIME_RANGE,
+      },
+      "editor.milestone.timeRange.previous": {
+        description: MILESTONE_PREVIOUS + MILESTONE_KIND_TIME_RANGE,
+      },
+      "editor.milestone.timeRange.next": {
+        description: MILESTONE_NEXT + MILESTONE_KIND_TIME_RANGE,
+      },
+      "editor.milestone.timeRange.current": {
+        description: MILESTONE_CURRENT + MILESTONE_KIND_TIME_RANGE,
+        placeholders: {
+          label: MILESTONE_LABEL_PLACEHOLDER,
+        },
+      },
+      "editor.milestone.timeRange.currentWithCells": {
+        description: MILESTONE_CURRENT_WITH_CELLS + MILESTONE_KIND_TIME_RANGE,
+        placeholders: {
+          label: MILESTONE_LABEL_PLACEHOLDER,
+          cells: MILESTONE_CELLS_PLACEHOLDER,
+        },
+      },
+      "editor.milestone.timeRange.findPlaceholder": {
+        description: MILESTONE_FIND_PLACEHOLDER + MILESTONE_KIND_TIME_RANGE,
+      },
+      "editor.milestone.timeRange.find": {
+        description: MILESTONE_FIND + MILESTONE_KIND_TIME_RANGE,
+      },
+      "editor.milestone.timeRange.empty": {
+        description: MILESTONE_EMPTY + MILESTONE_KIND_TIME_RANGE,
+      },
+      "editor.milestone.part.moveBetween": {
+        description: MILESTONE_MOVE_BETWEEN + MILESTONE_KIND_PART,
+      },
+      "editor.milestone.part.previous": {
+        description: MILESTONE_PREVIOUS + MILESTONE_KIND_PART,
+      },
+      "editor.milestone.part.next": {
+        description: MILESTONE_NEXT + MILESTONE_KIND_PART,
+      },
+      "editor.milestone.part.current": {
+        description: MILESTONE_CURRENT + MILESTONE_KIND_PART,
+        placeholders: {
+          label: MILESTONE_LABEL_PLACEHOLDER,
+        },
+      },
+      "editor.milestone.part.currentWithCells": {
+        description: MILESTONE_CURRENT_WITH_CELLS + MILESTONE_KIND_PART,
+        placeholders: {
+          label: MILESTONE_LABEL_PLACEHOLDER,
+          cells: MILESTONE_CELLS_PLACEHOLDER,
+        },
+      },
+      "editor.milestone.part.findPlaceholder": {
+        description: MILESTONE_FIND_PLACEHOLDER + MILESTONE_KIND_PART,
+      },
+      "editor.milestone.part.find": {
+        description: MILESTONE_FIND + MILESTONE_KIND_PART,
+      },
+      "editor.milestone.part.empty": {
+        description: MILESTONE_EMPTY + MILESTONE_KIND_PART,
+      },
+      "editor.milestone.group.moveBetween": {
+        description: MILESTONE_MOVE_BETWEEN + MILESTONE_KIND_GROUP,
+      },
+      "editor.milestone.group.previous": {
+        description: MILESTONE_PREVIOUS + MILESTONE_KIND_GROUP,
+      },
+      "editor.milestone.group.next": {
+        description: MILESTONE_NEXT + MILESTONE_KIND_GROUP,
+      },
+      "editor.milestone.group.current": {
+        description: MILESTONE_CURRENT + MILESTONE_KIND_GROUP,
+        placeholders: {
+          label: MILESTONE_LABEL_PLACEHOLDER,
+        },
+      },
+      "editor.milestone.group.currentWithCells": {
+        description: MILESTONE_CURRENT_WITH_CELLS + MILESTONE_KIND_GROUP,
+        placeholders: {
+          label: MILESTONE_LABEL_PLACEHOLDER,
+          cells: MILESTONE_CELLS_PLACEHOLDER,
+        },
+      },
+      "editor.milestone.group.findPlaceholder": {
+        description: MILESTONE_FIND_PLACEHOLDER + MILESTONE_KIND_GROUP,
+      },
+      "editor.milestone.group.find": {
+        description: MILESTONE_FIND + MILESTONE_KIND_GROUP,
+      },
+      "editor.milestone.group.empty": {
+        description: MILESTONE_EMPTY + MILESTONE_KIND_GROUP,
+      },
+      "editor.milestone.milestone.moveBetween": {
+        description: MILESTONE_MOVE_BETWEEN + MILESTONE_KIND_MILESTONE,
+      },
+      "editor.milestone.milestone.previous": {
+        description: MILESTONE_PREVIOUS + MILESTONE_KIND_MILESTONE,
+      },
+      "editor.milestone.milestone.next": {
+        description: MILESTONE_NEXT + MILESTONE_KIND_MILESTONE,
+      },
+      "editor.milestone.milestone.current": {
+        description: MILESTONE_CURRENT + MILESTONE_KIND_MILESTONE,
+        placeholders: {
+          label: MILESTONE_LABEL_PLACEHOLDER,
+        },
+      },
+      "editor.milestone.milestone.currentWithCells": {
+        description: MILESTONE_CURRENT_WITH_CELLS + MILESTONE_KIND_MILESTONE,
+        placeholders: {
+          label: MILESTONE_LABEL_PLACEHOLDER,
+          cells: MILESTONE_CELLS_PLACEHOLDER,
+        },
+      },
+      "editor.milestone.milestone.findPlaceholder": {
+        description: MILESTONE_FIND_PLACEHOLDER + MILESTONE_KIND_MILESTONE,
+      },
+      "editor.milestone.milestone.find": {
+        description: MILESTONE_FIND + MILESTONE_KIND_MILESTONE,
+      },
+      "editor.milestone.milestone.empty": {
+        description: MILESTONE_EMPTY + MILESTONE_KIND_MILESTONE,
       },
       "editor.milestone.vocab.chapterPlural": {
         description:
-          "Plural of editor.milestone.vocab.chapter. Used as a group heading in the " +
-          "milestone navigator, as the scope option for assigning whole chapters, and " +
-          "lower-cased by the app when it appears mid-sentence. Capitalised in English " +
-          "because its primary use is a heading.",
-      },
-      "editor.milestone.vocab.slide": {
-        description:
-          "Singular noun for a division of a presentation-shaped file — one slide. " +
-          "Lower-case, used mid-sentence.",
-        maxLength: 16,
+          "Plural noun for a scripture file's divisions. Used as the group heading " +
+          "over the rows of the division picker and as the scope option for " +
+          "assigning whole chapters. It stands alone in both places — nothing is " +
+          "interpolated into it — so it takes the language's heading form.",
       },
       "editor.milestone.vocab.slidePlural": {
-        description: "Plural of editor.milestone.vocab.slide; heading form.",
-        maxLength: 18,
-      },
-      "editor.milestone.vocab.story": {
         description:
-          "Singular noun for a division of an oral-Bible or story-set file — one " +
-          "story. Lower-case, used mid-sentence.",
-        maxLength: 16,
+          "Plural noun for a presentation-shaped file's divisions; the group " +
+          "heading over the division picker's rows. Standalone heading form.",
+        maxLength: 18,
       },
       "editor.milestone.vocab.storyPlural": {
-        description: "Plural of editor.milestone.vocab.story; heading form.",
-        maxLength: 18,
-      },
-      "editor.milestone.vocab.section": {
         description:
-          "Singular noun for a generic titled division of a document — the " +
-          "chapter-equivalent for non-scripture files. Lower-case, used mid-sentence.",
+          "Plural noun for an oral-Bible or story-set file's divisions; the group " +
+          "heading over the division picker's rows. Standalone heading form.",
+        maxLength: 18,
       },
       "editor.milestone.vocab.sectionPlural": {
         description:
-          "Plural of editor.milestone.vocab.section; heading form. Also the scope option " +
-          "for assigning whole sections of a non-scripture file, where 'section' is the " +
-          "chapter-equivalent unit.",
-      },
-      "editor.milestone.vocab.timeRange": {
-        description:
-          "Singular noun for a division of an audio or video file: a span of time on " +
-          "the timeline. Lower-case, used mid-sentence.",
-        maxLength: 18,
+          "Plural noun for the titled divisions of a non-scripture document, where " +
+          "'section' is the chapter-equivalent unit. Group heading over the " +
+          "division picker's rows, and the scope option for assigning whole " +
+          "sections. Standalone heading form.",
       },
       "editor.milestone.vocab.timeRangePlural": {
-        description: "Plural of editor.milestone.vocab.timeRange; heading form.",
+        description:
+          "Plural noun for the divisions of an audio or video file — spans of time " +
+          "on the timeline. Group heading over the picker's rows; heading form.",
         maxLength: 20,
       },
-      "editor.milestone.vocab.part": {
-        description:
-          "Singular noun for a division of a file split into numbered parts. " +
-          "Lower-case, used mid-sentence.",
-        maxLength: 16,
-      },
       "editor.milestone.vocab.partPlural": {
-        description: "Plural of editor.milestone.vocab.part; heading form.",
-        maxLength: 18,
-      },
-      "editor.milestone.vocab.group": {
         description:
-          "Singular noun for an arbitrary grouping of cells, used when the file's " +
-          "divisions have no more specific name. Lower-case, used mid-sentence.",
-        maxLength: 16,
+          "Plural noun for a file divided into numbered parts; the group heading " +
+          "over the division picker's rows. Standalone heading form.",
+        maxLength: 18,
       },
       "editor.milestone.vocab.groupPlural": {
-        description: "Plural of editor.milestone.vocab.group; heading form.",
-        maxLength: 18,
-      },
-      "editor.milestone.vocab.milestone": {
         description:
-          "The catch-all singular noun used when a file mixes several kinds of " +
-          "division, so none of the specific words fits. Choose a neutral word for " +
-          "'a marked point or stretch in the file'. Lower-case, used mid-sentence.",
+          "Plural noun for arbitrary groupings of cells, used when a file's " +
+          "divisions have no more specific name. Group heading; heading form.",
         maxLength: 18,
       },
       "editor.milestone.vocab.milestonePlural": {
-        description: "Plural of editor.milestone.vocab.milestone; heading form.",
+        description:
+          "The catch-all plural used when a file mixes several kinds of division, so " +
+          "none of the specific words fits. Choose a neutral word for 'marked " +
+          "points or stretches in the file'. Group heading; heading form.",
         maxLength: 20,
       },
       "editor.column.source": {
@@ -1658,10 +1936,12 @@ export const editor = defineNamespace({
             "Which column is mis-set — the translated editor.column.source or " +
             "editor.column.target.",
           forced:
-            "The direction the user forced, from editor.view.dirLtr / dirRtl.",
+            "The direction the user forced, from editor.view.dirLtr / dirRtl. Rendered " +
+            "bold, because it is half of the conflict this warning is about.",
           detected:
             "The direction the text actually appears to run, from " +
-            "editor.view.dirLtr / dirRtl / dirMixed.",
+            "editor.view.dirLtr / dirRtl / dirMixed. Also rendered bold — the two " +
+            "bold values are what the reader compares, so keep both placeholders.",
         },
       },
       "editor.view.dismissDirectionWarning": {
@@ -1830,7 +2110,8 @@ export const editor = defineNamespace({
         placeholders: {
           ref:
             "The verse reference in focus, e.g. 'MAT 3:16'. From the data — do not " +
-            "translate.",
+            "translate. The app renders it in a monospace face, so keep it a " +
+            "placeholder rather than writing a reference into the sentence.",
         },
       },
       "editor.ebible.matched": {
@@ -2062,7 +2343,8 @@ export const editor = defineNamespace({
         placeholders: {
           author:
             "The person's display name or username, or an agent name for AI edits. " +
-            "User data — never translate the substituted value.",
+            "User data — never translate the substituted value. The app renders it " +
+            "in a heavier weight, so it must stay a placeholder.",
         },
       },
       "editor.history.currentMarker": {
@@ -3167,8 +3449,13 @@ export const editor = defineNamespace({
           "endorsed this rendering, and the resulting support score as a percentage. The " +
           "middle dot separates the two figures.",
         placeholders: {
-          count: "Number of endorsements. Selects the plural form.",
-          percent: "Support score 0-100, already rounded, without the % sign.",
+          count:
+            "Number of endorsements. Selects the plural form, and the app renders it " +
+            "emphasised inside the sentence.",
+          percent:
+            "Support score 0-100, already rounded, without the % sign — the sign " +
+            "belongs to this string, so its glyph and position are yours to choose. " +
+            "The number itself is rendered emphasised.",
         },
       },
       "editor.expansion.lowerSupport": {

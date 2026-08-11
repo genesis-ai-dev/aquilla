@@ -135,11 +135,46 @@ const DISTINCT_MEANING: Record<string, string> = {
     "Names the find-and-replace mode, a term of art paired with 'Find' and usually " +
     "fixed by local software convention. audio.clone.replaceButton is an everyday " +
     "imperative that swaps an attached reference clip for another file.",
-  "editor.milestone.find":
-    "Accessible name of the division-picker's search field. " +
-    "editor.milestone.findPlaceholder is the visible prompt in the same field and " +
-    "ends with the language's continuation mark; an accessible name must not, " +
-    "because screen readers announce the punctuation.",
+  // The division picker keys a whole sentence per kind of division rather than
+  // pouring a translated noun into a shared frame (AQU-511 wave 4b, finding 3),
+  // so the one find/findPlaceholder pair below became eight — one per kind. Each
+  // pair is the same real distinction: the visible prompt carries the language's
+  // continuation mark and the accessible name must not, because a screen reader
+  // announces that punctuation. Normalization strips the mark, so only an
+  // exception can keep the two apart.
+  "editor.milestone.chapter.find":
+    "Accessible name of the chapter picker's search field. " +
+    "editor.milestone.chapter.findPlaceholder is the visible prompt in the same " +
+    "field and ends with the language's continuation mark; an accessible name " +
+    "must not, because screen readers announce the punctuation.",
+  "editor.milestone.slide.find":
+    "Accessible name of the slide picker's search field, against the visible " +
+    "prompt editor.milestone.slide.findPlaceholder, which carries the " +
+    "continuation mark an accessible name must not have.",
+  "editor.milestone.story.find":
+    "Accessible name of the story picker's search field, against the visible " +
+    "prompt editor.milestone.story.findPlaceholder, which carries the " +
+    "continuation mark an accessible name must not have.",
+  "editor.milestone.section.find":
+    "Accessible name of the section picker's search field, against the visible " +
+    "prompt editor.milestone.section.findPlaceholder, which carries the " +
+    "continuation mark an accessible name must not have.",
+  "editor.milestone.timeRange.find":
+    "Accessible name of the time-range picker's search field, against the visible " +
+    "prompt editor.milestone.timeRange.findPlaceholder, which carries the " +
+    "continuation mark an accessible name must not have.",
+  "editor.milestone.part.find":
+    "Accessible name of the part picker's search field, against the visible " +
+    "prompt editor.milestone.part.findPlaceholder, which carries the " +
+    "continuation mark an accessible name must not have.",
+  "editor.milestone.group.find":
+    "Accessible name of the group picker's search field, against the visible " +
+    "prompt editor.milestone.group.findPlaceholder, which carries the " +
+    "continuation mark an accessible name must not have.",
+  "editor.milestone.milestone.find":
+    "Accessible name of the catch-all milestone picker's search field, against " +
+    "the visible prompt editor.milestone.milestone.findPlaceholder, which carries " +
+    "the continuation mark an accessible name must not have.",
   "editor.lane.changeTargetLanguage":
     "Accessible name of the control once a target language is set. " +
     "changeTargetLanguageItem is the menu item, whose trailing mark promises a " +
@@ -147,43 +182,43 @@ const DISTINCT_MEANING: Record<string, string> = {
   "editor.source.placeholder":
     "Prompt inside the empty source-text editor, carrying the continuation mark. " +
     "editor.source.textAria is the accessible name of the read-only source column " +
-    "and must not carry it — same reason as editor.milestone.find.",
+    "and must not carry it — same reason as editor.milestone.chapter.find.",
   "search.ariaLabelProject":
     "Accessible name of the project-scope search box in the full dialog. " +
     "search.placeholderProject is the visible prompt in the same field and carries " +
     "the continuation mark; an accessible name must not, because a screen reader " +
     "announces the punctuation as part of the field's name — same reason as " +
-    "editor.milestone.find (AQU-511 wave-3 finding 6).",
+    "editor.milestone.chapter.find (AQU-511 wave-3 finding 6).",
   "search.bible.searchAriaLabel":
     "Accessible name of the Bible-resources search box. " +
     "search.bible.searchPlaceholder is the visible prompt in the same field and " +
     "carries the continuation mark; an accessible name must not — same reason as " +
-    "editor.milestone.find (AQU-511 wave-3 finding 6).",
+    "editor.milestone.chapter.find (AQU-511 wave-3 finding 6).",
   "search.replace.ariaLabel":
     "Accessible name of the 'replace with' text input in the full dialog's Replace " +
     "mode. search.replace.placeholder is the visible prompt in the same field and " +
     "carries the continuation mark; an accessible name must not — same reason as " +
-    "editor.milestone.find (AQU-511 wave-3 finding 6).",
+    "editor.milestone.chapter.find (AQU-511 wave-3 finding 6).",
   "search.dialog.ariaLabelPassages":
     "Accessible name of the search box in the full dialog's parallel-passages " +
     "mode. search.dialog.placeholderPassages is the visible prompt in the same " +
     "field and carries the continuation mark; an accessible name must not — same " +
-    "reason as editor.milestone.find (AQU-511 wave-3 finding 6).",
+    "reason as editor.milestone.chapter.find (AQU-511 wave-3 finding 6).",
   "search.dialog.ariaLabelScoped":
     "Accessible name of the search box in the full dialog's plain Search mode " +
     "when scoped to a file. search.dialog.placeholderScoped is the visible prompt " +
     "in the same field and carries the continuation mark; an accessible name must " +
-    "not — same reason as editor.milestone.find (AQU-511 wave-3 finding 6).",
+    "not — same reason as editor.milestone.chapter.find (AQU-511 wave-3 finding 6).",
   "search.dialog.ariaLabelReplaceProject":
     "Accessible name of the find box in the full dialog's Replace mode when scope " +
     "is the whole project. search.dialog.placeholderReplaceProject is the visible " +
     "prompt in the same field and carries the continuation mark; an accessible " +
-    "name must not — same reason as editor.milestone.find (AQU-511 wave-3 finding 6).",
+    "name must not — same reason as editor.milestone.chapter.find (AQU-511 wave-3 finding 6).",
   "search.dialog.ariaLabelReplaceScoped":
     "Accessible name of the find box in the full dialog's Replace mode when " +
     "scoped to a file. search.dialog.placeholderReplaceScoped is the visible " +
     "prompt in the same field and carries the continuation mark; an accessible " +
-    "name must not — same reason as editor.milestone.find (AQU-511 wave-3 finding 6).",
+    "name must not — same reason as editor.milestone.chapter.find (AQU-511 wave-3 finding 6).",
 }
 
 describe("catalog has no duplicate English strings (AQU-511)", () => {

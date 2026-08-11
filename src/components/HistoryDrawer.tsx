@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils"
 import { useCellEditHistory } from "@/hooks/useCellEditHistory"
 import { FootnotedTextValue } from "./footnotes/FootnoteInline"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { RichMessage } from "@/lib/i18n/RichMessage"
 
 interface HistoryDrawerProps {
   cell: CellData
@@ -351,7 +352,12 @@ function GroupItem({
         </span>
       </div>
       <div className="text-xs text-muted-foreground">
-        {t("editor.history.author", { author: terminal.author })}
+        {/* The name is the one scannable word in a line of muted metadata, so it
+            keeps its weight inside the translated attribution. */}
+        <RichMessage
+          k="editor.history.author"
+          values={{ author: <span className="font-medium">{terminal.author}</span> }}
+        />
         {isCurrent && <span className="ml-1.5 text-primary">{t("editor.history.currentMarker")}</span>}
         {isStale && (
           <span className="ml-1.5 text-amber-700 dark:text-amber-300">

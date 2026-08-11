@@ -24,6 +24,7 @@ import { cn } from "@/lib/utils"
 import { BookOpen, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { RichMessage } from "@/lib/i18n/RichMessage"
 
 // Sentinel fileId for project-scoped token mints (no specific file).
 // Must match the "__project__" sentinel used by useComments,
@@ -221,7 +222,12 @@ export function TranslationNotesSidebar({
           <p className="p-4 text-xs text-destructive">{error}</p>
         ) : notes.length === 0 ? (
           <p className="p-4 text-xs text-muted-foreground">
-            {t("editor.tn.noneForRef", { ref: canonicalRef })}
+            {/* Same ref, same monospacing as the badge in the header above — a
+                reference reads as data wherever this panel shows one. */}
+            <RichMessage
+              k="editor.tn.noneForRef"
+              values={{ ref: <span className="font-mono">{canonicalRef}</span> }}
+            />
           </p>
         ) : (
           <div className="divide-y">

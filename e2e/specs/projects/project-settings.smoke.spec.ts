@@ -6,6 +6,9 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
  * is editable for maintainer+ and persists through the server rename endpoint
  * (PATCH /api/v2/projects/:id), the source of truth every surface reads.
  * Other general settings save alongside in the same pass.
+ *
+ * Entry: project Overview (`/projects/:id`) → header "Project settings" gear
+ * → `/project/:id/settings` (then General).
  */
 test("project settings renames the project and saves source language", async ({ alice }) => {
   const dash = new Dashboard(alice)
@@ -19,9 +22,20 @@ test("project settings renames the project and saves source language", async ({ 
   const projectId = alice.url().match(/\/projects\/([^/]+)$/)?.[1]
   expect(projectId).toBeTruthy()
 
-  // Navigate directly to the settings page.
-  await alice.goto(`/project/${projectId}/settings/general`)
+  // Overview header gear → project settings (same discovery path as managers).
+  const settingsLink = alice.getByRole("link", { name: "Project settings" })
+  await expect(settingsLink).toBeVisible({ timeout: 10_000 })
+  await settingsLink.click()
+  await alice.waitForURL(new RegExp(`/project/${projectId}/settings`), { timeout: 10_000 })
+
+  // Index → General (name / languages live there).
+  const generalLink = alice.getByRole("link", { name: /General/i })
   const nameInput = alice.locator("#pname")
+  await expect(generalLink.or(nameInput).first()).toBeVisible({ timeout: 10_000 })
+  if (!(await nameInput.isVisible())) {
+    await generalLink.click()
+  }
+
   await expect(nameInput).toBeVisible({ timeout: 10_000 })
   await expect(nameInput).toHaveValue(originalName, { timeout: 5_000 })
   // The creator holds maintainer+, so the field is editable (AQU-765).

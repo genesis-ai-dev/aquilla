@@ -1,12 +1,13 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react"
-import { useParams, useNavigate } from "react-router-dom"
-import { MoreHorizontal, ChevronRight, Copy, Check, Download, Search, SlidersHorizontal, Archive, PlayCircle, PauseCircle } from "lucide-react"
+import { useParams, useNavigate, Link } from "react-router-dom"
+import { MoreHorizontal, ChevronRight, Copy, Check, Download, Search, SlidersHorizontal, Archive, PlayCircle, PauseCircle, Settings } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { ExpandableName } from "@/components/ui/expandable-name"
 import { InitialsAvatar } from "@/components/InitialsAvatar"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
-import { Button } from "@/components/ui/button"
+import { Button, buttonVariants } from "@/components/ui/button"
+import { projectSettingsPath } from "@/lib/navigation/org-paths"
 import { Spinner } from "@/components/ui/spinner"
 import { ButtonGroup } from "@/components/ui/button-group"
 import { useOpenWorkspace } from "@/hooks/useOpenWorkspace"
@@ -1008,6 +1009,16 @@ export function ProjectOverview() {
                         "Open project"
                       )}
                     </Button>
+                    {id && (
+                      <Link
+                        to={projectSettingsPath(id)}
+                        aria-label="Project settings"
+                        data-testid="overview-project-settings"
+                        className={cn(buttonVariants({ variant: "outline", size: "icon-sm" }), "shrink-0")}
+                      >
+                        <Settings className="h-4 w-4" />
+                      </Link>
+                    )}
                     {isOwner && isArchived && (
                       <Button variant="outline" onClick={handleRestore} disabled={busy}>
                         Restore

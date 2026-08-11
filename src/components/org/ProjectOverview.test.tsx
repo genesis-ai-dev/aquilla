@@ -890,6 +890,20 @@ describe("ProjectOverview project-only invitee access (AQU-474)", () => {
       navigate.mock.calls.some((call: unknown[]) => call[0] === "/project/p1/editor"),
     ).toBe(true)
   })
+
+  it("exposes a Project settings link to /project/:id/settings", async () => {
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 400, files: [] }),
+      status: "ready",
+      refresh,
+    })
+    getPortfolio.mockResolvedValue([])
+
+    renderOverview()
+
+    const settings = await screen.findByRole("link", { name: "Project settings" })
+    expect(settings).toHaveAttribute("href", "/project/p1/settings")
+  })
 })
 
 // ── AQU-292: AI-drafted segment ─────────────────────────────────────────────

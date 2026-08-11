@@ -136,6 +136,7 @@
 | Projects    | Projects list page renders project cards              | `e2e/specs/projects/projects-list-page.smoke.spec.ts`         |   ✅   |
 | Projects    | Project overview shows scoped loading progress, then opens editor; breadcrumbs preserve clickable organization ancestry | `e2e/specs/projects/project-overview.smoke.spec.ts` | ✅ |
 | Projects    | Opening a project blocks the surface with an "Opening project" overlay until the workspace chunk lands; back-navigation aborts to idle (AQU-737) | `e2e/specs/projects/open-project-blocking-overlay.smoke.spec.ts` | ✅ |
+| Projects    | Project overview header settings gear opens project settings | `e2e/specs/projects/project-settings.smoke.spec.ts` | ✅ |
 | Projects    | Project settings renames the project (AQU-765 server rename) and persists source language | `e2e/specs/projects/project-settings.smoke.spec.ts` | ✅ |
 | Projects    | Project card role badge shows user's role             | `e2e/specs/projects/project-card-role-badge.smoke.spec.ts`    |   ✅   |
 | Projects    | Org home project name filter narrows list             | `e2e/specs/projects/org-home-project-filter.smoke.spec.ts`    |   ✅   |

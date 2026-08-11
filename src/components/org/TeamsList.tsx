@@ -3,7 +3,6 @@ import { useForm } from "@tanstack/react-form"
 import { type ColumnDef } from "@tanstack/react-table"
 import { z } from "zod"
 import { useNavigate } from "react-router-dom"
-import { Plus } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
@@ -322,10 +321,9 @@ export function TeamsList() {
                   <VisibilitySelect value={visibility} onValueChange={setVisibility} />
                   {isAdmin ? (
                     <Button
-                      className="ml-auto shrink-0 gap-1.5"
+                      className="ml-auto shrink-0"
                       onClick={() => setCreating(true)}
                     >
-                      <Plus className="size-4" />
                       New team
                     </Button>
                   ) : null}

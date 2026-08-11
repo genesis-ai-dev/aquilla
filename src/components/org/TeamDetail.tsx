@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { type ColumnDef } from "@tanstack/react-table"
 import { Link, useNavigate, useParams } from "react-router-dom"
-import { FolderGit2, Settings, ShieldUser, Unlink, UserMinus, UserPlus, Users } from "lucide-react"
+import { FolderGit2, Settings, ShieldUser, Unlink, UserMinus, Users } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { MemberMultiSelect } from "@/components/MemberMultiSelect"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
@@ -654,7 +654,6 @@ export function TeamDetail() {
                         <div className="flex justify-end">
                           <Button
                             type="button"
-                            variant="outline"
                             className="shrink-0"
                             onClick={() => {
                               const attachableProjects = orgProjects.filter(
@@ -692,7 +691,6 @@ export function TeamDetail() {
                         isAdmin && !attachingProject ? (
                           <Button
                             type="button"
-                            variant="outline"
                             className="ml-auto shrink-0"
                             onClick={() => {
                               const attachableProjects = orgProjects.filter(
@@ -810,10 +808,8 @@ export function TeamDetail() {
                         <div className="flex justify-end">
                           <Button
                             type="button"
-                            className="gap-1.5"
                             onClick={() => { setAddingMember(true); setStagedUsernames([]); setAddError(null) }}
                           >
-                            <UserPlus className="size-3.5" />
                             Add a member
                           </Button>
                         </div>
@@ -844,10 +840,9 @@ export function TeamDetail() {
                       toolbar={
                         isAdmin ? (
                           <Button
-                            className="ml-auto shrink-0 gap-1.5"
+                            className="ml-auto shrink-0"
                             onClick={() => { setAddingMember(true); setStagedUsernames([]); setAddError(null) }}
                           >
-                            <UserPlus className="size-4" />
                             Add a member
                           </Button>
                         ) : null

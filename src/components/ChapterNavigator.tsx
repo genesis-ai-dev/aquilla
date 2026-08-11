@@ -24,6 +24,7 @@ import {
   ComboboxTrigger,
 } from "@/components/ui/combobox"
 import { cn } from "@/lib/utils"
+import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
 import type { ImportMilestoneKind } from "../../shared/import-contract"
 
 export interface MilestoneNavigationItem {
@@ -101,32 +102,59 @@ interface NavigationVocabulary {
   plural: string
 }
 
-function vocabularyFor(items: readonly MilestoneNavigationItem[]): NavigationVocabulary {
+function vocabularyFor(
+  items: readonly MilestoneNavigationItem[],
+  t: TFunction,
+): NavigationVocabulary {
   const kinds = new Set(items.map((item) => item.kind))
   if ([...kinds].every((kind) => (
     kind === "chapter" || kind === "chapter-range" || kind === "preface"
   ))) {
-    return { singular: "chapter", plural: "Chapters" }
+    return {
+      singular: t("editor.milestone.vocab.chapter"),
+      plural: t("editor.milestone.vocab.chapterPlural"),
+    }
   }
   if (kinds.size === 1 && kinds.has("slide")) {
-    return { singular: "slide", plural: "Slides" }
+    return {
+      singular: t("editor.milestone.vocab.slide"),
+      plural: t("editor.milestone.vocab.slidePlural"),
+    }
   }
   if (kinds.size === 1 && kinds.has("story")) {
-    return { singular: "story", plural: "Stories" }
+    return {
+      singular: t("editor.milestone.vocab.story"),
+      plural: t("editor.milestone.vocab.storyPlural"),
+    }
   }
   if (kinds.size === 1 && kinds.has("section")) {
-    return { singular: "section", plural: "Sections" }
+    return {
+      singular: t("editor.milestone.vocab.section"),
+      plural: t("editor.milestone.vocab.sectionPlural"),
+    }
   }
   if (kinds.size === 1 && kinds.has("time-range")) {
-    return { singular: "time range", plural: "Time ranges" }
+    return {
+      singular: t("editor.milestone.vocab.timeRange"),
+      plural: t("editor.milestone.vocab.timeRangePlural"),
+    }
   }
   if (kinds.size === 1 && kinds.has("part")) {
-    return { singular: "part", plural: "Parts" }
+    return {
+      singular: t("editor.milestone.vocab.part"),
+      plural: t("editor.milestone.vocab.partPlural"),
+    }
   }
   if (kinds.size === 1 && kinds.has("group")) {
-    return { singular: "group", plural: "Groups" }
+    return {
+      singular: t("editor.milestone.vocab.group"),
+      plural: t("editor.milestone.vocab.groupPlural"),
+    }
   }
-  return { singular: "milestone", plural: "Milestones" }
+  return {
+    singular: t("editor.milestone.vocab.milestone"),
+    plural: t("editor.milestone.vocab.milestonePlural"),
+  }
 }
 
 function percent(part: number, total: number): number {
@@ -138,10 +166,15 @@ function ProgressSummary({ translated, validated, total }: {
   validated: number
   total: number
 }) {
+  const t = useT()
   return (
     <span className="w-[7.5rem] shrink-0 justify-self-end text-right text-xs tabular-nums text-muted-foreground">
-      <span className="block">{percent(translated, total)}% translated</span>
-      <span className="block">{percent(validated, total)}% validated</span>
+      <span className="block">
+        {t("editor.milestone.percentTranslated", { percent: percent(translated, total) })}
+      </span>
+      <span className="block">
+        {t("editor.milestone.percentValidated", { percent: percent(validated, total) })}
+      </span>
     </span>
   )
 }
@@ -157,6 +190,7 @@ function VirtualizedMilestoneList({
   open: boolean
   virtualizerRef: RefObject<MilestoneListVirtualizer | null>
 }) {
+  const t = useT()
   const filteredItems = ComboboxPrimitive.useFilteredItems<NavigationRow>()
   const scrollElementRef = useRef<HTMLDivElement | null>(null)
 
@@ -251,7 +285,9 @@ function VirtualizedMilestoneList({
                         aria-hidden="true"
                         className="size-3.5 shrink-0 text-muted-foreground"
                       />
-                      <span className="truncate">Cells {subsection.label}</span>
+                      <span className="truncate">
+                        {t("editor.milestone.cellRange", { range: subsection.label })}
+                      </span>
                     </span>
                     <ProgressSummary {...subsection} />
                   </>
@@ -301,13 +337,14 @@ export function MilestoneNavigator({
   activeSubsectionKey?: string
   onSelect: (key: string, subsectionKey?: string) => void
 }) {
+  const t = useT()
   const [open, setOpen] = useState(false)
   const [expandedKey, setExpandedKey] = useState(activeKey)
   const [iconOnlyTrigger, setIconOnlyTrigger] = useState(false)
   const virtualizerRef = useRef<MilestoneListVirtualizer | null>(null)
   const buttonGroupRef = useRef<HTMLDivElement | null>(null)
   const pickerCentered = useMinWidthLg()
-  const vocabulary = useMemo(() => vocabularyFor(items), [items])
+  const vocabulary = useMemo(() => vocabularyFor(items, t), [items, t])
   const matchedActiveIndex = items.findIndex((item) => item.key === activeKey)
   const activeIndex = matchedActiveIndex >= 0 ? matchedActiveIndex : 0
   const active = items[activeIndex]
@@ -402,10 +439,12 @@ export function MilestoneNavigator({
   }
 
   return (
-    <nav aria-label="Milestone navigation" className="flex w-full min-w-24 max-w-full items-center lg:w-auto">
+    <nav aria-label={t("editor.milestone.region")} className="flex w-full min-w-24 max-w-full items-center lg:w-auto">
       <ButtonGroup
         ref={buttonGroupRef}
-        aria-label={`Move between ${vocabulary.plural.toLocaleLowerCase()}`}
+        aria-label={t("editor.milestone.moveBetween", {
+          plural: vocabulary.plural.toLocaleLowerCase(),
+        })}
         // Floor: prev + middle + next icon buttons (3× size-8). Never shrink
         // below the collapsed chevron-only trigger state.
         className="min-w-24 max-w-full shadow-xs"
@@ -414,7 +453,7 @@ export function MilestoneNavigator({
           variant="outline"
           size="icon"
           disabled={!canGoPrevious}
-          aria-label={`Previous ${vocabulary.singular}`}
+          aria-label={t("editor.milestone.previous", { singular: vocabulary.singular })}
           onClick={() => {
             const destination = destinations[activeDestinationIndex - 1]
             if (destination) choose(destination.milestoneKey, destination.subsectionKey)
@@ -445,7 +484,9 @@ export function MilestoneNavigator({
             choose(row.milestone.key)
           }}
           itemToStringLabel={(row) => (
-            row.subsection ? `Cells ${row.subsection.label}` : row.milestone.label
+            row.subsection
+              ? t("editor.milestone.cellRange", { range: row.subsection.label })
+              : row.milestone.label
           )}
           itemToStringValue={(row) => row.key}
           isItemEqualToValue={(a, b) => a.key === b.key}
@@ -476,9 +517,18 @@ export function MilestoneNavigator({
                 // button (w-8, p-0, label hidden, chevron centered). xl+: fixed
                 // width with start-aligned label regardless of squeeze.
                 className="flex h-8 min-w-8 w-auto max-w-full shrink items-center justify-center gap-2 overflow-hidden px-2.5 data-[icon-only]:w-8 data-[icon-only]:shrink-0 data-[icon-only]:gap-0 data-[icon-only]:p-0 xl:w-56 xl:min-w-56 xl:shrink-0 xl:justify-start xl:px-2.5 xl:data-[icon-only]:w-56 xl:data-[icon-only]:gap-2 xl:data-[icon-only]:p-2.5 xl:[&>svg:last-child]:ml-auto [&>svg:last-child]:shrink-0"
-                aria-label={`Current ${vocabulary.singular}: ${active.label}${
-                  activeSubsection ? `, cells ${activeSubsection.label}` : ""
-                }. Choose ${vocabulary.singular}`}
+                aria-label={
+                  activeSubsection
+                    ? t("editor.milestone.currentWithCells", {
+                        singular: vocabulary.singular,
+                        label: active.label,
+                        cells: activeSubsection.label,
+                      })
+                    : t("editor.milestone.current", {
+                        singular: vocabulary.singular,
+                        label: active.label,
+                      })
+                }
               />
             }
           >
@@ -508,14 +558,18 @@ export function MilestoneNavigator({
             <ComboboxInput
               showTrigger={false}
               showSearchIcon
-              placeholder={`Find a ${vocabulary.singular}…`}
-              aria-label={`Find a ${vocabulary.singular}`}
+              placeholder={t("editor.milestone.findPlaceholder", { singular: vocabulary.singular })}
+              aria-label={t("editor.milestone.find", { singular: vocabulary.singular })}
               // Input defaults to text-base below md (iOS zoom guard); keep this
               // popover field at text-sm so it doesn't jump larger on small screens.
               className="w-auto rounded-none border-0 shadow-none outline-none ring-0 tabular-nums *:data-[slot=input-group-control]:text-sm *:data-[slot=input-group-addon]:pl-3 hover:border-0! focus-within:border-0! has-[[data-slot=input-group-control]:focus-visible]:border-0! has-[[data-slot=input-group-control]:focus-visible]:ring-0!"
             />
             <ComboboxSeparator className="mx-0 my-0" />
-            <ComboboxEmpty>No {vocabulary.plural.toLocaleLowerCase()} found.</ComboboxEmpty>
+            <ComboboxEmpty>
+              {t("editor.milestone.empty", {
+                plural: vocabulary.plural.toLocaleLowerCase(),
+              })}
+            </ComboboxEmpty>
             <ComboboxList className="max-h-none overflow-visible p-0">
               {/* Named for assistive tech without a visible heading — the
                   trigger and search field already carry the vocabulary. */}
@@ -534,7 +588,7 @@ export function MilestoneNavigator({
           variant="outline"
           size="icon"
           disabled={!canGoNext}
-          aria-label={`Next ${vocabulary.singular}`}
+          aria-label={t("editor.milestone.next", { singular: vocabulary.singular })}
           onClick={() => {
             const destination = destinations[activeDestinationIndex + 1]
             if (destination) choose(destination.milestoneKey, destination.subsectionKey)

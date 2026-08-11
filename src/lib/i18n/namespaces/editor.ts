@@ -119,6 +119,81 @@ export const editor = defineNamespace({
     "editor.media.urlHint":
       "Or paste a direct media URL — the clip streams from its source; only " +
       "timing metadata is stored.",
+
+    // — Footnotes: the inline strip, the bottom tray, and one note's row ——
+    "editor.footnotes.label": "Footnotes",
+    "editor.footnotes.trayRegion": "Visible footnotes",
+    "editor.footnotes.trayHint": "Updates as the editor scrolls",
+    "editor.footnotes.closeTray": "Close footnotes tray",
+    "editor.footnotes.trayEmpty": "No footnotes in the visible rows.",
+    "editor.footnotes.docxReadOnly": "read-only · DOCX round-trip not yet safe",
+    "editor.footnotes.addTarget": "Add target footnote",
+    "editor.footnotes.noTarget": "No target footnote",
+    "editor.footnotes.noSource": "No source footnote",
+    "editor.footnotes.emptyNote": "Empty footnote",
+    "editor.footnotes.emptyTarget": "Empty target footnote",
+    "editor.footnotes.targetRole": "Target footnote",
+    "editor.footnotes.editPlaceholder": "Translate footnote...",
+    "editor.footnotes.editLabel": "Edit footnote",
+    "editor.footnotes.editMarker": "Edit footnote {label}",
+    "editor.footnotes.clickToEdit": "Click to edit footnote",
+    "editor.footnotes.translationLabel": "Footnote translation",
+    "editor.footnotes.addTranslation": "Add translation...",
+    "editor.footnotes.deleteConfirm": "I'm sure",
+    "editor.footnotes.saveConflict":
+      "Couldn't save — this footnote changed while you were editing. Copy your " +
+      "text, cancel, and reopen it.",
+
+    // — Add-footnote dialog ————————————————————————————————————————
+    "editor.footnote.add": "Add footnote",
+    "editor.footnote.addDescription":
+      "Choose how the marker should appear, then add the note for this anchor.",
+    "editor.footnote.markerStyle": "Marker style",
+    "editor.footnote.markerStyleGroup": "Footnote marker style",
+    "editor.footnote.markerNumbered": "Numbering",
+    "editor.footnote.markerNumberedDesc": "Use automatic numeric markers.",
+    "editor.footnote.markerLettered": "Lettering",
+    "editor.footnote.markerLetteredDesc":
+      "Use letter markers for a separate note sequence.",
+    "editor.footnote.textLabel": "Footnote text",
+    "editor.footnote.textPlaceholder": "Selected text: footnote text...",
+    "editor.footnote.attachedTo": "Attached to",
+    "editor.footnote.textHint":
+      "Include the selected word or phrase before a colon when it helps clarify " +
+      "the note.",
+    "editor.footnote.targetPreview": "Target preview",
+    "editor.footnote.previewEmptyCell": "Empty cell",
+
+    // — Milestone (chapter / slide / story / …) navigator in the header ——
+    "editor.milestone.region": "Milestone navigation",
+    "editor.milestone.moveBetween": "Move between {plural}",
+    "editor.milestone.previous": "Previous {singular}",
+    "editor.milestone.next": "Next {singular}",
+    "editor.milestone.current": "Current {singular}: {label}. Choose {singular}",
+    "editor.milestone.currentWithCells":
+      "Current {singular}: {label}, cells {cells}. Choose {singular}",
+    "editor.milestone.findPlaceholder": "Find a {singular}…",
+    "editor.milestone.find": "Find a {singular}",
+    "editor.milestone.empty": "No {plural} found.",
+    "editor.milestone.cellRange": "Cells {range}",
+    "editor.milestone.percentTranslated": "{percent}% translated",
+    "editor.milestone.percentValidated": "{percent}% validated",
+    "editor.milestone.vocab.chapter": "chapter",
+    "editor.milestone.vocab.chapterPlural": "Chapters",
+    "editor.milestone.vocab.slide": "slide",
+    "editor.milestone.vocab.slidePlural": "Slides",
+    "editor.milestone.vocab.story": "story",
+    "editor.milestone.vocab.storyPlural": "Stories",
+    "editor.milestone.vocab.section": "section",
+    "editor.milestone.vocab.sectionPlural": "Sections",
+    "editor.milestone.vocab.timeRange": "time range",
+    "editor.milestone.vocab.timeRangePlural": "Time ranges",
+    "editor.milestone.vocab.part": "part",
+    "editor.milestone.vocab.partPlural": "Parts",
+    "editor.milestone.vocab.group": "group",
+    "editor.milestone.vocab.groupPlural": "Groups",
+    "editor.milestone.vocab.milestone": "milestone",
+    "editor.milestone.vocab.milestonePlural": "Milestones",
   },
   context: {
     _context: {
@@ -624,6 +699,450 @@ export const editor = defineNamespace({
           "Explanatory line under the media URL field. The point after the dash is " +
           "reassurance about what is stored: only timing information is kept in the " +
           "project, the audio itself stays at the URL the user provided.",
+      },
+      "editor.footnotes.label": {
+        description:
+          "Heading of the footnote strip under a cell, and the name of the footnote " +
+          "tab in a cell's expansion panel. A footnote here is a translator's note " +
+          "carried inside the biblical text itself (a \\f marker in USFM), NOT a " +
+          "team comment. Plural noun.",
+        maxLength: 16,
+      },
+      "editor.footnotes.trayRegion": {
+        description:
+          "Screen-reader name of the tray docked at the bottom of the editor that " +
+          "collects the footnotes of whichever rows are currently on screen. " +
+          "'Visible' means 'in the rows you can currently see', not 'not hidden'.",
+      },
+      "editor.footnotes.trayHint": {
+        description:
+          "Sub-line under the tray's heading explaining that its contents change as " +
+          "the user scrolls the editor. A sentence fragment describing behaviour, " +
+          "not an instruction. Truncated when too long, so keep it short.",
+        maxLength: 34,
+      },
+      "editor.footnotes.closeTray": {
+        description:
+          "Screen-reader name of the X button that hides the bottom footnote tray. " +
+          "It closes the tray only; the footnotes themselves are untouched.",
+      },
+      "editor.footnotes.trayEmpty": {
+        description:
+          "Empty state inside the footnote tray: the rows currently on screen have " +
+          "no footnotes. Scrolling elsewhere may show some. Full sentence.",
+      },
+      "editor.footnotes.docxReadOnly": {
+        description:
+          "Amber badge beside the footnote heading for a file imported from Word. " +
+          "It warns that footnotes cannot be edited here yet, because writing them " +
+          "back into the .docx is not safe. 'DOCX' is the file format name and " +
+          "stays as-is; the middle dot separates the two halves.",
+      },
+      "editor.footnotes.addTarget": {
+        description:
+          "Small link-style button on a footnote row where the source has a note " +
+          "but the translation has none yet; it creates the matching note on the " +
+          "target side. Imperative.",
+        maxLength: 26,
+      },
+      "editor.footnotes.noTarget": {
+        description:
+          "Italic placeholder on the target half of a footnote row when the " +
+          "translation has no matching note and the user cannot create one. A state " +
+          "description, not an error.",
+        maxLength: 26,
+      },
+      "editor.footnotes.noSource": {
+        description:
+          "Italic placeholder on the source half of a footnote row when the " +
+          "translation has a note the source does not — the reverse of " +
+          "editor.footnotes.noTarget.",
+        maxLength: 26,
+      },
+      "editor.footnotes.emptyNote": {
+        description:
+          "Italic placeholder standing in for a footnote whose text is blank, in " +
+          "the read-only source view.",
+        maxLength: 22,
+      },
+      "editor.footnotes.emptyTarget": {
+        description:
+          "Italic placeholder for a target-side footnote whose text is blank, shown " +
+          "when the user cannot edit it (so it does not invite typing, unlike " +
+          "editor.footnotes.addTranslation).",
+        maxLength: 26,
+      },
+      "editor.footnotes.targetRole": {
+        description:
+          "Screen-reader-only label announcing that the following text is the " +
+          "translated side of a footnote pair. Never visible; it exists so a " +
+          "screen-reader user can tell the two halves of the row apart.",
+      },
+      "editor.footnotes.editPlaceholder": {
+        description:
+          "Placeholder inside the small textarea for typing a footnote's " +
+          "translation. Trailing three periods are literal in the English source. " +
+          "It tells the user what to type, so it must read as a prompt, not a label.",
+      },
+      "editor.footnotes.editLabel": {
+        description:
+          "Screen-reader name of that footnote textarea. A noun phrase naming the " +
+          "field's purpose.",
+      },
+      "editor.footnotes.editMarker": {
+        description:
+          "Screen-reader name of the small numbered/lettered marker badge beside a " +
+          "footnote; clicking it re-opens that note for editing.",
+        placeholders: {
+          label:
+            "The footnote's marker as it appears in the text — a number ('3') or a " +
+            "letter ('b'). Not translatable.",
+        },
+      },
+      "editor.footnotes.clickToEdit": {
+        description:
+          "Screen-reader name of an editable footnote's text, telling the user the " +
+          "text itself is the control that opens the editor.",
+      },
+      "editor.footnotes.translationLabel": {
+        description:
+          "Screen-reader name of the same footnote text when the user cannot edit " +
+          "it — a plain noun phrase with no call to action.",
+      },
+      "editor.footnotes.addTranslation": {
+        description:
+          "Italic prompt shown in place of an editable but still-empty target " +
+          "footnote, inviting the user to click and type. Trailing three periods " +
+          "are literal in the English source.",
+        maxLength: 24,
+      },
+      "editor.footnotes.deleteConfirm": {
+        description:
+          "Second state of the footnote Delete button: the user clicked Delete and " +
+          "this click actually deletes the note. First person, deliberately " +
+          "committing ('yes, I really mean it'). Use whatever a target-language " +
+          "user would say to confirm a destructive step in a tiny inline button.",
+        maxLength: 14,
+      },
+      "editor.footnotes.saveConflict": {
+        description:
+          "Inline error (role=alert) when saving a footnote failed because the " +
+          "cell's text changed underneath the open editor, so the app can no longer " +
+          "tell where the note belongs. The user's typing is preserved: the three " +
+          "imperative steps are the recovery path and must stay in order.",
+      },
+      "editor.footnote.add": {
+        description:
+          "Title of the add-footnote dialog and the label of its confirming button " +
+          "— the same words in both places. Imperative; it inserts a new note at " +
+          "the current cursor position in the translation.",
+        maxLength: 24,
+        screenshot: "cell-editor",
+      },
+      "editor.footnote.addDescription": {
+        description:
+          "Sub-heading of the add-footnote dialog, naming the two things the dialog " +
+          "asks for in order: the marker style, then the note text. 'Anchor' is the " +
+          "word or phrase in the translation the note hangs off.",
+        screenshot: "cell-editor",
+      },
+      "editor.footnote.markerStyle": {
+        description:
+          "Label above the pair of choices for how the footnote's marker is printed " +
+          "in the text (a number or a letter). 'Marker' is the small raised " +
+          "character readers click or look up.",
+        maxLength: 20,
+        screenshot: "cell-editor",
+      },
+      "editor.footnote.markerStyleGroup": {
+        description:
+          "Screen-reader name of the group containing the two marker-style buttons. " +
+          "Never visible.",
+        screenshot: "cell-editor",
+      },
+      "editor.footnote.markerNumbered": {
+        description:
+          "Title of the first marker-style option: markers are numbers that " +
+          "renumber themselves as notes are added or removed. A noun naming the " +
+          "scheme, not a command.",
+        maxLength: 18,
+        screenshot: "cell-editor",
+      },
+      "editor.footnote.markerNumberedDesc": {
+        description:
+          "One-line description under the Numbering option. 'Automatic' is the " +
+          "selling point: the user does not maintain the numbers by hand.",
+        screenshot: "cell-editor",
+      },
+      "editor.footnote.markerLettered": {
+        description:
+          "Title of the second marker-style option: markers are letters (a, b, c), " +
+          "conventionally used for a second, separate series of notes. A noun " +
+          "naming the scheme.",
+        maxLength: 18,
+        screenshot: "cell-editor",
+      },
+      "editor.footnote.markerLetteredDesc": {
+        description:
+          "One-line description under the Lettering option. The point is that " +
+          "letters keep this note in a series of its own, separate from the " +
+          "numbered notes.",
+        screenshot: "cell-editor",
+      },
+      "editor.footnote.textLabel": {
+        description:
+          "Form label above the large textarea holding the note's wording in the " +
+          "add-footnote dialog.",
+        maxLength: 20,
+        screenshot: "cell-editor",
+      },
+      "editor.footnote.textPlaceholder": {
+        description:
+          "Placeholder in that textarea, demonstrating the recommended shape of a " +
+          "note: the quoted word from the verse, a colon, then the explanation. " +
+          "It is an example, so translate both halves as example words rather than " +
+          "as instructions. Trailing three periods are literal.",
+        screenshot: "cell-editor",
+      },
+      "editor.footnote.attachedTo": {
+        description:
+          "Opening fragment of the line under the footnote textarea. It is followed " +
+          "immediately, in the same sentence, by the scripture reference in " +
+          "monospace and then a period — so this string ends mid-sentence on " +
+          "purpose. Word order is fixed by the layout: the reference cannot move " +
+          "in front of these words.",
+        screenshot: "cell-editor",
+      },
+      "editor.footnote.textHint": {
+        description:
+          "Advice under the footnote textarea, explaining the colon convention that " +
+          "editor.footnote.textPlaceholder demonstrates. A recommendation, not a " +
+          "requirement.",
+        screenshot: "cell-editor",
+      },
+      "editor.footnote.targetPreview": {
+        description:
+          "Label above the read-only rendering of the translated cell with the new " +
+          "marker inserted, so the user can see where the note will land before " +
+          "committing. 'Target' means the translation, as opposed to the source.",
+        maxLength: 22,
+        screenshot: "cell-editor",
+      },
+      "editor.footnote.previewEmptyCell": {
+        description:
+          "Stand-in shown inside the add-footnote preview when the translated cell " +
+          "has no text at all, so there is nothing to preview. A state description.",
+        maxLength: 20,
+        screenshot: "cell-editor",
+      },
+      "editor.milestone.region": {
+        description:
+          "Screen-reader name of the prev / picker / next control group in the " +
+          "editor header that moves between the file's major divisions. It is " +
+          "generic because the divisions differ by file type (chapters, slides, " +
+          "stories…); the specific words come from the editor.milestone.vocab.* keys.",
+      },
+      "editor.milestone.moveBetween": {
+        description:
+          "Screen-reader name of the button group holding the previous/next arrows " +
+          "and the picker.",
+        placeholders: {
+          plural:
+            "Lower-cased plural noun for this file's divisions, from " +
+            "editor.milestone.vocab.*Plural — e.g. 'chapters', 'slides'.",
+        },
+      },
+      "editor.milestone.previous": {
+        description:
+          "Screen-reader name of the left-arrow button; it steps back one division " +
+          "(or one cell range within a split division). Icon-only, so this string " +
+          "is the only name it has.",
+        placeholders: {
+          singular:
+            "Singular noun for this file's divisions, from editor.milestone.vocab.* " +
+            "— e.g. 'chapter', 'slide'.",
+        },
+      },
+      "editor.milestone.next": {
+        description:
+          "Screen-reader name of the right-arrow button; it steps forward one " +
+          "division. Icon-only, so this string is the only name it has.",
+        placeholders: {
+          singular:
+            "Singular noun for this file's divisions, from editor.milestone.vocab.* " +
+            "— e.g. 'chapter', 'slide'.",
+        },
+      },
+      "editor.milestone.current": {
+        description:
+          "Screen-reader name of the picker button between the two arrows. It does " +
+          "double duty: it states where the user currently is, then says what the " +
+          "button does. Keep both halves.",
+        placeholders: {
+          singular:
+            "Singular noun for this file's divisions — e.g. 'chapter', 'slide'.",
+          label:
+            "The division's own display label ('Matthew 1', a slide title). Content, " +
+            "so never translate the substituted value.",
+        },
+      },
+      "editor.milestone.currentWithCells": {
+        description:
+          "Same picker name as editor.milestone.current, for a division that is " +
+          "split into cell ranges, naming the range the user is inside.",
+        placeholders: {
+          singular:
+            "Singular noun for this file's divisions — e.g. 'chapter', 'slide'.",
+          label: "The division's own display label. Content — do not translate.",
+          cells:
+            "The cell range within the division, already formatted, e.g. '101–117'. " +
+            "Numbers only — do not translate.",
+        },
+      },
+      "editor.milestone.findPlaceholder": {
+        description:
+          "Placeholder in the search field inside the open division picker. Ends " +
+          "with an ellipsis glyph (…). It prompts typing, so it should read as an " +
+          "invitation rather than a label.",
+        placeholders: {
+          singular:
+            "Singular noun for this file's divisions — e.g. 'chapter', 'slide'.",
+        },
+      },
+      "editor.milestone.find": {
+        description:
+          "Screen-reader name of that same search field — the placeholder without " +
+          "its trailing ellipsis.",
+        placeholders: {
+          singular:
+            "Singular noun for this file's divisions — e.g. 'chapter', 'slide'.",
+        },
+      },
+      "editor.milestone.empty": {
+        description:
+          "Message inside the picker when the typed query matches no division. Full " +
+          "sentence with a period.",
+        placeholders: {
+          plural:
+            "Lower-cased plural noun for this file's divisions — e.g. 'chapters'.",
+        },
+      },
+      "editor.milestone.cellRange": {
+        description:
+          "Label of a cell-range row nested under a division in the picker, and the " +
+          "same row's text value. 'Cells' are the numbered translation units; the " +
+          "range is inclusive.",
+        placeholders: {
+          range:
+            "The inclusive range as already formatted by the app, e.g. '101–117' " +
+            "(en dash). Numbers only — do not translate.",
+        },
+      },
+      "editor.milestone.percentTranslated": {
+        description:
+          "First line of the two-line progress figure on the right of each picker " +
+          "row: the share of the division's cells that have any translation. Sits " +
+          "in a fixed 7.5rem column above editor.milestone.percentValidated, so " +
+          "both must fit on one short line.",
+        maxLength: 20,
+        placeholders: {
+          percent: "Whole-number percentage, already rounded, without the % sign.",
+        },
+      },
+      "editor.milestone.percentValidated": {
+        description:
+          "Second line of that progress figure: the share of the division's cells a " +
+          "reviewer has marked validated. Validated is a stronger state than " +
+          "translated, so the two words must stay clearly different.",
+        maxLength: 20,
+        placeholders: {
+          percent: "Whole-number percentage, already rounded, without the % sign.",
+        },
+      },
+      "editor.milestone.vocab.chapter": {
+        description:
+          "Singular noun substituted into the milestone navigator's labels for a " +
+          "scripture file: a chapter of a biblical book. Lower-case in English " +
+          "because it appears mid-sentence ('Previous chapter').",
+        maxLength: 16,
+      },
+      "editor.milestone.vocab.chapterPlural": {
+        description:
+          "Plural of editor.milestone.vocab.chapter, used as a group heading and " +
+          "lower-cased by the app when it appears mid-sentence. Capitalised in " +
+          "English because its primary use is a heading.",
+        maxLength: 18,
+      },
+      "editor.milestone.vocab.slide": {
+        description:
+          "Singular noun for a division of a presentation-shaped file — one slide. " +
+          "Lower-case, used mid-sentence.",
+        maxLength: 16,
+      },
+      "editor.milestone.vocab.slidePlural": {
+        description: "Plural of editor.milestone.vocab.slide; heading form.",
+        maxLength: 18,
+      },
+      "editor.milestone.vocab.story": {
+        description:
+          "Singular noun for a division of an oral-Bible or story-set file — one " +
+          "story. Lower-case, used mid-sentence.",
+        maxLength: 16,
+      },
+      "editor.milestone.vocab.storyPlural": {
+        description: "Plural of editor.milestone.vocab.story; heading form.",
+        maxLength: 18,
+      },
+      "editor.milestone.vocab.section": {
+        description:
+          "Singular noun for a generic titled division of a document. Lower-case, " +
+          "used mid-sentence.",
+        maxLength: 16,
+      },
+      "editor.milestone.vocab.sectionPlural": {
+        description: "Plural of editor.milestone.vocab.section; heading form.",
+        maxLength: 18,
+      },
+      "editor.milestone.vocab.timeRange": {
+        description:
+          "Singular noun for a division of an audio or video file: a span of time on " +
+          "the timeline. Lower-case, used mid-sentence.",
+        maxLength: 18,
+      },
+      "editor.milestone.vocab.timeRangePlural": {
+        description: "Plural of editor.milestone.vocab.timeRange; heading form.",
+        maxLength: 20,
+      },
+      "editor.milestone.vocab.part": {
+        description:
+          "Singular noun for a division of a file split into numbered parts. " +
+          "Lower-case, used mid-sentence.",
+        maxLength: 16,
+      },
+      "editor.milestone.vocab.partPlural": {
+        description: "Plural of editor.milestone.vocab.part; heading form.",
+        maxLength: 18,
+      },
+      "editor.milestone.vocab.group": {
+        description:
+          "Singular noun for an arbitrary grouping of cells, used when the file's " +
+          "divisions have no more specific name. Lower-case, used mid-sentence.",
+        maxLength: 16,
+      },
+      "editor.milestone.vocab.groupPlural": {
+        description: "Plural of editor.milestone.vocab.group; heading form.",
+        maxLength: 18,
+      },
+      "editor.milestone.vocab.milestone": {
+        description:
+          "The catch-all singular noun used when a file mixes several kinds of " +
+          "division, so none of the specific words fits. Choose a neutral word for " +
+          "'a marked point or stretch in the file'. Lower-case, used mid-sentence.",
+        maxLength: 18,
+      },
+      "editor.milestone.vocab.milestonePlural": {
+        description: "Plural of editor.milestone.vocab.milestone; heading form.",
+        maxLength: 20,
       },
     },
   },

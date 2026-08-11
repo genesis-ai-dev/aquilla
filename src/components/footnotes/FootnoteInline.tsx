@@ -14,6 +14,7 @@ import { extractUsfmFootnotes, type ExtractedFootnote } from "@/lib/footnotes/ex
 import type { VisibleFootnoteEntry } from "@/lib/footnotes/types"
 import { cn } from "@/lib/utils"
 import { FootnoteTextEditor, renderFootnoteRichText } from "./FootnoteTextEditor"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 interface FootnoteInlineProps {
   /** The footnotes extracted from this cell's original (source) text. */
@@ -56,6 +57,7 @@ export function FootnoteInline({
   activeFootnoteIndex = null,
   compact = false,
 }: FootnoteInlineProps) {
+  const t = useT()
   const hasSrc = sourceFootnotes.length > 0
   const hasTgt = targetFootnotes.length > 0
 
@@ -67,10 +69,10 @@ export function FootnoteInline({
       <div
         className="mt-1 rounded-md border border-border/40 bg-muted/20 px-1.5 py-0.5"
         role="region"
-        aria-label="Footnotes"
+        aria-label={t("editor.footnotes.label")}
       >
         <FootnoteSurfaceHeader
-          title="Footnotes"
+          title={t("editor.footnotes.label")}
           isDocx={isDocx}
           count={targetFootnotes.length || sourceFootnotes.length}
           className="mb-0.5"
@@ -96,10 +98,10 @@ export function FootnoteInline({
     <div
       className="grid items-start gap-1.5 border-t border-border/40 bg-muted/20 px-4 py-1.5 md:grid-cols-[minmax(0,1fr)_minmax(18rem,1fr)]"
       role="region"
-      aria-label="Footnotes"
+      aria-label={t("editor.footnotes.label")}
     >
       <FootnoteSurfaceHeader
-        title="Footnotes"
+        title={t("editor.footnotes.label")}
         isDocx={isDocx}
         count={targetFootnotes.length || sourceFootnotes.length}
       />
@@ -137,6 +139,7 @@ export function FootnotesTray({
   onDelete?: (cellId: string, footnoteIndex: number) => void
   onClose?: () => void
 }) {
+  const t = useT()
   const visibleEntries = entries.filter((entry) => entry.targetFootnotes.length > 0)
   const visibleFootnoteCount = visibleEntries.reduce((sum, entry) => sum + entry.targetFootnotes.length, 0)
 
@@ -146,15 +149,15 @@ export function FootnotesTray({
         "border-t border-border bg-background/95 shadow-[0_-10px_30px_rgba(15,23,42,0.06)] backdrop-blur supports-[backdrop-filter]:bg-background/85",
         className,
       )}
-      aria-label="Visible footnotes"
+      aria-label={t("editor.footnotes.trayRegion")}
     >
       <div className="flex items-center justify-between gap-3 border-b border-border/60 px-4 py-1.5">
         <div className="min-w-0">
           <div className="text-xs font-semibold text-foreground">
-            Footnotes
+            {t("editor.footnotes.label")}
           </div>
           <div className="truncate text-[11px] text-muted-foreground/80">
-            Updates as the editor scrolls
+            {t("editor.footnotes.trayHint")}
           </div>
         </div>
         <div className="flex items-center gap-1.5">
@@ -166,7 +169,7 @@ export function FootnotesTray({
               type="button"
               variant="ghost"
               size="icon-sm"
-              aria-label="Close footnotes tray"
+              aria-label={t("editor.footnotes.closeTray")}
               onClick={onClose}
             >
               <X />
@@ -178,7 +181,7 @@ export function FootnotesTray({
       <div className="h-[min(24vh,220px)] overflow-y-auto overscroll-contain">
         {visibleEntries.length === 0 ? (
           <div className="px-4 py-5 text-sm text-muted-foreground">
-            No footnotes in the visible rows.
+            {t("editor.footnotes.trayEmpty")}
           </div>
         ) : (
           <>
@@ -229,6 +232,7 @@ function FootnoteSurfaceHeader({
   count?: number
   className?: string
 }) {
+  const t = useT()
   return (
     <div className={cn("flex items-center gap-1.5", className)}>
       <span className="text-xs text-muted-foreground">
@@ -241,7 +245,7 @@ function FootnoteSurfaceHeader({
       )}
       {isDocx && (
         <Badge className="h-auto border-transparent bg-amber-500/10 px-1.5 text-[9px] font-medium text-amber-600 dark:text-amber-400">
-          read-only · DOCX round-trip not yet safe
+          {t("editor.footnotes.docxReadOnly")}
         </Badge>
       )}
     </div>
@@ -329,6 +333,7 @@ function FootnoteRow({
   onDelete,
   onCreateTarget,
 }: FootnoteRowProps) {
+  const t = useT()
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(targetFn?.text ?? "")
   const [confirmDelete, setConfirmDelete] = useState(false)
@@ -395,10 +400,10 @@ function FootnoteRow({
             className="rounded px-1 py-0.5 text-left text-xs font-medium text-primary hover:bg-primary/10"
             onClick={() => onCreateTarget(sourceFn)}
           >
-            Add target footnote
+            {t("editor.footnotes.addTarget")}
           </button>
         ) : (
-          <span className="italic text-muted-foreground/70">No target footnote</span>
+          <span className="italic text-muted-foreground/70">{t("editor.footnotes.noTarget")}</span>
         )
       ) : editing ? (
         <div className="flex flex-col gap-1">
@@ -411,12 +416,12 @@ function FootnoteRow({
               if (confirmDelete && next.trim().length > 0) setConfirmDelete(false)
             }}
             onKeyDown={handleKeyDown}
-            placeholder="Translate footnote..."
-            ariaLabel="Edit footnote"
+            placeholder={t("editor.footnotes.editPlaceholder")}
+            ariaLabel={t("editor.footnotes.editLabel")}
           />
           {saveError && (
             <p role="alert" className="text-[10px] text-destructive">
-              Couldn't save — this footnote changed while you were editing. Copy your text, cancel, and reopen it.
+              {t("editor.footnotes.saveConflict")}
             </p>
           )}
           <div className="flex gap-1">
@@ -425,14 +430,14 @@ function FootnoteRow({
               onClick={handleSave}
               className="rounded px-2 py-0.5 text-[10px] font-medium text-primary hover:bg-primary/10"
             >
-              Save
+              {t("common.save")}
             </button>
             <button
               type="button"
               onClick={handleCancel}
               className="rounded px-2 py-0.5 text-[10px] text-muted-foreground hover:bg-muted"
             >
-              Cancel
+              {t("common.cancel")}
             </button>
             {onDelete && (
               <button
@@ -445,7 +450,7 @@ function FootnoteRow({
                     : "text-destructive hover:bg-destructive/10",
                 )}
               >
-                {confirmDelete ? "I'm sure" : "Delete"}
+                {confirmDelete ? t("editor.footnotes.deleteConfirm") : t("common.delete")}
               </button>
             )}
           </div>
@@ -464,14 +469,14 @@ function FootnoteRow({
           onClick={() => {
             if (editable) setEditing(true)
           }}
-          aria-label={editable ? "Click to edit footnote" : "Footnote translation"}
+          aria-label={editable ? t("editor.footnotes.clickToEdit") : t("editor.footnotes.translationLabel")}
           disabled={!editable}
         >
           {targetFn.text
             ? renderFootnoteRichText(targetFn.text)
             : editable
-              ? "Add translation..."
-              : "Empty target footnote"}
+              ? t("editor.footnotes.addTranslation")
+              : t("editor.footnotes.emptyTarget")}
         </button>
       )}
     </div>
@@ -494,7 +499,7 @@ function FootnoteRow({
             targetOnlyLayout === "fill" && "w-full",
           )}
         >
-          <span className="sr-only">Target footnote</span>
+          <span className="sr-only">{t("editor.footnotes.targetRole")}</span>
           <FootnoteMarkerBadge
             label={callerLabel}
             active
@@ -518,12 +523,12 @@ function FootnoteRow({
         {sourceFn ? (
           <FootnoteText footnote={sourceFn} muted />
         ) : (
-          <span className="italic text-muted-foreground/60">No source footnote</span>
+          <span className="italic text-muted-foreground/60">{t("editor.footnotes.noSource")}</span>
         )}
       </div>
 
       <div className="flex min-w-0 items-start gap-1.5 border-border/40 md:border-l md:pl-2">
-        <span className="sr-only">Target footnote</span>
+        <span className="sr-only">{t("editor.footnotes.targetRole")}</span>
         {targetFn && (
           <FootnoteMarkerBadge
             label={callerLabel}
@@ -601,6 +606,7 @@ function FootnoteMarkerBadge({
   /** When set, the number badge becomes a button that re-opens the note for editing (AQU-598). */
   onActivate?: () => void
 }) {
+  const t = useT()
   const className = cn(
     "inline-flex h-4 min-w-4 shrink-0 items-center justify-center rounded-md px-1 text-[9px] font-bold",
     active ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground",
@@ -609,7 +615,7 @@ function FootnoteMarkerBadge({
   )
   if (onActivate) {
     return (
-      <button type="button" className={className} onClick={onActivate} aria-label={`Edit footnote ${label}`}>
+      <button type="button" className={className} onClick={onActivate} aria-label={t("editor.footnotes.editMarker", { label })}>
         {label}
       </button>
     )
@@ -632,6 +638,7 @@ function footnoteDisplayLabel(
 }
 
 function FootnoteText({ footnote, muted }: { footnote: ExtractedFootnote; muted?: boolean }) {
+  const t = useT()
   return (
     <div className="min-w-0 flex-1">
       {footnote.ref && (
@@ -640,7 +647,7 @@ function FootnoteText({ footnote, muted }: { footnote: ExtractedFootnote; muted?
         </span>
       )}
       <span className={cn(muted ? "text-muted-foreground" : "text-foreground")}>
-        {footnote.text ? renderFootnoteRichText(footnote.text) : <span className="italic text-muted-foreground/70">Empty footnote</span>}
+        {footnote.text ? renderFootnoteRichText(footnote.text) : <span className="italic text-muted-foreground/70">{t("editor.footnotes.emptyNote")}</span>}
       </span>
     </div>
   )

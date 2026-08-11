@@ -17,6 +17,7 @@ import { cn } from "@/lib/utils"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Spinner } from "@/components/ui/spinner"
 import { MISSING_AUDIO_MESSAGE } from "@/lib/audio/play-queue"
+import { SLOT_GROUP, TimelineSlotButton } from "./TimelineSlotButton"
 import { isVisible, secToPx, pxToSec } from "@/lib/timeline/scale"
 import {
   targetChipGeom,
@@ -661,22 +662,15 @@ export function TargetAudioLane({
             key={`addrec-${span.startSec}`}
             data-testid={`tl-target-add-${span.startSec}`}
             style={{ left: `${leftPx}px`, width: `${widthPx}px` }}
-            className="group/addrec absolute top-2.5 flex h-[46px] items-center justify-center"
+            className={`${SLOT_GROUP} absolute top-2.5 flex h-[46px] items-center justify-center`}
           >
-            <button
-              type="button"
-              title="Record over this stretch"
-              aria-label="Record over this stretch"
-              data-testid={`tl-target-add-${span.startSec}-record`}
-              onPointerDown={(e) => e.stopPropagation()}
-              onClick={(e) => {
-                e.stopPropagation()
-                onAddLineAndRecord(span.startSec, span.endSec)
-              }}
-              className="flex h-7 w-7 items-center justify-center rounded-full bg-background/90 opacity-25 shadow-sm ring-1 ring-border transition-opacity hover:bg-background group-hover/addrec:opacity-100 focus-visible:opacity-100"
+            <TimelineSlotButton
+              testId={`tl-target-add-${span.startSec}-record`}
+              label="Record over this stretch"
+              onClick={() => onAddLineAndRecord(span.startSec, span.endSec)}
             >
               <Mic className="h-3.5 w-3.5" />
-            </button>
+            </TimelineSlotButton>
           </div>
         )
       })}
@@ -685,26 +679,18 @@ export function TargetAudioLane({
           key={`empty-${cell.id}`}
           data-testid={`tl-target-empty-${cell.id}`}
           style={{ left: `${leftPx}px`, width: `${widthPx}px` }}
-          className="group/empty absolute top-2.5 flex h-[46px] items-center justify-center"
+          className={`${SLOT_GROUP} absolute top-2.5 flex h-[46px] items-center justify-center`}
         >
-          <button
-            type="button"
-            title="Record audio for this line"
-            data-testid={`tl-target-empty-${cell.id}-record`}
-            aria-label="Record audio for this line"
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={(e) => {
-              e.stopPropagation()
+          <TimelineSlotButton
+            testId={`tl-target-empty-${cell.id}-record`}
+            label="Record audio for this line"
+            onClick={() => {
               onSelect(cell.id)
               onOpenRecording?.(cell.id)
             }}
-            // Faint at rest rather than invisible (Sam, 2026-08-11): you should
-            // be able to see that recording is offered here without discovering
-            // it by accident.
-            className="flex h-7 w-7 items-center justify-center rounded-full bg-background/90 opacity-25 shadow-sm ring-1 ring-border transition-opacity hover:bg-background group-hover/empty:opacity-100 focus-visible:opacity-100"
           >
             <Mic className="h-3.5 w-3.5" />
-          </button>
+          </TimelineSlotButton>
         </div>
       ))}
       {chips.map((chip, i) =>

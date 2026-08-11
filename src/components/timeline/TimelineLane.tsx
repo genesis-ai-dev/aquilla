@@ -6,7 +6,9 @@
 // candidates (visible neighbors' edges + the cell's own frozen section edges),
 // and carries the lane's `retimable` flag — the source row passes false.
 
+import { Pencil } from "lucide-react"
 import { isVisible } from "@/lib/timeline/scale"
+import { SLOT_GROUP, TimelineSlotButton } from "./TimelineSlotButton"
 import { subtitleSpanSec } from "@/lib/timeline/lane-timing"
 import { TimelineCard } from "./TimelineCard"
 import type { TimelineLayout } from "@/lib/timeline/layout"
@@ -119,22 +121,15 @@ export function TimelineLane({
           key={`add-${span.startSec}`}
           data-testid={`tl-add-line-${span.startSec}`}
           style={{ left: `${leftPx}px`, width: `${widthPx}px` }}
-          className="group/add absolute top-2.5 flex h-[46px] items-center justify-center"
+          className={`${SLOT_GROUP} absolute top-2.5 flex h-[46px] items-center justify-center`}
         >
-          <button
-            type="button"
-            title="Add a line here"
-            aria-label="Add a line here"
-            data-testid={`tl-add-line-${span.startSec}-button`}
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={(e) => {
-              e.stopPropagation()
-              addLine?.(span.startSec, span.endSec)
-            }}
-            className="flex h-7 w-7 items-center justify-center rounded-full bg-background/90 text-xs font-semibold opacity-25 shadow-sm ring-1 ring-border transition-opacity hover:bg-background group-hover/add:opacity-100 focus-visible:opacity-100"
+          <TimelineSlotButton
+            testId={`tl-add-line-${span.startSec}-button`}
+            label="Add a line here"
+            onClick={() => addLine?.(span.startSec, span.endSec)}
           >
-            T
-          </button>
+            <Pencil className="h-3.5 w-3.5" />
+          </TimelineSlotButton>
         </div>
       ))}
       {visible.map((c) => (

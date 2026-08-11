@@ -24,6 +24,7 @@ import { FrontierSignupForm } from "./git-import/FrontierSignupForm"
 import { FrontierForgotPasswordForm } from "./git-import/FrontierForgotPasswordForm"
 import { cn } from "@/lib/utils"
 import { InitialsAvatar } from "@/components/InitialsAvatar"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 type AuthMode = "login" | "signup" | "forgot"
 
@@ -36,11 +37,12 @@ function AuthDialogBody({
   onDone: () => void
   returnTo?: string
 }) {
+  const t = useT()
   const [mode, setMode] = useState<AuthMode>("login")
   const titles: Record<AuthMode, string> = {
-    login: isAdditional ? "Add Frontier account" : "Log in to Frontier",
-    signup: "Create a Frontier account",
-    forgot: "Reset your password",
+    login: isAdditional ? t("nav.account.addTitle") : t("nav.account.loginTitle"),
+    signup: t("nav.account.signupTitle"),
+    forgot: t("nav.account.forgotTitle"),
   }
   return (
     <>
@@ -53,13 +55,13 @@ function AuthDialogBody({
             returnTo={returnTo}
           />
           <p className="text-center text-sm text-muted-foreground">
-            New to Frontier?{" "}
+            {t("nav.account.newToFrontier")}{" "}
             <button
               type="button"
               onClick={() => setMode("signup")}
               className="font-medium text-foreground underline-offset-4 hover:underline"
             >
-              Create an account
+              {t("nav.account.createAccountLink")}
             </button>
           </p>
         </div>
@@ -68,13 +70,13 @@ function AuthDialogBody({
         <div className="space-y-4">
           <FrontierSignupForm onSuccess={onDone} />
           <p className="text-center text-sm text-muted-foreground">
-            Already have an account?{" "}
+            {t("nav.account.alreadyHaveAccount")}{" "}
             <button
               type="button"
               onClick={() => setMode("login")}
               className="font-medium text-foreground underline-offset-4 hover:underline"
             >
-              Log in
+              {t("nav.account.loginLink")}
             </button>
           </p>
         </div>
@@ -98,6 +100,7 @@ export function AccountSwitcher({
   variant = "sidebar",
   compact = false,
 }: { variant?: "sidebar" | "header"; compact?: boolean } = {}) {
+  const t = useT()
   const { active, sessions, activate } = useAccounts()
   const qc = useQueryClient()
   const location = useLocation()
@@ -158,11 +161,11 @@ export function AccountSwitcher({
             !isHeader && !compact && "w-full",
             isHeader && "h-9",
           )}
-          aria-label="Log in"
+          aria-label={t("nav.account.logIn")}
           onClick={() => setLoginOpen(true)}
         >
           <LogIn className="h-4 w-4" />
-          {!compact && <span>Log in</span>}
+          {!compact && <span>{t("nav.account.logIn")}</span>}
         </button>
         <Dialog open={loginOpen} onOpenChange={setLoginOpen}>
           <DialogContent className="max-w-sm">
@@ -188,20 +191,20 @@ export function AccountSwitcher({
       <DropdownMenuGroup>
         <DropdownMenuItem render={<Link to="/preferences" onClick={() => setOpen(false)} />}>
           <Settings2 />
-          Preferences
+          {t("nav.account.preferences")}
         </DropdownMenuItem>
         <DropdownMenuItem onClick={() => { setOpen(false); setLoginOpen(true) }}>
           <UserPlus />
-          Add another account
+          {t("nav.account.addAnotherAccount")}
         </DropdownMenuItem>
         <DropdownMenuItem onClick={() => handleLogout("single")}>
           <LogOut />
-          Log out
+          {t("nav.account.logOut")}
         </DropdownMenuItem>
         {sessions.length > 1 && (
           <DropdownMenuItem variant="destructive" onClick={() => handleLogout("all")}>
             <LogOut />
-            Sign out of all accounts
+            {t("nav.account.signOutAllAccounts")}
           </DropdownMenuItem>
         )}
       </DropdownMenuGroup>
@@ -223,7 +226,7 @@ export function AccountSwitcher({
                     ? "h-8 w-8 justify-center rounded-md p-0 hover:bg-accent"
                     : "w-full rounded-md px-1.5 py-1.5 hover:bg-accent",
               )}
-              aria-label={`Account menu: ${active.username}`}
+              aria-label={t("nav.account.menuLabel", { username: active.username })}
             />
           }
         >
@@ -254,13 +257,19 @@ export function AccountSwitcher({
       <Dialog open={!!pendingLogout} onOpenChange={(v) => { if (!v) setPendingLogout(null) }}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
-            <DialogTitle>Unsaved edits</DialogTitle>
+            <DialogTitle>{t("nav.account.unsavedEditsTitle")}</DialogTitle>
             <DialogDescription>
-              You have {pendingLogout?.count ?? 0} unsaved edit{(pendingLogout?.count ?? 0) !== 1 ? "s" : ""} that haven't synced to the server. Logging out will discard them. Continue?
+              {t("nav.account.unsavedEditsDescription", {
+                count: pendingLogout?.count ?? 0,
+                noun:
+                  (pendingLogout?.count ?? 0) === 1
+                    ? t("nav.account.unsavedEditSingular")
+                    : t("nav.account.unsavedEditPlural"),
+              })}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="gap-2">
-            <Button variant="outline" onClick={() => setPendingLogout(null)}>Cancel</Button>
+            <Button variant="outline" onClick={() => setPendingLogout(null)}>{t("common.cancel")}</Button>
             <Button
               variant="destructive"
               onClick={async () => {
@@ -269,7 +278,7 @@ export function AccountSwitcher({
                 await doLogout(scope)
               }}
             >
-              Log out anyway
+              {t("nav.account.logOutAnyway")}
             </Button>
           </DialogFooter>
         </DialogContent>

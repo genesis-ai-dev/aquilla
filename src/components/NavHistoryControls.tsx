@@ -14,14 +14,16 @@ import { useNavHistory, type NavEntry, type NavHistoryValue } from "@/context/Na
 import { Popover, PopoverContent } from "@/components/ui/popover"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 const HOLD_MS = 350
 
 export function NavHistoryControls() {
   const nav = useNavHistory()
+  const t = useT()
   if (!nav) return null
   return (
-    <div className="flex items-center gap-0.5" role="group" aria-label="Page history">
+    <div className="flex items-center gap-0.5" role="group" aria-label={t("nav.historyControls.groupLabel")}>
       <NavArrowButton direction="back" nav={nav} />
       <NavArrowButton direction="forward" nav={nav} />
     </div>
@@ -34,6 +36,7 @@ interface HistoryTarget {
 }
 
 function NavArrowButton({ direction, nav }: { direction: "back" | "forward"; nav: NavHistoryValue }) {
+  const t = useT()
   const isBack = direction === "back"
   const enabled = isBack ? nav.canGoBack : nav.canGoForward
   const [open, setOpen] = useState(false)
@@ -83,9 +86,9 @@ function NavArrowButton({ direction, nav }: { direction: "back" | "forward"; nav
     setOpen(true)
   }
 
-  const label = isBack ? "Back" : "Forward"
   const Icon = isBack ? ChevronLeft : ChevronRight
   const nearest = list[0]?.entry.title
+  const plainLabel = isBack ? t("nav.historyControls.back") : t("nav.historyControls.forward")
 
   const button = (
     <Button
@@ -94,7 +97,13 @@ function NavArrowButton({ direction, nav }: { direction: "back" | "forward"; nav
       variant="ghost"
       size="icon-xs"
       disabled={!enabled}
-      aria-label={enabled && nearest ? `${label} to ${nearest}` : label}
+      aria-label={
+        enabled && nearest
+          ? isBack
+            ? t("nav.historyControls.backTo", { target: nearest })
+            : t("nav.historyControls.forwardTo", { target: nearest })
+          : plainLabel
+      }
       onPointerDown={onPointerDown}
       onPointerUp={clearHold}
       onPointerLeave={clearHold}
@@ -114,7 +123,9 @@ function NavArrowButton({ direction, nav }: { direction: "back" | "forward"; nav
       <Tooltip disabled={open}>
         <TooltipTrigger render={button} />
         <TooltipContent side="bottom">
-          {enabled ? `${label} · hold for history` : `No ${label.toLowerCase()} history`}
+          {enabled
+            ? t(isBack ? "nav.historyControls.backHoldHint" : "nav.historyControls.forwardHoldHint")
+            : t(isBack ? "nav.historyControls.noBackHistory" : "nav.historyControls.noForwardHistory")}
         </TooltipContent>
       </Tooltip>
       <Popover open={open} onOpenChange={setOpen}>
@@ -145,8 +156,13 @@ function HistoryList({
   list: HistoryTarget[]
   onPick: (target: number) => void
 }) {
+  const t = useT()
   if (list.length === 0) {
-    return <div className="px-2 py-3 text-center text-xs text-muted-foreground">No history</div>
+    return (
+      <div className="px-2 py-3 text-center text-xs text-muted-foreground">
+        {t("nav.historyControls.emptyList")}
+      </div>
+    )
   }
   return (
     <div className="max-h-80 overflow-y-auto">

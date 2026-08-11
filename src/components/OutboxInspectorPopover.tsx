@@ -10,6 +10,8 @@ import {
 import { cn } from "@/lib/utils"
 import { removeOutboxEvents, requeueOutboxEvents, type OutboxRecord } from "@/lib/sync/outbox"
 import type { CqrsEventKind } from "@/lib/sync/outbox-types"
+import { useT } from "@/lib/i18n/I18nProvider"
+import type { TFunction } from "@/lib/i18n/I18nProvider"
 
 interface Props {
   trigger: React.ReactNode
@@ -91,18 +93,18 @@ function statusBadgeVariant(
   }
 }
 
-function statusLabel(status: Status): string {
+function statusLabel(status: Status, t: TFunction): string {
   switch (status) {
     case "pending":
-      return "Pending"
+      return t("nav.outbox.statusPending")
     case "retrying":
-      return "Retrying"
+      return t("nav.outbox.statusRetrying")
     case "needs-signin":
-      return "Sign in to retry"
+      return t("nav.outbox.statusNeedsSignin")
     case "no-permission":
-      return "Not allowed"
+      return t("nav.outbox.statusNoPermission")
     case "stuck":
-      return "Stuck"
+      return t("nav.outbox.statusStuck")
   }
 }
 
@@ -122,40 +124,40 @@ function StatusIcon({ status }: { status: Status }) {
   }
 }
 
-function eventLabel(kind: CqrsEventKind): string {
+function eventLabel(kind: CqrsEventKind, t: TFunction): string {
   switch (kind) {
     case "target.cell.commit":
-      return "Edit"
+      return t("nav.outbox.eventEdit")
     case "target.cell.create":
-      return "New cell"
+      return t("nav.outbox.eventNewCell")
     case "target.cell.delete":
-      return "Delete cell"
+      return t("nav.outbox.eventDeleteCell")
     case "target.cell.reorder":
-      return "Reorder cell"
+      return t("nav.outbox.eventReorderCell")
     case "source.cell.commit":
-      return "Source edit"
+      return t("nav.outbox.eventSourceEdit")
     case "source.cell.create":
-      return "New source cell"
+      return t("nav.outbox.eventNewSourceCell")
     case "cell.validate":
-      return "Validate"
+      return t("nav.outbox.eventValidate")
     case "cell.unvalidate":
-      return "Unvalidate"
+      return t("nav.outbox.eventUnvalidate")
     case "comment.create":
-      return "New comment"
+      return t("nav.outbox.eventNewComment")
     case "comment.edit":
-      return "Edit comment"
+      return t("nav.outbox.eventEditComment")
     case "comment.delete":
-      return "Delete comment"
+      return t("nav.outbox.eventDeleteComment")
     case "comment.resolve":
-      return "Resolve comment"
+      return t("nav.outbox.eventResolveComment")
     case "file.create":
-      return "New file"
+      return t("nav.outbox.eventNewFile")
     case "cell.audio.attach":
-      return "Attach audio"
+      return t("nav.outbox.eventAttachAudio")
     case "cell.audio.select":
-      return "Select audio"
+      return t("nav.outbox.eventSelectAudio")
     case "cell.audio.remove":
-      return "Remove audio"
+      return t("nav.outbox.eventRemoveAudio")
     default:
       return kind
   }
@@ -182,7 +184,7 @@ function truncate(s: string, n: number): string {
 }
 
 /** Best-effort, human-readable preview of what the event will do. */
-function getPreview(rec: OutboxRecord): { preview: string; fullText: string | null } {
+function getPreview(rec: OutboxRecord, t: TFunction): { preview: string; fullText: string | null } {
   const p = rec.event.payload as Record<string, unknown>
   const text = typeof p?.value === "string"
     ? p.value as string
@@ -199,32 +201,36 @@ function getPreview(rec: OutboxRecord): { preview: string; fullText: string | nu
   switch (rec.event.kind) {
     case "cell.validate":
     case "cell.unvalidate":
-      return { preview: `→ edit ${shortId((p?.editEventId as string) ?? undefined)}`, fullText: null }
+      return {
+        preview: t("nav.outbox.previewEditRef", { id: shortId((p?.editEventId as string) ?? undefined) }),
+        fullText: null,
+      }
     case "cell.audio.attach":
     case "cell.audio.select":
     case "cell.audio.remove": {
       const slot = typeof p?.slot === "string" ? (p.slot as string) : null
-      return { preview: slot ? `${slot} slot` : "audio", fullText: null }
+      return { preview: slot ? t("nav.outbox.previewAudioSlot", { slot }) : t("nav.outbox.previewAudio"), fullText: null }
     }
     default:
       return { preview: "", fullText: null }
   }
 }
 
-function formatRelativeTime(ts: number, now: number): string {
+function formatRelativeTime(ts: number, now: number, t: TFunction): string {
   const delta = Math.max(0, now - ts)
-  if (delta < 5_000) return "just now"
+  if (delta < 5_000) return t("nav.outbox.timeJustNow")
   const sec = Math.round(delta / 1000)
-  if (sec < 60) return `${sec}s ago`
+  if (sec < 60) return t("nav.outbox.timeSecondsAgo", { sec })
   const min = Math.round(sec / 60)
-  if (min < 60) return `${min}m ago`
+  if (min < 60) return t("nav.outbox.timeMinutesAgo", { min })
   const hr = Math.round(min / 60)
-  if (hr < 24) return `${hr}h ago`
+  if (hr < 24) return t("nav.outbox.timeHoursAgo", { hr })
   const d = Math.round(hr / 24)
-  return `${d}d ago`
+  return t("nav.outbox.timeDaysAgo", { d })
 }
 
 export function OutboxInspectorPopover({ trigger, records, pendingCount, onRetryNow }: Props) {
+  const t = useT()
   // Capture "now" once per mount. The popover is short-lived, so we don't
   // tick it forward — "5s ago" briefly drifting to "10s ago" while the user
   // reads is fine and avoids a per-second re-render.
@@ -234,7 +240,7 @@ export function OutboxInspectorPopover({ trigger, records, pendingCount, onRetry
   const rows = useMemo<Row[]>(() => {
     const built = records.map<Row>((rec) => {
       const status = classify(rec)
-      const { preview, fullText } = getPreview(rec)
+      const { preview, fullText } = getPreview(rec, t)
       return { rec, status, preview, fullText }
     })
     // Stable sort: severity desc, then most recently enqueued first.
@@ -244,7 +250,7 @@ export function OutboxInspectorPopover({ trigger, records, pendingCount, onRetry
       return b.rec.enqueuedAt - a.rec.enqueuedAt
     })
     return built
-  }, [records])
+  }, [records, t])
 
   const summary = useMemo(() => {
     const counts = { edits: 0, validation: 0, comments: 0, other: 0 }
@@ -297,11 +303,11 @@ export function OutboxInspectorPopover({ trigger, records, pendingCount, onRetry
         side="top"
         align="end"
         sideOffset={6}
-        aria-label="Pending changes"
+        aria-label={t("nav.outbox.popoverAriaLabel")}
       >
         <header className="shrink-0 border-b border-border bg-popover px-3 py-2.5">
           <div className="flex items-baseline justify-between gap-2">
-            <h3 className="text-sm font-semibold tracking-tight">Outbox</h3>
+            <h3 className="text-sm font-semibold tracking-tight">{t("nav.outbox.title")}</h3>
             <span
               className="text-xs tabular-nums text-muted-foreground"
               aria-live="polite"
@@ -313,10 +319,10 @@ export function OutboxInspectorPopover({ trigger, records, pendingCount, onRetry
                 // and "All synced" only appears when the outbox is truly empty.
                 const failed = rows.filter((r) => r.rec.status === "failed").length
                 const pending = rows.length - failed
-                if (rows.length === 0) return "All synced"
-                if (failed === 0) return `${pending} pending`
-                if (pending === 0) return `${failed} failed`
-                return `${pending} pending · ${failed} failed`
+                if (rows.length === 0) return t("nav.outbox.allSynced")
+                if (failed === 0) return t("nav.outbox.pendingCount", { count: pending })
+                if (pending === 0) return t("nav.outbox.failedCount", { count: failed })
+                return t("nav.outbox.pendingAndFailedCount", { pending, failed })
               })()}
             </span>
           </div>
@@ -325,25 +331,31 @@ export function OutboxInspectorPopover({ trigger, records, pendingCount, onRetry
               {summary.edits > 0 && (
                 <span>
                   <span className="font-medium tabular-nums text-foreground">{summary.edits}</span>{" "}
-                  edit{summary.edits === 1 ? "" : "s"}
+                  {t("nav.outbox.countedItem", {
+                    count: summary.edits,
+                    noun: t(summary.edits === 1 ? "nav.outbox.editsSingular" : "nav.outbox.editsPlural"),
+                  })}
                 </span>
               )}
               {summary.validation > 0 && (
                 <span>
                   <span className="font-medium tabular-nums text-foreground">{summary.validation}</span>{" "}
-                  validation
+                  {t("nav.outbox.validationLabel")}
                 </span>
               )}
               {summary.comments > 0 && (
                 <span>
                   <span className="font-medium tabular-nums text-foreground">{summary.comments}</span>{" "}
-                  comment{summary.comments === 1 ? "" : "s"}
+                  {t("nav.outbox.countedItem", {
+                    count: summary.comments,
+                    noun: t(summary.comments === 1 ? "nav.outbox.commentsSingular" : "nav.outbox.commentsPlural"),
+                  })}
                 </span>
               )}
               {summary.other > 0 && (
                 <span>
                   <span className="font-medium tabular-nums text-foreground">{summary.other}</span>{" "}
-                  other
+                  {t("nav.outbox.otherLabel")}
                 </span>
               )}
             </p>
@@ -356,7 +368,7 @@ export function OutboxInspectorPopover({ trigger, records, pendingCount, onRetry
                 className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 <RotateCw className="size-3" aria-hidden />
-                Retry now
+                {t("nav.outbox.retryNow")}
               </button>
             </div>
           )}
@@ -366,9 +378,7 @@ export function OutboxInspectorPopover({ trigger, records, pendingCount, onRetry
               className="mt-2 flex items-start gap-1.5 rounded-md bg-destructive/10 px-2 py-1.5 text-xs text-destructive"
             >
               <LogIn className="mt-0.5 size-3.5 shrink-0" aria-hidden />
-              <span>
-                Your session expired. Edits are saved locally — sign in again to retry.
-              </span>
+              <span>{t("nav.outbox.sessionExpiredAlert")}</span>
             </p>
           )}
           {(hasNoPermission || hasStuck) && (
@@ -379,10 +389,7 @@ export function OutboxInspectorPopover({ trigger, records, pendingCount, onRetry
               <Ban className="mt-0.5 size-3.5 shrink-0" aria-hidden />
               <div className="min-w-0 flex-1">
                 <span>
-                  {hasNoPermission
-                    ? "Some changes weren’t allowed — you may not have permission, or they belong to a different project. Re-signing in won’t help."
-                    : "Some changes couldn’t be synced after several tries."}{" "}
-                  They stay saved locally until you discard them.
+                  {hasNoPermission ? t("nav.outbox.noPermissionMessage") : t("nav.outbox.stuckMessage")}
                 </span>
                 {discardableIds.length > 0 && (
                   <button
@@ -391,7 +398,14 @@ export function OutboxInspectorPopover({ trigger, records, pendingCount, onRetry
                     className="mt-1.5 flex items-center gap-1 rounded font-medium underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     <Trash2 className="size-3" aria-hidden />
-                    Discard {discardableIds.length} stuck change{discardableIds.length === 1 ? "" : "s"}
+                    {t("nav.outbox.discardStuckChangesButton", {
+                      count: discardableIds.length,
+                      noun: t(
+                        discardableIds.length === 1
+                          ? "nav.outbox.stuckChangeSingular"
+                          : "nav.outbox.stuckChangePlural",
+                      ),
+                    })}
                   </button>
                 )}
               </div>
@@ -404,9 +418,9 @@ export function OutboxInspectorPopover({ trigger, records, pendingCount, onRetry
             <span className="flex size-9 items-center justify-center rounded-lg bg-muted text-muted-foreground">
               <Check className="size-4" aria-hidden />
             </span>
-            <p className="text-sm font-medium">You&rsquo;re all caught up</p>
+            <p className="text-sm font-medium">{t("nav.outbox.allCaughtUpTitle")}</p>
             <p className="text-xs text-muted-foreground">
-              Every local change has been synced.
+              {t("nav.outbox.allCaughtUpDescription")}
             </p>
           </div>
         ) : (
@@ -443,14 +457,14 @@ export function OutboxInspectorPopover({ trigger, records, pendingCount, onRetry
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center justify-between gap-2">
                             <span className="truncate text-sm font-medium">
-                              {eventLabel(rec.event.kind as CqrsEventKind)}
+                              {eventLabel(rec.event.kind as CqrsEventKind, t)}
                             </span>
                             <Badge
                               variant={statusBadgeVariant(status)}
                               className="shrink-0 gap-1"
                             >
                               <StatusIcon status={status} />
-                              <span>{statusLabel(status)}</span>
+                              <span>{statusLabel(status, t)}</span>
                             </Badge>
                           </div>
                           {preview && (
@@ -465,13 +479,13 @@ export function OutboxInspectorPopover({ trigger, records, pendingCount, onRetry
                           )}
                           <div className="mt-1 flex items-center gap-1.5 text-[11px] text-muted-foreground">
                             <span className="tabular-nums">
-                              {formatRelativeTime(rec.enqueuedAt, now)}
+                              {formatRelativeTime(rec.enqueuedAt, now, t)}
                             </span>
                             {rec.event.cellId && (
                               <>
                                 <span aria-hidden>·</span>
                                 <span className="font-mono">
-                                  cell {shortId(rec.event.cellId)}
+                                  {t("nav.outbox.cellLabel", { id: shortId(rec.event.cellId) })}
                                 </span>
                               </>
                             )}
@@ -479,8 +493,12 @@ export function OutboxInspectorPopover({ trigger, records, pendingCount, onRetry
                               <>
                                 <span aria-hidden>·</span>
                                 <span className="tabular-nums">
-                                  {rec.attempts}
-                                  {rec.attempts === 1 ? " try" : " tries"}
+                                  {t("nav.outbox.countedItem", {
+                                    count: rec.attempts,
+                                    noun: t(
+                                      rec.attempts === 1 ? "nav.outbox.trySingular" : "nav.outbox.tryPlural",
+                                    ),
+                                  })}
                                 </span>
                               </>
                             )}
@@ -492,21 +510,21 @@ export function OutboxInspectorPopover({ trigger, records, pendingCount, onRetry
                           <div className="space-y-1.5 border-t border-border/60 bg-muted/30 px-3 py-2 pl-8 text-xs">
                             {rec.event.cellId && (
                               <div className="flex gap-2">
-                                <span className="w-16 shrink-0 text-muted-foreground">Cell</span>
+                                <span className="w-16 shrink-0 text-muted-foreground">{t("nav.outbox.cellDetailLabel")}</span>
                                 <span className="font-mono text-foreground/90">
                                   {rec.event.cellId}
                                 </span>
                               </div>
                             )}
                             <div className="flex gap-2">
-                              <span className="w-16 shrink-0 text-muted-foreground">Event</span>
+                              <span className="w-16 shrink-0 text-muted-foreground">{t("nav.outbox.eventDetailLabel")}</span>
                               <span className="font-mono text-foreground/90">
                                 {rec.event.id}
                               </span>
                             </div>
                             {rec.lastError && (
                               <div className="flex gap-2">
-                                <span className="w-16 shrink-0 text-muted-foreground">Error</span>
+                                <span className="w-16 shrink-0 text-muted-foreground">{t("nav.outbox.errorDetailLabel")}</span>
                                 <span className="text-destructive">
                                   {rec.lastError.status > 0
                                     ? `${rec.lastError.status} · ${rec.lastError.reason}`
@@ -523,7 +541,7 @@ export function OutboxInspectorPopover({ trigger, records, pendingCount, onRetry
                                     className="flex items-center gap-1 rounded px-1.5 py-0.5 font-medium text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                                   >
                                     <RotateCw className="size-3" aria-hidden />
-                                    Retry
+                                    {t("common.retry")}
                                   </button>
                                 )}
                                 <button
@@ -532,7 +550,7 @@ export function OutboxInspectorPopover({ trigger, records, pendingCount, onRetry
                                   className="flex items-center gap-1 rounded px-1.5 py-0.5 font-medium text-destructive hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                                 >
                                   <Trash2 className="size-3" aria-hidden />
-                                  Discard this change
+                                  {t("nav.outbox.discardChangeButton")}
                                 </button>
                               </div>
                             )}
@@ -546,7 +564,7 @@ export function OutboxInspectorPopover({ trigger, records, pendingCount, onRetry
             </ul>
             {overflow > 0 && (
               <p className="px-3 py-2 text-center text-xs text-muted-foreground" role="status">
-                +{overflow} more queued…
+                {t("nav.outbox.overflowMore", { count: overflow })}
               </p>
             )}
           </div>
@@ -554,8 +572,8 @@ export function OutboxInspectorPopover({ trigger, records, pendingCount, onRetry
 
         <footer className="shrink-0 border-t border-border bg-muted/30 px-3 py-1.5 text-[11px] text-muted-foreground">
           {rows.length > 0
-            ? "Edits stay saved locally until they sync."
-            : "Local changes sync automatically."}
+            ? t("nav.outbox.footerPending")
+            : t("nav.outbox.footerSynced")}
         </footer>
       </PopoverContent>
     </Popover>

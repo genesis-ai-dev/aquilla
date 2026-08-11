@@ -47,4 +47,21 @@ describe("I18nProvider + LanguageSwitcher", () => {
     expect(screen.getByTestId("label")).toHaveTextContent("Projects")
     expect(document.documentElement.dir).toBe("ltr")
   })
+
+  it("resolves English with no provider mounted, instead of throwing", () => {
+    // ~240 components are about to call t(), and most of their existing test
+    // files never mount a provider — nor do the prerendered marketing entries,
+    // by design. Throwing there would buy nothing: English is already the
+    // documented per-key fallback, so a provider-less read gives the same answer.
+    render(<Probe />)
+    expect(screen.getByTestId("label")).toHaveTextContent("Projects")
+  })
+
+  it("does not mutate <html> when no provider is mounted", () => {
+    // The fallback must stay inert: a provider-less render is usually a test or
+    // a prerender pass, and neither should be reaching into the document.
+    render(<Probe />)
+    expect(document.documentElement.getAttribute("lang")).toBeNull()
+    expect(document.documentElement.getAttribute("dir")).toBeNull()
+  })
 })

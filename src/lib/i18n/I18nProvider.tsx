@@ -81,10 +81,30 @@ export function I18nProvider({ children }: { children: ReactNode }) {
   return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>
 }
 
+/**
+ * Provider-less fallback — a frozen, referentially stable English context.
+ *
+ * `t()` is about to be called from ~240 components, and the vast majority of
+ * their existing test files do not mount a provider. Throwing there would force
+ * wrapper churn across the whole suite to buy nothing: English is already the
+ * documented per-key fallback, so resolving against the `en` catalog is the same
+ * answer the provider would give for an unset locale. The prerendered marketing
+ * entries get the same benefit — they render without a provider by design.
+ *
+ * `setLocale` is a no-op because with no provider there is no state to change
+ * and nothing to persist; chrome that needs to know whether switching is even
+ * possible should use `useI18nOptional()` instead of inspecting this.
+ */
+const FALLBACK_CONTEXT: I18nContextValue = Object.freeze<I18nContextValue>({
+  locale: DEFAULT_LOCALE,
+  dir: directionFor(DEFAULT_LOCALE),
+  locales: LOCALES,
+  setLocale: () => {},
+  t: (key, vars) => translate(CATALOGS[DEFAULT_LOCALE], key, vars),
+})
+
 export function useI18n(): I18nContextValue {
-  const ctx = useContext(I18nContext)
-  if (!ctx) throw new Error("useI18n must be used within I18nProvider")
-  return ctx
+  return useContext(I18nContext) ?? FALLBACK_CONTEXT
 }
 
 /**

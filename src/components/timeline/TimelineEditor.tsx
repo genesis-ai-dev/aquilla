@@ -1052,17 +1052,23 @@ export function TimelineEditor({
                 clock, so it can't be dragged on a re-flowed track. */}
             <TimelineLane cells={subtitle} variant="subtitle" retimable={!audioFirst} snapEnabled={snapOn} {...laneProps} />
             {/* AQU-646: a file with footage and no media cells of its own gets
-                the BAND — the video's audio as one continuous span, divided at
-                the subtitle timestamps, silences included. Otherwise the
-                original dialogue lane, whose source split is FROZEN at import
-                and never retimable (Round 6). */}
+                the video's audio as source chips — the same cards an mp3
+                import's source row draws, broken at the VTT timestamps, with a
+                dashed empty chip over each silence. Otherwise the original
+                dialogue lane, whose source split is FROZEN at import and never
+                retimable (Round 6). */}
             {drawsSourceBand ? (
               <SourceRegionLane
                 map={sourceRegions}
+                cells={subtitle}
                 pxPerSec={pxPerSec}
                 viewStartSec={viewStartSec}
                 viewEndSec={viewEndSec}
-                onSeek={seekTo}
+                selectedId={selectedId}
+                editable={editable}
+                onSelect={selectFromChip}
+                onSeek={laneProps.onSeek}
+                onSeekSec={seekTo}
               />
             ) : (
               <TimelineLane cells={dialogue} variant="dialogue" retimable={false} {...laneProps} />

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
 import { expectTooltip, renderWithTooltips } from "@/test-utils/tooltip"
 import { TimelineEditor } from "./TimelineEditor"
 import type { CellData } from "@/hooks/useCells"
@@ -923,9 +923,10 @@ describe("TimelineEditor — the source-audio band", () => {
     render(
       <TimelineEditor fileId="f1" coreMediaUrl={VIDEO} editable cells={subtitleCells} onRetimeSubtitle={() => {}} />,
     )
-    expect(screen.getByTestId("tl-source-regions")).toBeInTheDocument()
+    const lane = screen.getByTestId("tl-source-regions")
+    // The cues render as the SAME cards an mp3 import's source row draws.
+    expect(within(lane).getAllByTestId(/^tl-card-/)).toHaveLength(2)
     // The subtitle lane is still there; the DIALOGUE lane is what the band replaced.
-    expect(screen.queryByTestId("tl-lane")).toBeInTheDocument()
     expect(screen.queryAllByTestId("tl-lane")).toHaveLength(1)
   })
 
@@ -934,19 +935,19 @@ describe("TimelineEditor — the source-audio band", () => {
     render(
       <TimelineEditor fileId="f1" coreMediaUrl={VIDEO} editable cells={subtitleCells} onRetimeSubtitle={() => {}} />,
     )
-    // The trailing silence — 52s to 120s — is a real, reachable stretch.
-    const gaps = screen.getAllByTestId("tl-source-region-gap")
+    // The trailing silence — 52s to 120s — is a real, reachable chip.
+    const gaps = screen.getAllByTestId("tl-source-gap")
     const last = gaps[gaps.length - 1]
     expect(Number(last.getAttribute("data-region-end"))).toBe(120)
   })
 
-  it("still draws the band before the footage's length is known", () => {
+  it("still draws the row before the footage's length is known", () => {
     render(
       <TimelineEditor fileId="f1" coreMediaUrl={VIDEO} editable cells={subtitleCells} onRetimeSubtitle={() => {}} />,
     )
     // Spans the cues, exactly as the row did before — no crash, no empty row.
-    expect(screen.getByTestId("tl-source-regions")).toBeInTheDocument()
-    expect(screen.getByTestId("tl-source-band").style.width).not.toBe("")
+    const lane = screen.getByTestId("tl-source-regions")
+    expect(within(lane).getAllByTestId(/^tl-card-/)).toHaveLength(2)
   })
 
   it("hides the source speaker button, which cannot mute a video it does not own", () => {

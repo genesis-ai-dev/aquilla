@@ -1,87 +1,115 @@
-// The Source-audio row for a subtitle file timed against footage: the video's
-// own audio, drawn as ONE continuous span with a division at every subtitle
-// timestamp. (AQU-646)
+// The Source-audio row for a subtitle file timed against footage. (AQU-646)
 //
-// Deliberately NOT TimelineCard. That component draws a rounded, bordered,
-// individually-filled box — which is exactly the "lots of separate clips"
-// impression this row must not give, because the audio is not clips. It is one
-// piece that has been marked up. (It is also 271 lines of drag state, resize
-// grips and per-card pointer listeners, against a file that produces a couple
-// of thousand regions; but the drawing is the reason.)
+// Same chips as an imported recording's source row — literally the same
+// component, TimelineCard in its dialogue variant — with the breaks falling at
+// the VTT timestamps instead of at silence-detected splits. The stretches
+// BETWEEN cues get a chip too: same shape, dashed, empty. That is the point of
+// the row — the video has sound there, nobody has said anything about it yet,
+// and a later round makes those chips fillable.
 //
-// So: one bar underneath for continuity, one rectangle per region on top. The
-// stretches a subtitle covers are tinted, the silences are left plain, and the
-// left border of each rectangle IS the division mark. Nothing here is
-// draggable — the split is the VTT's, and this row does not edit it.
+// 2026-08-11: this replaced a first draft that drew one continuous tinted band
+// with hairline divisions. Sam: the app already has a chip language for "a
+// stretch of source audio"; this row should look exactly like an mp3 import's,
+// not invent its own.
 
 import { memo } from "react"
-import { cn } from "@/lib/utils"
 import { secToPx, pxToSec, isVisible } from "@/lib/timeline/scale"
-import type { SourceRegion, SourceRegionMap } from "@/lib/timeline/source-regions"
+import { fmtClock } from "./format"
+import { TimelineCard } from "./TimelineCard"
+import type { CellData } from "@/hooks/useCells"
+import type { SourceRegionMap } from "@/lib/timeline/source-regions"
+
+/** Silences shorter than this draw no chip. A real VTT carries 1–100ms
+ *  rounding gaps between most consecutive cues, and a dashed sliver at every
+ *  one reads as dirt — the space still shows, as the break between cards. */
+export const MIN_GAP_CHIP_SEC = 0.2
 
 export interface SourceRegionLaneProps {
   map: SourceRegionMap
+  /** Timed cells, lane-filtered + time-sorted (the subtitle derivation). */
+  cells: CellData[]
   pxPerSec: number
   viewStartSec: number
   viewEndSec: number
-  /** Clicking anywhere on the band moves the playhead there. */
-  onSeek(sec: number): void
-}
-
-function describe(region: SourceRegion): string {
-  const len = `${(region.endSec - region.startSec).toFixed(1)}s`
-  if (region.kind === "gap") return `No subtitle here · ${len}`
-  if (region.kind === "overlap") return `${region.cellIds.length} lines at once · ${len}`
-  return `Subtitle · ${len}`
+  selectedId: string | null
+  editable: boolean
+  onSelect(id: string): void
+  /** Clean click on a cue chip → navigate playback to it (same as any lane). */
+  onSeek?(id: string): void
+  /** A click on a silence — seeks the transport to the clicked second. */
+  onSeekSec(sec: number): void
 }
 
 function SourceRegionLaneImpl({
   map,
+  cells,
   pxPerSec,
   viewStartSec,
   viewEndSec,
+  selectedId,
+  editable,
+  onSelect,
   onSeek,
+  onSeekSec,
 }: SourceRegionLaneProps) {
-  const visible = map.regions.filter((r) => isVisible(r.startSec, r.endSec, viewStartSec, viewEndSec))
+  const spanOf = (c: CellData): { start: number; end: number } => {
+    const start = c.startTime ?? 0
+    return { start, end: c.endTime ?? start }
+  }
+  const visibleCells = cells.filter((c) => {
+    const s = spanOf(c)
+    return isVisible(s.start, s.end, viewStartSec, viewEndSec)
+  })
+  const visibleGaps = map.regions.filter(
+    (r) =>
+      r.kind === "gap" &&
+      r.endSec - r.startSec >= MIN_GAP_CHIP_SEC &&
+      isVisible(r.startSec, r.endSec, viewStartSec, viewEndSec),
+  )
 
   return (
-    <div
-      data-testid="tl-source-regions"
-      data-variant="source-band"
-      className="relative h-[66px] border-b border-border"
-      onClick={(e) => {
-        const rect = e.currentTarget.getBoundingClientRect()
-        onSeek(Math.max(0, pxToSec(e.clientX - rect.left, pxPerSec)))
-      }}
-    >
-      {/* The continuity: one unbroken piece of audio running the whole length
-          of the footage, including past the last cue. */}
-      <div
-        data-testid="tl-source-band"
-        className="absolute top-2.5 h-[46px] rounded-md border border-sky-200 bg-sky-50/60 dark:border-sky-900 dark:bg-sky-950/40"
-        style={{ left: 0, width: `${secToPx(map.totalSec, pxPerSec)}px` }}
-      />
-      {visible.map((r) => (
+    <div data-testid="tl-source-regions" data-variant="source-band" className="relative h-[66px] border-b border-border">
+      {visibleGaps.map((g) => (
         <div
-          key={r.startSec}
-          data-testid={`tl-source-region-${r.kind}`}
-          data-region-start={r.startSec}
-          data-region-end={r.endSec}
-          title={describe(r)}
-          className={cn(
-            "absolute top-2.5 h-[46px]",
-            // The left edge is the division mark — one rule per timestamp,
-            // drawn by the region that starts there.
-            r.startSec > 0 && "border-l border-sky-300/80 dark:border-sky-800",
-            r.kind === "cue" && "bg-sky-200/60 dark:bg-sky-900/50",
-            // Two speakers at once. Almost always the import's own doing, and
-            // there is currently no other way to see that it happened.
-            r.kind === "overlap" && "bg-amber-200/70 dark:bg-amber-900/50",
-          )}
-          style={{
-            left: `${secToPx(r.startSec, pxPerSec)}px`,
-            width: `${secToPx(r.endSec - r.startSec, pxPerSec)}px`,
+          key={g.startSec}
+          data-testid="tl-source-gap"
+          data-region-start={g.startSec}
+          data-region-end={g.endSec}
+          title={`No subtitle here · ${(g.endSec - g.startSec).toFixed(1)}s`}
+          onClick={(e) => {
+            const rect = e.currentTarget.getBoundingClientRect()
+            onSeekSec(g.startSec + pxToSec(e.clientX - rect.left, pxPerSec))
           }}
+          // TimelineCard's geometry and radius, dashed and unfilled — the
+          // established "slot with nothing in it yet" treatment (the untimed
+          // strip's chips are the precedent), kept in the lane's sky family.
+          className="absolute top-2.5 h-[46px] cursor-pointer overflow-hidden rounded-lg border border-dashed border-sky-300 bg-sky-50/30 transition-colors hover:bg-sky-100/40 dark:border-sky-900 dark:bg-sky-950/20 dark:hover:bg-sky-950/40"
+          style={{
+            left: `${secToPx(g.startSec, pxPerSec)}px`,
+            width: `${secToPx(g.endSec - g.startSec, pxPerSec)}px`,
+          }}
+        >
+          <span className="absolute bottom-1 left-2.5 font-mono text-[9px] tabular-nums text-muted-foreground">
+            {fmtClock(g.startSec, true)}–{fmtClock(g.endSec, true)}
+          </span>
+        </div>
+      ))}
+      {visibleCells.map((c) => (
+        <TimelineCard
+          key={c.id}
+          cell={c}
+          pxPerSec={pxPerSec}
+          laneStartSec={0}
+          variant="dialogue"
+          selected={selectedId === c.id}
+          editable={editable}
+          // The split is the VTT's; this row does not edit it. Same rule as an
+          // imported recording's source row (frozen at import).
+          retimable={false}
+          span={spanOf(c)}
+          onSelect={onSelect}
+          onRetime={() => {}}
+          onSeek={onSeek}
         />
       ))}
     </div>

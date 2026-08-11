@@ -31,6 +31,16 @@ export function dateToDeadlineString(date: Date): string {
   return `${y}-${m}-${d}`
 }
 
+/**
+ * Deliberately locked to "en-US" regardless of the active i18n locale (AQU-511
+ * finding 5). `parseInputDate` below has to be able to read back whatever this
+ * prints, and reliably parsing a *localised* typed date string is not solvable
+ * with `new Date()` — e.g. "03/04" is ambiguous between day-first and
+ * month-first locales, and a wrong guess silently saves the wrong date. A
+ * fixed, unambiguous English format is worth more than a translated one that
+ * can misparse. `common.datePlaceholder`'s context entry documents this
+ * constraint for translators; keep the two in sync if this ever changes.
+ */
 function formatDate(date: Date | undefined) {
   if (!date) return ""
   return date.toLocaleDateString("en-US", {
@@ -40,6 +50,7 @@ function formatDate(date: Date | undefined) {
   })
 }
 
+/** See `formatDate` above — must stay able to parse whatever it prints. */
 function parseInputDate(value: string): Date | undefined {
   const trimmed = value.trim()
   if (!trimmed) return undefined

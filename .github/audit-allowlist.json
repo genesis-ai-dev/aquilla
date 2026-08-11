@@ -1,0 +1,80 @@
+{
+  "$comment": [
+    "OPS-6 — advisories that scripts/audit-deps.mjs should not fail on.",
+    "",
+    "An entry here is an accepted risk with a named reason, not a mute button.",
+    "Every entry must say why the advisory is not reachable in what we ship, and",
+    "carry a reviewBy date so 'accepted' cannot quietly become 'forgotten'.",
+    "",
+    "If you cannot write a reachability argument, do not add the entry — upgrade",
+    "the dependency instead. That is what happened to the hono advisories found",
+    "on 2026-08-11: they were unreachable AND patched, so they were fixed rather",
+    "than listed here."
+  ],
+  "accepted": [
+    {
+      "ghsa": "GHSA-23hp-3jrh-7fpw",
+      "module": "tar",
+      "severity": "critical",
+      "reason": "Node-only transitive dep. Reaches the tree solely via @huggingface/transformers and kokoro-js -> onnxruntime-node, and those two packages are imported only from browser Web Workers (src/lib/audio/whisper-worker.ts, mms-worker.ts, kokoro-worker.ts). Vite resolves the browser target (onnxruntime-web); the Node target is never bundled, never deployed to a Cloudflare Worker, and never parses an archive at runtime. Exposure is limited to a developer's node_modules at install time.",
+      "addedOn": "2026-08-11",
+      "reviewBy": "2026-11-11"
+    },
+    {
+      "ghsa": "GHSA-8x88-c5mf-7j5w",
+      "module": "tar",
+      "severity": "high",
+      "reason": "Same path and same reasoning as GHSA-23hp-3jrh-7fpw.",
+      "addedOn": "2026-08-11",
+      "reviewBy": "2026-11-11"
+    },
+    {
+      "ghsa": "GHSA-vmf3-w455-68vh",
+      "module": "tar",
+      "severity": "moderate",
+      "reason": "Same path and same reasoning as GHSA-23hp-3jrh-7fpw.",
+      "addedOn": "2026-08-11",
+      "reviewBy": "2026-11-11"
+    },
+    {
+      "ghsa": "GHSA-w8wr-v893-vjvp",
+      "module": "tar",
+      "severity": "moderate",
+      "reason": "Same path and same reasoning as GHSA-23hp-3jrh-7fpw.",
+      "addedOn": "2026-08-11",
+      "reviewBy": "2026-11-11"
+    },
+    {
+      "ghsa": "GHSA-gvwx-54wh-qm9j",
+      "module": "tar",
+      "severity": "moderate",
+      "reason": "Same path and same reasoning as GHSA-23hp-3jrh-7fpw.",
+      "addedOn": "2026-08-11",
+      "reviewBy": "2026-11-11"
+    },
+    {
+      "ghsa": "GHSA-r292-9mhp-454m",
+      "module": "tar",
+      "severity": "moderate",
+      "reason": "Same path and same reasoning as GHSA-23hp-3jrh-7fpw.",
+      "addedOn": "2026-08-11",
+      "reviewBy": "2026-11-11"
+    },
+    {
+      "ghsa": "GHSA-xcpc-8h2w-3j85",
+      "module": "adm-zip",
+      "severity": "high",
+      "reason": "Node-only transitive dep of onnxruntime-node, reached only through @huggingface/transformers. Same browser-worker reasoning as the tar entries: the Node target is not part of any deployed artifact, and nothing in the product hands it a ZIP.",
+      "addedOn": "2026-08-11",
+      "reviewBy": "2026-11-11"
+    },
+    {
+      "ghsa": "GHSA-f88m-g3jw-g9cj",
+      "module": "sharp",
+      "severity": "high",
+      "reason": "libvips image-decoding CVEs inherited by sharp, which is an optional Node-side dependency of @huggingface/transformers. The SPA runs transformers in a browser Worker where image decoding goes through the platform, not sharp; no Cloudflare Worker installs or invokes it. Upgrade blocked upstream until transformers moves its floor to sharp >=0.35.0.",
+      "addedOn": "2026-08-11",
+      "reviewBy": "2026-11-11"
+    }
+  ]
+}

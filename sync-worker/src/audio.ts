@@ -21,10 +21,13 @@
 // projects/{pid}/files/{fid}/, so wiping a file naturally wipes its audio.
 
 import { verifyTokenForFile } from "./auth"
+import { adminBearerMatches } from "./lib/admin-secret"
 
 export interface AudioEnv {
   SNAPSHOTS: R2Bucket
   AQUILLA_PG?: AquillaDb
+  /** OPS-2: dedicated admin bearer; preferred over SYNC_SECRET_KEY. */
+  ADMIN_SECRET?: string
   SYNC_SECRET_KEY?: string
   R2_KEY_PREFIX?: string
 }
@@ -132,10 +135,11 @@ export async function handleAudioRequest(
 
   if (request.method === "DELETE") {
     const auth = request.headers.get("Authorization") ?? ""
-    const adminExpected = env.SYNC_SECRET_KEY
-      ? `Bearer ${env.SYNC_SECRET_KEY}`
-      : null
-    if (adminExpected && auth === adminExpected) {
+    // OPS-2: shared precedence (ADMIN_SECRET, else SYNC_SECRET_KEY) and a
+    // constant-time compare. This gate previously used `===`, so it leaked a
+    // length/prefix oracle on the signing key that admin.ts had already been
+    // hardened against.
+    if (adminBearerMatches(auth, env)) {
       // Admin DELETE: no extra scope check.
       await env.SNAPSHOTS.delete(key)
       return withAudioCors(Response.json({ ok: true }))

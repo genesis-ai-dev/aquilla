@@ -3,10 +3,15 @@
 // the partyserver import graph (which references cloudflare:* URLs Node
 // doesn't resolve).
 
-import { secureCompare as constantTimeEqual } from "./lib/secure-compare"
+import { adminBearerMatches } from "./lib/admin-secret"
 
 export interface AdminEnv {
   SNAPSHOTS: R2Bucket
+  /**
+   * Dedicated admin bearer. Preferred over SYNC_SECRET_KEY — see the auth note
+   * on handleAdminRequest. Provision with `wrangler secret put ADMIN_SECRET`.
+   */
+  ADMIN_SECRET?: string
   SYNC_SECRET_KEY?: string
   R2_KEY_PREFIX?: string
 }
@@ -20,9 +25,20 @@ function r2KeyPrefix(env: Pick<AdminEnv, "R2_KEY_PREFIX">): string {
  * Handles DELETE /admin/files/:projectId/:fileId. Returns null when the path
  * isn't an admin route so the caller can fall through to partyserver.
  *
- * Auth: Authorization: Bearer ${SYNC_SECRET_KEY}. Reuses the JWT-signing
- * secret as a shared admin key — only frontier-server (which already holds
- * SYNC_SECRET_KEY for token signing) can call this.
+ * Auth: `Authorization: Bearer ${ADMIN_SECRET}`.
+ *
+ * OPS-2: this route historically accepted `SYNC_SECRET_KEY` — the JWT *signing*
+ * key — as its bearer. That works, but it means every ad-hoc admin call puts a
+ * key that can mint sync tokens for any project into shell history, terminal
+ * scrollback, and any proxy's logs. `ADMIN_SECRET` is a dedicated credential
+ * whose whole blast radius is these two R2 routes.
+ *
+ * `SYNC_SECRET_KEY` is still accepted as a fallback, and ONLY when
+ * `ADMIN_SECRET` is unset, so an environment that has not been provisioned yet
+ * keeps working and the rollout can be done one environment at a time without
+ * locking ops out. Once `ADMIN_SECRET` is set everywhere, delete the fallback
+ * branch and drop `SYNC_SECRET_KEY` from AdminEnv — at that point a signing key
+ * presented here is rejected, which is the actual goal.
  */
 export async function handleAdminRequest(
   request: Request,
@@ -39,8 +55,7 @@ export async function handleAdminRequest(
 
   // Auth gate applies to every recognized admin route.
   const auth = request.headers.get("Authorization") ?? ""
-  const expected = env.SYNC_SECRET_KEY ? `Bearer ${env.SYNC_SECRET_KEY}` : null
-  if (!expected || !constantTimeEqual(auth, expected)) {
+  if (!adminBearerMatches(auth, env)) {
     return new Response("unauthorized", { status: 401 })
   }
 

@@ -90,6 +90,14 @@ id = "69bcc10e67464f2eaf4fe91a9141e7cd"
 # id = "<prod-namespace-id>"
 
 # Auth:
+#   ADMIN_SECRET gates the operator-only routes (`/admin/files/*` and
+#   `DELETE /audio/*`). Provision it per environment with
+#   `wrangler secret put ADMIN_SECRET [--env <name>]`. Until it is set, those
+#   routes fall back to accepting SYNC_SECRET_KEY, which is how they worked
+#   historically — but that puts a key that can mint sync tokens for ANY
+#   project into shell history on every ops call, so set ADMIN_SECRET and the
+#   fallback stops applying in that environment (OPS-2).
+#
 #   SYNC_SECRET_KEY (shared with auth-worker for sync-token verification and
 #   distinct from the identity access-token SECRET_KEY) and ALLOW_UNAUTHENTICATED live in
 #   .dev.vars for local dev (see .dev.vars.example) and are provisioned via

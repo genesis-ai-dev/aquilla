@@ -1694,6 +1694,11 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
       >
         <EditorContent
           editor={editor}
+          // OPS-3: the drafting surface is a contenteditable, so PostHog's
+          // `maskAllInputs` does not reach it — replay would capture every
+          // keystroke of an unpublished translation as page text. `data-ph-mask`
+          // is the configured maskTextSelector (src/lib/posthog.ts).
+          data-ph-mask
           className={cn(compactHeight ? "" : "h-full [&>.ProseMirror]:h-full")}
         />
       </div>

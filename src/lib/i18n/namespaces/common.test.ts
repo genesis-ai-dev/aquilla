@@ -57,4 +57,17 @@ describe("common namespace (AQU-511)", () => {
   it("gives every preallocated key a context entry or namespace cover", () => {
     expect(common.context._context.description.length).toBeGreaterThan(12)
   })
+
+  it("does not tell translators to reorder the date placeholder to day-month-year (I18N-TRACES finding 5)", () => {
+    // date-picker.tsx's formatDate/parseInputDate are hard-locked to en-US
+    // month-day-year ("June 01, 2025") — parsing a reordered, locale-typed
+    // date string back is genuinely ambiguous (is "03/04" March 4 or April
+    // 3?) and a wrong guess silently corrupts the saved date. The context
+    // must not promise a reorder the code cannot honour.
+    const entry = common.context.keys?.["common.datePlaceholder"]
+    expect(entry).toBeDefined()
+    const description = entry!.description
+    expect(description).not.toMatch(/day,\s*month(?: name)?,?\s*and year/i)
+    expect(description.toLowerCase()).toContain("month-day-year")
+  })
 })

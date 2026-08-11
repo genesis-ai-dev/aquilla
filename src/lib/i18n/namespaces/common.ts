@@ -172,9 +172,14 @@ export const common = defineNamespace({
       "common.datePlaceholder": {
         description:
           "Placeholder text shown inside an empty date-input field, illustrating the " +
-          "expected format with an example date. Not a real date — format it the way " +
-          "dates are conventionally written in the target language, keeping day, month " +
-          "name, and year in that order.",
+          "expected format with an example date. Not a real date, and NOT a free " +
+          "translation: the field's parser (date-picker.tsx) is hard-locked to the " +
+          "en-US month-day-year shape ('June 01, 2025') plus a raw ISO date — it " +
+          "cannot understand a reordered or foreign-language date, and a misread date " +
+          "silently corrupts what gets saved. Translate the surrounding words if the " +
+          "target language has an equivalent illustrative convention, but keep the " +
+          "unit order month-day-year and keep the month written in English, so a user " +
+          "who types the example back gets a date that parses correctly.",
         screenshot: "project-settings",
       },
       "common.breadcrumbNav": {

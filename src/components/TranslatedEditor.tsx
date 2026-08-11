@@ -70,6 +70,7 @@ import type { Concept } from "@/lib/terminology/types"
 import { findActiveTimingIndex } from "@/lib/audio/timings"
 import type { WordTiming } from "@/lib/codex-editor/types"
 import type { TargetPresenceSelection } from "@/lib/sync/presence-store"
+import { useT } from "@/lib/i18n/I18nProvider"
 import {
   detectStrongTextDirection,
   type DirectionMode,
@@ -436,6 +437,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   ariaLabel,
   onEscapeToGrid,
 }, ref) {
+  const t = useT()
   // Held in a ref so the editor's keydown handler — created once per cellId —
   // always sees the latest navigation callback without re-creating the editor.
   const onNavigateCellRef = useRef(onNavigateCell)
@@ -567,7 +569,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
     const value = editorInstance.getText().replace(new RegExp(IDML_COMPOSITION_SENTINEL, "g"), "")
     const valueHtml = serializeIdmlEditorDocument(editorInstance.state.doc)
     if (valueHtml === null) {
-      reportIdmlError("This edit changed the protected IDML document structure. Undo it or re-import the IDML.")
+      reportIdmlError(t("editor.idml.structureChanged"))
       return null
     }
     const validation = validateIdmlTranslation(
@@ -582,7 +584,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
     setIdmlError(null)
     onIdmlValidationErrorRef.current?.(null)
     return { value, valueHtml }
-  }, [idmlContext, reportIdmlError])
+  }, [idmlContext, reportIdmlError, t])
 
   const commitEditorSnapshot = useRef<(reason?: string) => void>(() => undefined)
   // NOTE on `isDestroyed` guards here and in the effects below: `useEditor`'s
@@ -1050,7 +1052,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
               view.state.tr.replaceSelectionWith(hardBreak.create()).scrollIntoView(),
             )
           } else {
-            reportIdmlError("Place the caret inside an InDesign text slot before adding a line break.")
+            reportIdmlError(t("editor.idml.caretOutsideSlot"))
           }
           return true
         }
@@ -1345,7 +1347,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
         to: from,
         plainPosition: pmPositionToPlainPosition(state.doc, from),
         source: "cursor",
-        previewText: "Cursor position",
+        previewText: t("editor.anchor.cursorPosition"),
       })
     },
     insertFootnoteMarker(marker, anchor, anchorText) {
@@ -1380,7 +1382,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
       commitEditorSnapshot.current("footnote")
       return true
     },
-  }), [editor, isReadOnly])
+  }), [editor, isReadOnly, t])
 
   // The committed baseline is the editor's OWN canonical text, never the raw
   // stored value. Stored values can be HTML-escaped or otherwise differ from
@@ -1550,20 +1552,20 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
     <div className={cn("relative", compactHeight ? "" : "h-full")}>
       {remoteChangedDuringEdit && onDiscardLocal && (
         <div className="mb-1 flex items-center justify-between gap-2 rounded-xl bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-800 dark:bg-amber-950 dark:text-amber-300">
-          <span>This cell changed elsewhere while you were editing.</span>
+          <span>{t("editor.conflict.changedElsewhere")}</span>
           <button
             type="button"
             onClick={onDiscardLocal}
             className="rounded-md bg-amber-500/20 px-2 py-0.5 text-amber-900 hover:bg-amber-500/30 dark:text-amber-100"
           >
-            Discard and reload
+            {t("editor.conflict.discardAndReload")}
           </button>
         </div>
       )}
       {pendingFootnoteDelete && (
         <div className="absolute right-2 top-2 z-20 flex items-center gap-2 rounded-lg border border-destructive/20 bg-background px-2 py-1 text-[11px]">
           <span className="text-muted-foreground">
-            Delete footnote {pendingFootnoteDelete.label}?
+            {t("editor.footnotes.deletePrompt", { label: pendingFootnoteDelete.label })}
           </span>
           <button
             type="button"
@@ -1571,7 +1573,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
             onClick={confirmPendingFootnoteDelete}
             className="rounded px-2 py-0.5 font-medium text-destructive hover:bg-destructive/10"
           >
-            I'm sure
+            {t("editor.footnotes.deleteConfirm")}
           </button>
           <button
             type="button"
@@ -1579,7 +1581,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
             onClick={cancelPendingFootnoteDelete}
             className="rounded px-2 py-0.5 text-muted-foreground hover:bg-muted"
           >
-            Cancel
+            {t("common.cancel")}
           </button>
         </div>
       )}
@@ -1593,61 +1595,61 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
           className="relative z-40 flex gap-0.5 rounded-lg bg-card p-0.5"
           onMouseDown={handleFormattingToolbarMouseDown}
         >
-          <AppTooltip content="Bold (Cmd+B)">
+          <AppTooltip content={t("editor.format.boldTooltip")}>
             <Button
               type="button"
               variant="ghost"
               size="icon-xs"
               onClick={() => editor.chain().focus().toggleBold().run()}
-              aria-label="Bold"
+              aria-label={t("editor.format.bold")}
               className={cn("rounded-md", editor.isActive("bold") && "bg-accent")}
             >
               <Bold className="h-3 w-3" />
             </Button>
           </AppTooltip>
-          <AppTooltip content="Italic (Cmd+I)">
+          <AppTooltip content={t("editor.format.italicTooltip")}>
             <Button
               type="button"
               variant="ghost"
               size="icon-xs"
               onClick={() => editor.chain().focus().toggleItalic().run()}
-              aria-label="Italic"
+              aria-label={t("editor.format.italic")}
               className={cn("rounded-md", editor.isActive("italic") && "bg-accent")}
             >
               <Italic className="h-3 w-3" />
             </Button>
           </AppTooltip>
-          <AppTooltip content="Underline (Cmd+U)">
+          <AppTooltip content={t("editor.format.underlineTooltip")}>
             <Button
               type="button"
               variant="ghost"
               size="icon-xs"
               onClick={() => editor.chain().focus().toggleUnderline().run()}
-              aria-label="Underline"
+              aria-label={t("editor.format.underline")}
               className={cn("rounded-md", editor.isActive("underline") && "bg-accent")}
             >
               <UnderlineIcon className="h-3 w-3" />
             </Button>
           </AppTooltip>
-          <AppTooltip content="Strikethrough">
+          <AppTooltip content={t("editor.format.strikethrough")}>
             <Button
               type="button"
               variant="ghost"
               size="icon-xs"
               onClick={() => editor.chain().focus().toggleStrike().run()}
-              aria-label="Strikethrough"
+              aria-label={t("editor.format.strikethrough")}
               className={cn("rounded-md", editor.isActive("strike") && "bg-accent")}
             >
               <Strikethrough className="h-3 w-3" />
             </Button>
           </AppTooltip>
-          <AppTooltip content="Inline code">
+          <AppTooltip content={t("editor.format.code")}>
             <Button
               type="button"
               variant="ghost"
               size="icon-xs"
               onClick={() => editor.chain().focus().toggleCode().run()}
-              aria-label="Inline code"
+              aria-label={t("editor.format.code")}
               className={cn("rounded-md", editor.isActive("code") && "bg-accent")}
             >
               <Code className="h-3 w-3" />

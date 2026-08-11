@@ -10,6 +10,7 @@
 import { X, AlertTriangle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { useT } from "@/lib/i18n/I18nProvider"
 import {
   useCompletionBatchProgress,
   cancelBatchCompletion,
@@ -17,6 +18,8 @@ import {
 } from "@/lib/completion/batch-completion"
 
 export function CompletionBulkProgressBanner() {
+  // `useT` before the idle early-return: hooks cannot sit after a conditional.
+  const t = useT()
   const progress = useCompletionBatchProgress()
   if (!progress) return null
 
@@ -28,17 +31,18 @@ export function CompletionBulkProgressBanner() {
       <div className="flex items-center gap-2 rounded-md border border-destructive/40 bg-background px-3 py-2 text-sm shadow-sm">
         <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-destructive" />
         <span>
-          {failed} of {total} cells failed
-          {done > 0 ? ` — ${done} completed` : ""}.
+          {done > 0
+            ? t("editor.completion.failedPartial", { failed, total, done })
+            : t("editor.completion.failed", { failed, total })}
         </span>
         <div className="flex-1" />
-        <AppTooltip content="Dismiss">
+        <AppTooltip content={t("common.dismiss")}>
           <Button
             type="button"
             variant="ghost"
             size="icon-xs"
             onClick={dismissBatchCompletionSummary}
-            aria-label="Dismiss"
+            aria-label={t("common.dismiss")}
             className="ml-1 text-muted-foreground"
           >
             <X />
@@ -52,7 +56,7 @@ export function CompletionBulkProgressBanner() {
 
   return (
     <div className="flex items-center gap-2 rounded-md border bg-background px-3 py-2 text-sm">
-      <span className="font-medium">Translating</span>
+      <span className="font-medium">{t("editor.completion.translating")}</span>
       <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
         <div
           className="h-full rounded-full bg-primary transition-all"
@@ -63,13 +67,13 @@ export function CompletionBulkProgressBanner() {
         {done}/{total}
       </span>
       {!cancelled && (
-        <AppTooltip content="Stop translating">
+        <AppTooltip content={t("editor.completion.stop")}>
           <Button
             type="button"
             variant="ghost"
             size="icon-xs"
             onClick={cancelBatchCompletion}
-            aria-label="Stop translating"
+            aria-label={t("editor.completion.stop")}
             className="ml-1 text-muted-foreground"
           >
             <X />
@@ -77,7 +81,7 @@ export function CompletionBulkProgressBanner() {
         </AppTooltip>
       )}
       {cancelled && (
-        <span className="text-muted-foreground">cancelling…</span>
+        <span className="text-muted-foreground">{t("editor.completion.cancelling")}</span>
       )}
     </div>
   )

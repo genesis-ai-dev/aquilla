@@ -26,6 +26,7 @@ import type { ProjectRecord, RuleInfraction } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
 import type { CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 export type { TimelineDetailActions } from "./TimelineCellDetail"
 
@@ -115,6 +116,7 @@ export function TimelineEditor({
   session,
   audioByCellId,
 }: TimelineEditorProps) {
+  const t = useT()
   const [pxPerSec, setPxPerSec] = useState(() => loadZoom(fileId))
   // Seeded by the text→media trace (AQU-646 round 3): the seed alone opens
   // the detail pane and rings the card.
@@ -414,12 +416,12 @@ export function TimelineEditor({
     <div data-testid="tl-editor" className="flex h-full min-h-0 flex-col">
       {/* toolbar */}
       <div className="flex items-center gap-2 border-b border-border bg-muted/30 px-3 py-1.5">
-        <span className="text-xs font-medium text-muted-foreground">Timeline</span>
+        <span className="text-xs font-medium text-muted-foreground">{t("editor.timeline.title")}</span>
         <div className="ml-auto flex items-center gap-1.5">
-          <AppTooltip content="Follow playhead">
+          <AppTooltip content={t("editor.timeline.followPlayhead")}>
             <button
               type="button"
-              aria-label="Follow playhead"
+              aria-label={t("editor.timeline.followPlayhead")}
               aria-pressed={follow}
               onClick={() => {
                 const next = !follow
@@ -446,19 +448,19 @@ export function TimelineEditor({
             <button
               type="button"
               onClick={() => {
-                const u = window.prompt("Core video URL (leave blank to clear)", coreMediaUrl ?? "")
+                const u = window.prompt(t("editor.timeline.coreVideoPrompt"), coreMediaUrl ?? "")
                 if (u !== null) onLinkVideo(u.trim() || null)
               }}
               className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground/80 hover:bg-muted"
             >
               <Film className="h-3.5 w-3.5 text-muted-foreground" />
-              {coreMediaUrl ? "Change video" : "Link video"}
+              {coreMediaUrl ? t("editor.timeline.changeVideo") : t("editor.timeline.linkVideo")}
             </button>
           )}
           <div className="inline-flex items-center rounded-md border border-border">
             <button
               type="button"
-              aria-label="Zoom out"
+              aria-label={t("editor.timeline.zoomOut")}
               onClick={() => applyZoom(pxPerSec / 1.3)}
               className="px-1.5 py-1 text-foreground/70 hover:bg-muted"
             >
@@ -469,7 +471,7 @@ export function TimelineEditor({
             </span>
             <button
               type="button"
-              aria-label="Zoom in"
+              aria-label={t("editor.timeline.zoomIn")}
               onClick={() => applyZoom(pxPerSec * 1.3)}
               className="px-1.5 py-1 text-foreground/70 hover:bg-muted"
             >
@@ -497,11 +499,19 @@ export function TimelineEditor({
       <div className="grid min-h-0 grid-cols-[128px_1fr]">
         <div className="border-r border-border bg-muted/20">
           <div className="h-7 border-b border-border" />
-          <LaneLabel name="Subtitle" sub="text · reading" dot="bg-zinc-400 dark:bg-zinc-600" />
-          <LaneLabel name="Dialogue" sub="audio · recording" dot="bg-sky-600" />
+          <LaneLabel
+            name={t("editor.timeline.laneSubtitle")}
+            sub={t("editor.timeline.laneSubtitleSub")}
+            dot="bg-zinc-400 dark:bg-zinc-600"
+          />
+          <LaneLabel
+            name={t("editor.timeline.laneDialogue")}
+            sub={t("editor.timeline.laneDialogueSub")}
+            dot="bg-sky-600"
+          />
           <div className="flex h-12 flex-col justify-center px-3">
-            <span className="text-xs font-semibold text-foreground">Untimed</span>
-            <span className="text-[10px] text-muted-foreground">no timecode</span>
+            <span className="text-xs font-semibold text-foreground">{t("editor.timeline.laneUntimed")}</span>
+            <span className="text-[10px] text-muted-foreground">{t("editor.timeline.laneUntimedSub")}</span>
           </div>
         </div>
         <div
@@ -525,7 +535,7 @@ export function TimelineEditor({
             <TimelineLane cells={dialogue} variant="dialogue" {...laneProps} />
             <div className="flex h-12 items-center gap-2 overflow-x-auto border-b border-border px-3">
               {untimed.length === 0 ? (
-                <span className="text-[10px] text-muted-foreground">No untimed clips.</span>
+                <span className="text-[10px] text-muted-foreground">{t("editor.timeline.noUntimedClips")}</span>
               ) : (
                 untimed.map((c) => (
                   <button

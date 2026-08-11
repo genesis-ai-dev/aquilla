@@ -9,6 +9,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { cn } from "@/lib/utils"
 import type { CellData } from "@/hooks/useCells"
 import type { CellAuditStats } from "@/hooks/useCellsAuditStats"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 interface Props {
   cell: CellData
@@ -38,6 +39,7 @@ export function CellActionsMenu({
   onAddComment,
   auditStatsByCellId,
 }: Props) {
+  const t = useT()
   const [open, setOpen] = useState(false)
 
   // Prefer D1 editCount when available; fall back to Y.Doc history length.
@@ -52,7 +54,7 @@ export function CellActionsMenu({
       ? {
           key: "addcomment",
           icon: <MessageCircle className="h-3.5 w-3.5" />,
-          label: "Add comment",
+          label: t("editor.cell.addComment"),
           onSelect: () => { onAddComment(cell.id); setOpen(false) },
         }
       : null,
@@ -60,7 +62,7 @@ export function CellActionsMenu({
       ? {
           key: "rerecord",
           icon: <Mic className="h-3.5 w-3.5" />,
-          label: "Re-record audio",
+          label: t("editor.cell.reRecord"),
           disabled: !editable || isGitProject,
           onSelect: () => { onOpenRecording(cell.id); setOpen(false) },
         }
@@ -69,7 +71,7 @@ export function CellActionsMenu({
       ? {
           key: "transcribe",
           icon: <Sparkles className={cn("h-3.5 w-3.5", isTranscribing && "animate-pulse")} />,
-          label: isTranscribing ? "Transcribing…" : "Transcribe with Whisper",
+          label: isTranscribing ? t("editor.cell.transcribing") : t("editor.cell.transcribe"),
           disabled: !editable || Boolean(isTranscribing),
           onSelect: () => { onTranscribe(cell); setOpen(false) },
         }
@@ -79,8 +81,10 @@ export function CellActionsMenu({
           key: "synth",
           icon: <Wand2 className={cn("h-3.5 w-3.5", isSynthesizing && "animate-pulse")} />,
           label: isSynthesizing
-            ? "Synthesizing…"
-            : hasAudio ? "Generate AI voice (replaces audio)" : "Generate AI voice",
+            ? t("editor.cell.synthesizing")
+            : hasAudio
+              ? t("editor.cell.generateVoiceReplace")
+              : t("editor.cell.generateVoice"),
           disabled: !editable || Boolean(isSynthesizing),
           onSelect: () => { onSynthesizeAudio(cell); setOpen(false) },
         }
@@ -89,7 +93,7 @@ export function CellActionsMenu({
       ? {
           key: "history",
           icon: <HistoryIcon className="h-3.5 w-3.5" />,
-          label: `History (${historyCount})`,
+          label: t("editor.cell.historyCount", { count: historyCount }),
           onSelect: () => { onOpenHistory(cell.id); setOpen(false) },
         }
       : null,
@@ -97,7 +101,9 @@ export function CellActionsMenu({
       ? {
           key: "backtranslate",
           icon: <Languages className={cn("h-3.5 w-3.5", isBacktranslating && "animate-pulse")} />,
-          label: cell.backtranslation ? "Regenerate backtranslation" : "Generate backtranslation",
+          label: cell.backtranslation
+            ? t("editor.cell.regenerateBacktranslation")
+            : t("editor.cell.generateBacktranslation"),
           disabled: !isBacktranslationConfigured || isBacktranslating || !editable,
           onSelect: () => { onBacktranslate(cell); setOpen(false) },
         }
@@ -113,7 +119,7 @@ export function CellActionsMenu({
         render={
           <button
             type="button"
-            aria-label="More actions"
+            aria-label={t("editor.cell.moreActions")}
             className={cn(
               "flex h-5 w-5 items-center justify-center rounded-lg transition-[transform,color] duration-150 ease-out active:scale-[0.92] hover:bg-muted/60",
               open ? "text-foreground bg-muted/60" : "text-muted-foreground/50 hover:text-foreground",

@@ -26,6 +26,7 @@ import { emitCellValidate, emitCellUnvalidate } from "@/lib/sync/events-emit"
 import { canPerform } from "@/lib/sync/role-policy"
 import { isBulkValidationEligible } from "@/lib/review/review-eligibility"
 import { isInMemberScope, type MemberScope } from "@/lib/sync/member-scopes"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 interface Props {
   project: ProjectRecord
@@ -82,6 +83,7 @@ type Running =
   | { kind: "voice" }
 
 export function SelectionBar({ project, cellStore, username, activeLane, myScopes, completeBatch, audioMode, onVoiceTogether, onHarmonize, canHarmonize = true, onValidationCommitted }: Props) {
+  const t = useT()
   const selected = useSelectedIds()
   const cellStoreVersion = useCellStoreVersion(cellStore)
   const [running, setRunning] = useState<Running>({ kind: "idle" })
@@ -139,7 +141,7 @@ export function SelectionBar({ project, cellStore, username, activeLane, myScope
         !isInMemberScope(myScopes, c.fileId, activeLane),
     ).length
     if (outOfScope > 0) {
-      return "Some selected cells are outside your assigned files or lanes"
+      return t("editor.selection.validateOutOfScope")
     }
     const alreadyMine = selectedCells.filter(
       (c) => isBulkValidationEligible(c) && c.activeValidators.includes(username),
@@ -149,12 +151,12 @@ export function SelectionBar({ project, cellStore, username, activeLane, myScope
     ).length
     const needTranslation = selectedCells.filter((c) => !c.translated.trim()).length
     if (alreadyMine > 0 && aiDrafts === 0 && needTranslation === 0) {
-      return "All selected cells are already validated by you"
+      return t("editor.selection.validateAllMine")
     }
-    if (aiDrafts > 0) return "Nothing eligible — untouched AI drafts require individual review"
-    if (needTranslation > 0) return "Selected cells need a translation first"
-    return "Nothing eligible to validate"
-  }, [validatableCount, selectedCells, username, myScopes, activeLane])
+    if (aiDrafts > 0) return t("editor.selection.validateAiDrafts")
+    if (needTranslation > 0) return t("editor.selection.validateNeedTranslation")
+    return t("editor.selection.validateNothingEligible")
+  }, [validatableCount, selectedCells, username, myScopes, activeLane, t])
   const allHaveTranslation = selectedCells.length > 0 && selectedCells.every((c) => c.translated.trim())
   const voiceableCount = useMemo(
     () => selectedCells.filter((c) => c.type !== "paratext" && c.translated.trim()).length,
@@ -217,8 +219,12 @@ export function SelectionBar({ project, cellStore, username, activeLane, myScope
         validated++
       }
       const msg = alreadyValidated > 0
-        ? `Validated ${validated} cell${validated === 1 ? "" : "s"} (${alreadyValidated} already validated)`
-        : `Validated ${validated} cell${validated === 1 ? "" : "s"}`
+        ? validated === 1
+          ? t("editor.selection.validatedToastSkippedOne", { count: validated, already: alreadyValidated })
+          : t("editor.selection.validatedToastSkippedMany", { count: validated, already: alreadyValidated })
+        : validated === 1
+          ? t("editor.selection.validatedToastOne", { count: validated })
+          : t("editor.selection.validatedToastMany", { count: validated })
       toast.success(msg)
       // AQU-616: flush the just-enqueued validates now instead of waiting for
       // the ~5s periodic flusher, so the confirmed/synced state lands promptly.
@@ -226,7 +232,7 @@ export function SelectionBar({ project, cellStore, username, activeLane, myScope
     } finally {
       setRunning({ kind: "idle" })
     }
-  }, [selectedCells, username, activeLane, myScopes, validatableCount, isBusy, project.id, onValidationCommitted])
+  }, [selectedCells, username, activeLane, myScopes, validatableCount, isBusy, project.id, onValidationCommitted, t])
 
   const onUnvalidate = useCallback(() => {
     if (isBusy) return
@@ -249,13 +255,17 @@ export function SelectionBar({ project, cellStore, username, activeLane, myScope
         })
         removed++
       }
-      toast.success(`Removed validations from ${removed} cell${removed === 1 ? "" : "s"}`)
+      toast.success(
+        removed === 1
+          ? t("editor.selection.unvalidatedToastOne", { count: removed })
+          : t("editor.selection.unvalidatedToastMany", { count: removed }),
+      )
       // AQU-616: flush now rather than waiting for the periodic flusher.
       if (removed > 0) onValidationCommitted?.()
     } finally {
       setRunning({ kind: "idle" })
     }
-  }, [selectedCells, username, activeLane, myScopes, unvalidatableCount, isBusy, project.id, onValidationCommitted])
+  }, [selectedCells, username, activeLane, myScopes, unvalidatableCount, isBusy, project.id, onValidationCommitted, t])
 
   // AQU-365: viewers (and any role below the lowest gated action here —
   // REVIEWER 300, the validate floor) get no selection affordance at all.
@@ -276,22 +286,22 @@ export function SelectionBar({ project, cellStore, username, activeLane, myScope
         "bottom-4 rounded-md border bg-card px-4 py-2 text-xs ring-1 ring-foreground/10",
       )}
       role="toolbar"
-      aria-label="Selection actions"
+      aria-label={t("editor.selection.actions")}
     >
       <span className="font-medium">
-        {selectedCells.length} selected
+        {t("editor.selection.count", { count: selectedCells.length })}
         {missingCount > 0 && (
           <span className="ml-1 text-muted-foreground">
-            ({missingCount} need translation)
+            {t("editor.selection.needTranslation", { count: missingCount })}
           </span>
         )}
       </span>
       <div className="mx-1 h-5 w-px rounded-lg" />
       {audioMode && (
         <AppTooltip content={
-          !onVoiceTogether ? "Voicing isn't available here" :
-          voiceableCount < 2 ? "Select at least two translated lines" :
-          `Voice ${voiceableCount} lines as one clip`
+          !onVoiceTogether ? t("editor.selection.voiceUnavailable") :
+          voiceableCount < 2 ? t("editor.selection.voiceNeedTwo") :
+          t("editor.selection.voiceTooltip", { count: voiceableCount })
         }>
           <Button
             type="button"
@@ -305,7 +315,7 @@ export function SelectionBar({ project, cellStore, username, activeLane, myScope
             ) : (
               <Sparkles className="mr-1 h-3.5 w-3.5" />
             )}
-            Voice together
+            {t("editor.selection.voiceTogether")}
             {voiceableCount > 1 && (
               <span className="ml-1 rounded-md bg-primary-foreground/20 px-1.5 py-0.5 tabular-nums text-primary-foreground">
                 {Math.min(voiceableCount, 12)}
@@ -317,9 +327,9 @@ export function SelectionBar({ project, cellStore, username, activeLane, myScope
       {!audioMode && (
         <>
       <AppTooltip content={
-        !completeBatch ? "Translation isn't configured for this project" :
-        missingCount === 0 ? "All selected cells already have translations" :
-        `Translate ${missingCount} missing`
+        !completeBatch ? t("editor.selection.translateNotConfigured") :
+        missingCount === 0 ? t("editor.selection.allTranslated") :
+        t("editor.selection.translateTooltip", { count: missingCount })
       }>
         <Button
           type="button"
@@ -333,7 +343,7 @@ export function SelectionBar({ project, cellStore, username, activeLane, myScope
           ) : (
             <Languages className="mr-1 h-3.5 w-3.5" />
           )}
-          Translate
+          {t("editor.selection.translate")}
           {missingCount > 0 && allHaveTranslation === false && (
             <span className="ml-1 rounded-md bg-primary-foreground/20 px-1.5 py-0.5 tabular-nums text-primary-foreground">
               {missingCount}
@@ -344,7 +354,9 @@ export function SelectionBar({ project, cellStore, username, activeLane, myScope
       <AppTooltip content={
         validateDisabledReason
           ? validateDisabledReason
-          : `Validate ${validatableCount} cell${validatableCount === 1 ? "" : "s"}`
+          : validatableCount === 1
+            ? t("editor.selection.validateTooltipOne", { count: validatableCount })
+            : t("editor.selection.validateTooltipMany", { count: validatableCount })
       }>
         <Button
           type="button"
@@ -356,7 +368,7 @@ export function SelectionBar({ project, cellStore, username, activeLane, myScope
           {running.kind === "validate" ? (
             <Spinner className="mr-1 size-3.5" />
           ) : null}
-          Validate
+          {t("editor.selection.validate")}
           {validatableCount > 0 && (
             <span className="ml-1 rounded-md bg-muted px-1.5 py-0.5 tabular-nums text-muted-foreground">
               {validatableCount}
@@ -366,8 +378,10 @@ export function SelectionBar({ project, cellStore, username, activeLane, myScope
       </AppTooltip>
       <AppTooltip content={
         unvalidatableCount === 0
-          ? "No cells have your validation"
-          : `Remove your validation from ${unvalidatableCount} cell${unvalidatableCount === 1 ? "" : "s"}`
+          ? t("editor.selection.noValidations")
+          : unvalidatableCount === 1
+            ? t("editor.selection.unvalidateTooltipOne", { count: unvalidatableCount })
+            : t("editor.selection.unvalidateTooltipMany", { count: unvalidatableCount })
       }>
         <Button
           type="button"
@@ -376,7 +390,7 @@ export function SelectionBar({ project, cellStore, username, activeLane, myScope
           onClick={onUnvalidate}
           disabled={isBusy || unvalidatableCount === 0}
         >
-          Remove my validations
+          {t("editor.selection.removeMyValidations")}
           {unvalidatableCount > 0 && (
             <span className="ml-1 rounded-md bg-muted px-1.5 py-0.5 tabular-nums text-muted-foreground">
               {unvalidatableCount}
@@ -390,8 +404,10 @@ export function SelectionBar({ project, cellStore, username, activeLane, myScope
       {onHarmonize != null && harmonizableCount > 0 && (
         <AppTooltip content={
           !canHarmonize
-            ? "You need project lead role to run a harmonization sweep"
-            : `Open harmonize sweep for ${harmonizableCount} selected cell${harmonizableCount === 1 ? "" : "s"}`
+            ? t("editor.selection.harmonizeNeedLead")
+            : harmonizableCount === 1
+              ? t("editor.selection.harmonizeTooltipOne", { count: harmonizableCount })
+              : t("editor.selection.harmonizeTooltipMany", { count: harmonizableCount })
         }>
           <Button
             type="button"
@@ -402,7 +418,7 @@ export function SelectionBar({ project, cellStore, username, activeLane, myScope
             data-testid="selection-harmonize-btn"
           >
             <Wand2 className="mr-1 h-3.5 w-3.5" />
-            Harmonize…
+            {t("editor.selection.harmonize")}
             <span className="ml-1 rounded-md bg-muted px-1.5 py-0.5 tabular-nums text-muted-foreground">
               {harmonizableCount}
             </span>
@@ -411,14 +427,14 @@ export function SelectionBar({ project, cellStore, username, activeLane, myScope
       )}
         </>
       )}
-      <AppTooltip content="Clear selection (Esc)">
+      <AppTooltip content={t("editor.selection.clearTooltip")}>
         <Button
           type="button"
           size="icon-sm"
           variant="ghost"
           onClick={() => clearSelection()}
           disabled={isBusy}
-          aria-label="Clear selection"
+          aria-label={t("editor.selection.clear")}
         >
           <X className="h-3.5 w-3.5" />
         </Button>

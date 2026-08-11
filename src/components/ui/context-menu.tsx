@@ -24,8 +24,71 @@ function openContextMenuAtPointer(
   )
 }
 
-function ContextMenu({ ...props }: ContextMenuPrimitive.Root.Props) {
-  return <ContextMenuPrimitive.Root data-slot="context-menu" {...props} />
+type ContextMenuOpenChange = NonNullable<ContextMenuPrimitive.Root.Props["onOpenChange"]>
+type ContextMenuOpenChangeDetails = Parameters<ContextMenuOpenChange>[1]
+
+/**
+ * Right-clicking elsewhere while a menu is open reads as one menu moving to the
+ * new spot, so the close/open pair must not cross-dissolve. Base UI only sets
+ * `data-instant` itself for keyboard presses, dismissals, and menubar moves, so
+ * the roots coordinate the reposition here.
+ *
+ * The outgoing root is dismissed on `pointerdown`, before the `contextmenu`
+ * event reaches the next trigger — the two roots never see each other open, so
+ * this is a short window rather than a count of open roots.
+ */
+const REPOSITION_WINDOW_MS = 250
+
+/** Base UI's own `data-instant` value for "the menu moved to another trigger". */
+const INSTANT_TRIGGER_CHANGE = "trigger-change"
+
+let repositionedAt = Number.NEGATIVE_INFINITY
+
+/** A right-press outside the popup is the start of a reposition, not a dismiss. */
+function isRepositionDismissal(details: ContextMenuOpenChangeDetails) {
+  if (details.reason !== "outside-press") {
+    return false
+  }
+  const event = details.event
+  if (!("button" in event)) {
+    return false
+  }
+  // macOS opens the menu on ctrl + primary press as well as secondary press.
+  return event.button === 2 || (event.button === 0 && event.ctrlKey)
+}
+
+const ContextMenuInstantContext = React.createContext<string | undefined>(undefined)
+
+function ContextMenu({ onOpenChange, ...props }: ContextMenuPrimitive.Root.Props) {
+  const [instant, setInstant] = React.useState<string | undefined>(undefined)
+
+  const handleOpenChange: ContextMenuOpenChange = (open, details) => {
+    if (open) {
+      setInstant(
+        Date.now() - repositionedAt < REPOSITION_WINDOW_MS
+          ? INSTANT_TRIGGER_CHANGE
+          : undefined,
+      )
+    } else if (isRepositionDismissal(details)) {
+      repositionedAt = Date.now()
+      setInstant(INSTANT_TRIGGER_CHANGE)
+    } else {
+      // Deliberate closes (escape, item press, plain outside click) keep their
+      // exit, including on a menu that was opened instantly.
+      setInstant(undefined)
+    }
+    onOpenChange?.(open, details)
+  }
+
+  return (
+    <ContextMenuInstantContext.Provider value={instant}>
+      <ContextMenuPrimitive.Root
+        data-slot="context-menu"
+        onOpenChange={handleOpenChange}
+        {...props}
+      />
+    </ContextMenuInstantContext.Provider>
+  )
 }
 
 function ContextMenuPortal({ ...props }: ContextMenuPrimitive.Portal.Props) {
@@ -54,11 +117,13 @@ function ContextMenuContent({
   side = "right",
   sideOffset = 0,
   ...props
-}: ContextMenuPrimitive.Popup.Props &
+  }: ContextMenuPrimitive.Popup.Props &
   Pick<
     ContextMenuPrimitive.Positioner.Props,
     "align" | "alignOffset" | "side" | "sideOffset"
   >) {
+  const instant = React.useContext(ContextMenuInstantContext)
+
   return (
     <ContextMenuPrimitive.Portal>
       <ContextMenuPrimitive.Positioner
@@ -70,7 +135,15 @@ function ContextMenuContent({
       >
         <ContextMenuPrimitive.Popup
           data-slot="context-menu-content"
-          className={cn("z-50 max-h-(--available-height) min-w-36 origin-(--transform-origin) overflow-x-hidden overflow-y-auto rounded-lg bg-popover p-1 text-popover-foreground shadow-md ring-1 ring-foreground/10 duration-100 outline-none data-[side=bottom]:slide-in-from-top-2 data-[side=inline-end]:slide-in-from-left-2 data-[side=inline-start]:slide-in-from-right-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95", className )}
+          // Only override Base UI's own value when this root repositioned.
+          {...(instant ? { "data-instant": instant } : null)}
+          // Matched on the value, not on the bare attribute: Base UI reports
+          // `data-instant="click"` for every mouse-driven context menu (a
+          // `contextmenu` event has `detail === 0`, which its keyboard-press
+          // heuristic reads as a keyboard press), so a bare `data-instant`
+          // selector would delete every entrance. `animate-none!` beats the
+          // enter/exit utilities regardless of the order Tailwind emits them in.
+          className={cn("z-50 max-h-(--available-height) min-w-36 origin-(--transform-origin) overflow-x-hidden overflow-y-auto rounded-lg bg-popover p-1 text-popover-foreground shadow-md ring-1 ring-foreground/10 duration-100 outline-none data-[side=bottom]:slide-in-from-top-2 data-[side=inline-end]:slide-in-from-left-2 data-[side=inline-start]:slide-in-from-right-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95 data-[instant=trigger-change]:animate-none!", className )}
           {...props}
         />
       </ContextMenuPrimitive.Positioner>
@@ -129,7 +202,11 @@ function ContextMenuItem({
 
 function ContextMenuSub({ ...props }: ContextMenuPrimitive.SubmenuRoot.Props) {
   return (
-    <ContextMenuPrimitive.SubmenuRoot data-slot="context-menu-sub" {...props} />
+    // Submenus open on their own (hover, arrow keys), so they keep their
+    // entrance even when the root menu arrived by reposition.
+    <ContextMenuInstantContext.Provider value={undefined}>
+      <ContextMenuPrimitive.SubmenuRoot data-slot="context-menu-sub" {...props} />
+    </ContextMenuInstantContext.Provider>
   )
 }
 

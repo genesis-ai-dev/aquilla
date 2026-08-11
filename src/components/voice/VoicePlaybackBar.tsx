@@ -4,7 +4,7 @@
 // volume. It mirrors ElevenLabs' bottom player — the per-line buttons stay for
 // voicing a single line, but listening to the take in sequence happens here.
 
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import {
   Pause, Play, SkipBack, SkipForward, Volume2, VolumeX,
 } from "lucide-react"
@@ -20,6 +20,7 @@ import {
   skipBack, skipForward, startQueue, updateQueueCells, useQueueProgress, useQueueState,
 } from "@/lib/audio/play-queue"
 import { spacebarShouldToggle } from "@/lib/audio/playback-keys"
+import { isTopAudioShortcutOwner, pushAudioShortcutOverride } from "@/lib/audio/audio-coordinator"
 import { resolveCastVoice } from "@/lib/audio/voices"
 import { useFileAudioAttachments, mergeCellsWithAudio } from "@/hooks/useFileAudioAttachments"
 import type { CellData } from "@/hooks/useCells"
@@ -92,6 +93,11 @@ export function VoicePlaybackBar({
 
   const onPlayPause = useCallback(() => {
     if (isPlaying) { pauseQueue(); return }
+    // FORTIFY: during a cold load the button shows a spinner — clicking it (or
+    // Space) must CANCEL the pending start, not dispose the in-flight load and
+    // start over from the top (which also made the transport unstoppable
+    // until sound was already playing).
+    if (queue.kind === "loading") { pauseQueue(); return }
     if (queue.kind === "paused") { void resumeQueue(); return }
     // Start from the highlighted section when one is selected, else the top of
     // the file (AQU-666). A selected start is "explicit": if that clip's audio
@@ -105,8 +111,31 @@ export function VoicePlaybackBar({
   // only renders in the audio lens, so the binding is naturally scoped to it).
   // The predicate ignores the key when the user is typing or a control is
   // focused, so editing a line or clicking a button keeps Space's normal effect.
+  //
+  // FORTIFY: the bar now CLAIMS the audio-shortcut owner stack for its mount
+  // lifetime and acts only while it is the TOP owner. Two bugs die at once:
+  // the global capture handler (which yields to the stack) can no longer
+  // steal Space to replay the last previewed cell clip in the audio lens, and
+  // the timeline/recorder still win whenever they claim above us (SUB-52's
+  // arbitration, now with every Space owner in ONE stack). The claim lives in
+  // its own MOUNT-LIFETIME effect — re-claiming on every canPlay flip would
+  // hoist the bar back above a timeline/recorder that claimed later.
+  const spaceOwnerRef = useRef<number | null>(null)
+  useEffect(() => {
+    // "base" tier: the bar yields to the timeline and the recording modal no
+    // matter who mounted first — in the media lens the bar mounts AFTER the
+    // timeline, and a normal claim would hoist it above the surface designed
+    // to own Space (SUB-52's order: bar < timeline < recorder).
+    const releaseOverride = pushAudioShortcutOverride("base")
+    spaceOwnerRef.current = releaseOverride.owner
+    return () => {
+      spaceOwnerRef.current = null
+      releaseOverride()
+    }
+  }, [])
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
+      if (spaceOwnerRef.current == null || !isTopAudioShortcutOwner(spaceOwnerRef.current)) return
       if (!spacebarShouldToggle(e) || !canPlay) return
       e.preventDefault()
       onPlayPause()

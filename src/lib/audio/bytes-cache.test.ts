@@ -180,3 +180,41 @@ describe("audioCachePutBlob (FRO-355)", () => {
     expect(Array.from(back!)).toEqual([7, 8, 9])
   })
 })
+
+describe("adaptive budget (smooth-playback round)", () => {
+  it("a tiny injected budget really evicts the least-recently-used entry", async () => {
+    const { __setBudgetForTests, audioCacheHas } = await import("./bytes-cache")
+    __setBudgetForTests(24) // three 8-byte entries fit; a fourth evicts one
+    try {
+      for (let i = 0; i < 3; i++) {
+        await audioCachePut(`audio-bud-${i}`, "webm", new Uint8Array(8).fill(i))
+      }
+      // Touch 0 so it is most-recent; 1 becomes the eviction candidate.
+      await audioCacheGet("audio-bud-0", "webm")
+      await audioCachePut("audio-bud-3", "webm", new Uint8Array(8).fill(3))
+
+      expect(await audioCacheHas("audio-bud-1", "webm")).toBe(false) // evicted
+      expect(await audioCacheHas("audio-bud-0", "webm")).toBe(true) // protected by the touch
+      expect(await audioCacheHas("audio-bud-3", "webm")).toBe(true)
+    } finally {
+      __setBudgetForTests(null)
+    }
+  })
+
+  it("audioCacheHas answers without bumping LRU order", async () => {
+    const { __setBudgetForTests, audioCacheHas } = await import("./bytes-cache")
+    __setBudgetForTests(16) // two 8-byte entries
+    try {
+      await audioCachePut("audio-has-a", "webm", new Uint8Array(8).fill(1))
+      await audioCachePut("audio-has-b", "webm", new Uint8Array(8).fill(2))
+      // A mere existence check on `a` must NOT promote it…
+      expect(await audioCacheHas("audio-has-a", "webm")).toBe(true)
+      // …so the next put still evicts `a` (the true LRU), not `b`.
+      await audioCachePut("audio-has-c", "webm", new Uint8Array(8).fill(3))
+      expect(await audioCacheHas("audio-has-a", "webm")).toBe(false)
+      expect(await audioCacheHas("audio-has-b", "webm")).toBe(true)
+    } finally {
+      __setBudgetForTests(null)
+    }
+  })
+})

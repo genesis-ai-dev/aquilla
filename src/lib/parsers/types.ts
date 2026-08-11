@@ -309,6 +309,36 @@ export interface CellTtsSettings {
   voiceId?: string
 }
 
+/**
+ * AQU-646 SUB-53: which job the Media lens is for.
+ *
+ * - `"dubbing"` (also the meaning of ABSENT — every project before SUB-53) —
+ *   the translation has to fit inside the original's window. The timeline is
+ *   drawn against the imported file's clock, a dub that runs past its section
+ *   is flagged, and the original plays continuously underneath.
+ * - `"audioFirst"` — the translation IS the deliverable and the original is a
+ *   reference. Verses are laid out end to end, each taking as much room as its
+ *   longer side, so a translation running 2× the original stops reading as a
+ *   misalignment. Nothing about the recordings or the imported file changes:
+ *   the layout is derived (see lib/timeline/programme.ts), so switching back
+ *   reproduces the dubbing view exactly.
+ */
+export type AudioTimingMode = "dubbing" | "audioFirst"
+
+/** The one place the two modes' user-facing names live — consumed by the
+ *  Project Settings card AND the media-lens toolbar note (2026-08-05: the
+ *  control moved into settings; the toolbar shows a note). */
+export const AUDIO_TIMING_MODE_LABELS: Record<AudioTimingMode, { name: string; description: string }> = {
+  dubbing: {
+    name: "Original's timing",
+    description: "The translation is fitted to the original recording's timing.",
+  },
+  audioFirst: {
+    name: "Free timing",
+    description: "Verses are laid end to end — each takes as much room as its longer side.",
+  },
+}
+
 export interface ProjectRecord {
   id: string
   name: string
@@ -421,6 +451,14 @@ export interface ProjectRecord {
   harmonize_min_role?: "project_lead" | "maintainer"
   /** Cached flag — set true when any cell first writes audio. Avoids scanning every file's Y.Doc on load. */
   hasAnyAudioData?: boolean
+  /**
+   * AQU-646 SUB-53: which job the Media lens is for — "dubbing" (the
+   * translation must fit the original's window; absent means this) or
+   * "audioFirst" (the translation is the deliverable, so verses are laid out
+   * end to end at their real lengths). Overlaid from
+   * ProjectWideSettings.audioTimingMode by useProject's overlaySettings.
+   */
+  audioTimingMode?: AudioTimingMode
   /** When and how to fetch audio bytes from the storage backend. Default: "lazy". */
   audioMediaStrategy?: AudioMediaStrategy
   /** Soft-delete marker. When present the project is in Trash; the Dashboard
@@ -545,6 +583,13 @@ export interface FileReference {
    * files.meta JSON (set via the `file.video.set` event). Absent ⇒ no video.
    */
   coreMediaUrl?: string | null
+  /**
+   * The file's audio timing mode (pre-merge round: a FILE-level distinction —
+   * the video link it interacts with is per-file too). Stored in files.meta
+   * JSON (set via the `file.timing.set` event). Absent ⇒ the project-level
+   * default applies (see `resolveFileTimingMode`).
+   */
+  timingMode?: AudioTimingMode | null
 }
 
 /** Which key is authoritative for ordering a file's segments. */
@@ -553,6 +598,24 @@ export type OrderedBy = "time" | "sequence"
 /** Resolve a file's order lens, defaulting absent → 'sequence'. */
 export function fileOrderedBy(file: Pick<FileReference, "orderedBy">): OrderedBy {
   return file.orderedBy ?? "sequence"
+}
+
+/**
+ * Resolve a file's audio timing mode: the file's own choice, else the
+ * project-level value (the legacy Project Settings field, kept as a read-only
+ * fallback so pre-existing projects keep the mode they had chosen), else
+ * Original timing. Mixed-mode projects are allowed by design.
+ */
+export function resolveFileTimingMode(
+  file: Pick<FileReference, "timingMode"> | null | undefined,
+  project: Pick<ProjectRecord, "audioTimingMode"> | null | undefined,
+): AudioTimingMode {
+  if (file?.timingMode === "audioFirst" || file?.timingMode === "dubbing") return file.timingMode
+  // Only "audioFirst" opts out of the original behaviour — anything else,
+  // including a value the settings blob happens to carry (the server accepts
+  // arbitrary top-level keys), reads as Original timing. Same normalization
+  // as resolveAudioTimingMode, inlined to keep this module import-free.
+  return project?.audioTimingMode === "audioFirst" ? "audioFirst" : "dubbing"
 }
 
 export interface ProjectMember {

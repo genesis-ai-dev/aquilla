@@ -54,6 +54,7 @@ vi.mock("@/hooks/useProject", () => ({
     roleLevel: null,
     pm: null,    refresh: vi.fn(),
     patchSettings: mockPatchSettings,
+    settingsFetched: true,
   })),
 }))
 
@@ -126,6 +127,7 @@ describe("TerminologyPage", () => {
       roleLevel: null,
       pm: null,      refresh: vi.fn(),
       patchSettings: mockPatchSettings,
+      settingsFetched: true,
     })
     mockPatchSettings.mockResolvedValue({ kind: "ok" })
   })
@@ -140,6 +142,7 @@ describe("TerminologyPage", () => {
       roleLevel: null,
       pm: null,      refresh: vi.fn(),
       patchSettings: mockPatchSettings,
+      settingsFetched: true,
     })
 
     renderPage()
@@ -192,6 +195,7 @@ describe("TerminologyPage", () => {
         roleLevel: null,
         pm: null,        refresh: vi.fn(),
         patchSettings: mockPatchSettings,
+        settingsFetched: true,
       })
       return { kind: "ok" }
     })
@@ -228,6 +232,7 @@ describe("TerminologyPage", () => {
       roleLevel: null,
       pm: null,      refresh: vi.fn(),
       patchSettings: mockPatchSettings,
+      settingsFetched: true,
     })
 
     renderPage()
@@ -252,6 +257,7 @@ describe("TerminologyPage", () => {
       roleLevel: null,
       pm: null,      refresh: vi.fn(),
       patchSettings: mockPatchSettings,
+      settingsFetched: true,
     })
 
     renderPage()
@@ -281,6 +287,7 @@ describe("TerminologyPage", () => {
       roleLevel: null,
       pm: null,      refresh: vi.fn(),
       patchSettings: mockPatchSettings,
+      settingsFetched: true,
     })
 
     vi.mocked(deleteConcept).mockReturnValueOnce(projectAfterDelete)
@@ -294,6 +301,7 @@ describe("TerminologyPage", () => {
         roleLevel: null,
         pm: null,        refresh: vi.fn(),
         patchSettings: mockPatchSettings,
+        settingsFetched: true,
       })
       return { kind: "ok" }
     })
@@ -339,6 +347,7 @@ describe("TerminologyPage", () => {
         roleLevel: null,
         pm: null,        refresh: vi.fn(),
         patchSettings: mockPatchSettings,
+        settingsFetched: true,
       })
       return { kind: "ok" }
     })
@@ -385,6 +394,7 @@ describe("TerminologyPage", () => {
       roleLevel: null,
       pm: null,      refresh: vi.fn(),
       patchSettings: mockPatchSettings,
+      settingsFetched: true,
     })
 
     renderPage()
@@ -415,6 +425,7 @@ describe("TerminologyPage", () => {
       roleLevel: null,
       pm: null,      refresh: vi.fn(),
       patchSettings: mockPatchSettings,
+      settingsFetched: true,
     })
 
     vi.mocked(approveConcept).mockReturnValueOnce(projectAfterApprove)
@@ -428,6 +439,7 @@ describe("TerminologyPage", () => {
         roleLevel: null,
         pm: null,        refresh: vi.fn(),
         patchSettings: mockPatchSettings,
+        settingsFetched: true,
       })
       return { kind: "ok" }
     })
@@ -471,6 +483,7 @@ describe("TerminologyPage", () => {
       roleLevel: null,
       pm: null,      refresh: vi.fn(),
       patchSettings: mockPatchSettings,
+      settingsFetched: true,
     })
 
     vi.mocked(rejectConcept).mockReturnValueOnce(projectAfterReject)
@@ -484,6 +497,7 @@ describe("TerminologyPage", () => {
         roleLevel: null,
         pm: null,        refresh: vi.fn(),
         patchSettings: mockPatchSettings,
+        settingsFetched: true,
       })
       return { kind: "ok" }
     })
@@ -528,6 +542,7 @@ describe("TerminologyPage", () => {
       roleLevel: null,
       pm: null,      refresh: vi.fn(),
       patchSettings: mockPatchSettings,
+      settingsFetched: true,
     })
 
     renderPage()
@@ -557,6 +572,7 @@ describe("TerminologyPage", () => {
       roleLevel: null,
       pm: null,      refresh: vi.fn(),
       patchSettings: mockPatchSettings,
+      settingsFetched: true,
     })
 
     vi.mocked(mergeConcepts).mockReturnValueOnce(projectAfterMerge)
@@ -570,6 +586,7 @@ describe("TerminologyPage", () => {
         roleLevel: null,
         pm: null,        refresh: vi.fn(),
         patchSettings: mockPatchSettings,
+        settingsFetched: true,
       })
       return { kind: "ok" }
     })
@@ -628,6 +645,7 @@ describe("TerminologyPage", () => {
       roleLevel: null,
       pm: null,      refresh: vi.fn(),
       patchSettings: mockPatchSettings,
+      settingsFetched: true,
     })
 
     renderPage()

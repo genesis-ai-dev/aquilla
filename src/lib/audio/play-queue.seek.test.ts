@@ -39,6 +39,26 @@ const noAudioCell = (startTime: number, endTime: number): CellData =>
     medium: "media", startTime, endTime,
   }) as CellData
 
+// Round 5: a DUBBED section — a cellId-seeded take is selected, but the
+// shared source clip is still attached. The master element keeps playing the
+// source clip, so this cell must behave exactly like a plain source section
+// for location/seek/advance math.
+const dubbedCell = (startTime: number, endTime: number): CellData => {
+  const id = `c${++nextId}`
+  const takeId = `audio-${id}-1700000000-take.webm`
+  return {
+    id, fileId: "f1", original: "", translated: "", context: "", group: "",
+    type: "text", status: "unvalidated", validationStatus: "none",
+    activeValidators: [], validationHistory: [], history: [], threads: [],
+    medium: "media", startTime, endTime,
+    selectedAudioId: takeId,
+    attachments: {
+      [takeId]: { type: "audio", url: `frontier-audio://take-${id}.webm` },
+      "audio-f1-1690000000-shared.mp3": { type: "audio", url: CLIP },
+    },
+  } as CellData
+}
+
 // A tiled imported file: three sections partitioning [0, 30).
 const tiled = [mediaCell(0, 10), mediaCell(10, 22), mediaCell(22, 30)]
 // A legacy (pre-tiling) file: gaps between windows.
@@ -70,6 +90,11 @@ describe("findCellAtTime", () => {
     const cells = [noAudioCell(0, 10), textCell(), mediaCell(10, 20)]
     expect(findCellAtTime(cells, 5)).toBe(2) // first two can't own the time
   })
+
+  it("a DUBBED section still owns its file-time span (round 5)", () => {
+    const cells = [mediaCell(0, 10), dubbedCell(10, 22), mediaCell(22, 30)]
+    expect(findCellAtTime(cells, 15)).toBe(1)
+  })
 })
 
 describe("planSeek", () => {
@@ -94,6 +119,11 @@ describe("planSeek", () => {
 
   it("no owning window and a windowed current cell → none", () => {
     expect(planSeek(tiled, 1, CLIP, 99)).toEqual({ kind: "none" })
+  })
+
+  it("seek into a DUBBED section is seamless on the shared source clip (round 5)", () => {
+    const cells = [mediaCell(0, 10), dubbedCell(10, 22)]
+    expect(planSeek(cells, 0, CLIP, 15)).toEqual({ kind: "seamless", index: 1, seconds: 15 })
   })
 })
 
@@ -129,5 +159,10 @@ describe("planAdvance", () => {
   it("skips cells without playable audio", () => {
     const cells = [mediaCell(0, 10), noAudioCell(10, 22), mediaCell(22, 30)]
     expect(planAdvance(cells, 0, CLIP, 10.01)).toEqual({ kind: "seamless", index: 2 })
+  })
+
+  it("advance into a DUBBED section stays seamless on the source clip, NOT an element swap to the take (round 5)", () => {
+    const cells = [mediaCell(0, 10), dubbedCell(10, 22)]
+    expect(planAdvance(cells, 0, CLIP, 10.01)).toEqual({ kind: "seamless", index: 1 })
   })
 })

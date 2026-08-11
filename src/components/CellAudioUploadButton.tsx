@@ -25,6 +25,7 @@ import { emitCellAudioAttach } from "@/lib/sync/events-emit"
 import { injectOptimisticAudioAttachment, notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
 import { markProjectHasAudioDataSoon } from "@/lib/audio/project-audio-state"
+import { probeDurationMsSafe } from "@/lib/import"
 
 const ACCEPT = "audio/*,.wav,.mp3,.m4a,.ogg"
 
@@ -86,8 +87,12 @@ export function CellAudioUploadButton({ projectId, fileId, cellId, username, dis
       })
       markProjectHasAudioDataSoon(projectId)
       const fullAudioId = `${result.audioId}.${result.ext}`
+      // Round 6: carry the upload's duration so its Target-track chip renders
+      // at the recording's real length. Best-effort.
+      const uploadDurationMs = await probeDurationMsSafe(file)
+      let attachEventId: string
       try {
-        await emitCellAudioAttach({
+        attachEventId = await emitCellAudioAttach({
           projectId,
           fileId,
           cellId,
@@ -95,6 +100,7 @@ export function CellAudioUploadButton({ projectId, fileId, cellId, username, dis
           url: result.url,
           slot: "recording",
           mimeType: file.type || undefined,
+          durationMs: uploadDurationMs,
           author: username,
         })
       } catch (emitErr) {
@@ -118,10 +124,10 @@ export function CellAudioUploadButton({ projectId, fileId, cellId, username, dis
         mimeType: file.type || null,
         voiceId: null,
         referenceAudioId: null,
-        durationMs: null,
+        durationMs: uploadDurationMs ?? null,
         trimStartMs: null,
         trimEndMs: null,
-      })
+      }, attachEventId)
       notifyAudioAttachmentsChanged(fileId)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))

@@ -1,4 +1,5 @@
 import React, { useEffect, useLayoutEffect, useRef, useCallback, useMemo, useState, forwardRef, useImperativeHandle } from "react"
+import { createPortal } from "react-dom"
 import {
   LegendList,
   type LegendListRef,
@@ -58,6 +59,9 @@ import { CellTranscriptPreview } from "./CellTranscriptPreview"
 import { ContextualDraftCard } from "./contextual/ContextualDraftCard"
 import { CellTranscribeBadge } from "./CellTranscribeBadge"
 import { CellActionRail, RailButton, isInteractiveTarget } from "./CellActionRail"
+import { useIsMediaCursorCell, useMediaSyncActive } from "@/lib/timeline/media-cursor"
+import { CastGutterVoice } from "@/components/voice/CastGutterVoice"
+import { useIsQueueCurrentCell, useQueueCurrentCellId } from "@/lib/audio/play-queue"
 import { useRailIdleHide } from "@/hooks/useRailIdleHide"
 import {
   computeRailPinned,
@@ -74,7 +78,6 @@ import { useCellAudio } from "@/hooks/useCellAudio"
 import { useTranscribeStatus } from "@/lib/audio/transcribe-status"
 import { transcribeCell } from "@/lib/audio/transcribe"
 import { isSourceSegmentSelected } from "@/lib/audio/batch-audio"
-import { audioIdSeededWith } from "@/lib/audio/upload"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import {
   MAX_SELECTED,
@@ -108,7 +111,7 @@ import { getUnsupportedReason } from "./CellAudioRecordButton"
 // AQU-513: plain file-picker upload next to the mic — works on mobile too.
 import { CellAudioUploadButton } from "./CellAudioUploadButton"
 import { useMicPermission } from "@/hooks/useMicPermission"
-import { assignedCastVoiceId, findVoice } from "@/lib/audio/voices"
+import { assignedCastVoiceId, findVoice, getVoiceLibrary, resolveCastVoice } from "@/lib/audio/voices"
 import { useNavigate } from "react-router-dom"
 import { cn } from "@/lib/utils"
 import { looksLikeUuid } from "@/lib/uuid"
@@ -191,7 +194,89 @@ import {
 //   window.__perfDumpRowRenders()   → console.table of the same
 const rowRenders = new Map<string, number>()
 const ESTIMATED_ROW_HEIGHT_PX = 140
+
+/** The gutter track widens by the character circle's w-6 when the cast
+ *  gutter is on (stacked media lens). One shared type keeps the header row,
+ *  paragraph bar, and rows in the same template. */
+type EditorGridCols = "grid-cols-[84px_1fr_1fr]" | "grid-cols-[132px_1fr_1fr]"
 const LEGEND_LIST_DRAW_DISTANCE_PX = 240
+
+/**
+ * 2026-08-07 (wire c): vertical follow for the stacked media lens — the table
+ * tracks the cell the queue is RUNNING, with the timeline's scroll-truce
+ * mirrored at row granularity. Mounted only while the timeline is stacked
+ * (media-sync active) and renders nothing, so the table root never subscribes
+ * to queue state and playback ticks cost zero table re-renders.
+ */
+export function MediaFollowDriver({
+  isCellDisplayed,
+  scrollToCell,
+  userScrollListenerRef,
+  programmaticStampRef,
+  followCommand,
+  onFollowRest,
+}: {
+  isCellDisplayed: (cellId: string) => boolean
+  scrollToCell: (cellId: string) => void
+  userScrollListenerRef: React.MutableRefObject<((opts?: { force?: boolean }) => void) | null>
+  programmaticStampRef: React.MutableRefObject<number>
+  /** Explicit intent from user gestures: chip/row clicks ENGAGE, inspection
+   *  jumps RELEASE. seq-keyed so repeats of the same intent still apply. */
+  followCommand: { seq: number; intent: "engage" | "release" } | null
+  /** Fired when the queue stops running (and on unmount) — the table lifts
+   *  its follow-hover lock. */
+  onFollowRest: () => void
+}) {
+  const queueCellId = useQueueCurrentCellId()
+  // Same stale-singleton guard as the timeline: a queue running another
+  // file's cells must not scroll this table.
+  const queueRunning = queueCellId != null && isCellDisplayed(queueCellId)
+  const [follow, setFollow] = useState(true)
+  // Rising edge of running (play, resume) re-engages following — a user who
+  // scrolled away re-opts-in by pressing play, exactly like the track view.
+  // The falling edge (pause/stop) lets the table lift its hover lock so a
+  // parked cursor gets normal hover back without needing to move.
+  useEffect(() => {
+    if (queueRunning) setFollow(true)
+    else onFollowRest()
+  }, [queueRunning, onFollowRest])
+  useEffect(() => () => onFollowRest(), [onFollowRest])
+  // Explicit intents win over the truce in both directions. The ref seeds
+  // from the CURRENT command so anything issued while this driver was
+  // unmounted (text-lens jumps default to "release") is dead on arrival —
+  // replaying it here silently killed following after a lens round-trip.
+  const appliedCommandSeqRef = useRef(followCommand?.seq ?? 0)
+  useEffect(() => {
+    if (!followCommand || followCommand.seq === appliedCommandSeqRef.current) return
+    appliedCommandSeqRef.current = followCommand.seq
+    setFollow(followCommand.intent === "engage")
+  }, [followCommand])
+  // A cell boundary IS the page-flip: bring the running row to ~1/3 height.
+  useEffect(() => {
+    if (follow && queueRunning && queueCellId != null) scrollToCell(queueCellId)
+  }, [follow, queueRunning, queueCellId, scrollToCell])
+  // The truce: a scroll more than 250ms after our own programmatic scroll is
+  // the USER moving away — stop following until the next play/resume. 250ms
+  // (vs the track's 150ms) absorbs LegendList's post-scrollToIndex settling
+  // corrections under recycled, estimated-height rows.
+  const runningRef = useRef(queueRunning)
+  runningRef.current = queueRunning
+  useEffect(() => {
+    userScrollListenerRef.current = (opts) => {
+      if (!runningRef.current) return
+      // force: a WHEEL is unambiguously the user — it must escape follow even
+      // while one of our smooth glides is streaming (self-re-stamping) scroll
+      // events; without it, dense boundaries could chain glides into a wall.
+      if (opts?.force || performance.now() - programmaticStampRef.current > 250) {
+        setFollow(false)
+      }
+    }
+    return () => {
+      userScrollListenerRef.current = null
+    }
+  }, [userScrollListenerRef, programmaticStampRef])
+  return null
+}
 const EMPTY_CONCEPTS: Concept[] = []
 
 interface EditorActivationOptions {
@@ -509,7 +594,10 @@ export interface EditorTableHandle {
   /** AQU-646: scroll to a cell by id in DISPLAY space (lens-sorted — correct
    *  for time-ordered files, where store order ≠ display order), optionally
    *  flashing it. Returns false when the id is not currently displayable. */
-  scrollToCellId: (cellId: string, opts?: { flash?: boolean }) => boolean
+  scrollToCellId: (cellId: string, opts?: { flash?: boolean; follow?: "engage" | "release" }) => boolean
+  /** 2026-08-08: command the media-lens playback follow directly (wire b —
+   *  a row click doesn't scroll the table but must re-engage following). */
+  setMediaFollow: (intent: "engage" | "release") => void
   focusCellEditorIndex: (index: number) => void
   getCurrentIndex?: () => number
   /** Briefly outline a cell after a "Go to cell" so the user sees where the search landed. */
@@ -587,6 +675,14 @@ interface EditorTableProps {
   onEditTargetLanguage?: () => void
   /** When set, each row shows the Audio-lens strip (speaker chip + generate). */
   audioLens?: AudioLensContext | null
+  /** 2026-08-07: the character gutter — a voice circle per speaking row,
+   *  aligned to the source's first line. On ONLY in the stacked media lens
+   *  (Sam's call: not the Text lens, not the voice-panel table). */
+  castGutter?: boolean
+  /** LIVE cast state for the gutter (useProjectTts's copy — cast assignments
+   *  update through tts.settings, NOT the project settings-overlay snapshot,
+   *  same rule the old detail pane followed). Stable ref between saves. */
+  ttsSettings?: ProjectTtsSettings
   /** Timeline-segment-model: the active file's order lens. When `'time'`, the
    *  Text/Audio toggle becomes a Text-layer / Media-layer switch — the row list
    *  filters by segment `medium` and sorts by timing. Absent or `'sequence'`
@@ -750,7 +846,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   activeCueIndex, onSeekToCue,
   lineNumbersEnabled, cellLabelsEnabled, sourceDirectionMode = "auto", targetDirectionMode = "auto", sourceTextDirection, targetTextDirection,
   isAnonymous, onJumpToCell,
-  audioLens, onOpenAudioSetup,
+  audioLens, castGutter = false, ttsSettings, onOpenAudioSetup,
   onAttachMediaFile, onAttachMediaUrl,
   orderedBy,
   onProjectChanged, onAddConceptFromSelection, addConceptBlockedReason, onAskAiFromSelection, onAssignVoice,
@@ -884,6 +980,114 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
 
   displayCellIdsRef.current = displayCellIds
 
+  // 2026-08-07 (wire c): follow-driver plumbing. The driver itself mounts
+  // only while the timeline is stacked above (media-sync active).
+  const mediaSyncActive = useMediaSyncActive()
+  const followProgrammaticStampRef = useRef(0)
+  const followUserScrollListenerRef = useRef<((opts?: { force?: boolean }) => void) | null>(null)
+  const followIsCellDisplayed = useCallback(
+    (cellId: string) => displayCellIdsRef.current.includes(cellId),
+    [],
+  )
+  // 2026-08-08: explicit follow intents. A chip/row click is "watch this" —
+  // it ENGAGES following even if the user had scrolled away; inspection jumps
+  // (search, presence, the segment navigator) RELEASE it deliberately instead
+  // of depending on racy stamp timing. Commands ride table state (rare, one
+  // per user gesture) into the driver.
+  const [followCommand, setFollowCommand] = useState<{ seq: number; intent: "engage" | "release" } | null>(null)
+  const followCommandSeqRef = useRef(0)
+  const issueFollowCommand = useCallback((intent: "engage" | "release") => {
+    followCommandSeqRef.current += 1
+    setFollowCommand({ seq: followCommandSeqRef.current, intent })
+  }, [])
+  /** >0 while a code-driven scroll (possibly a native SMOOTH animation that
+   *  emits events for hundreds of ms) is in flight — handleListScroll
+   *  re-stamps the truce for every event that arrives inside the window. */
+  const programmaticInFlightRef = useRef(0)
+  /** EVERY code-driven list scroll goes through here. Stamping only inside
+   *  one caller left the rest (navigator picks, focus scrolls, jumps) reading
+   *  as user scrolls — which silently killed following (2026-08-08 forensics). */
+  const programmaticListScroll = useCallback(
+    (index: number, opts: { viewPosition: number; animated: boolean; follow?: "engage" | "release" }) => {
+      followProgrammaticStampRef.current = performance.now()
+      if (opts.follow) issueFollowCommand(opts.follow)
+      programmaticInFlightRef.current += 1
+      const done = listRef.current?.scrollToIndex({
+        index,
+        viewPosition: opts.viewPosition,
+        animated: opts.animated,
+      })
+      // The promise resolves on scrollend (80ms-idle fallback where scrollend
+      // is missing); +150ms grace absorbs LegendList's settling corrections
+      // under recycled, estimated-height rows.
+      void Promise.resolve(done)
+        .catch(() => {})
+        .then(() => {
+          window.setTimeout(() => {
+            programmaticInFlightRef.current = Math.max(0, programmaticInFlightRef.current - 1)
+          }, 150)
+        })
+    },
+    [issueFollowCommand],
+  )
+  // 2026-08-08 hover quarantine: Chromium re-evaluates :hover AND re-fires
+  // mouseenter after every programmatic scroll, so during playback-follow the
+  // row shade and action rail "drift" onto whatever slides under a PARKED
+  // cursor. Each follow step arms a lock attribute on the list root; the row
+  // styles and mouseenter handler stand down under it. Any GENUINE pointer
+  // gesture — movement with an actual coordinate delta, a wheel tick, a press
+  // — lifts it instantly (the browser's synthetic re-fires keep identical
+  // coordinates, so they never unlock). Attribute-only: no React state, no
+  // row re-renders, hover feels native the moment the mouse is really used.
+  const setFollowHoverLock = useCallback((locked: boolean) => {
+    const el = listRootRef.current
+    if (!el) return
+    if (locked) el.setAttribute("data-follow-hover-lock", "")
+    else el.removeAttribute("data-follow-hover-lock")
+  }, [])
+  // Re-runs when the list root first renders (it is conditional on having
+  // rows) — binding once on mount left the listeners unattached for the whole
+  // session when the table mounted empty, making the lock un-liftable.
+  const hasListRows = displayCellIds.length > 0
+  useEffect(() => {
+    const el = listRootRef.current
+    if (!el) return
+    let last: { x: number; y: number } | null = null
+    const onMove = (e: PointerEvent) => {
+      const moved = last != null && Math.abs(e.clientX - last.x) + Math.abs(e.clientY - last.y) > 1
+      last = { x: e.clientX, y: e.clientY }
+      if (moved) setFollowHoverLock(false)
+    }
+    const unlock = () => setFollowHoverLock(false)
+    const onWheel = () => {
+      setFollowHoverLock(false)
+      // Wheel is the one gesture the scroll-event truce can't attribute while
+      // our own glide is streaming events — force the disengage directly.
+      followUserScrollListenerRef.current?.({ force: true })
+    }
+    el.addEventListener("pointermove", onMove, { capture: true, passive: true })
+    el.addEventListener("wheel", onWheel, { capture: true, passive: true })
+    el.addEventListener("pointerdown", unlock, { capture: true, passive: true })
+    return () => {
+      el.removeEventListener("pointermove", onMove, { capture: true } as EventListenerOptions)
+      el.removeEventListener("wheel", onWheel, { capture: true } as EventListenerOptions)
+      el.removeEventListener("pointerdown", unlock, { capture: true } as EventListenerOptions)
+    }
+  }, [setFollowHoverLock, hasListRows])
+  const handleFollowRest = useCallback(() => setFollowHoverLock(false), [setFollowHoverLock])
+  const followScrollToCell = useCallback((cellId: string) => {
+    const index = displayCellIdsRef.current.indexOf(cellId)
+    if (index < 0) return
+    setFollowHoverLock(true)
+    // A range picked in the segment navigator must not stay latched while
+    // playback walks past it — drop it so the trigger quietly tracks the
+    // sounding cell (Sam 2026-08-07), same as scrollToCellId does for jumps.
+    clearChapterNavigationSelection()
+    // 0.35: the running row rides high enough to leave reading room below.
+    // Animated (Sam 2026-08-08): the follow glides instead of teleporting.
+    programmaticListScroll(index, { viewPosition: 0.35, animated: true })
+  }, [clearChapterNavigationSelection, programmaticListScroll, setFollowHoverLock])
+
   // Durable cell audio (AD-2 cell.audio.* grammar). Per-file read; overlay each
   // visible row's attachments + selected clips at render time, rather than
   // cloning the entire active file into audio-enriched CellData objects.
@@ -1005,6 +1209,15 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   }, [firstVisibleIndex, getListQueryRoot])
 
   const handleListScroll = useCallback(() => {
+    // A native smooth animation emits scroll events far past any single
+    // stamp — while one of OUR scrolls is in flight, every event renews the
+    // stamp so the truce can't misread the animation as the user leaving.
+    if (programmaticInFlightRef.current > 0) {
+      followProgrammaticStampRef.current = performance.now()
+    }
+    // Wire c: every scroll event reaches the follow driver's truce check
+    // (it distinguishes its own programmatic scrolls by the stamp).
+    followUserScrollListenerRef.current?.()
     if (chapterScrollFrameRef.current !== null) return
     chapterScrollFrameRef.current = requestAnimationFrame(() => {
       // Legend List applies its row transforms after the scroll callback.
@@ -1048,11 +1261,9 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     const targetId = list[index]
     clearChapterNavigationSelection()
     handleActivateEditor(targetId)
-    void listRef.current?.scrollToIndex({
-      index,
-      viewPosition: 0.5,
-      animated: false,
-    })
+    // Navigating to EDIT a cell releases follow — playback must not yank the
+    // row out from under the caret (pre-round behavior, now explicit).
+    programmaticListScroll(index, { viewPosition: 0.5, animated: false, follow: "release" })
 
     let attempts = 0
     const focusWhenMounted = () => {
@@ -1086,7 +1297,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
       }
     }
     focusWhenMounted()
-  }, [clearChapterNavigationSelection, getListQueryRoot, handleActivateEditor])
+  }, [clearChapterNavigationSelection, getListQueryRoot, handleActivateEditor, programmaticListScroll])
 
   // AQU-646 round 3: shared flash body — scroll-by-id and the legacy flashCell
   // both defer to the next frame (the list may still be scrolling, so the DOM
@@ -1106,11 +1317,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     scrollToCellIndex(index: number) {
       if (index >= 0 && index < displayCellIds.length) {
         clearChapterNavigationSelection()
-        void listRef.current?.scrollToIndex({
-          index,
-          viewPosition: 0.5,
-          animated: false,
-        })
+        programmaticListScroll(index, { viewPosition: 0.5, animated: false })
       }
     },
     scrollToCellId(cellId, opts) {
@@ -1121,9 +1328,19 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
       const index = displayCellIdsRef.current.indexOf(cellId)
       if (index < 0) return false
       clearChapterNavigationSelection()
-      void listRef.current?.scrollToIndex({ index, viewPosition: 0.5, animated: false })
+      // Default "release": a jump the user is INSPECTING (search, presence,
+      // findings) must not have playback yank the table back a beat later.
+      // Wire a (chip clicks) passes "engage" — that jump means "watch this".
+      programmaticListScroll(index, {
+        viewPosition: 0.5,
+        animated: false,
+        follow: opts?.follow ?? "release",
+      })
       if (opts?.flash) flashCellDom(cellId)
       return true
+    },
+    setMediaFollow(intent: "engage" | "release") {
+      issueFollowCommand(intent)
     },
     focusCellEditorIndex: focusCellEditorByIndex,
     getCurrentIndex: () => {
@@ -1153,7 +1370,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     flashCell(cellId, _searchTerm) {
       flashCellDom(cellId)
     },
-  }), [clearChapterNavigationSelection, displayCellIds.length, cellStore, focusCellEditorByIndex, getListQueryRoot, flashCellDom])
+  }), [clearChapterNavigationSelection, displayCellIds.length, cellStore, focusCellEditorByIndex, getListQueryRoot, flashCellDom, programmaticListScroll, issueFollowCommand])
 
   // FRO-297: Focus the grid-row wrapper div (not TipTap) at `index`.
   // Used for Esc-to-grid and arrow-key navigation while NOT in edit mode.
@@ -1163,11 +1380,8 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     if (index < 0 || index >= list.length) return
     const targetId = list[index]
     clearChapterNavigationSelection()
-    void listRef.current?.scrollToIndex({
-      index,
-      viewPosition: 0.5,
-      animated: false,
-    })
+    // Grid-focus navigation is editing intent too — release follow.
+    programmaticListScroll(index, { viewPosition: 0.5, animated: false, follow: "release" })
     let attempts = 0
     const focusWhenMounted = () => {
       const root = getListQueryRoot()
@@ -1185,7 +1399,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
       rowEl.focus()
     }
     focusWhenMounted()
-  }, [clearChapterNavigationSelection, getListQueryRoot])
+  }, [clearChapterNavigationSelection, getListQueryRoot, programmaticListScroll])
 
   // Resolve a navigation request from a cell editor (Up/Down/Tab) to the
   // adjacent cell and focus it. Out-of-range steps (top/bottom edge) no-op.
@@ -1450,7 +1664,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   // fixed width keeps Source header-aligned. No right gutter; the floating
   // action rail is absolutely positioned. Target reserves pr-9 for the
   // expand chevron.
-  const gridCols = "grid-cols-[84px_1fr_1fr]"
+  const gridCols: EditorGridCols = castGutter ? "grid-cols-[132px_1fr_1fr]" : "grid-cols-[84px_1fr_1fr]"
 
   const handleMouseUp = useCallback(() => {
     if (isDragging.current && dragCells.current.size > 1) {
@@ -1681,12 +1895,11 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     })
     setFirstVisibleIndex(index)
     setChapterVisibleIndex(index)
-    void listRef.current?.scrollToIndex({
-      index,
-      viewPosition: 0,
-      animated: true,
-    })
-  }, [audioFileId, milestoneNavigation])
+    // Picking a range mid-playback is deliberate navigation AWAY — release
+    // following (its long smooth scroll used to trip the truce as a fake
+    // "user scroll" and kill follow as a side effect; now it's explicit).
+    programmaticListScroll(index, { viewPosition: 0, animated: true, follow: "release" })
+  }, [audioFileId, milestoneNavigation, programmaticListScroll])
 
   // Parallel-bibles sidebar tracking: report the first visible row's canonical
   // ref as the user scrolls. Keyed on the derived ref string
@@ -1808,6 +2021,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
             {/* Pilcrow sits in the number slot of the combined gutter so it
                 stays aligned with line numbers below. */}
             <div className="flex items-center py-1">
+              {castGutter && <div className="mr-2 w-10 shrink-0" aria-hidden="true" />}
               <div className="w-5 shrink-0" aria-hidden="true" />
               <div className="ml-2 flex min-w-0 flex-1 items-center gap-0.5">
                 <div className="w-5 shrink-0" aria-hidden="true" />
@@ -1890,6 +2104,8 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           sourceTextDirection={sourceTextDirection}
           targetTextDirection={targetTextDirection}
           gridCols={gridCols}
+          castGutter={castGutter}
+          ttsSettings={ttsSettings}
           isAnonymous={isAnonymous}
           onJumpToCell={onJumpToCell}
           micDenied={micDenied}
@@ -1929,12 +2145,16 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   }, [
     activeCueIndex,
     activeEditorCellId,
+    castGutter,
+    ttsSettings,
     focusedRailCellId,
     handleRowFocusPin,
     handleRowFocusRelease,
     activeLane,
     audioByCellId,
     audioLens,
+    castGutter,
+    ttsSettings,
     backtranslationByCellId,
     backtranslating,
     backtranslationErrors,
@@ -2016,8 +2236,37 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     [cellStoreVersion, renderListItem],
   )
 
+  // 2026-08-07 (Sam): in the stacked media lens the segment-range navigator
+  // leaves its own header row and rides COMPACT on the chip strip's right —
+  // portaled into the strip's slot (the nav's items/scroll handlers live
+  // here, the strip owns the spot). Navigation only either way (the row list
+  // is never filtered by it). The Text lens keeps the classic row.
+  const showMilestoneNav = !castGutter && milestoneNavigationItems.length > 0 && Boolean(activeChapterLabel)
+  const showStripNav = castGutter && milestoneNavigationItems.length > 0 && Boolean(activeChapterLabel)
+  const [stripNavSlot, setStripNavSlot] = useState<HTMLElement | null>(null)
+  useEffect(() => {
+    if (!showStripNav) {
+      setStripNavSlot(null)
+      return
+    }
+    // Both the strip (a TimelineEditor child) and this table commit in the
+    // same render pass, so the slot exists by the time effects run.
+    setStripNavSlot(document.querySelector<HTMLElement>("[data-strip-nav-slot]"))
+  }, [showStripNav])
+
   return (
     <div className="flex h-full min-h-0 flex-col" onMouseUp={handleMouseUp}>
+      {showStripNav && stripNavSlot
+        ? createPortal(
+            <MilestoneNavigator
+              items={milestoneNavigationItems}
+              activeKey={activeChapterLabel}
+              activeSubsectionKey={activeSubsectionKey}
+              onSelect={handleChapterSelect}
+            />,
+            stripNavSlot,
+          )
+        : null}
       <div className="shrink-0 bg-background">
         {/* FRO-273: role badge — shown for read-only roles (viewer/commenter/reviewer) */}
         {readOnlyLabel && (
@@ -2026,17 +2275,17 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
             {readOnlyLabel}
           </div>
         )}
-        {(milestoneNavigationItems.length > 0 && activeChapterLabel) || chapterNavTrailing ? (
+        {showMilestoneNav || chapterNavTrailing ? (
           // Below lg: in-flow left picker + end toolbar. lg+: equal flex
           // balancers keep the picker centered without absolute overlay — the
           // old inset-0 layer painted under Text/Audio + ⋯ when space was tight.
           // min-w-24 floors the picker at prev + chevron + next (three size-8s).
           // gap-2 matches FileChapterToolbar's tabs ↔ ⋯ spacing.
           <div className="relative flex items-center gap-2 border-b border-border bg-background/90 py-2 pl-2 pr-2 backdrop-blur-xl">
-            {milestoneNavigationItems.length > 0 && activeChapterLabel ? (
+            {showMilestoneNav ? (
               <div className="hidden min-w-0 flex-1 lg:block" aria-hidden="true" />
             ) : null}
-            {milestoneNavigationItems.length > 0 && activeChapterLabel ? (
+            {showMilestoneNav ? (
               <div
                 data-chapter-nav-slot=""
                 className="mr-auto flex min-w-24 max-w-full flex-1 items-center lg:mr-0 lg:flex-none lg:shrink"
@@ -2054,26 +2303,40 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
             {chapterNavTrailing ? (
               <div
                 className={
-                  milestoneNavigationItems.length > 0 && activeChapterLabel
+                  showMilestoneNav
                     ? "flex shrink-0 items-center lg:flex-1 lg:justify-end"
                     : "ml-auto flex shrink-0 items-center"
                 }
               >
                 {chapterNavTrailing}
               </div>
-            ) : milestoneNavigationItems.length > 0 && activeChapterLabel ? (
+            ) : showMilestoneNav ? (
               <div className="hidden min-w-0 flex-1 lg:block" aria-hidden="true" />
             ) : null}
           </div>
         ) : null}
         <div className={cn("grid gap-2 border-b border-border pl-2.5 pr-4 py-2 text-xs font-medium text-muted-foreground", gridCols)}>
-          {/* Unlabeled track: combined select + badges + number gutter. */}
-          <div aria-hidden="true" />
+          {/* With the character gutter on, the Source label sits over the
+              gutter at the LEFT EDGE (Sam 2026-08-07) instead of floating a
+              gutter-width away from the side; otherwise the track is
+              unlabeled (select + badges + number). */}
+          {castGutter ? (
+            <div data-testid="table-source-header" className="flex items-center gap-2">
+              Source
+              {project.sourceLanguage && (
+                <Badge variant="secondary" className="text-[10px] font-normal normal-case tracking-normal">
+                  {project.sourceLanguage}
+                </Badge>
+              )}
+            </div>
+          ) : (
+            <div aria-hidden="true" />
+          )}
           {/* In Audio mode the left column carries per-line voice controls, not
               source text, so label it "Controls" (no source-language badge). */}
           <div className="flex items-center gap-2 pl-2">
-            {audioLens ? "Controls" : "Source"}
-            {!audioLens && project.sourceLanguage && (
+            {castGutter ? null : audioLens ? "Controls" : "Source"}
+            {!castGutter && !audioLens && project.sourceLanguage && (
               <Badge variant="secondary" className="text-[10px] font-normal normal-case tracking-normal">
                 {project.sourceLanguage}
               </Badge>
@@ -2225,6 +2488,16 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           onWheelCapture={clearChapterNavigationSelection}
           onKeyDownCapture={handleChapterListKeyDownCapture}
         >
+          {mediaSyncActive && (
+            <MediaFollowDriver
+              isCellDisplayed={followIsCellDisplayed}
+              scrollToCell={followScrollToCell}
+              userScrollListenerRef={followUserScrollListenerRef}
+              programmaticStampRef={followProgrammaticStampRef}
+              followCommand={followCommand}
+              onFollowRest={handleFollowRest}
+            />
+          )}
           <LegendList
             ref={listRef}
             refScrollView={setListScrollElement}
@@ -2246,7 +2519,10 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           />
         </div>
       ) : isTimeOrdered ? (
-        audioLens && canEdit && onAttachMediaFile && onAttachMediaUrl ? (
+        // 2026-08-07: keyed on isTimeOrdered, not audioLens — the media lens
+        // renders this table in text mode under the timeline now, and an empty
+        // time-ordered file must still offer "attach a clip" there.
+        canEdit && onAttachMediaFile && onAttachMediaUrl ? (
           <div className="flex-1">
             <TimelineAddMedia onAttachFile={onAttachMediaFile} onAttachUrl={onAttachMediaUrl} />
           </div>
@@ -2255,13 +2531,9 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
             <EmptyState
               variant="inline"
               className="h-full py-10"
-              icon={audioLens ? Music : FileText}
-              title={audioLens ? "No media segments yet" : "No text segments in this file"}
-              description={
-                audioLens
-                  ? "Import an audio or video file, or record a take, to populate the media layer."
-                  : undefined
-              }
+              icon={Music}
+              title="No media segments yet"
+              description="Import an audio or video file, or record a take, to populate the media layer."
             />
           </div>
         )
@@ -2405,7 +2677,9 @@ interface MemoizedRowProps {
   targetDirectionMode: DirectionMode
   sourceTextDirection: TextDirection
   targetTextDirection: TextDirection
-  gridCols: "grid-cols-[84px_1fr_1fr]"
+  gridCols: EditorGridCols
+  castGutter: boolean
+  ttsSettings?: ProjectTtsSettings
   isAnonymous?: boolean
   onJumpToCell?: (cellId: string) => void
   micDenied?: boolean
@@ -2461,7 +2735,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
   const {
     cell, examples, completing, errors, previews, healthMap, infractions,
     backtranslating, backtranslationErrors, cellOpenCommentCount,
-    activeCueIndex, rowIndex, contentNumber, gridCols,
+    activeCueIndex, rowIndex, contentNumber, gridCols, castGutter, ttsSettings,
     onDragStart: onDragStartParent, onDragEnter: onDragEnterParent,
     onSelectionPointerDown: onSelectionPointerDownParent,
     onNavigateCell: onNavigateCellParent,
@@ -2639,6 +2913,8 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         sourceTextDirection={sourceTextDirection}
         targetTextDirection={targetTextDirection}
         gridCols={gridCols}
+        castGutter={castGutter}
+        ttsSettings={ttsSettings}
         isAnonymous={isAnonymous}
         onJumpToCell={onJumpToCell}
         micDenied={micDenied}
@@ -2795,7 +3071,9 @@ interface EditorRowProps {
   targetDirectionMode: DirectionMode
   sourceTextDirection: TextDirection
   targetTextDirection: TextDirection
-  gridCols: "grid-cols-[84px_1fr_1fr]"
+  gridCols: EditorGridCols
+  castGutter: boolean
+  ttsSettings?: ProjectTtsSettings
   isAnonymous?: boolean
   onJumpToCell?: (cellId: string) => void
   micDenied?: boolean
@@ -3645,7 +3923,7 @@ function EditorRow({
   isActiveCue: _isActiveCue, onSeekToCue,
   onDragStart, onDragEnter, onSelectionPointerDown, onNavigateCell,
   onEscapeToGrid, onGridRowKeyNav,
-  rowIndex, contentNumber, lineNumbersEnabled, scriptureNumbering, cellLabelsEnabled, sourceDirectionMode, targetDirectionMode, sourceTextDirection, targetTextDirection, gridCols,
+  rowIndex, contentNumber, lineNumbersEnabled, scriptureNumbering, cellLabelsEnabled, sourceDirectionMode, targetDirectionMode, sourceTextDirection, targetTextDirection, gridCols, castGutter, ttsSettings,
   isAnonymous, micDenied,
   audioLens, onOpenAudioSetup, onAssignVoice, onAddConceptFromSelection, addConceptBlockedReason, onAskAiFromSelection,
   onCellCommitted, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, presenceStore, remoteChangedWhileFocused,
@@ -3668,12 +3946,26 @@ function EditorRow({
   // FRO perf cleanup: pure pass-through openers (never consumed by
   // EditorTable/MemoizedRow) come from context instead of the prop chain —
   // keeps them out of MemoizedRow's React.memo compare surface.
-  const { onInfractionClick, onOpenComments, onOpenHistory, onAiSetupNeeded, onOpenRecording, myScopes } = useEditorActions()
+  const {
+    onInfractionClick, onOpenComments, onOpenHistory, onAiSetupNeeded, onOpenRecording,
+    onMediaRowActivate, onAssignCastVoice, myScopes,
+  } = useEditorActions()
   // AQU-633: a scoped member can only validate cells in their assigned lane/file.
   // Combine the role capability with the per-cell scope check so an out-of-scope
   // cell greys the toggle instead of offering a guaranteed-403 validate. Unscoped
   // members (empty scopes) → always in scope, so this is a no-op for them.
   const canValidateThisCell = canValidate && isInMemberScope(myScopes, cell.fileId, activeLane)
+  // 2026-08-07: the timeline's pointed-at cell (media lens only — the store
+  // self-clears when the timeline unmounts). Per-row subscription so a cursor
+  // move re-renders exactly the two affected rows.
+  const isMediaCursorRow = useIsMediaCursorCell(cell.id)
+  // Wire c: the cell the queue is RUNNING right now (stacked lens only —
+  // gated on the same media-sync flag so bar-driven playback in the Text
+  // lens keeps its existing scroll-and-flash behavior unchanged). Both hooks
+  // run unconditionally; only the combination is conditional.
+  const isQueueCurrentCell = useIsQueueCurrentCell(cell.id)
+  const rowMediaSyncActive = useMediaSyncActive()
+  const isQueueRow = isQueueCurrentCell && rowMediaSyncActive
   const remoteCellPresence = useCellPresence(presenceStore, cell.id)
   // A focus lock admits one active writer. Prefer its newest ephemeral draft
   // so the read surface and remote caret advance together between commits.
@@ -4549,11 +4841,6 @@ function EditorRow({
 
   const selectedAudio = cell.selectedAudioId ? cell.attachments?.[cell.selectedAudioId] : undefined
   const hasAudio = Boolean(selectedAudio && !selectedAudio.isDeleted)
-  // SUB-29: the mic/upload gate counts recorded TAKES — the imported source
-  // clip squatting in every media section's recording slot must not hide the
-  // record affordance (audioId provenance: takes are seeded with the cellId).
-  const hasRecordedTake =
-    hasAudio && (cell.medium !== "media" || audioIdSeededWith(cell.selectedAudioId, cell.id))
   const cellAudioTimings = cell.selectedAudioId ? cell.audioTimings?.[cell.selectedAudioId] : undefined
   const selectedGeneratedVoice = cell.selectedGeneratedVoiceAudioId
     ? cell.attachments?.[cell.selectedGeneratedVoiceAudioId]
@@ -4578,6 +4865,23 @@ function EditorRow({
     cell.attachments, cell.selectedAudioId,
   ])
   const audioController = useCellAudio(project, cellForAudio, cell.fileId)
+  // Round 5: when the rail plays the SHARED source clip (media section), it
+  // must stop at the section's end — the play-queue windows this clip, but
+  // this per-cell player was never told the window, so play ran on through
+  // the rest of the film. Takes and generated clips stay unconstrained.
+  const railSectionWindow =
+    isSourceSegmentSelected(cell) &&
+    typeof cell.startTime === "number" && Number.isFinite(cell.startTime) &&
+    typeof cell.endTime === "number" && Number.isFinite(cell.endTime) &&
+    cell.endTime > cell.startTime
+      ? { start: cell.startTime, end: cell.endTime }
+      : null
+  const { setTrim: setRailTrim } = audioController
+  useEffect(() => {
+    if (cell.medium !== "media") return
+    if (railSectionWindow) setRailTrim(railSectionWindow.start, railSectionWindow.end)
+    else setRailTrim(null, null)
+  }, [cell.medium, railSectionWindow?.start, railSectionWindow?.end, setRailTrim]) // eslint-disable-line react-hooks/exhaustive-deps -- window identity varies per render; primitives cover it
   const cellForGeneratedVoice = useMemo(() => ({
     metadata: {
       attachments: cell.attachments,
@@ -4769,6 +5073,28 @@ function EditorRow({
     contentNumber,
     displayLabel: importDisplayLabel(cell.metadata),
   })
+  // ── Character gutter (2026-08-07, stacked media lens only) ──────────────
+  // A row "speaks" unless it's structure (paratext/heading) or has no source
+  // text at all — the same set whose number pill is suppressed, so the two
+  // left-edge columns read consistently. The voice resolves through the LIVE
+  // tts settings (castAssignments → per-cell pin → default); "explicit" is
+  // gated through findVoice so an assignment pointing at a DELETED voice
+  // truthfully renders as the faded fallback rather than solid-but-narrator.
+  const gutterSpeaking =
+    castGutter &&
+    cell.type !== "paratext" &&
+    cell.type !== "heading" &&
+    Boolean((cell.original ?? cell.transcription ?? "").trim())
+  const gutterVoice = gutterSpeaking
+    ? resolveCastVoice(ttsSettings, cell.id, cell.ttsSettings?.voiceId)
+    : null
+  const gutterExplicit =
+    gutterSpeaking &&
+    Boolean(findVoice(ttsSettings, assignedCastVoiceId(ttsSettings, cell.id) ?? cell.ttsSettings?.voiceId))
+  const gutterCastName =
+    cell.metadata && typeof cell.metadata.cast_name === "string" ? (cell.metadata.cast_name as string) : null
+  const gutterVoices = useMemo(() => getVoiceLibrary(ttsSettings), [ttsSettings])
+
   const numberPill = numberLabel === null ? null : (
     // Box the digit to the source's first line (fontSize × line-height 1.6,
     // both set on the source well below) and center it, so the number keeps
@@ -4940,8 +5266,21 @@ function EditorRow({
 
   // Stable rail handlers
   const handleRowMouseEnter = () => {
+    // 2026-08-08: under the playback-follow hover lock this "enter" is the
+    // browser re-firing hover as content slides beneath a parked cursor —
+    // summoning the rail from it made the rail drift row-to-row.
+    if (rowRef.current?.closest("[data-follow-hover-lock]")) return
     setIsHovering(true)
     // AQU-354: a fresh hover re-summons the rail if it had idle-collapsed.
+    registerRailActivity()
+  }
+  const handleRowMouseMove = () => {
+    // After an in-place hover-lock lift the browser never re-fires mouseenter
+    // (the cursor hasn't crossed a row boundary) — the first REAL movement
+    // inside the row re-summons the rail instead.
+    if (isHovering) return
+    if (rowRef.current?.closest("[data-follow-hover-lock]")) return
+    setIsHovering(true)
     registerRailActivity()
   }
   const handleRowMouseLeave = () => {
@@ -4978,6 +5317,10 @@ function EditorRow({
       return
     }
     if (isInteractiveTarget(e.target)) return
+    // 2026-08-07 (wire b): with the timeline stacked above, a plain row click
+    // also points the timeline at this cell (select chip, center, cue paused).
+    // The workspace no-ops this outside the stacked media lens.
+    onMediaRowActivate?.(cell.id)
     // Plain click clears any active multi-selection so the next interaction
     // doesn't surprise the user with a stale bulk action target.
     clearSelection()
@@ -5252,8 +5595,10 @@ function EditorRow({
           // Keyboard-focus ring for the grid row (only when focused directly,
           // not via a child element — :focus-visible + :not(:focus-within:not(:focus))).
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-inset",
-          // Hover/active well via a subtle background overlay.
-          "hover:bg-muted/50",
+          // Hover/active well via a subtle background overlay. The :not()
+          // stands the shade down under the playback-follow hover lock —
+          // synthetic hover from content sliding under a parked cursor.
+          "[&:hover:not([data-follow-hover-lock]_*)]:bg-muted/50",
           expanded && "bg-muted/50",
           audioController.isPlaying && "bg-muted/40",
           // Multi-select: tinted fill + a subtle gold inset ring.
@@ -5262,6 +5607,11 @@ function EditorRow({
           openCommentCount > 0 && "ring-1 ring-blue-400/50 ring-inset",
           // Active cue highlight — tinted fill + gold ring.
           _isActiveCue && "bg-primary/5 ring-1 ring-primary/40 ring-inset",
+          // Timeline cursor (media lens): sky ring, same language as the
+          // selected chip's ring.
+          isMediaCursorRow && "bg-sky-500/5 ring-1 ring-sky-500/40 ring-inset",
+          // Wire c: the row the queue is sounding — gold, like the active cue.
+          isQueueRow && "bg-primary/5 ring-1 ring-primary/40 ring-inset",
           // Pulsing while a voice is being generated for this cell. Gives the
           // user a clear "something is happening" signal — drop, translate,
           // and bulk synth all flow through this status key.
@@ -5278,6 +5628,7 @@ function EditorRow({
           gridCols,
         )}
         onMouseEnter={handleRowMouseEnter}
+        onMouseMove={handleRowMouseMove}
         onMouseLeave={handleRowMouseLeave}
         onFocusCapture={handleRowFocusCapture}
         onBlurCapture={handleRowBlurCapture}
@@ -5289,6 +5640,30 @@ function EditorRow({
             pl-2.5); ml-2 opens space before the badge stack, then a tight
             gap to the verse number. Fixed track keeps Source header-aligned. */}
         <div className="flex h-full items-start self-stretch py-1.5">
+          {castGutter && (
+            <div className="mr-2 flex w-10 shrink-0 flex-col items-center">
+              <div className="mb-1 h-4 shrink-0" aria-hidden />
+              {/* 32px circles centered ON THE VERSE NUMBER (Sam 2026-08-07):
+                  same spacer + first-line box as the number column, so the
+                  circle's midpoint rides the number's midpoint; the circle
+                  overflows the line box symmetrically. */}
+              <span
+                className="flex items-center justify-center"
+                style={{ height: `calc(${sourceFontSize}px * 1.6)` }}
+              >
+                {gutterVoice && (
+                  <CastGutterVoice
+                    voice={gutterVoice}
+                    explicit={gutterExplicit}
+                    castName={gutterCastName}
+                    editable={editable && Boolean(onAssignCastVoice)}
+                    voices={gutterVoices}
+                    onPick={(voiceId, opts) => onAssignCastVoice?.(cell, voiceId, opts)}
+                  />
+                )}
+              </span>
+            </div>
+          )}
           {/* SWARM-TODO(voice-a5): "Voice together" multi-cell selection gives
               no visual feedback and the action bar never appears. Root cause:
               the drag-selection affordance (onPointerDown) uses setSelection()
@@ -5319,7 +5694,7 @@ function EditorRow({
                   "focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-2",
                   isMultiSelected
                     ? "border-transparent bg-primary text-primary-foreground opacity-100"
-                    : "border-border bg-card text-muted-foreground/70 opacity-60 hover:text-primary group-hover:opacity-100",
+                    : "border-border bg-card text-muted-foreground/70 opacity-60 hover:text-primary [.group:hover:not([data-follow-hover-lock]_*)_&]:opacity-100",
                 )}
               >
                 {isMultiSelected ? (
@@ -5461,7 +5836,7 @@ function EditorRow({
                     "absolute right-1 top-1 z-10 shrink-0",
                     sourceEditing
                       ? "bg-primary/10 text-primary"
-                      : "text-muted-foreground/50 opacity-0 hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100",
+                      : "text-muted-foreground/50 opacity-0 hover:text-foreground focus-visible:opacity-100 [.group:hover:not([data-follow-hover-lock]_*)_&]:opacity-100",
                   )}
                 >
                   <Pencil />
@@ -5474,7 +5849,7 @@ function EditorRow({
               <AppTooltip content={sourceReadOnlyReasonForCell} className="max-w-xs">
                 <span
                   aria-label="Source is locked"
-                  className="absolute right-1 top-1 z-10 inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground/50 opacity-0 focus-visible:opacity-100 group-hover:opacity-100"
+                  className="absolute right-1 top-1 z-10 inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground/50 opacity-0 focus-visible:opacity-100 [.group:hover:not([data-follow-hover-lock]_*)_&]:opacity-100"
                 >
                   <Lock className="size-3" />
                 </span>
@@ -6047,16 +6422,16 @@ function EditorRow({
                 />
               )}
 
-              {/* FRO-237: Direct mic button on the rail when no audio — one-click
-                  action without needing to open a popover ("just hit the record
-                  mic — quick action"). Replaces the redundant Record item inside
-                  the ⋯ popover. When audio IS present, FRO-236's Play icon on
-                  the overflow button already gives a direct play affordance.
+              {/* FRO-237: Direct mic button on the rail — one-click action
+                  without needing to open a popover ("just hit the record
+                  mic — quick action"). Round 5: stays visible when a take
+                  exists (re-recording is normal; the takes strip manages
+                  versions — a vanishing mic read as a bug in QA).
                   WARN fix: the button must NOT be disabled when micDenied —
                   disabled elements receive no mouse events, so the "click for
                   help" affordance is unreachable. Instead keep it enabled and
                   route clicks to the denied-help popover. */}
-              {!hasRecordedTake && onOpenRecording && editable && (() => {
+              {onOpenRecording && editable && (() => {
                 const unsupportedReason = getUnsupportedReason()
                 const isUnsupported = unsupportedReason !== null
                 const micTooltip = micDenied
@@ -6111,8 +6486,8 @@ function EditorRow({
               {/* AQU-513: file-picker upload next to the mic — a plain
                   <input type="file"> so phone browsers can attach an
                   existing wav/mp3/m4a recording without a desktop. Same
-                  gating as the mic (no audio yet, editable). */}
-              {!hasRecordedTake && editable && (
+                  gating as the mic (editable; visible with a take too). */}
+              {editable && (
                 <CellAudioUploadButton
                   projectId={project.id}
                   fileId={cell.fileId}
@@ -6147,25 +6522,25 @@ function EditorRow({
                 />
               )}
 
-              {visibleTranslated.trim().length > 0 && (
-                <CellTtsButton
-                  cellId={cell.id}
-                  text={visibleTranslated}
-                  original={effectiveSourceText(cell)}
-                  context={cell.context}
-                  cellLabel={cell.cellLabel}
-                  sourceLanguage={project.sourceLanguage}
-                  targetLanguage={project.targetLanguage}
-                  projectTtsSettings={project.ttsSettings}
-                  cellTtsSettings={cell.ttsSettings}
-                  generatedVoiceAudioId={cell.selectedGeneratedVoiceAudioId}
-                  attachments={cell.attachments}
-                  projectId={project.id}
-                  fileId={cell.fileId}
-                  disabled={!editable}
-                  playOnly
-                />
-              )}
+              {/* Round 5: no playOnly — generating here durably attaches the
+                  voice; an untranslated line shows the button disabled with
+                  the reason instead of hiding it. */}
+              <CellTtsButton
+                cellId={cell.id}
+                text={visibleTranslated}
+                original={effectiveSourceText(cell)}
+                context={cell.context}
+                cellLabel={cell.cellLabel}
+                sourceLanguage={project.sourceLanguage}
+                targetLanguage={project.targetLanguage}
+                projectTtsSettings={project.ttsSettings}
+                cellTtsSettings={cell.ttsSettings}
+                generatedVoiceAudioId={cell.selectedGeneratedVoiceAudioId}
+                attachments={cell.attachments}
+                projectId={project.id}
+                fileId={cell.fileId}
+                disabled={!editable}
+              />
 
               {editable && !isLoading && (
                 <RailButton

@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, vi } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import type { ReactNode } from "react"
 import { EditorTable } from "./EditorTable"
@@ -15,6 +15,12 @@ import { CellStore } from "@/hooks/useActiveCellStore"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import type { CellRow } from "@/lib/sync/cells-read-types"
 import { ROLE } from "@/lib/frontier/roles"
+
+// AQU-847 needs the pencil visible: the source-edit affordance is gated on a
+// resolved (unlinked) DCS cursor, and the un-mocked hook leaves it loading.
+vi.mock("@/hooks/useDcsUpstreamCursor", () => ({
+  useDcsUpstreamCursor: () => ({ cursor: null, loading: false }),
+}))
 
 vi.mock("@/lib/sync/events-emit", () => ({
   emitCellValidate: vi.fn(() => Promise.resolve("validate-event")),
@@ -136,5 +142,33 @@ describe("EditorTable — media sections in the TEXT lens (AQU-646)", () => {
     renderTable(makeStore([mediaRow("m2", { startMs: 0, endMs: 5_000 })]))
     expect(await screen.findByText("episode.mp3")).toBeInTheDocument()
     expect(screen.queryByText("No text segments in this file")).toBeNull()
+  })
+})
+
+describe("EditorTable — correcting a media section's transcript (AQU-847)", () => {
+  it("the pencil opens the editor on the TRANSCRIPT, not the file title", async () => {
+    renderTable(makeStore([
+      mediaRow("m3", { startMs: 0, endMs: 5_000, transcription: "in the beginning was the word" }),
+    ]))
+    fireEvent.click(await screen.findByRole("button", { name: "Edit source text" }))
+    const editor = await screen.findByRole("textbox", { name: "Edit source text" })
+    expect(editor.textContent).toBe("in the beginning was the word")
+    expect(editor.textContent).not.toContain("episode.mp3")
+  })
+
+  it("a filename valueHtml never shadows the transcript in the read surface", async () => {
+    // The shape a pre-fix commit left behind: `value_html` populated from the
+    // file title. The HTML branch used to win outright and pin the file title
+    // over the transcript forever.
+    renderTable(makeStore([
+      mediaRow("m4", {
+        startMs: 0,
+        endMs: 5_000,
+        valueHtml: "<p>episode.mp3</p>",
+        transcription: "in the beginning was the word",
+      }),
+    ]))
+    expect(await screen.findByText("in the beginning was the word")).toBeInTheDocument()
+    expect(screen.queryByText("episode.mp3")).toBeNull()
   })
 })

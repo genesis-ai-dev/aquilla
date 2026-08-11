@@ -625,6 +625,25 @@ export function buildEventProjectionStmts(
               ...gateBinds,
             ),
         )
+
+        // AQU-847: a source edit on an imported MEDIA section corrects its
+        // TRANSCRIPT, not its `value` — `value` holds the import filename and
+        // stays put as provenance. Conditional (only when supplied) so every
+        // ordinary text-cell source commit projects exactly as before, and
+        // scoped to side='source' like the `cell.audio.attach` transcript
+        // write it mirrors. Without this the correction was accepted, chained,
+        // and then silently discarded.
+        const sp = p as EventPayloads['source.cell.commit']
+        if (typeof sp.transcription === 'string') {
+          stmts.push(
+            db
+              .prepare(
+                `UPDATE cells SET transcription = ?
+                  WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'source'`,
+              )
+              .bind(sp.transcription, event.projectId, event.fileId, event.cellId),
+          )
+        }
       }
 
       // FTS5 maintenance (post-DML): insert the new indexed value now that

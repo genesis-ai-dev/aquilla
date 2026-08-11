@@ -2622,6 +2622,13 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
  * and revealed by CSS on the row's hover group — no per-row state, so hovering
  * never re-renders anything.
  *
+ * INSIDE the row's box, deliberately. The first cut hung it 12px outside
+ * (-bottom-3) so it would straddle the divider between rows, and it was
+ * invisible in a real browser: the virtualised list wraps every row in a
+ * container carrying `contain: content`, which implies PAINT containment and
+ * clips anything outside that box. Unit tests could not catch it — happy-dom
+ * has no layout engine, so a clipped element still measures as present.
+ *
  * The button is literally the timeline's slot button, so "insert a line here"
  * looks and behaves the same on both surfaces.
  */
@@ -2649,7 +2656,7 @@ function RowStructureStrip({
         SLOT_GROUP,
         "pointer-events-none absolute inset-x-0 z-20 flex justify-center gap-1",
         "opacity-0 transition-opacity group-hover/rowstrip:opacity-100 focus-within:opacity-100",
-        edge === "top" ? "-top-3" : "-bottom-3",
+        edge === "top" ? "top-0" : "bottom-0",
       )}
     >
       {/* Pointer events follow the opacity. Without that, an invisible button

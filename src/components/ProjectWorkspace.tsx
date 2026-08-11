@@ -92,6 +92,7 @@ import { v7 as uuidv7 } from "uuid"
 import { sequenceBetween } from "@/lib/timeline/derive"
 import { isLineEmpty, isUserAddedLine, userLineOrigin } from "@/lib/timeline/user-lines"
 import { MIN_ADDABLE_SPAN_SEC, targetOffsetMsFor } from "@/lib/timeline/lane-timing"
+import { deriveSourceRegions, insertSlotsByCell, EMPTY_INSERT_SLOTS } from "@/lib/timeline/source-regions"
 import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
 import { isBulkValidationEligible } from "@/lib/review/review-eligibility"
 import { TimelineEditor } from "@/components/timeline/TimelineEditor"
@@ -159,7 +160,7 @@ import {
   VIDEO_PANE_TABLE_MIN_WIDTH,
 } from "./timeline/video-pane-layout"
 import { setVideoClockSec, setVideoClockPlaying } from "@/lib/timeline/video-clock"
-import { setVideoDurationSec } from "@/lib/timeline/video-duration"
+import { setVideoDurationSec, useVideoDurationSec } from "@/lib/timeline/video-duration"
 import { uiSlotRef } from "@/lib/ui-slots"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { TimingModeChangedDialog } from "./timeline/TimingModeChangedDialog"
@@ -4655,6 +4656,47 @@ export function ProjectWorkspace() {
     [legacyCells, workspaceAudioByCellId],
   )
 
+  // AQU-646 round 8: the text table's add/remove controls. Live only in the
+  // VTT-plus-footage arrangement — the same test the timeline's band uses, plus
+  // the permission that actually creates the row — and undefined everywhere
+  // else, so no other workflow renders anything new.
+  //
+  // Gated on `legacyCellsNeeded` through audioMergedCells: outside the media
+  // lens that array is empty by design, and forcing it would cost a full
+  // thousand-object rebuild on every store bump for a surface nobody is looking
+  // at. This is why the controls are a media-lens affordance.
+  const sourceBandCells = activeFile?.coreMediaUrl && legacyCellsNeeded
+    && !audioMergedCells.some((c) => (c.medium ?? "text") === "media")
+    && canPerform("source.cell.create", project?.syncRole?.level ?? null)
+    ? audioMergedCells
+    : null
+  const videoDurationForTable = useVideoDurationSec(activeFile?.coreMediaUrl ?? null)
+  const insertSlots = useMemo(
+    () =>
+      sourceBandCells
+        ? insertSlotsByCell(
+            deriveSourceRegions(sourceBandCells, videoDurationForTable),
+            MIN_ADDABLE_SPAN_SEC,
+          )
+        : EMPTY_INSERT_SLOTS,
+    [sourceBandCells, videoDurationForTable],
+  )
+  const sourceLineEditing = useMemo(
+    () =>
+      sourceBandCells
+        ? {
+            head: insertSlots.head,
+            afterCell: insertSlots.afterCell,
+            onAddLine: (startSec: number, endSec: number) => void handleAddLine(startSec, endSec),
+            // The same predicate the timeline lane asks, so the two surfaces
+            // can never disagree about what is removable.
+            canRemove: (c: CellData) => isUserAddedLine(c) && isLineEmpty(c),
+            onRemoveLine: (cellId: string) => void handleRemoveLine(cellId),
+          }
+        : undefined,
+    [sourceBandCells, insertSlots, handleAddLine, handleRemoveLine],
+  )
+
   // AQU-646 SUB-53 / pre-merge round: which job THIS FILE is for. The mode is
   // file-level (files.meta via file.timing.set); a file with no mode of its
   // own inherits the legacy project-level value (so projects that chose Free
@@ -6132,6 +6174,7 @@ export function ProjectWorkspace() {
             getStatisticalBt={getStatisticalBt}
             onAlignmentSeedChange={handleAlignmentSeedChange}
             onSeekToCue={isSubtitleFile && timelineStacked ? handleCueSeek : undefined}
+            sourceLineEditing={sourceLineEditing}
             lineNumbersEnabled={fileMeta.lineNumbersEnabled}
             cellLabelsEnabled={cellLabelsEnabled}
             sourceDirectionMode={fileMeta.sourceDirectionMode}

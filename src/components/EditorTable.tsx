@@ -18,6 +18,7 @@ import {
   PilcrowRight,
 } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
+import { SLOT_GROUP, TimelineSlotButton } from "@/components/timeline/TimelineSlotButton"
 import { Button } from "@/components/ui/button"
 import { Badge, badgeVariants } from "@/components/ui/badge"
 import { EmptyState } from "@/components/ui/page"
@@ -756,6 +757,27 @@ interface EditorTableProps {
   // onOpenComments/onOpenHistory moved to EditorActionsContext (FRO perf
   // cleanup) — pure pass-through, never consumed above the row.
   onSeekToCue?: (cellId: string) => void
+  /**
+   * AQU-646 round 8: add and remove lines from the TABLE, mirroring the
+   * gestures the timeline already offers. Undefined in every arrangement but
+   * VTT-plus-footage — and then nothing here renders at all, which is how every
+   * other workflow stays untouched.
+   *
+   * The silences arrive pre-resolved (one pass per store version in the
+   * workspace) so a thousand-row file does one map lookup per row rather than
+   * a scan. A row with no room after it simply gets no control — the same rule
+   * as the timeline's pencil, never a disabled button.
+   */
+  sourceLineEditing?: {
+    /** The silence before the first cue, offered as "insert above" on row 0. */
+    head: { startSec: number; endSec: number } | null
+    /** Keyed by the cell whose row offers "insert below". */
+    afterCell: ReadonlyMap<string, { startSec: number; endSec: number }>
+    onAddLine(startSec: number, endSec: number): void
+    /** The workspace owns what is removable, exactly as the timeline lane does. */
+    canRemove(cell: CellData): boolean
+    onRemoveLine(cellId: string): void
+  }
   lineNumbersEnabled: boolean
   cellLabelsEnabled: boolean
   sourceDirectionMode?: DirectionMode
@@ -842,6 +864,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   onSaveBacktranslation, getStatisticalBt,
   cellOpenCommentCount,
   onSeekToCue,
+  sourceLineEditing,
   lineNumbersEnabled, cellLabelsEnabled, sourceDirectionMode = "auto", targetDirectionMode = "auto", sourceTextDirection, targetTextDirection,
   isAnonymous, onJumpToCell,
   audioLens, castGutter = false, ttsSettings, onOpenAudioSetup,
@@ -1996,6 +2019,12 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           const paragraphGroupInfo = cell.paragraphStart === true
             ? paragraphGroupInfoByCellId.get(cell.id)
             : undefined
+          // AQU-646 round 8: the row's STRUCTURAL controls — add a line into
+          // the silence after it, take an empty added line back. One map lookup
+          // and one predicate call per row; no scans.
+          const insertBelow = sourceLineEditing?.afterCell.get(cell.id) ?? null
+          const insertAbove = index === 0 ? (sourceLineEditing?.head ?? null) : null
+          const canRemoveLine = Boolean(sourceLineEditing?.canRemove(cell))
           return (
       <div
         data-cell-id={cell.id}
@@ -2005,10 +2034,31 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
         aria-label={untimedInTimeLens ? "No specific timing — ordered by sequence" : undefined}
         className={cn(
           "relative",
+          // The hover group for the structural strip below. Named so it cannot
+          // be caught by the row's other `group` users.
+          (insertBelow || insertAbove || canRemoveLine) && "group/rowstrip",
           untimedInTimeLens && "border-l-2 border-dashed border-amber-400/70",
           showParagraphBoundary && "mt-3",
         )}
       >
+        {insertAbove && sourceLineEditing && (
+          <RowStructureStrip
+            edge="top"
+            testId="row-insert-above"
+            insert={insertAbove}
+            onAddLine={sourceLineEditing.onAddLine}
+          />
+        )}
+        {(insertBelow || canRemoveLine) && sourceLineEditing && (
+          <RowStructureStrip
+            edge="bottom"
+            testId={`row-structure-${cell.id}`}
+            insert={insertBelow}
+            onAddLine={sourceLineEditing.onAddLine}
+            onRemove={canRemoveLine ? () => sourceLineEditing.onRemoveLine(cell.id) : undefined}
+            removeTestId={`row-remove-${cell.id}`}
+          />
+        )}
         {untimedInTimeLens && (
           <span className="pointer-events-none absolute left-1 top-1 z-10 rounded bg-amber-400/15 px-1 text-[9px] font-medium text-amber-600 dark:text-amber-400">
             no timing
@@ -2140,6 +2190,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
       </CellStoreRow>
     )
   }, [
+    sourceLineEditing,
     activeEditorCellId,
     castGutter,
     ttsSettings,
@@ -2533,6 +2584,74 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     </div>
   )
 })
+
+/**
+ * AQU-646 round 8: the row's structural controls — "add a line into the silence
+ * here" and "take this line back" — as ONE strip rather than Remove joining the
+ * eleven-button action rail (Sam, 2026-08-11). They are the same kind of thing:
+ * they change which rows exist, not what a row says.
+ *
+ * Absolutely positioned on the row's edge so a thousand rows gain no height,
+ * and revealed by CSS on the row's hover group — no per-row state, so hovering
+ * never re-renders anything.
+ *
+ * The button is literally the timeline's slot button, so "insert a line here"
+ * looks and behaves the same on both surfaces.
+ */
+function RowStructureStrip({
+  edge,
+  testId,
+  insert,
+  onAddLine,
+  onRemove,
+  removeTestId,
+}: {
+  edge: "top" | "bottom"
+  testId: string
+  /** Null when this row has no room after it — then no insert is offered AT
+   *  ALL, never a disabled one. Same rule as the timeline's pencil. */
+  insert: { startSec: number; endSec: number } | null
+  onAddLine(startSec: number, endSec: number): void
+  onRemove?: () => void
+  removeTestId?: string
+}) {
+  return (
+    <div
+      data-testid={testId}
+      className={cn(
+        SLOT_GROUP,
+        "pointer-events-none absolute inset-x-0 z-20 flex justify-center gap-1",
+        "opacity-0 transition-opacity group-hover/rowstrip:opacity-100 focus-within:opacity-100",
+        edge === "top" ? "-top-3" : "-bottom-3",
+      )}
+    >
+      {/* Pointer events follow the opacity. Without that, an invisible button
+          sits in the space between every pair of rows and swallows clicks
+          meant for the row. Keyboard reach is unaffected — tabbing to the
+          button fires focus-within, which turns both back on. */}
+      <div className="pointer-events-none flex items-center gap-1 group-hover/rowstrip:pointer-events-auto focus-within:pointer-events-auto">
+        {insert && (
+          <TimelineSlotButton
+            testId={`${testId}-add`}
+            label={edge === "top" ? "Add a line above" : "Add a line below"}
+            onClick={() => onAddLine(insert.startSec, insert.endSec)}
+          >
+            <Pencil className="h-3.5 w-3.5" />
+          </TimelineSlotButton>
+        )}
+        {onRemove && (
+          <TimelineSlotButton
+            testId={removeTestId ?? `${testId}-remove`}
+            label="Remove this line"
+            onClick={onRemove}
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </TimelineSlotButton>
+        )}
+      </div>
+    </div>
+  )
+}
 
 interface CellStoreRowProps {
   cellId: string

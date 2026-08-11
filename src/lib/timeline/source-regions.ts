@@ -193,6 +193,51 @@ export function cellIdAtSec(segments: readonly RegionSegment[], sec: number): st
   return null
 }
 
+/** Where the text table may offer to insert a line, resolved for a whole file. */
+export interface InsertSlots {
+  /** The silence before the very first cue, when there is room in it — the
+   *  file's only "insert ABOVE", offered on the first row. */
+  head: SourceRegion | null
+  /** Keyed by the cell whose row offers "insert BELOW" into the gap after it. */
+  afterCell: ReadonlyMap<string, SourceRegion>
+}
+
+export const EMPTY_INSERT_SLOTS: InsertSlots = { head: null, afterCell: new Map() }
+
+/**
+ * Every insertable silence, keyed by the row that should offer it.
+ *
+ * ONE left-to-right pass, because the text table renders a thousand rows and
+ * asking `regionAfterCell` per row is quadratic. The map is built once per store
+ * version and each row does a single lookup.
+ *
+ * THIS IS A UI AFFORDANCE MAP, NOT AN ANCHOR LOOKUP — the distinction the
+ * prohibition on `regionAfterCell` above is protecting. It answers "which row
+ * should draw a + button", which only has to match what the user sees. It does
+ * NOT answer "which cell does a new row chain onto": that needs the persisted
+ * chain order, and `handleAddLine` re-derives it from the store at click time.
+ *
+ * An overlap is keyed to its LAST cell — `cellIds` carries Set-insertion order,
+ * so the last entry is the latest-starting cue, which is the lower of the two
+ * rows on screen. Offering the button there rather than on the row above keeps
+ * "below this row" honest.
+ */
+export function insertSlotsByCell(map: SourceRegionMap, minGapSec: number): InsertSlots {
+  let head: SourceRegion | null = null
+  const afterCell = new Map<string, SourceRegion>()
+  for (let i = 0; i < map.regions.length; i++) {
+    const r = map.regions[i]
+    if (r.kind !== "gap" || r.endSec - r.startSec < minGapSec) continue
+    if (i === 0) {
+      head = r
+      continue
+    }
+    const owner = map.regions[i - 1].cellIds.at(-1)
+    if (owner) afterCell.set(owner, r)
+  }
+  return { head, afterCell }
+}
+
 /** The stretch immediately BEFORE this cell — what "insert above" would claim. */
 export function regionBeforeCell(map: SourceRegionMap, cellId: string): SourceRegion | null {
   for (let i = 0; i < map.regions.length; i++) {

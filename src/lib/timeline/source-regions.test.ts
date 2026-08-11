@@ -13,6 +13,7 @@ import {
   regionAfterCell,
   regionBeforeCell,
   cellIdAtSec,
+  insertSlotsByCell,
   type RegionSegment,
 } from "./source-regions"
 
@@ -215,5 +216,56 @@ describe("cellIdAtSec", () => {
     expect(cellIdAtSec([{ id: "untimed" }, seg("a", 1, 2)], 1.5)).toBe("a")
     expect(cellIdAtSec(subs, NaN)).toBeNull()
     expect(cellIdAtSec([], 5)).toBeNull()
+  })
+})
+
+// AQU-646 round 8: the same silences the timeline offers a pencil over, keyed
+// by the table row that should offer to insert into them. One pass, because the
+// table renders a thousand rows and a per-row scan would be quadratic.
+describe("insertSlotsByCell", () => {
+  const slots = (segs: RegionSegment[], totalSec: number | null, minGap = 0.2) =>
+    insertSlotsByCell(deriveSourceRegions(segs, totalSec), minGap)
+
+  it("offers the leading silence as the file's only insert-above", () => {
+    const s = slots([seg("a", 5, 10)], 20)
+    expect(s.head).toMatchObject({ startSec: 0, endSec: 5 })
+  })
+
+  it("no insert-above when the first cue starts at zero", () => {
+    expect(slots([seg("a", 0, 10)], 20).head).toBeNull()
+  })
+
+  it("no insert-above when the leading silence is too short to hold a line", () => {
+    expect(slots([seg("a", 0.1, 10)], 20).head).toBeNull()
+  })
+
+  it("keys the gap after a cue to that cue's row", () => {
+    const s = slots([seg("a", 0, 10), seg("b", 15, 20)], 30)
+    expect(s.afterCell.get("a")).toMatchObject({ startSec: 10, endSec: 15 })
+  })
+
+  it("offers nothing after a cue whose gap is a rounding breath", () => {
+    // 100ms — a real VTT carries these between most consecutive cues.
+    const s = slots([seg("a", 0, 10), seg("b", 10.1, 20)], 30)
+    expect(s.afterCell.has("a")).toBe(false)
+  })
+
+  it("keys the trailing silence to the last cue", () => {
+    const s = slots([seg("a", 0, 10)], 30)
+    expect(s.afterCell.get("a")).toMatchObject({ startSec: 10, endSec: 30 })
+  })
+
+  it("keys a post-overlap gap to the LOWER of the two rows", () => {
+    // a and b overlap; b starts later, so b is the row below on screen and
+    // "insert below" belongs to it, not to a.
+    const s = slots([seg("a", 0, 6), seg("b", 4, 10)], 30)
+    expect(s.afterCell.get("b")).toMatchObject({ startSec: 10, endSec: 30 })
+    expect(s.afterCell.has("a")).toBe(false)
+  })
+
+  it("is empty for a file with no regions at all", () => {
+    const s = slots([], null)
+    expect(s.head).toBeNull()
+    expect(s.afterCell.size).toBe(0)
   })
 })

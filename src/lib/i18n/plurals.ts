@@ -85,6 +85,15 @@ const CATEGORY_OVERRIDES: Record<string, readonly PluralCategory[]> = {
   mfa: ["other"],
 }
 
+/**
+ * Locales whose categories are decided here rather than by CLDR. Exported so a
+ * test can assert that every locale in `LOCALES` is either covered by CLDR or
+ * listed here — otherwise adding an uncovered locale silently serves it English's
+ * categories, and nothing fails until translations come back unusable.
+ */
+export const PLURAL_CATEGORY_OVERRIDE_LOCALES: readonly string[] =
+  Object.keys(CATEGORY_OVERRIDES)
+
 const rulesCache = new Map<string, Intl.PluralRules>()
 
 function rulesFor(locale: string): Intl.PluralRules {

@@ -7,9 +7,11 @@ import {
   pluralCategory,
   pluralCountFrom,
   selectPluralForm,
+  PLURAL_CATEGORY_OVERRIDE_LOCALES,
 } from "./plurals"
 import { translate } from "./translate"
 import { en } from "./messages/en"
+import { LOCALES } from "./locales"
 
 /**
  * Why these tests are shaped this way.
@@ -172,6 +174,33 @@ describe("translate over a count-governed key", () => {
     const th = { [key]: plural({ other: "{count} ผลลัพธ์" }) }
     expect(translate(th, key, { count: 1 }, "th")).toBe("1 ผลลัพธ์")
     expect(translate(th, key, { count: 7 }, "th")).toBe("7 ผลลัพธ์")
+  })
+
+  it("has decided plural categories for every shipping locale", () => {
+    // `new Intl.PluralRules("mfa")` does NOT throw — mfa is a well-formed tag —
+    // it silently resolves to the runtime's default locale and returns THAT
+    // language's categories. So an uncovered locale fails by quietly asking a
+    // translator for forms their language does not have, which stays invisible
+    // until the translations come back unusable.
+    //
+    // This makes it loud: add a locale to locales.ts that CLDR does not cover and
+    // you must also decide its categories in CATEGORY_OVERRIDES, or this goes red
+    // naming the locale.
+    for (const { code } of LOCALES) {
+      const resolved = new Intl.PluralRules(code).resolvedOptions().locale
+      const cldrCovers = resolved.split("-")[0] === code.split("-")[0]
+      expect(
+        cldrCovers || PLURAL_CATEGORY_OVERRIDE_LOCALES.includes(code),
+        `locale "${code}" is not covered by CLDR (Intl resolved it to "${resolved}") ` +
+          `and has no CATEGORY_OVERRIDES entry — decide its plural categories explicitly`,
+      ).toBe(true)
+
+      // Whatever the source, the result must be a non-empty set containing
+      // "other" — that is the category every fallback path lands on.
+      const categories = pluralCategoriesFor(code)
+      expect(categories.length, code).toBeGreaterThan(0)
+      expect(categories, code).toContain("other")
+    }
   })
 
   it("never renders a raw key for any base key, at any count, in any locale", () => {

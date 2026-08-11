@@ -9,6 +9,7 @@ import {
   useBatchProgress,
   cancelBatchTranscribe,
   cancelBatchSynth,
+  cancelBatchMeasure,
 } from "@/lib/audio/batch-audio"
 
 export function AudioBulkProgressBanner() {
@@ -18,10 +19,16 @@ export function AudioBulkProgressBanner() {
 
   const { kind, total, done, cancelled } = progress
   const pct = total > 0 ? Math.round((done / total) * 100) : 0
-  const label = kind === "transcribe" ? t("common.transcribing") : t("common.synthesizing")
+  const label =
+    kind === "transcribe"
+      ? t("common.transcribing")
+      : kind === "synth"
+        ? t("common.synthesizing")
+        : t("common.measuringLengths")
   const handleCancel = () => {
     if (kind === "transcribe") cancelBatchTranscribe()
-    else cancelBatchSynth()
+    else if (kind === "synth") cancelBatchSynth()
+    else cancelBatchMeasure()
   }
 
   return (

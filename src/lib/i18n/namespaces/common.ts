@@ -17,6 +17,7 @@ export const common = defineNamespace({
     "common.clear": "Clear",
     "common.discard": "Discard",
     "common.saved": "Saved",
+    "common.saving": "Saving…",
     "common.none": "None",
     "common.name": "Name",
     "common.email": "Email",
@@ -39,6 +40,7 @@ export const common = defineNamespace({
     "common.cancelling": "cancelling…",
     "common.transcribing": "Transcribing…",
     "common.synthesizing": "Synthesizing…",
+    "common.measuringLengths": "Measuring lengths",
     "common.uploading": "Uploading…",
     "common.uploadFailed": "Upload failed",
     "common.pause": "Pause",
@@ -136,6 +138,17 @@ export const common = defineNamespace({
         description:
           "Destructive-ish button that throws away unsaved edits and leaves the item as " +
           "it was last saved. Stronger than Cancel: Cancel closes, Discard drops work.",
+      },
+      "common.saving": {
+        description:
+          "Status text while a write is still in flight, shown wherever the app has " +
+          "taken the user's change but not finished storing it: as the label that " +
+          "replaces the back-translation Save button mid-write, and as the small " +
+          "badge on a recording take that is saved on this device but not yet " +
+          "uploaded. Present participle — clearly a status, never the command " +
+          "common.save, and not the finished state common.saved.",
+        screenshot: "cell-editor",
+        maxLength: 14,
       },
       "common.saved": {
         description:
@@ -281,6 +294,15 @@ export const common = defineNamespace({
           "Status text while text-to-speech is generating audio: on the disabled menu item " +
           "for a single line, and on the progress banner for a whole-file batch. " +
           "Present-participle status, not a command.",
+        screenshot: "audio-studio",
+      },
+      "common.measuringLengths": {
+        description:
+          "Status text on the batch progress banner while the app reads each existing " +
+          "recording just to find out how long it is (its duration) — no audio is " +
+          "changed. Sits in the same slot as common.transcribing and " +
+          "common.synthesizing. 'Lengths' means durations in seconds, not physical " +
+          "size. Present-participle status, not a command.",
         screenshot: "audio-studio",
       },
       "common.uploading": {

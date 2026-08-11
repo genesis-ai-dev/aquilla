@@ -46,8 +46,20 @@ import { interpolatedSec } from "@/components/timeline/TimelinePlayhead"
 
 describe("interpolatedSec", () => {
   it("advances linearly from the anchor at the playback rate", () => {
-    expect(interpolatedSec(10, 1_000, 1_500, 1)).toBeCloseTo(10.5)
-    expect(interpolatedSec(10, 1_000, 1_500, 2)).toBeCloseTo(11)
+    // Within a healthy tick interval (~250ms) the clamp never engages.
+    expect(interpolatedSec(10, 1_000, 1_200, 1)).toBeCloseTo(10.2)
+    expect(interpolatedSec(10, 1_000, 1_200, 2)).toBeCloseTo(10.4)
     expect(interpolatedSec(10, 1_000, 1_000, 1)).toBe(10)
+  })
+
+  it("parks just past the anchor when the clock stops ticking (smooth-playback clamp)", () => {
+    // Healthy ticks re-anchor ~every 250ms — inside the clamp, untouched.
+    expect(interpolatedSec(10, 1_000, 1_250, 1)).toBeCloseTo(10.25)
+    // A stalled clock (rebuffer / loading verse): 3s with no anchor must NOT
+    // run 3s ahead — it holds at the clamp, so there's nothing to snap back.
+    expect(interpolatedSec(10, 1_000, 4_000, 1)).toBeCloseTo(10.45)
+    // The clamp is in clip-seconds before the rate applies: at 2× a stall
+    // parks at anchor + 0.9s of programme, not unbounded.
+    expect(interpolatedSec(10, 1_000, 4_000, 2)).toBeCloseTo(10.9)
   })
 })

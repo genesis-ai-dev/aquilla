@@ -2,6 +2,7 @@
 // SWARM-TODO(export): only flat segment-per-paragraph output; USFM heading
 // levels, poetry (\q), tables, and footnotes are not preserved.
 import type { CellData } from "@/hooks/useCells"
+import { effectiveSourceText } from "@/lib/cell-text"
 
 export function exportMarkdown(cells: CellData[]): Blob {
   const parts: string[] = []
@@ -40,7 +41,7 @@ export function exportMarkdownStructured(cells: CellData[]): Blob {
   let currentGroup: string | null = null
   let orderedCounter = 0
   for (const c of cells as MdMetaCell[]) {
-    const text = (c.translated || c.original || "").trim()
+    const text = (c.translated || effectiveSourceText(c) || "").trim()
     if (!text) continue
     if (c.group && c.group === currentGroup && blocks.length > 0) {
       blocks[blocks.length - 1].texts.push(text)

@@ -71,11 +71,19 @@ export const audio = defineNamespace({
 
     // AudioRecordingModal — full-screen mic-recording flow.
     "audio.recordingModal.signInRequired": "Sign in to save recordings",
+    "audio.recordingModal.offlineMessage":
+      "You're offline — recordings can't be saved without a connection. Reconnect and try again.",
     "audio.recordingModal.micBlocked":
       "Microphone access is blocked. To record audio, allow microphone access in your browser's site settings and reload the page.",
     "audio.recordingModal.dialogTitle": "Record audio — {cellLabel}",
     "audio.recordingModal.targetWindow": "{seconds}s window",
     "audio.recordingModal.cellFallback": "Cell {index}",
+    "audio.recordingModal.autoAdvanceOnTooltip":
+      "Moving to the next line after each save — click to stay here",
+    "audio.recordingModal.autoAdvanceOffTooltip":
+      "Staying on this line after each save — click to move on automatically",
+    "audio.recordingModal.autoAdvanceDisableLabel": "Stay on this line after saving",
+    "audio.recordingModal.autoAdvanceEnableLabel": "Move to the next line after saving",
     "audio.recordingModal.muteBeepTooltip": "Mute countdown beep",
     "audio.recordingModal.unmuteBeepTooltip": "Enable countdown beep",
     "audio.recordingModal.closeTooltip": "Close (Esc)",
@@ -89,6 +97,8 @@ export const audio = defineNamespace({
     "audio.recordingModal.nearLimitWarning":
       "Recording is 25 minutes — it will stop automatically at 30 minutes.",
     "audio.recordingModal.capturedHint": "Captured — review and save, or retake.",
+    "audio.recordingModal.saveFailedNotice":
+      "Saving failed — the take is safe, try Save again. ({error})",
     "audio.recordingModal.savedStatus": "Saved — moving to next cell…",
     "audio.recordingModal.idleHintPrefix": "Press",
     "audio.recordingModal.idleHintSuffix":
@@ -103,12 +113,20 @@ export const audio = defineNamespace({
     "audio.recordingModal.saveTooltip": "Save (Space or Enter)",
     "audio.recordingModal.stopTooltip": "Stop (Space or Esc)",
     "audio.recordingModal.startButton": "Start",
+    "audio.recordingModal.startTooltip": "Start recording (Space)",
+    "audio.recordingModal.generateTtsButton": "Generate TTS",
+    "audio.recordingModal.ttsTooltip": "Generate this line's voice with the project's engine",
+    "audio.recordingModal.ttsNeedsTranslation": "Translate this line first to generate voice",
+    "audio.recordingModal.ttsDoneTooltip": "Voice generated — it plays on the Target track",
     "audio.recordingModal.cancelCountdown": "Cancel countdown",
 
     // TakesStrip — per-cell recorded-take management row.
     "audio.takesStrip.heading": "Takes ({count})",
     "audio.takesStrip.cleanedLabel": "Cleaned",
-    "audio.takesStrip.takeLabel": "Take {number}",
+    "audio.takesStrip.takeFallback": "Take",
+    "audio.takesStrip.renameTooltip": "Rename take",
+    "audio.takesStrip.unknownLengthTooltip": "Length unknown — re-record or re-upload to fix",
+    "audio.takesStrip.pendingSyncTooltip": "Saving — kept safe on this device until it syncs",
     "audio.takesStrip.playTakeTooltip": "Play take",
     "audio.takesStrip.removeNoiseTooltip": "Remove noise (adds a cleaned take)",
     "audio.takesStrip.revertTooltip": "Revert to the original recording",
@@ -495,6 +513,16 @@ export const audio = defineNamespace({
           "Error shown if the user tries to start recording while signed out — " +
           "recordings must be uploaded to a signed-in session to be saved.",
       },
+      "audio.recordingModal.offlineMessage": {
+        description:
+          "The one message used everywhere the recorder is blocked by lost " +
+          "connectivity: as the error when the user tries to start recording " +
+          "offline, as the amber notice under a captured take explaining why Save " +
+          "is greyed out, and as the tooltip of the disabled Start, Save and " +
+          "Generate-TTS buttons. Recording itself happens locally, so the take is " +
+          "never lost — only saving it needs the network, which is why the second " +
+          "sentence tells the user to reconnect and try again.",
+      },
       "audio.recordingModal.micBlocked": {
         description:
           "Error shown when the browser reports microphone permission as denied, " +
@@ -526,6 +554,32 @@ export const audio = defineNamespace({
         placeholders: {
           index: "1-based position of this line among the cells being recorded.",
         },
+      },
+      "audio.recordingModal.autoAdvanceOnTooltip": {
+        description:
+          "Tooltip of the header toggle that controls what happens after a take is " +
+          "saved, shown while auto-advance is ON: the first clause states the " +
+          "current behaviour (the recorder jumps to the next line), the second " +
+          "tells the user that clicking turns it off. Keep both halves.",
+      },
+      "audio.recordingModal.autoAdvanceOffTooltip": {
+        description:
+          "Tooltip of the same header toggle while auto-advance is OFF: the " +
+          "recorder stays on the current line after each save, and clicking turns " +
+          "jumping back on. Keep both halves.",
+      },
+      "audio.recordingModal.autoAdvanceDisableLabel": {
+        description:
+          "Accessible name of the auto-advance toggle while it is ON — never " +
+          "visible. Unlike the tooltip it names what pressing the button WILL DO " +
+          "(stop moving on, stay on this line), which is what a screen-reader user " +
+          "needs to hear before activating it.",
+      },
+      "audio.recordingModal.autoAdvanceEnableLabel": {
+        description:
+          "Accessible name of the auto-advance toggle while it is OFF, naming what " +
+          "pressing it will do: start jumping to the next line after each save. " +
+          "Never visible.",
       },
       "audio.recordingModal.muteBeepTooltip": {
         description:
@@ -590,6 +644,19 @@ export const audio = defineNamespace({
           "Status line shown after stopping a recording, above the audio preview " +
           "player, telling the user they can now listen back before deciding to " +
           "keep it or record again.",
+      },
+      "audio.recordingModal.saveFailedNotice": {
+        description:
+          "Red notice under the audio preview after an upload attempt failed for a " +
+          "reason other than being offline. The reassurance matters most: the " +
+          "recording is still in hand and the Save button is still there, so the " +
+          "user can simply press it again. The raw technical error is appended in " +
+          "parentheses — keep the parentheses.",
+        placeholders: {
+          error:
+            "The underlying error message, usually untranslated technical text from " +
+            "the browser or server.",
+        },
       },
       "audio.recordingModal.savedStatus": {
         description:
@@ -667,6 +734,39 @@ export const audio = defineNamespace({
           "from the idle or error state.",
         maxLength: 14,
       },
+      "audio.recordingModal.startTooltip": {
+        description:
+          "Tooltip for the Start button, naming its keyboard shortcut. 'Space' is " +
+          "the space bar and is kept as printed on the key, like the other key " +
+          "hints in this dialog.",
+      },
+      "audio.recordingModal.generateTtsButton": {
+        description:
+          "Visible label of the button beside Start that synthesizes this line's " +
+          "audio with a text-to-speech voice instead of recording a human one. " +
+          "'TTS' is the industry abbreviation for text-to-speech; keep it if it is " +
+          "recognised in the target language, otherwise use the local short form.",
+        maxLength: 18,
+      },
+      "audio.recordingModal.ttsTooltip": {
+        description:
+          "Tooltip for that synthesize button in its ready state. 'The project's " +
+          "engine' means the text-to-speech service configured for this project, so " +
+          "the user knows no choice is being asked of them here.",
+      },
+      "audio.recordingModal.ttsNeedsTranslation": {
+        description:
+          "Tooltip for the synthesize button while it is disabled because the line " +
+          "has no translated text yet — there is nothing for a voice to read. " +
+          "Phrased as the action that unblocks it.",
+      },
+      "audio.recordingModal.ttsDoneTooltip": {
+        description:
+          "Tooltip for the synthesize button right after it succeeded, saying where " +
+          "the result can be heard. 'Target track' is the name of the timeline lane " +
+          "holding the translated audio — translate it the same way as the lane's " +
+          "own label.",
+      },
       "audio.recordingModal.cancelCountdown": {
         description:
           "Button shown only during the 3-2-1 countdown that aborts it before " +
@@ -689,14 +789,31 @@ export const audio = defineNamespace({
           "small icon.",
         maxLength: 12,
       },
-      "audio.takesStrip.takeLabel": {
+      "audio.takesStrip.takeFallback": {
         description:
-          "Label on a take chip for an original (not cleaned) recording, numbering " +
-          "it among the line's original takes.",
-        placeholders: {
-          number: "1-based position of this take among the line's original takes.",
-        },
+          "Placeholder name for a take row that has no stored name yet — takes are " +
+          "named ('Take 1', 'Take 2', …) and users can rename them, but those names " +
+          "are stored data and are never translated. This word only fills the gap " +
+          "for an older recording until its name is filled in, so it should be the " +
+          "bare noun for one recorded attempt, with no number.",
         maxLength: 12,
+      },
+      "audio.takesStrip.renameTooltip": {
+        description:
+          "Tooltip and accessible name for the small pencil button on a take row " +
+          "that turns its name into an editable text box.",
+      },
+      "audio.takesStrip.unknownLengthTooltip": {
+        description:
+          "Hover title on the '?' shown in place of a take's duration when the app " +
+          "never captured how long that recording is — an older take saved before " +
+          "durations were measured. Names the two ways to fix it.",
+      },
+      "audio.takesStrip.pendingSyncTooltip": {
+        description:
+          "Hover title on the cloud badge of a take that has been saved on this " +
+          "device but not yet uploaded to the server. Reassurance: nothing is lost " +
+          "while it waits.",
       },
       "audio.takesStrip.playTakeTooltip": {
         description:

@@ -127,15 +127,7 @@ export const editor = defineNamespace({
       "microphone access, then reload the page.",
 
     // — Per-cell actions menu (ellipsis popover) ——————————————————
-    "editor.cell.moreActions": "More actions",
     "editor.cell.addComment": "Add comment",
-    "editor.cell.reRecord": "Re-record audio",
-    "editor.cell.transcribe": "Transcribe with Whisper",
-    "editor.cell.generateVoice": "Generate AI voice",
-    "editor.cell.generateVoiceReplace": "Generate AI voice (replaces audio)",
-    "editor.cell.historyCount": "History ({count})",
-    "editor.cell.generateBacktranslation": "Generate backtranslation",
-    "editor.cell.regenerateBacktranslation": "Regenerate backtranslation",
     "editor.cell.closeDetails": "Close cell details",
 
     // — Waveform strip under a translated cell ——————————————————————
@@ -565,13 +557,54 @@ export const editor = defineNamespace({
     "editor.timeline.coreVideoPrompt": "Core video URL (leave blank to clear)",
     "editor.timeline.zoomIn": "Zoom in",
     "editor.timeline.zoomOut": "Zoom out",
-    "editor.timeline.laneSubtitle": "Subtitle",
+    "editor.timeline.laneSubtitle": "Subtitles",
     "editor.timeline.laneSubtitleSub": "text · reading",
-    "editor.timeline.laneDialogue": "Dialogue",
-    "editor.timeline.laneDialogueSub": "audio · recording",
+    "editor.timeline.laneSourceAudio": "Source audio",
+    "editor.timeline.laneSourceAudioSub": "original speech",
+    "editor.timeline.laneTargetAudio": "Target audio",
+    "editor.timeline.laneTargetAudioSub": "takes · generated",
     "editor.timeline.laneUntimed": "Untimed",
-    "editor.timeline.laneUntimedSub": "no timecode",
-    "editor.timeline.noUntimedClips": "No untimed clips.",
+    "editor.timeline.laneUntimedSub": "no timecode yet",
+    "editor.timeline.muteSourceAudio": "Mute source audio",
+    "editor.timeline.unmuteSourceAudio": "Unmute source audio",
+    "editor.timeline.sourceAudioAudible": "Source audio is audible — click to mute",
+    "editor.timeline.sourceAudioMuted": "Source audio is muted — click to unmute",
+    "editor.timeline.muteTargetAudio": "Mute target audio",
+    "editor.timeline.unmuteTargetAudio": "Unmute target audio",
+    "editor.timeline.targetAudioAudible": "Target audio is audible — click to mute",
+    "editor.timeline.targetAudioMuted": "Target audio is muted — click to unmute",
+    "editor.timeline.timingModeDubbing": "Original's timing",
+    "editor.timeline.timingModeDubbingHint":
+      "The translation is fitted to the original recording's timing.",
+    "editor.timeline.timingModeDubbingHintLocked":
+      "The translation is fitted to the original recording's timing. Only a maintainer can change this.",
+    "editor.timeline.timingModeFree": "Free timing",
+    "editor.timeline.timingModeFreeHint":
+      "Verses are laid end to end — each takes as much room as its longer side.",
+    "editor.timeline.timingModeFreeHintLocked":
+      "Verses are laid end to end — each takes as much room as its longer side. Only a maintainer can change this.",
+    "editor.timeline.qualityToggleAria": "Play generated voices at original quality",
+    "editor.timeline.qualityOriginalTooltip":
+      "Original quality (WAV) for generated voices — larger downloads. Recordings are always compressed.",
+    "editor.timeline.qualityCompressedTooltip":
+      "Compressed playback (smaller, faster). Toggle for original-quality generated voices.",
+    "editor.timeline.snapToggleAria": "Snap to neighboring edges",
+    "editor.timeline.snapOnTooltip": "Snapping on — edges magnet to neighbors",
+    "editor.timeline.snapOffTooltip": "Snapping off",
+    "editor.timeline.videoHiddenNote":
+      "The linked video is hidden here — it plays on the original recording's timing, which this view no longer follows.",
+    "editor.timeline.measureNote": plural({
+      one: "{count} recording has no measured length — its chip is drawn at a guessed width.",
+      other:
+        "{count} recordings have no measured length — their chips are drawn at guessed widths.",
+    }),
+    "editor.timeline.measureNow": "Measure now",
+    "editor.timeline.measureTooltip":
+      "Download each recording, measure its real length, and fix the chips. Nothing else about the takes changes.",
+    "editor.timeline.measureOfflineTooltip":
+      "Measuring downloads each recording — connect to the internet first.",
+    "editor.timeline.measureBusyTooltip": "Another batch is running — wait for it to finish.",
+    "editor.timeline.measureDismiss": "Dismiss for now",
 
     // — Per-cell voice panel (audio lens) ————————————————————————
     "editor.voice.volumeLevel": "Volume level",
@@ -662,7 +695,6 @@ export const editor = defineNamespace({
     "editor.lane.changeTargetLanguageItem": "Change target language…",
     "editor.lane.showArchived": "Show archived ({count})",
     "editor.empty.noMediaSegments": "No media segments yet",
-    "editor.empty.noTextSegments": "No text segments in this file",
     "editor.empty.mediaLayerHint":
       "Import an audio or video file, or record a take, to populate the media layer.",
 
@@ -738,7 +770,6 @@ export const editor = defineNamespace({
     "editor.bt.contributorRequired": "Contributor+ required to edit back-translations",
     "editor.bt.translateFirst": "Translate this cell to read it back.",
     "editor.bt.staleWarning": "Your translation changed since this was written",
-    "editor.bt.saving": "Saving…",
     "editor.bt.emptyPitch":
       "See what your translation says when read back, so you can check the " +
       "meaning carried over.",
@@ -915,67 +946,12 @@ export const editor = defineNamespace({
           "icon in the address bar — keep the emoji. Two short sentences in a " +
           "narrow (about 13rem) popover, so keep it compact.",
       },
-      "editor.cell.moreActions": {
-        description:
-          "Screen-reader name of the ellipsis (…) button in a cell's action rail " +
-          "that opens the overflow menu of less-frequent cell actions. Never " +
-          "visible; it only needs to be unambiguous when read aloud.",
-      },
       "editor.cell.addComment": {
         description:
           "Overflow-menu item that starts a new comment thread on this cell. " +
           "Imperative; 'comment' here means a discussion note between team members " +
           "about the translation, not a footnote in the text.",
         maxLength: 24,
-      },
-      "editor.cell.reRecord": {
-        description:
-          "Overflow-menu item shown only when the cell already has audio; it " +
-          "re-opens the recording modal to replace the existing take. The 'again' " +
-          "sense of the prefix is the point — it discards nothing until the user " +
-          "saves a new take.",
-        maxLength: 28,
-      },
-      "editor.cell.transcribe": {
-        description:
-          "Overflow-menu item that runs speech-to-text on the cell's recording and " +
-          "puts the result in the translation field. 'Whisper' is the product name " +
-          "of the speech model — keep it untranslated.",
-        maxLength: 32,
-      },
-      "editor.cell.generateVoice": {
-        description:
-          "Overflow-menu item that synthesizes a spoken recording of the " +
-          "translation with a text-to-speech voice. Used when the cell has no audio " +
-          "yet, so nothing is at risk.",
-        maxLength: 32,
-      },
-      "editor.cell.generateVoiceReplace": {
-        description:
-          "The synthesize-voice menu item when the cell ALREADY has a recording: " +
-          "the parenthetical is the warning that the existing take will be " +
-          "overwritten. Keep the warning; it is the only thing separating this from " +
-          "editor.cell.generateVoice.",
-      },
-      "editor.cell.historyCount": {
-        description:
-          "Overflow-menu item that opens this cell's edit history, with the number " +
-          "of recorded edits in parentheses. 'History' is a noun naming the panel.",
-        placeholders: { count: "Number of recorded edits on this cell." },
-        maxLength: 24,
-      },
-      "editor.cell.generateBacktranslation": {
-        description:
-          "Overflow-menu item that asks the AI to translate the finished target " +
-          "text back into the reference language, as a meaning check. Used when no " +
-          "back-translation exists yet.",
-        maxLength: 32,
-      },
-      "editor.cell.regenerateBacktranslation": {
-        description:
-          "The same item when a back-translation already exists and running it " +
-          "again will replace it. The 're-' sense must survive translation.",
-        maxLength: 32,
       },
       "editor.cell.closeDetails": {
         description:
@@ -2760,17 +2736,202 @@ export const editor = defineNamespace({
           "activity — keep the two-word shape.",
         maxLength: 20,
       },
-      "editor.timeline.laneDialogue": {
+      "editor.timeline.laneSourceAudio": {
         description:
-          "Name of the timeline's second track, holding the spoken recordings. Sits " +
-          "in a 128px-wide label column.",
-        maxLength: 14,
+          "Name of the timeline's second track, holding the ORIGINAL recording the " +
+          "team is translating from — not their own takes, which have their own " +
+          "track. Sits in a 128px-wide label column.",
+        maxLength: 16,
       },
-      "editor.timeline.laneDialogueSub": {
+      "editor.timeline.laneSourceAudioSub": {
         description:
-          "10px sub-label under the Dialogue track name: audio the team records. " +
-          "Middle dot separates medium from activity.",
+          "10px sub-label under the Source audio track name, saying what is on it: " +
+          "the speech of the original recording.",
         maxLength: 22,
+      },
+      "editor.timeline.laneTargetAudio": {
+        description:
+          "Name of the timeline's third track, holding the translated audio — both " +
+          "recorded takes and text-to-speech voices. Pairs with " +
+          "editor.timeline.laneSourceAudio; 'target' is the translation side, the " +
+          "same sense as the Target column in the editor. 128px label column.",
+        maxLength: 16,
+      },
+      "editor.timeline.laneTargetAudioSub": {
+        description:
+          "10px sub-label under the Target audio track name, naming the two things " +
+          "that land on it: recorded takes and generated (synthesized) voices. The " +
+          "middle dot separates the two — keep the two-word shape.",
+        maxLength: 22,
+      },
+      "editor.timeline.muteSourceAudio": {
+        description:
+          "Accessible name of the speaker button on the Source audio track while that " +
+          "track is audible: pressing it silences the original recording during " +
+          "playback. Never visible.",
+      },
+      "editor.timeline.unmuteSourceAudio": {
+        description:
+          "Accessible name of the same speaker button while the Source audio track is " +
+          "already silenced: pressing it brings the original recording back. Never " +
+          "visible.",
+      },
+      "editor.timeline.sourceAudioAudible": {
+        description:
+          "Hover title of that speaker button while the Source audio track is " +
+          "audible. Two halves: the track's current state, then what clicking does. " +
+          "Keep both.",
+      },
+      "editor.timeline.sourceAudioMuted": {
+        description:
+          "Hover title of that speaker button while the Source audio track is " +
+          "silenced: current state, then what clicking does.",
+      },
+      "editor.timeline.muteTargetAudio": {
+        description:
+          "Accessible name of the speaker button on the Target audio track while it " +
+          "is audible: pressing it silences the translated audio during playback. " +
+          "Never visible.",
+      },
+      "editor.timeline.unmuteTargetAudio": {
+        description:
+          "Accessible name of the same button while the Target audio track is already " +
+          "silenced: pressing it brings the translated audio back. Never visible.",
+      },
+      "editor.timeline.targetAudioAudible": {
+        description:
+          "Hover title of that speaker button while the Target audio track is " +
+          "audible: current state, then what clicking does.",
+      },
+      "editor.timeline.targetAudioMuted": {
+        description:
+          "Hover title of that speaker button while the Target audio track is " +
+          "silenced: current state, then what clicking does.",
+      },
+      "editor.timeline.timingModeDubbing": {
+        description:
+          "Name of one of the two timing modes, shown on a small segmented control in " +
+          "the timeline toolbar. In this mode the translated audio has to fit inside " +
+          "the original recording's timing — the possessive is the point: the timing " +
+          "belongs to the original, not to the translation.",
+        maxLength: 20,
+      },
+      "editor.timeline.timingModeDubbingHint": {
+        description:
+          "Hover title of that mode's button, explaining what the mode does to the " +
+          "timeline: every translated line is placed to match where the original " +
+          "recording says it.",
+      },
+      "editor.timeline.timingModeDubbingHintLocked": {
+        description:
+          "The same sentence as editor.timeline.timingModeDubbingHint plus the note " +
+          "that the mode is read-only for this user, shown when their role is below " +
+          "maintainer so the control renders as a plain label. Kept as one key so the " +
+          "two sentences can be ordered naturally in the target language.",
+      },
+      "editor.timeline.timingModeFree": {
+        description:
+          "Name of the other timing mode, on the same segmented control: the " +
+          "translation sets its own pace instead of fitting the original's timing. " +
+          "'Free' means unconstrained by the original, not 'free of charge'.",
+        maxLength: 20,
+      },
+      "editor.timeline.timingModeFreeHint": {
+        description:
+          "Hover title of that mode's button. 'Verses' are the numbered lines of the " +
+          "text; 'laid end to end' means each one starts where the previous ends, and " +
+          "each gets as much room as whichever side (original or translation) runs " +
+          "longer.",
+      },
+      "editor.timeline.timingModeFreeHintLocked": {
+        description:
+          "The same sentence as editor.timeline.timingModeFreeHint plus the note that " +
+          "only a maintainer can change the mode, shown when this user's role is " +
+          "below that floor. One key so the two sentences can be ordered naturally.",
+      },
+      "editor.timeline.qualityToggleAria": {
+        description:
+          "Accessible name of the toolbar toggle that chooses how synthesized voices " +
+          "are downloaded for playback — pressed means the larger original-quality " +
+          "audio. Never visible.",
+      },
+      "editor.timeline.qualityOriginalTooltip": {
+        description:
+          "Tooltip of that toggle while original quality is on. 'WAV' is the " +
+          "uncompressed audio file format — keep it as the file-format name. The last " +
+          "sentence warns that microphone recordings have no uncompressed form, so " +
+          "the setting does not affect them.",
+      },
+      "editor.timeline.qualityCompressedTooltip": {
+        description:
+          "Tooltip of the same toggle while compressed playback is on, naming the " +
+          "trade-off (smaller and faster) and what clicking switches to.",
+      },
+      "editor.timeline.snapToggleAria": {
+        description:
+          "Accessible name of the toolbar toggle for snapping: while it is on, " +
+          "dragging a clip's edge jumps to line up exactly with the neighbouring " +
+          "clip's edge. Never visible.",
+      },
+      "editor.timeline.snapOnTooltip": {
+        description:
+          "Tooltip of the snapping toggle while snapping is on. 'Magnet to' is the " +
+          "metaphor for edges pulling together as they get close — use whatever " +
+          "phrasing conveys that, not a literal magnet.",
+      },
+      "editor.timeline.snapOffTooltip": {
+        description:
+          "Tooltip of the snapping toggle while snapping is off — dragged edges land " +
+          "wherever they are dropped. Two words, no sentence.",
+        maxLength: 20,
+      },
+      "editor.timeline.videoHiddenNote": {
+        description:
+          "Note replacing the linked video player when the file is in free-timing " +
+          "mode. The video can only play on the original recording's clock, and this " +
+          "view no longer lays clips out on that clock, so showing it would drift " +
+          "against the audio. Explains an absence — not an error.",
+      },
+      "editor.timeline.measureNote": {
+        description:
+          "Amber notice above the timeline: some recordings were saved before the app " +
+          "measured how long each one is, so their blocks on the track are drawn at a " +
+          "guessed width instead of their real length. Sits beside the 'Measure now' " +
+          "button that fixes it.",
+        placeholders: {
+          count:
+            "How many recordings have no measured length; it also selects which " +
+            "plural form is used.",
+        },
+      },
+      "editor.timeline.measureNow": {
+        description:
+          "Button in that notice that starts the measuring pass. Imperative; 'now' " +
+          "signals it happens on click rather than on its own.",
+        maxLength: 16,
+      },
+      "editor.timeline.measureTooltip": {
+        description:
+          "Tooltip of the Measure-now button in its ready state, spelling out what " +
+          "the pass does. The reassurance in the last sentence matters: only each " +
+          "recording's length is stored, and the audio itself is untouched.",
+      },
+      "editor.timeline.measureOfflineTooltip": {
+        description:
+          "Tooltip of the Measure-now button while it is disabled because the device " +
+          "is offline — measuring has to fetch each recording first. Names the " +
+          "condition that unblocks it.",
+      },
+      "editor.timeline.measureBusyTooltip": {
+        description:
+          "Tooltip of the Measure-now button while it is disabled because another " +
+          "bulk audio job is already running; only one runs at a time.",
+      },
+      "editor.timeline.measureDismiss": {
+        description:
+          "Accessible name of the small X that hides the measure notice for this " +
+          "visit. 'For now' is deliberate: the notice returns next time the timeline " +
+          "opens while unmeasured recordings remain. Never visible.",
       },
       "editor.timeline.laneUntimed": {
         description:
@@ -2783,12 +2944,6 @@ export const editor = defineNamespace({
           "10px sub-label under the Untimed area, restating why those clips are " +
           "parked there: they carry no timecode.",
         maxLength: 20,
-      },
-      "editor.timeline.noUntimedClips": {
-        description:
-          "Tiny (10px) empty state in the untimed area: every clip has timing, so " +
-          "nothing is parked. Reassuring, not an error. Full sentence with a period.",
-        maxLength: 26,
       },
       "editor.voice.volumeLevel": {
         description:
@@ -3235,12 +3390,6 @@ export const editor = defineNamespace({
           "no media clips yet. 'Segments' are the individual timed pieces.",
         maxLength: 30,
       },
-      "editor.empty.noTextSegments": {
-        description:
-          "Heading filling the editing area in the text lens when a timed file has " +
-          "no text cells. A state, not an error.",
-        maxLength: 34,
-      },
       "editor.empty.mediaLayerHint": {
         description:
           "Body under editor.empty.noMediaSegments, listing the two ways to get " +
@@ -3522,13 +3671,6 @@ export const editor = defineNamespace({
           "Amber warning inside the back-translation tab: the translation was edited " +
           "after this reading was produced, so the reading may describe older text. " +
           "A Refresh button sits beside it.",
-      },
-      "editor.bt.saving": {
-        description:
-          "Label of the back-translation Save button while the edit is being " +
-          "written. Present participle — it replaces common.save, so it must be " +
-          "clearly a status and not the command.",
-        maxLength: 14,
       },
       "editor.bt.emptyPitch": {
         description:

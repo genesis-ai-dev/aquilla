@@ -8,7 +8,7 @@
 // preview/retake step between stop and upload.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { ChevronLeft, ChevronRight, Mic, Play, Square, X, Volume2, VolumeX, RefreshCw, Check } from "lucide-react"
+import { ChevronLeft, ChevronRight, ChevronsRight, Mic, Pin, Play, Sparkles, Square, X, Volume2, VolumeX, RefreshCw, Check } from "lucide-react"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
 import { Spinner } from "@/components/ui/spinner"
@@ -18,15 +18,19 @@ import type { CellData } from "@/hooks/useCells"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { useAudioRecorder } from "@/hooks/useAudioRecorder"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
+import { useOnline } from "@/hooks/useOnline"
 import { pushAudioShortcutOverride } from "@/lib/audio/audio-coordinator"
+import { probeDurationMsSafe } from "@/lib/import"
+import { generateCellVoice } from "@/lib/audio/voice-generate-helpers"
 import { useCountdown } from "./useCountdown"
 import { AudioWaveform } from "./AudioWaveform"
 import { DurationBar } from "./DurationBar"
-import { TakesStrip } from "./TakesStrip"
+import { TakesStrip, nextTakeLabel } from "./TakesStrip"
+import { useRecordingAutoAdvance, setRecordingAutoAdvance } from "@/lib/store/recording-auto-advance-pref"
 import { useFileAudioAttachments } from "@/hooks/useFileAudioAttachments"
-import { buildAudioId, uploadCellAudio, deleteCellAudio } from "@/lib/audio/upload"
+import { audioIdSeededWith, buildAudioId, uploadCellAudio, deleteCellAudio, fetchCellAudio, parseFrontierAudioUrl } from "@/lib/audio/upload"
 import { audioCachePutBlob } from "@/lib/audio/bytes-cache"
-import { emitCellAudioAttach } from "@/lib/sync/events-emit"
+import { emitCellAudioAttach, emitCellAudioSelect } from "@/lib/sync/events-emit"
 import { notifyAudioAttachmentsChanged, injectOptimisticAudioAttachment } from "@/lib/audio/audio-attachments-bus"
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
 import { markProjectHasAudioDataSoon } from "@/lib/audio/project-audio-state"
@@ -54,7 +58,21 @@ export function AudioRecordingModal({
   const recorder = useAudioRecorder()
   const countdown = useCountdown()
   const { session } = useFrontierSession()
+  const online = useOnline()
+  // Decision 2026-08-05: recording is blocked UP FRONT while offline (a take
+  // can't be saved without a connection), instead of failing mid-flow with a
+  // raw fetch error. One copy of the message, used by every gate.
+  const offlineMessage = t("audio.recordingModal.offlineMessage")
   const [beepEnabled, setBeepEnabled] = useState(true)
+  // SUB-50: saving jumps to the next cell — great on a pass down the file,
+  // wrong when working one line over and over. Persisted per device.
+  const autoAdvance = useRecordingAutoAdvance()
+  const advanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // SUB-52 + the button-focus rule below need each other: Space on a focused
+  // button activates THAT button, so the dialog must not OPEN with a button
+  // focused (Base UI's default first-tabbable) or bare Space does nothing.
+  // Focus the dialog surface instead; Tab still reaches every control.
+  const dialogSurfaceRef = useRef<HTMLDivElement | null>(null)
   const [phase, setPhase] = useState<Phase>("idle")
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
@@ -82,10 +100,75 @@ export function AudioRecordingModal({
   const audioEntry = activeCell ? byCellId.get(activeCell.id) : undefined
   const recordingTakes = useMemo(
     () => Object.values(audioEntry?.attachments ?? {})
-      .filter((a) => a.slot === "recording")
+      // Round 8c (Sam): generated TTS is a TAKE too — one list, recorded and
+      // synthesized side by side, any of them circleable.
+      .filter((a) => a.slot === "recording" || a.slot === "generatedVoice")
+      // The imported SOURCE clip rides the recording slot too (fileId-seeded,
+      // per SUB-29 provenance) but is not a take — keep it out of the strip so
+      // it can't be listed, named "Take 1", or deleted from here. The Source
+      // audio track owns it.
+      .filter((a) => !audioIdSeededWith(a.audioId, activeCell?.fileId ?? ""))
       .sort((a, b) => a.audioId.localeCompare(b.audioId)),
-    [audioEntry],
+    [audioEntry, activeCell?.fileId],
   )
+  // The source clip itself — the recording slot's "no take" state. Activating
+  // a TTS take hands the slot back to it so the generated audio can sound.
+  const sourceClip = useMemo(
+    () => Object.values(audioEntry?.attachments ?? {})
+      .find((a) => a.slot === "recording" && audioIdSeededWith(a.audioId, activeCell?.fileId ?? "")) ?? null,
+    [audioEntry, activeCell?.fileId],
+  )
+
+  // Round 8c: takes recorded before the webm-duration fix attached without a
+  // durationMs (Chrome writes no duration header into MediaRecorder blobs), so
+  // their chips still fall back to section width. Heal the SELECTED take once
+  // per modal visit: fetch its bytes, decode the real length, re-attach with
+  // it (re-attach re-selects, which is a no-op here — and COALESCE keeps the
+  // name, while passing the trims keeps them).
+  const healTriedRef = useRef<Set<string>>(new Set())
+  useEffect(() => {
+    if (!open || !session?.jwt || !activeCell) return
+    const sel = audioEntry?.selectedAudioId
+    if (!sel || healTriedRef.current.has(sel)) return
+    const take = recordingTakes.find((t) => t.audioId === sel && t.slot === "recording")
+    if (!take || take.durationMs != null) return
+    healTriedRef.current.add(sel)
+    const cell = activeCell
+    void (async () => {
+      try {
+        const frontier = parseFrontierAudioUrl(take.url)
+        if (!frontier) return
+        const bytes = await fetchCellAudio({
+          projectId: project.id, fileId: cell.fileId,
+          audioId: frontier.audioId, ext: frontier.ext,
+          getSyncToken: audioSyncTokenFetcherForSession(session),
+        })
+        const durationMs = await probeDurationMsSafe(
+          new Blob([bytes as BlobPart], { type: take.mimeType ?? "audio/webm" }),
+        )
+        if (durationMs == null) return
+        const healEventId = await emitCellAudioAttach({
+          projectId: project.id, fileId: cell.fileId, cellId: cell.id,
+          audioId: take.audioId, url: take.url, slot: "recording",
+          mimeType: take.mimeType ?? undefined,
+          durationMs: Math.round(durationMs),
+          label: take.label ?? undefined,
+          trimStartMs: take.trimStartMs ?? undefined,
+          trimEndMs: take.trimEndMs ?? undefined,
+          author: username,
+        })
+        injectOptimisticAudioAttachment(
+          cell.fileId,
+          cell.id,
+          { ...take, durationMs: Math.round(durationMs) },
+          healEventId,
+        )
+        notifyAudioAttachmentsChanged(cell.fileId)
+      } catch {
+        /* best-effort — the take simply keeps its fallback-width chip */
+      }
+    })()
+  }, [open, session, activeCell, audioEntry?.selectedAudioId, recordingTakes, project.id, username])
 
   // Whenever the user switches cells, reset the capture state so the new cell
   // opens fresh.
@@ -131,6 +214,13 @@ export function AudioRecordingModal({
   }, [recorder.state, phase])
 
   const startFlow = useCallback(() => {
+    // Offline gates FIRST — when both fail it is the truer cause ("sign in"
+    // is unactionable without a connection anyway).
+    if (!online) {
+      setErrorMessage(offlineMessage)
+      setPhase("error")
+      return
+    }
     if (!session?.jwt) {
       setErrorMessage(t("audio.recordingModal.signInRequired"))
       setPhase("error")
@@ -161,7 +251,7 @@ export function AudioRecordingModal({
         },
       })
     })
-  }, [beepEnabled, countdown, recorder, session?.jwt, t])
+  }, [beepEnabled, countdown, recorder, session?.jwt, online, offlineMessage, t])
 
   const stopRecording = useCallback(() => {
     recorder.stop()
@@ -176,14 +266,65 @@ export function AudioRecordingModal({
     setTimeout(startFlow, 0)
   }, [recorder, previewUrl, startFlow])
 
+  // Round 8: durable TTS from the recording surface — the clear "regenerate"
+  // counterpart to re-recording. Uses the project engine + this cell's
+  // assigned voice; the result attaches to the generated-voice slot.
+  const [ttsBusy, setTtsBusy] = useState(false)
+  const [ttsDone, setTtsDone] = useState(false)
+  useEffect(() => {
+    setTtsDone(false)
+  }, [activeCellId])
+  const generateTts = useCallback(async () => {
+    if (!online) return // the disabled button + tooltip carry the message
+    if (!activeCell || !session || ttsBusy) return
+    setTtsBusy(true)
+    setTtsDone(false)
+    try {
+      // Round 8c: the TTS take is born with its permanent name like any take.
+      const ok = await generateCellVoice({
+        project, cell: activeCell, session, username,
+        label: nextTakeLabel(recordingTakes),
+      })
+      if (ok) {
+        setTtsDone(true)
+        // You asked for this voice — make it the one that sounds. A recorded
+        // take holding the recording slot would shadow it, so hand the slot
+        // back to the source clip (the "no take" state).
+        const recSel = audioEntry?.selectedAudioId
+        if (recSel && audioIdSeededWith(recSel, activeCell.id) && sourceClip) {
+          const displaceP = emitCellAudioSelect({
+            projectId: project.id, fileId: activeCell.fileId, cellId: activeCell.id,
+            audioId: sourceClip.audioId, slot: "recording", author: username,
+          })
+          injectOptimisticAudioAttachment(activeCell.fileId, activeCell.id, sourceClip, displaceP)
+          await displaceP
+          notifyAudioAttachmentsChanged(activeCell.fileId)
+        }
+      }
+    } finally {
+      setTtsBusy(false)
+    }
+  }, [online, activeCell, session, ttsBusy, project, username, recordingTakes, audioEntry?.selectedAudioId, sourceClip])
+
   const save = useCallback(async () => {
     if (recorder.state.kind !== "stopped") return
+    // Silent backstop for the Space/Enter path — deliberately NOT the error
+    // phase (that replaces the preview UI and its footer has no Save button,
+    // stranding a reconnected user). The disabled Save button + the visible
+    // preview notice carry the message; the take stays previewable and saves
+    // once the connection returns.
+    if (!online) return
     if (!session?.jwt || !activeCell) return
     setPhase("uploading")
     setErrorMessage(null)
     try {
       const blob = recorder.state.blob
       const ext = recorder.state.ext
+      // SUB-48: the recorder already TIMED this take — use that, never a probe.
+      // Chrome writes no duration header into MediaRecorder webm, so probing
+      // the blob raced a timeout and long takes silently attached with no
+      // length at all, leaving their chips stuck at section width.
+      const takeDurationMs = Math.round(recorder.state.durationSec * 1000)
       const audioId = buildAudioId(activeCell.id)
       // Warm the OPFS byte cache BEFORE upload (FRO-355), keyed exactly as
       // transcribeCell/useCellAudio look bytes up (audioId+ext of the
@@ -208,8 +349,11 @@ export function AudioRecordingModal({
       const savedAudioId = result.audioId
       setTranscribeStatus(savedAudioId, { kind: "idle" })
       markProjectHasAudioDataSoon(project.id)
+      // Round 8: takes are BORN with their permanent name — never renumbered.
+      const takeLabel = nextTakeLabel(recordingTakes)
+      let attachEventId: string
       try {
-        await emitCellAudioAttach({
+        attachEventId = await emitCellAudioAttach({
           projectId: project.id,
           fileId: activeCell.fileId,
           cellId: activeCell.id,
@@ -217,6 +361,8 @@ export function AudioRecordingModal({
           url: result.url,
           slot: "recording",
           mimeType: blob.type || undefined,
+          durationMs: takeDurationMs,
+          label: takeLabel,
           author: username,
         })
       } catch (emitErr) {
@@ -243,10 +389,11 @@ export function AudioRecordingModal({
         mimeType: blob.type || null,
         voiceId: null,
         referenceAudioId: null,
-        durationMs: null,
+        durationMs: takeDurationMs,
+        label: takeLabel,
         trimStartMs: null,
         trimEndMs: null,
-      })
+      }, attachEventId)
       notifyAudioAttachmentsChanged(activeCell.fileId)
       setPhase("saved")
       // Fire Whisper transcription in the background — user gets karaoke as
@@ -256,26 +403,60 @@ export function AudioRecordingModal({
         cell: {
           ...activeCell,
           selectedAudioId: fullAudioId,
-          attachments: { ...activeCell.attachments, [fullAudioId]: { url: result.url, type: "audio" } },
+          attachments: {
+            ...activeCell.attachments,
+            // SUB-49: hand transcription the REAL attachment. It re-attaches
+            // when it finishes and forwards whatever it finds here; a stub of
+            // `{url, type}` meant the re-attach carried no duration, which
+            // wiped the take's length a minute after saving. Mirrors the seed
+            // built by auto-transcribe.ts. (The mime type isn't carried on
+            // this shape; the projection's COALESCE protects it instead.)
+            [fullAudioId]: { url: result.url, type: "audio", durationMs: takeDurationMs },
+          },
         },
         session,
         projectId: project.id,
         language: project.targetLanguage,
       })
       // Auto-advance: settle on the new cell after a brief success indication.
-      setTimeout(() => {
-        const nextIdx = activeIndex + 1
-        if (nextIdx < cells.length) {
-          onActiveCellChange(cells[nextIdx].id)
-        } else {
-          onClose()
-        }
-      }, 450)
+      // SUB-50: opt-out for repeat takes on one line, and the handle is now
+      // tracked so closing/navigating inside the window can't fire a stray
+      // jump after the fact.
+      if (autoAdvance) {
+        if (advanceTimerRef.current) clearTimeout(advanceTimerRef.current)
+        advanceTimerRef.current = setTimeout(() => {
+          advanceTimerRef.current = null
+          const nextIdx = activeIndex + 1
+          if (nextIdx < cells.length) {
+            onActiveCellChange(cells[nextIdx].id)
+          } else {
+            onClose()
+          }
+        }, 450)
+      }
     } catch (e) {
-      setErrorMessage(e instanceof Error ? e.message : String(e))
-      setPhase("error")
+      // A network failure that raced the online flag reads as the same
+      // offline story, not a raw fetch error.
+      setErrorMessage(!navigator.onLine ? offlineMessage : e instanceof Error ? e.message : String(e))
+      // The take is still in hand (the recorder holds the stopped blob), so
+      // go back to the PREVIEW, not the error phase: error's footer has no
+      // Save or Retake, and the preview effect can't re-fire for this blob
+      // (consumedBlobRef already equals it) — the take would be stranded
+      // despite sitting right there. Preview keeps Save offered, so a flap
+      // that struck mid-upload retries with the SAME take after reconnect.
+      setPhase(recorder.state.kind === "stopped" ? "preview" : "error")
     }
-  }, [recorder.state, session, activeCell, project.id, username, activeIndex, cells, onActiveCellChange, onClose])
+  }, [recorder.state, online, session, activeCell, project.id, username, activeIndex, cells, onActiveCellChange, onClose, autoAdvance, recordingTakes])
+
+  // A pending advance must never outlive the modal (or a manual jump): the
+  // 450ms window was previously untracked, so closing inside it still fired.
+  useEffect(
+    () => () => {
+      if (advanceTimerRef.current) clearTimeout(advanceTimerRef.current)
+      advanceTimerRef.current = null
+    },
+    [],
+  )
 
   const canNav = phase === "idle" || phase === "preview" || phase === "error" || phase === "saved"
   const gotoIndex = useCallback((idx: number) => {
@@ -299,6 +480,11 @@ export function AudioRecordingModal({
       // Typing into an input? let it through.
       const target = e.target as HTMLElement
       if (target && ["INPUT", "TEXTAREA"].includes(target.tagName)) return
+      // Another dialog stacked ON TOP of the recorder (the timing-mode
+      // heads-up) owns the keyboard while it holds focus — without this,
+      // Escape would dismiss it AND close the recorder in one press.
+      const dialogOf = target?.closest?.('[data-slot="dialog-content"], [role="dialog"]')
+      if (dialogOf && !dialogOf.hasAttribute("data-recorder-dialog")) return
 
       if (e.key === "Escape") {
         e.preventDefault()
@@ -308,7 +494,13 @@ export function AudioRecordingModal({
         onClose()
         return
       }
-      if (e.key === " ") {
+      // SUB-52: modifier check matches the other Space handlers — Cmd/Ctrl/
+      // Alt+Space belong to the OS or other shortcuts, not to recording.
+      // FORTIFY: Space on a FOCUSED BUTTON activates that button — a keyboard
+      // user who tabbed to "Retake" and pressed Space was having the bad take
+      // SAVED instead of discarded.
+      if (e.key === " " && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) {
+        if (target?.tagName === "BUTTON" || target?.getAttribute?.("role") === "button") return
         e.preventDefault()
         if (phase === "idle" || phase === "error") { startFlow(); return }
         if (phase === "recording") { stopRecording(); return }
@@ -335,7 +527,16 @@ export function AudioRecordingModal({
           so it never clips at 100% zoom on 1280×800 or smaller viewports.
           The dialog is split into a fixed header, a scrollable stage+takes
           middle, and a fixed footer so navigation buttons stay reachable. */}
+      {/* finalFocus={false}: closing must NOT return focus to the opener —
+          the lane's mic buttons are hover-revealed, so focus would sit on an
+          INVISIBLE button where Space re-opens the recorder instead of
+          driving the transport. Released focus falls to the page, where
+          Space belongs to playback again. */}
       <DialogContent
+        ref={dialogSurfaceRef}
+        initialFocus={dialogSurfaceRef}
+        finalFocus={false}
+        data-recorder-dialog=""
         className="flex max-w-3xl flex-col gap-0 p-0"
         style={{ maxHeight: "min(92vh, 800px)" }}
         showCloseButton={false}
@@ -375,6 +576,30 @@ export function AudioRecordingModal({
             </div>
           </div>
           <div className="flex items-center gap-1">
+            <AppTooltip
+              content={
+                autoAdvance
+                  ? t("audio.recordingModal.autoAdvanceOnTooltip")
+                  : t("audio.recordingModal.autoAdvanceOffTooltip")
+              }
+            >
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                data-testid="rec-auto-advance"
+                aria-pressed={autoAdvance}
+                onClick={() => setRecordingAutoAdvance(!autoAdvance)}
+                aria-label={
+                  autoAdvance
+                    ? t("audio.recordingModal.autoAdvanceDisableLabel")
+                    : t("audio.recordingModal.autoAdvanceEnableLabel")
+                }
+                className="text-muted-foreground/60"
+              >
+                {autoAdvance ? <ChevronsRight className="h-4 w-4" /> : <Pin className="h-4 w-4" />}
+              </Button>
+            </AppTooltip>
             <AppTooltip content={beepEnabled ? t("audio.recordingModal.muteBeepTooltip") : t("audio.recordingModal.unmuteBeepTooltip")}>
               <Button
                 type="button"
@@ -459,6 +684,23 @@ export function AudioRecordingModal({
               {targetSec != null && (
                 <DurationBar elapsedMs={elapsedMs} targetSec={targetSec} />
               )}
+              {/* Connectivity died mid-flow: the take is safe (capture is
+                  local) — say why Save is disabled. Derived, so it clears
+                  itself the moment the connection returns. */}
+              {!online && (
+                <p data-testid="rec-offline-notice" className="text-center text-xs font-medium text-amber-500">
+                  {offlineMessage}
+                </p>
+              )}
+              {/* A save that FAILED bounced back here with its take intact.
+                  The offline story is carried by the notice above (and clears
+                  with the connection); anything else says why, in red, with
+                  Save still offered for the retry. */}
+              {online && errorMessage != null && errorMessage !== offlineMessage && (
+                <p data-testid="rec-save-error" className="text-center text-xs font-medium text-destructive">
+                  {t("audio.recordingModal.saveFailedNotice", { error: errorMessage })}
+                </p>
+              )}
             </div>
           )}
 
@@ -503,6 +745,8 @@ export function AudioRecordingModal({
             cellId={activeCell.id}
             takes={recordingTakes}
             selectedAudioId={audioEntry?.selectedAudioId ?? null}
+            selectedGeneratedAudioId={audioEntry?.selectedGeneratedVoiceAudioId ?? null}
+            sourceClip={sourceClip}
             author={username}
             session={session ?? null}
           />
@@ -542,10 +786,12 @@ export function AudioRecordingModal({
                   <RefreshCw className="mr-1 h-4 w-4" /> {t("audio.recordingModal.retakeButton")}
                 </Button>
               </AppTooltip>
-              <AppTooltip content={t("audio.recordingModal.saveTooltip")}>
-                <Button size="sm" onClick={save}>
-                  <Check className="mr-1 h-4 w-4" /> {t("common.save")}
-                </Button>
+              <AppTooltip content={online ? t("audio.recordingModal.saveTooltip") : offlineMessage}>
+                <span className="inline-flex">
+                  <Button size="sm" data-testid="rec-save" disabled={!online} onClick={save}>
+                    <Check className="mr-1 h-4 w-4" /> {t("common.save")}
+                  </Button>
+                </span>
               </AppTooltip>
             </>
           )}
@@ -559,9 +805,49 @@ export function AudioRecordingModal({
           )}
 
           {(displayPhase === "idle" || displayPhase === "error") && (
-            <Button size="sm" onClick={startFlow}>
-              <Play className="mr-1 h-4 w-4" /> {t("audio.recordingModal.startButton")}
-            </Button>
+            <>
+              {/* Round 8: a clear re-record vs REGENERATE choice — durable TTS
+                  right where recording lives. Round 8c: the result is a TAKE —
+                  it joins the list below (sparkle row) and becomes the one
+                  that sounds. */}
+              <AppTooltip
+                content={
+                  !online
+                    ? offlineMessage
+                    : !activeCell?.translated?.trim()
+                      ? t("audio.recordingModal.ttsNeedsTranslation")
+                      : ttsDone
+                        ? t("audio.recordingModal.ttsDoneTooltip")
+                        : t("audio.recordingModal.ttsTooltip")
+                }
+              >
+                <span className="inline-flex">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    data-testid="rec-generate-tts"
+                    disabled={!online || !activeCell?.translated?.trim() || ttsBusy}
+                    onClick={() => void generateTts()}
+                  >
+                    {ttsBusy ? (
+                      <Spinner className="mr-1 size-4" />
+                    ) : ttsDone ? (
+                      <Check className="mr-1 h-4 w-4 text-emerald-500" />
+                    ) : (
+                      <Sparkles className="mr-1 h-4 w-4" />
+                    )}
+                    {t("audio.recordingModal.generateTtsButton")}
+                  </Button>
+                </span>
+              </AppTooltip>
+              <AppTooltip content={online ? t("audio.recordingModal.startTooltip") : offlineMessage}>
+                <span className="inline-flex">
+                  <Button size="sm" data-testid="rec-start" disabled={!online} onClick={startFlow}>
+                    <Play className="mr-1 h-4 w-4" /> {t("audio.recordingModal.startButton")}
+                  </Button>
+                </span>
+              </AppTooltip>
+            </>
           )}
 
           {displayPhase === "counting" && (

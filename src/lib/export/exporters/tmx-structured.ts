@@ -4,6 +4,7 @@
 // `keepTags: false` strips to plain text (Matecat "Export TMX … without tags").
 // The legacy exportTmx stays untouched (C7).
 import type { CellData } from "@/hooks/useCells"
+import { effectiveSourceText } from "@/lib/cell-text"
 import type { TmxSegmentMeta } from "@/lib/parsers/tmx"
 import { fragmentText } from "@/lib/parsers/xliff"
 
@@ -28,16 +29,18 @@ export function exportTmxStructured(
   const keepTags = options.keepTags !== false
   const now = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d+/, "")
   const tus = (cells as MetaCell[])
-    .filter((c) => c.original.trim() && c.translated.trim())
+    // Untranscribed media cells drop out (see exportTmx's note) — a filename
+    // is not a source segment.
+    .filter((c) => effectiveSourceText(c).trim() && c.translated.trim())
     .map((c) => {
       const meta = c.metadata?.tmx
       const tuid = xmlEscape(meta?.tuid || c.group || c.id)
       const srcLang = xmlEscape(meta?.srcLang || sourceLanguage)
       const tgtLang = xmlEscape(meta?.tgtLang || targetLanguage)
-      let src = xmlEscape(c.original.trim())
+      let src = xmlEscape(effectiveSourceText(c).trim())
       let tgt = xmlEscape(c.translated.trim())
       if (keepTags && meta) {
-        if (c.original.trim() === fragmentText(meta.srcSegXml)) src = meta.srcSegXml
+        if (effectiveSourceText(c).trim() === fragmentText(meta.srcSegXml)) src = meta.srcSegXml
         if (meta.tgtSegXml != null && c.translated.trim() === fragmentText(meta.tgtSegXml)) {
           tgt = meta.tgtSegXml
         }

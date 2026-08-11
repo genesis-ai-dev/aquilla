@@ -151,6 +151,9 @@ export function CombinedBoundaryEditor(props: CombinedBoundaryEditorProps) {
         // Live cache the player reads.
         setCellPref(project.id, cell.id, { trimStart: start, trimEnd: end })
         // Durable, cross-device: re-attach the shared clip with this slice.
+        // Fortify pass: no mimeType on a trim re-attach — the clip may be
+        // webm/opus now (compressed generations); a hardcoded audio/wav would
+        // overwrite the real container type. Absent field = COALESCE keeps it.
         void emitCellAudioAttach({
           projectId: project.id,
           fileId,
@@ -158,7 +161,6 @@ export function CombinedBoundaryEditor(props: CombinedBoundaryEditorProps) {
           audioId,
           url,
           slot: "generatedVoice",
-          mimeType: "audio/wav",
           voiceId,
           ...(referenceAudioId ? { referenceAudioId } : {}),
           trimStartMs: Math.round(start * 1000),

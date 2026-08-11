@@ -950,14 +950,29 @@ describe("TimelineEditor — the source-audio band", () => {
     expect(within(lane).getAllByTestId(/^tl-card-/)).toHaveLength(2)
   })
 
-  it("hides the source speaker button, which cannot mute a video it does not own", () => {
+  // 2026-08-11: this button used to be hidden here, because setQueueAudibility
+  // only reaches the queue's own elements and there are none in this
+  // arrangement. It is back, and the video pane honours the same flag — muting
+  // the original while listening back to a take is the point of having it.
+  it("keeps the source speaker button, which now mutes the linked video", () => {
     setVideoDurationSec(VIDEO, 120)
     render(
       <TimelineEditor fileId="f1" coreMediaUrl={VIDEO} editable cells={subtitleCells} onRetimeSubtitle={() => {}} />,
     )
-    expect(screen.queryByTestId("tl-speaker-source")).not.toBeInTheDocument()
-    // The target row's button is untouched — the queue really does own that one.
-    expect(screen.getByTestId("tl-speaker-target")).toBeInTheDocument()
+    const speaker = screen.getByTestId("tl-speaker-source")
+    expect(speaker).toHaveAttribute("aria-pressed", "true")
+    fireEvent.click(speaker)
+    expect(screen.getByTestId("tl-speaker-source")).toHaveAttribute("aria-pressed", "false")
+    // The published flag is what the pane reads.
+    expect(lastAudibility).toEqual({ source: false, target: true })
+  })
+
+  it("leaves the target row's speaker button alone", () => {
+    setVideoDurationSec(VIDEO, 120)
+    render(
+      <TimelineEditor fileId="f1" coreMediaUrl={VIDEO} editable cells={subtitleCells} onRetimeSubtitle={() => {}} />,
+    )
+    expect(screen.getByTestId("tl-speaker-target")).toHaveAttribute("aria-pressed", "true")
   })
 
   it("leaves an imported recording alone even when it also has a video linked", () => {

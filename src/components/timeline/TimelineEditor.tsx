@@ -1004,17 +1004,13 @@ export function TimelineEditor({
         <div className="border-r border-border bg-muted/20">
           <div className="h-7 border-b border-border" />
           <LaneLabel name="Subtitles" sub="text · reading" dot="bg-zinc-400 dark:bg-zinc-600" />
-          {/* The speaker button drives setQueueAudibility, which only mutes the
-              queue's own elements. While the band is drawing there IS no queue
-              audio — the sound is the <video>'s, unmuted precisely because the
-              pane is standalone — so the control would do nothing. A dead
-              button on the row this feature is about is worse than no button. */}
-          <LaneLabel
-            name="Source audio"
-            sub="original speech"
-            dot="bg-sky-600"
-            trailing={drawsSourceBand ? undefined : speakerToggle("source", "source audio")}
-          />
+          {/* The speaker button publishes through setQueueAudibility, which
+              reaches the queue's own elements. While the source chips come from
+              a linked video there are none — so MediaVideoPane reads the same
+              flag and mutes the picture itself. Muting the original while you
+              listen back to a take is the whole reason to want this button on
+              this row. (2026-08-11) */}
+          <LaneLabel name="Source audio" sub="original speech" dot="bg-sky-600" trailing={speakerToggle("source", "source audio")} />
           <LaneLabel name="Target audio" sub="takes · generated" dot="bg-emerald-600" trailing={speakerToggle("target", "target audio")} />
           {/* SUB-37: the untimed parking strip only exists when something is
               actually untimed — an always-on empty row read as a mystery. */}

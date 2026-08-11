@@ -20,7 +20,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import { cn } from "@/lib/utils"
 import type { CellData } from "@/hooks/useCells"
-import { queueClockIsFileTime, useQueueForFile } from "@/lib/audio/play-queue"
+import { queueClockIsFileTime, useQueueAudibility, useQueueForFile } from "@/lib/audio/play-queue"
 import { effectiveSourceText } from "@/lib/cell-text"
 import type { DirectionMode, TextDirection } from "@/lib/text-direction"
 import { videoSyncAction } from "./video-sync"
@@ -122,6 +122,9 @@ export function MediaVideoPane({
    * the user gets a frozen first frame, no controls, and no way to start it.
    */
   const slaved = useMemo(() => cells.some((c) => queueClockIsFileTime(c)), [cells])
+  /** The timeline's Source-track speaker button. Only bites in the standalone
+   *  arrangement — a slaved picture is already silent. */
+  const sourceAudible = useQueueAudibility().source
 
   const setMode = useCallback((next: SubtitleMode) => {
     setModeState(next)
@@ -372,8 +375,12 @@ export function MediaVideoPane({
           playsInline
           preload="metadata"
           // Slaved: silent picture, no competing controls. Standalone: this IS
-          // the player, so it keeps both.
-          muted={slaved}
+          // the player, so it keeps both — and it is also the SOURCE AUDIO, so
+          // the timeline's Source-track speaker button mutes it. That button
+          // publishes through setQueueAudibility, which reaches the queue's own
+          // elements; there are none in this arrangement, so the pane honours
+          // the same flag directly. (AQU-646, 2026-08-11)
+          muted={slaved || !sourceAudible}
           controls={!slaved}
           onError={() => {
             setFailed(true)

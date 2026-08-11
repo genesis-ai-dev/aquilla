@@ -15,12 +15,16 @@ let mockQueue: QueueForFile = {
   kind: "idle",
   progress: { currentTime: 0, duration: 0, rate: 1, volume: 1 },
 }
+let mockAudibility: { source: boolean; target: boolean } = { source: true, target: true }
 vi.mock("@/lib/audio/play-queue", () => ({
   useQueueForFile: () => mockQueue,
   // Mirrors the real rule: the queue's clock is file time only for a media cell
   // backed by the shared source clip.
   queueClockIsFileTime: (c: CellData | undefined | null) =>
     c?.medium === "media" && Boolean(c?.attachments),
+  // The timeline's Source-track speaker button, which the pane honours when it
+  // is the thing making the sound.
+  useQueueAudibility: () => mockAudibility,
 }))
 
 import { MediaVideoPane, readCaptionPlacement, readSubtitleMode } from "./MediaVideoPane"
@@ -69,6 +73,43 @@ describe("MediaVideoPane", () => {
       kind: "idle",
       progress: { currentTime: 0, duration: 0, rate: 1, volume: 1 },
     }
+    mockAudibility = { source: true, target: true }
+  })
+
+  // AQU-646 2026-08-11: when the source chips come from a linked video, the
+  // video IS the source audio — so the timeline's Source-track speaker button
+  // has to reach it. Muting the original while listening back to a take is the
+  // reason that button exists on that row.
+  describe("the Source-track speaker button", () => {
+    const subtitleCells = [cell({ id: "s1", medium: "text", original: "Line one" })]
+    const renderStandalone = () =>
+      render(<MediaVideoPane src="https://cdn/episode.webm" cells={subtitleCells} />)
+
+    it("mutes the picture when the source track is muted", () => {
+      mockAudibility = { source: false, target: true }
+      renderStandalone()
+      // The PROPERTY, not the attribute — happy-dom falls back to the attribute,
+      // so an attribute check would pass even if React never set it.
+      expect((screen.getByTestId("video-pane-media") as HTMLVideoElement).muted).toBe(true)
+    })
+
+    it("leaves it audible when the source track is audible", () => {
+      renderStandalone()
+      expect((screen.getByTestId("video-pane-media") as HTMLVideoElement).muted).toBe(false)
+    })
+
+    it("ignores the TARGET track — that one is the dub overlay's, not the video's", () => {
+      mockAudibility = { source: true, target: false }
+      renderStandalone()
+      expect((screen.getByTestId("video-pane-media") as HTMLVideoElement).muted).toBe(false)
+    })
+
+    it("keeps a slaved picture silent whatever the source track says", () => {
+      // Slaved means the queue is making the sound and the picture never should.
+      mockAudibility = { source: true, target: true }
+      renderPane()
+      expect((screen.getByTestId("video-pane-media") as HTMLVideoElement).muted).toBe(true)
+    })
   })
 
   it("is a muted picture surface with no competing controls", () => {

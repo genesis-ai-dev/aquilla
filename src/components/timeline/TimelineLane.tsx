@@ -34,6 +34,10 @@ export interface TimelineLaneProps {
   canRetimeCell?(cell: CellData): boolean
   /** Round 6: edge snapping on/off (candidates are computed here). */
   snapEnabled?: boolean
+  /** AQU-646 round 8: hold every card inside its neighbours' edges. Off by
+   *  default — SUB-36's media-subtitle card is deliberately free to sit
+   *  anywhere, and an always-on bound would silently cage it. */
+  boundNeighbours?: boolean
   onSelect(id: string): void
   onRetime(id: string, startSec: number, endSec: number): void
   /** AQU-646: clean click on a card navigates playback to it. */
@@ -64,6 +68,7 @@ export function TimelineLane({
   retimable,
   canRetimeCell,
   snapEnabled,
+  boundNeighbours,
   onSelect,
   onRetime,
   onSeek,
@@ -83,6 +88,27 @@ export function TimelineLane({
     }
     const start = c.startTime ?? 0
     return { start, end: c.endTime ?? start }
+  }
+
+  // AQU-646 round 8: the walls each card may not cross, derived from the WHOLE
+  // lane before any windowing. Deriving them from `visible` would look natural
+  // — that is where the snap candidates come from — but `visible` is a window
+  // with about 240px of overscan, so a neighbour scrolled off-screen would
+  // silently stop constraining the drag and the card would sail through it.
+  //
+  // The floor is a running maximum of every END so far, not the previous card's
+  // end: `cells` arrives sorted by START, and a real VTT may contain overlapping
+  // cues, so a long cue can reach past several shorter ones after it.
+  const boundsById = new Map<string, { minStartSec: number; maxEndSec: number }>()
+  if (boundNeighbours) {
+    let maxEndBefore = 0
+    for (let i = 0; i < cells.length; i++) {
+      boundsById.set(cells[i].id, {
+        minStartSec: maxEndBefore,
+        maxEndSec: i + 1 < cells.length ? spanOf(cells[i + 1]).start : Number.POSITIVE_INFINITY,
+      })
+      maxEndBefore = Math.max(maxEndBefore, spanOf(cells[i]).end)
+    }
   }
 
   const visible = cells.filter((c) => {
@@ -158,6 +184,7 @@ export function TimelineLane({
           editable={editable}
           retimable={cardRetimable}
           span={spanOf(c)}
+          bounds={boundsById.get(c.id)}
           snap={cardRetimable ? { enabled: Boolean(snapEnabled), candidates: candidatesFor(c) } : undefined}
           onSelect={onSelect}
           onRetime={onRetime}

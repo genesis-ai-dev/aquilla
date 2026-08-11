@@ -221,4 +221,111 @@ describe("TimelineCard", () => {
     )
     expect(screen.getByTestId("tl-card-c1")).toHaveTextContent("hola")
   })
+
+  // ── AQU-646 round 8: neighbour walls ──
+  //
+  // A line added into a silence may move, but subtitle timing IS the cell's
+  // timing — so unlike a dub take it never gets to be approximate. The card
+  // stops dead at its neighbours' edges rather than crossing or overlapping.
+
+  describe("bounds", () => {
+    // The cell is 1s–3s at 40px/s. Walls at 0.5s and 4s leave 0.5s of slack
+    // either way.
+    const bounded = { minStartSec: 0.5, maxEndSec: 4 }
+
+    const dragBody = (dxPx: number) => {
+      const el = screen.getByTestId("tl-card-c1")
+      fireEvent.pointerDown(el, { clientX: 100, pointerId: 1 })
+      fireEvent.pointerMove(window, { clientX: 100 + dxPx })
+      fireEvent.pointerUp(window, { clientX: 100 + dxPx })
+    }
+
+    it("a move stops at the far wall, keeping its length", () => {
+      const onRetime = vi.fn()
+      render(
+        <TimelineCard cell={cell()} {...base} variant="subtitle" bounds={bounded}
+          onSelect={() => {}} onRetime={onRetime} />,
+      )
+      dragBody(400) // +10s, far past the wall
+      // Length preserved (2s), right edge flush with the neighbour.
+      expect(onRetime).toHaveBeenCalledWith("c1", 2, 4)
+    })
+
+    it("a move stops at the near wall too", () => {
+      const onRetime = vi.fn()
+      render(
+        <TimelineCard cell={cell()} {...base} variant="subtitle" bounds={bounded}
+          onSelect={() => {}} onRetime={onRetime} />,
+      )
+      dragBody(-400)
+      expect(onRetime).toHaveBeenCalledWith("c1", 0.5, 2.5)
+    })
+
+    it("stretching the end stops at the next cue's start", () => {
+      const onRetime = vi.fn()
+      render(
+        <TimelineCard cell={cell()} {...base} variant="subtitle" bounds={bounded}
+          onSelect={() => {}} onRetime={onRetime} />,
+      )
+      const grips = document.querySelectorAll(".cursor-ew-resize")
+      fireEvent.pointerDown(grips[1] as Element, { clientX: 200, pointerId: 2 })
+      fireEvent.pointerMove(window, { clientX: 600 })
+      fireEvent.pointerUp(window, { clientX: 600 })
+      expect(onRetime).toHaveBeenCalledWith("c1", 1, 4)
+    })
+
+    it("stretching the start stops at the previous cue's end", () => {
+      const onRetime = vi.fn()
+      render(
+        <TimelineCard cell={cell()} {...base} variant="subtitle" bounds={bounded}
+          onSelect={() => {}} onRetime={onRetime} />,
+      )
+      const grips = document.querySelectorAll(".cursor-ew-resize")
+      fireEvent.pointerDown(grips[0] as Element, { clientX: 40, pointerId: 3 })
+      fireEvent.pointerMove(window, { clientX: -400 })
+      fireEvent.pointerUp(window, { clientX: -400 })
+      expect(onRetime).toHaveBeenCalledWith("c1", 0.5, 3)
+    })
+
+    it("the wall beats a snap candidate that sits beyond it", () => {
+      // 6s is a legal edge to snap to and an illegal place to land. Clamping
+      // BEFORE snapping would let the snap step back over the wall; this is
+      // the assertion that pins the order.
+      const onRetime = vi.fn()
+      render(
+        <TimelineCard cell={cell()} {...base} variant="subtitle" bounds={bounded}
+          snap={{ enabled: true, candidates: [6] }} onSelect={() => {}} onRetime={onRetime} />,
+      )
+      dragBody(200) // +5s → 6s–8s, right on the candidate
+      expect(onRetime).toHaveBeenCalledWith("c1", 2, 4)
+    })
+
+    it("left out entirely, nothing is constrained", () => {
+      const onRetime = vi.fn()
+      render(
+        <TimelineCard cell={cell()} {...base} variant="subtitle" onSelect={() => {}} onRetime={onRetime} />,
+      )
+      dragBody(400)
+      expect(onRetime).toHaveBeenCalledWith("c1", 11, 13)
+    })
+  })
+
+  // The box and the number came from two different computations before round 8
+  // — one snapped and unclamped, the other clamped and unsnapped — so with
+  // snapping on they could disagree about where release would land.
+  it("with snapping on, the drawn box and the live readout agree", () => {
+    render(
+      <TimelineCard cell={cell()} {...base} variant="subtitle"
+        snap={{ enabled: true, candidates: [5] }} onSelect={() => {}} onRetime={() => {}} />,
+    )
+    const el = screen.getByTestId("tl-card-c1")
+    fireEvent.pointerDown(el, { clientX: 100, pointerId: 1 })
+    // +3.9s lands at 4.9s — inside the snap threshold of the 5s candidate.
+    fireEvent.pointerMove(window, { clientX: 256 })
+    // The box snapped to 5s...
+    expect(el).toHaveStyle({ left: "200px" })
+    // ...so the readout must say 5s too, not the unsnapped 4.9s.
+    expect(screen.getByTestId("tl-drag-chip").textContent).toContain("00:05.000")
+    fireEvent.pointerUp(window, { clientX: 256 })
+  })
 })

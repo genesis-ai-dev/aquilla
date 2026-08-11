@@ -1095,6 +1095,10 @@ export function TimelineEditor({
               // and cannot collide with it anyway, since that mirror exists
               // only when there ARE dialogue cells and the band needs none.
               canRetimeCell={drawsSourceBand ? isUserAddedLine : undefined}
+              // ...and the line it may move within is the space its neighbours
+              // leave it. Only here: SUB-36's media-subtitle card is meant to
+              // sit wherever it likes, so this must never be on by default.
+              boundNeighbours={drawsSourceBand}
               snapEnabled={snapOn}
               {...laneProps}
               // AQU-646: the stretches of film with no line of their own. Only

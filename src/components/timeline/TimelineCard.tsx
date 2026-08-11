@@ -48,6 +48,11 @@ export interface TimelineCardProps {
   /** SUB-53: where this card sits, resolved by the lane's layout. Absent falls
    *  back to the pre-SUB-53 computation (the dubbing answer). */
   span?: { start: number; end: number }
+  /** AQU-646 round 8: hard walls this card may not cross — the neighbouring
+   *  cues' edges. Absent = unbounded, which is every lane but the VTT-plus-
+   *  footage Subtitles track. Subtitle timing IS the cell's timing, so unlike a
+   *  dub take it does not get to be approximate: no crossing, no overlapping. */
+  bounds?: { minStartSec: number; maxEndSec: number }
   onSelect(cellId: string): void
   /** Final bounds in seconds, fired once on pointer-up. */
   onRetime(cellId: string, startSec: number, endSec: number): void
@@ -70,6 +75,7 @@ export function TimelineCard({
   retimable,
   snap,
   span,
+  bounds,
   onSelect,
   onRetime,
   onSeek,
@@ -85,8 +91,11 @@ export function TimelineCard({
   const movedRef = useRef(false)
   const canRetime = editable && retimable
 
-  // The one span transform shared by drag PREVIEW and COMMIT (snap included).
-  function proposeSpan(mode: DragMode, dxSec: number): { start: number; end: number } {
+  // The one span transform shared by drag PREVIEW, READOUT and COMMIT: the
+  // per-mode delta, then snapping, then the neighbour walls, then the minimum
+  // length. Everything the user can see about a drag comes through here, so the
+  // drawn box, the millisecond readout and the value that lands cannot disagree.
+  function proposeSpan(mode: DragMode, dxSec: number): { startSec: number; endSec: number } {
     let ns = startSec
     let ne = endSec
     if (mode === "move") {
@@ -96,39 +105,43 @@ export function TimelineCard({
     else ne += dxSec
     if (snap?.enabled) {
       const snapped = snapSpan({ start: ns, end: ne }, mode, snap.candidates, SNAP_THRESHOLD_PX / pxPerSec)
-      return { start: snapped.start, end: snapped.end }
+      ns = snapped.start
+      ne = snapped.end
     }
-    return { start: ns, end: ne }
+    // AFTER snapping, deliberately: a neighbour's edge is a legal snap target
+    // AND a wall, so a candidate that would land the card past a wall has to
+    // lose to the wall. Clamping first would let the snap step step back over it.
+    if (bounds) {
+      const { minStartSec: lo, maxEndSec: hi } = bounds
+      if (mode === "move") {
+        // Slide, never squeeze: a move keeps its length and stops at the wall.
+        const len = ne - ns
+        ns = Math.min(Math.max(ns, lo), Math.max(lo, hi - len))
+        ne = ns + len
+      } else if (mode === "resize-l") {
+        ns = Math.min(Math.max(ns, lo), ne - MIN_DUR_SEC)
+      } else {
+        ne = Math.max(Math.min(ne, hi), ns + MIN_DUR_SEC)
+      }
+    }
+    return clampRange(ns, ne, MIN_DUR_SEC)
   }
 
-  // Live preview geometry while dragging; committed values come from props.
-  let left = secToPx(startSec - laneStartSec, pxPerSec)
-  let width = secToPx(endSec - startSec, pxPerSec)
-  if (drag) {
-    const s = proposeSpan(drag.mode, pxToSec(drag.dx, pxPerSec))
-    left = secToPx(s.start - laneStartSec, pxPerSec)
-    width = secToPx(s.end - s.start, pxPerSec)
-  }
-  width = Math.max(width, secToPx(MIN_DUR_SEC, pxPerSec))
+  // Computed ONCE per render while a drag is live. Before round 8 the box read
+  // a snapped-but-unclamped span while the readout re-derived an unsnapped-but-
+  // clamped one — despite a comment claiming they matched — so with snapping on
+  // the number under the cursor disagreed with the box being drawn.
+  const dragged = drag ? proposeSpan(drag.mode, pxToSec(drag.dx, pxPerSec)) : null
 
-  // SUB-11: live preview TIMES during drag — the same per-mode + clampRange
-  // math `onUp` commits, so the readout always shows exactly what release
-  // would produce. `previewStart/End` equal the committed props when idle.
-  let previewStart = startSec
-  let previewEnd = endSec
-  if (drag) {
-    const dSec = pxToSec(drag.dx, pxPerSec)
-    let ns = startSec
-    let ne = endSec
-    if (drag.mode === "move") {
-      ns = startSec + dSec
-      ne = endSec + dSec
-    } else if (drag.mode === "resize-l") ns = startSec + dSec
-    else ne = endSec + dSec
-    const clamped = clampRange(ns, ne, MIN_DUR_SEC)
-    previewStart = clamped.startSec
-    previewEnd = clamped.endSec
-  }
+  const left = secToPx((dragged?.startSec ?? startSec) - laneStartSec, pxPerSec)
+  const width = Math.max(
+    secToPx((dragged?.endSec ?? endSec) - (dragged?.startSec ?? startSec), pxPerSec),
+    secToPx(MIN_DUR_SEC, pxPerSec),
+  )
+
+  // SUB-11: live preview TIMES during drag; equal to the committed props idle.
+  const previewStart = dragged?.startSec ?? startSec
+  const previewEnd = dragged?.endSec ?? endSec
   const dragDeltaSec = drag
     ? drag.mode === "resize-r"
       ? previewEnd - endSec
@@ -155,9 +168,8 @@ export function TimelineCard({
       window.removeEventListener("pointerup", onUp)
       setDrag(null)
       const s = proposeSpan(mode, pxToSec(ev.clientX - startX, pxPerSec))
-      const clamped = clampRange(s.start, s.end, MIN_DUR_SEC)
-      if (clamped.startSec !== startSec || clamped.endSec !== endSec) {
-        onRetime(cell.id, clamped.startSec, clamped.endSec)
+      if (s.startSec !== startSec || s.endSec !== endSec) {
+        onRetime(cell.id, s.startSec, s.endSec)
       }
     }
     window.addEventListener("pointermove", onMove)

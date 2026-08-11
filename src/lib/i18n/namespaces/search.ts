@@ -39,6 +39,7 @@ export const search = defineNamespace({
     // Search input placeholders shared verbatim between dock and dialog
     "search.placeholderProject": "Search project…",
     "search.placeholderFile": "Search {fileName}…",
+    "search.ariaLabelProject": "Search project",
 
     "search.noResults": "No results",
 
@@ -62,6 +63,7 @@ export const search = defineNamespace({
     "search.bible.truncated": "Truncated — open the full page on bibletranslation.org.",
     "search.bible.notesFor": "Notes for {ref}",
     "search.bible.searchPlaceholder": "Search Bible resources…",
+    "search.bible.searchAriaLabel": "Search Bible resources",
     "search.bible.noResults": "No resources found",
     "search.bible.idleHint":
       "Search bibletranslation.org for people, places, terms, and translation notes.",
@@ -72,6 +74,7 @@ export const search = defineNamespace({
     "search.replace.cellLocation": "{fileId} · cell {cellId}",
     "search.replace.matchCount": "{count} replacements in this cell",
     "search.replace.placeholder": "Replacement text…",
+    "search.replace.ariaLabel": "Replacement text",
     "search.replace.clearsValidation":
       "Replacing text clears validation — it must be re-reviewed.",
     "search.replace.skippedNotice": plural({
@@ -107,9 +110,13 @@ export const search = defineNamespace({
     "search.dialog.scopeCurrentFile": "Current file",
     "search.dialog.scopeEntireProject": "Entire project",
     "search.dialog.placeholderPassages": "Search parallel passages across all projects…",
+    "search.dialog.ariaLabelPassages": "Search parallel passages across all projects",
     "search.dialog.placeholderScoped": "Search {scope}…",
+    "search.dialog.ariaLabelScoped": "Search {scope}",
     "search.dialog.placeholderReplaceProject": "Find in project…",
+    "search.dialog.ariaLabelReplaceProject": "Find in project",
     "search.dialog.placeholderReplaceScoped": "Find in {scope}…",
+    "search.dialog.ariaLabelReplaceScoped": "Find in {scope}",
     "search.dialog.controlsAriaLabel": "Panel controls",
     "search.dialog.modeLabel": "Search mode",
     "search.dialog.contentSideLabel": "Content side",
@@ -125,12 +132,12 @@ export const search = defineNamespace({
 
     // Expanded "results as editor" view
     "search.expanded.header": "Search Results",
-    "search.expanded.forQueryPrefix": "for",
-    "search.expanded.countsJoiner": "in",
+    "search.expanded.forQuery": "for “{query}”",
     "search.expanded.fileCount": plural({
       one: "{count} file",
       other: "{count} files",
     }),
+    "search.expanded.summary": "{results} in {files}",
     "search.expanded.close": "Close search results",
 
     // Translation-memory examples popover
@@ -193,7 +200,15 @@ export const search = defineNamespace({
       "search.placeholderProject": {
         description:
           "Input placeholder shown in both the dock panel and the full dialog's search " +
-          "box when the scope is the whole project (not a single file).",
+          "box when the scope is the whole project (not a single file). Placeholder text " +
+          "only — see 'search.ariaLabelProject' for the accessible name.",
+      },
+      "search.ariaLabelProject": {
+        description:
+          "Accessible name (aria-label) of the full dialog's search box when scope is " +
+          "the whole project. Distinct key from 'search.placeholderProject' — the " +
+          "placeholder's trailing ellipsis must not be read aloud as part of the field's " +
+          "name (AQU-511 wave-3 finding 6).",
       },
       "search.placeholderFile": {
         description:
@@ -278,8 +293,17 @@ export const search = defineNamespace({
       },
       "search.bible.searchPlaceholder": {
         description:
-          "Placeholder AND aria-label on the Bible-resources search box (people, places, " +
-          "terms, translation notes from bibletranslation.org).",
+          "Placeholder text on the Bible-resources search box (people, places, terms, " +
+          "translation notes from bibletranslation.org). Placeholder text only — see " +
+          "'search.bible.searchAriaLabel' for the accessible name.",
+      },
+      "search.bible.searchAriaLabel": {
+        description:
+          "Accessible name (aria-label) of the Bible-resources search box. Distinct key " +
+          "from 'search.bible.searchPlaceholder' — the placeholder's trailing ellipsis " +
+          "must not be read aloud as part of the field's name, and a translator must be " +
+          "able to word the accessible name differently from the placeholder " +
+          "(AQU-511 wave-3 finding 6).",
       },
       "search.bible.noResults": {
         description:
@@ -317,8 +341,17 @@ export const search = defineNamespace({
       },
       "search.replace.placeholder": {
         description:
-          "Placeholder AND aria-label on the 'replace with' text input in the full " +
-          "dialog's Replace mode.",
+          "Placeholder text on the 'replace with' text input in the full dialog's " +
+          "Replace mode. Placeholder text only — see 'search.replace.ariaLabel' for the " +
+          "accessible name.",
+      },
+      "search.replace.ariaLabel": {
+        description:
+          "Accessible name (aria-label) of the 'replace with' text input. Distinct key " +
+          "from 'search.replace.placeholder' — the placeholder's trailing ellipsis must " +
+          "not be read aloud as part of the field's name, and a translator must be able " +
+          "to word the accessible name differently from the placeholder " +
+          "(AQU-511 wave-3 finding 6).",
       },
       "search.replace.clearsValidation": {
         description:
@@ -419,7 +452,16 @@ export const search = defineNamespace({
       "search.dialog.placeholderPassages": {
         description:
           "Search-box placeholder in the full dialog's parallel-passages mode, which " +
-          "searches across every project the user has access to, not just this one.",
+          "searches across every project the user has access to, not just this one. " +
+          "Placeholder text only — see 'search.dialog.ariaLabelPassages' for the " +
+          "accessible name.",
+      },
+      "search.dialog.ariaLabelPassages": {
+        description:
+          "Accessible name (aria-label) of the same search box, in parallel-passages " +
+          "mode. Distinct key from 'search.dialog.placeholderPassages' — the " +
+          "placeholder's trailing ellipsis must not be read aloud as part of the field's " +
+          "name (AQU-511 wave-3 finding 6).",
       },
       "search.dialog.placeholderScoped": {
         description:
@@ -428,18 +470,46 @@ export const search = defineNamespace({
           "of resolving 'search.dialog.scopeFile' or 'search.dialog.scopeCurrentFile' and " +
           "lowercasing it), not raw data — a known composition limitation: the lowercase " +
           "operation is a no-op in scripts without case, but the sentence structure is " +
-          "fixed English word order and cannot be reworded per locale.",
+          "fixed English word order and cannot be reworded per locale. Placeholder text " +
+          "only — see 'search.dialog.ariaLabelScoped' for the accessible name.",
+        placeholders: { scope: "Already-localized, lowercased description of the search scope." },
+      },
+      "search.dialog.ariaLabelScoped": {
+        description:
+          "Accessible name (aria-label) of the same search box, when scoped to a file. " +
+          "Distinct key from 'search.dialog.placeholderScoped' — the placeholder's " +
+          "trailing ellipsis must not be read aloud as part of the field's name " +
+          "(AQU-511 wave-3 finding 6). Same {scope} composition caveat.",
         placeholders: { scope: "Already-localized, lowercased description of the search scope." },
       },
       "search.dialog.placeholderReplaceProject": {
         description:
           "Find-box placeholder in the full dialog's Replace mode when scope is the " +
-          "whole project.",
+          "whole project. Placeholder text only — see " +
+          "'search.dialog.ariaLabelReplaceProject' for the accessible name.",
+      },
+      "search.dialog.ariaLabelReplaceProject": {
+        description:
+          "Accessible name (aria-label) of the same find box, in Replace mode scoped to " +
+          "the whole project. Distinct key from " +
+          "'search.dialog.placeholderReplaceProject' — the placeholder's trailing " +
+          "ellipsis must not be read aloud as part of the field's name " +
+          "(AQU-511 wave-3 finding 6).",
       },
       "search.dialog.placeholderReplaceScoped": {
         description:
           "Find-box placeholder in the full dialog's Replace mode when scoped to a file. " +
-          "Same composition caveat as 'search.dialog.placeholderScoped'.",
+          "Same composition caveat as 'search.dialog.placeholderScoped'. Placeholder " +
+          "text only — see 'search.dialog.ariaLabelReplaceScoped' for the accessible " +
+          "name.",
+        placeholders: { scope: "Already-localized, lowercased description of the search scope." },
+      },
+      "search.dialog.ariaLabelReplaceScoped": {
+        description:
+          "Accessible name (aria-label) of the same find box, in Replace mode scoped to " +
+          "a file. Distinct key from 'search.dialog.placeholderReplaceScoped' — the " +
+          "placeholder's trailing ellipsis must not be read aloud as part of the field's " +
+          "name (AQU-511 wave-3 finding 6). Same {scope} composition caveat.",
         placeholders: { scope: "Already-localized, lowercased description of the search scope." },
       },
       "search.dialog.controlsAriaLabel": {
@@ -501,27 +571,40 @@ export const search = defineNamespace({
           "Heading of the 'expand all results' view that opens in the main editor area, " +
           "listing every current search hit grouped by file.",
       },
-      "search.expanded.forQueryPrefix": {
+      "search.expanded.forQuery": {
         description:
-          "Lead-in word shown next to the header when a query is active, followed by the " +
-          "literal search term in curly quotes (fixed markup, not part of this string).",
-      },
-      "search.expanded.countsJoiner": {
-        description:
-          "Preposition joining the result count and file count in the results-view " +
-          "header summary ('2 results {in} 1 file'). Composing two independently " +
-          "pluralized phrases around a fixed joiner word is a known limitation — word " +
-          "order may not translate cleanly into every target language; flag to the " +
-          "review panel if a translation reads awkwardly here.",
+          "Whole sentence fragment shown next to the header when a query is active, " +
+          "naming the active search term. Was previously a lead-in word ('for') glued " +
+          "in JSX ahead of hardcoded curly quotes and the raw query, which froze English " +
+          "word order and could not be reworded per locale (AQU-511 wave-3 finding 3). " +
+          "Now one key: the translator places {query} anywhere in the sentence and " +
+          "chooses their own quoting convention.",
+        placeholders: {
+          query: "The user's literal search term, verbatim. Not translated.",
+        },
       },
       "search.expanded.fileCount": {
         description:
-          "Part of the results-view header summary: how many files the hits span. Composed " +
-          "with 'search.resultCount' and a fixed 'in' — see that key's note on the " +
-          "composition limitation.",
+          "Part of the results-view header summary: how many files the hits span. Its " +
+          "already-resolved (and already-pluralized) text is passed as the {files} " +
+          "placeholder of 'search.expanded.summary'.",
         placeholders: {
           count:
             "The number the sentence counts; it also selects which plural form is used.",
+        },
+      },
+      "search.expanded.summary": {
+        description:
+          "Results-view header summary combining the result count and file count into " +
+          "one sentence ('2 results in 1 file'). Was previously three separate translated " +
+          "fragments concatenated in fixed JSX order (result count, then a bare 'in' " +
+          "joiner key, then file count), which could not be reordered per locale " +
+          "(AQU-511 wave-3 finding 3). Now one key: {results} and {files} arrive already " +
+          "localized and pluralized, and the translator places them (and any joining " +
+          "word) in whatever order their language needs.",
+        placeholders: {
+          results: "Already-localized, already-pluralized result count, e.g. '2 results'.",
+          files: "Already-localized, already-pluralized file count, e.g. '1 file'.",
         },
       },
       "search.expanded.close": {

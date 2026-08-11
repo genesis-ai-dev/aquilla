@@ -148,6 +148,42 @@ const DISTINCT_MEANING: Record<string, string> = {
     "Prompt inside the empty source-text editor, carrying the continuation mark. " +
     "editor.source.textAria is the accessible name of the read-only source column " +
     "and must not carry it — same reason as editor.milestone.find.",
+  "search.ariaLabelProject":
+    "Accessible name of the project-scope search box in the full dialog. " +
+    "search.placeholderProject is the visible prompt in the same field and carries " +
+    "the continuation mark; an accessible name must not, because a screen reader " +
+    "announces the punctuation as part of the field's name — same reason as " +
+    "editor.milestone.find (AQU-511 wave-3 finding 6).",
+  "search.bible.searchAriaLabel":
+    "Accessible name of the Bible-resources search box. " +
+    "search.bible.searchPlaceholder is the visible prompt in the same field and " +
+    "carries the continuation mark; an accessible name must not — same reason as " +
+    "editor.milestone.find (AQU-511 wave-3 finding 6).",
+  "search.replace.ariaLabel":
+    "Accessible name of the 'replace with' text input in the full dialog's Replace " +
+    "mode. search.replace.placeholder is the visible prompt in the same field and " +
+    "carries the continuation mark; an accessible name must not — same reason as " +
+    "editor.milestone.find (AQU-511 wave-3 finding 6).",
+  "search.dialog.ariaLabelPassages":
+    "Accessible name of the search box in the full dialog's parallel-passages " +
+    "mode. search.dialog.placeholderPassages is the visible prompt in the same " +
+    "field and carries the continuation mark; an accessible name must not — same " +
+    "reason as editor.milestone.find (AQU-511 wave-3 finding 6).",
+  "search.dialog.ariaLabelScoped":
+    "Accessible name of the search box in the full dialog's plain Search mode " +
+    "when scoped to a file. search.dialog.placeholderScoped is the visible prompt " +
+    "in the same field and carries the continuation mark; an accessible name must " +
+    "not — same reason as editor.milestone.find (AQU-511 wave-3 finding 6).",
+  "search.dialog.ariaLabelReplaceProject":
+    "Accessible name of the find box in the full dialog's Replace mode when scope " +
+    "is the whole project. search.dialog.placeholderReplaceProject is the visible " +
+    "prompt in the same field and carries the continuation mark; an accessible " +
+    "name must not — same reason as editor.milestone.find (AQU-511 wave-3 finding 6).",
+  "search.dialog.ariaLabelReplaceScoped":
+    "Accessible name of the find box in the full dialog's Replace mode when " +
+    "scoped to a file. search.dialog.placeholderReplaceScoped is the visible " +
+    "prompt in the same field and carries the continuation mark; an accessible " +
+    "name must not — same reason as editor.milestone.find (AQU-511 wave-3 finding 6).",
 }
 
 describe("catalog has no duplicate English strings (AQU-511)", () => {

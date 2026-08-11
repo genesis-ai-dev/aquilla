@@ -90,17 +90,14 @@ export function SearchResultsView({
           {t("search.expanded.header")}
           {query && (
             <span className="ml-2 text-xs font-normal text-muted-foreground">
-              {t("search.expanded.forQueryPrefix")} &ldquo;{query}&rdquo;
+              {t("search.expanded.forQuery", { query })}
             </span>
           )}
         </span>
         <span className="text-xs text-muted-foreground shrink-0">
-          {t("search.resultCount", {
-            count: results.length,
-          })}{" "}
-          {t("search.expanded.countsJoiner")}{" "}
-          {t("search.expanded.fileCount", {
-            count: groups.length,
+          {t("search.expanded.summary", {
+            results: t("search.resultCount", { count: results.length }),
+            files: t("search.expanded.fileCount", { count: groups.length }),
           })}
         </span>
         <Button

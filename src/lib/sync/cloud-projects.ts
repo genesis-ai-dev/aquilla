@@ -37,6 +37,9 @@ export interface CloudProjectSummary {
   /** AQU-473: the host org's display name, joined server-side by the list
    *  endpoint. Absent on the single-project endpoint or older servers. */
   orgName?: string | null
+  /** AQU-822: the org's effective termbase-edit floor. Returned by the
+   *  single-project endpoint; absent on the list endpoint / older servers. */
+  termbaseEditMinRole?: number | null
   /** Present on the single-project endpoint; list endpoint filters archived rows. */
   archivedAt?: string | null
   /** Present on the single-project endpoint; used to show "archived by X" in Trash. */
@@ -320,6 +323,12 @@ export function minimalProjectRecord(summary: CloudProjectSummary): ProjectRecor
   // AD-9: propagate source link (null = no upstream; undefined = field absent)
   if (summary.sourceProjectId !== undefined) {
     record.sourceProjectId = summary.sourceProjectId
+  }
+  // AQU-822: propagate the org's termbase-edit floor when the server sent it.
+  // Absent (list endpoint / older server) leaves the field undefined, which
+  // callers read as the PROJECT_LEAD default.
+  if (summary.termbaseEditMinRole !== undefined) {
+    record.termbaseEditMinRole = summary.termbaseEditMinRole
   }
   // AQU-476/478: propagate link mode/consumes/gate/cursor when present.
   if (summary.sourceLinkMode !== undefined) record.sourceLinkMode = summary.sourceLinkMode

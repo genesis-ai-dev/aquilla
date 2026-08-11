@@ -88,6 +88,45 @@ describe("OrgSidebar shared-projects nav (AQU-474 / AQU-417)", () => {
   })
 })
 
+// AQU-790: in a guest org (`/orgs/:guestId`) the caller has project-level
+// access only. The sidebar hides every member-scoped action (Teams, Assigned,
+// Members, Archived, Settings) so nothing links into an org they can't operate
+// on — while Projects (the guest overview) and "Shared with you" stay.
+describe("OrgSidebar in a guest org (AQU-790)", () => {
+  function renderGuestSidebar() {
+    return render(
+      <MemoryRouter initialEntries={["/orgs/2"]}>
+        <OrgProvider>
+          <OrgSidebar />
+        </OrgProvider>
+      </MemoryRouter>,
+    )
+  }
+
+  it("hides member-only nav but keeps Projects and Shared with you", async () => {
+    // Caller owns org 1 (would normally show admin nav) but is a guest in org 2,
+    // with another cross-org grant (org 3) so the global "Shared with you" entry
+    // — which excludes the currently-active org's own projects — still shows.
+    listMyOrgs.mockResolvedValue([{ id: 1, name: "Acme", role: { level: 700, name: "owner" } }])
+    fetchAccessibleProjects.mockResolvedValue([
+      { id: "pg", name: "Shared Proj", orgId: 2, orgName: "Guest Org", role: { level: 100, name: "viewer", source: "override" } },
+      { id: "ph", name: "Other Shared", orgId: 3, orgName: "Other Guest", role: { level: 100, name: "viewer", source: "override" } },
+    ])
+
+    renderGuestSidebar()
+
+    // Guest overview + shared entry remain reachable.
+    await screen.findByRole("link", { name: "Shared with you" })
+    expect(screen.getByRole("link", { name: "Projects" })).toHaveAttribute("href", "/orgs/2")
+    // Member-only actions are gone (they previously linked into the owned org).
+    expect(screen.queryByRole("link", { name: "Members" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("link", { name: "Settings" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("link", { name: "Archived" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("link", { name: "Teams" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("link", { name: "Assigned to me" })).not.toBeInTheDocument()
+  })
+})
+
 // AQU-696: the nav entry itself carries the "New" badge while any shared
 // project remains unopened, so the signal is visible from every page — not
 // just once you're already on /shared or /projects.

@@ -75,7 +75,13 @@ const setProjectPm = vi.fn(async (_jwt: string, _projectId: string, _pmUserId: n
 // (the org overview's PM column joins from it, AQU-507). Default to empty so
 // it never interferes with pre-existing tests.
 const fetchAccessibleProjects = vi.fn(async (_jwt: string): Promise<unknown[]> => [])
-vi.mock("@/lib/sync/cloud-projects", () => ({
+// Spread the real module rather than replacing it: ProjectOverview's tree
+// reaches cloud-projects through several paths (useProject -> resolveCloudProjectResult
+// / minimalProjectRecord, SharePanel, useProjectOrgId), and a factory listing
+// only the three functions this file drives makes every one of those an
+// "export is not defined on the mock" failure the moment a new caller appears.
+vi.mock("@/lib/sync/cloud-projects", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/sync/cloud-projects")>()),
   setProjectDeadline: vi.fn(),
   setProjectPm: (jwt: string, projectId: string, pmUserId: number | null) => setProjectPm(jwt, projectId, pmUserId),
   fetchAccessibleProjects: (jwt: string) => fetchAccessibleProjects(jwt),
@@ -148,6 +154,8 @@ const defaultOrgSettingsMock = (): OrgSettingsMock => ({
   memberProgressViewMinRole: 600,
   // AQU-496: default leads-only (matches the server's safe default).
   allowSelfAssignment: false,
+  // AQU-822: default termbase-edit floor (project_lead), as the server resolves it.
+  termbaseEditMinRole: 500,
   refresh: vi.fn(async () => null),
   patch: vi.fn(async () => ({ kind: "ok" as const, value: { orgId: 1, settings: {}, version: 2, updatedAt: null, updatedBy: null } })),
   requestPromotion: vi.fn(async () => ({ kind: "blocked" as const })),

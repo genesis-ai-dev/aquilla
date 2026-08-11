@@ -26,10 +26,12 @@ import {
   loginIdentifier,
   LOGIN_MAX_FAILURES_PER_IDENTIFIER,
   LOGIN_MAX_FAILURES_PER_IP,
+  PASSWORD_RESET_ATTEMPT_MAX_FAILURES,
   recordAuthEvent,
   REGISTER_MAX_PER_IP,
   RESET_REQUEST_MAX_PER_IDENTIFIER,
 } from "../utils/rate-limit"
+import { revokeToken } from "../utils/token-revocation"
 import {
   LegacyUserMigrationError,
   migrateLegacyUserCandidate,
@@ -530,6 +532,30 @@ auth.get("/me", authMiddleware, async (c) => {
   })
 })
 
+// [Pen test] Auth & session mgmt (2026-08-03): there was previously no
+// server-side logout at all — the frontend only deleted the token locally
+// (session-store.ts clearSession), so a stolen/leaked access token kept
+// authenticating for up to its full 30-day lifetime after the user logged
+// out. This denylists the caller's own token by `jti`; see
+// utils/token-revocation.ts and migration 0073. Tokens minted before this
+// change carry no `jti` and can't be individually revoked — logging out
+// with one is still a no-op locally, same as before.
+auth.post("/logout", authMiddleware, async (c) => {
+  const user = c.get("user")
+  const payload = c.get("tokenPayload")
+
+  if (payload.jti) {
+    try {
+      await revokeToken(c.env.AQUILLA_PG, payload.jti, user.id, payload.exp)
+    } catch (err) {
+      console.error("[auth] logout revoke failed:", err)
+      return c.json({ error: "Failed to log out" }, 500)
+    }
+  }
+
+  return c.json({ success: true })
+})
+
 // AQU-436: Self-update gate for the authenticated user.
 //
 // USERNAME is intentionally immutable for self-service users. Come and See
@@ -809,12 +835,33 @@ auth.post(
   async (c) => {
     const { token, username } = c.req.valid("json")
     try {
+      // [Pen test] Auth & session mgmt (2026-08-10): the only reset-flow
+      // endpoint with no attempt limiting — the 122-bit token makes brute
+      // force infeasible in isolation, but every sibling endpoint in this
+      // file throttles unauthenticated attempts, so this closes the gap.
+      // Scoped per-username and checked before the DB lookup, same pattern
+      // as /token above.
+      const identifier = loginIdentifier(username)
+      const recentFailures = await countRecentEvents(
+        c.env.AQUILLA_PG,
+        "password_reset_attempt",
+        identifier,
+        { onlyFailures: true },
+      )
+      if (recentFailures >= PASSWORD_RESET_ATTEMPT_MAX_FAILURES) {
+        return c.json(
+          { error: "Too many attempts. Please try again later." },
+          429,
+        )
+      }
+
       const user = await c.env.AQUILLA_PG.prepare(
         "SELECT id FROM users WHERE username = ?",
       )
         .bind(username)
         .first<{ id: number }>()
       if (!user) {
+        await recordAuthEvent(c.env.AQUILLA_PG, "password_reset_attempt", identifier, false)
         return c.json({ error: "Invalid token" }, 400)
       }
 
@@ -825,6 +872,7 @@ auth.post(
         .bind(user.id, token)
         .first<ResetTokenRow>()
       if (!resetToken) {
+        await recordAuthEvent(c.env.AQUILLA_PG, "password_reset_attempt", identifier, false)
         return c.json({ error: "Invalid token" }, 400)
       }
 
@@ -835,8 +883,10 @@ auth.post(
         )
           .bind(user.id)
           .run()
+        await recordAuthEvent(c.env.AQUILLA_PG, "password_reset_attempt", identifier, false)
         return c.json({ error: "Token expired" }, 400)
       }
+      await recordAuthEvent(c.env.AQUILLA_PG, "password_reset_attempt", identifier, true)
       return c.json({ message: "Token is valid" })
     } catch (error) {
       console.error("Token verification error:", error)
@@ -851,12 +901,30 @@ auth.post(
   async (c) => {
     const { token, username, new_password } = c.req.valid("json")
     try {
+      // [Pen test] Auth & session mgmt (2026-08-10): same throttle as
+      // /password-reset/verify — this is the endpoint that actually spends
+      // a token, so it's the more valuable one to rate-limit.
+      const identifier = loginIdentifier(username)
+      const recentFailures = await countRecentEvents(
+        c.env.AQUILLA_PG,
+        "password_reset_attempt",
+        identifier,
+        { onlyFailures: true },
+      )
+      if (recentFailures >= PASSWORD_RESET_ATTEMPT_MAX_FAILURES) {
+        return c.json(
+          { error: "Too many attempts. Please try again later." },
+          429,
+        )
+      }
+
       const user = await c.env.AQUILLA_PG.prepare(
         "SELECT id FROM users WHERE username = ?",
       )
         .bind(username)
         .first<{ id: number }>()
       if (!user) {
+        await recordAuthEvent(c.env.AQUILLA_PG, "password_reset_attempt", identifier, false)
         return c.json({ error: "Invalid token" }, 400)
       }
 
@@ -867,6 +935,7 @@ auth.post(
         .bind(user.id, token)
         .first<ResetTokenRow>()
       if (!resetToken) {
+        await recordAuthEvent(c.env.AQUILLA_PG, "password_reset_attempt", identifier, false)
         return c.json({ error: "Invalid token" }, 400)
       }
       const expiresAt = new Date(resetToken.expires_at)
@@ -876,8 +945,10 @@ auth.post(
         )
           .bind(user.id)
           .run()
+        await recordAuthEvent(c.env.AQUILLA_PG, "password_reset_attempt", identifier, false)
         return c.json({ error: "Token expired" }, 400)
       }
+      await recordAuthEvent(c.env.AQUILLA_PG, "password_reset_attempt", identifier, true)
 
       const passwordHash = await hashPasswordWerkzeugScrypt(new_password)
       // [Pen test] Auth & session mgmt (2026-07-20): stamp password_changed_at

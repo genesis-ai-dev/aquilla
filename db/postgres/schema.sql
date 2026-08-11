@@ -305,6 +305,19 @@ CREATE TABLE auth_rate_limit_events (
 );
 CREATE INDEX idx_auth_rate_limit_lookup ON auth_rate_limit_events(kind, identifier, created_at);
 
+-- [Pen test] Auth & session mgmt (2026-08-03): denylist backing server-side
+-- logout (POST /api/v2/auth/logout, utils/token-revocation.ts). Keyed by the
+-- JWT `jti` claim (added to every newly minted access token). expires_at
+-- mirrors the token's own `exp` so rows can be pruned once the token would
+-- have expired naturally anyway.
+CREATE TABLE revoked_tokens (
+    jti        TEXT PRIMARY KEY,
+    user_id    INTEGER NOT NULL,
+    revoked_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    expires_at TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX idx_revoked_tokens_expires_at ON revoked_tokens(expires_at);
+
 CREATE TABLE admin_elevations (
     user_id        BIGINT PRIMARY KEY,
     elevated_until TIMESTAMPTZ NOT NULL,
@@ -1164,14 +1177,24 @@ CREATE TABLE IF NOT EXISTS contextual_runs (
   calls_spent integer NOT NULL DEFAULT 0,
   last_error text,
   steering_cursor timestamptz,          -- last steering read; informational
+  anchor_cell_id text,                  -- where the user was looking at start; rotates the first wave
+  scope_group text,                     -- shared id across runs one project-wide start created
   created_at timestamptz NOT NULL DEFAULT now(),
-  updated_at timestamptz NOT NULL DEFAULT now()
+  updated_at timestamptz NOT NULL DEFAULT now()  -- doubles as the driver heartbeat/lease
 );
 -- One ACTIVE run per (project, file, lane). Partial UNIQUE both serves the
 -- pill's hydrate lookup and enforces createRun's refuse-double-active.
 CREATE UNIQUE INDEX IF NOT EXISTS contextual_runs_active
   ON contextual_runs(project_id, file_id, target_lang)
   WHERE status IN ('running','pausing','paused','parked');
+-- Stranded-run sweeper: 'running' with a quiet heartbeat (dead driver) or
+-- 'parked' with spans still on the cursor (loop hit its wave cap).
+CREATE INDEX IF NOT EXISTS contextual_runs_driver
+  ON contextual_runs(status, updated_at)
+  WHERE status IN ('running', 'parked');
+CREATE INDEX IF NOT EXISTS contextual_runs_scope_group
+  ON contextual_runs(scope_group)
+  WHERE scope_group IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS contextual_steering (
   id text PRIMARY KEY,                  -- uuidv7

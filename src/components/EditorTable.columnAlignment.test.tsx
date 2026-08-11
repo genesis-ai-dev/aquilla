@@ -75,26 +75,33 @@ const project: ProjectRecord = {
   members: [],
 }
 
-/** No startMs/endMs, so buildCellData derives an empty `context` — the common case. */
-function makeRows(id: string): CellRow[] {
+/**
+ * No startMs/endMs, so buildCellData derives an empty `context` — the common case.
+ * Pass `timecode: true` to attach cue timings so `context` becomes a VTT range
+ * (the timeline-ordered / subtitle case).
+ */
+function makeRows(id: string, { timecode = false }: { timecode?: boolean } = {}): CellRow[] {
+  const timing = timecode ? { startMs: 0, endMs: 3970 } : {}
   return [
     {
       cellId: id, side: "source", value: "hello", valueHtml: null, type: "text",
       canonicalRef: "GEN 1:1", anchorCellId: null, eventId: `${id}-source`,
       sourceEventId: null, lastEditor: null, lastEditAt: 1, validated: false, wordCount: 1,
+      ...timing,
     },
     {
       cellId: id, side: "target", value: "bonjour", valueHtml: null, type: "text",
       canonicalRef: "GEN 1:1", anchorCellId: null, eventId: `${id}-target`,
       sourceEventId: `${id}-source`, lastEditor: "tester", lastEditAt: 2, validated: false, wordCount: 1,
+      ...timing,
     },
   ]
 }
 
-function renderTable({ lineNumbers = false }: { lineNumbers?: boolean } = {}) {
+function renderTable({ lineNumbers = false, timecode = false }: { lineNumbers?: boolean; timecode?: boolean } = {}) {
   const store = new CellStore()
   store.setRuntime({ projectId: project.id, fileId: "file-1", username: "tester", requiredValidations: 1, auditStats: new Map() })
-  store.replaceRows(makeRows("cell-1"), { full: true, maxServerSeq: 1 })
+  store.replaceRows(makeRows("cell-1", { timecode }), { full: true, maxServerSeq: 1 })
   const qc = new QueryClient()
   return render(
     <QueryClientProvider client={qc}>
@@ -162,6 +169,36 @@ describe("EditorTable — source/target first-line alignment", () => {
     // spacer sits inside the number slot (select | badges+number group).
     const gutter = spacer.parentElement?.parentElement?.parentElement
     expect(gutter?.className).toContain("py-1.5")
+  })
+
+  // AQU-800: the timecode range on timeline-ordered (subtitle/media) cells must
+  // read flush-left above the source text, while other context (empty, scripture
+  // verse refs) stays centered. Detection reuses parseTimestampRange, so only a
+  // real cue range flips the alignment — no false positive from a verse ref.
+  it("left-aligns the context line when it holds a timecode range", async () => {
+    renderTable({ timecode: true })
+    await screen.findByText("hello")
+
+    const contextLine = screen.getByTestId("source-context-line")
+    expect(contextLine.textContent).toBe("00:00:00.000 --> 00:00:03.970")
+    expect(contextLine.getAttribute("data-context-kind")).toBe("timecode")
+    expect(contextLine.className).toContain("justify-start")
+    expect(contextLine.className).toContain("text-left")
+    expect(contextLine.className).not.toContain("justify-center")
+    // Height strip is unchanged — baseline alignment still holds.
+    expect(contextLine.className).toContain("h-4")
+    expect(contextLine.className).toContain("mb-1")
+  })
+
+  it("keeps non-timecode context (empty / verse ref) centered", async () => {
+    renderTable()
+    await screen.findByText("hello")
+
+    const contextLine = screen.getByTestId("source-context-line")
+    expect(contextLine.getAttribute("data-context-kind")).toBeNull()
+    expect(contextLine.className).toContain("justify-center")
+    expect(contextLine.className).toContain("text-center")
+    expect(contextLine.className).not.toContain("justify-start")
   })
 
   it("sizes the line-number box to the source line height, not a fixed height", async () => {

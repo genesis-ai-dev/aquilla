@@ -17,6 +17,7 @@ import { authMiddleware } from "../middleware/auth"
 import { runAiGuard } from "../lib/ai-budget"
 import { getPlatformSettingsCached, type PlatformSettings } from "../lib/platform-settings"
 import { creditGuard, creditsFor, recordCredit, resolveCreditConfig } from "../lib/credits"
+import { makeCostMeter } from "../lib/cost-meter"
 import { resolveProjectRole } from "../services/project-permissions"
 import { AliasMap, compressRows } from "../lib/agent/compress"
 import { runGuardedSql, type SqlVarContext } from "../lib/agent/sql-guard"
@@ -42,7 +43,7 @@ import {
 import { buildMemoryContext, type MemoryContext } from "../../../db/shared/agent-memory"
 import { buildAugmentSystemPrompt } from "../lib/agent/prompt-augment"
 import { sandboxDestroy } from "../lib/agent/sandbox-client"
-import { openRouterExtras } from "../lib/llm-vendor"
+import { openRouterExtras, streamUsageOptions } from "../lib/llm-vendor"
 import {
   runCode,
   loadArtifact,
@@ -728,6 +729,12 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
   let stagedCount = 0
   let status: "ok" | "capped" | "error" = "ok"
 
+  // Dev cost meter (AQU pricing exercise) — per-call ledger alongside the run
+  // totals below. Unlike the totals, it separates orchestrator turns, the
+  // draft tool's internal model call, and each tool invocation, so the ACU
+  // breakdown shows where an agent run's compute actually goes.
+  const meter = makeCostMeter(env, env.AQUILLA_PG)
+
   // AQU-AGENT §2 run state: cost cap, untrusted-content guard, and the sandbox
   // container id.
   const costCapCents = resolveRunCostCapCents(env.AGENT_RUN_COST_CAP_CENTS)
@@ -799,6 +806,7 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
       // untrusted-content tool (contracts §2).
       untrusted.usedThisTurn = false
 
+      const turnStartedAt = Date.now()
       const upstream = await fetch(resolveOpenRouterUrl(env), {
         method: "POST",
         headers: {
@@ -811,12 +819,23 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
           tools,
           stream: true,
           ...openRouterExtras(env.OPENROUTER_BASE_URL),
+          ...streamUsageOptions(env.OPENROUTER_BASE_URL),
         }),
         signal,
       })
 
       if (!upstream.ok) {
         const text = await upstream.text()
+        meter.add({
+          surface: "agent",
+          runId,
+          projectId: body.projectId,
+          kind: "llm",
+          label: "orchestrator",
+          model,
+          latencyMs: Date.now() - turnStartedAt,
+          ok: false,
+        })
         send({ type: "error", message: `openrouter_error ${upstream.status}: ${text.slice(0, 500)}` })
         status = "error"
         break
@@ -832,7 +851,30 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
         promptTokens += turn.usage?.prompt_tokens ?? 0
         completionTokens += turn.usage?.completion_tokens ?? 0
         costCents += (turn.usage?.cost ?? 0) * 100
+        meter.add({
+          surface: "agent",
+          runId,
+          projectId: body.projectId,
+          kind: "llm",
+          label: "orchestrator",
+          model,
+          promptTokens: turn.usage?.prompt_tokens ?? 0,
+          completionTokens: turn.usage?.completion_tokens ?? 0,
+          costCents: (turn.usage?.cost ?? 0) * 100,
+          latencyMs: Date.now() - turnStartedAt,
+          ok: turn.usage !== undefined,
+        })
       } catch (err) {
+        meter.add({
+          surface: "agent",
+          runId,
+          projectId: body.projectId,
+          kind: "llm",
+          label: "orchestrator",
+          model,
+          latencyMs: Date.now() - turnStartedAt,
+          ok: false,
+        })
         send({ type: "error", message: err instanceof Error ? err.message : String(err) })
         status = "error"
         break
@@ -877,6 +919,7 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
           break
         }
         steps++
+        const toolStartedAt = Date.now()
         const result = await executeToolCall(call, {
           env,
           aliases,
@@ -897,6 +940,22 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
             promptTokens += u.prompt_tokens ?? 0
             completionTokens += u.completion_tokens ?? 0
             costCents += (u.cost ?? 0) * 100
+            // A tool's INTERNAL model call (today: draft). Recorded separately
+            // from the orchestrator turn that invoked it — folding the two
+            // together would hide that one `draft` tool call can outspend the
+            // reasoning turn that decided to make it.
+            meter.add({
+              surface: "agent",
+              runId,
+              projectId: body.projectId,
+              kind: "llm",
+              label: `tool-model:${call.function.name}`,
+              model: draftModel,
+              promptTokens: u.prompt_tokens ?? 0,
+              completionTokens: u.completion_tokens ?? 0,
+              costCents: (u.cost ?? 0) * 100,
+              ok: true,
+            })
           },
           // Acceptance-rate denominator (0051): staged commits per run. The
           // numerator lands in the event log when the user Applies.
@@ -904,6 +963,19 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
             stagedCount += n
           },
           harness,
+        })
+        // Tool wall-clock is the orchestration+infra half of an ACU: `run_code`
+        // is container time, `sql`/`search` are DB time. None of it appears as
+        // tokens, so a token-only meter would price it at zero.
+        const toolOk = !/^(error|tool_error)\b/i.test(result.trimStart())
+        meter.add({
+          surface: "agent",
+          runId,
+          projectId: body.projectId,
+          kind: "tool",
+          label: call.function.name,
+          latencyMs: Date.now() - toolStartedAt,
+          ok: toolOk,
         })
         convo.push({ role: "tool", tool_call_id: call.id, content: result })
       }
@@ -931,6 +1003,9 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
 
   send({ type: "usage", promptTokens, completionTokens, costCredits: toCredits(costCents) })
   send({ type: "done", runId, status })
+
+  // Drain the cost ledger. After `done` so it never delays the client's frame.
+  await meter.flush()
 
   try {
     await finishAgentRun(env.AQUILLA_PG, { runId, status, promptTokens, completionTokens, costCents, steps, stagedCount })

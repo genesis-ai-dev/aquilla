@@ -2,6 +2,7 @@ import { useCallback, useEffect } from "react"
 import { useQueryClient } from "@tanstack/react-query"
 import {
   login as doLogin,
+  logout as doServerLogout,
   register as doRegister,
   type LoginOptions,
 } from "@/lib/frontier/auth"
@@ -49,11 +50,15 @@ export function useFrontierSession() {
   const logout = useCallback(async () => {
     posthog.capture("user logged out")
     posthog.reset()
+    // Denylist the token server-side before dropping it locally, so a
+    // leaked copy elsewhere doesn't stay valid until its natural expiry.
+    // Best-effort — doServerLogout never throws.
+    if (active?.jwt) await doServerLogout(active.jwt)
     await clearSession()
     await clearAllLocalData()
     await purgeAudioCachesOnSignOut()
     qc.clear()
-  }, [qc])
+  }, [qc, active])
 
   // Edge-case mitigation: if IDB is empty but aq_hint cookie was somehow
   // set (storage cleared, old cookie, first deploy), clear the hint so the

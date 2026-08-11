@@ -14,7 +14,7 @@
 
 import { describe, it, expect, vi, afterEach } from "vitest"
 import { renderHook, waitFor, act } from "@testing-library/react"
-import { useOrgSettings, canEditRosterProgressFloor } from "./useOrgSettings"
+import { useOrgSettings, canEditRosterProgressFloor, canEditTermbaseFloor } from "./useOrgSettings"
 import * as restClient from "@/lib/sync/org-settings"
 import type { OrgSettingsResponse, OrgPatchResult } from "@/lib/sync/org-settings"
 import type { TranslationRule } from "@/lib/parsers/types"
@@ -401,5 +401,57 @@ describe("canEditRosterProgressFloor — owner-only write gate (AQU-485)", () =>
   it("denies when the caller's role is unknown (null/undefined)", () => {
     expect(canEditRosterProgressFloor(null)).toBe(false)
     expect(canEditRosterProgressFloor(undefined)).toBe(false)
+  })
+})
+
+// AQU-822: termbaseEditMinRole — the same permission-policy shape as the
+// floors above, but it gates a WRITE and defaults to PROJECT_LEAD (500)
+// rather than MAINTAINER, because 500 is the level the terminology UI has
+// always shown the editor at.
+describe("useOrgSettings — termbaseEditMinRole (AQU-822)", () => {
+  function makeTermbaseResponse(termbaseEditMinRole?: number): OrgSettingsResponse {
+    return {
+      orgId: 1,
+      settings: termbaseEditMinRole !== undefined ? { termbaseEditMinRole } : {},
+      version: 1,
+      updatedAt: "2026-01-01T00:00:00Z",
+      updatedBy: 1,
+    }
+  }
+
+  it("defaults to project_lead (500) when the org has not set it", async () => {
+    mockFetchResponse = makeTermbaseResponse()
+    const { result } = renderHook(() => useOrgSettings(1, 700))
+    await waitFor(() => expect(result.current.hasFetched).toBe(true))
+    expect(result.current.termbaseEditMinRole).toBe(500)
+  })
+
+  it("reads an explicitly lowered floor (contributor 400)", async () => {
+    mockFetchResponse = makeTermbaseResponse(400)
+    const { result } = renderHook(() => useOrgSettings(1, 700))
+    await waitFor(() => expect(result.current.hasFetched).toBe(true))
+    expect(result.current.termbaseEditMinRole).toBe(400)
+  })
+
+  it("falls back to the default for an out-of-ladder value", async () => {
+    mockFetchResponse = makeTermbaseResponse(9999)
+    const { result } = renderHook(() => useOrgSettings(1, 700))
+    await waitFor(() => expect(result.current.hasFetched).toBe(true))
+    expect(result.current.termbaseEditMinRole).toBe(500)
+  })
+})
+
+describe("canEditTermbaseFloor — owner-only write gate (AQU-822)", () => {
+  it("denies a maintainer (600) — a maintainer must not hand out termbase management", () => {
+    expect(canEditTermbaseFloor(600)).toBe(false)
+  })
+
+  it("permits an owner (700)", () => {
+    expect(canEditTermbaseFloor(700)).toBe(true)
+  })
+
+  it("denies when the caller's role is unknown (null/undefined)", () => {
+    expect(canEditTermbaseFloor(null)).toBe(false)
+    expect(canEditTermbaseFloor(undefined)).toBe(false)
   })
 })

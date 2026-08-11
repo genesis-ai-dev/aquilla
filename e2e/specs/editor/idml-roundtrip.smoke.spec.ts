@@ -102,6 +102,21 @@ test("IDML import, protected edit, and strict artifact export preserve original 
     alice.getByText(/This edit would remove protected InDesign formatting/i),
   ).toHaveCount(0)
 
+  // AQU-810: IME composition (Japanese romaji → kanji) must land exactly
+  // once. The regression echoed every intermediate update and leaked raw
+  // romaji ("k小日小日子にch子にc…") because the editor intercepted
+  // non-cancelable insertCompositionText events and re-dispatched their text.
+  // Driven through Chromium's real IME pipeline; ends untranslated.
+  // The update sequence mirrors a real IME session: romaji keystrokes build
+  // the kana reading and Enter commits it (kana commits without kanji
+  // conversion are an everyday Japanese flow). Kanji candidate replacement is
+  // covered at the unit level — CDP's synthetic IME cannot reproduce a real
+  // IME's candidate-swap event timing.
+  await ws.composeIdmlImeDraft(
+    1,
+    ["k", "か", "かn", "かん", "かんし", "かんしゃ"],
+    "かんしゃ",
+  )
   // AQU-740: deleting a slot's final character must not trip the protected-
   // formatting guard (native deletion used to drop the emptied slot span).
   // The second cell is typed into and backspaced empty again, ending exactly

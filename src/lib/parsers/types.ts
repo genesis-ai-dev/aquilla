@@ -344,6 +344,16 @@ export interface ProjectRecord {
   name: string
   /** Owning org id when the project was hydrated from the server. */
   orgId?: number | null
+  /**
+   * AQU-822: the org's effective `termbaseEditMinRole` — the minimum role
+   * allowed to manage this project's termbase (add/edit/delete/archive
+   * concepts). Sent by the single-project endpoint so the terminology UI and
+   * its settings write share one floor without a second org-settings fetch.
+   * Absent (older server / local-only project) ⇒ the PROJECT_LEAD default in
+   * `src/lib/terminology/glossary-view.ts`. The server re-resolves it on
+   * every terminology write, so this is an affordance value, not authority.
+   */
+  termbaseEditMinRole?: number | null
   sourceLanguage: string
   targetLanguage: string
   /**

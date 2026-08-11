@@ -24,6 +24,11 @@ export interface SetTranslationCommand {
   cellId: string
   value: string
   valueHtml?: string
+  /** Target-language lane (AQU-538): a language tag registered in the
+   *  project's settings.targetLanes (e.g. "es", "pt"). Omit for the default
+   *  lane. Prepare rejects an unregistered lane — register it with
+   *  UpdateProjectSettings first. */
+  laneId?: string
 }
 
 /** Create a file and its source cells via the changeset pipeline (AQU-533 §5).
@@ -148,12 +153,20 @@ export function validateCommands(raw: unknown): ValidateCommandsResult {
         issues.push({ index, message: 'SetTranslation.valueHtml must be a string when present' })
         return
       }
+      if (c.laneId !== undefined && (!isNonEmptyString(c.laneId) || c.laneId.length > 64)) {
+        issues.push({
+          index,
+          message: 'SetTranslation.laneId must be a non-empty string (max 64 chars) when present — omit it for the default lane',
+        })
+        return
+      }
       commands.push({
         kind: 'SetTranslation',
         fileId: c.fileId,
         cellId: c.cellId,
         value: c.value,
         ...(c.valueHtml !== undefined ? { valueHtml: c.valueHtml } : {}),
+        ...(c.laneId !== undefined ? { laneId: c.laneId } : {}),
       })
       return
     }
@@ -459,4 +472,11 @@ export function requiredRoleForCommand(c: Command): number {
 
 export function cellKey(fileId: string, cellId: string): string {
   return `${fileId} ${cellId}`
+}
+
+/** Lane-qualified cellKey (AQU-538): the same cell in two target lanes is two
+ *  distinct dedupe/join slots. Empty/absent lane is the default lane, so
+ *  lane-less callers key identically to each other (back-compat). */
+export function laneCellKey(fileId: string, cellId: string, laneId?: string): string {
+  return `${cellKey(fileId, cellId)}\u0000${laneId ?? ''}`
 }

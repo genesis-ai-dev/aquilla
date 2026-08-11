@@ -1,0 +1,32 @@
+# Security response headers for everything the static-asset router serves —
+# which is nearly the whole site.
+#
+# WHY THIS FILE CARRIES THE LOAD, NOT worker/security-headers.ts
+# wrangler.toml sets `run_worker_first = ["/"]` (one path) and
+# `not_found_handling = "single-page-application"`. Together those mean the
+# asset router answers every path except the bare root — matched assets
+# directly, and unmatched paths with index.html of its own accord — without
+# ever invoking the Worker. Deep links (/app, /project/*), the prerendered
+# marketing pages and hashed build assets therefore get their headers here and
+# only here.
+#
+# The values below MUST match worker/security-headers.ts exactly;
+# worker/security-headers.test.ts parses this file and fails the build if the
+# two drift. Change both together, or don't change either. The rationale for
+# each header — why the full CSP is report-only, why `microphone=(self)` is
+# load-bearing, why HSTS omits includeSubDomains — is documented once, there.
+#
+# NOTE: unlike dist/_redirects (which Workers' asset parser rejects, error
+# 100324 — the deploy scripts delete it post-build), `_headers` IS supported by
+# Workers static assets and must remain in dist/ at deploy time.
+#
+# Closes OPS-7 of docs/OPSEC-REVIEW-2026-08-10.md.
+
+/*
+  Content-Security-Policy: object-src 'none'; base-uri 'self'; frame-ancestors 'self'; form-action 'self'
+  Content-Security-Policy-Report-Only: default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob: https:; media-src 'self' data: blob: https:; connect-src 'self' https: wss:; frame-src https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com; object-src 'none'; base-uri 'self'; frame-ancestors 'self'; form-action 'self'
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: SAMEORIGIN
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: microphone=(self), camera=(), geolocation=(), payment=(), usb=(), interest-cohort=()
+  Strict-Transport-Security: max-age=31536000

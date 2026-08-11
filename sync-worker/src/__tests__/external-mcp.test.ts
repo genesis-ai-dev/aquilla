@@ -260,6 +260,10 @@ describe('MCP tools/call — reads', () => {
     // tools as SetTranslation — advertised, not a separate tool.
     expect(p.projectLifecycle.mcpStagingTool).toBe('prepare_translations')
     expect(p.projectLifecycle.commitTool).toBe('confirm_changeset')
+    // AQU-538: multi-target-language lanes are self-described — an agent can
+    // learn the register → write-per-lane → read-per-lane workflow from here.
+    expect(p.multiLanguage.note).toContain('targetLanes')
+    expect(p.multiLanguage.workflow.join(' ')).toContain('laneId')
     expect(p.linkMedia.mcpStagingTool).toBe('prepare_translations')
     expect(p.linkMedia.commitTool).toBe('confirm_changeset')
     expect(p.errorCodes).toContain('confirmation_required')

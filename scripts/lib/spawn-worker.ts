@@ -7,6 +7,15 @@ export interface SpawnedWorker {
   kill: () => Promise<void>
 }
 
+const INSPECTOR_PORT_OFFSET = 10_000
+
+/** Derive a stable inspector port from the worker's already-isolated HTTP port.
+ * This keeps concurrent E2E shards collision-free without relying on Wrangler's
+ * unstable `--inspector-port 0` proxy path. */
+export function inspectorPortForWorkerPort(workerPort: number): number {
+  return workerPort + INSPECTOR_PORT_OFFSET
+}
+
 export function wranglerDevArgs(opts: {
   port: number
   inspectorPort?: number
@@ -21,7 +30,7 @@ export function wranglerDevArgs(opts: {
     "--ip",
     "127.0.0.1",
     "--inspector-port",
-    String(opts.inspectorPort ?? 0),
+    String(opts.inspectorPort ?? inspectorPortForWorkerPort(opts.port)),
     ...(opts.extraArgs ?? []),
   ]
 }
@@ -48,8 +57,8 @@ function killTree(pid: number, signal: NodeJS.Signals = "SIGTERM"): void {
 export async function spawnWranglerDev(opts: {
   cwd: string
   port: number
-  /** Inspector port exposed by Wrangler. Zero asks the OS for a free port,
-   * which prevents concurrent dev/E2E stacks from racing on port 9229. */
+  /** Inspector port exposed by Wrangler. By default this is derived from the
+   * worker's HTTP port so concurrent dev/E2E stacks cannot collide. */
   inspectorPort?: number
   label: string
   env?: Record<string, string>

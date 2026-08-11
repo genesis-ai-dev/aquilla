@@ -187,4 +187,42 @@ describe("DataTable", () => {
     expect(screen.getByTestId("custom-empty")).toBeInTheDocument()
     expect(screen.queryByRole("table")).not.toBeInTheDocument()
   })
+
+  it("opens renderRowContextMenu from row right-click and from the ⋯ button", async () => {
+    const { DataTableRowActionsButton } = await import("./data-table")
+    const {
+      ContextMenuContent,
+      ContextMenuItem,
+    } = await import("./context-menu")
+    const cols: ColumnDef<Row>[] = [
+      ...columns,
+      {
+        id: "actions",
+        enableSorting: false,
+        cell: ({ row }) => (
+          <DataTableRowActionsButton label={`More actions for ${row.original.name}`} />
+        ),
+      },
+    ]
+    render(
+      <DataTable
+        columns={cols}
+        data={rows}
+        getRowId={(r) => String(r.id)}
+        renderRowContextMenu={(r) => (
+          <ContextMenuContent>
+            <ContextMenuItem>Act on {r.name}</ContextMenuItem>
+          </ContextMenuContent>
+        )}
+      />,
+    )
+
+    const alphaCell = screen.getByText("Alpha")
+    fireEvent.contextMenu(alphaCell.closest("tr")!)
+    expect(screen.getByRole("menuitem", { name: "Act on Alpha" })).toBeInTheDocument()
+    fireEvent.keyDown(document, { key: "Escape" })
+
+    fireEvent.click(screen.getByRole("button", { name: "More actions for Beta" }))
+    expect(screen.getByRole("menuitem", { name: "Act on Beta" })).toBeInTheDocument()
+  })
 })

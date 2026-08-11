@@ -4,6 +4,26 @@ import { ContextMenu as ContextMenuPrimitive } from "@base-ui/react/context-menu
 import { cn } from "@/lib/utils"
 import { ChevronRightIcon, CheckIcon } from "lucide-react"
 
+/**
+ * Open the nearest ancestor ContextMenu at the pointer.
+ * Used by ⋯ buttons so they share the row's right-click menu.
+ */
+function openContextMenuAtPointer(
+  target: EventTarget & Element,
+  clientX: number,
+  clientY: number,
+) {
+  target.dispatchEvent(
+    new MouseEvent("contextmenu", {
+      bubbles: true,
+      cancelable: true,
+      clientX,
+      clientY,
+      button: 2,
+    }),
+  )
+}
+
 function ContextMenu({ ...props }: ContextMenuPrimitive.Root.Props) {
   return <ContextMenuPrimitive.Root data-slot="context-menu" {...props} />
 }
@@ -251,6 +271,7 @@ function ContextMenuShortcut({
 }
 
 export {
+  openContextMenuAtPointer,
   ContextMenu,
   ContextMenuTrigger,
   ContextMenuContent,

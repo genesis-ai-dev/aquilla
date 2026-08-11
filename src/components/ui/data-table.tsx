@@ -24,9 +24,16 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import {
+  ContextMenu,
+  ContextMenuTrigger,
+  openContextMenuAtPointer,
+} from "@/components/ui/context-menu"
+import { Button } from "@/components/ui/button"
+import { Spinner } from "@/components/ui/spinner"
 import { DataTableColumnHeader } from "@/components/ui/data-table-column-header"
 import { cn } from "@/lib/utils"
-import { Search } from "lucide-react"
+import { MoreHorizontal, Search } from "lucide-react"
 
 function columnMetaClass(meta: unknown) {
   const m = meta as { align?: "right"; className?: string; hidden?: boolean } | undefined
@@ -94,6 +101,12 @@ interface DataTableProps<TData, TValue> {
   rowClassName?: string | ((row: TData) => string | undefined)
   /** When set, clicking a body row invokes this handler (e.g. navigate on row). */
   onRowClick?: (row: TData) => void
+  /**
+   * Right-click / ⋯ menu for a body row. Return `ContextMenuContent` (and
+   * nested items); the row becomes the ContextMenu trigger. Return null to
+   * skip the menu for that row.
+   */
+  renderRowContextMenu?: (row: TData) => React.ReactNode
   /** Optional detail row rendered under a data row (e.g. expandable tenants). */
   renderSubRow?: (row: TData) => React.ReactNode
   /** Shown when there are no rows to display (empty data or search/filter miss). */
@@ -118,6 +131,7 @@ function DataTable<TData, TValue>({
   testId,
   rowClassName,
   onRowClick,
+  renderRowContextMenu,
   renderSubRow,
   emptyState,
   dense = false,
@@ -214,29 +228,41 @@ function DataTable<TData, TValue>({
             {hasRows ? (
               table.getRowModel().rows.map((row) => {
                 const sub = renderSubRow?.(row.original)
+                const contextMenu = renderRowContextMenu?.(row.original) ?? null
+                const cells = row.getVisibleCells().map((cell) => (
+                  <TableCell
+                    key={cell.id}
+                    className={cn(
+                      dense ? "py-1.5" : "py-2.5",
+                      columnMetaClass(cell.column.columnDef.meta),
+                    )}
+                  >
+                    {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                  </TableCell>
+                ))
+                const rowProps = {
+                  "data-state": row.getIsSelected() && "selected",
+                  className: cn(
+                    typeof rowClassName === "function"
+                      ? rowClassName(row.original)
+                      : rowClassName,
+                  ),
+                  onClick: onRowClick ? () => onRowClick(row.original) : undefined,
+                } as const
                 return (
                   <React.Fragment key={row.id}>
-                    <TableRow
-                      data-state={row.getIsSelected() && "selected"}
-                      className={cn(
-                        typeof rowClassName === "function"
-                          ? rowClassName(row.original)
-                          : rowClassName,
-                      )}
-                      onClick={onRowClick ? () => onRowClick(row.original) : undefined}
-                    >
-                      {row.getVisibleCells().map((cell) => (
-                        <TableCell
-                          key={cell.id}
-                          className={cn(
-                            dense ? "py-1.5" : "py-2.5",
-                            columnMetaClass(cell.column.columnDef.meta),
-                          )}
+                    {contextMenu ? (
+                      <ContextMenu>
+                        <ContextMenuTrigger
+                          render={<TableRow {...rowProps} />}
                         >
-                          {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                        </TableCell>
-                      ))}
-                    </TableRow>
+                          {cells}
+                        </ContextMenuTrigger>
+                        {contextMenu}
+                      </ContextMenu>
+                    ) : (
+                      <TableRow {...rowProps}>{cells}</TableRow>
+                    )}
                     {sub}
                   </React.Fragment>
                 )
@@ -256,5 +282,40 @@ function DataTable<TData, TValue>({
   )
 }
 
-export { DataTable, DataTableColumnHeader }
+/**
+ * Ghost ⋯ control that opens the row ContextMenu at the pointer.
+ * Pair with `renderRowContextMenu` on DataTable (same pattern as FileRow).
+ */
+function DataTableRowActionsButton({
+  label,
+  disabled,
+  busy,
+  className,
+  ...props
+}: {
+  label: string
+  disabled?: boolean
+  busy?: boolean
+  className?: string
+} & Omit<React.ComponentProps<typeof Button>, "children" | "size" | "variant" | "type" | "aria-label" | "onClick">) {
+  return (
+    <Button
+      type="button"
+      size="icon-sm"
+      variant="ghost"
+      aria-label={label}
+      disabled={disabled}
+      className={cn("text-muted-foreground hover:text-foreground", className)}
+      onClick={(e) => {
+        e.stopPropagation()
+        openContextMenuAtPointer(e.currentTarget, e.clientX, e.clientY)
+      }}
+      {...props}
+    >
+      {busy ? <Spinner /> : <MoreHorizontal className="size-4" />}
+    </Button>
+  )
+}
+
+export { DataTable, DataTableColumnHeader, DataTableRowActionsButton }
 export type { DataTableProps }

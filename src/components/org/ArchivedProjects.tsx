@@ -4,18 +4,24 @@ import { AppShell } from "@/components/AppShell"
 import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
 import { ADMIN_TABLE_PANEL_CLASS } from "@/components/admin/shared"
-import { Button } from "@/components/ui/button"
-import { DataTable, DataTableColumnHeader } from "@/components/ui/data-table"
+import {
+  DataTable,
+  DataTableColumnHeader,
+  DataTableRowActionsButton,
+} from "@/components/ui/data-table"
 import { missingLast, SORT_MISSING_LAST } from "@/components/ui/data-table-missing"
 import { DateTooltip } from "@/components/ui/date-tooltip"
-import { Spinner } from "@/components/ui/spinner"
+import {
+  ContextMenuContent,
+  ContextMenuItem,
+} from "@/components/ui/context-menu"
 import { Page, PageHeader, EmptyState } from "@/components/ui/page"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { fetchArchivedProjects, type CloudProjectSummary } from "@/lib/sync/cloud-projects"
 import { unarchiveProjectRemote } from "@/lib/sync/archive"
 import { NAV_PAGE_ICONS } from "@/lib/navigation/page-icons"
-import { Building2 } from "lucide-react"
+import { ArchiveRestore, Building2 } from "lucide-react"
 
 export function ArchivedProjects() {
   const { activeOrgId } = useActiveOrg()
@@ -105,30 +111,21 @@ export function ArchivedProjects() {
         id: "actions",
         enableSorting: false,
         header: () => <span className="sr-only">Actions</span>,
-        meta: { className: "w-[7.5rem]" },
+        meta: { className: "w-10" },
         cell: ({ row }) => {
-          const id = row.original.id
-          const busy = restoringId === id
+          const p = row.original
           return (
-            <div className="flex justify-end">
-              <Button
-                type="button"
-                variant="outline"
-                disabled={restoringId != null}
-                onClick={(e) => {
-                  e.stopPropagation()
-                  void handleRestore(id)
-                }}
-              >
-                {busy && <Spinner data-icon="inline-start" />}
-                {busy ? "Restoring…" : "Restore"}
-              </Button>
-            </div>
+            <DataTableRowActionsButton
+              label={`More actions for ${p.name}`}
+              data-testid={`archived-row-actions-${p.id}`}
+              disabled={restoringId != null}
+              busy={restoringId === p.id}
+            />
           )
         },
       },
     ],
-    [handleRestore, restoringId],
+    [restoringId],
   )
 
   return (
@@ -187,6 +184,17 @@ export function ArchivedProjects() {
                     ? `${projects.length}`
                     : `${table.getFilteredRowModel().rows.length} of ${projects.length}`}
                 </span>
+              )}
+              renderRowContextMenu={(p) => (
+                <ContextMenuContent className="min-w-40">
+                  <ContextMenuItem
+                    disabled={restoringId != null}
+                    onClick={() => void handleRestore(p.id)}
+                  >
+                    <ArchiveRestore className="size-4" />
+                    Restore
+                  </ContextMenuItem>
+                </ContextMenuContent>
               )}
               emptyState={
                 <div className="flex flex-col items-center gap-3 py-10">

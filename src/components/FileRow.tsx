@@ -7,6 +7,7 @@ import { AppTooltip } from "@/components/ui/tooltip"
 import {
   ContextMenu,
   ContextMenuTrigger,
+  openContextMenuAtPointer,
 } from "@/components/ui/context-menu"
 import { FileActionMenu } from "./FileActionMenu"
 
@@ -30,19 +31,6 @@ interface FileRowProps {
   onDelete?: () => void
   onExportSource?: () => void
   onApplySuggestion?: () => void
-}
-
-/** Open the parent ContextMenu at the pointer (used by the ⋯ button). */
-function openContextMenuAtPointer(target: EventTarget & Element, clientX: number, clientY: number) {
-  target.dispatchEvent(
-    new MouseEvent("contextmenu", {
-      bubbles: true,
-      cancelable: true,
-      clientX,
-      clientY,
-      button: 2,
-    }),
-  )
 }
 
 export function FileRow(props: FileRowProps) {

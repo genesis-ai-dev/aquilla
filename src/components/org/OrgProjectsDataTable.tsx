@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useState, type ReactNode } from "react"
 import { useNavigate } from "react-router-dom"
 import { type ColumnDef } from "@tanstack/react-table"
-import { CircleCheck, FolderOpen, Mic, MoreHorizontal, Sparkles, UserPlus, Users } from "lucide-react"
+import { CircleCheck, FolderOpen, Mic, Sparkles, UserPlus, Users } from "lucide-react"
 import type { CloudProjectSummary } from "@/lib/sync/cloud-projects"
 import {
   attentionRank,
@@ -15,7 +15,7 @@ import { ROLE } from "@/lib/frontier/roles"
 import { portfolioActivityStatus } from "@/lib/project-status"
 import { ProjectDeadlineStatuses, deadlineStatusTooltip } from "@/components/ProjectStatus"
 import { DateTooltip } from "@/components/ui/date-tooltip"
-import { DataTable, DataTableColumnHeader } from "@/components/ui/data-table"
+import { DataTable, DataTableColumnHeader, DataTableRowActionsButton } from "@/components/ui/data-table"
 import { missingLast, SORT_MISSING_LAST } from "@/components/ui/data-table-missing"
 import {
   Empty,
@@ -28,11 +28,9 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
+  ContextMenuContent,
+  ContextMenuItem,
+} from "@/components/ui/context-menu"
 import { LaneChips } from "./LaneChips"
 import { ProjectMetricHeader } from "./ProjectMetricHeader"
 import { AddLanguagePopover } from "./AddLanguagePopover"
@@ -369,43 +367,10 @@ export function OrgProjectsDataTable({
         cell: ({ row }) => {
           const p = row.original
           return (
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                data-testid={`project-row-actions-${p.id}`}
-                render={
-                  <Button
-                    type="button"
-                    size="icon-sm"
-                    variant="ghost"
-                    aria-label={`More actions for ${p.name}`}
-                    className="text-muted-foreground hover:text-foreground"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <MoreHorizontal className="size-4" />
-                  </Button>
-                }
-              />
-              <DropdownMenuContent
-                align="end"
-                className="min-w-40"
-                onClick={(e) => e.stopPropagation()}
-              >
-                {canAssign && (
-                  <DropdownMenuItem
-                    onClick={() => setAssignTarget({ projectId: p.id, lane: "" })}
-                  >
-                    <UserPlus className="size-4" />
-                    Assign work
-                  </DropdownMenuItem>
-                )}
-                <DropdownMenuItem
-                  onClick={() => navigate(`/project/${p.id}/settings/members`)}
-                >
-                  <Users className="size-4" />
-                  Add member
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <DataTableRowActionsButton
+              label={`More actions for ${p.name}`}
+              data-testid={`project-row-actions-${p.id}`}
+            />
           )
         },
       },
@@ -420,7 +385,6 @@ export function OrgProjectsDataTable({
       jwt,
       onLaneAdded,
       canAssign,
-      navigate,
     ],
   )
 
@@ -486,6 +450,24 @@ export function OrgProjectsDataTable({
             />
           ) : null
         }
+        renderRowContextMenu={(p) => (
+          <ContextMenuContent className="min-w-40">
+            {canAssign && (
+              <ContextMenuItem
+                onClick={() => setAssignTarget({ projectId: p.id, lane: "" })}
+              >
+                <UserPlus className="size-4" />
+                Assign work
+              </ContextMenuItem>
+            )}
+            <ContextMenuItem
+              onClick={() => navigate(`/project/${p.id}/settings/members`)}
+            >
+              <Users className="size-4" />
+              Add member
+            </ContextMenuItem>
+          </ContextMenuContent>
+        )}
         emptyState={emptyState}
         testId={testId}
         dense

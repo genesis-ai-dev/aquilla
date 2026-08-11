@@ -7,21 +7,28 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { type ColumnDef } from "@tanstack/react-table"
 import {
-  AlertTriangle, Lock, MoreHorizontal, UserPlus,
+  AlertTriangle, Lock, UserPlus,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { LoadingPanel } from "@/components/ui/loading-overlay"
-import { DataTable, DataTableColumnHeader } from "@/components/ui/data-table"
+import {
+  DataTable,
+  DataTableColumnHeader,
+  DataTableRowActionsButton,
+} from "@/components/ui/data-table"
 import { missingLast, SORT_MISSING_LAST } from "@/components/ui/data-table-missing"
 import {
   Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog"
 import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator,
-  DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
+} from "@/components/ui/context-menu"
 import {
   Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select"
@@ -200,84 +207,16 @@ export function MembersSection({ projectId }: { projectId: string }) {
         meta: { align: "right" as const, className: "w-10" },
         cell: ({ row }) => {
           const m = row.original
-          const isSelf = callerUsername !== null && m.username === callerUsername
-          const isLocked = m.role.source === "org" || m.role.source === "creator"
-          const canRemoveDirect =
-            !isLocked && !isSelf && m.role.source === "override"
-          const canChangeRole = !isLocked && !isSelf
-
           return (
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                render={
-                  <Button
-                    type="button"
-                    size="icon-sm"
-                    variant="ghost"
-                    className="opacity-0 transition-none group-hover:opacity-100 focus-visible:opacity-100 data-popup-open:opacity-100"
-                    aria-label={`Actions for ${m.username}`}
-                  >
-                    <MoreHorizontal className="size-4" />
-                  </Button>
-                }
-              />
-              <DropdownMenuContent align="end" className="min-w-44">
-                {canChangeRole && (
-                  <DropdownMenuSub>
-                    <DropdownMenuSubTrigger>
-                      Change role
-                    </DropdownMenuSubTrigger>
-                    <DropdownMenuSubContent className="min-w-72 max-w-96">
-                      {grantableRoles.map((r) => (
-                        <DropdownMenuItem
-                          key={r.level}
-                          onClick={() => void add(m.username, r.level)}
-                          className="items-start"
-                        >
-                          <span className="flex min-w-0 flex-col gap-0.5">
-                            <span>
-                              <RoleLabel name={r.name} className="font-medium" />
-                              {r.level === m.role.level ? " (current)" : ""}
-                            </span>
-                            <span className="text-xs font-normal whitespace-normal text-muted-foreground">
-                              {r.description || roleDescription(r.level)}
-                            </span>
-                          </span>
-                        </DropdownMenuItem>
-                      ))}
-                    </DropdownMenuSubContent>
-                  </DropdownMenuSub>
-                )}
-                {canRemoveDirect && (
-                  <DropdownMenuItem onClick={() => setRemoveTarget(m)}>
-                    Remove direct access
-                  </DropdownMenuItem>
-                )}
-                {hasJwt && !isSelf && (
-                  <>
-                    {(canChangeRole || canRemoveDirect) && (
-                      <DropdownMenuSeparator />
-                    )}
-                    <DropdownMenuItem
-                      variant="destructive"
-                      onClick={() => setRevokeTarget(m)}
-                    >
-                      Revoke all access…
-                    </DropdownMenuItem>
-                  </>
-                )}
-                {!canChangeRole && !canRemoveDirect && !(hasJwt && !isSelf) && (
-                  <DropdownMenuItem disabled>
-                    No actions available
-                  </DropdownMenuItem>
-                )}
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <DataTableRowActionsButton
+              label={`Actions for ${m.username}`}
+              className="opacity-0 transition-none group-hover:opacity-100 focus-visible:opacity-100 group-data-popup-open:opacity-100"
+            />
           )
         },
       },
     ],
-    [add, callerUsername, grantableRoles, hasJwt],
+    [],
   )
 
   if (rosterHidden) {
@@ -362,6 +301,66 @@ export function MembersSection({ projectId }: { projectId: string }) {
               </>
             }
             rowClassName="group"
+            renderRowContextMenu={(m) => {
+              const isSelf = callerUsername !== null && m.username === callerUsername
+              const isLocked = m.role.source === "org" || m.role.source === "creator"
+              const canRemoveDirect =
+                !isLocked && !isSelf && m.role.source === "override"
+              const canChangeRole = !isLocked && !isSelf
+              return (
+                <ContextMenuContent className="min-w-44">
+                  {canChangeRole && (
+                    <ContextMenuSub>
+                      <ContextMenuSubTrigger>
+                        Change role
+                      </ContextMenuSubTrigger>
+                      <ContextMenuSubContent className="min-w-72 max-w-96">
+                        {grantableRoles.map((r) => (
+                          <ContextMenuItem
+                            key={r.level}
+                            onClick={() => void add(m.username, r.level)}
+                            className="items-start"
+                          >
+                            <span className="flex min-w-0 flex-col gap-0.5">
+                              <span>
+                                <RoleLabel name={r.name} className="font-medium" />
+                                {r.level === m.role.level ? " (current)" : ""}
+                              </span>
+                              <span className="text-xs font-normal whitespace-normal text-muted-foreground">
+                                {r.description || roleDescription(r.level)}
+                              </span>
+                            </span>
+                          </ContextMenuItem>
+                        ))}
+                      </ContextMenuSubContent>
+                    </ContextMenuSub>
+                  )}
+                  {canRemoveDirect && (
+                    <ContextMenuItem onClick={() => setRemoveTarget(m)}>
+                      Remove direct access
+                    </ContextMenuItem>
+                  )}
+                  {hasJwt && !isSelf && (
+                    <>
+                      {(canChangeRole || canRemoveDirect) && (
+                        <ContextMenuSeparator />
+                      )}
+                      <ContextMenuItem
+                        variant="destructive"
+                        onClick={() => setRevokeTarget(m)}
+                      >
+                        Revoke all access…
+                      </ContextMenuItem>
+                    </>
+                  )}
+                  {!canChangeRole && !canRemoveDirect && !(hasJwt && !isSelf) && (
+                    <ContextMenuItem disabled>
+                      No actions available
+                    </ContextMenuItem>
+                  )}
+                </ContextMenuContent>
+              )
+            }}
             emptyState={
               <p className="py-10 text-center text-sm text-muted-foreground">
                 {members.length === 0

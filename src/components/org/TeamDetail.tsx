@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { type ColumnDef } from "@tanstack/react-table"
 import { Link, useNavigate, useParams } from "react-router-dom"
-import { FolderGit2, MoreHorizontal, Settings, UserPlus, Users } from "lucide-react"
+import { FolderGit2, Settings, UserPlus, Users } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { MemberMultiSelect } from "@/components/MemberMultiSelect"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
@@ -9,16 +9,18 @@ import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
 import { ADMIN_TABLE_PANEL_CLASS } from "@/components/admin/shared"
 import { Button, buttonVariants } from "@/components/ui/button"
-import { DataTable, DataTableColumnHeader } from "@/components/ui/data-table"
+import {
+  DataTable,
+  DataTableColumnHeader,
+  DataTableRowActionsButton,
+} from "@/components/ui/data-table"
 import { missingLast, SORT_MISSING_LAST } from "@/components/ui/data-table-missing"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+} from "@/components/ui/context-menu"
 import { Spinner } from "@/components/ui/spinner"
 import { toast } from "@/components/ui/toast"
 import { InitialsAvatar } from "@/components/InitialsAvatar"
@@ -326,43 +328,15 @@ export function TeamDetail() {
           const p = row.original
           if (!isAdmin) return null
           return (
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                render={
-                  <Button
-                    type="button"
-                    size="icon-sm"
-                    variant="ghost"
-                    className="opacity-0 transition-none group-hover:opacity-100 focus-visible:opacity-100 data-popup-open:opacity-100"
-                    aria-label={`Actions for ${p.name}`}
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <MoreHorizontal className="size-4" />
-                  </Button>
-                }
-              />
-              <DropdownMenuContent
-                align="end"
-                className="min-w-40"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <DropdownMenuItem onClick={() => openProjectRoleChange(p)}>
-                  Change role
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  aria-label={`Detach ${p.name}`}
-                  onClick={() => void handleDetachProject(p.id)}
-                >
-                  Detach
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <DataTableRowActionsButton
+              label={`Actions for ${p.name}`}
+              className="opacity-0 transition-none group-hover:opacity-100 focus-visible:opacity-100 group-data-popup-open:opacity-100"
+            />
           )
         },
       },
     ],
-    [handleDetachProject, isAdmin],
+    [isAdmin],
   )
 
   const memberColumns = useMemo<ColumnDef<TeamMember>[]>(
@@ -447,39 +421,15 @@ export function TeamDetail() {
             )
           }
           return (
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                render={
-                  <Button
-                    type="button"
-                    size="icon-sm"
-                    variant="ghost"
-                    className="opacity-0 transition-none group-hover:opacity-100 focus-visible:opacity-100 data-popup-open:opacity-100"
-                    aria-label={`Actions for ${m.username}`}
-                  >
-                    <MoreHorizontal className="size-4" />
-                  </Button>
-                }
-              />
-              <DropdownMenuContent align="end" className="min-w-40">
-                {isOwner && (
-                  <>
-                    <DropdownMenuItem onClick={() => openRoleChange(m)}>
-                      Change role
-                    </DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                  </>
-                )}
-                <DropdownMenuItem onClick={() => void handleRemoveMember(m.userId)}>
-                  Remove from team
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <DataTableRowActionsButton
+              label={`Actions for ${m.username}`}
+              className="opacity-0 transition-none group-hover:opacity-100 focus-visible:opacity-100 group-data-popup-open:opacity-100"
+            />
           )
         },
       },
     ],
-    [handleRemoveMember, isAdmin, isOwner],
+    [isAdmin],
   )
 
   const teamDescription = team?.description?.trim() || null
@@ -759,6 +709,22 @@ export function TeamDetail() {
                       }
                       rowClassName="group"
                       onRowClick={(p) => navigate(`/projects/${p.id}`)}
+                      renderRowContextMenu={(p) =>
+                        isAdmin ? (
+                          <ContextMenuContent className="min-w-40">
+                            <ContextMenuItem onClick={() => openProjectRoleChange(p)}>
+                              Change role
+                            </ContextMenuItem>
+                            <ContextMenuSeparator />
+                            <ContextMenuItem
+                              aria-label={`Detach ${p.name}`}
+                              onClick={() => void handleDetachProject(p.id)}
+                            >
+                              Detach
+                            </ContextMenuItem>
+                          </ContextMenuContent>
+                        ) : null
+                      }
                       emptyState={
                         <p className="py-10 text-center text-sm text-muted-foreground">
                           No projects match this search.
@@ -885,6 +851,23 @@ export function TeamDetail() {
                         ) : null
                       }
                       rowClassName="group"
+                      renderRowContextMenu={(m) =>
+                        isAdmin ? (
+                          <ContextMenuContent className="min-w-40">
+                            {isOwner && (
+                              <>
+                                <ContextMenuItem onClick={() => openRoleChange(m)}>
+                                  Change role
+                                </ContextMenuItem>
+                                <ContextMenuSeparator />
+                              </>
+                            )}
+                            <ContextMenuItem onClick={() => void handleRemoveMember(m.userId)}>
+                              Remove from team
+                            </ContextMenuItem>
+                          </ContextMenuContent>
+                        ) : null
+                      }
                       emptyState={
                         <p className="py-10 text-center text-sm text-muted-foreground">
                           No members match this search.

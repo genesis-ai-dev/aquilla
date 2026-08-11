@@ -61,7 +61,28 @@ describe("ArchivedProjects", () => {
     expect(screen.getByRole("columnheader", { name: /Project/i })).toBeInTheDocument()
     expect(screen.getByRole("columnheader", { name: /Archived/i })).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole("button", { name: "Restore" }))
+    fireEvent.click(screen.getByRole("button", { name: "More actions for Old Project" }))
+    fireEvent.click(screen.getByRole("menuitem", { name: "Restore" }))
+    await waitFor(() => expect(unarchiveProjectRemote).toHaveBeenCalledWith("old", "jwt"))
+  })
+
+  it("restores from the row right-click context menu", async () => {
+    fetchArchivedProjects.mockResolvedValue([
+      {
+        id: "old",
+        name: "Old Project",
+        archivedAt: "2026-01-15T12:00:00.000Z",
+        files: [],
+        role: { level: 700, name: "owner", source: "org" },
+      },
+    ])
+    unarchiveProjectRemote.mockResolvedValue({ kind: "restored" })
+    renderArchived()
+
+    const row = (await screen.findByText("Old Project")).closest("tr")
+    expect(row).toBeTruthy()
+    fireEvent.contextMenu(row!)
+    fireEvent.click(screen.getByRole("menuitem", { name: "Restore" }))
     await waitFor(() => expect(unarchiveProjectRemote).toHaveBeenCalledWith("old", "jwt"))
   })
 

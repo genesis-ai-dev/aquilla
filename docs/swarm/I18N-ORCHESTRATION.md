@@ -83,6 +83,28 @@ Every agent's first step in a fresh worktree:
 | wave 1 | `swarm/i18n-w1-partition` | merged clean — Task 7 | — |
 | wave 1.5 | orchestrator `1a4a4d39d` | switcher reachability fix in the `leftDock` layout | 11 AppShell/Preferences tests |
 | wave 1.5 | orchestrator `3ecdc19e4` | provider-less English fallback for `useI18n()` | **tsc clean, 723 files / 6376 tests green** |
+| wave 2 | 9 × `swarm/i18n-w2-<ns>` | all merged clean; **1035 keys** extracted; zero file overlap, zero dirty barrels (verified mechanically, not trusted) | — |
+| wave 2.5 | orchestrator `18644939c` | wired both barrels + drivers; derived the over-specified `catalog-export.test.ts` list from the live catalog; added the `DISTINCT_MEANING` exception mechanism | tsc clean, i18n:check 1037 keys, **6376/6377 tests** |
+| wave 3 | 3 read-only lenses | 23 findings: 1 blocker, 13 should-fix, 8 notes | — |
+| wave 3.5 | orchestrator `adf3ab72f` | **blocker fixed**: outbox printed each count twice ("3 3 text edits") | regression test verified to fail on old code |
+| wave 4a | `swarm/i18n-w4a-catalog` | plural categories via `Intl.PluralRules` (33 keys migrated, leaf-per-category export, sidecar v2); **109 duplicate keys removed**; reworded English restored | tsc clean, i18n:check **963 keys**, **6398/6399 tests**, eslint 0 errors |
+| wave 4a.1 | orchestrator `751526bce` | loud failure when a locale's plural categories are undecided | verified with a fake uncovered locale |
+
+**Current integration state:** `tsc -b` clean · `pnpm i18n:check` 963 keys all carrying context ·
+`pnpm test` **723/724 files, 6398/6399 tests** · `pnpm exec eslint .` 0 errors.
+The single failing test is `context.test.ts` "every declared surface has its PNG captured" —
+six wave-2 surfaces (`assign-modal`, `editor-table`, `comments`, `auth`, `search`,
+`audio-studio`) need `pnpm i18n:shots` against a live dev stack. That is the next orchestrator
+step and it is the only thing standing between here and a fully green gate.
+
+## Remaining work
+
+| Wave | Work | Status |
+| --- | --- | --- |
+| 4b | Per-namespace review fixes: findings 3–8 (glued fragments in `JoinPage`/`ChapterNavigator`/`SearchResultsView`; flattened emphasis in `AssignModal`/`ViewSettingsMenu`/`HistoryDrawer`/`EditorTable`/`PermissionDeniedAlert`/`AddFootnoteDialog`/`TranslationNotesSidebar`; `date-picker` en-US lock; aria/placeholder key splits; `JoinPage` `t()` effect deps; duplicate "Language" accessible name) | not started |
+| 5 | `colima start` → `pnpm dev` → `pnpm i18n:shots` → commit PNGs → `pnpm i18n:export` → `pnpm test:e2e:smoke` | not started |
+| 6 | Hand `i18n-export/*.json` to Biblica's `my`/`mfa` reviewers; consultant reads `th`. **People, not code — the actual critical path.** | not started |
+| — | Promotion: open a PR rather than merging to `main` directly (history is PR-based; `main` is a clean ancestor, 24 behind; the root worktree holds another actor's branch) | pending user call |
 
 Wave 1 outcome: `pnpm test src/lib/i18n` 58 → **67 tests**; `pnpm i18n:check` reports 24 keys
 covered; no file outside `src/lib/i18n/`, `scripts/i18n-shots*`, `AppShell`, `Preferences` and

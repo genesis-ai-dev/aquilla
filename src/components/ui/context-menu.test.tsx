@@ -147,7 +147,9 @@ describe("ContextMenu reposition", () => {
     fireEvent.contextMenu(beta)
 
     expect(openPopup()).toHaveAttribute("data-instant", "trigger-change")
-    const sub = document.querySelector('[data-slot="context-menu-sub-content"]')
+    // A submenu is one of the parts shared with the dropdown menu, and no shared
+    // part reads the reposition flag — see `menu-parts.tsx`.
+    const sub = document.querySelector('[data-slot="menu-sub-content"]')
     expect(sub).toBeTruthy()
     expect(sub).not.toHaveAttribute("data-instant", "trigger-change")
   })

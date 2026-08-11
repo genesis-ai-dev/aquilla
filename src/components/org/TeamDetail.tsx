@@ -16,11 +16,7 @@ import {
 } from "@/components/ui/data-table"
 import { missingLast, SORT_MISSING_LAST } from "@/components/ui/data-table-missing"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
-import {
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuSeparator,
-} from "@/components/ui/context-menu"
+import { MenuItem, MenuSeparator } from "@/components/ui/menu-parts"
 import { Spinner } from "@/components/ui/spinner"
 import { toast } from "@/components/ui/toast"
 import { InitialsAvatar } from "@/components/InitialsAvatar"
@@ -707,22 +703,22 @@ export function TeamDetail() {
                       }
                       rowClassName="group"
                       onRowClick={(p) => navigate(`/projects/${p.id}`)}
-                      renderRowContextMenu={(p) =>
+                      renderRowMenuItems={(p) =>
                         isAdmin ? (
-                          <ContextMenuContent className="min-w-40">
-                            <ContextMenuItem onClick={() => openProjectRoleChange(p)}>
+                          <>
+                            <MenuItem onClick={() => openProjectRoleChange(p)}>
                               <ShieldUser className="size-4" />
                               Change role
-                            </ContextMenuItem>
-                            <ContextMenuSeparator />
-                            <ContextMenuItem
+                            </MenuItem>
+                            <MenuSeparator />
+                            <MenuItem
                               aria-label={`Detach ${p.name}`}
                               onClick={() => void handleDetachProject(p.id)}
                             >
                               <Unlink className="size-4" />
                               Detach
-                            </ContextMenuItem>
-                          </ContextMenuContent>
+                            </MenuItem>
+                          </>
                         ) : null
                       }
                       emptyState={
@@ -848,23 +844,23 @@ export function TeamDetail() {
                         ) : null
                       }
                       rowClassName="group"
-                      renderRowContextMenu={(m) =>
+                      renderRowMenuItems={(m) =>
                         isAdmin ? (
-                          <ContextMenuContent className="min-w-40">
+                          <>
                             {isOwner && (
                               <>
-                                <ContextMenuItem onClick={() => openRoleChange(m)}>
+                                <MenuItem onClick={() => openRoleChange(m)}>
                                   <ShieldUser className="size-4" />
                                   Change role
-                                </ContextMenuItem>
-                                <ContextMenuSeparator />
+                                </MenuItem>
+                                <MenuSeparator />
                               </>
                             )}
-                            <ContextMenuItem onClick={() => void handleRemoveMember(m.userId)}>
+                            <MenuItem onClick={() => void handleRemoveMember(m.userId)}>
                               <UserMinus className="size-4" />
                               Remove from team
-                            </ContextMenuItem>
-                          </ContextMenuContent>
+                            </MenuItem>
+                          </>
                         ) : null
                       }
                       emptyState={

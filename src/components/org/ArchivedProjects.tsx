@@ -11,10 +11,7 @@ import {
 } from "@/components/ui/data-table"
 import { missingLast, SORT_MISSING_LAST } from "@/components/ui/data-table-missing"
 import { DateTooltip } from "@/components/ui/date-tooltip"
-import {
-  ContextMenuContent,
-  ContextMenuItem,
-} from "@/components/ui/context-menu"
+import { MenuItem } from "@/components/ui/menu-parts"
 import { Button } from "@/components/ui/button"
 import { Page, PageHeader, EmptyState } from "@/components/ui/page"
 import { useActiveOrg } from "@/context/OrgContext"
@@ -180,16 +177,14 @@ export function ArchivedProjects() {
                     : `${table.getFilteredRowModel().rows.length} of ${projects.length}`}
                 </span>
               )}
-              renderRowContextMenu={(p) => (
-                <ContextMenuContent className="min-w-40">
-                  <ContextMenuItem
-                    disabled={restoringId != null}
-                    onClick={() => void handleRestore(p.id)}
-                  >
-                    <ArchiveRestore className="size-4" />
-                    Restore
-                  </ContextMenuItem>
-                </ContextMenuContent>
+              renderRowMenuItems={(p) => (
+                <MenuItem
+                  disabled={restoringId != null}
+                  onClick={() => void handleRestore(p.id)}
+                >
+                  <ArchiveRestore className="size-4" />
+                  Restore
+                </MenuItem>
               )}
               emptyState={(table) => {
                 if (projects.length === 0) {

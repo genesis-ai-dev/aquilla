@@ -22,13 +22,12 @@ import {
   Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog"
 import {
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuSeparator,
-  ContextMenuSub,
-  ContextMenuSubContent,
-  ContextMenuSubTrigger,
-} from "@/components/ui/context-menu"
+  MenuItem,
+  MenuSeparator,
+  MenuSub,
+  MenuSubContent,
+  MenuSubTrigger,
+} from "@/components/ui/menu-parts"
 import {
   Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select"
@@ -301,23 +300,23 @@ export function MembersSection({ projectId }: { projectId: string }) {
               </>
             }
             rowClassName="group"
-            renderRowContextMenu={(m) => {
+            renderRowMenuItems={(m) => {
               const isSelf = callerUsername !== null && m.username === callerUsername
               const isLocked = m.role.source === "org" || m.role.source === "creator"
               const canRemoveDirect =
                 !isLocked && !isSelf && m.role.source === "override"
               const canChangeRole = !isLocked && !isSelf
               return (
-                <ContextMenuContent className="min-w-44">
+                <>
                   {canChangeRole && (
-                    <ContextMenuSub>
-                      <ContextMenuSubTrigger>
+                    <MenuSub>
+                      <MenuSubTrigger>
                         <ShieldUser className="size-4" />
                         Change role
-                      </ContextMenuSubTrigger>
-                      <ContextMenuSubContent className="min-w-72 max-w-96">
+                      </MenuSubTrigger>
+                      <MenuSubContent className="min-w-72 max-w-96">
                         {grantableRoles.map((r) => (
-                          <ContextMenuItem
+                          <MenuItem
                             key={r.level}
                             onClick={() => void add(m.username, r.level)}
                             className="items-start"
@@ -331,37 +330,33 @@ export function MembersSection({ projectId }: { projectId: string }) {
                                 {r.description || roleDescription(r.level)}
                               </span>
                             </span>
-                          </ContextMenuItem>
+                          </MenuItem>
                         ))}
-                      </ContextMenuSubContent>
-                    </ContextMenuSub>
+                      </MenuSubContent>
+                    </MenuSub>
                   )}
                   {canRemoveDirect && (
-                    <ContextMenuItem onClick={() => setRemoveTarget(m)}>
+                    <MenuItem onClick={() => setRemoveTarget(m)}>
                       <UserMinus className="size-4" />
                       Remove direct access
-                    </ContextMenuItem>
+                    </MenuItem>
                   )}
                   {hasJwt && !isSelf && (
                     <>
-                      {(canChangeRole || canRemoveDirect) && (
-                        <ContextMenuSeparator />
-                      )}
-                      <ContextMenuItem
+                      {(canChangeRole || canRemoveDirect) && <MenuSeparator />}
+                      <MenuItem
                         variant="destructive"
                         onClick={() => setRevokeTarget(m)}
                       >
                         <ShieldOff className="size-4" />
                         Revoke all access…
-                      </ContextMenuItem>
+                      </MenuItem>
                     </>
                   )}
                   {!canChangeRole && !canRemoveDirect && !(hasJwt && !isSelf) && (
-                    <ContextMenuItem disabled>
-                      No actions available
-                    </ContextMenuItem>
+                    <MenuItem disabled>No actions available</MenuItem>
                   )}
-                </ContextMenuContent>
+                </>
               )
             }}
             emptyState={

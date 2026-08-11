@@ -26,9 +26,14 @@ import {
 } from "@/components/ui/table"
 import {
   ContextMenu,
+  ContextMenuContent,
   ContextMenuTrigger,
-  openContextMenuAtPointer,
 } from "@/components/ui/context-menu"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { DataTableColumnHeader } from "@/components/ui/data-table-column-header"
@@ -102,11 +107,13 @@ interface DataTableProps<TData, TValue> {
   /** When set, clicking a body row invokes this handler (e.g. navigate on row). */
   onRowClick?: (row: TData) => void
   /**
-   * Right-click / ⋯ menu for a body row. Return `ContextMenuContent` (and
-   * nested items); the row becomes the ContextMenu trigger. Return null to
-   * skip the menu for that row.
+   * Items for a body row's menu, reachable two ways: right-click anywhere on the
+   * row, or the ⋯ button (`DataTableRowActionsButton`) in an actions column.
+   * Return the items themselves (`MenuItem`, `MenuSeparator`, `MenuSub`, …) —
+   * this owns the popup around them, because each way of opening needs its own
+   * root. Return null to skip the menu for that row.
    */
-  renderRowContextMenu?: (row: TData) => React.ReactNode
+  renderRowMenuItems?: (row: TData) => React.ReactNode
   /** Optional detail row rendered under a data row (e.g. expandable tenants). */
   renderSubRow?: (row: TData) => React.ReactNode
   /** Shown when there are no rows to display (empty data or search/filter miss). */
@@ -131,7 +138,7 @@ function DataTable<TData, TValue>({
   testId,
   rowClassName,
   onRowClick,
-  renderRowContextMenu,
+  renderRowMenuItems,
   renderSubRow,
   emptyState,
   dense = false,
@@ -228,7 +235,7 @@ function DataTable<TData, TValue>({
               {hasRows ? (
                 table.getRowModel().rows.map((row) => {
                   const sub = renderSubRow?.(row.original)
-                  const contextMenu = renderRowContextMenu?.(row.original) ?? null
+                  const menuItems = renderRowMenuItems?.(row.original) ?? null
                   const cells = row.getVisibleCells().map((cell) => (
                     <TableCell
                       key={cell.id}
@@ -243,7 +250,7 @@ function DataTable<TData, TValue>({
                   const rowProps = {
                     "data-state": row.getIsSelected() && "selected",
                     className: cn(
-                      contextMenu && "group",
+                      menuItems && "group",
                       typeof rowClassName === "function"
                         ? rowClassName(row.original)
                         : rowClassName,
@@ -252,10 +259,10 @@ function DataTable<TData, TValue>({
                   } as const
                   return (
                     <React.Fragment key={row.id}>
-                      {contextMenu ? (
-                        <DataTableContextMenuRow rowProps={rowProps} menu={contextMenu}>
+                      {menuItems ? (
+                        <DataTableRowMenu rowProps={rowProps} items={menuItems}>
                           {cells}
-                        </DataTableContextMenuRow>
+                        </DataTableRowMenu>
                       ) : (
                         <TableRow {...rowProps}>{cells}</TableRow>
                       )}
@@ -278,59 +285,52 @@ function DataTable<TData, TValue>({
   )
 }
 
-type RowActionsOpenContextValue = {
-  openFromActions: boolean
-  markOpenFromActions: () => void
-}
-
-const RowActionsOpenContext = React.createContext<RowActionsOpenContextValue | null>(null)
+/** Both of a row's popups get the same width, so the two routes look alike. */
+const ROW_MENU_CLASS = "w-auto min-w-40"
 
 /**
- * Per-row ContextMenu wrapper. Tracks whether open came from the ⋯ button
- * (active button chrome) vs a row right-click (no button chrome).
+ * Lets the ⋯ button in an actions cell open the same items as its row, without
+ * every caller having to hand them to the button as well.
  */
-function DataTableContextMenuRow({
+const RowMenuItemsContext = React.createContext<React.ReactNode>(null)
+
+/**
+ * A row's menu, reachable by right-clicking the row or by pressing its ⋯ button.
+ *
+ * This needs two roots rather than one: Base UI anchors a context menu's popup to
+ * the pointer, so the same root cannot also anchor to a button. The row owns the
+ * context-menu root; the button owns the menu root, inside its own cell — a
+ * non-modal popup renders focus guards next to itself, and a `<tr>` may only
+ * contain cells.
+ */
+function DataTableRowMenu({
   rowProps,
   children,
-  menu,
+  items,
 }: {
   rowProps: React.ComponentProps<typeof TableRow>
   children: React.ReactNode
-  menu: React.ReactNode
+  items: React.ReactNode
 }) {
-  const [openFromActions, setOpenFromActions] = React.useState(false)
-  const fromActionsRef = React.useRef(false)
-  const markOpenFromActions = React.useCallback(() => {
-    fromActionsRef.current = true
-  }, [])
-
   return (
-    <RowActionsOpenContext.Provider value={{ openFromActions, markOpenFromActions }}>
-      <ContextMenu
-        onOpenChange={(open) => {
-          if (open) {
-            setOpenFromActions(fromActionsRef.current)
-            fromActionsRef.current = false
-          } else {
-            setOpenFromActions(false)
-            fromActionsRef.current = false
-          }
-        }}
-      >
+    <RowMenuItemsContext.Provider value={items}>
+      <ContextMenu>
         <ContextMenuTrigger render={<TableRow {...rowProps} />}>
           {children}
         </ContextMenuTrigger>
-        {menu}
+        <ContextMenuContent className={ROW_MENU_CLASS}>{items}</ContextMenuContent>
       </ContextMenu>
-    </RowActionsOpenContext.Provider>
+    </RowMenuItemsContext.Provider>
   )
 }
 
 /**
- * Ghost ⋯ control that opens the row ContextMenu at the pointer.
- * Pair with `renderRowContextMenu` on DataTable (same pattern as FileRow).
- * Active/pressed chrome applies only when this button opened the menu — not
- * when the row was right-clicked.
+ * Ghost ⋯ control for an actions column, and a real trigger for the row's menu:
+ * it carries `aria-haspopup`/`aria-expanded`, and the menu opens under the button
+ * for keyboard users as well as pointer users. Pair with `renderRowMenuItems`.
+ *
+ * Open chrome comes from the shared Button's `aria-expanded` ghost styling, so it
+ * appears only when this button opened the menu — not on a row right-click.
  */
 function DataTableRowActionsButton({
   label,
@@ -343,37 +343,54 @@ function DataTableRowActionsButton({
   label: string
   disabled?: boolean
   busy?: boolean
-  /** Hide until the row is hovered / focused / menu opened (fades in). */
+  /** Hide until the row is hovered / focused / menu opened (appears instantly). */
   revealOnHover?: boolean
   className?: string
-} & Omit<React.ComponentProps<typeof Button>, "children" | "size" | "variant" | "type" | "aria-label" | "onClick">) {
-  const actionsOpen = React.useContext(RowActionsOpenContext)
+} & Omit<
+  React.ComponentProps<typeof DropdownMenuTrigger>,
+  "children" | "render" | "className" | "disabled" | "aria-label" | "onClick"
+>) {
+  const items = React.useContext(RowMenuItemsContext)
 
   return (
-    <Button
-      type="button"
-      size="icon-sm"
-      variant="ghost"
-      {...props}
-      data-row-actions=""
-      aria-label={label}
-      disabled={disabled}
-      data-pressed={actionsOpen?.openFromActions ? "" : undefined}
-      className={cn(
-        "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
-        revealOnHover &&
-          "opacity-0 group-hover:opacity-100 focus-visible:opacity-100 group-data-popup-open:opacity-100 data-pressed:opacity-100",
-        actionsOpen?.openFromActions && "bg-accent text-accent-foreground",
-        className,
-      )}
-      onClick={(e) => {
-        e.stopPropagation()
-        actionsOpen?.markOpenFromActions()
-        openContextMenuAtPointer(e.currentTarget, e.clientX, e.clientY)
-      }}
-    >
-      {busy ? <Spinner /> : <MoreHorizontal className="size-4" />}
-    </Button>
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        {...props}
+        data-row-actions=""
+        aria-label={label}
+        disabled={disabled}
+        // Rows are often clickable; this press belongs to the menu, not the row.
+        onClick={(event) => event.stopPropagation()}
+        className={cn(
+          "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+          // Snap hover/active paint (no muddy transparent→accent fade). Keep
+          // transform so the shared Button active translate still works.
+          "transition-transform",
+          revealOnHover && [
+            "opacity-100",
+            "[@media(hover:hover)_and_(pointer:fine)]:opacity-0",
+            "[@media(hover:hover)_and_(pointer:fine)]:group-hover:opacity-100",
+            "[@media(hover:hover)_and_(pointer:fine)]:focus-visible:opacity-100",
+            "[@media(hover:hover)_and_(pointer:fine)]:group-data-popup-open:opacity-100",
+            "[@media(hover:hover)_and_(pointer:fine)]:aria-expanded:opacity-100",
+          ],
+          className,
+        )}
+        render={<Button type="button" size="icon-sm" variant="ghost" />}
+      >
+        {busy ? <Spinner /> : <MoreHorizontal className="size-4" />}
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        align="end"
+        className={ROW_MENU_CLASS}
+        // The popup is portalled out of the table, but React still bubbles its
+        // events along the React tree — through the row. Rows are often
+        // clickable, so pressing an item must not also count as a row click.
+        onClick={(event) => event.stopPropagation()}
+      >
+        {items}
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }
 

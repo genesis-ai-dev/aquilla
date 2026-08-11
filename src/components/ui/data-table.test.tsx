@@ -2,10 +2,11 @@
  * DataTable — docs shell from ui.shadcn.com/docs/components/base/data-table.
  * Verifies search, sort via DataTableColumnHeader, and empty results.
  */
-import { describe, it, expect } from "vitest"
+import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent, within } from "@testing-library/react"
 import type { ColumnDef } from "@tanstack/react-table"
-import { DataTable, DataTableColumnHeader } from "./data-table"
+import { DataTable, DataTableColumnHeader, DataTableRowActionsButton } from "./data-table"
+import { MenuItem } from "./menu-parts"
 
 interface Row {
   id: number
@@ -31,6 +32,31 @@ const columns: ColumnDef<Row>[] = [
     cell: ({ row }) => row.original.count,
   },
 ]
+
+/** A table whose rows carry a menu on both routes: right-click and the ⋯ button. */
+const renderRowMenuTable = (
+  handlers: { onRowClick?: (row: Row) => void; onAct?: () => void } = {},
+) =>
+  render(
+    <DataTable
+      columns={[
+        ...columns,
+        {
+          id: "actions",
+          enableSorting: false,
+          cell: ({ row }) => (
+            <DataTableRowActionsButton label={`More actions for ${row.original.name}`} />
+          ),
+        },
+      ]}
+      data={rows}
+      getRowId={(r) => String(r.id)}
+      onRowClick={handlers.onRowClick}
+      renderRowMenuItems={(r) => (
+        <MenuItem onClick={handlers.onAct}>Act on {r.name}</MenuItem>
+      )}
+    />,
+  )
 
 const bodyNames = () =>
   screen
@@ -191,45 +217,52 @@ describe("DataTable", () => {
     expect(screen.getByTestId("empty-table")).toHaveClass("border", "bg-card")
   })
 
-  it("opens renderRowContextMenu from row right-click and from the ⋯ button", async () => {
-    const { DataTableRowActionsButton } = await import("./data-table")
-    const {
-      ContextMenuContent,
-      ContextMenuItem,
-    } = await import("./context-menu")
-    const cols: ColumnDef<Row>[] = [
-      ...columns,
-      {
-        id: "actions",
-        enableSorting: false,
-        cell: ({ row }) => (
-          <DataTableRowActionsButton label={`More actions for ${row.original.name}`} />
-        ),
-      },
-    ]
-    render(
-      <DataTable
-        columns={cols}
-        data={rows}
-        getRowId={(r) => String(r.id)}
-        renderRowContextMenu={(r) => (
-          <ContextMenuContent>
-            <ContextMenuItem>Act on {r.name}</ContextMenuItem>
-          </ContextMenuContent>
-        )}
-      />,
-    )
+  it("opens renderRowMenuItems from row right-click and from the ⋯ button", async () => {
+    renderRowMenuTable()
 
     const alphaRow = screen.getByText("Alpha").closest("tr")!
     const alphaBtn = screen.getByRole("button", { name: "More actions for Alpha" })
     fireEvent.contextMenu(alphaRow)
     expect(screen.getByRole("menuitem", { name: "Act on Alpha" })).toBeInTheDocument()
-    expect(alphaBtn).not.toHaveAttribute("data-pressed")
+    // Open chrome belongs to the button's own menu, not to a row right-click.
+    expect(alphaBtn).toHaveAttribute("aria-expanded", "false")
     fireEvent.keyDown(document, { key: "Escape" })
 
     const betaBtn = screen.getByRole("button", { name: "More actions for Beta" })
     fireEvent.click(betaBtn)
     expect(screen.getByRole("menuitem", { name: "Act on Beta" })).toBeInTheDocument()
-    expect(betaBtn).toHaveAttribute("data-pressed")
+    expect(betaBtn).toHaveAttribute("aria-expanded", "true")
+  })
+
+  it("gives the ⋯ button the menu trigger contract instead of a synthetic right-click", async () => {
+    renderRowMenuTable()
+    const btn = screen.getByRole("button", { name: "More actions for Alpha" })
+
+    expect(btn).toHaveAttribute("aria-haspopup", "menu")
+
+    // A keyboard activation reports no pointer coordinates. The button used to
+    // dispatch a synthetic `contextmenu` at those coordinates, which anchored the
+    // menu to the top-left corner of the viewport; as a real trigger the popup is
+    // the button's own, so it anchors to the button however it was activated.
+    fireEvent.click(btn, { detail: 0, clientX: 0, clientY: 0 })
+
+    const popup = document.querySelector('[data-slot="dropdown-menu-content"]')
+    expect(popup).not.toBeNull()
+    expect(btn.getAttribute("aria-controls")).toBe(popup!.id)
+    expect(screen.getByRole("menuitem", { name: "Act on Alpha" })).toBeInTheDocument()
+  })
+
+  it("keeps a menu press out of a clickable row's own handler", () => {
+    const onRowClick = vi.fn()
+    const onAct = vi.fn()
+    renderRowMenuTable({ onRowClick, onAct })
+
+    fireEvent.click(screen.getByRole("button", { name: "More actions for Alpha" }))
+    fireEvent.click(screen.getByRole("menuitem", { name: "Act on Alpha" }))
+
+    expect(onAct).toHaveBeenCalledTimes(1)
+    // The popup is portalled out of the table, but React bubbles its events
+    // along the React tree — which runs through the row.
+    expect(onRowClick).not.toHaveBeenCalled()
   })
 })

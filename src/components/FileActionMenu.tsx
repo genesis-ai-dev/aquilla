@@ -1,10 +1,9 @@
 import { Pencil, FolderInput, Trash2, Download } from "lucide-react"
 import {
-  ContextMenuContent,
-  ContextMenuGroup,
-  ContextMenuItem,
-  ContextMenuSeparator,
-} from "@/components/ui/context-menu"
+  MenuGroup,
+  MenuItem,
+  MenuSeparator,
+} from "@/components/ui/menu-parts"
 
 interface FileActionMenuProps {
   onRename: () => void
@@ -17,37 +16,37 @@ interface FileActionMenuProps {
 }
 
 /**
- * Context-menu content for a sidebar file row. Must be rendered as a child of
- * `<ContextMenu>` (alongside a `<ContextMenuTrigger>`).
+ * The items of a sidebar file row's menu. Rendered inside a popup by `FileRow`,
+ * once per way of opening it (row right-click, ⋯ button).
  */
 export function FileActionMenu({
   onRename, onMove, onDelete, onExportSource,
 }: FileActionMenuProps) {
   return (
-    <ContextMenuContent side="bottom" align="start" alignOffset={0} sideOffset={4} className="w-44">
-      <ContextMenuGroup>
-        <ContextMenuItem onClick={onRename}>
+    <>
+      <MenuGroup>
+        <MenuItem onClick={onRename}>
           <Pencil /> Rename
-        </ContextMenuItem>
-        <ContextMenuItem onClick={onMove}>
+        </MenuItem>
+        <MenuItem onClick={onMove}>
           <FolderInput /> Move to corpus…
-        </ContextMenuItem>
+        </MenuItem>
         {onExportSource && (
-          <ContextMenuItem onClick={onExportSource}>
+          <MenuItem onClick={onExportSource}>
             <Download /> Export source (.SFM)
-          </ContextMenuItem>
+          </MenuItem>
         )}
-      </ContextMenuGroup>
+      </MenuGroup>
       {onDelete && (
         <>
-          <ContextMenuSeparator />
-          <ContextMenuGroup>
-            <ContextMenuItem variant="destructive" onClick={onDelete}>
+          <MenuSeparator />
+          <MenuGroup>
+            <MenuItem variant="destructive" onClick={onDelete}>
               <Trash2 /> Delete
-            </ContextMenuItem>
-          </ContextMenuGroup>
+            </MenuItem>
+          </MenuGroup>
         </>
       )}
-    </ContextMenuContent>
+    </>
   )
 }

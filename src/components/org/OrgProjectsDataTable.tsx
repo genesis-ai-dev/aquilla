@@ -27,10 +27,7 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
-import {
-  ContextMenuContent,
-  ContextMenuItem,
-} from "@/components/ui/context-menu"
+import { MenuItem } from "@/components/ui/menu-parts"
 import { LaneChips } from "./LaneChips"
 import { ProjectMetricHeader } from "./ProjectMetricHeader"
 import { AddLanguagePopover } from "./AddLanguagePopover"
@@ -448,23 +445,21 @@ export function OrgProjectsDataTable({
             />
           ) : null
         }
-        renderRowContextMenu={(p) => (
-          <ContextMenuContent className="min-w-40">
+        renderRowMenuItems={(p) => (
+          <>
             {canAssign && (
-              <ContextMenuItem
+              <MenuItem
                 onClick={() => setAssignTarget({ projectId: p.id, lane: "" })}
               >
                 <UserPlus className="size-4" />
                 Assign work
-              </ContextMenuItem>
+              </MenuItem>
             )}
-            <ContextMenuItem
-              onClick={() => navigate(`/project/${p.id}/settings/members`)}
-            >
+            <MenuItem onClick={() => navigate(`/project/${p.id}/settings/members`)}>
               <Users className="size-4" />
               Add member
-            </ContextMenuItem>
-          </ContextMenuContent>
+            </MenuItem>
+          </>
         )}
         emptyState={emptyState}
         testId={testId}

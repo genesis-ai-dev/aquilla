@@ -5,6 +5,7 @@ import { TimelineEditor } from "./TimelineEditor"
 import type { CellData } from "@/hooks/useCells"
 import type { QueueState, QueueProgress } from "@/lib/audio/play-queue"
 import { selectQueueForFile } from "@/lib/audio/queue-scope"
+import { sourceClipAudioForCell } from "@/lib/audio/track-audio"
 
 // AQU-646: the editor subscribes to the play-queue (read-only) for playhead
 // tracking. Mock the two hooks with mutable stubs so tests can simulate
@@ -24,6 +25,12 @@ vi.mock("@/lib/audio/play-queue", () => ({
     selectQueueForFile(mockQueueState, mockProgress, cellIds),
   useMissingClipCells: () => mockMissingCells,
   MISSING_AUDIO_MESSAGE: "This clip's audio is missing.",
+  // 2026-08-11: the editor gates its clock write on this. Built over the REAL
+  // sourceClipAudioForCell (side-effect-free) for the same reason as
+  // selectQueueForFile above — the part that decides whether a position is a
+  // file position cannot be allowed to drift from the real rule.
+  queueClockIsFileTime: (cell: CellData | undefined | null) =>
+    cell?.medium === "media" && sourceClipAudioForCell(cell) != null,
   setQueueAudibility: (a: { source: boolean; target: boolean }) => {
     lastAudibility = a
   },
@@ -194,9 +201,18 @@ describe("TimelineEditor", () => {
 
   // ── AQU-646: playhead follows the audio queue; clicks navigate playback ──
 
+  // The shared imported clip, seeded with the FILE id — that seeding is what
+  // makes the queue's progress a FILE position (sourceClipAudioForCell). Real
+  // imported media always carries it; without it these cells were a media file
+  // that had somehow lost its audio, and the playhead assertions below were
+  // passing on a case that cannot occur.
+  const SOURCE_CLIP = "audio-f1-1690000000-shared.mp3"
+  const withClip = (o: Partial<CellData>): CellData =>
+    cell({ ...o, attachments: { [SOURCE_CLIP]: { type: "audio", url: "frontier-audio://src" } } } as Partial<CellData>)
+
   const mediaCells = [
-    cell({ id: "m1", original: "One", medium: "media", startTime: 0, endTime: 10 }),
-    cell({ id: "m2", original: "Two", medium: "media", startTime: 10, endTime: 20 }),
+    withClip({ id: "m1", original: "One", medium: "media", startTime: 0, endTime: 10 }),
+    withClip({ id: "m2", original: "Two", medium: "media", startTime: 10, endTime: 20 }),
   ]
 
   it("the playhead tracks queue progress for THIS file's cells", () => {
@@ -209,6 +225,33 @@ describe("TimelineEditor", () => {
       const playhead = screen.getByTestId("tl-playhead")
       // 12s at the default 38 px/s zoom.
       expect(parseFloat(playhead.style.left)).toBeCloseTo(12 * 38, 0)
+    } finally {
+      mockQueueState = { kind: "idle" }
+      mockProgress = { currentTime: 0, duration: 0, rate: 1, volume: 1 }
+    }
+  })
+
+  // 2026-08-11 regression guard. A take's clock restarts at 0 and means
+  // nothing on the file timeline (play-queue says so outright). Writing it into
+  // the timeline clock yanked the playhead to the far left the moment anyone
+  // played a take from a row's rail — on a file whose cells sit at 10-20s, the
+  // playhead jumped to 0 and stayed there.
+  it("a take's own clock does NOT move the playhead", () => {
+    const takeOnly = [
+      cell({
+        id: "t1", original: "Take only", medium: "media", startTime: 10, endTime: 20,
+        selectedAudioId: "audio-t1-1700000000-take.webm",
+        attachments: { "audio-t1-1700000000-take.webm": { type: "audio", url: "frontier-audio://take" } },
+      } as Partial<CellData>),
+    ]
+    mockQueueState = { kind: "playing", cellIndex: 0, cellId: "t1" }
+    // 3s INTO THE TAKE — not 3s into the file.
+    mockProgress = { currentTime: 3, duration: 8, rate: 1, volume: 1 }
+    try {
+      render(
+        <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={takeOnly} onRetimeSubtitle={() => {}} />,
+      )
+      expect(parseFloat(screen.getByTestId("tl-playhead").style.left)).toBe(0)
     } finally {
       mockQueueState = { kind: "idle" }
       mockProgress = { currentTime: 0, duration: 0, rate: 1, volume: 1 }

@@ -154,7 +154,7 @@ import {
   VIDEO_PANE_MAX_SHARE,
   VIDEO_PANE_TABLE_MIN_WIDTH,
 } from "./timeline/video-pane-layout"
-import { setVideoClockSec } from "@/lib/timeline/video-clock"
+import { setVideoClockSec, setVideoClockPlaying } from "@/lib/timeline/video-clock"
 import { uiSlotRef } from "@/lib/ui-slots"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { TimingModeChangedDialog } from "./timeline/TimingModeChangedDialog"
@@ -5877,6 +5877,7 @@ export function ProjectWorkspace() {
                       cells={audioMergedCells}
                       seekSec={videoSeek}
                       onVideoTime={setVideoClockSec}
+                      onVideoPlaying={setVideoClockPlaying}
                       onChangeVideo={() => setLinkVideoOpen(true)}
                       sourceDirectionMode={fileMeta.sourceDirectionMode}
                       targetDirectionMode={fileMeta.targetDirectionMode}

@@ -17,13 +17,13 @@ import { secToPx, pxToSec, ZOOM_MIN, ZOOM_MAX, ZOOM_DEFAULT } from "@/lib/timeli
 // workspace (onSeekToTime), keeping this component testable with a spy prop.
 // Round 5 exception: the per-track speaker buttons drive setQueueAudibility
 // directly — muting is a pure element-level concern with no workspace state.
-import { useQueueForFile, useMissingClipCells, setQueueAudibility, type TrackAudibility } from "@/lib/audio/play-queue"
+import { useQueueForFile, useMissingClipCells, setQueueAudibility, queueClockIsFileTime, type TrackAudibility } from "@/lib/audio/play-queue"
 import { isInEditableContext, isTopAudioShortcutOwner, pushAudioShortcutOverride } from "@/lib/audio/audio-coordinator"
 import { spacebarShouldToggle } from "@/lib/audio/playback-keys"
 import { activeTargetForCell } from "@/lib/audio/track-audio"
 import { loadSnapEnabled, saveSnapEnabled } from "@/lib/timeline/snap"
 import { setMediaCursorCell, setMediaSyncActive } from "@/lib/timeline/media-cursor"
-import { useVideoClockSec } from "@/lib/timeline/video-clock"
+import { useVideoClockSec, useVideoClockPlaying } from "@/lib/timeline/video-clock"
 import { useUiSlot } from "@/lib/ui-slots"
 import { setAudioQualityPref, useAudioQualityPref } from "@/lib/store/audio-quality-pref"
 import { useBatchProgress } from "@/lib/audio/batch-audio"
@@ -232,24 +232,42 @@ export function TimelineEditor({
   // carries the cellId), and a definitively 404'd dub shows a missing badge.
   const loadingCellId = queue.kind === "loading" ? queue.cellId : null
   const missingCellIds = useMissingClipCells()
+  // 2026-08-11: the queue's progress is only a FILE position when the master
+  // element is the shared source clip. On a take it is a per-take clock that
+  // restarts at 0 — play-queue says outright that "no consumer may treat [it]
+  // as a position on the file" — so writing it here yanked the playhead to
+  // zero whenever a take was played from a row's rail. Same test the video
+  // pane already makes (MediaVideoPane's `clockIsFileTime`).
+  const queueSoundingCell = useMemo(
+    () => (queue.cellId != null ? cells.find((c) => c.id === queue.cellId) : undefined),
+    [cells, queue.cellId],
+  )
+  const queueClockIsFile = queueClockIsFileTime(queueSoundingCell)
   useEffect(() => {
-    if (queueActive) clock.setCurrentSec(queueProgress.currentTime)
+    if (queueActive && queueClockIsFile) clock.setCurrentSec(queueProgress.currentTime)
     // eslint-disable-next-line react-hooks/exhaustive-deps -- clock setters are stable
-  }, [queueActive, queueProgress.currentTime])
+  }, [queueActive, queueClockIsFile, queueProgress.currentTime])
   // The other driver: a file with a linked video but NO audio can never start
   // the queue, so the video plays itself and owns the playhead. Strictly gated
   // on the queue being idle, so the two writers can never overlap — which is
   // exactly what used to happen when the <video> lived in this component.
   const videoClockSec = useVideoClockSec()
+  const videoPlaying = useVideoClockPlaying()
   useEffect(() => {
     if (!queueActive && videoClockSec != null) clock.setCurrentSec(videoClockSec)
     // eslint-disable-next-line react-hooks/exhaustive-deps -- clock setters are stable
   }, [queueActive, videoClockSec])
+  // Whichever transport actually owns the clock. Parking (rather than merely
+  // withholding seconds) matters: the playhead's rAF interpolation extrapolates
+  // from its last anchor while `playing`, so leaving it running against a
+  // position nobody updates draws steady, confident, wrong motion.
+  const transportPlaying = queueActive ? queuePlaying && queueClockIsFile : videoPlaying
+  const transportRate = queueActive ? queueProgress.rate : 1
   useEffect(() => {
-    if (queuePlaying) clock.play()
+    if (transportPlaying) clock.play()
     else clock.pause()
     // eslint-disable-next-line react-hooks/exhaustive-deps -- clock setters are stable
-  }, [queuePlaying])
+  }, [transportPlaying])
   useEffect(() => {
     // Starting playback is an explicit "watch this" — re-engage follow. Keyed
     // on running (playing OR loading) so a gate's brief "loading" dip doesn't
@@ -698,18 +716,22 @@ export function TimelineEditor({
   // AQU-646 follow-playhead: page-flip the view when the playhead approaches
   // the right edge (or leaves the left). Reads the element's live scrollLeft —
   // state can lag a programmatic scroll by a frame.
+  // 2026-08-11: reads the CLOCK, not the queue's progress. A linked video with
+  // no audio never starts the queue, so this used to sit out the entire film —
+  // and it is the only thing that scrolls a track which, on a 70-minute
+  // episode, is roughly 160,000px wide.
   useEffect(() => {
-    if (!follow || !queuePlaying) return
+    if (!follow || !transportPlaying) return
     const el = scrollRef.current
     if (!el) return
     const target = computeFollowScroll(
-      secToPx(queueProgress.currentTime, pxPerSec),
+      secToPx(clock.currentSec, pxPerSec),
       el.scrollLeft,
       viewportPx,
       trackWidthPx,
     )
     if (target != null) scrollTrackTo(target)
-  }, [follow, queuePlaying, queueProgress.currentTime, pxPerSec, viewportPx, trackWidthPx])
+  }, [follow, transportPlaying, clock.currentSec, pxPerSec, viewportPx, trackWidthPx])
 
   // 2026-08-07 (wire a): USER chip selection — as opposed to programmatic
   // selection from a row click — also notifies the workspace so the text
@@ -987,13 +1009,19 @@ export function TimelineEditor({
             // A MANUAL scroll while playback runs means "stop following me".
             // Our own programmatic scrolls fire this handler too — the 150ms
             // stamp window filters them out.
-            if (queuePlaying && performance.now() - lastProgrammaticScrollAt.current > 150) {
+            if (transportPlaying && performance.now() - lastProgrammaticScrollAt.current > 150) {
               setFollow(false)
             }
           }}
         >
           <div className="relative" style={{ width: `${trackWidthPx}px` }}>
-            <TimelineRuler durationSec={durationSec} pxPerSec={pxPerSec} onScrub={seekTo} />
+            <TimelineRuler
+              durationSec={durationSec}
+              pxPerSec={pxPerSec}
+              viewStartSec={viewStartSec}
+              viewEndSec={viewEndSec}
+              onScrub={seekTo}
+            />
             {/* SUB-53: a subtitle span is expressed against the original's
                 clock, so it can't be dragged on a re-flowed track. */}
             <TimelineLane cells={subtitle} variant="subtitle" retimable={!audioFirst} snapEnabled={snapOn} {...laneProps} />
@@ -1040,8 +1068,8 @@ export function TimelineEditor({
             <TimelinePlayhead
               currentSec={clock.currentSec}
               pxPerSec={pxPerSec}
-              playing={queuePlaying}
-              rate={queueProgress.rate}
+              playing={transportPlaying}
+              rate={transportRate}
             />
           </div>
         </div>

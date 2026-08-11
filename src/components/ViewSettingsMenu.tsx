@@ -18,6 +18,8 @@ import { cn } from "@/lib/utils"
 import { MIN_FONT_SIZE, MAX_FONT_SIZE, FONT_SIZE_STEP } from "@/lib/store/file-view-prefs"
 import type { FootnoteViewMode } from "@/lib/footnotes/types"
 import type { DirectionMode, TextDirection, TextDirectionSummary } from "@/lib/text-direction"
+import { useT } from "@/lib/i18n/I18nProvider"
+import type { MessageKey } from "@/lib/i18n/messages/en"
 
 export interface ViewSettingsMenuHandle {
   open: () => void
@@ -53,10 +55,10 @@ interface ViewSettingsMenuProps {
   onFootnoteViewModeChange?: (v: FootnoteViewMode) => void
 }
 
-const FOOTNOTE_OPTIONS: { value: FootnoteViewMode; label: string }[] = [
-  { value: "off", label: "Hidden" },
-  { value: "inline", label: "Inline under cells" },
-  { value: "tray", label: "Bottom tray" },
+const FOOTNOTE_OPTIONS: { value: FootnoteViewMode; labelKey: MessageKey }[] = [
+  { value: "off", labelKey: "editor.view.footnotesHidden" },
+  { value: "inline", labelKey: "editor.view.footnotesInline" },
+  { value: "tray", labelKey: "editor.view.footnotesTray" },
 ]
 
 export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsMenuProps>(function ViewSettingsMenu({
@@ -83,6 +85,7 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
   onTnSidebarChange,
   onFootnoteViewModeChange,
 }, ref) {
+  const t = useT()
   const [menuOpen, setMenuOpen] = useState(false)
   const mismatch = getManualDirectionMismatch({
     sourceMode: sourceDirectionMode,
@@ -127,16 +130,18 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
         >
           <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-600" />
           <span className="text-foreground">
-            {mismatch.sideLabel} is forced{" "}
-            <strong>{directionName(mismatch.forced)}</strong>, but content looks{" "}
-            <strong>{detectedDirectionName(mismatch.detected)}</strong>
+            {t("editor.view.directionMismatch", {
+              side: t(sideLabelKey(mismatch.side)),
+              forced: t(directionNameKey(mismatch.forced)),
+              detected: t(detectedDirectionNameKey(mismatch.detected)),
+            })}
           </span>
           <button
             type="button"
             onClick={() => applyDirectionMismatchFix("auto")}
             className="rounded-md px-2 py-0.5 text-[11px] font-medium text-primary transition-all duration-150 ease-out hover:bg-card active:scale-[0.95]"
           >
-            Auto
+            {t("editor.view.directionAuto")}
           </button>
           {detectedManualDirection && (
             <button
@@ -147,13 +152,13 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
               {detectedManualDirection.toUpperCase()}
             </button>
           )}
-          <AppTooltip content="Dismiss">
+          <AppTooltip content={t("common.dismiss")}>
             <Button
               type="button"
               variant="ghost"
               size="icon-xs"
               onClick={() => setDismissedMismatchSignature(mismatchSignature)}
-              aria-label="Dismiss direction warning"
+              aria-label={t("editor.view.dismissDirectionWarning")}
               className="size-5 rounded-lg text-muted-foreground/70"
             >
               <X className="h-3 w-3" />
@@ -167,13 +172,13 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
       )}
       <Popover open={menuOpen} onOpenChange={setMenuOpen}>
         {!anchor && (
-          <AppTooltip content="Editor settings">
+          <AppTooltip content={t("editor.view.settings")}>
             <PopoverTrigger
               render={
                 <Button
                   variant="ghost"
                   size="icon"
-                  aria-label="Editor settings"
+                  aria-label={t("editor.view.settings")}
                   className={cn(hideTrigger ? "sr-only" : "relative")}
                 >
                   <Settings className="h-4 w-4" />
@@ -190,25 +195,25 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
           data-testid="view-settings-popover"
           className="w-72"
         >
-          <PopoverTitle className="sr-only">Editor settings</PopoverTitle>
+          <PopoverTitle className="sr-only">{t("editor.view.settings")}</PopoverTitle>
 
           <FieldGroup className="gap-3">
             <SwitchRow
               id="view-show-line-numbers"
-              label="Show line numbers"
+              label={t("editor.view.showLineNumbers")}
               checked={lineNumbersEnabled}
               disabled={!fileOpen}
               onCheckedChange={onLineNumbersChange}
             />
             <SwitchRow
               id="view-show-cell-labels"
-              label="Show cell labels"
+              label={t("editor.view.showCellLabels")}
               checked={cellLabelsEnabled}
               onCheckedChange={onCellLabelsChange}
             />
             <SwitchRow
               id="view-show-translation-notes"
-              label="Show translation notes"
+              label={t("editor.view.showTranslationNotes")}
               checked={tnSidebarEnabled}
               onCheckedChange={onTnSidebarChange}
             />
@@ -218,7 +223,7 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
             <>
               <Separator />
               <div className="flex flex-col gap-2">
-                <SectionLabel>Footnotes</SectionLabel>
+                <SectionLabel>{t("editor.footnotes.label")}</SectionLabel>
                 <RadioGroup
                   value={footnoteViewMode}
                   disabled={!fileOpen}
@@ -231,7 +236,7 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
                       <div key={option.value} className="flex items-center gap-3">
                         <RadioGroupItem id={id} value={option.value} />
                         <Label htmlFor={id} layout="inline" className="font-normal">
-                          {option.label}
+                          {t(option.labelKey)}
                         </Label>
                       </div>
                     )
@@ -243,15 +248,15 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
 
           <Separator />
           <div className="flex flex-col gap-2">
-            <SectionLabel>Text Direction</SectionLabel>
+            <SectionLabel>{t("editor.view.textDirection")}</SectionLabel>
             <DirectionModeRow
-              label="Source"
+              label={t("editor.column.source")}
               disabled={!fileOpen}
               mode={sourceDirectionMode}
               onChange={onSourceDirectionModeChange}
             />
             <DirectionModeRow
-              label="Target"
+              label={t("editor.column.target")}
               disabled={!fileOpen}
               mode={targetDirectionMode}
               onChange={onTargetDirectionModeChange}
@@ -260,15 +265,15 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
 
           <Separator />
           <div className="flex flex-col gap-2">
-            <SectionLabel>Font Size</SectionLabel>
+            <SectionLabel>{t("editor.view.fontSize")}</SectionLabel>
             <FontSizeRow
-              label="Source"
+              label={t("editor.column.source")}
               value={sourceFontSize}
               disabled={!fileOpen}
               onChange={onSourceFontSizeChange}
             />
             <FontSizeRow
-              label="Target"
+              label={t("editor.column.target")}
               value={targetFontSize}
               disabled={!fileOpen}
               onChange={onTargetFontSizeChange}
@@ -328,6 +333,7 @@ function FontSizeRow({
   disabled: boolean
   onChange: (v: number) => void
 }) {
+  const t = useT()
   return (
     <div
       className={cn(
@@ -337,12 +343,12 @@ function FontSizeRow({
     >
       <span>{label}</span>
       <span className="flex items-center gap-1">
-        <AppTooltip content={`Decrease ${label.toLowerCase()} font size`}>
+        <AppTooltip content={t("editor.view.decreaseFontSize", { side: label.toLowerCase() })}>
           <Button
             type="button"
             variant="ghost"
             size="icon-xs"
-            aria-label={`Decrease ${label.toLowerCase()} font size`}
+            aria-label={t("editor.view.decreaseFontSize", { side: label.toLowerCase() })}
             disabled={disabled || value <= MIN_FONT_SIZE}
             onClick={() => onChange(Math.max(MIN_FONT_SIZE, value - FONT_SIZE_STEP))}
             className="size-5"
@@ -351,12 +357,12 @@ function FontSizeRow({
           </Button>
         </AppTooltip>
         <span className="w-9 text-center text-[10px] tabular-nums text-muted-foreground">{value}px</span>
-        <AppTooltip content={`Increase ${label.toLowerCase()} font size`}>
+        <AppTooltip content={t("editor.view.increaseFontSize", { side: label.toLowerCase() })}>
           <Button
             type="button"
             variant="ghost"
             size="icon-xs"
-            aria-label={`Increase ${label.toLowerCase()} font size`}
+            aria-label={t("editor.view.increaseFontSize", { side: label.toLowerCase() })}
             disabled={disabled || value >= MAX_FONT_SIZE}
             onClick={() => onChange(Math.min(MAX_FONT_SIZE, value + FONT_SIZE_STEP))}
             className="size-5"
@@ -380,16 +386,17 @@ function DirectionModeRow({
   disabled: boolean
   onChange: (mode: DirectionMode) => void
 }) {
+  const t = useT()
   return (
     <div className={cn("flex flex-col gap-1.5", disabled && "opacity-50")}>
       <span className="text-sm">{label}</span>
       <SegmentTabs<DirectionMode>
         value={mode}
         onValueChange={onChange}
-        aria-label={`${label} direction`}
+        aria-label={t("editor.view.directionOf", { side: label })}
         listClassName="w-full"
         options={[
-          { label: "Auto", value: "auto", disabled },
+          { label: t("editor.view.directionAuto"), value: "auto", disabled },
           { label: "LTR", value: "ltr", disabled },
           { label: "RTL", value: "rtl", disabled },
         ]}
@@ -407,7 +414,6 @@ interface DirectionMismatchInput {
 
 interface DirectionMismatch {
   side: "source" | "target"
-  sideLabel: "Source" | "Target"
   forced: TextDirection
   detected: TextDirectionSummary
 }
@@ -431,19 +437,18 @@ function getManualDirectionMismatchForSide(
 ): DirectionMismatch | null {
   if (mode === "auto" || summary == null) return null
   if (summary === mode) return null
-  return {
-    side,
-    sideLabel: side === "source" ? "Source" : "Target",
-    forced: mode,
-    detected: summary,
-  }
+  return { side, forced: mode, detected: summary }
 }
 
-function directionName(direction: TextDirection): string {
-  return direction === "rtl" ? "right-to-left" : "left-to-right"
+function sideLabelKey(side: "source" | "target"): MessageKey {
+  return side === "source" ? "editor.column.source" : "editor.column.target"
 }
 
-function detectedDirectionName(direction: TextDirectionSummary): string {
-  if (direction === "mixed") return "mixed"
-  return directionName(direction)
+function directionNameKey(direction: TextDirection): MessageKey {
+  return direction === "rtl" ? "editor.view.dirRtl" : "editor.view.dirLtr"
+}
+
+function detectedDirectionNameKey(direction: TextDirectionSummary): MessageKey {
+  if (direction === "mixed") return "editor.view.dirMixed"
+  return directionNameKey(direction)
 }

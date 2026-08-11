@@ -138,7 +138,7 @@ export function AddFootnoteDialog({
             <FieldDescription>
               {ref ? (
                 <>
-                  {t("editor.footnote.attachedTo")} <span className="font-mono text-foreground">{ref}</span>.{" "}
+                  {t("editor.footnote.attachedTo", { ref })}{" "}
                 </>
               ) : null}
               {t("editor.footnote.textHint")}

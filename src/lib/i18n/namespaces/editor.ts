@@ -157,7 +157,7 @@ export const editor = defineNamespace({
       "Use letter markers for a separate note sequence.",
     "editor.footnote.textLabel": "Footnote text",
     "editor.footnote.textPlaceholder": "Selected text: footnote text...",
-    "editor.footnote.attachedTo": "Attached to",
+    "editor.footnote.attachedTo": "Attached to {ref}.",
     "editor.footnote.textHint":
       "Include the selected word or phrase before a colon when it helps clarify " +
       "the note.",
@@ -194,6 +194,84 @@ export const editor = defineNamespace({
     "editor.milestone.vocab.groupPlural": "Groups",
     "editor.milestone.vocab.milestone": "milestone",
     "editor.milestone.vocab.milestonePlural": "Milestones",
+
+    // — Column names, reused wherever the two sides are named ——————————
+    "editor.column.source": "Source",
+    "editor.column.target": "Target",
+
+    // — View-settings popover ————————————————————————————————————————
+    "editor.view.settings": "Editor settings",
+    "editor.view.showLineNumbers": "Show line numbers",
+    "editor.view.showCellLabels": "Show cell labels",
+    "editor.view.showTranslationNotes": "Show translation notes",
+    "editor.view.footnotesHidden": "Hidden",
+    "editor.view.footnotesInline": "Inline under cells",
+    "editor.view.footnotesTray": "Bottom tray",
+    "editor.view.textDirection": "Text Direction",
+    "editor.view.fontSize": "Font Size",
+    "editor.view.directionAuto": "Auto",
+    "editor.view.directionOf": "{side} direction",
+    "editor.view.decreaseFontSize": "Decrease {side} font size",
+    "editor.view.increaseFontSize": "Increase {side} font size",
+    "editor.view.directionMismatch":
+      "{side} is forced {forced}, but content looks {detected}",
+    "editor.view.dismissDirectionWarning": "Dismiss direction warning",
+    "editor.view.dirLtr": "left-to-right",
+    "editor.view.dirRtl": "right-to-left",
+    "editor.view.dirMixed": "mixed",
+
+    // — Parallel-bibles reference sidebar ————————————————————————————
+    "editor.bibles.openTooltip": "Parallel bibles: see this verse in other versions",
+    "editor.bibles.show": "Show parallel bibles",
+    "editor.bibles.hide": "Hide parallel bibles",
+    "editor.bibles.edgeTab": "Bibles",
+    "editor.bibles.title": "Parallel Bibles",
+    "editor.bibles.scrollHint":
+      "Scroll the editor to a verse to see it in other bible versions.",
+    "editor.bibles.noVersions":
+      "No versions added yet. Add a bible version to read alongside your text.",
+    "editor.bibles.removeVersion": "Remove {version}",
+    "editor.bibles.scrollToVerse": "Scroll to a verse to see its text.",
+    "editor.bibles.noTextForRef": "No text for {ref} in this version.",
+    "editor.bibles.searchPlaceholder": "Search versions (e.g. 'eng', 'BSB')",
+    "editor.bibles.searchLabel": "Search Bible versions",
+    "editor.bibles.failedToLoad": "Failed to load: {error}",
+    "editor.bibles.loadingVersions": "Loading versions…",
+    "editor.bibles.noMatches": "No matches.",
+    "editor.bibles.closePicker": "Close picker",
+    "editor.bibles.addVersion": "Add version",
+    "editor.bibles.attribution": "Text from the",
+
+    // — Translation-notes reference sidebar ——————————————————————————
+    "editor.tn.title": "Translation Notes",
+    "editor.tn.hide": "Hide translation notes",
+    "editor.tn.focusHint": "Focus a translation cell to see notes for that verse.",
+    "editor.tn.noneForRef": "No translation notes for {ref}.",
+
+    // — eBible target-import review panel ————————————————————————————
+    "editor.ebible.matchedOne": "{count} verse matched",
+    "editor.ebible.matchedMany": "{count} verses matched",
+    "editor.ebible.conflictsOne": "{count} conflict (existing target content)",
+    "editor.ebible.conflictsMany": "{count} conflicts (existing target content)",
+    "editor.ebible.orphansOne": "{count} orphan",
+    "editor.ebible.orphansMany": "{count} orphans",
+    "editor.ebible.selectedCount": "{selected} / {total} selected",
+    "editor.ebible.willOverwrite": "({count} will overwrite existing content)",
+    "editor.ebible.selectAll": "All",
+    "editor.ebible.selectClean": "Clean only",
+    "editor.ebible.noMatches":
+      "No source cells matched — the eBible translation may use different book " +
+      "references.",
+    "editor.ebible.orphanSummaryOne":
+      "{count} orphan verse (in eBible but no matching source cell)",
+    "editor.ebible.orphanSummaryMany":
+      "{count} orphan verses (in eBible but no matching source cell)",
+    "editor.ebible.andMore": "…and {count} more",
+    "editor.ebible.unmatchedOne": "{count} source cell had no matching eBible verse.",
+    "editor.ebible.unmatchedMany": "{count} source cells had no matching eBible verse.",
+    "editor.ebible.applyOne": "Apply {count} verse",
+    "editor.ebible.applyMany": "Apply {count} verses",
+    "editor.ebible.conflictBadge": "conflict",
   },
   context: {
     _context: {
@@ -906,11 +984,14 @@ export const editor = defineNamespace({
       },
       "editor.footnote.attachedTo": {
         description:
-          "Opening fragment of the line under the footnote textarea. It is followed " +
-          "immediately, in the same sentence, by the scripture reference in " +
-          "monospace and then a period — so this string ends mid-sentence on " +
-          "purpose. Word order is fixed by the layout: the reference cannot move " +
-          "in front of these words.",
+          "First sentence of the help line under the footnote textarea, naming the " +
+          "scripture reference the new note will be attached to. " +
+          "editor.footnote.textHint follows it in the same paragraph.",
+        placeholders: {
+          ref:
+            "Scripture reference of the cell, e.g. 'MAT 3:16'. Book codes and numbers " +
+            "come from the project's data — do not translate the substituted value.",
+        },
         screenshot: "cell-editor",
       },
       "editor.footnote.textHint": {
@@ -1143,6 +1224,429 @@ export const editor = defineNamespace({
       "editor.milestone.vocab.milestonePlural": {
         description: "Plural of editor.milestone.vocab.milestone; heading form.",
         maxLength: 20,
+      },
+      "editor.column.source": {
+        description:
+          "The name of the left-hand column of the editing table and of the " +
+          "'source' side generally: the text being translated FROM. Used as a table " +
+          "heading, as a settings row label, and interpolated into other strings " +
+          "('Source direction'). One word, and it must pair contrastively with " +
+          "editor.column.target.",
+        maxLength: 14,
+      },
+      "editor.column.target": {
+        description:
+          "The name of the right-hand, editable column of the editing table and of " +
+          "the 'target' side generally: the language being translated INTO. Used as " +
+          "a table heading, a settings row label, and interpolated into other " +
+          "strings. Must pair contrastively with editor.column.source.",
+        maxLength: 14,
+      },
+      "editor.view.settings": {
+        description:
+          "Tooltip, screen-reader name and hidden title of the gear-icon popover " +
+          "holding per-file display preferences (line numbers, footnote display, " +
+          "text direction, font size). 'Editor' here means the translation editor, " +
+          "not a person who edits.",
+        maxLength: 24,
+      },
+      "editor.view.showLineNumbers": {
+        description:
+          "Label of the switch that shows or hides the running line number at the " +
+          "left of every row. A switch label, so it names the thing being toggled " +
+          "on; do not phrase it as a question.",
+        maxLength: 28,
+      },
+      "editor.view.showCellLabels": {
+        description:
+          "Label of the switch that shows or hides each cell's own label (a verse " +
+          "number, a timecode, a slide title) beside the row.",
+        maxLength: 28,
+      },
+      "editor.view.showTranslationNotes": {
+        description:
+          "Label of the switch that reveals the translation-notes sidebar — " +
+          "published exegetical notes for the verse in focus, fetched from a notes " +
+          "resource. Not the user's own comments.",
+        maxLength: 32,
+      },
+      "editor.view.footnotesHidden": {
+        description:
+          "First of three radio options for how footnotes are displayed: not shown " +
+          "at all. A state, not a command.",
+        maxLength: 18,
+      },
+      "editor.view.footnotesInline": {
+        description:
+          "Second footnote-display option: each cell's footnotes appear in a strip " +
+          "directly beneath that cell's row.",
+        maxLength: 26,
+      },
+      "editor.view.footnotesTray": {
+        description:
+          "Third footnote-display option: footnotes are collected in a tray docked " +
+          "along the bottom of the editor, showing the notes of the rows currently " +
+          "on screen.",
+        maxLength: 26,
+      },
+      "editor.view.textDirection": {
+        description:
+          "Section heading in the view-settings popover for the left-to-right / " +
+          "right-to-left setting of each column. Title Case in English because it " +
+          "is a section heading.",
+        maxLength: 22,
+      },
+      "editor.view.fontSize": {
+        description:
+          "Section heading in the view-settings popover for the per-column text " +
+          "size steppers. Title Case in English because it is a section heading.",
+        maxLength: 18,
+      },
+      "editor.view.directionAuto": {
+        description:
+          "First option of the three-way text-direction control (Auto / LTR / RTL): " +
+          "let the app infer direction from the text itself. The other two options " +
+          "are the untranslated acronyms LTR and RTL.",
+        maxLength: 10,
+      },
+      "editor.view.directionOf": {
+        description:
+          "Screen-reader name of one column's three-way text-direction control.",
+        placeholders: {
+          side:
+            "Which column — the already-translated editor.column.source or " +
+            "editor.column.target.",
+        },
+      },
+      "editor.view.decreaseFontSize": {
+        description:
+          "Tooltip and screen-reader name of the 'A−' button that makes one " +
+          "column's text one step smaller. Imperative.",
+        placeholders: {
+          side:
+            "Which column, lower-cased by the app from editor.column.source / " +
+            "editor.column.target.",
+        },
+      },
+      "editor.view.increaseFontSize": {
+        description:
+          "Tooltip and screen-reader name of the 'A+' button that makes one " +
+          "column's text one step larger. Imperative.",
+        placeholders: {
+          side:
+            "Which column, lower-cased by the app from editor.column.source / " +
+            "editor.column.target.",
+        },
+      },
+      "editor.view.directionMismatch": {
+        description:
+          "Warning bubble beside the settings gear when a column's direction has " +
+          "been forced by hand but its actual text runs the other way — so the text " +
+          "will look wrong. Two contrasting halves: what was chosen, then what was " +
+          "detected. Rendered on one non-wrapping line, so keep it tight.",
+        placeholders: {
+          side:
+            "Which column is mis-set — the translated editor.column.source or " +
+            "editor.column.target.",
+          forced:
+            "The direction the user forced, from editor.view.dirLtr / dirRtl.",
+          detected:
+            "The direction the text actually appears to run, from " +
+            "editor.view.dirLtr / dirRtl / dirMixed.",
+        },
+      },
+      "editor.view.dismissDirectionWarning": {
+        description:
+          "Screen-reader name of the X that hides the direction-mismatch warning. " +
+          "It hides the warning only; the mis-set direction is unchanged.",
+      },
+      "editor.view.dirLtr": {
+        description:
+          "Name of left-to-right text direction, substituted mid-sentence into " +
+          "editor.view.directionMismatch. Lower-case in English for that reason. " +
+          "Spell out the direction rather than using the acronym.",
+        maxLength: 18,
+      },
+      "editor.view.dirRtl": {
+        description:
+          "Name of right-to-left text direction, substituted mid-sentence into " +
+          "editor.view.directionMismatch. Lower-case in English for that reason.",
+        maxLength: 18,
+      },
+      "editor.view.dirMixed": {
+        description:
+          "Substituted into editor.view.directionMismatch when the column's text " +
+          "runs both ways, so no single direction was detected. Lower-case, " +
+          "mid-sentence.",
+        maxLength: 14,
+      },
+      "editor.bibles.openTooltip": {
+        description:
+          "Tooltip on the collapsed right-edge tab that opens the parallel-bibles " +
+          "sidebar. Two halves: the feature's name, then what it does. 'Versions' " +
+          "here means published Bible translations, not document revisions.",
+      },
+      "editor.bibles.show": {
+        description:
+          "Screen-reader name of that same collapsed edge tab. Imperative.",
+      },
+      "editor.bibles.hide": {
+        description:
+          "Screen-reader name of the X that collapses the parallel-bibles sidebar " +
+          "back to its edge tab. Nothing is unpinned or lost.",
+      },
+      "editor.bibles.edgeTab": {
+        description:
+          "The one word printed vertically down the collapsed edge tab. Extremely " +
+          "tight — it must be short enough to read rotated 90° in a 36px-wide " +
+          "column. Abbreviate rather than let it overflow.",
+        maxLength: 10,
+      },
+      "editor.bibles.title": {
+        description:
+          "Heading of the open parallel-bibles sidebar. 'Parallel' means shown " +
+          "side by side with the user's own translation for comparison.",
+        maxLength: 22,
+      },
+      "editor.bibles.scrollHint": {
+        description:
+          "Empty state of the parallel-bibles sidebar before the editor has focused " +
+          "a verse. Explains the interaction: the panel follows the editor's scroll " +
+          "position. Full sentence.",
+      },
+      "editor.bibles.noVersions": {
+        description:
+          "Empty state when a verse is in focus but the user has not chosen any " +
+          "comparison translations yet. Two sentences: the state, then the fix.",
+      },
+      "editor.bibles.removeVersion": {
+        description:
+          "Screen-reader name of the X that unpins one comparison translation from " +
+          "the sidebar. Imperative.",
+        placeholders: {
+          version:
+            "The translation's short identifier, e.g. 'BSB'. A code — never " +
+            "translate the substituted value.",
+        },
+      },
+      "editor.bibles.scrollToVerse": {
+        description:
+          "Shown under a pinned translation when the editor is on a chapter but not " +
+          "on a specific verse, so there is no single verse to display. Full " +
+          "sentence.",
+      },
+      "editor.bibles.noTextForRef": {
+        description:
+          "Shown under a pinned translation that has no text at the current verse — " +
+          "the translation may not include that book, or numbers verses differently. " +
+          "Not an error.",
+        placeholders: {
+          ref:
+            "The verse reference being looked up, e.g. 'MAT 3:16'. Book codes and " +
+            "numbers come from the data — do not translate.",
+        },
+      },
+      "editor.bibles.searchPlaceholder": {
+        description:
+          "Placeholder in the search field of the add-translation picker. The two " +
+          "quoted items are examples of what to type — a language code and a " +
+          "translation abbreviation; keep them as-is and translate only the framing " +
+          "words.",
+      },
+      "editor.bibles.searchLabel": {
+        description:
+          "Screen-reader name of that same search field. A noun phrase naming what " +
+          "is searched: published Bible translations.",
+      },
+      "editor.bibles.failedToLoad": {
+        description:
+          "Error line in the picker when the list of available translations could " +
+          "not be fetched. The reason after the colon comes from the network layer " +
+          "and stays in English.",
+        placeholders: {
+          error: "Raw failure reason from the network layer; not translated.",
+        },
+      },
+      "editor.bibles.loadingVersions": {
+        description:
+          "Status text while the list of available translations is being fetched.",
+        maxLength: 24,
+      },
+      "editor.bibles.noMatches": {
+        description:
+          "Shown in the translation picker when the typed query matches nothing. " +
+          "Full sentence with a period, in a very narrow list.",
+        maxLength: 20,
+      },
+      "editor.bibles.closePicker": {
+        description:
+          "Footer button label while the add-translation picker is open; it hides " +
+          "the picker. Imperative. Swaps with editor.bibles.addVersion.",
+        maxLength: 20,
+      },
+      "editor.bibles.addVersion": {
+        description:
+          "Footer button label when the picker is closed; it opens the picker to " +
+          "pin another translation. Imperative.",
+        maxLength: 20,
+      },
+      "editor.bibles.attribution": {
+        description:
+          "Opening words of the 10px attribution line at the foot of the sidebar. " +
+          "It is followed immediately by a link whose text is the data source's " +
+          "proper name, which is not translated — so this string ends mid-phrase on " +
+          "purpose and the name cannot be moved in front of it.",
+      },
+      "editor.tn.title": {
+        description:
+          "Heading of the translation-notes sidebar. These are published exegetical " +
+          "notes about the verse (a translation-helps resource), not the team's own " +
+          "comments and not footnotes in the text.",
+        maxLength: 24,
+      },
+      "editor.tn.hide": {
+        description:
+          "Screen-reader name of the X that hides the translation-notes sidebar.",
+      },
+      "editor.tn.focusHint": {
+        description:
+          "Empty state of the translation-notes sidebar before a cell has focus. " +
+          "Explains the interaction: notes follow whichever cell the user is in. " +
+          "Full sentence.",
+      },
+      "editor.tn.noneForRef": {
+        description:
+          "Shown when a verse has focus but the notes resource has nothing for it. " +
+          "A neutral state, not an error. Full sentence with a period.",
+        placeholders: {
+          ref:
+            "The verse reference in focus, e.g. 'MAT 3:16'. From the data — do not " +
+            "translate.",
+        },
+      },
+      "editor.ebible.matchedOne": {
+        description:
+          "Singular form of the summary line in the eBible import review: how many " +
+          "verses of the chosen public translation line up with cells in this " +
+          "project. Only rendered for count = 1.",
+        placeholders: { count: "Always 1 for this form." },
+      },
+      "editor.ebible.matchedMany": {
+        description:
+          "Plural of editor.ebible.matchedOne. 'Matched' means paired to an " +
+          "existing source cell by verse reference.",
+        placeholders: {
+          count: "Number of verses paired with a cell, already digit-grouped.",
+        },
+      },
+      "editor.ebible.conflictsOne": {
+        description:
+          "Singular amber warning fragment appended to the match summary: matched " +
+          "cells that ALREADY have translated text, which importing would " +
+          "overwrite. The parenthetical is the reason it is a conflict.",
+        placeholders: { count: "Always 1 for this form." },
+      },
+      "editor.ebible.conflictsMany": {
+        description: "Plural of editor.ebible.conflictsOne.",
+        placeholders: {
+          count: "Number of matched cells that already contain a translation.",
+        },
+      },
+      "editor.ebible.orphansOne": {
+        description:
+          "Singular fragment appended to the match summary counting verses present " +
+          "in the eBible translation with no cell to import into. 'Orphan' is used " +
+          "in the sense 'has no counterpart here'.",
+        placeholders: { count: "Always 1 for this form." },
+      },
+      "editor.ebible.orphansMany": {
+        description: "Plural of editor.ebible.orphansOne.",
+        placeholders: { count: "Number of eBible verses with no matching cell." },
+      },
+      "editor.ebible.selectedCount": {
+        description:
+          "Counter above the review list showing how many of the matched verses are " +
+          "ticked for import. The slash separates chosen from available.",
+        placeholders: {
+          selected: "Number of verses currently ticked.",
+          total: "Number of matched verses available to tick.",
+        },
+      },
+      "editor.ebible.willOverwrite": {
+        description:
+          "Amber warning appended to the selection counter: this many of the ticked " +
+          "verses would replace text already in the project. Parenthesised because " +
+          "it qualifies the count before it.",
+        placeholders: {
+          count: "Number of ticked verses whose cell already has a translation.",
+        },
+      },
+      "editor.ebible.selectAll": {
+        description:
+          "Tiny underlined link that ticks every matched verse, including the ones " +
+          "that would overwrite existing text. One word.",
+        maxLength: 10,
+      },
+      "editor.ebible.selectClean": {
+        description:
+          "Tiny underlined link that ticks only the matched verses whose cell is " +
+          "still empty — the safe subset. 'Clean' means 'not yet translated', not " +
+          "'tidy'.",
+        maxLength: 14,
+      },
+      "editor.ebible.noMatches": {
+        description:
+          "Shown instead of the review list when no verse in the chosen eBible " +
+          "translation lines up with any cell. The clause after the dash is the " +
+          "likely cause, so the user knows it is fixable and not a bug.",
+      },
+      "editor.ebible.orphanSummaryOne": {
+        description:
+          "Singular summary of the collapsed list of eBible verses that had no cell " +
+          "to import into. The parenthetical explains what 'orphan' means here.",
+        placeholders: { count: "Always 1 for this form." },
+      },
+      "editor.ebible.orphanSummaryMany": {
+        description: "Plural of editor.ebible.orphanSummaryOne.",
+        placeholders: { count: "Number of eBible verses with no matching cell." },
+      },
+      "editor.ebible.andMore": {
+        description:
+          "Last row of the truncated orphan list, standing for the entries not " +
+          "shown. The leading ellipsis glyph continues the list visually — keep a " +
+          "leading continuation mark if the target language uses one.",
+        placeholders: { count: "Number of orphan entries not listed." },
+      },
+      "editor.ebible.unmatchedOne": {
+        description:
+          "Singular note counting the project's own source cells that the eBible " +
+          "translation had nothing for — the mirror image of an orphan. Full " +
+          "sentence.",
+        placeholders: { count: "Always 1 for this form." },
+      },
+      "editor.ebible.unmatchedMany": {
+        description: "Plural of editor.ebible.unmatchedOne.",
+        placeholders: {
+          count: "Number of source cells with no eBible verse, already digit-grouped.",
+        },
+      },
+      "editor.ebible.applyOne": {
+        description:
+          "Singular label of the confirming button that writes the ticked verses " +
+          "into the project's target column. Imperative, with the count so the user " +
+          "sees the scope before committing.",
+        placeholders: { count: "Always 1 for this form." },
+      },
+      "editor.ebible.applyMany": {
+        description: "Plural of editor.ebible.applyOne.",
+        placeholders: { count: "Number of ticked verses that will be written." },
+      },
+      "editor.ebible.conflictBadge": {
+        description:
+          "Tiny (9px) amber badge on a review row whose cell already has translated " +
+          "text. Lower-case in English because it is a badge, not a sentence. One " +
+          "word — there is almost no room.",
+        maxLength: 12,
       },
     },
   },

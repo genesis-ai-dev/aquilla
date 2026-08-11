@@ -87,6 +87,17 @@ export function useI18n(): I18nContextValue {
   return ctx
 }
 
+/**
+ * Optional read for chrome that may render outside I18nProvider — mirrors the
+ * BrandContext optional-read pattern in AppShell. Returns null instead of
+ * throwing so widely-shared chrome (AppShell) can skip locale-dependent
+ * controls in call sites/tests that don't mount the provider, rather than
+ * requiring every one of them to add it.
+ */
+export function useI18nOptional(): I18nContextValue | null {
+  return useContext(I18nContext)
+}
+
 /** Convenience hook for components that only need the translate function. */
 export function useT(): TFunction {
   return useI18n().t

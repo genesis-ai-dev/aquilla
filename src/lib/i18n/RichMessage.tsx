@@ -30,12 +30,27 @@
  * Placeholders the translation omits are simply not rendered, and placeholders the
  * translation keeps but `values` does not supply are left as literal `{name}`,
  * matching `interpolate()`'s behaviour rather than rendering `undefined`.
+ *
+ * A count-governed key may style the number itself — pass `count` for plural
+ * selection and a node for `{count}` in `values`:
+ *
+ *     <RichMessage
+ *       k="editor.expansion.endorsements"
+ *       count={n}
+ *       values={{ count: <span className="font-medium">{n}</span> }}
+ *     />
+ *
+ * The number then chooses the plural form without being interpolated away, which
+ * is why this resolves the template and the interpolation in two steps instead of
+ * calling `t()`.
  */
 
 import { Fragment, type ReactNode } from "react"
 import { useI18n } from "./I18nProvider"
+import { DEFAULT_LOCALE } from "./locales"
+import { CATALOGS } from "./messages"
 import type { MessageKey } from "./messages/en"
-import type { TVars } from "./translate"
+import { interpolate, selectTemplate, type TVars } from "./translate"
 
 /** A placeholder's rendering: a node to substitute, or a value to interpolate. */
 export type RichVars = Record<string, ReactNode>
@@ -80,23 +95,27 @@ export function RichMessage({
    */
   count?: number
 }) {
-  const { t } = useI18n()
-  // Only scalars can take part in plural selection and text interpolation, so
-  // node-valued placeholders are resolved here, after t(), not inside it.
-  const scalars: TVars = {}
-  if (count !== undefined) scalars.count = count
+  const { locale } = useI18n()
+  // Node-valued placeholders take no part in plural selection or in text
+  // interpolation — they are substituted here, after the template is resolved.
+  const nodeValues: RichVars = {}
+  const textVars: TVars = {}
   for (const [name, value] of Object.entries(values)) {
-    if (typeof value === "string" || typeof value === "number") scalars[name] = value
+    if (typeof value === "string" || typeof value === "number") textVars[name] = value
+    else nodeValues[name] = value
   }
-  const resolved = t(k, scalars)
-  const nodes = renderRichMessage(
-    resolved,
-    Object.fromEntries(
-      Object.entries(values).filter(
-        ([, v]) => typeof v !== "string" && typeof v !== "number",
-      ),
-    ),
-  )
+  // Selection and interpolation see different var sets. The governing count must
+  // reach plural selection, but if `values` renders `{count}` as markup it must
+  // NOT be interpolated — otherwise the digits become bare text and there is
+  // nothing left for the markup to wrap.
+  const scalars: TVars = count === undefined ? textVars : { count, ...textVars }
+  const interpolationVars: TVars =
+    count === undefined || "count" in nodeValues ? textVars : { count, ...textVars }
+  // Same catalog choice the provider's t() makes; RichMessage needs the
+  // uninterpolated template, which t() cannot hand back.
+  const catalog = CATALOGS[locale] ?? CATALOGS[DEFAULT_LOCALE]
+  const resolved = interpolate(selectTemplate(catalog, k, scalars, locale), interpolationVars)
+  const nodes = renderRichMessage(resolved, nodeValues)
   return (
     <>
       {nodes.map((node, i) => (

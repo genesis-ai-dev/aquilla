@@ -19,6 +19,7 @@ import { MIN_FONT_SIZE, MAX_FONT_SIZE, FONT_SIZE_STEP } from "@/lib/store/file-v
 import type { FootnoteViewMode } from "@/lib/footnotes/types"
 import type { DirectionMode, TextDirection, TextDirectionSummary } from "@/lib/text-direction"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { RichMessage } from "@/lib/i18n/RichMessage"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 
 export interface ViewSettingsMenuHandle {
@@ -130,11 +131,17 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
         >
           <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-600" />
           <span className="text-foreground">
-            {t("editor.view.directionMismatch", {
-              side: t(sideLabelKey(mismatch.side)),
-              forced: t(directionNameKey(mismatch.forced)),
-              detected: t(detectedDirectionNameKey(mismatch.detected)),
-            })}
+            {/* The two conflicting values are the point of the warning, so they
+                stay emphasised inside the translated sentence rather than being
+                flattened into it. */}
+            <RichMessage
+              k="editor.view.directionMismatch"
+              values={{
+                side: t(sideLabelKey(mismatch.side)),
+                forced: <strong>{t(directionNameKey(mismatch.forced))}</strong>,
+                detected: <strong>{t(detectedDirectionNameKey(mismatch.detected))}</strong>,
+              }}
+            />
           </span>
           <button
             type="button"

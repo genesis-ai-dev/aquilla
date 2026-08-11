@@ -26,7 +26,19 @@ export function interpolate(template: string, vars?: TVars): string {
   )
 }
 
-export function translate(
+/**
+ * The string a key resolves to for `locale` **before** interpolation: the plural
+ * form `vars` selects, with every `{placeholder}` still intact.
+ *
+ * `translate()` is this followed by `interpolate()`. `<RichMessage>` needs the
+ * two steps apart, because selection vars and interpolation vars are not the
+ * same set: a counted sentence whose NUMBER carries markup ("**3** endorsements
+ * · support **72**%") has to choose its plural form from that number while
+ * leaving `{count}` in the template for the markup to be substituted into.
+ * Interpolating it there would render the digits as bare text and there would be
+ * nothing left to wrap.
+ */
+export function selectTemplate(
   catalog: Catalog | undefined,
   key: MessageKey,
   vars?: TVars,
@@ -35,15 +47,26 @@ export function translate(
   const base = en[key]
   const localized = catalog?.[key]
   if (isPluralMessage(base)) {
-    return interpolate(selectPluralForm(localized, base, locale, vars), vars)
+    return selectPluralForm(localized, base, locale, vars)
   }
   // A locale that supplied plural forms for a key English keeps as one string:
   // honour the forms rather than dropping them, treating `other` as the base.
   if (isPluralMessage(localized)) {
-    return interpolate(
-      selectPluralForm(localized, { forms: { other: base }, countVar: "count" }, locale, vars),
+    return selectPluralForm(
+      localized,
+      { forms: { other: base }, countVar: "count" },
+      locale,
       vars,
     )
   }
-  return interpolate(localized ?? base, vars)
+  return localized ?? base
+}
+
+export function translate(
+  catalog: Catalog | undefined,
+  key: MessageKey,
+  vars?: TVars,
+  locale: string = DEFAULT_LOCALE,
+): string {
+  return interpolate(selectTemplate(catalog, key, vars, locale), vars)
 }

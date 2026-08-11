@@ -24,7 +24,8 @@ import {
   ComboboxTrigger,
 } from "@/components/ui/combobox"
 import { cn } from "@/lib/utils"
-import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
+import { useT } from "@/lib/i18n/I18nProvider"
+import type { MessageKey } from "@/lib/i18n/messages/en"
 import type { ImportMilestoneKind } from "../../shared/import-contract"
 
 export interface MilestoneNavigationItem {
@@ -97,64 +98,134 @@ export function milestoneMatchesSearch(item: MilestoneNavigationItem, query: str
     .includes(normalizedQuery)
 }
 
+/**
+ * Which set of navigator labels a file's divisions use.
+ *
+ * Each vocabulary owns whole sentences, not a noun the app pours into a shared
+ * frame: "Previous chapter" is its own key, so a translator can inflect the noun
+ * for the frame around it (Arabic) or move it (Burmese). `heading` is the one
+ * standalone noun left — the picker's group name — and stays a bare plural.
+ */
 interface NavigationVocabulary {
-  singular: string
-  plural: string
+  heading: MessageKey
+  moveBetween: MessageKey
+  previous: MessageKey
+  next: MessageKey
+  current: MessageKey
+  currentWithCells: MessageKey
+  findPlaceholder: MessageKey
+  find: MessageKey
+  empty: MessageKey
 }
 
-function vocabularyFor(
-  items: readonly MilestoneNavigationItem[],
-  t: TFunction,
-): NavigationVocabulary {
+type VocabularyId = "chapter" | "slide" | "story" | "section" | "timeRange" | "part" | "group" | "milestone"
+
+/** Exported so a test can assert every kind's sentences are complete. */
+export const VOCABULARIES: Record<VocabularyId, NavigationVocabulary> = {
+  chapter: {
+    heading: "editor.milestone.vocab.chapterPlural",
+    moveBetween: "editor.milestone.chapter.moveBetween",
+    previous: "editor.milestone.chapter.previous",
+    next: "editor.milestone.chapter.next",
+    current: "editor.milestone.chapter.current",
+    currentWithCells: "editor.milestone.chapter.currentWithCells",
+    findPlaceholder: "editor.milestone.chapter.findPlaceholder",
+    find: "editor.milestone.chapter.find",
+    empty: "editor.milestone.chapter.empty",
+  },
+  slide: {
+    heading: "editor.milestone.vocab.slidePlural",
+    moveBetween: "editor.milestone.slide.moveBetween",
+    previous: "editor.milestone.slide.previous",
+    next: "editor.milestone.slide.next",
+    current: "editor.milestone.slide.current",
+    currentWithCells: "editor.milestone.slide.currentWithCells",
+    findPlaceholder: "editor.milestone.slide.findPlaceholder",
+    find: "editor.milestone.slide.find",
+    empty: "editor.milestone.slide.empty",
+  },
+  story: {
+    heading: "editor.milestone.vocab.storyPlural",
+    moveBetween: "editor.milestone.story.moveBetween",
+    previous: "editor.milestone.story.previous",
+    next: "editor.milestone.story.next",
+    current: "editor.milestone.story.current",
+    currentWithCells: "editor.milestone.story.currentWithCells",
+    findPlaceholder: "editor.milestone.story.findPlaceholder",
+    find: "editor.milestone.story.find",
+    empty: "editor.milestone.story.empty",
+  },
+  section: {
+    heading: "editor.milestone.vocab.sectionPlural",
+    moveBetween: "editor.milestone.section.moveBetween",
+    previous: "editor.milestone.section.previous",
+    next: "editor.milestone.section.next",
+    current: "editor.milestone.section.current",
+    currentWithCells: "editor.milestone.section.currentWithCells",
+    findPlaceholder: "editor.milestone.section.findPlaceholder",
+    find: "editor.milestone.section.find",
+    empty: "editor.milestone.section.empty",
+  },
+  timeRange: {
+    heading: "editor.milestone.vocab.timeRangePlural",
+    moveBetween: "editor.milestone.timeRange.moveBetween",
+    previous: "editor.milestone.timeRange.previous",
+    next: "editor.milestone.timeRange.next",
+    current: "editor.milestone.timeRange.current",
+    currentWithCells: "editor.milestone.timeRange.currentWithCells",
+    findPlaceholder: "editor.milestone.timeRange.findPlaceholder",
+    find: "editor.milestone.timeRange.find",
+    empty: "editor.milestone.timeRange.empty",
+  },
+  part: {
+    heading: "editor.milestone.vocab.partPlural",
+    moveBetween: "editor.milestone.part.moveBetween",
+    previous: "editor.milestone.part.previous",
+    next: "editor.milestone.part.next",
+    current: "editor.milestone.part.current",
+    currentWithCells: "editor.milestone.part.currentWithCells",
+    findPlaceholder: "editor.milestone.part.findPlaceholder",
+    find: "editor.milestone.part.find",
+    empty: "editor.milestone.part.empty",
+  },
+  group: {
+    heading: "editor.milestone.vocab.groupPlural",
+    moveBetween: "editor.milestone.group.moveBetween",
+    previous: "editor.milestone.group.previous",
+    next: "editor.milestone.group.next",
+    current: "editor.milestone.group.current",
+    currentWithCells: "editor.milestone.group.currentWithCells",
+    findPlaceholder: "editor.milestone.group.findPlaceholder",
+    find: "editor.milestone.group.find",
+    empty: "editor.milestone.group.empty",
+  },
+  milestone: {
+    heading: "editor.milestone.vocab.milestonePlural",
+    moveBetween: "editor.milestone.milestone.moveBetween",
+    previous: "editor.milestone.milestone.previous",
+    next: "editor.milestone.milestone.next",
+    current: "editor.milestone.milestone.current",
+    currentWithCells: "editor.milestone.milestone.currentWithCells",
+    findPlaceholder: "editor.milestone.milestone.findPlaceholder",
+    find: "editor.milestone.milestone.find",
+    empty: "editor.milestone.milestone.empty",
+  },
+}
+
+function vocabularyFor(items: readonly MilestoneNavigationItem[]): NavigationVocabulary {
   const kinds = new Set(items.map((item) => item.kind))
   if ([...kinds].every((kind) => (
     kind === "chapter" || kind === "chapter-range" || kind === "preface"
   ))) {
-    return {
-      singular: t("editor.milestone.vocab.chapter"),
-      plural: t("editor.milestone.vocab.chapterPlural"),
-    }
+    return VOCABULARIES.chapter
   }
-  if (kinds.size === 1 && kinds.has("slide")) {
-    return {
-      singular: t("editor.milestone.vocab.slide"),
-      plural: t("editor.milestone.vocab.slidePlural"),
-    }
-  }
-  if (kinds.size === 1 && kinds.has("story")) {
-    return {
-      singular: t("editor.milestone.vocab.story"),
-      plural: t("editor.milestone.vocab.storyPlural"),
-    }
-  }
-  if (kinds.size === 1 && kinds.has("section")) {
-    return {
-      singular: t("editor.milestone.vocab.section"),
-      plural: t("editor.milestone.vocab.sectionPlural"),
-    }
-  }
-  if (kinds.size === 1 && kinds.has("time-range")) {
-    return {
-      singular: t("editor.milestone.vocab.timeRange"),
-      plural: t("editor.milestone.vocab.timeRangePlural"),
-    }
-  }
-  if (kinds.size === 1 && kinds.has("part")) {
-    return {
-      singular: t("editor.milestone.vocab.part"),
-      plural: t("editor.milestone.vocab.partPlural"),
-    }
-  }
-  if (kinds.size === 1 && kinds.has("group")) {
-    return {
-      singular: t("editor.milestone.vocab.group"),
-      plural: t("editor.milestone.vocab.groupPlural"),
-    }
-  }
-  return {
-    singular: t("editor.milestone.vocab.milestone"),
-    plural: t("editor.milestone.vocab.milestonePlural"),
-  }
+  if (kinds.size === 1 && kinds.has("slide")) return VOCABULARIES.slide
+  if (kinds.size === 1 && kinds.has("story")) return VOCABULARIES.story
+  if (kinds.size === 1 && kinds.has("section")) return VOCABULARIES.section
+  if (kinds.size === 1 && kinds.has("time-range")) return VOCABULARIES.timeRange
+  if (kinds.size === 1 && kinds.has("part")) return VOCABULARIES.part
+  if (kinds.size === 1 && kinds.has("group")) return VOCABULARIES.group
+  return VOCABULARIES.milestone
 }
 
 function percent(part: number, total: number): number {
@@ -344,7 +415,7 @@ export function MilestoneNavigator({
   const virtualizerRef = useRef<MilestoneListVirtualizer | null>(null)
   const buttonGroupRef = useRef<HTMLDivElement | null>(null)
   const pickerCentered = useMinWidthLg()
-  const vocabulary = useMemo(() => vocabularyFor(items, t), [items, t])
+  const vocabulary = useMemo(() => vocabularyFor(items), [items])
   const matchedActiveIndex = items.findIndex((item) => item.key === activeKey)
   const activeIndex = matchedActiveIndex >= 0 ? matchedActiveIndex : 0
   const active = items[activeIndex]
@@ -442,9 +513,7 @@ export function MilestoneNavigator({
     <nav aria-label={t("editor.milestone.region")} className="flex w-full min-w-24 max-w-full items-center lg:w-auto">
       <ButtonGroup
         ref={buttonGroupRef}
-        aria-label={t("editor.milestone.moveBetween", {
-          plural: vocabulary.plural.toLocaleLowerCase(),
-        })}
+        aria-label={t(vocabulary.moveBetween)}
         // Floor: prev + middle + next icon buttons (3× size-8). Never shrink
         // below the collapsed chevron-only trigger state.
         className="min-w-24 max-w-full shadow-xs"
@@ -453,7 +522,7 @@ export function MilestoneNavigator({
           variant="outline"
           size="icon"
           disabled={!canGoPrevious}
-          aria-label={t("editor.milestone.previous", { singular: vocabulary.singular })}
+          aria-label={t(vocabulary.previous)}
           onClick={() => {
             const destination = destinations[activeDestinationIndex - 1]
             if (destination) choose(destination.milestoneKey, destination.subsectionKey)
@@ -519,15 +588,11 @@ export function MilestoneNavigator({
                 className="flex h-8 min-w-8 w-auto max-w-full shrink items-center justify-center gap-2 overflow-hidden px-2.5 data-[icon-only]:w-8 data-[icon-only]:shrink-0 data-[icon-only]:gap-0 data-[icon-only]:p-0 xl:w-56 xl:min-w-56 xl:shrink-0 xl:justify-start xl:px-2.5 xl:data-[icon-only]:w-56 xl:data-[icon-only]:gap-2 xl:data-[icon-only]:p-2.5 xl:[&>svg:last-child]:ml-auto [&>svg:last-child]:shrink-0"
                 aria-label={
                   activeSubsection
-                    ? t("editor.milestone.currentWithCells", {
-                        singular: vocabulary.singular,
+                    ? t(vocabulary.currentWithCells, {
                         label: active.label,
                         cells: activeSubsection.label,
                       })
-                    : t("editor.milestone.current", {
-                        singular: vocabulary.singular,
-                        label: active.label,
-                      })
+                    : t(vocabulary.current, { label: active.label })
                 }
               />
             }
@@ -558,22 +623,18 @@ export function MilestoneNavigator({
             <ComboboxInput
               showTrigger={false}
               showSearchIcon
-              placeholder={t("editor.milestone.findPlaceholder", { singular: vocabulary.singular })}
-              aria-label={t("editor.milestone.find", { singular: vocabulary.singular })}
+              placeholder={t(vocabulary.findPlaceholder)}
+              aria-label={t(vocabulary.find)}
               // Input defaults to text-base below md (iOS zoom guard); keep this
               // popover field at text-sm so it doesn't jump larger on small screens.
               className="w-auto rounded-none border-0 shadow-none outline-none ring-0 tabular-nums *:data-[slot=input-group-control]:text-sm *:data-[slot=input-group-addon]:pl-3 hover:border-0! focus-within:border-0! has-[[data-slot=input-group-control]:focus-visible]:border-0! has-[[data-slot=input-group-control]:focus-visible]:ring-0!"
             />
             <ComboboxSeparator className="mx-0 my-0" />
-            <ComboboxEmpty>
-              {t("editor.milestone.empty", {
-                plural: vocabulary.plural.toLocaleLowerCase(),
-              })}
-            </ComboboxEmpty>
+            <ComboboxEmpty>{t(vocabulary.empty)}</ComboboxEmpty>
             <ComboboxList className="max-h-none overflow-visible p-0">
               {/* Named for assistive tech without a visible heading — the
                   trigger and search field already carry the vocabulary. */}
-              <ComboboxGroup aria-label={vocabulary.plural}>
+              <ComboboxGroup aria-label={t(vocabulary.heading)}>
                 <VirtualizedMilestoneList
                   activeRowKey={activeRowKey}
                   expandedKey={expandedKey}
@@ -588,7 +649,7 @@ export function MilestoneNavigator({
           variant="outline"
           size="icon"
           disabled={!canGoNext}
-          aria-label={t("editor.milestone.next", { singular: vocabulary.singular })}
+          aria-label={t(vocabulary.next)}
           onClick={() => {
             const destination = destinations[activeDestinationIndex + 1]
             if (destination) choose(destination.milestoneKey, destination.subsectionKey)

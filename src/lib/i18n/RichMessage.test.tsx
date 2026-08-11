@@ -71,4 +71,40 @@ describe("RichMessage", () => {
     )
     expect(screen.getByTestId("line").textContent).toBe("Switch language to Burmese")
   })
+
+  it("styles the count itself while the number still selects the plural form", () => {
+    // A counted sentence may need its NUMBER emphasised — the endorsement count
+    // and the outbox counts all are. That needs the count in two roles at once:
+    // it chooses the plural category AND it is rendered as markup. If it were
+    // interpolated as text like any other var, the digits would land in the
+    // string and there would be nothing left for the markup to wrap.
+    render(
+      <I18nProvider>
+        <p data-testid="line">
+          <RichMessage
+            k="editor.expansion.endorsements"
+            count={1}
+            values={{
+              count: <span data-testid="count">1</span>,
+              percent: 40,
+            }}
+          />
+        </p>
+      </I18nProvider>,
+    )
+    expect(screen.getByTestId("count").tagName).toBe("SPAN")
+    // Singular, because 1 reached plural selection despite not being interpolated.
+    expect(screen.getByTestId("line").textContent).toBe("1 endorsement · support 40%")
+  })
+
+  it("still interpolates {count} as text when values does not render it", () => {
+    render(
+      <I18nProvider>
+        <p data-testid="line">
+          <RichMessage k="editor.expansion.endorsements" count={2} values={{ percent: 40 }} />
+        </p>
+      </I18nProvider>,
+    )
+    expect(screen.getByTestId("line").textContent).toBe("2 endorsements · support 40%")
+  })
 })

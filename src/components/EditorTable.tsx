@@ -135,6 +135,7 @@ import type { RangeHighlight } from "./HighlightedText"
 import { TermLookupPopover } from "./TermLookupPopover"
 import type { Concept } from "@/lib/terminology/types"
 import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
+import { RichMessage } from "@/lib/i18n/RichMessage"
 import { useFileFontSizes } from "@/lib/store/file-view-prefs"
 import { getSkipReplaceConfirm, setSkipReplaceConfirm } from "@/lib/store/replace-confirm-pref"
 import { useEditorActions } from "@/context/EditorActionsContext"
@@ -6253,10 +6254,22 @@ function EditorRow({
               renderContent: () => (
                 <div className="space-y-1.5 py-3 text-xs text-muted-foreground">
                   <p>
-                    {t("editor.expansion.endorsements", {
-                      count: cell.endorsementCount ?? 0,
-                      percent: healthValue,
-                    })}
+                    {/* Both figures are what the line is read for, so they keep
+                        the foreground weight the muted paragraph drops. */}
+                    <RichMessage
+                      k="editor.expansion.endorsements"
+                      count={cell.endorsementCount ?? 0}
+                      values={{
+                        count: (
+                          <span className="font-medium text-foreground">
+                            {cell.endorsementCount ?? 0}
+                          </span>
+                        ),
+                        percent: (
+                          <span className="font-medium text-foreground">{healthValue}</span>
+                        ),
+                      }}
+                    />
                   </p>
                   <p>
                     {cellNeedsAttention

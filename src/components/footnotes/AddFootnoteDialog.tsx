@@ -12,6 +12,7 @@ import {
 import { FootnoteTextEditor } from "./FootnoteTextEditor"
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field"
 import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
+import { RichMessage } from "@/lib/i18n/RichMessage"
 
 export type FootnoteMarkerStyle = "numbered" | "lettered"
 
@@ -138,7 +139,14 @@ export function AddFootnoteDialog({
             <FieldDescription>
               {ref ? (
                 <>
-                  {t("editor.footnote.attachedTo", { ref })}{" "}
+                  {/* Monospacing marks the reference as machine-readable data
+                      rather than prose, the way refs are shown everywhere else. */}
+                  <RichMessage
+                    k="editor.footnote.attachedTo"
+                    values={{
+                      ref: <span className="font-mono text-foreground">{ref}</span>,
+                    }}
+                  />{" "}
                 </>
               ) : null}
               {t("editor.footnote.textHint")}

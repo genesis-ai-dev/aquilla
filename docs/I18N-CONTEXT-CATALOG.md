@@ -108,16 +108,18 @@ Current surfaces: `workspace-nav`, `cell-editor`, `confirm-dialog`, `project-set
 
 ### Capturing them
 
-The registry is shaped so capture is a thin loop over `SCREENSHOTS`: navigate to
-`route` (substituting the seeded project id), drive the surface into the state described in
-`notes`, and write `src/lib/i18n/screenshots/<id>.png`. Run it against the E2E stack
-(`e2e/README.md` — Docker Postgres + both workers) so the app state is deterministic, and
-re-run it per release so the images track the UI.
+`pnpm i18n:shots` (`scripts/i18n-shots.ts`) regenerates the full set. With the dev stack
+running (`pnpm dev`), it signs in via the `/__dev/login` bypass, drives each declared
+surface into the state its `notes` describe (importing a small sample file when the seed
+project is empty, opening the lane-remove confirm, hitting an unreachable project for the
+error surface), and overwrites `src/lib/i18n/screenshots/<id>.png`. Re-run it after visual
+changes to a captured surface and commit the diff.
 
-> **Status:** the surface registry and the metadata links are in place and enforced by
-> `context.test.ts`. Capturing the PNGs requires a running E2E stack and is tracked
-> separately — the lint deliberately does **not** assert the files exist, so it stays green
-> and useful in environments that can't boot Docker.
+Every surface in the registry must have a driver in the script — a new registry entry
+without one fails the run — and `context.test.ts` asserts each declared surface's PNG
+exists in the repo, so registry, captures, and metadata cannot drift apart. (In sandboxed
+agent environments where the pinned Playwright build lacks its browser, point the script at
+a pre-installed one: `I18N_SHOTS_CHROMIUM_PATH=/opt/pw-browsers/chromium pnpm i18n:shots`.)
 
 ## Adding a message key — the workflow
 

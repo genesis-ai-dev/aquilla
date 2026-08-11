@@ -120,7 +120,9 @@ export function GlossaryEditor({ files: workspaceFiles }: GlossaryEditorProps = 
     setOptimisticConcepts(null)
   }, [serverConcepts])
   const hasOrigin = Boolean(project?.origin)
-  const canManage = canEditTermbase(project?.syncRole, hasOrigin)
+  // AQU-822: the floor is the org's configured termbaseEditMinRole (carried on
+  // the project record), not a hardcoded project_lead level.
+  const canManage = canEditTermbase(project?.syncRole, hasOrigin, project?.termbaseEditMinRole)
 
   const { active, suggested, archived } = useMemo(
     () => partitionConcepts(concepts),

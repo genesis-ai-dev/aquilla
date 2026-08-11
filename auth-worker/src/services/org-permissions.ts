@@ -1406,3 +1406,57 @@ export function canViewMemberProgress(callerRoleLevel: number | null, progressMi
   if (callerRoleLevel == null) return false
   return callerRoleLevel >= progressMinRole
 }
+
+// ──────────────────────────────────────────────────────────────────────────
+// AQU-822: configurable termbase-edit floor
+//
+// Same org_settings permission-policy pattern as the read floors above, but
+// this one gates a WRITE: who may manage a project's termbase (add, edit,
+// delete, archive concepts). Requested by BGP so translators — Contributors
+// (400) — can own terminology on their own projects; other partners keep the
+// stricter default, hence an org-level setting rather than a global change.
+//
+// The default is PROJECT_LEAD (500), NOT the MAINTAINER default the read
+// floors use: 500 is the level the client has always shown the termbase
+// editor at (TERMBASE_EDIT_LEVEL in src/lib/terminology/glossary-view.ts).
+// Before this issue the only server-side gate on terminology was the generic
+// project-settings write floor (MAINTAINER 600), so a project_lead saw an
+// editor whose saves 403'd. Defaulting to 500 closes that divergence in
+// favour of the long-advertised client behavior.
+//
+// Lowering the floor grants FULL terminology management at that level — no
+// draft/suggestion/approval layer (decided 2026-08-07). It does NOT widen any
+// other project setting: enforcement is terminology-scoped, see the
+// `terminology`-only carve-out in routes/project-settings.ts.
+// ──────────────────────────────────────────────────────────────────────────
+
+/** Default floor for managing a project's termbase when the org hasn't set one. */
+export const DEFAULT_TERMBASE_EDIT_MIN_ROLE = 500 // ROLE.PROJECT_LEAD
+
+/**
+ * Resolve the effective termbase-edit floor for an org (falls back to the
+ * PROJECT_LEAD default when the org hasn't configured one, or configured a
+ * value outside the role ladder).
+ */
+export async function getTermbaseEditMinRole(env: Env, orgId: number): Promise<number> {
+  const settings = await loadOrgSettingsBlob(env, orgId)
+  return extractRoleFloor(settings, "termbaseEditMinRole", DEFAULT_TERMBASE_EDIT_MIN_ROLE)
+}
+
+/**
+ * Resolve the termbase-edit floor that applies to a project, via its org.
+ * Projects with no org (personal / not-yet-attached) fall back to the same
+ * PROJECT_LEAD default — there is no org policy to consult.
+ */
+export async function getTermbaseEditMinRoleForProject(
+  env: Env,
+  projectId: string,
+): Promise<number> {
+  const project = await env.AQUILLA_PG.prepare(
+    "SELECT org_id FROM projects WHERE id = ?",
+  )
+    .bind(projectId)
+    .first<{ org_id: number | null }>()
+  if (!project?.org_id) return DEFAULT_TERMBASE_EDIT_MIN_ROLE
+  return getTermbaseEditMinRole(env, project.org_id)
+}

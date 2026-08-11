@@ -1,5 +1,9 @@
 import { Link } from "react-router-dom"
+<<<<<<< HEAD
 import { Archive, Building2, Download, EyeOff, KeyRound, UserCheck, Workflow } from "lucide-react"
+=======
+import { Archive, BookMarked, Building2, Download, EyeOff, KeyRound, UserCheck, Users, UsersRound, Workflow } from "lucide-react"
+>>>>>>> origin/dev
 import { OrgBreadcrumb } from "@/components/org/OrgBreadcrumb"
 import { PageHeader } from "@/components/ui/page"
 import { NavList, NavRow } from "@/components/ui/nav-list"
@@ -13,7 +17,7 @@ import { OrgSettingsShell } from "./OrgSettingsShell"
 
 export function OrgSettingsIndex() {
   const { activeOrg, activeOrgId } = useActiveOrg()
-  const { exportMinRole, rosterViewMinRole, allowSelfAssignment } = useOrgSettings(
+  const { exportMinRole, rosterViewMinRole, allowSelfAssignment, termbaseEditMinRole } = useOrgSettings(
     activeOrgId,
     activeOrg?.role?.level,
   )
@@ -44,6 +48,12 @@ export function OrgSettingsIndex() {
             icon={UserCheck}
             title="Assignment authority"
             hint={allowSelfAssignment ? "Self-assign on" : "Leads only"}
+          />
+          <NavRow
+            to={orgSettingsPath(activeOrgId, "terminology")}
+            icon={BookMarked}
+            title="Terminology permissions"
+            hint={FLOOR_LABEL[termbaseEditMinRole] ?? "Project lead"}
           />
           <NavRow to={orgSettingsPath(activeOrgId, "providers")} icon={KeyRound} title="AI provider keys" hint="Org keys" />
           <NavRow to={orgSettingsPath(activeOrgId, "monday")} icon={Workflow} title="Monday.com" hint="Board sync" />

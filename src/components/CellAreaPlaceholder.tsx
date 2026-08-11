@@ -79,9 +79,13 @@ function LoadError({
 }
 
 function SkeletonRows() {
+  // AQU-819: this state is a plain read — the cells projection is being
+  // fetched, or the socket hasn't finished connecting yet. Nothing is being
+  // pushed or pulled on the user's behalf, so it must not say "Syncing";
+  // that word is reserved for the outbox/edit-flush indicators.
   return (
     <LoadingTemplate
-      label="Syncing file from the cloud"
+      label="Loading file from the cloud"
       className="h-full min-h-64"
       templateClassName="min-h-64"
       data-testid="cell-area-loading"

@@ -78,3 +78,22 @@ Every agent's first step in a fresh worktree:
 | When | Branch | Result | Gate |
 | --- | --- | --- | --- |
 | — | — | integration created at `8405a9ad2` | baseline 58 tests green |
+| wave 1 | `swarm/i18n-w1-registry` | merged clean — Tasks 1–5 | — |
+| wave 1 | `swarm/i18n-w1-switcher` | merged clean — Task 6 | — |
+| wave 1 | `swarm/i18n-w1-partition` | merged clean — Task 7 | — |
+| wave 1.5 | orchestrator `1a4a4d39d` | switcher reachability fix in the `leftDock` layout | 11 AppShell/Preferences tests |
+| wave 1.5 | orchestrator `3ecdc19e4` | provider-less English fallback for `useI18n()` | **tsc clean, 723 files / 6376 tests green** |
+
+Wave 1 outcome: `pnpm test src/lib/i18n` 58 → **67 tests**; `pnpm i18n:check` reports 24 keys
+covered; no file outside `src/lib/i18n/`, `scripts/i18n-shots*`, `AppShell`, `Preferences` and
+`docs/` touched.
+
+## Surface ids that ALREADY EXIST (wave 2 must not re-declare these)
+
+`workspace-nav` (owned by `nav`), `cell-editor`, `confirm-dialog`, `project-settings` (all three
+owned by `common`), `error-state` (owned by `error`).
+
+A namespace **references** a surface id in its context; only the namespace that **declares** it
+puts it in its `surfaces` array. Two namespaces declaring the same id would put a duplicate into
+`SCREENSHOTS`. So `dialog` references `confirm-dialog` without declaring it, and `editor`
+references `cell-editor` while declaring only its new `editor-table`.

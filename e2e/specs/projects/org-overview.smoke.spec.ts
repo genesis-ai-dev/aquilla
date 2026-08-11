@@ -51,9 +51,12 @@ test("org overview renders rollup stats and project filter", async ({ alice }) =
     await expect(alice.getByText(label).first()).toBeVisible({ timeout: 5_000 })
   }
 
-  // 3. Projects page — filter bar when projects exist.
-  await alice.getByRole("link", { name: "Projects" }).click()
+  // 3. Projects page — breadcrumb includes Projects; filter bar when projects exist.
+  await alice.getByRole("navigation").getByRole("link", { name: "Projects" }).click()
   await expect(alice).toHaveURL(/\/orgs\/\d+\/projects/)
+  await expect(
+    alice.getByRole("navigation", { name: "breadcrumb" }).getByText("Projects", { exact: true }),
+  ).toHaveAttribute("aria-current", "page")
   const filterInput = alice.locator('input[aria-label="Search projects…"]')
     .or(alice.getByRole("textbox", { name: /Search projects/i }))
     .or(alice.locator('input[aria-label="Filter projects by name"]'))
@@ -292,9 +295,9 @@ test("org overview does not present false zeroes while its portfolio is loading"
   try {
     await alice.goto("/")
 
-    await expect(alice.getByTestId("org-home-loading")).toBeVisible()
-    await expect(alice.getByText("Loading dashboard…")).toBeVisible()
-    await expect(alice.getByTestId("org-home-loading-template")).toBeVisible()
+    await expect(alice.getByTestId("org-overview-loading")).toBeVisible()
+    await expect(alice.getByText("Loading overview…")).toBeVisible()
+    await expect(alice.getByTestId("org-overview-loading-template")).toBeVisible()
     await expect(alice.locator('[data-slot="app-shell-header"]')).toBeVisible()
     await expect(alice.getByTestId("loading-neutral-template")).toHaveCount(0)
     await expect(alice.getByText("Your organization is ready")).toHaveCount(0)
@@ -303,7 +306,7 @@ test("org overview does not present false zeroes while its portfolio is loading"
     releasePortfolio()
   }
 
-  await expect(alice.getByTestId("org-home-loading")).toHaveCount(0)
+  await expect(alice.getByTestId("org-overview-loading")).toHaveCount(0)
   await expect(alice.getByText("Avg translated", { exact: true })).toBeVisible()
   // Portfolio gating must not fan out into a request storm. Strict remount /
   // org-shell hydration can legitimately issue a second directory read; the

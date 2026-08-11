@@ -88,6 +88,16 @@ describe("OrgBreadcrumb", () => {
 
     expect(screen.queryByRole("link", { name: "All organizations" })).not.toBeInTheDocument()
     expect(screen.getByText("All organizations")).toHaveAttribute("aria-current", "page")
+    // Portfolio home omits a redundant "Projects" section crumb.
+    expect(screen.queryByText("Projects")).not.toBeInTheDocument()
+  })
+
+  it("shows Projects as the current crumb on the member-org projects page", () => {
+    renderBreadcrumb(<OrgBreadcrumb section="Projects" />, "/orgs/7/projects")
+
+    expect(screen.getByRole("link", { name: "All organizations" })).toHaveAttribute("href", "/orgs/all")
+    expect(screen.getByRole("link", { name: "Dev Org" })).toHaveAttribute("href", "/orgs/7")
+    expect(screen.getByText("Projects")).toHaveAttribute("aria-current", "page")
   })
 
   // AQU-790: viewing a guest org (`/orgs/:guestId`), the guest org is a sibling
@@ -104,6 +114,8 @@ describe("OrgBreadcrumb", () => {
     expect(screen.getByText("Guest Org")).toHaveAttribute("aria-current", "page")
     // The caller's owned org never appears as an ancestor of the guest org.
     expect(screen.queryByText("Dev Org")).not.toBeInTheDocument()
+    // Guest index is the project list — no separate Projects section crumb.
+    expect(screen.queryByText("Projects")).not.toBeInTheDocument()
   })
 
   it("keeps the breadcrumb on one line and scrolls horizontally instead of clipping", () => {

@@ -103,12 +103,21 @@ export function OrgBreadcrumb({ parent, section, sectionTo, orgId, trail = [] }:
   const { activeOrgId, isAllOrgs, orgs, guestOrgs, setActiveOrg, setAllOrgs } = useActiveOrg()
   const location = useLocation()
   const scrollRef = useRef<HTMLOListElement | null>(null)
-  // "Overview" is the member-org landing: omit the trailing section crumb so
-  // the org name is current (same idea as the old Projects-on-index hide).
-  // "Projects" on /orgs/all (portfolio) also omits unless a parent forces it.
+  const parsed = parseOrgPath(location.pathname)
+  // "Overview" is the member-org landing (`/overview`): omit the trailing
+  // section crumb so the org name is current.
+  // "Projects" used to be the org index and was hidden the same way; now the
+  // dedicated `/orgs/:id/projects` page shows it (Teams-style). Portfolio
+  // (`/orgs/all`) and guest-org index still omit the redundant section crumb.
   const isOverviewSection = section === "Overview"
+  const isMemberOrgProjectsPage =
+    section === "Projects" &&
+    typeof parsed?.orgKey === "number" &&
+    parsed.rest === "/projects"
   const showSection =
-    (section !== "Projects" && !isOverviewSection) || parent != null
+    parent != null ||
+    isMemberOrgProjectsPage ||
+    (section !== "Projects" && !isOverviewSection)
   const resolvedOrgId = orgId ?? (!isAllOrgs ? activeOrgId : null)
   const resolvedOrg = resolvedOrgId == null ? null : orgs.find((org) => org.id === resolvedOrgId) ?? null
   // AQU-790: a guest org (`/orgs/:guestId`) is not a membership, so it isn't in
@@ -118,7 +127,6 @@ export function OrgBreadcrumb({ parent, section, sectionTo, orgId, trail = [] }:
     resolvedOrg == null && resolvedOrgId != null
       ? guestOrgs.find((g) => g.id === resolvedOrgId) ?? null
       : null
-  const parsed = parseOrgPath(location.pathname)
   const isRootLanding =
     parsed?.orgKey === ALL_ORGS_PARAM && !showSection && resolvedOrg == null && resolvedGuestOrg == null
   // Member org "home" is `/overview` (or bare index redirecting there).

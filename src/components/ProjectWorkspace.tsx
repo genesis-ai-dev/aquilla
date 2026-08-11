@@ -806,6 +806,9 @@ export function ProjectWorkspace() {
   const [searchExpandedQuery, setSearchExpandedQuery] = useState<string | null>(null)
   const [aiSetupOpen, setAiSetupOpen] = useState(false)
   const [recordingCellId, setRecordingCellId] = useState<string | null>(null)
+  /** A line that has just been created and is waiting for its row to exist so
+   *  the timeline and the table can both land on it. */
+  const [pendingNewCell, setPendingNewCell] = useState<{ cellId: string; thenRecord: boolean } | null>(null)
   // "Make a character from this voice" dialog (Cast studio). Owned here so the
   // per-cell control in the editor's source column can open it seeded to a
   // specific line's take, and the rail's button can open it for a manual pick.
@@ -3622,28 +3625,38 @@ export function ProjectWorkspace() {
       })
       await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
       revalidateCells()
-      // Land on it exactly as clicking its row would: ring the chip, centre the
-      // track, scroll the table there. No editor is opened — the line is yours
-      // to do what you like with (Sam, 2026-08-11). The revalidate above has to
-      // have landed first or there is no row to scroll to yet.
-      setTimelineSelectedCellId(cellId)
-      handleMediaRowActivate(cellId)
-      jumpToCellIdFollowing(cellId)
-      if (opts?.thenRecord) handleOpenRecording(cellId)
+      // Land on it exactly as clicking its row would — but not yet.
+      // `revalidate()` is fire-and-forget, so the row does not exist on this
+      // tick; scrolling to it here silently did nothing and the table stayed
+      // wherever it happened to be, which on a long file is nowhere near the
+      // new line. Hand the id to the effect below, which acts the moment the
+      // row actually arrives.
+      setPendingNewCell({ cellId, thenRecord: Boolean(opts?.thenRecord) })
       return cellId
     },
-    [
-      project?.id,
-      activeFileId,
-      currentUsername,
-      getActiveCells,
-      getTokenForProjectFile,
-      revalidateCells,
-      jumpToCellIdFollowing,
-      handleOpenRecording,
-      handleMediaRowActivate,
-    ],
+    [project?.id, activeFileId, currentUsername, getActiveCells, getTokenForProjectFile, revalidateCells],
   )
+
+  /**
+   * Land on a line the moment it exists. Keyed on the store's version so it
+   * re-checks on every projection change and fires exactly once, on the first
+   * tick where the row is really there. Gives up after a few seconds rather
+   * than waiting forever on a create that never landed.
+   */
+  useEffect(() => {
+    if (!pendingNewCell) return
+    if (!readAtVersion(cellStoreVersion, () => cellStore.getCellView(pendingNewCell.cellId))) return
+    setTimelineSelectedCellId(pendingNewCell.cellId)
+    handleMediaRowActivate(pendingNewCell.cellId)
+    jumpToCellIdFollowing(pendingNewCell.cellId)
+    if (pendingNewCell.thenRecord) handleOpenRecording(pendingNewCell.cellId)
+    setPendingNewCell(null)
+  }, [pendingNewCell, cellStore, cellStoreVersion, handleMediaRowActivate, jumpToCellIdFollowing, handleOpenRecording])
+  useEffect(() => {
+    if (!pendingNewCell) return
+    const t = window.setTimeout(() => setPendingNewCell(null), 8000)
+    return () => window.clearTimeout(t)
+  }, [pendingNewCell])
 
   // FRO perf cleanup: the five openers above are pure pass-throughs through
   // EditorTable -> MemoizedRow -> EditorRow with no intermediate consumer, so

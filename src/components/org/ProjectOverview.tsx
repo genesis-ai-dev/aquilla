@@ -7,7 +7,7 @@ import { ExpandableName } from "@/components/ui/expandable-name"
 import { InitialsAvatar } from "@/components/InitialsAvatar"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { Button, buttonVariants } from "@/components/ui/button"
-import { projectSettingsPath } from "@/lib/navigation/org-paths"
+import { orgProjectsPath, projectSettingsPath } from "@/lib/navigation/org-paths"
 import { Spinner } from "@/components/ui/spinner"
 import { ButtonGroup } from "@/components/ui/button-group"
 import { useOpenWorkspace } from "@/hooks/useOpenWorkspace"
@@ -884,7 +884,9 @@ export function ProjectOverview() {
     const res = await archiveProjectRemote(id, jwt)
     setBusy(false)
     if (res.kind === "archived" || res.kind === "local-only") {
-      navigate("/projects")
+      // Member orgs split Overview (`/orgs/:id`) from Projects — land on the
+      // projects table so the archived row is gone from the active list.
+      navigate(activeOrgId != null ? orgProjectsPath(activeOrgId) : "/projects")
     } else if (res.kind === "forbidden") {
       setError(res.message ?? "Only owners can archive a project.")
     } else if (res.kind === "error") {

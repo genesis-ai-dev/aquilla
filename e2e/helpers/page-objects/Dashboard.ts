@@ -19,10 +19,12 @@ export class Dashboard {
 
   async goto(): Promise<void> {
     // Prefer the authed fixture's org id (AuthedPage.orgId) so we never resume
-    // a stale org:active into OrgRouteGate's not-found shell.
+    // a stale org:active into OrgRouteGate's not-found shell. Member orgs land
+    // Overview at `/orgs/:id` (no New project / full table) — create/list
+    // journeys need the Projects page.
     const orgId = (this.page as Page & { orgId?: number }).orgId
     const target =
-      typeof orgId === "number" && orgId > 0 ? `/orgs/${orgId}` : "/"
+      typeof orgId === "number" && orgId > 0 ? `/orgs/${orgId}/projects` : "/"
     await this.page.goto(target)
     await expect(this.page.getByRole("button", { name: /new project/i }).first()).toBeVisible({
       timeout: 15_000,

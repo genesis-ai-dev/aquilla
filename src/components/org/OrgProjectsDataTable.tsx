@@ -249,7 +249,9 @@ export function OrgProjectsDataTable({
         meta: { className: "min-w-0 w-[9rem]" },
         cell: ({ row }) => {
           const username = row.original.pm?.username
-          if (!username) return null
+          if (!username) {
+            return <span className="text-sm text-muted-foreground">Unassigned</span>
+          }
           return (
             <UsernameWithAvatar
               username={username}

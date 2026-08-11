@@ -426,6 +426,185 @@ export const editor = defineNamespace({
       "re-import the IDML.",
     "editor.idml.caretOutsideSlot":
       "Place the caret inside an InDesign text slot before adding a line break.",
+
+    // — Text-to-speech status badge on a row ————————————————————————
+    "editor.tts.translatingBeforeVoicing": "Translating before voicing",
+    "editor.tts.loadingVoiceModel": "Loading voice model",
+    "editor.tts.loadingVoiceModelPct": "Loading voice model ({percent}%)",
+    "editor.tts.loading": "Loading",
+    "editor.tts.voicingBadge": "Voicing",
+    "editor.tts.generatingAudio": "Generating audio…",
+    "editor.tts.openAudioSetup": "Open audio setup",
+    "editor.tts.failedTooltip": "Audio generation failed — click Generate to retry",
+    "editor.tts.notVoiced": "Not voiced",
+    "editor.tts.audioFailed": "Audio failed",
+
+    // — Validation button, validator popover and its history ——————————
+    "editor.validation.notValidatedTooltip": "Not validated — click to validate",
+    "editor.validation.outOfScopeTooltip": "Outside your assigned files or lanes",
+    "editor.validation.unavailableTooltip": "Validation unavailable",
+    "editor.validation.ariaValidated":
+      "Validated — {ref}. Click to remove your validation.",
+    "editor.validation.ariaValidatedByOthers":
+      "Validated by others — {ref}. Click to add your validation.",
+    "editor.validation.ariaNotValidated": "Not validated — {ref}. Click to validate.",
+    "editor.validation.validatedBy": "Validated by",
+    "editor.validation.noActiveValidators": "No active validators",
+    "editor.validation.removeYours": "Remove your validation",
+    "editor.validation.history": "History",
+    "editor.validation.noValidatorsOnState": "No validators on this state",
+    "editor.validation.you": "(you)",
+
+    // — Row chrome: numbering, selection, paragraph and timing markers ——
+    "editor.row.noTimingAria": "No specific timing — ordered by sequence",
+    "editor.row.noTimingBadge": "no timing",
+    "editor.row.newParagraph": "New paragraph",
+    "editor.row.lineAria": "Line {number}",
+    "editor.row.cellAria": "{ref} cell",
+    "editor.row.rowFallbackRef": "row {index}",
+    "editor.row.editorAria": "{ref} — {state}",
+    "editor.row.selectedTooltip": "Selected. Drag up or down to extend the range.",
+    "editor.row.selectTooltip": "Select cell. Drag up or down to select a range.",
+    "editor.row.selectedAria": "Selected cell. Drag to extend selection.",
+    "editor.row.selectAria": "Select cell. Drag to select a range.",
+    "editor.state.empty": "empty",
+    "editor.state.selfValidated": "self-validated",
+
+    // — Open-comment indicator on a row ————————————————————————————
+    "editor.comments.openOne": "{count} open comment",
+    "editor.comments.openMany": "{count} open comments",
+    "editor.comments.openOneAria": "{count} open comment — open comments",
+    "editor.comments.openManyAria": "{count} open comments — open comments",
+
+    // — Table header, lane switcher and whole-file empty states ——————
+    "editor.column.controls": "Controls",
+    "editor.lane.activeAria": "Active translation lane",
+    "editor.lane.setTargetLanguage": "Set target language",
+    "editor.lane.changeTargetLanguage": "Change target language",
+    "editor.lane.changeTargetLanguageItem": "Change target language…",
+    "editor.lane.showArchived": "Show archived ({count})",
+    "editor.empty.noMediaSegments": "No media segments yet",
+    "editor.empty.noTextSegments": "No text segments in this file",
+    "editor.empty.mediaLayerHint":
+      "Import an audio or video file, or record a take, to populate the media layer.",
+
+    // — USFM note chips in the source text ————————————————————————
+    "editor.note.footnote": "Footnote",
+    "editor.note.endnote": "Endnote",
+    "editor.note.crossReference": "Cross reference",
+    "editor.note.empty": "(empty)",
+
+    // — Managed-term chips ————————————————————————————————————————
+    "editor.term.managed": "Managed term: {term}",
+
+    // — Write failures surfaced on the row ————————————————————————
+    "editor.write.saveFailed": "Could not save — please try again",
+    "editor.write.saveSourceFailed": "Could not save source edit — please try again",
+    "editor.write.sourceEditingClosed":
+      "Source editing is no longer available on this project — the source editor " +
+      "was closed.",
+
+    // — Source column ——————————————————————————————————————————————
+    "editor.source.textAria": "Source text",
+    "editor.source.editText": "Edit source text",
+    "editor.source.doneEditing": "Done editing source",
+    "editor.source.locked": "Source is locked",
+    "editor.source.placeholder": "Source text…",
+    "editor.source.formattingBadge": "formatting",
+    "editor.source.formattingLossTooltip":
+      "Source has inline formatting that the target does not preserve. Formatting " +
+      "will be lost on export.",
+
+    // — AI drafting on the target side ————————————————————————————
+    "editor.ai.draftBadge": "AI draft · review required",
+    "editor.ai.draftBadgeAria": "AI draft — individual human review required",
+    "editor.ai.lookingUpExamples": "Looking up similar examples…",
+    "editor.ai.generatingTranslation": "Generating translation…",
+    "editor.ai.signInForTranslations": "Sign in for AI translations",
+    "editor.ai.readOnlyGit": "Read-only (imported from git)",
+    "editor.ai.setUpToEnable": "Set up AI to enable",
+    "editor.ai.serviceUnavailable": "AI service unavailable — try again shortly",
+    "editor.ai.generating": "Generating…",
+    "editor.ai.translateWithAi": "Translate with AI",
+    "editor.ai.draftParagraph": "Draft paragraph ({count} cells)",
+    "editor.ai.regenerate": "Regenerate — another AI variation",
+
+    // — Remaining action-rail tooltips ————————————————————————————
+    "editor.audio.play": "Play audio",
+    "editor.cue.playFrom": "Play from this cue",
+
+    // — Expansion tab: retrieval support ——————————————————————————
+    "editor.expansion.retrievalSupport": "Retrieval support",
+    "editor.expansion.endorsementsOne": "{count} endorsement · support {percent}%",
+    "editor.expansion.endorsementsMany": "{count} endorsements · support {percent}%",
+    "editor.expansion.lowerSupport":
+      "Lower retrieval support — review terminology and context closely.",
+    "editor.expansion.betterSupport":
+      "Better retrieval support — human review is still required.",
+
+    // — Expansion tab: back-translation ————————————————————————————
+    "editor.bt.label": "Back-translation",
+    "editor.bt.explainTooltip":
+      "An AI reading of your translation back in your reference language. Use it " +
+      "to check the meaning carried over — the AI can misread, so treat it as a " +
+      "second opinion, not proof.",
+    "editor.bt.needsAiTooltip":
+      "Sign in or add an AI model in project settings to generate back-translations",
+    "editor.bt.regenerateTooltip": "Regenerate with AI",
+    "editor.bt.regenerateAria": "Regenerate the back-translation",
+    "editor.bt.editTooltip": "Edit the back-translation",
+    "editor.bt.contributorRequired": "Contributor+ required to edit back-translations",
+    "editor.bt.translateFirst": "Translate this cell to read it back.",
+    "editor.bt.staleWarning": "Your translation changed since this was written",
+    "editor.bt.refresh": "Refresh",
+    "editor.bt.saving": "Saving…",
+    "editor.bt.emptyPitch":
+      "See what your translation says when read back, so you can check the " +
+      "meaning carried over.",
+    "editor.bt.readingItBack": "Reading it back…",
+    "editor.bt.readItBack": "Read it back with AI",
+    "editor.bt.needsAiHint":
+      "Sign in or add an AI model in project settings to generate one.",
+    "editor.bt.contributorCanGenerate": "A contributor can generate one with AI.",
+    "editor.bt.statisticalGloss": "Statistical gloss",
+    "editor.bt.statisticalGlossSub": "— word-for-word, from this project's own pairs",
+    "editor.bt.glossNotEnoughPairs":
+      "Not enough translated pairs in this project to build a gloss yet.",
+    "editor.bt.glossDisclaimer":
+      "Built statistically from this project's translated pairs — no AI involved. " +
+      "It's only as good as the corpus so far: expect rough, literal, sometimes " +
+      "wrong word choices. Use it as a hint, not a reading.",
+    "editor.bt.alignment": "Alignment",
+    "editor.bt.alignmentSub": "— word-level source/target view",
+
+    // — Expansion tab: recording ————————————————————————————————
+    "editor.expansion.recording": "Recording",
+    "editor.voice.synthesizeWith": "Synthesize with {name}",
+    "editor.voice.dropToSynthesize": "Drop to synthesize",
+    "editor.audio.reRecordShort": "Re-record",
+    "editor.cell.transcribeShort": "Transcribe",
+    "editor.voice.aiGeneratedHint":
+      "AI generated voice. Drag a voice from the toolbar to regenerate, or:",
+    "editor.audio.recordOver": "Record over",
+    "editor.audio.noAudioYet":
+      "No audio yet. Record below, or drag a voice onto this cell from the " +
+      "toolbar above.",
+    "editor.audio.recordShort": "Record",
+
+    // — Expansion tabs: issues and metadata ————————————————————————
+    "editor.expansion.issues": "Issues",
+    "editor.expansion.metadata": "Metadata",
+    "editor.issues.none": "No translation rule issues on this cell.",
+    "editor.issues.waived": "Waived",
+
+    // — Draft-a-whole-paragraph confirm dialog ——————————————————————
+    "editor.paragraph.confirmTitle": "Draft this paragraph?",
+    "editor.paragraph.confirmAll":
+      "Draft this paragraph? {total} cells will be drafted as one unit.",
+    "editor.paragraph.confirmPartial":
+      "Draft this paragraph? {draftable} of {total} cells will be drafted; " +
+      "already-validated cells are kept as-is.",
+    "editor.paragraph.confirmAction": "Draft paragraph",
   },
   context: {
     _context: {
@@ -2564,6 +2743,792 @@ export const editor = defineNamespace({
           "be inserted. Imperative — it tells the user where to put the cursor. " +
           "'InDesign' is the product name and stays as-is; 'text slot' is the " +
           "translatable frame in the layout.",
+      },
+      "editor.tts.translatingBeforeVoicing": {
+        description:
+          "Tooltip on the tiny (9px) status badge beside a row while the AI is " +
+          "drafting the translation that will then be spoken. Explains the two-step " +
+          "order: translate first, voice second.",
+      },
+      "editor.tts.loadingVoiceModel": {
+        description:
+          "Tooltip while the speech model is being downloaded before it can speak " +
+          "this line. A one-off cost, not per line.",
+      },
+      "editor.tts.loadingVoiceModelPct": {
+        description:
+          "Same tooltip as editor.tts.loadingVoiceModel with download progress.",
+        placeholders: {
+          percent: "Whole-number download percentage, already rounded, no % sign.",
+        },
+      },
+      "editor.tts.loading": {
+        description:
+          "The 9px badge label itself while the speech model downloads; a numeric " +
+          "percentage may be appended after it. Present participle. Almost no " +
+          "room — one short word.",
+        maxLength: 12,
+      },
+      "editor.tts.voicingBadge": {
+        description:
+          "The 9px badge label while speech is actually being synthesized for this " +
+          "line. Present participle of 'to voice'. One short word.",
+        maxLength: 12,
+      },
+      "editor.tts.generatingAudio": {
+        description:
+          "Tooltip behind editor.tts.voicingBadge, saying what is happening in " +
+          "plainer words. Trailing character is a single ellipsis glyph.",
+      },
+      "editor.tts.openAudioSetup": {
+        description:
+          "Recovery button in the audio-error popover; it navigates to the " +
+          "project's voice/audio settings so the user can fix the configuration. " +
+          "Imperative.",
+        maxLength: 24,
+      },
+      "editor.tts.failedTooltip": {
+        description:
+          "Tooltip on the muted badge left behind after the user dismissed an " +
+          "audio-generation error. 'Generate' names the AI-voice button on the row, " +
+          "so keep it recognisable as that control's name.",
+      },
+      "editor.tts.notVoiced": {
+        description:
+          "Muted 9px badge shown after dismissing an audio error, so the row does " +
+          "not look as though it has audio. A state, not an error. Truncated at " +
+          "80px — very tight.",
+        maxLength: 14,
+      },
+      "editor.tts.audioFailed": {
+        description:
+          "Red 9px badge that opens the audio-error popover. Deliberately says " +
+          "which thing failed rather than just 'Failed', because a row can carry " +
+          "several kinds of failure. Truncated at 80px.",
+        maxLength: 14,
+      },
+      "editor.validation.notValidatedTooltip": {
+        description:
+          "Tooltip on a row's validation button when the user may sign this " +
+          "translation off. Two halves: the current state, then the invitation.",
+      },
+      "editor.validation.outOfScopeTooltip": {
+        description:
+          "Tooltip when the validation button is unavailable because this cell's " +
+          "file or language lane is not assigned to the user. A scope limit, not a " +
+          "role limit.",
+      },
+      "editor.validation.unavailableTooltip": {
+        description:
+          "Tooltip when validation is unavailable for any other reason, typically " +
+          "the user's project role. Deliberately vague — do not guess a cause.",
+      },
+      "editor.validation.ariaValidated": {
+        description:
+          "Screen-reader name of the validation button when THIS user has already " +
+          "signed the cell off; pressing it withdraws that sign-off. Three parts: " +
+          "state, which cell, what the press does.",
+        placeholders: {
+          ref:
+            "The cell's reference, e.g. 'MAT 3:16', or a fallback row number. From " +
+            "the data — do not translate.",
+        },
+      },
+      "editor.validation.ariaValidatedByOthers": {
+        description:
+          "Screen-reader name when other reviewers have signed off but this user " +
+          "has not; pressing it adds this user's sign-off alongside theirs.",
+        placeholders: {
+          ref: "The cell's reference or fallback row number. Do not translate.",
+        },
+      },
+      "editor.validation.ariaNotValidated": {
+        description:
+          "Screen-reader name when nobody has signed the cell off yet.",
+        placeholders: {
+          ref: "The cell's reference or fallback row number. Do not translate.",
+        },
+      },
+      "editor.validation.validatedBy": {
+        description:
+          "Heading of the popover listing the people who have signed this " +
+          "translation off. A sentence fragment introducing the list of names that " +
+          "follows.",
+        maxLength: 22,
+      },
+      "editor.validation.noActiveValidators": {
+        description:
+          "Empty state of that popover: sign-offs existed at some point but none is " +
+          "current (the translation changed, or they were withdrawn). The history " +
+          "below still shows them.",
+      },
+      "editor.validation.removeYours": {
+        description:
+          "Tooltip and screen-reader name of the small trash button beside the " +
+          "user's own name in the validator list; it withdraws only their sign-off. " +
+          "Imperative.",
+        maxLength: 26,
+      },
+      "editor.validation.history": {
+        description:
+          "Divider heading inside the validator popover, above the earlier states of " +
+          "this cell and who had signed each one off. A noun.",
+        maxLength: 16,
+      },
+      "editor.validation.noValidatorsOnState": {
+        description:
+          "Shown under an earlier version of the translation in the validator " +
+          "history when nobody had signed that particular version off. 'State' " +
+          "means that past version of the text.",
+      },
+      "editor.validation.you": {
+        description:
+          "Marker appended after the current user's own name in validator lists, so " +
+          "they can spot themselves. Parenthesised, second person.",
+        maxLength: 12,
+      },
+      "editor.row.noTimingAria": {
+        description:
+          "Screen-reader name of a row in the timeline view whose cell has no start " +
+          "or end time, so it is placed by document order instead. Explains the " +
+          "consequence, not just the fact.",
+      },
+      "editor.row.noTimingBadge": {
+        description:
+          "Tiny (9px) amber badge in the corner of such a row. Lower-case because it " +
+          "is a badge. Two words at most.",
+        maxLength: 14,
+      },
+      "editor.row.newParagraph": {
+        description:
+          "Tooltip on the pilcrow (¶) marker drawn between two rows where a new " +
+          "paragraph starts in the source document. A noun phrase naming what the " +
+          "marker means, not an action.",
+        maxLength: 20,
+      },
+      "editor.row.lineAria": {
+        description:
+          "Screen-reader name of the small number pill at the left of a row.",
+        placeholders: {
+          number:
+            "The line or verse number as printed in the pill. A number — do not " +
+            "translate.",
+        },
+      },
+      "editor.row.cellAria": {
+        description:
+          "Screen-reader name of a whole row in the editing grid, used when " +
+          "navigating row by row with the keyboard. 'Cell' is this app's word for " +
+          "one translation unit (usually a verse or a line).",
+        placeholders: {
+          ref: "The cell's reference or fallback row number. Do not translate.",
+        },
+      },
+      "editor.row.rowFallbackRef": {
+        description:
+          "Stand-in reference used in row and editor names when a cell has no " +
+          "scripture reference of its own — just its position in the file. " +
+          "Lower-case because it is substituted mid-phrase.",
+        placeholders: { index: "1-based position of the row in the file." },
+      },
+      "editor.row.editorAria": {
+        description:
+          "Screen-reader name of the editable translation box, so focusing it " +
+          "announces which cell it is and what state that cell is in.",
+        placeholders: {
+          ref: "The cell's reference or fallback row number. Do not translate.",
+          state:
+            "One of the state words: editor.state.validated, " +
+            "editor.state.unvalidated, editor.state.selfValidated, " +
+            "editor.state.empty — already translated.",
+        },
+      },
+      "editor.row.selectedTooltip": {
+        description:
+          "Tooltip on a row's selection checkbox when the row IS selected, " +
+          "explaining the drag gesture that extends the selection to neighbouring " +
+          "rows.",
+      },
+      "editor.row.selectTooltip": {
+        description:
+          "Tooltip on the selection checkbox when the row is NOT selected: what a " +
+          "click does, then what a drag does.",
+      },
+      "editor.row.selectedAria": {
+        description:
+          "Screen-reader name of the selection checkbox when the row is selected. " +
+          "Shorter than the tooltip because it is read aloud.",
+      },
+      "editor.row.selectAria": {
+        description:
+          "Screen-reader name of the selection checkbox when the row is not " +
+          "selected.",
+      },
+      "editor.state.empty": {
+        description:
+          "State word for a cell with no translation at all, used inside the " +
+          "editor's screen-reader name. Lower-case, mid-phrase.",
+        maxLength: 12,
+      },
+      "editor.state.selfValidated": {
+        description:
+          "State word for a cell the CURRENT user has signed off, as opposed to one " +
+          "signed off by someone else. Used inside the editor's screen-reader name. " +
+          "Lower-case, mid-phrase.",
+        maxLength: 20,
+      },
+      "editor.comments.openOne": {
+        description:
+          "Singular tooltip on the blue speech-bubble indicator showing a row has " +
+          "unresolved discussion. 'Open' means not yet resolved. Comments are team " +
+          "discussion, not footnotes.",
+        placeholders: { count: "Always 1 for this form." },
+      },
+      "editor.comments.openMany": {
+        description: "Plural of editor.comments.openOne.",
+        placeholders: { count: "Number of unresolved comment threads on the cell." },
+      },
+      "editor.comments.openOneAria": {
+        description:
+          "Screen-reader name of that indicator, singular: the count plus what " +
+          "clicking does (opens the comments panel).",
+        placeholders: { count: "Always 1 for this form." },
+      },
+      "editor.comments.openManyAria": {
+        description: "Plural of editor.comments.openOneAria.",
+        placeholders: { count: "Number of unresolved comment threads on the cell." },
+      },
+      "editor.column.controls": {
+        description:
+          "Heading of the editing table's left column in the audio lens, where the " +
+          "per-line voice and playback controls sit instead of source text. Replaces " +
+          "editor.column.source in that mode, so it must read as a column heading.",
+        maxLength: 14,
+      },
+      "editor.lane.activeAria": {
+        description:
+          "Screen-reader name of the pill in the table header that shows which " +
+          "language lane is being edited and opens the lane switcher. A 'lane' is " +
+          "one target language inside a multi-language project.",
+      },
+      "editor.lane.setTargetLanguage": {
+        description:
+          "Shown in place of a language name when the project has no target " +
+          "language set yet, and as the screen-reader name of the control that sets " +
+          "one. Imperative.",
+        maxLength: 26,
+      },
+      "editor.lane.changeTargetLanguage": {
+        description:
+          "Screen-reader name of the same control once a target language IS set, " +
+          "where pressing it replaces the existing one. Imperative.",
+        maxLength: 26,
+      },
+      "editor.lane.changeTargetLanguageItem": {
+        description:
+          "Menu item inside the lane switcher that opens the target-language " +
+          "editor. Trailing ellipsis means 'opens a further dialog' — keep it.",
+        maxLength: 28,
+      },
+      "editor.lane.showArchived": {
+        description:
+          "Menu item in the lane switcher that reveals retired language lanes, " +
+          "hidden by default so they do not clutter the list. Imperative, with the " +
+          "count in parentheses.",
+        placeholders: { count: "Number of archived lanes that would be revealed." },
+        maxLength: 28,
+      },
+      "editor.empty.noMediaSegments": {
+        description:
+          "Heading filling the editing area in the audio lens when a timed file has " +
+          "no media clips yet. 'Segments' are the individual timed pieces.",
+        maxLength: 30,
+      },
+      "editor.empty.noTextSegments": {
+        description:
+          "Heading filling the editing area in the text lens when a timed file has " +
+          "no text cells. A state, not an error.",
+        maxLength: 34,
+      },
+      "editor.empty.mediaLayerHint": {
+        description:
+          "Body under editor.empty.noMediaSegments, listing the two ways to get " +
+          "clips: import a file, or record. 'Media layer' is the audio/video track " +
+          "of the file.",
+      },
+      "editor.note.footnote": {
+        description:
+          "Kind label on the tooltip of a raised note marker in the source text: a " +
+          "note printed at the foot of the page. Singular; the plural heading is " +
+          "editor.footnotes.label.",
+        maxLength: 16,
+      },
+      "editor.note.endnote": {
+        description:
+          "Kind label for a note collected at the end of the book rather than at " +
+          "the foot of the page. Must be distinguishable from editor.note.footnote.",
+        maxLength: 16,
+      },
+      "editor.note.crossReference": {
+        description:
+          "Kind label for a note that points at other scripture passages rather " +
+          "than explaining anything — the parallel-passage references printed with " +
+          "a verse.",
+        maxLength: 22,
+      },
+      "editor.note.empty": {
+        description:
+          "Italic stand-in inside a note's tooltip when the note carries no text. " +
+          "Parenthesised and lower-case because it substitutes for the missing " +
+          "content, not for a label.",
+        maxLength: 14,
+      },
+      "editor.term.managed": {
+        description:
+          "Tooltip and screen-reader name of a highlighted word in the source that " +
+          "matches an entry in the project's approved terminology list. 'Managed' " +
+          "means the project has an agreed rendering for it, which the user can " +
+          "look up by clicking.",
+        placeholders: {
+          term:
+            "The source-language word or phrase itself — project content, so never " +
+            "translate the substituted value.",
+        },
+      },
+      "editor.write.saveFailed": {
+        description:
+          "Inline error (role=alert) when a translation edit could not even be " +
+          "queued locally — usually browser storage being full or blocked. The " +
+          "optimistic text is rolled back, so the user must retype or retry. " +
+          "Imperative second half.",
+      },
+      "editor.write.saveSourceFailed": {
+        description:
+          "The same failure for an edit to the SOURCE text, which only project " +
+          "leads can make. Named separately so the user knows which side was lost.",
+      },
+      "editor.write.sourceEditingClosed": {
+        description:
+          "Inline error when the user's permission to edit source text was " +
+          "withdrawn mid-edit, so the open source editor was closed. It explains " +
+          "why the editor vanished; keep the cause-and-effect order.",
+      },
+      "editor.source.textAria": {
+        description:
+          "Screen-reader name of the read-only source column of one row — the text " +
+          "being translated from.",
+      },
+      "editor.source.editText": {
+        description:
+          "Tooltip and screen-reader name of the pencil that opens the source text " +
+          "for editing. Only project leads see it; changing source text propagates " +
+          "downstream, so it is deliberately explicit. Imperative.",
+        maxLength: 24,
+      },
+      "editor.source.doneEditing": {
+        description:
+          "The same pencil's label while the source editor is open; pressing it " +
+          "closes the editor. It does not discard anything — edits are already " +
+          "committed as the user types.",
+        maxLength: 24,
+      },
+      "editor.source.locked": {
+        description:
+          "Screen-reader name of the padlock shown where the source pencil would " +
+          "be when source text cannot be edited (for example the source is pinned " +
+          "to an external repository). The tooltip beside it gives the reason.",
+      },
+      "editor.source.placeholder": {
+        description:
+          "Placeholder inside the open source-text editor when the cell has no " +
+          "source text. Ends with an ellipsis glyph.",
+        maxLength: 20,
+      },
+      "editor.source.formattingBadge": {
+        description:
+          "Tiny (9px) amber badge in a row's context line warning that the source " +
+          "carries inline formatting (bold, italics) the translation cannot keep. " +
+          "Lower-case badge — one word.",
+        maxLength: 14,
+      },
+      "editor.source.formattingLossTooltip": {
+        description:
+          "Tooltip behind editor.source.formattingBadge. Two sentences: what the " +
+          "source has, then the consequence at export time. It is a warning about " +
+          "losing styling, not about losing text.",
+      },
+      "editor.ai.draftBadge": {
+        description:
+          "Amber 9px badge on a translation the AI wrote that no human has checked " +
+          "yet. Two halves separated by a middle dot: what it is, then what is " +
+          "required. The 'review required' half is a policy statement and must " +
+          "survive.",
+        maxLength: 30,
+      },
+      "editor.ai.draftBadgeAria": {
+        description:
+          "Screen-reader name of that badge, spelling out the policy: each AI draft " +
+          "must be reviewed one at a time and cannot be approved in bulk.",
+      },
+      "editor.ai.lookingUpExamples": {
+        description:
+          "Status text while the app searches the project's existing translations " +
+          "for similar passages to feed the model, before any drafting begins. " +
+          "Trailing ellipsis glyph.",
+      },
+      "editor.ai.generatingTranslation": {
+        description:
+          "Status text once the model is actually producing the draft — the step " +
+          "after editor.ai.lookingUpExamples. Trailing ellipsis glyph.",
+      },
+      "editor.ai.signInForTranslations": {
+        description:
+          "Tooltip on the AI-draft button when nobody is signed in, so no model can " +
+          "be called. Imperative — the sign-in is the fix.",
+      },
+      "editor.ai.readOnlyGit": {
+        description:
+          "Tooltip on the AI-draft button when the file came from a Git repository " +
+          "and cannot be written to from here. 'git' is the tool's name and stays " +
+          "as-is.",
+      },
+      "editor.ai.setUpToEnable": {
+        description:
+          "Tooltip on an AI button when the project has no model configured yet; " +
+          "clicking opens the setup. 'Set up' is the verb, not the noun 'setup'.",
+        maxLength: 26,
+      },
+      "editor.ai.serviceUnavailable": {
+        description:
+          "Tooltip when the AI service is configured but currently unreachable. The " +
+          "clause after the dash is the reassurance that it is temporary and needs " +
+          "no action from the user.",
+      },
+      "editor.ai.generating": {
+        description:
+          "Tooltip on an AI button while its request is in flight. Present " +
+          "participle, trailing ellipsis glyph.",
+        maxLength: 18,
+      },
+      "editor.ai.translateWithAi": {
+        description:
+          "Tooltip on the sparkle button that asks the model to draft THIS one " +
+          "cell. Imperative.",
+        maxLength: 24,
+      },
+      "editor.ai.draftParagraph": {
+        description:
+          "Tooltip on the button that drafts every cell of the paragraph in one " +
+          "model call, so the sentences read together. The count tells the user the " +
+          "scope before they click.",
+        placeholders: { count: "Number of cells in the paragraph." },
+      },
+      "editor.ai.regenerate": {
+        description:
+          "Tooltip on the refresh button that asks the model for a different draft " +
+          "of a cell that already has one. The clause after the dash is the point: " +
+          "it produces an alternative, not a correction.",
+      },
+      "editor.audio.play": {
+        description:
+          "Tooltip on the action-rail play button for a cell's recording. Swaps " +
+          "with editor.audio.pause. Imperative.",
+        maxLength: 18,
+      },
+      "editor.cue.playFrom": {
+        description:
+          "Tooltip on the action-rail button that starts the file's master " +
+          "audio/video from this cell's timecode, rather than playing the cell's own " +
+          "recording. 'Cue' is the timed entry.",
+        maxLength: 24,
+      },
+      "editor.expansion.retrievalSupport": {
+        description:
+          "Name of the expansion tab showing how much evidence from the project's " +
+          "own existing translations backs this cell's draft. 'Retrieval' is the " +
+          "search step that finds that evidence. Tab labels sit beside an icon and " +
+          "hide on narrow screens.",
+        maxLength: 22,
+      },
+      "editor.expansion.endorsementsOne": {
+        description:
+          "Singular summary line in the retrieval-support tab: how many times " +
+          "reviewers have endorsed this rendering, and the resulting support score " +
+          "as a percentage. The middle dot separates the two figures.",
+        placeholders: {
+          count: "Always 1 for this form.",
+          percent: "Support score 0-100, already rounded, without the % sign.",
+        },
+      },
+      "editor.expansion.endorsementsMany": {
+        description: "Plural of editor.expansion.endorsementsOne.",
+        placeholders: {
+          count: "Number of endorsements, which may be 0.",
+          percent: "Support score 0-100, already rounded, without the % sign.",
+        },
+      },
+      "editor.expansion.lowerSupport": {
+        description:
+          "Advice shown when the retrieval-support score is below the threshold: " +
+          "little comparable material was found, so check the wording carefully. Not " +
+          "a claim that the translation is wrong.",
+      },
+      "editor.expansion.betterSupport": {
+        description:
+          "Advice shown when the score is healthy. The clause after the dash is " +
+          "load-bearing: a good score never removes the need for human review.",
+      },
+      "editor.bt.label": {
+        description:
+          "Name of the expansion tab and its heading: the AI's rendering of the " +
+          "finished translation back into a language the reviewer reads, used to " +
+          "check that the meaning carried over. A standard Bible-translation term.",
+        maxLength: 24,
+      },
+      "editor.bt.explainTooltip": {
+        description:
+          "Tooltip explaining what a back-translation is and how much to trust it. " +
+          "The caution after the dash is the important half and must survive.",
+      },
+      "editor.bt.needsAiTooltip": {
+        description:
+          "Tooltip on the disabled regenerate button when no AI model is available: " +
+          "either nobody is signed in, or the project has no model configured. Both " +
+          "routes are offered.",
+      },
+      "editor.bt.regenerateTooltip": {
+        description:
+          "Tooltip on the enabled regenerate button; it asks the model to read the " +
+          "current translation back again, replacing the existing reading. " +
+          "Imperative.",
+        maxLength: 24,
+      },
+      "editor.bt.regenerateAria": {
+        description:
+          "Screen-reader name of that same regenerate button, naming its object " +
+          "explicitly because the icon alone is ambiguous on this panel.",
+      },
+      "editor.bt.editTooltip": {
+        description:
+          "Tooltip and screen-reader name of the pencil that opens the " +
+          "back-translation for hand-editing, so a reviewer can correct the AI's " +
+          "reading. Imperative.",
+        maxLength: 26,
+      },
+      "editor.bt.contributorRequired": {
+        description:
+          "Tooltip on the disabled pencil when the user's project role is below " +
+          "contributor. 'Contributor+' means contributor or any higher role — keep " +
+          "the 'or above' sense.",
+      },
+      "editor.bt.translateFirst": {
+        description:
+          "Empty state of the back-translation tab when the cell has no translation " +
+          "yet: there is nothing to read back. Full sentence.",
+      },
+      "editor.bt.staleWarning": {
+        description:
+          "Amber warning inside the back-translation tab: the translation was edited " +
+          "after this reading was produced, so the reading may describe older text. " +
+          "A Refresh button sits beside it.",
+      },
+      "editor.bt.refresh": {
+        description:
+          "Small amber button beside editor.bt.staleWarning that regenerates the " +
+          "reading from the current translation. Imperative; very little room.",
+        maxLength: 14,
+      },
+      "editor.bt.saving": {
+        description:
+          "Label of the back-translation Save button while the edit is being " +
+          "written. Present participle — it replaces common.save, so it must be " +
+          "clearly a status and not the command.",
+        maxLength: 14,
+      },
+      "editor.bt.emptyPitch": {
+        description:
+          "Invitation shown when no back-translation exists yet, explaining what the " +
+          "feature is for before the user spends a model call on it. One sentence, " +
+          "wrapped at about 34 characters, so avoid very long words.",
+      },
+      "editor.bt.readingItBack": {
+        description:
+          "Label of the generate button while the model is working. Present " +
+          "participle of the same idiom as editor.bt.readItBack.",
+        maxLength: 24,
+      },
+      "editor.bt.readItBack": {
+        description:
+          "Primary button that generates the first back-translation. 'Read it back' " +
+          "is the plain-language version of 'back-translate' — keep it approachable " +
+          "rather than technical. Imperative.",
+        maxLength: 26,
+      },
+      "editor.bt.needsAiHint": {
+        description:
+          "Small print under the disabled generate button, offering the two ways to " +
+          "make an AI model available. Full sentence.",
+      },
+      "editor.bt.contributorCanGenerate": {
+        description:
+          "Small print shown instead of the generate button to a user whose role is " +
+          "too low: a teammate with more permission can do it. Neutral, not a " +
+          "refusal aimed at the reader.",
+      },
+      "editor.bt.statisticalGloss": {
+        description:
+          "Heading of a collapsed section holding a rough word-for-word rendering " +
+          "computed from the project's own translated pairs, offered as a " +
+          "cross-check on the AI reading. 'Gloss' is the word-by-word sense.",
+        maxLength: 24,
+      },
+      "editor.bt.statisticalGlossSub": {
+        description:
+          "Muted continuation of the statistical-gloss heading, on the same line. " +
+          "The leading dash joins it to the heading, so keep an equivalent " +
+          "separator and do not start with a capital.",
+      },
+      "editor.bt.glossNotEnoughPairs": {
+        description:
+          "Italic message when the project has too few translated pairs to compute a " +
+          "word-for-word gloss. It is a matter of corpus size, not an error.",
+      },
+      "editor.bt.glossDisclaimer": {
+        description:
+          "10px small print under the statistical gloss. Three points, in order: it " +
+          "is computed from the project's own pairs with no AI, its quality tracks " +
+          "how much has been translated so far, and it should be treated as a hint. " +
+          "The honesty here is the point — do not soften it.",
+      },
+      "editor.bt.alignment": {
+        description:
+          "Heading of a collapsed section showing which source words correspond to " +
+          "which target words. 'Alignment' is the standard term for that pairing.",
+        maxLength: 20,
+      },
+      "editor.bt.alignmentSub": {
+        description:
+          "Muted continuation of the alignment heading, on the same line. The " +
+          "leading dash joins it to the heading; do not start with a capital. The " +
+          "slash separates the two sides, named by editor.column.source and " +
+          "editor.column.target elsewhere.",
+      },
+      "editor.expansion.recording": {
+        description:
+          "Name of the expansion tab holding this cell's spoken audio — the human " +
+          "recording and any synthesized voice. A noun, beside an icon, hidden on " +
+          "narrow screens.",
+        maxLength: 18,
+      },
+      "editor.voice.synthesizeWith": {
+        description:
+          "Label inside the drop zone while a voice from the cast toolbar is being " +
+          "dragged over the cell: releasing synthesizes this line in that voice. " +
+          "Imperative.",
+        placeholders: {
+          name:
+            "The dragged voice's own name from the project's cast — user data, so " +
+            "never translate the substituted value.",
+        },
+      },
+      "editor.voice.dropToSynthesize": {
+        description:
+          "The same drop-zone label when the dragged voice cannot be named. " +
+          "Imperative: describes the release gesture and its result.",
+        maxLength: 26,
+      },
+      "editor.audio.reRecordShort": {
+        description:
+          "Small button in the recording tab that re-opens the recording modal to " +
+          "replace the existing take. The short form of editor.cell.reRecord, for a " +
+          "narrow row of buttons.",
+        maxLength: 16,
+      },
+      "editor.cell.transcribeShort": {
+        description:
+          "Small button in the recording tab that runs speech-to-text on the take. " +
+          "The short form of editor.cell.transcribe, without naming the model.",
+        maxLength: 16,
+      },
+      "editor.voice.aiGeneratedHint": {
+        description:
+          "Line above the buttons in the recording tab when the cell's audio is " +
+          "synthetic. Two parts: what this audio is, then how to change it. The " +
+          "trailing colon leads into the button beside it, so keep it.",
+      },
+      "editor.audio.recordOver": {
+        description:
+          "Small button offering to replace a synthesized voice with a real human " +
+          "recording. Imperative; 'over' carries the replacing sense.",
+        maxLength: 18,
+      },
+      "editor.audio.noAudioYet": {
+        description:
+          "Empty state of the recording tab, offering the two ways to get audio: " +
+          "record it, or drag a synthetic voice onto the cell. 'Below' and 'above' " +
+          "refer to the button under this text and the cast toolbar over the table.",
+      },
+      "editor.audio.recordShort": {
+        description:
+          "Primary button in the recording tab's empty state; it opens the " +
+          "recording modal. Imperative, one word.",
+        maxLength: 14,
+      },
+      "editor.expansion.issues": {
+        description:
+          "Name of the expansion tab listing translation-rule problems found in this " +
+          "cell (a checklist of project conventions), beside a warning icon. Plural " +
+          "noun; the tab is disabled when there are none.",
+        maxLength: 16,
+      },
+      "editor.expansion.metadata": {
+        description:
+          "Name of the expansion tab showing extra untranslated columns that came in " +
+          "with the import (reference codes, quotes, tags, attached images). A noun.",
+        maxLength: 18,
+      },
+      "editor.issues.none": {
+        description:
+          "Reassuring empty state of the Issues tab: no rule was broken in this " +
+          "cell. Full sentence with a period.",
+      },
+      "editor.issues.waived": {
+        description:
+          "Divider heading above rule problems the team has explicitly decided to " +
+          "accept, so they no longer count against the cell. Past participle of " +
+          "'to waive' — a deliberate exemption, not something ignored by accident.",
+        maxLength: 16,
+      },
+      "editor.paragraph.confirmTitle": {
+        description:
+          "Title of the dialog confirming that the AI should draft every cell of the " +
+          "paragraph in one go. A question, so keep the question mark.",
+        maxLength: 30,
+      },
+      "editor.paragraph.confirmAll": {
+        description:
+          "Body of that dialog when every cell in the paragraph will be drafted. It " +
+          "repeats the question and then states the scope. 'As one unit' is the " +
+          "selling point: the sentences are drafted together so they read as " +
+          "continuous prose.",
+        placeholders: { total: "Number of cells in the paragraph." },
+      },
+      "editor.paragraph.confirmPartial": {
+        description:
+          "Body of that dialog when some cells are already signed off and will be " +
+          "left alone. Three parts: the question, the scope, and the reassurance " +
+          "that validated work is not touched.",
+        placeholders: {
+          draftable: "Number of cells that will actually be drafted.",
+          total: "Total number of cells in the paragraph.",
+        },
+      },
+      "editor.paragraph.confirmAction": {
+        description:
+          "Confirming button of the draft-paragraph dialog. Imperative, and it must " +
+          "match the wording of editor.ai.draftParagraph's tooltip closely enough " +
+          "that the user recognises the same action.",
+        maxLength: 22,
       },
     },
   },

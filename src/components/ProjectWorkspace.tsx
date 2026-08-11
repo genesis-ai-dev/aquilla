@@ -5977,6 +5977,7 @@ export function ProjectWorkspace() {
                       cells={audioMergedCells}
                       seekSec={videoSeek}
                       togglePlay={videoToggle}
+                      suspended={recordingCellId !== null}
                       onVideoTime={setVideoClockSec}
                       onVideoPlaying={setVideoClockPlaying}
                       onVideoDuration={setVideoDurationSec}

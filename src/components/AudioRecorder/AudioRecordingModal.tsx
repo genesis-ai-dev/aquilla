@@ -13,6 +13,8 @@ import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { cn } from "@/lib/utils"
+import { MIN_USEFUL_REGION_SEC } from "@/lib/timeline/lane-timing"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { useAudioRecorder } from "@/hooks/useAudioRecorder"
@@ -554,8 +556,25 @@ export function AudioRecordingModal({
                 {activeCell.cellLabel ?? `Cell ${activeIndex + 1}`}
               </span>
               {targetSec != null && (
-                <span className="rounded bg-muted px-1.5 py-0.5 tabular-nums">
+                <span
+                  data-testid="recorder-window"
+                  className={cn(
+                    "rounded px-1.5 py-0.5 tabular-nums",
+                    // AQU-646: a section this short is very likely a mistake —
+                    // say so and let them carry on anyway. Never a block; it
+                    // stays the user's call (Sam).
+                    targetSec < MIN_USEFUL_REGION_SEC
+                      ? "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300"
+                      : "bg-muted",
+                  )}
+                  title={
+                    targetSec < MIN_USEFUL_REGION_SEC
+                      ? "This section is very short — you can still record, but there is barely room for anything."
+                      : undefined
+                  }
+                >
                   {targetSec.toFixed(1)}s window
+                  {targetSec < MIN_USEFUL_REGION_SEC ? " — very short" : ""}
                 </span>
               )}
               <span className="ml-auto tabular-nums">

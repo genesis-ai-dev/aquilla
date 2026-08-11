@@ -70,6 +70,14 @@ export function subtitleSpanSec(cell: CellData): SpanSec | null {
 /** A dub chip can't be trimmed shorter than this (matches card MIN_DUR_SEC). */
 export const MIN_TARGET_LEN_SEC = 0.2
 
+/**
+ * AQU-646: below this, a section is very likely a mistake — a rounding gap
+ * between two cues rather than a place anyone meant to put something. The user
+ * is TOLD and may carry on regardless; it is never a block (Sam, 2026-08-11).
+ * Lives here beside the other span thresholds so there is one of it.
+ */
+export const MIN_USEFUL_REGION_SEC = 0.5
+
 export interface TargetChipGeom {
   /** File-second where the CLIP'S SAMPLE ZERO sits (= target_start_ms; the
    *  round-7 formalization — playback always cued clips relative to this). */

@@ -60,6 +60,12 @@ export interface MediaVideoPaneProps {
    *  standalone arrangement, so anything stateful would drift out of step with
    *  them. Toggling against the element's own `paused` cannot. */
   togglePlay?: { nonce: number } | null
+  /** True while the recorder is open. The picture stops and stays stopped —
+   *  `pauseAllPlayback()` only reaches the queue's own elements, so without
+   *  this the mic records the film's soundtrack into the take (and the mic is
+   *  opened with echo cancellation off). Deliberately not auto-resumed: after
+   *  a take you want to hear the take, not the film starting up again. */
+  suspended?: boolean
   /** Only called in the standalone arrangement, where the video owns the clock.
    *  null clears it — the store outlives this component, so a stale position
    *  would go on driving the playhead. */
@@ -86,6 +92,7 @@ export function MediaVideoPane({
   cells,
   seekSec,
   togglePlay,
+  suspended,
   onVideoTime,
   onVideoPlaying,
   onVideoDuration,
@@ -325,6 +332,22 @@ export function MediaVideoPane({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the NONCE is the
     // command; re-running on `slaved`/`requestPlay` would replay a stale press.
   }, [toggleNonce])
+
+  // The recorder is open: stop the picture, and keep stopping it. Re-asserted
+  // on every tick of `suspended` rather than fired once, because the native
+  // controls are right there and a stray click on play mid-take would put the
+  // soundtrack straight into the recording.
+  useEffect(() => {
+    if (!suspended) return
+    const video = videoRef.current
+    if (!video) return
+    wantPlayRef.current = false
+    video.pause()
+    const t = window.setInterval(() => {
+      if (videoRef.current && !videoRef.current.paused) videoRef.current.pause()
+    }, 250)
+    return () => window.clearInterval(t)
+  }, [suspended])
 
   // A new source is a fresh element as far as we're concerned.
   useEffect(() => {

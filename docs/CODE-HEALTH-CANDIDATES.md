@@ -37,13 +37,24 @@ Prune entries once a later run completes them.
   run. Proof needed: full gate green (comment-only diff can't change test outcomes, but the
   routine still requires it) + `git diff` shows only comment lines changed.
 
-- **Lower-confidence zero-importer exports, needs product/ownership call, not blind deletion**:
+ - **Lower-confidence zero-importer exports, needs product/ownership call, not blind deletion**:
   - `src/lib/frontier/orgs.ts:164,170` `listOrgInvites`/`revokeOrgInvite` — reads like an
     unbuilt "manage pending org invites" admin UI rather than abandoned code.
   - `src/lib/audio/voices.ts:35,102` `DEFAULT_VOICE_ID`/`forkVoice` — `forkVoice` ("fork a
     built-in voice into a user-editable copy") reads like a planned feature hook.
   - `src/lib/sync/cells-read.ts:159` `fetchFile`, `src/lib/sync/comments-read.ts:39`
-    `fetchCommentsForCell`, `src/lib/sync/cells-cache.ts:247` `deleteCellsCache`,
-    `src/lib/sync/commit-message.ts` (whole file) `buildCommitMessage` — typed client wrappers
-    matching sync-worker REST routes with zero current callers; may be intentional API-surface
-    completeness rather than dead debris.
+   `fetchCommentsForCell`, `src/lib/sync/cells-cache.ts:247` `deleteCellsCache`,
+   `src/lib/sync/commit-message.ts` (whole file) `buildCommitMessage` — typed client wrappers
+   matching sync-worker REST routes with zero current callers; may be intentional API-surface
+   completeness rather than dead debris.
+
+## 2026-08-11 verified-dead candidates
+
+- **`src/lib/sync/settings-read.ts`** and `settings-read-types.ts` (~106 lines) — the
+  project-settings hook imports the underlying module directly; re-verify the zero-importer
+  result before deletion.
+- **`src/lib/sync/sync-debug.ts`** (~125 lines) — no references outside its definition.
+- **`src/lib/timeline/diarization-loader.ts`** (~122 lines) — no references; re-check that
+  no feature flag still needs the in-browser diarizer before removing it.
+- **Unwired shadcn primitives:** `toggle-group.tsx`, `item.tsx`, and `attachment.tsx`.
+  These are lower confidence: confirm zero imports across every brand before deletion.

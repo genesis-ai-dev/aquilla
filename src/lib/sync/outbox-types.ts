@@ -394,10 +394,14 @@ export interface OutboxEventPayloads {
   }
   // AQU-646 round 6: per-LANE presentation timing (subtitle span / target-audio
   // start) merged into source-side metadata. number sets, null clears,
-  // undefined = untouched. Absolute file ms.
+  // undefined = untouched. Absolute file ms, EXCEPT targetOffsetMs.
   "cell.lane.retime": {
     subtitleStartMs?: number | null
     subtitleEndMs?: number | null
+    /** Round 8: dub anchor RELATIVE to the cell's own start. May be negative. */
+    targetOffsetMs?: number | null
+    /** Legacy absolute dub anchor. Still projected so historical events replay
+     *  unchanged, but nothing writes it any more. */
     targetStartMs?: number | null
   }
   // The file's audio timing mode (Original vs Free); null clears back to the

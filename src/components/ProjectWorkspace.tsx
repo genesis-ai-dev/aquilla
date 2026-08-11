@@ -91,6 +91,7 @@ import { emitTargetCellCommit, emitCellBacktranslationSet, emitFileRename, emitF
 import { v7 as uuidv7 } from "uuid"
 import { sequenceBetween } from "@/lib/timeline/derive"
 import { isLineEmpty, isUserAddedLine, userLineOrigin } from "@/lib/timeline/user-lines"
+import { targetOffsetMsFor } from "@/lib/timeline/lane-timing"
 import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
 import { isBulkValidationEligible } from "@/lib/review/review-eligibility"
 import { TimelineEditor } from "@/components/timeline/TimelineEditor"
@@ -1740,26 +1741,32 @@ export function ProjectWorkspace() {
     [],
   )
 
-  // Round 6: move a section's dub chip → target_start_ms (the clip-zero
-  // anchor, absolute file ms). Round 7: applied optimistically first.
+  // Round 6: move a section's dub chip. Round 7: applied optimistically first.
+  // Round 8: stored RELATIVE to the cell (target_offset_ms) so the take travels
+  // with its line — the callers still hand an absolute anchor, and this is the
+  // one place that converts.
   const handleRetimeTarget = useCallback(
     async (cellId: string, anchorSec: number) => {
       if (!project?.id || !activeFileId) return
-      // The drag clamp already floors the anchor at 0; enforce it again at the
-      // single persistence point so no caller can store a chip before file zero.
-      const targetStartMs = Math.max(0, Math.round(anchorSec * 1000))
-      applyOptimisticCellTiming(cellId, { metadata: { target_start_ms: targetStartMs } })
+      // Without the cell we'd have no start to measure against, and defaulting
+      // it to 0 would quietly persist an absolute value into an offset field.
+      const cell = getActiveCell(cellId)
+      if (!cell) return
+      // targetOffsetMsFor carries the old "never before file zero" floor into
+      // the offset domain; enforced here, at the single persistence point.
+      const targetOffsetMs = targetOffsetMsFor(cell, anchorSec)
+      applyOptimisticCellTiming(cellId, { metadata: { target_offset_ms: targetOffsetMs } })
       await emitCellLaneRetime({
         projectId: project.id,
         fileId: activeFileId,
         cellId,
-        targetStartMs,
+        targetOffsetMs,
         author: currentUsername,
       })
       await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
       revalidateCells()
     },
-    [project?.id, activeFileId, currentUsername, applyOptimisticCellTiming, getTokenForProjectFile, revalidateCells],
+    [project?.id, activeFileId, currentUsername, getActiveCell, applyOptimisticCellTiming, getTokenForProjectFile, revalidateCells],
   )
 
   // Timeline editor: set/clear the file's core video URL. coreMediaUrl lives on

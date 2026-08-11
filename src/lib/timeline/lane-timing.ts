@@ -1,11 +1,19 @@
 // Per-lane timing resolution (AQU-646 round 6). The cell's start/end is the
-// FROZEN source split; the subtitle lane and the target-audio lane may carry
-// their own spans via metadata keys written by cell.lane.retime:
+// source split; the subtitle lane and the target-audio lane may carry their own
+// spans via metadata keys written by cell.lane.retime:
 //   subtitle_start_ms / subtitle_end_ms — the subtitle card's independent span
-//   target_start_ms — where the dub actually starts (absolute file ms)
+//   target_offset_ms — where the dub starts, RELATIVE to the cell's own start
+//   target_start_ms — the same thing as an absolute file ms (legacy, read-only)
 // A target chip's LENGTH is never stored: it is the recording's effective
 // duration (trim-aware). All helpers are pure and defensive — corrupt or
 // missing metadata falls back to the source split.
+//
+// Round 8: the source split stopped being frozen — the video-first workflow
+// lets a user-added line move — so an ABSOLUTE dub anchor was wrong. It made a
+// take stop following its line the moment anyone nudged it, and it made
+// chipTrespass/chipOverflowState fire with no user intent, because moving a cue
+// moved the section out from under a chip that stayed put. An offset is
+// invariant under moving the cue, so both problems go away at the source.
 
 import type { CellData } from "@/hooks/useCells"
 import type { CodexCellAttachment } from "@/lib/codex-editor/types"
@@ -79,8 +87,9 @@ export const MIN_TARGET_LEN_SEC = 0.2
 export const MIN_USEFUL_REGION_SEC = 0.5
 
 export interface TargetChipGeom {
-  /** File-second where the CLIP'S SAMPLE ZERO sits (= target_start_ms; the
-   *  round-7 formalization — playback always cued clips relative to this). */
+  /** File-second where the CLIP'S SAMPLE ZERO sits (the round-7 formalization —
+   *  playback always cued clips relative to this). Resolved from the cell's own
+   *  start plus target_offset_ms; absolute for legacy takes. */
   anchor: number
   /** Audible start on the file timeline = anchor + trimStart. */
   start: number
@@ -90,6 +99,42 @@ export interface TargetChipGeom {
   trimEndSec: number | null
   durationSec: number | null
   usingFallback: boolean
+}
+
+/**
+ * Where the clip's sample zero sits, in file seconds.
+ *
+ * The offset wins; the absolute key is a permanent fallback, not a migration
+ * step. It has to stay permanent because rebuild.ts replays historical
+ * cell.lane.retime events, so absolute values keep being re-materialized no
+ * matter what any one-off backfill did. A legacy take simply doesn't follow its
+ * cell until someone next drags it, which is exactly today's behavior — better
+ * than a migration that silently MOVES takes it guessed wrong about.
+ */
+function targetAnchorSec(cell: CellData, section: SpanSec): number {
+  // `!= null`, not truthiness: an offset of exactly 0 is legal and common (a
+  // take that starts flush with its line), and would otherwise fall through to
+  // the legacy branch and then to the section start.
+  const offsetMs = metaNumber(cell.metadata, "target_offset_ms")
+  if (offsetMs != null) return section.start + offsetMs / 1000
+  const absoluteMs = metaNumber(cell.metadata, "target_start_ms")
+  if (absoluteMs != null) return absoluteMs / 1000
+  return section.start
+}
+
+/**
+ * The inverse: what to STORE so a chip's sample zero lands at `anchorSec`.
+ *
+ * Lives here beside the reader so the two can't drift, and so the conversion is
+ * unit-testable without a component. Clamped so a chip can never be anchored
+ * before file zero — the same invariant the caller used to enforce on the
+ * absolute value, restated in the offset domain.
+ */
+export function targetOffsetMsFor(cell: CellData, anchorSec: number): number {
+  const startMs = Math.round((cell.startTime ?? 0) * 1000)
+  const floored = Math.max(-startMs, Math.round(anchorSec * 1000) - startMs)
+  // A cell starting at 0 clamps to -0, which is only ever confusing downstream.
+  return floored === 0 ? 0 : floored
 }
 
 /**
@@ -108,8 +153,7 @@ export function targetChipGeom(
 ): TargetChipGeom | null {
   const section = sectionSpanSec(cell)
   if (!section) return null
-  const anchorMs = metaNumber(cell.metadata, "target_start_ms")
-  const anchor = anchorMs != null ? anchorMs / 1000 : section.start
+  const anchor = targetAnchorSec(cell, section)
   const trimStartSec =
     att?.trimStartMs != null && Number.isFinite(att.trimStartMs) && att.trimStartMs > 0
       ? att.trimStartMs / 1000

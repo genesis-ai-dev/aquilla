@@ -1547,6 +1547,7 @@ case 'cell.audio.attach': {
       const laneKeys: Array<[key: string, value: number | null | undefined]> = [
         ['subtitle_start_ms', p.subtitleStartMs],
         ['subtitle_end_ms', p.subtitleEndMs],
+        ['target_offset_ms', p.targetOffsetMs],
         ['target_start_ms', p.targetStartMs],
       ]
       for (const [key, value] of laneKeys) {

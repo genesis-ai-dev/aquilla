@@ -558,6 +558,10 @@ export interface EventPayloads {
   'cell.lane.retime': {
     subtitleStartMs?: number | null
     subtitleEndMs?: number | null
+    // Round 8: the dub anchor RELATIVE to the cell's own start, so a take moves
+    // with its line. May be negative. targetStartMs is the legacy absolute form
+    // — still projected so historical events replay, never written any more.
+    targetOffsetMs?: number | null
     targetStartMs?: number | null
   }
   // Set/clear a file's core video URL (timeline preview master clock), stored

@@ -563,7 +563,12 @@ export interface CellLaneRetimeInput {
   /** Subtitle span, absolute file ms. null clears (back to the source split). */
   subtitleStartMs?: number | null
   subtitleEndMs?: number | null
-  /** Target-audio (dub) start, absolute file ms. null clears (section start). */
+  /** Target-audio (dub) start RELATIVE to the cell's own start, in ms. May be
+   *  negative (a take that leads its line). null clears (section start). */
+  targetOffsetMs?: number | null
+  /** Legacy absolute dub start. Nothing writes this any more — it exists so
+   *  historical events keep projecting. See lane-timing.ts for why the read
+   *  fallback is permanent rather than a migration. */
   targetStartMs?: number | null
   author: string
   clientTs?: number
@@ -577,6 +582,7 @@ export async function emitCellLaneRetime(input: CellLaneRetimeInput): Promise<st
   if (
     input.subtitleStartMs === undefined &&
     input.subtitleEndMs === undefined &&
+    input.targetOffsetMs === undefined &&
     input.targetStartMs === undefined
   ) {
     throw new Error("emitCellLaneRetime: at least one timing key is required")
@@ -591,6 +597,7 @@ export async function emitCellLaneRetime(input: CellLaneRetimeInput): Promise<st
     payload: {
       ...(input.subtitleStartMs !== undefined ? { subtitleStartMs: input.subtitleStartMs } : {}),
       ...(input.subtitleEndMs !== undefined ? { subtitleEndMs: input.subtitleEndMs } : {}),
+      ...(input.targetOffsetMs !== undefined ? { targetOffsetMs: input.targetOffsetMs } : {}),
       ...(input.targetStartMs !== undefined ? { targetStartMs: input.targetStartMs } : {}),
     },
     clientTs: input.clientTs,

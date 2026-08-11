@@ -41,7 +41,9 @@ function ProjectsLoadingTemplate() {
         statusBar={null}
         main={
           <Page size="full" className="px-6">
-            <Skeleton className="mb-8 h-7 w-32" />
+            <div className="mb-12 max-w-6xl">
+              <Skeleton className="h-7 w-32" />
+            </div>
             <Skeleton className="h-64 w-full rounded-lg" />
           </Page>
         }
@@ -115,36 +117,41 @@ export function OrgProjectsPage() {
       statusBar={null}
       main={
         <Page size="full" className="px-6">
-          <PageHeader
-            title="Projects"
-            description="Open a project to edit, or start a new translation workspace."
-            inset={false}
-          />
-          {portfolio.error ? (
-            <p className="text-sm text-destructive">{portfolio.error}</p>
-          ) : portfolio.projects.length === 0 ? (
-            <EmptyState
-              icon={FolderPlus}
-              title="Your organization is ready"
-              description="Start a translation project, or bring your team in first — Aquilla is built for people working together."
-              action={
-                <div className="flex flex-wrap items-center justify-center gap-2">
-                  {activeOrgId != null && (
-                    <ProjectCreateDialog
-                      orgId={activeOrgId}
-                      onCreated={handleCreated}
-                      linkableProjects={accessibleProjects}
-                    />
-                  )}
-                  <Button
-                    variant="outline"
-                    onClick={() => activeOrgId != null && navigate(membersPath(activeOrgId))}
-                  >
-                    Invite your team
-                  </Button>
-                </div>
-              }
+          {/* Title matches Teams/Members max width; table uses the full content well. */}
+          <div className="max-w-6xl">
+            <PageHeader
+              title="Projects"
+              description="Open a project to edit, or start a new translation workspace."
+              inset={false}
             />
+          </div>
+          {portfolio.error ? (
+            <p className="max-w-6xl text-sm text-destructive">{portfolio.error}</p>
+          ) : portfolio.projects.length === 0 ? (
+            <div className="max-w-6xl">
+              <EmptyState
+                icon={FolderPlus}
+                title="Your organization is ready"
+                description="Start a translation project, or bring your team in first — Aquilla is built for people working together."
+                action={
+                  <div className="flex flex-wrap items-center justify-center gap-2">
+                    {activeOrgId != null && (
+                      <ProjectCreateDialog
+                        orgId={activeOrgId}
+                        onCreated={handleCreated}
+                        linkableProjects={accessibleProjects}
+                      />
+                    )}
+                    <Button
+                      variant="outline"
+                      onClick={() => activeOrgId != null && navigate(membersPath(activeOrgId))}
+                    >
+                      Invite your team
+                    </Button>
+                  </div>
+                }
+              />
+            </div>
           ) : (
             <OrgProjectsDataTable
               projects={statusFilteredProjects}

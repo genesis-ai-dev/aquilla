@@ -11,9 +11,9 @@ export function DateTooltip({
   label?: string
   className?: string
 }) {
-  if (value == null) return <span className={className}>—</span>
+  if (value == null) return null
   const t = typeof value === "number" ? value : Date.parse(value)
-  if (Number.isNaN(t)) return <span className={className}>—</span>
+  if (Number.isNaN(t)) return null
 
   return (
     <AppTooltip content={fmtLabeledDateTime(t, label)} side="bottom">

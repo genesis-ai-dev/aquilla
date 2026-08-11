@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { useForm } from "@tanstack/react-form"
 import { z } from "zod"
 import { v4 as uuid } from "uuid"
-import { Info, Plus, X } from "lucide-react"
+import { Info, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -284,8 +284,7 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger render={<Button />}>
-        <Plus className="size-4" aria-hidden />
-        New Project
+        New project
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>

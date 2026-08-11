@@ -61,7 +61,7 @@ describe("ProjectCreateDialog — submit in-flight state (AQU-711)", () => {
 
   it("opts create fields out of Chrome contact autocomplete", () => {
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
-    fireEvent.click(screen.getByRole("button", { name: "New Project" }))
+    fireEvent.click(screen.getByRole("button", { name: "New project" }))
 
     const name = screen.getByLabelText(/^Project title$/i)
     expect(name).toHaveAttribute("autocomplete", "off")
@@ -89,7 +89,7 @@ describe("ProjectCreateDialog — submit in-flight state (AQU-711)", () => {
     )
 
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
-    fireEvent.click(screen.getByRole("button", { name: "New Project" }))
+    fireEvent.click(screen.getByRole("button", { name: "New project" }))
     fillValidSelfContained()
 
     const button = screen.getByRole("button", { name: /Create Project/i })
@@ -112,7 +112,7 @@ describe("ProjectCreateDialog — submit in-flight state (AQU-711)", () => {
     )
 
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
-    fireEvent.click(screen.getByRole("button", { name: "New Project" }))
+    fireEvent.click(screen.getByRole("button", { name: "New project" }))
     fillValidSelfContained()
 
     const button = screen.getByRole("button", { name: /Create Project/i })
@@ -138,7 +138,7 @@ describe("ProjectCreateDialog — submit in-flight state (AQU-711)", () => {
     mockCreateCloudProject.mockRejectedValueOnce(new Error("network blip"))
 
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
-    fireEvent.click(screen.getByRole("button", { name: "New Project" }))
+    fireEvent.click(screen.getByRole("button", { name: "New project" }))
     fillValidSelfContained()
 
     fireEvent.click(screen.getByRole("button", { name: /Create Project/i }))

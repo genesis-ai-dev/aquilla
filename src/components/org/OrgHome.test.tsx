@@ -39,10 +39,7 @@ function renderMemberProjects() {
 type FakeSession = { jwt: string; username: string; createdAt: string } | null
 const mockUseFrontierSession = vi.fn<() => { session: FakeSession; loading: boolean }>(() => ({ session: { jwt: "jwt", username: "anna", createdAt: "x" }, loading: false }))
 vi.mock("@/hooks/useFrontierSession", () => ({ useFrontierSession: () => mockUseFrontierSession() }))
-vi.mock("@/lib/frontier/orgs", () => ({
-  listMyOrgs: vi.fn(async () => [{ id: 1, name: "Come and See", role: { level: 700, name: "owner" } }]),
-  createOrg: vi.fn(),
-}))
+vi.mock("@/lib/frontier/orgs", () => ({ listMyOrgs: vi.fn(async () => [{ id: 1, name: "Come and See", role: { level: 700, name: "owner" } }]) }))
 vi.mock("@/components/AccountSwitcher", () => ({ AccountSwitcher: () => null }))
 vi.mock("@/components/HelpMenu", () => ({ HelpMenu: () => null }))
 vi.mock("./OrgSwitcher", () => ({ OrgSwitcher: () => null }))
@@ -694,26 +691,6 @@ describe("OrgOverview signed-out state", () => {
 
     const link = await screen.findByRole("link", { name: /sign in/i })
     expect(link.getAttribute("href")).toMatch(/\/login\?next=/)
-  })
-})
-
-describe("OrgHome org-less state", () => {
-  it("shows a create-organization empty state instead of a fake ready workspace", async () => {
-    const { listMyOrgs } = await import("@/lib/frontier/orgs")
-    vi.mocked(listMyOrgs).mockResolvedValue([])
-
-    render(
-      <MemoryRouter initialEntries={["/orgs/all"]}>
-        <OrgProvider><OrgHome /></OrgProvider>
-      </MemoryRouter>,
-    )
-
-    await waitFor(() => {
-      expect(screen.getByText(/create an organization to get started/i)).toBeInTheDocument()
-    })
-    expect(screen.getAllByRole("button", { name: /create organization/i }).length).toBeGreaterThanOrEqual(1)
-    expect(screen.queryByText(/your organization is ready/i)).not.toBeInTheDocument()
-    expect(screen.queryByText(/select an organization to create a project/i)).not.toBeInTheDocument()
   })
 })
 

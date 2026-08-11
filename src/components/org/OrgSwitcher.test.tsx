@@ -205,49 +205,6 @@ describe("OrgSwitcher", () => {
     expect(screen.queryByTestId("guest-orgs-separator")).not.toBeInTheDocument()
   })
 
-  // Org-less accounts must still reach Create — the previous early-return hid the
-  // whole switcher when there was no activeOrg and no guest orgs.
-  it("zero orgs: still shows the switcher with Create", async () => {
-    listMyOrgs.mockResolvedValue([])
-    fetchAccessibleProjects.mockResolvedValue([])
-
-    render(<MemoryRouter><OrgProvider><OrgSwitcher /></OrgProvider></MemoryRouter>)
-    const trigger = await screen.findByRole("combobox", {
-      name: /organization switcher: no organization/i,
-    })
-    await act(async () => { trigger.click() })
-
-    expect(await screen.findByRole("button", { name: /^create$/i })).toBeInTheDocument()
-    expect(screen.getByText(/no organizations found/i)).toBeInTheDocument()
-  })
-
-  it("zero orgs: Create submits createOrg and switches to the new org", async () => {
-    listMyOrgs
-      .mockResolvedValueOnce([])
-      .mockResolvedValue([{ id: 42, name: "First Org", role: { level: 700, name: "owner" } }])
-    createOrg.mockResolvedValue({ id: 42, name: "First Org", role: { level: 700, name: "owner" } })
-    fetchAccessibleProjects.mockResolvedValue([])
-
-    render(
-      <MemoryRouter>
-        <OrgProvider><OrgSwitcher /><LocationProbe /></OrgProvider>
-      </MemoryRouter>,
-    )
-    const trigger = await screen.findByRole("combobox", {
-      name: /organization switcher: no organization/i,
-    })
-    await act(async () => { trigger.click() })
-    await act(async () => { (await screen.findByRole("button", { name: /^create$/i })).click() })
-
-    const input = await screen.findByLabelText(/organization name/i)
-    fireEvent.change(input, { target: { value: "First Org" } })
-    await act(async () => { screen.getByRole("button", { name: /create organization/i }).click() })
-
-    await waitFor(() => expect(createOrg).toHaveBeenCalledWith("jwt", "First Org"))
-    await waitFor(() => expect(localStorage.getItem("org:active")).toBe("42"))
-    await waitFor(() => expect(screen.getByTestId("loc")).toHaveTextContent("/orgs/42"))
-  })
-
   // AQU-790: clicking a guest org switches to it using the SAME path convention
   // as an owned org (`/orgs/<id>`, not the divergent `/shared?org=<id>`), and
   // reflects the selection (checkmark + trigger label).

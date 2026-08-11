@@ -9,12 +9,11 @@ import { fetchAccessibleProjectsResult, type CloudProjectSummary } from "@/lib/s
 import { partitionSharedProjects } from "@/lib/frontier/shared-projects"
 import { isProjectNew, readProjectOpenedAt } from "@/lib/frontier/opened-shared-store"
 import { ProjectCreateDialog } from "@/components/ProjectCreateDialog"
-import { OrgCreateDialog } from "./OrgCreateDialog"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { notifySessionExpired } from "@/lib/errors/session-expired-signal"
 import { attentionRank, deadlineStatus, getPortfolios, translatedPct, type PortfolioProject } from "@/lib/frontier/portfolio"
 import { UserError } from "@/lib/errors/user-error"
-import { buttonVariants, Button } from "@/components/ui/button"
+import { buttonVariants } from "@/components/ui/button"
 import { RoleLabel } from "@/components/RoleLabel"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -32,9 +31,8 @@ import {
   InputGroupInput,
 } from "@/components/ui/input-group"
 import { cn } from "@/lib/utils"
-import { Building2, FolderOpen, Search } from "lucide-react"
+import { FolderOpen, Search } from "lucide-react"
 import { EmptyState } from "@/components/ui/page"
-import { orgHomePath } from "@/lib/navigation/org-paths"
 
 // ── Sort options ─────────────────────────────────────────────────────────────
 type SortKey = "name" | "role"
@@ -194,15 +192,7 @@ function ProjectRow({
 
 // ── Main component ───────────────────────────────────────────────────────────
 export function ProjectsList() {
-  const {
-    activeOrgId,
-    isAllOrgs,
-    orgs,
-    isLoading: orgLoading,
-    error: orgError,
-    refresh: refreshOrgs,
-    setActiveOrg,
-  } = useActiveOrg()
+  const { activeOrgId, isAllOrgs, orgs, isLoading: orgLoading, error: orgError, refresh: refreshOrgs } = useActiveOrg()
   const { session, loading: sessionLoading } = useFrontierSession()
   const jwt = session?.jwt ?? null
   const username = session?.username ?? null
@@ -213,7 +203,6 @@ export function ProjectsList() {
   // projects before the initial request effect has had a chance to begin.
   const [loading, setLoading] = useState(true)
   const [unreachable, setUnreachable] = useState(false)
-  const [createOrgOpen, setCreateOrgOpen] = useState(false)
 
   // Filter + sort state
   const [filter, setFilter] = useState("")
@@ -308,14 +297,6 @@ export function ProjectsList() {
     navigate(`/projects/${project.id}`)
   }
 
-  async function handleOrgCreated(orgId: number) {
-    await refreshOrgs()
-    setActiveOrg(orgId)
-    navigate(orgHomePath(orgId))
-  }
-
-  const noOrgs = !orgLoading && orgs.length === 0 && jwt != null && orgError == null
-
   function handleSort(key: SortKey) {
     if (key === sortKey) {
       setSortDir((d) => (d === "asc" ? "desc" : "asc"))
@@ -399,7 +380,6 @@ export function ProjectsList() {
   const isPageLoading = sessionLoading || orgLoading || loading
 
   return (
-    <>
     <AppShell
       sidebar={<OrgSidebar />}
       header={
@@ -407,10 +387,6 @@ export function ProjectsList() {
           <OrgBreadcrumb section="Projects" />
           {activeOrgId != null ? (
             <ProjectCreateDialog orgId={activeOrgId} onCreated={handleCreated} />
-          ) : noOrgs ? (
-            <Button type="button" onClick={() => setCreateOrgOpen(true)}>
-              Create organization
-            </Button>
           ) : (
             <Badge variant="outline">Select an organization to create a project</Badge>
           )}
@@ -429,17 +405,6 @@ export function ProjectsList() {
         <div className="h-full overflow-y-auto overscroll-contain p-6" data-testid="projects-list-scroll">
           {isPageLoading ? (
             <LoadingPanel label="Loading projects" className="min-h-[34rem]" />
-          ) : noOrgs ? (
-            <EmptyState
-              icon={Building2}
-              title="Create an organization to get started"
-              description="Organizations hold your projects, members, and settings. Create one to start collaborating."
-              action={
-                <Button type="button" onClick={() => setCreateOrgOpen(true)}>
-                  Create organization
-                </Button>
-              }
-            />
           ) : unreachable || orgsUnreachable ? (
             <div className="flex items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm dark:border-amber-800 dark:bg-amber-950">
               <span className="text-amber-800 dark:text-amber-200">
@@ -592,11 +557,5 @@ export function ProjectsList() {
         </div>
       }
     />
-    <OrgCreateDialog
-      open={createOrgOpen}
-      onOpenChange={setCreateOrgOpen}
-      onCreated={(orgId) => void handleOrgCreated(orgId)}
-    />
-    </>
   )
 }

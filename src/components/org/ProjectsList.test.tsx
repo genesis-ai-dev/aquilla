@@ -14,10 +14,7 @@ vi.mock("react-router-dom", async (importActual) => {
 type FakeSession = { jwt: string; username: string; createdAt: string } | null
 const mockUseFrontierSession = vi.fn<() => { session: FakeSession; loading: boolean }>(() => ({ session: { jwt: "jwt", username: "anna", createdAt: "x" }, loading: false }))
 vi.mock("@/hooks/useFrontierSession", () => ({ useFrontierSession: () => mockUseFrontierSession() }))
-vi.mock("@/lib/frontier/orgs", () => ({
-  listMyOrgs: vi.fn(async () => [{ id: 7, name: "Come and See", role: { level: 700, name: "owner" } }]),
-  createOrg: vi.fn(),
-}))
+vi.mock("@/lib/frontier/orgs", () => ({ listMyOrgs: vi.fn(async () => [{ id: 7, name: "Come and See", role: { level: 700, name: "owner" } }]) }))
 vi.mock("@/components/AccountSwitcher", () => ({ AccountSwitcher: () => null }))
 const fetchAccessibleProjectsResultMock = vi.fn()
 vi.mock("@/lib/sync/cloud-projects", () => ({
@@ -26,16 +23,11 @@ vi.mock("@/lib/sync/cloud-projects", () => ({
   createCloudProject: vi.fn(),
 }))
 
-const defaultOrgs = [{ id: 7, name: "Come and See", role: { level: 700, name: "owner" } }]
-
-beforeEach(async () => {
+beforeEach(() => {
   localStorage.clear()
   fetchAccessibleProjectsResultMock.mockReset()
   navigate.mockClear()
   mockUseFrontierSession.mockReturnValue({ session: { jwt: "jwt", username: "anna", createdAt: "x" }, loading: false } as { session: FakeSession; loading: boolean })
-  const { listMyOrgs } = await import("@/lib/frontier/orgs")
-  vi.mocked(listMyOrgs).mockReset()
-  vi.mocked(listMyOrgs).mockResolvedValue(defaultOrgs as never)
 })
 afterEach(() => vi.restoreAllMocks())
 
@@ -134,20 +126,6 @@ describe("ProjectsList", () => {
 
     const link = await screen.findByRole("link", { name: /sign in/i })
     expect(link.getAttribute("href")).toMatch(/\/login\?next=.*projects/)
-  })
-
-  it("org-less account shows a create-organization empty state instead of an empty project list", async () => {
-    const { listMyOrgs } = await import("@/lib/frontier/orgs")
-    vi.mocked(listMyOrgs).mockResolvedValueOnce([])
-
-    render(<MemoryRouter><OrgProvider><ProjectsList /></OrgProvider></MemoryRouter>)
-
-    await waitFor(() => {
-      expect(screen.getByText(/create an organization to get started/i)).toBeInTheDocument()
-    })
-    expect(screen.getAllByRole("button", { name: /create organization/i }).length).toBeGreaterThanOrEqual(1)
-    expect(screen.queryByText(/no projects in this org yet/i)).not.toBeInTheDocument()
-    expect(screen.queryByText(/select an organization to create a project/i)).not.toBeInTheDocument()
   })
 
   // AQU-366: the projects list must scroll natively (h-full + overflow-y-auto

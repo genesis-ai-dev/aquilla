@@ -1148,6 +1148,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS scene_briefs_live
   WHERE status='approved';
 CREATE INDEX IF NOT EXISTS scene_briefs_lookup
   ON scene_briefs(project_id, file_id, start_cell_id);
+CREATE INDEX IF NOT EXISTS scene_briefs_run_provenance_time
+  ON scene_briefs(project_id, (provenance ->> 'runId'), created_at DESC, id DESC);
 
 -- Contextual run engine (0071_contextual_runs.sql; pipeline design §8, slice D1).
 -- contextual_runs: one durable pipeline run; span_cursor {seeds, nextIndex}
@@ -1190,6 +1192,10 @@ CREATE INDEX IF NOT EXISTS contextual_runs_driver
 CREATE INDEX IF NOT EXISTS contextual_runs_scope_group
   ON contextual_runs(scope_group)
   WHERE scope_group IS NOT NULL;
+CREATE INDEX IF NOT EXISTS contextual_runs_project_time
+  ON contextual_runs(project_id, created_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS contextual_runs_project_lane_time
+  ON contextual_runs(project_id, file_id, target_lang, created_at DESC, id DESC);
 
 CREATE TABLE IF NOT EXISTS contextual_steering (
   id text PRIMARY KEY,                  -- uuidv7
@@ -1228,6 +1234,68 @@ CREATE UNIQUE INDEX IF NOT EXISTS contextual_drafts_live
   WHERE status = 'proposed';
 CREATE INDEX IF NOT EXISTS contextual_drafts_run
   ON contextual_drafts(run_id, status);
+CREATE INDEX IF NOT EXISTS contextual_drafts_project_status_run_time
+  ON contextual_drafts(project_id, status, run_id, created_at DESC, id DESC);
+
+-- Durable contextual-run activity (0074_contextual_run_events.sql; AQU-826).
+-- Append-only, bounded product telemetry: never prompts, draft text, model
+-- reasoning, or token deltas. The shared write primitive applies a strict
+-- per-kind detail allowlist before these database byte guards.
+CREATE TABLE IF NOT EXISTS contextual_run_events (
+  id text PRIMARY KEY,                  -- uuidv7
+  run_id text NOT NULL,
+  project_id text NOT NULL,
+  file_id text NOT NULL,
+  kind text NOT NULL CHECK (kind IN (
+    'run_created',
+    'run_state',
+    'span_started',
+    'phase',
+    'scene_ready',
+    'drafts_staged',
+    'span_outcome',
+    'steering_queued',
+    'draft_reviewed'
+  )),
+  span_id text,
+  span_label text,
+  status text,
+  phase text CHECK (phase IS NULL OR phase IN ('reading','drafting','checking','staging')),
+  summary text NOT NULL,
+  details jsonb NOT NULL DEFAULT '{}'::jsonb
+    CHECK (jsonb_typeof(details) = 'object')
+    CHECK (octet_length(details::text) <= 8192),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  CHECK (char_length(id) = 36),
+  CHECK (octet_length(run_id) <= 512),
+  CHECK (octet_length(project_id) <= 512),
+  CHECK (octet_length(file_id) <= 512),
+  CHECK (span_id IS NULL OR octet_length(span_id) <= 512),
+  CHECK (status IS NULL OR octet_length(status) <= 64),
+  CHECK (octet_length(summary) <= 512),
+  CHECK (span_label IS NULL OR octet_length(span_label) <= 512)
+);
+CREATE INDEX IF NOT EXISTS contextual_run_events_run_time
+  ON contextual_run_events(run_id, created_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS contextual_run_events_project_time
+  ON contextual_run_events(project_id, created_at DESC, id DESC);
+
+-- Cross-isolate weighted capacity leases for project Autopilot waves (0074).
+-- Rows are ephemeral coordination state: every lease expires and is deleted
+-- on normal completion; project-row locking serializes capacity acquisition.
+CREATE TABLE IF NOT EXISTS contextual_project_leases (
+  id text PRIMARY KEY,
+  project_id text NOT NULL,
+  run_id text NOT NULL UNIQUE,
+  weight integer NOT NULL CHECK (weight BETWEEN 1 AND 1000),
+  expires_at timestamptz NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  CHECK (char_length(id) = 36),
+  CHECK (octet_length(project_id) <= 512),
+  CHECK (octet_length(run_id) <= 512)
+);
+CREATE INDEX IF NOT EXISTS contextual_project_leases_project_expiry
+  ON contextual_project_leases(project_id, expires_at);
 
 -- ───────────────────────── post-migration notes ─────────────────────────
 -- After the bulk data load (Stage C), reset each identity sequence so new

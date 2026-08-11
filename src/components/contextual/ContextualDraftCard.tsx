@@ -11,9 +11,11 @@
 //     draft becomes an ordinary human edit, subject to the same role check,
 //     focus-lock check, and outbox as anything typed by hand. The agent
 //     proposes; only a person commits, and there is exactly one commit path.
-//   - The server report is fire-and-forget. The user's decision already landed
-//     locally; blocking the UI on a bookkeeping call would make a fast action
-//     feel slow for no gain, and the next hydrate reconciles a lost report.
+//   - Acceptance is projection-authoritative. A successful `onAccept` means
+//     the target commit is durably queued in the local outbox, not that it won
+//     server arbitration. The winning target projection applies/supersedes the
+//     draft atomically and its event echo refreshes this mirror. Rejection has
+//     no cell event, so it remains an explicit server-backed review action.
 
 import { useState } from "react"
 import { Check, Sparkles, X } from "lucide-react"
@@ -23,17 +25,21 @@ import { cn } from "@/lib/utils"
 import {
   resolveContextualDraft,
   useContextualDrafts,
+  useContextualDraftsSummary,
 } from "@/lib/contextual/drafts-store"
 import { reviewContextualDraft } from "@/lib/contextual/transport"
 
 interface ContextualDraftCardProps {
   cellId: string
   projectId: string
-  /** False for roles below contributor — the draft still shows (seeing the
-   *  work is useful) but cannot be accepted into the document. */
+  fileId: string
+  /** Empty string is Project default. Autopilot v1 never proposes elsewhere. */
+  targetLang: string
+  /** False for roles below contributor — evidence remains visible, but no
+   *  commit or review action is offered. */
   editable: boolean
-  /** Commit the accepted text through the row's normal editor commit path. */
-  onAccept: (text: string) => void
+  /** Commit through the normal editor path and confirm durable enqueue. */
+  onAccept: (text: string) => boolean | Promise<boolean>
   /** Text direction of the target column. */
   dir?: "ltr" | "rtl"
 }
@@ -41,31 +47,77 @@ interface ContextualDraftCardProps {
 export function ContextualDraftCard({
   cellId,
   projectId,
+  fileId,
+  targetLang,
   editable,
   onAccept,
   dir,
 }: ContextualDraftCardProps) {
   const drafts = useContextualDrafts()
-  const draft = drafts.get(cellId)
+  const summary = useContextualDraftsSummary()
+  const draft =
+    targetLang === "" &&
+    summary.projectId === projectId &&
+    summary.fileId === fileId &&
+    summary.targetLang === targetLang
+      ? drafts.get(cellId)
+      : undefined
   const [resolving, setResolving] = useState(false)
+  const [decisionError, setDecisionError] = useState<{
+    draftId: string
+    message: string
+  } | null>(null)
 
   if (!draft) return null
 
-  const decide = (action: "accepted" | "rejected") => {
+  const decide = async (action: "accepted" | "rejected") => {
     if (resolving) return
+    const decidedDraft = draft
     setResolving(true)
-    if (action === "accepted") onAccept(draft.text)
-    // Clear optimistically: the decision is already made locally, and a draft
-    // that lingers after the click reads as a broken button.
-    resolveContextualDraft(cellId, action)
-    void reviewContextualDraft(
+    setDecisionError(null)
+    if (action === "accepted") {
+      try {
+        // This confirms only the durable local enqueue. Do not report
+        // `applied` here: AD-2 arbitration still decides whether this commit
+        // becomes the server cell head. The winning projection reconciles the
+        // draft and its event.applied echo hydrates that authoritative result.
+        if (await onAccept(decidedDraft.text) !== true) {
+          setResolving(false)
+          return
+        }
+      } catch {
+        setResolving(false)
+        return
+      }
+      setResolving(false)
+      return
+    }
+    try {
+      await reviewContextualDraft(
+        projectId,
+        decidedDraft.draftId,
+        "rejected",
+      )
+    } catch {
+      setDecisionError({
+        draftId: decidedDraft.draftId,
+        message: "This suggestion couldn’t be dismissed. Retry.",
+      })
+      setResolving(false)
+      return
+    }
+
+    // Identity-aware resolution cannot remove a replacement that arrived
+    // while the durable content/review handshakes were in flight.
+    const resolvedLocally = resolveContextualDraft(
       projectId,
-      draft.draftId,
-      action === "accepted" ? "applied" : "rejected",
-    ).catch((err: unknown) => {
-      // Bookkeeping only — the edit itself already landed through the outbox.
-      console.warn("[autopilot] draft review report failed:", err)
-    })
+      fileId,
+      targetLang,
+      cellId,
+      decidedDraft.draftId,
+      action,
+    )
+    if (!resolvedLocally) setResolving(false)
   }
 
   return (
@@ -111,26 +163,33 @@ export function ContextualDraftCard({
                 variant="ghost"
                 aria-label="Use this translation"
                 disabled={resolving}
-                onClick={() => decide("accepted")}
+                onClick={() => void decide("accepted")}
               >
                 <Check className="h-3.5 w-3.5" />
               </Button>
             </AppTooltip>
           )}
-          <AppTooltip content="Dismiss this suggestion">
-            <Button
-              type="button"
-              size="icon-sm"
-              variant="ghost"
-              aria-label="Dismiss this suggestion"
-              disabled={resolving}
-              onClick={() => decide("rejected")}
-            >
-              <X className="h-3.5 w-3.5" />
-            </Button>
-          </AppTooltip>
+          {editable && (
+            <AppTooltip content="Dismiss this suggestion">
+              <Button
+                type="button"
+                size="icon-sm"
+                variant="ghost"
+                aria-label="Dismiss this suggestion"
+                disabled={resolving}
+                onClick={() => void decide("rejected")}
+              >
+                <X className="h-3.5 w-3.5" />
+              </Button>
+            </AppTooltip>
+          )}
         </div>
       </div>
+      {decisionError?.draftId === draft.draftId && (
+        <p role="alert" className="text-xs text-destructive">
+          {decisionError.message}
+        </p>
+      )}
     </div>
   )
 }

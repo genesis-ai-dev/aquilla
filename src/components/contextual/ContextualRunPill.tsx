@@ -7,8 +7,8 @@
 // durable server-side workflow; closing the tab changes nothing. All strings
 // here are plain user words (ui-jargon-guard.test.ts bans spec ids).
 
-import { useEffect } from "react"
-import { AlertTriangle, Eye, Pause, Play, Sparkles, X } from "lucide-react"
+import { useEffect, useMemo, useState } from "react"
+import { AlertTriangle, CheckCircle2, Eye, ListTree, Pause, Play, Sparkles, X } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -25,12 +25,17 @@ import {
   useContextualRunState,
 } from "@/lib/contextual/run-store"
 import { useContextualDraftsSummary } from "@/lib/contextual/drafts-store"
-import { installContextualTransport } from "@/lib/contextual/transport"
+import { installContextualTransport, type ContextualRunRecord } from "@/lib/contextual/transport"
+import { AutopilotActivityInspector } from "./AutopilotActivityInspector"
 import { ContextualSteering } from "./ContextualSteering"
 
 interface PillProps {
   projectId: string
   fileId: string
+  /** Empty string is Project default. v1 does not operate in other lanes. */
+  activeLane?: string
+  /** Server mutations require contributor access. Omitted is fail-closed. */
+  canControl?: boolean
   /** SparkleButton idiom: when the backend isn't available the Play button is
    *  never disabled — clicking it opens setup instead. */
   onSetupNeeded?: () => void
@@ -50,37 +55,109 @@ function ProgressBar({ done, total }: { done: number; total: number }) {
   return (
     <div className="h-1.5 w-24 overflow-hidden rounded-full bg-muted">
       <div
-        className="h-full rounded-full bg-primary transition-all"
+        className="h-full rounded-full bg-primary transition-[width] motion-reduce:transition-none"
         style={{ width: `${pct}%` }}
       />
     </div>
   )
 }
 
-export function ContextualRunPill({
+export function ContextualRunPill(props: PillProps) {
+  return (
+    <ContextualRunPillScoped
+      key={`${props.projectId}:${props.fileId}:${props.activeLane ?? ""}`}
+      {...props}
+    />
+  )
+}
+
+function ContextualRunPillScoped({
   projectId,
   fileId,
   onSetupNeeded,
   onSpanClick,
   anchorCellId,
+  canControl = false,
+  activeLane = "",
 }: PillProps) {
   const state = useContextualRunState()
-  const progress = useContextualRunProgress()
+  const storedProgress = useContextualRunProgress()
   const drafts = useContextualDraftsSummary()
+  const [inspectorOpen, setInspectorOpen] = useState(false)
+  const [controlError, setControlError] = useState<string | null>(null)
 
-  const { available, status, phase, spanLabel, runId, activeDirections, lanes } = state
+  // The store is a single mirror mounted inside one editor. During a React
+  // file-switch render the previous file can remain visible until the attach
+  // effect runs; fail closed so that brief window can never expose commands
+  // for another file's run.
+  const belongsToOpenFile = state.projectId === projectId && state.fileId === fileId
+  const visibleState = belongsToOpenFile ? state : {
+    available: false,
+    projectId,
+    runId: null,
+    fileId,
+    status: "idle" as const,
+    phase: null,
+    spanLabel: null,
+    activeDirections: [],
+    lanes: [],
+  }
+  const progress = belongsToOpenFile
+    ? storedProgress
+    : { done: 0, total: 0, failed: 0 }
+  const pendingDrafts =
+    drafts.projectId === projectId &&
+    drafts.fileId === fileId &&
+    drafts.targetLang === ""
+      ? drafts.pending
+      : 0
+  const { available, status, phase, spanLabel, runId, activeDirections, lanes } = visibleState
+  const parkedRemaining = status === "parked"
+    ? Math.max(0, progress.total - progress.done - progress.failed)
+    : 0
+  const inspectorRun = useMemo<ContextualRunRecord | null>(() => runId ? ({
+    runId,
+    fileId,
+    status,
+    phase,
+    spanLabel,
+    done: progress.done,
+    total: progress.total,
+    failed: progress.failed,
+    unitsSpent: 0,
+    callsSpent: 0,
+    lastError: null,
+    createdAt: "",
+    updatedAt: "",
+    activeDirections,
+    proposedDrafts: pendingDrafts,
+  }) : null, [activeDirections, fileId, pendingDrafts, phase, progress.done, progress.failed, progress.total, runId, spanLabel, status])
+
+  // Autopilot v1 is deliberately default-lane-only. Do not leave a hidden
+  // default run's controls or inspector mounted while edits commit into a
+  // multilingual lane; show the boundary in plain language instead.
+  if (activeLane !== "") {
+    return (
+      <div className={PILL_BASE} data-testid="contextual-run-pill" role="status">
+        <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+        <span className="text-muted-foreground">
+          Autopilot works in Project default only. Switch to that lane to run it.
+        </span>
+      </div>
+    )
+  }
 
   // Drafts waiting on a human are the run's RESULT, so they outrank its
   // machinery: a translator wants "12 ready for you", not a span count.
   const pendingChip =
-    drafts.pending > 0 ? (
+    pendingDrafts > 0 ? (
       <AppTooltip content="Suggestions waiting in your cells">
         <span
           data-testid="contextual-pending-drafts"
           className="flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-primary"
         >
           <Sparkles className="h-3 w-3" aria-hidden />
-          <span className="tabular-nums">{drafts.pending}</span>
+          <span className="tabular-nums">{pendingDrafts}</span>
           <span className="sr-only"> suggestions ready to review</span>
         </span>
       </AppTooltip>
@@ -111,8 +188,8 @@ export function ContextualRunPill({
   // close the open popover under the user's cursor and drop half-typed text.
   const steerable =
     runId && (status === "running" || status === "pausing" || status === "paused" ||
-      status === "parked" || status === "done")
-  const steer = steerable ? (
+      status === "parked")
+  const steer = canControl && steerable ? (
     <ContextualSteering
       projectId={projectId}
       fileId={fileId}
@@ -124,28 +201,35 @@ export function ContextualRunPill({
   let content: React.ReactNode
   let trailing: React.ReactNode = null
   let pillClass = PILL_BASE
-  let role: "status" | undefined
+  let announcement = ""
 
   if (status === "idle" || status === "terminated") {
+    if (status === "terminated") announcement = "Autopilot stopped."
     // Idle (no run) and terminated (run is over, can start fresh) share the
     // icon-only Play affordance.
-    content = (
-      <AppTooltip content="Contextual draft">
+    content = canControl ? (
+      <AppTooltip content="Run Autopilot">
         <Button
           type="button"
           size="icon-sm"
           variant="ghost"
-          aria-label="Contextual draft"
+          aria-label="Run Autopilot"
           onClick={() => {
+            setControlError(null)
             if (!available) { onSetupNeeded?.(); return }
-            void startContextualRun(projectId, fileId, anchorCellId ?? undefined)
+            void startContextualRun(projectId, fileId, anchorCellId ?? undefined).then((started) => {
+              if (!started) {
+                setControlError("Autopilot couldn’t start. Try again or check AI setup.")
+              }
+            })
           }}
         >
           <Play className="h-3.5 w-3.5" />
         </Button>
       </AppTooltip>
-    )
+    ) : status === "terminated" ? <span className="text-muted-foreground">Stopped</span> : null
   } else if (status === "starting") {
+    announcement = "Autopilot is starting."
     content = (
       <>
         <Spinner className="size-3.5 text-muted-foreground" />
@@ -153,6 +237,7 @@ export function ContextualRunPill({
       </>
     )
   } else if (status === "pausing") {
+    announcement = "Autopilot will pause after the current passage."
     content = (
       <>
         <Spinner className="size-3.5 text-muted-foreground" />
@@ -160,9 +245,10 @@ export function ContextualRunPill({
       </>
     )
   } else if (status === "paused") {
+    announcement = "Autopilot paused."
     content = (
       <>
-        <AppTooltip content="Resume drafting">
+        {canControl && <AppTooltip content="Resume drafting">
           <Button
             type="button"
             size="icon-sm"
@@ -172,7 +258,7 @@ export function ContextualRunPill({
           >
             <Play className="h-3.5 w-3.5" />
           </Button>
-        </AppTooltip>
+        </AppTooltip>}
         <span className="text-muted-foreground">Paused</span>
         {pendingChip}
         {progress.total > 0 && (
@@ -182,7 +268,7 @@ export function ContextualRunPill({
         )}
       </>
     )
-    trailing = (
+    trailing = canControl ? (
       <AppTooltip content="Stop this run">
         <Button
           type="button"
@@ -194,23 +280,52 @@ export function ContextualRunPill({
           <X className="h-3.5 w-3.5" />
         </Button>
       </AppTooltip>
-    )
-  } else if (status === "parked" || status === "done") {
+    ) : null
+  } else if (status === "parked") {
+    announcement = parkedRemaining > 0
+      ? `Autopilot has ${parkedRemaining} ${parkedRemaining === 1 ? "passage" : "passages"} queued and will continue in the background.`
+      : "Autopilot is idle. No work is queued."
     content = (
       <>
         <Eye className="h-3.5 w-3.5 text-muted-foreground" />
-        <span className="text-muted-foreground">Watching for changes</span>
+        <span className="text-muted-foreground">
+          {parkedRemaining > 0
+            ? `Queued · ${parkedRemaining} ${parkedRemaining === 1 ? "passage" : "passages"} remaining`
+            : "Idle · no work queued"}
+        </span>
         {pendingChip}
       </>
     )
-    trailing = (
-      <AppTooltip content="Stop watching">
+    trailing = canControl ? (
+      <AppTooltip content="Stop this run">
         <Button
           type="button"
           size="icon-sm"
           variant="ghost"
-          aria-label="Stop watching"
+          aria-label="Stop this run"
           onClick={() => void terminateContextualRun()}
+        >
+          <X className="h-3.5 w-3.5" />
+        </Button>
+      </AppTooltip>
+    ) : null
+  } else if (status === "done") {
+    announcement = "Autopilot completed."
+    content = (
+      <>
+        <CheckCircle2 className="h-3.5 w-3.5 text-muted-foreground" />
+        <span className="text-muted-foreground">Complete</span>
+        {pendingChip}
+      </>
+    )
+    trailing = (
+      <AppTooltip content="Dismiss">
+        <Button
+          type="button"
+          size="icon-sm"
+          variant="ghost"
+          aria-label="Dismiss"
+          onClick={dismissContextualRunSummary}
         >
           <X className="h-3.5 w-3.5" />
         </Button>
@@ -218,7 +333,7 @@ export function ContextualRunPill({
     )
   } else if (status === "failed") {
     pillClass = cn(PILL_BASE, "border-destructive/40")
-    role = "status"
+    announcement = "Autopilot stopped after a problem."
     content = (
       <>
         <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-destructive" />
@@ -227,6 +342,7 @@ export function ContextualRunPill({
             ? `${progress.failed} of ${progress.total} passages had problems`
             : "Drafting stopped unexpectedly"}
         </span>
+        {pendingChip}
       </>
     )
     trailing = (
@@ -244,9 +360,10 @@ export function ContextualRunPill({
     )
   } else {
     // running
+    announcement = "Autopilot is working."
     content = (
       <>
-        <AppTooltip content="Pause after this passage">
+        {canControl && <AppTooltip content="Pause after this passage">
           <Button
             type="button"
             size="icon-sm"
@@ -256,7 +373,7 @@ export function ContextualRunPill({
           >
             <Pause className="h-3.5 w-3.5" />
           </Button>
-        </AppTooltip>
+        </AppTooltip>}
         <ProgressBar done={progress.done} total={progress.total} />
         {(phase || laneReadout) && (
           <span className="flex max-w-56 items-center gap-1 truncate text-muted-foreground">
@@ -273,12 +390,47 @@ export function ContextualRunPill({
     )
   }
 
+  const activityButton = runId ? (
+    <AppTooltip content="View Autopilot activity">
+      <Button
+        type="button"
+        size="icon-sm"
+        variant="ghost"
+        aria-label="View Autopilot activity"
+        onClick={() => setInspectorOpen(true)}
+      >
+        <ListTree aria-hidden />
+      </Button>
+    </AppTooltip>
+  ) : null
+
+  if (!content && !activityButton) return null
+
   return (
-    <div className={pillClass} data-testid="contextual-run-pill" role={role}>
-      {content}
-      {steer}
-      {trailing}
-    </div>
+    <>
+      <span className="sr-only" role="status" aria-live="polite" aria-atomic="true">{announcement}</span>
+      <div className={pillClass} data-testid="contextual-run-pill">
+        {content}
+        {steer}
+        {activityButton}
+        {trailing}
+        {controlError && (
+          <span role="alert" className="text-destructive">
+            {controlError}
+          </span>
+        )}
+      </div>
+      <AutopilotActivityInspector
+        key={`${projectId}:${fileId}:${activeLane}`}
+        projectId={projectId}
+        open={inspectorOpen}
+        onOpenChange={setInspectorOpen}
+        focusRunId={runId}
+        focusFileId={fileId}
+        fallbackRun={inspectorRun}
+        canControl={canControl}
+      />
+    </>
   )
 }
 
@@ -287,27 +439,32 @@ export function ContextualRunPill({
  * and wires span-label clicks to the editor's scroll request. Must render
  * inside EditorScrollProvider (it does — the editor viewport wrapper is).
  */
-export function ContextualRunPillMount({ projectId, fileId, onSetupNeeded, anchorCellId }: {
+export function ContextualRunPillMount({ projectId, fileId, activeLane, onSetupNeeded, anchorCellId, canControl }: {
   projectId: string
   fileId: string
+  activeLane: string
+  canControl: boolean
   onSetupNeeded?: () => void
   anchorCellId?: string | null
 }) {
   const { requestScrollToSection } = useEditorScroll()
 
   useEffect(() => {
+    if (activeLane !== "") return
     // Slice D2: swap the run-store's stub transport for the real auth-worker
     // client before the first snapshot fetch. Idempotent (first call wins).
     installContextualTransport()
     void attachContextualRun(projectId, fileId)
-  }, [projectId, fileId])
+  }, [activeLane, projectId, fileId])
 
   return (
     <ContextualRunPill
       projectId={projectId}
       fileId={fileId}
+      activeLane={activeLane}
       onSetupNeeded={onSetupNeeded}
       anchorCellId={anchorCellId}
+      canControl={canControl}
       onSpanClick={(label) => requestScrollToSection(label, fileId)}
     />
   )

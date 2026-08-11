@@ -78,6 +78,29 @@ describe("guardSql — accepts", () => {
     expect(r.ok).toBe(false)
     if (!r.ok) expect(r.error).toContain(":project")
   })
+
+  it("treats contextual activity as project data in catalog joins", () => {
+    const r = guard(
+      "SELECT e.summary FROM information_schema.tables t CROSS JOIN contextual_run_events e",
+    )
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.error).toContain(":project")
+  })
+
+  it.each([
+    "scene_briefs",
+    "contextual_runs",
+    "contextual_steering",
+    "contextual_drafts",
+    "contextual_project_leases",
+  ])(
+    "treats %s as project data in catalog joins",
+    (table) => {
+      const r = guard(`SELECT x.* FROM information_schema.tables t CROSS JOIN ${table} x`)
+      expect(r.ok).toBe(false)
+      if (!r.ok) expect(r.error).toContain(":project")
+    },
+  )
 })
 
 describe("guardSql — rejects", () => {

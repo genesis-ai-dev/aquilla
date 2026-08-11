@@ -3992,16 +3992,16 @@ function EditorRow({
   // We emit a `target.cell.commit` event chained off cell.targetEventId
   // (AD-2) and pinned to cell.sourceEventId (AD-9 staleness pin), then ping
   // the parent to revalidate useCells so the projection lands.
-  const handleEditorCommit = useCallback(({ value, valueHtml }: { value: string; valueHtml: string }) => {
-    if (!editable) return
-    if (!project.id) return
+  const handleEditorCommit = useCallback(async ({ value, valueHtml }: { value: string; valueHtml: string }): Promise<boolean> => {
+    if (!editable) return false
+    if (!project.id) return false
     // FRO-273: belt-and-suspenders role-mirror check. `editable` is already
     // false for roles < CONTRIBUTOR, so this guard only fires in the unlikely
     // race where `editable` hasn't updated yet after a role downgrade — it
     // prevents a guaranteed-403 event from entering the durable outbox.
     if (!canPerform("target.cell.commit", project.syncRole?.level ?? null)) {
       console.warn("[editor-commit] aborting: role too low for target.cell.commit")
-      return
+      return false
     }
     // RACE-5 — Lock re-check at commit time. Uses the ref-backed `checkLockHolder`
     // (updated synchronously on every WS frame) as the authoritative source so
@@ -4014,12 +4014,12 @@ function EditorRow({
     if (liveHolder) {
       console.warn("[editor-commit] aborting: lock held by", liveHolder)
       void onCellCommitted?.(cell.id)
-      return
+      return false
     }
     const idmlCommitError = validateIdmlEditorCommit(idmlConfiguration, valueHtml)
     if (idmlCommitError) {
       setWriteError(idmlCommitError)
-      return
+      return false
     }
     // Optimistic local patch: applies BEFORE the outbox enqueue so this row's
     // signature (`status original translated`) shifts and `useHealth` re-runs
@@ -4043,17 +4043,18 @@ function EditorRow({
     // row's ACTIVE-lane target value, so the edited text belongs to `activeLane`.
     // emitTargetCellCommit omits `''` (default lane) on the wire, so N=1 is
     // byte-identical.
-    emitTargetCellCommit({
-      projectId: project.id,
-      fileId: cell.fileId,
-      cellId: cell.id,
-      parentId,
-      sourceEventId: cell.sourceEventId ?? null,
-      value,
-      valueHtml,
-      author: username,
-      targetLang: activeLane,
-    }).then((eventId) => {
+    try {
+      const eventId = await emitTargetCellCommit({
+        projectId: project.id,
+        fileId: cell.fileId,
+        cellId: cell.id,
+        parentId,
+        sourceEventId: cell.sourceEventId ?? null,
+        value,
+        valueHtml,
+        author: username,
+        targetLang: activeLane,
+      })
       pendingTargetEventIdRef.current = eventId
       // Restore codex behaviour: a direct human edit auto-validates the cell
       // ("a human has touched it"). The target.cell.commit above cleared any
@@ -4090,7 +4091,8 @@ function EditorRow({
       // Pass the just-assigned event id: the auto-BT in the parent pins to it
       // so the BT describes THIS commit, not the lagging projection head.
       void onCellCommitted?.(cell.id, eventId, parentId)
-    }).catch((err) => {
+      return true
+    } catch (err) {
       // RES-4/M1-3: enqueue failure (IDB quota, private-mode, InsufficientRoleError)
       // must be loud. Revert the optimistic patch so the cell doesn't show
       // "saved" styling for an event that exists nowhere durable.
@@ -4103,7 +4105,8 @@ function EditorRow({
         value: cell.translated ?? "",
         valueHtml: cell.translatedHtml ?? "",
       })
-    })
+      return false
+    }
   }, [editable, canValidate, project.id, project.syncRole?.level, project.allowSelfValidation, cell.fileId, cell.id, cell.targetEventId, cell.translated, cell.translatedHtml, cell.sourceEventId, username, activeLane, onCellCommitted, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, checkLockHolder, idmlConfiguration])
 
   // AQU-618: run a single-cell AI generate/Replace, then return the translator
@@ -5797,6 +5800,8 @@ function EditorRow({
                 <ContextualDraftCard
                   cellId={cell.id}
                   projectId={project.id}
+                  fileId={cell.fileId}
+                  targetLang={activeLane}
                   editable={editable}
                   dir={targetCellDirection}
                   onAccept={(text) => handleEditorCommit({ value: text, valueHtml: text })}

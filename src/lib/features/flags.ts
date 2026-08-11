@@ -20,9 +20,9 @@ export interface FeatureFlagDefinition {
 
 export const FLAGS: Record<string, FeatureFlagDefinition> = {
   contextualTranslation: {
-    label: "Contextual drafting",
+    label: "Show Autopilot controls",
     description:
-      "An assistant that reads whole passages, drafts translations from the surrounding context, and stages them for your review. Early preview — stays on this device.",
+      "Shows Autopilot controls on this device. Turning this on does not start work, and hiding the controls does not stop a run. Choose Run Autopilot when you are ready; suggestions stay in review until you accept them.",
     // Default ON: this flag gates DISCOVERY, not spend. It decides whether the
     // play button is visible; a run only starts, and only costs anything, when
     // someone deliberately clicks it. Defaulting it off meant the feature could

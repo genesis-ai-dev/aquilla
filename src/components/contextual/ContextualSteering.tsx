@@ -16,6 +16,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import {
   attachContextualRun,
+  getContextualRunState,
   noteContextualDirectionQueued,
 } from "@/lib/contextual/run-store"
 import { ContextualAuthError, sendContextualSteering } from "@/lib/contextual/transport"
@@ -46,6 +47,17 @@ export function ContextualSteering({ projectId, fileId, runId, directions }: Ste
     setError(null)
     try {
       await sendContextualSteering(runId, trimmed)
+      const current = getContextualRunState()
+      if (
+        current.projectId !== projectId ||
+        current.fileId !== fileId ||
+        current.runId !== runId
+      ) {
+        // The server accepted the old run's direction, but the editor moved
+        // on while the request was in flight. Never inject that direction or
+        // reattach the abandoned file into the current editor mirror.
+        return
+      }
       // The server accepted the direction — it is queued now; show the chip
       // immediately and let the snapshot refresh reconcile.
       noteContextualDirectionQueued(trimmed)

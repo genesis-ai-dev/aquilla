@@ -86,10 +86,11 @@ async function overlayDeviceLocalSettings(record: ProjectRecord): Promise<Projec
     console.warn("[useProject] failed to read device-local project cache", err)
     return record
   }
-  if (!local?.completionSettings) return record
+  if (!local?.completionSettings && !local?.experimentalFlags) return record
   return {
     ...record,
-    completionSettings: local.completionSettings,
+    ...(local.completionSettings ? { completionSettings: local.completionSettings } : {}),
+    ...(local.experimentalFlags ? { experimentalFlags: local.experimentalFlags } : {}),
   }
 }
 

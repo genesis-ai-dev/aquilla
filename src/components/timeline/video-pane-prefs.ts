@@ -14,16 +14,22 @@ const SUBTITLE_MODE_KEY = "codex:video-subtitle-mode"
 const CAPTION_PLACEMENTS: readonly CaptionPlacement[] = ["picture", "bar"]
 const CAPTION_PLACEMENT_KEY = "codex:video-caption-placement"
 
+/** Both lines, until someone says otherwise. (Sam, 2026-08-11 — was "target".)
+ *  A file being timed against footage usually has no translation yet, so a
+ *  target-only default burns nothing and reads as broken; and while translating,
+ *  seeing the line you are working FROM against the picture is the job. */
+const DEFAULT_SUBTITLE_MODE: SubtitleMode = "both"
+
 /** Read the persisted caption preference. Deliberately global rather than
  *  per-project: it expresses how someone likes to watch, not anything about the
  *  material. An unrecognised stored value falls back rather than rendering. */
 export function readSubtitleMode(): SubtitleMode {
-  if (typeof window === "undefined") return "target"
+  if (typeof window === "undefined") return DEFAULT_SUBTITLE_MODE
   try {
     const raw = window.localStorage.getItem(SUBTITLE_MODE_KEY)
-    return SUBTITLE_MODES.includes(raw as SubtitleMode) ? (raw as SubtitleMode) : "target"
+    return SUBTITLE_MODES.includes(raw as SubtitleMode) ? (raw as SubtitleMode) : DEFAULT_SUBTITLE_MODE
   } catch {
-    return "target"
+    return DEFAULT_SUBTITLE_MODE
   }
 }
 

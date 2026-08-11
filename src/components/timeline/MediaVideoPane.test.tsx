@@ -250,7 +250,36 @@ describe("MediaVideoPane", () => {
     expect(readSubtitleMode()).toBe("off")
 
     localStorage.setItem("codex:video-subtitle-mode", "sideways")
-    expect(readSubtitleMode()).toBe("target")
+    expect(readSubtitleMode()).toBe("both")
+  })
+
+  // 2026-08-11 (Sam): was "target", which burns nothing at all on a file with
+  // no translation yet — the common case for footage being timed — and reads as
+  // a broken caption rather than an empty one.
+  it("defaults to showing BOTH lines when nothing is stored", () => {
+    localStorage.removeItem("codex:video-subtitle-mode")
+    expect(readSubtitleMode()).toBe("both")
+    sounding("c1")
+    renderPane()
+    expect(screen.getByTestId("video-pane-caption-target")).toHaveTextContent(
+      "Que la paz de Cristo reine en sus corazones.",
+    )
+    expect(screen.getByTestId("video-pane-caption-source")).toHaveTextContent(
+      "Let the peace of Christ rule in your hearts.",
+    )
+  })
+
+  it("still burns the source line when there is no translation yet", () => {
+    // The reason the default moved off "target": footage being timed usually
+    // has no target text at all, and a target-only caption burns nothing.
+    localStorage.removeItem("codex:video-subtitle-mode")
+    const untranslated = [
+      cell({ id: "u1", medium: "media", attachments: {}, transcription: "In the beginning was the Word.", translated: "" }),
+    ]
+    sounding("u1")
+    render(<MediaVideoPane src="https://cdn/episode.webm" cells={untranslated} />)
+    expect(screen.getByTestId("video-pane-caption-source")).toHaveTextContent("In the beginning was the Word.")
+    expect(screen.queryByTestId("video-pane-caption-target")).toBeNull()
   })
 
   it("hands the video back its controls when the queue cannot own the clock", () => {

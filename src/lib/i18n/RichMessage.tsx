@@ -34,8 +34,10 @@
 
 import { Fragment, type ReactNode } from "react"
 import { useI18n } from "./I18nProvider"
-import type { MessageKey } from "./messages/en"
-import type { TVars } from "./translate"
+import { CATALOGS } from "./messages"
+import { en, type MessageKey } from "./messages/en"
+import { isPluralMessage, selectPluralForm } from "./plurals"
+import { interpolate, type TVars } from "./translate"
 
 /** A placeholder's rendering: a node to substitute, or a value to interpolate. */
 export type RichVars = Record<string, ReactNode>
@@ -75,28 +77,40 @@ export function RichMessage({
   /** Rendering for each `{placeholder}` in the string. */
   values: RichVars
   /**
-   * Governing number for a count-based key. Passed through to plural selection;
-   * also available to the string as `{count}` unless `values` overrides it.
+   * Governing number for a count-based key. Always used for plural selection;
+   * also interpolated into the string as `{count}` unless `values` supplies a
+   * node for `count`, in which case the node is drawn there instead.
    */
   count?: number
 }) {
-  const { t } = useI18n()
+  const { t, locale } = useI18n()
   // Only scalars can take part in plural selection and text interpolation, so
   // node-valued placeholders are resolved here, after t(), not inside it.
   const scalars: TVars = {}
-  if (count !== undefined) scalars.count = count
+  const nodeValues = Object.fromEntries(
+    Object.entries(values).filter(
+      ([, v]) => typeof v !== "string" && typeof v !== "number",
+    ),
+  )
   for (const [name, value] of Object.entries(values)) {
     if (typeof value === "string" || typeof value === "number") scalars[name] = value
   }
-  const resolved = t(k, scalars)
-  const nodes = renderRichMessage(
-    resolved,
-    Object.fromEntries(
-      Object.entries(values).filter(
-        ([, v]) => typeof v !== "string" && typeof v !== "number",
-      ),
-    ),
-  )
+  const base = en[k]
+  // The count itself is often the thing that carries markup — a bold,
+  // tabular-figure numeral inside an otherwise muted sentence. `values` then
+  // "overrides" `{count}`, and handing the number to `t()` as a var would defeat
+  // that: `interpolate` would consume `{count}` and leave the node nothing to
+  // replace. So when `count` is rendered as a node, selection is done here with
+  // the real number and only the *other* vars are interpolated. Selection has to
+  // see the number — a locale with six plural categories cannot be served by a
+  // call-site `=== 1` branch, which is the whole reason `count` exists.
+  const countIsNode = "count" in nodeValues
+  if (count !== undefined && !countIsNode) scalars.count = count
+  const resolved =
+    countIsNode && count !== undefined && isPluralMessage(base)
+      ? interpolate(selectPluralForm(CATALOGS[locale]?.[k], base, locale, { count }), scalars)
+      : t(k, scalars)
+  const nodes = renderRichMessage(resolved, nodeValues)
   return (
     <>
       {nodes.map((node, i) => (

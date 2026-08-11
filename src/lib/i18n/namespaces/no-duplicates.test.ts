@@ -78,17 +78,11 @@ const DISTINCT_MEANING: Record<string, string> = {
     "('New cell', 'Delete comment', 'Attach audio'). common.edit is the imperative " +
     "button that starts editing. Languages that nominalize operation names would " +
     "write these differently, and one of them would be wrong.",
-  "nav.outbox.editsNoun":
-    "The bare noun after a separately-styled count in the outbox summary ('3 " +
-    "edits'), so it is count-governed and must take whatever form follows a number. " +
-    "common.edit is the imperative button that starts editing. A counted noun and a " +
-    "command are different parts of speech; English spelling both 'edit' is the " +
-    "coincidence, not the rule.",
-  "nav.outbox.commentsNoun":
-    "The bare noun after a separately-styled count in the outbox summary ('3 " +
-    "comments'). common.comments is the standalone heading over a thread list. " +
-    "Arabic and many other languages inflect a noun differently after a numeral " +
-    "than they do standing alone as a heading, so one key cannot serve both.",
+  // The outbox summary's bare nouns (editsNoun/commentsNoun) needed exceptions
+  // here because their English collided with common.edit / common.comments. They
+  // are now nav.outbox.summary* — whole sentences carrying their own {count} —
+  // so they no longer collide, and an exception that no longer collides is a
+  // failure of the "keeps every documented exception real" test above.
   "nav.historyControls.back":
     "Accessible name of the browser-style back arrow in the app header: return to " +
     "the previously visited page. common.back is the 'previous step' button inside a " +

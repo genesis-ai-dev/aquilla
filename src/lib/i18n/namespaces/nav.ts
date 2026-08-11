@@ -133,16 +133,30 @@ export const nav = defineNamespace({
       one: "{count} try",
       other: "{count} tries",
     }),
-    "nav.outbox.editsNoun": plural({
-      one: "edit",
-      other: "edits",
+    // Each summary item is ONE key carrying both the count and its noun, so the
+    // translator places the numeral. `<span>{n}</span> {noun}` in JSX froze the
+    // numeral before the noun, which several target languages cannot follow;
+    // `{count}` is substituted with the styled span at the call site via
+    // <RichMessage>, so it appears exactly once and keeps its tabular-nums
+    // styling. All four are count-governed: "3 validation" and "3 other" were
+    // ungrammatical English, and a bare noun cannot inflect after an Arabic
+    // numeral at all.
+    "nav.outbox.summaryEdits": plural({
+      one: "{count} edit",
+      other: "{count} edits",
     }),
-    "nav.outbox.validationLabel": "validation",
-    "nav.outbox.commentsNoun": plural({
-      one: "comment",
-      other: "comments",
+    "nav.outbox.summaryValidations": plural({
+      one: "{count} validation",
+      other: "{count} validations",
     }),
-    "nav.outbox.otherLabel": "other",
+    "nav.outbox.summaryComments": plural({
+      one: "{count} comment",
+      other: "{count} comments",
+    }),
+    "nav.outbox.summaryOther": plural({
+      one: "{count} other change",
+      other: "{count} other changes",
+    }),
     "nav.outbox.retryNow": "Retry now",
     "nav.outbox.sessionExpiredAlert":
       "Your session expired. Edits are saved locally — sign in again to retry.",
@@ -698,27 +712,37 @@ export const nav = defineNamespace({
           "'Try' here is a noun (an attempt), not the verb.",
         placeholders: { count: "Number of sync attempts made for this record." },
       },
-      "nav.outbox.editsNoun": {
+      "nav.outbox.summaryEdits": {
         description:
-          "The noun in the outbox summary line, after a separately-rendered bold " +
-          "count: '3 edits'. The number is NOT part of this string — it is styled " +
-          "on its own — so translate the noun alone, in whatever form follows a " +
-          "number in the target language. Refers to edits to a cell's translated " +
-          "text, the same act nav.outbox.eventEdit names on a single row.",
+          "One item of the outbox summary line, which lists what is queued by " +
+          "category: '3 edits · 1 comment'. Refers to edits to a cell's translated " +
+          "text, the same act nav.outbox.eventEdit names on a single row. Put " +
+          "{count} wherever the numeral belongs in your language — it renders as a " +
+          "bold, tabular-figure number, so the surrounding words are yours to order.",
+        placeholders: { count: "Number of queued text edits." },
       },
-      "nav.outbox.validationLabel": {
+      "nav.outbox.summaryValidations": {
         description:
-          "Invariant noun (no plural form used in the English original) composed after " +
-          "a count in the outbox summary line, e.g. '3 validation'.",
+          "The validation item of the outbox summary line: queued sign-offs and " +
+          "un-sign-offs of a cell. Same shape as nav.outbox.summaryEdits — {count} " +
+          "is the styled numeral and may go wherever your language puts it.",
+        placeholders: { count: "Number of queued validate/unvalidate actions." },
       },
-      "nav.outbox.commentsNoun": {
+      "nav.outbox.summaryComments": {
         description:
-          "The noun in the outbox summary line, after a separately-rendered bold " +
-          "count: '3 comments'. The number is NOT part of this string, so translate " +
-          "the noun alone in the form that follows a number.",
+          "The comment item of the outbox summary line: queued comment writes. Same " +
+          "shape as nav.outbox.summaryEdits — {count} is the styled numeral and may " +
+          "go wherever your language puts it.",
+        placeholders: { count: "Number of queued comment changes." },
       },
-      "nav.outbox.otherLabel": {
-        description: "Invariant noun for the 'other' bucket in the outbox summary line.",
+      "nav.outbox.summaryOther": {
+        description:
+          "The catch-all item of the outbox summary line, covering every queued " +
+          "change that is not a text edit, a validation or a comment (file " +
+          "creation, audio attachment, and so on). 'Change' is deliberate: the " +
+          "bucket is heterogeneous, so the noun has to be the general one. Same " +
+          "shape as nav.outbox.summaryEdits.",
+        placeholders: { count: "Number of queued changes in no other category." },
       },
       "nav.outbox.retryNow": {
         description:

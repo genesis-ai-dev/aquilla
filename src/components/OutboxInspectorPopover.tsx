@@ -12,6 +12,14 @@ import { removeOutboxEvents, requeueOutboxEvents, type OutboxRecord } from "@/li
 import type { CqrsEventKind } from "@/lib/sync/outbox-types"
 import { useT } from "@/lib/i18n/I18nProvider"
 import type { TFunction } from "@/lib/i18n/I18nProvider"
+import { RichMessage } from "@/lib/i18n/RichMessage"
+
+/** The bold, tabular-figure numeral inside one outbox summary item. It is a node
+ *  rather than inline JSX around the noun so the translated string decides where
+ *  the numeral sits relative to its noun. */
+function SummaryCount({ value }: { value: number }) {
+  return <span className="font-medium tabular-nums text-foreground">{value}</span>
+}
 
 interface Props {
   trigger: React.ReactNode
@@ -328,33 +336,48 @@ export function OutboxInspectorPopover({ trigger, records, pendingCount, onRetry
           </div>
           {rows.length > 0 && (
             <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
+              {/* Each item is one translated sentence whose `{count}` is
+                  substituted with the styled numeral node below. Splitting it
+                  into `<span>{n}</span> {noun}` — the shape this used to have —
+                  hardcoded numeral-before-noun, which Burmese and other
+                  classifier languages cannot follow. The number still appears
+                  exactly once: <RichMessage> hands the scalar to `t()` for
+                  plural selection and substitutes the node for the placeholder,
+                  so nothing prints "3 3 edits". */}
               {summary.edits > 0 && (
                 <span>
-                  {/* The count is rendered by the styled span above, so these
-                      keys contribute the noun only — interpolating {count} here
-                      too printed it twice ("3 3 edits"). The count is still
-                      handed to `t` because it selects the plural form: the noun
-                      alone has to agree with the number in Arabic. */}
-                  <span className="font-medium tabular-nums text-foreground">{summary.edits}</span>{" "}
-                  {t("nav.outbox.editsNoun", { count: summary.edits })}
+                  <RichMessage
+                    k="nav.outbox.summaryEdits"
+                    count={summary.edits}
+                    values={{ count: <SummaryCount value={summary.edits} /> }}
+                  />
                 </span>
               )}
               {summary.validation > 0 && (
                 <span>
-                  <span className="font-medium tabular-nums text-foreground">{summary.validation}</span>{" "}
-                  {t("nav.outbox.validationLabel")}
+                  <RichMessage
+                    k="nav.outbox.summaryValidations"
+                    count={summary.validation}
+                    values={{ count: <SummaryCount value={summary.validation} /> }}
+                  />
                 </span>
               )}
               {summary.comments > 0 && (
                 <span>
-                  <span className="font-medium tabular-nums text-foreground">{summary.comments}</span>{" "}
-                  {t("nav.outbox.commentsNoun", { count: summary.comments })}
+                  <RichMessage
+                    k="nav.outbox.summaryComments"
+                    count={summary.comments}
+                    values={{ count: <SummaryCount value={summary.comments} /> }}
+                  />
                 </span>
               )}
               {summary.other > 0 && (
                 <span>
-                  <span className="font-medium tabular-nums text-foreground">{summary.other}</span>{" "}
-                  {t("nav.outbox.otherLabel")}
+                  <RichMessage
+                    k="nav.outbox.summaryOther"
+                    count={summary.other}
+                    values={{ count: <SummaryCount value={summary.other} /> }}
+                  />
                 </span>
               )}
             </p>

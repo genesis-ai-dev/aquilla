@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useState, type ReactNode } from "react"
 import { useParams, useNavigate } from "react-router-dom"
 import { AlertCircle, Users } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -22,6 +22,8 @@ import posthog from "@/lib/posthog"
 import { INVITE_REDEEMED } from "@/lib/event-names"
 import { RoleLabel } from "@/components/RoleLabel"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { RichMessage } from "@/lib/i18n/RichMessage"
+import type { MessageKey } from "@/lib/i18n/messages/en"
 
 type Phase = "initial" | "redeeming" | "error"
 type AuthMode = "login" | "signup" | "forgot"
@@ -48,7 +50,12 @@ export function JoinPage() {
   const navigate = useNavigate()
   const { session, loading: sessionLoading } = useFrontierSession()
   const [phase, setPhase] = useState<Phase>("initial")
-  const [error, setError] = useState<string | null>(null)
+  // The KEY of the error to show, not the resolved sentence (AQU-511 finding 7).
+  // Resolving with t() at the moment the failure happened froze the message in
+  // whatever language was active then, so a later language switch left a
+  // stale-language error on screen. A key in state is resolved at render, so it
+  // follows the active locale for free.
+  const [errorKey, setErrorKey] = useState<MessageKey | null>(null)
   const [preview, setPreview] = useState<InvitePreview | null>(null)
   // null = still loading; string = failed with that reason
   const [previewLoadState, setPreviewLoadState] = useState<PreviewLoadState>(null)
@@ -92,23 +99,27 @@ export function JoinPage() {
     return () => { cancelled = true }
   }, [token, session?.jwt])
 
-  useEffect(() => {
-    if (!token) {
-      setPhase("error")
-      setError(t("auth.join.invalidInviteLink"))
-    }
-    // Signed-in users land on the confirmation card and accept explicitly
-    // (AQU-335: silent auto-accept on link-open meant no user-facing signal
-    // that access was just granted — and contradicted the join-via-invite-link
-    // spec's confirmation step). Signed-out users see the same preview with
-    // inline auth; after signing in they land on the confirmation too.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token])
+  // A /join URL carrying no token at all is knowable during render, so it is
+  // DERIVED here rather than pushed into state by an effect. The effect this
+  // replaces resolved its message with t() and then left `t` out of its
+  // dependency array behind an eslint-disable, so the message stayed in the
+  // mount-time language for the rest of the page's life — and the suppression
+  // silently covered a second warning about calling setState in an effect body.
+  // Deriving removes the effect, the suppression and the staleness together, and
+  // shows the error on the first render instead of after a flash of the preview.
+  //
+  // Signed-in users still land on the confirmation card and accept explicitly
+  // (AQU-335: silent auto-accept on link-open meant no user-facing signal that
+  // access was just granted — and contradicted the join-via-invite-link spec's
+  // confirmation step). Signed-out users see the same preview with inline auth;
+  // after signing in they land on the confirmation too.
+  const effectivePhase: Phase = token ? phase : "error"
+  const shownErrorKey: MessageKey | null = token ? errorKey : "auth.join.invalidInviteLink"
 
   async function redeem(jwt: string) {
     if (!token) return
     setPhase("redeeming")
-    setError(null)
+    setErrorKey(null)
     // Prefer the multi-project accept — it also redeems a single-project token
     // (one row) — then fall back to the legacy single-project accept.
     const multi = await acceptMultiInvite(jwt, token)
@@ -149,18 +160,16 @@ export function JoinPage() {
     }
     if (single.reason === "network") {
       setPhase("error")
-      setError(t("auth.join.networkError"))
+      setErrorKey("auth.join.networkError")
       return
     }
     if (single.reason === "wrong_email") {
       setPhase("error")
-      setError(t("auth.join.wrongEmail"))
+      setErrorKey("auth.join.wrongEmail")
       return
     }
     setPhase("error")
-    setError(
-      t("auth.join.noLongerValidFresh")
-    )
+    setErrorKey("auth.join.noLongerValidFresh")
   }
 
   // An expired stored JWT is treated as signed-out: the accept endpoint would
@@ -169,9 +178,9 @@ export function JoinPage() {
   const sessionExpired = !!session?.jwt && isJwtExpired(session.jwt)
   const hasValidSession = !!session?.jwt && !sessionExpired
   const isSignedOut = !sessionLoading && !hasValidSession
-  const showPreviewCard = isSignedOut && phase === "initial"
+  const showPreviewCard = isSignedOut && effectivePhase === "initial"
   // AQU-335: signed-in users confirm explicitly instead of auto-accepting.
-  const showConfirmCard = !sessionLoading && hasValidSession && phase === "initial"
+  const showConfirmCard = !sessionLoading && hasValidSession && effectivePhase === "initial"
   // Preview failed — show error instead of auth form / accept button. A
   // network failure only blocks the signed-out card (signed-in users can
   // still accept; the accept endpoint is the authority on token validity).
@@ -386,16 +395,16 @@ export function JoinPage() {
                 {t("auth.join.postAuthNote")}
               </p>
             </div>
-          ) : phase === "redeeming" ? (
+          ) : effectivePhase === "redeeming" ? (
             <div className="flex flex-col items-center gap-2 py-4">
               <Spinner className="size-8 text-primary" />
               <p className="text-sm text-muted-foreground">{t("auth.join.joiningInProgress")}</p>
             </div>
-          ) : phase === "error" ? (
+          ) : effectivePhase === "error" ? (
             <div className="space-y-3">
               <div className="flex items-center gap-2 text-destructive">
                 <AlertCircle className="h-5 w-5" />
-                <p className="text-sm">{error}</p>
+                <p className="text-sm">{shownErrorKey ? t(shownErrorKey) : null}</p>
               </div>
               <Button variant="outline" onClick={() => navigate("/")} className="w-full">
                 {t("auth.join.backToProjects")}
@@ -417,6 +426,36 @@ export interface InviteSummaryProject {
   projectId: string
   projectName: string
   archived?: boolean
+}
+
+/**
+ * Catalog key for the summary's second line — the sentence that says what role
+ * the invite grants.
+ *
+ * Three independent facts change the sentence, not just a word of it: whether
+ * one project or several are granted ("join as" vs "join each as"), whether the
+ * inviter is named (English then opens with "Invited by X — " and continues in
+ * lowercase), and whether the invite is bound to an email address. The first
+ * extraction pass glued those in from fragment keys with hardcoded English
+ * spacing, em dashes and a full stop, which froze English word order into this
+ * component — and silently dropped the "You'll"/"you'll" case flip, so every
+ * invite with a known inviter rendered a capital letter mid-sentence.
+ *
+ * So each combination is its own complete sentence in the catalog. The keys are
+ * written out literally rather than assembled from string pieces so `tsc` checks
+ * that all eight exist.
+ */
+function roleLineKey(each: boolean, hasInviter: boolean, hasEmail: boolean): MessageKey {
+  if (each) {
+    if (hasInviter) {
+      return hasEmail ? "auth.join.roleLineEachInviterEmail" : "auth.join.roleLineEachInviter"
+    }
+    return hasEmail ? "auth.join.roleLineEachEmail" : "auth.join.roleLineEach"
+  }
+  if (hasInviter) {
+    return hasEmail ? "auth.join.roleLineSingleInviterEmail" : "auth.join.roleLineSingleInviter"
+  }
+  return hasEmail ? "auth.join.roleLineSingleEmail" : "auth.join.roleLineSingle"
 }
 
 /**
@@ -454,40 +493,47 @@ export function InviteSummary({
   invitedBy?: string | null
 }) {
   const t = useT()
-  const role = <RoleLabel name={roleName} />
-  const archivedSuffix = (archived?: boolean) => (archived ? ` (${t("auth.join.archived")})` : "")
-  const emailSuffix = email ? (
-    <>
-      {" "}— {t("auth.join.invitationSentTo")} <span className="font-mono">{email}</span>
-    </>
+  // Both lines of the card are whole translated sentences whose styled parts are
+  // supplied as placeholder values (see RichMessage). The styling carries meaning
+  // — the project name is the fact being reported, the inviter's name and the
+  // bound address are literals to read character by character, the workspace is
+  // secondary context — so it has to survive translation, while the translator
+  // stays free to reorder everything around it.
+  const workspace = orgName ? (
+    <span className="text-muted-foreground">{orgName}</span>
   ) : null
-  const workspaceSuffix = orgName ? (
-    <span className="text-muted-foreground"> in {orgName}</span>
-  ) : null
-  // "Invited by {name} — " prefix, present only when the inviter is known.
-  const inviterPrefix = invitedBy ? (
-    <>
-      {t("auth.join.invitedByPrefix")} <span className="font-medium">{invitedBy}</span> —{" "}
-    </>
-  ) : null
+  const roleLineValues: Record<string, ReactNode> = {
+    role: <RoleLabel name={roleName} />,
+    ...(invitedBy ? { inviter: <span className="font-medium">{invitedBy}</span> } : {}),
+    ...(email ? { email: <span className="font-mono">{email}</span> } : {}),
+  }
+  const projectDisplay = (p: InviteSummaryProject) => {
+    const name = p.projectName || p.projectId
+    return p.archived ? t("auth.join.archivedProject", { project: name }) : name
+  }
+  const roleLine = (
+    <p className="text-xs text-muted-foreground">
+      <RichMessage
+        k={roleLineKey(projects.length !== 1, !!invitedBy, !!email)}
+        values={roleLineValues}
+      />
+    </p>
+  )
 
   if (projects.length === 1) {
     const p = projects[0]
     return (
       <div className="rounded-md border bg-muted/30 p-3 space-y-1.5">
         <p className="text-sm">
-          {t("auth.join.projectLabel")}{" "}
-          <strong className="font-medium">
-            {p.projectName || p.projectId}
-            {archivedSuffix(p.archived)}
-          </strong>
-          {workspaceSuffix}
+          <RichMessage
+            k={orgName ? "auth.join.summarySingleInWorkspace" : "auth.join.summarySingle"}
+            values={{
+              project: <strong className="font-medium">{projectDisplay(p)}</strong>,
+              workspace,
+            }}
+          />
         </p>
-        <p className="text-xs text-muted-foreground">
-          {inviterPrefix}
-          {t("auth.join.youllJoinAs")} {role}
-          {emailSuffix}.
-        </p>
+        {roleLine}
       </div>
     )
   }
@@ -495,25 +541,24 @@ export function InviteSummary({
   return (
     <div className="rounded-md border bg-muted/30 p-3 space-y-1.5">
       <p className="text-sm">
-        {t("auth.join.invitedToProjects")}{" "}
-        <strong className="font-medium">
-          {t("auth.join.projectCount", { count: projects.length })}
-        </strong>
-        {workspaceSuffix}:
+        {/* The count is interpolated as text, not wrapped in <strong> as the
+            fragment version was. A count-governed placeholder is consumed by
+            plural selection inside t(), so it cannot also be a styled node — and
+            whole-sentence word order is worth more here than bold on a numeral.
+            Same trade the outbox summary faces from the other side; see the
+            wave-4a note in docs/swarm/I18N-TRACES.md. */}
+        <RichMessage
+          k={orgName ? "auth.join.summaryMultiInWorkspace" : "auth.join.summaryMulti"}
+          count={projects.length}
+          values={{ workspace }}
+        />
       </p>
       <ul className="list-disc space-y-0.5 pl-4 text-xs text-muted-foreground">
         {projects.map((p) => (
-          <li key={p.projectId}>
-            {p.projectName || p.projectId}
-            {archivedSuffix(p.archived)}
-          </li>
+          <li key={p.projectId}>{projectDisplay(p)}</li>
         ))}
       </ul>
-      <p className="text-xs text-muted-foreground">
-        {inviterPrefix}
-        {t("auth.join.youllJoinEachAs")} {role}
-        {emailSuffix}.
-      </p>
+      {roleLine}
     </div>
   )
 }

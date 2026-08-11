@@ -1,4 +1,35 @@
-import { defineNamespace } from "./types"
+import { defineNamespace, plural } from "./types"
+
+/**
+ * Placeholder notes shared by the invite-summary sentence variants below.
+ *
+ * The summary is the same two sentences in eight (role line) and four (project
+ * line) shapes, so the placeholder semantics are identical across them. Sharing
+ * the note keeps every variant's documentation in step — the context lint checks
+ * placeholders in both directions per key, and eight hand-copied paragraphs
+ * would drift.
+ */
+const PROJECT_PLACEHOLDER =
+  "Name of the project the invite grants access to, rendered in medium weight. " +
+  "A proper name — never translate it. Falls back to the project's opaque id " +
+  "when the project has no name, and carries the '(archived)' marker from " +
+  "auth.join.archivedProject when it applies."
+const WORKSPACE_PLACEHOLDER =
+  "Name of the workspace (organization) the project or projects belong to, " +
+  "rendered in the muted secondary colour. A proper name — never translate it."
+const ROLE_PLACEHOLDER =
+  "The role the invite grants, e.g. 'contributor' or 'project lead'. Comes from " +
+  "a fixed English role vocabulary rendered elsewhere in the app and is NOT " +
+  "translated by this key; treat it as a name."
+const INVITER_PLACEHOLDER =
+  "Display name of whoever sent the invite, rendered in medium weight. A " +
+  "person's name — never translate it."
+const EMAIL_PLACEHOLDER =
+  "The email address this invite was sent to, rendered monospaced. Never " +
+  "translate, transliterate or reformat it."
+const INVITE_COUNT_PLACEHOLDER =
+  "How many projects this one invite grants access to. Always 2 or more here — " +
+  "a one-project invite renders auth.join.summarySingle instead."
 
 export const auth = defineNamespace({
   keys: {
@@ -84,14 +115,32 @@ export const auth = defineNamespace({
       "This invite link is no longer valid. Ask the project owner for a fresh link.",
     "auth.join.loadingDetails": "Loading invitation details…",
     "auth.join.initializing": "Initializing…",
-    "auth.join.projectLabel": "Project:",
-    "auth.join.invitedByPrefix": "Invited by",
-    "auth.join.youllJoinAs": "You'll join as",
-    "auth.join.youllJoinEachAs": "You'll join each as",
-    "auth.join.invitationSentTo": "invitation sent to",
-    "auth.join.invitedToProjects": "You're invited to",
-    "auth.join.projectCount": "{count} projects",
-    "auth.join.archived": "archived",
+    // --- Invite summary card (/join/:token) ---------------------------------
+    // Whole sentences, one key per case that actually renders. The first pass
+    // extracted this card as fragments ("Project:", "Invited by", "You'll join
+    // as", "invitation sent to") glued together in JSX with hardcoded English
+    // spacing, em dashes and full stops — which froze English word order into the
+    // component and dropped the deliberate "You'll"/"you'll" case flip that kept
+    // the sentence grammatical after an "Invited by X — " opening. Burmese and
+    // Arabic both need to reorder these, so the combinatorial cost (inviter ×
+    // one-or-many projects × bound email) is paid in key count instead.
+    "auth.join.summarySingle": "Project: {project}",
+    "auth.join.summarySingleInWorkspace": "Project: {project} in {workspace}",
+    "auth.join.summaryMulti": plural({ other: "You're invited to {count} projects:" }),
+    "auth.join.summaryMultiInWorkspace": plural({
+      other: "You're invited to {count} projects in {workspace}:",
+    }),
+    "auth.join.archivedProject": "{project} (archived)",
+    "auth.join.roleLineSingle": "You'll join as {role}.",
+    "auth.join.roleLineSingleEmail": "You'll join as {role} — invitation sent to {email}.",
+    "auth.join.roleLineSingleInviter": "Invited by {inviter} — you'll join as {role}.",
+    "auth.join.roleLineSingleInviterEmail":
+      "Invited by {inviter} — you'll join as {role} — invitation sent to {email}.",
+    "auth.join.roleLineEach": "You'll join each as {role}.",
+    "auth.join.roleLineEachEmail": "You'll join each as {role} — invitation sent to {email}.",
+    "auth.join.roleLineEachInviter": "Invited by {inviter} — you'll join each as {role}.",
+    "auth.join.roleLineEachInviterEmail":
+      "Invited by {inviter} — you'll join each as {role} — invitation sent to {email}.",
 
     // --- Verify email (/verify-email) ---------------------------------------
     "auth.verifyEmail.missingToken": "This verification link is missing its token.",
@@ -455,53 +504,117 @@ export const auth = defineNamespace({
       "auth.join.initializing": {
         description: "Placeholder text for the brief instant before any other state applies.",
       },
-      "auth.join.projectLabel": {
+      "auth.join.summarySingle": {
         description:
-          "Label word before the project name in the single-project invite summary " +
-          "card, e.g. 'Project: Genesis Pilot'.",
+          "First line of the invite-summary card when the invite grants exactly ONE " +
+          "project and the project has no workspace. A complete labelled line naming " +
+          "the project; the label's separator (the colon in English) is part of this " +
+          "string, so use whatever mark your language uses — or none.",
+        placeholders: { project: PROJECT_PLACEHOLDER },
       },
-      "auth.join.invitedByPrefix": {
+      "auth.join.summarySingleInWorkspace": {
         description:
-          "Label word before the inviter's name in the invite summary, e.g. " +
-          "'Invited by Prabhu — you'll join as Contributor.' Omitted entirely when " +
-          "the inviter is unknown.",
-      },
-      "auth.join.youllJoinAs": {
-        description:
-          "Fragment of the invite-summary sentence for a SINGLE project, immediately " +
-          "followed by the role name, e.g. '<this text> Contributor.' Must not contain " +
-          "the word 'each' — that variant is auth.join.youllJoinEachAs.",
-      },
-      "auth.join.youllJoinEachAs": {
-        description:
-          "Fragment of the invite-summary sentence for MULTIPLE projects, immediately " +
-          "followed by the role name, e.g. '<this text> Contributor.' The role applies " +
-          "to every listed project, hence 'each'.",
-      },
-      "auth.join.invitationSentTo": {
-        description:
-          "Mid-sentence fragment naming who an email-bound invite was sent to, e.g. " +
-          "'— invitation sent to alice@example.com.' Lowercase, no surrounding " +
-          "punctuation.",
-      },
-      "auth.join.invitedToProjects": {
-        description:
-          "Opening fragment of the multi-project invite summary, immediately followed " +
-          "by the bolded project count, e.g. '<this text> 3 projects:'.",
-      },
-      "auth.join.projectCount": {
-        description:
-          "Bolded project-count fragment following auth.join.invitedToProjects. Only " +
-          "used for 2+ projects (the 1-project case uses auth.join.projectLabel " +
-          "instead), so no singular form is needed.",
+          "Same first line as auth.join.summarySingle, for a one-project invite whose " +
+          "project belongs to a named workspace. One sentence: name the project and " +
+          "say which workspace it is in, in whatever order your language wants.",
         placeholders: {
-          count: "Number of projects the invite grants access to (always 2 or more here).",
+          project: PROJECT_PLACEHOLDER,
+          workspace: WORKSPACE_PLACEHOLDER,
         },
       },
-      "auth.join.archived": {
+      "auth.join.summaryMulti": {
         description:
-          "Single word appended in parentheses after a project's name in the invite " +
-          "list when that project has since been archived, e.g. 'Genesis (archived)'.",
+          "First line of the invite-summary card when one invite grants SEVERAL " +
+          "projects, which are then listed as bullets underneath. The trailing colon " +
+          "is what introduces that list, so keep whatever mark your language uses to " +
+          "introduce a list. Count-governed: the number and the noun it counts may " +
+          "sit wherever your language needs them.",
+        placeholders: { count: INVITE_COUNT_PLACEHOLDER },
+      },
+      "auth.join.summaryMultiInWorkspace": {
+        description:
+          "Same first line as auth.join.summaryMulti, for a several-project invite " +
+          "where every project belongs to the same named workspace. Introduces the " +
+          "bulleted project list that follows.",
+        placeholders: {
+          count: INVITE_COUNT_PLACEHOLDER,
+          workspace: WORKSPACE_PLACEHOLDER,
+        },
+      },
+      "auth.join.archivedProject": {
+        description:
+          "A project's name with a marker saying the project has since been archived, " +
+          "e.g. 'Genesis (archived)'. Used wherever a project name appears in the " +
+          "invite summary. The brackets are part of this string — use your language's " +
+          "own convention for an aside, and put the marker where it reads naturally.",
+        placeholders: { project: PROJECT_PLACEHOLDER },
+      },
+      "auth.join.roleLineSingle": {
+        description:
+          "Second line of the invite-summary card: the whole sentence telling the " +
+          "visitor what role they will get in the ONE project the invite grants. This " +
+          "is the variant with no inviter named and no email bound to the invite, so " +
+          "it is a sentence on its own and starts one.",
+        placeholders: { role: ROLE_PLACEHOLDER },
+      },
+      "auth.join.roleLineSingleEmail": {
+        description:
+          "As auth.join.roleLineSingle (ONE project, inviter unknown), plus the " +
+          "address the invite was emailed to — shown so a visitor signed in under a " +
+          "different address understands which account the invite expects.",
+        placeholders: { role: ROLE_PLACEHOLDER, email: EMAIL_PLACEHOLDER },
+      },
+      "auth.join.roleLineSingleInviter": {
+        description:
+          "As auth.join.roleLineSingle (ONE project) but the inviter is known, so the " +
+          "sentence also says who sent the invite. In English this puts 'Invited by " +
+          "<name>' first, which is why 'you'll' is lowercase here and capitalised in " +
+          "auth.join.roleLineSingle — order the clauses however your language prefers " +
+          "and capitalise to match.",
+        placeholders: { inviter: INVITER_PLACEHOLDER, role: ROLE_PLACEHOLDER },
+      },
+      "auth.join.roleLineSingleInviterEmail": {
+        description:
+          "The fullest one-project variant: who sent the invite, the role it grants, " +
+          "and the address it was emailed to, in one sentence.",
+        placeholders: {
+          inviter: INVITER_PLACEHOLDER,
+          role: ROLE_PLACEHOLDER,
+          email: EMAIL_PLACEHOLDER,
+        },
+      },
+      "auth.join.roleLineEach": {
+        description:
+          "Second line of the invite-summary card when the invite grants SEVERAL " +
+          "projects: the same role applies to every project in the list above, which " +
+          "is what English's 'each' distributes. Inviter unknown, no bound email.",
+        placeholders: { role: ROLE_PLACEHOLDER },
+      },
+      "auth.join.roleLineEachEmail": {
+        description:
+          "As auth.join.roleLineEach (SEVERAL projects, one shared role, inviter " +
+          "unknown) plus the address the invite was emailed to. Rare today: the " +
+          "server's several-project invite preview does not yet report a bound email, " +
+          "so this variant is reachable only once it does.",
+        placeholders: { role: ROLE_PLACEHOLDER, email: EMAIL_PLACEHOLDER },
+      },
+      "auth.join.roleLineEachInviter": {
+        description:
+          "As auth.join.roleLineEach (SEVERAL projects, one shared role) but the " +
+          "inviter is known and named. English opens with 'Invited by <name>' and so " +
+          "continues in lowercase; reorder and recapitalise as your language needs.",
+        placeholders: { inviter: INVITER_PLACEHOLDER, role: ROLE_PLACEHOLDER },
+      },
+      "auth.join.roleLineEachInviterEmail": {
+        description:
+          "The fullest several-project variant: who sent the invite, the one role it " +
+          "grants across every listed project, and the address it was emailed to. " +
+          "Rare today, for the same reason as auth.join.roleLineEachEmail.",
+        placeholders: {
+          inviter: INVITER_PLACEHOLDER,
+          role: ROLE_PLACEHOLDER,
+          email: EMAIL_PLACEHOLDER,
+        },
       },
       "auth.verifyEmail.missingToken": {
         description:

@@ -1,8 +1,12 @@
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { render, screen, waitFor, fireEvent } from "@testing-library/react"
 import { MemoryRouter, Routes, Route } from "react-router-dom"
 import { JoinPage, InviteSummary } from "./JoinPage"
 import { acceptServerInvite, previewMultiInvite, acceptMultiInvite, previewServerInvite } from "@/lib/sync/invites"
+import { I18nProvider } from "@/lib/i18n/I18nProvider"
+import { LanguageSwitcher } from "@/lib/i18n/LanguageSwitcher"
+import { CATALOGS } from "@/lib/i18n/messages"
+import { LOCALE_STORAGE_KEY } from "@/lib/i18n/store"
 
 const navigate = vi.fn()
 vi.mock("react-router-dom", async (i) => ({
@@ -91,7 +95,9 @@ describe("JoinPage inline auth", () => {
     })
     renderJoin()
     expect(await screen.findByText("Kilisusu NT")).toBeInTheDocument()
-    expect(screen.getByText(/in Come and See/)).toBeInTheDocument()
+    // The workspace name is its own node inside the translated sentence now
+    // (AQU-511), so it is matched exactly rather than as "in <name>".
+    expect(screen.getByText("Come and See")).toBeInTheDocument()
     expect(screen.getByText(/invited by/i)).toBeInTheDocument()
     expect(screen.getByText("Prabhu")).toBeInTheDocument()
   })
@@ -355,7 +361,9 @@ describe("InviteSummary (AQU-337 singular/plural copy)", () => {
       />,
     )
     expect(screen.getByText(/you'll join each as/i)).toBeInTheDocument()
-    expect(screen.getByText("3 projects")).toBeInTheDocument()
+    // One whole sentence now (AQU-511), so the count is asserted in place rather
+    // than as the separately-bolded "3 projects" fragment it used to be.
+    expect(screen.getByText("You're invited to 3 projects:")).toBeInTheDocument()
     expect(screen.getByText("Alpha")).toBeInTheDocument()
     expect(screen.getByText("Beta")).toBeInTheDocument()
     expect(screen.getByText("Gamma")).toBeInTheDocument()
@@ -404,5 +412,166 @@ describe("InviteSummary (AQU-337 singular/plural copy)", () => {
       />,
     )
     expect(screen.getByText(/Beta \(archived\)/)).toBeInTheDocument()
+  })
+})
+
+// AQU-511 finding 3, and the grammar bug the extraction hid.
+//
+// The invite summary used to be assembled from fragment keys ("Project:",
+// "Invited by", "You'll join as", "invitation sent to") concatenated in JSX with
+// hardcoded English spaces, em dashes and a full stop. Two things were wrong with
+// that. A translator could not reorder the sentence — Burmese and Arabic both
+// have to — and the deliberate "You'll"/"you'll" case flip that kept the sentence
+// grammatical after an "Invited by X — " opening was dropped in extraction, so
+// every invite from a known inviter rendered a capital letter mid-sentence.
+//
+// Each real case is now one whole catalog key with placeholders, so these tests
+// assert entire sentences (a fragment assertion is what let the bug through) and
+// assert the ELEMENT around each styled placeholder, not just its text — a
+// text-only check passes just as happily on a flattened, unstyled sentence.
+describe("InviteSummary renders whole translated sentences (AQU-511 finding 3)", () => {
+  const single = [{ projectId: "p1", projectName: "Genesis Pilot" }]
+  const three = [
+    { projectId: "p1", projectName: "Alpha" },
+    { projectId: "p2", projectName: "Beta" },
+    { projectId: "p3", projectName: "Gamma" },
+  ]
+
+  /** The card's last paragraph — the sentence naming the role. */
+  const roleLine = (container: HTMLElement) => {
+    const paragraphs = container.querySelectorAll("p")
+    return paragraphs[paragraphs.length - 1].textContent
+  }
+
+  afterEach(() => {
+    CATALOGS.my = {}
+    window.localStorage.clear()
+  })
+
+  it("capitalises the sentence when no inviter is named", () => {
+    const { container } = render(<InviteSummary projects={single} roleName="viewer" />)
+    expect(roleLine(container)).toBe("You'll join as viewer.")
+  })
+
+  it("continues in lowercase after the 'Invited by' opening", () => {
+    // The whole sentence starts with "Invited by Alice — ", so the clause after it
+    // is mid-sentence and must not be capitalised. The original JSX flipped the
+    // case by hand; extraction replaced it with a hardcoded "You'll", producing
+    // "Invited by Alice — You'll join as viewer." for every known inviter.
+    const { container } = render(
+      <InviteSummary projects={single} roleName="viewer" invitedBy="Alice" />,
+    )
+    expect(roleLine(container)).toBe("Invited by Alice — you'll join as viewer.")
+  })
+
+  it("keeps the inviter's name emphasised inside the sentence", () => {
+    render(<InviteSummary projects={single} roleName="viewer" invitedBy="Alice" />)
+    // Who invited you is the salient fact in that clause; flattening it to plain
+    // text loses the distinction between the name and the words around it.
+    const name = screen.getByText("Alice")
+    expect(name.tagName).toBe("SPAN")
+    expect(name.className).toContain("font-medium")
+  })
+
+  it("keeps the bound email monospaced inside the sentence", () => {
+    const { container } = render(
+      <InviteSummary projects={single} roleName="viewer" email="ryan@example.com" />,
+    )
+    // Monospacing marks the address as a literal string to compare character by
+    // character against the account you are signed in as.
+    expect(screen.getByText("ryan@example.com").className).toContain("font-mono")
+    expect(roleLine(container)).toBe(
+      "You'll join as viewer — invitation sent to ryan@example.com.",
+    )
+  })
+
+  it("keeps the single project's name emphasised inside the sentence", () => {
+    render(<InviteSummary projects={single} roleName="viewer" />)
+    // The project you are being given access to is the fact the line reports.
+    expect(screen.getByText("Genesis Pilot").tagName).toBe("STRONG")
+  })
+
+  it("lets a translation reorder the counted project line, count included", () => {
+    // The count line is count-governed, so its number is consumed by plural
+    // selection and cannot also be a styled node — the fragment version bolded
+    // "3 projects" as one English-ordered blob instead. Whole-sentence word order
+    // is the thing worth keeping: this translation puts the workspace first and
+    // the number last, which the fragments could never have produced.
+    CATALOGS.my = {
+      "auth.join.summaryMultiInWorkspace": "{workspace} ။ စီမံကိန်း {count} ခု ။",
+    }
+    window.localStorage.setItem(LOCALE_STORAGE_KEY, "my")
+    const { container } = render(
+      <I18nProvider>
+        <InviteSummary projects={three} roleName="contributor" orgName="Come and See" />
+      </I18nProvider>,
+    )
+    expect(container.querySelector("p")!.textContent).toBe(
+      "Come and See ။ စီမံကိန်း 3 ခု ။",
+    )
+    // The workspace keeps its muted styling even in the reordered sentence.
+    expect(screen.getByText("Come and See").className).toContain("text-muted-foreground")
+  })
+
+  it("names the workspace as a distinct muted node inside the sentence", () => {
+    const { container } = render(
+      <InviteSummary projects={single} roleName="viewer" orgName="Come and See" />,
+    )
+    // The workspace is secondary context, which is what the muted colour says.
+    const org = screen.getByText("Come and See")
+    expect(org.className).toContain("text-muted-foreground")
+    expect(container.querySelector("p")!.textContent).toBe(
+      "Project: Genesis Pilot in Come and See",
+    )
+  })
+
+  it("renders in the translation's word order, not the call site's", () => {
+    // The reason whole-sentence keys exist at all: a translation must be able to
+    // put the role before the inviter, and to use its own punctuation. While the
+    // sentence was concatenated fragments, the order was frozen in the JSX and no
+    // translation could move it.
+    CATALOGS.my = {
+      "auth.join.roleLineSingleInviter": "{role} · invited by {inviter} ။",
+    }
+    window.localStorage.setItem(LOCALE_STORAGE_KEY, "my")
+    const { container } = render(
+      <I18nProvider>
+        <InviteSummary projects={single} roleName="viewer" invitedBy="Alice" />
+      </I18nProvider>,
+    )
+    expect(roleLine(container)).toBe("viewer · invited by Alice ။")
+  })
+})
+
+// AQU-511 finding 7. Three of JoinPage's error messages were resolved with t()
+// at the moment the failure happened and stored as plain strings, one of them in
+// an effect whose dependency array omitted `t` behind an eslint-disable. Whatever
+// language was active then was frozen into the message, so switching language
+// left a stale-language error on screen. The state now holds the message KEY and
+// resolves it at render.
+describe("JoinPage error messages follow a language switch (AQU-511 finding 7)", () => {
+  afterEach(() => {
+    CATALOGS.my = {}
+    window.localStorage.clear()
+  })
+
+  it("re-resolves the invalid-link error into the newly chosen language", () => {
+    CATALOGS.my = { "auth.join.invalidInviteLink": "MY invalid invite link" }
+    render(
+      <I18nProvider>
+        <LanguageSwitcher />
+        <MemoryRouter initialEntries={["/join"]}>
+          <Routes>
+            <Route path="/join" element={<JoinPage />} />
+          </Routes>
+        </MemoryRouter>
+      </I18nProvider>,
+    )
+    expect(screen.getByText("Invalid invite link")).toBeInTheDocument()
+
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "my" } })
+
+    expect(screen.getByText("MY invalid invite link")).toBeInTheDocument()
+    expect(screen.queryByText("Invalid invite link")).not.toBeInTheDocument()
   })
 })

@@ -143,6 +143,7 @@ import type { EditorLens } from "@/components/EditorModeToggle"
 import { SelectionBar } from "./SelectionBar"
 import { WorkspaceStatusBar } from "./WorkspaceStatusBar"
 import { ExpandableFileList } from "./ExpandableFileList"
+import { FileDetailsModal } from "./FileDetailsModal"
 import { SidebarProjectSection } from "./SidebarProjectSection"
 import { SuggestionBanner } from "./SuggestionBanner"
 import { ConfirmActionDialog } from "./ConfirmActionDialog"
@@ -3721,6 +3722,8 @@ export function ProjectWorkspace() {
     return Array.from(set).sort((a, b) => a.localeCompare(b))
   }, [project?.files])
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null)
+  // "File details" modal (sidebar file row ⋯ menu).
+  const [detailsFileId, setDetailsFileId] = useState<string | null>(null)
   // Latest project for the suggestion-apply undo toast action (avoids stale closure).
   const projectForUndoRef = useRef(project)
   projectForUndoRef.current = project
@@ -5017,6 +5020,7 @@ export function ProjectWorkspace() {
                     }
                     workspaceTabs.openFile(fileId, opts)
                   }}
+                  onShowDetails={setDetailsFileId}
                   onRename={handleRename}
                   onMove={(fileId) => {
                     setMoveTargetId(fileId)
@@ -5990,6 +5994,41 @@ export function ProjectWorkspace() {
           onConfirm={() => { pendingActionConfirm.run(actionCtx, actionArgs); setPendingActionConfirm(null) }}
         />
       )}
+      {/* "File details" modal — metadata plus permission-aware actions for a sidebar file row. */}
+      <FileDetailsModal
+        open={detailsFileId !== null}
+        onOpenChange={(v) => { if (!v) setDetailsFileId(null) }}
+        file={detailsFileId ? project.files.find((f) => f.id === detailsFileId) ?? null : null}
+        progress={detailsFileId ? fileProgress.get(detailsFileId) : undefined}
+        roleLevel={currentRoleLevel}
+        canExportByOrgPolicy={canExportByOrgPolicy}
+        onRename={() => {
+          if (detailsFileId) setRenameSignal({ fileId: detailsFileId, nonce: Date.now() })
+          setDetailsFileId(null)
+        }}
+        onMove={() => {
+          if (detailsFileId) {
+            setMoveTargetId(detailsFileId)
+            setMoveCorpus(project.files.find((f) => f.id === detailsFileId)?.corpusMarker ?? "")
+          }
+          setDetailsFileId(null)
+        }}
+        onExportSource={() => {
+          const f = detailsFileId ? project.files.find((x) => x.id === detailsFileId) : null
+          if (f) {
+            void exportSourceFile({
+              projectId: project.id,
+              file: f,
+              getToken: getTokenForFile,
+              targetLang: activeLane,
+            })
+          }
+        }}
+        onDelete={() => {
+          if (detailsFileId) setPendingDeleteId(detailsFileId)
+          setDetailsFileId(null)
+        }}
+      />
       {/* FRO-272: soft-delete confirmation — file moves to "Recently deleted" (30-day retention). */}
       <ConfirmActionDialog
         open={pendingDeleteId !== null}

@@ -87,9 +87,10 @@ import {
   buildFileScopedTokenFetcher,
   buildProjectAwareMinter,
 } from "@/lib/sync/cqrs-bridge"
-import { emitTargetCellCommit, emitCellBacktranslationSet, emitFileRename, emitFileDelete, emitFileRestore, emitCellValidate, emitCellRetime, emitCellLaneRetime, emitCellAudioAttach, emitFileVideoSet, emitFileTimingSet, emitSourceCellCreate } from "@/lib/sync/events-emit"
+import { emitTargetCellCommit, emitCellBacktranslationSet, emitFileRename, emitFileDelete, emitFileRestore, emitCellValidate, emitCellRetime, emitCellLaneRetime, emitCellAudioAttach, emitFileVideoSet, emitFileTimingSet, emitSourceCellCreate, enqueueEvents } from "@/lib/sync/events-emit"
 import { v7 as uuidv7 } from "uuid"
 import { sequenceBetween } from "@/lib/timeline/derive"
+import { isLineEmpty, isUserAddedLine, userLineOrigin } from "@/lib/timeline/user-lines"
 import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
 import { isBulkValidationEligible } from "@/lib/review/review-eligibility"
 import { TimelineEditor } from "@/components/timeline/TimelineEditor"
@@ -1519,6 +1520,64 @@ export function ProjectWorkspace() {
       setDiarizeError(e instanceof Error ? e.message : String(e))
     }
   }, [project?.id, activeFileId, currentUsername, cellStore, getTokenForFile, getTokenForProjectFile, tts.settings, tts.saveTts, revalidateCells])
+
+  /**
+   * AQU-646: take back a line you added. Deliberately narrow — only a line a
+   * person created here (`metadata.aquillaOrigin`), and only while it is still
+   * empty on every side. That is not timidity: `source.cell.delete`'s
+   * projection removes one row and cleans up nothing else, so a cell carrying
+   * takes, validators or comments would leave all of them behind. Clear those
+   * first and the line becomes removable.
+   */
+  const handleRemoveLine = useCallback(
+    async (cellId: string) => {
+      if (!project?.id || !activeFileId) return
+      const cell = getActiveCell(cellId)
+      if (!cell || !isUserAddedLine(cell) || !isLineEmpty(cell)) return
+      const plan = cellStore.getRemovalPlan(cellId)
+      if (!plan) return
+      // One batch, in order: re-point the row that pointed at this one, drop
+      // any target rows, then the source row itself. The two chain-mutating
+      // events sit on DIFFERENT cells, so neither waits on the other's head.
+      await enqueueEvents([
+        ...(plan.successor
+          ? [
+              {
+                kind: "source.cell.reorder" as const,
+                projectId: project.id,
+                fileId: activeFileId,
+                cellId: plan.successor.cellId,
+                parentId: plan.successor.eventId,
+                author: currentUsername,
+                payload: { anchorCellId: plan.anchorCellId },
+              },
+            ]
+          : []),
+        ...plan.targetLangs.map((lang) => ({
+          kind: "target.cell.delete" as const,
+          projectId: project.id!,
+          fileId: activeFileId,
+          cellId,
+          parentId: null,
+          author: currentUsername,
+          payload: lang ? { targetLang: lang } : {},
+        })),
+        {
+          kind: "source.cell.delete" as const,
+          projectId: project.id,
+          fileId: activeFileId,
+          cellId,
+          parentId: plan.eventId,
+          author: currentUsername,
+          payload: {},
+        },
+      ])
+      await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+      revalidateCells()
+      setTimelineSelectedCellId(null)
+    },
+    [project?.id, activeFileId, currentUsername, getActiveCell, cellStore, getTokenForProjectFile, revalidateCells],
+  )
 
   // Media-lens empty state: attach a clip to the ACTIVE file by upload or
   // direct URL. The Import dialog can't do this — it always creates a new
@@ -3620,7 +3679,7 @@ export function ProjectWorkspace() {
         // The one durable signal that a person made this line rather than an
         // import. Inferring it from the ABSENCE of an import envelope would be
         // wrong — that also describes every pre-normalized-manifest file.
-        metadata: { aquillaOrigin: { version: 1, kind: "user-insert", createdAt: Date.now() } },
+        metadata: { aquillaOrigin: userLineOrigin() },
         author: currentUsername,
       })
       await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
@@ -5925,6 +5984,7 @@ export function ProjectWorkspace() {
                     onTogglePlay={handleTimelineTogglePlay}
                     onRequestLinkVideo={() => setLinkVideoOpen(true)}
                     onAddLine={handleAddLine}
+                    onRemoveLine={handleRemoveLine}
                     // Creating a cell is a source.* write, PROJECT_LEAD+ on the
                     // server. Offering the button below that bar would mint a
                     // guaranteed 403 and wedge the outbox.

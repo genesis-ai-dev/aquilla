@@ -10,6 +10,7 @@ import { AudioLines, Film, LocateFixed, Magnet, Minus, Plus, Volume2, VolumeX, X
 import { cn } from "@/lib/utils"
 import { deriveLanes } from "@/lib/timeline/lanes"
 import { deriveSourceRegions, EMPTY_SOURCE_REGIONS } from "@/lib/timeline/source-regions"
+import { isLineEmpty, isUserAddedLine } from "@/lib/timeline/user-lines"
 import { SourceRegionLane } from "./SourceRegionLane"
 import { chipOverlaps } from "@/lib/timeline/lane-timing"
 import { buildTimelineLayout, type TimelineLayout } from "@/lib/timeline/layout"
@@ -76,6 +77,8 @@ export interface TimelineEditorProps {
   onAddLine?(startSec: number, endSec: number, opts?: { thenRecord?: boolean }): Promise<string | null>
   /** Whether this user may create cells at all (source.* is PROJECT_LEAD+). */
   canAddLine?: boolean
+  /** Take back a line someone added, while it is still empty. */
+  onRemoveLine?(cellId: string): void
   /** False disables the control — `file.video.set` needs contributor access,
    *  and the emit throws rather than failing quietly. */
   canLinkVideo?: boolean
@@ -186,6 +189,7 @@ export function TimelineEditor({
   onRequestLinkVideo,
   onAddLine,
   canAddLine,
+  onRemoveLine,
   canLinkVideo = true,
   onSeekToTime,
   onOpenRecording,
@@ -1083,6 +1087,11 @@ export function TimelineEditor({
               // exactly as it was.
               emptySpans={addableSpans}
               onAddLine={canAddLine && onAddLine ? (s, e) => void onAddLine(s, e) : undefined}
+              // Only a line someone added here, and only while it is still
+              // empty — deleting a cell with takes or comments on it would
+              // leave every one of them behind.
+              canRemove={drawsSourceBand && canAddLine ? (c) => isUserAddedLine(c) && isLineEmpty(c) : undefined}
+              onRemove={onRemoveLine}
             />
             {/* AQU-646: a file with footage and no media cells of its own gets
                 the video's audio as source chips — the same cards an mp3

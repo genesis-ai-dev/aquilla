@@ -39,6 +39,9 @@ export interface TimelineLaneProps {
   emptySpans?: readonly { startSec: number; endSec: number }[]
   /** Clicking the "add a line" button over one of those stretches. */
   onAddLine?(startSec: number, endSec: number): void
+  /** Take back a line. The lane decides nothing — it asks this per cell. */
+  canRemove?(cell: CellData): boolean
+  onRemove?(cellId: string): void
 }
 
 /** Below this a round button has nowhere to sit, so none is offered — zoom in
@@ -61,6 +64,8 @@ export function TimelineLane({
   onSeek,
   emptySpans,
   onAddLine,
+  canRemove,
+  onRemove,
 }: TimelineLaneProps) {
   const spanOf = (c: CellData): { start: number; end: number } => {
     if (layout) {
@@ -147,6 +152,7 @@ export function TimelineLane({
           onSelect={onSelect}
           onRetime={onRetime}
           onSeek={onSeek}
+          onRemove={onRemove && canRemove?.(c) ? onRemove : undefined}
         />
       ))}
     </div>

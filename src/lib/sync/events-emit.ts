@@ -866,10 +866,51 @@ export async function emitSourceCellCreate(
   return eventId
 }
 
+export interface SourceCellReorderInput {
+  projectId: string
+  fileId: string
+  /** The cell being re-pointed (NOT the one being removed). */
+  cellId: string
+  /** Its current source-side chain head — reorder is chain-mutating. */
+  parentId: string | null
+  /** Its new predecessor; null makes it the head of the file. */
+  anchorCellId: string | null
+  author: string
+  clientTs?: number
+}
+
+/**
+ * Emit a `source.cell.reorder` — re-point one cell's place in the anchor chain.
+ * (AQU-646: the first client emitter for this kind.)
+ *
+ * Removing a line has to re-point whatever pointed AT it, or that row becomes
+ * unreachable and `walkAnchorChain` appends it at the TAIL of the file — a
+ * delete would silently reorder the document.
+ */
+export async function emitSourceCellReorder(input: SourceCellReorderInput): Promise<string> {
+  const { eventId } = await enqueueEvent({
+    kind: "source.cell.reorder",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    cellId: input.cellId,
+    parentId: input.parentId ?? null,
+    author: input.author,
+    payload: { anchorCellId: input.anchorCellId },
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
 export interface SourceCellDeleteInput {
   projectId: string
   fileId: string
   cellId: string
+  /** AQU-646: `source.cell.delete` is CHAIN-MUTATING, so it needs the row's
+   *  current head. It used to be hardcoded null here, which the server's
+   *  parent-chain guard reads as a stale write — the delete simply never
+   *  applied. Optional only so the existing callers (diarization, DCS) keep
+   *  their previous behaviour until they are looked at. */
+  parentId?: string | null
   author: string
   clientTs?: number
 }
@@ -885,7 +926,7 @@ export async function emitSourceCellDelete(input: SourceCellDeleteInput): Promis
     projectId: input.projectId,
     fileId: input.fileId,
     cellId: input.cellId,
-    parentId: null,
+    parentId: input.parentId ?? null,
     author: input.author,
     payload: {},
     clientTs: input.clientTs,

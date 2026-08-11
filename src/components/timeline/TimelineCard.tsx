@@ -11,6 +11,7 @@
 // same seconds-domain transform, so what you see is what lands.
 
 import { useRef, useState } from "react"
+import { X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { secToPx, pxToSec, clampRange } from "@/lib/timeline/scale"
 import { subtitleMirrorText } from "@/lib/timeline/lanes"
@@ -54,6 +55,9 @@ export interface TimelineCardProps {
    *  moved the pointer >3px is a retime, not a seek). Optional — read-only
    *  surfaces select without seeking. */
   onSeek?(cellId: string): void
+  /** AQU-646: offered only on a line a person added that is still empty —
+   *  the workspace decides, this just draws the control. */
+  onRemove?(cellId: string): void
 }
 
 export function TimelineCard({
@@ -69,6 +73,7 @@ export function TimelineCard({
   onSelect,
   onRetime,
   onSeek,
+  onRemove,
 }: TimelineCardProps) {
   // Round 6: a subtitle card on a media cell shows its INDEPENDENT span.
   const laneSpan = span ?? (variant === "subtitle" ? subtitleSpanSec(cell) : null)
@@ -238,6 +243,25 @@ export function TimelineCard({
           isDialogue ? "bg-sky-600" : "bg-zinc-400 dark:bg-zinc-600",
         )}
       />
+      {onRemove && (
+        // Same manners as the slot buttons: nothing at rest, faint on the
+        // chip's hover. It must not reach the card's own click, which would
+        // select and seek on the way out.
+        <button
+          type="button"
+          title="Remove this line"
+          aria-label="Remove this line"
+          data-testid={`tl-card-${cell.id}-remove`}
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation()
+            onRemove(cell.id)
+          }}
+          className="absolute right-1 top-1 z-20 flex h-4 w-4 items-center justify-center rounded-full text-muted-foreground opacity-0 transition-opacity hover:bg-background hover:text-foreground group-hover:opacity-70 focus-visible:opacity-100"
+        >
+          <X className="h-3 w-3" />
+        </button>
+      )}
       {canRetime && (
         <span
           aria-hidden

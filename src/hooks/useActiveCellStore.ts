@@ -556,6 +556,39 @@ export class CellStore {
     }
   }
 
+  /**
+   * AQU-646: everything removing a line needs — its own source-side chain head,
+   * the cell it is anchored to, and the row anchored TO it, whose anchor has to
+   * be re-pointed or `walkAnchorChain` appends it at the tail of the file and a
+   * delete silently reorders the document.
+   *
+   * Reads `sourceById` because `CellData` carries neither field.
+   */
+  getRemovalPlan(cellId: string): {
+    eventId: string
+    anchorCellId: string | null
+    successor: { cellId: string; eventId: string } | null
+    /** The target-side rows to take with it, per language lane. */
+    targetLangs: string[]
+  } | null {
+    const source = this.sourceById.get(cellId)
+    if (!source) return null
+    let successor: { cellId: string; eventId: string } | null = null
+    for (const [id, row] of this.sourceById) {
+      if (row.anchorCellId === cellId) {
+        successor = { cellId: id, eventId: row.eventId }
+        break
+      }
+    }
+    const targetLangs: string[] = []
+    const own = this.targetById.get(cellId)
+    if (own) targetLangs.push(own.targetLang ?? "")
+    for (const row of this.otherLaneTargetRows) {
+      if (row.cellId === cellId) targetLangs.push(row.targetLang ?? "")
+    }
+    return { eventId: source.eventId, anchorCellId: source.anchorCellId, successor, targetLangs }
+  }
+
   getCommitHandle(cellId: string): CellCommitHandle | null {
     if (!this.ctx.projectId || !this.ctx.fileId) return null
     const source = this.sourceById.get(cellId)

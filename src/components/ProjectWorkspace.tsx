@@ -71,7 +71,7 @@ import { HistoryDrawer } from "./HistoryDrawer"
 import { SharePanel } from "./SharePanel"
 import { VideoPlayer, type VideoPlayerHandle } from "./VideoPlayer"
 import { VideoAttachmentDialog } from "./VideoAttachmentDialog"
-import { parseTimestampRange, extractCuesFromCells } from "@/lib/video/vtt-generator"
+import { extractCuesFromCells } from "@/lib/video/vtt-generator"
 import { useFileSync } from "@/hooks/useFileSync"
 import { useFileMeta } from "@/hooks/useFileMeta"
 import { useCellLabelsPreference } from "@/hooks/useCellLabelsPreference"
@@ -87,7 +87,7 @@ import {
   buildFileScopedTokenFetcher,
   buildProjectAwareMinter,
 } from "@/lib/sync/cqrs-bridge"
-import { emitTargetCellCommit, emitCellBacktranslationSet, emitFileRename, emitFileDelete, emitFileRestore, emitCellValidate, emitCellRetime, emitCellLaneRetime, emitCellAudioAttach, emitFileVideoSet, emitFileTimingSet, emitSourceCellCreate, enqueueEvents } from "@/lib/sync/events-emit"
+import { emitTargetCellCommit, emitCellBacktranslationSet, emitFileRename, emitFileDelete, emitFileRestore, emitCellValidate, emitCellRetime, emitCellLaneRetime, emitCellAudioAttach, emitFileVideoSet, emitFileTimingSet, enqueueEvents } from "@/lib/sync/events-emit"
 import { v7 as uuidv7 } from "uuid"
 import { sequenceBetween } from "@/lib/timeline/derive"
 import { isLineEmpty, isUserAddedLine, userLineOrigin } from "@/lib/timeline/user-lines"
@@ -1819,7 +1819,10 @@ export function ProjectWorkspace() {
   )
 
   const [videoDialogOpen, setVideoDialogOpen] = useState(false)
-  const [currentVideoTime, setCurrentVideoTime] = useState(0)
+  // Nothing reads this any more (round 8 removed the dead cue clock below), but
+  // the player it belongs to comes back with the event grammar in v1.x, so the
+  // wire stays rather than being re-derived from scratch then.
+  const [, setCurrentVideoTime] = useState(0)
   const videoPlayerRef = useRef<VideoPlayerHandle>(null)
   // Phase 2c-gamma: video attachments lived on Y.Doc meta. Disabled here so
   // the editor still renders for subtitle files; the attach/play workflow
@@ -1839,37 +1842,28 @@ export function ProjectWorkspace() {
 
   const videoStartOffset = videoAttachment.videoStartOffset ?? 0
 
-  // Active cue is in cue-space (not raw video time). Adjust by offset.
-  const cueTime = currentVideoTime - videoStartOffset
-  const activeCueIndex = useMemo(() => {
-    if (!isSubtitleFile) return -1
-    for (let i = 0; i < cellSummaries.length; i++) {
-      const range = parseTimestampRange(cellSummaries[i].context)
-      if (!range) continue
-      if (cueTime >= range.start && cueTime <= range.end) {
-        return i
-      }
-    }
-    return -1
-  }, [cellSummaries, cueTime, isSubtitleFile])
+  // AQU-646 round 8: `activeCueIndex` and the 500ms effect that fed it to
+  // scrollToCellIndex are GONE. Three things were wrong with them at once.
+  // Their clock could never advance — currentVideoTime's only writer is a
+  // <VideoPlayer> gated on `videoSrc`, hardcoded null above, so it never
+  // mounts and cueTime sat permanently at 0. They were computed in STORE space
+  // over cellSummaries and handed to a DISPLAY-space scroll, two orders that
+  // diverge on any time-sorted file. And the leading gap always starts at
+  // exactly 0, so a line added at the very start was the one cue whose range
+  // contained that frozen 0 — which is why the table jumped to the last row
+  // half a second after landing correctly on the first, and only ever there.
+  // Highlighting the line that is playing is the media-follow driver's job now.
 
-  useEffect(() => {
-    if (activeCueIndex < 0) return
-    const timer = setTimeout(() => {
-      editorRef.current?.scrollToCellIndex(activeCueIndex)
-    }, 500)
-    return () => clearTimeout(timer)
-  }, [activeCueIndex])
-
+  // "Play from this cue", the little Play button on every subtitle row. It has
+  // done nothing for a long time, on every subtitle project: it drove the same
+  // videoPlayerRef as the dead clock above, and that player never mounts. Now
+  // it points playback at the line the way everything else does — the same pair
+  // the "land on a new line" effect uses. Only offered where there is something
+  // to play into (see its render site), so it is present and working or absent.
   const handleCueSeek = useCallback((cellId: string) => {
-    const cell = cellStore.getCellView(cellId)
-    if (!cell) return
-    const range = parseTimestampRange(cell.context)
-    if (!range) return
-    // Seek in raw video time = cue-space start + offset
-    videoPlayerRef.current?.seekTo(range.start + videoStartOffset)
-    videoPlayerRef.current?.play().catch(() => { /* autoplay blocked */ })
-  }, [cellStore])
+    handleMediaRowActivate(cellId)
+    editorRef.current?.scrollToCellId(cellId, { flash: true, follow: "engage" })
+  }, [handleMediaRowActivate])
 
   const {
     buildIndex,
@@ -3676,21 +3670,55 @@ export function ProjectWorkspace() {
       const before = [...byTime].reverse().find((c) => (c.endTime ?? 0) <= startSec) ?? null
       const after = byTime.find((c) => (c.startTime ?? 0) >= endSec) ?? null
       const cellId = uuidv7()
-      await emitSourceCellCreate({
-        projectId: project.id,
-        fileId: activeFileId,
-        cellId,
-        anchorCellId: before?.id ?? null,
-        value: "",
-        startMs,
-        endMs,
-        sequenceIndex: sequenceBetween(before?.sequenceIndex, after?.sequenceIndex),
-        // The one durable signal that a person made this line rather than an
-        // import. Inferring it from the ABSENCE of an import envelope would be
-        // wrong — that also describes every pre-normalized-manifest file.
-        metadata: { aquillaOrigin: userLineOrigin() },
-        author: currentUsername,
-      })
+      // Inserting at the HEAD needs the old head re-pointed at the new line, or
+      // the file ends up with two rows claiming a null anchor. walkAnchorChain
+      // buckets both under the same key and breaks the tie by event id, and a
+      // fresh uuidv7 always sorts last — so the new line lands at the TAIL of
+      // store order while display order (time-sorted) correctly puts it first.
+      // That is a data-order bug in its own right: store order is what the
+      // exporters and findIndexByCellId read, not just what the table scrolls to.
+      const oldHead = before ? null : cellStore.getChainHeadCellId()
+      // ONE batch, create first, so there is never a tick where the row exists
+      // at the tail. The two chain-mutating events sit on different cells, so
+      // neither waits on the other's head. source.cell.reorder carries the same
+      // PROJECT_LEAD floor as source.cell.create, so the caller's permission
+      // check already covers it — and enqueueEvents re-checks per input and
+      // throws before writing anything.
+      await enqueueEvents([
+        {
+          kind: "source.cell.create" as const,
+          projectId: project.id,
+          fileId: activeFileId,
+          cellId,
+          parentId: null,
+          author: currentUsername,
+          payload: {
+            cellId,
+            anchorCellId: before?.id ?? null,
+            value: "",
+            startMs,
+            endMs,
+            sequenceIndex: sequenceBetween(before?.sequenceIndex, after?.sequenceIndex),
+            // The one durable signal that a person made this line rather than
+            // an import. Inferring it from the ABSENCE of an import envelope
+            // would be wrong — that describes every pre-manifest file too.
+            metadata: { aquillaOrigin: userLineOrigin() },
+          },
+        },
+        ...(oldHead
+          ? [
+              {
+                kind: "source.cell.reorder" as const,
+                projectId: project.id,
+                fileId: activeFileId,
+                cellId: oldHead.cellId,
+                parentId: oldHead.eventId,
+                author: currentUsername,
+                payload: { anchorCellId: cellId },
+              },
+            ]
+          : []),
+      ])
       await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
       revalidateCells()
       // Land on it exactly as clicking its row would — but not yet.
@@ -3702,7 +3730,7 @@ export function ProjectWorkspace() {
       setPendingNewCell({ cellId, thenRecord: Boolean(opts?.thenRecord) })
       return cellId
     },
-    [project?.id, activeFileId, currentUsername, getActiveCells, getTokenForProjectFile, revalidateCells],
+    [project?.id, activeFileId, currentUsername, getActiveCells, cellStore, getTokenForProjectFile, revalidateCells],
   )
 
   /**
@@ -6103,8 +6131,7 @@ export function ProjectWorkspace() {
             getAlignmentModel={getAlignmentModel}
             getStatisticalBt={getStatisticalBt}
             onAlignmentSeedChange={handleAlignmentSeedChange}
-            activeCueIndex={activeCueIndex >= 0 ? activeCueIndex : undefined}
-            onSeekToCue={isSubtitleFile ? handleCueSeek : undefined}
+            onSeekToCue={isSubtitleFile && timelineStacked ? handleCueSeek : undefined}
             lineNumbersEnabled={fileMeta.lineNumbersEnabled}
             cellLabelsEnabled={cellLabelsEnabled}
             sourceDirectionMode={fileMeta.sourceDirectionMode}

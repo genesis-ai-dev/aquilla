@@ -88,3 +88,33 @@ describe("CellStore.applyOptimisticCellTiming", () => {
     expect(() => store.applyOptimisticCellTiming("nope", { startMs: 1 })).not.toThrow()
   })
 })
+
+// AQU-646 round 8: the chain head is what a head-insert has to re-point, or the
+// file ends up with two rows claiming a null anchor and the new line sorts to
+// the tail of store order while display order puts it first.
+describe("CellStore.getChainHeadCellId", () => {
+  const chained = () => [
+    row("a"),
+    row("b", { anchorCellId: "a", eventId: "source-b" }),
+    row("c", { anchorCellId: "b", eventId: "source-c" }),
+  ]
+
+  it("finds the row with no cell before it", () => {
+    expect(makeStore(chained()).getChainHeadCellId()).toEqual({
+      cellId: "a",
+      eventId: "source-a",
+    })
+  })
+
+  it("returns null for an empty file", () => {
+    expect(makeStore([]).getChainHeadCellId()).toBeNull()
+  })
+
+  it("ignores target rows — the chain is a source-side structure", () => {
+    const store = makeStore([
+      ...chained(),
+      row("c", { side: "target", value: "hola", eventId: "t-c" }),
+    ])
+    expect(store.getChainHeadCellId()?.cellId).toBe("a")
+  })
+})

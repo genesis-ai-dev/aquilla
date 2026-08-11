@@ -755,7 +755,6 @@ interface EditorTableProps {
   cellOpenCommentCount?: Map<string, number>
   // onOpenComments/onOpenHistory moved to EditorActionsContext (FRO perf
   // cleanup) — pure pass-through, never consumed above the row.
-  activeCueIndex?: number
   onSeekToCue?: (cellId: string) => void
   lineNumbersEnabled: boolean
   cellLabelsEnabled: boolean
@@ -842,7 +841,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   backtranslationByCellId,
   onSaveBacktranslation, getStatisticalBt,
   cellOpenCommentCount,
-  activeCueIndex, onSeekToCue,
+  onSeekToCue,
   lineNumbersEnabled, cellLabelsEnabled, sourceDirectionMode = "auto", targetDirectionMode = "auto", sourceTextDirection, targetTextDirection,
   isAnonymous, onJumpToCell,
   audioLens, castGutter = false, ttsSettings, onOpenAudioSetup,
@@ -2087,7 +2086,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           getStatisticalBt={getStatisticalBt}
           getFootnoteDetails={getFootnoteDetails}
           cellOpenCommentCount={cellOpenCommentCount}
-          activeCueIndex={activeCueIndex}
           onSeekToCue={onSeekToCue}
           rowIndex={index}
           contentNumber={sequentialNumberByCellId.get(cell.id) ?? index + 1}
@@ -2142,7 +2140,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
       </CellStoreRow>
     )
   }, [
-    activeCueIndex,
     activeEditorCellId,
     castGutter,
     ttsSettings,
@@ -2659,7 +2656,6 @@ interface MemoizedRowProps {
   getStatisticalBt?: (translatedText: string) => string
   getFootnoteDetails: (cellId: string) => CellFootnoteDetails
   cellOpenCommentCount?: Map<string, number>
-  activeCueIndex?: number
   onSeekToCue?: (cellId: string) => void
   rowIndex: number
   /** AQU-610: 1-based ordinal among numbered (non-paratext) cells for sequential numbering. */
@@ -2728,7 +2724,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
   const {
     cell, examples, completing, errors, previews, healthMap, infractions,
     backtranslating, backtranslationErrors, cellOpenCommentCount,
-    activeCueIndex, rowIndex, contentNumber, gridCols, castGutter, ttsSettings,
+    rowIndex, contentNumber, gridCols, castGutter, ttsSettings,
     onDragStart: onDragStartParent, onDragEnter: onDragEnterParent,
     onSelectionPointerDown: onSelectionPointerDownParent,
     onNavigateCell: onNavigateCellParent,
@@ -2819,7 +2815,6 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
   const isBacktranslating = backtranslating?.has(cellId)
   const backtranslationError = backtranslationErrors?.get(cellId)
   const openCommentCount = cellOpenCommentCount?.get(cellId) ?? 0
-  const isActiveCue = activeCueIndex !== undefined && activeCueIndex === rowIndex
 
   // Bind the stable parent (cellId) => void handlers to this row's cellId.
   // Stable per-row because both parent callbacks and cellId are stable.
@@ -2894,7 +2889,6 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         getStatisticalBt={getStatisticalBt}
         getFootnoteDetails={getFootnoteDetails}
         openCommentCount={openCommentCount}
-        isActiveCue={isActiveCue}
         onSeekToCue={onSeekToCue}
         rowIndex={rowIndex}
         contentNumber={contentNumber}
@@ -3042,7 +3036,6 @@ interface EditorRowProps {
   /** FRO-207: Called when user confirms/invalidates an alignment. */
   onAlignmentSeedChange?: (seed: import("@/lib/completion/interlinear").AlignmentSeed) => void
   openCommentCount: number
-  isActiveCue?: boolean
   onSeekToCue?: (cellId: string) => void
   onDragStart: () => void
   onDragEnter: () => void
@@ -3913,7 +3906,7 @@ function EditorRow({
   getStatisticalBt,
   getFootnoteDetails,
   openCommentCount,
-  isActiveCue: _isActiveCue, onSeekToCue,
+  onSeekToCue,
   onDragStart, onDragEnter, onSelectionPointerDown, onNavigateCell,
   onEscapeToGrid, onGridRowKeyNav,
   rowIndex, contentNumber, lineNumbersEnabled, scriptureNumbering, cellLabelsEnabled, sourceDirectionMode, targetDirectionMode, sourceTextDirection, targetTextDirection, gridCols, castGutter, ttsSettings,
@@ -5612,8 +5605,6 @@ function EditorRow({
           isMultiSelected && "bg-primary/5 ring-1 ring-primary/40 ring-inset",
           // Open-comments accent — a soft inset ring.
           openCommentCount > 0 && "ring-1 ring-blue-400/50 ring-inset",
-          // Active cue highlight — tinted fill + gold ring.
-          _isActiveCue && "bg-primary/5 ring-1 ring-primary/40 ring-inset",
           // Timeline cursor (media lens): sky ring, same language as the
           // selected chip's ring.
           isMediaCursorRow && "bg-sky-500/5 ring-1 ring-sky-500/40 ring-inset",

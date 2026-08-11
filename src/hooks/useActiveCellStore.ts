@@ -589,6 +589,29 @@ export class CellStore {
     return { eventId: source.eventId, anchorCellId: source.anchorCellId, successor, targetLangs }
   }
 
+  /**
+   * The row that starts the file's anchor chain — the one with no cell before
+   * it. AQU-646 round 8: inserting a line BEFORE the first cue would otherwise
+   * give the file two of these, and walkAnchorChain buckets both under the same
+   * null key and breaks the tie by event id. A fresh uuidv7 always sorts last,
+   * so the whole original chain got emitted first and the new line landed at the
+   * TAIL of store order while display order correctly put it first — the two
+   * diverging as far as they possibly can, on a file with a thousand rows.
+   *
+   * The caller re-points the old head onto the new line, so the invariant holds:
+   * exactly one source row has a null anchor.
+   *
+   * Walks `order` rather than the map so the answer is the FIRST such row in the
+   * order the store already resolved, not whichever the map happens to yield.
+   */
+  getChainHeadCellId(): { cellId: string; eventId: string } | null {
+    for (const id of this.order) {
+      const row = this.sourceById.get(id)
+      if (row && row.anchorCellId == null) return { cellId: id, eventId: row.eventId }
+    }
+    return null
+  }
+
   getCommitHandle(cellId: string): CellCommitHandle | null {
     if (!this.ctx.projectId || !this.ctx.fileId) return null
     const source = this.sourceById.get(cellId)

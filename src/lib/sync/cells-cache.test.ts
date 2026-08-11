@@ -98,6 +98,31 @@ describe("mergeCellsDelta", () => {
     expect(merged.map((r) => r.cellId)).toEqual(["a", "x", "b"])
   })
 
+  // AQU-646 round 8: inserting a line BEFORE the first cue. The pair of tests
+  // matters more than either one — the first pins the bug so it cannot come
+  // back quietly, the second proves the fix.
+  it("WITHOUT re-pointing the old head, a head insert lands at the TAIL", () => {
+    // Two rows now claim a null anchor. They bucket under the same key and
+    // tiebreak by eventId, and a fresh uuidv7 always sorts last — so the whole
+    // original chain is emitted first and the new row is appended after it.
+    const cached = chain("source", "a", "b")
+    const merged = mergeCellsDelta(cached, ["x"], [
+      row("x", "source", { anchorCellId: null, eventId: "e-zzz-newer" }),
+    ])
+    expect(merged.map((r) => r.cellId)).toEqual(["a", "b", "x"])
+  })
+
+  it("re-pointing the old head puts the new line FIRST, where it belongs", () => {
+    const cached = chain("source", "a", "b")
+    const merged = mergeCellsDelta(cached, ["x", "a"], [
+      row("x", "source", { anchorCellId: null, eventId: "e-zzz-newer" }),
+      row("a", "source", { anchorCellId: "x", eventId: "e-a2" }),
+    ])
+    expect(merged.map((r) => r.cellId)).toEqual(["x", "a", "b"])
+    // ...and the file is back to exactly one row with no cell before it.
+    expect(merged.filter((r) => r.anchorCellId == null)).toHaveLength(1)
+  })
+
   it("replaces a changed row in place without disturbing order (validate flip)", () => {
     const cached = chain("target", "a", "b", "c")
     const merged = mergeCellsDelta(cached, ["b"], [

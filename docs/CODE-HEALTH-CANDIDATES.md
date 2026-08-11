@@ -33,3 +33,15 @@ a later run completes.
 - **Proof needed**: comment-only edits; verify each hit is genuinely describing D1 as live
   (not historical "migrated from D1" framing) before touching it — some framing may already
   be correct and should be left alone.
+
+## Additional candidates from the 2026-08-11 component cleanup run
+
+- **`src/components/RulesPage.tsx`** and its test (671 lines total) — superseded by
+  `RulesSurface` in `ProjectWorkspace`; the old route’s removed UI is already documented
+  in the corresponding smoke spec. Confirm zero real importers before deletion.
+- **`src/components/TerminologyPage.tsx`** and its test (2,034 lines total) — superseded
+  by `GlossaryEditorContent` / `GlossaryEditor`. This needs a dedicated review because of
+  its size; confirm no e2e spec still depends on it.
+- **`src/lib/sync/projects-read.ts`**, `projects-read-types.ts`, and their test (220 lines)
+  — unused Phase 2b wrapper. Grep precise paths/exports before deleting: a different,
+  live `fetchAccessibleProjects` exists in `cloud-projects.ts`.

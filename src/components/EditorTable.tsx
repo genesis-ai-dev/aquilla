@@ -296,12 +296,9 @@ if (typeof window !== "undefined") {
  *     clearing the failed state entirely — cell still looks unvoiced.
  */
 function SynthStatusBadge({
-  status, cellId: _cellId, projectId, onOpenAudioSetup,
+  status, projectId, onOpenAudioSetup,
 }: {
   status: ReturnType<typeof useTtsStatus>
-  /** Retained for the call-site; no longer used inside the badge (dismiss
-   *  no longer resets status via setTtsStatus — see A4). */
-  cellId: string
   projectId: string
   /** Navigate to audio/voice settings so the user can fix the setup. */
   onOpenAudioSetup?: () => void
@@ -3694,7 +3691,7 @@ function EditorRow({
   // AQU-664: live editor text, published on a short debounce by TranslatedEditor
   // so terminology blots recompute off the live buffer (not the ~1.2s commit).
   const [liveTargetText, setLiveTargetText] = useState<string | null>(null)
-  const [examplesExpanded, setExamplesExpanded] = useState(false)
+  const [examplesExpanded] = useState(false)
   // FRO-204: chip click state for TermLookupPopover on target editor chips.
   const [termChipState, setTermChipState] = useState<{ term: string; anchor: HTMLElement } | null>(null)
   // Track whether the target editor has a non-empty text selection when a chip is clicked.
@@ -5349,7 +5346,7 @@ function EditorRow({
                   />
                 )}
                 {(isSynthBusy || isSynthError) && (
-                  <SynthStatusBadge status={synthStatus} cellId={cell.id} projectId={project.id} onOpenAudioSetup={onOpenAudioSetup} />
+                  <SynthStatusBadge status={synthStatus} projectId={project.id} onOpenAudioSetup={onOpenAudioSetup} />
                 )}
                 {/* AQU-599: persistent "has comment" indicator. Unlike the
                     action-rail comment button (which only appears on
@@ -5537,11 +5534,7 @@ function EditorRow({
               />
             )}
             {cellExamples.length > 0 && (
-              <ExamplePanel
-                examples={cellExamples}
-                expanded={examplesExpanded}
-                onExpandedChange={setExamplesExpanded}
-              />
+              <ExamplePanel examples={cellExamples} />
             )}
           </div>
         )}

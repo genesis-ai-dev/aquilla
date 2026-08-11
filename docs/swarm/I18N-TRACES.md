@@ -27,6 +27,12 @@ Fixed in `adf3ab72f` with a regression test verified to fail on the old code.
 **OPEN — must land before the catalog goes to translators.** Handing a translator a catalog
 with these defects wastes *their* time, and their availability is the release's critical path.
 
+> **Wave 4a: findings 1, 2 and 9 are CLOSED** (branch `swarm/i18n-w4a-catalog`). Finding
+> 3 is partly closed — `dialog.assign`'s three `{unit}` sentences no longer glue a
+> translated noun in, because deleting the `unit.*Lower` keys was also the dedupe fix.
+> `JoinPage`, `ChapterNavigator` and `SearchResultsView` are untouched. Findings 4–8
+> remain open. See the closing note at the foot of this file.
+
 1. **Cross-namespace duplication (109 keys, 48 duplicate-English groups, 37 cross-namespace).**
    The guard only compares each namespace against `common.*`, so it cannot see nine sibling
    namespaces duplicating each other — the exact blind spot of nine agents who could not see
@@ -115,3 +121,46 @@ with these defects wastes *their* time, and their availability is the release's 
 - `src/lib/i18n/screenshots/` holds the PNGs, so the per-namespace surface *modules* live in
   `src/lib/i18n/namespaces/` (not a `screenshots/` sibling) to avoid mixing TS and binaries
   and to avoid `screenshots.ts` vs `screenshots/` resolution ambiguity.
+
+## Wave 4a — plural categories + cross-namespace dedupe (findings 1, 2, 9)
+
+Catalog is 1037 → 963 keys. `pnpm test` is green except the one pre-existing
+`context.test.ts` failure ("every declared surface has its PNG captured"), which needs
+`pnpm i18n:shots` against a live dev stack — six surfaces added in wave 2 were never
+captured. That is the orchestrator's open SWARM-TODO, not a regression here.
+
+- **Plurals are real CLDR categories.** `src/lib/i18n/plurals.ts` is a leaf module with
+  the `plural({ one, other, … })` authoring shape, `Intl.PluralRules` selection, and a
+  fallback chain that cannot yield a raw key. 31 `*One`/`*Many` pairs (62 keys) became
+  31 count-governed keys; `editor.completion.failed`/`failedPartial` gained the singular
+  they never had, governed by `{total}` because the counted noun is "cells".
+  `translate()` now takes the active locale — plural selection is a property of the
+  language, not of which strings happen to be translated.
+- **`Intl.PluralRules` does not know `mfa`.** It does not throw; it silently falls back
+  to the runtime default locale and reports English's two categories. `plurals.ts` keeps
+  an override table (`mfa: ["other"]`) so a Patani Malay translator is not asked for an
+  unusable `one` form. Any locale added to `locales.ts` that CLDR does not cover needs an
+  entry there — nothing fails loudly if it is missed.
+- **Export is per-locale now.** A count-governed key exports one leaf per category the
+  *target* locale needs (`search.resultCount#few`), so `i18n:export` writes
+  `<locale>.catalog.json` + `<locale>.notes.json` for every locale plus the shared
+  `en.context.json` (sidecar schema v2, with a `plurals` section). One shared
+  `en.catalog.json` cannot work: Arabic needs six cells where Thai needs one.
+- **The duplicate guard compares every namespace against every other**, plural forms
+  included, and an exception is granted per key rather than per string (a third test
+  pins that, so excusing two of three colliding keys still leaves the pair red).
+- **Two count-bearing keys were deliberately left alone**, and both are English copy
+  bugs rather than i18n bugs: `nav.outbox.validationLabel` ("validation") and
+  `nav.outbox.otherLabel` ("other") render after a count and never inflect, so the
+  outbox summary reads "3 validation". Making them plural keys would change English
+  copy, which was out of scope for a catalog-shape pass. Worth a copy decision.
+- **The outbox summary nouns stay bare** (`nav.outbox.editsNoun`, `commentsNoun`)
+  because the count beside them is separately styled — the wave-3 blocker fix depends on
+  that. They are count-governed, so the noun agrees with the number, but the word ORDER
+  is still fixed by JSX. Fixing that means giving up the styled count; whoever picks up
+  finding 4 (lost inline emphasis) should decide the two together.
+- **Case-only duplicates were merged, not excused**, so a few strings changed case where
+  the two roles disagreed: the report dialog's captured-context line now reads
+  "· Project abc123" / "· File abc123", and the search-hit side badges read
+  "Source"/"Target" rather than lowercase. Three of the four target locales have no
+  letter case, so keeping those splits would have been pure duplicate work.

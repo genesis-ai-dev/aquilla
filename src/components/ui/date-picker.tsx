@@ -1,6 +1,7 @@
 import * as React from "react"
 import { CalendarIcon } from "lucide-react"
 
+import { useT } from "@/lib/i18n/I18nProvider"
 import { Calendar } from "@/components/ui/calendar"
 import {
   InputGroup,
@@ -73,9 +74,11 @@ export function DatePicker({
   value,
   onChange,
   disabled,
-  placeholder = "June 01, 2025",
+  placeholder,
   id,
 }: DatePickerProps) {
+  const t = useT()
+  const resolvedPlaceholder = placeholder ?? t("common.datePlaceholder")
   const [open, setOpen] = React.useState(false)
   const [textValue, setTextValue] = React.useState(() => formatDate(value))
   const [month, setMonth] = React.useState<Date | undefined>(value)
@@ -93,7 +96,7 @@ export function DatePicker({
       <InputGroupInput
         id={id}
         value={textValue}
-        placeholder={placeholder}
+        placeholder={resolvedPlaceholder}
         disabled={disabled}
         onChange={(e) => {
           const next = e.target.value
@@ -123,11 +126,11 @@ export function DatePicker({
                 id={pickerId}
                 variant="ghost"
                 size="icon-xs"
-                aria-label="Select date"
+                aria-label={t("common.selectDate")}
                 disabled={disabled}
               >
                 <CalendarIcon />
-                <span className="sr-only">Select date</span>
+                <span className="sr-only">{t("common.selectDate")}</span>
               </InputGroupButton>
             }
           />

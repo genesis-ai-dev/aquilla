@@ -20,6 +20,11 @@ export const common = defineNamespace({
     "common.none": "None",
     "common.name": "Name",
     "common.email": "Email",
+    "common.selectDate": "Select date",
+    "common.datePlaceholder": "June 01, 2025",
+    "common.breadcrumbNav": "breadcrumb",
+    "common.moreBreadcrumbs": "More",
+    "common.loadingSpinner": "Loading",
   },
   context: {
     _context: {
@@ -127,6 +132,44 @@ export const common = defineNamespace({
           "Form label and table column heading for a person's email address, in sign-in, " +
           "invite, and member-management forms.",
         screenshot: "project-settings",
+      },
+      "common.selectDate": {
+        description:
+          "Accessible name for the icon-only calendar-picker button beside a date input " +
+          "(e.g. the project deadline field). Announced by a screen reader for the button; " +
+          "there is no visible label, only a calendar icon.",
+        screenshot: "project-settings",
+      },
+      "common.datePlaceholder": {
+        description:
+          "Placeholder text shown inside an empty date-input field, illustrating the " +
+          "expected format with an example date. Not a real date — format it the way " +
+          "dates are conventionally written in the target language, keeping day, month " +
+          "name, and year in that order.",
+        screenshot: "project-settings",
+      },
+      "common.breadcrumbNav": {
+        description:
+          "Accessible landmark name (aria-label) for the breadcrumb trail shown above " +
+          "nested pages (e.g. project > settings). Announced by a screen reader; not " +
+          "visible text. Conventionally left as the generic term for this UI pattern " +
+          "rather than translated literally.",
+        screenshot: "project-settings",
+      },
+      "common.moreBreadcrumbs": {
+        description:
+          "Screen-reader-only text on the '…' overflow indicator in a breadcrumb trail, " +
+          "read when there are more ancestor pages than fit. Not visible; announced " +
+          "alongside the ellipsis glyph.",
+        screenshot: "project-settings",
+      },
+      "common.loadingSpinner": {
+        description:
+          "Accessible name (aria-label) for an icon-only spinning loading indicator — no " +
+          "visible caption, just the spinning graphic. Distinct from common.loading, which " +
+          "is visible status text with a trailing ellipsis; this is announced once by a " +
+          "screen reader for the spinner element itself, so it takes no ellipsis.",
+        screenshot: "cell-editor",
       },
     },
   },

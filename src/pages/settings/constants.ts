@@ -14,6 +14,7 @@ export const ORG_SETTINGS_SECTIONS = [
   "export",
   "roster",
   "assignment",
+  "terminology",
   "providers",
   "monday",
 ] as const
@@ -24,6 +25,7 @@ export const ORG_SETTINGS_SECTION_TITLES: Record<OrgSettingsSection, string> = {
   export: "Export permissions",
   roster: "Roster & progress visibility",
   assignment: "Assignment authority",
+  terminology: "Terminology permissions",
   providers: "AI provider keys",
   monday: "Monday.com",
 }
@@ -36,6 +38,8 @@ export const ORG_SETTINGS_SECTION_DESCRIPTIONS: Record<OrgSettingsSection, strin
     "Who can see the member roster and per-member progress. Both default to Maintainer.",
   assignment:
     "Whether members below project lead may claim work for themselves. Leads and maintainers can always assign.",
+  terminology:
+    "Minimum role required to manage a project's term base — add, edit, delete, and archive terms. Defaults to Project lead.",
   providers:
     "Org-level keys act as a baseline for everyone in this organization. Projects or individuals can override with their own.",
   monday:

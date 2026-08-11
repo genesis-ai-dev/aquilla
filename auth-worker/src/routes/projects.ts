@@ -50,9 +50,11 @@ import { getFileChapters, getMyAssignments, getProjectAssignmentRoster } from ".
 import {
   bumpOrgActivity,
   canViewRoster,
+  DEFAULT_TERMBASE_EDIT_MIN_ROLE,
   getEffectiveOrgRole,
   getOrCreateUserOrg,
   getRosterViewMinRole,
+  getTermbaseEditMinRole,
   listEffectiveProjectMembers,
 } from "../services/org-permissions"
 import { isPlatformAdminEmail } from "../middleware/platform-admin"
@@ -517,10 +519,20 @@ projects.get("/:projectId", authMiddleware, async (c) => {
   const filesByProject = await loadFilesByProject(c.env, [projectId])
   const files = filesByProject.get(projectId) ?? []
 
+  // AQU-822: the org's effective termbase-edit floor travels with the project
+  // so the client can gate the terminology UI (and its settings write) without
+  // a second org-settings round trip. Server-authoritative either way — the
+  // project-settings route re-resolves it on every terminology write.
+  const termbaseEditMinRole =
+    row.org_id != null
+      ? await getTermbaseEditMinRole(c.env, row.org_id)
+      : DEFAULT_TERMBASE_EDIT_MIN_ROLE
+
   return c.json({
     id: row.id,
     name: row.name,
     orgId: row.org_id,
+    termbaseEditMinRole,
     archivedAt: row.archived_at,
     archivedBy: row.archived_by
       ? { id: row.archived_by, username: row.archived_by_username }

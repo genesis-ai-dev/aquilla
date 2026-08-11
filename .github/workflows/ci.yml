@@ -102,6 +102,10 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm test
+      # Mirrors the spa lane in scripts/cloudflare-ci-checks.mjs, which is the
+      # gate that actually runs on pull requests (this workflow is
+      # workflow_dispatch-only). Keep the two in step. OPS-4.
+      - run: pnpm test:worker
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm test:idml
 

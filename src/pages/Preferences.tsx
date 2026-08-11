@@ -11,6 +11,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Page, PageHeader, SettingsGroup, SettingsRow } from "@/components/ui/page"
 import { NavList, NavRow, BackLink } from "@/components/ui/nav-list"
 import { LanguageSwitcher } from "@/lib/i18n/LanguageSwitcher"
+import { useI18n } from "@/lib/i18n/I18nProvider"
 import { useThemeMode, type ThemeMode } from "@/branding/ThemeMode"
 import { useAnalyticsConsent } from "@/hooks/useAnalyticsConsent"
 import { useDockRailPosition } from "@/hooks/useDockRailPosition"
@@ -155,13 +156,17 @@ function AppearanceSection() {
  * translator profile's "Assistant language" (which only steers AI replies).
  */
 function LanguageSection() {
+  const { t } = useI18n()
   return (
     <SettingsGroup label="Language">
       <SettingsRow
         label="UI language"
         description="The language the app's own interface (menus, buttons, messages) is shown in."
         control={
-          <LanguageSwitcher className="h-9 rounded-md border border-input bg-transparent px-3 text-sm" />
+          <LanguageSwitcher
+            className="h-9 rounded-md border border-input bg-transparent px-3 text-sm"
+            ariaLabel={t("language.switcher.settingsRow")}
+          />
         }
       />
     </SettingsGroup>

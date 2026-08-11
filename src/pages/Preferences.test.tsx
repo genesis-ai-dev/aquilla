@@ -96,16 +96,25 @@ describe("Preferences", () => {
     expect(document.documentElement).toHaveClass("dark")
   })
 
-  it("offers a UI-language control", async () => {
+  it("offers a UI-language control with an accessible name distinct from the chrome switcher", async () => {
     renderAt("/preferences/language")
-    // AppShell also mounts a global chrome switcher (Task 6), so on this page
-    // there are two elements labelled "Language" — the persistent chrome one
-    // and this page's dedicated row. Scope to <main> for the row under test.
-    const main = screen.getByRole("main")
-    const select = await within(main).findByLabelText("Language")
+    // AppShell also mounts a global chrome switcher (finding 8), so this page
+    // has TWO <select> language controls on screen at once. A screen reader
+    // announcing "Language, combo box" twice with nothing to tell them apart
+    // is the bug — so each control must have its own accessible name, and we
+    // assert the page's control by that specific name rather than scoping to
+    // <main> to dodge the duplicate.
+    const select = await screen.findByRole("combobox", { name: "UI language" })
     expect(select).toBeInTheDocument()
     // The switcher must list endonyms, not English names — a Burmese speaker
     // looking for their language will not scan for the word "Burmese".
-    expect(within(main).getByRole("option", { name: "မြန်မာ" })).toBeInTheDocument()
+    expect(within(select).getByRole("option", { name: "မြန်မာ" })).toBeInTheDocument()
+
+    // Exactly one control per distinct accessible name: the generic "Language"
+    // name must not appear at all (both instances now use their specific
+    // names), and each specific name must resolve to exactly one control.
+    expect(screen.queryAllByRole("combobox", { name: "Language" })).toHaveLength(0)
+    expect(screen.getAllByRole("combobox", { name: "UI language" })).toHaveLength(1)
+    expect(screen.getAllByRole("combobox", { name: "Quick language switch" })).toHaveLength(1)
   })
 })

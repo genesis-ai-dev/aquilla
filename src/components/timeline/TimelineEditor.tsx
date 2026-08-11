@@ -24,6 +24,7 @@ import { activeTargetForCell } from "@/lib/audio/track-audio"
 import { loadSnapEnabled, saveSnapEnabled } from "@/lib/timeline/snap"
 import { setMediaCursorCell, setMediaSyncActive } from "@/lib/timeline/media-cursor"
 import { useVideoClockSec, useVideoClockPlaying } from "@/lib/timeline/video-clock"
+import { useVideoDurationSec } from "@/lib/timeline/video-duration"
 import { useUiSlot } from "@/lib/ui-slots"
 import { setAudioQualityPref, useAudioQualityPref } from "@/lib/store/audio-quality-pref"
 import { useBatchProgress } from "@/lib/audio/batch-audio"
@@ -373,12 +374,19 @@ export function TimelineEditor({
   }
 
   const { subtitle, dialogue, untimed } = useMemo(() => deriveLanes(cells), [cells])
+  // AQU-646: the source-audio BAND draws for a file that has footage linked and
+  // no media cells of its own — a VTT timed against a video, where the Source
+  // row is empty today because deriveLanes only ever fills it from media cells.
+  // That is also exactly the case where the track has to reach the end of the
+  // footage rather than stopping after the last cue.
+  const videoDurationSec = useVideoDurationSec(coreMediaUrl)
+  const drawsSourceBand = Boolean(coreMediaUrl) && dialogue.length === 0
   // SUB-53: the single answer to "where does this go on the track?". Dubbing
   // returns the pre-SUB-53 geometry verbatim; audio-first returns the laid-out
   // programme. Everything below reads positions through this.
   const layout = useMemo<TimelineLayout>(
-    () => buildTimelineLayout(timingMode, cells, dialogue),
-    [timingMode, cells, dialogue],
+    () => buildTimelineLayout(timingMode, cells, dialogue, drawsSourceBand ? videoDurationSec : null),
+    [timingMode, cells, dialogue, drawsSourceBand, videoDurationSec],
   )
   // Round 5: the Target-audio track's chips — one per section with dub audio.
   const targetItems = useMemo<TargetAudioItem[]>(

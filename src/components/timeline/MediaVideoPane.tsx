@@ -62,6 +62,11 @@ export interface MediaVideoPaneProps {
    *  ~4Hz, so the playhead needs this to know it may interpolate between
    *  ticks — otherwise it steps. Cleared with the position. */
   onVideoPlaying?: (playing: boolean) => void
+  /** How long the linked video is. Reported in BOTH arrangements — the track's
+   *  extent is a property of the footage, not of who is driving the transport.
+   *  Carries its own src so the store can key by address; null means the
+   *  element does not know (yet, or ever). */
+  onVideoDuration?: (src: string, sec: number | null) => void
   /** Opens the link-video dialog — offered when the source will not load. */
   onChangeVideo?: () => void
   sourceDirectionMode?: DirectionMode
@@ -76,6 +81,7 @@ export function MediaVideoPane({
   seekSec,
   onVideoTime,
   onVideoPlaying,
+  onVideoDuration,
   onChangeVideo,
   sourceDirectionMode = "auto",
   targetDirectionMode = "auto",
@@ -369,15 +375,24 @@ export function MediaVideoPane({
           // the player, so it keeps both.
           muted={slaved}
           controls={!slaved}
-          onError={() => setFailed(true)}
+          onError={() => {
+            setFailed(true)
+            // Whatever length we had is no longer trustworthy — a track sized
+            // to a video that will not load is worse than one sized to the cues.
+            onVideoDuration?.(src, null)
+          }}
           onLoadedMetadata={(e) => {
             setMediaEpoch((n) => n + 1)
             // The element now knows its real shape — letterbox against THAT
             // rather than the assumed 16:9.
             const real = intrinsicAspect(e.currentTarget.videoWidth, e.currentTarget.videoHeight)
             if (real != null) setAspect(real)
+            onVideoDuration?.(src, e.currentTarget.duration)
           }}
-          onDurationChange={() => setMediaEpoch((n) => n + 1)}
+          onDurationChange={(e) => {
+            setMediaEpoch((n) => n + 1)
+            onVideoDuration?.(src, e.currentTarget.duration)
+          }}
           onTimeUpdate={
             slaved ? undefined : (e) => onVideoTime?.(e.currentTarget.currentTime)
           }

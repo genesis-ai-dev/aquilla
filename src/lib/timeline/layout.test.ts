@@ -152,3 +152,37 @@ describe("audio-first layout — verses laid out end to end", () => {
     expect(l.spanFor(sub, "subtitle")).toEqual({ start: 11, end: 21 })
   })
 })
+
+// AQU-646: a subtitle file timed against footage. Its last cue lands minutes
+// before the episode ends, and everything past it used to be off the end of the
+// scrollable track — on the demo episode, three minutes of it.
+describe("dubbing layout — the footage's length is a floor on the track", () => {
+  const subs = [
+    { id: "c1", fileId: "f1", medium: "text", startTime: 41.792, endTime: 43.043 },
+    { id: "c2", fileId: "f1", medium: "text", startTime: 4020, endTime: 4029.321 },
+  ] as unknown as CellData[]
+
+  it("reaches the end of the video, not the end of the last cue", () => {
+    const l = buildTimelineLayout("dubbing", subs, [], 4212.096)
+    expect(l.totalSec).toBeCloseTo(4212.096 + 2, 3)
+  })
+
+  it("falls back to the cues when the duration is not known yet", () => {
+    for (const unknown of [undefined, null, 0, NaN, -1]) {
+      const l = buildTimelineLayout("dubbing", subs, [], unknown as number | null)
+      expect(l.totalSec).toBeCloseTo(4029.321 + 2, 3)
+    }
+  })
+
+  it("never SHORTENS the track — a cue past the video's end still fits", () => {
+    const overrun = [
+      { id: "c1", fileId: "f1", medium: "text", startTime: 10, endTime: 500 },
+    ] as unknown as CellData[]
+    expect(buildTimelineLayout("dubbing", overrun, [], 120).totalSec).toBe(500 + 2)
+  })
+
+  it("leaves Free timing alone — the footage's clock means nothing there", () => {
+    const l = buildTimelineLayout("audioFirst", subs, [], 4212.096)
+    expect(l.totalSec).toBe(0 + 2) // no media cells → empty programme
+  })
+})

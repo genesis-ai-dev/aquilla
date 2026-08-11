@@ -125,7 +125,10 @@ describe("AppShell main-content error containment", () => {
         </I18nProvider>
       </MemoryRouter>,
     )
-    const select = await screen.findByLabelText("Language")
+    // Distinct from the Preferences page's own switcher (finding 8) so a
+    // screen reader never announces "Language, combo box" twice with nothing
+    // to tell the two apart.
+    const select = await screen.findByLabelText("Quick language switch")
     expect(select).toBeInTheDocument()
     // The switcher must list endonyms, not English names — a Burmese speaker
     // looking for their language will not scan for the word "Burmese".
@@ -148,6 +151,6 @@ describe("AppShell main-content error containment", () => {
     // ProjectWorkspace is the only caller that passes leftDock, and it is the
     // screen a translator works in all day. If the switcher only rendered in the
     // org-chrome layout, changing UI language would mean leaving your work.
-    expect(await screen.findByLabelText("Language")).toBeInTheDocument()
+    expect(await screen.findByLabelText("Quick language switch")).toBeInTheDocument()
   })
 })

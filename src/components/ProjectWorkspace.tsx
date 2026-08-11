@@ -91,7 +91,7 @@ import { emitTargetCellCommit, emitCellBacktranslationSet, emitFileRename, emitF
 import { v7 as uuidv7 } from "uuid"
 import { sequenceBetween } from "@/lib/timeline/derive"
 import { isLineEmpty, isUserAddedLine, userLineOrigin } from "@/lib/timeline/user-lines"
-import { targetOffsetMsFor } from "@/lib/timeline/lane-timing"
+import { MIN_ADDABLE_SPAN_SEC, targetOffsetMsFor } from "@/lib/timeline/lane-timing"
 import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
 import { isBulkValidationEligible } from "@/lib/review/review-eligibility"
 import { TimelineEditor } from "@/components/timeline/TimelineEditor"
@@ -3664,7 +3664,9 @@ export function ProjectWorkspace() {
       if (!project?.id || !activeFileId) return null
       const startMs = Math.round(startSec * 1000)
       const endMs = Math.round(endSec * 1000)
-      if (endMs <= startMs) return null
+      // "No room, no add", enforced again at the single persistence point so no
+      // caller can create a line into a stretch neither surface would offer.
+      if (endMs - startMs < MIN_ADDABLE_SPAN_SEC * 1000) return null
       // Neighbours by TIME — the anchor chain and the clock agree for a file
       // nobody has retimed, and where they disagree the clock is what the user
       // is looking at.

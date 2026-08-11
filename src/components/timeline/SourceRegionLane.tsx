@@ -14,15 +14,17 @@
 
 import { memo } from "react"
 import { secToPx, pxToSec, isVisible } from "@/lib/timeline/scale"
+import { MIN_ADDABLE_SPAN_SEC } from "@/lib/timeline/lane-timing"
 import { fmtClock } from "./format"
 import { TimelineCard } from "./TimelineCard"
 import type { CellData } from "@/hooks/useCells"
 import type { SourceRegionMap } from "@/lib/timeline/source-regions"
 
-/** Silences shorter than this draw no chip. A real VTT carries 1–100ms
- *  rounding gaps between most consecutive cues, and a dashed sliver at every
- *  one reads as dirt — the space still shows, as the break between cards. */
-export const MIN_GAP_CHIP_SEC = 0.2
+// Silences shorter than MIN_ADDABLE_SPAN_SEC draw no chip. A real VTT carries
+// 1–100ms rounding gaps between most consecutive cues, and a dashed sliver at
+// every one reads as dirt — the space still shows, as the break between cards.
+// Round 8: this is the same threshold that decides whether a line may be added
+// there, so the row can never draw nothing over a stretch the pencil offers.
 
 export interface SourceRegionLaneProps {
   map: SourceRegionMap
@@ -63,7 +65,7 @@ function SourceRegionLaneImpl({
   const visibleGaps = map.regions.filter(
     (r) =>
       r.kind === "gap" &&
-      r.endSec - r.startSec >= MIN_GAP_CHIP_SEC &&
+      r.endSec - r.startSec >= MIN_ADDABLE_SPAN_SEC &&
       isVisible(r.startSec, r.endSec, viewStartSec, viewEndSec),
   )
 

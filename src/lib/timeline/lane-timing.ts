@@ -86,6 +86,20 @@ export const MIN_TARGET_LEN_SEC = 0.2
  */
 export const MIN_USEFUL_REGION_SEC = 0.5
 
+/**
+ * AQU-646 round 8: the shortest silence a line may be added into (Sam,
+ * 2026-08-11 — "no room, no add"). Below this a chip cannot be dragged without
+ * immediately colliding with the cues on either side, and the Source row
+ * already declines to draw a chip that short, so offering to fill it meant
+ * offering to fill a silence you cannot see.
+ *
+ * ONE number for both halves of that rule — the same value gates whether the
+ * band draws a gap chip and whether either surface offers to add a line into
+ * it. TimelineLane's MIN_BUTTON_PX is unrelated and stays: that is a pixel
+ * question about whether a button has anywhere to sit.
+ */
+export const MIN_ADDABLE_SPAN_SEC = 0.2
+
 export interface TargetChipGeom {
   /** File-second where the CLIP'S SAMPLE ZERO sits (the round-7 formalization —
    *  playback always cued clips relative to this). Resolved from the cell's own

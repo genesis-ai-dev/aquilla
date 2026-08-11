@@ -12,7 +12,7 @@ import { deriveLanes } from "@/lib/timeline/lanes"
 import { deriveSourceRegions, EMPTY_SOURCE_REGIONS } from "@/lib/timeline/source-regions"
 import { isLineEmpty, isUserAddedLine } from "@/lib/timeline/user-lines"
 import { SourceRegionLane } from "./SourceRegionLane"
-import { chipOverlaps } from "@/lib/timeline/lane-timing"
+import { chipOverlaps, MIN_ADDABLE_SPAN_SEC } from "@/lib/timeline/lane-timing"
 import { buildTimelineLayout, type TimelineLayout } from "@/lib/timeline/layout"
 import { computeFollowScroll } from "@/lib/timeline/follow"
 import { secToPx, pxToSec, ZOOM_MIN, ZOOM_MAX, ZOOM_DEFAULT } from "@/lib/timeline/scale"
@@ -414,10 +414,16 @@ export function TimelineEditor({
   // Stretches of film that no cell covers — where a line can still be added.
   // Derived from the same sweep the Source track draws, so the two can never
   // disagree about where there is room.
+  //
+  // Round 8, "no room, no add": the length floor is the SAME one the band uses
+  // to decide whether a gap gets a chip. Without it, zooming past ~160px/s let
+  // the pencil appear over a silence the row had declined to draw — an offer to
+  // fill a stretch you cannot see. Both the pencil and the mic read this array,
+  // so one filter covers both surfaces.
   const addableSpans = useMemo(
     () =>
       sourceRegions.regions
-        .filter((r) => r.kind === "gap")
+        .filter((r) => r.kind === "gap" && r.endSec - r.startSec >= MIN_ADDABLE_SPAN_SEC)
         .map((r) => ({ startSec: r.startSec, endSec: r.endSec })),
     [sourceRegions],
   )

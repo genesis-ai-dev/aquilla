@@ -7,6 +7,7 @@ import type { QueueState, QueueProgress } from "@/lib/audio/play-queue"
 import { selectQueueForFile } from "@/lib/audio/queue-scope"
 import { sourceClipAudioForCell } from "@/lib/audio/track-audio"
 import { resetVideoDurationsForTests, setVideoDurationSec } from "@/lib/timeline/video-duration"
+import { ZOOM_MAX } from "@/lib/timeline/scale"
 
 // AQU-646: the editor subscribes to the play-queue (read-only) for playhead
 // tracking. Mock the two hooks with mutable stubs so tests can simulate
@@ -990,5 +991,52 @@ describe("TimelineEditor — the source-audio band", () => {
       <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={subtitleCells} onRetimeSubtitle={() => {}} />,
     )
     expect(screen.queryByTestId("tl-source-regions")).not.toBeInTheDocument()
+  })
+
+  // Round 8, "no room, no add". These run ZOOMED IN ON PURPOSE: the buttons
+  // also have a pixel floor (MIN_BUTTON_PX), and at the default 38px/s that
+  // floor alone hides anything under ~0.63s — which would make these pass
+  // without the length rule existing at all. At 240px/s the pixel floor clears
+  // at 0.1s, so the only thing that can still hide a 0.15s gap is the new rule.
+  describe("no room, no add", () => {
+    const zoomedIn = (cells: CellData[]) => {
+      localStorage.setItem("codex:timelineZoom:fzoom", String(ZOOM_MAX))
+      return render(
+        <TimelineEditor
+          fileId="fzoom" coreMediaUrl={VIDEO} editable cells={cells}
+          canAddLine onAddLine={async () => null} onRetimeSubtitle={() => {}}
+        />,
+      )
+    }
+
+    it("offers no way in over a silence too short to hold a line", () => {
+      setVideoDurationSec(VIDEO, 120)
+      // 10.00–20.00, a 0.15s breath, 20.15–30.00.
+      zoomedIn([
+        cell({ id: "a", original: "A", medium: "text", startTime: 10, endTime: 20 }),
+        cell({ id: "b", original: "B", medium: "text", startTime: 20.15, endTime: 30 }),
+      ])
+      expect(screen.queryByTestId("tl-add-line-20")).not.toBeInTheDocument()
+      expect(screen.queryByTestId(/^tl-target-add-20/)).not.toBeInTheDocument()
+      // ...and the band does not draw a chip there either. Same threshold: the
+      // row can never stay silent about a stretch the pencil offers to fill.
+      const gapStarts = screen
+        .getAllByTestId("tl-source-gap")
+        .map((el) => Number(el.getAttribute("data-region-start")))
+      expect(gapStarts).not.toContain(20)
+    })
+
+    it("offers both ways in over a silence with room", () => {
+      setVideoDurationSec(VIDEO, 120)
+      zoomedIn([
+        cell({ id: "a", original: "A", medium: "text", startTime: 10, endTime: 20 }),
+        cell({ id: "b", original: "B", medium: "text", startTime: 20.3, endTime: 30 }),
+      ])
+      expect(screen.getByTestId("tl-add-line-20")).toBeInTheDocument()
+      const gapStarts = screen
+        .getAllByTestId("tl-source-gap")
+        .map((el) => Number(el.getAttribute("data-region-start")))
+      expect(gapStarts).toContain(20)
+    })
   })
 })

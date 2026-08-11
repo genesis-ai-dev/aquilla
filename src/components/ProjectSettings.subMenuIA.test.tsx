@@ -305,6 +305,13 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
     expect(screen.getByLabelText(/required validators \(text\)/i)).toBeTruthy()
     expect(screen.getByText(/^harmonization$/i)).toBeTruthy()
     expect(screen.getByText(/retrieval support/i)).toBeTruthy()
+    // Retrieval support sits under Validation + Harmonization on this pane.
+    const validationHeading = screen.getByText(/^validation$/i)
+    const retrievalHeading = screen.getByText(/retrieval support/i)
+    expect(
+      validationHeading.compareDocumentPosition(retrievalHeading) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
 
     renderAt(`/project/${PROJECT_ID}/settings/audio-media`)
     expect(screen.getByText(/audio loading/i)).toBeTruthy()

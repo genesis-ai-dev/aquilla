@@ -262,7 +262,7 @@
 | Projects    | Project create advanced shape section (radio buttons) | `e2e/specs/projects/project-create-advanced-shape.smoke.spec.ts` |   ✅   |
 | Projects    | Project settings advanced LLM section expands         | `e2e/specs/projects/project-settings-advanced-llm.smoke.spec.ts` |   ✅   |
 | Projects    | Project settings audio media strategy buttons         | `e2e/specs/projects/project-settings-audio-strategy.smoke.spec.ts` |   ✅   |
-| Projects    | Project settings decay section expands                | `e2e/specs/projects/project-settings-decay.smoke.spec.ts`     |   ✅   |
+| Projects    | Project settings retrieval support under validation   | `e2e/specs/projects/project-settings-decay.smoke.spec.ts`     |   ✅   |
 | Projects    | Project settings more save options → Close without saving | `e2e/specs/projects/project-settings-more-save-options.smoke.spec.ts` |   ✅   |
 | Projects    | Project settings named validators avatar-stack combobox | `e2e/specs/projects/project-settings-named-validators.smoke.spec.ts` |   ✅   |
 | Projects    | Project settings search filter (across sub-menus, AQU-501) | `e2e/specs/projects/project-settings-nav-search.smoke.spec.ts` |   ✅   |

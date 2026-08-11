@@ -879,8 +879,8 @@ export function ProjectSettings() {
     { id: "section-advanced-llm", label: "Advanced LLM", keywords: ["provider", "endpoint", "api key", "model", "temperature", "max tokens", "health penalty", "frontier", "openai", "custom"] },
     { id: "section-voice", label: "Voice", keywords: ["tts", "voice studio", "audio", "gemini", "api key", "tts key"] },
     { id: "section-local-models", label: "Local AI models", keywords: ["whisper", "kokoro", "mms", "transcription", "model", "download", "offline", "local ai"] },
-    { id: "section-decay", label: "Decay", keywords: ["decay", "decay threshold", "half life"] },
     { id: "section-validation", label: "Validation", keywords: ["validation count", "approvals", "audio validation"] },
+    { id: "section-decay", label: "Retrieval support", keywords: ["decay", "decay threshold", "half life", "retrieval support", "max hops", "attention threshold"] },
     { id: "section-audio-media", label: "Audio Media", keywords: ["audio media strategy", "lazy", "eager"] },
     { id: "section-git-sync", label: "Git Sync", keywords: ["git", "sync", "auto sync", "interval", "branch", "clone"], visible: hasGitOrigin },
     { id: "section-terminology", label: "Terminology", keywords: ["terminology", "termbase", "glossary", "concepts"] },
@@ -1041,8 +1041,8 @@ export function ProjectSettings() {
       "section-advanced-llm",
       "section-voice",
       "section-local-models",
-      "section-decay",
       "section-validation",
+      "section-decay",
       "section-audio-media",
       "section-git-sync",
       "section-terminology",
@@ -1876,16 +1876,6 @@ export function ProjectSettings() {
           </Card>
         )}
 
-        {searchGroupLabel("section-decay")}
-        {sectionsToRender.some((s) => s.id === "section-decay") && (
-          <div id="section-decay">
-            <DecaySettingsSection
-              settings={decaySettings}
-              onChange={setDecaySettings}
-            />
-          </div>
-        )}
-
         {searchGroupLabel("section-validation")}
         {sectionsToRender.some((s) => s.id === "section-validation") && (
           <div id="section-validation">
@@ -1947,6 +1937,16 @@ export function ProjectSettings() {
               </div>
             </CardContent>
           </Card>
+        )}
+
+        {searchGroupLabel("section-decay")}
+        {sectionsToRender.some((s) => s.id === "section-decay") && (
+          <div id="section-decay">
+            <DecaySettingsSection
+              settings={decaySettings}
+              onChange={setDecaySettings}
+            />
+          </div>
         )}
 
         {searchGroupLabel("section-audio-media")}

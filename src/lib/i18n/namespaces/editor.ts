@@ -407,6 +407,25 @@ export const editor = defineNamespace({
     "editor.voice.activeVoice": "Voice: {name}. Choose a voice",
     "editor.voice.searchPlaceholder": "Search voices…",
     "editor.voice.noMatches": "No matches",
+
+    // — Rich-text editor: formatting bubble, conflict banner, IDML guards ——
+    "editor.format.bold": "Bold",
+    "editor.format.boldTooltip": "Bold (Cmd+B)",
+    "editor.format.italic": "Italic",
+    "editor.format.italicTooltip": "Italic (Cmd+I)",
+    "editor.format.underline": "Underline",
+    "editor.format.underlineTooltip": "Underline (Cmd+U)",
+    "editor.format.strikethrough": "Strikethrough",
+    "editor.format.code": "Inline code",
+    "editor.conflict.changedElsewhere": "This cell changed elsewhere while you were editing.",
+    "editor.conflict.discardAndReload": "Discard and reload",
+    "editor.footnotes.deletePrompt": "Delete footnote {label}?",
+    "editor.anchor.cursorPosition": "Cursor position",
+    "editor.idml.structureChanged":
+      "This edit changed the protected IDML document structure. Undo it or " +
+      "re-import the IDML.",
+    "editor.idml.caretOutsideSlot":
+      "Place the caret inside an InDesign text slot before adding a line break.",
   },
   context: {
     _context: {
@@ -2449,6 +2468,102 @@ export const editor = defineNamespace({
           "Italic empty state in the voice picker when the typed query matches no " +
           "voice. No trailing period in the English source.",
         maxLength: 18,
+      },
+      "editor.format.bold": {
+        description:
+          "Screen-reader name of the B button in the formatting bubble that appears " +
+          "over selected text in the translation editor. The typographic weight, not " +
+          "the adjective for a daring person.",
+        maxLength: 16,
+      },
+      "editor.format.boldTooltip": {
+        description:
+          "Tooltip of that same B button: the name plus its keyboard shortcut. " +
+          "'Cmd' is the macOS modifier key's name and the letter is the physical " +
+          "key — leave the parenthesised shortcut exactly as it is.",
+      },
+      "editor.format.italic": {
+        description:
+          "Screen-reader name of the I button in the formatting bubble — slanted " +
+          "type. Some scripts have no italic form; use the term a local typesetter " +
+          "would use, or keep the loanword.",
+        maxLength: 16,
+      },
+      "editor.format.italicTooltip": {
+        description:
+          "Tooltip of the italic button: the name plus its keyboard shortcut. Leave " +
+          "the parenthesised shortcut exactly as it is.",
+      },
+      "editor.format.underline": {
+        description:
+          "Screen-reader name of the U button in the formatting bubble — a line " +
+          "under the text.",
+        maxLength: 16,
+      },
+      "editor.format.underlineTooltip": {
+        description:
+          "Tooltip of the underline button: the name plus its keyboard shortcut. " +
+          "Leave the parenthesised shortcut exactly as it is.",
+      },
+      "editor.format.strikethrough": {
+        description:
+          "Tooltip and screen-reader name of the S button in the formatting bubble — " +
+          "a line drawn through the text, conventionally marking it as removed.",
+        maxLength: 18,
+      },
+      "editor.format.code": {
+        description:
+          "Tooltip and screen-reader name of the button that marks the selection as " +
+          "monospaced code inside a normal line. 'Inline' distinguishes it from a " +
+          "whole code block.",
+        maxLength: 18,
+      },
+      "editor.conflict.changedElsewhere": {
+        description:
+          "Amber banner above the editor when a teammate (or another device) " +
+          "committed a new value for this cell while the user was typing. It states " +
+          "the fact only — the button beside it is the action. Full sentence.",
+      },
+      "editor.conflict.discardAndReload": {
+        description:
+          "Button in that amber banner. It throws away the user's uncommitted typing " +
+          "and loads the other person's value instead — destructive to local work, " +
+          "so it must not read as a harmless refresh. Imperative.",
+        maxLength: 24,
+      },
+      "editor.footnotes.deletePrompt": {
+        description:
+          "Inline confirmation floating in the corner of the editor after the user " +
+          "deleted a footnote marker, naming which note is about to go. A question, " +
+          "so keep the question mark. Confirm/cancel controls follow it; the confirm " +
+          "reuses editor.footnotes.deleteConfirm.",
+        placeholders: {
+          label:
+            "The footnote's marker as it appears in the text — a number ('3') or a " +
+            "letter ('b'). Not translatable.",
+        },
+      },
+      "editor.anchor.cursorPosition": {
+        description:
+          "Stand-in preview of where a new footnote will be anchored when the user " +
+          "has selected no text, so there is no wording to show. A noun phrase " +
+          "naming the insertion point.",
+        maxLength: 22,
+      },
+      "editor.idml.structureChanged": {
+        description:
+          "Inline error (role=alert) shown for a file imported from Adobe InDesign " +
+          "(IDML), where the layout's structure must survive translation. The edit " +
+          "broke that structure, so it was refused. Two sentences: what happened, " +
+          "then the two ways out. 'IDML' is the file-format name and stays as-is.",
+      },
+      "editor.idml.caretOutsideSlot": {
+        description:
+          "Inline error when the user pressed Shift+Enter in an InDesign file with " +
+          "the cursor outside a translatable text frame, so a line break could not " +
+          "be inserted. Imperative — it tells the user where to put the cursor. " +
+          "'InDesign' is the product name and stays as-is; 'text slot' is the " +
+          "translatable frame in the layout.",
       },
     },
   },

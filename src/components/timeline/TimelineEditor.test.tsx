@@ -6,6 +6,7 @@ import type { CellData } from "@/hooks/useCells"
 import type { QueueState, QueueProgress } from "@/lib/audio/play-queue"
 import { selectQueueForFile } from "@/lib/audio/queue-scope"
 import { sourceClipAudioForCell } from "@/lib/audio/track-audio"
+import { resetVideoDurationsForTests, setVideoDurationSec } from "@/lib/timeline/video-duration"
 
 // AQU-646: the editor subscribes to the play-queue (read-only) for playhead
 // tracking. Mock the two hooks with mutable stubs so tests can simulate
@@ -893,5 +894,85 @@ describe("TimelineEditor — audio-first mode", () => {
     const v2 = container.querySelector('[data-variant="dialogue"] [data-testid="tl-card-v2"]')!
     expect(px(v2, "left")).toBeCloseTo(px(container.querySelector('[data-variant="dialogue"] [data-testid="tl-card-v1"]')!, "width"), 5)
     expect(screen.getByTestId("tl-snap-toggle")).toBeInTheDocument()
+  })
+})
+
+// AQU-646: the Source row has two possible tenants. For an imported recording
+// it is the dialogue lane, as before. For a subtitle file timed against footage
+// — which produces no media cells at all, which is why that row is simply blank
+// today — it is the band: the video's own audio, divided at the subtitle
+// timestamps, silences included.
+describe("TimelineEditor — the source-audio band", () => {
+  const VIDEO = "https://cdn/episode.m3u8"
+  const subtitleCells = [
+    cell({ id: "s1", original: "One", medium: "text", startTime: 41.792, endTime: 43.043 }),
+    cell({ id: "s2", original: "Two", medium: "text", startTime: 50, endTime: 52 }),
+  ]
+  // An imported recording: media cells backed by the shared file-seeded clip.
+  const importedMedia = [
+    cell({
+      id: "m1", original: "One", medium: "media", startTime: 0, endTime: 10,
+      attachments: { "audio-f1-1690000000-shared.mp3": { type: "audio", url: "frontier-audio://src" } },
+    } as Partial<CellData>),
+  ]
+
+  beforeEach(() => resetVideoDurationsForTests())
+
+  it("draws the band for a subtitle file with footage linked, in place of the dialogue lane", () => {
+    setVideoDurationSec(VIDEO, 120)
+    render(
+      <TimelineEditor fileId="f1" coreMediaUrl={VIDEO} editable cells={subtitleCells} onRetimeSubtitle={() => {}} />,
+    )
+    expect(screen.getByTestId("tl-source-regions")).toBeInTheDocument()
+    // The subtitle lane is still there; the DIALOGUE lane is what the band replaced.
+    expect(screen.queryByTestId("tl-lane")).toBeInTheDocument()
+    expect(screen.queryAllByTestId("tl-lane")).toHaveLength(1)
+  })
+
+  it("reaches past the last subtitle to the end of the footage", () => {
+    setVideoDurationSec(VIDEO, 120)
+    render(
+      <TimelineEditor fileId="f1" coreMediaUrl={VIDEO} editable cells={subtitleCells} onRetimeSubtitle={() => {}} />,
+    )
+    // The trailing silence — 52s to 120s — is a real, reachable stretch.
+    const gaps = screen.getAllByTestId("tl-source-region-gap")
+    const last = gaps[gaps.length - 1]
+    expect(Number(last.getAttribute("data-region-end"))).toBe(120)
+  })
+
+  it("still draws the band before the footage's length is known", () => {
+    render(
+      <TimelineEditor fileId="f1" coreMediaUrl={VIDEO} editable cells={subtitleCells} onRetimeSubtitle={() => {}} />,
+    )
+    // Spans the cues, exactly as the row did before — no crash, no empty row.
+    expect(screen.getByTestId("tl-source-regions")).toBeInTheDocument()
+    expect(screen.getByTestId("tl-source-band").style.width).not.toBe("")
+  })
+
+  it("hides the source speaker button, which cannot mute a video it does not own", () => {
+    setVideoDurationSec(VIDEO, 120)
+    render(
+      <TimelineEditor fileId="f1" coreMediaUrl={VIDEO} editable cells={subtitleCells} onRetimeSubtitle={() => {}} />,
+    )
+    expect(screen.queryByTestId("tl-speaker-source")).not.toBeInTheDocument()
+    // The target row's button is untouched — the queue really does own that one.
+    expect(screen.getByTestId("tl-speaker-target")).toBeInTheDocument()
+  })
+
+  it("leaves an imported recording alone even when it also has a video linked", () => {
+    setVideoDurationSec(VIDEO, 120)
+    render(
+      <TimelineEditor fileId="f1" coreMediaUrl={VIDEO} editable cells={importedMedia} onRetimeSubtitle={() => {}} />,
+    )
+    expect(screen.queryByTestId("tl-source-regions")).not.toBeInTheDocument()
+    expect(screen.getAllByTestId("tl-lane")).toHaveLength(2)
+    expect(screen.getByTestId("tl-speaker-source")).toBeInTheDocument()
+  })
+
+  it("does not draw the band with no video linked", () => {
+    render(
+      <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={subtitleCells} onRetimeSubtitle={() => {}} />,
+    )
+    expect(screen.queryByTestId("tl-source-regions")).not.toBeInTheDocument()
   })
 })

@@ -9,6 +9,8 @@ import { createPortal } from "react-dom"
 import { AudioLines, Film, LocateFixed, Magnet, Minus, Plus, Volume2, VolumeX, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { deriveLanes } from "@/lib/timeline/lanes"
+import { deriveSourceRegions, EMPTY_SOURCE_REGIONS } from "@/lib/timeline/source-regions"
+import { SourceRegionLane } from "./SourceRegionLane"
 import { chipOverlaps } from "@/lib/timeline/lane-timing"
 import { buildTimelineLayout, type TimelineLayout } from "@/lib/timeline/layout"
 import { computeFollowScroll } from "@/lib/timeline/follow"
@@ -387,6 +389,12 @@ export function TimelineEditor({
   const layout = useMemo<TimelineLayout>(
     () => buildTimelineLayout(timingMode, cells, dialogue, drawsSourceBand ? videoDurationSec : null),
     [timingMode, cells, dialogue, drawsSourceBand, videoDurationSec],
+  )
+  // Derived, never stored — recomputed from the cells and the footage's length
+  // exactly like the lanes above it.
+  const sourceRegions = useMemo(
+    () => (drawsSourceBand ? deriveSourceRegions(cells, videoDurationSec) : EMPTY_SOURCE_REGIONS),
+    [drawsSourceBand, cells, videoDurationSec],
   )
   // Round 5: the Target-audio track's chips — one per section with dub audio.
   const targetItems = useMemo<TargetAudioItem[]>(
@@ -996,7 +1004,17 @@ export function TimelineEditor({
         <div className="border-r border-border bg-muted/20">
           <div className="h-7 border-b border-border" />
           <LaneLabel name="Subtitles" sub="text · reading" dot="bg-zinc-400 dark:bg-zinc-600" />
-          <LaneLabel name="Source audio" sub="original speech" dot="bg-sky-600" trailing={speakerToggle("source", "source audio")} />
+          {/* The speaker button drives setQueueAudibility, which only mutes the
+              queue's own elements. While the band is drawing there IS no queue
+              audio — the sound is the <video>'s, unmuted precisely because the
+              pane is standalone — so the control would do nothing. A dead
+              button on the row this feature is about is worse than no button. */}
+          <LaneLabel
+            name="Source audio"
+            sub="original speech"
+            dot="bg-sky-600"
+            trailing={drawsSourceBand ? undefined : speakerToggle("source", "source audio")}
+          />
           <LaneLabel name="Target audio" sub="takes · generated" dot="bg-emerald-600" trailing={speakerToggle("target", "target audio")} />
           {/* SUB-37: the untimed parking strip only exists when something is
               actually untimed — an always-on empty row read as a mystery. */}
@@ -1033,8 +1051,22 @@ export function TimelineEditor({
             {/* SUB-53: a subtitle span is expressed against the original's
                 clock, so it can't be dragged on a re-flowed track. */}
             <TimelineLane cells={subtitle} variant="subtitle" retimable={!audioFirst} snapEnabled={snapOn} {...laneProps} />
-            {/* Round 6: the source split is FROZEN at import — never retimable. */}
-            <TimelineLane cells={dialogue} variant="dialogue" retimable={false} {...laneProps} />
+            {/* AQU-646: a file with footage and no media cells of its own gets
+                the BAND — the video's audio as one continuous span, divided at
+                the subtitle timestamps, silences included. Otherwise the
+                original dialogue lane, whose source split is FROZEN at import
+                and never retimable (Round 6). */}
+            {drawsSourceBand ? (
+              <SourceRegionLane
+                map={sourceRegions}
+                pxPerSec={pxPerSec}
+                viewStartSec={viewStartSec}
+                viewEndSec={viewEndSec}
+                onSeek={seekTo}
+              />
+            ) : (
+              <TimelineLane cells={dialogue} variant="dialogue" retimable={false} {...laneProps} />
+            )}
             <TargetAudioLane
               items={targetItems}
               layout={layout}

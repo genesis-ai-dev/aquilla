@@ -5,6 +5,7 @@ import { useAccounts } from "@/hooks/useAccounts"
 import { AccountSwitcher } from "@/components/AccountSwitcher"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 // AQU-623: link denials to the docs page describing permission levels, so a
 // blocked user can learn what each role can do and how to get a higher one.
@@ -49,9 +50,18 @@ export interface PermissionDeniedAlertProps {
  * there's no other session.
  */
 export function PermissionDeniedAlert({ action, requiredRole, currentRole, className }: PermissionDeniedAlertProps) {
+  const t = useT()
   const { session } = useFrontierSession()
   const { sessions, activate } = useAccounts()
   const otherSessions = useMemo(() => sessions.filter((s) => !s.active), [sessions])
+
+  const account = `${session?.username ?? "local"}${session?.email ? ` (${session.email})` : ""}`
+  const requiredRoleNote = requiredRole
+    ? t("error.permissionDenied.requiredRoleNote", { requiredRole })
+    : ""
+  const message = currentRole
+    ? t("error.permissionDenied.messageWithRole", { account, role: currentRole, action, requiredRoleNote })
+    : t("error.permissionDenied.messageWithoutRole", { account, action, requiredRoleNote })
 
   return (
     <div
@@ -61,23 +71,7 @@ export function PermissionDeniedAlert({ action, requiredRole, currentRole, class
         className,
       )}
     >
-      <p className="text-destructive">
-        You're signed in as{" "}
-        <span className="font-medium">{session?.username ?? "local"}</span>
-        {session?.email ? ` (${session.email})` : ""}
-        {currentRole ? (
-          <>
-            {" — your role on this project is "}
-            <span className="font-medium">{currentRole}</span>
-            {", which"}
-          </>
-        ) : (
-          ", which"
-        )}
-        {" doesn't have permission to "}
-        {action}
-        {requiredRole ? ` (needs ${requiredRole})` : ""}.
-      </p>
+      <p className="text-destructive">{message}</p>
       <a
         href={PERMISSION_DOCS_URL}
         target="_blank"
@@ -85,12 +79,12 @@ export function PermissionDeniedAlert({ action, requiredRole, currentRole, class
         className="inline-flex w-fit items-center gap-1.5 text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
       >
         <BookOpen className="h-3.5 w-3.5" aria-hidden />
-        Learn about permission levels
+        {t("error.permissionDenied.learnMore")}
         <ExternalLink className="h-3 w-3 opacity-60" aria-hidden />
       </a>
       {otherSessions.length > 0 ? (
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-xs text-muted-foreground">Switch account:</span>
+          <span className="text-xs text-muted-foreground">{t("error.permissionDenied.switchAccountLabel")}</span>
           {otherSessions.map((s) => (
             <Button
               key={s.key}
@@ -98,14 +92,14 @@ export function PermissionDeniedAlert({ action, requiredRole, currentRole, class
               variant="outline"
               onClick={() => activate(s.key)}
             >
-              Switch to {s.username}
+              {t("error.permissionDenied.switchToAccount", { username: s.username })}
             </Button>
           ))}
         </div>
       ) : (
         <div className="flex items-center gap-2">
           <span className="text-xs text-muted-foreground">
-            Have another account? Add or switch:
+            {t("error.permissionDenied.addOrSwitchLabel")}
           </span>
           <AccountSwitcher variant="header" />
         </div>

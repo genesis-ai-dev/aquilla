@@ -261,10 +261,6 @@ export function AccountSwitcher({
             <DialogDescription>
               {t("nav.account.unsavedEditsDescription", {
                 count: pendingLogout?.count ?? 0,
-                noun:
-                  (pendingLogout?.count ?? 0) === 1
-                    ? t("nav.account.unsavedEditSingular")
-                    : t("nav.account.unsavedEditPlural"),
               })}
             </DialogDescription>
           </DialogHeader>

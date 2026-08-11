@@ -28,7 +28,7 @@ export function ExamplePanel({
               className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
             >
               <BookOpen className="h-3 w-3" />
-              {t(examples.length === 1 ? "search.examples.countOne" : "search.examples.countOther", {
+              {t("search.examples.count", {
                 count: examples.length,
               })}
             </button>

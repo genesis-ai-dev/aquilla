@@ -226,9 +226,7 @@ export function HistoryDrawer({ cell, onClose, projectId, fileId, getTokenForFil
               </p>
             )}
             <p className="text-[10px] text-muted-foreground">
-              {groups.length === 1
-                ? t("editor.history.revisionsOne", { count: groups.length })
-                : t("editor.history.revisionsMany", { count: groups.length })}
+              {t("editor.history.revisions", { count: groups.length })}
               {hiddenCount > 0 && (
                 <span className="ml-1 normal-case text-muted-foreground/70">
                   {t("editor.history.collapsedNote", {
@@ -345,9 +343,7 @@ function GroupItem({
         )}
         {hasSubEntries && (
           <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-            {group.entries.length - 1 === 1
-              ? t("editor.history.minorEditsOne", { count: 1 })
-              : t("editor.history.minorEditsMany", { count: group.entries.length - 1 })}
+            {t("editor.history.minorEdits", { count: group.entries.length - 1 })}
           </span>
         )}
         <span className="ml-auto text-muted-foreground">
@@ -369,9 +365,7 @@ function GroupItem({
       {terminal.examples && terminal.examples.length > 0 && (
         <div className="mt-1 flex items-center gap-1 text-[10px] text-muted-foreground">
           <BookOpen className="h-3 w-3" />
-          {terminal.examples.length === 1
-            ? t("editor.history.examplesOne", { count: terminal.examples.length })
-            : t("editor.history.examplesMany", { count: terminal.examples.length })}
+          {t("editor.history.examples", { count: terminal.examples.length })}
         </div>
       )}
       {isStale && onPromote && !pendingPromote && (

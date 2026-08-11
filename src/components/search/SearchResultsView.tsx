@@ -95,11 +95,11 @@ export function SearchResultsView({
           )}
         </span>
         <span className="text-xs text-muted-foreground shrink-0">
-          {t(results.length === 1 ? "search.resultCountOne" : "search.resultCountOther", {
+          {t("search.resultCount", {
             count: results.length,
           })}{" "}
           {t("search.expanded.countsJoiner")}{" "}
-          {t(groups.length === 1 ? "search.expanded.fileCountOne" : "search.expanded.fileCountOther", {
+          {t("search.expanded.fileCount", {
             count: groups.length,
           })}
         </span>

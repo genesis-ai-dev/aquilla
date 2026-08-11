@@ -219,12 +219,8 @@ export function SelectionBar({ project, cellStore, username, activeLane, myScope
         validated++
       }
       const msg = alreadyValidated > 0
-        ? validated === 1
-          ? t("editor.selection.validatedToastSkippedOne", { count: validated, already: alreadyValidated })
-          : t("editor.selection.validatedToastSkippedMany", { count: validated, already: alreadyValidated })
-        : validated === 1
-          ? t("editor.selection.validatedToastOne", { count: validated })
-          : t("editor.selection.validatedToastMany", { count: validated })
+        ? t("editor.selection.validatedToastSkipped", { count: validated, already: alreadyValidated })
+        : t("editor.selection.validatedToast", { count: validated })
       toast.success(msg)
       // AQU-616: flush the just-enqueued validates now instead of waiting for
       // the ~5s periodic flusher, so the confirmed/synced state lands promptly.
@@ -255,11 +251,7 @@ export function SelectionBar({ project, cellStore, username, activeLane, myScope
         })
         removed++
       }
-      toast.success(
-        removed === 1
-          ? t("editor.selection.unvalidatedToastOne", { count: removed })
-          : t("editor.selection.unvalidatedToastMany", { count: removed }),
-      )
+      toast.success(t("editor.selection.unvalidatedToast", { count: removed }))
       // AQU-616: flush now rather than waiting for the periodic flusher.
       if (removed > 0) onValidationCommitted?.()
     } finally {
@@ -354,9 +346,7 @@ export function SelectionBar({ project, cellStore, username, activeLane, myScope
       <AppTooltip content={
         validateDisabledReason
           ? validateDisabledReason
-          : validatableCount === 1
-            ? t("editor.selection.validateTooltipOne", { count: validatableCount })
-            : t("editor.selection.validateTooltipMany", { count: validatableCount })
+          : t("editor.selection.validateTooltip", { count: validatableCount })
       }>
         <Button
           type="button"
@@ -379,9 +369,7 @@ export function SelectionBar({ project, cellStore, username, activeLane, myScope
       <AppTooltip content={
         unvalidatableCount === 0
           ? t("editor.selection.noValidations")
-          : unvalidatableCount === 1
-            ? t("editor.selection.unvalidateTooltipOne", { count: unvalidatableCount })
-            : t("editor.selection.unvalidateTooltipMany", { count: unvalidatableCount })
+          : t("editor.selection.unvalidateTooltip", { count: unvalidatableCount })
       }>
         <Button
           type="button"
@@ -405,9 +393,7 @@ export function SelectionBar({ project, cellStore, username, activeLane, myScope
         <AppTooltip content={
           !canHarmonize
             ? t("editor.selection.harmonizeNeedLead")
-            : harmonizableCount === 1
-              ? t("editor.selection.harmonizeTooltipOne", { count: harmonizableCount })
-              : t("editor.selection.harmonizeTooltipMany", { count: harmonizableCount })
+            : t("editor.selection.harmonizeTooltip", { count: harmonizableCount })
         }>
           <Button
             type="button"

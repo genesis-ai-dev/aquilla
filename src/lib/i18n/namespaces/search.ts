@@ -1,4 +1,4 @@
-import { defineNamespace } from "./types"
+import { defineNamespace, plural } from "./types"
 
 /**
  * search — AQU-511 wave 2.
@@ -14,12 +14,12 @@ import { defineNamespace } from "./types"
  * - "Loading…" in the Bible-resources reader reuses `common.loading`
  *   verbatim rather than a new key.
  *
- * Pluralization: `translate()` has no plural-rules engine — it only does
- * `{name}` substitution. Every English string here whose grammatical number
- * actually changes with the count (e.g. "1 result" vs "2 results") is split
- * into an explicit `...One` / `...Other` key pair, chosen by the component at
- * call time. Strings where the noun doesn't inflect ("Replace {count}",
- * "{count} more — …") stay a single key.
+ * Pluralization: every string here whose grammatical number changes with a count
+ * is one key holding a `plural({ … })` record of CLDR category → string, and the
+ * component passes the count instead of choosing a branch — `translate()`
+ * selects the category through `Intl.PluralRules` for the active locale. Strings
+ * where the noun doesn't inflect ("Replace {count}", "{count} more — …") stay a
+ * plain single key.
  */
 export const search = defineNamespace({
   keys: {
@@ -48,8 +48,10 @@ export const search = defineNamespace({
     // Dock panel — idle / result states
     "search.dock.typeToSearchFile": "Type to search this file",
     "search.dock.typeToSearchProject": "Type to search the project",
-    "search.resultCountOne": "{count} result",
-    "search.resultCountOther": "{count} results",
+    "search.resultCount": plural({
+      one: "{count} result",
+      other: "{count} results",
+    }),
     "search.dock.expandAllTooltip": "Expand all results in main area",
     "search.dock.expandAllAriaLabel": "Expand all results",
     "search.dock.expandAllLabel": "Expand all",
@@ -75,16 +77,22 @@ export const search = defineNamespace({
     "search.replace.placeholder": "Replacement text…",
     "search.replace.clearsValidation":
       "Replacing text clears validation — it must be re-reviewed.",
-    "search.replace.skippedNoticeOne": "{count} match skipped — spans HTML tag boundary.",
-    "search.replace.skippedNoticeOther": "{count} matches skipped — spans HTML tag boundary.",
-    "search.replace.appliedResultOne": "Replaced {count} cell.",
-    "search.replace.appliedResultOther": "Replaced {count} cells.",
-    "search.replace.appliedResultWithSkippedOne":
-      "Replaced {count} cell ({skipped} skipped — HTML boundary).",
-    "search.replace.appliedResultWithSkippedOther":
-      "Replaced {count} cells ({skipped} skipped — HTML boundary).",
-    "search.replace.affectedCountOne": "{count} cell affected",
-    "search.replace.affectedCountOther": "{count} cells affected",
+    "search.replace.skippedNotice": plural({
+      one: "{count} match skipped — spans HTML tag boundary.",
+      other: "{count} matches skipped — spans HTML tag boundary.",
+    }),
+    "search.replace.appliedResult": plural({
+      one: "Replaced {count} cell.",
+      other: "Replaced {count} cells.",
+    }),
+    "search.replace.appliedResultWithSkipped": plural({
+      one: "Replaced {count} cell ({skipped} skipped — HTML boundary).",
+      other: "Replaced {count} cells ({skipped} skipped — HTML boundary).",
+    }),
+    "search.replace.affectedCount": plural({
+      one: "{count} cell affected",
+      other: "{count} cells affected",
+    }),
     "search.replace.selectAll": "Select all",
     "search.replace.selectNone": "Select none",
     "search.replace.cellListAriaLabel": "Cells to replace",
@@ -127,13 +135,17 @@ export const search = defineNamespace({
     "search.expanded.header": "Search Results",
     "search.expanded.forQueryPrefix": "for",
     "search.expanded.countsJoiner": "in",
-    "search.expanded.fileCountOne": "{count} file",
-    "search.expanded.fileCountOther": "{count} files",
+    "search.expanded.fileCount": plural({
+      one: "{count} file",
+      other: "{count} files",
+    }),
     "search.expanded.close": "Close search results",
 
     // Translation-memory examples popover
-    "search.examples.countOne": "{count} example",
-    "search.examples.countOther": "{count} examples",
+    "search.examples.count": plural({
+      one: "{count} example",
+      other: "{count} examples",
+    }),
     "search.examples.popoverAriaLabel": "Translation examples",
   },
   context: {
@@ -228,17 +240,14 @@ export const search = defineNamespace({
           "Dock panel idle-state hint, shown before the user has typed anything, when " +
           "scope is set to the whole project.",
       },
-      "search.resultCountOne": {
+      "search.resultCount": {
         description:
-          "Result-count label for exactly one hit. Shown in the dock panel's result " +
-          "group and the full dialog's results footer.",
-        placeholders: { count: "Always 1 — kept as a placeholder so wording stays parallel with the Other form." },
-      },
-      "search.resultCountOther": {
-        description:
-          "Result-count label for zero or two-or-more hits. Shown in the dock panel's " +
-          "result group and the full dialog's results footer.",
-        placeholders: { count: "Number of matching hits." },
+          "Result-count label. Shown in the dock panel's result group and the full dialog's " +
+          "results footer.",
+        placeholders: {
+          count:
+            "The number the sentence counts; it also selects which plural form is used.",
+        },
       },
       "search.dock.expandAllTooltip": {
         description:
@@ -339,59 +348,39 @@ export const search = defineNamespace({
           "advances the cell's edit chain, so any prior validation is dropped and the " +
           "cell must be re-reviewed (AQU-286 — there is no 'retain validations' option).",
       },
-      "search.replace.skippedNoticeOne": {
+      "search.replace.skippedNotice": {
         description:
-          "Warning shown when exactly one match could not be replaced because it spans " +
-          "an HTML tag boundary (e.g. matching text that straddles '</b>').",
-        placeholders: { count: "Always 1." },
-      },
-      "search.replace.skippedNoticeOther": {
-        description:
-          "Warning shown when zero or several matches could not be replaced because " +
-          "they span an HTML tag boundary.",
-        placeholders: { count: "How many matches were skipped." },
-      },
-      "search.replace.appliedResultOne": {
-        description:
-          "Success message after applying a replace that changed exactly one cell and " +
-          "skipped none.",
-        placeholders: { count: "Always 1." },
-      },
-      "search.replace.appliedResultOther": {
-        description:
-          "Success message after applying a replace that changed zero or several cells " +
-          "and skipped none.",
-        placeholders: { count: "How many cells were changed." },
-      },
-      "search.replace.appliedResultWithSkippedOne": {
-        description:
-          "Success message after applying a replace that changed exactly one cell and " +
-          "also skipped some HTML-boundary matches.",
+          "Warning shown when a match could not be replaced because it spans an HTML tag " +
+          "boundary (e.g. matching text that straddles '</b>').",
         placeholders: {
-          count: "Always 1.",
+          count:
+            "The number the sentence counts; it also selects which plural form is used.",
+        },
+      },
+      "search.replace.appliedResult": {
+        description: "Success message after applying a replace that skipped nothing.",
+        placeholders: {
+          count:
+            "The number the sentence counts; it also selects which plural form is used.",
+        },
+      },
+      "search.replace.appliedResultWithSkipped": {
+        description:
+          "Success message after applying a replace that also skipped some HTML-boundary " +
+          "matches.",
+        placeholders: {
+          count: "How many cells were changed. Selects the plural form.",
           skipped: "How many matches were skipped for spanning an HTML tag boundary.",
         },
       },
-      "search.replace.appliedResultWithSkippedOther": {
+      "search.replace.affectedCount": {
         description:
-          "Success message after applying a replace that changed zero or several cells " +
-          "and also skipped some HTML-boundary matches.",
+          "Live count above the diff preview list of the cells matching the current " +
+          "find/replace terms.",
         placeholders: {
-          count: "How many cells were changed.",
-          skipped: "How many matches were skipped for spanning an HTML tag boundary.",
+          count:
+            "The number the sentence counts; it also selects which plural form is used.",
         },
-      },
-      "search.replace.affectedCountOne": {
-        description:
-          "Live count above the diff preview list, for exactly one cell matching the " +
-          "current find/replace terms.",
-        placeholders: { count: "Always 1." },
-      },
-      "search.replace.affectedCountOther": {
-        description:
-          "Live count above the diff preview list, for zero or several cells matching " +
-          "the current find/replace terms.",
-        placeholders: { count: "How many cells the current find term matches." },
       },
       "search.replace.selectAll": {
         description:
@@ -577,35 +566,29 @@ export const search = defineNamespace({
           "order may not translate cleanly into every target language; flag to the " +
           "review panel if a translation reads awkwardly here.",
       },
-      "search.expanded.fileCountOne": {
+      "search.expanded.fileCount": {
         description:
-          "Part of the results-view header summary, for the case where hits span exactly " +
-          "one file. Composed with 'search.resultCountOne'/'search.resultCountOther' and " +
-          "a fixed 'in' — see that pair's note on the composition limitation.",
-        placeholders: { count: "Always 1." },
-      },
-      "search.expanded.fileCountOther": {
-        description:
-          "Part of the results-view header summary, for the case where hits span zero " +
-          "or several files.",
-        placeholders: { count: "How many distinct files the hits are spread across." },
+          "Part of the results-view header summary: how many files the hits span. Composed " +
+          "with 'search.resultCount' and a fixed 'in' — see that key's note on the " +
+          "composition limitation.",
+        placeholders: {
+          count:
+            "The number the sentence counts; it also selects which plural form is used.",
+        },
       },
       "search.expanded.close": {
         description:
           "Accessible name (aria-label) of the close (X) button on the expanded results " +
           "view.",
       },
-      "search.examples.countOne": {
+      "search.examples.count": {
         description:
-          "Trigger button in the translation-memory examples popover, for exactly one " +
-          "example pair.",
-        placeholders: { count: "Always 1." },
-      },
-      "search.examples.countOther": {
-        description:
-          "Trigger button in the translation-memory examples popover, for zero or " +
-          "several example pairs.",
-        placeholders: { count: "How many similar source/target example pairs were found." },
+          "Trigger button in the translation-memory examples popover, counting the example " +
+          "pairs it holds.",
+        placeholders: {
+          count:
+            "The number the sentence counts; it also selects which plural form is used.",
+        },
       },
       "search.examples.popoverAriaLabel": {
         description:

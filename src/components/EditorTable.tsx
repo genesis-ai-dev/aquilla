@@ -5369,14 +5369,10 @@ function EditorRow({
                     hover/focus), this icon stays visible whenever the cell
                     carries an open comment. Clicking opens the comments panel. */}
                 {onOpenComments && openCommentCount > 0 && (
-                  <AppTooltip content={openCommentCount === 1
-                    ? t("editor.comments.openOne", { count: openCommentCount })
-                    : t("editor.comments.openMany", { count: openCommentCount })}>
+                  <AppTooltip content={t("editor.comments.open", { count: openCommentCount })}>
                     <button
                       type="button"
-                      aria-label={openCommentCount === 1
-                        ? t("editor.comments.openOneAria", { count: openCommentCount })
-                        : t("editor.comments.openManyAria", { count: openCommentCount })}
+                      aria-label={t("editor.comments.openAria", { count: openCommentCount })}
                       className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full text-blue-500 transition-colors hover:bg-blue-500/10 hover:text-blue-600"
                       onClick={() => onOpenComments(cell.id)}
                     >
@@ -6204,9 +6200,7 @@ function EditorRow({
                   icon={<MessageCircle className="h-3.5 w-3.5" />}
                   tooltip={
                     openCommentCount > 0
-                      ? openCommentCount === 1
-                        ? t("editor.comments.openOne", { count: openCommentCount })
-                        : t("editor.comments.openMany", { count: openCommentCount })
+                      ? t("editor.comments.open", { count: openCommentCount })
                       : t("editor.cell.addComment")
                   }
                   onClick={() => onOpenComments(cell.id)}
@@ -6259,15 +6253,10 @@ function EditorRow({
               renderContent: () => (
                 <div className="space-y-1.5 py-3 text-xs text-muted-foreground">
                   <p>
-                    {(cell.endorsementCount ?? 0) === 1
-                      ? t("editor.expansion.endorsementsOne", {
-                          count: cell.endorsementCount ?? 0,
-                          percent: healthValue,
-                        })
-                      : t("editor.expansion.endorsementsMany", {
-                          count: cell.endorsementCount ?? 0,
-                          percent: healthValue,
-                        })}
+                    {t("editor.expansion.endorsements", {
+                      count: cell.endorsementCount ?? 0,
+                      percent: healthValue,
+                    })}
                   </p>
                   <p>
                     {cellNeedsAttention

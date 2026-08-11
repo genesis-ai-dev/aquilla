@@ -314,9 +314,7 @@ function ReplaceSection({ query, results, isReadOnly, onAfterReplace, t }: Repla
       {/* Skipped count notice */}
       {totalSkipped > 0 && (
         <p className="text-xs text-amber-600 dark:text-amber-400" role="note">
-          {t(totalSkipped === 1 ? "search.replace.skippedNoticeOne" : "search.replace.skippedNoticeOther", {
-            count: totalSkipped,
-          })}
+          {t("search.replace.skippedNotice", { count: totalSkipped })}
         </p>
       )}
 
@@ -324,18 +322,11 @@ function ReplaceSection({ query, results, isReadOnly, onAfterReplace, t }: Repla
       {lastResult && (
         <p className="text-xs text-green-700 dark:text-green-400" role="status" aria-live="polite">
           {lastResult.skipped > 0
-            ? t(
-                lastResult.replaced === 1
-                  ? "search.replace.appliedResultWithSkippedOne"
-                  : "search.replace.appliedResultWithSkippedOther",
-                { count: lastResult.replaced, skipped: lastResult.skipped },
-              )
-            : t(
-                lastResult.replaced === 1
-                  ? "search.replace.appliedResultOne"
-                  : "search.replace.appliedResultOther",
-                { count: lastResult.replaced },
-              )}
+            ? t("search.replace.appliedResultWithSkipped", {
+                count: lastResult.replaced,
+                skipped: lastResult.skipped,
+              })
+            : t("search.replace.appliedResult", { count: lastResult.replaced })}
         </p>
       )}
 
@@ -344,9 +335,7 @@ function ReplaceSection({ query, results, isReadOnly, onAfterReplace, t }: Repla
         <>
           <div className="flex items-center justify-between text-xs text-muted-foreground px-1">
             <span>
-              {t(diffs.length === 1 ? "search.replace.affectedCountOne" : "search.replace.affectedCountOther", {
-                count: diffs.length,
-              })}
+              {t("search.replace.affectedCount", { count: diffs.length })}
             </span>
             <div className="flex gap-2">
               <button
@@ -694,9 +683,7 @@ export function ParallelPassagesPanel(props: ParallelPassagesPanelProps) {
         {!loading && results.length > 0 && (
           <div className="flex shrink-0 items-center justify-between border-t border-border bg-muted/20 px-4 py-2.5">
             <span className="text-xs tabular-nums text-muted-foreground">
-              {t(results.length === 1 ? "search.resultCountOne" : "search.resultCountOther", {
-                count: results.length.toLocaleString(),
-              })}
+              {t("search.resultCount", { count: results.length.toLocaleString() })}
             </span>
             <span className="max-w-[60%] truncate text-right text-xs text-muted-foreground">
               {mode === "passages" ? t("search.dialog.titlePassages") : scopeLabel}

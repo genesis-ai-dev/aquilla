@@ -1,4 +1,4 @@
-import { defineNamespace } from "./types"
+import { defineNamespace, plural } from "./types"
 
 export const nav = defineNamespace({
   keys: {
@@ -34,10 +34,10 @@ export const nav = defineNamespace({
     "nav.account.logOut": "Log out",
     "nav.account.signOutAllAccounts": "Sign out of all accounts",
     "nav.account.unsavedEditsTitle": "Unsaved edits",
-    "nav.account.unsavedEditsDescription":
-      "You have {count} {noun} that haven't synced to the server. Logging out will discard them. Continue?",
-    "nav.account.unsavedEditSingular": "unsaved edit",
-    "nav.account.unsavedEditPlural": "unsaved edits",
+    "nav.account.unsavedEditsDescription": plural({
+      one: "You have {count} unsaved edit that hasn't synced to the server. Logging out will discard it. Continue?",
+      other: "You have {count} unsaved edits that haven't synced to the server. Logging out will discard them. Continue?",
+    }),
     "nav.account.logOutAnyway": "Log out anyway",
 
     // -- HelpMenu --
@@ -137,12 +137,19 @@ export const nav = defineNamespace({
     "nav.outbox.pendingCount": "{count} pending",
     "nav.outbox.failedCount": "{count} failed",
     "nav.outbox.pendingAndFailedCount": "{pending} pending · {failed} failed",
-    "nav.outbox.countedItem": "{count} {noun}",
-    "nav.outbox.editsSingular": "text edit",
-    "nav.outbox.editsPlural": "text edits",
+    "nav.outbox.attempts": plural({
+      one: "{count} try",
+      other: "{count} tries",
+    }),
+    "nav.outbox.editsNoun": plural({
+      one: "text edit",
+      other: "text edits",
+    }),
     "nav.outbox.validationLabel": "validation",
-    "nav.outbox.commentsSingular": "comment",
-    "nav.outbox.commentsPlural": "comments",
+    "nav.outbox.commentsNoun": plural({
+      one: "comment",
+      other: "comments",
+    }),
     "nav.outbox.otherLabel": "other",
     "nav.outbox.retryNow": "Retry now",
     "nav.outbox.sessionExpiredAlert":
@@ -151,9 +158,10 @@ export const nav = defineNamespace({
       "Some changes weren't allowed — you may not have permission, or they belong to a different project. Re-signing in won't help. They stay saved locally until you discard them.",
     "nav.outbox.stuckMessage":
       "Some changes couldn't be synced after several tries. They stay saved locally until you discard them.",
-    "nav.outbox.discardStuckChangesButton": "Discard {count} {noun}",
-    "nav.outbox.stuckChangeSingular": "stuck change",
-    "nav.outbox.stuckChangePlural": "stuck changes",
+    "nav.outbox.discardStuckChangesButton": plural({
+      one: "Discard {count} stuck change",
+      other: "Discard {count} stuck changes",
+    }),
     "nav.outbox.allCaughtUpTitle": "You're all caught up",
     "nav.outbox.allCaughtUpDescription": "Every local change has been synced.",
     "nav.outbox.overflowMore": "+{count} more queued…",
@@ -189,8 +197,6 @@ export const nav = defineNamespace({
     "nav.outbox.timeHoursAgo": "{hr}h ago",
     "nav.outbox.timeDaysAgo": "{d}d ago",
     "nav.outbox.cellLabel": "cell {id}",
-    "nav.outbox.trySingular": "try",
-    "nav.outbox.tryPlural": "tries",
     "nav.outbox.cellDetailLabel": "Cell",
     "nav.outbox.eventDetailLabel": "Event",
     "nav.outbox.errorDetailLabel": "Error",
@@ -351,23 +357,12 @@ export const nav = defineNamespace({
       "nav.account.unsavedEditsDescription": {
         description:
           "Body text of the unsaved-edits confirmation dialog, asking the user to " +
-          "confirm they want to discard pending local changes by logging out.",
+          "confirm they want to discard pending local changes by logging out. The " +
+          "whole sentence is translated per plural form, so the noun and the pronoun " +
+          "referring back to it ('discard it' / 'discard them') can agree with the " +
+          "number the way the target language requires.",
         screenshot: "confirm-dialog",
-        placeholders: {
-          count: "Number of unsynced local edits.",
-          noun: "Already-pluralized noun phrase from unsavedEditSingular/Plural " +
-            "('unsaved edit' or 'unsaved edits'), composed in.",
-        },
-      },
-      "nav.account.unsavedEditSingular": {
-        description:
-          "Singular noun phrase ('1 {noun}') composed into " +
-          "nav.account.unsavedEditsDescription when there is exactly one unsynced edit.",
-      },
-      "nav.account.unsavedEditPlural": {
-        description:
-          "Plural noun phrase composed into nav.account.unsavedEditsDescription when " +
-          "there are zero or two-or-more unsynced edits.",
+        placeholders: { count: "Number of unsynced local edits." },
       },
       "nav.account.logOutAnyway": {
         description:
@@ -742,25 +737,31 @@ export const nav = defineNamespace({
           failed: "Number of records that failed to sync.",
         },
       },
-      "nav.outbox.countedItem": {
+      "nav.outbox.attempts": {
         description:
-          "Generic '{count} {noun}' composition used for the edits/comments/tries " +
-          "summary chips and detail rows, where {noun} is already the correctly " +
-          "pluralized word from a sibling *Singular/*Plural key.",
-        placeholders: {
-          count: "The number being described.",
-          noun: "An already-pluralized noun composed in from a sibling key.",
-        },
+          "How many times the app has already tried to sync this one queued change, " +
+          "shown after a bullet beside the relative timestamp on a record row. " +
+          "'Try' here is a noun (an attempt), not the verb.",
+        placeholders: { count: "Number of sync attempts made for this record." },
       },
-      "nav.outbox.editsSingular": { description: "Singular noun composed by nav.outbox.countedItem for edits." },
-      "nav.outbox.editsPlural": { description: "Plural noun composed by nav.outbox.countedItem for edits." },
+      "nav.outbox.editsNoun": {
+        description:
+          "The noun in the outbox summary line, after a separately-rendered bold " +
+          "count: '3 edits'. The number is NOT part of this string — it is styled " +
+          "on its own — so translate the noun alone, in whatever form follows a " +
+          "number in the target language. Refers to edits to a cell's translated text.",
+      },
       "nav.outbox.validationLabel": {
         description:
           "Invariant noun (no plural form used in the English original) composed after " +
           "a count in the outbox summary line, e.g. '3 validation'.",
       },
-      "nav.outbox.commentsSingular": { description: "Singular noun composed by nav.outbox.countedItem for comments." },
-      "nav.outbox.commentsPlural": { description: "Plural noun composed by nav.outbox.countedItem for comments." },
+      "nav.outbox.commentsNoun": {
+        description:
+          "The noun in the outbox summary line, after a separately-rendered bold " +
+          "count: '3 comments'. The number is NOT part of this string, so translate " +
+          "the noun alone in the form that follows a number.",
+      },
       "nav.outbox.otherLabel": {
         description: "Invariant noun for the 'other' bucket in the outbox summary line.",
       },
@@ -788,14 +789,12 @@ export const nav = defineNamespace({
       "nav.outbox.discardStuckChangesButton": {
         description:
           "Button under the no-permission/stuck alert that discards every discardable " +
-          "record at once. {noun} is composed from the sibling stuckChange* keys.",
+          "record at once. 'Stuck' means the change exhausted its retry budget; it is " +
+          "still saved locally until this button removes it.",
         placeholders: {
           count: "Number of discardable (stuck or not-allowed) records.",
-          noun: "Already-pluralized 'stuck change'/'stuck changes' from sibling keys.",
         },
       },
-      "nav.outbox.stuckChangeSingular": { description: "Singular noun for the discard-all button." },
-      "nav.outbox.stuckChangePlural": { description: "Plural noun for the discard-all button." },
       "nav.outbox.allCaughtUpTitle": {
         description: "Empty-state heading shown when the outbox has zero records.",
       },
@@ -871,8 +870,6 @@ export const nav = defineNamespace({
           "the relative timestamp.",
         placeholders: { id: "Shortened cell id." },
       },
-      "nav.outbox.trySingular": { description: "Singular unit composed by nav.outbox.countedItem for retry attempts." },
-      "nav.outbox.tryPlural": { description: "Plural unit composed by nav.outbox.countedItem for retry attempts." },
       "nav.outbox.cellDetailLabel": {
         description: "Field label in a row's expanded detail panel, before the raw cell id.",
       },

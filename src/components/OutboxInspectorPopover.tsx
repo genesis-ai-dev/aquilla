@@ -330,11 +330,13 @@ export function OutboxInspectorPopover({ trigger, records, pendingCount, onRetry
             <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
               {summary.edits > 0 && (
                 <span>
-                  {/* The count is rendered by the styled span above, so this key
-                      contributes the noun only — interpolating {count} here too
-                      printed it twice ("3 3 text edits"). */}
+                  {/* The count is rendered by the styled span above, so these
+                      keys contribute the noun only — interpolating {count} here
+                      too printed it twice ("3 3 edits"). The count is still
+                      handed to `t` because it selects the plural form: the noun
+                      alone has to agree with the number in Arabic. */}
                   <span className="font-medium tabular-nums text-foreground">{summary.edits}</span>{" "}
-                  {t(summary.edits === 1 ? "nav.outbox.editsSingular" : "nav.outbox.editsPlural")}
+                  {t("nav.outbox.editsNoun", { count: summary.edits })}
                 </span>
               )}
               {summary.validation > 0 && (
@@ -346,7 +348,7 @@ export function OutboxInspectorPopover({ trigger, records, pendingCount, onRetry
               {summary.comments > 0 && (
                 <span>
                   <span className="font-medium tabular-nums text-foreground">{summary.comments}</span>{" "}
-                  {t(summary.comments === 1 ? "nav.outbox.commentsSingular" : "nav.outbox.commentsPlural")}
+                  {t("nav.outbox.commentsNoun", { count: summary.comments })}
                 </span>
               )}
               {summary.other > 0 && (
@@ -397,11 +399,6 @@ export function OutboxInspectorPopover({ trigger, records, pendingCount, onRetry
                     <Trash2 className="size-3" aria-hidden />
                     {t("nav.outbox.discardStuckChangesButton", {
                       count: discardableIds.length,
-                      noun: t(
-                        discardableIds.length === 1
-                          ? "nav.outbox.stuckChangeSingular"
-                          : "nav.outbox.stuckChangePlural",
-                      ),
                     })}
                   </button>
                 )}
@@ -490,12 +487,7 @@ export function OutboxInspectorPopover({ trigger, records, pendingCount, onRetry
                               <>
                                 <span aria-hidden>·</span>
                                 <span className="tabular-nums">
-                                  {t("nav.outbox.countedItem", {
-                                    count: rec.attempts,
-                                    noun: t(
-                                      rec.attempts === 1 ? "nav.outbox.trySingular" : "nav.outbox.tryPlural",
-                                    ),
-                                  })}
+                                  {t("nav.outbox.attempts", { count: rec.attempts })}
                                 </span>
                               </>
                             )}

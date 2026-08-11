@@ -255,7 +255,7 @@ export function SearchDockPanel({
               {onExpandResults && (
                 <div className="flex items-center justify-between pb-0.5 pt-0.5">
                   <span className="px-2 text-[10px] text-muted-foreground">
-                    {t(results.length === 1 ? "search.resultCountOne" : "search.resultCountOther", {
+                    {t("search.resultCount", {
                       count: results.length,
                     })}
                   </span>

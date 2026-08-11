@@ -58,18 +58,12 @@ export function EBibleTargetReviewPanel({ translation, matchResult, onApply, onC
       <div className="space-y-1">
         <p className="text-sm font-medium">{translation.title} <span className="text-xs font-normal text-muted-foreground">({translation.id})</span></p>
         <p className="text-xs text-muted-foreground">
-          {matched.length === 1
-            ? t("editor.ebible.matchedOne", { count: matched.length.toLocaleString() })
-            : t("editor.ebible.matchedMany", { count: matched.length.toLocaleString() })}
+          {t("editor.ebible.matched", { count: matched.length.toLocaleString() })}
           {conflictCount > 0 && (
-            <> · <span className="text-amber-600 dark:text-amber-400">{conflictCount === 1
-              ? t("editor.ebible.conflictsOne", { count: conflictCount.toLocaleString() })
-              : t("editor.ebible.conflictsMany", { count: conflictCount.toLocaleString() })}</span></>
+            <> · <span className="text-amber-600 dark:text-amber-400">{t("editor.ebible.conflicts", { count: conflictCount.toLocaleString() })}</span></>
           )}
           {orphans.length > 0 && (
-            <> · {orphans.length === 1
-              ? t("editor.ebible.orphansOne", { count: orphans.length.toLocaleString() })
-              : t("editor.ebible.orphansMany", { count: orphans.length.toLocaleString() })}</>
+            <> · {t("editor.ebible.orphans", { count: orphans.length.toLocaleString() })}</>
           )}
         </p>
       </div>
@@ -117,9 +111,7 @@ export function EBibleTargetReviewPanel({ translation, matchResult, onApply, onC
       {orphans.length > 0 && (
         <details className="rounded-md border p-2 text-xs">
           <summary className="select-none text-muted-foreground">
-            {orphans.length === 1
-              ? t("editor.ebible.orphanSummaryOne", { count: orphans.length })
-              : t("editor.ebible.orphanSummaryMany", { count: orphans.length })}
+            {t("editor.ebible.orphanSummary", { count: orphans.length })}
           </summary>
           <ul className="mt-2 max-h-32 space-y-0.5 overflow-auto pl-2">
             {orphans.slice(0, 30).map((o) => (
@@ -137,9 +129,7 @@ export function EBibleTargetReviewPanel({ translation, matchResult, onApply, onC
       {/* Unmatched source cells */}
       {unmatchedSourceCount > 0 && (
         <p className="text-xs text-muted-foreground">
-          {unmatchedSourceCount === 1
-            ? t("editor.ebible.unmatchedOne", { count: unmatchedSourceCount.toLocaleString() })
-            : t("editor.ebible.unmatchedMany", { count: unmatchedSourceCount.toLocaleString() })}
+          {t("editor.ebible.unmatched", { count: unmatchedSourceCount.toLocaleString() })}
         </p>
       )}
 
@@ -151,9 +141,7 @@ export function EBibleTargetReviewPanel({ translation, matchResult, onApply, onC
           disabled={selected.size === 0}
           onClick={() => onApply(selected)}
         >
-          {selected.size === 1
-            ? t("editor.ebible.applyOne", { count: selected.size.toLocaleString() })
-            : t("editor.ebible.applyMany", { count: selected.size.toLocaleString() })}
+          {t("editor.ebible.apply", { count: selected.size.toLocaleString() })}
         </Button>
       </div>
     </div>

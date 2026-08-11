@@ -66,9 +66,7 @@ export function DecayBreakdown({
 
         {typeof staleSourceCount === "number" && staleSourceCount > 0 && (
           <p className="mb-2 text-xs text-amber-600">
-            {staleSourceCount === 1
-              ? t("editor.health.staleSourceOne", { count: staleSourceCount })
-              : t("editor.health.staleSourceMany", { count: staleSourceCount })}
+            {t("editor.health.staleSource", { count: staleSourceCount })}
           </p>
         )}
 

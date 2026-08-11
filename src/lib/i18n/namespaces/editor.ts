@@ -11,7 +11,7 @@
  * Clear, None, Name) are NOT re-keyed here; they come from `common.*`.
  */
 
-import { defineNamespace } from "./types"
+import { defineNamespace, plural } from "./types"
 
 export const editor = defineNamespace({
   keys: {
@@ -22,16 +22,29 @@ export const editor = defineNamespace({
     "editor.completion.translating": "Translating",
     "editor.completion.stop": "Stop translating",
     "editor.completion.cancelling": "cancelling…",
-    "editor.completion.failed": "{failed} of {total} cells failed.",
-    "editor.completion.failedPartial":
-      "{failed} of {total} cells failed — {done} completed.",
+    "editor.completion.failed": plural(
+      {
+        one: "{failed} of {total} cell failed.",
+        other: "{failed} of {total} cells failed.",
+      },
+      "total",
+    ),
+    "editor.completion.failedPartial": plural(
+      {
+        one: "{failed} of {total} cell failed — {done} completed.",
+        other: "{failed} of {total} cells failed — {done} completed.",
+      },
+      "total",
+    ),
 
     // — Health / decay breakdown popover ——————————————————————————
     "editor.health.needsAttention": "{percent}% of cells need attention",
     "editor.health.noneNeedAttention": "No cells need attention.",
     "editor.health.biggestDrags": "Biggest drags",
-    "editor.health.staleSourceOne": "{count} cell with stale source",
-    "editor.health.staleSourceMany": "{count} cells with stale source",
+    "editor.health.staleSource": plural({
+      one: "{count} cell with stale source",
+      other: "{count} cells with stale source",
+    }),
 
     // — Per-cell audio: record / upload / playback ——————————————————
     "editor.audio.record": "Record audio",
@@ -249,12 +262,18 @@ export const editor = defineNamespace({
     "editor.tn.noneForRef": "No translation notes for {ref}.",
 
     // — eBible target-import review panel ————————————————————————————
-    "editor.ebible.matchedOne": "{count} verse matched",
-    "editor.ebible.matchedMany": "{count} verses matched",
-    "editor.ebible.conflictsOne": "{count} conflict (existing target content)",
-    "editor.ebible.conflictsMany": "{count} conflicts (existing target content)",
-    "editor.ebible.orphansOne": "{count} orphan",
-    "editor.ebible.orphansMany": "{count} orphans",
+    "editor.ebible.matched": plural({
+      one: "{count} verse matched",
+      other: "{count} verses matched",
+    }),
+    "editor.ebible.conflicts": plural({
+      one: "{count} conflict (existing target content)",
+      other: "{count} conflicts (existing target content)",
+    }),
+    "editor.ebible.orphans": plural({
+      one: "{count} orphan",
+      other: "{count} orphans",
+    }),
     "editor.ebible.selectedCount": "{selected} / {total} selected",
     "editor.ebible.willOverwrite": "({count} will overwrite existing content)",
     "editor.ebible.selectAll": "All",
@@ -262,15 +281,19 @@ export const editor = defineNamespace({
     "editor.ebible.noMatches":
       "No source cells matched — the eBible translation may use different book " +
       "references.",
-    "editor.ebible.orphanSummaryOne":
-      "{count} orphan verse (in eBible but no matching source cell)",
-    "editor.ebible.orphanSummaryMany":
-      "{count} orphan verses (in eBible but no matching source cell)",
+    "editor.ebible.orphanSummary": plural({
+      one: "{count} orphan verse (in eBible but no matching source cell)",
+      other: "{count} orphan verses (in eBible but no matching source cell)",
+    }),
     "editor.ebible.andMore": "…and {count} more",
-    "editor.ebible.unmatchedOne": "{count} source cell had no matching eBible verse.",
-    "editor.ebible.unmatchedMany": "{count} source cells had no matching eBible verse.",
-    "editor.ebible.applyOne": "Apply {count} verse",
-    "editor.ebible.applyMany": "Apply {count} verses",
+    "editor.ebible.unmatched": plural({
+      one: "{count} source cell had no matching eBible verse.",
+      other: "{count} source cells had no matching eBible verse.",
+    }),
+    "editor.ebible.apply": plural({
+      one: "Apply {count} verse",
+      other: "Apply {count} verses",
+    }),
     "editor.ebible.conflictBadge": "conflict",
 
     // — Cell validation state words, reused in badges and a11y names ————
@@ -285,8 +308,10 @@ export const editor = defineNamespace({
     "editor.history.noEdits": "No edits yet.",
     "editor.history.refreshFailed":
       "Couldn't refresh from the server — showing local edits.",
-    "editor.history.revisionsOne": "{count} significant revision",
-    "editor.history.revisionsMany": "{count} significant revisions",
+    "editor.history.revisions": plural({
+      one: "{count} significant revision",
+      other: "{count} significant revisions",
+    }),
     "editor.history.collapsedNote":
       "({total} total, {hidden} minor intermediate edits collapsed)",
     "editor.history.staleBadge": "stale branch",
@@ -298,13 +323,17 @@ export const editor = defineNamespace({
     "editor.history.syncFailedTooltip":
       "This edit is safe in this browser, but it could not sync to the server. " +
       "Use the sync indicator to retry or inspect the failure.",
-    "editor.history.minorEditsOne": "+{count} minor edit",
-    "editor.history.minorEditsMany": "+{count} minor edits",
+    "editor.history.minorEdits": plural({
+      one: "+{count} minor edit",
+      other: "+{count} minor edits",
+    }),
     "editor.history.author": "by {author}",
     "editor.history.currentMarker": "· current",
     "editor.history.bumpedMarker": "· bumped by a concurrent edit",
-    "editor.history.examplesOne": "{count} example used",
-    "editor.history.examplesMany": "{count} examples used",
+    "editor.history.examples": plural({
+      one: "{count} example used",
+      other: "{count} examples used",
+    }),
     "editor.history.promote": "Promote to current",
     "editor.history.promoteConfirm": "Make this the current value?",
     "editor.history.showIntermediate": "Show intermediate edits",
@@ -324,8 +353,10 @@ export const editor = defineNamespace({
     "editor.selection.allTranslated": "All selected cells already have translations",
     "editor.selection.translateTooltip": "Translate {count} missing",
     "editor.selection.validate": "Validate",
-    "editor.selection.validateTooltipOne": "Validate {count} cell",
-    "editor.selection.validateTooltipMany": "Validate {count} cells",
+    "editor.selection.validateTooltip": plural({
+      one: "Validate {count} cell",
+      other: "Validate {count} cells",
+    }),
     "editor.selection.validateOutOfScope":
       "Some selected cells are outside your assigned files or lanes",
     "editor.selection.validateAllMine": "All selected cells are already validated by you",
@@ -335,23 +366,31 @@ export const editor = defineNamespace({
     "editor.selection.validateNothingEligible": "Nothing eligible to validate",
     "editor.selection.removeMyValidations": "Remove my validations",
     "editor.selection.noValidations": "No cells have your validation",
-    "editor.selection.unvalidateTooltipOne": "Remove your validation from {count} cell",
-    "editor.selection.unvalidateTooltipMany": "Remove your validation from {count} cells",
+    "editor.selection.unvalidateTooltip": plural({
+      one: "Remove your validation from {count} cell",
+      other: "Remove your validation from {count} cells",
+    }),
     "editor.selection.harmonize": "Harmonize…",
     "editor.selection.harmonizeNeedLead":
       "You need project lead role to run a harmonization sweep",
-    "editor.selection.harmonizeTooltipOne": "Open harmonize sweep for {count} selected cell",
-    "editor.selection.harmonizeTooltipMany": "Open harmonize sweep for {count} selected cells",
+    "editor.selection.harmonizeTooltip": plural({
+      one: "Open harmonize sweep for {count} selected cell",
+      other: "Open harmonize sweep for {count} selected cells",
+    }),
     "editor.selection.clearTooltip": "Clear selection (Esc)",
     "editor.selection.clear": "Clear selection",
-    "editor.selection.validatedToastOne": "Validated {count} cell",
-    "editor.selection.validatedToastMany": "Validated {count} cells",
-    "editor.selection.validatedToastSkippedOne":
-      "Validated {count} cell ({already} already validated)",
-    "editor.selection.validatedToastSkippedMany":
-      "Validated {count} cells ({already} already validated)",
-    "editor.selection.unvalidatedToastOne": "Removed validations from {count} cell",
-    "editor.selection.unvalidatedToastMany": "Removed validations from {count} cells",
+    "editor.selection.validatedToast": plural({
+      one: "Validated {count} cell",
+      other: "Validated {count} cells",
+    }),
+    "editor.selection.validatedToastSkipped": plural({
+      one: "Validated {count} cell ({already} already validated)",
+      other: "Validated {count} cells ({already} already validated)",
+    }),
+    "editor.selection.unvalidatedToast": plural({
+      one: "Removed validations from {count} cell",
+      other: "Removed validations from {count} cells",
+    }),
 
     // — Attach-video dialog for a timed file ————————————————————————
     "editor.video.title": "Attach Video",
@@ -471,10 +510,14 @@ export const editor = defineNamespace({
     "editor.state.selfValidated": "self-validated",
 
     // — Open-comment indicator on a row ————————————————————————————
-    "editor.comments.openOne": "{count} open comment",
-    "editor.comments.openMany": "{count} open comments",
-    "editor.comments.openOneAria": "{count} open comment — open comments",
-    "editor.comments.openManyAria": "{count} open comments — open comments",
+    "editor.comments.open": plural({
+      one: "{count} open comment",
+      other: "{count} open comments",
+    }),
+    "editor.comments.openAria": plural({
+      one: "{count} open comment — open comments",
+      other: "{count} open comments — open comments",
+    }),
 
     // — Table header, lane switcher and whole-file empty states ——————
     "editor.column.controls": "Controls",
@@ -538,8 +581,10 @@ export const editor = defineNamespace({
 
     // — Expansion tab: retrieval support ——————————————————————————
     "editor.expansion.retrievalSupport": "Retrieval support",
-    "editor.expansion.endorsementsOne": "{count} endorsement · support {percent}%",
-    "editor.expansion.endorsementsMany": "{count} endorsements · support {percent}%",
+    "editor.expansion.endorsements": plural({
+      one: "{count} endorsement · support {percent}%",
+      other: "{count} endorsements · support {percent}%",
+    }),
     "editor.expansion.lowerSupport":
       "Lower retrieval support — review terminology and context closely.",
     "editor.expansion.betterSupport":
@@ -659,7 +704,8 @@ export const editor = defineNamespace({
         description:
           "Summary sentence replacing the progress bar when a batch AI translation " +
           "run finished and every attempted cell failed. Full sentence with a " +
-          "period. Honest failure reporting, so do not soften it.",
+          "period. Honest failure reporting, so do not soften it. The counted noun " +
+          "is 'cells', so the plural form is governed by {total}, not {failed}.",
         placeholders: {
           failed: "Number of cells that could not be translated.",
           total: "Number of cells the run attempted in total.",
@@ -669,7 +715,8 @@ export const editor = defineNamespace({
         description:
           "Same summary as editor.completion.failed but for a partially successful " +
           "run: some cells failed and some were drafted. Full sentence with a " +
-          "period; the dash separates the failure count from the success count.",
+          "period; the dash separates the failure count from the success count. As " +
+          "above, the counted noun is 'cells' and the form is governed by {total}.",
         placeholders: {
           failed: "Number of cells that could not be translated.",
           total: "Number of cells the run attempted in total.",
@@ -700,20 +747,14 @@ export const editor = defineNamespace({
           "translate the meaning ('what is hurting the score most'), not the image.",
         maxLength: 24,
       },
-      "editor.health.staleSourceOne": {
+      "editor.health.staleSource": {
         description:
-          "Singular form of the amber warning row in the health popover counting " +
-          "cells whose pinned source text has changed since the translation was " +
-          "last revised. Only ever rendered with count = 1.",
-        placeholders: { count: "Always the number 1 for this form." },
-      },
-      "editor.health.staleSourceMany": {
-        description:
-          "Plural form of the amber warning row in the health popover counting " +
-          "cells whose pinned source text has changed since the translation was " +
-          "last revised. Rendered for any count other than 1, including 0.",
+          "Amber warning row in the health popover counting cells whose pinned source text " +
+          "has changed since the translation was last revised, so the translation may no " +
+          "longer match what it was made from.",
         placeholders: {
-          count: "Number of cells whose source has advanced past the translation.",
+          count:
+            "The number the sentence counts; it also selects which plural form is used.",
         },
       },
       "editor.audio.record": {
@@ -1860,44 +1901,35 @@ export const editor = defineNamespace({
             "translate.",
         },
       },
-      "editor.ebible.matchedOne": {
+      "editor.ebible.matched": {
         description:
-          "Singular form of the summary line in the eBible import review: how many " +
-          "verses of the chosen public translation line up with cells in this " +
-          "project. Only rendered for count = 1.",
-        placeholders: { count: "Always 1 for this form." },
-      },
-      "editor.ebible.matchedMany": {
-        description:
-          "Plural of editor.ebible.matchedOne. 'Matched' means paired to an " +
-          "existing source cell by verse reference.",
+          "Summary line in the eBible import review: how many verses of the chosen public " +
+          "translation line up with cells in this project. 'Matched' means paired to an " +
+          "existing cell, not that the wording agrees.",
         placeholders: {
-          count: "Number of verses paired with a cell, already digit-grouped.",
+          count:
+            "The number the sentence counts; it also selects which plural form is used.",
         },
       },
-      "editor.ebible.conflictsOne": {
+      "editor.ebible.conflicts": {
         description:
-          "Singular amber warning fragment appended to the match summary: matched " +
-          "cells that ALREADY have translated text, which importing would " +
-          "overwrite. The parenthetical is the reason it is a conflict.",
-        placeholders: { count: "Always 1 for this form." },
-      },
-      "editor.ebible.conflictsMany": {
-        description: "Plural of editor.ebible.conflictsOne.",
+          "Amber warning fragment appended to the match summary: matched cells that ALREADY " +
+          "have translated text, which importing would overwrite. The parenthetical is the " +
+          "reason it is a conflict.",
         placeholders: {
-          count: "Number of matched cells that already contain a translation.",
+          count:
+            "The number the sentence counts; it also selects which plural form is used.",
         },
       },
-      "editor.ebible.orphansOne": {
+      "editor.ebible.orphans": {
         description:
-          "Singular fragment appended to the match summary counting verses present " +
-          "in the eBible translation with no cell to import into. 'Orphan' is used " +
-          "in the sense 'has no counterpart here'.",
-        placeholders: { count: "Always 1 for this form." },
-      },
-      "editor.ebible.orphansMany": {
-        description: "Plural of editor.ebible.orphansOne.",
-        placeholders: { count: "Number of eBible verses with no matching cell." },
+          "Fragment appended to the match summary counting verses present in the eBible " +
+          "translation with no cell to import into. 'Orphan' is used in the sense 'has no " +
+          "counterpart here'.",
+        placeholders: {
+          count:
+            "The number the sentence counts; it also selects which plural form is used.",
+        },
       },
       "editor.ebible.selectedCount": {
         description:
@@ -1936,15 +1968,14 @@ export const editor = defineNamespace({
           "translation lines up with any cell. The clause after the dash is the " +
           "likely cause, so the user knows it is fixable and not a bug.",
       },
-      "editor.ebible.orphanSummaryOne": {
+      "editor.ebible.orphanSummary": {
         description:
-          "Singular summary of the collapsed list of eBible verses that had no cell " +
-          "to import into. The parenthetical explains what 'orphan' means here.",
-        placeholders: { count: "Always 1 for this form." },
-      },
-      "editor.ebible.orphanSummaryMany": {
-        description: "Plural of editor.ebible.orphanSummaryOne.",
-        placeholders: { count: "Number of eBible verses with no matching cell." },
+          "Summary of the collapsed list of eBible verses that had no cell to import into. " +
+          "The parenthetical explains what 'orphan' means here.",
+        placeholders: {
+          count:
+            "The number the sentence counts; it also selects which plural form is used.",
+        },
       },
       "editor.ebible.andMore": {
         description:
@@ -1953,29 +1984,24 @@ export const editor = defineNamespace({
           "leading continuation mark if the target language uses one.",
         placeholders: { count: "Number of orphan entries not listed." },
       },
-      "editor.ebible.unmatchedOne": {
+      "editor.ebible.unmatched": {
         description:
-          "Singular note counting the project's own source cells that the eBible " +
-          "translation had nothing for — the mirror image of an orphan. Full " +
-          "sentence.",
-        placeholders: { count: "Always 1 for this form." },
-      },
-      "editor.ebible.unmatchedMany": {
-        description: "Plural of editor.ebible.unmatchedOne.",
+          "Note counting the project's own source cells that the eBible translation had " +
+          "nothing for — the mirror image of an orphan. Full sentence.",
         placeholders: {
-          count: "Number of source cells with no eBible verse, already digit-grouped.",
+          count:
+            "The number the sentence counts; it also selects which plural form is used.",
         },
       },
-      "editor.ebible.applyOne": {
+      "editor.ebible.apply": {
         description:
-          "Singular label of the confirming button that writes the ticked verses " +
-          "into the project's target column. Imperative, with the count so the user " +
-          "sees the scope before committing.",
-        placeholders: { count: "Always 1 for this form." },
-      },
-      "editor.ebible.applyMany": {
-        description: "Plural of editor.ebible.applyOne.",
-        placeholders: { count: "Number of ticked verses that will be written." },
+          "Label of the confirming button that writes the ticked verses into the project's " +
+          "target column. Imperative, with the count so the user sees the scope before " +
+          "committing.",
+        placeholders: {
+          count:
+            "The number the sentence counts; it also selects which plural form is used.",
+        },
       },
       "editor.ebible.conflictBadge": {
         description:
@@ -2033,16 +2059,14 @@ export const editor = defineNamespace({
           "but locally-known edits are being shown. The clause after the dash is " +
           "what the user is looking at. A Retry control follows.",
       },
-      "editor.history.revisionsOne": {
+      "editor.history.revisions": {
         description:
-          "Singular count of 'significant' revisions — the app groups bursts of " +
-          "keystrokes into one revision, so this is smaller than the raw edit " +
-          "count. Only rendered for count = 1.",
-        placeholders: { count: "Always 1 for this form." },
-      },
-      "editor.history.revisionsMany": {
-        description: "Plural of editor.history.revisionsOne.",
-        placeholders: { count: "Number of grouped revisions listed." },
+          "Count of 'significant' revisions — the app groups bursts of keystrokes into one " +
+          "revision, so this is smaller than the raw edit count.",
+        placeholders: {
+          count:
+            "The number the sentence counts; it also selects which plural form is used.",
+        },
       },
       "editor.history.collapsedNote": {
         description:
@@ -2088,18 +2112,15 @@ export const editor = defineNamespace({
           "edit is safe in this browser), second is where to go to retry. 'Sync " +
           "indicator' is the connection status control in the app chrome.",
       },
-      "editor.history.minorEditsOne": {
+      "editor.history.minorEdits": {
         description:
-          "Singular badge counting the intermediate keystroke-level edits folded " +
-          "into a revision group. The leading plus sign means 'in addition to the " +
-          "one shown' — keep it.",
-        placeholders: { count: "Always 1 for this form." },
+          "Badge counting the intermediate keystroke-level edits folded into a revision " +
+          "group. The leading plus sign means 'in addition to the one shown' — keep it.",
         maxLength: 20,
-      },
-      "editor.history.minorEditsMany": {
-        description: "Plural of editor.history.minorEditsOne.",
-        placeholders: { count: "Number of folded intermediate edits." },
-        maxLength: 22,
+        placeholders: {
+          count:
+            "The number the sentence counts; it also selects which plural form is used.",
+        },
       },
       "editor.history.author": {
         description:
@@ -2126,16 +2147,15 @@ export const editor = defineNamespace({
           "the separator — keep it.",
         maxLength: 36,
       },
-      "editor.history.examplesOne": {
+      "editor.history.examples": {
         description:
-          "Singular note under an AI-generated history entry: how many retrieved " +
-          "translation examples the model was given as context. Evidence about how " +
-          "the draft was produced.",
-        placeholders: { count: "Always 1 for this form." },
-      },
-      "editor.history.examplesMany": {
-        description: "Plural of editor.history.examplesOne.",
-        placeholders: { count: "Number of retrieved examples used for the draft." },
+          "Note under an AI-generated history entry: how many retrieved translation " +
+          "examples the model was given as context. Evidence about how the draft was " +
+          "produced.",
+        placeholders: {
+          count:
+            "The number the sentence counts; it also selects which plural form is used.",
+        },
       },
       "editor.history.promote": {
         description:
@@ -2237,15 +2257,14 @@ export const editor = defineNamespace({
           "keep the word alone short. It approves work, it does not check syntax.",
         maxLength: 16,
       },
-      "editor.selection.validateTooltipOne": {
+      "editor.selection.validateTooltip": {
         description:
-          "Singular tooltip on the enabled bulk-validate button, stating how many " +
-          "cells the click would sign off.",
-        placeholders: { count: "Always 1 for this form." },
-      },
-      "editor.selection.validateTooltipMany": {
-        description: "Plural of editor.selection.validateTooltipOne.",
-        placeholders: { count: "Number of cells that would be signed off." },
+          "Tooltip on the enabled bulk-validate button, stating how many cells the click " +
+          "would sign off.",
+        placeholders: {
+          count:
+            "The number the sentence counts; it also selects which plural form is used.",
+        },
       },
       "editor.selection.validateOutOfScope": {
         description:
@@ -2287,15 +2306,14 @@ export const editor = defineNamespace({
           "Tooltip when the remove-my-validations button is disabled because none of " +
           "the selected cells carries this user's sign-off.",
       },
-      "editor.selection.unvalidateTooltipOne": {
+      "editor.selection.unvalidateTooltip": {
         description:
-          "Singular tooltip on the enabled remove-my-validations button, stating the " +
-          "scope. 'Your' keeps it clear that other reviewers are untouched.",
-        placeholders: { count: "Always 1 for this form." },
-      },
-      "editor.selection.unvalidateTooltipMany": {
-        description: "Plural of editor.selection.unvalidateTooltipOne.",
-        placeholders: { count: "Number of cells the sign-off is withdrawn from." },
+          "Tooltip on the enabled remove-my-validations button, stating the scope. 'Your' " +
+          "keeps it clear that other reviewers are untouched.",
+        placeholders: {
+          count:
+            "The number the sentence counts; it also selects which plural form is used.",
+        },
       },
       "editor.selection.harmonize": {
         description:
@@ -2310,15 +2328,14 @@ export const editor = defineNamespace({
           "Tooltip when the harmonize button is disabled because the user's project " +
           "role is below lead. 'Project lead' is a role name in this app.",
       },
-      "editor.selection.harmonizeTooltipOne": {
+      "editor.selection.harmonizeTooltip": {
         description:
-          "Singular tooltip on the enabled harmonize button, stating the scope of " +
-          "the sweep it opens.",
-        placeholders: { count: "Always 1 for this form." },
-      },
-      "editor.selection.harmonizeTooltipMany": {
-        description: "Plural of editor.selection.harmonizeTooltipOne.",
-        placeholders: { count: "Number of selected cells the sweep would cover." },
+          "Tooltip on the enabled harmonize button, stating the scope of the sweep it " +
+          "opens.",
+        placeholders: {
+          count:
+            "The number the sentence counts; it also selects which plural form is used.",
+        },
       },
       "editor.selection.clearTooltip": {
         description:
@@ -2329,42 +2346,31 @@ export const editor = defineNamespace({
         description:
           "Screen-reader name of that same X. It only deselects; nothing is deleted.",
       },
-      "editor.selection.validatedToastOne": {
+      "editor.selection.validatedToast": {
         description:
-          "Singular success toast after a bulk validate. Past tense — it reports " +
-          "what happened.",
-        placeholders: { count: "Always 1 for this form." },
-      },
-      "editor.selection.validatedToastMany": {
-        description: "Plural of editor.selection.validatedToastOne.",
-        placeholders: { count: "Number of cells newly signed off." },
-      },
-      "editor.selection.validatedToastSkippedOne": {
-        description:
-          "Singular success toast when some selected cells were skipped because " +
-          "this user had already signed them off. The parenthetical is the honest " +
-          "accounting of the difference.",
+          "Success toast after a bulk validate. Past tense — it reports what happened.",
         placeholders: {
-          count: "Always 1 for this form — cells newly signed off.",
+          count:
+            "The number the sentence counts; it also selects which plural form is used.",
+        },
+      },
+      "editor.selection.validatedToastSkipped": {
+        description:
+          "Success toast when some selected cells were skipped because this user had " +
+          "already signed them off. The parenthetical is the honest accounting of the " +
+          "difference.",
+        placeholders: {
+          count: "How many cells were newly signed off. Selects the plural form.",
           already: "How many were skipped because they were already signed off.",
         },
       },
-      "editor.selection.validatedToastSkippedMany": {
-        description: "Plural of editor.selection.validatedToastSkippedOne.",
-        placeholders: {
-          count: "Number of cells newly signed off.",
-          already: "How many were skipped because they were already signed off.",
-        },
-      },
-      "editor.selection.unvalidatedToastOne": {
+      "editor.selection.unvalidatedToast": {
         description:
-          "Singular success toast after withdrawing this user's sign-off in bulk. " +
-          "Past tense.",
-        placeholders: { count: "Always 1 for this form." },
-      },
-      "editor.selection.unvalidatedToastMany": {
-        description: "Plural of editor.selection.unvalidatedToastOne.",
-        placeholders: { count: "Number of cells the sign-off was withdrawn from." },
+          "Success toast after withdrawing this user's sign-off in bulk. Past tense.",
+        placeholders: {
+          count:
+            "The number the sentence counts; it also selects which plural form is used.",
+        },
       },
       "editor.video.title": {
         description:
@@ -2984,26 +2990,24 @@ export const editor = defineNamespace({
           "Lower-case, mid-phrase.",
         maxLength: 20,
       },
-      "editor.comments.openOne": {
+      "editor.comments.open": {
         description:
-          "Singular tooltip on the blue speech-bubble indicator showing a row has " +
-          "unresolved discussion. 'Open' means not yet resolved. Comments are team " +
-          "discussion, not footnotes.",
-        placeholders: { count: "Always 1 for this form." },
+          "Tooltip on the blue speech-bubble indicator showing a row has unresolved " +
+          "discussion. 'Open' means not yet resolved. Comments are team discussion, not " +
+          "footnotes.",
+        placeholders: {
+          count:
+            "The number the sentence counts; it also selects which plural form is used.",
+        },
       },
-      "editor.comments.openMany": {
-        description: "Plural of editor.comments.openOne.",
-        placeholders: { count: "Number of unresolved comment threads on the cell." },
-      },
-      "editor.comments.openOneAria": {
+      "editor.comments.openAria": {
         description:
-          "Screen-reader name of that indicator, singular: the count plus what " +
-          "clicking does (opens the comments panel).",
-        placeholders: { count: "Always 1 for this form." },
-      },
-      "editor.comments.openManyAria": {
-        description: "Plural of editor.comments.openOneAria.",
-        placeholders: { count: "Number of unresolved comment threads on the cell." },
+          "Screen-reader name of that indicator: the count plus what clicking does (opens " +
+          "the comments panel).",
+        placeholders: {
+          count:
+            "The number the sentence counts; it also selects which plural form is used.",
+        },
       },
       "editor.column.controls": {
         description:
@@ -3265,20 +3269,13 @@ export const editor = defineNamespace({
           "hide on narrow screens.",
         maxLength: 22,
       },
-      "editor.expansion.endorsementsOne": {
+      "editor.expansion.endorsements": {
         description:
-          "Singular summary line in the retrieval-support tab: how many times " +
-          "reviewers have endorsed this rendering, and the resulting support score " +
-          "as a percentage. The middle dot separates the two figures.",
+          "Summary line in the retrieval-support tab: how many times reviewers have " +
+          "endorsed this rendering, and the resulting support score as a percentage. The " +
+          "middle dot separates the two figures.",
         placeholders: {
-          count: "Always 1 for this form.",
-          percent: "Support score 0-100, already rounded, without the % sign.",
-        },
-      },
-      "editor.expansion.endorsementsMany": {
-        description: "Plural of editor.expansion.endorsementsOne.",
-        placeholders: {
-          count: "Number of endorsements, which may be 0.",
+          count: "Number of endorsements. Selects the plural form.",
           percent: "Support score 0-100, already rounded, without the % sign.",
         },
       },

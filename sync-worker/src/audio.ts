@@ -20,7 +20,7 @@
 // The DELETE handler in admin.ts already enumerates everything under
 // projects/{pid}/files/{fid}/, so wiping a file naturally wipes its audio.
 
-import { verifyTokenForFile } from "./auth"
+import { verifyTokenForFile, WRITE_ROLE_LEVEL } from "./auth"
 
 export interface AudioEnv {
   SNAPSHOTS: R2Bucket
@@ -154,6 +154,12 @@ export async function handleAudioRequest(
         new Response("token scoped to different project", { status: 403 }),
       )
     }
+    // F8 says "contributor+" — enforce the floor the comment promises. Without
+    // this, any project member (viewer included) with a valid file-scoped
+    // token could delete another member's audio recording.
+    if (verified.claims.role < WRITE_ROLE_LEVEL) {
+      return withAudioCors(new Response("insufficient role", { status: 403 }))
+    }
     await env.SNAPSHOTS.delete(key)
     return withAudioCors(Response.json({ ok: true }))
   }
@@ -183,6 +189,12 @@ export async function handleAudioRequest(
   }
 
   if (request.method === "PUT") {
+    // Writing/overwriting audio bytes is a contributor-level action — matches
+    // the CONTRIBUTOR floor the corresponding cell.audio.attach event enforces
+    // in the structured event log (role-policy.ts). GET stays viewer-readable.
+    if (verified.claims.role < WRITE_ROLE_LEVEL) {
+      return withAudioCors(new Response("insufficient role", { status: 403 }))
+    }
     const artifactId = request.headers.get("X-Artifact-Id")?.trim()
     if (artifactId && !UUID_RE.test(artifactId)) {
       return withAudioCors(new Response("invalid artifact id", { status: 400 }))

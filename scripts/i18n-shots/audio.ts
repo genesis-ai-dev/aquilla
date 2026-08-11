@@ -8,20 +8,25 @@
  */
 
 import type { Page } from "@playwright/test"
-import { BASE_URL, DEV_PROJECT, type SurfaceDrivers } from "./shared"
+import { openShotsFile } from "./open-file"
+import type { SurfaceDrivers } from "./shared"
 
 export const audio: SurfaceDrivers = {
   "audio-studio": async (page: Page) => {
-    // The `/voice` deep link puts ProjectWorkspace straight into the Audio
-    // lens on mount (see ProjectWorkspace.tsx), landing on the Voices
-    // sidebar + transport bar without needing to click through tabs.
-    //
-    // The full recording flow (AudioRecordingModal) needs live microphone
-    // permission, which a headless capture browser cannot grant — so this
-    // driver stops at the Voices sidebar + playback bar, the reachable state
-    // that still shows the bulk of this namespace's strings (voice rows,
-    // narrator badge, New voice button, transport controls).
-    await page.goto(`${BASE_URL}/project/${DEV_PROJECT}/voice`)
+    // Open the seeded file FIRST, then switch to the Audio lens with the
+    // header's Text/Audio toggle. The `/voice` deep link also lands in the
+    // Audio lens, but with no file open, so the centre of the shot was the
+    // "No file selected" placeholder rather than the per-line record/generate
+    // rows this surface's notes describe — only the Voices sidebar and the
+    // transport bar had any content.
+    await openShotsFile(page)
+    // EditorModeToggle is a Radix Tabs list, so the lens switch is role="tab",
+    // not a button (see src/components/EditorModeToggle.tsx). Its label is
+    // "Audio" for a sequence-ordered file and "Media" for a time-ordered one.
+    await page.getByRole("tab", { name: /^(Audio|Media)$/ }).first().click()
     await page.getByRole("heading", { name: "Voices" }).waitFor({ timeout: 30_000 })
+    // The audio rows re-render per cell with their own controls; give the lens
+    // switch a beat to finish before the shot.
+    await page.waitForTimeout(1500)
   },
 }

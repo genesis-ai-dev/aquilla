@@ -126,10 +126,20 @@ export const error = defineNamespace({
     {
       id: "error-state",
       title: "Error state",
-      route: "/project/:projectId",
+      // Route changed from "/project/:projectId" during the AQU-511 capture
+      // run: that route's failure is one line of muted prose with no heading
+      // and no action, so the shot showed none of the layout these strings are
+      // written for. The 404 screen renders title-as-heading + description +
+      // action button, which the error boundary and permission-denied alert
+      // reuse. See scripts/i18n-shots/error.ts.
+      route: "/(any unmatched route)",
       notes:
-        "Generic failure surface (error boundary / failed load). Wording should be " +
-        "reassuring and non-technical; the title is a heading, not a button.",
+        "Generic failure surface, captured on the 404 screen — the failure state " +
+        "that shows the full shape these strings share: title as a heading, one " +
+        "line of description under it, and a single short action button. The " +
+        "error boundary and the permission-denied alert reuse that layout. " +
+        "Wording should be reassuring and non-technical; the title is a heading, " +
+        "not a button.",
     },
   ],
 })

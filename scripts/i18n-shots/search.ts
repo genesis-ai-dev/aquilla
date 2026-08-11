@@ -7,51 +7,31 @@
  * surface has one here.
  */
 
-import { writeFileSync } from "node:fs"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
 import type { Page } from "@playwright/test"
-import { BASE_URL, DEV_PROJECT, type SurfaceDrivers } from "./shared"
+import { openShotsFile } from "./open-file"
+import type { SurfaceDrivers } from "./shared"
 
 export const search: SurfaceDrivers = {
   search: async (page: Page) => {
-    await page.goto(`${BASE_URL}/project/${DEV_PROJECT}/editor`)
-
-    // The seed project ships empty; import a tiny sample so there is
-    // something for the search dock to find, mirroring the `common` driver's
-    // cell-editor setup.
-    const emptyCta = page.getByRole("button", { name: /import a file/i })
-    const cell = page.getByText("In the beginning God created", { exact: false }).first()
-    await emptyCta.or(cell).first().waitFor({ timeout: 30_000 })
-    if (await emptyCta.isVisible().catch(() => false)) {
-      const samplePath = join(tmpdir(), "i18n-shots-sample.txt")
-      writeFileSync(
-        samplePath,
-        "In the beginning God created the heavens and the earth.\n" +
-          "And God said, Let there be light: and there was light.\n",
-      )
-      await emptyCta.click()
-      await page.getByRole("dialog").waitFor({ timeout: 10_000 })
-      await page.getByText("Upload files", { exact: true }).click()
-      const fileInput = page.locator('input[type="file"]').first()
-      await fileInput.waitFor({ state: "attached", timeout: 10_000 })
-      await fileInput.setInputFiles(samplePath)
-      await page.getByRole("button", { name: /confirm import/i }).click()
-      await cell.waitFor({ timeout: 60_000 })
-      const skipDirection = page.getByRole("button", { name: /skip for now/i })
-      if (await skipDirection.isVisible().catch(() => false)) {
-        await skipDirection.click()
-        await skipDirection.waitFor({ state: "hidden", timeout: 10_000 })
-      }
-    }
+    // Content first, so the dock has something to find. The previous driver
+    // tried to import through the empty state's "Import a file" CTA, which
+    // `/editor` never renders — see open-file.ts.
+    await openShotsFile(page)
 
     // Open the search dock (left dock rail icon, aria-label "Search").
     await page.getByRole("button", { name: "Search", exact: true }).first().click()
 
-    // Enter a query that matches the sample text so the shot shows results.
+    // A query that matches the seeded source text, so the shot shows the
+    // result list alongside the mode switcher and scope toggle.
     const searchBox = page.getByPlaceholder(/search/i).first()
     await searchBox.waitFor({ timeout: 15_000 })
     await searchBox.fill("God")
-    await page.getByText("God created", { exact: false }).first().waitFor({ timeout: 15_000 })
+    // Settle on the dock's own result chrome. Waiting on matched text (as this
+    // driver used to) is not enough: the same words are on screen in the
+    // editor table behind the dock, so the wait resolved instantly and the
+    // shot caught the panel still reading "Searching…". "Expand all" and the
+    // result count only render once results have landed.
+    await page.getByRole("button", { name: /expand all/i }).waitFor({ timeout: 30_000 })
+    await page.getByText(/\d+ results?/).first().waitFor({ timeout: 30_000 })
   },
 }

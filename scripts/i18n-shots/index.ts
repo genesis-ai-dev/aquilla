@@ -19,7 +19,7 @@ import { error } from "./error"
 import { dialog } from "./dialog"
 import { editor } from "./editor"
 import { comments } from "./comments"
-import { auth } from "./auth"
+import { auth, authSignedOutSurfaceIds } from "./auth"
 import { search } from "./search"
 import { audio } from "./audio"
 import type { SurfaceDriver } from "./shared"
@@ -39,3 +39,10 @@ export const DRIVERS: Record<string, SurfaceDriver> = {
 }
 
 export const SURFACE_DRIVER_IDS: readonly string[] = Object.keys(DRIVERS)
+
+/**
+ * Surfaces the runner must drive in a signed-OUT context (pre-auth screens).
+ * Contributed per namespace so the reason sits with the driver; see
+ * `authSignedOutSurfaceIds`.
+ */
+export const SIGNED_OUT_SURFACE_IDS: readonly string[] = [...authSignedOutSurfaceIds]

@@ -12,11 +12,19 @@ import { BASE_URL, type SurfaceDrivers } from "./shared"
 
 export const error: SurfaceDrivers = {
   "error-state": async (page: Page) => {
-    // A project id that cannot exist renders the workspace failure surface.
-    await page.goto(`${BASE_URL}/project/i18n-shots-no-such-project/editor`)
-    await page
-      .getByText(/went wrong|not found|no longer have access|couldn.t|failed|error/i)
-      .first()
-      .waitFor({ timeout: 30_000 })
+    // The 404 page, reached by any unmatched route.
+    //
+    // WHY NOT `/project/<nonexistent>`: that route does render a failure, but
+    // it is a single line of muted prose ("You no longer have access to this
+    // project…") on an otherwise blank 1440x900 frame — no heading, no button,
+    // nothing showing the shape this namespace's context describes ("the title
+    // is a heading, not a button"). The 404 screen renders
+    // error.notFound.title as a real heading, error.notFound.description under
+    // it, and error.notFound.goHome as a button, so one frame shows the
+    // heading/body/action layout every other key in the namespace is written
+    // against. The surface's declared `route` was updated to match.
+    await page.goto(`${BASE_URL}/i18n-shots-no-such-route`)
+    await page.getByRole("heading", { name: /page not found/i }).waitFor({ timeout: 30_000 })
+    await page.getByRole("button", { name: /go home/i }).waitFor({ timeout: 10_000 })
   },
 }

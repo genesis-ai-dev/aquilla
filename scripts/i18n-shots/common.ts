@@ -7,42 +7,28 @@
  * surface has one here.
  */
 
-import { writeFileSync } from "node:fs"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
 import type { Page } from "@playwright/test"
+import { openShotsFile } from "./open-file"
+import { FIRST_TARGET_TEXT } from "./seed"
 import { BASE_URL, DEV_PROJECT, type SurfaceDrivers } from "./shared"
 
 export const common: SurfaceDrivers = {
   "cell-editor": async (page: Page) => {
-    await page.goto(`${BASE_URL}/project/${DEV_PROJECT}/editor`)
-    // The seed project ships empty; import a tiny text file through the real
-    // upload flow so the shot shows the editing table, not the empty state.
-    const emptyCta = page.getByRole("button", { name: /import a file/i })
-    const cell = page.getByText("In the beginning God created", { exact: false }).first()
-    await emptyCta.or(cell).first().waitFor({ timeout: 30_000 })
-    if (await emptyCta.isVisible().catch(() => false)) {
-      const samplePath = join(tmpdir(), "i18n-shots-sample.txt")
-      writeFileSync(
-        samplePath,
-        "In the beginning God created the heavens and the earth.\n" +
-          "And God said, Let there be light: and there was light.\n",
-      )
-      await emptyCta.click()
-      await page.getByRole("dialog").waitFor({ timeout: 10_000 })
-      await page.getByText("Upload files", { exact: true }).click()
-      const fileInput = page.locator('input[type="file"]').first()
-      await fileInput.waitFor({ state: "attached", timeout: 10_000 })
-      await fileInput.setInputFiles(samplePath)
-      await page.getByRole("button", { name: /confirm import/i }).click()
-      await cell.waitFor({ timeout: 60_000 })
-      // First import prompts for translation direction — not this surface.
-      const skipDirection = page.getByRole("button", { name: /skip for now/i })
-      if (await skipDirection.isVisible().catch(() => false)) {
-        await skipDirection.click()
-        await skipDirection.waitFor({ state: "hidden", timeout: 10_000 })
-      }
-    }
+    // One cell open for editing — this surface's keys are the inline controls
+    // and status text that sit *next to* translation content, so the shot has
+    // to show a focused row with its action rail, not just the table.
+    //
+    // The previous driver waited on the "Import a file" CTA of the empty
+    // state, which `/editor` (no file id) never renders: it lands on
+    // CellAreaPlaceholder's no-file-selected branch instead. Content is now
+    // seeded server-side and deep-linked — see open-file.ts.
+    await openShotsFile(page)
+    // Clicking the row wrapper only selects it; clicking the *target* text is
+    // what mounts the TipTap editor and reveals the rail.
+    await page.getByText(FIRST_TARGET_TEXT, { exact: false }).first().click()
+    await page.locator('[contenteditable="true"]').first().waitFor({ timeout: 15_000 })
+    // Let the focus ring and the action rail finish transitioning in.
+    await page.waitForTimeout(800)
   },
   "confirm-dialog": async (page: Page) => {
     // The project-card delete flow is the canonical confirm/cancel pattern.

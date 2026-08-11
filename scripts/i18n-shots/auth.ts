@@ -21,3 +21,13 @@ export const auth: SurfaceDrivers = {
     await page.getByLabel(/username or email/i).waitFor({ timeout: 30_000 })
   },
 }
+
+/**
+ * Surfaces whose drivers need a SIGNED-OUT browser context.
+ *
+ * The capture runner signs in before driving every other surface; for these it
+ * skips the bypass, because a live session bounces `/login` straight into the
+ * workspace and the form never renders. Declared here rather than in the runner
+ * so the reason lives next to the driver that needs it.
+ */
+export const authSignedOutSurfaceIds: readonly string[] = ["auth"]

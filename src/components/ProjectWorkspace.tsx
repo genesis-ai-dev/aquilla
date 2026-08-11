@@ -6149,8 +6149,8 @@ function MoveToCorpusDialog({
 
 // ── ScrollToGroupHandler ───────────────────────────────────────────────────
 // Must render inside <EditorScrollProvider> so useEditorScroll() has context.
-// Watches pendingGroup and scrolls the first matching cell into view via the
-// forwarded editorRef.
+// Watches editorScroll.pending and scrolls the first matching cell into view
+// via the forwarded editorRef.
 
 interface ScrollToGroupHandlerProps {
   cellStore: CellStore

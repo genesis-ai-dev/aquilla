@@ -272,6 +272,141 @@ export const editor = defineNamespace({
     "editor.ebible.applyOne": "Apply {count} verse",
     "editor.ebible.applyMany": "Apply {count} verses",
     "editor.ebible.conflictBadge": "conflict",
+
+    // — Cell validation state words, reused in badges and a11y names ————
+    "editor.state.validated": "validated",
+    "editor.state.unvalidated": "unvalidated",
+
+    // — Per-cell edit-history drawer ————————————————————————————————
+    "editor.history.title": "Edit history",
+    "editor.history.close": "Close history",
+    "editor.history.loading": "Loading history…",
+    "editor.history.loadFailed": "Couldn't load edit history.",
+    "editor.history.noEdits": "No edits yet.",
+    "editor.history.refreshFailed":
+      "Couldn't refresh from the server — showing local edits.",
+    "editor.history.revisionsOne": "{count} significant revision",
+    "editor.history.revisionsMany": "{count} significant revisions",
+    "editor.history.collapsedNote":
+      "({total} total, {hidden} minor intermediate edits collapsed)",
+    "editor.history.staleBadge": "stale branch",
+    "editor.history.staleTooltip":
+      "This edit lost the first-child-of-parent race for its slot. It was logged " +
+      "but never applied to the cell's current value.",
+    "editor.history.syncing": "syncing",
+    "editor.history.syncFailed": "sync failed",
+    "editor.history.syncFailedTooltip":
+      "This edit is safe in this browser, but it could not sync to the server. " +
+      "Use the sync indicator to retry or inspect the failure.",
+    "editor.history.minorEditsOne": "+{count} minor edit",
+    "editor.history.minorEditsMany": "+{count} minor edits",
+    "editor.history.author": "by {author}",
+    "editor.history.currentMarker": "· current",
+    "editor.history.bumpedMarker": "· bumped by a concurrent edit",
+    "editor.history.examplesOne": "{count} example used",
+    "editor.history.examplesMany": "{count} examples used",
+    "editor.history.promote": "Promote to current",
+    "editor.history.promoteConfirm": "Make this the current value?",
+    "editor.history.showIntermediate": "Show intermediate edits",
+    "editor.history.hideIntermediate": "Hide intermediate edits",
+
+    // — Multi-cell selection toolbar ————————————————————————————————
+    "editor.selection.actions": "Selection actions",
+    "editor.selection.count": "{count} selected",
+    "editor.selection.needTranslation": "({count} need translation)",
+    "editor.selection.voiceTogether": "Voice together",
+    "editor.selection.voiceUnavailable": "Voicing isn't available here",
+    "editor.selection.voiceNeedTwo": "Select at least two translated lines",
+    "editor.selection.voiceTooltip": "Voice {count} lines as one clip",
+    "editor.selection.translate": "Translate",
+    "editor.selection.translateNotConfigured":
+      "Translation isn't configured for this project",
+    "editor.selection.allTranslated": "All selected cells already have translations",
+    "editor.selection.translateTooltip": "Translate {count} missing",
+    "editor.selection.validate": "Validate",
+    "editor.selection.validateTooltipOne": "Validate {count} cell",
+    "editor.selection.validateTooltipMany": "Validate {count} cells",
+    "editor.selection.validateOutOfScope":
+      "Some selected cells are outside your assigned files or lanes",
+    "editor.selection.validateAllMine": "All selected cells are already validated by you",
+    "editor.selection.validateAiDrafts":
+      "Nothing eligible — untouched AI drafts require individual review",
+    "editor.selection.validateNeedTranslation": "Selected cells need a translation first",
+    "editor.selection.validateNothingEligible": "Nothing eligible to validate",
+    "editor.selection.removeMyValidations": "Remove my validations",
+    "editor.selection.noValidations": "No cells have your validation",
+    "editor.selection.unvalidateTooltipOne": "Remove your validation from {count} cell",
+    "editor.selection.unvalidateTooltipMany": "Remove your validation from {count} cells",
+    "editor.selection.harmonize": "Harmonize…",
+    "editor.selection.harmonizeNeedLead":
+      "You need project lead role to run a harmonization sweep",
+    "editor.selection.harmonizeTooltipOne": "Open harmonize sweep for {count} selected cell",
+    "editor.selection.harmonizeTooltipMany": "Open harmonize sweep for {count} selected cells",
+    "editor.selection.clearTooltip": "Clear selection (Esc)",
+    "editor.selection.clear": "Clear selection",
+    "editor.selection.validatedToastOne": "Validated {count} cell",
+    "editor.selection.validatedToastMany": "Validated {count} cells",
+    "editor.selection.validatedToastSkippedOne":
+      "Validated {count} cell ({already} already validated)",
+    "editor.selection.validatedToastSkippedMany":
+      "Validated {count} cells ({already} already validated)",
+    "editor.selection.unvalidatedToastOne": "Removed validations from {count} cell",
+    "editor.selection.unvalidatedToastMany": "Removed validations from {count} cells",
+
+    // — Attach-video dialog for a timed file ————————————————————————
+    "editor.video.title": "Attach Video",
+    "editor.video.currentlyAttached": "Currently attached",
+    "editor.video.removeAttachment": "Remove attachment",
+    "editor.video.startOffset": "Start offset (s)",
+    "editor.video.saveOffset": "Save offset",
+    "editor.video.offsetHint":
+      "Seconds to wait before cues align. If your video has an intro, set this to " +
+      "the duration of the intro so subtitles line up correctly.",
+    "editor.video.tabUrl": "From URL",
+    "editor.video.tabUpload": "Upload file",
+    "editor.video.urlLabel": "Video URL",
+    "editor.video.urlHint":
+      "Direct video URL (MP4, WebM, etc). URL syncs across collaborators.",
+    "editor.video.displayNameLabel": "Display name (optional)",
+    "editor.video.displayNamePlaceholder": "Episode 1",
+    "editor.video.saveUrl": "Save URL",
+    "editor.video.enterUrl": "Enter a video URL",
+    "editor.video.uploadFailed": "Upload failed",
+    "editor.video.storingLocally": "Storing video locally...",
+    "editor.video.dropHint": "Drag a video file here, or",
+    "editor.video.chooseFile": "Choose file",
+    "editor.video.localOnlyHint": "Stored locally on this device only (not synced to peers).",
+    "editor.video.uploadedFallbackName": "Uploaded video",
+
+    // — Timeline lens (time-ordered files) ————————————————————————
+    "editor.timeline.title": "Timeline",
+    "editor.timeline.followPlayhead": "Follow playhead",
+    "editor.timeline.linkVideo": "Link video",
+    "editor.timeline.changeVideo": "Change video",
+    "editor.timeline.coreVideoPrompt": "Core video URL (leave blank to clear)",
+    "editor.timeline.zoomIn": "Zoom in",
+    "editor.timeline.zoomOut": "Zoom out",
+    "editor.timeline.laneSubtitle": "Subtitle",
+    "editor.timeline.laneSubtitleSub": "text · reading",
+    "editor.timeline.laneDialogue": "Dialogue",
+    "editor.timeline.laneDialogueSub": "audio · recording",
+    "editor.timeline.laneUntimed": "Untimed",
+    "editor.timeline.laneUntimedSub": "no timecode",
+    "editor.timeline.noUntimedClips": "No untimed clips.",
+
+    // — Per-cell voice panel (audio lens) ————————————————————————
+    "editor.voice.seek": "Seek",
+    "editor.voice.volume": "Volume",
+    "editor.voice.volumeLevel": "Volume level",
+    "editor.voice.translateFirst": "Translate to voice this line",
+    "editor.voice.play": "Play this line",
+    "editor.voice.clone": "Clone a voice from this take",
+    "editor.voice.voicing": "Voicing…",
+    "editor.voice.clickVoiceToGenerate": "Click a voice to generate",
+    "editor.voice.choose": "Choose a voice",
+    "editor.voice.activeVoice": "Voice: {name}. Choose a voice",
+    "editor.voice.searchPlaceholder": "Search voices…",
+    "editor.voice.noMatches": "No matches",
   },
   context: {
     _context: {
@@ -1647,6 +1782,673 @@ export const editor = defineNamespace({
           "text. Lower-case in English because it is a badge, not a sentence. One " +
           "word — there is almost no room.",
         maxLength: 12,
+      },
+      "editor.state.validated": {
+        description:
+          "The state word for a translation a reviewer has signed off. Used as a " +
+          "small badge in the history drawer and inside the screen-reader name of a " +
+          "cell's editor. Lower-case in English because it is a badge and appears " +
+          "mid-phrase; it must contrast clearly with editor.state.unvalidated.",
+        maxLength: 14,
+      },
+      "editor.state.unvalidated": {
+        description:
+          "The state word for a translation that exists but nobody has signed off " +
+          "yet. Not an error and not a rejection — just 'not yet checked'. " +
+          "Lower-case, appears mid-phrase and as a small badge.",
+        maxLength: 16,
+      },
+      "editor.history.title": {
+        description:
+          "Heading of the drawer listing every recorded change to one cell's " +
+          "translation. A noun phrase naming the panel; the cell's reference is " +
+          "appended after it by the layout.",
+        maxLength: 22,
+      },
+      "editor.history.close": {
+        description:
+          "Screen-reader name of the X that closes the edit-history drawer.",
+      },
+      "editor.history.loading": {
+        description:
+          "Status text while a cell's history is being fetched from the server.",
+        maxLength: 24,
+      },
+      "editor.history.loadFailed": {
+        description:
+          "Shown when the history fetch failed, in place of the list. It must not " +
+          "read like 'this cell has no history' — the distinction matters, because " +
+          "the cell probably does. A Retry control follows.",
+      },
+      "editor.history.noEdits": {
+        description:
+          "Genuine empty state: the cell has never been edited. Full sentence with " +
+          "a period.",
+        maxLength: 24,
+      },
+      "editor.history.refreshFailed": {
+        description:
+          "Quiet 10px warning above the list when the server could not be reached " +
+          "but locally-known edits are being shown. The clause after the dash is " +
+          "what the user is looking at. A Retry control follows.",
+      },
+      "editor.history.revisionsOne": {
+        description:
+          "Singular count of 'significant' revisions — the app groups bursts of " +
+          "keystrokes into one revision, so this is smaller than the raw edit " +
+          "count. Only rendered for count = 1.",
+        placeholders: { count: "Always 1 for this form." },
+      },
+      "editor.history.revisionsMany": {
+        description: "Plural of editor.history.revisionsOne.",
+        placeholders: { count: "Number of grouped revisions listed." },
+      },
+      "editor.history.collapsedNote": {
+        description:
+          "Parenthetical after the revision count, reconciling it with the raw " +
+          "number of stored edits: the difference was folded into the groups. " +
+          "Parenthesised because it qualifies the count before it.",
+        placeholders: {
+          total: "Raw number of stored edits, before grouping.",
+          hidden: "How many of those were folded into a group and are not listed.",
+        },
+      },
+      "editor.history.staleBadge": {
+        description:
+          "Amber badge on a history entry that was recorded but never became the " +
+          "cell's value, because a concurrent edit won the slot. 'Branch' is the " +
+          "version-control sense: a line of edits that split off and was not " +
+          "merged. Two words maximum.",
+        maxLength: 18,
+      },
+      "editor.history.staleTooltip": {
+        description:
+          "Tooltip explaining the stale-branch badge. 'First-child-of-parent race' " +
+          "is this app's conflict rule: when two edits claim the same slot, the " +
+          "first one to arrive wins and the other is kept but not applied. Explain " +
+          "the outcome plainly; the user's text was not lost, it just is not the " +
+          "current value.",
+      },
+      "editor.history.syncing": {
+        description:
+          "Badge on a history entry that is saved locally and currently being sent " +
+          "to the server. Lower-case because it is a badge. Present participle.",
+        maxLength: 14,
+      },
+      "editor.history.syncFailed": {
+        description:
+          "Badge on a history entry that is saved locally but could not be sent to " +
+          "the server. Lower-case badge. It means 'not uploaded yet', NOT 'lost'.",
+        maxLength: 16,
+      },
+      "editor.history.syncFailedTooltip": {
+        description:
+          "Tooltip on the sync-failed badge. First clause is the reassurance (the " +
+          "edit is safe in this browser), second is where to go to retry. 'Sync " +
+          "indicator' is the connection status control in the app chrome.",
+      },
+      "editor.history.minorEditsOne": {
+        description:
+          "Singular badge counting the intermediate keystroke-level edits folded " +
+          "into a revision group. The leading plus sign means 'in addition to the " +
+          "one shown' — keep it.",
+        placeholders: { count: "Always 1 for this form." },
+        maxLength: 20,
+      },
+      "editor.history.minorEditsMany": {
+        description: "Plural of editor.history.minorEditsOne.",
+        placeholders: { count: "Number of folded intermediate edits." },
+        maxLength: 22,
+      },
+      "editor.history.author": {
+        description:
+          "Attribution line under a history entry naming who made the edit. A " +
+          "sentence fragment, lower-case, immediately followed by the current / " +
+          "bumped marker keys.",
+        placeholders: {
+          author:
+            "The person's display name or username, or an agent name for AI edits. " +
+            "User data — never translate the substituted value.",
+        },
+      },
+      "editor.history.currentMarker": {
+        description:
+          "Marker appended to the attribution line of the entry that IS the cell's " +
+          "value right now. The leading middle dot is the separator from the author " +
+          "name — keep it (or the target language's equivalent inline separator).",
+        maxLength: 18,
+      },
+      "editor.history.bumpedMarker": {
+        description:
+          "Marker appended to a stale entry's attribution line, saying why it is " +
+          "not the current value: another edit landed first. Leading middle dot is " +
+          "the separator — keep it.",
+        maxLength: 36,
+      },
+      "editor.history.examplesOne": {
+        description:
+          "Singular note under an AI-generated history entry: how many retrieved " +
+          "translation examples the model was given as context. Evidence about how " +
+          "the draft was produced.",
+        placeholders: { count: "Always 1 for this form." },
+      },
+      "editor.history.examplesMany": {
+        description: "Plural of editor.history.examplesOne.",
+        placeholders: { count: "Number of retrieved examples used for the draft." },
+      },
+      "editor.history.promote": {
+        description:
+          "Link on a stale history entry that makes that entry the cell's current " +
+          "value. Imperative. 'Promote' is the lift-it-up sense; it does not delete " +
+          "anything.",
+        maxLength: 26,
+      },
+      "editor.history.promoteConfirm": {
+        description:
+          "Inline confirmation question shown after clicking Promote, with Confirm " +
+          "and Cancel beside it. A question, so keep the question mark.",
+      },
+      "editor.history.showIntermediate": {
+        description:
+          "Tiny (10px) disclosure link that expands the folded keystroke-level " +
+          "edits inside a revision group. Imperative. Swaps with " +
+          "editor.history.hideIntermediate.",
+        maxLength: 30,
+      },
+      "editor.history.hideIntermediate": {
+        description:
+          "The same disclosure link once expanded; it collapses the folded edits " +
+          "again. Imperative.",
+        maxLength: 30,
+      },
+      "editor.selection.actions": {
+        description:
+          "Screen-reader name of the floating toolbar that appears at the bottom of " +
+          "the editor when several cells are selected. Names the toolbar's purpose; " +
+          "never visible.",
+      },
+      "editor.selection.count": {
+        description:
+          "Leading text of that toolbar: how many cells are currently selected. " +
+          "Sits at the start of a single crowded row of buttons, so keep it short.",
+        placeholders: { count: "Number of selected cells." },
+        maxLength: 20,
+      },
+      "editor.selection.needTranslation": {
+        description:
+          "Muted qualifier after the selection count: how many of the selected " +
+          "cells are still empty. Parenthesised because it qualifies the count " +
+          "before it.",
+        placeholders: { count: "Number of selected cells with no translation yet." },
+      },
+      "editor.selection.voiceTogether": {
+        description:
+          "Button in the selection toolbar (audio lens only) that synthesizes the " +
+          "selected lines into ONE continuous recording rather than one clip per " +
+          "line. 'Together' is the whole point — keep that sense.",
+        maxLength: 22,
+      },
+      "editor.selection.voiceUnavailable": {
+        description:
+          "Tooltip when the voice-together button is disabled because this file or " +
+          "project has no voicing configured at all.",
+      },
+      "editor.selection.voiceNeedTwo": {
+        description:
+          "Tooltip when the voice-together button is disabled because fewer than " +
+          "two of the selected lines have a translation — there is nothing to join. " +
+          "Imperative: tells the user what to do.",
+      },
+      "editor.selection.voiceTooltip": {
+        description:
+          "Tooltip on the enabled voice-together button, stating the scope of the " +
+          "action. 'Voice' is a verb here: produce spoken audio.",
+        placeholders: { count: "Number of translated lines that will be joined." },
+      },
+      "editor.selection.translate": {
+        description:
+          "Button in the selection toolbar that asks the AI to draft the untranslated " +
+          "cells in the selection. Imperative verb; a count badge follows it, so " +
+          "keep the word alone short.",
+        maxLength: 16,
+      },
+      "editor.selection.translateNotConfigured": {
+        description:
+          "Tooltip when the bulk-translate button is disabled because the project " +
+          "has no AI model configured. A state, with the implied fix being project " +
+          "settings.",
+      },
+      "editor.selection.allTranslated": {
+        description:
+          "Tooltip when the bulk-translate button is disabled because every " +
+          "selected cell already has a translation, so there is nothing to draft.",
+      },
+      "editor.selection.translateTooltip": {
+        description:
+          "Tooltip on the enabled bulk-translate button. 'Missing' means cells with " +
+          "no translation yet.",
+        placeholders: { count: "Number of empty cells that would be drafted." },
+      },
+      "editor.selection.validate": {
+        description:
+          "Button in the selection toolbar that records the current user's sign-off " +
+          "on the selected translations. Imperative verb; a count badge follows, so " +
+          "keep the word alone short. It approves work, it does not check syntax.",
+        maxLength: 16,
+      },
+      "editor.selection.validateTooltipOne": {
+        description:
+          "Singular tooltip on the enabled bulk-validate button, stating how many " +
+          "cells the click would sign off.",
+        placeholders: { count: "Always 1 for this form." },
+      },
+      "editor.selection.validateTooltipMany": {
+        description: "Plural of editor.selection.validateTooltipOne.",
+        placeholders: { count: "Number of cells that would be signed off." },
+      },
+      "editor.selection.validateOutOfScope": {
+        description:
+          "Tooltip when bulk-validate is disabled because the selection reaches into " +
+          "files or language lanes this user is not assigned to. A permissions " +
+          "explanation, not a fault.",
+      },
+      "editor.selection.validateAllMine": {
+        description:
+          "Tooltip when bulk-validate is disabled because this user has already " +
+          "signed off every selected cell. Nothing is wrong.",
+      },
+      "editor.selection.validateAiDrafts": {
+        description:
+          "Tooltip when bulk-validate is disabled because the selected cells are " +
+          "untouched AI drafts. Policy: a human must open each AI draft " +
+          "individually, so they cannot be approved in bulk. The reason after the " +
+          "dash is the important half.",
+      },
+      "editor.selection.validateNeedTranslation": {
+        description:
+          "Tooltip when bulk-validate is disabled because the selected cells have " +
+          "no translation yet — there is nothing to approve.",
+      },
+      "editor.selection.validateNothingEligible": {
+        description:
+          "Catch-all tooltip when bulk-validate is disabled and none of the more " +
+          "specific reasons applies.",
+      },
+      "editor.selection.removeMyValidations": {
+        description:
+          "Button in the selection toolbar that withdraws THIS user's sign-off from " +
+          "the selected cells, leaving other reviewers' sign-offs alone. The " +
+          "first-person possessive is load-bearing.",
+        maxLength: 30,
+      },
+      "editor.selection.noValidations": {
+        description:
+          "Tooltip when the remove-my-validations button is disabled because none of " +
+          "the selected cells carries this user's sign-off.",
+      },
+      "editor.selection.unvalidateTooltipOne": {
+        description:
+          "Singular tooltip on the enabled remove-my-validations button, stating the " +
+          "scope. 'Your' keeps it clear that other reviewers are untouched.",
+        placeholders: { count: "Always 1 for this form." },
+      },
+      "editor.selection.unvalidateTooltipMany": {
+        description: "Plural of editor.selection.unvalidateTooltipOne.",
+        placeholders: { count: "Number of cells the sign-off is withdrawn from." },
+      },
+      "editor.selection.harmonize": {
+        description:
+          "Button in the selection toolbar that opens a review sweep for wording " +
+          "that should be consistent across the selected cells (key terms, names). " +
+          "The trailing ellipsis means 'opens a further screen' — keep it. Only " +
+          "shown to project leads.",
+        maxLength: 22,
+      },
+      "editor.selection.harmonizeNeedLead": {
+        description:
+          "Tooltip when the harmonize button is disabled because the user's project " +
+          "role is below lead. 'Project lead' is a role name in this app.",
+      },
+      "editor.selection.harmonizeTooltipOne": {
+        description:
+          "Singular tooltip on the enabled harmonize button, stating the scope of " +
+          "the sweep it opens.",
+        placeholders: { count: "Always 1 for this form." },
+      },
+      "editor.selection.harmonizeTooltipMany": {
+        description: "Plural of editor.selection.harmonizeTooltipOne.",
+        placeholders: { count: "Number of selected cells the sweep would cover." },
+      },
+      "editor.selection.clearTooltip": {
+        description:
+          "Tooltip on the X at the end of the selection toolbar. The parenthetical " +
+          "is the keyboard shortcut — 'Esc' is the key's name and stays as-is.",
+      },
+      "editor.selection.clear": {
+        description:
+          "Screen-reader name of that same X. It only deselects; nothing is deleted.",
+      },
+      "editor.selection.validatedToastOne": {
+        description:
+          "Singular success toast after a bulk validate. Past tense — it reports " +
+          "what happened.",
+        placeholders: { count: "Always 1 for this form." },
+      },
+      "editor.selection.validatedToastMany": {
+        description: "Plural of editor.selection.validatedToastOne.",
+        placeholders: { count: "Number of cells newly signed off." },
+      },
+      "editor.selection.validatedToastSkippedOne": {
+        description:
+          "Singular success toast when some selected cells were skipped because " +
+          "this user had already signed them off. The parenthetical is the honest " +
+          "accounting of the difference.",
+        placeholders: {
+          count: "Always 1 for this form — cells newly signed off.",
+          already: "How many were skipped because they were already signed off.",
+        },
+      },
+      "editor.selection.validatedToastSkippedMany": {
+        description: "Plural of editor.selection.validatedToastSkippedOne.",
+        placeholders: {
+          count: "Number of cells newly signed off.",
+          already: "How many were skipped because they were already signed off.",
+        },
+      },
+      "editor.selection.unvalidatedToastOne": {
+        description:
+          "Singular success toast after withdrawing this user's sign-off in bulk. " +
+          "Past tense.",
+        placeholders: { count: "Always 1 for this form." },
+      },
+      "editor.selection.unvalidatedToastMany": {
+        description: "Plural of editor.selection.unvalidatedToastOne.",
+        placeholders: { count: "Number of cells the sign-off was withdrawn from." },
+      },
+      "editor.video.title": {
+        description:
+          "Title of the dialog that links a video to a subtitle/timed file so the " +
+          "translator can watch it while timing cues. Title Case in English because " +
+          "it is a dialog title. 'Attach' rather than 'upload' — a URL is not copied.",
+        maxLength: 24,
+      },
+      "editor.video.currentlyAttached": {
+        description:
+          "Muted label above the name of the video already linked to this file. A " +
+          "state description, not an action.",
+        maxLength: 24,
+      },
+      "editor.video.removeAttachment": {
+        description:
+          "Tooltip and screen-reader name of the trash button that unlinks the " +
+          "current video. For an uploaded file it also deletes the local copy; for a " +
+          "URL nothing at the far end is touched.",
+        maxLength: 26,
+      },
+      "editor.video.startOffset": {
+        description:
+          "Label of the numeric field holding how many seconds of the video come " +
+          "BEFORE the first subtitle cue. The '(s)' is the unit abbreviation for " +
+          "seconds — keep an equivalent short unit marker.",
+        maxLength: 22,
+      },
+      "editor.video.saveOffset": {
+        description:
+          "Small button that stores the start-offset value without changing which " +
+          "video is attached. Imperative.",
+        maxLength: 18,
+      },
+      "editor.video.offsetHint": {
+        description:
+          "Help text under the start-offset field. Two sentences: what the number " +
+          "means, then the common case (a title sequence) worked through so the user " +
+          "knows what to type. 'Cues' are the timed subtitle entries.",
+      },
+      "editor.video.tabUrl": {
+        description:
+          "First of two tabs in the attach-video dialog: link a video already " +
+          "hosted somewhere by pasting its address.",
+        maxLength: 18,
+      },
+      "editor.video.tabUpload": {
+        description:
+          "Second tab: pick a video file from this computer, stored locally in the " +
+          "browser rather than on the server.",
+        maxLength: 18,
+      },
+      "editor.video.urlLabel": {
+        description:
+          "Form label for the field taking the video's web address.",
+        maxLength: 18,
+      },
+      "editor.video.urlHint": {
+        description:
+          "Help text under the video URL field. Two points: it must be a direct " +
+          "link to the video file itself (the formats in parentheses are file-format " +
+          "names and stay as-is), and unlike an upload a URL is visible to the rest " +
+          "of the team.",
+      },
+      "editor.video.displayNameLabel": {
+        description:
+          "Form label for the optional friendly name shown instead of the raw URL. " +
+          "The '(optional)' must survive — it is what tells the user they can skip it.",
+        maxLength: 28,
+      },
+      "editor.video.displayNamePlaceholder": {
+        description:
+          "Example value in the display-name field. It is a sample title, so " +
+          "translate it as a plausible episode name in the target language rather " +
+          "than as an instruction.",
+        maxLength: 20,
+      },
+      "editor.video.saveUrl": {
+        description:
+          "Full-width confirming button on the URL tab; it attaches the pasted " +
+          "address to the file. Imperative.",
+        maxLength: 18,
+      },
+      "editor.video.enterUrl": {
+        description:
+          "Validation error under the URL field when the user pressed the button " +
+          "with the field empty. Imperative — it says what to do, not what went " +
+          "wrong.",
+        maxLength: 28,
+      },
+      "editor.video.uploadFailed": {
+        description:
+          "Fallback error when storing the chosen video file failed and the browser " +
+          "gave no usable reason. Short state phrase.",
+        maxLength: 24,
+      },
+      "editor.video.storingLocally": {
+        description:
+          "Status text while the chosen video is being written into this browser's " +
+          "local storage. 'Locally' is the reassuring part: nothing is uploaded. " +
+          "Trailing three periods are literal in the English source.",
+      },
+      "editor.video.dropHint": {
+        description:
+          "Line inside the upload drop zone offering drag-and-drop. It ends with " +
+          "'or' on purpose: the file-picker button follows immediately below and " +
+          "completes the sentence.",
+      },
+      "editor.video.chooseFile": {
+        description:
+          "Button under the drop zone that opens the operating system's file " +
+          "picker. Imperative.",
+        maxLength: 18,
+      },
+      "editor.video.localOnlyHint": {
+        description:
+          "Small print under the upload drop zone. The point is the limitation: an " +
+          "uploaded video stays in this browser, so teammates will not see it — " +
+          "unlike a URL. 'Peers' means the other people on the project.",
+      },
+      "editor.video.uploadedFallbackName": {
+        description:
+          "Stand-in name shown for a locally stored video whose original file name " +
+          "was not recorded. A noun phrase, not an action.",
+        maxLength: 24,
+      },
+      "editor.timeline.title": {
+        description:
+          "Label at the left of the timeline toolbar, naming the strip below it: the " +
+          "time-ordered view of a file's audio/video clips. A noun.",
+        maxLength: 16,
+      },
+      "editor.timeline.followPlayhead": {
+        description:
+          "Tooltip and screen-reader name of the toggle that keeps the timeline " +
+          "scrolled to the moving playback marker. When on, the view chases " +
+          "playback; when off the user scrolls freely. 'Playhead' is the audio/video " +
+          "term for the current-position marker.",
+      },
+      "editor.timeline.linkVideo": {
+        description:
+          "Toolbar button when no video is attached; it asks for a video URL to use " +
+          "as the timeline's master clock. Imperative. Swaps with " +
+          "editor.timeline.changeVideo.",
+        maxLength: 18,
+      },
+      "editor.timeline.changeVideo": {
+        description:
+          "The same toolbar button when a video is already attached; it replaces the " +
+          "current one. Imperative.",
+        maxLength: 18,
+      },
+      "editor.timeline.coreVideoPrompt": {
+        description:
+          "Message in the browser's own prompt box that asks for the timeline's " +
+          "master video URL. The parenthetical tells the user how to unlink: submit " +
+          "an empty value. Plain text — no formatting is possible here.",
+      },
+      "editor.timeline.zoomIn": {
+        description:
+          "Screen-reader name of the + button that stretches the timeline so each " +
+          "second takes more width. Icon-only, so this is its only name.",
+      },
+      "editor.timeline.zoomOut": {
+        description:
+          "Screen-reader name of the − button that compresses the timeline so more " +
+          "time fits on screen. Icon-only.",
+      },
+      "editor.timeline.laneSubtitle": {
+        description:
+          "Name of the timeline's first track, holding the on-screen text cues. " +
+          "Sits in a 128px-wide label column, so it must be short.",
+        maxLength: 14,
+      },
+      "editor.timeline.laneSubtitleSub": {
+        description:
+          "10px sub-label under the Subtitle track name, saying what the track is " +
+          "for: text meant to be read. The middle dot separates the medium from the " +
+          "activity — keep the two-word shape.",
+        maxLength: 20,
+      },
+      "editor.timeline.laneDialogue": {
+        description:
+          "Name of the timeline's second track, holding the spoken recordings. Sits " +
+          "in a 128px-wide label column.",
+        maxLength: 14,
+      },
+      "editor.timeline.laneDialogueSub": {
+        description:
+          "10px sub-label under the Dialogue track name: audio the team records. " +
+          "Middle dot separates medium from activity.",
+        maxLength: 22,
+      },
+      "editor.timeline.laneUntimed": {
+        description:
+          "Name of the holding area below the timeline for clips that have no start " +
+          "or end time yet, so they cannot be placed. A state word.",
+        maxLength: 14,
+      },
+      "editor.timeline.laneUntimedSub": {
+        description:
+          "10px sub-label under the Untimed area, restating why those clips are " +
+          "parked there: they carry no timecode.",
+        maxLength: 20,
+      },
+      "editor.timeline.noUntimedClips": {
+        description:
+          "Tiny (10px) empty state in the untimed area: every clip has timing, so " +
+          "nothing is parked. Reassuring, not an error. Full sentence with a period.",
+        maxLength: 26,
+      },
+      "editor.voice.seek": {
+        description:
+          "Screen-reader name of the waveform slider in a cell's voice panel; " +
+          "dragging it moves the playback position within the clip. The audio sense " +
+          "of 'seek', not searching.",
+      },
+      "editor.voice.volume": {
+        description:
+          "Screen-reader name of the speaker button that opens the volume slider for " +
+          "this cell's playback. A noun.",
+      },
+      "editor.voice.volumeLevel": {
+        description:
+          "Screen-reader name of the volume slider itself, inside that popover. " +
+          "Distinct from editor.voice.volume so the two do not read identically.",
+      },
+      "editor.voice.translateFirst": {
+        description:
+          "Italic hint shown in place of the voice panel when the cell has no " +
+          "translation yet: there is nothing to speak. 'Voice' is a verb here — " +
+          "produce spoken audio for this line.",
+      },
+      "editor.voice.play": {
+        description:
+          "Tooltip and screen-reader name of the round play button over the " +
+          "waveform. 'This line' matters: playback is scoped to this one cell, not " +
+          "the whole file. Swaps with editor.audio.pause.",
+        maxLength: 22,
+      },
+      "editor.voice.clone": {
+        description:
+          "Tooltip of the add-person button in the voice card, which turns this " +
+          "recording into a reusable synthetic voice for the project's cast. " +
+          "'Clone' is the voice-synthesis term for copying a speaker's sound.",
+      },
+      "editor.voice.voicing": {
+        description:
+          "Status text while text-to-speech is producing this line's audio. " +
+          "Present participle of the verb 'to voice'. Shown in a 10px overlay, so " +
+          "keep it very short.",
+        maxLength: 14,
+      },
+      "editor.voice.clickVoiceToGenerate": {
+        description:
+          "Hint above the cast picker when the line has a translation but no audio " +
+          "yet: choosing a voice immediately synthesizes it. Explains that the " +
+          "picker is also the action.",
+      },
+      "editor.voice.choose": {
+        description:
+          "Tooltip on the cast picker button that opens the searchable list of " +
+          "voices. Imperative.",
+        maxLength: 20,
+      },
+      "editor.voice.activeVoice": {
+        description:
+          "Screen-reader name of the cast picker button. Two parts: which voice is " +
+          "currently selected, then what pressing it does.",
+        placeholders: {
+          name:
+            "The voice's own name as configured in the project's cast — user data, " +
+            "so never translate the substituted value.",
+        },
+      },
+      "editor.voice.searchPlaceholder": {
+        description:
+          "Placeholder in the search field of the voice picker, for filtering a cast " +
+          "that can run to dozens of voices. Ends with an ellipsis glyph.",
+      },
+      "editor.voice.noMatches": {
+        description:
+          "Italic empty state in the voice picker when the typed query matches no " +
+          "voice. No trailing period in the English source.",
+        maxLength: 18,
       },
     },
   },

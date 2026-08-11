@@ -47,8 +47,8 @@ describe("OutboxInspectorPopover queue summary (AQU-511)", () => {
     // "3 3 text edits" — an unexplainable number in the one surface whose whole
     // job is telling the user what is still unsaved.
     const summary = await screen.findByLabelText("Pending changes")
-    expect(summary.textContent).toContain("3 text edits")
-    expect(summary.textContent).not.toContain("3 3 text edits")
+    expect(summary.textContent).toContain("3 edits")
+    expect(summary.textContent).not.toContain("3 3 edits")
   })
 
   it("uses the singular noun for a queue of one", async () => {
@@ -61,8 +61,12 @@ describe("OutboxInspectorPopover queue summary (AQU-511)", () => {
     )
     fireEvent.click(screen.getByRole("button", { name: /open inspector/i }))
     const summary = await screen.findByLabelText("Pending changes")
-    expect(summary.textContent).toContain("1 text edit")
-    expect(summary.textContent).not.toContain("1 text edits")
+    // The noun is count-governed (`nav.outbox.editsNoun`), not chosen by a
+    // `count === 1` branch at the call site, so the count has to reach `t()` even
+    // though the string interpolates nothing — that argument is what selects the
+    // form. Drop it and every queue reads "1 edits", in every locale.
+    expect(summary.textContent).toContain("1 edit")
+    expect(summary.textContent).not.toContain("1 edits")
   })
 })
 

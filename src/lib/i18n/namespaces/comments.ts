@@ -123,7 +123,7 @@ export const comments = defineNamespace({
         description:
           "Thread scope label shown above a thread card: which cell, in which file, " +
           "the thread is attached to. {cell} is already a formatted label (a Bible " +
-          "reference like 'GEN 1:1', or the localized comments.scope.cellFallback " +
+          "reference like 'GEN 1:1', or the localized common.cellLabel " +
           "string) and {file} is the file's display name — reorder them to whatever " +
           "reads naturally, this is not necessarily 'X in Y' in every language.",
         placeholders: {

@@ -2511,7 +2511,7 @@ export const editor = defineNamespace({
       "editor.voice.volumeLevel": {
         description:
           "Screen-reader name of the volume slider itself, inside that popover. " +
-          "Distinct from editor.voice.volume so the two do not read identically.",
+          "Distinct from common.volume so the two do not read identically.",
       },
       "editor.voice.translateFirst": {
         description:
@@ -2523,7 +2523,7 @@ export const editor = defineNamespace({
         description:
           "Tooltip and screen-reader name of the round play button over the " +
           "waveform. 'This line' matters: playback is scoped to this one cell, not " +
-          "the whole file. Swaps with editor.audio.pause.",
+          "the whole file. Swaps with common.pause.",
         maxLength: 22,
       },
       "editor.voice.clone": {
@@ -2688,7 +2688,7 @@ export const editor = defineNamespace({
       },
       "editor.tts.generatingAudio": {
         description:
-          "Tooltip behind editor.tts.voicingBadge, saying what is happening in " +
+          "Tooltip behind the voicing badge (editor.voice.voicing), saying what is happening in " +
           "plainer words. Trailing character is a single ellipsis glyph.",
       },
       "editor.tts.openAudioSetup": {
@@ -3143,7 +3143,7 @@ export const editor = defineNamespace({
       "editor.audio.play": {
         description:
           "Tooltip on the action-rail play button for a cell's recording. Swaps " +
-          "with editor.audio.pause. Imperative.",
+          "with common.pause. Imperative.",
         maxLength: 18,
       },
       "editor.cue.playFrom": {

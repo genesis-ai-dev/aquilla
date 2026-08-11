@@ -199,7 +199,7 @@ export function VoiceCloneSection({ voice, projectId, fileId, session, onChange,
           </Button>
           {status.kind === "uploading" && (
             <span className="flex items-center gap-1 text-xs text-muted-foreground">
-              <Spinner className="size-3.5" /> {t("audio.uploadingStatus")}
+              <Spinner className="size-3.5" /> {t("common.uploading")}
             </span>
           )}
         </div>
@@ -289,7 +289,7 @@ export function ReferencePreview({ projectId, fileId, referenceAudioId, session 
       ) : (
         <Play className="mr-1 h-3.5 w-3.5" />
       )}
-      {state === "error" ? t("audio.clone.previewFailed") : t("audio.clone.previewButton")}
+      {state === "error" ? t("audio.clone.previewFailed") : t("common.preview")}
     </Button>
     </AppTooltip>
   )

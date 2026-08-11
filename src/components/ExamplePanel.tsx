@@ -52,7 +52,7 @@ export function ExamplePanel({
                 style={{ borderLeftColor: EXAMPLE_COLORS[colorIndex] }}
               >
                 <div className="text-xs text-muted-foreground/70">
-                  {t("search.side.source")}
+                  {t("editor.column.source")}
                 </div>
                 <div className="text-muted-foreground">
                   <HighlightedText
@@ -61,7 +61,7 @@ export function ExamplePanel({
                   />
                 </div>
                 <div className="text-xs text-muted-foreground/70 mt-1">
-                  {t("search.side.target")}
+                  {t("editor.column.target")}
                 </div>
                 <div className="font-medium">{ex.target}</div>
               </div>

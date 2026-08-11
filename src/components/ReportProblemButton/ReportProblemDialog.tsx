@@ -120,12 +120,12 @@ export function ReportProblemDialog({ open, onOpenChange }: Props) {
                 {t("nav.report.capturedContext")} <span className="font-mono">{pathname}</span>
                 {params.id && (
                   <>
-                    {" "}· {t("nav.report.projectLabel")} <span className="font-mono">{params.id}</span>
+                    {" "}· {t("common.project")} <span className="font-mono">{params.id}</span>
                   </>
                 )}
                 {params.fileId && (
                   <>
-                    {" "}· {t("nav.report.fileLabel")} <span className="font-mono">{params.fileId}</span>
+                    {" "}· {t("common.file")} <span className="font-mono">{params.fileId}</span>
                   </>
                 )}
               </p>

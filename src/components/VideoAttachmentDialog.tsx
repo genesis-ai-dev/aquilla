@@ -103,7 +103,7 @@ export function VideoAttachmentDialog({ open, onOpenChange, current, onSave }: V
       })
       onOpenChange(false)
     } catch (err) {
-      setError(err instanceof Error ? err.message : t("editor.video.uploadFailed"))
+      setError(err instanceof Error ? err.message : t("common.uploadFailed"))
     } finally {
       setUploading(false)
     }

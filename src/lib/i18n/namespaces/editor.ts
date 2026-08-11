@@ -21,7 +21,6 @@ export const editor = defineNamespace({
     // — Batch AI translation banner ————————————————————————————————
     "editor.completion.translating": "Translating",
     "editor.completion.stop": "Stop translating",
-    "editor.completion.cancelling": "cancelling…",
     "editor.completion.failed": plural(
       {
         one: "{failed} of {total} cell failed.",
@@ -60,10 +59,8 @@ export const editor = defineNamespace({
     "editor.cell.addComment": "Add comment",
     "editor.cell.reRecord": "Re-record audio",
     "editor.cell.transcribe": "Transcribe with Whisper",
-    "editor.cell.transcribing": "Transcribing…",
     "editor.cell.generateVoice": "Generate AI voice",
     "editor.cell.generateVoiceReplace": "Generate AI voice (replaces audio)",
-    "editor.cell.synthesizing": "Synthesizing…",
     "editor.cell.historyCount": "History ({count})",
     "editor.cell.generateBacktranslation": "Generate backtranslation",
     "editor.cell.regenerateBacktranslation": "Regenerate backtranslation",
@@ -82,19 +79,14 @@ export const editor = defineNamespace({
 
     // — Per-cell audio upload ————————————————————————————————————
     "editor.audio.upload": "Upload audio file",
-    "editor.audio.uploading": "Uploading…",
-    "editor.audio.uploadFailed": "Upload failed",
     "editor.audio.uploadSignIn": "Sign in to upload recordings",
-    "editor.audio.pause": "Pause",
 
     // — Audio crop popover ————————————————————————————————————————
     "editor.crop.open": "Crop audio",
     "editor.crop.title": "Crop",
     "editor.crop.reset": "Reset to full clip",
-    "editor.crop.resetShort": "Reset",
     "editor.crop.start": "Crop start",
     "editor.crop.end": "Crop end",
-    "editor.crop.preview": "Preview",
 
     // — Empty / loading / error states where the table would be ——————
     "editor.file.loadErrorTitleNamed": "Couldn't load {fileName}",
@@ -410,7 +402,6 @@ export const editor = defineNamespace({
     "editor.video.displayNamePlaceholder": "Episode 1",
     "editor.video.saveUrl": "Save URL",
     "editor.video.enterUrl": "Enter a video URL",
-    "editor.video.uploadFailed": "Upload failed",
     "editor.video.storingLocally": "Storing video locally...",
     "editor.video.dropHint": "Drag a video file here, or",
     "editor.video.chooseFile": "Choose file",
@@ -434,8 +425,6 @@ export const editor = defineNamespace({
     "editor.timeline.noUntimedClips": "No untimed clips.",
 
     // — Per-cell voice panel (audio lens) ————————————————————————
-    "editor.voice.seek": "Seek",
-    "editor.voice.volume": "Volume",
     "editor.voice.volumeLevel": "Volume level",
     "editor.voice.translateFirst": "Translate to voice this line",
     "editor.voice.play": "Play this line",
@@ -444,8 +433,6 @@ export const editor = defineNamespace({
     "editor.voice.clickVoiceToGenerate": "Click a voice to generate",
     "editor.voice.choose": "Choose a voice",
     "editor.voice.activeVoice": "Voice: {name}. Choose a voice",
-    "editor.voice.searchPlaceholder": "Search voices…",
-    "editor.voice.noMatches": "No matches",
 
     // — Rich-text editor: formatting bubble, conflict banner, IDML guards ——
     "editor.format.bold": "Bold",
@@ -471,7 +458,6 @@ export const editor = defineNamespace({
     "editor.tts.loadingVoiceModel": "Loading voice model",
     "editor.tts.loadingVoiceModelPct": "Loading voice model ({percent}%)",
     "editor.tts.loadingPct": "Loading {percent}%",
-    "editor.tts.voicingBadge": "Voicing",
     "editor.tts.generatingAudio": "Generating audio…",
     "editor.tts.openAudioSetup": "Open audio setup",
     "editor.tts.failedTooltip": "Audio generation failed — click Generate to retry",
@@ -567,7 +553,6 @@ export const editor = defineNamespace({
     "editor.ai.lookingUpExamples": "Looking up similar examples…",
     "editor.ai.generatingTranslation": "Generating translation…",
     "editor.ai.signInForTranslations": "Sign in for AI translations",
-    "editor.ai.readOnlyGit": "Read-only (imported from git)",
     "editor.ai.setUpToEnable": "Set up AI to enable",
     "editor.ai.serviceUnavailable": "AI service unavailable — try again shortly",
     "editor.ai.generating": "Generating…",
@@ -604,7 +589,6 @@ export const editor = defineNamespace({
     "editor.bt.contributorRequired": "Contributor+ required to edit back-translations",
     "editor.bt.translateFirst": "Translate this cell to read it back.",
     "editor.bt.staleWarning": "Your translation changed since this was written",
-    "editor.bt.refresh": "Refresh",
     "editor.bt.saving": "Saving…",
     "editor.bt.emptyPitch":
       "See what your translation says when read back, so you can check the " +
@@ -691,14 +675,6 @@ export const editor = defineNamespace({
           "batch AI translation. Imperative; it cancels the remaining cells and " +
           "keeps the ones already drafted.",
         maxLength: 24,
-      },
-      "editor.completion.cancelling": {
-        description:
-          "Status text replacing the stop button after the user asked to stop, " +
-          "while in-flight cells finish. Deliberately lowercase in English " +
-          "because it sits mid-row as a quiet aside; follow whatever the target " +
-          "language does for such inline status text.",
-        maxLength: 18,
       },
       "editor.completion.failed": {
         description:
@@ -818,12 +794,6 @@ export const editor = defineNamespace({
           "of the speech model — keep it untranslated.",
         maxLength: 32,
       },
-      "editor.cell.transcribing": {
-        description:
-          "The same menu item's label while transcription is running; the item is " +
-          "disabled. Present-participle status text, not a command.",
-        maxLength: 24,
-      },
       "editor.cell.generateVoice": {
         description:
           "Overflow-menu item that synthesizes a spoken recording of the " +
@@ -837,12 +807,6 @@ export const editor = defineNamespace({
           "the parenthetical is the warning that the existing take will be " +
           "overwritten. Keep the warning; it is the only thing separating this from " +
           "editor.cell.generateVoice.",
-      },
-      "editor.cell.synthesizing": {
-        description:
-          "The synthesize-voice menu item's label while text-to-speech is running; " +
-          "the item is disabled. Present-participle status text.",
-        maxLength: 24,
       },
       "editor.cell.historyCount": {
         description:
@@ -929,31 +893,11 @@ export const editor = defineNamespace({
           "the app.",
         maxLength: 24,
       },
-      "editor.audio.uploading": {
-        description:
-          "The upload button's tooltip while the chosen audio file is being sent to " +
-          "storage. Present-participle status text.",
-        maxLength: 18,
-      },
-      "editor.audio.uploadFailed": {
-        description:
-          "Bold heading of the small popover shown when attaching an audio file " +
-          "failed; the underlying error message appears beneath it in English. A " +
-          "short state phrase, not a sentence.",
-        maxLength: 24,
-      },
       "editor.audio.uploadSignIn": {
         description:
           "Error shown in that popover when the user is signed out: uploading a " +
           "recording needs an account. Imperative sentence telling them what to do, " +
           "not an accusation.",
-      },
-      "editor.audio.pause": {
-        description:
-          "Label/tooltip of the transport button while a clip is playing; pressing " +
-          "it halts playback where it is (it does not stop and rewind). Imperative " +
-          "verb, shown in place of Play.",
-        maxLength: 12,
       },
       "editor.crop.open": {
         description:
@@ -972,13 +916,6 @@ export const editor = defineNamespace({
           "Screen-reader name of the small reset control in the crop popover, which " +
           "clears both trim points so the whole recording plays again.",
       },
-      "editor.crop.resetShort": {
-        description:
-          "Visible 11px label of that same reset control, beside a counter-clockwise " +
-          "arrow icon; editor.crop.reset is its longer accessible name. Extremely " +
-          "tight — one short word.",
-        maxLength: 10,
-      },
       "editor.crop.start": {
         description:
           "Screen-reader name of the draggable handle marking where the cropped " +
@@ -988,13 +925,6 @@ export const editor = defineNamespace({
         description:
           "Screen-reader name of the draggable handle marking where the cropped " +
           "clip stops. A noun phrase naming the handle, not a command.",
-      },
-      "editor.crop.preview": {
-        description:
-          "Button in the crop popover that plays the cropped selection so the user " +
-          "can hear the result before keeping it. Swaps to editor.audio.pause while " +
-          "playing. Imperative verb.",
-        maxLength: 12,
       },
       "editor.file.loadErrorTitleNamed": {
         description:
@@ -1519,17 +1449,17 @@ export const editor = defineNamespace({
       },
       "editor.milestone.vocab.chapter": {
         description:
-          "Singular noun substituted into the milestone navigator's labels for a " +
-          "scripture file: a chapter of a biblical book. Lower-case in English " +
-          "because it appears mid-sentence ('Previous chapter').",
-        maxLength: 16,
+          "Singular noun for a division of a scripture file: a chapter of a biblical book. " +
+          "Substituted into the milestone navigator's labels and used wherever a single " +
+          "chapter is named mid-sentence. Lower-case in English because it appears " +
+          "mid-sentence ('Previous chapter').",
       },
       "editor.milestone.vocab.chapterPlural": {
         description:
-          "Plural of editor.milestone.vocab.chapter, used as a group heading and " +
-          "lower-cased by the app when it appears mid-sentence. Capitalised in " +
-          "English because its primary use is a heading.",
-        maxLength: 18,
+          "Plural of editor.milestone.vocab.chapter. Used as a group heading in the " +
+          "milestone navigator, as the scope option for assigning whole chapters, and " +
+          "lower-cased by the app when it appears mid-sentence. Capitalised in English " +
+          "because its primary use is a heading.",
       },
       "editor.milestone.vocab.slide": {
         description:
@@ -1553,13 +1483,14 @@ export const editor = defineNamespace({
       },
       "editor.milestone.vocab.section": {
         description:
-          "Singular noun for a generic titled division of a document. Lower-case, " +
-          "used mid-sentence.",
-        maxLength: 16,
+          "Singular noun for a generic titled division of a document — the " +
+          "chapter-equivalent for non-scripture files. Lower-case, used mid-sentence.",
       },
       "editor.milestone.vocab.sectionPlural": {
-        description: "Plural of editor.milestone.vocab.section; heading form.",
-        maxLength: 18,
+        description:
+          "Plural of editor.milestone.vocab.section; heading form. Also the scope option " +
+          "for assigning whole sections of a non-scripture file, where 'section' is the " +
+          "chapter-equivalent unit.",
       },
       "editor.milestone.vocab.timeRange": {
         description:
@@ -1604,20 +1535,21 @@ export const editor = defineNamespace({
       },
       "editor.column.source": {
         description:
-          "The name of the left-hand column of the editing table and of the " +
-          "'source' side generally: the text being translated FROM. Used as a table " +
-          "heading, as a settings row label, and interpolated into other strings " +
-          "('Source direction'). One word, and it must pair contrastively with " +
-          "editor.column.target.",
-        maxLength: 14,
+          "The name of the source side generally: the text being translated FROM. Used as " +
+          "the left column heading of the editing table, as a settings row label, as the " +
+          "label above the source snippet in the comments drawer and the recording dialog, " +
+          "as the search filter that looks only at source text, as the badge marking a " +
+          "search hit as source-language, and interpolated into other strings ('Source " +
+          "direction'). One word, and it must pair contrastively with editor.column.target.",
       },
       "editor.column.target": {
         description:
-          "The name of the right-hand, editable column of the editing table and of " +
-          "the 'target' side generally: the language being translated INTO. Used as " +
-          "a table heading, a settings row label, and interpolated into other " +
-          "strings. Must pair contrastively with editor.column.source.",
-        maxLength: 14,
+          "The name of the target side generally: the language being translated INTO. Used " +
+          "as the right, editable column heading of the editing table, as a settings row " +
+          "label, as the label above the translated snippet in the comments drawer, as the " +
+          "search filter that looks only at translated text, as the badge marking a search " +
+          "hit as target-language, and interpolated into other strings. Must pair " +
+          "contrastively with editor.column.source.",
       },
       "editor.view.settings": {
         description:
@@ -2461,12 +2393,6 @@ export const editor = defineNamespace({
           "wrong.",
         maxLength: 28,
       },
-      "editor.video.uploadFailed": {
-        description:
-          "Fallback error when storing the chosen video file failed and the browser " +
-          "gave no usable reason. Short state phrase.",
-        maxLength: 24,
-      },
       "editor.video.storingLocally": {
         description:
           "Status text while the chosen video is being written into this browser's " +
@@ -2582,17 +2508,6 @@ export const editor = defineNamespace({
           "nothing is parked. Reassuring, not an error. Full sentence with a period.",
         maxLength: 26,
       },
-      "editor.voice.seek": {
-        description:
-          "Screen-reader name of the waveform slider in a cell's voice panel; " +
-          "dragging it moves the playback position within the clip. The audio sense " +
-          "of 'seek', not searching.",
-      },
-      "editor.voice.volume": {
-        description:
-          "Screen-reader name of the speaker button that opens the volume slider for " +
-          "this cell's playback. A noun.",
-      },
       "editor.voice.volumeLevel": {
         description:
           "Screen-reader name of the volume slider itself, inside that popover. " +
@@ -2619,10 +2534,10 @@ export const editor = defineNamespace({
       },
       "editor.voice.voicing": {
         description:
-          "Status text while text-to-speech is producing this line's audio. " +
-          "Present participle of the verb 'to voice'. Shown in a 10px overlay, so " +
-          "keep it very short.",
-        maxLength: 14,
+          "Status text while text-to-speech is producing this line's audio, in both the " +
+          "waveform overlay and the small badge on the row. Present participle of the verb " +
+          "'to voice'. Rendered as small as 9px, so keep it very short.",
+        maxLength: 12,
       },
       "editor.voice.clickVoiceToGenerate": {
         description:
@@ -2645,17 +2560,6 @@ export const editor = defineNamespace({
             "The voice's own name as configured in the project's cast — user data, " +
             "so never translate the substituted value.",
         },
-      },
-      "editor.voice.searchPlaceholder": {
-        description:
-          "Placeholder in the search field of the voice picker, for filtering a cast " +
-          "that can run to dozens of voices. Ends with an ellipsis glyph.",
-      },
-      "editor.voice.noMatches": {
-        description:
-          "Italic empty state in the voice picker when the typed query matches no " +
-          "voice. No trailing period in the English source.",
-        maxLength: 18,
       },
       "editor.format.bold": {
         description:
@@ -2781,12 +2685,6 @@ export const editor = defineNamespace({
           percent: "Whole-number download percentage, already rounded, no % sign.",
         },
         maxLength: 16,
-      },
-      "editor.tts.voicingBadge": {
-        description:
-          "The 9px badge label while speech is actually being synthesized for this " +
-          "line. Present participle of 'to voice'. One short word.",
-        maxLength: 12,
       },
       "editor.tts.generatingAudio": {
         description:
@@ -3205,12 +3103,6 @@ export const editor = defineNamespace({
           "Tooltip on the AI-draft button when nobody is signed in, so no model can " +
           "be called. Imperative — the sign-in is the fix.",
       },
-      "editor.ai.readOnlyGit": {
-        description:
-          "Tooltip on the AI-draft button when the file came from a Git repository " +
-          "and cannot be written to from here. 'git' is the tool's name and stays " +
-          "as-is.",
-      },
       "editor.ai.setUpToEnable": {
         description:
           "Tooltip on an AI button when the project has no model configured yet; " +
@@ -3343,12 +3235,6 @@ export const editor = defineNamespace({
           "Amber warning inside the back-translation tab: the translation was edited " +
           "after this reading was produced, so the reading may describe older text. " +
           "A Refresh button sits beside it.",
-      },
-      "editor.bt.refresh": {
-        description:
-          "Small amber button beside editor.bt.staleWarning that regenerates the " +
-          "reading from the current translation. Imperative; very little room.",
-        maxLength: 14,
       },
       "editor.bt.saving": {
         description:

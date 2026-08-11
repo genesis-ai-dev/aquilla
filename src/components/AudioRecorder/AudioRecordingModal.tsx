@@ -362,7 +362,7 @@ export function AudioRecordingModal({
               </span>
             </div>
             <div className="space-y-0.5">
-              <div className="text-xs text-muted-foreground/60">{t("audio.recordingModal.sourceLabel")}</div>
+              <div className="text-xs text-muted-foreground/60">{t("editor.column.source")}</div>
               <div className="text-xs leading-snug text-muted-foreground">
                 {activeCell.original || <span className="italic text-muted-foreground/60">{t("audio.recordingModal.emptySource")}</span>}
               </div>
@@ -465,7 +465,7 @@ export function AudioRecordingModal({
           {displayPhase === "uploading" && (
             <div className="flex flex-col items-center gap-3 text-muted-foreground">
               <Spinner className="size-7" />
-              <p className="text-sm">{t("audio.uploadingStatus")}</p>
+              <p className="text-sm">{t("common.uploading")}</p>
             </div>
           )}
 
@@ -553,7 +553,7 @@ export function AudioRecordingModal({
           {displayPhase === "recording" && (
             <AppTooltip content={t("audio.recordingModal.stopTooltip")}>
               <Button variant="destructive" size="sm" onClick={stopRecording}>
-                <Square className="mr-1 h-4 w-4" /> {t("audio.recordingModal.stopButton")}
+                <Square className="mr-1 h-4 w-4" /> {t("common.stop")}
               </Button>
             </AppTooltip>
           )}

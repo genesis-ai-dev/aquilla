@@ -118,7 +118,7 @@ function WaveScrubber({ fraction, onSeek, seed }: { fraction: number; onSeek: (f
     <div
       ref={ref}
       role="slider"
-      aria-label={t("editor.voice.seek")}
+      aria-label={t("common.seek")}
       aria-valuemin={0}
       aria-valuemax={100}
       aria-valuenow={Math.round(active * 100)}
@@ -151,7 +151,7 @@ function VolumeButton({ volume, onChange }: { volume: number; onChange: (v: numb
             type="button"
             variant="ghost"
             size="icon-sm"
-            aria-label={t("editor.voice.volume")}
+            aria-label={t("common.volume")}
             className="shrink-0"
           >
             {volume === 0 ? <VolumeX className="h-3.5 w-3.5" /> : <Volume2 className="h-3.5 w-3.5" />}
@@ -379,7 +379,7 @@ export function CellVoicePanel({
   const effDur = Math.max(0, effEnd - effStart)
   const effCurrent = Math.max(0, Math.min(currentTime - effStart, effDur))
   const fraction = effDur > 0 ? effCurrent / effDur : 0
-  const primaryTitle = isPlaying ? t("editor.audio.pause") : t("editor.voice.play")
+  const primaryTitle = isPlaying ? t("common.pause") : t("editor.voice.play")
 
   return (
     <div
@@ -503,12 +503,12 @@ function VoiceCombobox({
             autoFocus
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder={t("editor.voice.searchPlaceholder")}
+            placeholder={t("audio.library.searchPlaceholder")}
           />
         </InputGroup>
         <div className="max-h-56 space-y-0.5 overflow-y-auto">
           {filtered.length === 0 ? (
-            <p className="px-2 py-3 text-center text-xs italic text-muted-foreground">{t("editor.voice.noMatches")}</p>
+            <p className="px-2 py-3 text-center text-xs italic text-muted-foreground">{t("common.noMatches")}</p>
           ) : (
             filtered.map((v) => (
               <button

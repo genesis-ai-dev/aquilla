@@ -181,8 +181,8 @@ function DiffPreviewRow({
 // ---------------------------------------------------------------------------
 function SearchResultContent({ result, t }: { result: WorkspaceSearchResult; t: TFunction }) {
   const columnLabel = result.original
-    ? t("search.result.columnSource")
-    : t("search.result.columnTarget")
+    ? t("editor.column.source")
+    : t("editor.column.target")
   return (
     <>
       <div className="flex w-full items-center justify-between gap-2 mb-1">
@@ -213,7 +213,7 @@ function SearchResultContent({ result, t }: { result: WorkspaceSearchResult; t: 
 // ---------------------------------------------------------------------------
 function ResultsLoadingSkeleton({ t }: { t: TFunction }) {
   return (
-    <div role="status" aria-label={t("search.searching")}>
+    <div role="status" aria-label={t("common.searching")}>
       {Array.from({ length: 4 }).map((_, i) => (
         <div key={i} className="px-3 py-2.5 space-y-2">
           <Skeleton className="h-2.5 w-1/3" />
@@ -221,7 +221,7 @@ function ResultsLoadingSkeleton({ t }: { t: TFunction }) {
           <Skeleton className="h-3.5 w-2/3" />
         </div>
       ))}
-      <span className="sr-only">{t("search.searching")}</span>
+      <span className="sr-only">{t("common.searching")}</span>
     </div>
   )
 }
@@ -343,7 +343,7 @@ function ReplaceSection({ query, results, isReadOnly, onAfterReplace, t }: Repla
                 className="underline"
                 onClick={() => setSelected(new Set(diffs.map((d) => d.cellId)))}
               >
-                {t("search.replace.selectAll")}
+                {t("common.selectAll")}
               </button>
               <button
                 type="button"
@@ -571,9 +571,9 @@ export function ParallelPassagesPanel(props: ParallelPassagesPanelProps) {
             value={scope}
             aria-label={t("search.scope.label")}
             options={[
-              { label: t("search.scope.project"), value: "project" },
+              { label: t("common.project"), value: "project" },
               {
-                label: scope === "file" && activeFileName ? activeFileName : t("search.scope.file"),
+                label: scope === "file" && activeFileName ? activeFileName : t("common.file"),
                 value: "file",
                 disabled: !activeFileId,
               },
@@ -596,8 +596,8 @@ export function ParallelPassagesPanel(props: ParallelPassagesPanelProps) {
               aria-label={t("search.dialog.contentSideLabel")}
               options={[
                 { label: t("search.side.both"), value: "both" },
-                { label: t("search.side.source"), value: "source" },
-                { label: t("search.side.target"), value: "target" },
+                { label: t("editor.column.source"), value: "source" },
+                { label: t("editor.column.target"), value: "target" },
               ]}
               onValueChange={handleSideChange}
             />
@@ -661,8 +661,8 @@ export function ParallelPassagesPanel(props: ParallelPassagesPanelProps) {
             <CommandGroup>
               {results.map((r) => {
                 const columnLabel = r.original
-                  ? t("search.result.columnSource")
-                  : t("search.result.columnTarget")
+                  ? t("editor.column.source")
+                  : t("editor.column.target")
                 const itemKey = `${r.fileId}:${r.cellId}:${r.original ? "src" : "tgt"}`
                 return (
                   <CommandItem

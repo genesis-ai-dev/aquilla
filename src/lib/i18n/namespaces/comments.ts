@@ -15,12 +15,9 @@ export const comments = defineNamespace({
     // Thread scope label (which cell/file/the whole project a thread is on)
     "comments.scope.cell": "{cell} in {file}",
     "comments.scope.file": "File {file}",
-    "comments.scope.project": "Project",
-    "comments.scope.cellFallback": "Cell {id}",
 
     // @mention composer (shared by the reply and edit textareas)
     "comments.mention.typeMore": "Type more to search…",
-    "comments.mention.searching": "Searching…",
     "comments.mention.noResults": "No users found.",
     "comments.composer.editPlaceholder": "Edit comment…",
     "comments.composer.replyPlaceholder": "Reply… (type @ to mention)",
@@ -58,17 +55,13 @@ export const comments = defineNamespace({
     "comments.filter.filtersButton": "Filters",
     "comments.filter.sortLabel": "Sort",
     "comments.filter.showResolved": "Show resolved",
-    "comments.filter.fileLabel": "File",
     "comments.filter.allFiles": "All files",
     "comments.filter.authorLabel": "Author",
     "comments.filter.participantLabel": "Participant",
     "comments.filter.anyone": "Anyone",
-    "comments.filter.reset": "Reset",
 
     // Page chrome
     "comments.backToProject": "Back to project",
-    "comments.refresh": "Refresh",
-    "comments.page.title": "Comments",
     "comments.page.titleWithProject": "{projectName} — Comments",
     "comments.filterCount.one": "{count} filter",
     "comments.filterCount.other": "{count} filters",
@@ -80,14 +73,10 @@ export const comments = defineNamespace({
 
     // CommentsDrawer (per-cell comments panel in the editor)
     "comments.drawer.closeLabel": "Close comments",
-    "comments.drawer.title": "Comments",
-    "comments.drawer.source": "Source",
-    "comments.drawer.target": "Target",
     "comments.drawer.noComments": "No comments yet.",
     "comments.drawer.newThreadHeading": "New thread",
     "comments.drawer.newThreadPlaceholder": "Start a new comment thread...",
     "comments.drawer.post": "Post",
-    "comments.drawer.readOnlyFallback": "Read-only (imported from git)",
   },
   context: {
     _context: {
@@ -148,26 +137,10 @@ export const comments = defineNamespace({
           "single cell.",
         placeholders: { file: "Display name of the file." },
       },
-      "comments.scope.project": {
-        description:
-          "Thread scope label for a thread attached to the project as a whole, not " +
-          "any particular file or cell. Noun naming the scope, not a sentence.",
-      },
-      "comments.scope.cellFallback": {
-        description:
-          "Fallback label used in place of the real cell reference (e.g. 'GEN 1:1') " +
-          "when the server has none to offer — a non-scripture cell, a deleted cell, " +
-          "or an older worker version. {id} is the raw cell id, or '?' if even that is " +
-          "unavailable.",
-        placeholders: { id: "The cell's id, or the literal character '?' when unknown." },
-      },
       "comments.mention.typeMore": {
         description:
           "Hint shown in the @mention dropdown while the typed query is still too " +
           "short to search on.",
-      },
-      "comments.mention.searching": {
-        description: "Loading label shown in the @mention dropdown while a search is in flight.",
       },
       "comments.mention.noResults": {
         description: "Empty-state row in the @mention dropdown when no user matches the query.",
@@ -299,9 +272,6 @@ export const comments = defineNamespace({
       "comments.filter.showResolved": {
         description: "Checkbox label: include resolved threads in the visible list.",
       },
-      "comments.filter.fileLabel": {
-        description: "Form label beside the file picker in the filter row.",
-      },
       "comments.filter.allFiles": {
         description: "Option in the file picker meaning no file filter is applied.",
       },
@@ -319,22 +289,10 @@ export const comments = defineNamespace({
           "Option shared by both the author and participant pickers meaning no " +
           "person filter is applied.",
       },
-      "comments.filter.reset": {
-        description: "Button that clears every active filter back to the defaults.",
-      },
       "comments.backToProject": {
         description:
           "Button at the top of the full-page thread list that navigates back to the " +
           "project's editor.",
-      },
-      "comments.refresh": {
-        description:
-          "Button that re-fetches the thread list from the server. Shows a spinner in " +
-          "place of the label while loading.",
-      },
-      "comments.page.title": {
-        description:
-          "Heading of the full-page thread list when no project name is available yet.",
       },
       "comments.page.titleWithProject": {
         description:
@@ -386,28 +344,6 @@ export const comments = defineNamespace({
           "drawer in the editor.",
         screenshot: "cell-editor",
       },
-      "comments.drawer.title": {
-        description:
-          "Heading of the per-cell comments drawer. Sometimes followed by the cell's " +
-          "reference (e.g. 'GEN 1:1'), which is data and not part of this string. Short " +
-          "— the drawer is narrow.",
-        screenshot: "cell-editor",
-        maxLength: 16,
-      },
-      "comments.drawer.source": {
-        description:
-          "Form-style label above the source-text snippet at the top of the per-cell " +
-          "drawer, reminding the reader what cell the thread below is about.",
-        screenshot: "cell-editor",
-        maxLength: 16,
-      },
-      "comments.drawer.target": {
-        description:
-          "Form-style label above the current translated-text snippet at the top of " +
-          "the per-cell drawer, shown only when the cell has a translation yet.",
-        screenshot: "cell-editor",
-        maxLength: 16,
-      },
       "comments.drawer.noComments": {
         description:
           "Plain inline text shown in the per-cell drawer's thread list when the cell " +
@@ -430,15 +366,6 @@ export const comments = defineNamespace({
           "Button that submits the new-thread textarea, creating the first comment of " +
           "a new thread on this cell. Imperative verb naming the act of publishing, " +
           "not a generic 'Add' or 'Save'.",
-        screenshot: "cell-editor",
-      },
-      "comments.drawer.readOnlyFallback": {
-        description:
-          "Fallback shown in place of the composer when the current user cannot " +
-          "comment, for projects imported from git that have no server-side role to " +
-          "give a more specific reason. Most users instead see a role-specific denial " +
-          "message generated elsewhere (src/lib/permissions/denial.ts, out of scope " +
-          "here) — this is only the generic backstop.",
         screenshot: "cell-editor",
       },
     },

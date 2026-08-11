@@ -116,7 +116,7 @@ function CropPanel({ controller, trim, onChange }: {
           aria-label={t("editor.crop.reset")}
           className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-muted-foreground hover:bg-accent/50 hover:text-foreground"
         >
-          <RotateCcw className="h-3 w-3" /> {t("editor.crop.resetShort")}
+          <RotateCcw className="h-3 w-3" /> {t("common.reset")}
         </button>
       </div>
 
@@ -168,7 +168,7 @@ function CropPanel({ controller, trim, onChange }: {
           onClick={() => { if (isPlaying) pause(); else void play() }}
         >
           {isPlaying ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
-          {isPlaying ? t("editor.audio.pause") : t("editor.crop.preview")}
+          {isPlaying ? t("common.pause") : t("common.preview")}
         </Button>
         <span className="text-[10px] tabular-nums text-muted-foreground">
           {fmt(start)} – {dur > 0 ? fmt(end) : "–:––"} · {fmt(Math.max(0, end - start))}

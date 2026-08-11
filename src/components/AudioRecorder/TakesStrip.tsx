@@ -194,13 +194,13 @@ export function TakesStrip({ projectId, fileId, cellId, takes, selectedAudioId, 
                     : "border-border bg-muted/30",
               )}
             >
-              <AppTooltip content={isPlaying ? t("audio.takesStrip.stopTooltip") : t("audio.takesStrip.playTakeTooltip")}>
+              <AppTooltip content={isPlaying ? t("common.stop") : t("audio.takesStrip.playTakeTooltip")}>
                 <Button
                   type="button"
                   variant="ghost"
                   size="icon-xs"
                   onClick={() => void play(att)}
-                  aria-label={isPlaying ? t("audio.takesStrip.stopTooltip") : t("audio.takesStrip.playTakeTooltip")}
+                  aria-label={isPlaying ? t("common.stop") : t("audio.takesStrip.playTakeTooltip")}
                   className="rounded-md hover:bg-background"
                 >
                   {isLoading ? <Spinner className="size-3.5" />

@@ -213,14 +213,14 @@ function scopeLabel(comment: CommentRecord, fileMap: Map<string, string>, t: TFu
     // instead of the opaque cellId. Fall back to the raw id only when no
     // canonical ref is available (non-scripture / deleted cell / older worker).
     const cellLabel =
-      comment.cellRef?.trim() || t("comments.scope.cellFallback", { id: comment.cellId ?? "?" })
+      comment.cellRef?.trim() || t("common.cellLabel", { id: comment.cellId ?? "?" })
     return t("comments.scope.cell", { cell: cellLabel, file: name })
   }
   if (comment.scopeKind === "file") {
     const { name } = resolveFileName(comment.fileId, fileMap, t)
     return t("comments.scope.file", { file: name })
   }
-  return t("comments.scope.project")
+  return t("common.project")
 }
 
 // ── @mention typeahead in comment composer ────────────────────────────────
@@ -314,7 +314,7 @@ function MentionTextarea({
           )}
           {!needsMorePrefix && isLoading && (
             <p className="flex items-center gap-1.5 px-3 py-2 text-[11px] text-muted-foreground">
-              <Spinner className="size-3" /> {t("comments.mention.searching")}
+              <Spinner className="size-3" /> {t("common.searching")}
             </p>
           )}
           {!needsMorePrefix && !isLoading && results.length === 0 && mentionQuery.length >= 2 && (
@@ -737,7 +737,7 @@ function FilterControls({ filter, onChange, fileOptions, authorOptions }: Filter
           {/* File filter */}
           {fileOptions.length > 0 && (
             <label className="flex items-center gap-1.5">
-              <span className="text-muted-foreground whitespace-nowrap">{t("comments.filter.fileLabel")}</span>
+              <span className="text-muted-foreground whitespace-nowrap">{t("common.file")}</span>
               <Select
                 items={[
                   { value: "", label: allFilesLabel },
@@ -822,7 +822,7 @@ function FilterControls({ filter, onChange, fileOptions, authorOptions }: Filter
             className="h-6 px-2 text-xs text-muted-foreground"
             onClick={() => onChange(DEFAULT_FILTER)}
           >
-            {t("comments.filter.reset")}
+            {t("common.reset")}
           </Button>
         </div>
       )}
@@ -937,7 +937,7 @@ export function CommentsPage() {
           <ArrowLeft className="mr-2 h-4 w-4" /> {t("comments.backToProject")}
         </Button>
         <Button variant="outline" size="sm" onClick={refresh} disabled={isLoading}>
-          {isLoading ? <Spinner className="size-3.5" /> : t("comments.refresh")}
+          {isLoading ? <Spinner className="size-3.5" /> : t("common.refresh")}
         </Button>
       </div>
 
@@ -946,7 +946,7 @@ export function CommentsPage() {
         <h1 className="text-xl font-semibold">
           {project?.name
             ? t("comments.page.titleWithProject", { projectName: project.name })
-            : t("comments.page.title")}
+            : t("common.comments")}
         </h1>
         {comments.length > 0 && (
           <Badge variant="secondary" data-testid="comments-count-badge">

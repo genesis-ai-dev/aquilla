@@ -71,7 +71,7 @@ export function CellActionsMenu({
       ? {
           key: "transcribe",
           icon: <Sparkles className={cn("h-3.5 w-3.5", isTranscribing && "animate-pulse")} />,
-          label: isTranscribing ? t("editor.cell.transcribing") : t("editor.cell.transcribe"),
+          label: isTranscribing ? t("common.transcribing") : t("editor.cell.transcribe"),
           disabled: !editable || Boolean(isTranscribing),
           onSelect: () => { onTranscribe(cell); setOpen(false) },
         }
@@ -81,7 +81,7 @@ export function CellActionsMenu({
           key: "synth",
           icon: <Wand2 className={cn("h-3.5 w-3.5", isSynthesizing && "animate-pulse")} />,
           label: isSynthesizing
-            ? t("editor.cell.synthesizing")
+            ? t("common.synthesizing")
             : hasAudio
               ? t("editor.cell.generateVoiceReplace")
               : t("editor.cell.generateVoice"),

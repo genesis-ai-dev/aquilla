@@ -357,7 +357,7 @@ function SynthStatusBadge({
       <AppTooltip content={t("editor.tts.generatingAudio")}>
         <span className="inline-flex items-center gap-1 rounded-md bg-primary/15 px-1.5 py-0.5 text-[9px] font-medium text-primary">
           <span className="h-1 w-1 animate-pulse rounded-full bg-primary" />
-          {t("editor.tts.voicingBadge")}
+          {t("editor.voice.voicing")}
         </span>
       </AppTooltip>
     )
@@ -5932,7 +5932,7 @@ function EditorRow({
                   isAnonymous
                     ? t("editor.ai.signInForTranslations")
                     : !editable
-                      ? t("editor.ai.readOnlyGit")
+                      ? t("common.readOnlyGit")
                       : !isCompletionConfigured
                         ? t("editor.ai.setUpToEnable")
                         : !isCompletionAvailable
@@ -6146,7 +6146,7 @@ function EditorRow({
                       <Play className="h-3.5 w-3.5" />
                     )
                   }
-                  tooltip={audioController.isPlaying ? t("editor.audio.pause") : t("editor.audio.play")}
+                  tooltip={audioController.isPlaying ? t("common.pause") : t("editor.audio.play")}
                   onClick={() => {
                     if (audioController.state === "loading") return
                     if (audioController.isPlaying) audioController.pause()
@@ -6375,7 +6375,7 @@ function EditorRow({
                               ) : (
                                 <RefreshCw />
                               )}
-                              {t("editor.bt.refresh")}
+                              {t("common.refresh")}
                             </Button>
                           )}
                         </div>
@@ -6640,7 +6640,7 @@ function EditorRow({
                               isTranscribing && "animate-pulse",
                             )}
                           />
-                          {isTranscribing ? t("editor.cell.transcribing") : t("editor.cell.transcribeShort")}
+                          {isTranscribing ? t("common.transcribing") : t("editor.cell.transcribeShort")}
                         </Button>
                         {/* Surfaces model-download %, failures (click-to-expand
                             with Retry), and a success flash. Errors previously

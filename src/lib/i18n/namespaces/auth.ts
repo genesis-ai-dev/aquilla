@@ -70,7 +70,6 @@ export const auth = defineNamespace({
     "auth.join.sessionExpiredNotice":
       "Your session expired — sign in again to join. Your invitation is still valid.",
     "auth.join.alreadyHaveAccount": "Already have an account?",
-    "auth.join.logInLink": "Log in",
     "auth.join.emailPrefilledNote":
       "We've pre-filled the email from your invitation — you can use a different one if " +
       "you prefer.",
@@ -182,15 +181,15 @@ export const auth = defineNamespace({
       },
       "auth.login.createAccountLink": {
         description:
-          "Link or button that switches from signing in to creating a new account. " +
-          "Reused on the sign-in page (as a link to onboarding) and on the invite " +
-          "landing page (as a mode toggle) — same intent both places: start the " +
-          "sign-up flow.",
+          "Link or button that switches from signing in to creating a new account. Used on " +
+          "the sign-in page, on the invite landing page, and in the account dialog — same " +
+          "intent everywhere: start the sign-up flow.",
       },
       "auth.resetPassword.title": {
         description:
-          "Heading shared by the /reset-password page and the sign-in page's " +
-          "'forgot password' mode. Names the action the whole form performs.",
+          "Names the action the whole password-reset form performs, as its heading. Shared " +
+          "by the /reset-password page, the sign-in page's 'forgot password' mode, and the " +
+          "same form when it opens as a dialog from the account menu.",
       },
       "auth.resetPassword.accountPrefix": {
         description:
@@ -398,13 +397,9 @@ export const auth = defineNamespace({
       },
       "auth.join.alreadyHaveAccount": {
         description:
-          "Short question introducing the 'Log in' link/button in the inline sign-up " +
-          "form on the invite-landing page, for a visitor who already has an account.",
-      },
-      "auth.join.logInLink": {
-        description:
-          "Link/button beside auth.join.alreadyHaveAccount that switches the inline " +
-          "auth form from sign-up to sign-in.",
+          "Short question introducing the 'Log in' link beside it, for a visitor who " +
+          "already has an account. Shown under the sign-up form on the invite-landing page " +
+          "and under the sign-up form in the account dialog.",
       },
       "auth.join.emailPrefilledNote": {
         description:

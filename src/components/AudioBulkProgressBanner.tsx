@@ -18,7 +18,7 @@ export function AudioBulkProgressBanner() {
 
   const { kind, total, done, cancelled } = progress
   const pct = total > 0 ? Math.round((done / total) * 100) : 0
-  const label = kind === "transcribe" ? t("audio.bulkProgress.transcribing") : t("audio.bulkProgress.synthesizing")
+  const label = kind === "transcribe" ? t("common.transcribing") : t("common.synthesizing")
   const handleCancel = () => {
     if (kind === "transcribe") cancelBatchTranscribe()
     else cancelBatchSynth()
@@ -51,7 +51,7 @@ export function AudioBulkProgressBanner() {
         </AppTooltip>
       )}
       {cancelled && (
-        <span className="text-muted-foreground">{t("audio.bulkProgress.cancelling")}</span>
+        <span className="text-muted-foreground">{t("common.cancelling")}</span>
       )}
     </div>
   )

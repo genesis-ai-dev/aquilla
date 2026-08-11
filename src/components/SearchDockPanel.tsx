@@ -188,8 +188,8 @@ export function SearchDockPanel({
           className="ml-auto"
           listClassName="text-[10px]"
           options={[
-            { label: t("search.scope.file"), value: "file", disabled: !activeFileId },
-            { label: t("search.scope.project"), value: "project" },
+            { label: t("common.file"), value: "file", disabled: !activeFileId },
+            { label: t("common.project"), value: "project" },
           ]}
           onValueChange={setScope}
         />
@@ -240,7 +240,7 @@ export function SearchDockPanel({
 
         <CommandList className="max-h-none flex-1 overflow-y-auto px-2 py-1">
           {loading && (
-            <CommandEmpty>{t("search.searching")}</CommandEmpty>
+            <CommandEmpty>{t("common.searching")}</CommandEmpty>
           )}
           {!loading && query && results.length === 0 && (
             <CommandEmpty>{t("search.noResults")}</CommandEmpty>

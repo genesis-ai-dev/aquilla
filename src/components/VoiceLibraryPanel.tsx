@@ -162,7 +162,7 @@ export function VoiceLibraryPanel({
     <div className="flex h-full min-h-0 flex-col">
       {/* Header */}
       <div className="flex items-center justify-between px-4 pb-2 pt-3">
-        <h2 className="text-sm font-semibold">{t("audio.library.heading")}</h2>
+        <h2 className="text-sm font-semibold">{t("common.voices")}</h2>
         <span className="text-xs text-muted-foreground">{voices.length}</span>
       </div>
 
@@ -185,7 +185,7 @@ export function VoiceLibraryPanel({
       <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-3 pb-3">
         {filtered.length === 0 ? (
           <p className="px-2 py-3 text-center text-xs italic text-muted-foreground">
-            {query ? t("audio.library.noMatches") : t("audio.library.noVoicesYet")}
+            {query ? t("common.noMatches") : t("audio.library.noVoicesYet")}
           </p>
         ) : (
           filtered.map((voice) => (

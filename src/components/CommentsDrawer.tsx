@@ -94,7 +94,7 @@ export function CommentsDrawer({ project, cell, liveComments, onClose, onNewThre
     <div className="bg-card relative z-10 flex h-full w-96 flex-col border-l" data-testid="comments-drawer">
       <div className="flex items-center justify-between border-b p-2">
         <h3 className="text-sm font-semibold">
-          {t("comments.drawer.title")} {cell.context && <span className="text-muted-foreground">· {cell.context}</span>}
+          {t("common.comments")} {cell.context && <span className="text-muted-foreground">· {cell.context}</span>}
         </h3>
         <Button variant="ghost" size="icon-sm" onClick={onClose} aria-label={t("comments.drawer.closeLabel")}>
           <X />
@@ -102,11 +102,11 @@ export function CommentsDrawer({ project, cell, liveComments, onClose, onNewThre
       </div>
 
       <div className="border-b px-3 py-2 text-xs">
-        <div className="text-muted-foreground">{t("comments.drawer.source")}</div>
+        <div className="text-muted-foreground">{t("editor.column.source")}</div>
         <div className="mt-0.5">{cell.original}</div>
         {cell.translated && (
           <>
-            <div className="mt-1.5 text-muted-foreground">{t("comments.drawer.target")}</div>
+            <div className="mt-1.5 text-muted-foreground">{t("editor.column.target")}</div>
             <div className="mt-0.5">{cell.translated}</div>
           </>
         )}
@@ -150,7 +150,7 @@ export function CommentsDrawer({ project, cell, liveComments, onClose, onNewThre
         <div className="border-t p-3">
           {/* AQU-427: show a human-readable denial for roles that cannot comment. */}
           <p className="text-xs text-muted-foreground" data-testid="comments-drawer-denial">
-            {commentDenialReason ?? t("comments.drawer.readOnlyFallback")}
+            {commentDenialReason ?? t("common.readOnlyGit")}
           </p>
         </div>
       )}

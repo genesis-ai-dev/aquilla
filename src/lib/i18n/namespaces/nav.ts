@@ -8,8 +8,8 @@ export const nav = defineNamespace({
 
     // -- NavHistoryControls: back/forward arrows + hold-for-history popover --
     "nav.historyControls.groupLabel": "Page history",
-    "nav.historyControls.back": "Go back",
-    "nav.historyControls.forward": "Go forward",
+    "nav.historyControls.back": "Back",
+    "nav.historyControls.forward": "Forward",
     "nav.historyControls.backTo": "Back to {target}",
     "nav.historyControls.forwardTo": "Forward to {target}",
     "nav.historyControls.backHoldHint": "Back · hold for history",
@@ -22,12 +22,7 @@ export const nav = defineNamespace({
     "nav.account.addTitle": "Add Frontier account",
     "nav.account.loginTitle": "Log in to Frontier",
     "nav.account.signupTitle": "Create a Frontier account",
-    "nav.account.forgotTitle": "Reset your password",
     "nav.account.newToFrontier": "New to Frontier?",
-    "nav.account.createAccountLink": "Create an account",
-    "nav.account.alreadyHaveAccount": "Already have an account?",
-    "nav.account.loginLink": "Log in",
-    "nav.account.logIn": "Log in",
     "nav.account.menuLabel": "Account menu: {username}",
     "nav.account.preferences": "Preferences",
     "nav.account.addAnotherAccount": "Add another account",
@@ -50,7 +45,6 @@ export const nav = defineNamespace({
 
     // -- LeftDock: tab rail + expand affordance --
     "nav.dock.filesTab": "Files",
-    "nav.dock.voicesTab": "Voices",
     "nav.dock.agentTab": "Agent",
     "nav.dock.agentUnread": "{count} unread",
     "nav.dock.expandSidebar": "Expand sidebar",
@@ -98,8 +92,6 @@ export const nav = defineNamespace({
     "nav.report.placeholder": "What went wrong?",
     "nav.report.descriptionRequired": "Description is required",
     "nav.report.capturedContext": "Captured context:",
-    "nav.report.projectLabel": "project",
-    "nav.report.fileLabel": "file",
     "nav.report.analyticsOffNotice":
       "Usage data collection is off. Enable it in Preferences if you'd like reports to be sent automatically — or use \"Copy report\" to share it manually.",
     "nav.report.sendReport": "Send report",
@@ -142,8 +134,8 @@ export const nav = defineNamespace({
       other: "{count} tries",
     }),
     "nav.outbox.editsNoun": plural({
-      one: "text edit",
-      other: "text edits",
+      one: "edit",
+      other: "edits",
     }),
     "nav.outbox.validationLabel": "validation",
     "nav.outbox.commentsNoun": plural({
@@ -155,14 +147,14 @@ export const nav = defineNamespace({
     "nav.outbox.sessionExpiredAlert":
       "Your session expired. Edits are saved locally — sign in again to retry.",
     "nav.outbox.noPermissionMessage":
-      "Some changes weren't allowed — you may not have permission, or they belong to a different project. Re-signing in won't help. They stay saved locally until you discard them.",
+      "Some changes weren’t allowed — you may not have permission, or they belong to a different project. Re-signing in won’t help. They stay saved locally until you discard them.",
     "nav.outbox.stuckMessage":
-      "Some changes couldn't be synced after several tries. They stay saved locally until you discard them.",
+      "Some changes couldn’t be synced after several tries. They stay saved locally until you discard them.",
     "nav.outbox.discardStuckChangesButton": plural({
       one: "Discard {count} stuck change",
       other: "Discard {count} stuck changes",
     }),
-    "nav.outbox.allCaughtUpTitle": "You're all caught up",
+    "nav.outbox.allCaughtUpTitle": "You’re all caught up",
     "nav.outbox.allCaughtUpDescription": "Every local change has been synced.",
     "nav.outbox.overflowMore": "+{count} more queued…",
     "nav.outbox.footerPending": "Edits stay saved locally until they sync.",
@@ -172,7 +164,7 @@ export const nav = defineNamespace({
     "nav.outbox.statusNeedsSignin": "Sign in to retry",
     "nav.outbox.statusNoPermission": "Not allowed",
     "nav.outbox.statusStuck": "Stuck",
-    "nav.outbox.eventEdit": "Text edit",
+    "nav.outbox.eventEdit": "Edit",
     "nav.outbox.eventNewCell": "New cell",
     "nav.outbox.eventDeleteCell": "Delete cell",
     "nav.outbox.eventReorderCell": "Reorder cell",
@@ -196,7 +188,6 @@ export const nav = defineNamespace({
     "nav.outbox.timeMinutesAgo": "{min}m ago",
     "nav.outbox.timeHoursAgo": "{hr}h ago",
     "nav.outbox.timeDaysAgo": "{d}d ago",
-    "nav.outbox.cellLabel": "cell {id}",
     "nav.outbox.cellDetailLabel": "Cell",
     "nav.outbox.eventDetailLabel": "Event",
     "nav.outbox.errorDetailLabel": "Error",
@@ -299,32 +290,11 @@ export const nav = defineNamespace({
         description: "Dialog title for the account-creation form.",
         screenshot: "confirm-dialog",
       },
-      "nav.account.forgotTitle": {
-        description: "Dialog title for the password-reset request form.",
-        screenshot: "confirm-dialog",
-      },
       "nav.account.newToFrontier": {
         description:
           "Prompt text preceding the 'Create an account' link at the bottom of the " +
           "login form. 'Frontier' is the identity provider's product name — keep it " +
           "untranslated.",
-      },
-      "nav.account.createAccountLink": {
-        description: "Inline text-button that switches the auth dialog to the signup form.",
-      },
-      "nav.account.alreadyHaveAccount": {
-        description:
-          "Prompt text preceding the 'Log in' link at the bottom of the signup form.",
-      },
-      "nav.account.loginLink": {
-        description: "Inline text-button that switches the auth dialog back to the login form.",
-      },
-      "nav.account.logIn": {
-        description:
-          "Sign-in affordance shown in place of the account switcher when no one is " +
-          "signed in — both the button's visible label (when not collapsed to an icon) " +
-          "and its accessible name.",
-        maxLength: 16,
       },
       "nav.account.menuLabel": {
         description:
@@ -402,12 +372,6 @@ export const nav = defineNamespace({
           "Tab label for the file browser panel in the left dock's icon tab rail. Icon-" +
           "only when the rail is collapsed to 40px, so the label is used as a tooltip/" +
           "aria-label there and as a visible label only in the top-rail layout.",
-        maxLength: 12,
-      },
-      "nav.dock.voicesTab": {
-        description:
-          "Tab label for the audio/voices panel in the left dock's tab rail. Hidden " +
-          "entirely on projects without the Audio lens.",
         maxLength: 12,
       },
       "nav.dock.agentTab": {
@@ -580,16 +544,6 @@ export const nav = defineNamespace({
           "under the textarea, e.g. 'Captured context: /project/p1 · project p1'.",
         screenshot: "confirm-dialog",
       },
-      "nav.report.projectLabel": {
-        description:
-          "Short noun composed after a bullet in the captured-context line, before a " +
-          "raw project id, e.g. '· project abc123'.",
-      },
-      "nav.report.fileLabel": {
-        description:
-          "Short noun composed after a bullet in the captured-context line, before a " +
-          "raw file id, mirroring nav.report.projectLabel.",
-      },
       "nav.report.analyticsOffNotice": {
         description:
           "Amber notice shown only when analytics consent is off, pointing the user at " +
@@ -749,7 +703,8 @@ export const nav = defineNamespace({
           "The noun in the outbox summary line, after a separately-rendered bold " +
           "count: '3 edits'. The number is NOT part of this string — it is styled " +
           "on its own — so translate the noun alone, in whatever form follows a " +
-          "number in the target language. Refers to edits to a cell's translated text.",
+          "number in the target language. Refers to edits to a cell's translated " +
+          "text, the same act nav.outbox.eventEdit names on a single row.",
       },
       "nav.outbox.validationLabel": {
         description:
@@ -863,12 +818,6 @@ export const nav = defineNamespace({
       "nav.outbox.timeDaysAgo": {
         description: "Relative-time label for events a day or more old.",
         placeholders: { d: "Whole days elapsed." },
-      },
-      "nav.outbox.cellLabel": {
-        description:
-          "Short technical label on a row showing which cell an event touches, next to " +
-          "the relative timestamp.",
-        placeholders: { id: "Shortened cell id." },
       },
       "nav.outbox.cellDetailLabel": {
         description: "Field label in a row's expanded detail panel, before the raw cell id.",

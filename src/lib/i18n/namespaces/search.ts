@@ -33,8 +33,6 @@ export const search = defineNamespace({
 
     // Scope toggle (dock panel + full panel)
     "search.scope.label": "Search scope",
-    "search.scope.file": "File",
-    "search.scope.project": "Project",
 
     "search.openFullPanel": "Open full search panel",
 
@@ -42,7 +40,6 @@ export const search = defineNamespace({
     "search.placeholderProject": "Search project…",
     "search.placeholderFile": "Search {fileName}…",
 
-    "search.searching": "Searching…",
     "search.noResults": "No results",
 
     // Dock panel — idle / result states
@@ -93,7 +90,6 @@ export const search = defineNamespace({
       one: "{count} cell affected",
       other: "{count} cells affected",
     }),
-    "search.replace.selectAll": "Select all",
     "search.replace.selectNone": "Select none",
     "search.replace.cellListAriaLabel": "Cells to replace",
     "search.replace.readOnlyTooltip": "Replace requires contributor access on these files",
@@ -103,8 +99,6 @@ export const search = defineNamespace({
     "search.replace.applyButtonAll": "Replace All",
 
     // Result row column badge (aria-hidden decorative label on a search hit)
-    "search.result.columnSource": "source",
-    "search.result.columnTarget": "target",
 
     // Full-panel dialog chrome
     "search.dialog.titlePassages": "Parallel passages",
@@ -120,8 +114,6 @@ export const search = defineNamespace({
     "search.dialog.modeLabel": "Search mode",
     "search.dialog.contentSideLabel": "Content side",
     "search.side.both": "Both",
-    "search.side.source": "Source",
-    "search.side.target": "Target",
     "search.dialog.openFileHint": "Open a file to enable file-scoped search.",
     "search.dialog.replaceSectionHeading": "Replace (target cells only)",
     "search.dialog.idlePassages":
@@ -193,15 +185,6 @@ export const search = defineNamespace({
           "Accessible name (aria-label) of the File/Project scope toggle, read by screen " +
           "readers before the two tab options.",
       },
-      "search.scope.file": {
-        description:
-          "Tab option that scopes the search to the currently open file. Falls back to " +
-          "this generic word when no file is open (disabled) or the file's own name is " +
-          "shown instead when one is.",
-      },
-      "search.scope.project": {
-        description: "Tab option that scopes the search to every file in the project.",
-      },
       "search.openFullPanel": {
         description:
           "Tooltip AND aria-label on the icon button that expands the dock panel into " +
@@ -219,11 +202,6 @@ export const search = defineNamespace({
         placeholders: {
           fileName: "The open file's display name, e.g. 'Genesis.sfm'. Not translated.",
         },
-      },
-      "search.searching": {
-        description:
-          "Transient status text shown in place of results while a search request is " +
-          "in flight, in both the dock panel and the full dialog.",
       },
       "search.noResults": {
         description:
@@ -382,11 +360,6 @@ export const search = defineNamespace({
             "The number the sentence counts; it also selects which plural form is used.",
         },
       },
-      "search.replace.selectAll": {
-        description:
-          "Link-styled button above the diff preview list that selects every row for " +
-          "replacement.",
-      },
       "search.replace.selectNone": {
         description:
           "Link-styled button above the diff preview list that deselects every row.",
@@ -420,20 +393,6 @@ export const search = defineNamespace({
         description:
           "Replace button label before any row is individually selected/deselected — " +
           "implies 'replace everything currently matched'.",
-      },
-      "search.result.columnSource": {
-        description:
-          "Tiny decorative badge (aria-hidden, not read by screen readers) beside a " +
-          "search hit marking it as source-language text, as opposed to target. " +
-          "Deliberately lowercase in the UI. Different key from 'search.side.source' " +
-          "because that one is a visible, capitalized filter-tab label — same underlying " +
-          "concept (source vs. target text) but a different visual role and casing.",
-      },
-      "search.result.columnTarget": {
-        description:
-          "Tiny decorative badge (aria-hidden) beside a search hit marking it as " +
-          "target-language (translated) text. See 'search.result.columnSource' for why " +
-          "this isn't merged with 'search.side.target'.",
       },
       "search.dialog.titlePassages": {
         description:
@@ -500,17 +459,6 @@ export const search = defineNamespace({
       },
       "search.side.both": {
         description: "Tab option: search both source and target text.",
-      },
-      "search.side.source": {
-        description:
-          "Tab option: search only source-language text. Also reused as the section " +
-          "heading over the source line in the translation-examples popover — same " +
-          "meaning (source-language text) in both places.",
-      },
-      "search.side.target": {
-        description:
-          "Tab option: search only target-language (translated) text. Also reused as the " +
-          "section heading over the target line in the translation-examples popover.",
       },
       "search.dialog.openFileHint": {
         description:

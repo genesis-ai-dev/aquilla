@@ -152,7 +152,7 @@ export function CellAudioUploadButton({ projectId, fileId, cellId, username, dis
       />
       <RailButton
         icon={<Upload className="h-3.5 w-3.5" />}
-        tooltip={uploading ? t("editor.audio.uploading") : t("editor.audio.upload")}
+        tooltip={uploading ? t("common.uploading") : t("editor.audio.upload")}
         onClick={openPicker}
         disabled={disabled}
         pulsing={uploading}
@@ -162,7 +162,7 @@ export function CellAudioUploadButton({ projectId, fileId, cellId, username, dis
           role="tooltip"
           className="absolute bottom-full right-0 z-50 mb-1 w-52 rounded-md border bg-popover px-3 py-2 text-[11px] leading-snug text-popover-foreground shadow-md"
         >
-          <strong className="block font-semibold">{t("editor.audio.uploadFailed")}</strong>
+          <strong className="block font-semibold">{t("common.uploadFailed")}</strong>
           <span className="mt-0.5 block text-muted-foreground">{error}</span>
           <button
             type="button"

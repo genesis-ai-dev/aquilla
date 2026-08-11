@@ -68,7 +68,7 @@ type TabMeta = { id: DockTab; icon: typeof Files; labelKey: Parameters<ReturnTyp
 
 const TAB_META: TabMeta[] = [
   { id: "files", icon: Files, labelKey: "nav.dock.filesTab" },
-  { id: "voices", icon: AudioLines, labelKey: "nav.dock.voicesTab" },
+  { id: "voices", icon: AudioLines, labelKey: "common.voices" },
   { id: "agent", icon: Bot, labelKey: "nav.dock.agentTab" },
   { id: "search", icon: Search, labelKey: "nav.search" },
 ]

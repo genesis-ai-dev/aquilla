@@ -224,14 +224,20 @@ export function AssignModal({
   )
   const isScripture = activeFile ? SCRIPTURE_FILE_TYPES.has(activeFile.type) : false
   const sectionNoun = isScripture
-    ? t("dialog.assign.scope.chapters")
-    : t("dialog.assign.scope.sections")
-  const sectionNounLower = isScripture
-    ? t("dialog.assign.unit.chaptersLower")
-    : t("dialog.assign.unit.sectionsLower")
-  const sectionSingularLower = isScripture
-    ? t("dialog.assign.unit.chapterLower")
-    : t("dialog.assign.unit.sectionLower")
+    ? t("editor.milestone.vocab.chapterPlural")
+    : t("editor.milestone.vocab.sectionPlural")
+  // AQU-511 wave 4: the chapter/section wording is chosen by picking a whole
+  // translated sentence, not by substituting a translated noun into one. A noun
+  // interpolated into another language's sentence cannot agree with it.
+  const loadingUnitsKey = isScripture
+    ? ("dialog.assign.loadingChapters" as const)
+    : ("dialog.assign.loadingSections" as const)
+  const noUnitsFoundKey = isScripture
+    ? ("dialog.assign.noChaptersFound" as const)
+    : ("dialog.assign.noSectionsFound" as const)
+  const selectUnitErrorKey = isScripture
+    ? ("dialog.assign.error.selectChapter" as const)
+    : ("dialog.assign.error.selectSection" as const)
   const segmentNoun = isScripture ? "verse" : "segment"
   const wholeFileLabel = isScripture
     ? t("dialog.assign.scope.allVerses")
@@ -426,7 +432,7 @@ export function AssignModal({
     } else if (scopeKind === "chapters") {
       if (!activeFileId) { setError(t("dialog.assign.error.noFileOpen")); return }
       if (selectedChapters.size === 0) {
-        setError(t("dialog.assign.error.selectUnit", { unit: sectionSingularLower }))
+        setError(t(selectUnitErrorKey))
         return
       }
       const file = projectFiles.find((f) => f.id === activeFileId)
@@ -470,7 +476,7 @@ export function AssignModal({
     selectedCellIds.size, selectedChapters, selectedFileIds,
     jwt, projectId, author, note, onAssigned, onOpenChange,
     roleLevel, allowSelfAssignment, callerUserId, deadlineDate, groupLabelByFileId,
-    selectedLane, isScripture, segmentNoun, sectionSingularLower, t,
+    selectedLane, isScripture, segmentNoun, selectUnitErrorKey, t,
   ])
 
   // Role gate (AQU-496): PROJECT_LEAD (500)+ always renders; below that, only
@@ -594,7 +600,7 @@ export function AssignModal({
                             className="text-xs text-primary hover:underline"
                             onClick={() => toggleFileGroup(groupFileIds)}
                           >
-                            {allSelected ? t("common.clear") : t("dialog.assign.selectAll")}
+                            {allSelected ? t("common.clear") : t("common.selectAll")}
                           </button>
                         )}
                       </div>
@@ -621,11 +627,11 @@ export function AssignModal({
               {chaptersLoading ? (
                 <div className="flex items-center gap-1 text-xs text-muted-foreground">
                   <Spinner className="size-3" />
-                  {t("dialog.assign.loadingUnit", { unit: sectionNounLower })}
+                  {t(loadingUnitsKey)}
                 </div>
               ) : availableChapters.length === 0 ? (
                 <p className="text-xs text-muted-foreground">
-                  {t("dialog.assign.noUnitFound", { unit: sectionNounLower })}
+                  {t(noUnitsFoundKey)}
                 </p>
               ) : (
                 <div className="max-h-40 space-y-0.5 overflow-y-auto rounded-md border p-2">

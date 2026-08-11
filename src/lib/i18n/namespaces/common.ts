@@ -25,13 +25,42 @@ export const common = defineNamespace({
     "common.breadcrumbNav": "breadcrumb",
     "common.moreBreadcrumbs": "More",
     "common.loadingSpinner": "Loading",
+
+    // — Shared vocabulary and status words (AQU-511 wave 4):
+    //   promoted here because two or more namespaces render exactly these
+    //   strings, and a translator should be asked for each of them once.
+    "common.logIn": "Log in",
+    "common.voices": "Voices",
+    "common.project": "Project",
+    "common.file": "File",
+    "common.comments": "Comments",
+    "common.cellLabel": "Cell {id}",
+    "common.selectAll": "Select all",
+    "common.cancelling": "cancelling…",
+    "common.transcribing": "Transcribing…",
+    "common.synthesizing": "Synthesizing…",
+    "common.uploading": "Uploading…",
+    "common.uploadFailed": "Upload failed",
+    "common.pause": "Pause",
+    "common.reset": "Reset",
+    "common.preview": "Preview",
+    "common.seek": "Seek",
+    "common.volume": "Volume",
+    "common.noMatches": "No matches",
+    "common.readOnlyGit": "Read-only (imported from git)",
+    "common.refresh": "Refresh",
+    "common.searching": "Searching…",
+    "common.stop": "Stop",
   },
   context: {
     _context: {
       description:
-        "Shared action verbs and status text reused across the whole app — mostly " +
-        "buttons in dialog footers and toolbars, so they sit side by side with other " +
-        "actions and must stay short and imperative.",
+        "Strings reused across the whole app, so each one is translated once and " +
+        "rendered in several places: action verbs, status words, and shared " +
+        "vocabulary. Most are buttons in dialog footers and toolbars, sitting side by " +
+        "side with other actions, so they must stay short. Each key's own note names " +
+        "every surface it appears on — read it, because a word that fits one of them " +
+        "may need to fit all of them.",
       screenshot: "confirm-dialog",
       maxLength: 20,
     },
@@ -170,6 +199,169 @@ export const common = defineNamespace({
           "is visible status text with a trailing ellipsis; this is announced once by a " +
           "screen reader for the spinner element itself, so it takes no ellipsis.",
         screenshot: "cell-editor",
+      },
+      "common.logIn": {
+        description:
+          "The sign-in affordance, in all three places it appears: the button shown in " +
+          "place of the account switcher when nobody is signed in (visible label and " +
+          "accessible name), and the inline text-button that switches an auth form from " +
+          "sign-up to sign-in in both the account dialog and the invite-landing page. " +
+          "Imperative verb phrase.",
+        screenshot: "auth",
+      },
+      "common.voices": {
+        description:
+          "The set of speaking voices configured for a project — TTS configurations and " +
+          "cloned voices. Used both as the left-dock tab label that opens the voices panel " +
+          "and as that panel's own heading. Plural noun; the tab is in a narrow rail.",
+        screenshot: "audio-studio",
+      },
+      "common.project": {
+        description:
+          "The word for a translation project, as a standalone label: the scope option that " +
+          "widens a search or a comment thread to the whole project, and the noun before a " +
+          "project id in a captured-context line. Noun, not a verb.",
+        screenshot: "search",
+      },
+      "common.file": {
+        description:
+          "The word for one imported file, as a standalone label: the scope option that " +
+          "narrows a search to the open file, the label beside a file picker, and the noun " +
+          "before a file id in a captured-context line.",
+        screenshot: "search",
+      },
+      "common.comments": {
+        description:
+          "Heading over a list of comment threads — both the full-page thread list and the " +
+          "narrow per-cell drawer, so it must fit a narrow column. Comments are team " +
+          "discussion about a translation, not footnotes in the text.",
+        screenshot: "comments",
+      },
+      "common.cellLabel": {
+        description:
+          "Identifies one cell by its raw id, used where no human-readable scripture " +
+          "reference is available: on an outbox row beside the timestamp, and as the " +
+          "fallback scope label on a comment thread. 'Cell' is Aquilla's unit of " +
+          "translation — one verse, line, or segment.",
+        screenshot: "workspace-nav",
+        placeholders: {
+          id: "The cell's id, shortened, or '?' when even that is unavailable.",
+        },
+      },
+      "common.selectAll": {
+        description:
+          "Small link-styled button that ticks every row in the list below it — every file " +
+          "in an assignment group, every cell in a replace preview. Imperative; pairs with " +
+          "common.clear, which replaces it once everything is ticked.",
+        screenshot: "search",
+      },
+      "common.cancelling": {
+        description:
+          "Status text that replaces a cancel/stop button once the user has asked to stop " +
+          "but in-flight work is still finishing. Deliberately lowercase in English because " +
+          "it sits mid-row as a quiet aside; follow whatever the target language does for " +
+          "such inline status text.",
+        screenshot: "audio-studio",
+        maxLength: 18,
+      },
+      "common.transcribing": {
+        description:
+          "Status text while speech-to-text is running: on the disabled menu item for a " +
+          "single line, and on the progress banner for a whole-file batch. " +
+          "Present-participle status, not a command.",
+        screenshot: "audio-studio",
+      },
+      "common.synthesizing": {
+        description:
+          "Status text while text-to-speech is generating audio: on the disabled menu item " +
+          "for a single line, and on the progress banner for a whole-file batch. " +
+          "Present-participle status, not a command.",
+        screenshot: "audio-studio",
+      },
+      "common.uploading": {
+        description:
+          "Transient status while a chosen or recorded media file is being sent to storage. " +
+          "Present participle; the trailing character is a single ellipsis glyph (…).",
+        screenshot: "audio-studio",
+      },
+      "common.uploadFailed": {
+        description:
+          "Short state phrase shown when storing a chosen media file failed — audio or " +
+          "video. The underlying error, when there is one, appears beneath it. Not a " +
+          "sentence; no final period.",
+        screenshot: "audio-studio",
+      },
+      "common.pause": {
+        description:
+          "Label, tooltip and accessible name of a transport button while audio is playing; " +
+          "pressing it halts playback where it is, without rewinding. Imperative verb, " +
+          "shown in place of Play.",
+        screenshot: "audio-studio",
+      },
+      "common.reset": {
+        description:
+          "Button that puts a control back to its default: clears every active filter, or " +
+          "discards a crop back to the full clip. Imperative, and sometimes rendered at " +
+          "11px beside an icon, so it must stay to one short word.",
+        screenshot: "comments",
+        maxLength: 12,
+      },
+      "common.preview": {
+        description:
+          "Button that plays a clip back so the user can hear it before committing — a crop " +
+          "selection, or an attached reference recording. Imperative verb; swaps to " +
+          "common.pause while it is playing.",
+        screenshot: "audio-studio",
+      },
+      "common.seek": {
+        description:
+          "Accessible name (never visible) of a draggable audio progress control — the " +
+          "waveform slider in a cell and the progress line across the transport bar. " +
+          "Dragging it moves the playback position. The audio sense of 'seek', not " +
+          "searching.",
+        screenshot: "audio-studio",
+      },
+      "common.volume": {
+        description:
+          "Accessible name (never visible) of a playback volume control — the speaker " +
+          "button that opens the slider, and the slider itself. A noun.",
+        screenshot: "audio-studio",
+      },
+      "common.noMatches": {
+        description:
+          "Empty state shown when a filter query matches nothing in the list below — a " +
+          "voice picker, a voice library. No trailing period in the English source.",
+        screenshot: "audio-studio",
+      },
+      "common.readOnlyGit": {
+        description:
+          "Explains that the open project came from a Git repository and cannot be written " +
+          "to from Aquilla: shown as the AI-draft button's tooltip and in place of the " +
+          "comment composer. 'git' is the tool's name and stays as-is.",
+        screenshot: "editor-table",
+        maxLength: 40,
+      },
+      "common.refresh": {
+        description:
+          "Button that re-fetches what the panel is showing from the server — a thread " +
+          "list, a generated back-translation. Imperative, and sometimes in very little " +
+          "room.",
+        screenshot: "comments",
+        maxLength: 12,
+      },
+      "common.searching": {
+        description:
+          "Transient status shown in place of results while a search request is in flight — " +
+          "the search dock and dialog, and the @mention dropdown. Present participle; the " +
+          "trailing character is a single ellipsis glyph (…).",
+        screenshot: "search",
+      },
+      "common.stop": {
+        description:
+          "Imperative button that halts something already running: a recording in progress, " +
+          "or playback of a take. Distinct from Pause in English only by convention — use " +
+          "whichever verb your language uses for 'stop', not 'pause'.",
+        screenshot: "audio-studio",
       },
     },
   },

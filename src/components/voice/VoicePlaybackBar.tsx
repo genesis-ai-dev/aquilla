@@ -157,14 +157,14 @@ export function VoicePlaybackBar({
           <IconButton title={t("audio.playbackBar.previousLine")} disabled={!canPlay} onClick={skipBack}>
             <SkipBack className="h-4 w-4" />
           </IconButton>
-          <AppTooltip content={isPlaying ? t("audio.playbackBar.pause") : t("audio.playbackBar.playAll")}>
+          <AppTooltip content={isPlaying ? t("common.pause") : t("audio.playbackBar.playAll")}>
             <Button
               type="button"
               size="icon"
               variant="default"
               onClick={onPlayPause}
               disabled={!canPlay}
-              aria-label={isPlaying ? t("audio.playbackBar.pause") : t("audio.playbackBar.playAll")}
+              aria-label={isPlaying ? t("common.pause") : t("audio.playbackBar.playAll")}
               className="bg-foreground text-background hover:bg-foreground/90"
             >
               {isLoading ? <Spinner /> : isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4 translate-x-px" />}
@@ -225,7 +225,7 @@ function BarScrubber({ fraction, onSeek, disabled }: {
   return (
     <div
       role="slider"
-      aria-label={t("audio.playbackBar.seek")}
+      aria-label={t("common.seek")}
       aria-valuemin={0}
       aria-valuemax={100}
       aria-valuenow={Math.round(fraction * 100)}
@@ -305,7 +305,7 @@ function VolumeControl({ volume, onChange }: { volume: number; onChange: (v: num
         step={0.01}
         value={[volume]}
         onValueChange={(next) => onChange(Array.isArray(next) ? next[0] : next)}
-        aria-label={t("audio.playbackBar.volume")}
+        aria-label={t("common.volume")}
         className="hidden w-24 sm:block"
       />
     </div>

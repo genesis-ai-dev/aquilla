@@ -373,7 +373,7 @@ export function JoinPage() {
                         onClick={() => setAuthMode("login")}
                         className="font-medium text-foreground underline-offset-4 hover:underline"
                       >
-                        {t("auth.join.logInLink")}
+                        {t("common.logIn")}
                       </button>
                     </p>
                   </div>

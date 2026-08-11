@@ -4,7 +4,6 @@ export const audio = defineNamespace({
   keys: {
     // Shared across more than one audio surface.
     "audio.narrator": "Narrator",
-    "audio.uploadingStatus": "Uploading…",
 
     // NewVoiceModal — create/edit a voice (TTS engine config, or a cloned
     // voice built from a reference clip).
@@ -56,13 +55,10 @@ export const audio = defineNamespace({
     "audio.playbackBar.noVoicedLines": "No voiced lines yet",
     "audio.playbackBar.previousLine": "Previous line",
     "audio.playbackBar.nextLine": "Next line",
-    "audio.playbackBar.pause": "Pause",
     "audio.playbackBar.playAll": "Play all",
     "audio.playbackBar.playbackSpeed": "Playback speed",
     "audio.playbackBar.unmute": "Unmute",
     "audio.playbackBar.mute": "Mute",
-    "audio.playbackBar.seek": "Seek",
-    "audio.playbackBar.volume": "Volume",
 
     // CombinedBoundaryEditor — split a multi-line "Voice together" clip.
     "audio.boundaryEditor.title": "Split the combined clip by line",
@@ -83,7 +79,6 @@ export const audio = defineNamespace({
     "audio.recordingModal.muteBeepTooltip": "Mute countdown beep",
     "audio.recordingModal.unmuteBeepTooltip": "Enable countdown beep",
     "audio.recordingModal.closeTooltip": "Close (Esc)",
-    "audio.recordingModal.sourceLabel": "Source",
     "audio.recordingModal.emptySource": "empty",
     "audio.recordingModal.readAloudLabel": "Read aloud",
     "audio.recordingModal.notTranslated": "not translated",
@@ -107,7 +102,6 @@ export const audio = defineNamespace({
     "audio.recordingModal.retakeButton": "Retake",
     "audio.recordingModal.saveTooltip": "Save (Space or Enter)",
     "audio.recordingModal.stopTooltip": "Stop (Space or Esc)",
-    "audio.recordingModal.stopButton": "Stop",
     "audio.recordingModal.startButton": "Start",
     "audio.recordingModal.cancelCountdown": "Cancel countdown",
 
@@ -115,7 +109,6 @@ export const audio = defineNamespace({
     "audio.takesStrip.heading": "Takes ({count})",
     "audio.takesStrip.cleanedLabel": "Cleaned",
     "audio.takesStrip.takeLabel": "Take {number}",
-    "audio.takesStrip.stopTooltip": "Stop",
     "audio.takesStrip.playTakeTooltip": "Play take",
     "audio.takesStrip.removeNoiseTooltip": "Remove noise (adds a cleaned take)",
     "audio.takesStrip.revertTooltip": "Revert to the original recording",
@@ -124,9 +117,7 @@ export const audio = defineNamespace({
     "audio.takesStrip.deleteTakeTooltip": "Delete take",
 
     // VoiceLibraryPanel — the Voices sidebar (select / assign / manage cast).
-    "audio.library.heading": "Voices",
     "audio.library.searchPlaceholder": "Search voices…",
-    "audio.library.noMatches": "No matches",
     "audio.library.noVoicesYet": "No voices yet",
     "audio.library.rowHint": "Click to select · drag onto a line to assign",
     "audio.library.narratorHint":
@@ -155,13 +146,9 @@ export const audio = defineNamespace({
     "audio.clone.errorTooLarge": "Reference clip too large (max 8 MB). Use a few seconds.",
     "audio.clone.previewTooltip": "Preview reference clip",
     "audio.clone.previewFailed": "Preview failed",
-    "audio.clone.previewButton": "Preview",
 
     // AudioBulkProgressBanner — batch transcribe-all / synth-all progress.
-    "audio.bulkProgress.transcribing": "Transcribing",
-    "audio.bulkProgress.synthesizing": "Synthesizing",
     "audio.bulkProgress.cancelTooltip": "Cancel batch",
-    "audio.bulkProgress.cancelling": "cancelling…",
   },
   context: {
     _context: {
@@ -186,13 +173,6 @@ export const audio = defineNamespace({
           "used for any line that has no explicit speaker assigned. Appears both as a " +
           "small badge on a voice's row in the Voices list and as inline status text " +
           "in the voice editor's footer. Noun, not a verb.",
-      },
-      "audio.uploadingStatus": {
-        description:
-          "Transient status text shown while a recorded clip is being uploaded to " +
-          "storage. Appears in both the full-screen recording flow and the smaller " +
-          "voice-clone reference uploader. Trailing character is a single ellipsis " +
-          "glyph (…).",
       },
       "audio.newVoice.createLabel": {
         description:
@@ -447,11 +427,6 @@ export const audio = defineNamespace({
           "Tooltip and accessible name for the transport-bar button that jumps " +
           "playback forward to the next line.",
       },
-      "audio.playbackBar.pause": {
-        description:
-          "Tooltip and accessible name for the central play/pause button, shown " +
-          "while audio is currently playing (pressing it pauses).",
-      },
       "audio.playbackBar.playAll": {
         description:
           "Tooltip and accessible name for the central play/pause button, shown " +
@@ -472,16 +447,6 @@ export const audio = defineNamespace({
         description:
           "Tooltip and accessible name for the volume button when audio is " +
           "currently audible (pressing it mutes).",
-      },
-      "audio.playbackBar.seek": {
-        description:
-          "Accessible name (not visible text) for the thin draggable progress line " +
-          "spanning the top of the transport bar, which scrubs playback position.",
-      },
-      "audio.playbackBar.volume": {
-        description:
-          "Accessible name (not visible text) for the volume slider beside the mute " +
-          "button.",
       },
       "audio.boundaryEditor.title": {
         description:
@@ -577,11 +542,6 @@ export const audio = defineNamespace({
           "Tooltip for the dialog's close button, including its keyboard shortcut " +
           "hint. '(Esc)' names the Escape key and is conventionally left " +
           "untranslated/abbreviated the way key names are elsewhere in this dialog.",
-      },
-      "audio.recordingModal.sourceLabel": {
-        description:
-          "Small caption above the original (source-language) text of the line " +
-          "being recorded, shown in the dialog header for reference.",
       },
       "audio.recordingModal.emptySource": {
         description:
@@ -701,11 +661,6 @@ export const audio = defineNamespace({
           "Tooltip for the button that stops an in-progress recording, including " +
           "its keyboard shortcut hint.",
       },
-      "audio.recordingModal.stopButton": {
-        description:
-          "Visible label of the button that stops an in-progress recording.",
-        maxLength: 14,
-      },
       "audio.recordingModal.startButton": {
         description:
           "Visible label of the button that begins the countdown-then-record flow " +
@@ -743,11 +698,6 @@ export const audio = defineNamespace({
         },
         maxLength: 12,
       },
-      "audio.takesStrip.stopTooltip": {
-        description:
-          "Tooltip and accessible name for a take chip's play button, shown while " +
-          "that take is currently playing (pressing it stops playback).",
-      },
       "audio.takesStrip.playTakeTooltip": {
         description:
           "Tooltip and accessible name for a take chip's play button, shown while " +
@@ -780,21 +730,12 @@ export const audio = defineNamespace({
           "Tooltip and accessible name for the button that permanently deletes one " +
           "take from the line.",
       },
-      "audio.library.heading": {
-        description:
-          "Heading of the Voices sidebar panel in the Audio lens, listing every " +
-          "voice (TTS configuration or clone) available in the project.",
-        screenshot: "audio-studio",
-      },
       "audio.library.searchPlaceholder": {
         description:
-          "Placeholder text in the search box at the top of the Voices sidebar, " +
-          "which filters the voice list by name as the user types.",
-      },
-      "audio.library.noMatches": {
-        description:
-          "Empty-state message shown in the Voices list when a search query matches " +
-          "no voice.",
+          "Placeholder in the search box above a list of voices, which filters the list by " +
+          "name as the user types. Used by the Voices sidebar panel and by the voice picker " +
+          "on a single cell, either of which can hold dozens of voices. Ends with a single " +
+          "ellipsis glyph.",
       },
       "audio.library.noVoicesYet": {
         description:
@@ -926,33 +867,10 @@ export const audio = defineNamespace({
           "reference clip fails to load.",
         maxLength: 16,
       },
-      "audio.clone.previewButton": {
-        description:
-          "Default visible label of the reference-clip preview button, shown when " +
-          "not currently playing or failed.",
-        maxLength: 16,
-      },
-      "audio.bulkProgress.transcribing": {
-        description:
-          "Label on the bulk-progress banner while a batch 'transcribe every line' " +
-          "job is running across the file.",
-        maxLength: 20,
-      },
-      "audio.bulkProgress.synthesizing": {
-        description:
-          "Label on the bulk-progress banner while a batch 'generate TTS audio for " +
-          "every line' job is running across the file.",
-        maxLength: 20,
-      },
       "audio.bulkProgress.cancelTooltip": {
         description:
           "Tooltip and accessible name for the small 'x' button on the bulk-progress " +
           "banner that cancels the running batch job.",
-      },
-      "audio.bulkProgress.cancelling": {
-        description:
-          "Replaces the cancel button on the bulk-progress banner once cancellation " +
-          "has been requested but the job hasn't stopped yet.",
       },
     },
   },

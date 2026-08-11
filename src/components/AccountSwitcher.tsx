@@ -42,7 +42,7 @@ function AuthDialogBody({
   const titles: Record<AuthMode, string> = {
     login: isAdditional ? t("nav.account.addTitle") : t("nav.account.loginTitle"),
     signup: t("nav.account.signupTitle"),
-    forgot: t("nav.account.forgotTitle"),
+    forgot: t("auth.resetPassword.title"),
   }
   return (
     <>
@@ -61,7 +61,7 @@ function AuthDialogBody({
               onClick={() => setMode("signup")}
               className="font-medium text-foreground underline-offset-4 hover:underline"
             >
-              {t("nav.account.createAccountLink")}
+              {t("auth.login.createAccountLink")}
             </button>
           </p>
         </div>
@@ -70,13 +70,13 @@ function AuthDialogBody({
         <div className="space-y-4">
           <FrontierSignupForm onSuccess={onDone} />
           <p className="text-center text-sm text-muted-foreground">
-            {t("nav.account.alreadyHaveAccount")}{" "}
+            {t("auth.join.alreadyHaveAccount")}{" "}
             <button
               type="button"
               onClick={() => setMode("login")}
               className="font-medium text-foreground underline-offset-4 hover:underline"
             >
-              {t("nav.account.loginLink")}
+              {t("common.logIn")}
             </button>
           </p>
         </div>
@@ -161,11 +161,11 @@ export function AccountSwitcher({
             !isHeader && !compact && "w-full",
             isHeader && "h-9",
           )}
-          aria-label={t("nav.account.logIn")}
+          aria-label={t("common.logIn")}
           onClick={() => setLoginOpen(true)}
         >
           <LogIn className="h-4 w-4" />
-          {!compact && <span>{t("nav.account.logIn")}</span>}
+          {!compact && <span>{t("common.logIn")}</span>}
         </button>
         <Dialog open={loginOpen} onOpenChange={setLoginOpen}>
           <DialogContent className="max-w-sm">

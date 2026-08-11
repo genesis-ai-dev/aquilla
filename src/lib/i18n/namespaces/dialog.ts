@@ -8,13 +8,13 @@ export const dialog = defineNamespace({
     "dialog.assign.scope.selection": "Current selection",
     "dialog.assign.scope.allVerses": "All verses in file",
     "dialog.assign.scope.entireFile": "Entire file",
-    "dialog.assign.scope.chapters": "Chapters",
-    "dialog.assign.scope.sections": "Sections",
     "dialog.assign.scope.books": "Books (files)",
-    "dialog.assign.unit.chaptersLower": "chapters",
-    "dialog.assign.unit.sectionsLower": "sections",
-    "dialog.assign.unit.chapterLower": "chapter",
-    "dialog.assign.unit.sectionLower": "section",
+    "dialog.assign.loadingChapters": "Loading chapters…",
+    "dialog.assign.loadingSections": "Loading sections…",
+    "dialog.assign.noChaptersFound": "No chapters found in this file.",
+    "dialog.assign.noSectionsFound": "No sections found in this file.",
+    "dialog.assign.error.selectChapter": "Select at least one chapter.",
+    "dialog.assign.error.selectSection": "Select at least one section.",
     "dialog.assign.laneLabel": "Language lane",
     "dialog.assign.defaultLaneFallback": "Default language",
     "dialog.assign.laneDescription":
@@ -24,9 +24,6 @@ export const dialog = defineNamespace({
     "dialog.assign.filesDescription":
       "Files sharing a season/testament are grouped — use \"Select all\" to assign a " +
       "whole season in one action.",
-    "dialog.assign.selectAll": "Select all",
-    "dialog.assign.loadingUnit": "Loading {unit}…",
-    "dialog.assign.noUnitFound": "No {unit} found in this file.",
     "dialog.assign.assigneeLabel": "Assign to",
     "dialog.assign.selectMemberPlaceholder": "Select member…",
     "dialog.assign.assigneeSelfSuffix": "{username} (you)",
@@ -44,7 +41,6 @@ export const dialog = defineNamespace({
     "dialog.assign.error.selfOnly": "You can only assign work to yourself.",
     "dialog.assign.error.selectFile": "Select at least one book/file.",
     "dialog.assign.error.noFileOpen": "No file open.",
-    "dialog.assign.error.selectUnit": "Select at least one {unit}.",
     "dialog.assign.error.noRouteFile": "No file available for routing.",
     "dialog.assign.error.unknown": "Unknown error",
     "dialog.assign.error.bulkFailed": "{failed} of {total} assignment(s) failed",
@@ -100,49 +96,10 @@ export const dialog = defineNamespace({
           "the whole currently open file. Neutral wording for non-scripture imports.",
         screenshot: "assign-modal",
       },
-      "dialog.assign.scope.chapters": {
-        description:
-          "Scope option label used when the active file is a Bible text: assign one " +
-          "or more chapters. Plural noun.",
-        screenshot: "assign-modal",
-      },
-      "dialog.assign.scope.sections": {
-        description:
-          "Scope option label used when the active file is NOT a Bible text: assign " +
-          "one or more sections (the chapter-equivalent unit for non-scripture " +
-          "imports). Plural noun.",
-        screenshot: "assign-modal",
-      },
       "dialog.assign.scope.books": {
         description:
           "Scope option: assign one or more whole files/books at once, grouped by " +
           "season/testament in the picker below.",
-        screenshot: "assign-modal",
-      },
-      "dialog.assign.unit.chaptersLower": {
-        description:
-          "Lowercase plural of dialog.assign.scope.chapters, used only as the " +
-          "{unit} value substituted into loading/empty/validation messages — never " +
-          "shown on its own.",
-        screenshot: "assign-modal",
-      },
-      "dialog.assign.unit.sectionsLower": {
-        description:
-          "Lowercase plural of dialog.assign.scope.sections, used only as the " +
-          "{unit} value substituted into loading/empty/validation messages — never " +
-          "shown on its own.",
-        screenshot: "assign-modal",
-      },
-      "dialog.assign.unit.chapterLower": {
-        description:
-          "Lowercase singular of dialog.assign.scope.chapters, used only as the " +
-          "{unit} value in the 'select at least one {unit}' validation message.",
-        screenshot: "assign-modal",
-      },
-      "dialog.assign.unit.sectionLower": {
-        description:
-          "Lowercase singular of dialog.assign.scope.sections, used only as the " +
-          "{unit} value in the 'select at least one {unit}' validation message.",
         screenshot: "assign-modal",
       },
       "dialog.assign.laneLabel": {
@@ -178,33 +135,6 @@ export const dialog = defineNamespace({
           "whatever this namespace's 'Select all' toggle reads as in translation " +
           "(shared with common.clear for the toggled-off state).",
         screenshot: "assign-modal",
-      },
-      "dialog.assign.selectAll": {
-        description:
-          "Toggle button inside a file group's header in the 'books' scope picker; " +
-          "checks every file in that group. Swaps to common.clear once the whole " +
-          "group is already checked. Small inline link-style text, not a full button.",
-        screenshot: "assign-modal",
-      },
-      "dialog.assign.loadingUnit": {
-        description:
-          "Transient status text while the chapter/section list for the active file " +
-          "loads, shown beside a spinner.",
-        screenshot: "assign-modal",
-        placeholders: {
-          unit: "The lowercase plural unit noun — 'chapters' for scripture files, " +
-            "'sections' for everything else.",
-        },
-      },
-      "dialog.assign.noUnitFound": {
-        description:
-          "Empty-state message when the active file has no chapters/sections to pick " +
-          "from.",
-        screenshot: "assign-modal",
-        placeholders: {
-          unit: "The lowercase plural unit noun — 'chapters' for scripture files, " +
-            "'sections' for everything else.",
-        },
       },
       "dialog.assign.assigneeLabel": {
         description: "Form label above the assignee picker.",
@@ -288,16 +218,6 @@ export const dialog = defineNamespace({
           "but no file is currently open in the editor.",
         screenshot: "assign-modal",
       },
-      "dialog.assign.error.selectUnit": {
-        description:
-          "Inline validation error when the 'chapters' scope is chosen but no " +
-          "chapter/section is checked.",
-        screenshot: "assign-modal",
-        placeholders: {
-          unit: "The lowercase singular unit noun — 'chapter' for scripture files, " +
-            "'section' for everything else.",
-        },
-      },
       "dialog.assign.error.noRouteFile": {
         description:
           "Inline validation error in the rare case no file can be resolved to route " +
@@ -332,6 +252,41 @@ export const dialog = defineNamespace({
         placeholders: {
           succeeded: "Count of file assignments that succeeded, as a plain number.",
         },
+      },
+      "dialog.assign.loadingChapters": {
+        description:
+          "Transient status text while the chapter list for the active file loads, shown " +
+          "beside a spinner. Used when the file is a Bible text.",
+        screenshot: "assign-modal",
+      },
+      "dialog.assign.loadingSections": {
+        description:
+          "The same status as dialog.assign.loadingChapters, for a file that is not a Bible " +
+          "text and is divided into sections instead of chapters.",
+        screenshot: "assign-modal",
+      },
+      "dialog.assign.noChaptersFound": {
+        description:
+          "Empty-state message when the active Bible file has no chapters to pick from.",
+        screenshot: "assign-modal",
+      },
+      "dialog.assign.noSectionsFound": {
+        description:
+          "Empty-state message when the active non-scripture file has no sections to pick " +
+          "from.",
+        screenshot: "assign-modal",
+      },
+      "dialog.assign.error.selectChapter": {
+        description:
+          "Inline validation error when the chapters scope is chosen but no chapter is " +
+          "checked. Full sentence.",
+        screenshot: "assign-modal",
+      },
+      "dialog.assign.error.selectSection": {
+        description:
+          "The same validation error for a non-scripture file, where the unit is a section " +
+          "rather than a chapter.",
+        screenshot: "assign-modal",
       },
     },
   },

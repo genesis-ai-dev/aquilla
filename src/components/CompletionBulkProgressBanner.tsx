@@ -81,7 +81,7 @@ export function CompletionBulkProgressBanner() {
         </AppTooltip>
       )}
       {cancelled && (
-        <span className="text-muted-foreground">{t("editor.completion.cancelling")}</span>
+        <span className="text-muted-foreground">{t("common.cancelling")}</span>
       )}
     </div>
   )

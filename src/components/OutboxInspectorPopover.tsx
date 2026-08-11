@@ -479,7 +479,7 @@ export function OutboxInspectorPopover({ trigger, records, pendingCount, onRetry
                               <>
                                 <span aria-hidden>·</span>
                                 <span className="font-mono">
-                                  {t("nav.outbox.cellLabel", { id: shortId(rec.event.cellId) })}
+                                  {t("common.cellLabel", { id: shortId(rec.event.cellId) })}
                                 </span>
                               </>
                             )}

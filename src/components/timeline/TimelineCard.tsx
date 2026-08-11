@@ -41,6 +41,25 @@ const MIN_DUR_SEC = 0.2
 export const MIN_CARD_META_PX = 72
 const MIN_CARD_TEXT_PX = 40
 
+/**
+ * The colored stripe down a chip's left edge. A shared constant because the
+ * left resize grip has to start where it ENDS — see below.
+ */
+const ACCENT_BAR_PX = 3
+
+/**
+ * Below this a chip offers no resize grips.
+ *
+ * The arithmetic: each grip is an 8px target, and the left one starts after the
+ * accent bar, so the two together claim 3 + 8 + 8 = 19px. Under about 28px
+ * there is no body left between them to grab for a MOVE, and the grips
+ * themselves start to overlap — you would be aiming at a target smaller than
+ * the pointer. A chip this narrow is also a poor thing to resize by hand: at
+ * the widest zoom-out a single pixel is an eighth of a second. Move it, or zoom
+ * in to trim it.
+ */
+const MIN_CARD_GRIP_PX = 28
+
 type DragMode = "move" | "resize-l" | "resize-r"
 
 /** SUB-11: millisecond clock for the live drag readout — `formatVttTime`
@@ -167,6 +186,9 @@ export function TimelineCard({
   // the readout that matters.
   const showsText = width >= MIN_CARD_TEXT_PX || Boolean(drag)
   const showsMeta = width >= MIN_CARD_META_PX || Boolean(drag)
+  // Grips stay while a drag is live, or a resize would cancel itself the moment
+  // it dragged the chip below the threshold.
+  const showsGrips = canRetime && (width >= MIN_CARD_GRIP_PX || Boolean(drag))
 
   // SUB-11: live preview TIMES during drag; equal to the committed props idle.
   const previewStart = dragged?.startSec ?? startSec
@@ -289,11 +311,15 @@ export function TimelineCard({
       )}
       <span
         className={cn(
-          "absolute inset-y-0 left-0 w-[3px]",
+          "absolute inset-y-0 left-0",
           isDialogue ? "bg-sky-600" : "bg-zinc-400 dark:bg-zinc-600",
         )}
         // Follows the card's own corner or it pokes out of a sharpened one.
-        style={{ borderTopLeftRadius: `${radiusPx}px`, borderBottomLeftRadius: `${radiusPx}px` }}
+        style={{
+          width: `${ACCENT_BAR_PX}px`,
+          borderTopLeftRadius: `${radiusPx}px`,
+          borderBottomLeftRadius: `${radiusPx}px`,
+        }}
       />
       {onRemove && showsText && (
         // Same manners as the slot buttons: nothing at rest, faint on the
@@ -314,11 +340,16 @@ export function TimelineCard({
           <X className="h-3 w-3" />
         </button>
       )}
-      {canRetime && (
+      {showsGrips && (
         <span
           aria-hidden
           onPointerDown={(e) => beginDrag("resize-l", e)}
-          className="absolute inset-y-0 left-0 flex w-2 cursor-ew-resize items-center justify-center opacity-0 transition-opacity group-hover:opacity-100"
+          className="absolute inset-y-0 flex w-2 cursor-ew-resize items-center justify-center opacity-0 transition-opacity group-hover:opacity-100"
+          // Starts where the accent bar ENDS. At left-0 its line landed flush
+          // against the stripe, and the two read as one thick left edge — which
+          // is what made the handle look mis-set to the left next to a right
+          // grip that has clear space on both sides (Sam, 2026-08-11).
+          style={{ left: `${ACCENT_BAR_PX}px` }}
         >
           <span className="h-4 w-0.5 rounded bg-foreground/30" />
         </span>
@@ -348,7 +379,7 @@ export function TimelineCard({
         </span>
       </div>
       )}
-      {canRetime && (
+      {showsGrips && (
         <span
           aria-hidden
           onPointerDown={(e) => beginDrag("resize-r", e)}

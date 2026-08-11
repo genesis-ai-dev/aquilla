@@ -425,6 +425,46 @@ describe("TimelineCard", () => {
       expect(cls(20)).not.toContain("px-2.5")
     })
 
+    it("the left grip clears the accent stripe instead of sitting flush to it", () => {
+      // At left-0 the grip's line landed flush against the coloured stripe and
+      // the two read as one thick left edge — which made the handle look
+      // mis-set next to a right grip that has clear space on both sides
+      // (Sam, 2026-08-11). It now starts where the stripe ends.
+      atWidth(200)
+      const card = screen.getByTestId("tl-card-c1")
+      const grips = card.querySelectorAll("span.cursor-ew-resize")
+      expect(grips).toHaveLength(2)
+      const bar = card.querySelector("span.absolute.inset-y-0.left-0") as HTMLElement
+      expect((grips[0] as HTMLElement).style.left).toBe(bar.style.width)
+      expect(bar.style.width).toBe("3px")
+    })
+
+    it("stops offering grips on a chip too narrow to aim at", () => {
+      // 3px of stripe plus two 8px targets is 19px; under ~28px there is no
+      // body left between them to grab for a move, and they start to overlap.
+      const grips = (w: number) => {
+        const { unmount } = atWidth(w)
+        const n = screen.getByTestId("tl-card-c1").querySelectorAll("span.cursor-ew-resize").length
+        unmount()
+        return n
+      }
+      expect(grips(60)).toBe(2)
+      expect(grips(28)).toBe(2)
+      expect(grips(24)).toBe(0)
+      expect(grips(12)).toBe(0)
+    })
+
+    it("a resize in progress keeps its grips however narrow the chip gets", () => {
+      // Otherwise the gesture cancels itself the moment it crosses the floor.
+      atWidth(20)
+      const card = screen.getByTestId("tl-card-c1")
+      expect(card.querySelectorAll("span.cursor-ew-resize")).toHaveLength(0)
+      fireEvent.pointerDown(card, { clientX: 100, pointerId: 1 })
+      fireEvent.pointerMove(window, { clientX: 140 })
+      expect(card.querySelectorAll("span.cursor-ew-resize")).toHaveLength(2)
+      fireEvent.pointerUp(window, { clientX: 140 })
+    })
+
     it("a card being DRAGGED keeps its text however narrow it is", () => {
       // You are looking straight at it, and the live readout is the point.
       atWidth(20)

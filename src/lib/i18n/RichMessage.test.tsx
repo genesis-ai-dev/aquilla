@@ -61,6 +61,43 @@ describe("RichMessage", () => {
     expect(screen.getByText(/Switch language to/)).toBeInTheDocument()
   })
 
+  it("renders a count as a node while the number still selects the plural form", () => {
+    // The count is frequently the part that carries markup (a bold, tabular
+    // numeral in an otherwise muted line). Both of the number's jobs must
+    // survive: selecting the plural form, AND being drawn by the caller's
+    // element. Handing it to `t()` as a var did only the first — interpolation
+    // replaced `{count}` with bare digits, so the styled node was silently
+    // dropped even though the docblock promises `values` overrides `{count}`.
+    const { rerender } = render(
+      <I18nProvider>
+        <p data-testid="line">
+          <RichMessage
+            k="nav.outbox.summaryEdits"
+            count={3}
+            values={{ count: <b data-testid="n">3</b> }}
+          />
+        </p>
+      </I18nProvider>,
+    )
+    expect(screen.getByTestId("n").tagName).toBe("B")
+    expect(screen.getByTestId("line").textContent).toBe("3 edits")
+
+    rerender(
+      <I18nProvider>
+        <p data-testid="line">
+          <RichMessage
+            k="nav.outbox.summaryEdits"
+            count={1}
+            values={{ count: <b data-testid="n">1</b> }}
+          />
+        </p>
+      </I18nProvider>,
+    )
+    // Selection still sees the real number: a `count === 1` branch at the call
+    // site cannot serve Arabic's six categories, which is why `count` exists.
+    expect(screen.getByTestId("line").textContent).toBe("1 edit")
+  })
+
   it("interpolates scalar values as plain text in the same sentence", () => {
     render(
       <I18nProvider>

@@ -23,6 +23,26 @@ The branch is green **on its own base**, but that base has moved. Facts, so nobo
   the catalog key stays present and the lint only checks the catalog, not the call sites.
 - Nothing has been pushed. No PR opened.
 
+## Follow-ups created by the dev merge (not defects in this branch)
+
+- **`AUDIO_TIMING_MODE_LABELS` (`src/lib/parsers/types.ts`) stays English.** The timeline toolbar
+  now reads its copy from the catalog via a `MessageKey` map, but the constant's other two
+  consumers — `ProjectSettings.tsx` and dev's new `timeline/TimingModeChangedDialog.tsx` — still
+  render the raw English, so those two surfaces show "Original's timing" / "Free timing"
+  untranslated. Point them at `editor.timeline.timingMode*`.
+- **Dev's brand-new components are unlocalized**, and are outside this branch's partition:
+  `timeline/{TargetAudioLane,TimelineChipStrip,LinkVideoTimingDialog,TimingModeChangedDialog,TimingVideoWarningDialog}.tsx`
+  and `voice/CastGutterVoice.tsx`. They arrived on `dev` after the partition was computed. Fold
+  them into the `editor`/`audio` namespaces in the Phase 3 pass.
+- **`TakesStrip`'s `Take ${n}` is deliberately English forever.** It is persisted data
+  (`cell.audio.rename` label, shared between users, parsed back by `/^Take (\\d+)$/`).
+  Localizing it would write locale-specific names into the database and break that round-trip.
+  Only the display-only no-stored-name fallback is localized (`audio.takesStrip.takeFallback`).
+  Do not "fix" this later without changing the storage format first.
+- **Pre-existing i18n gaps left untouched** (bare literals on both sides of the merge, so not
+  regressions): `EditorTable`'s visible "Target" column header and its untimed-chip fallback, and
+  `TakesStrip`'s `throw new Error("Sign in to play audio")`.
+
 ## Open
 
 - **SWARM-TODO (orchestrator, after wave 2):** wire all 9 namespaces into

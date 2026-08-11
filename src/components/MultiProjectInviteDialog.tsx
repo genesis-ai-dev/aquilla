@@ -130,7 +130,7 @@ export function MultiProjectInviteDialog({
         const errors: Record<string, string> = {}
         const successes: Record<string, "ok"> = {}
         results.forEach((created, i) => {
-          const id = selectedIds[i]!
+          const id = selectedIds[i]
           if (created) {
             successes[id] = "ok"
           } else {
@@ -157,13 +157,13 @@ export function MultiProjectInviteDialog({
       // round-trip cost to be O(1) round-trips, not O(N).
       const results = await Promise.allSettled(
         selectedIds.map((projectId) =>
-          addProjectMember(session.jwt, projectId, target.username, selections[projectId]!)
+          addProjectMember(session.jwt, projectId, target.username, selections[projectId])
         )
       )
       const errors: Record<string, string> = {}
       const successes: Record<string, "ok"> = {}
       results.forEach((r, i) => {
-        const id = selectedIds[i]!
+        const id = selectedIds[i]
         if (r.status === "fulfilled") {
           successes[id] = "ok"
         } else {
@@ -345,7 +345,7 @@ export function MultiProjectInviteDialog({
                 {selectedIds.length > 1 && (
                   <>
                     {" "}— roles:{" "}
-                    {[...new Set(selectedIds.map((id) => selections[id]!))]
+                    {[...new Set(selectedIds.map((id) => selections[id]))]
                       .map((lvl) => roleDisplayText(roleName(lvl)))
                       .join(", ")}
                   </>

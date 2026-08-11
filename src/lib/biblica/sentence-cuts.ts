@@ -58,12 +58,12 @@ export function biblicaSentenceCutPoints(text: string): readonly number[] {
   let sliceStart = 0
 
   for (let index = 0; index < text.length; index += 1) {
-    if (!SENTENCE_TERMINATORS.has(text[index]!)) continue
+    if (!SENTENCE_TERMINATORS.has(text[index])) continue
 
     let cursor = index + 1
-    while (cursor < text.length && TRAILING_PUNCTUATION.has(text[cursor]!)) cursor += 1
+    while (cursor < text.length && TRAILING_PUNCTUATION.has(text[cursor])) cursor += 1
     const punctuationEnd = cursor
-    while (cursor < text.length && isWhitespace(text[cursor]!)) cursor += 1
+    while (cursor < text.length && isWhitespace(text[cursor])) cursor += 1
 
     // No space after the mark: a decimal, an ellipsis mid-word, a verse letter.
     if (cursor === punctuationEnd) continue
@@ -89,7 +89,7 @@ function isWhitespace(character: string): boolean {
 /** True when the text at `index` reads like the start of a new sentence. */
 function startsSentence(text: string, index: number): boolean {
   let cursor = index
-  while (cursor < text.length && LEADING_PUNCTUATION.has(text[cursor]!)) cursor += 1
+  while (cursor < text.length && LEADING_PUNCTUATION.has(text[cursor])) cursor += 1
   const character = text[cursor]
   return character !== undefined && (/\p{Lu}/u.test(character) || /\d/u.test(character))
 }
@@ -100,7 +100,7 @@ function startsSentence(text: string, index: number): boolean {
  */
 function periodEndsSentence(text: string, index: number): boolean {
   let start = index
-  while (start > 0 && !isWordBreak(text[start - 1]!)) start -= 1
+  while (start > 0 && !isWordBreak(text[start - 1])) start -= 1
   const word = text.slice(start, index)
   if (ABBREVIATIONS.has(`${word.toLowerCase()}.`)) return false
   // "A. B. Smith": a lone capital is an initial.

@@ -166,7 +166,7 @@ function repairEditableSlotCompletion(
       `span[data-idml-slot="${editableIndex}"]`,
     )
     if (matches.length === 1) {
-      translatedSlots.set(editableIndex, textWithLineBreaks(matches[0]!))
+      translatedSlots.set(editableIndex, textWithLineBreaks(matches[0]))
     }
   }
 

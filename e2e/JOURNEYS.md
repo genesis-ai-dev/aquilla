@@ -142,7 +142,7 @@
 | Projects    | Org home project name filter narrows list             | `e2e/specs/projects/org-home-project-filter.smoke.spec.ts`    |   ✅   |
 | Projects    | Org home status filter select (All/Stalled/Overdue/Needs attention) | `e2e/specs/projects/org-home-status-filter.smoke.spec.ts`     |   ✅   |
 | Projects    | Project settings user section (username/author)       | `e2e/specs/projects/project-settings-user-section.smoke.spec.ts` |   ✅   |
-| Projects    | Project settings AI instructions textarea             | `e2e/specs/projects/project-settings-ai-instructions.smoke.spec.ts` |   ✅   |
+| Projects    | Project settings system prompt (nested under AI)      | `e2e/specs/projects/project-settings-ai-instructions.smoke.spec.ts` |   ✅   |
 | Projects    | Project settings context controls section             | `e2e/specs/projects/project-settings-context-controls.smoke.spec.ts` |   ✅   |
 | Projects    | Project settings terminology link navigates           | `e2e/specs/projects/project-settings-terminology-link.smoke.spec.ts` |   ✅   |
 | Projects    | Project settings voice studio link navigates          | `e2e/specs/projects/project-settings-voice-studio-link.smoke.spec.ts` |   ✅   |

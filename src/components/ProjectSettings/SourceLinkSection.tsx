@@ -28,7 +28,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { SettingsGroup, SettingsRow } from "@/components/ui/page"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { FRONTIER_API_URL } from "@/lib/sync/sync-token"
 import { DcsUpstreamPanel } from "@/components/dcs/DcsUpstreamPanel"
@@ -107,85 +107,81 @@ export function SourceLinkSection({
           `dcsUpstream` cursor (i.e. it is a Door43 adapter project). Self-gated
           inside the panel: readCursor() ⇒ null renders nothing. */}
       <DcsUpstreamPanel projectId={projectId} roleLevel={roleLevel} />
-      <Card id="section-source-link">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Link2Off className="h-4 w-4 text-muted-foreground" />
-            Source link
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <div className="text-sm text-muted-foreground">
-            This project is linked to an upstream source project.
-            Source cells are read from the upstream; translators work on the
-            target side here.
-          </div>
-          <div className="flex items-center gap-2 rounded border px-3 py-2 text-sm">
-            <span className="font-medium text-foreground shrink-0">Upstream project ID:</span>
-            <code className="flex-1 truncate font-mono text-xs text-muted-foreground">
-              {sourceProjectId}
-            </code>
-          </div>
-          {/* AQU-478: mode/consumes/gate/cursor state, read-only — set at
-              link/creation time, not editable from here. */}
-          <div className="flex flex-wrap items-center gap-1.5 text-xs">
-            <Badge variant={sourceLinkMode === "clone" ? "secondary" : "default"}>
-              {sourceLinkMode === "clone" ? "Clone" : "Live"}
-            </Badge>
-            {sourceLinkConsumes === "target" && (
-              <Badge variant="outline">consumes translations</Badge>
-            )}
-            {sourceLinkConsumes !== "target" && (
-              <Badge variant="outline">consumes source</Badge>
-            )}
-            {sourceLinkConsumes === "target" && sourceLinkGate && (
-              <Badge variant="outline">
-                gate: {sourceLinkGate === "validated" ? "validated only" : "every commit"}
-              </Badge>
-            )}
-            {sourceLinkMode !== "clone" && (
-              <Badge variant="outline">cursor: {sourceLinkCursor ?? 0}</Badge>
-            )}
-          </div>
-          {sourceLinkMode === "clone" && (
-            <p className="text-xs text-muted-foreground">
-              This is a one-time snapshot — upstream changes do not propagate here.
-            </p>
-          )}
-          {canDetach ? (
-            <div className="flex items-start gap-3 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm dark:border-amber-800 dark:bg-amber-950">
-              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
-              <div className="space-y-1">
-                <p className="font-medium text-amber-900 dark:text-amber-100">
-                  Detaching is irreversible
-                </p>
-                <p className="text-amber-800 dark:text-amber-200">
-                  Detaching snapshots the current upstream source cells into
-                  this project and severs the live link. Stale-source markers
-                  will clear. This action cannot be undone.
-                </p>
-              </div>
+      <div id="section-source-link">
+        <SettingsGroup label="Source link">
+          <SettingsRow
+            label="Upstream project"
+            description="This project is linked to an upstream source. Source cells are read from the upstream; translators work on the target side here."
+            block
+          >
+            <div className="flex items-center gap-2 rounded border bg-background px-3 py-2 text-sm">
+              <span className="shrink-0 font-medium text-foreground">Upstream project ID:</span>
+              <code className="flex-1 truncate font-mono text-xs text-muted-foreground">
+                {sourceProjectId}
+              </code>
             </div>
-          ) : (
-            <p className="text-xs text-muted-foreground">
-              Project lead or above required to detach from source.
-            </p>
-          )}
-          <div className="flex justify-end">
-            <Button
-              variant="destructive"
-              disabled={!canDetach || !session}
-              onClick={() => {
-                setConfirmInput("")
-                setError(null)
-                setDialogOpen(true)
-              }}
-            >
-              Detach from source
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
+            {/* AQU-478: mode/consumes/gate/cursor state, read-only — set at
+                link/creation time, not editable from here. */}
+            <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs">
+              <Badge variant={sourceLinkMode === "clone" ? "secondary" : "default"}>
+                {sourceLinkMode === "clone" ? "Clone" : "Live"}
+              </Badge>
+              {sourceLinkConsumes === "target" && (
+                <Badge variant="outline">consumes translations</Badge>
+              )}
+              {sourceLinkConsumes !== "target" && (
+                <Badge variant="outline">consumes source</Badge>
+              )}
+              {sourceLinkConsumes === "target" && sourceLinkGate && (
+                <Badge variant="outline">
+                  gate: {sourceLinkGate === "validated" ? "validated only" : "every commit"}
+                </Badge>
+              )}
+              {sourceLinkMode !== "clone" && (
+                <Badge variant="outline">cursor: {sourceLinkCursor ?? 0}</Badge>
+              )}
+            </div>
+            {sourceLinkMode === "clone" && (
+              <p className="mt-2 text-xs text-muted-foreground">
+                This is a one-time snapshot — upstream changes do not propagate here.
+              </p>
+            )}
+          </SettingsRow>
+          <SettingsRow
+            label="Detach from source"
+            description={
+              canDetach
+                ? "Detaching snapshots the current upstream source cells into this project and severs the live link. Stale-source markers will clear. This action cannot be undone."
+                : "Project lead or above required to detach from source."
+            }
+            control={
+              <Button
+                variant="destructive"
+                disabled={!canDetach || !session}
+                onClick={() => {
+                  setConfirmInput("")
+                  setError(null)
+                  setDialogOpen(true)
+                }}
+              >
+                <Link2Off className="size-4" data-icon="inline-start" />
+                Detach from source
+              </Button>
+            }
+          />
+          {canDetach ? (
+            <div className="flex items-start gap-3 border-t px-4 py-3 text-sm">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+              <p className="text-amber-900 dark:text-amber-100">
+                <span className="font-medium">Detaching is irreversible. </span>
+                <span className="text-amber-800 dark:text-amber-200">
+                  Type DETACH in the confirmation dialog to proceed.
+                </span>
+              </p>
+            </div>
+          ) : null}
+        </SettingsGroup>
+      </div>
 
       <Dialog
         open={dialogOpen}

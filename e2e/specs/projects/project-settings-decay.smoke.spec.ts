@@ -5,12 +5,11 @@ import { jwtFor, seedProjectWithFile } from "../../helpers/seed-project"
  * ProjectSettings — Retrieval support (under Validation & health).
  *
  * DecaySettingsSection on `/settings/validation`:
- *   - <summary>Retrieval support</summary> (below Validation + Harmonization)
+ *   - SettingsGroup "Retrieval support" (below Validation + Harmonization)
  *   - Input id="decay-max-hops" (confidence propagation radius — replaced the
  *     retired endorsement-target field, AD-14 amendment 2026-06-04)
  *   - Input id="decay-warn" (attention threshold)
  *
- * Clicking the <summary> expands the section.
  * Changing a value marks the form dirty and shows "Save changes".
  */
 test("project settings retrieval support is under validation and marks form dirty", async ({ alice }) => {
@@ -22,6 +21,7 @@ test("project settings retrieval support is under validation and marks form dirt
   const retrievalSection = alice.locator("#section-decay")
   await expect(validationSection).toBeVisible({ timeout: 10_000 })
   await expect(retrievalSection).toBeVisible({ timeout: 10_000 })
+  await expect(retrievalSection.getByText(/Retrieval support/i)).toBeVisible()
 
   // Retrieval support must appear after Validation on this pane.
   const order = await alice.evaluate(() => {
@@ -33,10 +33,6 @@ test("project settings retrieval support is under validation and marks form dirt
       : "before"
   })
   expect(order).toBe("after")
-
-  const summary = alice.locator("summary").filter({ hasText: /Retrieval support/i })
-  await expect(summary).toBeVisible({ timeout: 10_000 })
-  await summary.click()
 
   const decayTarget = alice.locator("#decay-max-hops")
   await expect(decayTarget).toBeVisible({ timeout: 3_000 })

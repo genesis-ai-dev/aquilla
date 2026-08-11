@@ -14,7 +14,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { Link } from "react-router-dom"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { SettingsGroup, SettingsRow } from "@/components/ui/page"
 import {
   Dialog,
   DialogContent,
@@ -301,122 +301,125 @@ export function MondayIntegrationSection({ projectId, orgId, roleLevel }: Props)
 
   // ── Render ───────────────────────────────────────────────────────────────
   return (
-    <Card id="section-monday">
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          Monday.com
-          {link && (
-            <Badge variant={link.enabled ? "default" : "secondary"}>
-              {link.enabled ? "Sync on" : "Sync paused"}
-            </Badge>
-          )}
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {loading ? (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Spinner /> Loading Monday integration…
-          </div>
-        ) : !orgConnected ? (
-          <div className="space-y-2 text-sm text-muted-foreground">
-            <p>Your organization hasn't connected Monday.com yet.</p>
-            <p>
-              An org maintainer can connect it in{" "}
-              <Link to="/settings/monday" className="font-medium text-foreground underline underline-offset-4">
-                organization settings
-              </Link>
-              , or ask an org maintainer to set it up.
-            </p>
-          </div>
-        ) : link ? (
-          <MondayLinkedView
-            link={link}
-            structure={structure}
-            canManage={canManage}
-            toggling={toggling}
-            syncing={syncing}
-            syncNotice={syncNotice}
-            savingMapping={savingMapping}
-            analyzing={analyzing}
-            reconfigureMsg={reconfigureMsg}
-            onReconfigureMsg={setReconfigureMsg}
-            onToggleEnabled={handleToggleEnabled}
-            onSyncNow={handleSyncNow}
-            onSaveMapping={handleSaveMapping}
-            onReconfigure={() => void runAnalyze(link.boardId, reconfigureMsg.trim() || undefined, link.config)}
-            onUnlink={() => setUnlinkOpen(true)}
-            warnings={warnings}
-          />
-        ) : !canManage ? (
-          <p className="text-sm text-muted-foreground">
-            No Monday board is linked to this project. Maintainers can set one up here.
-          </p>
-        ) : (
-          <div className="space-y-3">
-            <p className="text-sm text-muted-foreground">
-              Link a Monday board to push this project's translation progress automatically.
-            </p>
-            <div className="flex items-center gap-2">
-              <Select
-                items={Object.fromEntries((boards ?? []).map((b) => [b.id, b.name]))}
-                value={selectedBoardId || null}
-                onValueChange={(value) => setSelectedBoardId((value as string) ?? "")}
-                disabled={boards === null}
-              >
-                <SelectTrigger aria-label="Monday board">
-                  <SelectValue placeholder={boards === null ? "Loading boards…" : "Pick a board"} />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    {(boards ?? []).map((b) => (
-                      <SelectItem key={b.id} value={b.id}>
-                        {b.name}
-                        {b.workspace?.name ? ` — ${b.workspace.name}` : ""}
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-              <span className="flex items-center gap-1 text-sm text-muted-foreground">
-                <SparkleButton
-                  disabled={!selectedBoardId}
-                  loading={analyzing}
-                  onComplete={() => void runAnalyze(selectedBoardId)}
-                  tooltip="Use AI to configure"
-                />
-                Use AI to configure
-              </span>
+    <div id="section-monday">
+      <SettingsGroup
+        label={
+          <span className="inline-flex items-center gap-2">
+            Monday.com
+            {link ? (
+              <Badge variant={link.enabled ? "default" : "secondary"}>
+                {link.enabled ? "Sync on" : "Sync paused"}
+              </Badge>
+            ) : null}
+          </span>
+        }
+      >
+        <SettingsRow label="Board sync" block>
+          {loading ? (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Spinner /> Loading Monday integration…
             </div>
-            {analyzing && (
-              <p className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Spinner /> Analyzing the board and this project…
+          ) : !orgConnected ? (
+            <div className="space-y-2 text-sm text-muted-foreground">
+              <p>Your organization hasn&apos;t connected Monday.com yet.</p>
+              <p>
+                An org maintainer can connect it in{" "}
+                <Link to="/settings/monday" className="font-medium text-foreground underline underline-offset-4">
+                  organization settings
+                </Link>
+                , or ask an org maintainer to set it up.
               </p>
-            )}
-          </div>
-        )}
-
-        {proposal && (
-          <div className="space-y-3 rounded-lg border p-4" data-testid="monday-proposal-review">
-            <p className="text-sm font-medium">AI proposal</p>
-            <p className="text-sm text-muted-foreground">{proposal.summary}</p>
-            <MondayMappingTable columns={proposal.proposal.columns} structure={structure} />
-            {proposal.proposal.notes && (
-              <p className="text-xs text-muted-foreground">{proposal.proposal.notes}</p>
-            )}
-            <div className="flex items-center gap-2">
-              <Button onClick={() => void applyProposal()} disabled={applying}>
-                {applying && <Spinner data-icon="inline-start" />}
-                Apply
-              </Button>
-              <Button variant="ghost" onClick={() => setProposal(null)} disabled={applying}>
-                Discard
-              </Button>
             </div>
-          </div>
-        )}
+          ) : link ? (
+            <MondayLinkedView
+              link={link}
+              structure={structure}
+              canManage={canManage}
+              toggling={toggling}
+              syncing={syncing}
+              syncNotice={syncNotice}
+              savingMapping={savingMapping}
+              analyzing={analyzing}
+              reconfigureMsg={reconfigureMsg}
+              onReconfigureMsg={setReconfigureMsg}
+              onToggleEnabled={handleToggleEnabled}
+              onSyncNow={handleSyncNow}
+              onSaveMapping={handleSaveMapping}
+              onReconfigure={() => void runAnalyze(link.boardId, reconfigureMsg.trim() || undefined, link.config)}
+              onUnlink={() => setUnlinkOpen(true)}
+              warnings={warnings}
+            />
+          ) : !canManage ? (
+            <p className="text-sm text-muted-foreground">
+              No Monday board is linked to this project. Maintainers can set one up here.
+            </p>
+          ) : (
+            <div className="space-y-3">
+              <p className="text-sm text-muted-foreground">
+                Link a Monday board to push this project&apos;s translation progress automatically.
+              </p>
+              <div className="flex items-center gap-2">
+                <Select
+                  items={Object.fromEntries((boards ?? []).map((b) => [b.id, b.name]))}
+                  value={selectedBoardId || null}
+                  onValueChange={(value) => setSelectedBoardId((value as string) ?? "")}
+                  disabled={boards === null}
+                >
+                  <SelectTrigger aria-label="Monday board" className="bg-background">
+                    <SelectValue placeholder={boards === null ? "Loading boards…" : "Pick a board"} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      {(boards ?? []).map((b) => (
+                        <SelectItem key={b.id} value={b.id}>
+                          {b.name}
+                          {b.workspace?.name ? ` — ${b.workspace.name}` : ""}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+                <span className="flex items-center gap-1 text-sm text-muted-foreground">
+                  <SparkleButton
+                    disabled={!selectedBoardId}
+                    loading={analyzing}
+                    onComplete={() => void runAnalyze(selectedBoardId)}
+                    tooltip="Use AI to configure"
+                  />
+                  Use AI to configure
+                </span>
+              </div>
+              {analyzing && (
+                <p className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Spinner /> Analyzing the board and this project…
+                </p>
+              )}
+            </div>
+          )}
 
-        {error && <p className="text-sm text-destructive">{error}</p>}
-      </CardContent>
+          {proposal && (
+            <div className="mt-3 space-y-3 rounded-lg border bg-background p-4" data-testid="monday-proposal-review">
+              <p className="text-sm font-medium">AI proposal</p>
+              <p className="text-sm text-muted-foreground">{proposal.summary}</p>
+              <MondayMappingTable columns={proposal.proposal.columns} structure={structure} />
+              {proposal.proposal.notes && (
+                <p className="text-xs text-muted-foreground">{proposal.proposal.notes}</p>
+              )}
+              <div className="flex items-center gap-2">
+                <Button onClick={() => void applyProposal()} disabled={applying}>
+                  {applying && <Spinner data-icon="inline-start" />}
+                  Apply
+                </Button>
+                <Button variant="ghost" onClick={() => setProposal(null)} disabled={applying}>
+                  Discard
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
+        </SettingsRow>
+      </SettingsGroup>
 
       <Dialog open={unlinkOpen} onOpenChange={setUnlinkOpen}>
         <DialogContent>
@@ -438,6 +441,6 @@ export function MondayIntegrationSection({ projectId, orgId, roleLevel }: Props)
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </Card>
+    </div>
   )
 }

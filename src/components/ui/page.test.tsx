@@ -23,6 +23,18 @@ describe("Page", () => {
     const well = container.firstElementChild?.firstElementChild
     expect(well).toHaveClass("py-18")
   })
+
+  it("reserves a stable scrollbar gutter so centered columns do not nudge", () => {
+    const { container } = render(
+      <Page>
+        <div>body</div>
+      </Page>,
+    )
+    expect(container.firstElementChild).toHaveClass(
+      "overflow-y-auto",
+      "scrollbar-gutter-stable",
+    )
+  })
 })
 
 describe("PageHeader", () => {

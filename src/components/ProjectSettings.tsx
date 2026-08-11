@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType }
 import { useParams, useNavigate, useSearchParams } from "react-router-dom"
 import { projectSettingsPath } from "@/lib/navigation/org-paths"
 import {
-  Check, CheckCircle, XCircle, ChevronDown, Sparkles, Save, HardDriveDownload,
+  Check, CheckCircle, XCircle, ChevronDown, Save, Sparkles,
   SlidersHorizontal, Link2, BarChart3, ShieldCheck, AudioLines, Plug, FlaskConical,
   Users,
 } from "lucide-react"
@@ -20,7 +20,7 @@ import {
 import { Checkbox } from "@/components/ui/checkbox"
 import { Switch } from "@/components/ui/switch"
 import { Input } from "@/components/ui/input"
-import { Field, FieldDescription, FieldLabel, OptionalMark } from "@/components/ui/field"
+import { OptionalMark } from "@/components/ui/field"
 import { Slider } from "@/components/ui/slider"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import {
@@ -33,7 +33,6 @@ import {
 } from "@/components/ui/select"
 import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   Dialog,
   DialogContent,
@@ -46,7 +45,7 @@ import { DisabledFieldTooltip } from "./ProjectSettings/DisabledFieldTooltip"
 import { AppShell } from "@/components/AppShell"
 import { OrgSidebar } from "@/components/org/OrgSidebar"
 import { OrgBreadcrumb } from "@/components/org/OrgBreadcrumb"
-import { Page, PageHeader } from "@/components/ui/page"
+import { Page, PageHeader, SettingsGroup, SettingsRow } from "@/components/ui/page"
 import { useProject } from "@/hooks/useProject"
 import { useProjectSettings } from "@/hooks/useProjectSettings"
 import { getProject, updateProject } from "@/lib/store/project-index"
@@ -874,7 +873,8 @@ export function ProjectSettings() {
     { id: "section-import", label: "Import", keywords: ["import", "usfm", "front matter", "book title", "book name", "introduction", "toc", "running header", "paratext", "door43"] },
     { id: "section-user", label: "User", keywords: ["username", "author"] },
     { id: "section-members", label: "Team members", keywords: ["members", "invite", "invite link", "link", "join", "share", "access", "role", "roster", "collaborator"] },
-    { id: "section-ai-instructions", label: "AI Instructions", keywords: ["system prompt", "ai", "llm", "instructions", "batch size", "completions batch", "validation batch", "batch validate"] },
+    { id: "section-ai-instructions", label: "AI Instructions", keywords: ["ai", "llm", "instructions", "batch size", "completions batch", "validation batch", "batch validate", "top_k", "examples", "context window", "assistant language", "few shot"] },
+    { id: "section-system-prompt", label: "System prompt", keywords: ["system prompt", "ai instructions", "prompt", "product", "tone", "style", "domain", "guidance"] },
     { id: "section-draft-context", label: "Draft Context", keywords: ["draft context", "preceding cells", "left context", "paragraph drafting", "context budget"] },
     { id: "section-advanced-llm", label: "Advanced LLM", keywords: ["provider", "endpoint", "api key", "model", "temperature", "max tokens", "health penalty", "frontier", "openai", "custom"] },
     { id: "section-voice", label: "Voice", keywords: ["tts", "voice studio", "audio", "gemini", "api key", "tts key"] },
@@ -912,10 +912,9 @@ export function ProjectSettings() {
 
   // AQU-501: sub-menu IA — group the flat section list into labeled panes so
   // picking a sub-section shows only that pane, matching the org Settings
-  // index → detail pattern (src/pages/Settings.tsx) instead of one long
-  // scroll. Pane identity lives in `/settings/:section`; search still
-  // filters within the active pane, and clears the pane to show cross-group
-  // matches (mirrors the old scroll-spy filter).
+  // index → detail pattern. Pane identity lives in `/settings/:section`.
+  // The settings index groups those panes into labeled NavLists (like org
+  // settings / Preferences) with short right-aligned hints.
   const SETTINGS_GROUPS: {
     id: string
     label: string
@@ -924,12 +923,19 @@ export function ProjectSettings() {
     sectionIds: string[]
     /** Roster / DataTable panes use Page `wide` (max-w-6xl); form panes stay default. */
     wide?: boolean
+    /** Hub group label on the settings index (NavList). */
+    hub: string
+    /** Omit from the settings index (still deep-linkable as a pane). */
+    hideFromIndex?: boolean
+    /** Parent group id when this is a nested detail pane (breadcrumb trail). */
+    parentId?: string
   }[] = [
     {
       id: "general",
       label: "General",
       description: "Name, languages, username, Bible resources",
       icon: SlidersHorizontal,
+      hub: "Project",
       sectionIds: ["section-project-info", "section-languages", "section-bible-resources", "section-import", "section-user"],
     },
     {
@@ -937,6 +943,7 @@ export function ProjectSettings() {
       label: "Members",
       description: "Who can access this project, invites, and roles",
       icon: Users,
+      hub: "Project",
       wide: true,
       sectionIds: ["section-members"],
     },
@@ -945,6 +952,7 @@ export function ProjectSettings() {
       label: "Source & sync",
       description: "Linked source project, upstream changes, git sync",
       icon: Link2,
+      hub: "Project",
       sectionIds: [
         "section-source-link",
         "section-upstream-changes",
@@ -957,16 +965,31 @@ export function ProjectSettings() {
       label: "AI & completion",
       description: "Instructions, draft context, provider, voice, terminology",
       icon: Sparkles,
+      hub: "AI & media",
+      // System prompt is a nested detail page (linked with a chevron from this
+      // pane); it is not listed again on the settings index.
       sectionIds: [
         "section-ai-instructions", "section-draft-context", "section-advanced-llm",
         "section-voice", "section-local-models", "section-terminology", "section-termbase-sharing",
       ],
     },
     {
+      id: "system-prompt",
+      label: "System prompt",
+      description: "How translations should read for this project — used on every AI completion",
+      icon: Sparkles,
+      hub: "AI & media",
+      /** Nested under AI & completion — only deep-linked / opened from that pane. */
+      hideFromIndex: true,
+      parentId: "ai",
+      sectionIds: ["section-system-prompt"],
+    },
+    {
       id: "validation",
       label: "Validation & health",
       description: "Approvals, harmonization, staleness decay",
       icon: ShieldCheck,
+      hub: "Quality",
       sectionIds: ["section-validation", "section-decay"],
     },
     {
@@ -974,6 +997,7 @@ export function ProjectSettings() {
       label: "Audio media",
       description: "How audio is fetched from storage",
       icon: AudioLines,
+      hub: "AI & media",
       sectionIds: ["section-audio-media"],
     },
     {
@@ -981,6 +1005,7 @@ export function ProjectSettings() {
       label: "AI metrics",
       description: "Post-edit distance and AI usage",
       icon: BarChart3,
+      hub: "AI & media",
       sectionIds: ["section-ai-metrics"],
     },
     {
@@ -988,6 +1013,7 @@ export function ProjectSettings() {
       label: "Integrations",
       description: "Monday.com board sync",
       icon: Plug,
+      hub: "Integrations",
       sectionIds: ["section-monday"],
     },
     {
@@ -995,14 +1021,20 @@ export function ProjectSettings() {
       label: "Experimental",
       description: "Early features, this device only",
       icon: FlaskConical,
+      hub: "Integrations",
       sectionIds: ["section-experimental"],
     },
   ]
+
+  const HUB_ORDER = ["Project", "AI & media", "Quality", "Integrations"] as const
 
   const visibleSectionIdSet = new Set(visibleSections.map((s) => s.id))
   const visibleGroups = SETTINGS_GROUPS
     .map((g) => ({ ...g, sectionIds: g.sectionIds.filter((id) => visibleSectionIdSet.has(id)) }))
     .filter((g) => g.sectionIds.length > 0)
+  // Index lists only hub-level entries; nested panes (e.g. system-prompt) are
+  // opened from a parent pane NavRow.
+  const indexGroups = visibleGroups.filter((g) => !g.hideFromIndex)
 
   // Navigation between the index and a pane uses `/settings/:section` —
   // deep-linkable and back-button friendly.
@@ -1036,6 +1068,7 @@ export function ProjectSettings() {
       "section-bible-resources",
       "section-user",
       "section-members",
+      "section-system-prompt",
       "section-ai-instructions",
       "section-draft-context",
       "section-advanced-llm",
@@ -1057,6 +1090,8 @@ export function ProjectSettings() {
       const group = visibleGroups.find((g) => g.sectionIds.includes(sectionId))
       if (!group || claimedGroups.has(group.id)) continue
       claimedGroups.add(group.id)
+      // Nested panes that are hidden from the index still show their own title
+      // (e.g. "System prompt") rather than the parent hub name in search.
       headers.set(sectionId, group.label)
     }
     return headers
@@ -1081,6 +1116,19 @@ export function ProjectSettings() {
   // Table panes (Members roster) need the wider content well; form panes stay
   // intentional/narrow. Search flattens across groups → keep default width.
   const pageSize = activeGroup?.wide && !lowerQuery ? "wide" : "default"
+
+  // Hints for index NavRows — short current-value summaries (org / Preferences pattern).
+  const groupHints: Record<string, string> = {
+    general: name.trim() || "Untitled",
+    members: "Roles & invites",
+    "source-sync": hasSourceLink ? "Linked" : hasGitOrigin ? "Git" : "None",
+    ai: provider === "frontier" ? "Frontier" : "Custom",
+    validation: validationRoleFloor.replace(/_/g, " "),
+    "audio-media": audioMediaStrategy,
+    metrics: "Post-edit",
+    integrations: "Monday.com",
+    experimental: "This device",
+  }
 
   const headerActions = (
     <div className="flex flex-wrap items-center justify-end gap-2">
@@ -1136,6 +1184,11 @@ export function ProjectSettings() {
   )
 
   const onSettingsPane = Boolean(activeGroup && !lowerQuery)
+  const showSearch = !onSettingsPane
+  const breadcrumbParent =
+    onSettingsPane && activeGroup?.parentId
+      ? visibleGroups.find((g) => g.id === activeGroup.parentId) ?? null
+      : null
   const breadcrumb = (
     <OrgBreadcrumb
       section={project?.name ?? "Project"}
@@ -1146,6 +1199,9 @@ export function ProjectSettings() {
         onSettingsPane
           ? { label: "Settings", to: projectSettingsPath(id!) }
           : { label: "Settings" },
+        ...(breadcrumbParent
+          ? [{ label: breadcrumbParent.label, to: projectSettingsPath(id!, breadcrumbParent.id) }]
+          : []),
         ...(onSettingsPane && activeGroup ? [{ label: activeGroup.label }] : []),
       ]}
     />
@@ -1182,23 +1238,31 @@ export function ProjectSettings() {
               className="mb-0"
             />
 
-            {/* Table panes already have their own search; skip the settings filter. */}
-            {!(activeGroup?.wide && !lowerQuery) && (
+            {/* Search lives on the index only (detail panes match org settings). */}
+            {showSearch && (
               <SettingsNav onSearch={setSearchQuery} searchQuery={searchQuery} />
             )}
 
             {showIndex && !lowerQuery ? (
-              <NavList>
-                {visibleGroups.map((g) => (
-                  <NavRow
-                    key={g.id}
-                    to={projectSettingsPath(id!, g.id)}
-                    icon={g.icon}
-                    title={g.label}
-                    description={g.description}
-                  />
-                ))}
-              </NavList>
+              <div className="flex flex-col gap-12">
+                {HUB_ORDER.map((hub) => {
+                  const rows = indexGroups.filter((g) => g.hub === hub)
+                  if (rows.length === 0) return null
+                  return (
+                    <NavList key={hub} label={hub}>
+                      {rows.map((g) => (
+                        <NavRow
+                          key={g.id}
+                          to={projectSettingsPath(id!, g.id)}
+                          icon={g.icon}
+                          title={g.label}
+                          hint={groupHints[g.id] ?? g.description}
+                        />
+                      ))}
+                    </NavList>
+                  )
+                })}
+              </div>
             ) : null}
 
             {showIndex && lowerQuery && sectionsToRender.length === 0 ? (
@@ -1259,65 +1323,76 @@ export function ProjectSettings() {
         )}
         {searchGroupLabel("section-project-info")}
         {sectionsToRender.some((s) => s.id === "section-project-info") && (
-          <Card id="section-project-info">
-            <CardHeader><CardTitle>Project Info</CardTitle></CardHeader>
-            <CardContent className="space-y-4">
-              <div>
-                <FieldLabel htmlFor="pname">Project Title</FieldLabel>
-                {/* AQU-765: a synced project's name lives in the server
-                    `projects.name` row (the source of truth for the org list,
-                    breadcrumbs, portfolio, and search). Renaming now PATCHes
-                    that row on save (maintainer+); local projects keep editing
-                    their IDB record directly. Below the maintainer floor the
-                    field is disabled with an honest reason (AQU-427), not left
-                    editable to write a silent local-only no-op. */}
-                <DisabledFieldTooltip
-                  disabled={!canRenameProject}
-                  tooltip={renameDisabledTooltip}
-                >
-                  <Input
-                    id="pname"
-                    value={name}
-                    onChange={(e) => {
-                      setName(e.target.value)
-                      if (nameError) setNameError(null)
-                    }}
-                    disabled={!canRenameProject || saving}
-                    aria-invalid={nameError ? true : undefined}
-                  />
-                </DisabledFieldTooltip>
-                {nameError ? (
-                  <p role="alert" className="mt-1 text-xs text-destructive">
-                    {nameError}
-                  </p>
-                ) : !canRenameProject ? (
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {renameDisabledTooltip}
-                  </p>
-                ) : null}
-              </div>
-              {sharedUpdatedBy && sharedUpdatedAt && sharedVersion != null && sharedVersion > 0 && (
-                <p className="text-xs text-muted-foreground">
-                  Last edited by {sharedUpdatedBy.username} ·{" "}
-                  {new Date(sharedUpdatedAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
+          <div id="section-project-info">
+            <SettingsGroup label="Project info">
+              <SettingsRow
+                label={<label htmlFor="pname">Project title</label>}
+                description={
+                  sharedUpdatedBy && sharedUpdatedAt && sharedVersion != null && sharedVersion > 0
+                    ? `Last edited by ${sharedUpdatedBy.username} · ${new Date(sharedUpdatedAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}`
+                    : "Shown across the workspace and project list."
+                }
+                control={
+                  <DisabledFieldTooltip
+                    disabled={!canRenameProject}
+                    tooltip={renameDisabledTooltip}
+                  >
+                    <Input
+                      id="pname"
+                      value={name}
+                      onChange={(e) => {
+                        setName(e.target.value)
+                        if (nameError) setNameError(null)
+                      }}
+                      disabled={!canRenameProject || saving}
+                      aria-invalid={nameError ? true : undefined}
+                      aria-label="Project title"
+                      className="w-56 bg-background"
+                    />
+                  </DisabledFieldTooltip>
+                }
+              />
+              {nameError ? (
+                <p role="alert" className="px-4 pb-2 text-xs text-destructive">
+                  {nameError}
                 </p>
-              )}
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <FieldLabel htmlFor="sl">Source Language</FieldLabel>
+              ) : !canRenameProject ? (
+                <p className="px-4 pb-2 text-xs text-muted-foreground">
+                  {renameDisabledTooltip}
+                </p>
+              ) : null}
+              <SettingsRow
+                label={<label htmlFor="sl">Source language</label>}
+                control={
                   <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip}>
-                    <Input id="sl" value={sourceLanguage} onChange={(e) => setSourceLanguage(e.target.value)} disabled={!canEditShared} />
+                    <Input
+                      id="sl"
+                      value={sourceLanguage}
+                      onChange={(e) => setSourceLanguage(e.target.value)}
+                      disabled={!canEditShared}
+                      aria-label="Source language"
+                      className="w-40 bg-background"
+                    />
                   </DisabledFieldTooltip>
-                </div>
-                <div>
-                  <FieldLabel htmlFor="tl">Target Language</FieldLabel>
+                }
+              />
+              <SettingsRow
+                label={<label htmlFor="tl">Target language</label>}
+                control={
                   <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip}>
-                    <Input id="tl" value={targetLanguage} onChange={(e) => setTargetLanguage(e.target.value)} disabled={!canEditShared} />
+                    <Input
+                      id="tl"
+                      value={targetLanguage}
+                      onChange={(e) => setTargetLanguage(e.target.value)}
+                      disabled={!canEditShared}
+                      aria-label="Target language"
+                      className="w-40 bg-background"
+                    />
                   </DisabledFieldTooltip>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+                }
+              />
+            </SettingsGroup>
+          </div>
         )}
 
         {searchGroupLabel("section-languages")}
@@ -1334,91 +1409,83 @@ export function ProjectSettings() {
 
         {searchGroupLabel("section-bible-resources")}
         {sectionsToRender.some((s) => s.id === "section-bible-resources") && (
-          <Card id="section-bible-resources">
-            <CardHeader>
-              <CardTitle>Bible resources</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip ?? null}>
-                <div className="flex items-start justify-between gap-4">
-                  <div className="space-y-0.5">
-                    <FieldLabel htmlFor="bible-resources-enabled" className="text-sm">
-                      Enable Bible resources
-                    </FieldLabel>
-                    <p className="text-xs text-muted-foreground">
-                      Scholarly reference data from bibletranslation.org in Search and the agent.
-                    </p>
-                    {/* AQU-460 derive-on-read: nothing is written just by viewing this
-                        page — the hint below only describes what's already true. */}
-                    {bibleResourcesEnabled === undefined && projectHasScriptureFiles(project?.files) && (
-                      <p className="text-xs text-muted-foreground">
-                        Available by default for scripture projects — turn off to disable.
-                      </p>
-                    )}
-                    {bibleResourcesEnabled === undefined && !projectHasScriptureFiles(project?.files) && (
-                      <p className="text-xs text-muted-foreground">
-                        Off by default for non-scripture projects — turn on to enable.
-                      </p>
-                    )}
-                    {bibleResourcesEnabled === false && (
-                      <p className="text-xs text-muted-foreground">
-                        Turned off for this project. This is always respected, even for scripture projects.
-                      </p>
-                    )}
-                  </div>
-                  <Switch
-                    id="bible-resources-enabled"
-                    checked={resolveBibleResourcesEnabled(bibleResourcesEnabled, projectHasScriptureFiles(project?.files))}
-                    onCheckedChange={(checked) => setBibleResourcesEnabled(checked)}
-                    disabled={!canEditShared}
-                  />
-                </div>
-              </DisabledFieldTooltip>
-            </CardContent>
-          </Card>
+          <div id="section-bible-resources">
+            <SettingsGroup label="Bible resources">
+              <SettingsRow
+                label={<label htmlFor="bible-resources-enabled">Enable Bible resources</label>}
+                description={
+                  <>
+                    Scholarly reference data from bibletranslation.org in Search and the agent.
+                    {bibleResourcesEnabled === undefined && projectHasScriptureFiles(project?.files) ? (
+                      <span className="mt-1 block">Available by default for scripture projects — turn off to disable.</span>
+                    ) : null}
+                    {bibleResourcesEnabled === undefined && !projectHasScriptureFiles(project?.files) ? (
+                      <span className="mt-1 block">Off by default for non-scripture projects — turn on to enable.</span>
+                    ) : null}
+                    {bibleResourcesEnabled === false ? (
+                      <span className="mt-1 block">Turned off for this project. This is always respected, even for scripture projects.</span>
+                    ) : null}
+                  </>
+                }
+                control={
+                  <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip ?? null}>
+                    <Switch
+                      id="bible-resources-enabled"
+                      checked={resolveBibleResourcesEnabled(bibleResourcesEnabled, projectHasScriptureFiles(project?.files))}
+                      onCheckedChange={(checked) => setBibleResourcesEnabled(checked)}
+                      disabled={!canEditShared}
+                      aria-label="Enable Bible resources"
+                    />
+                  </DisabledFieldTooltip>
+                }
+              />
+            </SettingsGroup>
+          </div>
         )}
 
         {searchGroupLabel("section-import")}
         {sectionsToRender.some((s) => s.id === "section-import") && (
-          <Card id="section-import">
-            <CardHeader>
-              <CardTitle>Import</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip ?? null}>
-                <div className="flex items-start justify-between gap-4">
-                  <div className="space-y-0.5">
-                    <FieldLabel htmlFor="import-exclude-front-matter" className="text-sm">
-                      Exclude USFM front matter
-                    </FieldLabel>
-                    <p className="text-xs text-muted-foreground">
-                      When on, USFM imports drop the book name, running header, TOC, main
-                      title, and introduction paragraphs. Section headings and Psalm titles
-                      still import. Off (the default) imports front matter as translatable cells.
-                    </p>
-                  </div>
-                  <Switch
-                    id="import-exclude-front-matter"
-                    checked={importExcludeFrontMatter}
-                    onCheckedChange={(checked) => setImportExcludeFrontMatter(checked)}
-                    disabled={!canEditShared}
-                  />
-                </div>
-              </DisabledFieldTooltip>
-            </CardContent>
-          </Card>
+          <div id="section-import">
+            <SettingsGroup label="Import">
+              <SettingsRow
+                label={<label htmlFor="import-exclude-front-matter">Exclude USFM front matter</label>}
+                description="When on, USFM imports drop the book name, running header, TOC, main title, and introduction paragraphs. Section headings and Psalm titles still import. Off (the default) imports front matter as translatable cells."
+                control={
+                  <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip ?? null}>
+                    <Switch
+                      id="import-exclude-front-matter"
+                      checked={importExcludeFrontMatter}
+                      onCheckedChange={(checked) => setImportExcludeFrontMatter(checked)}
+                      disabled={!canEditShared}
+                      aria-label="Exclude USFM front matter"
+                    />
+                  </DisabledFieldTooltip>
+                }
+              />
+            </SettingsGroup>
+          </div>
         )}
 
         {searchGroupLabel("section-user")}
         {sectionsToRender.some((s) => s.id === "section-user") && (
-          <Card id="section-user">
-            <CardHeader><CardTitle>User</CardTitle></CardHeader>
-            <CardContent>
-              <FieldLabel htmlFor="un">Username</FieldLabel>
-              <Input id="un" value={username} onChange={(e) => setUsername(e.target.value)} placeholder="local" />
-              <p className="mt-1 text-xs text-muted-foreground">Used as author name in translation history.</p>
-            </CardContent>
-          </Card>
+          <div id="section-user">
+            <SettingsGroup label="User">
+              <SettingsRow
+                label={<label htmlFor="un">Username</label>}
+                description="Used as author name in translation history."
+                control={
+                  <Input
+                    id="un"
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                    placeholder="local"
+                    aria-label="Username"
+                    className="w-40 bg-background"
+                  />
+                }
+              />
+            </SettingsGroup>
+          </div>
         )}
 
         {searchGroupLabel("section-members")}
@@ -1426,36 +1493,61 @@ export function ProjectSettings() {
           <MembersSection projectId={id} />
         )}
 
+        {searchGroupLabel("section-system-prompt")}
+        {sectionsToRender.some((s) => s.id === "section-system-prompt") && (
+          <div id="section-system-prompt">
+            <SettingsGroup>
+              <SettingsRow
+                label={<label htmlFor="sp">System prompt</label>}
+                description={
+                  <>
+                    Describe what this project is producing and how translations should read — the AI uses this on every
+                    completion. Use <code className="rounded bg-muted px-1">{"{sourceLanguage}"}</code> and{" "}
+                    <code className="rounded bg-muted px-1">{"{targetLanguage}"}</code> as placeholders.
+                  </>
+                }
+                block
+              >
+                <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip}>
+                  <Textarea
+                    id="sp"
+                    value={systemPrompt}
+                    onChange={(e) => setSystemPrompt(e.target.value)}
+                    rows={24}
+                    disabled={!canEditShared}
+                    className="min-h-[28rem] bg-background font-mono text-sm leading-relaxed"
+                    placeholder={DEFAULT_SYSTEM_PROMPT}
+                    aria-label="System prompt"
+                  />
+                </DisabledFieldTooltip>
+              </SettingsRow>
+            </SettingsGroup>
+          </div>
+        )}
+
         {searchGroupLabel("section-ai-instructions")}
         {sectionsToRender.some((s) => s.id === "section-ai-instructions") && (
-          <Card id="section-ai-instructions">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Sparkles className="h-4 w-4 text-primary" />
-                AI Instructions
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip}>
-                <Textarea
-                  id="sp"
-                  value={systemPrompt}
-                  onChange={(e) => setSystemPrompt(e.target.value)}
-                  rows={6}
-                  disabled={!canEditShared}
-                  className="font-mono"
-                  placeholder={DEFAULT_SYSTEM_PROMPT}
+          <div id="section-ai-instructions" className="flex flex-col gap-12">
+            {/* Nested detail: system prompt lives on its own page; open via chevron row. */}
+            {!lowerQuery && id ? (
+              <NavList>
+                <NavRow
+                  to={projectSettingsPath(id, "system-prompt")}
+                  title="System prompt"
+                  description="What this project is producing and how translations should read"
+                  hint={
+                    systemPrompt.trim() && systemPrompt !== DEFAULT_SYSTEM_PROMPT
+                      ? "Custom"
+                      : "Default"
+                  }
                 />
-              </DisabledFieldTooltip>
-              <p className="text-xs text-muted-foreground">
-                Describe what this project is producing and how translations should read — the AI uses this on every
-                completion. Use <code className="rounded bg-muted px-1">{"{sourceLanguage}"}</code> and{" "}
-                <code className="rounded bg-muted px-1">{"{targetLanguage}"}</code> as placeholders.
-              </p>
-
-              <div className="grid grid-cols-1 gap-4 pt-2 sm:grid-cols-2">
-                <div className="space-y-1">
-                  <FieldLabel htmlFor="top-k">Examples retrieved (top_k)</FieldLabel>
+              </NavList>
+            ) : null}
+            <SettingsGroup label="AI instructions">
+              <SettingsRow
+                label={<label htmlFor="top-k">Examples retrieved (top_k)</label>}
+                description="How many reference examples the AI retrieves per translation (1–20). Default: 5."
+                control={
                   <Input
                     id="top-k"
                     type="number"
@@ -1463,16 +1555,15 @@ export function ProjectSettings() {
                     max={20}
                     value={topK}
                     onChange={(e) => setTopK(Math.max(1, Math.min(20, Number(e.target.value))))}
+                    aria-label="Examples retrieved (top_k)"
+                    className="w-24 bg-background"
                   />
-                  <p className="text-xs text-muted-foreground">
-                    How many reference examples the AI retrieves per translation (1–20). Default: 5.
-                  </p>
-                </div>
-
-                {/* AQU-586: configurable batch sizes for the Run AI completions
-                    and Batch validate workspace actions. */}
-                <div className="space-y-1">
-                  <FieldLabel htmlFor="completion-batch-size">AI completions batch size</FieldLabel>
+                }
+              />
+              <SettingsRow
+                label={<label htmlFor="completion-batch-size">AI completions batch size</label>}
+                description={`How many untranslated cells one "Run AI completions" package drafts (1–50). Run again to advance further. Default: ${MAX_BATCH_COMPLETIONS}.`}
+                control={
                   <Input
                     id="completion-batch-size"
                     type="number"
@@ -1482,16 +1573,21 @@ export function ProjectSettings() {
                     onChange={(e) =>
                       setCompletionBatchSize(Math.max(1, Math.min(50, Number(e.target.value) || 1)))
                     }
-                    className="w-24"
+                    aria-label="AI completions batch size"
+                    className="w-24 bg-background"
                   />
-                  <p className="text-xs text-muted-foreground">
-                    How many untranslated cells one "Run AI completions" package drafts (1–50).
-                    Run again to advance further. Default: {MAX_BATCH_COMPLETIONS}.
-                  </p>
-                </div>
-
-                <div className="space-y-1">
-                  <FieldLabel htmlFor="validation-batch-size">Batch validation size</FieldLabel>
+                }
+              />
+              <SettingsRow
+                label={<label htmlFor="validation-batch-size">Batch validation size</label>}
+                description={
+                  <>
+                    How many eligible cells one &quot;Batch validate&quot; run approves (0–500).{" "}
+                    <strong>0 validates all eligible cells</strong> (default); set a cap to
+                    validate in bounded batches.
+                  </>
+                }
+                control={
                   <Input
                     id="validation-batch-size"
                     type="number"
@@ -1501,17 +1597,15 @@ export function ProjectSettings() {
                     onChange={(e) =>
                       setValidationBatchSize(Math.max(0, Math.min(500, Number(e.target.value) || 0)))
                     }
-                    className="w-24"
+                    aria-label="Batch validation size"
+                    className="w-24 bg-background"
                   />
-                  <p className="text-xs text-muted-foreground">
-                    How many eligible cells one "Batch validate" run approves (0–500).
-                    <strong> 0 validates all eligible cells</strong> (default); set a cap to
-                    validate in bounded batches.
-                  </p>
-                </div>
-
-                <div className="space-y-1">
-                  <FieldLabel htmlFor="context-size">Context window</FieldLabel>
+                }
+              />
+              <SettingsRow
+                label={<label htmlFor="context-size">Context window</label>}
+                description="Controls how much surrounding passage context is included."
+                control={
                   <Select
                     items={{
                       small: "Small — tight window",
@@ -1521,7 +1615,7 @@ export function ProjectSettings() {
                     value={contextSize}
                     onValueChange={(value) => setContextSize(value as ContextSize)}
                   >
-                    <SelectTrigger id="context-size">
+                    <SelectTrigger id="context-size" aria-label="Context window" className="w-56 bg-background">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -1532,41 +1626,38 @@ export function ProjectSettings() {
                       </SelectGroup>
                     </SelectContent>
                   </Select>
-                  <p className="text-xs text-muted-foreground">
-                    Controls how much surrounding passage context is included.
-                  </p>
-                </div>
-
-                <div className="space-y-1">
-                  <FieldLabel htmlFor="main-chat-language">Assistant language</FieldLabel>
+                }
+              />
+              <SettingsRow
+                label={<label htmlFor="main-chat-language">Assistant language</label>}
+                description="Language the AI assistant uses in chat responses. Independent of the UI locale."
+                control={
                   <Input
                     id="main-chat-language"
                     value={mainChatLanguage}
                     onChange={(e) => setMainChatLanguage(e.target.value)}
                     placeholder="e.g. English, Français, Español…"
+                    aria-label="Assistant language"
+                    className="w-56 bg-background"
                   />
-                  <p className="text-xs text-muted-foreground">
-                    Language the AI assistant uses in chat responses. Independent of the UI locale.
-                  </p>
-                </div>
-
-                <div className="flex items-start gap-3 pt-1">
+                }
+              />
+              <SettingsRow
+                label={<label htmlFor="validated-only">Approved examples only</label>}
+                description="Drafting always retrieves human-validated project translations. Raw machine drafts never enter the trusted example pool."
+                control={
                   <Checkbox
                     id="validated-only"
-                    className="mt-1"
                     checked
                     disabled
+                    aria-label="Approved examples only"
                   />
-                  <div>
-                    <FieldLabel htmlFor="validated-only">Approved examples only</FieldLabel>
-                    <p className="mt-0.5 text-xs text-muted-foreground">
-                      Drafting always retrieves human-validated project translations. Raw machine drafts never enter the trusted example pool.
-                    </p>
-                  </div>
-                </div>
-
-                <div className="space-y-1">
-                  <FieldLabel htmlFor="few-shot-example-format">Reference example format</FieldLabel>
+                }
+              />
+              <SettingsRow
+                label={<label htmlFor="few-shot-example-format">Reference example format</label>}
+                description='"Target only" shows only the target text of each example, useful when source alignment is unavailable or undesirable. The model is told these are reference translations to imitate.'
+                control={
                   <Select
                     items={{
                       "source-and-target": "Source + target (default)",
@@ -1575,7 +1666,7 @@ export function ProjectSettings() {
                     value={fewShotExampleFormat}
                     onValueChange={(value) => setFewShotExampleFormat(value as "source-and-target" | "target-only")}
                   >
-                    <SelectTrigger id="few-shot-example-format">
+                    <SelectTrigger id="few-shot-example-format" aria-label="Reference example format" className="w-56 bg-background">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -1585,61 +1676,54 @@ export function ProjectSettings() {
                       </SelectGroup>
                     </SelectContent>
                   </Select>
-                  <p className="text-xs text-muted-foreground">
-                    "Target only" shows only the target text of each example, useful when source alignment is unavailable or undesirable. The model is told these are reference translations to imitate.
-                  </p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+                }
+              />
+            </SettingsGroup>
+          </div>
         )}
 
         {searchGroupLabel("section-draft-context")}
         {sectionsToRender.some((s) => s.id === "section-draft-context") && (
-          <Card id="section-draft-context">
-            <CardHeader>
-              <CardTitle>Draft Context</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="space-y-1">
-                <FieldLabel htmlFor="preceding-target-cells">Preceding committed-target cells</FieldLabel>
-                <Input
-                  id="preceding-target-cells"
-                  type="number"
-                  min={0}
-                  max={10}
-                  value={precedingTargetCells}
-                  onChange={(e) =>
-                    setPrecedingTargetCells(
-                      Math.max(0, Math.min(10, Number(e.target.value))),
-                    )
-                  }
-                  className="w-24"
-                />
-                <p className="text-xs text-muted-foreground">
-                  How many immediately preceding committed target cells to include as discourse
-                  left-context when drafting. 0 disables preceding-context. Default:{" "}
-                  {DEFAULT_DRAFT_CONTEXT.precedingTargetCells}.
-                </p>
-              </div>
-            </CardContent>
-          </Card>
+          <div id="section-draft-context">
+            <SettingsGroup label="Draft context">
+              <SettingsRow
+                label={<label htmlFor="preceding-target-cells">Preceding committed-target cells</label>}
+                description={`How many immediately preceding committed target cells to include as discourse left-context when drafting. 0 disables preceding-context. Default: ${DEFAULT_DRAFT_CONTEXT.precedingTargetCells}.`}
+                control={
+                  <Input
+                    id="preceding-target-cells"
+                    type="number"
+                    min={0}
+                    max={10}
+                    value={precedingTargetCells}
+                    onChange={(e) =>
+                      setPrecedingTargetCells(
+                        Math.max(0, Math.min(10, Number(e.target.value))),
+                      )
+                    }
+                    aria-label="Preceding committed-target cells"
+                    className="w-24 bg-background"
+                  />
+                }
+              />
+            </SettingsGroup>
+          </div>
         )}
 
         {searchGroupLabel("section-advanced-llm")}
         {sectionsToRender.some((s) => s.id === "section-advanced-llm") && (
-          <details id="section-advanced-llm" className="group rounded-lg border bg-card">
-            <summary className="select-none list-none px-6 py-4 text-sm font-medium marker:hidden">
-              <span className="flex items-center justify-between">
-                <span>Advanced LLM settings</span>
-                <span className="text-xs text-muted-foreground">
-                  {provider === "frontier" ? "Frontier (default)" : `Custom: ${endpoint || "not set"}`}
+          <div id="section-advanced-llm">
+            <SettingsGroup
+              label={
+                <span className="inline-flex w-full items-center justify-between gap-4 pr-4">
+                  <span>Advanced LLM settings</span>
+                  <span className="text-xs font-normal text-muted-foreground">
+                    {provider === "frontier" ? "Frontier (default)" : `Custom: ${endpoint || "not set"}`}
+                  </span>
                 </span>
-              </span>
-            </summary>
-            <div className="space-y-4 border-t px-6 py-4">
-              <div className="space-y-2">
-                <FieldLabel>Provider</FieldLabel>
+              }
+            >
+              <SettingsRow label="Provider" block>
                 <RadioGroup
                   name="provider"
                   value={provider}
@@ -1661,31 +1745,41 @@ export function ProjectSettings() {
                     </span>
                   </label>
                 </RadioGroup>
-              </div>
+              </SettingsRow>
 
               {provider === "custom" && (
                 <>
-                  <div>
-                    <FieldLabel htmlFor="preset">Provider preset</FieldLabel>
-                    <Select
-                      items={CUSTOM_PRESETS.map((p) => ({ value: p.id, label: p.label }))}
-                      value={presetId}
-                      onValueChange={(value) => handlePresetChange(value ?? "")}
-                    >
-                      <SelectTrigger id="preset">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectGroup>
-                          {CUSTOM_PRESETS.map((p) => (
-                            <SelectItem key={p.id} value={p.id}>{p.label}</SelectItem>
-                          ))}
-                        </SelectGroup>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div>
-                    <FieldLabel htmlFor="ep">Endpoint URL</FieldLabel>
+                  <SettingsRow
+                    label={<label htmlFor="preset">Provider preset</label>}
+                    control={
+                      <Select
+                        items={CUSTOM_PRESETS.map((p) => ({ value: p.id, label: p.label }))}
+                        value={presetId}
+                        onValueChange={(value) => handlePresetChange(value ?? "")}
+                      >
+                        <SelectTrigger id="preset" aria-label="Provider preset" className="w-56 bg-background">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectGroup>
+                            {CUSTOM_PRESETS.map((p) => (
+                              <SelectItem key={p.id} value={p.id}>{p.label}</SelectItem>
+                            ))}
+                          </SelectGroup>
+                        </SelectContent>
+                      </Select>
+                    }
+                  />
+                  <SettingsRow
+                    label={<label htmlFor="ep">Endpoint URL</label>}
+                    description={
+                      <>
+                        Base URL. Trailing <code className="rounded bg-muted px-1">/v1</code> or{" "}
+                        <code className="rounded bg-muted px-1">/chat/completions</code> is accepted.
+                      </>
+                    }
+                    block
+                  >
                     <div className="flex gap-2">
                       <Input
                         id="ep"
@@ -1699,20 +1793,17 @@ export function ProjectSettings() {
                           lastModelFetchKeyRef.current = null
                         }}
                         placeholder="http://localhost:8000"
-                        className="flex-1"
+                        className="flex-1 bg-background"
+                        aria-label="Endpoint URL"
                       />
                       <Button onClick={handleConnect} disabled={connecting}>
                         {connecting ? <Spinner /> : "Connect"}
                       </Button>
                     </div>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      Base URL. Trailing <code className="rounded bg-muted px-1">/v1</code> or
-                      {" "}<code className="rounded bg-muted px-1">/chat/completions</code> is accepted.
-                    </p>
                     {connected && <p className="mt-1 flex items-center gap-1 text-xs text-green-600"><CheckCircle className="h-3 w-3" /> Connected — {models.length} model(s)</p>}
                     {connectionError && <p className="mt-1 flex items-center gap-1 text-xs text-destructive"><XCircle className="h-3 w-3" /> {connectionError}</p>}
-                  </div>
-                  <ApiKeyField
+                  </SettingsRow>
+                  <SettingsRow
                     label={
                       preset.requiresKey ? (
                         "API key *"
@@ -1722,163 +1813,196 @@ export function ProjectSettings() {
                         </>
                       )
                     }
-                    placeholder={preset.keyHint ?? (preset.requiresKey ? "Paste your API key" : "Leave blank for no auth")}
-                    projectKey={apiKey}
-                    userKey={completionUserKey}
-                    onProjectKeyChange={setApiKey}
-                    onUserKeyChange={(v) => setUserApiKey("completion", v)}
-                    help="Sent as Authorization: Bearer <key>. Stored locally in your browser; never uploaded to Frontier."
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Stays on this device — not shared with collaborators.
-                  </p>
+                    description="Stays on this device — not shared with collaborators."
+                    block
+                  >
+                    <ApiKeyField
+                      label={
+                        preset.requiresKey ? (
+                          "API key *"
+                        ) : (
+                          <>
+                            API key <OptionalMark />
+                          </>
+                        )
+                      }
+                      placeholder={preset.keyHint ?? (preset.requiresKey ? "Paste your API key" : "Leave blank for no auth")}
+                      projectKey={apiKey}
+                      userKey={completionUserKey}
+                      onProjectKeyChange={setApiKey}
+                      onUserKeyChange={(v) => setUserApiKey("completion", v)}
+                      help="Sent as Authorization: Bearer <key>. Stored locally in your browser; never uploaded to Frontier."
+                    />
+                  </SettingsRow>
                   {models.length > 0 && (
-                    <div>
-                      <FieldLabel htmlFor="mdl">Model</FieldLabel>
-                      <Select value={model} onValueChange={(value) => setModel(value ?? "")}>
-                        <SelectTrigger id="mdl">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectGroup>
-                            {models.map((m) => <SelectItem key={m} value={m}>{m}</SelectItem>)}
-                          </SelectGroup>
-                        </SelectContent>
-                      </Select>
-                    </div>
+                    <SettingsRow
+                      label={<label htmlFor="mdl">Model</label>}
+                      control={
+                        <Select value={model} onValueChange={(value) => setModel(value ?? "")}>
+                          <SelectTrigger id="mdl" aria-label="Model" className="w-56 bg-background">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectGroup>
+                              {models.map((m) => <SelectItem key={m} value={m}>{m}</SelectItem>)}
+                            </SelectGroup>
+                          </SelectContent>
+                        </Select>
+                      }
+                    />
                   )}
                   {models.length === 0 && (
-                    <div>
-                      <FieldLabel htmlFor="mdl-manual">Model (if not listed)</FieldLabel>
-                      <Input
-                        id="mdl-manual"
-                        value={model}
-                        onChange={(e) => setModel(e.target.value)}
-                        placeholder={presetId === "openrouter" ? "anthropic/claude-3.5-sonnet" : "Type a model id"}
-                      />
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        Click Connect to discover models, or type one manually (required for providers that don't expose <code className="rounded bg-muted px-1">/models</code>).
-                      </p>
-                    </div>
+                    <SettingsRow
+                      label={<label htmlFor="mdl-manual">Model (if not listed)</label>}
+                      description={
+                        <>
+                          Click Connect to discover models, or type one manually (required for providers that don&apos;t expose <code className="rounded bg-muted px-1">/models</code>).
+                        </>
+                      }
+                      control={
+                        <Input
+                          id="mdl-manual"
+                          value={model}
+                          onChange={(e) => setModel(e.target.value)}
+                          placeholder={presetId === "openrouter" ? "anthropic/claude-3.5-sonnet" : "Type a model id"}
+                          aria-label="Model (if not listed)"
+                          className="w-56 bg-background"
+                        />
+                      }
+                    />
                   )}
                 </>
               )}
 
               {provider === "frontier" && (
-                <div>
-                  <FieldLabel htmlFor="mdl-frontier">
-                    Model override <OptionalMark />
-                  </FieldLabel>
-                  <Input
-                    id="mdl-frontier"
-                    value={model}
-                    onChange={(e) => setModel(e.target.value)}
-                    placeholder="Leave blank for Frontier's default"
-                  />
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Optionally specify an OpenRouter model (e.g. <code className="rounded bg-muted px-1">anthropic/claude-3.5-sonnet</code>).
-                  </p>
-                </div>
+                <SettingsRow
+                  label={
+                    <label htmlFor="mdl-frontier">
+                      Model override <OptionalMark />
+                    </label>
+                  }
+                  description={
+                    <>
+                      Optionally specify an OpenRouter model (e.g. <code className="rounded bg-muted px-1">anthropic/claude-3.5-sonnet</code>).
+                    </>
+                  }
+                  control={
+                    <Input
+                      id="mdl-frontier"
+                      value={model}
+                      onChange={(e) => setModel(e.target.value)}
+                      placeholder="Leave blank for Frontier's default"
+                      aria-label="Model override"
+                      className="w-56 bg-background"
+                    />
+                  }
+                />
               )}
 
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <FieldLabel htmlFor="mt">Max Tokens</FieldLabel>
-                  <Input id="mt" type="number" value={maxTokens} onChange={(e) => setMaxTokens(Number(e.target.value))} />
-                </div>
-                <Field>
-                  <FieldLabel>Temperature ({temperature})</FieldLabel>
-                  <Slider
-                    min={0}
-                    max={1}
-                    step={0.05}
-                    value={[temperature]}
-                    onValueChange={(next) => setTemperature(Array.isArray(next) ? next[0] : next)}
+              <SettingsRow
+                label={<label htmlFor="mt">Max tokens</label>}
+                control={
+                  <Input
+                    id="mt"
+                    type="number"
+                    value={maxTokens}
+                    onChange={(e) => setMaxTokens(Number(e.target.value))}
+                    aria-label="Max tokens"
+                    className="w-24 bg-background"
                   />
-                </Field>
-              </div>
-
-              <Field>
-                <FieldLabel>LLM Health Penalty ({Math.round(llmHealthPenalty * 100)}%)</FieldLabel>
-                <Slider
-                  min={0}
-                  max={0.5}
-                  step={0.05}
-                  value={[llmHealthPenalty]}
-                  onValueChange={(next) => setLlmHealthPenalty(Array.isArray(next) ? next[0] : next)}
-                />
-                <FieldDescription>
-                  LLM translations are penalized by this amount in health calculations. 0% = full trust, 50% = heavy penalty. Default: 10%.
-                </FieldDescription>
-              </Field>
-            </div>
-          </details>
+                }
+              />
+              <SettingsRow
+                label={`Temperature (${temperature})`}
+                control={
+                  <div className="w-40">
+                    <Slider
+                      min={0}
+                      max={1}
+                      step={0.05}
+                      value={[temperature]}
+                      onValueChange={(next) => setTemperature(Array.isArray(next) ? next[0] : next)}
+                    />
+                  </div>
+                }
+              />
+              <SettingsRow
+                label={`LLM health penalty (${Math.round(llmHealthPenalty * 100)}%)`}
+                description="LLM translations are penalized by this amount in health calculations. 0% = full trust, 50% = heavy penalty. Default: 10%."
+                control={
+                  <div className="w-40">
+                    <Slider
+                      min={0}
+                      max={0.5}
+                      step={0.05}
+                      value={[llmHealthPenalty]}
+                      onValueChange={(next) => setLlmHealthPenalty(Array.isArray(next) ? next[0] : next)}
+                    />
+                  </div>
+                }
+              />
+            </SettingsGroup>
+          </div>
         )}
 
         {searchGroupLabel("section-voice")}
         {sectionsToRender.some((s) => s.id === "section-voice") && (
-          <Card id="section-voice">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Sparkles className="h-4 w-4 text-primary" /> Voice
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <ApiKeyField
-                label="Gemini API key"
-                placeholder="AIza..."
-                projectKey={geminiApiKey}
-                userKey={geminiUserKey}
-                onProjectKeyChange={setGeminiApiKey}
-                onUserKeyChange={(v) => setUserApiKey("gemini-tts", v)}
-                help="Used for Gemini-powered text-to-speech. Get a key at aistudio.google.com/apikey. Sent directly to Google; never uploaded to Frontier."
+          <div id="section-voice">
+            <SettingsGroup label="Voice">
+              <SettingsRow
+                label="Gemini TTS"
+                description="Used for Gemini-powered text-to-speech. Get a key at aistudio.google.com/apikey. Sent directly to Google; never uploaded to Frontier."
+                block
+              >
+                <ApiKeyField
+                  label="Gemini API key"
+                  placeholder="AIza..."
+                  projectKey={geminiApiKey}
+                  userKey={geminiUserKey}
+                  onProjectKeyChange={setGeminiApiKey}
+                  onUserKeyChange={(v) => setUserApiKey("gemini-tts", v)}
+                  help="Used for Gemini-powered text-to-speech. Get a key at aistudio.google.com/apikey. Sent directly to Google; never uploaded to Frontier."
+                />
+              </SettingsRow>
+              <SettingsRow
+                label="Voice Studio"
+                description="Voice library and cast assignments live in the Voice Studio."
+                control={
+                  <Button variant="outline" onClick={() => {
+                    try { window.localStorage.setItem(`codex:editorLens:${id}`, "audio") } catch { /* ignore */ }
+                    requestNavigate(`/project/${id}/editor`)
+                  }}>
+                    Open Voice Studio
+                  </Button>
+                }
               />
-              <div className="flex items-center justify-between gap-4 pt-1">
-                <p className="text-sm text-muted-foreground">
-                  Voice library and cast assignments live in the Voice Studio.
-                </p>
-                <Button variant="outline" onClick={() => {
-                  // Set the Audio lens preference before navigating so the workspace opens in audio mode.
-                  try { window.localStorage.setItem(`codex:editorLens:${id}`, "audio") } catch { /* ignore */ }
-                  requestNavigate(`/project/${id}/editor`)
-                }} className="shrink-0">
-                  Open Voice Studio
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
+            </SettingsGroup>
+          </div>
         )}
 
         {searchGroupLabel("section-local-models")}
         {sectionsToRender.some((s) => s.id === "section-local-models") && (
-          <Card id="section-local-models">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <HardDriveDownload className="h-4 w-4 text-primary" /> Local AI models
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="flex items-center justify-between gap-4">
-                <p className="text-sm text-muted-foreground">
-                  Whisper transcription and the local voices run in your browser and
-                  are shared across every project on this device. Manage downloads in
-                  your personal preferences.
-                </p>
-                <Button
-                  variant="outline"
-                  onClick={() => requestNavigate("/preferences")}
-                  className="shrink-0"
-                >
-                  Manage models
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
+          <div id="section-local-models">
+            <SettingsGroup label="Local AI models">
+              <SettingsRow
+                label="On-device models"
+                description="Whisper transcription and the local voices run in your browser and are shared across every project on this device. Manage downloads in your personal preferences."
+                control={
+                  <Button
+                    variant="outline"
+                    onClick={() => requestNavigate("/preferences")}
+                  >
+                    Manage models
+                  </Button>
+                }
+              />
+            </SettingsGroup>
+          </div>
         )}
 
         {searchGroupLabel("section-validation")}
         {sectionsToRender.some((s) => s.id === "section-validation") && (
-          <div id="section-validation">
+          <div id="section-validation" className="flex flex-col gap-12">
             <ValidationSettingsSection
               projectId={id}
               validationCount={validationCount}
@@ -1897,46 +2021,37 @@ export function ProjectSettings() {
                 if (u.allowSelfValidation !== undefined) setAllowSelfValidation(u.allowSelfValidation)
               }}
             />
+            {/* AQU-186: Harmonization settings — harmonize_min_role floor. */}
+            <SettingsGroup label="Harmonization">
+              <SettingsRow
+                label={<label htmlFor="harmonize-min-role">Minimum role to run a harmonization sweep</label>}
+                description="Only users with at least this role can open a harmonization sweep on this project. The floor cannot be lowered below Project Lead (hard floor per spec)."
+                control={
+                  <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip ?? null}>
+                    <Select
+                      items={{
+                        project_lead: "Project Lead (default)",
+                        maintainer: "Maintainer",
+                      }}
+                      disabled={!canEditShared}
+                      value={harmonizeMinRole}
+                      onValueChange={(value) => setHarmonizeMinRole(value as "project_lead" | "maintainer")}
+                    >
+                      <SelectTrigger id="harmonize-min-role" aria-label="Minimum role to run a harmonization sweep" className="w-56 bg-background">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectGroup>
+                          <SelectItem value="project_lead">Project Lead (default)</SelectItem>
+                          <SelectItem value="maintainer">Maintainer</SelectItem>
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                  </DisabledFieldTooltip>
+                }
+              />
+            </SettingsGroup>
           </div>
-        )}
-
-        {/* AQU-186: Harmonization settings — harmonize_min_role floor. */}
-        {sectionsToRender.some((s) => s.id === "section-validation") && (
-          <Card>
-            <CardHeader>
-              <CardTitle>Harmonization</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <FieldLabel htmlFor="harmonize-min-role">Minimum role to run a harmonization sweep</FieldLabel>
-                <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip ?? null}>
-                  <Select
-                    items={{
-                      project_lead: "Project Lead (default)",
-                      maintainer: "Maintainer",
-                    }}
-                    disabled={!canEditShared}
-                    value={harmonizeMinRole}
-                    onValueChange={(value) => setHarmonizeMinRole(value as "project_lead" | "maintainer")}
-                  >
-                    <SelectTrigger id="harmonize-min-role">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectGroup>
-                        <SelectItem value="project_lead">Project Lead (default)</SelectItem>
-                        <SelectItem value="maintainer">Maintainer</SelectItem>
-                      </SelectGroup>
-                    </SelectContent>
-                  </Select>
-                </DisabledFieldTooltip>
-                <p className="text-xs text-muted-foreground">
-                  Only users with at least this role can open a harmonization sweep on this project.
-                  The floor cannot be lowered below Project Lead (hard floor per spec).
-                </p>
-              </div>
-            </CardContent>
-          </Card>
         )}
 
         {searchGroupLabel("section-decay")}
@@ -1961,52 +2076,59 @@ export function ProjectSettings() {
 
         {searchGroupLabel("section-git-sync")}
         {project?.origin?.kind === "git" && sectionsToRender.some((s) => s.id === "section-git-sync") && (
-          <Card id="section-git-sync">
-            <CardHeader><CardTitle>Git Sync</CardTitle></CardHeader>
-            <CardContent className="space-y-3">
-              <p className="text-xs text-muted-foreground">
-                Origin: <span className="font-mono">{project.origin.cloneUrl}</span> (branch: <span className="font-mono">{project.origin.branch}</span>)
-              </p>
-              <div className="flex items-center gap-2">
-                <Checkbox
-                  id="auto-sync"
-                  checked={autoSyncEnabled}
-                  onCheckedChange={(checked) => setAutoSyncEnabled(checked)}
-                />
-                <FieldLabel htmlFor="auto-sync" className="text-sm">Auto-sync every</FieldLabel>
-                <Input
-                  type="number"
-                  min={1}
-                  max={60}
-                  className="h-8 w-20"
-                  value={autoSyncInterval}
-                  onChange={(e) => setAutoSyncInterval(Math.max(1, Number(e.target.value) || 1))}
-                />
-                <span className="text-sm">minutes (only when there are changes)</span>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Interval is floored at 1 minute. Sync will only push when there are local changes.
-              </p>
-            </CardContent>
-          </Card>
+          <div id="section-git-sync">
+            <SettingsGroup label="Git Sync">
+              <SettingsRow
+                label="Origin"
+                description={
+                  <>
+                    <span className="font-mono">{project.origin.cloneUrl}</span>
+                    {" "}(branch: <span className="font-mono">{project.origin.branch}</span>)
+                  </>
+                }
+              />
+              <SettingsRow
+                label={<label htmlFor="auto-sync">Auto-sync</label>}
+                description="Interval is floored at 1 minute. Sync will only push when there are local changes."
+                control={
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      id="auto-sync"
+                      checked={autoSyncEnabled}
+                      onCheckedChange={(checked) => setAutoSyncEnabled(checked)}
+                      aria-label="Auto-sync"
+                    />
+                    <Input
+                      type="number"
+                      min={1}
+                      max={60}
+                      className="h-8 w-20 bg-background"
+                      value={autoSyncInterval}
+                      onChange={(e) => setAutoSyncInterval(Math.max(1, Number(e.target.value) || 1))}
+                      aria-label="Auto-sync interval minutes"
+                    />
+                    <span className="text-sm text-muted-foreground">min</span>
+                  </div>
+                }
+              />
+            </SettingsGroup>
+          </div>
         )}
         {searchGroupLabel("section-terminology")}
         {sectionsToRender.some((s) => s.id === "section-terminology") && (
-          <Card id="section-terminology">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                Terminology Library
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="flex items-center justify-between gap-4">
-              <p className="text-sm text-muted-foreground">
-                Manage approved terms, renderings, and the project glossary (term base).
-              </p>
-              <Button variant="outline" onClick={() => requestNavigate(`/project/${id}/terminology`)} className="shrink-0">
-                Open Terminology Library
-              </Button>
-            </CardContent>
-          </Card>
+          <div id="section-terminology">
+            <SettingsGroup label="Terminology">
+              <SettingsRow
+                label="Terminology library"
+                description="Manage approved terms, renderings, and the project glossary (term base)."
+                control={
+                  <Button variant="outline" onClick={() => requestNavigate(`/project/${id}/terminology`)}>
+                    Open Terminology Library
+                  </Button>
+                }
+              />
+            </SettingsGroup>
+          </div>
         )}
         {searchGroupLabel("section-termbase-sharing")}
         {id && SHOW_TERMBASE_SHARING_IN_SETTINGS && sectionsToRender.some((s) => s.id === "section-termbase-sharing") && (

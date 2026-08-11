@@ -36,6 +36,10 @@ type PageSize = "default" | "wide" | "full"
  * `space-y-12`). PageHeader's bottom margin matches that same section gap.
  * AppShell keeps the floating card flush under the header so the card's top
  * edge still lines up with the org switcher despite this inner pad.
+ *
+ * `scrollbar-gutter: stable` reserves the scrollbar lane so centered
+ * `max-w-*` columns (org / project / team settings, Preferences, …) do not
+ * nudge horizontally when overflow appears or disappears between panes.
  */
 function Page({
   size = "default",
@@ -48,7 +52,7 @@ function Page({
   children: React.ReactNode
 } & Omit<React.ComponentProps<"div">, "children" | "className">) {
   return (
-    <div className="h-full overflow-y-auto" {...props}>
+    <div className="h-full overflow-y-auto scrollbar-gutter-stable" {...props}>
       <div
         className={cn(
           "mx-auto w-full py-18",

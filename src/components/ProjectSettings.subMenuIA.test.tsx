@@ -296,10 +296,17 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
     expect(screen.getByText("Git Sync")).toBeTruthy()
 
     renderAt(`/project/${PROJECT_ID}/settings/ai`)
+    // System prompt is nested — AI pane shows a chevron row, not the textarea.
+    expect(screen.getByRole("link", { name: /system prompt/i })).toBeTruthy()
+    expect(screen.queryByLabelText(/^system prompt$/i)).toBeNull()
     expect(screen.getByLabelText(/examples retrieved/i)).toBeTruthy()
     expect(screen.getByLabelText(/preceding committed-target cells/i)).toBeTruthy()
     expect(screen.getByText(/^voice$/i)).toBeTruthy()
     expect(screen.getByRole("button", { name: /open terminology library/i })).toBeTruthy()
+
+    renderAt(`/project/${PROJECT_ID}/settings/system-prompt`)
+    expect(screen.getByLabelText(/^system prompt$/i)).toBeTruthy()
+    expect(screen.queryByLabelText(/examples retrieved/i)).toBeNull()
 
     renderAt(`/project/${PROJECT_ID}/settings/validation`)
     expect(screen.getByLabelText(/required validators \(text\)/i)).toBeTruthy()

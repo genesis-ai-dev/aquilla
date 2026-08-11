@@ -181,6 +181,11 @@ export function TeamDetail() {
     [orgMembers, team?.members],
   )
 
+  const attachableProjects = useMemo(
+    () => orgProjects.filter((op) => !team?.projects.some((tp) => tp.id === op.id)),
+    [orgProjects, team?.projects],
+  )
+
   function closeAddMember() {
     setAddingMember(false)
     setStagedUsernames([])
@@ -222,12 +227,22 @@ export function TeamDetail() {
     await refetch()
   }, [jwt, activeOrgId, groupIdNum, refetch])
 
-  async function handleAttachProject() {
-    if (!jwt || activeOrgId == null || groupIdNum == null || !selectedProjectId) return
-    await attachProject(jwt, activeOrgId, groupIdNum, selectedProjectId, selectedRole)
+  function closeAttachProject() {
     setAttachingProject(false)
     setSelectedProjectId("")
     setSelectedRole(ROLE.VIEWER)
+  }
+
+  function openAttachProject() {
+    setSelectedProjectId(attachableProjects[0]?.id ?? "")
+    setSelectedRole(ROLE.VIEWER)
+    setAttachingProject(true)
+  }
+
+  async function handleAttachProject() {
+    if (!jwt || activeOrgId == null || groupIdNum == null || !selectedProjectId) return
+    await attachProject(jwt, activeOrgId, groupIdNum, selectedProjectId, selectedRole)
+    closeAttachProject()
     await refetch()
   }
 
@@ -605,60 +620,72 @@ export function TeamDetail() {
                     </div>
                   </div>
 
-                  {isAdmin && attachingProject && (
-                    <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-card p-3">
-                      <Select
-                        items={orgProjects
-                          .filter((op) => !team.projects.some((tp) => tp.id === op.id))
-                          .map((op) => ({ value: op.id, label: op.name }))}
-                        value={selectedProjectId}
-                        onValueChange={(v) => setSelectedProjectId(v ?? "")}
-                      >
-                        <SelectTrigger aria-label="Project to attach">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectGroup>
-                            {orgProjects
-                              .filter((op) => !team.projects.some((tp) => tp.id === op.id))
-                              .map((op) => (
-                                <SelectItem key={op.id} value={op.id}>{op.name}</SelectItem>
-                              ))}
-                          </SelectGroup>
-                        </SelectContent>
-                      </Select>
-                      <RoleSelect
-                        options={ALL_ROLE_OPTIONS}
-                        value={selectedRole}
-                        onValueChange={setSelectedRole}
-                        aria-label="Granted role"
-                      />
-                      <Button type="button" onClick={handleAttachProject}>Attach</Button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        onClick={() => { setAttachingProject(false); setSelectedProjectId("") }}
-                      >
-                        Cancel
-                      </Button>
-                    </div>
+                  {isAdmin && (
+                    <Dialog
+                      open={attachingProject}
+                      onOpenChange={(o) => { if (!o) closeAttachProject() }}
+                    >
+                      <DialogContent className="max-w-md gap-4">
+                        <DialogHeader>
+                          <DialogTitle>Attach project to &apos;{team.name}&apos;</DialogTitle>
+                          <DialogDescription>
+                            Grant this team access at a chosen role.
+                          </DialogDescription>
+                        </DialogHeader>
+                        <div className="flex w-full flex-col gap-3">
+                          <Select
+                            items={attachableProjects.map((op) => ({ value: op.id, label: op.name }))}
+                            value={selectedProjectId}
+                            onValueChange={(v) => setSelectedProjectId(v ?? "")}
+                          >
+                            <SelectTrigger aria-label="Project to attach" className="w-full">
+                              <SelectValue placeholder="Select a project…" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectGroup>
+                                {attachableProjects.map((op) => (
+                                  <SelectItem key={op.id} value={op.id}>{op.name}</SelectItem>
+                                ))}
+                              </SelectGroup>
+                            </SelectContent>
+                          </Select>
+                          <RoleSelect
+                            options={ALL_ROLE_OPTIONS}
+                            value={selectedRole}
+                            onValueChange={setSelectedRole}
+                            aria-label="Granted role"
+                            className="w-full"
+                          />
+                          {attachableProjects.length === 0 && (
+                            <p className="text-xs text-muted-foreground">
+                              All org projects are already attached to this team.
+                            </p>
+                          )}
+                        </div>
+                        <DialogFooter className="mt-0">
+                          <Button type="button" variant="outline" onClick={closeAttachProject}>
+                            Cancel
+                          </Button>
+                          <Button
+                            type="button"
+                            onClick={handleAttachProject}
+                            disabled={!selectedProjectId}
+                          >
+                            Attach
+                          </Button>
+                        </DialogFooter>
+                      </DialogContent>
+                    </Dialog>
                   )}
 
                   {team.projects.length === 0 ? (
                     <div className="space-y-4">
-                      {isAdmin && !attachingProject && (
+                      {isAdmin && (
                         <div className="flex justify-end">
                           <Button
                             type="button"
                             className="shrink-0"
-                            onClick={() => {
-                              const attachableProjects = orgProjects.filter(
-                                (op) => !team.projects.some((tp) => tp.id === op.id),
-                              )
-                              setSelectedProjectId(attachableProjects[0]?.id ?? "")
-                              setSelectedRole(ROLE.VIEWER)
-                              setAttachingProject(true)
-                            }}
+                            onClick={openAttachProject}
                           >
                             Attach project
                           </Button>
@@ -684,18 +711,11 @@ export function TeamDetail() {
                         return row.original.name.toLowerCase().includes(q)
                       }}
                       toolbar={
-                        isAdmin && !attachingProject ? (
+                        isAdmin ? (
                           <Button
                             type="button"
                             className="ml-auto shrink-0"
-                            onClick={() => {
-                              const attachableProjects = orgProjects.filter(
-                                (op) => !team.projects.some((tp) => tp.id === op.id),
-                              )
-                              setSelectedProjectId(attachableProjects[0]?.id ?? "")
-                              setSelectedRole(ROLE.VIEWER)
-                              setAttachingProject(true)
-                            }}
+                            onClick={openAttachProject}
                           >
                             Attach project
                           </Button>

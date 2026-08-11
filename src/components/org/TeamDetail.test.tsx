@@ -95,6 +95,7 @@ describe("TeamDetail project management", () => {
     renderDetail()
     await openTeamTab(/^projects$/i)
     await act(async () => { (await screen.findByRole("button", { name: /attach project/i })).click() })
+    expect(screen.getByRole("dialog", { name: /attach project to 'wa'/i })).toBeInTheDocument()
     await pickSelectOption(/project to attach/i, /bambara/i)
     await pickSelectOption(/granted role/i, /contributor/i)
     await act(async () => { screen.getByRole("button", { name: /^attach$/i }).click() })

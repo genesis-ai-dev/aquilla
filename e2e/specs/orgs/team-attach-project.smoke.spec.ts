@@ -6,9 +6,9 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
  * TeamDetail — attach a project to a team.
  *
  * TeamDetail.tsx has an "Attach project" control (admin only) on the Projects
- * tab. Clicking it shows a project select + role select + "Attach" and
- * "Cancel" buttons. Clicking "Attach" adds the project to the team's
- * projects DataTable.
+ * tab. Clicking it opens a modal with a project select + role select +
+ * "Attach" and "Cancel" buttons. Clicking "Attach" adds the project to the
+ * team's projects DataTable.
  *
  * This spec: creates a project → creates a team → navigates to the team
  * detail → clicks "Attach project" → selects the project → clicks "Attach"

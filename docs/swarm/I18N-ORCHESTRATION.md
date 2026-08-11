@@ -90,12 +90,44 @@ Every agent's first step in a fresh worktree:
 | wave 4a | `swarm/i18n-w4a-catalog` | plural categories via `Intl.PluralRules` (33 keys migrated, leaf-per-category export, sidecar v2); **109 duplicate keys removed**; reworded English restored | tsc clean, i18n:check **963 keys**, **6398/6399 tests**, eslint 0 errors |
 | wave 4a.1 | orchestrator `751526bce` | loud failure when a locale's plural categories are undecided | verified with a fake uncovered locale |
 
-**Current integration state:** `tsc -b` clean · `pnpm i18n:check` 963 keys all carrying context ·
-`pnpm test` **723/724 files, 6398/6399 tests** · `pnpm exec eslint .` 0 errors.
-The single failing test is `context.test.ts` "every declared surface has its PNG captured" —
-six wave-2 surfaces (`assign-modal`, `editor-table`, `comments`, `auth`, `search`,
-`audio-studio`) need `pnpm i18n:shots` against a live dev stack. That is the next orchestrator
-step and it is the only thing standing between here and a fully green gate.
+| wave 4b | 8 × `swarm/i18n-w4b-<ns>` | review findings 3–8 fixed; 2 real conflicts resolved as unions | tsc clean, **6438/6439 tests** |
+| wave 4b.1 | orchestrator `330102ee3`, `6e82aaaf9` | `RichMessage` helper added centrally; auth's bold-count compromise reverted once the helper supported it | 35 JoinPage tests green |
+| wave 5 | `19d7e24d1` | **all 11 surfaces captured**; 4 stale drivers repaired; catalog exported | see below |
+
+**FINAL GATE — VERIFIED BY THE ORCHESTRATOR, dev stack DOWN:**
+
+```
+pnpm exec tsc -b     clean
+pnpm i18n:check      context complete — 1025 message key(s) covered
+pnpm test            730 files / 6439 tests — ALL PASSING
+pnpm exec eslint .   0 errors (336 pre-existing warnings)
+```
+
+Every STOP-checklist item is met. `context.test.ts` was not modified to get there. The gate was
+re-run with the dev stack shut down, so it is not environment-dependent.
+
+11 surfaces committed at 1440×900: `workspace-nav` `cell-editor` `confirm-dialog`
+`project-settings` `error-state` `assign-modal` `editor-table` `comments` `auth` `search`
+`audio-studio`. I spot-checked `cell-editor` and `error-state` as images, not just by file size.
+`cell-editor` also visually confirms the wave-1.5 fix: the language switcher renders in the
+project-workspace (`leftDock`) chrome, which is the check that was deferred from `1a4a4d39d`.
+
+**Known limits of the captured set** (translator-facing, so worth stating):
+- `audio-studio` does not include `AudioRecordingModal` — it needs live microphone permission
+  that headless Chromium cannot grant. The shot covers the reachable Voices sidebar, per-line
+  record/generate controls and transport bar, which is what the surface's notes describe.
+- `error-state` is the 404 instance. It shows the heading/body/action shape that
+  `error.generic.*` and the permission-denied alert reuse, but not their wording — a translator
+  working on "Something went wrong" sees the layout, not that string. Splitting `error` into two
+  surfaces would fix it properly.
+- `error-state`'s declared `route` in `namespaces/error.ts` was changed from `/project/:projectId`
+  to any-unmatched-route. This is the one catalog-adjacent edit wave 5 made; no message strings
+  changed and `i18n:check` still reports the same 1025 keys.
+
+**Exported for translators** (`i18n-export/`, gitignored): `en.catalog.json` 68KB,
+`en.context.json` 309KB, `en.notes.json` 1.24MB, plus per-locale catalogs and notes for
+`th`/`my`/`mfa`/`ar`. `ar.notes.json` is 1.49MB against `th`'s 1.18MB — that gap is the plural
+work landing correctly: Arabic gets six leaves per counted message where Thai gets one.
 
 ## Remaining work
 

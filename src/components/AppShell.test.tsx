@@ -10,6 +10,7 @@ import { describe, it, expect } from "vitest"
 import { MemoryRouter, useLocation, useNavigate } from "react-router-dom"
 import { render, screen, fireEvent } from "@testing-library/react"
 import { AppShell } from "./AppShell"
+import { I18nProvider } from "@/lib/i18n/I18nProvider"
 
 function AlwaysThrows(): never {
   throw new Error("main content crash")
@@ -109,5 +110,25 @@ describe("AppShell main-content error containment", () => {
     )
 
     expect(container.querySelector('[data-slot="app-shell-header"]')).toHaveClass("h-[52px]", "min-h-[52px]", "justify-center")
+  })
+
+  it("offers a UI-language control in the chrome when an I18nProvider is present", async () => {
+    render(
+      <MemoryRouter>
+        <I18nProvider>
+          <AppShell
+            header={<div data-testid="header">header</div>}
+            statusBar={<div data-testid="status-bar">status</div>}
+            sidebar={<div data-testid="sidebar">sidebar</div>}
+            main={<div data-testid="content">content</div>}
+          />
+        </I18nProvider>
+      </MemoryRouter>,
+    )
+    const select = await screen.findByLabelText("Language")
+    expect(select).toBeInTheDocument()
+    // The switcher must list endonyms, not English names — a Burmese speaker
+    // looking for their language will not scan for the word "Burmese".
+    expect(screen.getByRole("option", { name: "မြန်မာ" })).toBeInTheDocument()
   })
 })

@@ -1,8 +1,9 @@
 import { describe, it, expect, afterEach, vi } from "vitest"
-import { fireEvent, render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, within } from "@testing-library/react"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { OrgProvider } from "@/context/OrgContext"
 import { ThemeModeProvider } from "@/branding/ThemeMode"
+import { I18nProvider } from "@/lib/i18n/I18nProvider"
 import { Preferences } from "./Preferences"
 
 vi.mock("@/hooks/useFrontierSession", () => ({
@@ -29,14 +30,16 @@ afterEach(() => {
 function renderAt(path: string) {
   return render(
     <MemoryRouter initialEntries={[path]}>
-      <ThemeModeProvider>
-        <OrgProvider>
-          <Routes>
-            <Route path="/preferences" element={<Preferences />} />
-            <Route path="/preferences/:section" element={<Preferences />} />
-          </Routes>
-        </OrgProvider>
-      </ThemeModeProvider>
+      <I18nProvider>
+        <ThemeModeProvider>
+          <OrgProvider>
+            <Routes>
+              <Route path="/preferences" element={<Preferences />} />
+              <Route path="/preferences/:section" element={<Preferences />} />
+            </Routes>
+          </OrgProvider>
+        </ThemeModeProvider>
+      </I18nProvider>
     </MemoryRouter>,
   )
 }
@@ -91,5 +94,18 @@ describe("Preferences", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Dark" }))
     expect(window.localStorage.getItem("codex-theme")).toBe("dark")
     expect(document.documentElement).toHaveClass("dark")
+  })
+
+  it("offers a UI-language control", async () => {
+    renderAt("/preferences/language")
+    // AppShell also mounts a global chrome switcher (Task 6), so on this page
+    // there are two elements labelled "Language" — the persistent chrome one
+    // and this page's dedicated row. Scope to <main> for the row under test.
+    const main = screen.getByRole("main")
+    const select = await within(main).findByLabelText("Language")
+    expect(select).toBeInTheDocument()
+    // The switcher must list endonyms, not English names — a Burmese speaker
+    // looking for their language will not scan for the word "Burmese".
+    expect(within(main).getByRole("option", { name: "မြန်မာ" })).toBeInTheDocument()
   })
 })

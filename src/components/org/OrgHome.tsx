@@ -592,7 +592,7 @@ export function OrgHome() {
     return (
       <AppShell
         sidebar={<OrgSidebar />}
-        header={<OrgBreadcrumb section="Projects" />}
+        header={<OrgBreadcrumb section="Overview" />}
         statusBar={null}
         main={
           <div className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center">
@@ -719,7 +719,7 @@ export function OrgHome() {
   return (
     <AppShell
       sidebar={<OrgSidebar />}
-      header={<OrgBreadcrumb section="Projects" />}
+      header={<OrgBreadcrumb section="Overview" />}
       statusBar={null}
       main={
         <Page size="wide">

@@ -22,6 +22,9 @@ function isoDateOffset(days: number): string {
  *  - Filter bar (search + status filter select) when projects exist
  *  - Project rows linking to /projects/:id
  *
+ * All organizations (`/orgs/all`): portfolio Overview only (sidebar label
+ * "Overview", no separate Projects nav) — rollups + cross-org project table.
+ *
  * We create a project first so the portfolio API has at least one entry,
  * guaranteeing the filter bar and attention surfaces can render.
  */
@@ -78,12 +81,15 @@ test("org overview renders rollup stats and project filter", async ({ alice }) =
   // 5. The new project's row is visible.
   await expect(alice.getByText(name).first()).toBeVisible({ timeout: 5_000 })
 
-  // 6. In the all-organizations table, project and org identity remain useful
-  // at both wide and compact desktop widths. Long names expand without shifting
-  // the row, while ordinary names are not squeezed to one or two characters.
+  // 6. All-organizations portfolio home is Overview (not a separate Projects
+  // tool). Project and org identity remain useful at wide and compact widths.
   const aliceSession = await ensureAuthState("alice")
   await createOrg(aliceSession.jwt, `A second organization with a long name ${Date.now()}`)
   await alice.goto("/orgs/all")
+  await expect(alice.getByRole("navigation").getByRole("link", { name: "Overview" })).toBeVisible({
+    timeout: 10_000,
+  })
+  await expect(alice.getByRole("navigation").getByRole("link", { name: "Projects" })).toHaveCount(0)
   const projectRow = alice.locator(`[data-project-id]`).filter({ hasText: name }).first()
   await expect(projectRow).toBeVisible({ timeout: 10_000 })
   const projectName = projectRow.getByTestId("project-table-name")

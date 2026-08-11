@@ -4,8 +4,10 @@ import { deriveNavTitle } from "./deriveTitle"
 describe("deriveNavTitle", () => {
   it("maps org-shell routes to readable labels", () => {
     expect(deriveNavTitle("/")).toBe("Home")
-    expect(deriveNavTitle("/orgs/all")).toBe("Projects")
+    expect(deriveNavTitle("/orgs/all")).toBe("Overview")
     expect(deriveNavTitle("/orgs/7")).toBe("Projects")
+    expect(deriveNavTitle("/orgs/7/overview")).toBe("Overview")
+    expect(deriveNavTitle("/orgs/7/projects")).toBe("Projects")
     expect(deriveNavTitle("/orgs/7/archived")).toBe("Archived projects")
     expect(deriveNavTitle("/orgs/7/assigned")).toBe("Assigned to me")
     expect(deriveNavTitle("/orgs/7/settings")).toBe("Organization settings")

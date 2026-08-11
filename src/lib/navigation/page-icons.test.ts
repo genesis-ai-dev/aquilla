@@ -17,7 +17,7 @@ describe("navIconForLabel", () => {
 
 describe("deriveNavIcon", () => {
   it("mirrors org-shell routes used by the sidebar", () => {
-    expect(deriveNavIcon("/orgs/all")).toBe(NAV_PAGE_ICONS.projects)
+    expect(deriveNavIcon("/orgs/all")).toBe(NAV_PAGE_ICONS.overview)
     expect(deriveNavIcon("/orgs/7")).toBe(NAV_PAGE_ICONS.projects)
     expect(deriveNavIcon("/orgs/7/overview")).toBe(NAV_PAGE_ICONS.overview)
     expect(deriveNavIcon("/orgs/7/teams")).toBe(NAV_PAGE_ICONS.teams)

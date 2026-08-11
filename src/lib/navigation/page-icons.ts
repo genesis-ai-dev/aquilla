@@ -132,7 +132,8 @@ export function deriveNavIcon(pathname: string): LucideIcon {
 
   const org = parseOrgPath(p)
   if (org) {
-    if (org.orgKey === ALL_ORGS_PARAM || org.rest === "") return NAV_PAGE_ICONS.projects
+    if (org.orgKey === ALL_ORGS_PARAM) return NAV_PAGE_ICONS.overview
+    if (org.rest === "") return NAV_PAGE_ICONS.projects
     const rest = org.rest.replace(/^\//, "")
     const parts = rest.split("/").filter(Boolean)
     switch (parts[0]) {

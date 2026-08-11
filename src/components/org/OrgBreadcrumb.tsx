@@ -109,6 +109,7 @@ export function OrgBreadcrumb({ parent, section, sectionTo, orgId, trail = [] }:
   // "Projects" used to be the org index and was hidden the same way; now the
   // dedicated `/orgs/:id/projects` page shows it (Teams-style). Portfolio
   // (`/orgs/all`) and guest-org index still omit the redundant section crumb.
+  // Portfolio home passes section="Overview"; guest index still uses "Projects".
   const isOverviewSection = section === "Overview"
   const isMemberOrgProjectsPage =
     section === "Projects" &&

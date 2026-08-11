@@ -106,14 +106,17 @@ export function OrgSidebar() {
             </NavLink>
           </>
         ) : (
+          // All organizations: single portfolio home (OrgHome). There is no
+          // separate /projects tool under `/orgs/all`, so label it Overview —
+          // matching member-org Overview, not the Teams-style Projects table.
           <NavLink
             to={portfolioHomeTo}
             end
             className={link}
             data-tour="nav-overview"
           >
-            <NavIcon icon={NAV_PAGE_ICONS.projects} />
-            Projects
+            <NavIcon icon={NAV_PAGE_ICONS.overview} />
+            Overview
           </NavLink>
         )}
         {isMemberOrg && activeOrgId != null && <>

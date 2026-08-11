@@ -84,12 +84,12 @@ describe("OrgBreadcrumb", () => {
     orgContext.activeOrgId = null
     orgContext.isAllOrgs = true
 
-    renderBreadcrumb(<OrgBreadcrumb section="Projects" />, "/orgs/all")
+    renderBreadcrumb(<OrgBreadcrumb section="Overview" />, "/orgs/all")
 
     expect(screen.queryByRole("link", { name: "All organizations" })).not.toBeInTheDocument()
     expect(screen.getByText("All organizations")).toHaveAttribute("aria-current", "page")
-    // Portfolio home omits a redundant "Projects" section crumb.
-    expect(screen.queryByText("Projects")).not.toBeInTheDocument()
+    // Portfolio home omits a redundant Overview section crumb.
+    expect(screen.queryByText("Overview")).not.toBeInTheDocument()
   })
 
   it("shows Projects as the current crumb on the member-org projects page", () => {

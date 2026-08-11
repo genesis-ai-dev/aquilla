@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { useParams, useNavigate } from "react-router-dom"
-import { MoreHorizontal, ChevronRight, Copy, Check, Download, Search, SlidersHorizontal } from "lucide-react"
+import { MoreHorizontal, ChevronRight, Copy, Check, Download, Search, SlidersHorizontal, Archive, PlayCircle, PauseCircle } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { ExpandableName } from "@/components/ui/expandable-name"
@@ -1034,6 +1034,7 @@ export function ProjectOverview() {
                               onClick={handleDownloadBundle}
                               disabled={busy || (project?.files.length ?? 0) === 0}
                             >
+                              <Download className="size-4" />
                               Download deliverable
                             </DropdownMenuItem>
                           )}
@@ -1042,6 +1043,11 @@ export function ProjectOverview() {
                               onClick={handleToggleLifecycle}
                               disabled={lifecycleBusy}
                             >
+                              {isFrozen ? (
+                                <PlayCircle className="size-4" />
+                              ) : (
+                                <PauseCircle className="size-4" />
+                              )}
                               {isFrozen ? "Mark as Active" : "Mark as Inactive"}
                             </DropdownMenuItem>
                           )}
@@ -1051,6 +1057,7 @@ export function ProjectOverview() {
                               disabled={busy}
                               variant="destructive"
                             >
+                              <Archive className="size-4" />
                               Archive
                             </DropdownMenuItem>
                           )}

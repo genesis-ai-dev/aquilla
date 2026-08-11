@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { type ColumnDef } from "@tanstack/react-table"
 import {
-  AlertTriangle, Lock, UserPlus,
+  AlertTriangle, Lock, ShieldOff, ShieldUser, UserMinus, UserPlus,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -312,6 +312,7 @@ export function MembersSection({ projectId }: { projectId: string }) {
                   {canChangeRole && (
                     <ContextMenuSub>
                       <ContextMenuSubTrigger>
+                        <ShieldUser className="size-4" />
                         Change role
                       </ContextMenuSubTrigger>
                       <ContextMenuSubContent className="min-w-72 max-w-96">
@@ -337,6 +338,7 @@ export function MembersSection({ projectId }: { projectId: string }) {
                   )}
                   {canRemoveDirect && (
                     <ContextMenuItem onClick={() => setRemoveTarget(m)}>
+                      <UserMinus className="size-4" />
                       Remove direct access
                     </ContextMenuItem>
                   )}
@@ -349,6 +351,7 @@ export function MembersSection({ projectId }: { projectId: string }) {
                         variant="destructive"
                         onClick={() => setRevokeTarget(m)}
                       >
+                        <ShieldOff className="size-4" />
                         Revoke all access…
                       </ContextMenuItem>
                     </>

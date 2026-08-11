@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { type ColumnDef } from "@tanstack/react-table"
 import { Link, useNavigate, useParams } from "react-router-dom"
-import { FolderGit2, Settings, UserPlus, Users } from "lucide-react"
+import { FolderGit2, Settings, ShieldUser, Unlink, UserMinus, UserPlus, Users } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { MemberMultiSelect } from "@/components/MemberMultiSelect"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
@@ -713,6 +713,7 @@ export function TeamDetail() {
                         isAdmin ? (
                           <ContextMenuContent className="min-w-40">
                             <ContextMenuItem onClick={() => openProjectRoleChange(p)}>
+                              <ShieldUser className="size-4" />
                               Change role
                             </ContextMenuItem>
                             <ContextMenuSeparator />
@@ -720,6 +721,7 @@ export function TeamDetail() {
                               aria-label={`Detach ${p.name}`}
                               onClick={() => void handleDetachProject(p.id)}
                             >
+                              <Unlink className="size-4" />
                               Detach
                             </ContextMenuItem>
                           </ContextMenuContent>
@@ -857,12 +859,14 @@ export function TeamDetail() {
                             {isOwner && (
                               <>
                                 <ContextMenuItem onClick={() => openRoleChange(m)}>
+                                  <ShieldUser className="size-4" />
                                   Change role
                                 </ContextMenuItem>
                                 <ContextMenuSeparator />
                               </>
                             )}
                             <ContextMenuItem onClick={() => void handleRemoveMember(m.userId)}>
+                              <UserMinus className="size-4" />
                               Remove from team
                             </ContextMenuItem>
                           </ContextMenuContent>

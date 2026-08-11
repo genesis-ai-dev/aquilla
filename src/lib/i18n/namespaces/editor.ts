@@ -431,7 +431,7 @@ export const editor = defineNamespace({
     "editor.tts.translatingBeforeVoicing": "Translating before voicing",
     "editor.tts.loadingVoiceModel": "Loading voice model",
     "editor.tts.loadingVoiceModelPct": "Loading voice model ({percent}%)",
-    "editor.tts.loading": "Loading",
+    "editor.tts.loadingPct": "Loading {percent}%",
     "editor.tts.voicingBadge": "Voicing",
     "editor.tts.generatingAudio": "Generating audio…",
     "editor.tts.openAudioSetup": "Open audio setup",
@@ -2762,12 +2762,16 @@ export const editor = defineNamespace({
           percent: "Whole-number download percentage, already rounded, no % sign.",
         },
       },
-      "editor.tts.loading": {
+      "editor.tts.loadingPct": {
         description:
-          "The 9px badge label itself while the speech model downloads; a numeric " +
-          "percentage may be appended after it. Present participle. Almost no " +
-          "room — one short word.",
-        maxLength: 12,
+          "The 9px badge itself while the speech model downloads, with progress. " +
+          "Present participle plus a percentage. Almost no room — abbreviate the " +
+          "word rather than let the badge wrap. When no progress figure is " +
+          "available the badge falls back to common.loading.",
+        placeholders: {
+          percent: "Whole-number download percentage, already rounded, no % sign.",
+        },
+        maxLength: 16,
       },
       "editor.tts.voicingBadge": {
         description:

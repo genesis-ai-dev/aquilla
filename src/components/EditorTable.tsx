@@ -343,8 +343,11 @@ function SynthStatusBadge({
           {isTranslating
             ? t("editor.completion.translating")
             : pct != null
-              ? <>{t("editor.tts.loading")} <span className="tabular-nums">{pct}%</span></>
-              : t("editor.tts.loading")}
+              // One interpolated string rather than label + <span>: the badge
+              // has to be translatable as a whole, and "Loading" alone would
+              // duplicate common.loading.
+              ? <span className="tabular-nums">{t("editor.tts.loadingPct", { percent: pct })}</span>
+              : t("common.loading")}
         </span>
       </AppTooltip>
     )

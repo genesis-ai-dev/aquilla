@@ -330,7 +330,7 @@ export function TeamDetail() {
           return (
             <DataTableRowActionsButton
               label={`Actions for ${p.name}`}
-              className="opacity-0 transition-none group-hover:opacity-100 focus-visible:opacity-100 group-data-popup-open:opacity-100"
+              revealOnHover
             />
           )
         },
@@ -423,7 +423,7 @@ export function TeamDetail() {
           return (
             <DataTableRowActionsButton
               label={`Actions for ${m.username}`}
-              className="opacity-0 transition-none group-hover:opacity-100 focus-visible:opacity-100 group-data-popup-open:opacity-100"
+              revealOnHover
             />
           )
         },

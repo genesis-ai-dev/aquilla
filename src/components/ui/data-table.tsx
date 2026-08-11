@@ -243,6 +243,7 @@ function DataTable<TData, TValue>({
                 const rowProps = {
                   "data-state": row.getIsSelected() && "selected",
                   className: cn(
+                    contextMenu && "group",
                     typeof rowClassName === "function"
                       ? rowClassName(row.original)
                       : rowClassName,
@@ -252,14 +253,9 @@ function DataTable<TData, TValue>({
                 return (
                   <React.Fragment key={row.id}>
                     {contextMenu ? (
-                      <ContextMenu>
-                        <ContextMenuTrigger
-                          render={<TableRow {...rowProps} />}
-                        >
-                          {cells}
-                        </ContextMenuTrigger>
-                        {contextMenu}
-                      </ContextMenu>
+                      <DataTableContextMenuRow rowProps={rowProps} menu={contextMenu}>
+                        {cells}
+                      </DataTableContextMenuRow>
                     ) : (
                       <TableRow {...rowProps}>{cells}</TableRow>
                     )}
@@ -282,35 +278,99 @@ function DataTable<TData, TValue>({
   )
 }
 
+type RowActionsOpenContextValue = {
+  openFromActions: boolean
+  markOpenFromActions: () => void
+}
+
+const RowActionsOpenContext = React.createContext<RowActionsOpenContextValue | null>(null)
+
+/**
+ * Per-row ContextMenu wrapper. Tracks whether open came from the ⋯ button
+ * (active button chrome) vs a row right-click (no button chrome).
+ */
+function DataTableContextMenuRow({
+  rowProps,
+  children,
+  menu,
+}: {
+  rowProps: React.ComponentProps<typeof TableRow>
+  children: React.ReactNode
+  menu: React.ReactNode
+}) {
+  const [openFromActions, setOpenFromActions] = React.useState(false)
+  const fromActionsRef = React.useRef(false)
+  const markOpenFromActions = React.useCallback(() => {
+    fromActionsRef.current = true
+  }, [])
+
+  return (
+    <RowActionsOpenContext.Provider value={{ openFromActions, markOpenFromActions }}>
+      <ContextMenu
+        onOpenChange={(open) => {
+          if (open) {
+            setOpenFromActions(fromActionsRef.current)
+            fromActionsRef.current = false
+          } else {
+            setOpenFromActions(false)
+            fromActionsRef.current = false
+          }
+        }}
+      >
+        <ContextMenuTrigger render={<TableRow {...rowProps} />}>
+          {children}
+        </ContextMenuTrigger>
+        {menu}
+      </ContextMenu>
+    </RowActionsOpenContext.Provider>
+  )
+}
+
 /**
  * Ghost ⋯ control that opens the row ContextMenu at the pointer.
  * Pair with `renderRowContextMenu` on DataTable (same pattern as FileRow).
+ * Active/pressed chrome applies only when this button opened the menu — not
+ * when the row was right-clicked.
  */
 function DataTableRowActionsButton({
   label,
   disabled,
   busy,
+  revealOnHover = false,
   className,
   ...props
 }: {
   label: string
   disabled?: boolean
   busy?: boolean
+  /** Hide until the row is hovered / focused / menu opened (fades in). */
+  revealOnHover?: boolean
   className?: string
 } & Omit<React.ComponentProps<typeof Button>, "children" | "size" | "variant" | "type" | "aria-label" | "onClick">) {
+  const actionsOpen = React.useContext(RowActionsOpenContext)
+
   return (
     <Button
       type="button"
       size="icon-sm"
       variant="ghost"
+      {...props}
+      data-row-actions=""
       aria-label={label}
       disabled={disabled}
-      className={cn("text-muted-foreground hover:text-foreground", className)}
+      data-pressed={actionsOpen?.openFromActions ? "" : undefined}
+      className={cn(
+        "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+        revealOnHover &&
+          "opacity-0 group-hover:opacity-100 focus-visible:opacity-100 group-data-popup-open:opacity-100 data-pressed:opacity-100",
+        actionsOpen?.openFromActions && "bg-accent text-accent-foreground",
+        className,
+      )}
       onClick={(e) => {
         e.stopPropagation()
+        actionsOpen?.markOpenFromActions()
         openContextMenuAtPointer(e.currentTarget, e.clientX, e.clientY)
       }}
-      {...props}
     >
       {busy ? <Spinner /> : <MoreHorizontal className="size-4" />}
     </Button>

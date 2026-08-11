@@ -217,12 +217,16 @@ describe("DataTable", () => {
       />,
     )
 
-    const alphaCell = screen.getByText("Alpha")
-    fireEvent.contextMenu(alphaCell.closest("tr")!)
+    const alphaRow = screen.getByText("Alpha").closest("tr")!
+    const alphaBtn = screen.getByRole("button", { name: "More actions for Alpha" })
+    fireEvent.contextMenu(alphaRow)
     expect(screen.getByRole("menuitem", { name: "Act on Alpha" })).toBeInTheDocument()
+    expect(alphaBtn).not.toHaveAttribute("data-pressed")
     fireEvent.keyDown(document, { key: "Escape" })
 
-    fireEvent.click(screen.getByRole("button", { name: "More actions for Beta" }))
+    const betaBtn = screen.getByRole("button", { name: "More actions for Beta" })
+    fireEvent.click(betaBtn)
     expect(screen.getByRole("menuitem", { name: "Act on Beta" })).toBeInTheDocument()
+    expect(betaBtn).toHaveAttribute("data-pressed")
   })
 })

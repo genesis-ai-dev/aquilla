@@ -210,7 +210,7 @@ export function MembersSection({ projectId }: { projectId: string }) {
           return (
             <DataTableRowActionsButton
               label={`Actions for ${m.username}`}
-              className="opacity-0 transition-none group-hover:opacity-100 focus-visible:opacity-100 group-data-popup-open:opacity-100"
+              revealOnHover
             />
           )
         },

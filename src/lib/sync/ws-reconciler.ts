@@ -681,6 +681,40 @@ function isTargetPresenceSelection(value: unknown): value is TargetPresenceSelec
   )
 }
 
+// ── AQU-845 reconnect resync ──────────────────────────────────────────────
+
+/**
+ * Build the handler ProjectWorkspace calls from `onOpen`.
+ *
+ * AQU-845: the per-project DO holds no durable state (AD-1) — it broadcasts
+ * `event.applied` live and never replays. So every frame that lands while a
+ * client's socket is down (a sync-worker redeploy, a DO eviction, a network
+ * blip, a sleeping laptop) is lost to that client *permanently*: the read path
+ * only refetches on mount, on file switch, on an `event.applied` frame it
+ * actually received, and on window focus/visibilitychange. A peer's committed
+ * cell therefore renders blank until the user happens to blur and refocus the
+ * window — which is exactly the reported "cells are empty for the other
+ * member, then fill in on their own with no user action".
+ *
+ * Reopening the socket is the signal that a gap may exist, so every reopen
+ * pulls the projection back. The FIRST open is skipped: the reconciler is
+ * created alongside the initial read, which is already fetching, and firing
+ * there would just double the request on every file open.
+ *
+ * The resync itself is a `?since=` delta in the read path, so the recovery
+ * costs one small request per reconnect — not a full re-stream.
+ */
+export function createReconnectResyncHandler(onResync: () => void): () => void {
+  let opened = false
+  return () => {
+    if (!opened) {
+      opened = true
+      return
+    }
+    onResync()
+  }
+}
+
 // ── FRO-479 push-accelerator client glue ──────────────────────────────────
 //
 // FRO-479 wiring (done by the swarm orchestrator): ProjectWorkspace.tsx builds

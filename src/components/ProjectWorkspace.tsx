@@ -3169,7 +3169,7 @@ export function ProjectWorkspace() {
     let cancelled = false
     let reconciler: import("@/lib/sync/ws-reconciler").WsReconciler | null = null
     void (async () => {
-      const { createWsReconciler, isOwnWriteEcho, isValidationEvent, createLinkUpstreamChangedHandler, fileInventoryChanged } =
+      const { createWsReconciler, isOwnWriteEcho, isValidationEvent, createLinkUpstreamChangedHandler, createReconnectResyncHandler, fileInventoryChanged } =
         await import("@/lib/sync/ws-reconciler")
       const { syncWorkerHttpOrigin } = await import("@/lib/sync/sync-worker-url")
       if (cancelled || !project?.id) return
@@ -3192,6 +3192,20 @@ export function ProjectWorkspace() {
             revalidateCellsRef.current()
           })
         },
+      })
+      // AQU-845: the DO never replays `event.applied`, so anything broadcast
+      // while this client's socket was down is gone. Reopening the socket is
+      // the only in-app signal that such a gap may exist — pull the open
+      // file's projection (and the progress/validation reads that hang off it)
+      // back, instead of waiting for a window focus that may never come.
+      const handleReconnectResync = createReconnectResyncHandler(() => {
+        if (cancelled) return
+        revalidateCellsRef.current()
+        revalidateAuditStats()
+        invalidateProjectFileProgress(pid)
+        void refreshAllFilesProgress().catch(() => {
+          // The next normal sidebar refresh retries a transient failure.
+        })
       })
       reconciler = createWsReconciler(
         {
@@ -3218,6 +3232,9 @@ export function ProjectWorkspace() {
               currentFileId: activeFileIdRef.current,
               selection: null,
             })
+            // Skips the first open (the initial read is already in flight);
+            // every reconnect after that closes the missed-broadcast gap.
+            handleReconnectResync()
           },
           onClose() {
             if (cancelled) return
@@ -3467,6 +3484,7 @@ export function ProjectWorkspace() {
     presenceStore,
     sendPresenceUpdate,
     refreshAllFilesProgress,
+    revalidateAuditStats,
   ])
 
   // FRO-288: workspace-level focus-lock with renewal.

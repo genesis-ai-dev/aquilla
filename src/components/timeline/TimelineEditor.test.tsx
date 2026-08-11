@@ -1049,6 +1049,29 @@ describe("TimelineEditor — the source-audio band", () => {
     })
   })
 
+  it("clicking a silence seeks its start and names the lines on both sides", () => {
+    setVideoDurationSec(VIDEO, 120)
+    const onSeekToTime = vi.fn()
+    const onRevealGap = vi.fn()
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={VIDEO} editable
+        cells={[
+          cell({ id: "a", original: "One", medium: "text", startTime: 10, endTime: 20 }),
+          cell({ id: "b", original: "Two", medium: "text", startTime: 30, endTime: 40 }),
+        ]}
+        onSeekToTime={onSeekToTime}
+        onRevealGap={onRevealGap}
+        onRetimeSubtitle={() => {}}
+      />,
+    )
+    const gaps = screen.getAllByTestId("tl-source-gap")
+    const middle = gaps.find((g) => g.getAttribute("data-region-start") === "20")!
+    fireEvent.click(middle, { clientX: 400 })
+    expect(onSeekToTime).toHaveBeenCalledWith(20)
+    expect(onRevealGap).toHaveBeenCalledWith(20, "a", "b")
+  })
+
   // Round 8, "no room, no add". These run ZOOMED IN ON PURPOSE: the buttons
   // also have a pixel floor (MIN_BUTTON_PX), and at the default 38px/s that
   // floor alone hides anything under ~0.63s — which would make these pass

@@ -2911,6 +2911,28 @@ export function ProjectWorkspace() {
   const jumpToCellIdFollowing = useCallback((cellId: string) => {
     editorRef.current?.scrollToCellId(cellId, { flash: true, follow: "engage" })
   }, [])
+  // AQU-646 round 8: someone clicked a silence on the source band. The timeline
+  // has already put the playhead on its start; this is the table's half.
+  //
+  // Scroll to the line BEFORE the gap and pulse the lines on BOTH sides of it.
+  // Scrolling alone drops you into a long list with several silences in view and
+  // nothing saying which one you clicked (Sam, 2026-08-11) — the two pulses
+  // bracket the gap, so the eye lands on the space between them.
+  //
+  // Deliberately NOT selectFromChip: that sets selectedId and draws a selection
+  // ring, and nothing was selected. A silence is not a thing you can select.
+  const revealGap = useCallback(
+    (_startSec: number, beforeCellId: string | null, afterCellId: string | null) => {
+      // The leading silence has no line before it, so there is nowhere to
+      // scroll — the playhead is already at 0, which says it well enough.
+      if (beforeCellId) {
+        editorRef.current?.scrollToCellId(beforeCellId, { flash: false })
+      }
+      editorRef.current?.pulseCells([beforeCellId, afterCellId].filter((id): id is string => Boolean(id)))
+    },
+    [],
+  )
+
   // The bottom bar's per-advance jump: startQueue captures this ONCE, but the
   // lens can change mid-run — so the "driver owns follow while stacked" gate
   // must be evaluated per call (ref), not baked in at render time.
@@ -6068,6 +6090,7 @@ export function ProjectWorkspace() {
                     // server. Offering the button below that bar would mint a
                     // guaranteed 403 and wedge the outbox.
                     canAddLine={canPerform("source.cell.create", project?.syncRole?.level ?? null)}
+                    onRevealGap={revealGap}
                     canLinkVideo={canPerform("file.video.set", project?.syncRole?.level ?? null)}
                     onSeekToTime={handleTimelineSeekToTime}
                     timingMode={timingMode}

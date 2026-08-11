@@ -14,6 +14,7 @@ import {
   regionBeforeCell,
   cellIdAtSec,
   insertSlotsByCell,
+  cuesAroundGap,
   type RegionSegment,
 } from "./source-regions"
 
@@ -267,5 +268,37 @@ describe("insertSlotsByCell", () => {
     const s = slots([], null)
     expect(s.head).toBeNull()
     expect(s.afterCell.size).toBe(0)
+  })
+})
+
+// AQU-646 round 8: which two rows to pulse so the eye lands on the silence the
+// user just clicked. Also a UI-affordance lookup, not an anchor lookup.
+describe("cuesAroundGap", () => {
+  const map = (segs: RegionSegment[], totalSec: number) => deriveSourceRegions(segs, totalSec)
+
+  it("names the cue on each side of a mid-file silence", () => {
+    expect(cuesAroundGap(map([seg("a", 0, 10), seg("b", 15, 20)], 30), 10))
+      .toEqual({ beforeCellId: "a", afterCellId: "b" })
+  })
+
+  it("the LEADING silence has nothing before it", () => {
+    expect(cuesAroundGap(map([seg("a", 5, 10)], 20), 0))
+      .toEqual({ beforeCellId: null, afterCellId: "a" })
+  })
+
+  it("the TRAILING silence has nothing after it", () => {
+    expect(cuesAroundGap(map([seg("a", 0, 10)], 20), 10))
+      .toEqual({ beforeCellId: "a", afterCellId: null })
+  })
+
+  it("picks the nearest row on each side across an overlap", () => {
+    // a and b overlap up to 6s, then b runs alone to 10, gap, then c.
+    const m = map([seg("a", 0, 6), seg("b", 4, 10), seg("c", 15, 20)], 30)
+    expect(cuesAroundGap(m, 10)).toEqual({ beforeCellId: "b", afterCellId: "c" })
+  })
+
+  it("returns nothing for a second that is not the start of a gap", () => {
+    expect(cuesAroundGap(map([seg("a", 0, 10)], 20), 5))
+      .toEqual({ beforeCellId: null, afterCellId: null })
   })
 })

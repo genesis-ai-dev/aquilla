@@ -602,6 +602,9 @@ export interface EditorTableHandle {
   getCurrentIndex?: () => number
   /** Briefly outline a cell after a "Go to cell" so the user sees where the search landed. */
   flashCell: (cellId: string, searchTerm: string) => void
+  /** AQU-646 round 8: pulse rows twice WITHOUT selecting them — "look here",
+   *  for the lines bracketing a silence the user clicked on the source band. */
+  pulseCells: (cellIds: readonly string[]) => void
 }
 
 /** Per-cell audio production data + actions, supplied only when the editor is
@@ -1334,6 +1337,27 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     })
   }, [getListQueryRoot])
 
+  // AQU-646 round 8: two short beats on a set of rows, with NO selection — the
+  // gap-click's "look here" for the lines on either side of a silence. Removing
+  // the class first is what lets a second click on the same pair re-fire it;
+  // re-adding a class the node already carries restarts nothing.
+  const pulseCellsDom = useCallback((cellIds: readonly string[]) => {
+    if (cellIds.length === 0) return
+    requestAnimationFrame(() => {
+      const root = getListQueryRoot()
+      if (!root) return
+      for (const cellId of cellIds) {
+        const el = root.querySelector<HTMLElement>(`[data-cell-id="${CSS.escape(cellId)}"]`)
+        if (!el) continue
+        el.classList.remove("codex-gap-pulse")
+        // Force a reflow so the removal is committed before the re-add.
+        void el.offsetWidth
+        el.classList.add("codex-gap-pulse")
+        window.setTimeout(() => el.classList.remove("codex-gap-pulse"), 600)
+      }
+    })
+  }, [getListQueryRoot])
+
   useImperativeHandle(ref, () => ({
     scrollToCellIndex(index: number) {
       if (index >= 0 && index < displayCellIds.length) {
@@ -1391,7 +1415,10 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     flashCell(cellId, _searchTerm) {
       flashCellDom(cellId)
     },
-  }), [clearChapterNavigationSelection, displayCellIds.length, cellStore, focusCellEditorByIndex, getListQueryRoot, flashCellDom, programmaticListScroll, issueFollowCommand])
+    pulseCells(cellIds) {
+      pulseCellsDom(cellIds)
+    },
+  }), [clearChapterNavigationSelection, displayCellIds.length, cellStore, focusCellEditorByIndex, getListQueryRoot, flashCellDom, pulseCellsDom, programmaticListScroll, issueFollowCommand])
 
   // FRO-297: Focus the grid-row wrapper div (not TipTap) at `index`.
   // Used for Esc-to-grid and arrow-key navigation while NOT in edit mode.

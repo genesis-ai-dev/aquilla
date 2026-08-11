@@ -238,6 +238,31 @@ export function insertSlotsByCell(map: SourceRegionMap, minGapSec: number): Inse
   return { head, afterCell }
 }
 
+/**
+ * The cues on either side of the silence starting at `startSec`.
+ *
+ * ALSO a UI affordance map, not an anchor lookup — see `insertSlotsByCell`. This
+ * one answers "which two rows should I flash so the eye lands on the gap the
+ * user just clicked", which is a question about what is on screen. Nothing here
+ * decides where a row is chained.
+ *
+ * Either side may be null: the leading silence has nothing before it, the
+ * trailing one nothing after.
+ */
+export function cuesAroundGap(
+  map: SourceRegionMap,
+  startSec: number,
+): { beforeCellId: string | null; afterCellId: string | null } {
+  const i = map.regions.findIndex((r) => r.startSec === startSec && r.kind === "gap")
+  if (i < 0) return { beforeCellId: null, afterCellId: null }
+  // The row you see nearest the gap on each side: the LAST cue of the region
+  // before it, the FIRST of the region after.
+  return {
+    beforeCellId: map.regions[i - 1]?.cellIds.at(-1) ?? null,
+    afterCellId: map.regions[i + 1]?.cellIds[0] ?? null,
+  }
+}
+
 /** The stretch immediately BEFORE this cell — what "insert above" would claim. */
 export function regionBeforeCell(map: SourceRegionMap, cellId: string): SourceRegion | null {
   for (let i = 0; i < map.regions.length; i++) {

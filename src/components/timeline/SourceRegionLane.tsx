@@ -13,7 +13,7 @@
 // not invent its own.
 
 import { memo } from "react"
-import { secToPx, pxToSec, isVisible } from "@/lib/timeline/scale"
+import { secToPx, isVisible } from "@/lib/timeline/scale"
 import { MIN_ADDABLE_SPAN_SEC } from "@/lib/timeline/lane-timing"
 import { fmtClock } from "./format"
 import { TimelineCard } from "./TimelineCard"
@@ -38,7 +38,13 @@ export interface SourceRegionLaneProps {
   onSelect(id: string): void
   /** Clean click on a cue chip → navigate playback to it (same as any lane). */
   onSeek?(id: string): void
-  /** A click on a silence — seeks the transport to the clicked second. */
+  /**
+   * A click on a silence. Round 8: it reports the silence's START, not wherever
+   * the pointer happened to land. Clicking a stretch that means "nothing is
+   * said here" and being dropped at an arbitrary point inside it told you
+   * nothing; the beginning of the silence is the only second in it worth
+   * naming, and it is where you would start listening.
+   */
   onSeekSec(sec: number): void
 }
 
@@ -78,10 +84,7 @@ function SourceRegionLaneImpl({
           data-region-start={g.startSec}
           data-region-end={g.endSec}
           title={`No subtitle here · ${(g.endSec - g.startSec).toFixed(1)}s`}
-          onClick={(e) => {
-            const rect = e.currentTarget.getBoundingClientRect()
-            onSeekSec(g.startSec + pxToSec(e.clientX - rect.left, pxPerSec))
-          }}
+          onClick={() => onSeekSec(g.startSec)}
           // TimelineCard's geometry and radius, dashed and unfilled — the
           // established "slot with nothing in it yet" treatment (the untimed
           // strip's chips are the precedent), kept in the lane's sky family.

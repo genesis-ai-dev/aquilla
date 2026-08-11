@@ -87,12 +87,16 @@ describe("SourceRegionLane", () => {
     expect(onSeek).toHaveBeenCalledWith("a")
   })
 
-  it("clicking a silence seeks to the clicked second", () => {
+  // Round 8: this used to seek to wherever the pointer landed. Being dropped at
+  // an arbitrary second inside a stretch that means "nothing is said here" told
+  // you nothing; the start of the silence is the only second in it worth naming
+  // and it is where you would begin listening.
+  it("clicking a silence seeks to its START, not to the pointer", () => {
     const { onSeekSec, onSelect } = renderLane()
-    // The middle gap spans 12–20s at 10px/s; its own box is 0-origin in
-    // happy-dom, so clientX 30 = 3s into the gap = 15s on the file.
+    // The middle gap spans 12–20s at 10px/s. Click well inside it.
     fireEvent.click(screen.getAllByTestId("tl-source-gap")[1], { clientX: 30 })
-    expect(onSeekSec).toHaveBeenCalledWith(15)
+    expect(onSeekSec).toHaveBeenCalledWith(12)
+    // A silence is not a thing you can select, so nothing gains a ring.
     expect(onSelect).not.toHaveBeenCalled()
   })
 

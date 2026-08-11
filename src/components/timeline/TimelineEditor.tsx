@@ -4,12 +4,12 @@
 // own — the play queue is the master clock, and the linked video lives beside
 // the text table as MediaVideoPane (AQU-646).
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { createPortal } from "react-dom"
 import { AudioLines, Film, LocateFixed, Magnet, Minus, Plus, Volume2, VolumeX, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { deriveLanes } from "@/lib/timeline/lanes"
-import { deriveSourceRegions, EMPTY_SOURCE_REGIONS } from "@/lib/timeline/source-regions"
+import { cuesAroundGap, deriveSourceRegions, EMPTY_SOURCE_REGIONS } from "@/lib/timeline/source-regions"
 import { isLineEmpty, isUserAddedLine } from "@/lib/timeline/user-lines"
 import { SourceRegionLane } from "./SourceRegionLane"
 import { chipOverlaps, MIN_ADDABLE_SPAN_SEC } from "@/lib/timeline/lane-timing"
@@ -79,6 +79,14 @@ export interface TimelineEditorProps {
   canAddLine?: boolean
   /** Take back a line someone added, while it is still empty. */
   onRemoveLine?(cellId: string): void
+  /**
+   * AQU-646 round 8: someone clicked a silence on the source band. The playhead
+   * has already been moved to its start; this is the table's half — scroll to
+   * the line before the gap and draw the eye to the gap itself. Either id may
+   * be null (the leading silence has no line before it, the trailing one none
+   * after). Nothing here selects anything: nothing was selected.
+   */
+  onRevealGap?(startSec: number, beforeCellId: string | null, afterCellId: string | null): void
   /** False disables the control — `file.video.set` needs contributor access,
    *  and the emit throws rather than failing quietly. */
   canLinkVideo?: boolean
@@ -189,6 +197,7 @@ export function TimelineEditor({
   onRequestLinkVideo,
   onAddLine,
   canAddLine,
+  onRevealGap,
   onRemoveLine,
   canLinkVideo = true,
   onSeekToTime,
@@ -411,6 +420,20 @@ export function TimelineEditor({
     () => (drawsSourceBand ? deriveSourceRegions(cells, videoDurationSec) : EMPTY_SOURCE_REGIONS),
     [drawsSourceBand, cells, videoDurationSec],
   )
+  // AQU-646 round 8: a click on a silence lands the playhead at its START —
+  // being dropped at an arbitrary point inside a stretch that means "nothing is
+  // said here" told you nothing — and hands the table the two lines around it
+  // so it can scroll there and draw the eye to the gap.
+  const handleGapClick = useCallback(
+    (startSec: number) => {
+      seekTo(startSec)
+      if (!onRevealGap) return
+      const { beforeCellId, afterCellId } = cuesAroundGap(sourceRegions, startSec)
+      onRevealGap(startSec, beforeCellId, afterCellId)
+    },
+    [seekTo, onRevealGap, sourceRegions],
+  )
+
   // Stretches of film that no cell covers — where a line can still be added.
   // Derived from the same sweep the Source track draws, so the two can never
   // disagree about where there is room.
@@ -1129,7 +1152,7 @@ export function TimelineEditor({
                 editable={editable}
                 onSelect={selectFromChip}
                 onSeek={laneProps.onSeek}
-                onSeekSec={seekTo}
+                onSeekSec={handleGapClick}
               />
             ) : (
               <TimelineLane cells={dialogue} variant="dialogue" retimable={false} {...laneProps} />

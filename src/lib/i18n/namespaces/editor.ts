@@ -511,6 +511,9 @@ export const editor = defineNamespace({
     "editor.source.locked": "Source is locked",
     "editor.source.placeholder": "Source text…",
     "editor.source.formattingBadge": "formatting",
+    "editor.source.idmlProtected":
+      "IDML source text is protected because changing it would invalidate the " +
+      "original package locator.",
     "editor.source.formattingLossTooltip":
       "Source has inline formatting that the target does not preserve. Formatting " +
       "will be lost on export.",
@@ -3147,6 +3150,14 @@ export const editor = defineNamespace({
           "Placeholder inside the open source-text editor when the cell has no " +
           "source text. Ends with an ellipsis glyph.",
         maxLength: 20,
+      },
+      "editor.source.idmlProtected": {
+        description:
+          "Tooltip on the padlock where the source-edit pencil would be, for a file " +
+          "imported from Adobe InDesign. Source text there carries invisible " +
+          "position markers that tie it back to the original layout, so editing it " +
+          "would break the round-trip. Explain the reason plainly; the user has done " +
+          "nothing wrong. 'IDML' is the file-format name and stays as-is.",
       },
       "editor.source.formattingBadge": {
         description:

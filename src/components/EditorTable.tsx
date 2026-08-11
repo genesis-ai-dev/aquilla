@@ -3807,7 +3807,7 @@ function EditorRow({
   )
   const canEditSourceForCell = canEditSource && !idmlConfiguration
   const sourceReadOnlyReasonForCell = idmlConfiguration
-    ? "IDML source text is protected because changing it would invalidate the original package locator."
+    ? t("editor.source.idmlProtected")
     : sourceReadOnlyReason
   const hasTranslatedText = Boolean(visibleTranslated?.trim())
   const showCompletionOverlay = isLoading && !hasTranslatedText

@@ -53,6 +53,7 @@ import { warmFileDubs } from "@/lib/audio/warm-dubs"
 import { effectiveSourceText } from "@/lib/cell-text"
 import { resolveDeepLinkLane } from "./project-workspace-lane-deeplink"
 import { resolveActiveTargetLanguage } from "./project-workspace-lane-target"
+import { resolveActiveSourceLanguage } from "./project-workspace-source-language"
 import { useWorkspaceSearch } from "@/hooks/useWorkspaceSearch"
 import { ParallelPassagesPanel, type ParallelPanelMode, type ParallelPanelScope, type ReplaceAllPayload } from "./ParallelPassagesPanel"
 import type { EditorTableHandle } from "./EditorTable"
@@ -1370,7 +1371,16 @@ export function ProjectWorkspace() {
     if (next >= 0) editorRef.current?.focusCellEditorIndex(next)
   }, [findNextUnfinished])
   const activeFile = activeFileId ? project?.files.find((f) => f.id === activeFileId) : null
-  const activeSourceLanguage = activeFile?.sourceLanguage || project?.sourceLanguage
+  // AQU-848: the SOURCE language is the project setting, never the file's
+  // import-time stamp — same rule the target side settled in AQU-583. A file
+  // stamped at import (some importers stamp a literal, e.g. `"en"` for OBS)
+  // otherwise shadows the setting forever, so a project configured for a
+  // low-resource language keeps reporting English in the editor and in AI
+  // prompts, and changing Settings can never clear it.
+  const activeSourceLanguage = resolveActiveSourceLanguage(
+    activeFile?.sourceLanguage,
+    project?.sourceLanguage,
+  )
   // The DEFAULT (`''`) lane's target language — the PROJECT default only. Used to
   // label the default-lane switch option, which must always name the project
   // default regardless of which lane is active. AQU-583: the per-file target is
@@ -2580,7 +2590,11 @@ export function ProjectWorkspace() {
         // per-device provider override on top.
         settings: project?.completionSettings ?? FALLBACK_COMPLETION_SETTINGS,
         session: frontierSession,
-        sourceLanguage: project?.sourceLanguage || "English",
+        // AQU-848: never claim English on the project's behalf. The configured
+        // source language is what the model must be told to back-translate
+        // into; when the project has none, the service substitutes a
+        // language-neutral phrase rather than inventing one.
+        sourceLanguage: project?.sourceLanguage?.trim() || "",
         targetLanguage: project?.targetLanguage || "Unknown",
         targetText: cell.translated,
         examples: [],

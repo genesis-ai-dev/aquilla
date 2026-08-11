@@ -17,11 +17,11 @@ interface HistoryDrawerProps {
    *  /events route was file-scoped; Phase 2b's per-cell history route is
    *  project-scoped so we surface projectId explicitly here. */
   projectId?: string | null
-  /** File the cell belongs to — required to fetch D1 audit history. */
+  /** File the cell belongs to — required to fetch server-side audit history. */
   fileId?: string | null
   /** Fetches a file-scoped sync token (same as Phase 2 outbox flusher). */
   getTokenForFile?: (fileId: string) => Promise<string | null>
-  /** Whether this project has cloud (D1) history at all. Gates the
+  /** Whether this project has cloud (server) history at all. Gates the
    *  fetch-error state: tokenless local projects legitimately fall back to
    *  cell.history and must not see a scary "couldn't load" message. */
   isSynced?: boolean
@@ -195,7 +195,7 @@ export function HistoryDrawer({ cell, onClose, projectId, fileId, getTokenForFil
         {isSynced && d1Loading && history.length === 0 ? (
           <p className="text-xs text-muted-foreground">Loading history…</p>
         ) : isSynced && d1Error && history.length === 0 ? (
-          // A failed D1 fetch on a synced project used to fall through to
+          // A failed history fetch on a synced project used to fall through to
           // "No edits yet." — confidently wrong for cells with real history.
           <div className="space-y-1.5">
             <p className="text-xs text-muted-foreground">Couldn't load edit history.</p>

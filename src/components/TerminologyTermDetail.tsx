@@ -6,7 +6,7 @@
  * lightweight inline target editor for contributor+ users.
  *
  * Deliberately minimal: no rail, no audio, no validation UI.  The commit
- * path mirrors EditorTable: emitTargetCellCommit → outbox → D1 projection.
+ * path mirrors EditorTable: emitTargetCellCommit → outbox → server projection.
  */
 
 import { useMemo, useCallback, useState } from "react"

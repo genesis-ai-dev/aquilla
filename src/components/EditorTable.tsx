@@ -790,7 +790,7 @@ interface EditorTableProps {
    *  `staleCellIds` above. */
   upstreamStaleCellIds?: ReadonlySet<string>
   /** Token fetcher for project-scoped sync reads. Required for the inline
-   *  History tab to query the D1 event log on demand. */
+   *  History tab to query the Postgres event log on demand. */
   getTokenForFile?: (fileId: string) => Promise<string | null>
   /** FRO-207: Lazily returns the interlinear alignment model for source↔target
    *  token alignment in the BT expansion tab. Built by ProjectWorkspace from
@@ -5139,8 +5139,8 @@ function EditorRow({
 
   // Edit history is reached via the single History control on the cell action
   // rail (opens the full HistoryDrawer). The audit trail lives in the
-  // sync-worker, not the cell projection, so the drawer fetches the D1 event
-  // log on demand — the row itself no longer renders a duplicate inline list.
+  // sync-worker, not the cell projection, so the drawer fetches the Postgres
+  // event log on demand — the row itself no longer renders a duplicate inline list.
 
   // ── Compute attention signals for chevron + tab dots ──────────────────────
   const isBtStale = Boolean(

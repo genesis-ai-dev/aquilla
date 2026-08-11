@@ -1011,7 +1011,7 @@ export function ProjectWorkspace() {
   // out-of-scope cells (no guaranteed-403) rather than silently reverting.
   const myScopes = useMyScopes(project?.id ?? null)
 
-  // D1-backed audit stats for the active file with the client outbox applied
+  // Server-backed (Postgres) audit stats for the active file with the client outbox applied
   // on top — pending commits/validates show up immediately, before the next
   // 30s refetch. Source of truth for project-wide validation views.
   const auditStatsEnabled = Boolean(project?.id && activeFileId && frontierSession?.jwt)

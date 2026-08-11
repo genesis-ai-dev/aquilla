@@ -12,7 +12,7 @@ import {
   parseTranslatedCatalog,
   renderCatalogModule,
 } from "./catalog-export"
-import { MESSAGE_KEYS } from "./context"
+import { MESSAGE_KEYS, namespaceOf } from "./context"
 import { en, type MessageKey } from "./messages/en"
 import { translate } from "./translate"
 
@@ -128,12 +128,14 @@ describe("context sidecar", () => {
       namespaces: Record<string, { _context: { description: string } }>
     }
     expect(parsed.version).toBe(1)
-    expect(Object.keys(parsed.namespaces).sort()).toEqual([
-      "common",
-      "error",
-      "language",
-      "nav",
-    ])
+    // Derived from the live catalog rather than hardcoded. The sidecar's job is
+    // to carry EVERY namespace to translators, so what needs asserting is
+    // "nothing was dropped in export" — not "these four exist". A literal list
+    // here went red the moment the fan-out added namespaces, which said nothing
+    // about whether the export was correct.
+    expect(Object.keys(parsed.namespaces).sort()).toEqual(
+      [...new Set(MESSAGE_KEYS.map((k) => namespaceOf(k)))].sort(),
+    )
     expect(parsed.namespaces.nav._context.description).toMatch(/navigation/i)
   })
 })

@@ -20,12 +20,24 @@ import { common } from "../namespaces/common"
 import { nav } from "../namespaces/nav"
 import { error } from "../namespaces/error"
 import { language } from "../namespaces/language"
+import { dialog } from "../namespaces/dialog"
+import { editor } from "../namespaces/editor"
+import { comments } from "../namespaces/comments"
+import { auth } from "../namespaces/auth"
+import { search } from "../namespaces/search"
+import { audio } from "../namespaces/audio"
 
 export const en = {
   ...common.keys,
   ...nav.keys,
   ...error.keys,
   ...language.keys,
+  ...dialog.keys,
+  ...editor.keys,
+  ...comments.keys,
+  ...auth.keys,
+  ...search.keys,
+  ...audio.keys,
 } as const
 
 export type MessageKey = keyof typeof en

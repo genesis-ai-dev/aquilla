@@ -17,7 +17,8 @@ import { cn } from "@/lib/utils"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Spinner } from "@/components/ui/spinner"
 import { MISSING_AUDIO_MESSAGE } from "@/lib/audio/play-queue"
-import { SLOT_GROUP, TimelineSlotButton } from "./TimelineSlotButton"
+import { TimelineSlotButton } from "./TimelineSlotButton"
+import { MIN_SLOT_PX, useHotSlot } from "./slot-hover"
 import { isVisible, secToPx, pxToSec } from "@/lib/timeline/scale"
 import {
   targetChipGeom,
@@ -615,6 +616,11 @@ export function TargetAudioLane({
     return out
   }
 
+  // Which record slot the pointer is on — ONE for both kinds, so an
+  // add-and-record slot and an empty-section slot can never both be lit. Keys
+  // are prefixed because a span start and a cell id share no namespace.
+  const { hotKey, slotHoverProps } = useHotSlot(viewStartSec, pxPerSec)
+
   // SUB-51: a record button hiding in the empty space under each dub-free
   // section. Rendered BEFORE the chips and with no z-index, so a real chip —
   // including an overlong neighbour painting across — always wins the pointer.
@@ -629,7 +635,7 @@ export function TargetAudioLane({
           if (typeof start !== "number" || typeof end !== "number") return []
           if (!isVisible(start, end, viewStartSec, viewEndSec)) return []
           const widthPx = secToPx(end - start, pxPerSec)
-          if (widthPx < 24) return [] // no room for a button worth hitting
+          if (widthPx < MIN_SLOT_PX) return []
           return [{ cell, leftPx: secToPx(start, pxPerSec), widthPx }]
         })
       : []
@@ -653,20 +659,21 @@ export function TargetAudioLane({
       {(emptySpans ?? []).map((span) => {
         const leftPx = secToPx(span.startSec, pxPerSec)
         const widthPx = secToPx(span.endSec - span.startSec, pxPerSec)
-        // Same floor as a section's own slot — below this the button has
-        // nowhere to sit, so none is offered until you zoom in.
-        if (!editable || !onAddLineAndRecord || widthPx < 24) return null
+        // Same floor as a section's own slot.
+        if (!editable || !onAddLineAndRecord || widthPx < MIN_SLOT_PX) return null
         if (!isVisible(span.startSec, span.endSec, viewStartSec, viewEndSec)) return null
         return (
           <div
             key={`addrec-${span.startSec}`}
             data-testid={`tl-target-add-${span.startSec}`}
             style={{ left: `${leftPx}px`, width: `${widthPx}px` }}
-            className={`${SLOT_GROUP} absolute top-2.5 flex h-[46px] items-center justify-center`}
+            className="absolute top-2.5 flex h-[46px] items-center justify-center"
+            {...slotHoverProps(`add-${span.startSec}`)}
           >
             <TimelineSlotButton
               testId={`tl-target-add-${span.startSec}-record`}
               label="Record over this stretch"
+              hot={hotKey === `add-${span.startSec}`}
               onClick={() => onAddLineAndRecord(span.startSec, span.endSec)}
             >
               <Mic className="h-3.5 w-3.5" />
@@ -679,11 +686,13 @@ export function TargetAudioLane({
           key={`empty-${cell.id}`}
           data-testid={`tl-target-empty-${cell.id}`}
           style={{ left: `${leftPx}px`, width: `${widthPx}px` }}
-          className={`${SLOT_GROUP} absolute top-2.5 flex h-[46px] items-center justify-center`}
+          className="absolute top-2.5 flex h-[46px] items-center justify-center"
+          {...slotHoverProps(`empty-${cell.id}`)}
         >
           <TimelineSlotButton
             testId={`tl-target-empty-${cell.id}-record`}
             label="Record audio for this line"
+            hot={hotKey === `empty-${cell.id}`}
             onClick={() => {
               onSelect(cell.id)
               onOpenRecording?.(cell.id)

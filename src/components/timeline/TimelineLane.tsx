@@ -8,7 +8,8 @@
 
 import { Pencil } from "lucide-react"
 import { isVisible } from "@/lib/timeline/scale"
-import { SLOT_GROUP, TimelineSlotButton } from "./TimelineSlotButton"
+import { TimelineSlotButton } from "./TimelineSlotButton"
+import { MIN_SLOT_PX, useHotSlot } from "./slot-hover"
 import { subtitleSpanSec } from "@/lib/timeline/lane-timing"
 import { TimelineCard } from "./TimelineCard"
 import type { TimelineLayout } from "@/lib/timeline/layout"
@@ -52,10 +53,6 @@ export interface TimelineLaneProps {
   onRemove?(cellId: string): void
 }
 
-/** Below this a round button has nowhere to sit, so none is offered — zoom in
- *  and it appears. Matches the target lane's own floor. */
-const MIN_BUTTON_PX = 24
-
 export function TimelineLane({
   cells,
   variant,
@@ -77,6 +74,10 @@ export function TimelineLane({
   canRemove,
   onRemove,
 }: TimelineLaneProps) {
+  // Which add-line slot the pointer is on. State rather than CSS `:hover` —
+  // see TimelineSlotButton's header for the six-lit-at-once bug that forced it.
+  const { hotKey, slotHoverProps } = useHotSlot(viewStartSec, pxPerSec)
+
   const spanOf = (c: CellData): { start: number; end: number } => {
     if (layout) {
       const s = layout.spanFor(c, variant === "subtitle" ? "subtitle" : "source")
@@ -147,7 +148,7 @@ export function TimelineLane({
             leftPx: s.startSec * pxPerSec,
             widthPx: (s.endSec - s.startSec) * pxPerSec,
           }))
-          .filter((s) => s.widthPx >= MIN_BUTTON_PX)
+          .filter((s) => s.widthPx >= MIN_SLOT_PX)
       : []
 
   return (
@@ -157,11 +158,13 @@ export function TimelineLane({
           key={`add-${span.startSec}`}
           data-testid={`tl-add-line-${span.startSec}`}
           style={{ left: `${leftPx}px`, width: `${widthPx}px` }}
-          className={`${SLOT_GROUP} absolute top-2.5 flex h-[46px] items-center justify-center`}
+          className="absolute top-2.5 flex h-[46px] items-center justify-center"
+          {...slotHoverProps(String(span.startSec))}
         >
           <TimelineSlotButton
             testId={`tl-add-line-${span.startSec}-button`}
             label="Add a line here"
+            hot={hotKey === String(span.startSec)}
             onClick={() => addLine?.(span.startSec, span.endSec)}
           >
             <Pencil className="h-3.5 w-3.5" />

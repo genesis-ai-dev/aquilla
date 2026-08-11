@@ -175,4 +175,122 @@ describe("TimelineLane", () => {
       expect(onRetime).toHaveBeenCalledWith("b", 14, 16)
     })
   })
+
+  // AQU-646 round 9: the add-line button's reveal moved off CSS `:hover`.
+  // Sam had six mic buttons lit at once at 0.2x zoom with the pointer on none
+  // of them: WebKit does not re-evaluate `:hover` when content moves UNDER a
+  // stationary pointer, so every slot the pointer had passed over while the
+  // track scrolled stayed lit. The lane now owns the answer, and these tests
+  // pin the two properties CSS could not give: at most one, and forgotten the
+  // moment the track moves.
+  describe("which slot is hot", () => {
+    const withSlots = (props: Partial<React.ComponentProps<typeof TimelineLane>> = {}) =>
+      render(
+        <TimelineLane
+          cells={[]}
+          variant="subtitle"
+          pxPerSec={40}
+          viewStartSec={0}
+          viewEndSec={40}
+          selectedId={null}
+          editable
+          retimable
+          emptySpans={[
+            { startSec: 1, endSec: 5 },
+            { startSec: 10, endSec: 15 },
+          ]}
+          onAddLine={() => {}}
+          onSelect={() => {}}
+          onRetime={() => {}}
+          {...props}
+        />,
+      )
+    const btn = (start: number) => screen.getByTestId(`tl-add-line-${start}-button`)
+    const slot = (start: number) => screen.getByTestId(`tl-add-line-${start}`)
+    const lit = () => document.querySelectorAll('[data-hot="true"]').length
+
+    it("lights the slot the pointer entered, and only that one", () => {
+      withSlots()
+      expect(lit()).toBe(0)
+      fireEvent.pointerEnter(slot(1))
+      expect(btn(1)).toHaveAttribute("data-hot", "true")
+      expect(btn(10)).not.toHaveAttribute("data-hot")
+      expect(lit()).toBe(1)
+    })
+
+    it("moving between abutting slots never lights two", () => {
+      withSlots()
+      fireEvent.pointerEnter(slot(1))
+      // The new slot's enter can arrive before the old slot's leave.
+      fireEvent.pointerEnter(slot(10))
+      fireEvent.pointerLeave(slot(1))
+      expect(btn(10)).toHaveAttribute("data-hot", "true")
+      expect(lit()).toBe(1)
+    })
+
+    it("leaving clears it", () => {
+      withSlots()
+      fireEvent.pointerEnter(slot(1))
+      fireEvent.pointerLeave(slot(1))
+      expect(lit()).toBe(0)
+    })
+
+    it("SCROLLING clears it — the pointer never moved, so nothing else would", () => {
+      const { rerender } = withSlots()
+      fireEvent.pointerEnter(slot(1))
+      expect(lit()).toBe(1)
+      rerender(
+        <TimelineLane
+          cells={[]}
+          variant="subtitle"
+          pxPerSec={40}
+          viewStartSec={7}
+          viewEndSec={47}
+          selectedId={null}
+          editable
+          retimable
+          emptySpans={[
+            { startSec: 1, endSec: 5 },
+            { startSec: 10, endSec: 15 },
+          ]}
+          onAddLine={() => {}}
+          onSelect={() => {}}
+          onRetime={() => {}}
+        />,
+      )
+      expect(lit()).toBe(0)
+    })
+
+    it("ZOOMING clears it too", () => {
+      const { rerender } = withSlots()
+      fireEvent.pointerEnter(slot(1))
+      expect(lit()).toBe(1)
+      rerender(
+        <TimelineLane
+          cells={[]}
+          variant="subtitle"
+          pxPerSec={80}
+          viewStartSec={0}
+          viewEndSec={40}
+          selectedId={null}
+          editable
+          retimable
+          emptySpans={[
+            { startSec: 1, endSec: 5 },
+            { startSec: 10, endSec: 15 },
+          ]}
+          onAddLine={() => {}}
+          onSelect={() => {}}
+          onRetime={() => {}}
+        />,
+      )
+      expect(lit()).toBe(0)
+    })
+
+    it("a 6px span still offers its button — the floor is 5px now", () => {
+      // 0.15s at 40px/s. Under the old 24px gate this vanished.
+      withSlots({ emptySpans: [{ startSec: 1, endSec: 1.15 }] })
+      expect(screen.getByTestId("tl-add-line-1-button")).toBeInTheDocument()
+    })
+  })
 })

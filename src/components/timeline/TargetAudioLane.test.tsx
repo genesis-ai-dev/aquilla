@@ -946,7 +946,7 @@ describe("TargetAudioLane — empty-slot record button (SUB-51)", () => {
     expect(onSeek).not.toHaveBeenCalled()
   })
 
-  it("is absent when read-only, unwired, or the section is too narrow to hit", () => {
+  it("is absent when read-only, unwired, or the section is a sliver", () => {
     const { rerender } = render(
       <TargetAudioLane {...base} items={[]} emptyCells={[emptyCell("c9")]} editable={false} onOpenRecording={vi.fn()} />,
     )
@@ -955,11 +955,24 @@ describe("TargetAudioLane — empty-slot record button (SUB-51)", () => {
     rerender(<TargetAudioLane {...base} items={[]} emptyCells={[emptyCell("c9")]} />)
     expect(screen.queryByTestId("tl-target-empty-c9")).toBeNull()
 
-    // 0.5s at 40px/s = 20px — no room for a 28px button.
+    // 0.1s at 40px/s = 4px, under MIN_SLOT_PX.
     rerender(
-      <TargetAudioLane {...base} items={[]} emptyCells={[emptyCell("c9", 30, 30.5)]} onOpenRecording={vi.fn()} />,
+      <TargetAudioLane {...base} items={[]} emptyCells={[emptyCell("c9", 30, 30.1)]} onOpenRecording={vi.fn()} />,
     )
     expect(screen.queryByTestId("tl-target-empty-c9")).toBeNull()
+  })
+
+  // Round 9: this used to be suppressed. The floor was 24px in three separate
+  // copies, which meant that zooming out silently took the record button away
+  // from most sections — Sam read it as "the button doesn't show up on shorter
+  // sections". The rule is the 0.2-SECOND floor; the pixel gate only exists to
+  // stop offering a button over a sliver.
+  it("a 20px section still offers its button — the pixel floor is 5px, not 24px", () => {
+    // 0.5s at 40px/s.
+    render(
+      <TargetAudioLane {...base} items={[]} emptyCells={[emptyCell("c9", 30, 30.5)]} onOpenRecording={vi.fn()} />,
+    )
+    expect(screen.getByTestId("tl-target-empty-c9")).toBeInTheDocument()
   })
 
   it("uses a testid distinct from a real chip's, so a dub-free cell still has no chip", () => {
@@ -980,5 +993,48 @@ describe("TargetAudioLane — empty-slot record button (SUB-51)", () => {
       />,
     )
     expect(screen.queryByTestId("tl-target-empty-c9")).toBeNull()
+  })
+})
+
+// Round 9: both kinds of record slot share ONE hot key, so an add-and-record
+// slot over a silence and an empty-section slot can never both be lit. See
+// TimelineSlotButton's header for the bug that forced this off CSS `:hover`.
+describe("TargetAudioLane — which record slot is hot", () => {
+  const emptyCell = (id: string, startTime = 30, endTime = 36): CellData =>
+    ({ id, fileId: "f1", original: "", translated: "", medium: "media", startTime, endTime }) as unknown as CellData
+  const both = {
+    ...base,
+    items: [],
+    emptyCells: [emptyCell("c9", 30, 34)],
+    emptySpans: [{ startSec: 1, endSec: 5 }],
+    onOpenRecording: vi.fn(),
+    onAddLineAndRecord: vi.fn(),
+  }
+  const lit = () => document.querySelectorAll('[data-hot="true"]').length
+
+  it("lights one slot at a time across BOTH kinds", () => {
+    render(<TargetAudioLane {...both} />)
+    fireEvent.pointerEnter(screen.getByTestId("tl-target-add-1"))
+    expect(screen.getByTestId("tl-target-add-1-record")).toHaveAttribute("data-hot", "true")
+    expect(lit()).toBe(1)
+
+    fireEvent.pointerEnter(screen.getByTestId("tl-target-empty-c9"))
+    expect(screen.getByTestId("tl-target-empty-c9-record")).toHaveAttribute("data-hot", "true")
+    expect(lit()).toBe(1)
+  })
+
+  it("scrolling the track forgets which was hot", () => {
+    const { rerender } = render(<TargetAudioLane {...both} />)
+    fireEvent.pointerEnter(screen.getByTestId("tl-target-empty-c9"))
+    expect(lit()).toBe(1)
+    rerender(<TargetAudioLane {...both} viewStartSec={12} viewEndSec={112} />)
+    expect(lit()).toBe(0)
+  })
+
+  it("leaving clears it", () => {
+    render(<TargetAudioLane {...both} />)
+    fireEvent.pointerEnter(screen.getByTestId("tl-target-add-1"))
+    fireEvent.pointerLeave(screen.getByTestId("tl-target-add-1"))
+    expect(lit()).toBe(0)
   })
 })

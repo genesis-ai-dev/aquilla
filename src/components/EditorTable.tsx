@@ -3986,7 +3986,7 @@ function EditorRow({
   // AQU-664: live editor text, published on a short debounce by TranslatedEditor
   // so terminology blots recompute off the live buffer (not the ~1.2s commit).
   const [liveTargetText, setLiveTargetText] = useState<string | null>(null)
-  const [examplesExpanded, setExamplesExpanded] = useState(false)
+  const examplesExpanded = false
   // FRO-204: chip click state for TermLookupPopover on target editor chips.
   const [termChipState, setTermChipState] = useState<{ term: string; anchor: HTMLElement } | null>(null)
   // Track whether the target editor has a non-empty text selection when a chip is clicked.
@@ -5912,11 +5912,7 @@ function EditorRow({
               />
             )}
             {cellExamples.length > 0 && (
-              <ExamplePanel
-                examples={cellExamples}
-                expanded={examplesExpanded}
-                onExpandedChange={setExamplesExpanded}
-              />
+              <ExamplePanel examples={cellExamples} />
             )}
           </div>
         )}

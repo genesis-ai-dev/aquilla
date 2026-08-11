@@ -4,6 +4,8 @@ _Scope: the operational security of **this project** — the data Aquilla handle
 
 Findings raised here are numbered **OPS-n** to keep them distinct from the June **SEC-n** series. Each is labelled **FACT** (verified against the tree at this commit) or **JUDGMENT** (reasoned inference). Two findings are fixed in the same change that adds this document; the rest are recorded with a recommended owner-decision, because they are configuration or policy calls rather than code.
 
+> **Amended 2026-08-10 (follow-up change).** OPS-7 was closed and **re-rated from Low to High**: the original entry claimed SPA deep links reached the Worker, so the OPS-1 headers were nearly complete. Measuring the live deployment showed the Worker runs for `/` alone, so those headers covered one URL. `public/_headers` closes the gap. The same change raises the declared `hono` floor, adds Dependabot coverage for `agent-worker`, and adds `SECURITY.md`. Superseded PRs #303 and #304 proposed overlapping versions of this work; their unique parts are folded in here.
+
 ---
 
 ## 1. Critical data — what this system actually holds
@@ -57,8 +59,14 @@ Worth naming precisely, because the first attempt at this fix was itself placebo
 ### OPS-6 — [JUDGMENT] No dependency-vulnerability or secret-scanning step in CI
 `ci.yml` runs lint, typecheck, unit, build and per-worker suites. Nothing runs `pnpm audit`, and nothing scans a diff for credentials. June's SEC-7 was found by a human running `pnpm audit` by hand; the two items that mattered (`hono`, the `onnxruntime-web` nightly) are both resolved now (§6) — by ordinary dependency drift, not by a control that would catch the next one.
 
-### OPS-7 — [FACT] Static assets bypass the Worker, so headers do not reach every response
-`run_worker_first = ["/"]` plus the asset router means a literal `/index.html` or `/homepage.html` request is served without invoking the Worker and therefore without the OPS-1 headers. SPA deep links, `/`, and the `STATIC_PAGES` routes all do go through the Worker, so the documents users actually load are covered. Closing the remainder means a `_headers` file, which interacts with the legacy Pages deploys for the other brands — a deliberate follow-up, not an oversight.
+### OPS-7 — [FACT] Static assets bypass the Worker, so headers reached almost nothing — **fixed in this change**
+`run_worker_first = ["/"]` lists exactly one path, and `not_found_handling = "single-page-application"` means the asset router answers every *unmatched* path with `index.html` on its own — there is no fall-through to the Worker. The Worker therefore runs for `/` and nothing else.
+
+This entry originally claimed that SPA deep links and the `STATIC_PAGES` routes went through the Worker, so "the documents users actually load are covered," and rated the residual risk Low. That was wrong, and it made OPS-1 look closed when it covered one URL. Measured against the live deployment rather than reasoned about: on `dev.aquilla.app`, `/` returns the Worker-only `X-Robots-Tag: noindex`, while a never-before-requested path returns `200` HTML with no such header — the Worker did not run.
+
+The unit tests did not catch this because they call the Worker's `fetch` directly, which is a fair test of the Worker and no test at all of what Cloudflare routes to it.
+
+Fixed by `public/_headers`, which carries the identical header set for everything the asset router serves. `worker/security-headers.test.ts` parses that file and asserts parity with `security-headers.ts`, so the two cannot drift.
 
 ## 4. Risk assessment
 
@@ -70,9 +78,11 @@ Worth naming precisely, because the first attempt at this fix was itself placebo
 | OPS-4 | Certain — it had already happened | Medium — a silent deployment-config regression reaches prod | **Medium** | The `/` routing regression this suite exists to catch previously shipped to production undetected. |
 | OPS-5 | Low | Critical if the gate is ever weakened on the strength of the comment | **Low-Medium** | Pure documentation risk. |
 | OPS-6 | Medium — new advisories land continuously | Medium-High | **Medium** | Detection gap, not an exposure. |
-| OPS-7 | Low | Low | **Low** | The document responses that matter are covered. |
+| OPS-7 | Certain — it was the deployed behaviour | High — it silently voided most of OPS-1 | **High** (was mis-rated Low) | Re-rated after measuring the live deployment: the Worker runs for `/` only, so the OPS-1 headers reached one URL. Closed by `public/_headers`. |
 
-Ranked action order: **OPS-1, OPS-2, OPS-4, OPS-6, OPS-3, OPS-5, OPS-7.**
+Ranked action order: **OPS-2, OPS-6, OPS-3, OPS-5** (OPS-1, OPS-4 and OPS-7 are closed in code).
+
+The OPS-7 mis-rating is worth keeping in view: it was assigned Low on a plausible reading of `wrangler.toml` that a single `curl` disproved. Deployment-routing claims in this document are cheap to verify against the running site, and should be.
 
 ## 5. Countermeasures
 
@@ -83,6 +93,10 @@ Ranked action order: **OPS-1, OPS-2, OPS-4, OPS-6, OPS-3, OPS-5, OPS-7.**
    - *Report-only*: the full policy (`script-src`, `style-src`, `connect-src`, `frame-src`, …), mirroring the Tauri CSP. The SPA's backend, analytics and model hosts are all injected at build time (`VITE_*`), and the marketing pages are prerendered, so enforcing blind would risk a production outage for a defence-in-depth control. Watch the console on the SPA and each marketing page, then promote directives into `ENFORCED_CSP` one at a time.
 2. **`pnpm test:worker` added to the `spa` lane in `scripts/cloudflare-ci-checks.mjs`** — the gate Cloudflare Workers Builds actually runs on every pull request — and mirrored into the retained `ci.yml` fallback. The stale staging-era assertion in `worker/index.test.ts` is corrected, so the SPA Worker's deployment-config guards now gate merges (OPS-4).
 3. **Corrected the dev-seed comment** so it states the true blast radius of a failed-open gate (OPS-5).
+4. **`public/_headers`** — the same header set for every path the asset router serves, which is all of them but `/` (OPS-7). `worker/security-headers.test.ts` derives the Worker's real output and fails the build if the two disagree, so tightening one surface alone cannot silently leave the other behind.
+5. **Raised the declared `hono` floor to `^4.12.21`** in `auth-worker` and `agent-worker`, with all four lockfiles updated. SEC-7 was previously "fixed by drift" — the installed versions had moved past the JWT `NumericDate` advisory while the declared ranges still permitted a vulnerable resolution on a fresh install. This makes the fix a constraint instead of a coincidence.
+6. **Dependabot now watches `/agent-worker`** — it has its own lockfiles and was the one Worker no ecosystem entry covered, so a CVE in its dependencies would have gone unflagged. Partial mitigation for OPS-6.
+7. **Added `SECURITY.md`** — a private disclosure route. Without one, a good-faith finder's only options were a public issue or silence.
 
 **Recommended, requiring an owner decision (not implemented here):**
 
@@ -111,7 +125,7 @@ Re-verified against the tree, not assumed.
 | SEC-4 — no auth rate limiting | **Fixed, and extended beyond the original scope** | `auth-worker/src/utils/rate-limit.ts` now covers login, password reset, contact, register, and admin step-up verification. |
 | SEC-5 — `SYNC_SECRET_KEY` as plaintext admin bearer | **Half fixed** | Compare is constant-time (`sync-worker/src/admin.ts:41`); the key is still doing double duty. Carried forward as **OPS-2**. |
 | SEC-6 — no CSP; tokens/keys in script-readable storage | **Half fixed** | Tauri CSP landed (`src-tauri/tauri.conf.json:23`); the web build had none until this change (**OPS-1**). Storage locations unchanged, with the trade-off documented at `src/lib/store/user-api-keys.ts:5-9`. |
-| SEC-7 — dependency CVEs | **Fixed by drift, not by control** | `hono` resolves to 4.12.25 (auth-worker), 4.12.33 (sync-worker), 4.12.31 (agent-worker) — all past the JWT `NumericDate` advisory. `onnxruntime-web` is now stable `1.27.0`, no longer a nightly. Nothing prevents the next one: **OPS-6**. |
+| SEC-7 — dependency CVEs | **Fixed, and now constrained** | `hono` resolves past the JWT `NumericDate` advisory in all three Workers, and the amendment below raises the *declared* floor to `^4.12.21` in auth-worker and agent-worker so a fresh install cannot resolve back under it. `onnxruntime-web` is stable `1.27.0`, no longer a nightly. Nothing yet prevents the *next* advisory: **OPS-6**. |
 | SEC-8 — misleading dev-bypass comment | **Fixed in this change** | **OPS-5**. |
 | SEC-9 — sync-token auto-registers unknown projects as OWNER | **Open** | `auth-worker/src/routes/sync-token.ts:98-111` still inserts the project and grants OWNER when `projectName` is supplied. |
 | SEC-10 — scrypt work factor | **Open (accepted)** | Legacy byte-compatibility constraint unchanged. |

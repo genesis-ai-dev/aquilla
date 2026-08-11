@@ -21,18 +21,31 @@
 //               surfaces every violation in devtools first; promote directives
 //               into ENFORCED_CSP as each one comes back clean.
 //
-// Coverage note: `run_worker_first = ["/"]` (wrangler.toml) plus the asset
-// router means this Worker sees `/`, the STATIC_PAGES marketing routes, and
-// every SPA deep link (no asset match → Worker → ASSETS.fetch fallback).
-// Hashed build assets and a literal `/index.html` request are served by the
-// asset router without invoking the Worker, so they carry no headers — that is
-// acceptable for CSP (the policy is enforced on the *document* response) and is
-// tracked as the follow-up in the OPSEC review.
+// Coverage note — READ THIS BEFORE ASSUMING A HEADER SET HERE IS LIVE.
+//
+// This Worker runs for `/` and nothing else. `run_worker_first = ["/"]` lists
+// exactly one path, and `not_found_handling = "single-page-application"` means
+// the asset router answers every unmatched path with index.html ITSELF — the
+// request never reaches the Worker, so there is no ASSETS.fetch fallback to
+// ride headers in on. Deep links (`/app`, `/project/*`), the prerendered
+// marketing pages and hashed build assets are all served without this module
+// executing.
+//
+// Verified against the live deployment rather than reasoned about: `/` returns
+// the Worker-only `X-Robots-Tag: noindex` on dev.aquilla.app, while a
+// never-before-requested path returns 200 HTML with no such header. An earlier
+// version of this comment claimed deep links reached the Worker; they do not,
+// and a header file that only *looks* deployed is worse than a known gap.
+//
+// public/_headers is therefore not an optimisation, it is the majority of the
+// coverage. security-headers.test.ts asserts the two declare identical values,
+// so tightening one without the other fails the build. (Closes OPS-7 of
+// docs/OPSEC-REVIEW-2026-08-10.md.)
 
 /** Directives safe to enforce today: none of them can break a page that isn't
  *  already doing something we don't want (plugin embeds, <base> rewriting,
  *  being framed by a third party, cross-origin form posts). */
-const ENFORCED_CSP = [
+export const ENFORCED_CSP = [
   "object-src 'none'",
   "base-uri 'self'",
   "frame-ancestors 'self'",
@@ -44,7 +57,7 @@ const ENFORCED_CSP = [
  *  `'wasm-unsafe-eval'` for the onnxruntime-web / sherpa-onnx WASM runtimes,
  *  blob: workers for the audio pipeline). Report-only until the console is
  *  clean on both the SPA and the prerendered marketing pages. */
-const REPORT_ONLY_CSP = [
+export const REPORT_ONLY_CSP = [
   "default-src 'self'",
   "script-src 'self' 'wasm-unsafe-eval'",
   "worker-src 'self' blob:",
@@ -68,7 +81,7 @@ const REPORT_ONLY_CSP = [
 // dictation flow both call getUserMedia (src/components/AudioRecorder/*).
 // Everything else the app never asks for, so denying it costs nothing and
 // removes the capability from any injected script.
-const PERMISSIONS_POLICY = [
+export const PERMISSIONS_POLICY = [
   "microphone=(self)",
   "camera=()",
   "geolocation=()",
@@ -82,7 +95,7 @@ const PERMISSIONS_POLICY = [
 // cover subdomains this repo does not own the TLS posture of. Tracked as a
 // follow-up in the OPSEC review once every *.aquilla.app host is confirmed
 // HTTPS-only.
-const HSTS = "max-age=31536000"
+export const HSTS = "max-age=31536000"
 
 // Statuses that must not carry a body — `new Response(body, init)` throws for
 // these, so the clone has to pass null instead of res.body.

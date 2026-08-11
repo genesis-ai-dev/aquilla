@@ -35,6 +35,20 @@ updates:
         patterns:
           - "*"
 
+  # agent-worker has its own package-lock.json and was the one Worker no
+  # ecosystem entry covered, so a CVE in its dependencies — it shares hono with
+  # the other two — would have gone unflagged. Partially addresses OPS-6 of
+  # docs/OPSEC-REVIEW-2026-08-10.md ("no dependency-vulnerability step in CI").
+  - package-ecosystem: npm
+    directory: "/agent-worker"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    groups:
+      agent-worker-deps:
+        patterns:
+          - "*"
+
   - package-ecosystem: cargo
     directory: "/src-tauri"
     schedule:

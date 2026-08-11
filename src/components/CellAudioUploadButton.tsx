@@ -25,6 +25,7 @@ import { emitCellAudioAttach } from "@/lib/sync/events-emit"
 import { injectOptimisticAudioAttachment, notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
 import { markProjectHasAudioDataSoon } from "@/lib/audio/project-audio-state"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 const ACCEPT = "audio/*,.wav,.mp3,.m4a,.ogg"
 
@@ -55,6 +56,7 @@ interface Props {
 }
 
 export function CellAudioUploadButton({ projectId, fileId, cellId, username, disabled }: Props) {
+  const t = useT()
   const { session } = useFrontierSession()
   const inputRef = useRef<HTMLInputElement | null>(null)
   const [uploading, setUploading] = useState(false)
@@ -68,7 +70,7 @@ export function CellAudioUploadButton({ projectId, fileId, cellId, username, dis
 
   const handleFileSelected = useCallback(async (file: File) => {
     if (!session?.jwt) {
-      setError("Sign in to upload recordings")
+      setError(t("editor.audio.uploadSignIn"))
       return
     }
     setUploading(true)
@@ -128,7 +130,7 @@ export function CellAudioUploadButton({ projectId, fileId, cellId, username, dis
     } finally {
       setUploading(false)
     }
-  }, [session, projectId, fileId, cellId, username])
+  }, [session, projectId, fileId, cellId, username, t])
 
   const onInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -146,11 +148,11 @@ export function CellAudioUploadButton({ projectId, fileId, cellId, username, dis
         className="sr-only"
         onChange={onInputChange}
         disabled={disabled || uploading}
-        aria-label="Upload audio file"
+        aria-label={t("editor.audio.upload")}
       />
       <RailButton
         icon={<Upload className="h-3.5 w-3.5" />}
-        tooltip={uploading ? "Uploading…" : "Upload audio file"}
+        tooltip={uploading ? t("editor.audio.uploading") : t("editor.audio.upload")}
         onClick={openPicker}
         disabled={disabled}
         pulsing={uploading}
@@ -160,14 +162,14 @@ export function CellAudioUploadButton({ projectId, fileId, cellId, username, dis
           role="tooltip"
           className="absolute bottom-full right-0 z-50 mb-1 w-52 rounded-md border bg-popover px-3 py-2 text-[11px] leading-snug text-popover-foreground shadow-md"
         >
-          <strong className="block font-semibold">Upload failed</strong>
+          <strong className="block font-semibold">{t("editor.audio.uploadFailed")}</strong>
           <span className="mt-0.5 block text-muted-foreground">{error}</span>
           <button
             type="button"
             onClick={() => setError(null)}
             className="mt-1.5 text-[10px] underline text-muted-foreground hover:text-foreground"
           >
-            Dismiss
+            {t("common.dismiss")}
           </button>
         </span>
       )}

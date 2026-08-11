@@ -55,6 +55,70 @@ export const editor = defineNamespace({
     "editor.cell.generateBacktranslation": "Generate backtranslation",
     "editor.cell.regenerateBacktranslation": "Regenerate backtranslation",
     "editor.cell.closeDetails": "Close cell details",
+
+    // — Waveform strip under a translated cell ——————————————————————
+    "editor.waveform.scrubber": "Audio scrubber",
+    "editor.waveform.seekTooltip": "Click to seek",
+    "editor.waveform.loading": "Loading waveform...",
+    "editor.waveform.needsLoadTooltip":
+      "Click to download and decode this clip's waveform",
+    "editor.waveform.load": "Load waveform",
+    "editor.waveform.decodeErrorTooltip": "Couldn't decode the waveform; click retry",
+    "editor.waveform.retryTooltip": "Couldn't load this clip's waveform; click to retry",
+    "editor.waveform.retry": "Retry waveform",
+
+    // — Per-cell audio upload ————————————————————————————————————
+    "editor.audio.upload": "Upload audio file",
+    "editor.audio.uploading": "Uploading…",
+    "editor.audio.uploadFailed": "Upload failed",
+    "editor.audio.uploadSignIn": "Sign in to upload recordings",
+    "editor.audio.pause": "Pause",
+
+    // — Audio crop popover ————————————————————————————————————————
+    "editor.crop.open": "Crop audio",
+    "editor.crop.title": "Crop",
+    "editor.crop.reset": "Reset to full clip",
+    "editor.crop.resetShort": "Reset",
+    "editor.crop.start": "Crop start",
+    "editor.crop.end": "Crop end",
+    "editor.crop.preview": "Preview",
+
+    // — Empty / loading / error states where the table would be ——————
+    "editor.file.loadErrorTitleNamed": "Couldn't load {fileName}",
+    "editor.file.loadErrorTitle": "Couldn't load this file",
+    "editor.file.loadErrorBody":
+      "The file is still safe. Check your connection and try loading it again.",
+    "editor.file.retryLoad": "Retry loading file",
+    "editor.file.loadingFromCloud": "Loading file from the cloud",
+    "editor.file.noneSelectedTitle": "No file selected",
+    "editor.file.noneSelectedBody": "Pick a file from the sidebar to start translating.",
+    "editor.file.noFilesTitle": "No files yet",
+    "editor.file.noFilesBody": "Import a file to get started.",
+    "editor.file.importFile": "Import a file",
+    "editor.file.emptyNamedTitle": "{fileName} is empty",
+    "editor.file.emptyTitle": "This file has no cells yet",
+    "editor.file.emptyBody": "Import content, or start typing in the first cell.",
+    "editor.file.importContent": "Import content",
+
+    // — Stale-source badges in the cell rail ————————————————————————
+    "editor.stale.directLabel": "Source changed since last revision",
+    "editor.stale.directTooltip":
+      "The source has changed since this translation was last revised.",
+    "editor.stale.upstreamLabel": "Upstream ancestry changed",
+    "editor.stale.upstreamTooltip":
+      "Something further upstream in the translation chain has changed — this " +
+      "cell's ancestry is stale.",
+
+    // — Attaching media to a time-ordered file ——————————————————————
+    "editor.media.emptyTitle": "No media on this file yet",
+    "editor.media.dropHint": "Drag & drop an audio or video file here, or",
+    "editor.media.choose": "Choose media file",
+    "editor.media.adding": "Adding media to this file…",
+    "editor.media.urlLabel": "Media URL",
+    "editor.media.attach": "Attach",
+    "editor.media.urlHint":
+      "Or paste a direct media URL — the clip streams from its source; only " +
+      "timing metadata is stored.",
   },
   context: {
     _context: {
@@ -275,6 +339,291 @@ export const editor = defineNamespace({
           "Screen-reader name of the X button in the header of the panel that " +
           "expands under a cell row (back-translation, audio, footnotes, history). " +
           "It collapses that panel only; it does not close the file or the editor.",
+      },
+      "editor.waveform.scrubber": {
+        description:
+          "Screen-reader name of the waveform strip drawn under a cell's " +
+          "translation. It behaves as a slider over the clip's duration: dragging " +
+          "moves playback position. 'Scrubber' is the audio-editing term for that " +
+          "control; use whatever the target language calls it.",
+      },
+      "editor.waveform.seekTooltip": {
+        description:
+          "Tooltip on a ready waveform explaining that clicking it jumps playback " +
+          "to that point in the clip. 'Seek' is the audio sense of moving the " +
+          "playback position, not searching for something.",
+      },
+      "editor.waveform.loading": {
+        description:
+          "Tooltip while the waveform's peak data is being downloaded and decoded. " +
+          "The trailing three periods are literal in the English source here " +
+          "(not the … glyph used elsewhere); use the target language's normal " +
+          "continuation mark.",
+      },
+      "editor.waveform.needsLoadTooltip": {
+        description:
+          "Tooltip on a waveform that has not been fetched yet, because the project " +
+          "is set to load audio only on demand. Explains that clicking downloads " +
+          "the clip and draws its waveform — it does not start playback.",
+      },
+      "editor.waveform.load": {
+        description:
+          "Tiny (10px) label centred inside a not-yet-loaded waveform strip, " +
+          "beside a download icon. Clicking fetches and draws the waveform. Very " +
+          "little room — abbreviate before wrapping.",
+        maxLength: 18,
+      },
+      "editor.waveform.decodeErrorTooltip": {
+        description:
+          "Tooltip when the clip downloaded but its audio could not be decoded into " +
+          "a waveform. Two clauses: what went wrong, then what to do.",
+      },
+      "editor.waveform.retryTooltip": {
+        description:
+          "Tooltip on the amber retry overlay shown after a waveform failed to " +
+          "load. Two clauses: what went wrong, then what to do. Only the waveform " +
+          "drawing failed — the recording itself is fine and still plays.",
+      },
+      "editor.waveform.retry": {
+        description:
+          "Tiny (10px) label of the retry overlay inside a failed waveform strip, " +
+          "beside a circular-arrow icon. Imperative; retries drawing the waveform, " +
+          "not the recording.",
+        maxLength: 18,
+      },
+      "editor.audio.upload": {
+        description:
+          "Tooltip and screen-reader name of the upload button in a cell's action " +
+          "rail, which opens the file picker to attach an existing audio file " +
+          "recorded elsewhere (typically on a phone). Distinct from recording in " +
+          "the app.",
+        maxLength: 24,
+      },
+      "editor.audio.uploading": {
+        description:
+          "The upload button's tooltip while the chosen audio file is being sent to " +
+          "storage. Present-participle status text.",
+        maxLength: 18,
+      },
+      "editor.audio.uploadFailed": {
+        description:
+          "Bold heading of the small popover shown when attaching an audio file " +
+          "failed; the underlying error message appears beneath it in English. A " +
+          "short state phrase, not a sentence.",
+        maxLength: 24,
+      },
+      "editor.audio.uploadSignIn": {
+        description:
+          "Error shown in that popover when the user is signed out: uploading a " +
+          "recording needs an account. Imperative sentence telling them what to do, " +
+          "not an accusation.",
+      },
+      "editor.audio.pause": {
+        description:
+          "Label/tooltip of the transport button while a clip is playing; pressing " +
+          "it halts playback where it is (it does not stop and rewind). Imperative " +
+          "verb, shown in place of Play.",
+        maxLength: 12,
+      },
+      "editor.crop.open": {
+        description:
+          "Screen-reader name of the scissors button that opens the crop popover " +
+          "for a cell's recording. Cropping trims the start and end of the clip " +
+          "non-destructively — nothing is re-encoded or deleted.",
+      },
+      "editor.crop.title": {
+        description:
+          "Heading of the crop popover. A noun naming the operation (trimming the " +
+          "start/end of an audio clip), not an imperative.",
+        maxLength: 14,
+      },
+      "editor.crop.reset": {
+        description:
+          "Screen-reader name of the small reset control in the crop popover, which " +
+          "clears both trim points so the whole recording plays again.",
+      },
+      "editor.crop.resetShort": {
+        description:
+          "Visible 11px label of that same reset control, beside a counter-clockwise " +
+          "arrow icon; editor.crop.reset is its longer accessible name. Extremely " +
+          "tight — one short word.",
+        maxLength: 10,
+      },
+      "editor.crop.start": {
+        description:
+          "Screen-reader name of the draggable handle marking where the cropped " +
+          "clip begins. A noun phrase naming the handle, not a command.",
+      },
+      "editor.crop.end": {
+        description:
+          "Screen-reader name of the draggable handle marking where the cropped " +
+          "clip stops. A noun phrase naming the handle, not a command.",
+      },
+      "editor.crop.preview": {
+        description:
+          "Button in the crop popover that plays the cropped selection so the user " +
+          "can hear the result before keeping it. Swaps to editor.audio.pause while " +
+          "playing. Imperative verb.",
+        maxLength: 12,
+      },
+      "editor.file.loadErrorTitleNamed": {
+        description:
+          "Heading of the panel filling the editing area when a named file failed " +
+          "to load. Reassuring, not technical; the body text explains that nothing " +
+          "was lost.",
+        placeholders: {
+          fileName:
+            "The file's own name as the user typed or imported it — user data, so " +
+            "never translate the substituted value.",
+        },
+      },
+      "editor.file.loadErrorTitle": {
+        description:
+          "Same failure heading as editor.file.loadErrorTitleNamed, used when the " +
+          "file's name is not known yet.",
+      },
+      "editor.file.loadErrorBody": {
+        description:
+          "Body of the failed-to-load panel. First sentence reassures that the " +
+          "user's work is intact; second suggests the likely cause and the fix. " +
+          "Two short sentences.",
+      },
+      "editor.file.retryLoad": {
+        description:
+          "Button in the failed-to-load panel that fetches the file again. " +
+          "Imperative. Distinct from the bare common.retry because it names what " +
+          "is being retried.",
+        maxLength: 24,
+      },
+      "editor.file.loadingFromCloud": {
+        description:
+          "Accessible label of the skeleton shown while a file's cells are being " +
+          "fetched from the server. It is a plain read, so it must NOT say " +
+          "'syncing' — that word is reserved in this app for pushing the user's " +
+          "own unsaved edits.",
+      },
+      "editor.file.noneSelectedTitle": {
+        description:
+          "Heading of the neutral empty state filling the editing area when the " +
+          "project has files but none is open yet. A state description, not an error.",
+        maxLength: 28,
+      },
+      "editor.file.noneSelectedBody": {
+        description:
+          "Body under editor.file.noneSelectedTitle, pointing at the file list in " +
+          "the left sidebar. One imperative sentence.",
+      },
+      "editor.file.noFilesTitle": {
+        description:
+          "Heading of the empty state when the project contains no files at all, so " +
+          "there is nothing to pick from the sidebar. Not an error — the project is " +
+          "simply new.",
+        maxLength: 28,
+      },
+      "editor.file.noFilesBody": {
+        description:
+          "Body under editor.file.noFilesTitle. 'Import' means bringing an existing " +
+          "document (USFM, docx, subtitles, audio…) into the project.",
+      },
+      "editor.file.importFile": {
+        description:
+          "Call-to-action button in the no-files empty state; it opens the import " +
+          "dialog. Imperative, and 'import' in the bring-a-document-in sense.",
+        maxLength: 24,
+      },
+      "editor.file.emptyNamedTitle": {
+        description:
+          "Heading shown when the open file loaded successfully but contains no " +
+          "cells yet. Names the file so the user knows which one is empty.",
+        placeholders: {
+          fileName:
+            "The file's own name as the user typed or imported it — user data, so " +
+            "never translate the substituted value.",
+        },
+      },
+      "editor.file.emptyTitle": {
+        description:
+          "Same empty-file heading as editor.file.emptyNamedTitle, used when the " +
+          "file's name is not known. 'Cells' are the numbered translation units " +
+          "(usually a verse or a line) the editor lists one per row.",
+      },
+      "editor.file.emptyBody": {
+        description:
+          "Body under the empty-file heading, offering the two ways forward: import " +
+          "content into the file, or type directly into the first row.",
+      },
+      "editor.file.importContent": {
+        description:
+          "Call-to-action button in the empty-file state; it opens the import dialog " +
+          "to add cells to the file that is already open. Imperative.",
+        maxLength: 24,
+      },
+      "editor.stale.directLabel": {
+        description:
+          "Screen-reader name of the amber warning triangle in a cell's action rail " +
+          "shown when the source text this translation was pinned to has since been " +
+          "edited. A state description read aloud in place of the icon.",
+      },
+      "editor.stale.directTooltip": {
+        description:
+          "Tooltip behind that amber triangle, spelling out the state: the source " +
+          "moved on after this translation was last revised, so the translation may " +
+          "no longer match. Full sentence.",
+      },
+      "editor.stale.upstreamLabel": {
+        description:
+          "Screen-reader name of the violet dotted-border branch icon, shown when " +
+          "this cell's own source is unchanged but something earlier in the chain of " +
+          "linked projects it derives from has changed.",
+      },
+      "editor.stale.upstreamTooltip": {
+        description:
+          "Tooltip behind that violet icon. 'Upstream' and 'ancestry' refer to the " +
+          "chain of linked projects this translation derives from — the change " +
+          "happened in one of those, not in this project's own source.",
+      },
+      "editor.media.emptyTitle": {
+        description:
+          "Heading of the drop zone shown when a time-ordered (audio/video) file has " +
+          "no media attached yet. 'Media' means the audio or video recording the " +
+          "timeline's clips are cut from.",
+        maxLength: 36,
+      },
+      "editor.media.dropHint": {
+        description:
+          "Line under editor.media.emptyTitle offering drag-and-drop. It ends with " +
+          "'or' on purpose: the file-picker button follows immediately below and " +
+          "completes the sentence. Keep that dangling-conjunction structure, or " +
+          "rephrase so the button still reads as the alternative.",
+      },
+      "editor.media.choose": {
+        description:
+          "Button under the drop zone that opens the operating system's file picker " +
+          "for an audio or video file. Imperative.",
+        maxLength: 26,
+      },
+      "editor.media.adding": {
+        description:
+          "Status line replacing the drop zone while the chosen media is being " +
+          "attached, beside a spinner. Present-participle status text.",
+      },
+      "editor.media.urlLabel": {
+        description:
+          "Screen-reader name of the text field for pasting a direct link to an " +
+          "audio or video file hosted elsewhere. A noun phrase naming the field.",
+      },
+      "editor.media.attach": {
+        description:
+          "Button beside the media URL field that links that URL to the file. " +
+          "Imperative. 'Attach' rather than 'upload' because nothing is copied — " +
+          "the clip keeps streaming from its original location.",
+        maxLength: 14,
+      },
+      "editor.media.urlHint": {
+        description:
+          "Explanatory line under the media URL field. The point after the dash is " +
+          "reassurance about what is stored: only timing information is kept in the " +
+          "project, the audio itself stays at the URL the user provided.",
       },
     },
   },

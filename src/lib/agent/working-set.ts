@@ -30,6 +30,9 @@ export interface RowDecision {
 }
 
 export interface WorkingSetRow extends PassageRow {
+  /** AQU-846: destination file's display name, so a pending row says where it
+   *  lands. Carried from the staged event's display context. */
+  fileName?: string
   /** Staged-but-unapplied target.cell.commit value, when one exists. */
   proposed?: string
   /** The proposal the pending value came from (for per-row apply). */
@@ -89,6 +92,7 @@ export function deriveWorkingSet(
             // Decided — drop the pending overlay but keep the outcome.
             upsert(ev.cellId, {
               ...(ev.fileId ? { fileId: ev.fileId } : {}),
+              ...(ev.display.fileName ? { fileName: ev.display.fileName } : {}),
               ...(ev.display.canonicalRef ? { ref: ev.display.canonicalRef } : {}),
               proposed: undefined,
               proposalId: undefined,
@@ -100,6 +104,7 @@ export function deriveWorkingSet(
           }
           upsert(ev.cellId, {
             ...(ev.fileId ? { fileId: ev.fileId } : {}),
+            ...(ev.display.fileName ? { fileName: ev.display.fileName } : {}),
             ...(ev.display.canonicalRef ? { ref: ev.display.canonicalRef } : {}),
             proposed: typeof ev.payload.value === "string" ? ev.payload.value : ev.display.after ?? "",
             proposalId: item.proposal.proposalId,

@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { type ColumnDef } from "@tanstack/react-table"
 import {
-  AlertTriangle, Lock, ShieldOff, ShieldUser, UserMinus, UserPlus,
+  AlertTriangle, Lock, ShieldOff, ShieldUser, UserMinus,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -18,6 +18,7 @@ import {
   DataTableRowActionsButton,
 } from "@/components/ui/data-table"
 import { missingLast, SORT_MISSING_LAST } from "@/components/ui/data-table-missing"
+import { ADMIN_TABLE_PANEL_CLASS } from "@/components/admin/shared"
 import {
   Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog"
@@ -291,10 +292,9 @@ export function MembersSection({ projectId }: { projectId: string }) {
                   </SelectContent>
                 </Select>
                 <Button
-                  className="ml-auto shrink-0 gap-1.5"
+                  className="ml-auto shrink-0"
                   onClick={openAddDialog}
                 >
-                  <UserPlus className="size-4" />
                   Add a member
                 </Button>
               </>
@@ -367,6 +367,7 @@ export function MembersSection({ projectId }: { projectId: string }) {
               </p>
             }
             testId="settings-members-table"
+            className={ADMIN_TABLE_PANEL_CLASS}
             dense
           />
         )}

@@ -23,6 +23,24 @@ import type { CellData } from "@/hooks/useCells"
 
 const MIN_DUR_SEC = 0.2
 
+/**
+ * Below these widths a chip stops rendering text. (AQU-646 round 9)
+ *
+ * Fully zoomed out a chip is 10–20px wide, and it was still rendering its label
+ * AND its clock range: every chip a column of one or two truncated glyphs, and
+ * the source band's time ranges reading as if they bled across their
+ * neighbours. Sam's word for the result was "rendering issues", and he was
+ * being generous.
+ *
+ * Two thresholds because the two texts fail at different widths. The clock line
+ * ("0:41.8–0:43.0") needs ~85px and has no `truncate`, so it is the first to
+ * turn to mush; the label has `truncate` and survives down to about 40px, below
+ * which even an ellipsis is noise. Under 40 the card is what it should have
+ * been all along at that zoom: a plain block.
+ */
+export const MIN_CARD_META_PX = 72
+const MIN_CARD_TEXT_PX = 40
+
 type DragMode = "move" | "resize-l" | "resize-r"
 
 /** SUB-11: millisecond clock for the live drag readout — `formatVttTime`
@@ -138,6 +156,12 @@ export function TimelineCard({
     secToPx((dragged?.endSec ?? endSec) - (dragged?.startSec ?? startSec), pxPerSec),
     secToPx(MIN_DUR_SEC, pxPerSec),
   )
+
+  // Round 9: what there is room to SAY at this width. A dragging card always
+  // shows its text — you are looking straight at it, and its own drag chip is
+  // the readout that matters.
+  const showsText = width >= MIN_CARD_TEXT_PX || Boolean(drag)
+  const showsMeta = width >= MIN_CARD_META_PX || Boolean(drag)
 
   // SUB-11: live preview TIMES during drag; equal to the committed props idle.
   const previewStart = dragged?.startSec ?? startSec
@@ -255,7 +279,7 @@ export function TimelineCard({
           isDialogue ? "bg-sky-600" : "bg-zinc-400 dark:bg-zinc-600",
         )}
       />
-      {onRemove && (
+      {onRemove && showsText && (
         // Same manners as the slot buttons: nothing at rest, faint on the
         // chip's hover. It must not reach the card's own click, which would
         // select and seek on the way out.
@@ -283,7 +307,8 @@ export function TimelineCard({
           <span className="h-4 w-0.5 rounded bg-foreground/30" />
         </span>
       )}
-      <div className="truncate pl-1 text-[11px] leading-tight">{label}</div>
+      {showsText && <div className="truncate pl-1 text-[11px] leading-tight">{label}</div>}
+      {showsMeta && (
       <div className="flex items-center gap-1.5 pl-1 text-[9px] text-muted-foreground">
         {isDialogue && cell.cameraState && (
           <span
@@ -306,6 +331,7 @@ export function TimelineCard({
             : `${fmtClock(startSec, true)}–${fmtClock(endSec, true)}`}
         </span>
       </div>
+      )}
       {canRetime && (
         <span
           aria-hidden

@@ -16,7 +16,7 @@ import { memo } from "react"
 import { secToPx, isVisible } from "@/lib/timeline/scale"
 import { MIN_ADDABLE_SPAN_SEC } from "@/lib/timeline/lane-timing"
 import { fmtClock } from "./format"
-import { TimelineCard } from "./TimelineCard"
+import { MIN_CARD_META_PX, TimelineCard } from "./TimelineCard"
 import type { CellData } from "@/hooks/useCells"
 import type { SourceRegionMap } from "@/lib/timeline/source-regions"
 
@@ -94,9 +94,19 @@ function SourceRegionLaneImpl({
             width: `${secToPx(g.endSec - g.startSec, pxPerSec)}px`,
           }}
         >
-          <span className="absolute bottom-1 left-2.5 font-mono text-[9px] tabular-nums text-muted-foreground">
-            {fmtClock(g.startSec, true)}–{fmtClock(g.endSec, true)}
-          </span>
+          {/* Round 9: only when there is room for it, and never wrapping.
+              This label is absolutely positioned with no right anchor, so at a
+              narrow width it shrink-to-fits, WRAPS onto two or three lines, and
+              the `bottom-1` anchor pushes those lines up out of the 46px chip
+              where overflow-hidden slices them mid-glyph. Fully zoomed out that
+              read as time ranges bleeding across neighbouring chips. Same
+              threshold as a card's own clock line — it is the same question,
+              "is there room for a clock string here". */}
+          {secToPx(g.endSec - g.startSec, pxPerSec) >= MIN_CARD_META_PX && (
+            <span className="absolute bottom-1 left-2.5 font-mono text-[9px] tabular-nums whitespace-nowrap text-muted-foreground">
+              {fmtClock(g.startSec, true)}–{fmtClock(g.endSec, true)}
+            </span>
+          )}
         </div>
       ))}
       {visibleCells.map((c) => (

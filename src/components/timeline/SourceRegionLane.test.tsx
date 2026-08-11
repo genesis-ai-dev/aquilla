@@ -41,7 +41,11 @@ function renderLane(over: Partial<React.ComponentProps<typeof SourceRegionLane>>
 
 describe("SourceRegionLane", () => {
   it("draws each cue as the SAME card an mp3 import's source row uses", () => {
-    renderLane()
+    // Zoomed IN relative to the rest of this file: at the default 10px/s these
+    // 2s cues are 20px wide, and round 9 stopped a card that narrow from
+    // rendering text at all. The point of this test is the card's identity, so
+    // it asks at a width where a card has something to say.
+    renderLane({ pxPerSec: 40 })
     const cards = screen.getAllByTestId(/^tl-card-/)
     expect(cards).toHaveLength(2)
     // TimelineCard's dialogue variant shows the cell's text, like a transcript.
@@ -124,5 +128,29 @@ describe("SourceRegionLane", () => {
     renderLane({ map: { regions: [], totalSec: 0 }, cells: [] })
     expect(screen.queryByTestId(/^tl-card-/)).not.toBeInTheDocument()
     expect(screen.queryByTestId("tl-source-gap")).not.toBeInTheDocument()
+  })
+
+  // Round 9: the gap's time range is absolutely positioned with NO right
+  // anchor, so at a narrow width it shrink-to-fits, wraps onto several lines,
+  // and `bottom-1` pushes them up out of the 46px chip where overflow-hidden
+  // slices them mid-glyph. Fully zoomed out that read as ranges bleeding across
+  // neighbouring chips.
+  it("a narrow gap chip shows no time range, and never wraps when it does", () => {
+    const cells = [cell("a", 0, 5), cell("b", 6, 10)]
+    const map = deriveSourceRegions(cells, 10)
+    // 1s gap at 20px/s = 20px — nowhere near a clock string.
+    renderLane({ map, cells, pxPerSec: 20, viewStartSec: 0, viewEndSec: 10 })
+    const narrow = screen.getAllByTestId("tl-source-gap")[0]
+    expect(narrow.textContent).toBe("")
+  })
+
+  it("a wide gap chip shows its range, on one line", () => {
+    const cells = [cell("a", 0, 5), cell("b", 12, 16)]
+    const map = deriveSourceRegions(cells, 16)
+    // 7s gap at 40px/s = 280px.
+    renderLane({ map, cells, pxPerSec: 40, viewStartSec: 0, viewEndSec: 16 })
+    const wide = screen.getAllByTestId("tl-source-gap").find((g) => g.textContent !== "")!
+    expect(wide.textContent).toContain("–")
+    expect(wide.querySelector("span")!.className).toContain("whitespace-nowrap")
   })
 })

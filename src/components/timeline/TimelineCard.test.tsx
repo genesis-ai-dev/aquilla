@@ -328,4 +328,59 @@ describe("TimelineCard", () => {
     expect(screen.getByTestId("tl-drag-chip").textContent).toContain("00:05.000")
     fireEvent.pointerUp(window, { clientX: 256 })
   })
+
+  // ── AQU-646 round 9: a chip too narrow to read says nothing ──
+  //
+  // Fully zoomed out a chip is 10-20px wide and was still rendering its label
+  // AND its clock range. Every chip became a column of one or two truncated
+  // glyphs, and the clock strings read as if they bled across neighbours. Sam
+  // called it "rendering issues in the source timeline".
+  describe("text thresholds", () => {
+    // The fixture cell is 1s-3s, so pxPerSec IS the card's width in px per 2s.
+    const atWidth = (widthPx: number) =>
+      render(
+        <TimelineCard
+          cell={cell()}
+          {...base}
+          pxPerSec={widthPx / 2}
+          onSelect={() => {}}
+          onRetime={() => {}}
+          onRemove={() => {}}
+        />,
+      )
+
+    it("a wide card says everything", () => {
+      atWidth(200)
+      const card = screen.getByTestId("tl-card-c1")
+      expect(card).toHaveTextContent("Go get the man")
+      expect(card.textContent).toContain("–")
+      expect(screen.getByTestId("tl-card-c1-remove")).toBeInTheDocument()
+    })
+
+    it("below the meta threshold the CLOCK goes but the label stays", () => {
+      // 60px: the label truncates gracefully, the clock string (~85px) would not.
+      atWidth(60)
+      const card = screen.getByTestId("tl-card-c1")
+      expect(card).toHaveTextContent("Go get the man")
+      expect(card.textContent).not.toContain("–")
+    })
+
+    it("below the text threshold the card is a plain block", () => {
+      atWidth(20)
+      const card = screen.getByTestId("tl-card-c1")
+      expect(card.textContent).toBe("")
+      // The X is 16px on a 20px card — it covered the whole chip.
+      expect(screen.queryByTestId("tl-card-c1-remove")).toBeNull()
+    })
+
+    it("a card being DRAGGED keeps its text however narrow it is", () => {
+      // You are looking straight at it, and the live readout is the point.
+      atWidth(20)
+      const card = screen.getByTestId("tl-card-c1")
+      fireEvent.pointerDown(card, { clientX: 100, pointerId: 1 })
+      fireEvent.pointerMove(window, { clientX: 140 })
+      expect(card).toHaveTextContent("Go get the man")
+      fireEvent.pointerUp(window, { clientX: 140 })
+    })
+  })
 })

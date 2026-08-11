@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { getProject, patchProject } from "@/lib/store/project-index"
 import { ROLE } from "@/lib/frontier/roles"
+import { resolveTermbaseEditFloor } from "@/lib/terminology/glossary-view"
 import {
   fetchProjectSettingsResult,
   patchProjectSettings,
@@ -17,6 +18,25 @@ import posthog from "@/lib/posthog"
 // (row 600). Lowering the floor to PROJECT_LEAD (500) would widen server permissions
 // without spec support — do not change without a matching auth-worker update + spec citation.
 export const SETTINGS_EDIT_ROLE_FLOOR = ROLE.MAINTAINER
+
+/**
+ * AQU-822: the one settings key that does NOT sit behind
+ * {@link SETTINGS_EDIT_ROLE_FLOOR}. A patch that touches only `terminology`
+ * is gated by the org's configurable `termbaseEditMinRole` floor instead
+ * (default project_lead 500), so an org can let translators own terminology
+ * without handing them AI config, languages, or health thresholds.
+ *
+ * Mirrors the server carve-out in auth-worker/src/routes/project-settings.ts,
+ * which re-derives the same "only terminology changed" test against the
+ * stored row and remains authoritative.
+ */
+const TERMINOLOGY_KEY = "terminology"
+
+/** True when a patch changes the termbase and nothing else. */
+export function isTerminologyOnlyPatch(partial: ProjectWideSettings): boolean {
+  const keys = Object.keys(partial)
+  return keys.length > 0 && keys.every((key) => key === TERMINOLOGY_KEY)
+}
 
 export type CannotEditReason = "offline" | "role" | null
 
@@ -74,9 +94,21 @@ export interface UseProjectSettings {
   refresh: () => Promise<ProjectSettingsResponse | null>
   /** Apply a partial settings update. Optimistic local update, server PATCH,
    *  conflict-snap on 409, returns outcome. Blocked when offline or below
-   *  MAINTAINER (600). Server-forbidden writes are surfaced as blocked and
-   *  the optimistic overlay is rolled back — no silent local divergence. */
+   *  MAINTAINER (600) — except a terminology-only patch, which is gated by the
+   *  org's `termbaseEditMinRole` floor (AQU-822). Server-forbidden writes are
+   *  surfaced as blocked and the optimistic overlay is rolled back — no silent
+   *  local divergence. */
   patch: (partial: ProjectWideSettings) => Promise<PatchOutcome>
+}
+
+export interface UseProjectSettingsOptions {
+  /**
+   * AQU-822: the org's effective termbase-edit floor for this project
+   * (`ProjectRecord.termbaseEditMinRole`, resolved server-side). Applies only
+   * to terminology-only patches; every other key keeps the MAINTAINER floor.
+   * Omitted ⇒ the PROJECT_LEAD default.
+   */
+  termbaseEditMinRole?: number | null
 }
 
 function settingsValueEqual(a: unknown, b: unknown): boolean {
@@ -159,7 +191,9 @@ function localSettingsFrom(
 export function useProjectSettings(
   projectId: string | null,
   roleLevel: number | null,
+  options?: UseProjectSettingsOptions,
 ): UseProjectSettings {
+  const termbaseEditMinRole = options?.termbaseEditMinRole
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
   const isOnline = useOnline()
@@ -440,11 +474,18 @@ export function useProjectSettings(
     // 2. Offline → apply locally (preserve work, server reconciles on reconnect).
     // 3. roleLevel === null → unsynced project (server has no record of this
     //    project); apply locally only, no server roundtrip. Same as original.
-    // 4. roleLevel < SETTINGS_EDIT_ROLE_FLOOR → synced project, below floor. DO NOT apply
-    //    locally — this was the root cause of AQU-255 silent divergence. The
-    //    server would reject, leaving stale IDB data the user can't clear.
-    // 5. roleLevel >= SETTINGS_EDIT_ROLE_FLOOR → optimistic local apply happens *after*
+    // 4. roleLevel < the floor required for THIS patch → synced project, below
+    //    floor. DO NOT apply locally — this was the root cause of AQU-255
+    //    silent divergence. The server would reject, leaving stale IDB data
+    //    the user can't clear.
+    // 5. roleLevel >= that floor → optimistic local apply happens *after*
     //    this block, just before the serialized server write.
+    //
+    // AQU-822: the required floor is SETTINGS_EDIT_ROLE_FLOOR (maintainer) for
+    // every patch EXCEPT a terminology-only one, which uses the org's
+    // configured termbaseEditMinRole. Deriving it per-patch (rather than
+    // loosening the hook-wide floor) keeps the AQU-255 guarantee intact for
+    // all the other keys.
 
     if (!projectId || !jwt) return { kind: "error", message: "no session or project" }
 
@@ -466,7 +507,10 @@ export function useProjectSettings(
       return { kind: "blocked", reason: "role" }
     }
 
-    if (roleLevel < SETTINGS_EDIT_ROLE_FLOOR) {
+    const requiredLevel = isTerminologyOnlyPatch(partial)
+      ? resolveTermbaseEditFloor(termbaseEditMinRole)
+      : SETTINGS_EDIT_ROLE_FLOOR
+    if (roleLevel < requiredLevel) {
       // Synced project below floor — do NOT apply locally; the server will
       // reject and we'd silently diverge (the original AQU-255 bug).
       return { kind: "blocked", reason: "role" }
@@ -600,7 +644,7 @@ export function useProjectSettings(
       return next
     })
     return { kind: "error", message: result.message }
-  }, [projectId, jwt, roleLevel, refresh, runSerialized])
+  }, [projectId, jwt, roleLevel, termbaseEditMinRole, refresh, runSerialized])
 
   return {
     settings,

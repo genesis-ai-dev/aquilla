@@ -542,15 +542,19 @@ export function InviteSummary({
     <div className="rounded-md border bg-muted/30 p-3 space-y-1.5">
       <p className="text-sm">
         {/* The count is interpolated as text, not wrapped in <strong> as the
-            fragment version was. A count-governed placeholder is consumed by
-            plural selection inside t(), so it cannot also be a styled node — and
-            whole-sentence word order is worth more here than bold on a numeral.
-            Same trade the outbox summary faces from the other side; see the
-            wave-4a note in docs/swarm/I18N-TRACES.md. */}
+            fragment version was, AND keeps the count bold: `count` drives plural
+            selection while `values.count` supplies the styled numeral, so the
+            number is emphasised without being interpolated away. (RichMessage
+            could not do this when this call site was first written — the node was
+            silently dropped — so the trade recorded in the wave-4a note no longer
+            applies here.) */}
         <RichMessage
           k={orgName ? "auth.join.summaryMultiInWorkspace" : "auth.join.summaryMulti"}
           count={projects.length}
-          values={{ workspace }}
+          values={{
+            workspace,
+            count: <strong className="font-medium">{projects.length}</strong>,
+          }}
         />
       </p>
       <ul className="list-disc space-y-0.5 pl-4 text-xs text-muted-foreground">

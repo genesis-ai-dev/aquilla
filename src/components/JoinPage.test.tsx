@@ -361,9 +361,14 @@ describe("InviteSummary (AQU-337 singular/plural copy)", () => {
       />,
     )
     expect(screen.getByText(/you'll join each as/i)).toBeInTheDocument()
-    // One whole sentence now (AQU-511), so the count is asserted in place rather
-    // than as the separately-bolded "3 projects" fragment it used to be.
-    expect(screen.getByText("You're invited to 3 projects:")).toBeInTheDocument()
+    // One whole sentence (AQU-511) so a translator controls its word order, AND
+    // the count keeps the emphasis the pre-extraction UI gave it. Both, not
+    // either: assert the sentence reads correctly and that the numeral is still
+    // its own emphasised element.
+    const line = screen.getByText(/invited to/).closest("p")
+    expect(line?.textContent).toBe("You're invited to 3 projects:")
+    const count = screen.getByText("3", { selector: "strong" })
+    expect(count).toHaveClass("font-medium")
     expect(screen.getByText("Alpha")).toBeInTheDocument()
     expect(screen.getByText("Beta")).toBeInTheDocument()
     expect(screen.getByText("Gamma")).toBeInTheDocument()

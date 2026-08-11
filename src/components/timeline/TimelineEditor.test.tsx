@@ -993,6 +993,62 @@ describe("TimelineEditor — the source-audio band", () => {
     expect(screen.queryByTestId("tl-source-regions")).not.toBeInTheDocument()
   })
 
+  // Round 8: the VTT's own timing is not ours to nudge, but a line added into
+  // a silence still moves. Both cards live in the SAME lane, so this is the
+  // test that would catch a lane-wide freeze pretending to be a per-cell one.
+  describe("imported cues are frozen, added lines are not", () => {
+    // Scoped to the Subtitles track on purpose: the band draws the SAME cell as
+    // a chip too, so an unscoped testid query matches twice.
+    const gripsInSubtitleLane = (cardId: string) =>
+      within(screen.getByTestId("tl-lane")).getByTestId(`tl-card-${cardId}`)
+        .querySelectorAll(".cursor-ew-resize")
+
+    it("no grips on an imported cue, grips on a line someone added", () => {
+      setVideoDurationSec(VIDEO, 120)
+      render(
+        <TimelineEditor
+          fileId="f1" coreMediaUrl={VIDEO} editable
+          cells={[
+            cell({ id: "imported", original: "One", medium: "text", startTime: 10, endTime: 20 }),
+            cell({
+              id: "added", original: "", medium: "text", startTime: 25, endTime: 28,
+              metadata: { aquillaOrigin: { kind: "user-insert" } },
+            } as Partial<CellData>),
+          ]}
+          onRetimeSubtitle={() => {}}
+        />,
+      )
+      expect(gripsInSubtitleLane("imported")).toHaveLength(0)
+      expect(gripsInSubtitleLane("added")).toHaveLength(2)
+    })
+
+    it("SUB-36's subtitle mirror keeps its grips", () => {
+      // The mirror cannot collide with the band — it exists only when there ARE
+      // dialogue cells, and the band needs there to be none — but the predicate
+      // is scoped rather than trusted, so assert the other side of that.
+      // deriveLanes only mirrors a media cell that has transcript/translation.
+      setVideoDurationSec(VIDEO, 120)
+      render(
+        <TimelineEditor
+          fileId="f1" coreMediaUrl={VIDEO} editable
+          cells={[cell({
+            id: "m1", original: "One", transcription: "One", medium: "media",
+            startTime: 0, endTime: 10,
+          } as Partial<CellData>)]}
+          onRetimeSubtitle={() => {}}
+        />,
+      )
+      // Band off (there are dialogue cells), so both lanes render. Pick the
+      // subtitle one by variant — the dialogue row is frozen by design, so an
+      // index would silently assert the wrong lane.
+      const lanes = screen.getAllByTestId("tl-lane")
+      expect(lanes).toHaveLength(2)
+      const subtitleLane = lanes.find((l) => l.getAttribute("data-variant") === "subtitle")!
+      expect(within(subtitleLane).getByTestId("tl-card-m1").querySelectorAll(".cursor-ew-resize"))
+        .toHaveLength(2)
+    })
+  })
+
   // Round 8, "no room, no add". These run ZOOMED IN ON PURPOSE: the buttons
   // also have a pixel floor (MIN_BUTTON_PX), and at the default 38px/s that
   // floor alone hides anything under ~0.63s — which would make these pass

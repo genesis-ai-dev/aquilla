@@ -28,6 +28,10 @@ export interface TimelineLaneProps {
   editable: boolean
   /** Round 6: whether cards in this lane may be retimed at all. */
   retimable: boolean
+  /** AQU-646 round 8: per-CARD veto on top of `retimable`, shaped like
+   *  `canRemove` below. Absent = every card in the lane may move, which is what
+   *  every caller but the VTT-plus-footage arrangement wants. */
+  canRetimeCell?(cell: CellData): boolean
   /** Round 6: edge snapping on/off (candidates are computed here). */
   snapEnabled?: boolean
   onSelect(id: string): void
@@ -58,6 +62,7 @@ export function TimelineLane({
   selectedId,
   editable,
   retimable,
+  canRetimeCell,
   snapEnabled,
   onSelect,
   onRetime,
@@ -137,7 +142,12 @@ export function TimelineLane({
           </TimelineSlotButton>
         </div>
       ))}
-      {visible.map((c) => (
+      {visible.map((c) => {
+        // An AND, never a replacement: the lane-wide flag still has the last
+        // word, so a lane that was frozen (SUB-53's re-flowed track) cannot be
+        // thawed by a permissive per-cell predicate.
+        const cardRetimable = retimable && (canRetimeCell?.(c) ?? true)
+        return (
         <TimelineCard
           key={c.id}
           cell={c}
@@ -146,15 +156,16 @@ export function TimelineLane({
           variant={variant}
           selected={selectedId === c.id}
           editable={editable}
-          retimable={retimable}
+          retimable={cardRetimable}
           span={spanOf(c)}
-          snap={retimable ? { enabled: Boolean(snapEnabled), candidates: candidatesFor(c) } : undefined}
+          snap={cardRetimable ? { enabled: Boolean(snapEnabled), candidates: candidatesFor(c) } : undefined}
           onSelect={onSelect}
           onRetime={onRetime}
           onSeek={onSeek}
           onRemove={onRemove && canRemove?.(c) ? onRemove : undefined}
         />
-      ))}
+        )
+      })}
     </div>
   )
 }

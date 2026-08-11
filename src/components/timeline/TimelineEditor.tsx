@@ -1086,6 +1086,15 @@ export function TimelineEditor({
               cells={subtitle}
               variant="subtitle"
               retimable={!audioFirst}
+              // AQU-646 round 8: an imported VTT cue is frozen. Its timing is
+              // the file's, not ours to nudge — arguing for the VTT's integrity
+              // while letting anyone drag its cues is incoherent (Sam,
+              // 2026-08-11). A line someone added here still moves, bounded by
+              // its neighbours. Only this arrangement passes the predicate, so
+              // SUB-36's deliberately draggable subtitle mirror is untouched —
+              // and cannot collide with it anyway, since that mirror exists
+              // only when there ARE dialogue cells and the band needs none.
+              canRetimeCell={drawsSourceBand ? isUserAddedLine : undefined}
               snapEnabled={snapOn}
               {...laneProps}
               // AQU-646: the stretches of film with no line of their own. Only

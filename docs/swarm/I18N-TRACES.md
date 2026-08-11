@@ -3,6 +3,26 @@
 Open TODOs and findings that outlive any single agent's context. Append; don't rewrite.
 Companion to `I18N-ORCHESTRATION.md`.
 
+## Promotion state (measured 2026-08-11, after wave 5)
+
+The branch is green **on its own base**, but that base has moved. Facts, so nobody re-derives them:
+
+- `swarm/i18n-aqu-511` = 70 commits ahead of `origin/dev`; **`origin/dev` is 115 commits ahead of
+  our fork point.** `dev` moved substantially while the swarm ran.
+- The base branch `claude/app-localization-status-b3aa56` descends from **`dev`, not `main`** — the
+  24 commits between `main` and our fork point are merged PRs (#291, #293, #305, #311, #315, …)
+  that are on `dev` and not yet on `main`. So **`dev` is the promotion target**, and an earlier
+  note in this file describing `main` as "a clean ancestor 24 behind" was measuring the wrong base.
+- A probe merge of `origin/dev` (`git merge --no-commit --no-ff`, then aborted) conflicts in
+  exactly **8 files**, all inside the `audio` and `editor` namespaces:
+  `AudioBulkProgressBanner.tsx`, `AudioRecorder/AudioRecordingModal.tsx`,
+  `AudioRecorder/TakesStrip.tsx`, `CellActionsMenu.tsx`, `CellAudioUploadButton.tsx`,
+  `EditorTable.tsx`, `cell/CellVoicePanel.tsx`, `timeline/TimelineEditor.tsx`.
+- Resolution rule for those files: keep `dev`'s logic changes AND re-apply the `t()` calls.
+  A resolution that drops a `t()` silently un-localizes a string with no test to catch it, because
+  the catalog key stays present and the lint only checks the catalog, not the call sites.
+- Nothing has been pushed. No PR opened.
+
 ## Open
 
 - **SWARM-TODO (orchestrator, after wave 2):** wire all 9 namespaces into

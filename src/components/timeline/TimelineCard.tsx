@@ -245,7 +245,16 @@ export function TimelineCard({
       }}
       onPointerDown={(e) => beginDrag("move", e)}
       className={cn(
-        "group absolute top-2.5 flex h-[46px] touch-none select-none flex-col justify-center gap-0.5 border px-2.5 transition-colors",
+        "group absolute top-2.5 flex h-[46px] touch-none select-none flex-col justify-center gap-0.5 border transition-colors",
+        // The padding comes off before the chip gets narrow enough for it to
+        // LIE ABOUT THE CHIP'S WIDTH. px-2.5 plus two 1px borders is 22px of
+        // chrome, and under border-box that is a hard floor on the rendered
+        // box — so a cue shorter than 22px was drawn 22px wide and spilled
+        // into its neighbour. That is the "two real chips overlap" Sam saw:
+        // the chip was positioned correctly and simply drawn too big. Keyed on
+        // width alone rather than `showsText`, so a chip being dragged cannot
+        // re-inflate itself while you are placing it.
+        width >= MIN_CARD_TEXT_PX ? "px-2.5" : "px-0",
         // SUB-11: the drag chip renders above the card bounds, so overflow can't
         // be hidden mid-drag; inner text stays contained by its own `truncate`s.
         drag ? "z-20 overflow-visible" : "overflow-hidden",

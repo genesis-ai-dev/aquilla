@@ -407,6 +407,24 @@ describe("TimelineCard", () => {
       expect(narrow.barBottom).toBe(narrow.card)
     })
 
+    it("sheds its padding before the padding can lie about its width", () => {
+      // px-2.5 + two 1px borders is 22px of chrome, and under border-box that
+      // is a hard FLOOR on the rendered box — a 0.58s cue at 32px/s asks for
+      // 18.7px and gets drawn 22px, spilling 3.3px into its neighbour. That is
+      // the overlap Sam reported between two real chips. happy-dom has no
+      // layout engine so the class is what can be asserted here; the browser
+      // pass measures the actual seams.
+      const cls = (w: number) => {
+        const { unmount } = atWidth(w)
+        const out = screen.getByTestId("tl-card-c1").className
+        unmount()
+        return out
+      }
+      expect(cls(200)).toContain("px-2.5")
+      expect(cls(20)).toContain("px-0")
+      expect(cls(20)).not.toContain("px-2.5")
+    })
+
     it("a card being DRAGGED keeps its text however narrow it is", () => {
       // You are looking straight at it, and the live readout is the point.
       atWidth(20)

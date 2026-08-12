@@ -318,6 +318,45 @@ describe("OrgProvider", () => {
       unsubscribe()
     })
   })
+
+  // AQU-885: the stored JWT's `exp` is knowable before any request goes out.
+  // Booting on an already-expired token used to fire both fetches anyway, take
+  // two 401s, and land the user on an empty all-orgs dashboard.
+  describe("already-expired stored token at boot (AQU-885)", () => {
+    /** Fake JWT with an `exp` claim `secondsFromNow` out (isJwtExpired is real). */
+    function fakeJwt(secondsFromNow: number): string {
+      const exp = Math.floor(Date.now() / 1000) + secondsFromNow
+      return `h.${btoa(JSON.stringify({ exp }))}.s`
+    }
+
+    afterEach(() => {
+      sessionState.session = { jwt: "jwt", username: "anna", createdAt: "x" }
+    })
+
+    it("issues no org or project-directory request, and signals session-expired", async () => {
+      sessionState.session = { jwt: fakeJwt(-60), username: "anna", createdAt: "x" }
+      const expired = vi.fn()
+      const unsubscribe = onSessionExpired(expired)
+
+      render(<MemoryRouter><OrgProvider><Probe /></OrgProvider></MemoryRouter>)
+
+      await waitFor(() => expect(expired).toHaveBeenCalled())
+      await waitFor(() => expect(screen.getByTestId("loading").textContent).toBe("no"))
+      expect(listMyOrgs).not.toHaveBeenCalled()
+      expect(fetchAccessibleProjects).not.toHaveBeenCalled()
+      unsubscribe()
+    })
+
+    it("still fetches normally for a valid unexpired token", async () => {
+      sessionState.session = { jwt: fakeJwt(3600), username: "anna", createdAt: "x" }
+      listMyOrgs.mockResolvedValue([{ id: 1, name: "A", role: { level: 700, name: "owner" } }])
+
+      render(<MemoryRouter><OrgProvider><Probe /></OrgProvider></MemoryRouter>)
+
+      await waitFor(() => expect(screen.getByTestId("count").textContent).toBe("1"))
+      expect(fetchAccessibleProjects).toHaveBeenCalled()
+    })
+  })
 })
 
 // AQU-883: the project directory is the ONLY source of guest orgs and shared

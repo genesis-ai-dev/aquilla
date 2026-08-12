@@ -3,6 +3,7 @@ import { useLocation } from "react-router-dom"
 import { listMyOrgs, type OrgSummary } from "@/lib/frontier/orgs"
 import { fetchAccessibleProjects, type CloudProjectSummary } from "@/lib/sync/cloud-projects"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
+import { isJwtExpired } from "@/lib/frontier/auth"
 import { UserError } from "@/lib/errors/user-error"
 import { notifySessionExpired } from "@/lib/errors/session-expired-signal"
 import {
@@ -106,6 +107,19 @@ export function OrgProvider({ children }: { children: ReactNode }) {
       setLoading(false)
       return []
     }
+    // AQU-885: the token's `exp` is knowable without a round-trip, so don't
+    // spend a doomed request (and a 401) on a session we already know is dead.
+    // Signal the expiry instead and let ExpiredSessionGate / the AQU-293 banner
+    // drive re-auth — the previous behavior rendered an empty all-orgs
+    // dashboard with no org picker and no explanation.
+    if (isJwtExpired(jwt)) {
+      setOrgs([])
+      setActiveOrgId(null)
+      setResolvedOrgJwt(jwt)
+      setLoading(false)
+      notifySessionExpired()
+      return []
+    }
     setLoading(true); setError(null)
     try {
       const list = await listMyOrgs(jwt)
@@ -156,6 +170,18 @@ export function OrgProvider({ children }: { children: ReactNode }) {
       setAccessibleProjects([])
       setAccessibleProjectsError(null)
       setResolvedProjectsJwt(null)
+      setAccessibleProjectsLoading(false)
+      return []
+    }
+    // AQU-885: same short-circuit as the org fetch — an expired token can only
+    // produce a 401 here, and swallowing that 401 is what made the directory
+    // look empty rather than unauthenticated.
+    if (isJwtExpired(jwt)) {
+      projectsRequestRef.current += 1
+      projectsInFlightRef.current = null
+      setAccessibleProjects([])
+      setAccessibleProjectsError(null)
+      setResolvedProjectsJwt(jwt)
       setAccessibleProjectsLoading(false)
       return []
     }

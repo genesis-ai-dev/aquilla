@@ -35,6 +35,7 @@ import { AiModelDownloadChip } from "@/components/AiModelDownloadChip"
 import { AudioBulkProgressBanner } from "@/components/AudioBulkProgressBanner"
 import { PrivateModeBanner } from "@/components/PrivateModeBanner"
 import { SessionExpiredBanner } from "@/components/SessionExpiredBanner"
+import { ExpiredSessionGate } from "@/components/ExpiredSessionGate"
 import { VersionBadge } from "@/components/VersionBadge"
 import { UpdateBanner } from "@/components/UpdateBanner"
 import { hydratePrefetchStatus } from "@/lib/audio/prefetch"
@@ -156,6 +157,9 @@ export default function App() {
         <PrivateModeBanner />
         {/* AQU-293: session-expiry banner — must be inside Router (uses useLocation) */}
         <SessionExpiredBanner />
+        {/* AQU-885: a stored JWT that's already expired at boot goes straight to
+            re-auth instead of rendering a shell that silently empties out. */}
+        <ExpiredSessionGate />
         <SyncFreezeOverlay />
         <OrgProvider>
           <OutboxProvider>

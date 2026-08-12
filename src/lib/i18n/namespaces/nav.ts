@@ -19,9 +19,7 @@ export const nav = defineNamespace({
     "nav.historyControls.emptyList": "No history",
     "nav.historyControls.previouslyViewed": "Previously viewed",
     "nav.historyControls.noPreviouslyViewed": "No previously viewed pages",
-    "nav.historyControls.recentKind.project": "Project",
     "nav.historyControls.recentKind.team": "Team",
-    "nav.historyControls.recentKind.file": "File",
 
     // -- AccountSwitcher: account menu + auth dialogs --
     "nav.account.addTitle": "Add Frontier account",
@@ -302,16 +300,8 @@ export const nav = defineNamespace({
         description:
           "Tooltip on the disabled clock button when the recently viewed list is empty.",
       },
-      "nav.historyControls.recentKind.project": {
-        description: "Kind column label for a project row in the recently viewed menu.",
-        maxLength: 12,
-      },
       "nav.historyControls.recentKind.team": {
         description: "Kind column label for a team row in the recently viewed menu.",
-        maxLength: 12,
-      },
-      "nav.historyControls.recentKind.file": {
-        description: "Kind column label for a file row in the recently viewed menu.",
         maxLength: 12,
       },
 

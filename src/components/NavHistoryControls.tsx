@@ -106,11 +106,11 @@ function HistoryMenuButton({ nav }: { nav: NavHistoryValue }) {
 function recentKindLabel(t: ReturnType<typeof useT>, kind: RecentKind): string {
   switch (kind) {
     case "project":
-      return t("nav.historyControls.recentKind.project")
+      return t("common.project")
     case "team":
       return t("nav.historyControls.recentKind.team")
     case "file":
-      return t("nav.historyControls.recentKind.file")
+      return t("common.file")
   }
 }
 

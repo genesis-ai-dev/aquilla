@@ -618,7 +618,7 @@ export const nav = defineNamespace({
         description:
           "Same sidebar-footer chip as nav.sidebarSection.setupChipDismissed, " +
           "before dismissal: shows how many onboarding steps are complete. The " +
-          "'Setup:' lead-in must stay, since e2e locates the chip by that prefix.",
+          "Do not reword the ENGLISH here: e2e locates the chip by the 'Setup:' prefix. Translate normally — e2e runs in English, so translations cannot affect it.",
         placeholders: {
           ratio: "Already-formatted 'done/total' count (e.g. '2/4'), pre-wrapped in " +
             "Unicode bidi isolate characters by the caller — reproduce it verbatim, " +
@@ -793,7 +793,7 @@ export const nav = defineNamespace({
       "nav.workspaceActions.confirmAttribution": {
         description:
           "Checkbox label on the workspace-action confirmation dialog gating its " +
-          "confirm button. Must keep this exact English wording — an e2e spec " +
+          "confirm button. Do not reword the ENGLISH — an e2e spec " +
           "(ai-completion-dialog.smoke.spec.ts) asserts it verbatim.",
         maxLength: 120,
       },
@@ -802,14 +802,14 @@ export const nav = defineNamespace({
       "nav.workspaceActions.deleteFile.title": {
         description:
           "Heading of the file soft-delete confirmation dialog. Must keep this " +
-          "exact English wording — e2e specs (delete-file-confirm-dialog, file-" +
+          "the ENGLISH unchanged — e2e specs (delete-file-confirm-dialog, file-" +
           "delete) assert it verbatim.",
         maxLength: 40,
       },
       "nav.workspaceActions.deleteFile.description": {
         description:
           "Body of the file soft-delete confirmation dialog. Must keep the " +
-          "'Move \"{name}\" to Recently deleted?' opening exactly — e2e specs match " +
+          "'Move \"{name}\" to Recently deleted?' opening in ENGLISH exactly — e2e specs match " +
           "it by regex.",
         placeholders: {
           name: "The file's display name, already quoted by the template — do not " +
@@ -820,7 +820,7 @@ export const nav = defineNamespace({
       "nav.workspaceActions.deleteFile.confirmLabel": {
         description:
           "Confirm button of the dialog above. Must keep this exact English " +
-          "wording — e2e specs match the button by exact accessible name.",
+          "ENGLISH wording — e2e specs match the button by exact accessible name. Translate normally; e2e runs in English.",
         maxLength: 32,
       },
 

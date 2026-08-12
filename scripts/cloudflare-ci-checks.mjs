@@ -7,10 +7,16 @@ const ROOT_LANE = { name: "root", steps: [["pnpm", ["test"]]] }
 // its own so it shares an already-required check — a secret scan that can be
 // merged past is decoration. This script is the gate that actually runs on
 // pull requests (AQU-564); the ci.yml lint job mirrors it for dispatch runs.
+// i18n context-catalog check (AQU-832) rides in the lint lane for the same
+// reason scan:secrets does: it shares an already-required check rather than
+// adding a new one. Previously wired into `pnpm test` only — grep found zero
+// i18n references anywhere in CI before this, so a context regression could
+// merge unnoticed until someone ran `pnpm test` locally.
 const LINT_LANE = {
   name: "lint",
   steps: [
     ["pnpm", ["lint"]],
+    ["pnpm", ["run", "i18n:check"]],
     ["pnpm", ["run", "scan:secrets"]],
   ],
 }

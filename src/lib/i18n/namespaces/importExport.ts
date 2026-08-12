@@ -596,6 +596,15 @@ export const importExport = defineNamespace({
       "re-exporting it as mp3 or wav.",
     "importExport.errors.notAParatextProject":
       "That doesn't look like a Paratext project — no Settings.xml (or .ssf) with USFM books was found.",
+
+    // — Thrown-error triage: src/lib/sync/source-upload.ts —
+    "importExport.errors.sourceUploadEmpty": "Source upload failed: the original file is empty.",
+    "importExport.errors.sourceUploadTooLarge": "Source upload failed: the original file exceeds the {maxSize} limit.",
+    "importExport.errors.couldNotGetUploadToken": "Couldn't get an upload token — sign in and try again.",
+    "importExport.errors.sourceUploadNetworkFailed": "Source upload failed: {detail}",
+    "importExport.errors.sourceUploadFailed": "Source upload failed",
+    "importExport.errors.artifactBindingNetworkFailed": "Artifact binding failed: {detail}",
+    "importExport.errors.artifactBindingFailed": "Artifact binding failed",
   },
   context: {
     _context: {
@@ -1136,6 +1145,20 @@ export const importExport = defineNamespace({
       "importExport.errors.couldNotDecodeAudio": {
         description: "Thrown when the browser's Web Audio API fails to decode an uploaded audio/video file.",
         placeholders: { fileName: "Name of the file — not translated." },
+      },
+      "importExport.errors.sourceUploadTooLarge": {
+        description: "Thrown when a source artifact upload exceeds the server-side size ceiling.",
+        placeholders: { maxSize: "The size limit, already formatted (e.g. '95.0 MB') — not translated." },
+      },
+      "importExport.errors.sourceUploadNetworkFailed": {
+        description:
+          "Thrown when the source-upload PUT fails at the network level (offline, DNS, etc.), before any HTTP response. {detail} is the raw underlying error, interpolated as data.",
+        placeholders: { detail: "Raw network-error message — not translated." },
+      },
+      "importExport.errors.artifactBindingNetworkFailed": {
+        description:
+          "Thrown when binding an already-uploaded artifact to another file fails at the network level. {detail} is the raw underlying error, interpolated as data.",
+        placeholders: { detail: "Raw network-error message — not translated." },
       },
       "importExport.dialog.finishSaveFailed": {
         description:

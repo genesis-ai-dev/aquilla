@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { Navigate, useParams } from "react-router-dom"
-import { Cpu, Gauge, Globe, KeyRound, Palette, PanelLeft, ShieldCheck, UserRound } from "lucide-react"
+import { Cpu, Gauge, KeyRound, PanelLeft, UserRound } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { OrgSidebar } from "@/components/org/OrgSidebar"
 import { OrgBreadcrumb } from "@/components/org/OrgBreadcrumb"
@@ -17,7 +17,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { LanguageSwitcher } from "@/lib/i18n/LanguageSwitcher"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { useThemeMode, type ThemeMode } from "@/branding/ThemeMode"
 import { useAnalyticsConsent } from "@/hooks/useAnalyticsConsent"
@@ -26,7 +25,6 @@ import { PersonalProviderSection } from "@/components/settings/PersonalProviderS
 import { LocalModelsSection } from "@/components/ProjectSettings/LocalModelsSection"
 import { UsageSection } from "@/components/settings/UsageSection"
 import { ApiTokensSection } from "@/components/settings/ApiTokensSection"
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import type { DockRailPosition } from "@/lib/dock-rail-position"
 import { useSkipReplaceConfirm, setSkipReplaceConfirm } from "@/lib/store/replace-confirm-pref"
 import {
@@ -40,10 +38,10 @@ import {
  * these are reachable by EVERY signed-in user (via the AccountSwitcher), not
  * just org admins — /settings is now an org-level surface gated to managers.
  *
- * Rather than stacking every form onto one long page, `/preferences` is an
- * index of navigation rows (grouped, with a hint showing the current value);
- * each row opens a focused detail sub-page at `/preferences/:section`. Both
- * routes render this same component — it branches on the `section` param.
+ * `/preferences` shows a General card inline (theme, UI language, analytics,
+ * and a Workspace nav row in the same group); heavier sections stay as
+ * navigation rows into `/preferences/:section`. Both routes render this
+ * same component — it branches on the `section` param.
  *
  * Detail pages match the org-settings layout: page-sized title via PageHeader,
  * then floating SettingsGroup headers with content cards for the controls.
@@ -139,64 +137,80 @@ function WorkspaceSection() {
 }
 
 /**
- * Appearance settings stay device-scoped and deliberately separate from the
- * source/target text direction and other project-specific display settings.
+ * Device-scoped General card on the Preferences index — theme, UI language,
+ * analytics consent, plus Workspace as a connected nav row into its detail page.
  */
-function AppearanceSection() {
+function GeneralSection({ workspaceHint }: { workspaceHint: string }) {
   const { mode, setMode } = useThemeMode()
+  const { locale, locales, setLocale, t } = useI18n()
+  const { enabled, setEnabled } = useAnalyticsConsent()
+  const languageItems = locales.map((l) => ({ value: l.code, label: l.nativeName }))
 
   return (
-    <SettingsGroup label="Theme">
+    <SettingsGroup label="General">
       <SettingsRow
         label="Theme"
         description="Follow your system appearance or choose a theme for this device."
-        block
-      >
-        <Tabs
-          value={mode}
-          onValueChange={(value) => setMode(value as ThemeMode)}
-          className="gap-0"
-        >
-          <TabsList aria-label="Theme">
-            {THEME_OPTIONS.map(({ id, label }) => (
-              <TabsTrigger key={id} value={id}>
-                {label}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-        </Tabs>
-      </SettingsRow>
-    </SettingsGroup>
-  )
-}
-
-/**
- * UI language. Device-scoped like Appearance, and separate from the
- * translator profile's "Assistant language" (which only steers AI replies).
- */
-function LanguageSection() {
-  const { t } = useI18n()
-  return (
-    <SettingsGroup label="Language">
+        control={
+          <Select
+            items={THEME_OPTIONS.map((opt) => ({ value: opt.id, label: opt.label }))}
+            value={mode}
+            onValueChange={(value) => {
+              if (value === "system" || value === "light" || value === "dark") {
+                setMode(value)
+              }
+            }}
+          >
+            <SelectTrigger
+              id="theme-mode"
+              aria-label="Theme"
+              className="w-36 bg-background"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                {THEME_OPTIONS.map(({ id, label }) => (
+                  <SelectItem key={id} value={id}>
+                    {label}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+        }
+      />
       <SettingsRow
         label="UI language"
         description="The language the app's own interface (menus, buttons, messages) is shown in."
         control={
-          <LanguageSwitcher
-            className="h-9 rounded-md border border-input bg-transparent px-3 text-sm"
-            ariaLabel={t("language.switcher.settingsRow")}
-          />
+          <Select items={languageItems} value={locale} onValueChange={setLocale}>
+            <SelectTrigger
+              id="ui-language"
+              aria-label={t("language.switcher.settingsRow")}
+              className="w-44 bg-background"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                {locales.map((l) => (
+                  <SelectItem
+                    key={l.code}
+                    value={l.code}
+                    // Endonym alone for sighted users; tag lang/dir so the
+                    // browser shapes the script correctly (incl. RTL Arabic).
+                    lang={l.code}
+                    dir={l.dir}
+                  >
+                    {l.nativeName}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
         }
       />
-    </SettingsGroup>
-  )
-}
-
-/** Analytics consent toggle. Self-contained for its detail page. */
-function PrivacySection() {
-  const { enabled, setEnabled } = useAnalyticsConsent()
-  return (
-    <SettingsGroup label="Analytics">
       <SettingsRow
         label="Share usage data"
         description={
@@ -218,6 +232,12 @@ function PrivacySection() {
             aria-label="Share usage data"
           />
         }
+      />
+      <NavRow
+        to="/preferences/workspace"
+        icon={PanelLeft}
+        title="Workspace"
+        hint={workspaceHint}
       />
     </SettingsGroup>
   )
@@ -282,6 +302,9 @@ interface PreferenceSection {
   render: () => React.ReactNode
 }
 
+/** Former nested slugs now inlined on the index — keep redirecting for bookmarks. */
+const INLINE_PREFERENCE_SLUGS = new Set(["appearance", "language", "privacy"])
+
 const PREFERENCE_SECTIONS: PreferenceSection[] = [
   {
     slug: "workspace",
@@ -290,30 +313,6 @@ const PREFERENCE_SECTIONS: PreferenceSection[] = [
     group: "General",
     icon: PanelLeft,
     render: () => <WorkspaceSection />,
-  },
-  {
-    slug: "appearance",
-    title: "Appearance",
-    description: "How the workspace looks on this device.",
-    group: "General",
-    icon: Palette,
-    render: () => <AppearanceSection />,
-  },
-  {
-    slug: "language",
-    title: "Language",
-    description: "The language the app's own interface is shown in.",
-    group: "General",
-    icon: Globe,
-    render: () => <LanguageSection />,
-  },
-  {
-    slug: "privacy",
-    title: "Privacy",
-    description: "Control what's shared with us about how you use the app.",
-    group: "General",
-    icon: ShieldCheck,
-    render: () => <PrivacySection />,
   },
   {
     slug: "profile",
@@ -360,21 +359,18 @@ const PREFERENCE_SECTIONS: PreferenceSection[] = [
   },
 ]
 
-const PREFERENCE_GROUPS = ["General", "AI & personalization", "Account"] as const
+/** Nested nav groups after the inline General card. */
+const PREFERENCE_GROUPS = ["AI & personalization", "Account"] as const
 
-/** The index: grouped navigation rows, each hinting its current value. */
+/** The index: inline General card + grouped navigation rows for nested sections. */
 function PreferencesIndex() {
-  const { enabled } = useAnalyticsConsent()
   const { position } = useDockRailPosition()
-  const { mode } = useThemeMode()
 
   const profile = getTranslatorProfile()
   const profileFilled = PROFILE_KEYS.filter((k) => (profile[k] ?? "").trim().length > 0).length
 
   const hints: Record<string, string> = {
     workspace: RAIL_OPTIONS.find((o) => o.id === position)?.label ?? "",
-    appearance: mode === "system" ? "System" : mode === "dark" ? "Dark" : "Light",
-    privacy: enabled ? "Sharing on" : "Sharing off",
     profile: profileFilled > 0 ? `${profileFilled}/${PROFILE_KEYS.length} set` : "Not set",
     "provider-keys": "Personal",
     "local-models": "On-device",
@@ -393,6 +389,7 @@ function PreferencesIndex() {
             description="Personal preferences that apply to you across all projects on this device."
           />
           <div className="flex flex-col gap-12">
+            <GeneralSection workspaceHint={hints.workspace} />
             {PREFERENCE_GROUPS.map((group) => (
               <NavList key={group} label={group}>
                 {PREFERENCE_SECTIONS.filter((s) => s.group === group).map((s) => (
@@ -415,6 +412,7 @@ function PreferencesIndex() {
 
 /** A single section, rendered on its own page with a back breadcrumb. */
 function PreferencesDetail({ slug }: { slug: string }) {
+  if (INLINE_PREFERENCE_SLUGS.has(slug)) return <Navigate to="/preferences" replace />
   const section = PREFERENCE_SECTIONS.find((s) => s.slug === slug)
   if (!section) return <Navigate to="/preferences" replace />
   return (

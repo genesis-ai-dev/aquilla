@@ -36,9 +36,13 @@ interface FileRowProps {
   onShowDetails?: () => void
   onStartRename: () => void
   onMove: () => void
+  /** Opens the Export dialog for this file. */
+  onExport?: () => void
+  onExportSource?: () => void
+  /** Opens Assign work scoped to this file. Hidden when the caller cannot assign. */
+  onAssignWork?: () => void
   /** AQU-271: Optional — pass undefined to hide delete for roles below project_lead. */
   onDelete?: () => void
-  onExportSource?: () => void
   onApplySuggestion?: () => void
 }
 
@@ -46,7 +50,7 @@ export function FileRow(props: FileRowProps) {
   const {
     file, active, expanded, progress, hasSuggestion, editing,
     onEditCommit, onEditCancel, onToggleExpand, onSelect, onShowDetails, onStartRename,
-    onMove, onDelete, onExportSource, onApplySuggestion,
+    onMove, onExport, onExportSource, onAssignWork, onDelete, onApplySuggestion,
   } = props
   const t = useT()
   const inputRef = useRef<HTMLInputElement>(null)
@@ -81,8 +85,10 @@ export function FileRow(props: FileRowProps) {
       onShowDetails={onShowDetails}
       onRename={onStartRename}
       onMove={onMove}
-      onDelete={onDelete}
+      onExport={onExport}
       onExportSource={onExportSource}
+      onAssignWork={onAssignWork}
+      onDelete={onDelete}
     />
   )
 

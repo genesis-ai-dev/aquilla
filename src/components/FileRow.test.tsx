@@ -128,4 +128,20 @@ describe("FileRow — file actions menu", () => {
     // events along the React tree — so the popup lives outside the row.
     expect(onSelect).not.toHaveBeenCalled()
   })
+
+  it("opens Export and Assign work from the ⋯ menu without opening the file", () => {
+    const onSelect = vi.fn()
+    const onExport = vi.fn()
+    const onAssignWork = vi.fn()
+    const { getByRole } = renderRow({ onSelect, onExport, onAssignWork })
+
+    fireEvent.click(getByRole("button", { name: "File actions" }))
+    fireEvent.click(getByRole("menuitem", { name: /^Export$/ }))
+    expect(onExport).toHaveBeenCalledTimes(1)
+
+    fireEvent.click(getByRole("button", { name: "File actions" }))
+    fireEvent.click(getByRole("menuitem", { name: /assign work/i }))
+    expect(onAssignWork).toHaveBeenCalledTimes(1)
+    expect(onSelect).not.toHaveBeenCalled()
+  })
 })

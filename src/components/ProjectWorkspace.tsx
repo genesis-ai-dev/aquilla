@@ -945,6 +945,9 @@ export function ProjectWorkspace() {
   const [makeCharacterSeedCellId, setMakeCharacterSeedCellId] = useState<string | null>(null)
   // FRO-192: Assign… modal
   const [assignModalOpen, setAssignModalOpen] = useState(false)
+  // File the sidebar context menu asked to assign; null means "use the
+  // editor's active file" (overflow-menu launch).
+  const [assignTargetFileId, setAssignTargetFileId] = useState<string | null>(null)
   // Increment to force a refresh of the assignments pickup panel after a new
   // assignment is created. The EditorTable assignmentsByCellId map is also
   // rebuilt on the same tick.
@@ -5010,7 +5013,7 @@ export function ProjectWorkspace() {
             : "Diarize"
 
     const actionItems: OverflowMenuItem[] = project === null ? [] : getVisibleActions(workspaceActions, actionCtx)
-      .filter((a) => a.id !== "import-new")
+      .filter((a) => a.id !== "import-new" && a.id !== "export")
       .map((a) => ({
         id: `action-${a.id}`,
         label: a.label,
@@ -5039,15 +5042,6 @@ export function ProjectWorkspace() {
         onClick: handleJumpNextUnfinished,
       },
     )
-
-    if (canAssignWork) {
-      items.push({
-        id: "assign-work",
-        label: "Assign work",
-        icon: UserCheck,
-        onClick: () => setAssignModalOpen(true),
-      })
-    }
 
     if (lens === "audio" && canDiarize) {
       items.push({
@@ -5108,6 +5102,23 @@ export function ProjectWorkspace() {
         },
       },
     )
+    if (canAssignWork) {
+      items.push({
+        id: "assign-work",
+        label: "Assign work",
+        icon: UserCheck,
+        onClick: () => {
+          setAssignTargetFileId(null)
+          setAssignModalOpen(true)
+        },
+      })
+    }
+    items.push({
+      id: "file-export",
+      label: "Export",
+      icon: Download,
+      onClick: openExportFlow,
+    })
     if (activeFile && canExportSourceFile(activeFile, canExportByOrgPolicy)) {
       items.push({
         id: "file-export-source",
@@ -5158,6 +5169,7 @@ export function ProjectWorkspace() {
     hasUnfinished,
     isSubtitleFile,
     lens,
+    openExportFlow,
     project,
     projectId,
     suggestions.length,
@@ -5558,6 +5570,14 @@ export function ProjectWorkspace() {
                     setMoveTargetId(fileId)
                     setMoveCorpus(project.files.find((f) => f.id === fileId)?.corpusMarker ?? "")
                   }}
+                  onExport={(fileId) => {
+                    if (fileId !== activeFileId) workspaceTabs.openFile(fileId)
+                    openExportFlow()
+                  }}
+                  onAssignWork={canAssignWork ? (fileId) => {
+                    setAssignTargetFileId(fileId)
+                    setAssignModalOpen(true)
+                  } : undefined}
                   onDelete={currentRoleLevel >= ROLE.PROJECT_LEAD ? (fileId) => setPendingDeleteId(fileId) : undefined}
                   onApplySuggestion={handleApplyOneSuggestion}
                   onRenameCorpus={handleRenameCorpus}
@@ -6394,9 +6414,12 @@ export function ProjectWorkspace() {
       {project && canAssignWork && (
         <AssignModal
           open={assignModalOpen}
-          onOpenChange={setAssignModalOpen}
+          onOpenChange={(open) => {
+            setAssignModalOpen(open)
+            if (!open) setAssignTargetFileId(null)
+          }}
           projectId={project.id}
-          activeFileId={activeFileId}
+          activeFileId={assignTargetFileId ?? activeFileId}
           projectFiles={projectFiles}
           targetLanes={project.targetLanes}
           defaultLane={activeLane}
@@ -6405,7 +6428,11 @@ export function ProjectWorkspace() {
           roleLevel={currentRoleLevel}
           allowSelfAssignment={allowSelfAssignment}
           callerUserId={currentUserId}
-          selectedCellIds={getSelectedIds()}
+          selectedCellIds={
+            assignTargetFileId != null && assignTargetFileId !== activeFileId
+              ? new Set<string>()
+              : getSelectedIds()
+          }
           jwt={jwt ?? ""}
           author={currentUsername}
           onAssigned={() => setAssignmentsRefreshKey((k) => k + 1)}
@@ -6588,40 +6615,12 @@ export function ProjectWorkspace() {
           onConfirm={() => { pendingActionConfirm.run(actionCtx, actionArgs); setPendingActionConfirm(null) }}
         />
       )}
-      {/* "File details" modal — metadata plus permission-aware actions for a sidebar file row. */}
+      {/* "File details" modal — metadata for a sidebar file row. */}
       <FileDetailsModal
         open={detailsFileId !== null}
         onOpenChange={(v) => { if (!v) setDetailsFileId(null) }}
         file={detailsFileId ? project.files.find((f) => f.id === detailsFileId) ?? null : null}
         progress={detailsFileId ? fileProgress.get(detailsFileId) : undefined}
-        roleLevel={currentRoleLevel}
-        canExportByOrgPolicy={canExportByOrgPolicy}
-        onRename={() => {
-          if (detailsFileId) setRenameSignal({ fileId: detailsFileId, nonce: Date.now() })
-          setDetailsFileId(null)
-        }}
-        onMove={() => {
-          if (detailsFileId) {
-            setMoveTargetId(detailsFileId)
-            setMoveCorpus(project.files.find((f) => f.id === detailsFileId)?.corpusMarker ?? "")
-          }
-          setDetailsFileId(null)
-        }}
-        onExportSource={() => {
-          const f = detailsFileId ? project.files.find((x) => x.id === detailsFileId) : null
-          if (f) {
-            void exportSourceFile({
-              projectId: project.id,
-              file: f,
-              getToken: getTokenForFile,
-              targetLang: activeLane,
-            })
-          }
-        }}
-        onDelete={() => {
-          if (detailsFileId) setPendingDeleteId(detailsFileId)
-          setDetailsFileId(null)
-        }}
       />
       {/* FRO-272: soft-delete confirmation — file moves to "Recently deleted" (30-day retention). */}
       <ConfirmActionDialog

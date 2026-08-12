@@ -69,8 +69,8 @@
 | Marketing   | Homepage "book a call": Google Calendar booking link + contact form → POST /api/v2/contact/book-call → sent state | `e2e/specs/marketing/book-call.smoke.spec.ts` | ✅ |
 | Editor      | Formatting bubble menu (bold/italic/underline/strikethrough/code) | `e2e/specs/editor/formatting-bubble-menu.smoke.spec.ts` + `formatting-inline-code-toggle.smoke.spec.ts` + `formatting-underline-strikethrough.smoke.spec.ts` | ✅ |
 | Editor      | Formatting loss warning when source has bold/italic   | `e2e/specs/editor/formatting-loss-warning.smoke.spec.ts`      |   ✅   |
-| Editor      | File actions hover menu (rename/delete), by pointer and by keyboard | `e2e/specs/editor/file-actions-button.smoke.spec.ts` |   ✅   |
-| Editor      | File details modal (metadata + permission-aware actions) | `e2e/specs/editor/file-actions-button.smoke.spec.ts`       |   ✅   |
+| Editor      | File actions hover menu (rename/export/assign/delete), by pointer and by keyboard | `e2e/specs/editor/file-actions-button.smoke.spec.ts` |   ✅   |
+| Editor      | File details modal (metadata only)                   | `e2e/specs/editor/file-actions-button.smoke.spec.ts`       |   ✅   |
 | Editor      | Corpus rename inline edit                             | `e2e/specs/editor/sidebar-corpus-rename.smoke.spec.ts`        |   ✅   |
 | Editor      | Video attachment dialog fill + Save URL               | `e2e/specs/editor/video-attachment-save-url.smoke.spec.ts`    |   ✅   |
 | Editor      | Specialized import routes enable TMX, Macula, Translation Notes, and Biblica study notes | `e2e/specs/editor/import-specialized-options.smoke.spec.ts` | ✅ |

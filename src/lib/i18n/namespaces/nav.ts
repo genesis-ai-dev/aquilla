@@ -111,6 +111,8 @@ export const nav = defineNamespace({
     "nav.fileRow.importedAsTooltip": "{name} (imported as {originalName})",
     "nav.fileRow.progressAriaLabel": "{translated}% translated, {validated}% validated",
     "nav.fileRow.fileActions": "File actions",
+    "nav.fileRow.export": "Export",
+    "nav.fileRow.assignWork": "Assign work",
     "nav.fileRow.suggestionTooltip":
       "A cleaner name was detected for this file. Click to apply, or use the Apply button at the top of the sidebar.",
     "nav.fileRow.applyRenameSuggestion": "Apply rename suggestion",
@@ -644,7 +646,19 @@ export const nav = defineNamespace({
       "nav.fileRow.fileActions": {
         description:
           "Tooltip and accessible name for the ⋯ button that opens the file's context " +
-          "menu (rename, move, delete, export).",
+          "menu (rename, move, export, assign work, delete).",
+      },
+      "nav.fileRow.export": {
+        description:
+          "Menu item that opens the Export dialog for this file. Imperative verb. " +
+          "Distinct from 'Export source (.SFM)', which downloads USFM immediately.",
+        maxLength: 20,
+      },
+      "nav.fileRow.assignWork": {
+        description:
+          "Menu item that opens the Assign work dialog scoped to this file. " +
+          "Noun phrase matching the dialog title.",
+        maxLength: 24,
       },
       "nav.fileRow.suggestionTooltip": {
         description:

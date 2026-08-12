@@ -33,6 +33,8 @@ test("file actions button opens the file menu for pointer and keyboard alike", a
   const renameItem = alice.getByRole("menuitem", { name: /Rename/i })
   await expect(renameItem).toBeVisible({ timeout: 5_000 })
   await expect(alice.getByRole("menuitem", { name: /Delete/i })).toBeVisible({ timeout: 3_000 })
+  await expect(alice.getByRole("menuitem", { name: /^Export$/ })).toBeVisible({ timeout: 3_000 })
+  await expect(alice.getByRole("menuitem", { name: /Assign work/i })).toBeVisible({ timeout: 3_000 })
   await expect(fileActionsBtn).toHaveAttribute("aria-expanded", "true")
 
   // Press Escape to dismiss the menu.
@@ -59,12 +61,10 @@ test("file actions button opens the file menu for pointer and keyboard alike", a
 })
 
 /**
- * "File details" menu item opens the FileDetailsModal: metadata (type,
- * segment count) plus permission-aware actions. Alice owns the seeded
- * project, so Rename/Move/Delete are enabled; the seeded file is sample.md,
- * so source export is disabled with the USFM-only reason.
+ * "File details" menu item opens the FileDetailsModal: metadata only
+ * (type, segment count). File actions stay on the row menu, not the dialog.
  */
-test("file details menu item opens metadata modal with permission-aware actions", async ({ alice }) => {
+test("file details menu item opens metadata modal", async ({ alice }) => {
   const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `FileDetails ${Date.now()}` })
   await openSeededProject(alice, seeded)
 
@@ -83,14 +83,38 @@ test("file details menu item opens metadata modal with permission-aware actions"
   await expect(dialog.getByText("MD", { exact: true })).toBeVisible()
   await expect(dialog.getByText("Segments")).toBeVisible()
 
-  // Owner role: Rename/Move/Delete enabled; MD file: export disabled with reason.
-  await expect(dialog.getByRole("button", { name: /^Rename$/ })).toBeEnabled()
-  await expect(dialog.getByRole("button", { name: /^Delete$/ })).toBeEnabled()
-  await expect(dialog.getByRole("button", { name: /Export source/ })).toBeDisabled()
-  await expect(dialog.getByText(/Only USFM files support/i)).toBeVisible()
+  await expect(dialog.getByRole("button", { name: /^Rename$/ })).toHaveCount(0)
+  await expect(dialog.getByRole("button", { name: /^Delete$/ })).toHaveCount(0)
+  await expect(dialog.getByRole("button", { name: /Export source/ })).toHaveCount(0)
+})
 
-  // Delete chains into the existing soft-delete confirmation dialog.
-  await dialog.getByRole("button", { name: /^Delete$/ }).click()
-  await expect(alice.getByRole("heading", { name: /Recently deleted/i })).toBeVisible({ timeout: 5_000 })
-  await alice.getByRole("button", { name: /Cancel/i }).click()
+/**
+ * File-row menu Export and Assign work open the same dialogs as the
+ * editor overflow menu, scoped to the clicked file.
+ */
+test("file menu Export and Assign work open their dialogs", async ({ alice }) => {
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `FileMenuDialogs ${Date.now()}` })
+  await openSeededProject(alice, seeded)
+
+  const fileRow = alice.locator("aside").getByText(/sample/i).first()
+  await expect(fileRow).toBeVisible({ timeout: 10_000 })
+  await fileRow.hover()
+  const fileActionsBtn = alice.locator('button[aria-label="File actions"]').first()
+  await expect(fileActionsBtn).toBeVisible({ timeout: 5_000 })
+
+  await fileActionsBtn.click()
+  await alice.getByRole("menuitem", { name: /^Export$/ }).click()
+  const exportDialog = alice.getByRole("dialog")
+  await expect(exportDialog).toBeVisible({ timeout: 5_000 })
+  await expect(exportDialog.getByRole("heading", { name: "Export" })).toBeVisible()
+  await alice.keyboard.press("Escape")
+  await expect(exportDialog).not.toBeVisible({ timeout: 3_000 })
+
+  await fileRow.hover()
+  await expect(fileActionsBtn).toBeVisible({ timeout: 5_000 })
+  await fileActionsBtn.click()
+  await alice.getByRole("menuitem", { name: /Assign work/i }).click()
+  const assignDialog = alice.getByRole("dialog")
+  await expect(assignDialog).toBeVisible({ timeout: 5_000 })
+  await expect(assignDialog.getByRole("heading", { name: /Assign work/i })).toBeVisible()
 })

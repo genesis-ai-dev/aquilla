@@ -36,6 +36,10 @@ interface Props {
   onShowDetails?: (fileId: string) => void
   onRename: (fileId: string, newName: string) => void
   onMove: (fileId: string) => void
+  /** Opens the Export dialog for the given file. */
+  onExport?: (fileId: string) => void
+  /** Opens Assign work scoped to the given file. Hidden when omitted. */
+  onAssignWork?: (fileId: string) => void
   /** AQU-271: Optional — pass undefined to hide delete for roles below project_lead (500). */
   onDelete?: (fileId: string) => void
   onApplySuggestion?: (fileId: string) => void
@@ -53,7 +57,7 @@ interface Props {
 
 export function ExpandableFileList({
   projectId, files, activeFileId, fileProgress,
-  suggestionFileIds, validationCount, getTokenForFile, onSelectFile, onShowDetails, onRename, onMove, onDelete,
+  suggestionFileIds, validationCount, getTokenForFile, onSelectFile, onShowDetails, onRename, onMove, onExport, onAssignWork, onDelete,
   targetLang = "",
   onApplySuggestion, onRenameCorpus, canExportByOrgPolicy = true,
   renameSignal,
@@ -215,6 +219,8 @@ export function ExpandableFileList({
                             onShowDetails={onShowDetails ? () => onShowDetails(file.id) : undefined}
                             onStartRename={() => setEditingFileId(file.id)}
                             onMove={() => onMove(file.id)}
+                            onExport={onExport ? () => onExport(file.id) : undefined}
+                            onAssignWork={onAssignWork ? () => onAssignWork(file.id) : undefined}
                             onDelete={onDelete ? () => onDelete(file.id) : undefined}
                             onExportSource={
                               canExportSourceFile(file, canExportByOrgPolicy)

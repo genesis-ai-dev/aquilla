@@ -15,6 +15,8 @@ import { Spinner } from "@/components/ui/spinner"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { AUTH_BASE } from "@/lib/frontier/auth"
+import { useI18n } from "@/lib/i18n/I18nProvider"
+import { formatDateTime } from "@/lib/i18n/format"
 import {
   ChangeList,
   ImportPreviewView,
@@ -245,6 +247,7 @@ function ApprovalSummaryView({
   onApprove: () => void
   onReject: () => void
 }) {
+  const { locale } = useI18n()
   const { warnings, settingsChanges, ...facts } = data.summary
   const factEntries = Object.entries(facts).filter(([, v]) => typeof v === "number" || typeof v === "string")
   const settingsEntries =
@@ -328,7 +331,7 @@ function ApprovalSummaryView({
 
       <div className="flex items-center justify-between text-xs text-muted-foreground">
         <span>Digest: <span className="font-mono">{data.digest.slice(0, 16)}…</span></span>
-        <span>Expires {new Date(data.expiresAt).toLocaleString()}</span>
+        <span>Expires {formatDateTime(data.expiresAt, locale)}</span>
       </div>
 
       {actionError && (

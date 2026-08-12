@@ -11,6 +11,9 @@
  * Spec: docs/superpowers/specs/2026-06-13-org-credits-cost-model.md
  */
 
+import { formatNumber } from "./i18n/format"
+import { DEFAULT_LOCALE } from "./i18n/locales"
+
 export interface CreditConfig {
   markup: number
   agentMarkup: number
@@ -44,10 +47,14 @@ export function creditsFor(rawCents: number, rail: Rail, cfg: Pick<CreditConfig,
  *
  * Non-finite input (NaN/undefined/±Infinity — e.g. a not-yet-loaded or
  * malformed credit value) is treated as 0 so the UI never renders "NaN cr".
+ *
+ * Locale-aware (WS-09): `locale` defaults to the base `en` catalog locale, not
+ * the browser's, so untranslated call sites keep compiling; pass the active
+ * app locale (`useI18n().locale`) from components that render this in UI.
  */
-export function formatCredits(n: number): string {
+export function formatCredits(n: number, locale: string = DEFAULT_LOCALE): string {
   const value = Number.isFinite(n) ? n : 0
-  return `${Math.round(value).toLocaleString()} cr`
+  return `${formatNumber(Math.round(value), locale)} cr`
 }
 
 /**

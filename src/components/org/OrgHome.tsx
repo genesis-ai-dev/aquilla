@@ -13,6 +13,8 @@ import { getPortfolio, getPortfolios, translatedPct, validatedPct, attentionRank
 import { portfolioActivityStatus, portfolioAttentionReasons } from "@/lib/project-status"
 import { ProjectDeadlineStatuses } from "@/components/ProjectStatus"
 import { listMyPendingInvites, type MyPendingInvite } from "@/lib/sync/invites"
+import { useI18n } from "@/lib/i18n/I18nProvider"
+import { formatDate, formatList } from "@/lib/i18n/format"
 import { WorkloadRollup } from "./WorkloadRollup"
 import { UsageRollup } from "./UsageRollup"
 import { CreditsPanel } from "./CreditsPanel"
@@ -547,6 +549,7 @@ export function ProjectTable({
 }
 
 export function OrgHome() {
+  const { locale } = useI18n()
   const {
     activeOrg,
     activeOrgId,
@@ -898,11 +901,11 @@ export function OrgHome() {
                       <div key={inv.token} className="flex flex-wrap items-center gap-3 p-4">
                         <div className="flex-1 min-w-0">
                           <p className="truncate text-sm font-medium">
-                            {inv.projects.map((p) => p.projectName).join(", ")}
+                            {formatList(inv.projects.map((p) => p.projectName), locale)}
                           </p>
                           <p className="text-xs text-muted-foreground">
                             Invited by {inv.createdBy} as <RoleLabel name={inv.role.name} />
-                            {inv.expiresAt ? ` · expires ${new Date(inv.expiresAt).toLocaleDateString()}` : ""}
+                            {inv.expiresAt ? ` · expires ${formatDate(inv.expiresAt, locale, {})}` : ""}
                           </p>
                         </div>
                         <Link

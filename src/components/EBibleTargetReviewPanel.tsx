@@ -11,7 +11,8 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
 import type { EBibleMatchResult, EBibleMatchedCell } from "@/lib/import"
-import { useT } from "@/lib/i18n/I18nProvider"
+import { useI18n } from "@/lib/i18n/I18nProvider"
+import { formatCount } from "@/lib/i18n/format"
 
 interface Props {
   translation: { title: string; id: string }
@@ -22,7 +23,7 @@ interface Props {
 }
 
 export function EBibleTargetReviewPanel({ translation, matchResult, onApply, onCancel }: Props) {
-  const t = useT()
+  const { t, locale } = useI18n()
   const { matched, orphans, unmatchedSourceCount } = matchResult
 
   // Default: all non-conflict cells selected; conflict cells UNselected (keep).
@@ -58,12 +59,12 @@ export function EBibleTargetReviewPanel({ translation, matchResult, onApply, onC
       <div className="space-y-1">
         <p className="text-sm font-medium">{translation.title} <span className="text-xs font-normal text-muted-foreground">({translation.id})</span></p>
         <p className="text-xs text-muted-foreground">
-          {t("editor.ebible.matched", { count: matched.length.toLocaleString() })}
+          {t("editor.ebible.matched", { count: formatCount(matched.length, locale) })}
           {conflictCount > 0 && (
-            <> · <span className="text-amber-600 dark:text-amber-400">{t("editor.ebible.conflicts", { count: conflictCount.toLocaleString() })}</span></>
+            <> · <span className="text-amber-600 dark:text-amber-400">{t("editor.ebible.conflicts", { count: formatCount(conflictCount, locale) })}</span></>
           )}
           {orphans.length > 0 && (
-            <> · {t("editor.ebible.orphans", { count: orphans.length.toLocaleString() })}</>
+            <> · {t("editor.ebible.orphans", { count: formatCount(orphans.length, locale) })}</>
           )}
         </p>
       </div>
@@ -129,7 +130,7 @@ export function EBibleTargetReviewPanel({ translation, matchResult, onApply, onC
       {/* Unmatched source cells */}
       {unmatchedSourceCount > 0 && (
         <p className="text-xs text-muted-foreground">
-          {t("editor.ebible.unmatched", { count: unmatchedSourceCount.toLocaleString() })}
+          {t("editor.ebible.unmatched", { count: formatCount(unmatchedSourceCount, locale) })}
         </p>
       )}
 
@@ -141,7 +142,7 @@ export function EBibleTargetReviewPanel({ translation, matchResult, onApply, onC
           disabled={selected.size === 0}
           onClick={() => onApply(selected)}
         >
-          {t("editor.ebible.apply", { count: selected.size.toLocaleString() })}
+          {t("editor.ebible.apply", { count: formatCount(selected.size, locale) })}
         </Button>
       </div>
     </div>
@@ -159,7 +160,7 @@ interface MatchedCellRowProps {
 }
 
 function MatchedCellRow({ cell, checked, onToggle }: MatchedCellRowProps) {
-  const t = useT()
+  const { t } = useI18n()
   return (
     <li
       className={cn(

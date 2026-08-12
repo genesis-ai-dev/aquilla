@@ -21,6 +21,8 @@ import { AppTooltip } from "@/components/ui/tooltip"
 import { useProjectSettings } from "@/hooks/useProjectSettings"
 import { readCursor } from "@/lib/dcs/cursor"
 import type { DcsCursor } from "@/lib/dcs/types"
+import { useI18n } from "@/lib/i18n/I18nProvider"
+import { formatDate } from "@/lib/i18n/format"
 
 export interface DcsSyncBadgeProps {
   /** The pinned upstream cursor, or null ⇒ render nothing. */
@@ -31,11 +33,11 @@ export interface DcsSyncBadgeProps {
 
 /** Full-pin tooltip: what's synced, from where, at which release, and where
  *  to manage it. */
-function pinTooltip(cursor: DcsCursor): string {
+function pinTooltip(cursor: DcsCursor, locale: string): string {
   const imported = new Date(cursor.importedAt)
   const importedLabel = Number.isNaN(imported.getTime())
     ? cursor.importedAt
-    : imported.toLocaleDateString()
+    : formatDate(imported, locale, {})
   return (
     `Source synced from ${cursor.owner}/${cursor.repo} (${cursor.subject}) ` +
     `@ ${cursor.ref} · imported ${importedLabel}. Source cells are managed by ` +
@@ -44,9 +46,10 @@ function pinTooltip(cursor: DcsCursor): string {
 }
 
 export function DcsSyncBadge({ cursor, onClick }: DcsSyncBadgeProps) {
+  const { locale } = useI18n()
   if (!cursor) return null
   return (
-    <AppTooltip content={pinTooltip(cursor)} side="bottom">
+    <AppTooltip content={pinTooltip(cursor, locale)} side="bottom">
       <Badge
         variant="outline"
         data-testid="dcs-sync-badge"

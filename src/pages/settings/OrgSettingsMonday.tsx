@@ -24,6 +24,8 @@ import {
 import { Spinner } from "@/components/ui/spinner"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
+import { useI18n } from "@/lib/i18n/I18nProvider"
+import { formatDate } from "@/lib/i18n/format"
 import { ROLE } from "@/lib/frontier/roles"
 import {
   deleteMondayConnection,
@@ -35,6 +37,7 @@ import { ORG_SETTINGS_SECTION_DESCRIPTIONS, ORG_SETTINGS_SECTION_TITLES } from "
 import { OrgSettingsDetailPage } from "./OrgSettingsDetailPage"
 
 export function OrgSettingsMonday() {
+  const { locale } = useI18n()
   const { activeOrg, activeOrgId } = useActiveOrg()
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
@@ -246,11 +249,7 @@ export function OrgSettingsMonday() {
                 {connection?.createdAt && (
                   <p className="text-xs text-muted-foreground">
                     Connected{" "}
-                    {new Date(connection.createdAt).toLocaleDateString(undefined, {
-                      month: "short",
-                      day: "numeric",
-                      year: "numeric",
-                    })}
+                    {formatDate(connection.createdAt, locale, { month: "short", day: "numeric", year: "numeric" })}
                   </p>
                 )}
               </div>

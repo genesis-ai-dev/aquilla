@@ -8,7 +8,8 @@ import type { CellHistoryEntry } from "@/lib/parsers/types"
 import { cn } from "@/lib/utils"
 import { useCellEditHistory } from "@/hooks/useCellEditHistory"
 import { FootnotedTextValue } from "./footnotes/FootnoteInline"
-import { useT } from "@/lib/i18n/I18nProvider"
+import { useT, useI18n } from "@/lib/i18n/I18nProvider"
+import { formatDateTime } from "@/lib/i18n/format"
 import { RichMessage } from "@/lib/i18n/RichMessage"
 
 interface HistoryDrawerProps {
@@ -121,7 +122,7 @@ function commonSuffixLength(a: string, b: string, prefixLen: number): number {
 }
 
 export function HistoryDrawer({ cell, onClose, projectId, fileId, getTokenForFile, isSynced = false, onPromote }: HistoryDrawerProps) {
-  const t = useT()
+  const { t, locale } = useI18n()
   const enabled = !!projectId && !!fileId && !!getTokenForFile
   // Target side is the typical edit surface in this translation app, so we
   // use `targetEventId` as the AD-2 chain head when computing stale-branch
@@ -172,7 +173,7 @@ export function HistoryDrawer({ cell, onClose, projectId, fileId, getTokenForFil
 
   function formatTimestamp(iso: string): string {
     try {
-      return new Date(iso).toLocaleString()
+      return formatDateTime(iso, locale)
     } catch {
       return iso
     }

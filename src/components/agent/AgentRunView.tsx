@@ -9,6 +9,8 @@
  */
 
 import { useState, type ReactNode } from "react"
+import { useI18n } from "@/lib/i18n/I18nProvider"
+import { formatNumber } from "@/lib/i18n/format"
 import {
   AlertTriangle,
   Book,
@@ -115,6 +117,7 @@ export function AgentRunView({
   renderToolCard,
   onReviewMemory,
 }: AgentRunViewProps) {
+  const { locale } = useI18n()
   return (
     <div className="flex flex-col gap-2">
       {/* User prompt — right-aligned primary bubble. */}
@@ -203,9 +206,9 @@ export function AgentRunView({
 
       {run.usage && (
         <div className="text-[10px] text-muted-foreground">
-          {run.usage.promptTokens.toLocaleString()} prompt + {run.usage.completionTokens.toLocaleString()} completion tokens
+          {formatNumber(run.usage.promptTokens, locale)} prompt + {formatNumber(run.usage.completionTokens, locale)} completion tokens
           {" · "}
-          {formatCredits(run.usage.costCredits)}
+          {formatCredits(run.usage.costCredits, locale)}
         </div>
       )}
 

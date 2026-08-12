@@ -15,6 +15,8 @@
 
 import React, { useMemo, useState } from "react"
 import { useParams, useNavigate } from "react-router-dom"
+import { useI18n } from "@/lib/i18n/I18nProvider"
+import { formatDate, formatNumber } from "@/lib/i18n/format"
 import { BookOpen, Users, AlertTriangle, Plus, Pencil, Trash2, Lock, Brain } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -313,6 +315,7 @@ function AuthoredEntriesSection({
   onUpdate,
   onDelete,
 }: AuthoredEntriesSectionProps) {
+  const { locale } = useI18n()
   const [adding, setAdding] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<LivingMemoryEntry | null>(null)
@@ -405,7 +408,7 @@ function AuthoredEntriesSection({
                   </div>
                 )}
                 <p className="text-[10px] text-muted-foreground/60 mt-1.5">
-                  {entry.author} · {new Date(entry.createdAt).toLocaleDateString()}
+                  {entry.author} · {formatDate(entry.createdAt, locale, {})}
                 </p>
               </CardContent>
             </Card>
@@ -447,6 +450,7 @@ function AuthoredEntriesSection({
 // body. No back-button chrome — the shell owns nav.
 
 export function LivingMemoryPage() {
+  const { locale } = useI18n()
   const { id: projectId } = useParams<{ id: string }>()
   const navigate = useNavigate()
 
@@ -555,7 +559,7 @@ export function LivingMemoryPage() {
           <Skeleton className="h-4 w-20 rounded-md" aria-label="Loading count" />
         ) : (
           <Badge variant="secondary" className="text-[10px] tabular-nums">
-            {cells.length.toLocaleString()} validated
+            {formatNumber(cells.length, locale)} validated
           </Badge>
         )}
         <div className="flex-1" />

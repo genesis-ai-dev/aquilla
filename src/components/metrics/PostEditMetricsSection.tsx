@@ -32,6 +32,8 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import type { PostEditMetrics, WeekBucket, UserBucket } from "@/lib/metrics/post-edit-metrics"
+import { useI18n } from "@/lib/i18n/I18nProvider"
+import { formatDate } from "@/lib/i18n/format"
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -55,10 +57,10 @@ function nedColor(ned: number): string {
   return "bg-red-500"
 }
 
-function formatWeek(weekStart: string): string {
+function formatWeek(weekStart: string, locale: string): string {
   // "2024-01-08" → "Jan 8"
   const d = new Date(weekStart + "T00:00:00Z")
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" })
+  return formatDate(d, locale, { month: "short", day: "numeric", timeZone: "UTC" })
 }
 
 function formatDuration(ms: number): string {
@@ -72,6 +74,7 @@ function formatDuration(ms: number): string {
 // ── Bar chart (weekly trend) ──────────────────────────────────────────────────
 
 function WeeklyChart({ weeks }: { weeks: WeekBucket[] }) {
+  const { locale } = useI18n()
   if (weeks.length === 0) return null
   const maxCount = Math.max(...weeks.map((w) => w.count), 1)
 
@@ -79,7 +82,7 @@ function WeeklyChart({ weeks }: { weeks: WeekBucket[] }) {
     <div className="mt-3 space-y-1">
       {weeks.map((w) => (
         <div key={w.weekStart} className="flex items-center gap-2 text-xs">
-          <span className="w-14 shrink-0 text-muted-foreground">{formatWeek(w.weekStart)}</span>
+          <span className="w-14 shrink-0 text-muted-foreground">{formatWeek(w.weekStart, locale)}</span>
           {/* NED bar */}
           <div className="relative h-5 flex-1 rounded bg-muted/40">
             <div

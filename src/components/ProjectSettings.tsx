@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType } from "react"
 import { useParams, useNavigate, useSearchParams } from "react-router-dom"
+import { useI18n } from "@/lib/i18n/I18nProvider"
+import { formatDate, formatList } from "@/lib/i18n/format"
 import { projectSettingsPath } from "@/lib/navigation/org-paths"
 import {
   Check, CheckCircle, XCircle, ChevronDown, Sparkles, Save, HardDriveDownload,
@@ -223,6 +225,7 @@ function decayEqual(a: DecaySettings | undefined, b: DecaySettings | undefined):
 }
 
 export function ProjectSettings() {
+  const { locale } = useI18n()
   const { id, section: sectionParam } = useParams<{ id: string; section?: string }>()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
@@ -804,8 +807,8 @@ export function ProjectSettings() {
         changedFieldLabels.length === 0
           ? "No changes to save."
           : changedFieldLabels.length <= 3
-            ? `Saved: ${changedFieldLabels.join(", ")}.`
-            : `Saved ${changedFieldLabels.length} changes: ${changedFieldLabels.slice(0, 3).join(", ")}, +${changedFieldLabels.length - 3} more.`
+            ? `Saved: ${formatList(changedFieldLabels, locale)}.`
+            : `Saved ${changedFieldLabels.length} changes: ${formatList(changedFieldLabels.slice(0, 3), locale)}, +${changedFieldLabels.length - 3} more.`
       setSavedMessage(message)
       if (savedMessageTimerRef.current != null) window.clearTimeout(savedMessageTimerRef.current)
       savedMessageTimerRef.current = window.setTimeout(() => setSavedMessage(null), 4000)
@@ -1280,7 +1283,7 @@ export function ProjectSettings() {
               {sharedUpdatedBy && sharedUpdatedAt && sharedVersion != null && sharedVersion > 0 && (
                 <p className="text-xs text-muted-foreground">
                   Last edited by {sharedUpdatedBy.username} ·{" "}
-                  {new Date(sharedUpdatedAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
+                  {formatDate(sharedUpdatedAt, locale, { month: "short", day: "numeric", year: "numeric" })}
                 </p>
               )}
               <div className="grid grid-cols-2 gap-4">

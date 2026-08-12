@@ -22,7 +22,8 @@ import { SegmentTabs } from "@/components/ui/tabs"
 import { cn } from "@/lib/utils"
 import type { WorkspaceSearchResult, SearchOptions } from "@/lib/search/workspace-index"
 import { computeReplaceDiffs, type CellReplaceDiff } from "@/lib/search/replace-action"
-import { useT } from "@/lib/i18n/I18nProvider"
+import { useI18n } from "@/lib/i18n/I18nProvider"
+import { formatCount } from "@/lib/i18n/format"
 import type { TFunction } from "@/lib/i18n/I18nProvider"
 
 export type ParallelPanelMode = "search" | "passages" | "replace"
@@ -413,7 +414,7 @@ function ReplaceSection({ query, results, isReadOnly, onAfterReplace, t }: Repla
 const DEBOUNCE_MS = 250
 
 export function ParallelPassagesPanel(props: ParallelPassagesPanelProps) {
-  const t = useT()
+  const { t, locale } = useI18n()
   const {
     open,
     onOpenChange,
@@ -697,7 +698,7 @@ export function ParallelPassagesPanel(props: ParallelPassagesPanelProps) {
         {!loading && results.length > 0 && (
           <div className="flex shrink-0 items-center justify-between border-t border-border bg-muted/20 px-4 py-2.5">
             <span className="text-xs tabular-nums text-muted-foreground">
-              {t("search.resultCount", { count: results.length.toLocaleString() })}
+              {t("search.resultCount", { count: formatCount(results.length, locale) })}
             </span>
             <span className="max-w-[60%] truncate text-right text-xs text-muted-foreground">
               {mode === "passages" ? t("search.dialog.titlePassages") : scopeLabel}

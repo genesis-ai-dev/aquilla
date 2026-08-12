@@ -19,6 +19,8 @@ import { Button } from "@/components/ui/button"
 import type { ImportResult } from "@/lib/import"
 import { formatBytesProgress } from "@/lib/format-bytes"
 import { usfmDisplayText } from "@/lib/parsers/usfm-display"
+import { useI18n } from "@/lib/i18n/I18nProvider"
+import { formatNumber } from "@/lib/i18n/format"
 
 /**
  * Live upload progress surfaced from the importer. `count`/`total` are cells;
@@ -61,6 +63,7 @@ export interface PreviewPanelProps {
 const PREVIEW_LIMIT = 20
 
 export function PreviewPanel({ results, onConfirm, onCancel, uploadPhase, uploadProgress, error }: PreviewPanelProps) {
+  const { locale } = useI18n()
   const [confirming, setConfirming] = useState(false)
 
   const totalCells = results.reduce((n, r) => n + r.strings.length, 0)
@@ -94,12 +97,12 @@ export function PreviewPanel({ results, onConfirm, onCancel, uploadPhase, upload
               />
             </div>
             <p className="text-xs text-muted-foreground">
-              {uploadProgress.count.toLocaleString()} / {uploadProgress.total.toLocaleString()} cells
+              {formatNumber(uploadProgress.count, locale)} / {formatNumber(uploadProgress.total, locale)} cells
               {uploadProgress.bytesTotal ? (
                 <>
                   {" · "}
                   <span data-testid="preview-upload-bytes">
-                    {formatBytesProgress(uploadProgress.bytesReceived, uploadProgress.bytesTotal)}
+                    {formatBytesProgress(uploadProgress.bytesReceived, uploadProgress.bytesTotal, locale)}
                   </span>
                 </>
               ) : null}
@@ -116,7 +119,7 @@ export function PreviewPanel({ results, onConfirm, onCancel, uploadPhase, upload
     <div className="flex flex-col gap-4 py-2">
       <div>
         <p className="text-sm font-medium">
-          Preview — {totalCells.toLocaleString()} cell{totalCells !== 1 ? "s" : ""} across {results.length} file{results.length !== 1 ? "s" : ""}
+          Preview — {formatNumber(totalCells, locale)} cell{totalCells !== 1 ? "s" : ""} across {results.length} file{results.length !== 1 ? "s" : ""}
         </p>
         <p className="text-xs text-muted-foreground">
           Review what will be imported, then click Confirm to upload.
@@ -139,7 +142,7 @@ export function PreviewPanel({ results, onConfirm, onCancel, uploadPhase, upload
               <p className="mb-2 text-xs font-semibold text-foreground/80">
                 {r.name}
                 <span className="ml-2 font-normal normal-case text-muted-foreground">
-                  {r.strings.length.toLocaleString()} cells
+                  {formatNumber(r.strings.length, locale)} cells
                 </span>
               </p>
               {r.importClassification ? (
@@ -198,7 +201,7 @@ export function PreviewPanel({ results, onConfirm, onCancel, uploadPhase, upload
                 ))}
                 {r.strings.length > PREVIEW_LIMIT && (
                   <li className="text-xs text-muted-foreground italic">
-                    … and {(r.strings.length - PREVIEW_LIMIT).toLocaleString()} more
+                    … and {formatNumber(r.strings.length - PREVIEW_LIMIT, locale)} more
                   </li>
                 )}
               </ul>

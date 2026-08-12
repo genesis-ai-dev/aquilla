@@ -556,6 +556,7 @@ export function OrgHome() {
     orgs,
     accessibleProjects,
     accessibleProjectsLoading,
+    accessibleProjectsError,
     isLoading: orgLoading,
     error: orgsError,
     setActiveOrg,
@@ -755,7 +756,7 @@ export function OrgHome() {
   // navigated nowhere. Send the caller to the surface that does list what they
   // can reach instead of stranding them on a page with nothing clickable.
   if (isAllOrgsRoute) {
-    const landing = resolveAllOrgsLanding({ orgs, accessibleProjects, orgsError })
+    const landing = resolveAllOrgsLanding({ orgs, accessibleProjects, orgsError, accessibleProjectsError })
     if (landing.kind === "org") {
       return <Navigate to={orgHomePath(landing.orgId)} replace />
     }
@@ -780,7 +781,7 @@ export function OrgHome() {
                 data-testid="org-load-error"
                 icon={AlertTriangle}
                 title="Couldn’t load your organizations"
-                description={orgsError ?? "Something went wrong loading your workspace."}
+                description={orgsError ?? accessibleProjectsError ?? "Something went wrong loading your workspace."}
                 action={
                   <Button onClick={() => { void retryOrgLoad() }}>Retry</Button>
                 }
@@ -1159,13 +1160,39 @@ export function OrgHome() {
                         data-testid="projects-scroll"
                         className="min-h-0 overscroll-contain lg:overflow-y-auto"
                       >
-                        {projects.length === 0 ? (
+                        {/* AQU-883: the project directory backs shared/guest
+                            projects and the guest orgs derived from them. Its
+                            failure used to fold into an empty list, leaving
+                            this panel indistinguishable from "nothing is
+                            shared with you". Announce it above whatever member
+                            projects the portfolio did load — hiding those would
+                            overstate the failure — and offer an in-place retry. */}
+                        {accessibleProjectsError ? (
                           <EmptyState
+                            data-testid="project-directory-error"
                             variant="inline"
                             className="py-10"
-                            icon={FolderPlus}
-                            title="No projects yet."
+                            icon={AlertTriangle}
+                            title="Couldn’t load your project directory"
+                            description="Projects shared with you and guest organizations may be missing from this view."
+                            action={
+                              <Button size="sm" onClick={() => { void refreshAccessibleProjects() }}>
+                                Retry
+                              </Button>
+                            }
                           />
+                        ) : null}
+                        {projects.length === 0 ? (
+                          // Suppress the plain empty state while the directory
+                          // error above is explaining the blank panel.
+                          accessibleProjectsError ? null : (
+                            <EmptyState
+                              variant="inline"
+                              className="py-10"
+                              icon={FolderPlus}
+                              title="No projects yet."
+                            />
+                          )
                         ) : visible.length === 0 ? (
                           <EmptyState
                             variant="inline"

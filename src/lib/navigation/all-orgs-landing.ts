@@ -27,13 +27,16 @@ export type AllOrgsLanding =
   | { kind: "shared" }
   /** No access anywhere yet — the genuine create-your-organization empty state. */
   | { kind: "empty" }
-  /** The org list failed to load, so "no orgs" is unknown, not zero. */
+  /** A load failed in a way that makes the caller's access unknown — the org
+   *  list itself, or (at zero memberships) the project directory that decides
+   *  shared-vs-empty. "No access" is unknown here, not zero. */
   | { kind: "error" }
 
 export function resolveAllOrgsLanding(input: {
   orgs: Pick<OrgSummary, "id">[]
   accessibleProjects: Pick<CloudProjectSummary, "id">[]
   orgsError: string | null
+  accessibleProjectsError: string | null
 }): AllOrgsLanding {
   // A failed org fetch also leaves `orgs` empty, which is indistinguishable
   // from a real zero — never let a fetch failure masquerade as "you have no
@@ -41,6 +44,11 @@ export function resolveAllOrgsLanding(input: {
   if (input.orgsError) return { kind: "error" }
   if (input.orgs.length > 1) return { kind: "portfolio" }
   if (input.orgs.length === 1) return { kind: "org", orgId: input.orgs[0].id }
+  // AQU-883: at zero memberships the shared-vs-empty call is made entirely
+  // from the project directory, and its fetch failing leaves the same empty
+  // list as "nothing is shared with you" — don't bounce to the
+  // create-your-organization dead end on a failure.
+  if (input.accessibleProjectsError) return { kind: "error" }
   if (input.accessibleProjects.length > 0) return { kind: "shared" }
   return { kind: "empty" }
 }

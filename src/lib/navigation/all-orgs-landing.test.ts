@@ -15,6 +15,7 @@ describe("resolveAllOrgsLanding (AQU-864)", () => {
         orgs: [org(1), org(2)],
         accessibleProjects: [project("p1")],
         orgsError: null,
+        accessibleProjectsError: null,
       }),
     ).toEqual({ kind: "portfolio" })
   })
@@ -25,6 +26,7 @@ describe("resolveAllOrgsLanding (AQU-864)", () => {
         orgs: [org(7)],
         accessibleProjects: [project("p1")],
         orgsError: null,
+        accessibleProjectsError: null,
       }),
     ).toEqual({ kind: "org", orgId: 7 })
   })
@@ -37,13 +39,19 @@ describe("resolveAllOrgsLanding (AQU-864)", () => {
         orgs: [],
         accessibleProjects: [project("p1"), project("p2")],
         orgsError: null,
+        accessibleProjectsError: null,
       }),
     ).toEqual({ kind: "shared" })
   })
 
   it("keeps the create-your-organization empty state for a caller with no access at all", () => {
     expect(
-      resolveAllOrgsLanding({ orgs: [], accessibleProjects: [], orgsError: null }),
+      resolveAllOrgsLanding({
+        orgs: [],
+        accessibleProjects: [],
+        orgsError: null,
+        accessibleProjectsError: null,
+      }),
     ).toEqual({ kind: "empty" })
   })
 
@@ -55,6 +63,7 @@ describe("resolveAllOrgsLanding (AQU-864)", () => {
         orgs: [],
         accessibleProjects: [],
         orgsError: "Failed to fetch",
+        accessibleProjectsError: null,
       }),
     ).toEqual({ kind: "error" })
   })
@@ -65,7 +74,35 @@ describe("resolveAllOrgsLanding (AQU-864)", () => {
         orgs: [],
         accessibleProjects: [project("p1")],
         orgsError: "500 Internal Server Error",
+        accessibleProjectsError: null,
       }),
     ).toEqual({ kind: "error" })
+  })
+
+  // AQU-883: at zero memberships the shared-vs-empty decision is made entirely
+  // from the project directory, so its failure makes the caller's access
+  // unknown — never the create-your-organization empty state.
+  it("reports an error rather than an empty state when the project directory failed at zero memberships", () => {
+    expect(
+      resolveAllOrgsLanding({
+        orgs: [],
+        accessibleProjects: [],
+        orgsError: null,
+        accessibleProjectsError: "Failed to fetch",
+      }),
+    ).toEqual({ kind: "error" })
+  })
+
+  it("still routes a member to their org when only the project directory failed", () => {
+    // Membership decides the landing on its own; the org home surfaces the
+    // directory failure in its projects panel (AQU-883) with its own retry.
+    expect(
+      resolveAllOrgsLanding({
+        orgs: [org(7)],
+        accessibleProjects: [],
+        orgsError: null,
+        accessibleProjectsError: "Failed to fetch",
+      }),
+    ).toEqual({ kind: "org", orgId: 7 })
   })
 })

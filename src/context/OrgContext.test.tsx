@@ -40,7 +40,11 @@ vi.mock("@/lib/sync/cloud-projects", () => ({
 }))
 
 function Probe() {
-  const { orgs, activeOrg, activeGuestOrg, isAllOrgs, guestOrgs, setActiveOrg, setAllOrgs, error, isLoading, retryOrgLoad } = useActiveOrg()
+  const {
+    orgs, activeOrg, activeGuestOrg, isAllOrgs, guestOrgs, setActiveOrg, setAllOrgs,
+    error, isLoading, retryOrgLoad,
+    accessibleProjectsError, refreshAccessibleProjects,
+  } = useActiveOrg()
   return (
     <div>
       <span data-testid="count">{orgs.length}</span>
@@ -52,9 +56,12 @@ function Probe() {
       {/* AQU-882: a failed load must be distinguishable from an empty list. */}
       <span data-testid="error">{error ?? "none"}</span>
       <span data-testid="loading">{isLoading ? "yes" : "no"}</span>
+      {/* AQU-883: the project-directory failure is tracked separately. */}
+      <span data-testid="projects-error">{accessibleProjectsError ?? "none"}</span>
       <button onClick={() => setActiveOrg(2)}>switch</button>
       <button onClick={() => setAllOrgs()}>all</button>
       <button onClick={() => { void retryOrgLoad() }}>retry</button>
+      <button onClick={() => { void refreshAccessibleProjects() }}>retry-projects</button>
     </div>
   )
 }
@@ -310,5 +317,56 @@ describe("OrgProvider", () => {
       expect(screen.getByTestId("error").textContent).not.toBe("none")
       unsubscribe()
     })
+  })
+})
+
+// AQU-883: the project directory is the ONLY source of guest orgs and shared
+// projects. Its fetch used to swallow every failure into an empty list, so a
+// blocked/401/5xx directory read was indistinguishable from "nothing is shared
+// with you" — with no error recorded anywhere for a consumer to surface.
+describe("OrgProvider — project-directory load failure (AQU-883)", () => {
+  it("records a distinct error instead of reporting an empty directory", async () => {
+    listMyOrgs.mockResolvedValue([{ id: 1, name: "A", role: { level: 700, name: "owner" } }])
+    fetchAccessibleProjects.mockRejectedValue(new Error("Failed to fetch"))
+
+    render(<MemoryRouter><OrgProvider><Probe /></OrgProvider></MemoryRouter>)
+
+    // Orgs still load — the two fetches fail independently.
+    await waitFor(() => expect(screen.getByTestId("count").textContent).toBe("1"))
+    await waitFor(() =>
+      expect(screen.getByTestId("projects-error").textContent).toBe("Failed to fetch"),
+    )
+    expect(screen.getByTestId("guest-count").textContent).toBe("0")
+  })
+
+  it("clears the error and restores guest orgs on a successful retry", async () => {
+    listMyOrgs.mockResolvedValue([{ id: 1, name: "A", role: { level: 700, name: "owner" } }])
+    fetchAccessibleProjects.mockRejectedValueOnce(new Error("Failed to fetch"))
+
+    render(<MemoryRouter><OrgProvider><Probe /></OrgProvider></MemoryRouter>)
+    await waitFor(() =>
+      expect(screen.getByTestId("projects-error").textContent).toBe("Failed to fetch"),
+    )
+
+    // Backend recovers; retry re-issues the directory fetch in place.
+    fetchAccessibleProjects.mockResolvedValue([
+      { id: "p9", name: "Shared", orgId: 42, orgName: "Alice Co", role: { level: 100, name: "viewer", source: "project" } },
+    ])
+    await act(async () => { screen.getByText("retry-projects").click() })
+
+    await waitFor(() => expect(screen.getByTestId("projects-error").textContent).toBe("none"))
+    await waitFor(() => expect(screen.getByTestId("guest-count").textContent).toBe("1"))
+    expect(screen.getByTestId("guest-names").textContent).toBe("Alice Co")
+  })
+
+  it("leaves the error null when the directory genuinely comes back empty", async () => {
+    listMyOrgs.mockResolvedValue([{ id: 1, name: "A", role: { level: 700, name: "owner" } }])
+    fetchAccessibleProjects.mockResolvedValue([])
+
+    render(<MemoryRouter><OrgProvider><Probe /></OrgProvider></MemoryRouter>)
+
+    await waitFor(() => expect(screen.getByTestId("count").textContent).toBe("1"))
+    expect(screen.getByTestId("projects-error").textContent).toBe("none")
+    expect(screen.getByTestId("guest-count").textContent).toBe("0")
   })
 })

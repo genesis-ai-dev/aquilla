@@ -102,6 +102,10 @@ declare global {
       ENVIRONMENT?: string
       /** Base URL of the identity worker in the same deployment environment. */
       AUTH_WORKER_URL?: string
+      /** Exact Worker namespace selected by the deployment profile. */
+      DEPLOYMENT_WORKER_NAME?: string
+      /** Cloudflare version metadata used to reject a version from another namespace. */
+      CF_VERSION_METADATA?: { id: string; tag: string; timestamp: string }
       /**
        * Dev escape hatch. "true" disables JWT verification for ProjectSync
        * WS connections. Set to "false" (or omit) in production.

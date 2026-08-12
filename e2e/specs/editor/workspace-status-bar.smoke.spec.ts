@@ -49,11 +49,11 @@ test("file hydration shows explicit progress and withholds unresolved zero stati
     await alice.goto(`/project/${seeded.projectId}/editor/file/${seeded.fileId}`)
 
     const loading = alice.getByRole("status", {
-      name: "Syncing file from the cloud",
+      name: "Loading file from the cloud",
     })
     await expect(loading).toBeVisible()
     await expect(loading.locator("[data-slot='spinner']")).toBeVisible()
-    await expect(alice.getByText("Syncing file from the cloud…")).toBeVisible()
+    await expect(alice.getByText("Loading file from the cloud…")).toBeVisible()
     await expect(alice.getByText(/^0 cells ·/)).toHaveCount(0)
   } finally {
     releaseCells()

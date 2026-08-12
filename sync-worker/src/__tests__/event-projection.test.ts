@@ -99,8 +99,7 @@ describe('buildEventProjectionStmts — source.cell.create', () => {
       stmts,
     )
 
-    // FTS maintenance adds 2 statements (delete + insert) around the cells
-    // DML, and the files-counter recompute adds 1 more.
+    // Cell UPSERT plus the file-counter recompute share the projection batch.
     expect(stmts).toHaveLength(2)
     const cellsStmts = recorded.filter(r => !r.sql.includes('cells_fts') && !r.sql.includes('WHERE false'))
     const { sql, args } = cellsStmts[0]
@@ -156,9 +155,9 @@ describe('buildEventProjectionStmts — target.cell.commit', () => {
       }),
       stmts,
     )
-    // FTS maintenance adds 2 statements (delete + insert) around the cells
-    // DML, and the files-counter recompute adds 1 more.
-    expect(stmts).toHaveLength(2)
+    // Cell UPSERT, durable contextual-draft reconciliation, then the file
+    // counter recompute all share the caller's atomic projection batch.
+    expect(stmts).toHaveLength(3)
     const cellsStmts = recorded.filter(r => !r.sql.includes('cells_fts') && !r.sql.includes('WHERE false'))
     const { sql, args } = cellsStmts[0]
     // The client never emits target.cell.create, so the commit is an UPSERT:
@@ -177,6 +176,10 @@ describe('buildEventProjectionStmts — target.cell.commit', () => {
     expect(args[4]).toBe('new text')
     expect(args[6]).toBe('evt-test-id')
     expect(args[7]).toBe('src-event-99')
+    const reconciliation = recorded.find(r => r.sql.includes('UPDATE contextual_drafts AS draft'))
+    expect(reconciliation?.sql).toContain("draft.status = 'proposed'")
+    expect(reconciliation?.sql).toContain('projected.event_id = ?')
+    expect(reconciliation?.sql).toContain('INSERT INTO contextual_run_events')
   })
 
   it('writes NULL source_event_id when omitted', () => {
@@ -822,7 +825,11 @@ describe('isChainMutatingKind', () => {
     'project.link-source': false,
     'cast.assign': false,
     'cell.retime': false,
+    'cell.audio.rename': false,
+    'cell.audio.measure': false,
+    'cell.lane.retime': false,
     'file.video.set': false,
+    'file.timing.set': false,
     // AQU-476: mirror events replicate an ordering the upstream already
     // arbitrated — see CHAIN_MUTATING_KINDS's doc comment.
     'source.cell.mirror': false,

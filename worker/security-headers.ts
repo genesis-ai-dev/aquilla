@@ -1,82 +1,131 @@
-// Baseline HTTP security headers for the aquilla-web Worker.
+// Response security headers for aquilla-web (the SPA + marketing Worker).
 //
-// Scope caveat, stated up front because it bounds what these buy us:
-// wrangler.toml sets `run_worker_first = ["/"]`, so Cloudflare's asset router
-// serves any request that matches a built file WITHOUT invoking this Worker.
-// These headers therefore land on the HTML surface — `/`, the STATIC_PAGES
-// marketing routes, and every SPA route that falls through to
-// `not_found_handling = "single-page-application"` (/app, /project/…,
-// /join/:token) — but not on hashed asset responses under /assets/. That is
-// the surface where framing, sniffing, and referrer leakage actually matter,
-// and HSTS pins the host from any one of these responses.
+// Context: the Tauri desktop shell has carried a real CSP since June
+// (src-tauri/tauri.conf.json → app.security.csp), but the browser build shipped
+// with no CSP and no transport/framing hardening at all. That leaves the web
+// app — the surface that actually holds 30-day session JWTs in IndexedDB and
+// user-supplied provider API keys in localStorage — without the standard second
+// layer behind input sanitisation. See docs/OPSEC-REVIEW-2026-08-10.md (OPS-1).
 //
-// Deliberately NOT included: a full Content-Security-Policy. The SPA loads
-// Vite-hashed modules, inline theme/brand bootstrap, PostHog, and remote model
-// hosts (R2 / Hugging Face), so a script-src policy needs a nonce pipeline
-// through the prerender step to avoid breaking the app on deploy. Only the
-// framing directive is carried here; the rest is tracked in docs/OPSEC.md.
+// Two-tier rollout, deliberately:
+//
+//   ENFORCED  — the directives that cannot break a working page: no plugins,
+//               no <base> hijack, no third-party framing, plus the transport
+//               and referrer headers. Shipping these is pure gain.
+//   REPORT-ONLY — the full policy (script-src/style-src/connect-src/…). The
+//               SPA talks to a build-time-configurable set of hosts (identity
+//               and sync Workers, PostHog, Hugging Face / R2 model hosts,
+//               door43, OpenRouter via the proxy) and the marketing pages are
+//               prerendered, so enforcing a full policy blind would risk a
+//               production outage for a defence-in-depth control. Report-only
+//               surfaces every violation in devtools first; promote directives
+//               into ENFORCED_CSP as each one comes back clean.
+//
+// Coverage note — READ THIS BEFORE ASSUMING A HEADER SET HERE IS LIVE.
+//
+// This Worker runs for `/` and nothing else. `run_worker_first = ["/"]` lists
+// exactly one path, and `not_found_handling = "single-page-application"` means
+// the asset router answers every unmatched path with index.html ITSELF — the
+// request never reaches the Worker, so there is no ASSETS.fetch fallback to
+// ride headers in on. Deep links (`/app`, `/project/*`), the prerendered
+// marketing pages and hashed build assets are all served without this module
+// executing.
+//
+// Verified against the live deployment rather than reasoned about: `/` returns
+// the Worker-only `X-Robots-Tag: noindex` on dev.aquilla.app, while a
+// never-before-requested path returns 200 HTML with no such header. An earlier
+// version of this comment claimed deep links reached the Worker; they do not,
+// and a header file that only *looks* deployed is worse than a known gap.
+//
+// public/_headers is therefore not an optimisation, it is the majority of the
+// coverage. security-headers.test.ts asserts the two declare identical values,
+// so tightening one without the other fails the build. (Closes OPS-7 of
+// docs/OPSEC-REVIEW-2026-08-10.md.)
 
-/** Hosts that must not get HSTS: no TLS, and pinning them breaks local dev. */
-function isLocalHost(hostname: string): boolean {
+/** Directives safe to enforce today: none of them can break a page that isn't
+ *  already doing something we don't want (plugin embeds, <base> rewriting,
+ *  being framed by a third party, cross-origin form posts). */
+export const ENFORCED_CSP = [
+  "object-src 'none'",
+  "base-uri 'self'",
+  "frame-ancestors 'self'",
+  "form-action 'self'",
+].join("; ")
+
+/** The policy we intend to enforce. Mirrors the Tauri shell's CSP so the two
+ *  shells converge, with the web-only additions (Google Fonts stylesheet,
+ *  `'wasm-unsafe-eval'` for the onnxruntime-web / sherpa-onnx WASM runtimes,
+ *  blob: workers for the audio pipeline). Report-only until the console is
+ *  clean on both the SPA and the prerendered marketing pages. */
+export const REPORT_ONLY_CSP = [
+  "default-src 'self'",
+  "script-src 'self' 'wasm-unsafe-eval'",
+  "worker-src 'self' blob:",
+  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+  "font-src 'self' data: https://fonts.gstatic.com",
+  "img-src 'self' data: blob: https:",
+  "media-src 'self' data: blob: https:",
+  // Deliberately host-agnostic for now: the API base, sync host, PostHog host
+  // and model hosts are all injected at build time (VITE_*), so pinning them
+  // here would silently break a rebranded or staging build. Narrowing this to
+  // an explicit allowlist is the highest-value follow-up.
+  "connect-src 'self' https: wss:",
+  "frame-src https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com",
+  "object-src 'none'",
+  "base-uri 'self'",
+  "frame-ancestors 'self'",
+  "form-action 'self'",
+].join("; ")
+
+// Microphone stays enabled for this origin — cell audio recording and the MMS
+// dictation flow both call getUserMedia (src/components/AudioRecorder/*).
+// Everything else the app never asks for, so denying it costs nothing and
+// removes the capability from any injected script.
+export const PERMISSIONS_POLICY = [
+  "microphone=(self)",
+  "camera=()",
+  "geolocation=()",
+  "payment=()",
+  "usb=()",
+  "interest-cohort=()",
+].join(", ")
+
+// One year. Deliberately without `includeSubDomains`/`preload` in this pass:
+// both are effectively irreversible for the lifetime of the max-age and would
+// cover subdomains this repo does not own the TLS posture of. Tracked as a
+// follow-up in the OPSEC review once every *.aquilla.app host is confirmed
+// HTTPS-only.
+export const HSTS = "max-age=31536000"
+
+// Statuses that must not carry a body — `new Response(body, init)` throws for
+// these, so the clone has to pass null instead of res.body.
+const NULL_BODY_STATUSES = new Set([101, 204, 205, 304])
+
+/**
+ * Clone `res` with the security headers applied. Cloning is required because
+ * responses from the static-asset binding have immutable headers.
+ *
+ * `hostname` decides only whether HSTS is sent: it is meaningless (and
+ * actively annoying) on a plaintext localhost dev server.
+ */
+export function withSecurityHeaders(res: Response, hostname: string): Response {
+  const body = NULL_BODY_STATUSES.has(res.status) ? null : res.body
+  const out = new Response(body, res)
+  out.headers.set("Content-Security-Policy", ENFORCED_CSP)
+  out.headers.set("Content-Security-Policy-Report-Only", REPORT_ONLY_CSP)
+  out.headers.set("X-Content-Type-Options", "nosniff")
+  out.headers.set("X-Frame-Options", "SAMEORIGIN")
+  out.headers.set("Referrer-Policy", "strict-origin-when-cross-origin")
+  out.headers.set("Permissions-Policy", PERMISSIONS_POLICY)
+  if (!isLocalHost(hostname)) out.headers.set("Strict-Transport-Security", HSTS)
+  return out
+}
+
+export function isLocalHost(hostname: string): boolean {
   return (
     hostname === "localhost" ||
     hostname.endsWith(".localhost") ||
     hostname === "127.0.0.1" ||
     hostname === "[::1]"
   )
-}
-
-/**
- * Headers applied to every Worker-served response.
- *
- * - `X-Content-Type-Options: nosniff` — stops a user-uploaded or R2-proxied
- *   body being re-interpreted as HTML/JS by MIME sniffing.
- * - `Referrer-Policy: strict-origin-when-cross-origin` — invite links carry a
- *   bearer token in the path (/join/:token, /join-org/:token). This is the
- *   modern browser default, but stating it explicitly means an older or
- *   differently-configured browser can't send that path to a third-party host
- *   in a `Referer` header.
- * - `X-Frame-Options: DENY` + `frame-ancestors 'none'` — the app has
- *   irreversible actions behind single clicks (archive project, remove member,
- *   apply/undo agent changesets); clickjacking them is worth closing. Nothing
- *   in the product is designed to be embedded: the Monday.com integration is
- *   API + OAuth-popup based, not a board-view iframe, and the Tauri shell
- *   loads the built assets locally rather than through this Worker.
- * - `Permissions-Policy` — the app records audio (CellAudioRecordButton), so
- *   microphone stays self-allowed; camera/geolocation/payment are features it
- *   never uses, and denying them keeps an injected third-party frame from
- *   inheriting them. Unlisted features keep their browser defaults.
- */
-const BASE_HEADERS: Record<string, string> = {
-  "X-Content-Type-Options": "nosniff",
-  "Referrer-Policy": "strict-origin-when-cross-origin",
-  "X-Frame-Options": "DENY",
-  "Content-Security-Policy": "frame-ancestors 'none'",
-  "Permissions-Policy": "camera=(), geolocation=(), payment=(), microphone=(self)",
-}
-
-/**
- * HSTS. `includeSubDomains` covers api.aquilla.app and dev.aquilla.app, which
- * are already HTTPS-only behind Cloudflare. `preload` is deliberately omitted:
- * getting onto the preload list is effectively irreversible and is an
- * operator decision, not a code one.
- */
-const HSTS = "max-age=31536000; includeSubDomains"
-
-/**
- * Return a copy of `response` carrying the baseline security headers. Existing
- * values are overwritten so a header set upstream (e.g. by the asset binding)
- * can't downgrade the policy; unrelated headers — Cache-Control, the
- * X-Robots-Tag added for non-canonical hosts — pass through untouched.
- */
-export function withSecurityHeaders(response: Response, requestUrl: string): Response {
-  const url = new URL(requestUrl)
-  const wrapped = new Response(response.body, response)
-  for (const [name, value] of Object.entries(BASE_HEADERS)) {
-    wrapped.headers.set(name, value)
-  }
-  if (url.protocol === "https:" && !isLocalHost(url.hostname)) {
-    wrapped.headers.set("Strict-Transport-Security", HSTS)
-  }
-  return wrapped
 }

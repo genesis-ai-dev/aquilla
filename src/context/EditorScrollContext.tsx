@@ -17,10 +17,6 @@ interface EditorScroll {
   requestScrollToGroup: (groupId: string, fileId: string) => void
   /** Request scroll to a section label (e.g. "GEN 1"). Falls back to group match. */
   requestScrollToSection: (sectionLabel: string, fileId: string) => void
-  /** @deprecated Use pending instead. */
-  pendingGroup: string | null
-  /** @deprecated Use pending instead. */
-  pendingSection: string | null
   consume: () => { group: string | null; section: string | null }
 }
 
@@ -44,9 +40,6 @@ export function EditorScrollProvider({ children }: { children: ReactNode }) {
       pending,
       requestScrollToGroup,
       requestScrollToSection,
-      // backward-compat accessors
-      pendingGroup: pending?.group ?? null,
-      pendingSection: pending?.section ?? null,
       consume,
     }}>
       {children}

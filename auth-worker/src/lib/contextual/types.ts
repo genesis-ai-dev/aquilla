@@ -16,6 +16,14 @@ export interface LlmRequest {
   tier: Tier
   maxTokens: number
   temperature: number
+  /** Which pipeline node issued this call ("construe", "summarize", "draft",
+   *  "verify"). Cost-meter attribution only — no node reads it. Optional so
+   *  scripted test LlmCalls stay unchanged. */
+  label?: string
+  /** Span this call belongs to (SpanSeed.id), injected by the tick's per-span
+   *  wrapper. Cost-meter attribution only. Waves run several spans at once, so
+   *  this cannot be a mutable "current span" — it rides the request. */
+  spanId?: string
 }
 
 /** The ONLY way any node reaches a model. Injected; tests script it. */

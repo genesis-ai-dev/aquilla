@@ -153,25 +153,6 @@ export async function createOrgInvite(
   return (await res.json()) as OrgInviteResult;
 }
 
-export interface ActiveOrgInvite {
-  token: string;
-  role: OrgRole;
-  email: string | null;
-  createdAt: string;
-  expiresAt: string | null;
-}
-
-export async function listOrgInvites(jwt: string, orgId: number): Promise<ActiveOrgInvite[]> {
-  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/orgs/${orgId}/invites`, { headers: authHeaders(jwt) });
-  if (!res.ok) throw new UserError(res.status, "", "org");
-  return ((await res.json()) as { invites: ActiveOrgInvite[] }).invites;
-}
-
-export async function revokeOrgInvite(jwt: string, orgId: number, token: string): Promise<void> {
-  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/orgs/${orgId}/invites/${token}`, { method: "DELETE", headers: authHeaders(jwt) });
-  if (!res.ok) throw new UserError(res.status, "", "org");
-}
-
 /** Public preview of an org invite (AQU-471) — what JoinOrgPage shows before
  * the recipient signs in / accepts. */
 export interface OrgInvitePreview {

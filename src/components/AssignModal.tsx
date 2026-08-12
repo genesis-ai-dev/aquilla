@@ -56,6 +56,8 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { DatePicker, dateToDeadlineString } from "@/components/ui/date-picker"
+import { useT } from "@/lib/i18n/I18nProvider"
+import { RichMessage } from "@/lib/i18n/RichMessage"
 import { partitionMembers, type ProjectMember } from "@/lib/frontier/members"
 import type { FileReference, FileType } from "@/lib/parsers/types"
 import {
@@ -171,6 +173,7 @@ export function AssignModal({
   author,
   onAssigned,
 }: AssignModalProps) {
+  const t = useT()
   // AQU-496: below PROJECT_LEAD, the only reason this modal can be open at
   // all is the self-assign carve-out (see canOpenAssignUi gate below) — so
   // "below lead" and "self-assign mode" are equivalent here.
@@ -221,17 +224,31 @@ export function AssignModal({
     [activeFileId, projectFiles],
   )
   const isScripture = activeFile ? SCRIPTURE_FILE_TYPES.has(activeFile.type) : false
-  const sectionNoun = isScripture ? "Chapters" : "Sections"
-  const sectionNounLower = isScripture ? "chapters" : "sections"
-  const sectionSingularLower = isScripture ? "chapter" : "section"
+  const sectionNoun = isScripture
+    ? t("editor.milestone.vocab.chapterPlural")
+    : t("editor.milestone.vocab.sectionPlural")
+  // AQU-511 wave 4: the chapter/section wording is chosen by picking a whole
+  // translated sentence, not by substituting a translated noun into one. A noun
+  // interpolated into another language's sentence cannot agree with it.
+  const loadingUnitsKey = isScripture
+    ? ("dialog.assign.loadingChapters" as const)
+    : ("dialog.assign.loadingSections" as const)
+  const noUnitsFoundKey = isScripture
+    ? ("dialog.assign.noChaptersFound" as const)
+    : ("dialog.assign.noSectionsFound" as const)
+  const selectUnitErrorKey = isScripture
+    ? ("dialog.assign.error.selectChapter" as const)
+    : ("dialog.assign.error.selectSection" as const)
   const segmentNoun = isScripture ? "verse" : "segment"
-  const wholeFileLabel = isScripture ? "All verses in file" : "Entire file"
+  const wholeFileLabel = isScripture
+    ? t("dialog.assign.scope.allVerses")
+    : t("dialog.assign.scope.entireFile")
 
   const scopeOptions: { value: ScopeKind; label: string }[] = [
-    { value: "selection", label: "Current selection" },
+    { value: "selection", label: t("dialog.assign.scope.selection") },
     { value: "verses", label: wholeFileLabel },
     { value: "chapters", label: sectionNoun },
-    { value: "books", label: "Books (files)" },
+    { value: "books", label: t("dialog.assign.scope.books") },
   ]
 
   // AQU-676: the assignee picker must list only the project's own members,
@@ -261,12 +278,12 @@ export function AssignModal({
     // so every lane, including the default, is listed by name and preselecting
     // the launching default lane reads as the language, not "default". Only
     // fall back to the generic label when the default language is unknown.
-    const defaultLabel = defaultLaneLabel?.trim() || "Default language"
+    const defaultLabel = defaultLaneLabel?.trim() || t("dialog.assign.defaultLaneFallback")
     return [
       { value: "", label: defaultLabel },
       ...extra.map((lane) => ({ value: lane, label: lane })),
     ]
-  }, [targetLanes, defaultLaneLabel])
+  }, [targetLanes, defaultLaneLabel, t])
   // fileId -> named group label (excludes the synthetic "Ungrouped" bucket),
   // used to prefix each bulk-created assignment's scopeLabel so a PM can see
   // which season an individually-removable row came from.
@@ -325,7 +342,7 @@ export function AssignModal({
   const handleSubmit = useCallback(async () => {
     setError(null)
     const member = members.find((m) => String(m.userId) === selectedMemberId)
-    if (!member) { setError("Select a member."); return }
+    if (!member) { setError(t("dialog.assign.error.selectMember")); return }
 
     // AQU-676 defense-in-depth: org-baseline-only members are not assignable —
     // only the project's own members. The picker already hides them (see
@@ -336,7 +353,7 @@ export function AssignModal({
       !isSelfAssignMode &&
       !eligibleMembers.some((m) => m.userId === member.userId)
     ) {
-      setError("You can only assign work to a project member.")
+      setError(t("dialog.assign.error.notProjectMember"))
       return
     }
 
@@ -344,7 +361,7 @@ export function AssignModal({
     // locked to self in self-assign mode — the server is authoritative and
     // will 403 regardless, but this avoids a round-trip for the obvious case.
     if (!canSubmitAssignment(roleLevel, allowSelfAssignment, callerUserId, member.userId)) {
-      setError("You can only assign work to yourself.")
+      setError(t("dialog.assign.error.selfOnly"))
       return
     }
 
@@ -354,7 +371,7 @@ export function AssignModal({
     // separately since it emits N events, not one, and reports partial
     // failure per-file rather than an all-or-nothing error.
     if (scopeKind === "books") {
-      if (selectedFileIds.size === 0) { setError("Select at least one book/file."); return }
+      if (selectedFileIds.size === 0) { setError(t("dialog.assign.error.selectFile")); return }
       const entries = Array.from(selectedFileIds).map((fid) => {
         const name = projectFiles.find((f) => f.id === fid)?.name ?? fid
         const groupLabel = groupLabelByFileId.get(fid)
@@ -377,8 +394,13 @@ export function AssignModal({
         if (succeeded > 0) onAssigned()
         if (failed.length > 0) {
           setError(
-            `${failed.length} of ${results.length} assignment(s) failed` +
-            (succeeded > 0 ? ` (${succeeded} succeeded)` : "") +
+            t("dialog.assign.error.bulkFailed", {
+              failed: String(failed.length),
+              total: String(results.length),
+            }) +
+            (succeeded > 0
+              ? t("dialog.assign.error.bulkSucceededSuffix", { succeeded: String(succeeded) })
+              : "") +
             `: ${failed[0].error}`,
           )
         } else {
@@ -396,10 +418,12 @@ export function AssignModal({
     let apiScopeKind: "books" | "chapters" = "books"
 
     if (scopeKind === "selection" || scopeKind === "verses") {
-      if (!activeFileId) { setError("No file open."); return }
+      if (!activeFileId) { setError(t("dialog.assign.error.noFileOpen")); return }
       const file = projectFiles.find((f) => f.id === activeFileId)
       const fileName = file?.name ?? activeFileId
       scope = [{ fileId: activeFileId }]
+      // Persisted scope-label data (stored on the assignment record), not a
+      // rendered UI string — left in English; see AQU-511 dialog namespace notes.
       scopeLabel = scopeKind === "selection"
         ? `${selectedCellIds.size} ${segmentNoun}(s) in ${fileName}`
         : isScripture
@@ -407,8 +431,11 @@ export function AssignModal({
           : `Entire ${fileName}`
       apiScopeKind = "books"
     } else if (scopeKind === "chapters") {
-      if (!activeFileId) { setError("No file open."); return }
-      if (selectedChapters.size === 0) { setError(`Select at least one ${sectionSingularLower}.`); return }
+      if (!activeFileId) { setError(t("dialog.assign.error.noFileOpen")); return }
+      if (selectedChapters.size === 0) {
+        setError(t(selectUnitErrorKey))
+        return
+      }
       const file = projectFiles.find((f) => f.id === activeFileId)
       scope = Array.from(selectedChapters).map((ch) => ({ fileId: activeFileId, chapter: ch }))
       scopeLabel = `${Array.from(selectedChapters).join(", ")} in ${file?.name ?? activeFileId}`
@@ -417,7 +444,7 @@ export function AssignModal({
 
     // Use activeFileId as the routing file for the event token.
     const routeFileId = activeFileId ?? scope[0]?.fileId
-    if (!routeFileId) { setError("No file available for routing."); return }
+    if (!routeFileId) { setError(t("dialog.assign.error.noRouteFile")); return }
 
     setSubmitting(true)
     try {
@@ -440,7 +467,7 @@ export function AssignModal({
       if (e instanceof AssignmentEmitError) {
         setError(e.message)
       } else {
-        setError(e instanceof Error ? e.message : "Unknown error")
+        setError(e instanceof Error ? e.message : t("dialog.assign.error.unknown"))
       }
     } finally {
       setSubmitting(false)
@@ -450,7 +477,7 @@ export function AssignModal({
     selectedCellIds.size, selectedChapters, selectedFileIds,
     jwt, projectId, author, note, onAssigned, onOpenChange,
     roleLevel, allowSelfAssignment, callerUserId, deadlineDate, groupLabelByFileId,
-    selectedLane, isScripture, segmentNoun, sectionSingularLower,
+    selectedLane, isScripture, segmentNoun, selectUnitErrorKey, t,
   ])
 
   // Role gate (AQU-496): PROJECT_LEAD (500)+ always renders; below that, only
@@ -464,9 +491,12 @@ export function AssignModal({
   const assigneeItems = isSelfAssignMode
     ? members
         .filter((m) => m.userId === callerUserId)
-        .map((m) => ({ value: String(m.userId), label: `${m.username} (you)` }))
+        .map((m) => ({
+          value: String(m.userId),
+          label: t("dialog.assign.assigneeSelfSuffix", { username: m.username }),
+        }))
     : [
-        { value: "", label: "Select member…" },
+        { value: "", label: t("dialog.assign.selectMemberPlaceholder") },
         // AQU-676: project members only — org-baseline-only people are excluded.
         ...eligibleMembers.map((m) => ({ value: String(m.userId), label: m.username })),
       ]
@@ -477,7 +507,7 @@ export function AssignModal({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <UserCheck className="h-4 w-4" />
-            Assign work
+            {t("dialog.assign.title")}
           </DialogTitle>
         </DialogHeader>
 
@@ -487,7 +517,7 @@ export function AssignModal({
         <DialogBody>
         <FieldGroup className="py-1">
           <Field>
-            <FieldLabel htmlFor="assign-modal-scope">Scope</FieldLabel>
+            <FieldLabel htmlFor="assign-modal-scope">{t("dialog.assign.scopeLabel")}</FieldLabel>
             <Select
               items={scopeOptions.map((opt) => ({
                 value: opt.value,
@@ -530,7 +560,7 @@ export function AssignModal({
               wall (that's a scope — see §3.5). */}
           {laneItems.length > 1 && (
             <Field>
-              <FieldLabel htmlFor="assign-modal-lane">Language lane</FieldLabel>
+              <FieldLabel htmlFor="assign-modal-lane">{t("dialog.assign.laneLabel")}</FieldLabel>
               <Select
                 items={laneItems}
                 value={selectedLane}
@@ -550,19 +580,23 @@ export function AssignModal({
                 </SelectContent>
               </Select>
               <FieldDescription>
-                Routes this work to a language lane. Restricting who <em>can</em> edit a
-                lane is separate (staffing).
+                {/* AQU-511 wave-3 finding 4: the italic on "can" is what distinguishes
+                    assigning work (this field) from gating who may edit a lane
+                    (staffing, elsewhere) — flattening it turned the sentence into a
+                    truism. RichMessage keeps the emphasis while leaving the
+                    translator in control of sentence/word order. */}
+                <RichMessage
+                  k="dialog.assign.laneDescription"
+                  values={{ can: <em>can</em> }}
+                />
               </FieldDescription>
             </Field>
           )}
 
           {scopeKind === "books" && (
             <Field>
-              <FieldLabel>Files / books</FieldLabel>
-              <FieldDescription>
-                Files sharing a season/testament are grouped — use "Select all" to assign a
-                whole season in one action.
-              </FieldDescription>
+              <FieldLabel>{t("dialog.assign.filesLabel")}</FieldLabel>
+              <FieldDescription>{t("dialog.assign.filesDescription")}</FieldDescription>
               <div className="max-h-56 space-y-2 overflow-y-auto rounded-md border p-2">
                 {fileGroups.map((group) => {
                   const groupFileIds = group.files.map((f) => f.id)
@@ -577,7 +611,7 @@ export function AssignModal({
                             className="text-xs text-primary hover:underline"
                             onClick={() => toggleFileGroup(groupFileIds)}
                           >
-                            {allSelected ? "Clear" : "Select all"}
+                            {allSelected ? t("common.clear") : t("common.selectAll")}
                           </button>
                         )}
                       </div>
@@ -604,10 +638,12 @@ export function AssignModal({
               {chaptersLoading ? (
                 <div className="flex items-center gap-1 text-xs text-muted-foreground">
                   <Spinner className="size-3" />
-                  Loading {sectionNounLower}…
+                  {t(loadingUnitsKey)}
                 </div>
               ) : availableChapters.length === 0 ? (
-                <p className="text-xs text-muted-foreground">No {sectionNounLower} found in this file.</p>
+                <p className="text-xs text-muted-foreground">
+                  {t(noUnitsFoundKey)}
+                </p>
               ) : (
                 <div className="max-h-40 space-y-0.5 overflow-y-auto rounded-md border p-2">
                   {availableChapters.map((ch) => (
@@ -626,7 +662,7 @@ export function AssignModal({
           )}
 
           <Field>
-            <FieldLabel htmlFor="assign-modal-assignee">Assign to</FieldLabel>
+            <FieldLabel htmlFor="assign-modal-assignee">{t("dialog.assign.assigneeLabel")}</FieldLabel>
             <Select
               items={assigneeItems}
               value={selectedMemberId}
@@ -647,15 +683,12 @@ export function AssignModal({
               </SelectContent>
             </Select>
             {isSelfAssignMode && (
-              <FieldDescription>
-                Self-assignment is on — you can claim this work for yourself. Only leads and
-                maintainers can assign work to someone else.
-              </FieldDescription>
+              <FieldDescription>{t("dialog.assign.selfAssignDescription")}</FieldDescription>
             )}
           </Field>
 
           <Field>
-            <FieldLabel htmlFor="assign-modal-deadline">Deadline (optional)</FieldLabel>
+            <FieldLabel htmlFor="assign-modal-deadline">{t("dialog.assign.deadlineLabel")}</FieldLabel>
             <DatePicker
               id="assign-modal-deadline"
               value={deadlineDate}
@@ -663,21 +696,19 @@ export function AssignModal({
               disabled={submitting}
             />
             {scopeKind === "books" && (
-              <FieldDescription>
-                Applies to every file selected above — one deadline for the whole batch.
-              </FieldDescription>
+              <FieldDescription>{t("dialog.assign.deadlineBatchDescription")}</FieldDescription>
             )}
           </Field>
 
           <Field>
-            <FieldLabel htmlFor="assign-modal-note">Note (optional)</FieldLabel>
+            <FieldLabel htmlFor="assign-modal-note">{t("dialog.assign.noteLabel")}</FieldLabel>
             <Textarea
               id="assign-modal-note"
               value={note}
               onChange={(e) => setNote(e.target.value)}
               rows={2}
               className="resize-none"
-              placeholder="Any context for the assignee…"
+              placeholder={t("dialog.assign.notePlaceholder")}
             />
           </Field>
 
@@ -687,11 +718,11 @@ export function AssignModal({
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button onClick={handleSubmit} disabled={submitting}>
             {submitting ? <Spinner className="mr-1" /> : null}
-            Assign
+            {t("dialog.assign.submit")}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -1,15 +1,11 @@
 name: CI
 
-# AQU-799: checks and route-free PR previews share one workflow so a preview can
-# consume the exact artifact that passed the build/environment gate. Actions
-# gates pull requests only; live environments require an explicit operator
-# deployment. Required check names are pinned by the deployment contract tests.
-# There is deliberately no push trigger: merging a checked PR must not consume
-# another full Actions run or imply authorization to deploy.
+# AQU-564: Cloudflare Workers Builds owns automatic pull-request validation and
+# route-free versions. This workflow is retained only as an explicit fallback;
+# it has no pull-request or push trigger and therefore consumes no hosted runner
+# minutes during ordinary repository activity.
 
 on:
-  pull_request:
-    types: [opened, reopened, ready_for_review, synchronize]
   workflow_dispatch:
 
 concurrency:
@@ -82,9 +78,10 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
-      # Credential guard (docs/OPSEC.md §5). Runs in `lint` rather than as its
-      # own job so it inherits an existing required check — a secret scan that
-      # can be merged past is decoration.
+      # Credential guard (docs/OPSEC.md §5). Mirrors the lint lane in
+      # scripts/cloudflare-ci-checks.mjs, which is the gate that actually runs
+      # on pull requests (this workflow is workflow_dispatch-only). Keep the
+      # two in step.
       - run: pnpm run scan:secrets
 
   typecheck:
@@ -110,6 +107,10 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm test
+      # Mirrors the spa lane in scripts/cloudflare-ci-checks.mjs, which is the
+      # gate that actually runs on pull requests (this workflow is
+      # workflow_dispatch-only). Keep the two in step. OPS-4.
+      - run: pnpm test:worker
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm test:idml
 
@@ -157,22 +158,6 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm neon:check
-
-  # The SPA-serving Worker (worker/). Its suite is excluded from the root
-  # `pnpm test` run (vite.config.ts) like every other worker package, but —
-  # unlike the others — nothing ever ran it, so it sat red through the AQU-799
-  # staging retirement. It uses only root deps, so it needs no second install.
-  web-worker-tests:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm run test:worker
 
   auth-worker-tests:
     needs: changes

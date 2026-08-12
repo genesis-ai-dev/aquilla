@@ -12,6 +12,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
 import { detectFileType, isMediaFileType } from "@/lib/parsers/types"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 /** Same audio/video extensions the Import dialog accepts. */
 const MEDIA_FILE_ACCEPT = ".mp3,.wav,.m4a,.aac,.flac,.ogg,.oga,.opus,.mp4,.m4v,.mov,.webm,.mkv"
@@ -22,6 +23,7 @@ interface TimelineAddMediaProps {
 }
 
 export function TimelineAddMedia({ onAttachFile, onAttachUrl }: TimelineAddMediaProps) {
+  const t = useT()
   const [busy, setBusy] = useState<"file" | "url" | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [dragOver, setDragOver] = useState(false)
@@ -79,13 +81,13 @@ export function TimelineAddMedia({ onAttachFile, onAttachUrl }: TimelineAddMedia
       >
         {busy === "file" ? (
           <p className="flex items-center gap-2 text-sm font-medium">
-            <Spinner /> Adding media to this file…
+            <Spinner /> {t("editor.media.adding")}
           </p>
         ) : (
           <>
             <FileAudio className="mb-2 h-6 w-6 text-muted-foreground" />
-            <p className="text-sm font-medium">No media on this file yet</p>
-            <p className="mt-1 text-xs text-muted-foreground">Drag & drop an audio or video file here, or</p>
+            <p className="text-sm font-medium">{t("editor.media.emptyTitle")}</p>
+            <p className="mt-1 text-xs text-muted-foreground">{t("editor.media.dropHint")}</p>
             <Button
               variant="outline"
               size="sm"
@@ -93,7 +95,7 @@ export function TimelineAddMedia({ onAttachFile, onAttachUrl }: TimelineAddMedia
               nativeButton={false}
               render={<label />}
             >
-              Choose media file
+              {t("editor.media.choose")}
               <input
                 type="file"
                 className="hidden"
@@ -120,15 +122,15 @@ export function TimelineAddMedia({ onAttachFile, onAttachUrl }: TimelineAddMedia
             }}
             placeholder="https://example.com/episode.mp4"
             disabled={busy != null}
-            aria-label="Media URL"
+            aria-label={t("editor.media.urlLabel")}
             className="h-8 text-sm"
           />
           <Button size="sm" variant="outline" onClick={() => void attachUrl()} disabled={busy != null || !url.trim()}>
-            {busy === "url" ? <Spinner /> : "Attach"}
+            {busy === "url" ? <Spinner /> : t("editor.media.attach")}
           </Button>
         </div>
         <p className="mt-1.5 text-xs text-muted-foreground">
-          Or paste a direct media URL — the clip streams from its source; only timing metadata is stored.
+          {t("editor.media.urlHint")}
         </p>
       </div>
 

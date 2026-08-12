@@ -18,6 +18,7 @@
 import type { AquillaDb } from "../../../../db/shim/postgres"
 import {
   getRun,
+  failRun,
   confirmPause,
   parkRun,
   recordWaveOutcome,
@@ -27,7 +28,11 @@ import {
   markSteeringConsumed,
   insertDrafts,
   findOccupiedCells,
+  findProposedCellsFromOtherRuns,
+  appendContextualRunEvent,
   type ContextualRun,
+  type ContextualRunStatus,
+  type ContextualSpanReason,
   type SpanCursor,
   type StoredSpanSeed,
 } from "../../../../db/shared/contextual-runs"
@@ -90,51 +95,192 @@ export function resolveOpenRouterUrl(env: { OPENROUTER_BASE_URL?: string }): str
     : "https://openrouter.ai/api/v1/chat/completions"
 }
 
+/** One metered model call. `costCents` is 0 against any non-OpenRouter
+ *  upstream (`usage.cost` is an OpenRouter extension — see lib/llm-vendor.ts),
+ *  so the cost meter prices `promptTokens`/`completionTokens` offline instead
+ *  of trusting this field. */
+export interface LlmCallUsage {
+  promptTokens: number
+  completionTokens: number
+  costCents: number
+  /** Pipeline node that issued the call (LlmRequest.label); "" if unlabelled. */
+  label: string
+  /** Span the call belongs to (LlmRequest.spanId); "" outside a span. */
+  spanId: string
+  tier: Tier
+  /** Model actually requested for this tier. */
+  model: string
+  latencyMs: number
+  /** False when the call threw or returned no usage block — a failed call
+   *  still costs wall-clock and still burdens the run's budget. */
+  ok: boolean
+  /** llama.cpp/llama-swap `timings.predicted_per_second`, when the upstream
+   *  reports it. Absent for OpenRouter. */
+  tokensPerSecond?: number
+}
+
+/** Bounded-concurrency gate. `limit <= 0` disables it entirely (no queueing,
+ *  no bookkeeping) so the OpenRouter path behaves exactly as before. */
+function makeGate(limit: number): <T>(fn: () => Promise<T>) => Promise<T> {
+  if (limit <= 0) return (fn) => fn()
+  let active = 0
+  const waiting: (() => void)[] = []
+  return async <T>(fn: () => Promise<T>): Promise<T> => {
+    if (active >= limit) await new Promise<void>((resolve) => waiting.push(resolve))
+    active++
+    try {
+      return await fn()
+    } finally {
+      active--
+      waiting.shift()?.()
+    }
+  }
+}
+
 /** Build the pipeline's LlmCall over the OpenRouter chat-completions API
  *  (non-streaming). Throws on transport/HTTP errors — runSpan's nodes treat a
- *  throw as that call failing, and the tick records the span outcome. */
+ *  throw as that call failing, and the tick records the span outcome.
+ *
+ *  `onUsage` fires exactly once per call, including on failure, so the cost
+ *  meter counts attempts rather than successes: a model that fails a parse and
+ *  forces a retry costs twice, and a ledger that only recorded successes would
+ *  hide that. It must never throw — it is called from the LLM hot path. */
 export function makeLlmCall(cfg: {
   url: string
   apiKey: string
   models: ContextualModels
   signal?: AbortSignal
-  onUsage?: (u: { promptTokens: number; completionTokens: number; costCents: number }) => void
+  onUsage?: (u: LlmCallUsage) => void
+  /** Cap on HTTP requests in flight through THIS LlmCall at any moment.
+   *  0/undefined = uncapped (the OpenRouter default). */
+  maxInFlight?: number
 }): LlmCall {
+  // Span concurrency is not request concurrency: one span fans its verifier
+  // panel out three-wide, so N spans burst to ~3N requests. Against an upstream
+  // with a fixed slot count that burst is rejected outright, and retrying it
+  // just re-collides. Gate here, where every node's call converges, so the
+  // wave width stays a scheduling decision and this stays the hard limit.
+  const gate = makeGate(cfg.maxInFlight ?? 0)
   return async (req) => {
     const model = cfg.models[req.tier as Tier]
-    const res = await fetch(cfg.url, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${cfg.apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model,
-        messages: [
-          { role: "system", content: req.system },
-          { role: "user", content: req.user },
-        ],
-        max_tokens: req.maxTokens,
-        temperature: req.temperature,
-        ...openRouterUsage(cfg.url),
-      }),
-      ...(cfg.signal ? { signal: cfg.signal } : {}),
-    })
-    if (!res.ok) {
-      const text = await res.text()
-      throw new Error(`openrouter_error ${res.status}: ${text.slice(0, 300)}`)
+    // Per-ATTEMPT, so a retry's recorded latency is its own round-trip and not
+    // the backoff it waited through. Reset at the top of each attempt below.
+    let startedAt = Date.now()
+    const report = (
+      u: Omit<LlmCallUsage, "label" | "spanId" | "tier" | "model" | "latencyMs">,
+    ): void => {
+      if (!cfg.onUsage) return
+      try {
+        cfg.onUsage({
+          ...u,
+          label: req.label ?? "",
+          spanId: req.spanId ?? "",
+          tier: req.tier as Tier,
+          model,
+          latencyMs: Date.now() - startedAt,
+        })
+      } catch {
+        /* the meter must never break the run it is measuring */
+      }
     }
-    const body = (await res.json()) as {
+    const failed = { promptTokens: 0, completionTokens: 0, costCents: 0, ok: false }
+
+    // Capacity rejections are NOT model failures. A busy upstream (OpenRouter
+    // rate limit, or a self-hosted server whose slots are all occupied) answers
+    // in milliseconds with no tokens spent, but the pipeline treats a throw as
+    // the node failing — and a rejected `ambiguity` verifier fails its whole
+    // span. Wait for a slot instead. Each attempt is still metered, so
+    // contention stays visible rather than being smoothed away.
+    const requestBody = JSON.stringify({
+      model,
+      messages: [
+        { role: "system", content: req.system },
+        { role: "user", content: req.user },
+      ],
+      max_tokens: req.maxTokens,
+      temperature: req.temperature,
+      ...openRouterUsage(cfg.url),
+    })
+    const RETRIABLE = new Set([429, 500, 502, 503, 504])
+    const MAX_ATTEMPTS = 5
+
+    interface UpstreamBody {
       choices?: { message?: { content?: string | null } }[]
       usage?: { prompt_tokens?: number; completion_tokens?: number; cost?: number }
+      timings?: { predicted_per_second?: number }
     }
-    if (body.usage && cfg.onUsage) {
-      cfg.onUsage({
-        promptTokens: body.usage.prompt_tokens ?? 0,
-        completionTokens: body.usage.completion_tokens ?? 0,
-        costCents: (body.usage.cost ?? 0) * 100,
-      })
+    type Attempt =
+      | { ok: true; body: UpstreamBody }
+      | { ok: false; status: number; code: "http_error" | "invalid_response" }
+
+    let body!: UpstreamBody
+    for (let attempt = 1; ; attempt++) {
+      startedAt = Date.now()
+      let outcome: Attempt
+      try {
+        // The gate holds a slot only for the round-trip, never across the
+        // backoff below — a sleeping retry must not occupy capacity.
+        outcome = await gate<Attempt>(async () => {
+          const res = await fetch(cfg.url, {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${cfg.apiKey}`,
+              "Content-Type": "application/json",
+            },
+            body: requestBody,
+            ...(cfg.signal ? { signal: cfg.signal } : {}),
+          })
+          if (!res.ok) {
+            // Provider bodies are untrusted and may echo credentials, prompts,
+            // or user text. Never materialize them in an Error that can reach
+            // the durable run row or a live progress frame.
+            try {
+              await res.body?.cancel()
+            } catch {
+              /* cancellation is cleanup only */
+            }
+            return { ok: false, status: res.status, code: "http_error" }
+          }
+          try {
+            return { ok: true, body: (await res.json()) as UpstreamBody }
+          } catch {
+            return { ok: false, status: res.status, code: "invalid_response" }
+          }
+        })
+      } catch {
+        report(failed)
+        throw new Error(cfg.signal?.aborted ? "provider_request_aborted" : "provider_transport_error")
+      }
+      if (outcome.ok) {
+        body = outcome.body
+        break
+      }
+
+      report(failed)
+      if (
+        outcome.code === "invalid_response"
+        || !RETRIABLE.has(outcome.status)
+        || attempt >= MAX_ATTEMPTS
+        || cfg.signal?.aborted
+      ) {
+        const code = outcome.code === "invalid_response"
+          ? "provider_invalid_response"
+          : "provider_http_error"
+        throw new Error(`${code} status=${outcome.status}`)
+      }
+      // Exponential backoff with jitter — without the jitter every rejected
+      // lane in a wave would wake at the same instant and collide again.
+      const backoffMs = Math.min(1000 * 2 ** (attempt - 1), 8000) * (0.5 + Math.random())
+      await new Promise((r) => setTimeout(r, backoffMs))
     }
+    const tps = body.timings?.predicted_per_second
+    report({
+      promptTokens: body.usage?.prompt_tokens ?? 0,
+      completionTokens: body.usage?.completion_tokens ?? 0,
+      costCents: (body.usage?.cost ?? 0) * 100,
+      ok: body.usage !== undefined,
+      ...(typeof tps === "number" ? { tokensPerSecond: tps } : {}),
+    })
     return body.choices?.[0]?.message?.content ?? ""
   }
 }
@@ -145,7 +291,8 @@ export interface ContextualRunStateFrame {
   type: "contextual.run.state"
   runId: string
   fileId: string
-  status: string
+  targetLang: string
+  status: ContextualRunStatus
   done: number
   total: number
   failed?: number
@@ -169,6 +316,12 @@ export interface ContextualSpanFrame {
   skipped: number
   verdictSummary: string
   spanId?: string
+  /** Sanitized durable outcome fields. `verdictSummary` remains a live-display
+   * string; persistence records only this categorical subset. */
+  outcome?: "complete" | "partial" | "failed"
+  reasons?: ContextualSpanReason[]
+  calls?: number
+  units?: number
 }
 
 /** A lane OPENS. Emitted before any model call, so the UI never shows dead air
@@ -198,7 +351,13 @@ export interface ContextualDraftsFrame {
   type: "contextual.drafts"
   runId: string
   fileId: string
+  /** Required even though v1 only emits the default lane. Consumers fail
+   * closed on missing/non-default values during rolling or legacy traffic. */
+  targetLang: string
+  spanId?: string
   spanLabel: string
+  /** Authoritative staged count when the draft payload below is capped. */
+  draftCount?: number
   drafts: { draftId: string; cellId: string; text: string }[]
   truncated?: boolean
 }
@@ -221,10 +380,103 @@ export function runStateFrame(run: ContextualRun): ContextualRunStateFrame {
     type: "contextual.run.state",
     runId: run.id,
     fileId: run.fileId,
+    targetLang: run.targetLang,
     status: run.status,
     done: run.doneSpans,
     total: run.totalSpans,
     failed: run.failedSpans,
+  }
+}
+
+/** Persist one live progress frame as a bounded product-activity fact. The
+ * draft frame intentionally loses draft ids/text here: only count + cell ids
+ * cross the durable telemetry boundary. */
+export async function persistContextualProgressFrame(
+  db: AquillaDb,
+  scope: { projectId: string; fileId: string },
+  frame: ContextualProgressFrame,
+): Promise<void> {
+  switch (frame.type) {
+    case "contextual.run.state":
+      await appendContextualRunEvent(db, {
+        runId: frame.runId,
+        projectId: scope.projectId,
+        fileId: scope.fileId,
+        kind: "run_state",
+        status: frame.status,
+        details: { done: frame.done, total: frame.total, failed: frame.failed ?? 0 },
+      })
+      return
+    case "contextual.span.start":
+      await appendContextualRunEvent(db, {
+        runId: frame.runId,
+        projectId: scope.projectId,
+        fileId: scope.fileId,
+        kind: "span_started",
+        spanId: frame.spanId,
+        spanLabel: frame.spanLabel,
+        status: "started",
+      })
+      return
+    case "contextual.phase":
+      await appendContextualRunEvent(db, {
+        runId: frame.runId,
+        projectId: scope.projectId,
+        fileId: scope.fileId,
+        kind: "phase",
+        spanId: frame.spanId,
+        spanLabel: frame.spanLabel,
+        phase: frame.phase,
+      })
+      return
+    case "contextual.scene":
+      await appendContextualRunEvent(db, {
+        runId: frame.runId,
+        projectId: scope.projectId,
+        fileId: scope.fileId,
+        kind: "scene_ready",
+        spanId: frame.spanId,
+        spanLabel: frame.spanLabel,
+        status: "complete",
+        details: {
+          sceneBriefId: frame.sceneBriefId,
+          ambiguityCount: frame.ambiguityCount,
+        },
+      })
+      return
+    case "contextual.drafts":
+      await appendContextualRunEvent(db, {
+        runId: frame.runId,
+        projectId: scope.projectId,
+        fileId: scope.fileId,
+        kind: "drafts_staged",
+        spanId: frame.spanId,
+        spanLabel: frame.spanLabel,
+        status: "complete",
+        details: {
+          count: frame.draftCount ?? frame.drafts.length,
+          cellIds: frame.drafts.map((draft) => draft.cellId),
+          truncated: frame.truncated === true,
+        },
+      })
+      return
+    case "contextual.span":
+      await appendContextualRunEvent(db, {
+        runId: frame.runId,
+        projectId: scope.projectId,
+        fileId: scope.fileId,
+        kind: "span_outcome",
+        spanId: frame.spanId,
+        spanLabel: frame.spanLabel,
+        status: frame.outcome ?? "complete",
+        details: {
+          staged: frame.staged,
+          skipped: frame.skipped,
+          reasons: frame.reasons,
+          calls: frame.calls,
+          units: frame.units,
+        },
+      })
   }
 }
 
@@ -298,11 +550,16 @@ async function loadNeighborBriefs(
   db: AquillaDb,
   projectId: string,
   fileId: string,
+  targetLang: string,
   seed: StoredSpanSeed,
   pairs: CellPair[],
 ): Promise<NeighborBrief[]> {
   try {
-    const approved = await listSceneBriefs(db, projectId, { fileId, status: "approved" })
+    const approved = await listSceneBriefs(db, projectId, {
+      fileId,
+      status: "approved",
+      targetLang,
+    })
     const order = new Map(pairs.map((p, i) => [p.cellId, i]))
     const seedStart = order.get(seed.startCellId) ?? 0
     const out: NeighborBrief[] = []
@@ -364,7 +621,12 @@ async function consumeSteering(
     } else if (e.kind === "refresh_span") {
       const briefId = e.body.trim()
       const brief = await getSceneBrief(db, briefId)
-      if (brief && brief.projectId === run.projectId) {
+      if (
+        brief &&
+        brief.projectId === run.projectId &&
+        brief.fileId === run.fileId &&
+        brief.targetLang === run.targetLang
+      ) {
         await markStale(db, briefId, "steering-refresh")
         const seed = cursor?.seeds.find(
           (s) => s.startCellId === brief.startCellId && s.endCellId === brief.endCellId,
@@ -410,6 +672,7 @@ interface RunContext {
   rules: LintRule[]
   pairs: CellPair[]
   layerAbove: LayerAboveBlock[]
+  excludedCellIds: Set<string>
   scope: {
     projectId: string
     fileId: string
@@ -424,6 +687,32 @@ interface SpanOutcome {
   outcome: "done" | "failed"
   lastError: string | null
   report?: SpanReport
+}
+
+/** Reduce pipeline/model prose to a stable categorical vocabulary before it
+ * reaches durable activity. This preserves the reason a user can act on
+ * without persisting verifier reasoning or upstream response text. */
+function spanReasonCodes(
+  report: SpanReport | undefined,
+  outcome: "done" | "failed",
+  occupiedAtStage: number,
+): ContextualSpanReason[] {
+  const reasons = new Set<ContextualSpanReason>()
+  if (outcome === "failed") reasons.add("span_failed")
+  if (occupiedAtStage > 0) reasons.add("target_already_filled")
+  for (const reason of report?.incompleteReasons ?? []) {
+    if (reason.startsWith("scene construal did not close")) reasons.add("scene_construal_incomplete")
+    else if (reason.startsWith("draft attempt")) reasons.add("draft_failed")
+    else if (reason.startsWith("verifier barrier unmet")) reasons.add("verification_unavailable")
+  }
+  for (const skipped of report?.cellsSkipped ?? []) {
+    if (skipped.reason.startsWith("construal incomplete")) reasons.add("scene_construal_incomplete")
+    else if (skipped.reason.startsWith("draft failed")) reasons.add("draft_failed")
+    else if (skipped.reason.startsWith("no draft returned")) reasons.add("no_draft_returned")
+    else if (skipped.reason.startsWith("verification unavailable")) reasons.add("verification_unavailable")
+    else if (skipped.reason.startsWith("rejected by quorum twice")) reasons.add("rejected_by_quorum")
+  }
+  return [...reasons]
 }
 
 /**
@@ -460,16 +749,26 @@ async function processSpan(
     spanLabel: label,
   })
 
-  const neighborBriefs = await loadNeighborBriefs(db, run.projectId, run.fileId, storedSeed, shared.pairs)
+  const neighborBriefs = await loadNeighborBriefs(
+    db,
+    run.projectId,
+    run.fileId,
+    run.targetLang,
+    storedSeed,
+    shared.pairs,
+  )
 
   let outcome: "done" | "failed" = "done"
   let lastError: string | null = null
   let report: SpanReport | undefined
+  let occupiedAtStage = 0
+  let phaseActivity = Promise.resolve()
   try {
     report = await runSpan({
       seed,
       scope: shared.scope,
       pairs: shared.pairs,
+      excludedCellIds: shared.excludedCellIds,
       neighborBriefs,
       layerAbove: shared.layerAbove,
       examples: validatedExamples(shared.pairs),
@@ -482,15 +781,26 @@ async function processSpan(
       rules: shared.rules,
       ...(shared.ctx.sourceLanguage ? { sourceLanguage: shared.ctx.sourceLanguage } : {}),
       ...(shared.ctx.targetLanguage ? { targetLanguage: shared.ctx.targetLanguage } : {}),
-      llm: deps.llm,
+      // Tag every call this span makes, for cost attribution. A wave runs
+      // several spans concurrently, so the span id must ride the request
+      // rather than live in shared mutable state.
+      llm: (req) => deps.llm({ ...req, spanId: seed.id }),
       onPhase: (phase: SpanPhase) => {
-        void notify({
-          type: "contextual.phase",
-          runId: run.id,
-          spanId: seed.id,
-          spanLabel: label,
-          phase,
-        }).catch(() => {})
+        // RunSpan's phase callback is synchronous, so serialize the async
+        // durable writes here and drain them before the span outcome. Failure
+        // remains decorative (never breaks translation work), matching the
+        // callback's existing contract.
+        phaseActivity = phaseActivity
+          .then(() =>
+            notify({
+              type: "contextual.phase",
+              runId: run.id,
+              spanId: seed.id,
+              spanLabel: label,
+              phase,
+            }),
+          )
+          .catch(() => {})
       },
       persistBrief: async (brief) => {
         const proposed = await proposeSceneBrief(db, {
@@ -534,7 +844,9 @@ async function processSpan(
           projectId: run.projectId,
           fileId: run.fileId,
           cellIds: draft.cells.map((c) => c.cellId),
+          targetLang: "",
         })
+        occupiedAtStage += occupied.size
         const fresh = draft.cells.filter((c) => !occupied.has(c.cellId))
         if (fresh.length === 0) {
           return { proposalId: "", spanId: draft.spanId, stagedCellIds: [], verdicts: {} }
@@ -557,17 +869,32 @@ async function processSpan(
         // The moment that makes the feature legible: verified text, streamed
         // to every open editor on this project.
         if (staged.length > 0) {
+          // Live frames are an optimization, never the authoritative review
+          // payload. Do not send a cropped suggestion that the editor could
+          // mistake for the full text stored in Postgres. Omit oversized
+          // entries and mark the frame incomplete so the client refetches the
+          // exact draft before exposing any review action.
+          const frameDrafts = staged
+            .slice(0, MAX_DRAFTS_PER_FRAME)
+            .filter((draft) => draft.text.length <= MAX_DRAFT_TEXT_CHARS)
+            .map((draft) => ({
+              draftId: draft.id,
+              cellId: draft.cellId,
+              text: draft.text,
+            }))
+          const frameIsTruncated =
+            staged.length > MAX_DRAFTS_PER_FRAME ||
+            frameDrafts.length !== Math.min(staged.length, MAX_DRAFTS_PER_FRAME)
           await notify({
             type: "contextual.drafts",
             runId: run.id,
             fileId: run.fileId,
+            targetLang: run.targetLang,
+            spanId: seed.id,
             spanLabel: label,
-            drafts: staged.slice(0, MAX_DRAFTS_PER_FRAME).map((d) => ({
-              draftId: d.id,
-              cellId: d.cellId,
-              text: d.text.slice(0, MAX_DRAFT_TEXT_CHARS),
-            })),
-            ...(staged.length > MAX_DRAFTS_PER_FRAME ? { truncated: true } : {}),
+            draftCount: staged.length,
+            drafts: frameDrafts,
+            ...(frameIsTruncated ? { truncated: true } : {}),
           })
         }
         return {
@@ -578,28 +905,54 @@ async function processSpan(
         }
       },
     })
-    if (report.incomplete && report.cellsStaged.length === 0) {
+    await phaseActivity
+    const skippedCount = report.cellsSkipped.length
+    if (skippedCount > 0) {
+      // A named skip is unfinished work even when sibling cells staged cleanly.
+      // Keep the useful partial proposals, but account the passage in the
+      // failure counter so the overview cannot call it a clean completion.
+      outcome = "failed"
+      lastError = report.cellsStaged.length > 0
+        ? "Some cells could not be drafted and need attention."
+        : "This passage could not produce a reviewable draft."
+    } else if (report.incomplete && report.cellsStaged.length === 0) {
       outcome = "failed"
       lastError = report.incompleteReasons.join("; ").slice(0, 2000) || "span incomplete"
     }
   } catch (err) {
+    await phaseActivity
     outcome = "failed"
     lastError = (err instanceof Error ? err.message : String(err)).slice(0, 2000)
   }
 
+  const skippedCount = report?.cellsSkipped.length ?? 0
+  const stagedCount = report?.cellsStaged.length ?? 0
+  // Event outcome describes the evidence produced; aggregate outcome above
+  // describes whether the passage needs attention. A partially staged span
+  // with named skips is therefore `partial` evidence but one failed passage.
+  const eventOutcome = skippedCount > 0
+    ? stagedCount > 0 ? "partial" : "failed"
+    : outcome === "failed"
+      ? "failed"
+      : report?.incomplete || occupiedAtStage > 0
+        ? "partial"
+        : "complete"
+  const reasons = spanReasonCodes(report, outcome, occupiedAtStage)
   await notify({
     type: "contextual.span",
     runId: run.id,
     spanLabel: label,
-    staged: report?.cellsStaged.length ?? 0,
-    skipped: report?.cellsSkipped.length ?? 0,
-    verdictSummary:
-      outcome === "failed"
-        ? `failed: ${lastError ?? "unknown"}`
-        : report?.incomplete
-          ? `partial: ${report.incompleteReasons.join("; ")}`
-          : "complete",
+    staged: stagedCount,
+    skipped: skippedCount + occupiedAtStage,
+    // Only stable categories cross the activity boundary. Verifier/model
+    // prose remains inside the transient report and is never persisted.
+    verdictSummary: eventOutcome === "complete"
+      ? "complete"
+      : `${eventOutcome}: ${reasons.join(", ") || "attention_required"}`,
     spanId: seed.id,
+    outcome: eventOutcome,
+    ...(reasons.length > 0 ? { reasons } : {}),
+    ...(report ? { calls: report.callsUsed, units: report.unitsUsed } : {}),
   })
 
   return { outcome, lastError, ...(report ? { report } : {}) }
@@ -620,9 +973,30 @@ async function processSpan(
  */
 export async function runOneTick(deps: TickDeps): Promise<TickResult> {
   const { db, runId } = deps
-  const notify = deps.notify ?? (async () => {})
+  const externalNotify = deps.notify ?? (async () => {})
   const run = await getRun(db, runId)
   if (!run) return { continueRun: false, status: "not_found" }
+  const notify = async (frame: ContextualProgressFrame): Promise<void> => {
+    try {
+      await persistContextualProgressFrame(
+        db,
+        { projectId: run.projectId, fileId: run.fileId },
+        frame,
+      )
+    } catch (err) {
+      // Observability is durable when healthy, never a control dependency.
+      // In particular, a code-before-migration deploy must not fail a span.
+      console.warn(`[contextual] activity append failed for run ${run.id}/${frame.type}:`, err)
+    }
+    try {
+      await externalNotify(frame)
+    } catch (err) {
+      // The relay is a live-view optimization. Snapshot/activity persistence
+      // remains authoritative, so a collaborator broadcast outage must never
+      // turn otherwise valid drafting work into a failed passage.
+      console.warn(`[contextual] live notification failed for run ${run.id}/${frame.type}:`, err)
+    }
+  }
 
   // Pause/terminate honoured at the span edge — never mid-span.
   if (run.status === "pausing") {
@@ -634,9 +1008,30 @@ export async function runOneTick(deps: TickDeps): Promise<TickResult> {
     return { continueRun: false, status: run.status }
   }
 
+  // AQU-826 filters cell reads by lane, but contextual_drafts remain lane-less.
+  // Fail legacy non-default runs before reading any cells rather than persist
+  // evidence whose lane identity the review queue cannot represent.
+  if (run.targetLang !== "") {
+    const failed = await failRun(
+      db,
+      runId,
+      "unsupported_target_language_lane",
+    )
+    if (failed.status === "ok") await notify(runStateFrame(failed.run))
+    return { continueRun: false, status: failed.status === "ok" ? "failed" : run.status }
+  }
+
   // Scope + cursor. Pairs are re-read every wave (cells move under the run);
   // seeds are pinned in the cursor so segmentation never shifts mid-run.
-  const pairs = await selectCellPairs(db, run.projectId, { fileId: run.fileId })
+  const [pairs, excludedCellIds] = await Promise.all([
+    selectCellPairs(db, run.projectId, { fileId: run.fileId, targetLang: "" }),
+    findProposedCellsFromOtherRuns(db, {
+      projectId: run.projectId,
+      fileId: run.fileId,
+      runId: run.id,
+      targetLang: run.targetLang,
+    }),
+  ])
   let cursor = run.spanCursor
   if (!cursor) {
     // First wave: derive the segmentation, then rotate it so work starts where
@@ -655,12 +1050,14 @@ export async function runOneTick(deps: TickDeps): Promise<TickResult> {
   }
 
   if (cursor.nextIndex >= cursor.seeds.length) {
-    // Spans exhausted → parked (steering or resume can wake the run). Queued
-    // directions are deliberately NOT consumed here — they stay visible and
-    // apply when a span next exists (refresh, new cells, or re-run).
-    const t = await parkRun(db, runId)
+    // A paused final failure resumes into this edge. Preserve its actionable
+    // terminal state instead of relabelling it as idle; only clean exhaustion
+    // parks for future steering/new cells.
+    const t = run.failedSpans > 0
+      ? await failRun(db, runId, run.lastError ?? "One or more passages need attention.")
+      : await parkRun(db, runId)
     if (t.status === "ok") await notify(runStateFrame(t.run))
-    return { continueRun: false, status: t.status === "ok" ? "parked" : run.status }
+    return { continueRun: false, status: t.status === "ok" ? t.run.status : run.status }
   }
 
   // Spans WILL run this wave — the queued directions now take effect, so
@@ -681,12 +1078,15 @@ export async function runOneTick(deps: TickDeps): Promise<TickResult> {
     rules,
     pairs,
     layerAbove,
+    excludedCellIds,
     scope: {
       projectId: run.projectId,
       fileId: run.fileId,
       targetLang: run.targetLang,
       orderedCellIds: pairs.map((p) => p.cellId),
-      untranslatedCellIds: pairs.filter((p) => !p.target.trim()).map((p) => p.cellId),
+      untranslatedCellIds: pairs
+        .filter((p) => !p.target.trim() && !excludedCellIds.has(p.cellId))
+        .map((p) => p.cellId),
       fileKind: "",
     },
   }
@@ -731,7 +1131,6 @@ export async function runOneTick(deps: TickDeps): Promise<TickResult> {
     lastError,
     steeringCursor: new Date().toISOString(),
   })
-  if (after) await notify(runStateFrame(after))
 
   const lastReport = reports[reports.length - 1]
   const result = (continueRun: boolean, status: string): TickResult => ({
@@ -742,14 +1141,30 @@ export async function runOneTick(deps: TickDeps): Promise<TickResult> {
   })
 
   // Continue only while the run is STILL running (a pause/terminate landed
-  // mid-wave loses nothing — the next wave honours it) and spans remain.
-  const fresh = after ?? (await getRun(db, runId))
+  // mid-wave loses nothing). A pause needs acknowledgement at THIS edge:
+  // returning `pausing` would stop the loop and strand the run because the
+  // sweeper intentionally adopts only running/parked work.
+  let fresh = after ?? (await getRun(db, runId))
+  if (fresh?.status === "pausing") {
+    const paused = await confirmPause(db, runId)
+    if (paused.status === "ok") {
+      await notify(runStateFrame(paused.run))
+      return result(false, "paused")
+    }
+    // A hard terminate can win between the wave write and confirmation. Do
+    // not publish the stale pausing snapshot in that case.
+    fresh = await getRun(db, runId)
+    return result(false, fresh?.status ?? "not_found")
+  }
+  if (after) await notify(runStateFrame(after))
   if (fresh?.status === "running" && advanced.nextIndex >= advanced.seeds.length) {
-    // That was the last wave — park immediately so the run never idles as
-    // 'running' with an exhausted cursor.
-    const t = await parkRun(db, runId)
+    // Exhausted work with any failed passage is terminal/actionable, not
+    // "idle". Successful siblings and their proposals remain reviewable.
+    const t = fresh.failedSpans > 0
+      ? await failRun(db, runId, fresh.lastError ?? "One or more passages need attention.")
+      : await parkRun(db, runId)
     if (t.status === "ok") await notify(runStateFrame(t.run))
-    return result(false, "parked")
+    return result(false, t.status === "ok" ? t.run.status : fresh.status)
   }
   const more = fresh !== null && fresh.status === "running"
   return result(more, fresh?.status ?? "not_found")

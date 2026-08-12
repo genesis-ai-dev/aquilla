@@ -3,21 +3,46 @@
 This runbook implements the Cloudflare Builds section of the canonical
 [deployment environment matrix](../DEPLOYMENT-ENVIRONMENTS.md).
 
-Explicit operator commands own production and development deployments. Neither
-GitHub pushes nor Cloudflare Git integrations may automatically deploy live
-traffic. Pull requests may publish only a route-free preview version.
+Explicit operator commands own production and development traffic. Cloudflare
+Workers Builds is disconnected from every live Worker, and GitHub-hosted runners
+are not used during ordinary pull-request or push activity.
+`aquilla-web-preview` is the only Git-connected Worker; it is dedicated and
+route-free.
 
 ## Control-plane state
 
-The Git connections for `aquilla-web`, `aquilla-identity`, and
-`aquilla-sync-worker` are disconnected. `versification-tool` was already
-disconnected. The cutover did not delete or alter the existing Workers, versions,
-bindings, routes, or traffic allocations, and production verification passed
-after the change.
+Keep all six live Workers disconnected from Git:
 
-Do not reconnect a Git repository or add a dashboard deploy command. The former
-`deploy:workers-build` helper and Cloudflare-specific build script were removed
-with the connections so they cannot become a second deployment owner later.
+- production: `aquilla-web`, `aquilla-identity`, `aquilla-sync-worker`
+- development: `aquilla-web-development`, `aquilla-dev-identity`,
+  `aquilla-sync-worker-dev`
+
+Production and development builds and deployments are manual only. A repository
+push must not create a Worker version, change dashboard-level displayed
+bindings, or promote traffic in either environment.
+
+The route-free Workers Builds helpers fail closed unless Cloudflare provides
+`WORKERS_CI`, `WORKERS_CI_BRANCH`, and `WORKERS_CI_COMMIT_SHA`. The preview
+uploader always names `aquilla-web-preview`, always builds the SPA against
+development APIs, and never invokes a traffic promotion or trigger deployment.
+
+The identity and sync build wrappers install their package-local lockfiles only
+after Cloudflare has installed the root lockfile. This two-level install is
+required: their Wrangler entrypoints live in the package directories, while
+their TypeScript graphs include shared root modules.
+
+`versification-tool` remains disconnected. It has no deployable Wrangler
+application and must not be given a placeholder build command.
+
+## Workers Builds branch policy
+
+| Connection | Branch | Binding profile | Operation | Changes live traffic |
+| --- | --- | --- | --- | --- |
+| All live Workers | Any | N/A | no automatic build; Git disconnected | No |
+| `aquilla-web-preview` | Any repository branch | development API hosts | lint, tests, build, route-free preview upload | No |
+
+Both environments and their routes remain controlled by the explicit operator
+commands below.
 
 ## Explicit deployments
 
@@ -31,8 +56,12 @@ current remote branch:
 
 The branch guard fails before Wrangler if the checkout is dirty, on the wrong
 branch, or not at the current `origin/<branch>` commit. The deployer uploads one
-version, validates its exact bindings, promotes that exact ID to 100%, reapplies
-routes/triggers, verifies traffic, and then checks public health.
+version and validates its exact bindings. For web, it then crawls the complete
+SPA JavaScript graph and underlying static marketing documents on that version's
+immutable `preview_url`; a missing chunk, document, or HTML fallback aborts
+before traffic changes. Only a verified version is
+promoted to 100%, after which the deployer reapplies routes/triggers, verifies
+traffic, and checks public health.
 
 Before any SPA version upload, `public/.assetsignore` tells Wrangler to exclude
 workstation metadata such as `.DS_Store`, AppleDouble files, `Thumbs.db`, and
@@ -56,35 +85,46 @@ separately in Cloudflare. Any retained Neon branch or R2 data is not deployable
 application infrastructure and requires its own backup/retention decision before
 deletion.
 
-Web pull-request previews continue through GitHub Actions on the route-free
-`aquilla-web-preview` Worker when hosted runners are available.
+`.github/workflows/ci.yml` and `.github/workflows/deploy-workers.yml` are retained
+as explicit `workflow_dispatch` fallbacks. Neither has a `pull_request` or `push`
+trigger. Scheduled Neon/content workflows and tag-triggered Tauri releases are
+separate operational workloads and are not silently reassigned to Workers Builds.
 
-## Pull-request web previews
+## Pull-request validation
 
-Every non-draft web pull request uploads the current commit to the route-free
-`aquilla-web-preview` Worker with the sanitized alias `pr-<number>`. Draft and
-documentation-only pull requests remain excluded. The alias is refreshed on
-every supported pull-request update; no commit-message tag is required.
+Connect only `aquilla-web-preview` to `genesis-ai-dev/aquilla`. Configure:
 
-`scripts/cloudflare-pr-preview.mjs` reads Wrangler's structured NDJSON output
-and accepts only a `preview_alias_url` for the expected alias and Worker name.
-It does not scrape a display log or hard-code the account's Workers subdomain.
-If the preview Worker is missing, the helper may bootstrap only the `preview`
-Wrangler profile, which explicitly enables preview URLs and declares no custom
-routes, then retry the version upload.
+- build command: `pnpm run build:workers-build`
+- deploy command: `pnpm run deploy:workers-build`
+- root directory: `/`
+- non-production branch builds: enabled
 
-Before the URL is posted to the pull request, the live verifier loads `/app`
-through that exact preview origin, crawls the deployed JavaScript graph, and
-requires the development identity, sync, and chat targets. This preview process
-does not promote a version or change production or development route traffic.
-Preview bundles do use development services and data.
+The build runs root lint/unit/IDML/schema/build gates, both identity and sync
+typecheck/test suites, and the agent-worker typecheck/tests. Independent lanes
+run concurrently in three bounded-memory phases so the complete gate fits both
+Cloudflare's build-duration and memory limits; any failed phase prevents later
+phases and fails the whole build. The long root and sync Vitest suites run in
+separate phases so they cannot starve each other's asynchronous tests. The IDML
+browser-conformance lane uses its pinned, serverless Chromium binary without
+requiring root access. The deploy step uploads only a route-free
+`aquilla-web-preview` version. Slash-named branches are normalized and hashed
+into stable lowercase aliases. No preview command can name `aquilla-web`,
+`aquilla-web-development`, either identity Worker, or either sync Worker.
+
+GitHub's removed Actions contexts (`lint`, `typecheck`, `unit`, and `build`)
+must not remain required. After the first successful Workers Build establishes
+the exact GitHub check name, require that Cloudflare preview check on `dev`; add
+the same requirement to `main` only when this configuration reaches `main`.
 
 ## Exact-version deployment and verification
 
 The repository deployer writes Wrangler's structured NDJSON output to a temporary
-file and extracts the exact uploaded version ID. It validates that version's
-bindings before production promotion, promotes only that ID to 100%, applies the
-profile's routes and cron triggers, and then requires the same ID at 100% traffic.
+file and extracts the exact uploaded version ID and immutable preview URL. It
+validates that version's bindings before production promotion. Web deployments
+also verify the immutable preview's SPA and static assets before any
+`wrangler versions deploy` or trigger command can run. It then promotes only
+that ID to 100%, applies the profile's routes and cron triggers, and requires the
+same ID at 100% traffic.
 Run the read-only production checks independently with:
 
 ```sh
@@ -104,10 +144,31 @@ deployed SPA bundle's environment targets. A `503` with an
 environment-mismatch message means the custom hostname and bindings do not
 match.
 
-Identity versions also carry a version-metadata binding. Scheduled work requires
-the version tag's actual Worker namespace to agree with the environment's
-`DEPLOYMENT_WORKER_NAME` before it opens Hyperdrive. This prevents a development
-preview manually promoted under the production Worker from running the cron.
+SPA bundle verification follows only executable ESM imports and Vite's
+generated preload table. It deduplicates cycles before scheduling requests and
+rejects HTML returned for a JavaScript URL, so package-internal `.js` filenames
+and single-page-application fallbacks cannot inflate or poison the crawl. A
+high emergency asset ceiling remains configurable for deterministic tests and
+still fails closed if a genuinely unbounded import graph is encountered.
+The live crawl bypasses stale edge-cache entries and gives a newly promoted
+Worker and its asset manifest a bounded three-minute convergence window. It
+retries only the lagging SPA document or JavaScript asset rather than restarting
+the complete graph crawl. Persistent HTML fallbacks still fail the deployment;
+transient route propagation no longer turns a successful upload into a false
+terminal error. Immutable preview verification does not retry an HTML fallback:
+an immutable version cannot acquire a chunk that was absent from its uploaded
+asset manifest, so the deploy fails closed before production traffic changes.
+Version-preview hosts do not consistently exercise the custom-domain Worker's
+marketing-route rewrites, so this pre-promotion gate checks the immutable
+underlying documents (`/case-study` and `/case-study-biblica`). The
+post-promotion public check remains responsible for proving that
+`/case-studies/come-and-see` and `/case-studies/biblica` route to those documents.
+
+Identity and sync versions also carry a version-metadata binding. First-party
+requests require the version tag's actual Worker namespace to agree with the
+environment's `DEPLOYMENT_WORKER_NAME` before opening Hyperdrive. Identity's
+scheduled work enforces the same contract before its cron opens Neon. This
+prevents a version from another Worker namespace from reaching either database.
 
 ## Workers Builds without a Wrangler application
 

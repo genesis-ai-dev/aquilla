@@ -2,6 +2,7 @@ import { useState } from "react"
 import { MoreHorizontal, type LucideIcon } from "lucide-react"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 export interface ProjectNavItem {
   id: string
@@ -41,6 +42,7 @@ function NavRow({ item, onAfterClick }: { item: ProjectNavItem; onAfterClick?: (
 }
 
 export function SidebarProjectSection({ items }: Props) {
+  const t = useT()
   const [moreOpen, setMoreOpen] = useState(false)
   const pinned = items.filter((i) => i.pinned)
   const overflow = items.filter((i) => !i.pinned)
@@ -61,7 +63,7 @@ export function SidebarProjectSection({ items }: Props) {
                 <button
                   // Distinct accessible name: the workspace header already has a
                   // button named exactly "More" (OverflowMenu).
-                  aria-label="More project options"
+                  aria-label={t("nav.sidebarSection.moreOptions")}
                   className={cn(
                     "flex h-7 w-full items-center gap-2 rounded-lg px-2 text-[13px] transition-colors",
                     "hover:bg-accent hover:text-foreground focus-visible:bg-accent focus-visible:outline-none",
@@ -69,7 +71,7 @@ export function SidebarProjectSection({ items }: Props) {
                   )}
                 >
                   <MoreHorizontal className="h-3.5 w-3.5 shrink-0" />
-                  <span className="flex-1 truncate text-left">More</span>
+                  <span className="flex-1 truncate text-left">{t("nav.sidebarSection.more")}</span>
                   {overflowBadge > 0 && (
                     <span className="rounded-md px-1.5 text-[10px] tabular-nums text-primary">
                       {overflowBadge}

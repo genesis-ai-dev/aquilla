@@ -102,3 +102,6 @@ ds-bundle/
 
 # Local QA session logs (findings/decisions scratch) — deliberately untracked.
 /docs/qa/
+
+# AQU-832 — generated i18n translator hand-off bundle (pnpm i18n:export)
+i18n-export/

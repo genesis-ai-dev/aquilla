@@ -54,6 +54,9 @@ interface FileSummary {
   /** Timeline editor: core video URL for the preview, read from meta. Null ⇒
    *  no video linked. */
   coreMediaUrl: string | null
+  /** The file's audio timing mode (file.timing.set), read from meta. Null ⇒
+   *  the project-level default applies. */
+  timingMode: 'dubbing' | 'audioFirst' | null
   cellCount: number
   approvedCount: number
   /** Target cells with content (TRIM(value) != ''): the "translated" count. */
@@ -76,6 +79,7 @@ function mapRow(row: FileRowRaw): FileSummary {
     targetTextDirection?: string
     orderedBy?: string
     coreMediaUrl?: string
+    timingMode?: string
   } = {}
   try {
     meta = row.meta ? JSON.parse(row.meta) : {}
@@ -96,6 +100,7 @@ function mapRow(row: FileRowRaw): FileSummary {
     targetTextDirection: normalizeTextDirection(meta.target_text_direction ?? meta.targetTextDirection),
     orderedBy: meta.orderedBy ?? null,
     coreMediaUrl: meta.coreMediaUrl ?? null,
+    timingMode: meta.timingMode === 'dubbing' || meta.timingMode === 'audioFirst' ? meta.timingMode : null,
     cellCount: row.cell_count,
     approvedCount: row.approved_count,
     filledCount: row.filled_count,

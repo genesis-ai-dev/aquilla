@@ -85,18 +85,21 @@ path *is* a bearer token (D5) — relying on browser defaults not to forward the
 path in a `Referer`, and left an app full of one-click irreversible actions
 (archive project, remove member, apply agent changeset) framable by anyone.
 
-**Fixed:** `worker/security-headers.ts` applies `nosniff`,
-`Referrer-Policy: strict-origin-when-cross-origin`, `X-Frame-Options: DENY` +
-`frame-ancestors 'none'`, a `Permissions-Policy` that keeps the microphone (the
-app records cell audio) and denies camera/geolocation/payment, and HSTS on
-non-local HTTPS origins.
+**Fixed — superseded at merge by the parallel OPSEC review already on `dev`**
+(docs/OPSEC-REVIEW-2026-08-10.md, OPS-1/OPS-7): this branch's original
+`worker/security-headers.ts` was replaced by dev's fuller implementation, which
+applies `nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`,
+`X-Frame-Options: SAMEORIGIN` + an *enforced* CSP subset (`object-src 'none'`,
+`base-uri`, `frame-ancestors 'self'`, `form-action`), a full CSP in
+report-only, `Permissions-Policy` (microphone kept), and HSTS. Crucially, dev's
+version corrected a coverage assumption this section originally made: the
+Worker serves `/` and nothing else — `not_found_handling` makes the asset
+router answer deep links with index.html itself — so `public/_headers` carries
+the majority of the coverage, with a parity test binding the two header sets.
 
-**Still open:** a full `script-src` CSP. `run_worker_first = ["/"]` means these
-headers land on the HTML surface but not on hashed asset responses, and a real
-script policy needs a nonce threaded through the prerender step
-(`scripts/prerender-marketing.ts`) to survive deploy. The Tauri policy is the
-right starting shape. Until that lands, SEC-6's core point — one XSS yields a
-30-day token plus the user's vendor API keys — stands.
+**Still open:** promoting the report-only CSP directives (script-src etc.) into
+the enforced set as each comes back clean. Until then, SEC-6's core point — one
+XSS yields a 30-day token plus the user's vendor API keys — stands.
 
 ### V3 — Invite tokens written to the browser console — **FIXED IN THIS CHANGE** [FACT]
 
@@ -155,6 +158,15 @@ nothing, including for the credential scan added in V5.
 **Not fixed here** — it is an Actions/org-level issue, not a code change. It is
 the first thing to resolve, because it gates whether anything else in §5 is
 actually enforced.
+
+**Update (2026-08-12, dev merge): resolved by relocation, not repair.** AQU-564
+retired Actions as the pull-request gate entirely: `ci.yml` now has no
+`pull_request`/`push` trigger (dispatch-only fallback), and PR validation runs
+in Cloudflare Workers Builds via `scripts/cloudflare-ci-checks.mjs`. The
+credential scan from V5 accordingly runs in that script's `lint` lane — the
+enforced path — with the `ci.yml` lint step retained as a mirror for dispatch
+runs. "CI is green" is meaningful again, provided the Workers Builds check is
+required on the target branch.
 
 ### V5 — No credential scanning in the toolchain — **FIXED IN THIS CHANGE** [FACT]
 
@@ -238,16 +250,17 @@ Likelihood is over roughly the next year, assuming current practices.
 | V8 | 30-day tokens, partial revocation | Medium | High — one XSS ⇒ a month of access | **Medium-High** | Partial |
 | V2 | No web security headers | Medium | Medium — clickjacking, referrer leak of D5 | **Medium** | Fixed (CSP still open) |
 | V6 | Dependency CVEs | Medium | Low-Medium — DoS, build-time paths | **Medium** | Tracked |
-| V4a | CI producing no meaningful result | **Certain** (currently true) | High — every automated control below is unenforced | **High** | Open |
+| V4a | CI producing no meaningful result | Was certain; gate since moved | High — every automated control below is unenforced | **High** | Resolved (AQU-564 — PR gate moved to Workers Builds) |
 | V4 | Tests not running / silently red | **Certain** (already happened, twice) | Medium — silent routing and deploy-verifier regressions | **Medium** | Fixed |
 | V3 | Invite token in console | Low | Medium — one project's membership (D5) | **Low-Medium** | Fixed |
 | V9 | Tokens in URL paths | Medium | Medium — scoped, expiring, revocable | **Low-Medium** | Mitigated |
 
 Note the shape of this table: the highest-risk rows (V4a, V7, V5) are *not*
-sophisticated attacks. One is broken automation, one a documented convenience
+sophisticated attacks. One was broken automation, one a documented convenience
 trade-off, one an absent routine check. That is the normal distribution of OPSEC
-failure — and V4a sitting at the top is the point: a control that doesn't run is
-worth exactly as much as one that was never written.
+failure — and V4a having sat at the top is the point: a control that doesn't
+run is worth exactly as much as one that was never written. (V4a has since been
+resolved by AQU-564 — see its section above.)
 
 ---
 
@@ -260,25 +273,29 @@ worth exactly as much as one that was never written.
 | Fail closed on the sync auth bypass in deployed environments | `sync-worker/src/environment-guard.ts`, `index.ts`, `project-do.ts` |
 | Baseline HTTP security headers on the web surface | `worker/security-headers.ts` |
 | Invite tokens fingerprinted, never logged whole | `src/lib/sync/invites.ts` |
-| Credential scanning as a required CI check | `scripts/secret-scan.ts`, `.github/workflows/ci.yml` (`lint`) |
-| SPA Worker suite actually runs | `pnpm run test:worker`, `web-worker-tests` job |
+| Credential scanning as a required CI check | `scripts/secret-scan.ts`; lint lane of `scripts/cloudflare-ci-checks.mjs` (the enforced PR gate), mirrored in `.github/workflows/ci.yml` (`lint`) |
+| SPA Worker suite actually runs | `pnpm run test:worker` — spa lane of `scripts/cloudflare-ci-checks.mjs`, mirrored in the ci.yml `unit` job |
 | auth-worker `hono` floor raised above the SEC-7 advisory | `auth-worker/package.json` |
 
 Every one has a test. A control without a test is V4 waiting to happen again.
 
 ### Recommended next, in order
 
-0. **Get CI actually running again (V4a).** Everything in the table above is
-   delivered by a CI check. Until a failing check means "this change is bad"
-   rather than "Actions didn't start", none of it is enforced.
+0. ~~**Get CI actually running again (V4a).**~~ Done via AQU-564: the PR gate
+   moved off Actions to Cloudflare Workers Builds
+   (`scripts/cloudflare-ci-checks.mjs`); every control above now rides an
+   enforced lane there. Residual: confirm the Workers Builds check is marked
+   required on `dev`/`main` branch protection.
 1. **Split `SECRET_KEY` / `SYNC_SECRET_KEY` per environment (V7).** Highest
    leverage remaining. Replace cross-env token portability with a dev-only test
    fixture — the testing convenience it buys is not worth prod credentials
    living in the dev environment.
-2. **Ship a web CSP (V2 remainder).** Start from the Tauri policy in
-   `src-tauri/tauri.conf.json`; the work is nonce-threading through
-   `scripts/prerender-marketing.ts`, plus allowing PostHog and the R2/HF model
-   hosts in `connect-src`. Report-only first.
+2. **Promote the web CSP to enforced (V2 remainder).** Dev's parallel review
+   already ships the full policy in report-only alongside an enforced subset
+   (`worker/security-headers.ts` + `public/_headers`); the remaining work is
+   watching for violations and promoting directives into `ENFORCED_CSP` /
+   `_headers` one at a time, then narrowing `connect-src` from `https:` to the
+   real host list.
 3. **Shorten the access-token TTL (V8).** 30 days is a deliberate choice made
    before revocation existed; now that `jti` denylisting works, a shorter TTL
    plus refresh is affordable.
@@ -357,9 +374,9 @@ Reviewed against what the June audit and the 2026-08-03 pen test put in place.
 
 | Control | Problem | Action |
 |---|---|---|
-| `worker/` test suite | Existed, never ran, went red unnoticed (V4) | Fixed — CI job added |
+| `worker/` test suite | Existed, never ran, went red unnoticed (V4) | Fixed — spa lane of the Workers Builds gate |
 | Root `unit` CI job | Was red on `dev` via a self-neutralising mock (V4) | Fixed |
-| **CI as a whole** | Jobs fail in ~2s before running anything, so no check result is meaningful (V4a) | **Open — resolve first; every §5 control depends on it** |
+| **CI as a whole** | Jobs fail in ~2s before running anything, so no check result is meaningful (V4a) | Resolved — AQU-564 moved the PR gate to Workers Builds; Actions is dispatch-only fallback |
 | `wrangler.toml` comments as the only guard on `ALLOW_UNAUTHENTICATED` | A comment is not a control (V1) | Fixed — enforced in code |
 | PostHog input masking | Doesn't cover console output (V3) | Fixed at the source; keep console capture off in the PostHog project |
 | Environment separation | Explicitly defeated for signing keys (V7) | Open — recommendation #1 |

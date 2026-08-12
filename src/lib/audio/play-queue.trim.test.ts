@@ -65,4 +65,21 @@ describe("trimWindowForCell — attachment provenance (SUB-29)", () => {
       })),
     ).toBeNull()
   })
+
+  // Round 5: the master element plays the SOURCE clip even when a take is
+  // selected (the take moved to the target overlay) — so the window applies
+  // whenever the source clip attachment is still there.
+  it("take selected but source clip present → still windowed (round 5)", () => {
+    expect(
+      trimWindowForCell(baseCell({
+        id: "c1",
+        medium: "media", startTime: 2.9, endTime: 5,
+        selectedAudioId: "audio-c1-1700000000-abcdefgh.webm",
+        attachments: {
+          "audio-c1-1700000000-abcdefgh.webm": { url: "frontier-audio://take", type: "audio" },
+          "audio-f1-1690000000-source12.mp3": { url: "frontier-audio://src", type: "audio" },
+        },
+      })),
+    ).toEqual({ start: 2.9, end: 5 })
+  })
 })

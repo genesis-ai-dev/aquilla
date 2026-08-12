@@ -18,7 +18,7 @@
  */
 
 import { DurableObject } from "cloudflare:workers"
-import { verifyTokenForProject } from "./auth"
+import { shouldBeReadOnly, verifyTokenForProject } from "./auth"
 import { isDeployedEnvironment } from "./environment-guard"
 import {
   applyDisconnect,
@@ -60,6 +60,14 @@ interface ConnectionState {
   userId: string
   /** Numeric user id from verified token claims; null in ALLOW_UNAUTHENTICATED dev. */
   numericUserId: number | null
+  /**
+   * Role level from verified token claims; null in ALLOW_UNAUTHENTICATED dev
+   * (treated permissively, matching shouldBeReadOnly's null-role default).
+   * [Pen test 2026-08-10] previously unused — focus.claim/renew accepted
+   * any authenticated connection regardless of role, letting a Viewer or
+   * Commenter hold every cell's edit lock and lock out Contributors.
+   */
+  role: number | null
 }
 
 interface DOEnv {
@@ -279,6 +287,7 @@ export class ProjectSync extends DurableObject<DOEnv> {
       this.env.ALLOW_UNAUTHENTICATED === "true" && !isDeployedEnvironment(this.env)
     let userId: string
     let numericUserId: number | null = null
+    let role: number | null = null
     if (!bypassAuth) {
       const token = url.searchParams.get("token")
       const auth = await verifyTokenForProject(token, projectId, this.env.SYNC_SECRET_KEY)
@@ -297,6 +306,7 @@ export class ProjectSync extends DurableObject<DOEnv> {
       }
       userId = auth.claims.username ?? `user:${auth.claims.userId}`
       numericUserId = auth.claims.userId
+      role = auth.claims.role
     } else {
       userId = url.searchParams.get("user") ?? "anon"
     }
@@ -307,7 +317,7 @@ export class ProjectSync extends DurableObject<DOEnv> {
 
     server.accept()
 
-    const conn: ConnectionState = { ws: server, userId, numericUserId }
+    const conn: ConnectionState = { ws: server, userId, numericUserId, role }
     this.connections.set(server, conn)
     this.presence.set(userId, { userId, ts: Date.now() })
     this.startLeaseSweep()
@@ -363,6 +373,12 @@ export class ProjectSync extends DurableObject<DOEnv> {
     if (!msg) return
     const now = Date.now()
     if (msg.t === "focus.claim") {
+      // [Pen test 2026-08-10] a read-only role (viewer/commenter/reviewer)
+      // can observe and render the editor but must not be able to hold an
+      // edit lock — granting one anyway lets them block every contributor
+      // out of a cell indefinitely. Mirrors the write-drop policy already
+      // applied to actual content writes (see shouldBeReadOnly callers).
+      if (shouldBeReadOnly(conn.role)) return
       const result = applyFocusClaim(this.locks, this.presence, conn.userId, msg, now)
       this.locks = result.locks
       this.presence = result.presence
@@ -371,6 +387,7 @@ export class ProjectSync extends DurableObject<DOEnv> {
       return
     }
     if (msg.t === "focus.renew") {
+      if (shouldBeReadOnly(conn.role)) return
       const result = applyFocusRenew(this.locks, this.presence, conn.userId, msg, now)
       this.locks = result.locks
       return

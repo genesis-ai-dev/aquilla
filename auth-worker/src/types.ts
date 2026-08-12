@@ -177,6 +177,16 @@ export interface Env {
   /** Per-run OpenRouter cost cap in whole cents. Default 500 (frames.ts). The
    *  run halts gracefully with a budget.exhausted frame at this ceiling. */
   AGENT_RUN_COST_CAP_CENTS?: string
+  /** Spans a project-wide autopilot start may drive at once. Lower it for a
+   *  self-hosted upstream with few slots (see routes/contextual.ts). */
+  CONTEXTUAL_MAX_CONCURRENCY?: string
+  /** Hard cap on autopilot model requests in flight at once. Unset = uncapped.
+   *  Set to the upstream's slot count when it has a fixed one; span concurrency
+   *  bursts ~3x wider than it looks (verifier fan-out). */
+  CONTEXTUAL_MAX_INFLIGHT?: string
+  /** "1" enables the per-call cost ledger (lib/cost-meter.ts). Off otherwise —
+   *  no table, no writes. See docs/COST-METERING.md. */
+  COST_METER?: string
   /** R2 bucket `aquilla-snapshots` (same bucket sync-worker + agent-worker
    *  bind as SNAPSHOTS). The agent-artifacts upload route (routes/agent-artifacts.ts)
    *  writes attached files here so the sandbox's fetch-artifact can read them

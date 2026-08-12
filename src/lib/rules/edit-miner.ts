@@ -23,6 +23,13 @@
  *      uncommitted local edit sitting in the outbox) — these are the user's most
  *      recent corrections.
  *   3. VALIDATED-PAIR pass: the existing `suggestRulesFromPairs` path (untouched).
+ *   4. HUMAN-AUTHORED pass (AQU-820): any cell whose current target was written
+ *      or post-edited by a human — i.e. `aiDrafted !== true` — regardless of
+ *      validation state. Tiers 1–3 all require a cell to be an exact duplicate
+ *      of another, sitting in the outbox, or explicitly validated, so a project
+ *      translated by hand and imported (no AI pre-drafts, no per-cell
+ *      validation) mined to nothing at all. This pass is the floor that makes
+ *      "Suggest from edits" work on human-only corpora.
  *
  * SWARM-TODO(event-layer): To detect ACTUAL prior-value corrections (e.g. "user
  * changed X→Y in cell ABC and also X→Y in cell DEF") the mining step needs:
@@ -34,8 +41,8 @@
  */
 
 export interface EditCandidate {
-  /** "repeated" | "recent" | "validated-pair" */
-  kind: "repeated" | "recent" | "validated-pair"
+  /** "repeated" | "recent" | "validated-pair" | "human-authored" */
+  kind: "repeated" | "recent" | "validated-pair" | "human-authored"
   /** Human-readable evidence string surfaced in RuleImportReview */
   evidence: string
   /** Rank score — higher = more important */
@@ -61,6 +68,13 @@ export interface MinerCell {
   translated: string
   status: "empty" | "unvalidated" | "validated"
   hasPendingEdit?: boolean
+  /**
+   * AQU-820: true only while the current target head is an *untouched* machine
+   * draft (see `CellRow.aiDrafted`). Absent on legacy/cached rows, which
+   * predate AI drafting — so `!== true` is the human-authored test, never
+   * `=== false`.
+   */
+  aiDrafted?: boolean
   // SUB-28: media sections mine from their transcript, not the filename.
   medium?: import("@/lib/sync/cells-read-types").SegmentMedium | null
   transcription?: string
@@ -172,9 +186,55 @@ export function mineRecentEdits(cells: MinerCell[]): EditCandidate[] {
 }
 
 /**
+ * AQU-820: mine HUMAN-AUTHORED candidates — cells whose current target text was
+ * written or post-edited by a human, whether or not an AI draft came first and
+ * whether or not the cell has been explicitly validated.
+ *
+ * `aiDrafted` is true only while the target head is an untouched machine draft,
+ * so `aiDrafted !== true` selects exactly "a human wrote this" (and keeps
+ * legacy rows, where the flag is absent, in scope).
+ *
+ * This is the lowest-signal tier by design: it is the fallback that gives the
+ * LLM something real to work with on a corpus translated entirely by hand.
+ * Higher tiers dedupe against it in `combineAndRankCandidates`.
+ *
+ * @param limit - max candidates to emit (default 40). The prompt builder only
+ *   consumes the top 20, and a completed New Testament is thousands of cells.
+ */
+export function mineHumanAuthoredEdits(
+  cells: MinerCell[],
+  limit = 40,
+): EditCandidate[] {
+  const human: EditCandidate[] = []
+  for (const cell of cells) {
+    if (human.length >= limit) break
+    if (cell.aiDrafted === true) continue
+    if (cell.status === "empty") continue
+    const source = src(cell).trim()
+    const target = cell.translated.trim()
+    if (!source || !target) continue
+    human.push({
+      kind: "human-authored",
+      evidence:
+        cell.status === "validated"
+          ? "Human-authored translation (validated)"
+          : "Human-authored translation",
+      // Below validated-pair (100 - i) so explicitly-validated pairs still lead
+      // whenever a project has them.
+      score: 50 - human.length,
+      sourceSample: source,
+      targetSample: target,
+      key: candidateKey(source, cell.translated),
+    })
+  }
+  return human
+}
+
+/**
  * Combine, deduplicate, and rank candidates from all sources.
  *
- * Order: repeated (score ≥1000) > recent (score ≥500) > validated-pair (score <500)
+ * Order: repeated (score ≥1000) > recent (score ≥500) > validated-pair (score
+ * ≤100) > human-authored (score ≤50)
  *
  * Deduplication: if a candidate key appears in a higher-priority tier it is
  * dropped from lower tiers so we don't show the same pattern twice.
@@ -183,11 +243,12 @@ export function combineAndRankCandidates(
   repeated: EditCandidate[],
   recent: EditCandidate[],
   validatedPair: EditCandidate[],
+  humanAuthored: EditCandidate[] = [],
 ): EditCandidate[] {
   const seen = new Set<string>()
   const result: EditCandidate[] = []
 
-  for (const candidate of [...repeated, ...recent, ...validatedPair]) {
+  for (const candidate of [...repeated, ...recent, ...validatedPair, ...humanAuthored]) {
     if (seen.has(candidate.key)) continue
     seen.add(candidate.key)
     result.push(candidate)
@@ -226,5 +287,9 @@ export function mineCandidates(
   const repeated = mineRepeatedEdits(cells)
   const recent = mineRecentEdits(cells)
   const pairCandidates = validatedPairsToCandidate(validatedPairs)
-  return combineAndRankCandidates(repeated, recent, pairCandidates)
+  // AQU-820: human-authored targets are mined unconditionally; the dedupe in
+  // combineAndRankCandidates drops any that a higher tier already covers, so
+  // this only *adds* material on projects the other tiers came up empty on.
+  const humanAuthored = mineHumanAuthoredEdits(cells)
+  return combineAndRankCandidates(repeated, recent, pairCandidates, humanAuthored)
 }

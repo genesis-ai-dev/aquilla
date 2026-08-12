@@ -1,6 +1,6 @@
 import { v4 as uuid } from "uuid"
-import type { TranslatableString } from "./types"
-import type { CellData } from "@/hooks/useCells"
+import type { TranslatableString } from "./core-types"
+import type { ExportCellFields } from "./core-types"
 
 /** Java .properties importer/exporter.
  *
@@ -142,8 +142,8 @@ function encodeValue(value: string): string {
  *  preserved. Cells match by `group === key`, falling back to positional
  *  order over the file's key lines; a missing/empty translation falls back
  *  to the original value. */
-export function exportProperties(originalContent: string, cells: CellData[]): Blob {
-  const byGroup = new Map<string, CellData>()
+export function exportProperties(originalContent: string, cells: ExportCellFields[]): Blob {
+  const byGroup = new Map<string, ExportCellFields>()
   for (const cell of cells) {
     if (cell.group && !byGroup.has(cell.group)) byGroup.set(cell.group, cell)
   }

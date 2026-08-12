@@ -99,7 +99,7 @@ export class AgentPage {
   async waitForStagedChangeset(): Promise<{ approvalUrl: string; card: Locator }> {
     const card = this.page.locator('[data-frame-type="changeset.staged"]').first()
     await expect(card).toBeVisible({ timeout: 30_000 })
-    const link = card.getByRole("link", { name: /Review|Approve/i })
+    const link = card.getByRole("link", { name: /Review|Approve|full details/i })
     const href = await link.getAttribute("href")
     if (!href) throw new Error("staged-changeset card has no approval link href")
     return { approvalUrl: href, card }

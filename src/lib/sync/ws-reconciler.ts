@@ -76,6 +76,11 @@ export type ProjectWsServerMessage =
       cell?: string
       /** Actor username — populated by post-2c-γ sync workers. */
       by?: string
+      /** Set when the write arrived via the external Agent API channel
+       *  (server-verified from the token-bridge minted JWT). Such writes made
+       *  no local outbox write, so they are never own-write echoes — even
+       *  when `by` matches this client's identity. */
+      via?: "external"
     }
   | { t: "event.stale"; id: string; reason: string }
   | { t: "presence"; users: PresenceUser[] }
@@ -114,8 +119,19 @@ export type ProjectWsServerMessage =
  * attribute the write, so we report `false` (treat as remote) — older servers
  * keep their pre-existing "always refetch" behavior rather than risk dropping a
  * real remote change.
+ *
+ * `via: "external"` marks an Agent API commit (sync-worker external/commit.ts
+ * routes agent changesets through /events with a token minted for the
+ * credential OWNER, so `by` is the owner's username). If that owner has the
+ * project open, no outbox write happened in this client — there is no prior
+ * targeted refetch to dedupe against, and suppressing the echo would hide the
+ * agent's committed translation until a manual reload. Always remote.
  */
-export function isOwnWriteEcho(msg: { by?: string }, currentUserId: string): boolean {
+export function isOwnWriteEcho(
+  msg: { by?: string; via?: string },
+  currentUserId: string,
+): boolean {
+  if (msg.via === "external") return false
   return !!msg.by && msg.by === currentUserId
 }
 

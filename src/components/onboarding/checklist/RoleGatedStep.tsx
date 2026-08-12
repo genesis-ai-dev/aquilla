@@ -64,7 +64,10 @@ export function RoleGatedStep({
 
   // AQU-623 class of bug: the plural role noun ("Maintainers") comes from the
   // catalog's plural() form, never from concatenating "s" onto the singular.
-  const tooltip = `${actionLabel} is available to ${resolveRoleName(t, requiredRole, { plural: true })} and above.`
+  const tooltip = t("onboarding.checklist.roleGated.tooltip", {
+    action: actionLabel,
+    role: resolveRoleName(t, requiredRole, { plural: true }),
+  })
 
   return (
     <AppTooltip content={tooltip}>

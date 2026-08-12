@@ -10,10 +10,11 @@ import { Spinner } from "@/components/ui/spinner"
 import { createServerInvite } from "@/lib/sync/invites"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
-import { ROLE } from "@/lib/frontier/roles"
+import { ROLE, resolveRoleName } from "@/lib/frontier/roles"
 import { isFieldInvalid } from "@/lib/forms/field-state"
 import { requiredString } from "@/lib/forms/schemas"
 import { useSubmitError } from "@/lib/forms/submit-error"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 const inviteSchema = z.object({
   username: requiredString("Username"),
@@ -39,6 +40,7 @@ interface InviteStepProps {
  * actually work for the joiner.
  */
 export function InviteStep({ projectId, onSharesChanged }: InviteStepProps) {
+  const t = useT()
   const { session } = useFrontierSession()
   const { add, error: memberError } = useProjectMembers(projectId)
   const { submitError, setSubmitError, clearSubmitError } = useSubmitError()
@@ -57,21 +59,21 @@ export function InviteStep({ projectId, onSharesChanged }: InviteStepProps) {
       clearSubmitError()
       setAddedUsername(null)
       if (!session?.jwt) {
-        setSubmitError("Sign in to invite by username.")
+        setSubmitError(t("onboarding.checklist.invite.signInRequired"))
         return
       }
       const trimmed = value.username.trim()
       try {
         const member = await add(trimmed, ROLE.CONTRIBUTOR)
         if (!member) {
-          setSubmitError(`No Aquilla user named "${trimmed}".`)
+          setSubmitError(t("onboarding.checklist.invite.noSuchUser", { username: trimmed }))
         } else {
           setAddedUsername(member.username)
           form.reset()
           onSharesChanged()
         }
       } catch (err) {
-        setSubmitError(err instanceof Error ? err.message : "Couldn't add member.")
+        setSubmitError(err instanceof Error ? err.message : t("onboarding.checklist.invite.addFailed"))
       }
     },
   })
@@ -79,14 +81,14 @@ export function InviteStep({ projectId, onSharesChanged }: InviteStepProps) {
   async function handleCreateLink() {
     setLinkError(null)
     if (!session?.jwt) {
-      setLinkError("Sign in to create an invite link.")
+      setLinkError(t("onboarding.checklist.invite.linkSignInRequired"))
       return
     }
     setLinkBusy(true)
     try {
       const serverInvite = await createServerInvite(session.jwt, projectId, ROLE.CONTRIBUTOR)
       if (!serverInvite) {
-        setLinkError("Couldn't create invite. Try again, or check your permission on this project.")
+        setLinkError(t("onboarding.checklist.invite.linkCreateFailed"))
         return
       }
       setIssuedUrl(`${window.location.origin}/join/${serverInvite.token}`)
@@ -105,9 +107,9 @@ export function InviteStep({ projectId, onSharesChanged }: InviteStepProps) {
   return (
     <div className="flex flex-col gap-4">
       <p className="text-xs text-muted-foreground">
-        Add teammates as <strong>contributors</strong> — they can read, comment,
-        and edit cells. You can change roles or upgrade them in Project →
-        Share.
+        {t("onboarding.checklist.invite.descriptionPrefix")}{" "}
+        <strong>{resolveRoleName(t, ROLE.CONTRIBUTOR, { plural: true })}</strong>{" "}
+        {t("onboarding.checklist.invite.descriptionSuffix")}
       </p>
 
       {/* Direct username invite */}
@@ -127,7 +129,7 @@ export function InviteStep({ projectId, onSharesChanged }: InviteStepProps) {
               return (
                 <Field data-invalid={invalid}>
                   <FieldLabel htmlFor="invite-user" className="text-xs">
-                    Invite by Aquilla username
+                    {t("onboarding.checklist.invite.usernameLabel")}
                   </FieldLabel>
                   <div className="flex gap-1.5">
                     <Input
@@ -136,7 +138,7 @@ export function InviteStep({ projectId, onSharesChanged }: InviteStepProps) {
                       value={field.state.value}
                       onBlur={field.handleBlur}
                       onChange={(e) => field.handleChange(e.target.value)}
-                      placeholder="e.g. mariad"
+                      placeholder={t("onboarding.checklist.invite.usernamePlaceholder")}
                       className="text-sm"
                       aria-invalid={invalid}
                       disabled={form.state.isSubmitting || !session?.jwt}
@@ -152,7 +154,7 @@ export function InviteStep({ projectId, onSharesChanged }: InviteStepProps) {
                       ) : (
                         <UserPlus className="me-1 h-3.5 w-3.5" />
                       )}
-                      Add
+                      {t("common.add")}
                     </Button>
                   </div>
                   {invalid && <FieldError errors={field.state.meta.errors} className="text-xs" />}
@@ -163,13 +165,14 @@ export function InviteStep({ projectId, onSharesChanged }: InviteStepProps) {
         </FieldGroup>
         {!session?.jwt && (
           <p className="text-[11px] text-muted-foreground">
-            Sign in to invite by username.
+            {t("onboarding.checklist.invite.signInRequired")}
           </p>
         )}
         {addedUsername && (
           <p className="flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400">
-            <Check className="h-3 w-3" /> Added <strong>{addedUsername}</strong>{" "}
-            as contributor.
+            <Check className="h-3 w-3" /> {t("onboarding.checklist.invite.addedPrefix")}{" "}
+            <strong>{addedUsername}</strong>{" "}
+            {t("onboarding.checklist.invite.addedSuffix")}
           </p>
         )}
         {submitError && (
@@ -186,7 +189,7 @@ export function InviteStep({ projectId, onSharesChanged }: InviteStepProps) {
       {/* Share-link path */}
       <div className="flex flex-col gap-2 rounded-md border bg-muted/20 p-2.5">
         <div className="flex items-center justify-between">
-          <span className="text-xs font-medium">Or share a link</span>
+          <span className="text-xs font-medium">{t("onboarding.checklist.invite.shareLinkLabel")}</span>
           {!issuedUrl && (
             <Button
               type="button"
@@ -197,7 +200,7 @@ export function InviteStep({ projectId, onSharesChanged }: InviteStepProps) {
               className="h-7"
             >
               <Plus className="me-1 h-3 w-3" />
-              {linkBusy ? "Creating…" : "Create link"}
+              {linkBusy ? t("onboarding.common.creating") : t("onboarding.checklist.invite.createLinkButton")}
             </Button>
           )}
         </div>
@@ -205,14 +208,14 @@ export function InviteStep({ projectId, onSharesChanged }: InviteStepProps) {
           <div className="flex flex-col gap-1.5">
             <div className="flex items-center gap-1">
               <Input value={issuedUrl} readOnly className="h-7 text-[11px] font-mono" />
-              <AppTooltip content={copied ? "Copied!" : "Copy"}>
+              <AppTooltip content={copied ? t("nav.report.copied") : t("onboarding.common.copy")}>
                 <Button
                   type="button"
                   size="sm"
                   variant="ghost"
                   onClick={() => copyUrl(issuedUrl)}
                   className="h-7 w-7 p-0"
-                  aria-label={copied ? "Copied" : "Copy invite link"}
+                  aria-label={copied ? t("nav.version.copiedLabel") : t("onboarding.checklist.invite.copyLinkAriaLabel")}
                 >
                 {copied ? (
                   <Check className="h-3 w-3 text-emerald-600" />
@@ -230,13 +233,12 @@ export function InviteStep({ projectId, onSharesChanged }: InviteStepProps) {
               className="h-7 w-full text-xs"
             >
               <Plus className="me-1 h-3 w-3" />
-              Create another link
+              {t("onboarding.checklist.invite.createAnotherLink")}
             </Button>
           </div>
         ) : (
           <p className="text-[11px] text-muted-foreground">
-            Anyone with the link joins as a contributor after signing in. Use
-            this when you don't have the recipient's username yet.
+            {t("onboarding.checklist.invite.shareLinkHint")}
           </p>
         )}
         {linkError && (

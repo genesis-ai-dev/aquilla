@@ -1,5 +1,6 @@
 import { Button } from "@/components/ui/button"
 import type { ProjectRecord } from "@/lib/parsers/types"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 interface ImportFilesStepProps {
   project: ProjectRecord
@@ -9,24 +10,23 @@ interface ImportFilesStepProps {
 }
 
 export function ImportFilesStep({ project, onOpenImport }: ImportFilesStepProps) {
+  const t = useT()
   const fileCount = project.files?.length ?? 0
 
   return (
     <div className="space-y-3">
       <p className="text-xs text-muted-foreground">
-        Import your source text first — USFM, plain text, or other supported
-        formats. Everything else (AI suggestions, voice, and collaboration) works
-        on specific files, so importing first sets you up for success.
+        {t("onboarding.checklist.importFiles.description")}
       </p>
 
       {fileCount > 0 && (
         <p className="text-xs font-medium text-emerald-700 dark:text-emerald-400">
-          {fileCount} file{fileCount === 1 ? "" : "s"} imported
+          {t("onboarding.checklist.importFiles.countImported", { count: fileCount })}
         </p>
       )}
 
       <Button size="sm" className="w-full" onClick={onOpenImport}>
-        {fileCount > 0 ? "Import more files" : "Import files"}
+        {fileCount > 0 ? t("onboarding.checklist.importFiles.importMore") : t("onboarding.checklist.importFiles.title")}
       </Button>
     </div>
   )

@@ -16,16 +16,21 @@ import { X, ChevronRight, ChevronLeft } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { markProductTourDone, shouldAutoStartTour } from "@/hooks/useProductTour"
 import { ROLE, type RoleLevel } from "@/lib/frontier/roles"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 // ---------------------------------------------------------------------------
 // Step definitions
 // ---------------------------------------------------------------------------
 
+/** MessageKey, without importing from the generated catalog (leaf modules
+ *  stay import-free of the i18n barrels — see LeftDock.tsx for the pattern). */
+type TourMessageKey = Parameters<ReturnType<typeof useT>>[0]
+
 export interface TourStep {
   /** data-tour value on the target element. Null = centre-screen splash step. */
   anchor: string | null
-  title: string
-  body: string
+  titleKey: TourMessageKey
+  bodyKey: TourMessageKey
   /** Preferred placement relative to the anchor element. */
   placement?: "top" | "bottom" | "left" | "right"
   /**
@@ -40,32 +45,32 @@ export interface TourStep {
 export const TOUR_STEPS: TourStep[] = [
   {
     anchor: null,
-    title: "Welcome to your workspace",
-    body: "This quick tour shows you where everything lives. You can skip at any time.",
+    titleKey: "onboarding.tour.welcome.title",
+    bodyKey: "onboarding.tour.welcome.body",
     placement: undefined,
   },
   {
     anchor: "org-switcher",
-    title: "Switch organizations",
-    body: "Click here to switch between organizations or create a new one.",
+    titleKey: "onboarding.tour.orgSwitcher.title",
+    bodyKey: "onboarding.tour.orgSwitcher.body",
     placement: "right",
   },
   {
     anchor: "nav-overview",
-    title: "Projects",
-    body: "Open the project hub for the current organization or All organizations, then filter, sort, open, or create projects from one place.",
+    titleKey: "nav.projects",
+    bodyKey: "onboarding.tour.projects.body",
     placement: "right",
   },
   {
     anchor: "nav-assigned",
-    title: "Assigned to me",
-    body: "Jump straight to the segments assigned to you across all projects.",
+    titleKey: "editor.navTitle.assignedToMe",
+    bodyKey: "onboarding.tour.assigned.body",
     placement: "right",
   },
   {
     anchor: "nav-settings",
-    title: "Settings & members",
-    body: "Manage your organization settings, invite members, and configure access here.",
+    titleKey: "onboarding.tour.settingsStep.title",
+    bodyKey: "onboarding.tour.settingsStep.body",
     placement: "right",
     // AQU-512: PM-only step — a translator (contributor) has nothing to do
     // on this screen (no manage-members/settings permission at that level).
@@ -73,8 +78,8 @@ export const TOUR_STEPS: TourStep[] = [
   },
   {
     anchor: "account-switcher",
-    title: "Your account",
-    body: "Access your preferences, add another account, or sign out from here.",
+    titleKey: "onboarding.tour.account.title",
+    bodyKey: "onboarding.tour.account.body",
     placement: "top",
   },
 ]
@@ -325,14 +330,16 @@ interface TooltipCardProps {
 }
 
 function TooltipCard({ step, stepIndex, totalSteps, pos, onNext, onPrev, onSkip }: TooltipCardProps) {
+  const t = useT()
   const isFirst = stepIndex === 0
   const isLast = stepIndex === totalSteps - 1
+  const title = t(step.titleKey)
 
   return (
     <div
       role="dialog"
       aria-modal="false"
-      aria-label={`Tour step ${stepIndex + 1} of ${totalSteps}: ${step.title}`}
+      aria-label={t("onboarding.tour.stepDialogLabel", { step: stepIndex + 1, total: totalSteps, title })}
       className="fixed rounded-xl border bg-popover text-popover-foreground shadow-lg"
       style={{
         zIndex: 9991,
@@ -348,12 +355,12 @@ function TooltipCard({ step, stepIndex, totalSteps, pos, onNext, onPrev, onSkip 
 
       {/* Header */}
       <div className="flex items-start justify-between gap-2 p-4 pb-2">
-        <p className="text-sm font-semibold leading-tight">{step.title}</p>
+        <p className="text-sm font-semibold leading-tight">{title}</p>
         <Button
           type="button"
           variant="ghost"
           size="icon-xs"
-          aria-label="Skip tour"
+          aria-label={t("onboarding.tour.skipAriaLabel")}
           onClick={onSkip}
           className="shrink-0 text-muted-foreground"
         >
@@ -362,7 +369,7 @@ function TooltipCard({ step, stepIndex, totalSteps, pos, onNext, onPrev, onSkip 
       </div>
 
       {/* Body */}
-      <p className="px-4 pb-3 text-xs leading-relaxed text-muted-foreground">{step.body}</p>
+      <p className="px-4 pb-3 text-xs leading-relaxed text-muted-foreground">{t(step.bodyKey)}</p>
 
       {/* Footer */}
       <div className="flex items-center justify-between gap-2 border-t px-4 py-3">
@@ -380,15 +387,15 @@ function TooltipCard({ step, stepIndex, totalSteps, pos, onNext, onPrev, onSkip 
         <div className="flex items-center gap-1.5">
           {!isFirst && (
             <Button variant="ghost" size="sm" onClick={onPrev} className="h-7 px-2 text-xs">
-              <ChevronLeft className="h-3 w-3" />
-              Back
+              <ChevronLeft className="h-3 w-3 rtl:rotate-180" />
+              {t("common.back")}
             </Button>
           )}
           <Button size="sm" onClick={onNext} className="h-7 px-3 text-xs">
-            {isLast ? "Done" : (
+            {isLast ? t("onboarding.common.done") : (
               <>
-                Next
-                <ChevronRight className="h-3 w-3" />
+                {t("common.next")}
+                <ChevronRight className="h-3 w-3 rtl:rotate-180" />
               </>
             )}
           </Button>

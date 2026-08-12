@@ -16,9 +16,18 @@ import {
 // Import step list directly for data-level assertions (no render harness needed).
 import { TOUR_STEPS, filterStepsByRole, ARROW_CLASS, TOUR_ARROW_PX, type TourStep } from "./ProductTour"
 import { ROLE } from "@/lib/frontier/roles"
+import { en } from "@/lib/i18n/messages/en"
 
 const TOUR_DONE_KEY = "codex:productTourDone"
 const ONBOARDING_DONE_KEY = "codex:onboardingComplete"
+
+/** AQU-832: steps carry MessageKeys, not raw English — resolve against the
+ *  base English catalog for these content-correctness assertions. Tour step
+ *  copy is never plural-governed, so this is always a plain string. */
+function englishOf(key: TourStep["titleKey"]): string {
+  const value = en[key]
+  return typeof value === "string" ? value : (value.forms.other ?? "")
+}
 
 describe("wasProductTourDone / markProductTourDone / resetProductTour", () => {
   beforeEach(() => {
@@ -90,8 +99,9 @@ describe("TOUR_STEPS — AQU-262 copy and anchor correctness", () => {
   it("AQU-262: account-switcher step does not mention switching organizations", () => {
     const step = TOUR_STEPS.find((s) => s.anchor === "account-switcher")
     expect(step).toBeDefined()
-    expect(step!.body.toLowerCase()).not.toMatch(/switch.*org|org.*switch/i)
-    expect(step!.body.toLowerCase()).not.toContain("organization")
+    const body = englishOf(step!.bodyKey).toLowerCase()
+    expect(body).not.toMatch(/switch.*org|org.*switch/i)
+    expect(body).not.toContain("organization")
   })
 
   it("AQU-262: a step anchored to org-switcher exists", () => {
@@ -102,7 +112,7 @@ describe("TOUR_STEPS — AQU-262 copy and anchor correctness", () => {
   it("AQU-262: org-switcher step body mentions organizations", () => {
     const step = TOUR_STEPS.find((s) => s.anchor === "org-switcher")
     expect(step).toBeDefined()
-    expect(step!.body.toLowerCase()).toMatch(/org/)
+    expect(englishOf(step!.bodyKey).toLowerCase()).toMatch(/org/)
   })
 
   it("AQU-262: org-switcher step appears before nav steps (near start of tour)", () => {
@@ -116,10 +126,11 @@ describe("TOUR_STEPS — AQU-262 copy and anchor correctness", () => {
   it("AQU-262: projects step describes the consolidated project hub", () => {
     const step = TOUR_STEPS.find((s) => s.anchor === "nav-overview")
     expect(step).toBeDefined()
-    expect(step!.title).toBe("Projects")
-    expect(step!.body.toLowerCase()).toContain("project hub")
-    expect(step!.body.toLowerCase()).toContain("all organizations")
-    expect(step!.body.toLowerCase()).toMatch(/filter.*sort|sort.*filter/)
+    expect(englishOf(step!.titleKey)).toBe("Projects")
+    const body = englishOf(step!.bodyKey).toLowerCase()
+    expect(body).toContain("project hub")
+    expect(body).toContain("all organizations")
+    expect(body).toMatch(/filter.*sort|sort.*filter/)
   })
 
   it("AQU-262: splash step (anchor=null) still comes first", () => {
@@ -164,13 +175,22 @@ describe("filterStepsByRole (AQU-512)", () => {
   })
 
   it("AQU-512: a step with no minRole is shown regardless of role level", () => {
-    const steps: TourStep[] = [{ anchor: "x", title: "t", body: "b" }]
+    const steps: TourStep[] = [
+      { anchor: "x", titleKey: "onboarding.tour.welcome.title", bodyKey: "onboarding.tour.welcome.body" },
+    ]
     expect(filterStepsByRole(steps, ROLE.VIEWER)).toHaveLength(1)
     expect(filterStepsByRole(steps, null)).toHaveLength(1)
   })
 
   it("AQU-512: a below-floor role is excluded even one rung under minRole", () => {
-    const steps: TourStep[] = [{ anchor: "x", title: "t", body: "b", minRole: ROLE.PROJECT_LEAD }]
+    const steps: TourStep[] = [
+      {
+        anchor: "x",
+        titleKey: "onboarding.tour.welcome.title",
+        bodyKey: "onboarding.tour.welcome.body",
+        minRole: ROLE.PROJECT_LEAD,
+      },
+    ]
     expect(filterStepsByRole(steps, ROLE.REVIEWER)).toHaveLength(0)
     expect(filterStepsByRole(steps, ROLE.PROJECT_LEAD)).toHaveLength(1)
   })

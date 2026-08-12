@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button"
 import { DEFAULT_SYSTEM_PROMPT } from "@/lib/completion/completion-service"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { patchProject } from "@/lib/store/project-index"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 interface SystemPromptNudgeProps {
   project: ProjectRecord
@@ -37,6 +38,7 @@ export function shouldShowSystemPromptNudge(project: ProjectRecord): boolean {
 }
 
 export function SystemPromptNudge({ project, onProjectUpdated, onCustomize }: SystemPromptNudgeProps) {
+  const t = useT()
   if (!shouldShowSystemPromptNudge(project)) return null
 
   async function dismiss() {
@@ -51,9 +53,9 @@ export function SystemPromptNudge({ project, onProjectUpdated, onCustomize }: Sy
     <div className="flex items-center gap-3 border-b bg-primary/5 px-4 py-2 text-xs">
       <Sparkles className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden />
       <p className="flex-1 text-foreground/80">
-        Your AI is still using the default translation instructions.{" "}
+        {t("onboarding.systemPromptNudge.message")}{" "}
         <span className="text-muted-foreground">
-          Customize them to match your project's tone and domain — shared with everyone on the project.
+          {t("onboarding.systemPromptNudge.detail")}
         </span>
       </p>
       <Button
@@ -66,14 +68,14 @@ export function SystemPromptNudge({ project, onProjectUpdated, onCustomize }: Sy
           onCustomize()
         }}
       >
-        Customize
+        {t("onboarding.systemPromptNudge.customizeButton")}
       </Button>
       <Button
         type="button"
         variant="ghost"
         size="icon-xs"
         onClick={() => void dismiss()}
-        aria-label="Dismiss"
+        aria-label={t("common.dismiss")}
         className="text-muted-foreground"
       >
         <X />

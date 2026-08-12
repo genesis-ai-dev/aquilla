@@ -12,7 +12,7 @@ import { Page, PageHeader, SettingsGroup, SettingsRow } from "@/components/ui/pa
 import { NavList, NavRow, BackLink } from "@/components/ui/nav-list"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { LanguageSwitcher } from "@/lib/i18n/LanguageSwitcher"
-import { useI18n } from "@/lib/i18n/I18nProvider"
+import { useI18n, useT } from "@/lib/i18n/I18nProvider"
 import { useThemeMode, type ThemeMode } from "@/branding/ThemeMode"
 import { useAnalyticsConsent } from "@/hooks/useAnalyticsConsent"
 import { useDockRailPosition } from "@/hooks/useDockRailPosition"
@@ -42,30 +42,53 @@ import {
  * Detail pages match the org-settings layout: page-sized title via PageHeader,
  * then floating SettingsGroup headers with content cards for the controls.
  */
-const RAIL_OPTIONS: { id: DockRailPosition; label: string }[] = [
-  { id: "left", label: "Left rail" },
-  { id: "top", label: "Top bar" },
+/** MessageKey, without importing from the generated catalog — see LeftDock.tsx. */
+type PrefMessageKey = Parameters<ReturnType<typeof useT>>[0]
+
+const RAIL_OPTIONS: { id: DockRailPosition; labelKey: PrefMessageKey }[] = [
+  { id: "left", labelKey: "onboarding.preferences.rail.left" },
+  { id: "top", labelKey: "onboarding.preferences.rail.top" },
 ]
 
-const THEME_OPTIONS: { id: ThemeMode; label: string }[] = [
-  { id: "system", label: "System" },
-  { id: "light", label: "Light" },
-  { id: "dark", label: "Dark" },
+const THEME_OPTIONS: { id: ThemeMode; labelKey: PrefMessageKey }[] = [
+  { id: "system", labelKey: "onboarding.preferences.theme.system" },
+  { id: "light", labelKey: "onboarding.preferences.theme.light" },
+  { id: "dark", labelKey: "onboarding.preferences.theme.dark" },
 ]
 
 /** Single-line fields rendered as text inputs, in render order. */
 const PROFILE_TEXT_FIELDS: {
   key: Exclude<keyof TranslatorProfile, "otherInfo">
-  label: string
-  placeholder: string
+  labelKey: PrefMessageKey
+  placeholderKey: PrefMessageKey
 }[] = [
-  { key: "responseLanguage", label: "Assistant language", placeholder: "e.g. Tagalog — the AI replies in this language" },
-  { key: "age", label: "Age", placeholder: "e.g. 32" },
-  { key: "gender", label: "Gender", placeholder: "e.g. Female" },
-  { key: "educationLevel", label: "Level of education", placeholder: "e.g. High school" },
-  { key: "religiousBackground", label: "Religious background", placeholder: "e.g. Christian" },
-  { key: "translationExperience", label: "Translation experience", placeholder: "e.g. 2 years" },
-  { key: "geographicalSetting", label: "Geographical setting", placeholder: "e.g. Rural, Asia" },
+  {
+    key: "responseLanguage",
+    labelKey: "onboarding.preferences.profile.responseLanguage.label",
+    placeholderKey: "onboarding.preferences.profile.responseLanguage.placeholder",
+  },
+  { key: "age", labelKey: "onboarding.preferences.profile.age.label", placeholderKey: "onboarding.preferences.profile.age.placeholder" },
+  { key: "gender", labelKey: "onboarding.preferences.profile.gender.label", placeholderKey: "onboarding.preferences.profile.gender.placeholder" },
+  {
+    key: "educationLevel",
+    labelKey: "onboarding.preferences.profile.educationLevel.label",
+    placeholderKey: "onboarding.preferences.profile.educationLevel.placeholder",
+  },
+  {
+    key: "religiousBackground",
+    labelKey: "onboarding.preferences.profile.religiousBackground.label",
+    placeholderKey: "onboarding.preferences.profile.religiousBackground.placeholder",
+  },
+  {
+    key: "translationExperience",
+    labelKey: "onboarding.preferences.profile.translationExperience.label",
+    placeholderKey: "onboarding.preferences.profile.translationExperience.placeholder",
+  },
+  {
+    key: "geographicalSetting",
+    labelKey: "onboarding.preferences.profile.geographicalSetting.label",
+    placeholderKey: "onboarding.preferences.profile.geographicalSetting.placeholder",
+  },
 ]
 
 /** All translator-profile keys, used to count how many fields are filled in. */
@@ -79,14 +102,15 @@ const PROFILE_KEYS: (keyof TranslatorProfile)[] = [
  * Self-contained so it can render on its own detail page.
  */
 function WorkspaceSection() {
+  const t = useT()
   const { position: railPosition, setPosition: setRailPosition } = useDockRailPosition()
   // AQU-591: the store tracks whether to SKIP the confirm; present it positively.
   const skipReplaceConfirm = useSkipReplaceConfirm()
   return (
-    <SettingsGroup label="Workspace">
+    <SettingsGroup label={t("onboarding.preferences.workspace.groupLabel")}>
       <SettingsRow
-        label="Sidebar tab layout"
-        description="Show Files, Chat, and Search as a vertical rail on the left or a horizontal bar across the top of the sidebar."
+        label={t("onboarding.preferences.workspace.railLabel")}
+        description={t("onboarding.preferences.workspace.railDescription")}
         block
       >
         <Tabs
@@ -94,10 +118,10 @@ function WorkspaceSection() {
           onValueChange={(value) => setRailPosition(value as DockRailPosition)}
           className="gap-0"
         >
-          <TabsList aria-label="Sidebar tab layout">
-            {RAIL_OPTIONS.map(({ id, label }) => (
+          <TabsList aria-label={t("onboarding.preferences.workspace.railLabel")}>
+            {RAIL_OPTIONS.map(({ id, labelKey }) => (
               <TabsTrigger key={id} value={id}>
-                {label}
+                {t(labelKey)}
               </TabsTrigger>
             ))}
           </TabsList>
@@ -105,9 +129,9 @@ function WorkspaceSection() {
       </SettingsRow>
       <SettingsRow
         label={
-          <label htmlFor="confirm-replace">Confirm before replacing a translation</label>
+          <label htmlFor="confirm-replace">{t("onboarding.preferences.workspace.confirmReplaceLabel")}</label>
         }
-        description="Ask for confirmation when AI Generate replaces a cell that already has a translation. Validated cells always confirm regardless of this setting."
+        description={t("onboarding.preferences.workspace.confirmReplaceDescription")}
         control={
           <Switch
             id="confirm-replace"
@@ -125,13 +149,14 @@ function WorkspaceSection() {
  * source/target text direction and other project-specific display settings.
  */
 function AppearanceSection() {
+  const t = useT()
   const { mode, setMode } = useThemeMode()
 
   return (
-    <SettingsGroup label="Theme">
+    <SettingsGroup label={t("onboarding.preferences.appearance.groupLabel")}>
       <SettingsRow
-        label="Theme"
-        description="Follow your system appearance or choose a theme for this device."
+        label={t("onboarding.preferences.appearance.groupLabel")}
+        description={t("onboarding.preferences.appearance.themeDescription")}
         block
       >
         <Tabs
@@ -139,10 +164,10 @@ function AppearanceSection() {
           onValueChange={(value) => setMode(value as ThemeMode)}
           className="gap-0"
         >
-          <TabsList aria-label="Theme">
-            {THEME_OPTIONS.map(({ id, label }) => (
+          <TabsList aria-label={t("onboarding.preferences.appearance.groupLabel")}>
+            {THEME_OPTIONS.map(({ id, labelKey }) => (
               <TabsTrigger key={id} value={id}>
-                {label}
+                {t(labelKey)}
               </TabsTrigger>
             ))}
           </TabsList>
@@ -159,10 +184,10 @@ function AppearanceSection() {
 function LanguageSection() {
   const { t } = useI18n()
   return (
-    <SettingsGroup label="Language">
+    <SettingsGroup label={t("language.label")}>
       <SettingsRow
-        label="UI language"
-        description="The language the app's own interface (menus, buttons, messages) is shown in."
+        label={t("language.switcher.settingsRow")}
+        description={t("onboarding.preferences.language.rowDescription")}
         control={
           <LanguageSwitcher
             className="h-9 rounded-md border border-input bg-transparent px-3 text-sm"
@@ -176,18 +201,18 @@ function LanguageSection() {
 
 /** Analytics consent toggle. Self-contained for its detail page. */
 function PrivacySection() {
+  const t = useT()
   const { enabled, setEnabled } = useAnalyticsConsent()
   return (
-    <SettingsGroup label="Analytics">
+    <SettingsGroup label={t("onboarding.preferences.privacy.groupLabel")}>
       <SettingsRow
-        label="Share usage data"
+        label={t("onboarding.privacy.shareUsageData")}
         description={
           <>
-            Events like project creation, exports, and AI translations. Never the contents of your
-            translations or files.
+            {t("onboarding.preferences.privacy.rowDescription")}
             {!enabled ? (
               <span className="mt-1 block text-amber-600 dark:text-amber-400">
-                With analytics disabled, we may not be able to help diagnose problems you encounter.
+                {t("onboarding.privacy.disabledWarning")}
               </span>
             ) : null}
           </>
@@ -197,7 +222,7 @@ function PrivacySection() {
             id="analytics-consent"
             checked={enabled}
             onCheckedChange={setEnabled}
-            aria-label="Share usage data"
+            aria-label={t("onboarding.privacy.shareUsageData")}
           />
         }
       />
@@ -211,6 +236,7 @@ function PrivacySection() {
  * sanitizes for storage and notifies the chat/agent hooks.
  */
 function TranslatorProfileSection() {
+  const t = useT()
   const [form, setForm] = useState<TranslatorProfile>(() => getTranslatorProfile())
 
   function update(key: keyof TranslatorProfile, value: string) {
@@ -220,36 +246,36 @@ function TranslatorProfileSection() {
   }
 
   return (
-    <SettingsGroup label="About you">
+    <SettingsGroup label={t("onboarding.preferences.profileSection.groupLabel")}>
       <SettingsRow
-        label="Profile fields"
-        description="All fields are optional. Stored on this device and sent to the AI to tailor your summaries."
+        label={t("onboarding.preferences.profileSection.rowLabel")}
+        description={t("onboarding.preferences.profileSection.rowDescription")}
         block
       >
         <FieldGroup className="grid gap-4 sm:grid-cols-2">
-          {PROFILE_TEXT_FIELDS.map(({ key, label, placeholder }) => (
+          {PROFILE_TEXT_FIELDS.map(({ key, labelKey, placeholderKey }) => (
             <Field key={key}>
               <FieldLabel htmlFor={`profile-${key}`} className="text-sm font-medium">
-                {label}
+                {t(labelKey)}
               </FieldLabel>
               <Input
                 id={`profile-${key}`}
                 value={form[key] ?? ""}
                 onChange={(e) => update(key, e.target.value)}
-                placeholder={placeholder}
+                placeholder={t(placeholderKey)}
               />
             </Field>
           ))}
         </FieldGroup>
         <Field className="mt-4">
           <FieldLabel htmlFor="profile-otherInfo" className="text-sm font-medium">
-            Other relevant information
+            {t("onboarding.preferences.profile.otherInfoLabel")}
           </FieldLabel>
           <Textarea
             id="profile-otherInfo"
             value={form.otherInfo ?? ""}
             onChange={(e) => update("otherInfo", e.target.value)}
-            placeholder="Anything else that should shape the summaries you get"
+            placeholder={t("onboarding.preferences.profile.otherInfoPlaceholder")}
             rows={3}
           />
         </Field>
@@ -261,95 +287,97 @@ function TranslatorProfileSection() {
 /** One preference section: its route slug, index-row presentation, and body. */
 interface PreferenceSection {
   slug: string
-  title: string
-  description: string
-  group: string
+  titleKey: PrefMessageKey
+  descriptionKey: PrefMessageKey
+  group: (typeof PREFERENCE_GROUPS)[number]
   icon: React.ComponentType<{ className?: string }>
   render: () => React.ReactNode
 }
 
+const PREFERENCE_GROUPS = [
+  "onboarding.preferences.group.general",
+  "onboarding.preferences.group.aiPersonalization",
+  "onboarding.preferences.group.account",
+] as const satisfies readonly PrefMessageKey[]
+
 const PREFERENCE_SECTIONS: PreferenceSection[] = [
   {
     slug: "workspace",
-    title: "Workspace",
-    description: "Layout and editing behavior for the project workspace.",
-    group: "General",
+    titleKey: "onboarding.preferences.workspace.groupLabel",
+    descriptionKey: "onboarding.preferences.section.workspace.description",
+    group: "onboarding.preferences.group.general",
     icon: PanelLeft,
     render: () => <WorkspaceSection />,
   },
   {
     slug: "appearance",
-    title: "Appearance",
-    description: "How the workspace looks on this device.",
-    group: "General",
+    titleKey: "onboarding.preferences.section.appearance.title",
+    descriptionKey: "onboarding.preferences.section.appearance.description",
+    group: "onboarding.preferences.group.general",
     icon: Palette,
     render: () => <AppearanceSection />,
   },
   {
     slug: "language",
-    title: "Language",
-    description: "The language the app's own interface is shown in.",
-    group: "General",
+    titleKey: "language.label",
+    descriptionKey: "onboarding.preferences.section.language.description",
+    group: "onboarding.preferences.group.general",
     icon: Globe,
     render: () => <LanguageSection />,
   },
   {
     slug: "privacy",
-    title: "Privacy",
-    description: "Control what's shared with us about how you use the app.",
-    group: "General",
+    titleKey: "onboarding.preferences.section.privacy.title",
+    descriptionKey: "onboarding.preferences.section.privacy.description",
+    group: "onboarding.preferences.group.general",
     icon: ShieldCheck,
     render: () => <PrivacySection />,
   },
   {
     slug: "profile",
-    title: "Translator profile",
-    description:
-      "Tell the AI about yourself so its summaries and answers fit your context — and so it replies in your language.",
-    group: "AI & personalization",
+    titleKey: "onboarding.preferences.section.profile.title",
+    descriptionKey: "onboarding.preferences.section.profile.description",
+    group: "onboarding.preferences.group.aiPersonalization",
     icon: UserRound,
     render: () => <TranslatorProfileSection />,
   },
   {
     slug: "provider-keys",
-    title: "AI provider keys",
-    description: "Optional personal AI provider override for this device only.",
-    group: "AI & personalization",
+    titleKey: "onboarding.preferences.section.providerKeys.title",
+    descriptionKey: "onboarding.preferences.section.providerKeys.description",
+    group: "onboarding.preferences.group.aiPersonalization",
     icon: KeyRound,
     render: () => <PersonalProviderSection />,
   },
   {
     slug: "local-models",
-    title: "Local models",
-    description:
-      "Whisper transcription and Kokoro / MMS voices run entirely in your browser — stored once and shared across all projects on this device.",
-    group: "AI & personalization",
+    titleKey: "onboarding.preferences.section.localModels.title",
+    descriptionKey: "onboarding.preferences.section.localModels.description",
+    group: "onboarding.preferences.group.aiPersonalization",
     icon: Cpu,
     render: () => <LocalModelsSection />,
   },
   {
     slug: "usage",
-    title: "Usage",
-    description: "Your audio and AI activity. No pricing is shown here.",
-    group: "Account",
+    titleKey: "onboarding.preferences.section.usage.title",
+    descriptionKey: "onboarding.preferences.section.usage.description",
+    group: "onboarding.preferences.group.account",
     icon: Gauge,
     render: () => <UsageSection />,
   },
   {
     slug: "api-tokens",
-    title: "API tokens",
-    description:
-      "Personal access tokens for the Agent API. Anyone holding a token can act with your access, up to its scope — treat it like a password.",
-    group: "Account",
+    titleKey: "onboarding.preferences.section.apiTokens.title",
+    descriptionKey: "onboarding.preferences.section.apiTokens.description",
+    group: "onboarding.preferences.group.account",
     icon: KeyRound,
     render: () => <ApiTokensSection />,
   },
 ]
 
-const PREFERENCE_GROUPS = ["General", "AI & personalization", "Account"] as const
-
 /** The index: grouped navigation rows, each hinting its current value. */
 function PreferencesIndex({ modal = false, backgroundLocation }: { modal?: boolean; backgroundLocation?: Location }) {
+  const t = useT()
   const { enabled } = useAnalyticsConsent()
   const { position } = useDockRailPosition()
   const { mode } = useThemeMode()
@@ -357,32 +385,43 @@ function PreferencesIndex({ modal = false, backgroundLocation }: { modal?: boole
   const profile = getTranslatorProfile()
   const profileFilled = PROFILE_KEYS.filter((k) => (profile[k] ?? "").trim().length > 0).length
 
+  const railHintKey = RAIL_OPTIONS.find((o) => o.id === position)?.labelKey
+  const themeHintKey =
+    mode === "system"
+      ? "onboarding.preferences.theme.system"
+      : mode === "dark"
+        ? "onboarding.preferences.theme.dark"
+        : "onboarding.preferences.theme.light"
+
   const hints: Record<string, string> = {
-    workspace: RAIL_OPTIONS.find((o) => o.id === position)?.label ?? "",
-    appearance: mode === "system" ? "System" : mode === "dark" ? "Dark" : "Light",
-    privacy: enabled ? "Sharing on" : "Sharing off",
-    profile: profileFilled > 0 ? `${profileFilled}/${PROFILE_KEYS.length} set` : "Not set",
-    "provider-keys": "Personal",
-    "local-models": "On-device",
-    usage: "This week",
+    workspace: railHintKey ? t(railHintKey) : "",
+    appearance: t(themeHintKey),
+    privacy: t(enabled ? "onboarding.preferences.hint.sharingOn" : "onboarding.preferences.hint.sharingOff"),
+    profile:
+      profileFilled > 0
+        ? t("onboarding.preferences.hint.profileSet", { filled: profileFilled, total: PROFILE_KEYS.length })
+        : t("onboarding.preferences.hint.notSet"),
+    "provider-keys": t("onboarding.preferences.hint.personal"),
+    "local-models": t("onboarding.preferences.hint.onDevice"),
+    usage: t("onboarding.timeWindow.thisWeek"),
   }
 
   const content = (
     <Page>
       <PageHeader
-        title="Preferences"
-        description="Personal preferences that apply to you across all projects on this device."
+        title={t("nav.account.preferences")}
+        description={t("onboarding.preferences.pageDescription")}
       />
       <div className="space-y-6">
         {PREFERENCE_GROUPS.map((group) => (
-          <NavList key={group} label={group}>
+          <NavList key={group} label={t(group)}>
             {PREFERENCE_SECTIONS.filter((s) => s.group === group).map((s) => (
               <NavRow
                 key={s.slug}
                 to={`/preferences/${s.slug}`}
                 state={backgroundLocation ? { backgroundLocation, preferencesModalDepth: 2 } : undefined}
                 icon={s.icon}
-                title={s.title}
+                title={t(s.titleKey)}
                 hint={hints[s.slug]}
               />
             ))}
@@ -405,18 +444,20 @@ function PreferencesIndex({ modal = false, backgroundLocation }: { modal?: boole
 
 /** A single section, rendered on its own page with a back breadcrumb. */
 function PreferencesDetail({ slug, modal = false }: { slug: string; modal?: boolean }) {
+  const t = useT()
   const navigate = useNavigate()
   const section = PREFERENCE_SECTIONS.find((s) => s.slug === slug)
   if (!section) return <Navigate to="/preferences" replace />
+  const title = t(section.titleKey)
   const content = (
     <Page>
       <div className="space-y-6">
         <BackLink
           to="/preferences"
           onClick={modal ? () => navigate(-1) : undefined}
-          label="Preferences"
+          label={t("nav.account.preferences")}
         />
-        <PageHeader title={section.title} description={section.description} />
+        <PageHeader title={title} description={t(section.descriptionKey)} />
         {section.render()}
       </div>
     </Page>
@@ -425,7 +466,7 @@ function PreferencesDetail({ slug, modal = false }: { slug: string; modal?: bool
   return (
     <AppShell
       sidebar={<OrgSidebar />}
-      header={<OrgBreadcrumb parent={{ label: "Preferences", to: "/preferences" }} section={section.title} />}
+      header={<OrgBreadcrumb parent={{ label: t("nav.account.preferences"), to: "/preferences" }} section={title} />}
       statusBar={null}
       main={content}
     />
@@ -440,6 +481,7 @@ export function Preferences() {
 /** Route-modal presentation used by in-app entry points. Direct URLs continue
  * to render the full-page Preferences surface above. */
 export function PreferencesDialog() {
+  const t = useT()
   const { section } = useParams<{ section?: string }>()
   const location = useLocation()
   const navigate = useNavigate()
@@ -457,8 +499,8 @@ export function PreferencesDialog() {
         data-testid="preferences-dialog"
       >
         <DialogHeader className="sr-only">
-          <DialogTitle>Preferences</DialogTitle>
-          <DialogDescription>Personal preferences that apply across projects.</DialogDescription>
+          <DialogTitle>{t("nav.account.preferences")}</DialogTitle>
+          <DialogDescription>{t("onboarding.preferences.dialogDescription")}</DialogDescription>
         </DialogHeader>
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
           {section

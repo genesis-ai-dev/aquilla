@@ -6,6 +6,7 @@ import {
   useSaveCompletionSettings,
 } from "@/hooks/useCompletionSettings"
 import type { ProjectRecord } from "@/lib/parsers/types"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 interface AiInstructionsStepProps {
   project: ProjectRecord
@@ -13,6 +14,7 @@ interface AiInstructionsStepProps {
 }
 
 export function AiInstructionsStep({ project, onUpdated }: AiInstructionsStepProps) {
+  const t = useT()
   const saved = project.completionSettings?.systemPrompt ?? ""
   const [prompt, setPrompt] = useState(saved || DEFAULT_SYSTEM_PROMPT)
   const [busy, setBusy] = useState(false)
@@ -33,17 +35,15 @@ export function AiInstructionsStep({ project, onUpdated }: AiInstructionsStepPro
   return (
     <div className="space-y-3">
       <p className="text-xs text-muted-foreground">
-        Tell the AI how to translate. The starter prompt works for most projects;
-        edit it to match your tone, formality, or domain (legal, scripture,
-        marketing, etc.). Use{" "}
+        {t("onboarding.checklist.aiInstructions.introPrefix")}{" "}
         <code className="rounded bg-muted px-1 py-0.5 font-mono text-[10px]">
           {"{sourceLanguage}"}
         </code>{" "}
-        and{" "}
+        {t("onboarding.checklist.aiInstructions.introAnd")}{" "}
         <code className="rounded bg-muted px-1 py-0.5 font-mono text-[10px]">
           {"{targetLanguage}"}
         </code>{" "}
-        as placeholders.
+        {t("onboarding.checklist.aiInstructions.introSuffix")}
       </p>
 
       <Textarea
@@ -60,9 +60,9 @@ export function AiInstructionsStep({ project, onUpdated }: AiInstructionsStepPro
           disabled={isDefault}
           className="underline-offset-2 hover:underline disabled:opacity-50"
         >
-          Reset to default
+          {t("onboarding.checklist.aiInstructions.resetToDefault")}
         </button>
-        <span>{prompt.length} characters</span>
+        <span>{t("onboarding.checklist.aiInstructions.charCount", { count: prompt.length })}</span>
       </div>
       <Button
         size="sm"
@@ -70,7 +70,7 @@ export function AiInstructionsStep({ project, onUpdated }: AiInstructionsStepPro
         disabled={busy || prompt.trim().length === 0}
         className="w-full"
       >
-        {busy ? "Saving…" : "Save instructions"}
+        {busy ? t("common.saving") : t("onboarding.checklist.aiInstructions.saveButton")}
       </Button>
     </div>
   )

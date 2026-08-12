@@ -7,7 +7,11 @@
 
 import { render, screen } from "@testing-library/react"
 import { describe, it, expect, vi } from "vitest"
-import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu"
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu"
 import { I18nProvider } from "@/lib/i18n/I18nProvider"
 import { FileActionMenu } from "./FileActionMenu"
 
@@ -19,11 +23,13 @@ function renderMenu(onDelete?: () => void) {
     <I18nProvider>
       <ContextMenu open>
         <ContextMenuTrigger>trigger</ContextMenuTrigger>
-        <FileActionMenu
-          onRename={vi.fn()}
-          onMove={vi.fn()}
-          onDelete={onDelete}
-        />
+        <ContextMenuContent>
+          <FileActionMenu
+            onRename={vi.fn()}
+            onMove={vi.fn()}
+            onDelete={onDelete}
+          />
+        </ContextMenuContent>
       </ContextMenu>
     </I18nProvider>,
   )

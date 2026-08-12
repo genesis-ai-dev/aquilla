@@ -5042,7 +5042,11 @@ export function ProjectWorkspace() {
   // Dropped when the file changes: the pane remounts and would otherwise open
   // on the PREVIOUS file's last seek, i.e. minutes into a video it has never
   // been asked to move.
-  useEffect(() => { setVideoSeek(null) }, [activeFileId])
+  // Both video commands are cleared on a file switch. `videoToggle` was not,
+  // which is harmless only because the pane is keyed by file id — a fragile
+  // thing to rely on when the toggle effect deliberately depends on the nonce
+  // alone.
+  useEffect(() => { setVideoSeek(null); setVideoToggle(null) }, [activeFileId])
   const handleTimelineSeekToTime = useCallback((sec: number) => {
     setVideoSeek((prev) => ({ sec: Math.max(0, sec), nonce: (prev?.nonce ?? 0) + 1 }))
     if (!project?.id) return
@@ -5071,7 +5075,11 @@ export function ProjectWorkspace() {
     // PICTURE is the transport — hand it the press. Gated on the same test the
     // pane uses to decide it is standalone, so a file whose queue can run is
     // untouched.
-    if (activeFile?.coreMediaUrl && !audioMergedCells.some((c) => queueClockIsFileTime(c))) {
+    // Gated on the pane being ON SCREEN, not merely on a video being linked.
+    // In Free timing the pane is hidden, so this used to hand the press to a
+    // nonce nothing consumes and Space went dead — the queue owns the transport
+    // there and should get it.
+    if (showVideoPane && !audioMergedCells.some((c) => queueClockIsFileTime(c))) {
       setVideoToggle((prev) => ({ nonce: (prev?.nonce ?? 0) + 1 }))
       return
     }
@@ -5099,7 +5107,7 @@ export function ProjectWorkspace() {
     const ctx = { cells: audioMergedCells, projectId: project.id, session: frontierSession }
     if (from >= 0) startQueue(ctx, from, true)
     else startQueueAtTime(ctx, 0, { play: true })
-  }, [project?.id, audioMergedCells, frontierSession, timelineSelectedCellId, activeFile?.coreMediaUrl])
+  }, [project?.id, audioMergedCells, frontierSession, timelineSelectedCellId, showVideoPane])
 
   // AQU-654: count outstanding (non-waived) LQA/validation infractions on the
   // active file. Export never hard-blocks on these — the count only drives a

@@ -712,9 +712,6 @@ interface EditorTableProps {
    *  the projection round-trip. The follow-up `onCellCommitted` -> revalidate
    *  overwrites this with the authoritative server projection. */
   onOptimisticEdit?: (cellId: string, patch: { value: string; valueHtml?: string }) => void
-  /** AQU-803: delete a source cell + its target rows (IDML files, project_lead+).
-   *  When omitted, the per-row delete affordance is not rendered. */
-  onDeleteCell?: (cellId: string) => void | Promise<void>
   /** Map of cellId → presence holder label. When present, the cell editor
    *  goes read-only with an "Alice is editing" banner. */
   cellLockHolders?: ReadonlyMap<string, string>
@@ -863,7 +860,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   onCellCommitted,
   getPendingTargetEventId,
   onOptimisticEdit,
-  onDeleteCell,
   cellLockHolders,
   presenceStore,
   cellsWithRemoteChange,
@@ -2071,7 +2067,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           onCellCommitted={onCellCommitted}
           getPendingTargetEventId={getPendingTargetEventId}
           onOptimisticEdit={onOptimisticEdit}
-          onDeleteCell={onDeleteCell}
           lockHolderLabel={cellLockHolders?.get(cell.id) ?? null}
           presenceStore={presenceStore}
           remoteChangedWhileFocused={cellsWithRemoteChange?.has(cell.id) ?? false}
@@ -2225,7 +2220,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     onOpenAudioSetup,
     getPendingTargetEventId,
     onOptimisticEdit,
-    onDeleteCell,
     onProjectChanged,
     onReleaseCell,
     onSaveBacktranslation,
@@ -2637,7 +2631,6 @@ interface MemoizedRowProps {
   onCellCommitted?: (cellId: string, committedEventId?: string, parentId?: string | null) => void | Promise<void>
   getPendingTargetEventId?: (cellId: string) => string | null
   onOptimisticEdit?: (cellId: string, patch: { value: string; valueHtml?: string }) => void
-  onDeleteCell?: (cellId: string) => void | Promise<void>
   lockHolderLabel: string | null
   presenceStore?: ProjectPresenceStore | null
   remoteChangedWhileFocused: boolean
@@ -2779,7 +2772,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     sourceDirectionMode, targetDirectionMode, sourceTextDirection, targetTextDirection, isAnonymous,
     onJumpToCell, micDenied, onProjectChanged, onAddConceptFromSelection, addConceptBlockedReason, onAskAiFromSelection, onAssignVoice,
     audioLens, onOpenAudioSetup,
-    onCellCommitted, getPendingTargetEventId, onOptimisticEdit, onDeleteCell, lockHolderLabel, presenceStore, remoteChangedWhileFocused,
+    onCellCommitted, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, presenceStore, remoteChangedWhileFocused,
     onClaimCell, onReleaseCell, onTargetPresenceSelection, onAckRemoteChange,
     isStaleSource,
     isUpstreamStaleSource,
@@ -2954,7 +2947,6 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         onCellCommitted={onCellCommitted}
         getPendingTargetEventId={getPendingTargetEventId}
         onOptimisticEdit={onOptimisticEdit}
-        onDeleteCell={onDeleteCell}
         lockHolderLabel={lockHolderLabel}
         presenceStore={presenceStore}
         remoteChangedWhileFocused={remoteChangedWhileFocused}
@@ -3015,7 +3007,6 @@ interface EditorRowProps {
   onCellCommitted?: (cellId: string, committedEventId?: string, parentId?: string | null) => void
   getPendingTargetEventId?: (cellId: string) => string | null
   onOptimisticEdit?: (cellId: string, patch: { value: string; valueHtml?: string }) => void
-  onDeleteCell?: (cellId: string) => void | Promise<void>
   lockHolderLabel: string | null
   presenceStore?: ProjectPresenceStore | null
   remoteChangedWhileFocused: boolean
@@ -3949,7 +3940,7 @@ function EditorRow({
   rowIndex, contentNumber, lineNumbersEnabled, scriptureNumbering, cellLabelsEnabled, sourceDirectionMode, targetDirectionMode, sourceTextDirection, targetTextDirection, gridCols, castGutter, ttsSettings,
   isAnonymous, micDenied,
   audioLens, onOpenAudioSetup, onAssignVoice, onAddConceptFromSelection, addConceptBlockedReason, onAskAiFromSelection,
-  onCellCommitted, getPendingTargetEventId, onOptimisticEdit, onDeleteCell, lockHolderLabel, presenceStore, remoteChangedWhileFocused,
+  onCellCommitted, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, presenceStore, remoteChangedWhileFocused,
   onClaimCell, onReleaseCell, onTargetPresenceSelection, onAckRemoteChange,
   isStaleSource,
   isUpstreamStaleSource,
@@ -4039,8 +4030,6 @@ function EditorRow({
   // hold of the just-committed text (kept out of the target-only optimistic-shadow
   // machinery in useCells) shown until the projection round-trips.
   const [sourceEditing, setSourceEditing] = useState(false)
-  // AQU-803: confirmation gate for the destructive delete-cell affordance.
-  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
   const [sourceDraft, setSourceDraft] = useState<{ value: string; valueHtml: string } | null>(null)
   // Tracks the newest source.cell.commit this row enqueued whose projection
   // head hasn't caught up yet, as { eventId, parentId }. Successive source edits
@@ -4113,12 +4102,6 @@ function EditorRow({
   const sourceReadOnlyReasonForCell = idmlConfiguration
     ? t("editor.source.idmlProtected")
     : sourceReadOnlyReason
-  // AQU-803: the delete-cell affordance is IDML-only — it reuses the same
-  // per-cell IDML gate that suppresses the source-edit pencil — and requires the
-  // source-edit capability (cloud project_lead+, not live-linked / DCS-pinned),
-  // the same authority bar the server enforces for source.cell.delete. Absent
-  // unless the parent wired `onDeleteCell`.
-  const canDeleteCell = canEditSource && Boolean(idmlConfiguration) && Boolean(onDeleteCell)
   const hasTranslatedText = Boolean(visibleTranslated?.trim())
   const showCompletionOverlay = isLoading && !hasTranslatedText
   const sourceCellDirection = useMemo(
@@ -5876,23 +5859,6 @@ function EditorRow({
                   <Pencil />
                 </Button>
               </AppTooltip>
-            ) : canDeleteCell ? (
-              // AQU-803: IDML cells suppress the source-edit pencil; the delete
-              // affordance is a distinct destructive control in the same region.
-              // Project_lead+ only (canEditSource encodes the 500 floor).
-              <AppTooltip content={t("editor.deleteCell.action")}>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-xs"
-                  aria-label={t("editor.deleteCell.action")}
-                  data-testid="delete-source-cell"
-                  onClick={() => setDeleteConfirmOpen(true)}
-                  className="absolute right-1 top-1 z-10 shrink-0 text-muted-foreground/50 opacity-0 hover:text-destructive focus-visible:opacity-100 group-hover:opacity-100"
-                >
-                  <Trash2 />
-                </Button>
-              </AppTooltip>
             ) : sourceReadOnlyReasonForCell ? (
               // Force-locked source lane (DCS pin): keep an explained
               // affordance where the pencil would be instead of letting it
@@ -5906,16 +5872,6 @@ function EditorRow({
                 </span>
               </AppTooltip>
             ) : null}
-            {canDeleteCell && (
-              <DeleteCellConfirmDialog
-                open={deleteConfirmOpen}
-                onCancel={() => setDeleteConfirmOpen(false)}
-                onConfirm={() => {
-                  setDeleteConfirmOpen(false)
-                  void onDeleteCell?.(cell.id)
-                }}
-              />
-            )}
             {/* Context line. Rendered even when empty: its 20px (h-4 + mb-1)
                 mirrors the target column's header lane, and that mirror is what
                 puts the two columns' first text lines on the same baseline. Drop
@@ -7407,45 +7363,6 @@ import { GenerateOverwriteDialog } from "./GenerateOverwriteDialog"
 // completeParagraph's skip-validated-cells guard) — it must never claim a
 // count that doesn't match what will actually happen.
 // ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// AQU-803 — DeleteCellConfirmDialog
-// ---------------------------------------------------------------------------
-// Confirms the destructive delete-cell action before it emits source.cell.delete
-// plus one target.cell.delete per lane. Names exactly what disappears (the
-// source cell AND its translations) — there is no undo/restore flow today, so
-// the copy must be unambiguous.
-// ---------------------------------------------------------------------------
-
-interface DeleteCellConfirmDialogProps {
-  open: boolean
-  onConfirm: () => void
-  onCancel: () => void
-}
-
-export function DeleteCellConfirmDialog({ open, onConfirm, onCancel }: DeleteCellConfirmDialogProps) {
-  const t = useT()
-  return (
-    <Dialog open={open} onOpenChange={(isOpen) => { if (!isOpen) onCancel() }}>
-      <DialogContent aria-labelledby="delete-cell-title" aria-describedby="delete-cell-desc">
-        <DialogHeader>
-          <DialogTitle id="delete-cell-title">{t("editor.deleteCell.confirmTitle")}</DialogTitle>
-          <DialogDescription id="delete-cell-desc">
-            {t("editor.deleteCell.confirmBody")}
-          </DialogDescription>
-        </DialogHeader>
-        <DialogFooter>
-          <Button variant="outline" onClick={onCancel}>
-            {t("common.cancel")}
-          </Button>
-          <Button variant="destructive" onClick={onConfirm}>
-            {t("editor.deleteCell.action")}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  )
-}
 
 interface ParagraphDraftConfirmDialogProps {
   open: boolean

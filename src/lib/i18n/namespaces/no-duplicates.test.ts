@@ -93,12 +93,6 @@ const DISTINCT_MEANING: Record<string, string> = {
     "as its siblings. editor.selection.validate is the imperative toolbar button " +
     "that performs the sign-off. Operation name vs command; they diverge wherever " +
     "operation names are nominalized.",
-  "nav.outbox.eventDeleteCell":
-    "Names a queued operation in the outbox feed, in the same noun-phrase register " +
-    "as its siblings. editor.deleteCell.action is the imperative destructive " +
-    "button (and its tooltip) that performs the deletion. Operation name vs " +
-    "command; they diverge wherever operation names are nominalized — same " +
-    "distinction as nav.outbox.eventValidate.",
   "nav.outbox.eventEditComment":
     "Names a queued operation in the outbox feed (noun-phrase register, like its " +
     "siblings). comments.composer.editPlaceholder is prompt text inside a textarea " +

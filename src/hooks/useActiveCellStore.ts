@@ -953,43 +953,6 @@ export class CellStore {
     this.freshnessFloors.set(cellId, ++this.writeSeq)
   }
 
-  /**
-   * AQU-803: optimistically drop a cell entirely — every side and every lane —
-   * from the view the instant a delete is confirmed, before the
-   * source.cell.delete / target.cell.delete events round-trip. A freshness
-   * floor is stamped so an in-flight (pre-delete) refetch's buffer swap can't
-   * resurrect the row: `mergeProtectedRows` keeps the store's CURRENT rows for
-   * a protected cell, and there are none once it's removed here. The server
-   * projection's own removal (delta with no rows for the cell) then confirms it
-   * permanently; a full reload never sees it.
-   */
-  removeCellOptimistically(cellId: string): void {
-    const present = this.indexById.has(cellId)
-      || this.sourceById.has(cellId)
-      || this.targetById.has(cellId)
-      || this.otherLaneTargetRows.some((row) => row.cellId === cellId)
-    // Always stamp the floor (even if not currently rendered) so a racing
-    // fetch that snapshotted the cell before this delete can't re-add it.
-    this.freshnessFloors.set(cellId, ++this.writeSeq)
-    this.optimisticEdits.delete(cellId)
-    this.pendingOverlay.delete(cellId)
-    this.footnoteCache.delete(cellId)
-    if (!present) return
-    this.sourceById.delete(cellId)
-    this.targetById.delete(cellId)
-    this.otherLaneTargetRows = this.otherLaneTargetRows.filter((row) => row.cellId !== cellId)
-    this.sourceOrder = this.sourceOrder.filter((id) => id !== cellId)
-    this.targetOrder = this.targetOrder.filter((id) => id !== cellId)
-    const nextOrder = this.order.filter((id) => id !== cellId)
-    if (nextOrder.length !== this.order.length) this.listVersion++
-    this.order = nextOrder
-    this.indexById = new Map(this.order.map((id, index) => [id, index]))
-    this.rebuildDerivedIndexes()
-    this.bumpCells([cellId])
-    this.fileVersion++
-    this.emit([cellId])
-  }
-
   replaceRowsForCell(cellId: string, rows: CellRow[]): void {
     const lane = this.ctx.lane ?? ""
     const source = rows.find((row) => row.side === "source")
@@ -1322,9 +1285,6 @@ export interface UseActiveCellStoreResult {
   applyOptimisticTargetEdit: (cellId: string, patch: { value: string; valueHtml?: string; aiDrafted?: boolean }) => void
   /** Bulk version of applyOptimisticTargetEdit — see CellStore.applyOptimisticTargetEdits. */
   applyOptimisticTargetEdits: (patches: { cellId: string; value: string; valueHtml?: string }[]) => void
-  /** AQU-803: optimistically drop a cell (all sides + lanes) from the view before
-   *  the delete events round-trip. See CellStore.removeCellOptimistically. */
-  applyOptimisticCellDelete: (cellId: string) => void
   /** Round 7: optimistic TIMING/metadata patch — see CellStore.applyOptimisticCellTiming. */
   applyOptimisticCellTiming: (
     cellId: string,
@@ -1684,10 +1644,6 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
     store.applyOptimisticTargetEdits(patches)
   }, [store])
 
-  const applyOptimisticCellDelete = useCallback((cellId: string) => {
-    store.removeCellOptimistically(cellId)
-  }, [store])
-
   const applyOptimisticCellTiming = useCallback(
     (cellId: string, patch: { startMs?: number; endMs?: number; metadata?: Record<string, number | null> }) => {
       store.applyOptimisticCellTiming(cellId, patch)
@@ -1734,7 +1690,7 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
     }
   }, [store])
 
-  return { store, revalidate, retry, revalidateCell, applyOptimisticTargetEdit, applyOptimisticTargetEdits, applyOptimisticCellDelete, applyOptimisticCellTiming, isLoading, isError }
+  return { store, revalidate, retry, revalidateCell, applyOptimisticTargetEdit, applyOptimisticTargetEdits, applyOptimisticCellTiming, isLoading, isError }
 }
 
 /**

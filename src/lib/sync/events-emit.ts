@@ -893,41 +893,6 @@ export async function emitSourceCellDelete(input: SourceCellDeleteInput): Promis
   return eventId
 }
 
-export interface TargetCellDeleteInput {
-  projectId: string
-  fileId: string
-  cellId: string
-  /** AQU-538 lane whose target row is removed. Omit/'' for the default lane. */
-  targetLang?: string
-  author: string
-  clientTs?: number
-}
-
-/**
- * Emit a `target.cell.delete` — removes ONE target-language lane's row for the
- * cell from the projection (events stay queryable); the source row and every
- * sibling lane are untouched. The delete-a-cell editor affordance (AQU-803)
- * pairs one of these per lane with a single `source.cell.delete` so no lane is
- * left holding an orphaned translation.
- */
-export async function emitTargetCellDelete(input: TargetCellDeleteInput): Promise<string> {
-  const { eventId } = await enqueueEvent({
-    kind: "target.cell.delete",
-    projectId: input.projectId,
-    fileId: input.fileId,
-    cellId: input.cellId,
-    parentId: null,
-    author: input.author,
-    payload: {
-      // AQU-538: '' (default lane) is omitted so default-lane deletes stay
-      // byte-identical to pre-lane events.
-      ...(input.targetLang ? { targetLang: input.targetLang } : {}),
-    },
-    clientTs: input.clientTs,
-  })
-  return eventId
-}
-
 export interface SourceCellCommitInput {
   projectId: string
   fileId: string

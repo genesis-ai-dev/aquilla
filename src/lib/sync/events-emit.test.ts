@@ -7,8 +7,6 @@ import {
   emitCellValidate,
   emitCellUnvalidate,
   emitSourceCellCreate,
-  emitSourceCellDelete,
-  emitTargetCellDelete,
   emitFileCreate,
   enqueueEvent,
   enqueueEvents,
@@ -195,37 +193,6 @@ describe("events-emit", () => {
       })
       const peek = await peekOutboxBatch(10)
       const ev = peek[0].event as unknown as OutboxRawEvent<"target.cell.commit">
-      expect("targetLang" in ev.payload).toBe(false)
-    })
-
-    // AQU-803: the delete-a-cell editor affordance pairs one source.cell.delete
-    // with one target.cell.delete per lane. These pin the emitters' wire shape.
-    it("AQU-803: emitSourceCellDelete emits a source.cell.delete with an empty payload and null parent", async () => {
-      const id = await emitSourceCellDelete({ projectId: "p", fileId: "f", cellId: "c", author: "lead" })
-      expect(typeof id).toBe("string")
-      const peek = await peekOutboxBatch(10)
-      const ev = peek[0].event as unknown as OutboxRawEvent<"source.cell.delete">
-      expect(ev.kind).toBe("source.cell.delete")
-      expect(ev.parentId).toBe(null)
-      expect(ev.cellId).toBe("c")
-      expect(ev.fileId).toBe("f")
-      expect(Object.keys(ev.payload)).toHaveLength(0)
-    })
-
-    it("AQU-803: emitTargetCellDelete carries targetLang for a non-default lane", async () => {
-      await emitTargetCellDelete({ projectId: "p", fileId: "f", cellId: "c", targetLang: "fr", author: "lead" })
-      const peek = await peekOutboxBatch(10)
-      const ev = peek[0].event as unknown as OutboxRawEvent<"target.cell.delete">
-      expect(ev.kind).toBe("target.cell.delete")
-      expect(ev.parentId).toBe(null)
-      expect(ev.payload.targetLang).toBe("fr")
-    })
-
-    it("AQU-803/538: emitTargetCellDelete OMITS targetLang for the default lane ('' never crosses the wire)", async () => {
-      await emitTargetCellDelete({ projectId: "p", fileId: "f", cellId: "c", targetLang: "", author: "lead" })
-      const peek = await peekOutboxBatch(10)
-      const ev = peek[0].event as unknown as OutboxRawEvent<"target.cell.delete">
-      expect(ev.kind).toBe("target.cell.delete")
       expect("targetLang" in ev.payload).toBe(false)
     })
 

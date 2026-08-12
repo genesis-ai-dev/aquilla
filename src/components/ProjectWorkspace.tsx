@@ -5933,7 +5933,11 @@ export function ProjectWorkspace() {
             surfaceLabel={workspaceBreadcrumb.surfaceLabel}
           >
             {centerSurface === "editor" && activeFileId ? (
-              agentOpen || (lens === "audio" && activeFile && fileOrderedBy(activeFile) === "time") ? (
+              // Agent replaces the editor, so the chapter-row toolbar has nowhere
+              // to live — hoist it into the header. Time-ordered media already
+              // renders the same toolbar above the timeline; putting it here too
+              // duplicated the Text/Media tabs (strict-mode e2e failure).
+              agentOpen ? (
                 fileChapterToolbar
               ) : (
                 <div

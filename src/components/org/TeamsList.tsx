@@ -26,6 +26,8 @@ import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { listTeams, createTeam, type TeamSummary } from "@/lib/frontier/teams"
 import { orgPath } from "@/lib/navigation/org-paths"
+import { useT } from "@/lib/i18n/I18nProvider"
+import type { MessageKey } from "@/lib/i18n/messages/en"
 import {
   Select,
   SelectContent,
@@ -42,10 +44,10 @@ const createTeamSchema = z.object({
   description: optionalString,
 })
 
-const SORT_OPTIONS: { value: SortOption; label: string }[] = [
-  { value: "name", label: "Name (A–Z)" },
-  { value: "members", label: "Members (most first)" },
-  { value: "projects", label: "Projects (most first)" },
+const SORT_OPTIONS: { value: SortOption; labelKey: MessageKey }[] = [
+  { value: "name", labelKey: "org.teamsList.sortNameLabel" },
+  { value: "members", labelKey: "org.teamsList.sortMembersLabel" },
+  { value: "projects", labelKey: "org.teamsList.sortProjectsLabel" },
 ]
 
 // AQU-333: three-position internal/public filter. Default is "internal",
@@ -54,10 +56,10 @@ const SORT_OPTIONS: { value: SortOption; label: string }[] = [
 // still holds — they remain reachable via "all"/"public".
 type Visibility = "all" | "internal" | "public"
 
-const VISIBILITY_OPTIONS: { value: Visibility; label: string }[] = [
-  { value: "all", label: "All" },
-  { value: "internal", label: "Internal only" },
-  { value: "public", label: "Public only" },
+const VISIBILITY_OPTIONS: { value: Visibility; labelKey: MessageKey }[] = [
+  { value: "all", labelKey: "org.orgHome.statusFilter.all" },
+  { value: "internal", labelKey: "org.teamsList.visibilityInternalLabel" },
+  { value: "public", labelKey: "org.teamsList.visibilityPublicLabel" },
 ]
 
 function filterByVisibility(teams: TeamSummary[], visibility: Visibility): TeamSummary[] {
@@ -75,6 +77,7 @@ function sortTeams(teams: TeamSummary[], sort: SortOption): TeamSummary[] {
 }
 
 export function TeamsList() {
+  const t = useT()
   const { activeOrgId, activeOrg } = useActiveOrg()
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
@@ -104,7 +107,7 @@ export function TeamsList() {
         createTeamForm.reset()
         navigate(orgPath(activeOrgId, `/teams/${t.id}`))
       } catch (err) {
-        setSubmitError(err instanceof Error ? err.message : "Couldn't create team.")
+        setSubmitError(err instanceof Error ? err.message : t("org.teamsList.createErrorFallback"))
       }
     },
   })
@@ -142,18 +145,18 @@ export function TeamsList() {
   return (
     <AppShell
       sidebar={<OrgSidebar />}
-      header={<OrgBreadcrumb section="Teams" />}
+      header={<OrgBreadcrumb section={t("editor.navTitle.teams")} />}
       statusBar={null}
       main={
         <Page size="wide">
           <PageHeader
-            title="Teams"
-            description="Group members and grant project access together."
+            title={t("editor.navTitle.teams")}
+            description={t("org.teamsList.pageDescription")}
             actions={
               isAdmin ? (
                 <Button size="sm" onClick={() => setCreating(true)}>
                   <Plus className="size-4" />
-                  New team
+                  {t("org.teamsList.newTeamButton")}
                 </Button>
               ) : null
             }
@@ -166,7 +169,7 @@ export function TeamsList() {
             >
               <DialogContent className="max-w-md">
                 <DialogHeader>
-                  <DialogTitle>New team</DialogTitle>
+                  <DialogTitle>{t("org.teamsList.newTeamButton")}</DialogTitle>
                 </DialogHeader>
                 <form
                   id="create-team-form"
@@ -182,14 +185,14 @@ export function TeamsList() {
                         const invalid = isFieldInvalid(field)
                         return (
                           <Field data-invalid={invalid}>
-                            <FieldLabel htmlFor="create-team-name">Team name</FieldLabel>
+                            <FieldLabel htmlFor="create-team-name">{t("org.teamForm.nameLabel")}</FieldLabel>
                             <Input
                               id="create-team-name"
                               name={field.name}
                               value={field.state.value}
                               onBlur={field.handleBlur}
                               onChange={(e) => field.handleChange(e.target.value)}
-                              placeholder="Team name"
+                              placeholder={t("org.teamForm.nameLabel")}
                               aria-invalid={invalid}
                               autoFocus
                             />
@@ -202,14 +205,14 @@ export function TeamsList() {
                       name="description"
                       children={(field) => (
                         <Field>
-                          <FieldLabel htmlFor="create-team-desc">Description (optional)</FieldLabel>
+                          <FieldLabel htmlFor="create-team-desc">{t("org.teamForm.descriptionOptionalLabel")}</FieldLabel>
                           <Input
                             id="create-team-desc"
                             name={field.name}
                             value={field.state.value}
                             onBlur={field.handleBlur}
                             onChange={(e) => field.handleChange(e.target.value)}
-                            placeholder="Description (optional)"
+                            placeholder={t("org.teamForm.descriptionOptionalLabel")}
                           />
                         </Field>
                       )}
@@ -223,11 +226,11 @@ export function TeamsList() {
                 </form>
                 <DialogFooter>
                   <Button type="button" variant="outline" onClick={() => setCreating(false)}>
-                    Cancel
+                    {t("common.cancel")}
                   </Button>
                   <Button type="submit" form="create-team-form">
                     {createTeamForm.state.isSubmitting && <Spinner data-icon="inline-start" />}
-                    {createTeamForm.state.isSubmitting ? "Creating…" : "Create"}
+                    {createTeamForm.state.isSubmitting ? t("org.createDialog.submitCreating") : t("org.switcher.create")}
                   </Button>
                 </DialogFooter>
               </DialogContent>
@@ -245,26 +248,26 @@ export function TeamsList() {
                   type="search"
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Search teams…"
+                  placeholder={t("org.teamsList.searchPlaceholder")}
                 />
               </InputGroup>
               <Select
-                items={SORT_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
+                items={SORT_OPTIONS.map((o) => ({ value: o.value, label: t(o.labelKey) }))}
                 value={sort}
                 onValueChange={(v) => setSort((v ?? "name") as SortOption)}
               >
-                <SelectTrigger aria-label="Sort teams by" className="w-56">
+                <SelectTrigger aria-label={t("org.teamsList.sortByAriaLabel")} className="w-56">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectGroup>
                     {SORT_OPTIONS.map((o) => (
-                      <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                      <SelectItem key={o.value} value={o.value}>{t(o.labelKey)}</SelectItem>
                     ))}
                   </SelectGroup>
                 </SelectContent>
               </Select>
-              <ButtonGroup aria-label="Filter teams by visibility">
+              <ButtonGroup aria-label={t("org.teamsList.visibilityFilterAriaLabel")}>
                 {VISIBILITY_OPTIONS.map((o) => (
                   <Button
                     key={o.value}
@@ -273,7 +276,7 @@ export function TeamsList() {
                     aria-pressed={visibility === o.value}
                     onClick={() => setVisibility(o.value)}
                   >
-                    {o.label}
+                    {t(o.labelKey)}
                   </Button>
                 ))}
               </ButtonGroup>
@@ -283,8 +286,8 @@ export function TeamsList() {
           {activeOrgId == null ? (
             <EmptyState
               icon={Users}
-              title="Select an organization"
-              description="Teams are managed within a single organization. Choose one from the switcher to continue."
+              title={t("org.teamsList.selectOrgTitle")}
+              description={t("org.teamsList.selectOrgDescription")}
             />
           ) : loading ? (
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -295,11 +298,11 @@ export function TeamsList() {
           ) : teams.length === 0 ? (
             <EmptyState
               icon={Users}
-              title="No teams in this org yet."
+              title={t("org.teamsList.noTeamsTitle")}
               description={
                 isAdmin
-                  ? "Create a team to group members and grant project access together."
-                  : "An org admin can create teams to group members and grant project access together."
+                  ? t("org.teamsList.noTeamsAdminDescription")
+                  : t("org.teamsList.noTeamsNonAdminDescription")
               }
             />
           ) : filtered.length === 0 ? (
@@ -307,12 +310,12 @@ export function TeamsList() {
               icon={Search}
               title={
                 query.trim()
-                  ? <>No teams match &ldquo;{query}&rdquo;</>
+                  ? t("org.teamsList.noTeamsMatchQuery", { query })
                   : visibility === "public"
-                    ? "No public teams in this organization"
+                    ? t("org.teamsList.noPublicTeams")
                     : visibility === "internal"
-                      ? "No internal teams in this organization"
-                      : "No teams match your filters"
+                      ? t("org.teamsList.noInternalTeams")
+                      : t("org.teamsList.noTeamsMatchFilters")
               }
               action={
                 <Button
@@ -320,31 +323,31 @@ export function TeamsList() {
                   variant="outline"
                   onClick={() => { setQuery(""); setVisibility("all") }}
                 >
-                  Clear
+                  {t("common.clear")}
                 </Button>
               }
             />
           ) : (
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {filtered.map((t) => (
+              {filtered.map((team) => (
                 <button
-                  key={t.id}
-                  onClick={() => activeOrgId != null && navigate(orgPath(activeOrgId, `/teams/${t.id}`))}
+                  key={team.id}
+                  onClick={() => activeOrgId != null && navigate(orgPath(activeOrgId, `/teams/${team.id}`))}
                   className="rounded-2xl border bg-card p-4 text-start transition-colors hover:bg-accent/40"
                 >
-                  <span className="block truncate font-medium text-foreground">{t.name}</span>
+                  <span className="block truncate font-medium text-foreground">{team.name}</span>
                   <span className="mt-1 block text-sm tabular-nums text-muted-foreground">
-                    {t.memberCount} members · {t.projectCount} projects
+                    {t("org.teamsList.memberCount", { count: team.memberCount })} · {t("org.orgHome.organizationsPanel.projectCount", { count: team.projectCount })}
                   </span>
                   <span className="mt-2 flex flex-wrap gap-1">
-                    {!t.isInternal && (
+                    {!team.isInternal && (
                       <Badge variant="secondary">
-                        Public
+                        {t("org.teamsList.publicBadge")}
                       </Badge>
                     )}
-                    {t.viewerIsMember && (
+                    {team.viewerIsMember && (
                       <Badge variant="secondary">
-                        Member
+                        {t("org.teamsList.memberBadge")}
                       </Badge>
                     )}
                   </span>

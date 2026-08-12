@@ -26,6 +26,7 @@ import {
 import { useOrgSettings, canEditRosterProgressFloor } from "@/hooks/useOrgSettings"
 import { ROLE, resolveRoleName } from "@/lib/frontier/roles"
 import { useT } from "@/lib/i18n/I18nProvider"
+import type { MessageKey } from "@/lib/i18n/messages/en"
 import { RoleLabel } from "@/components/RoleLabel"
 import { UserError } from "@/lib/errors/user-error"
 import { notifySessionExpired } from "@/lib/errors/session-expired-signal"
@@ -224,50 +225,50 @@ type OrgPortfolioSummary = {
   overdueCount: number
 }
 
-const STATUS_FILTERS: { value: StatusFilter; label: string }[] = [
-  { value: "all", label: "All" },
-  { value: "stalled", label: "Stalled" },
-  { value: "overdue", label: "Overdue" },
-  { value: "attention", label: "Needs attention" },
+const STATUS_FILTERS: { value: StatusFilter; labelKey: MessageKey }[] = [
+  { value: "all", labelKey: "org.orgHome.statusFilter.all" },
+  { value: "stalled", labelKey: "org.orgHome.stalled" },
+  { value: "overdue", labelKey: "org.orgHome.overdue" },
+  { value: "attention", labelKey: "autopilot.status.needsAttention" },
 ]
 
-const PROJECT_LENSES: { value: ProjectLens; label: string; description: string; empty: string }[] = [
+const PROJECT_LENSES: { value: ProjectLens; labelKey: MessageKey; descriptionKey: MessageKey; emptyKey: MessageKey }[] = [
   {
     value: "recent",
-    label: "Recently updated",
-    description: "Latest project activity across all organizations",
-    empty: "No recently updated projects yet.",
+    labelKey: "org.orgHome.lens.recentLabel",
+    descriptionKey: "org.orgHome.lens.recentDescription",
+    emptyKey: "org.orgHome.lens.recentEmpty",
   },
   {
     value: "attention",
-    label: "Needs attention",
-    description: "Highest-priority projects by deadline, activity, and progress",
-    empty: "No projects need attention yet.",
+    labelKey: "autopilot.status.needsAttention",
+    descriptionKey: "org.orgHome.lens.attentionDescription",
+    emptyKey: "org.orgHome.lens.attentionEmpty",
   },
   {
     value: "least-translated",
-    label: "Least translated",
-    description: "Projects with the lowest translation progress",
-    empty: "No projects yet.",
+    labelKey: "org.orgHome.lens.leastTranslatedLabel",
+    descriptionKey: "org.orgHome.lens.leastTranslatedDescription",
+    emptyKey: "org.orgHome.noProjectsYet",
   },
   {
     value: "most-progress",
-    label: "Most progress",
-    description: "Projects with the highest translation progress",
-    empty: "No projects yet.",
+    labelKey: "org.orgHome.lens.mostProgressLabel",
+    descriptionKey: "org.orgHome.lens.mostProgressDescription",
+    emptyKey: "org.orgHome.noProjectsYet",
   },
   {
     value: "name",
-    label: "Name",
-    description: "Projects sorted alphabetically",
-    empty: "No projects yet.",
+    labelKey: "common.name",
+    descriptionKey: "org.orgHome.lens.nameDescription",
+    emptyKey: "org.orgHome.noProjectsYet",
   },
   {
     // AQU-507: group projects by their designated Project Manager.
     value: "pm",
-    label: "Project manager",
-    description: "Projects grouped by their designated project manager",
-    empty: "No projects yet.",
+    labelKey: "org.projectOverview.projectManagerHeading",
+    descriptionKey: "org.orgHome.lens.pmDescription",
+    emptyKey: "org.orgHome.noProjectsYet",
   },
 ]
 
@@ -296,8 +297,8 @@ function averagePct(projects: PortfolioProjectRow[], readPct: (project: Portfoli
   return projects.length > 0 ? projects.reduce((sum, project) => sum + readPct(project), 0) / projects.length : 0
 }
 
-function orgDisplayName(org: OrgSummary): string {
-  return org.name ?? "Workspace"
+function orgDisplayName(t: ReturnType<typeof useT>, org: OrgSummary): string {
+  return org.name ?? t("org.switcher.workspaceFallback")
 }
 
 function roleLabel(t: ReturnType<typeof useT>, org: OrgSummary): string {
@@ -315,12 +316,14 @@ function formatDeadlineDate(value: string): string {
   }).format(new Date(parsed))
 }
 
-function deadlineTooltip(project: PortfolioProjectRow, status: "overdue" | "soon") {
+function deadlineTooltip(t: ReturnType<typeof useT>, project: PortfolioProjectRow, status: "overdue" | "soon") {
   return (
     <span className="flex flex-col gap-0.5">
-      <span className="font-medium">{status === "overdue" ? "Overdue" : "Due soon"}</span>
+      <span className="font-medium">{status === "overdue" ? t("org.orgHome.overdue") : t("org.orgHome.dueSoon")}</span>
       {project.deadlineAt && (
-        <span className="text-muted-foreground">Due {formatDeadlineDate(project.deadlineAt)}</span>
+        <span className="text-muted-foreground">
+          {t("org.orgHome.dueDate", { date: formatDeadlineDate(project.deadlineAt) })}
+        </span>
       )}
     </span>
   )
@@ -390,6 +393,7 @@ export function ProjectTable({
   showOrg: boolean
   defaultLaneLabelByProjectId?: Map<string, string>
 }) {
+  const t = useT()
   return (
     <div data-testid="project-table" className="@container/project-table overflow-hidden">
       <div className="w-full">
@@ -402,26 +406,28 @@ export function ProjectTable({
               showOrg && `@md/project-table:grid ${PROJECT_IDENTITY_COLS} @md/project-table:gap-x-2`,
             )}
           >
-            <span>Project</span>
-            {showOrg && <span className="hidden text-start @md/project-table:block">Org</span>}
+            <span>{t("common.project")}</span>
+            {showOrg && (
+              <span className="hidden text-start @md/project-table:block">{t("org.orgHome.table.orgHeader")}</span>
+            )}
           </span>
           {/* AQU-538: lane chips column (see the LaneChips cell in each row). */}
-          <span className="hidden @md/project-table:block">Language</span>
+          <span className="hidden @md/project-table:block">{t("org.orgHome.table.languageHeader")}</span>
           <ProjectMetricHeader
-            label="Translated"
-            description="Translated: percentage of cells with target-language content filled in."
+            label={t("org.orgHome.table.translatedHeaderLabel")}
+            description={t("org.orgHome.table.translatedHeaderDescription")}
             icon={Sparkles}
             testId="project-table-translated-header"
           />
           <ProjectMetricHeader
-            label="Validated"
-            description="Validated: percentage of cells marked validated by a reviewer."
+            label={t("org.orgHome.table.validatedHeaderLabel")}
+            description={t("org.orgHome.table.validatedHeaderDescription")}
             icon={CircleCheck}
             testId="project-table-validated-header"
           />
           <ProjectMetricHeader
-            label="Has audio"
-            description="Audio: percentage of cells with at least one recording attached."
+            label={t("org.orgHome.table.audioHeaderLabel")}
+            description={t("org.orgHome.table.audioHeaderDescription")}
             icon={Mic}
             testId="project-table-audio-header"
             className="hidden @md/project-table:inline-flex"
@@ -454,7 +460,7 @@ export function ProjectTable({
                       <ProjectTableName name={p.name} />
                       {(dstatus === "overdue" || dstatus === "soon") && (
                         <AppTooltip
-                          content={deadlineTooltip(p, dstatus)}
+                          content={deadlineTooltip(t, p, dstatus)}
                           side="top"
                           delay={0}
                         >
@@ -480,7 +486,7 @@ export function ProjectTable({
                         data-testid="project-table-metadata"
                         className="flex min-w-0 items-center text-xs leading-4 text-muted-foreground"
                       >
-                        <span className="truncate" aria-label="Source and target language">
+                        <span className="truncate" aria-label={t("org.orgHome.table.sourceTargetLanguageAria")}>
                           {/* AQU-i18n: the lib-generated label uses a literal " → "
                               separator; wrap that glyph so it mirrors under RTL
                               instead of pointing away from the target language. */}
@@ -535,21 +541,21 @@ export function ProjectTable({
                 <span
                   data-testid="project-table-translated-value"
                   className="justify-self-start text-start font-medium tabular-nums text-foreground"
-                  aria-label={`${tpct}% translated`}
+                  aria-label={t("org.orgHome.pctTranslated", { pct: tpct })}
                 >
                   {tpct}%
                 </span>
                 <span
                   data-testid="project-table-validated-value"
                   className="justify-self-start text-start tabular-nums text-muted-foreground"
-                  aria-label={`${pct}% validated`}
+                  aria-label={t("org.orgHome.pctValidated", { pct: pct })}
                 >
                   {pct}%
                 </span>
                 <span
                   data-testid="project-table-audio-value"
                   className="hidden justify-self-start text-start tabular-nums text-muted-foreground @md/project-table:block"
-                  aria-label={`${apct}% audio`}
+                  aria-label={t("org.orgHome.table.audioPctAria", { pct: apct })}
                 >
                   {apct}%
                 </span>
@@ -649,7 +655,7 @@ export function OrgHome() {
             return list.map((project) => ({
               ...project,
               orgId: org.id,
-              orgName: org.name ?? "Workspace",
+              orgName: org.name ?? t("org.switcher.workspaceFallback"),
             }))
           }))
         })
@@ -680,7 +686,7 @@ export function OrgHome() {
           setProjects(list.map((project) => ({
             ...project,
             orgId: activeOrgId,
-            orgName: activeOrg?.name ?? "Workspace",
+            orgName: activeOrg?.name ?? t("org.switcher.workspaceFallback"),
           })))
         }
       })
@@ -714,19 +720,19 @@ export function OrgHome() {
     return (
       <AppShell
         sidebar={<OrgSidebar />}
-        header={<OrgBreadcrumb section="Projects" />}
+        header={<OrgBreadcrumb section={t("nav.projects")} isProjectsLanding />}
         statusBar={null}
         main={
           <div className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center">
-            <p className="text-lg font-medium">Sign in to see your workspace</p>
+            <p className="text-lg font-medium">{t("org.orgHome.signedOut.heading")}</p>
             <p className="text-sm text-muted-foreground max-w-xs">
-              Your session has ended or you are not signed in. Sign in to access your projects and translation data.
+              {t("org.orgHome.signedOut.description")}
             </p>
             <Link
               to={`/login?next=${encodeURIComponent("/")}`}
               className={cn(buttonVariants())}
             >
-              Sign in
+              {t("auth.login.title")}
             </Link>
           </div>
         }
@@ -738,14 +744,14 @@ export function OrgHome() {
     || orgLoading
     || accessibleProjectsLoading
     || (portfolioScopeKey != null && resolvedPortfolioScopeKey !== portfolioScopeKey)
-  const workspaceLabel = isAllOrgs ? "All organizations" : activeOrg?.name ?? "Workspace"
+  const workspaceLabel = isAllOrgs ? t("org.breadcrumb.allOrganizations") : activeOrg?.name ?? t("org.switcher.workspaceFallback")
 
   // Keep cold-start data atomic while preserving the destination's geometry.
   // The template is intentionally disconnected from partial org/project state:
   // unknown values remain skeletons and startup has one visual transition.
   if (isPageLoading) {
     return (
-      <LoadingOverlay label="Loading dashboard" data-testid="org-home-loading">
+      <LoadingOverlay label={t("org.orgHome.loadingDashboard")} data-testid="org-home-loading">
         <OrgHomeLoadingTemplate />
       </LoadingOverlay>
     )
@@ -810,11 +816,11 @@ export function OrgHome() {
         overdueCount: orgProjects.filter((project) => deadlineStatus(project, now) === "overdue").length,
       }
     })
-    .sort((a, b) => orgDisplayName(a.org).localeCompare(orgDisplayName(b.org)))
+    .sort((a, b) => orgDisplayName(t, a.org).localeCompare(orgDisplayName(t, b.org)))
 
   const visibleOrgSummaries = orgSummaries.filter((summary) => {
     if (!orgQuery) return true
-    return orgDisplayName(summary.org).toLowerCase().includes(orgQuery.toLowerCase())
+    return orgDisplayName(t, summary.org).toLowerCase().includes(orgQuery.toLowerCase())
   })
 
   function openOrg(orgId: number) {
@@ -838,7 +844,14 @@ export function OrgHome() {
   }
 
   // Project lists
-  const currentProjectLens = PROJECT_LENSES.find((lens) => lens.value === projectLens) ?? PROJECT_LENSES[0]
+  const statusFilters = STATUS_FILTERS.map((f) => ({ value: f.value, label: t(f.labelKey) }))
+  const projectLenses = PROJECT_LENSES.map((lens) => ({
+    value: lens.value,
+    label: t(lens.labelKey),
+    description: t(lens.descriptionKey),
+    empty: t(lens.emptyKey),
+  }))
+  const currentProjectLens = projectLenses.find((lens) => lens.value === projectLens) ?? projectLenses[0]
 
   // Filter bar — narrows the listed projects only; the rollup strip above
   // continues to reflect the full portfolio.
@@ -885,7 +898,7 @@ export function OrgHome() {
       sidebar={<OrgSidebar />}
       header={
         <div className="flex items-center justify-between pe-4">
-          <OrgBreadcrumb section="Projects" />
+          <OrgBreadcrumb section={t("nav.projects")} isProjectsLanding />
           {activeOrgId != null ? (
             <ProjectCreateDialog
               orgId={activeOrgId}
@@ -893,7 +906,7 @@ export function OrgHome() {
               linkableProjects={accessibleProjects}
             />
           ) : (
-            <Badge variant="outline">Select an organization to create a project</Badge>
+            <Badge variant="outline">{t("org.orgHome.selectOrgToCreateProject")}</Badge>
           )}
         </div>
       }
@@ -910,7 +923,7 @@ export function OrgHome() {
                   never arrived is undiscoverable in-app. */}
               {pendingInvites.length > 0 && (
                 <section data-testid="pending-invitations" className="space-y-2">
-                  <h2 className="text-sm font-medium text-muted-foreground">Pending invitations</h2>
+                  <h2 className="text-sm font-medium text-muted-foreground">{t("org.orgHome.pendingInvitations.heading")}</h2>
                   <div className="rounded-2xl border divide-y">
                     {pendingInvites.map((inv) => (
                       <div key={inv.token} className="flex flex-wrap items-center gap-3 p-4">
@@ -919,15 +932,18 @@ export function OrgHome() {
                             {formatList(inv.projects.map((p) => p.projectName), locale)}
                           </p>
                           <p className="text-xs text-muted-foreground">
-                            Invited by {inv.createdBy} as <RoleLabel name={inv.role.name} />
-                            {inv.expiresAt ? ` · expires ${formatDate(inv.expiresAt, locale, {})}` : ""}
+                            {t("org.orgHome.pendingInvitations.invitedByAs", { username: inv.createdBy })}{" "}
+                            <RoleLabel name={inv.role.name} />
+                            {inv.expiresAt
+                              ? ` · ${t("org.orgHome.pendingInvitations.expiresOn", { date: formatDate(inv.expiresAt, locale, {}) })}`
+                              : ""}
                           </p>
                         </div>
                         <Link
                           to={`/join/${inv.token}`}
                           className={cn(buttonVariants({ size: "sm" }), "shrink-0")}
                         >
-                          Review &amp; accept
+                          {t("org.orgHome.pendingInvitations.reviewAccept")}
                         </Link>
                       </div>
                     ))}
@@ -947,13 +963,13 @@ export function OrgHome() {
               {isAllOrgs ? (
                 <>
                   <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-6">
-                    <StatTile label="Organizations" value={orgs.length} />
-                    <StatTile label="Projects" value={projects.length} />
-                    <StatTile label="Avg translated" value={`${Math.round(avgTranslatedPct * 100)}%`} />
-                    <StatTile label="Avg validated" value={`${Math.round(avgValidatedPct * 100)}%`} />
-                    <StatTile label="Stalled" value={stalledCount} />
+                    <StatTile label={t("org.orgHome.organizations")} value={orgs.length} />
+                    <StatTile label={t("nav.projects")} value={projects.length} />
+                    <StatTile label={t("org.orgHome.avgTranslated")} value={`${Math.round(avgTranslatedPct * 100)}%`} />
+                    <StatTile label={t("org.orgHome.avgValidated")} value={`${Math.round(avgValidatedPct * 100)}%`} />
+                    <StatTile label={t("org.orgHome.stalled")} value={stalledCount} />
                     <StatTile
-                      label="Overdue"
+                      label={t("org.orgHome.overdue")}
                       value={
                         <span className={overdueCount > 0 ? "text-destructive" : undefined}>
                           {overdueCount}
@@ -969,9 +985,12 @@ export function OrgHome() {
                     >
                       <div className="shrink-0 flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
                         <div>
-                          <h2 className="text-base font-semibold">Organizations</h2>
+                          <h2 className="text-base font-semibold">{t("org.orgHome.organizations")}</h2>
                           <p className="text-xs text-muted-foreground">
-                            {visibleOrgSummaries.length} of {orgSummaries.length}
+                            {t("org.orgHome.organizationsPanel.countFraction", {
+                              shown: visibleOrgSummaries.length,
+                              total: orgSummaries.length,
+                            })}
                           </p>
                         </div>
                         {orgSummaries.length > 0 && (
@@ -983,8 +1002,8 @@ export function OrgHome() {
                               type="search"
                               value={orgQuery}
                               onChange={(e) => setOrgQuery(e.target.value)}
-                              placeholder="Filter organizations…"
-                              aria-label="Filter organizations by name"
+                              placeholder={t("org.orgHome.organizationsPanel.filterPlaceholder")}
+                              aria-label={t("org.orgHome.organizationsPanel.filterAria")}
                             />
                           </InputGroup>
                         )}
@@ -999,14 +1018,14 @@ export function OrgHome() {
                             variant="inline"
                             className="py-10"
                             icon={Building2}
-                            title="No organizations yet."
+                            title={t("org.orgHome.organizationsPanel.noOrganizationsYet")}
                           />
                         ) : visibleOrgSummaries.length === 0 ? (
                           <EmptyState
                             variant="inline"
                             className="py-10"
                             icon={Search}
-                            title="No matching organizations."
+                            title={t("org.orgHome.organizationsPanel.noMatchingOrganizations")}
                           />
                         ) : (
                           <div className="divide-y">
@@ -1019,15 +1038,15 @@ export function OrgHome() {
                               >
                                 <div className="min-w-0 flex-1">
                                   <div className="flex flex-wrap items-center gap-2">
-                                    <p className="truncate font-medium">{orgDisplayName(summary.org)}</p>
+                                    <p className="truncate font-medium">{orgDisplayName(t, summary.org)}</p>
                                     <Badge variant="secondary" className="shrink-0">
                                       {roleLabel(t, summary.org)}
                                     </Badge>
                                   </div>
                                   <div className="mt-2 grid grid-cols-3 gap-2 text-xs text-muted-foreground">
-                                    <span>{summary.projectCount} project{summary.projectCount === 1 ? "" : "s"}</span>
-                                    <span>{Math.round(summary.avgTranslatedPct * 100)}% translated</span>
-                                    <span>{Math.round(summary.avgValidatedPct * 100)}% validated</span>
+                                    <span>{t("org.orgHome.organizationsPanel.projectCount", { count: summary.projectCount })}</span>
+                                    <span>{t("org.orgHome.pctTranslated", { pct: Math.round(summary.avgTranslatedPct * 100) })}</span>
+                                    <span>{t("org.orgHome.pctValidated", { pct: Math.round(summary.avgValidatedPct * 100) })}</span>
                                   </div>
                                 </div>
                               </button>
@@ -1044,7 +1063,7 @@ export function OrgHome() {
                       <div className="shrink-0 flex flex-col gap-2 border-b px-4 py-2.5">
                         <div className="flex flex-wrap items-start justify-between gap-3">
                           <div>
-                            <h2 className="text-base font-semibold">Projects</h2>
+                            <h2 className="text-base font-semibold">{t("nav.projects")}</h2>
                             <p className="text-xs text-muted-foreground">{currentProjectLens.description}</p>
                           </div>
                         </div>
@@ -1060,8 +1079,8 @@ export function OrgHome() {
                               onKeyDown={(e) => {
                                 if (e.key === "Escape") e.currentTarget.blur()
                               }}
-                              placeholder="Filter projects…"
-                              aria-label="Filter projects by name"
+                              placeholder={t("org.orgHome.projectsPanel.filterPlaceholder")}
+                              aria-label={t("org.orgHome.projectsPanel.filterAria")}
                               autoCorrect="off"
                               autoCapitalize="none"
                               spellCheck={false}
@@ -1071,7 +1090,7 @@ export function OrgHome() {
                                 <InputGroupButton
                                   type="button"
                                   size="icon-xs"
-                                  aria-label="Clear project filter"
+                                  aria-label={t("org.orgHome.projectsPanel.clearFilterAria")}
                                   onMouseDown={(e) => e.preventDefault()}
                                   onClick={() => setProjectQuery("")}
                                 >
@@ -1080,28 +1099,28 @@ export function OrgHome() {
                               </InputGroupAddon>
                             )}
                           </InputGroup>
-                          <div className="flex shrink-0 items-center gap-2" aria-label="Project status filter">
-                            <span className="text-xs font-medium text-muted-foreground">Status</span>
+                          <div className="flex shrink-0 items-center gap-2" aria-label={t("org.orgHome.projectsPanel.statusFilterAria")}>
+                            <span className="text-xs font-medium text-muted-foreground">{t("org.orgHome.projectsPanel.statusLabel")}</span>
                             <SegmentTabs
-                              aria-label="Project status filter"
+                              aria-label={t("org.orgHome.projectsPanel.statusFilterAria")}
                               value={statusFilter}
                               onValueChange={setStatusFilter}
-                              options={STATUS_FILTERS}
+                              options={statusFilters}
                             />
                           </div>
-                          <div className="ms-auto flex shrink-0 items-center gap-2" aria-label="Project sort">
-                            <span className="text-xs font-medium text-muted-foreground">Sort by</span>
+                          <div className="ms-auto flex shrink-0 items-center gap-2" aria-label={t("org.orgHome.projectsPanel.sortAria")}>
+                            <span className="text-xs font-medium text-muted-foreground">{t("org.orgHome.projectsPanel.sortByLabel")}</span>
                             <Select
-                              items={PROJECT_LENSES.map((lens) => ({ value: lens.value, label: lens.label }))}
+                              items={projectLenses.map((lens) => ({ value: lens.value, label: lens.label }))}
                               value={projectLens}
                               onValueChange={handleProjectLensChange}
                             >
-                              <SelectTrigger aria-label="Sort projects" size="sm" className="w-40 max-w-full bg-background">
+                              <SelectTrigger aria-label={t("org.orgHome.projectsPanel.sortProjectsAria")} size="sm" className="w-40 max-w-full bg-background">
                                 <SelectValue />
                               </SelectTrigger>
                               <SelectContent>
                                 <SelectGroup>
-                                  {PROJECT_LENSES.map((lens) => (
+                                  {projectLenses.map((lens) => (
                                     <SelectItem key={lens.value} value={lens.value}>
                                       {lens.label}
                                     </SelectItem>
@@ -1122,14 +1141,14 @@ export function OrgHome() {
                             variant="inline"
                             className="py-10"
                             icon={FolderPlus}
-                            title="No projects yet."
+                            title={t("org.orgHome.noProjectsYet")}
                           />
                         ) : visible.length === 0 ? (
                           <EmptyState
                             variant="inline"
                             className="py-10"
                             icon={Search}
-                            title={projectQuery ? "No matching projects." : currentProjectLens.empty}
+                            title={projectQuery ? t("org.orgHome.projectsPanel.noMatchingProjects") : currentProjectLens.empty}
                           />
                         ) : (
                           <ProjectTable
@@ -1147,13 +1166,13 @@ export function OrgHome() {
                 <>
                   {/* Rollup strip */}
                   <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-6">
-                    <StatTile label="Projects" value={projects.length} />
-                    <StatTile label="Avg translated" value={`${Math.round(avgTranslatedPct * 100)}%`} />
-                    <StatTile label="Avg validated" value={`${Math.round(avgValidatedPct * 100)}%`} />
-                    <StatTile label="Avg audio" value={`${Math.round(avgAudioPct * 100)}%`} />
-                    <StatTile label="Stalled" value={stalledCount} />
+                    <StatTile label={t("nav.projects")} value={projects.length} />
+                    <StatTile label={t("org.orgHome.avgTranslated")} value={`${Math.round(avgTranslatedPct * 100)}%`} />
+                    <StatTile label={t("org.orgHome.avgValidated")} value={`${Math.round(avgValidatedPct * 100)}%`} />
+                    <StatTile label={t("org.orgHome.avgAudio")} value={`${Math.round(avgAudioPct * 100)}%`} />
+                    <StatTile label={t("org.orgHome.stalled")} value={stalledCount} />
                     <StatTile
-                      label="Overdue"
+                      label={t("org.orgHome.overdue")}
                       value={
                         <span className={overdueCount > 0 ? "text-destructive" : undefined}>
                           {overdueCount}
@@ -1166,8 +1185,8 @@ export function OrgHome() {
                   {projects.length === 0 ? (
                     <EmptyState
                       icon={FolderPlus}
-                      title="Your organization is ready"
-                      description="Start a translation project, or bring your team in first — Aquilla is built for people working together."
+                      title={t("org.orgHome.readyTitle")}
+                      description={t("org.orgHome.readyDescription")}
                       action={
                         <div className="flex flex-wrap items-center justify-center gap-2">
                           {activeOrgId != null && (
@@ -1181,7 +1200,7 @@ export function OrgHome() {
                             variant="outline"
                             onClick={() => activeOrgId != null && navigate(membersPath(activeOrgId))}
                           >
-                            Invite your team
+                            {t("org.orgHome.inviteYourTeam")}
                           </Button>
                         </div>
                       }
@@ -1189,10 +1208,10 @@ export function OrgHome() {
                   ) : (
                       <div className="flex flex-col gap-3">
                       <SegmentTabs
-                        aria-label="Project status filter"
+                        aria-label={t("org.orgHome.projectsPanel.statusFilterAria")}
                         value={statusFilter}
                         onValueChange={setStatusFilter}
-                        options={STATUS_FILTERS}
+                        options={statusFilters}
                       />
 
                       <OrgProjectsDataTable
@@ -1210,12 +1229,12 @@ export function OrgHome() {
                         initialLens={statusFilter === "attention" ? "attention" : projectLens}
                         emptyTitle={
                           statusFilter === "stalled"
-                            ? "No stalled projects."
+                            ? t("org.orgHome.emptyTitle.stalled")
                             : statusFilter === "attention"
-                              ? "No projects need attention."
+                              ? t("org.orgHome.emptyTitle.attention")
                               : statusFilter === "overdue"
-                                ? "No overdue projects."
-                                : "No projects yet."
+                                ? t("org.orgHome.emptyTitle.overdue")
+                                : t("org.orgHome.noProjectsYet")
                         }
                       />
                     </div>
@@ -1244,7 +1263,7 @@ export function OrgHome() {
                           minRole={orgSettings.memberProgressViewMinRole}
                           canEdit={canEditVisibility}
                           onChangeMinRole={async (next) => { await orgSettings.patch({ memberProgressViewMinRole: next }) }}
-                          description="Who can see each teammate's assignment progress on this org's overview."
+                          description={t("org.orgHome.workloadVisibilityDescription")}
                         />
                       )}
                     />
@@ -1272,7 +1291,7 @@ export function OrgHome() {
                           minRole={orgSettings.memberProgressViewMinRole}
                           canEdit={canEditVisibility}
                           onChangeMinRole={async (next) => { await orgSettings.patch({ memberProgressViewMinRole: next }) }}
-                          description="Who can see each teammate's usage on this org's overview."
+                          description={t("org.orgHome.usageVisibilityDescription")}
                         />
                       )}
                     />

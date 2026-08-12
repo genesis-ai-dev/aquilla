@@ -16,30 +16,35 @@ import { X } from "lucide-react"
 import { useMemberActivity } from "@/hooks/useMemberActivity"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { formatDateTime } from "@/lib/i18n/format"
+import type { MessageKey } from "@/lib/i18n/messages/en"
+import type { TFunction } from "@/lib/i18n/I18nProvider"
 import type { MemberActivityEvent } from "@/lib/sync/member-activity-read-types"
 import { Button } from "@/components/ui/button"
 
-const KIND_LABELS: Record<string, string> = {
-  "target.cell.create": "Created a translation",
-  "target.cell.commit": "Edited a translation",
-  "target.cell.delete": "Deleted a translation",
-  "source.cell.create": "Created a source cell",
-  "source.cell.commit": "Edited a source cell",
-  "cell.validate": "Validated a cell",
-  "cell.unvalidate": "Un-validated a cell",
-  "cell.waive": "Waived a QA flag",
-  "cell.unwaive": "Un-waived a QA flag",
-  "comment.create": "Left a comment",
-  "comment.edit": "Edited a comment",
-  "comment.resolve": "Resolved a comment",
-  "cell.backtranslation.set": "Set a back-translation",
-  "cell.audio.attach": "Attached audio",
-  "cell.audio.select": "Selected an audio take",
-  "cell.retime": "Retimed a cell",
+const KIND_LABEL_KEYS: Record<string, MessageKey> = {
+  "target.cell.create": "org.memberActivityPanel.kindTargetCellCreate",
+  "target.cell.commit": "org.memberActivityPanel.kindTargetCellCommit",
+  "target.cell.delete": "org.memberActivityPanel.kindTargetCellDelete",
+  "source.cell.create": "org.memberActivityPanel.kindSourceCellCreate",
+  "source.cell.commit": "org.memberActivityPanel.kindSourceCellCommit",
+  "cell.validate": "org.memberActivityPanel.kindCellValidate",
+  "cell.unvalidate": "org.memberActivityPanel.kindCellUnvalidate",
+  "cell.waive": "org.memberActivityPanel.kindCellWaive",
+  "cell.unwaive": "org.memberActivityPanel.kindCellUnwaive",
+  "comment.create": "org.memberActivityPanel.kindCommentCreate",
+  "comment.edit": "org.memberActivityPanel.kindCommentEdit",
+  "comment.resolve": "org.memberActivityPanel.kindCommentResolve",
+  "cell.backtranslation.set": "org.memberActivityPanel.kindCellBacktranslationSet",
+  "cell.audio.attach": "org.memberActivityPanel.kindCellAudioAttach",
+  "cell.audio.select": "org.memberActivityPanel.kindCellAudioSelect",
+  "cell.retime": "org.memberActivityPanel.kindCellRetime",
 }
 
-function kindLabel(kind: string): string {
-  return KIND_LABELS[kind] ?? kind
+// Falls back to the raw event kind for a kind this client doesn't recognize
+// yet — never real UI vocabulary, so it stays untranslated (shouldn't happen).
+function kindLabel(t: TFunction, kind: string): string {
+  const key = KIND_LABEL_KEYS[kind]
+  return key ? t(key) : kind
 }
 
 function formatTimestamp(ms: number | null, locale: string): string {
@@ -61,7 +66,7 @@ export interface MemberActivityPanelProps {
  * sync-token minter via `getToken`.
  */
 export function MemberActivityPanel({ projectId, username, getToken, onClose }: MemberActivityPanelProps) {
-  const { locale } = useI18n()
+  const { locale, t } = useI18n()
   const { events, fileRollup, isLoading, isError } = useMemberActivity({
     projectId,
     author: username,
@@ -74,30 +79,30 @@ export function MemberActivityPanel({ projectId, username, getToken, onClose }: 
       data-testid="member-activity-panel"
     >
       <div className="mb-3 flex items-center justify-between gap-2">
-        <h3 className="text-sm font-medium">Activity — {username}</h3>
+        <h3 className="text-sm font-medium">{t("org.memberActivityPanel.heading", { username })}</h3>
         <Button
           variant="ghost"
           size="icon-sm"
           className="text-muted-foreground"
           onClick={onClose}
-          aria-label="Close member activity"
+          aria-label={t("org.memberActivityPanel.closeAriaLabel")}
         >
           <X />
         </Button>
       </div>
 
       {isLoading && events.length === 0 && fileRollup.length === 0 ? (
-        <p className="text-sm text-muted-foreground">Loading activity…</p>
+        <p className="text-sm text-muted-foreground">{t("org.memberActivityPanel.loadingActivity")}</p>
       ) : isError ? (
-        <p className="text-sm text-destructive">Couldn't load activity for {username}.</p>
+        <p className="text-sm text-destructive">{t("org.memberActivityPanel.loadErrorFor", { username })}</p>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2">
           <div>
             <h4 className="mb-2 text-xs font-semibold text-muted-foreground">
-              Files worked on
+              {t("org.memberActivityPanel.filesWorkedOnHeading")}
             </h4>
             {fileRollup.length === 0 ? (
-              <p className="text-xs text-muted-foreground">No tracked edits yet.</p>
+              <p className="text-xs text-muted-foreground">{t("org.memberActivityPanel.noTrackedEdits")}</p>
             ) : (
               <ul className="space-y-1.5" data-testid="member-file-rollup">
                 {fileRollup.map((f) => (
@@ -114,15 +119,15 @@ export function MemberActivityPanel({ projectId, username, getToken, onClose }: 
 
           <div>
             <h4 className="mb-2 text-xs font-semibold text-muted-foreground">
-              Recent actions
+              {t("org.memberActivityPanel.recentActionsHeading")}
             </h4>
             {events.length === 0 ? (
-              <p className="text-xs text-muted-foreground">No recent actions.</p>
+              <p className="text-xs text-muted-foreground">{t("org.memberActivityPanel.noRecentActions")}</p>
             ) : (
               <ul className="space-y-1.5" data-testid="member-recent-actions">
                 {events.map((e: MemberActivityEvent) => (
                   <li key={e.id} className="flex items-center justify-between gap-2 text-xs">
-                    <span className="truncate">{kindLabel(e.kind)}</span>
+                    <span className="truncate">{kindLabel(t, e.kind)}</span>
                     <span className="shrink-0 tabular-nums text-muted-foreground">
                       {formatTimestamp(e.serverTs, locale)}
                     </span>

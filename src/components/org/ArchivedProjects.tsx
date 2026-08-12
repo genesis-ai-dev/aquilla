@@ -10,8 +10,10 @@ import { Button } from "@/components/ui/button"
 import { LoadingPanel } from "@/components/ui/loading-overlay"
 import { EmptyState } from "@/components/ui/page"
 import { Archive, Building2 } from "lucide-react"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 export function ArchivedProjects() {
+  const t = useT()
   const { activeOrgId } = useActiveOrg()
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
@@ -42,7 +44,7 @@ export function ArchivedProjects() {
     if (res.kind === "restored" || res.kind === "local-only") {
       load()
     } else if (res.kind === "forbidden") {
-      setError(res.message ?? "Only owners can restore a project.")
+      setError(res.message ?? t("org.projectOverview.restoreForbidden"))
     } else if (res.kind === "error") {
       setError(res.message)
     }
@@ -51,7 +53,7 @@ export function ArchivedProjects() {
   return (
     <AppShell
       sidebar={<OrgSidebar />}
-      header={<OrgBreadcrumb section="Archived" />}
+      header={<OrgBreadcrumb section={t("org.orgSidebar.archived")} />}
       statusBar={null}
       main={
         // AQU-366: see ProjectsList.tsx for why `h-full overflow-y-auto` is the
@@ -62,15 +64,15 @@ export function ArchivedProjects() {
           {activeOrgId == null ? (
             <EmptyState
               icon={Building2}
-              title="Select an organization"
-              description="Archived projects are managed within a single organization."
+              title={t("org.teamsList.selectOrgTitle")}
+              description={t("org.archivedProjects.selectOrgDescription")}
             />
           ) : loading ? (
-            <LoadingPanel label="Loading archived projects" className="min-h-80" />
+            <LoadingPanel label={t("org.archivedProjects.loadingLabel")} className="min-h-80" />
           ) : projects.length === 0 ? (
             <EmptyState
               icon={Archive}
-              title="No archived projects."
+              title={t("org.archivedProjects.emptyTitle")}
             />
           ) : (
             <div className="rounded-lg border divide-y">
@@ -83,7 +85,7 @@ export function ArchivedProjects() {
                     variant="outline"
                     onClick={() => void handleRestore(p.id)}
                   >
-                    Restore
+                    {t("org.projectOverview.restore")}
                   </Button>
                 </div>
               ))}

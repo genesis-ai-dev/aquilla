@@ -37,16 +37,18 @@ import { AddLanguagePopover } from "./AddLanguagePopover"
 import { ProjectLaneSubRows } from "./ProjectLaneSubRows"
 import { OrgLaneAssignModal } from "./OrgLaneAssignModal"
 import { displayLanes } from "./project-lanes"
+import { useT } from "@/lib/i18n/I18nProvider"
+import type { TFunction } from "@/lib/i18n/I18nProvider"
 
 export type OrgProjectRow = PortfolioProject & {
   orgId?: number
   orgName?: string | null
 }
 
-function activityLabel(project: PortfolioProject, now: number): string | null {
+function activityLabel(project: PortfolioProject, now: number, t: TFunction): string | null {
   const status = portfolioActivityStatus(project, now)
-  if (status === "not-started") return "Not started"
-  if (status === "stalled") return "Stalled"
+  if (status === "not-started") return t("autopilot.status.notStarted")
+  if (status === "stalled") return t("org.orgHome.stalled")
   return null
 }
 
@@ -77,7 +79,7 @@ export function OrgProjectsDataTable({
   showOrg = false,
   roleByProjectId,
   initialLens = "recent",
-  emptyTitle = "No projects yet.",
+  emptyTitle,
   emptyDescription,
   testId = "org-projects-table",
   defaultLaneLabelByProjectId,
@@ -118,6 +120,8 @@ export function OrgProjectsDataTable({
   onLaneAdded?: (projectId: string, lane: string) => void
 }) {
   const navigate = useNavigate()
+  const t = useT()
+  const resolvedEmptyTitle = emptyTitle ?? t("org.orgHome.noProjectsYet")
   const [tableNow] = useState(() => now)
   // AQU-538 §3.2: which project rows are expanded into their per-lane detail.
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
@@ -156,7 +160,7 @@ export function OrgProjectsDataTable({
     () => [
       {
         accessorKey: "name",
-        header: ({ column }) => <DataTableColumnHeader column={column} title="Name" />,
+        header: ({ column }) => <DataTableColumnHeader column={column} title={t("common.name")} />,
         cell: ({ row }) => {
           const p = row.original
           return (
@@ -175,7 +179,7 @@ export function OrgProjectsDataTable({
       {
         id: "languages",
         enableSorting: false,
-        header: ({ column }) => <DataTableColumnHeader column={column} title="Language" />,
+        header: ({ column }) => <DataTableColumnHeader column={column} title={t("org.orgHome.table.languageHeader")} />,
         cell: ({ row }) => {
           const p = row.original
           return (
@@ -203,8 +207,8 @@ export function OrgProjectsDataTable({
         accessorFn: (p) => translatedPct(p),
         header: ({ column }) => (
           <ProjectMetricHeader
-            label="Translated"
-            description="Translated: percentage of cells with target-language content filled in."
+            label={t("org.orgHome.table.translatedHeaderLabel")}
+            description={t("org.orgHome.table.translatedHeaderDescription")}
             icon={Sparkles}
             testId="project-table-translated-header"
             sorted={column.getIsSorted()}
@@ -217,7 +221,7 @@ export function OrgProjectsDataTable({
             <div
               data-testid="project-table-translated-value"
               className="text-start font-medium tabular-nums text-foreground"
-              aria-label={`${pct}% translated`}
+              aria-label={t("org.orgHome.pctTranslated", { pct })}
             >
               {pct}%
             </div>
@@ -229,8 +233,8 @@ export function OrgProjectsDataTable({
         accessorFn: (p) => validatedPct(p),
         header: ({ column }) => (
           <ProjectMetricHeader
-            label="Validated"
-            description="Validated: percentage of cells marked validated by a reviewer."
+            label={t("org.orgHome.table.validatedHeaderLabel")}
+            description={t("org.orgHome.table.validatedHeaderDescription")}
             icon={CircleCheck}
             testId="project-table-validated-header"
             sorted={column.getIsSorted()}
@@ -243,7 +247,7 @@ export function OrgProjectsDataTable({
             <div
               data-testid="project-table-validated-value"
               className="text-start tabular-nums text-muted-foreground"
-              aria-label={`${pct}% validated`}
+              aria-label={t("org.orgHome.pctValidated", { pct })}
             >
               {pct}%
             </div>
@@ -255,8 +259,8 @@ export function OrgProjectsDataTable({
         accessorFn: (p) => audioPct(p),
         header: ({ column }) => (
           <ProjectMetricHeader
-            label="Has audio"
-            description="Audio: percentage of cells with at least one recording attached."
+            label={t("org.orgHome.table.audioHeaderLabel")}
+            description={t("org.orgHome.table.audioHeaderDescription")}
             icon={Mic}
             testId="project-table-audio-header"
             sorted={column.getIsSorted()}
@@ -269,7 +273,7 @@ export function OrgProjectsDataTable({
             <div
               data-testid="project-table-audio-value"
               className="text-start tabular-nums text-muted-foreground"
-              aria-label={`${pct}% audio`}
+              aria-label={t("org.orgHome.table.audioPctAria", { pct })}
             >
               {pct}%
             </div>
@@ -280,7 +284,7 @@ export function OrgProjectsDataTable({
         id: "role",
         accessorFn: (p) => roleByProjectId?.get(p.id)?.name ?? "",
         enableSorting: false,
-        header: ({ column }) => <DataTableColumnHeader column={column} title="Role" />,
+        header: ({ column }) => <DataTableColumnHeader column={column} title={t("org.membersPage.roleLabel")} />,
         cell: ({ row }) => (
           <div className="truncate text-start text-xs text-muted-foreground">
             {roleByProjectId?.get(row.original.id)?.name.replace(/_/g, " ") ?? "—"}
@@ -292,7 +296,7 @@ export function OrgProjectsDataTable({
         // last (see sortingFn) so scanning "by PM" surfaces owned projects first.
         id: "pm",
         accessorFn: (p) => p.pm?.username ?? "",
-        header: ({ column }) => <DataTableColumnHeader column={column} title="PM" />,
+        header: ({ column }) => <DataTableColumnHeader column={column} title={t("org.orgProjectsDataTable.pmColumn")} />,
         sortingFn: (a, b) => {
           const av = a.original.pm?.username ?? null
           const bv = b.original.pm?.username ?? null
@@ -306,14 +310,14 @@ export function OrgProjectsDataTable({
           return username ? (
             <div className="truncate text-start text-xs text-muted-foreground">{username}</div>
           ) : (
-            <div className="truncate text-start text-xs text-muted-foreground/60">Unassigned</div>
+            <div className="truncate text-start text-xs text-muted-foreground/60">{t("org.projectOverview.unassigned")}</div>
           )
         },
       },
       {
         id: "edited",
         accessorFn: (p) => p.lastEditAt ?? null,
-        header: ({ column }) => <DataTableColumnHeader column={column} title="Updated" />,
+        header: ({ column }) => <DataTableColumnHeader column={column} title={t("org.orgProjectsDataTable.updatedColumn")} />,
         sortingFn: (a, b) => {
           const av = a.original.lastEditAt
           const bv = b.original.lastEditAt
@@ -324,7 +328,7 @@ export function OrgProjectsDataTable({
         },
         cell: ({ row }) => {
           const status = portfolioActivityStatus(row.original, tableNow)
-          const label = activityLabel(row.original, tableNow)
+          const label = activityLabel(row.original, tableNow, t)
           if (label) {
             return (
               <div
@@ -340,7 +344,7 @@ export function OrgProjectsDataTable({
             <div className="truncate text-start text-xs text-muted-foreground">
               <DateTooltip
                 value={row.original.lastEditAt}
-                label="Updated"
+                label={t("org.orgProjectsDataTable.updatedColumn")}
                 className="text-muted-foreground"
               />
             </div>
@@ -350,7 +354,7 @@ export function OrgProjectsDataTable({
       {
         id: "actions",
         enableSorting: false,
-        header: () => <span className="sr-only">Project actions</span>,
+        header: () => <span className="sr-only">{t("org.orgProjectsDataTable.actionsColumnSrOnly")}</span>,
         cell: ({ row }) => {
           const p = row.original
           return (
@@ -362,7 +366,7 @@ export function OrgProjectsDataTable({
                     type="button"
                     size="icon-sm"
                     variant="ghost"
-                    aria-label={`More actions for ${p.name}`}
+                    aria-label={t("org.orgProjectsDataTable.moreActionsAriaLabel", { name: p.name })}
                     className="text-muted-foreground hover:bg-accent hover:text-foreground"
                     onClick={(e) => e.stopPropagation()}
                   >
@@ -380,13 +384,13 @@ export function OrgProjectsDataTable({
                     onClick={() => setAssignTarget({ projectId: p.id, lane: "" })}
                   >
                     <UserPlus className="size-4" />
-                    Assign work
+                    {t("dialog.assign.title")}
                   </DropdownMenuItem>
                 )}
                 <DropdownMenuItem
                   onClick={() => navigate(`/project/${p.id}/members`)}
                 >
-                  Add member
+                  {t("org.teamDetail.addMemberButton")}
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -405,6 +409,7 @@ export function OrgProjectsDataTable({
       onLaneAdded,
       canAssign,
       navigate,
+      t,
     ],
   )
 
@@ -424,7 +429,7 @@ export function OrgProjectsDataTable({
           <EmptyMedia variant="icon">
             <FolderOpen />
           </EmptyMedia>
-          <EmptyTitle>{emptyTitle}</EmptyTitle>
+          <EmptyTitle>{resolvedEmptyTitle}</EmptyTitle>
           {emptyDescription ? <EmptyDescription>{emptyDescription}</EmptyDescription> : null}
         </EmptyHeader>
       </Empty>
@@ -441,7 +446,7 @@ export function OrgProjectsDataTable({
         initialSorting={
           initialLens === "attention" ? [] : [...lensToSorting(initialLens)]
         }
-        searchPlaceholder="Filter projects by name"
+        searchPlaceholder={t("org.orgHome.projectsPanel.filterAria")}
         globalFilterFn={(row, _columnId, filterValue) => {
           const q = String(filterValue).trim().toLowerCase()
           if (!q) return true
@@ -454,7 +459,10 @@ export function OrgProjectsDataTable({
           <span className="ms-auto text-xs tabular-nums text-muted-foreground">
             {table.getFilteredRowModel().rows.length === tableData.length
               ? `${tableData.length}`
-              : `${table.getFilteredRowModel().rows.length} of ${tableData.length}`}
+              : t("org.orgHome.organizationsPanel.countFraction", {
+                  shown: table.getFilteredRowModel().rows.length,
+                  total: tableData.length,
+                })}
           </span>
         )}
         renderSubRow={(p) =>

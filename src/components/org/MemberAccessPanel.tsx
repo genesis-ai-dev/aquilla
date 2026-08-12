@@ -39,6 +39,7 @@ export function MemberAccessRow({
    */
   callerOrgRoleLevel?: number | null
 }) {
+  const t = useT()
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
   const [open, setOpen] = useState(false)
@@ -100,8 +101,8 @@ export function MemberAccessRow({
         {data && (
           <span className="text-[10px] text-muted-foreground">
             {data.projects.length > 0
-              ? `${data.projects.length} project${data.projects.length === 1 ? "" : "s"} with explicit access`
-              : "org-role only; no project overrides"}
+              ? t("org.memberAccessPanel.projectsWithAccessCount", { count: data.projects.length })
+              : t("org.memberAccessPanel.orgRoleOnlyNote")}
           </span>
         )}
       </button>
@@ -111,7 +112,7 @@ export function MemberAccessRow({
           {loading && (
             <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
               <Spinner className="size-3" />
-              Loading…
+              {t("common.loading")}
             </span>
           )}
           {error && <p className="text-[10px] text-destructive">{error}</p>}
@@ -120,15 +121,15 @@ export function MemberAccessRow({
               <p className="text-[10px] text-muted-foreground">
                 {data.orgRole != null ? (
                   <>
-                    Org role: <RoleLevelLabel level={data.orgRole} as="strong" /> — applies to every project in this org.
+                    {t("org.memberAccessPanel.orgRoleLabel")} <RoleLevelLabel level={data.orgRole} as="strong" /> {t("org.memberAccessPanel.orgRoleAppliesNote")}
                   </>
                 ) : (
-                  "No org-wide role."
+                  t("org.memberAccessPanel.noOrgRole")
                 )}
               </p>
               {data.projects.length === 0 ? (
                 <p className="text-[10px] text-muted-foreground">
-                  No direct, team, or creator grants on any project.
+                  {t("org.memberAccessPanel.noGrantsNote")}
                 </p>
               ) : (
                 <ul className="space-y-1.5">
@@ -168,37 +169,37 @@ function AccessProjectRow({
 }) {
   const t = useT()
   const otherPaths = [
-    ...p.groups.map((g) => `team "${g.name}"`),
-    ...(p.org != null ? ["org role"] : []),
-    ...(p.creator ? ["project creator"] : []),
+    ...p.groups.map((g) => t("org.memberAccessPanel.viaTeamLabel", { name: g.name })),
+    ...(p.org != null ? [t("org.memberAccessPanel.viaOrgRoleLabel")] : []),
+    ...(p.creator ? [t("org.membersPage.sourceProjectCreator")] : []),
   ]
   return (
     <li className="rounded border bg-background p-2">
       <div className="flex items-center justify-between gap-2">
         <span className="truncate text-xs font-medium">{p.projectName}</span>
         <span className="shrink-0 text-[10px] text-muted-foreground">
-          resolved: <RoleLevelLabel level={p.resolved} as="strong" />
+          {t("org.memberAccessPanel.resolvedLabel")} <RoleLevelLabel level={p.resolved} as="strong" />
         </span>
       </div>
       <div className="mt-1 flex flex-wrap gap-1">
         {p.direct != null && (
           <Badge variant="secondary" className="text-[10px]">
-            direct: <RoleLevelLabel level={p.direct} />
+            {t("org.memberAccessPanel.directLabel")} <RoleLevelLabel level={p.direct} />
           </Badge>
         )}
         {p.groups.map((g) => (
           <Badge key={g.groupId} variant="secondary" className="text-[10px]">
-            team {g.name}: <RoleLevelLabel level={g.roleLevel} />
+            {t("org.memberAccessPanel.teamGrantLabel", { name: g.name })} <RoleLevelLabel level={g.roleLevel} />
           </Badge>
         ))}
         {p.org != null && (
           <Badge variant="secondary" className="text-[10px]">
-            org: <RoleLevelLabel level={p.org} />
+            {t("org.memberAccessPanel.orgGrantLabel")} <RoleLevelLabel level={p.org} />
           </Badge>
         )}
         {p.creator && (
           <Badge variant="secondary" className="text-[10px]">
-            creator
+            {t("org.memberAccessPanel.creatorGrantLabel")}
           </Badge>
         )}
       </div>
@@ -215,13 +216,13 @@ function AccessProjectRow({
               data-testid="revoke-direct-grant"
               className="rounded border px-2 py-0.5 text-[10px] hover:bg-destructive/10 hover:text-destructive disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {revoking ? "Revoking…" : "Revoke direct grant"}
+              {revoking ? t("org.membersPage.revoking") : t("org.memberAccessPanel.revokeButton")}
             </button>
           </AppTooltip>
         )}
         {otherPaths.length > 0 && (
           <span className="text-[10px] text-muted-foreground">
-            Also via {otherPaths.join(", ")} — manage in Teams / Members.
+            {t("org.memberAccessPanel.alsoViaNote", { paths: otherPaths.join(", ") })}
           </span>
         )}
       </div>

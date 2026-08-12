@@ -35,23 +35,36 @@ import {
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field"
 import { ROLE } from "@/lib/frontier/roles"
 import { cn } from "@/lib/utils"
+import { useT } from "@/lib/i18n/I18nProvider"
+import type { MessageKey } from "@/lib/i18n/messages/en"
 
 /** Role levels this control offers — mirrors RosterProgressSection's picker. */
 const VISIBILITY_ROLE_OPTIONS = [
-  { level: ROLE.VIEWER, label: "Everyone with access" },
-  { level: ROLE.CONTRIBUTOR, label: "Contributors and up" },
-  { level: ROLE.PROJECT_LEAD, label: "Project leads and up" },
-  { level: ROLE.MAINTAINER, label: "Maintainers and owners" },
-  { level: ROLE.OWNER, label: "Owners only" },
+  { level: ROLE.VIEWER, labelKey: "org.sectionVisibilityBadge.rolePickerEveryone" as MessageKey },
+  { level: ROLE.CONTRIBUTOR, labelKey: "org.sectionVisibilityBadge.rolePickerContributor" as MessageKey },
+  { level: ROLE.PROJECT_LEAD, labelKey: "org.sectionVisibilityBadge.rolePickerProjectLead" as MessageKey },
+  { level: ROLE.MAINTAINER, labelKey: "org.sectionVisibilityBadge.rolePickerMaintainer" as MessageKey },
+  { level: ROLE.OWNER, labelKey: "org.sectionVisibilityBadge.rolePickerOwner" as MessageKey },
 ] as const
 
-/** Short human label for a floor, used in the badge itself. */
+/** Short human label for a floor, used in the badge itself. English fallback for
+ *  pure-lib/test callers without access to t() — see visibilityFloorLabelKey for
+ *  the localized path the component itself uses. */
 export function visibilityFloorLabel(minRole: number): string {
   if (minRole <= ROLE.VIEWER) return "Everyone can see this"
   if (minRole <= ROLE.CONTRIBUTOR) return "Contributors & up can see this"
   if (minRole <= ROLE.PROJECT_LEAD) return "Project leads & up can see this"
   if (minRole <= ROLE.MAINTAINER) return "Only maintainers & owners can see this"
   return "Only owners can see this"
+}
+
+/** Catalog key for a floor's display label — see visibilityFloorLabel's own doc. */
+export function visibilityFloorLabelKey(minRole: number): MessageKey {
+  if (minRole <= ROLE.VIEWER) return "org.sectionVisibilityBadge.floorEveryone"
+  if (minRole <= ROLE.CONTRIBUTOR) return "org.sectionVisibilityBadge.floorContributor"
+  if (minRole <= ROLE.PROJECT_LEAD) return "org.sectionVisibilityBadge.floorProjectLead"
+  if (minRole <= ROLE.MAINTAINER) return "org.sectionVisibilityBadge.floorMaintainer"
+  return "org.sectionVisibilityBadge.floorOwner"
 }
 
 /** True when a floor restricts the section beyond "everyone with access". */
@@ -99,9 +112,10 @@ export function SectionVisibilityBadge({
   description,
   className,
 }: SectionVisibilityBadgeProps) {
+  const t = useT()
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
-  const label = visibilityFloorLabel(minRole)
+  const label = t(visibilityFloorLabelKey(minRole))
   const Icon = isRestrictedFloor(minRole) ? Lock : Eye
   const interactive = canEdit && typeof onChangeMinRole === "function"
 
@@ -144,7 +158,7 @@ export function SectionVisibilityBadge({
             type="button"
             data-testid="section-visibility-badge"
             className="inline-flex rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-            aria-label={`${label}. Change section visibility`}
+            aria-label={t("org.sectionVisibilityBadge.changeVisibilityAriaLabel", { label })}
           >
             {badgeContent}
           </button>
@@ -152,21 +166,21 @@ export function SectionVisibilityBadge({
       />
       <PopoverContent align="end" className="w-64">
         <Field>
-          <FieldLabel className="text-xs font-medium">Who can see this section</FieldLabel>
+          <FieldLabel className="text-xs font-medium">{t("org.sectionVisibilityBadge.whoCanSeeLabel")}</FieldLabel>
           <Select
-            items={VISIBILITY_ROLE_OPTIONS.map((opt) => ({ value: String(opt.level), label: opt.label }))}
+            items={VISIBILITY_ROLE_OPTIONS.map((opt) => ({ value: String(opt.level), label: t(opt.labelKey) }))}
             value={String(minRole)}
             onValueChange={(v) => void handleChange(v)}
             disabled={busy}
           >
-            <SelectTrigger aria-label="Who can see this section" size="sm" className="w-full">
+            <SelectTrigger aria-label={t("org.sectionVisibilityBadge.whoCanSeeLabel")} size="sm" className="w-full">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
               <SelectGroup>
                 {VISIBILITY_ROLE_OPTIONS.map((opt) => (
                   <SelectItem key={opt.level} value={String(opt.level)}>
-                    {opt.label}
+                    {t(opt.labelKey)}
                   </SelectItem>
                 ))}
               </SelectGroup>

@@ -23,6 +23,7 @@ import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { resolveRoleName } from "@/lib/frontier/roles"
 import { useT } from "@/lib/i18n/I18nProvider"
+import type { MessageKey } from "@/lib/i18n/messages/en"
 import { orgPath } from "@/lib/navigation/org-paths"
 import {
   getTeam,
@@ -69,31 +70,26 @@ const editTeamSchema = z.object({
  * Canonical descriptions for each access level (from AD-6 / permission-semantics.md, AQU-138).
  * Shown as tooltips next to the member's role display.
  */
-const ROLE_DESCRIPTIONS: Record<number, string> = {
-  100: "Viewer (100) — can read all org projects. No edit or management actions.",
-  200: "Commenter (200) — can read and leave comments. Cannot edit content.",
-  300: "Reviewer (300) — can read, comment, and review. Cannot make direct edits.",
-  400: "Contributor (400) — can edit project content. Maximum level grantable via share link.",
-  500: "Project Lead (500) — can add members to projects, mint share-link invites, and lead project work.",
-  600: "Maintainer (600) — can create/manage teams, rename the org, set project deadlines, and remove project members.",
-  700: "Owner (700) — full control: add/remove org members, archive/restore projects, and all maintainer actions.",
+const ROLE_DESCRIPTION_KEYS: Record<number, MessageKey> = {
+  100: "org.teamDetail.roleDescriptionViewer",
+  200: "org.teamDetail.roleDescriptionCommenter",
+  300: "org.teamDetail.roleDescriptionReviewer",
+  400: "org.teamDetail.roleDescriptionContributor",
+  500: "org.teamDetail.roleDescriptionProjectLead",
+  600: "org.teamDetail.roleDescriptionMaintainer",
+  700: "org.teamDetail.roleDescriptionOwner",
 }
 
 function roleLabel(t: ReturnType<typeof useT>, roleLevel: number | null | undefined): string {
-  if (roleLevel == null) return "Unknown"
+  if (roleLevel == null) return t("autopilot.evidence.status.unknown")
   // Falls back to the canonical humanized name — never a raw numeric (FRO-368).
   return resolveRoleName(t, roleLevel)
 }
 
-// AQU-789: removing a team member is a maintainer+ (600) action. Non-maintainers
-// who can view a team see this on a disabled Remove control instead of nothing.
-const REMOVE_REQUIRES_MAINTAINER_TOOLTIP =
-  "Only maintainers and org owners can remove members from a team. Ask a maintainer to remove someone."
-
-function lockedOrgRoleTooltip(roleLevel: number | null | undefined): string {
-  const roleDescription = roleLevel != null ? ROLE_DESCRIPTIONS[roleLevel] : null
-  const prefix = roleDescription ?? "This member's org-level role is unknown."
-  return `${prefix} This permission is set at the org level and can only be changed by an org owner.`
+function lockedOrgRoleTooltip(t: ReturnType<typeof useT>, roleLevel: number | null | undefined): string {
+  const key = roleLevel != null ? ROLE_DESCRIPTION_KEYS[roleLevel] : undefined
+  const description = key ? t(key) : t("org.teamDetail.lockedOrgRoleUnknownDescription")
+  return t("org.teamDetail.lockedOrgRoleTooltip", { description })
 }
 
 export function TeamDetail() {
@@ -142,7 +138,7 @@ export function TeamDetail() {
         setEditing(false)
         await refetch()
       } catch (err) {
-        setEditSubmitError(err instanceof Error ? err.message : "Couldn't save team.")
+        setEditSubmitError(err instanceof Error ? err.message : t("org.teamDetail.saveTeamErrorFallback"))
       }
     },
   })
@@ -237,11 +233,11 @@ export function TeamDetail() {
       setStagedUsernames(failures.map((f) => f.username))
       setAddError(
         failures
-          .map((f) => `${f.username} (${f.error?.message ?? "couldn't be added"})`)
+          .map((f) => `${f.username} (${f.error?.message ?? t("org.teamDetail.couldntBeAddedFallback")})`)
           .join(", "),
       )
     } catch (err) {
-      setAddError(err instanceof Error ? err.message : "Couldn't add members.")
+      setAddError(err instanceof Error ? err.message : t("org.teamDetail.addMembersErrorFallback"))
     } finally {
       setAddBusy(false)
     }
@@ -298,7 +294,7 @@ export function TeamDetail() {
   return (
     <AppShell
       sidebar={<OrgSidebar />}
-      header={<OrgBreadcrumb parent={{ label: "Teams", to: activeOrgId != null ? orgPath(activeOrgId, "/teams") : "/orgs/all" }} section={team?.name ?? "Team"} />}
+      header={<OrgBreadcrumb parent={{ label: t("editor.navTitle.teams"), to: activeOrgId != null ? orgPath(activeOrgId, "/teams") : "/orgs/all" }} section={team?.name ?? t("editor.navTitle.team")} />}
       statusBar={null}
       main={
         <Page size="wide">
@@ -309,7 +305,7 @@ export function TeamDetail() {
                 <div className="h-40 animate-pulse rounded-2xl border bg-card" />
               </>
             ) : team == null ? (
-              <EmptyState title="Team not found." description="This team may have been deleted, or you may not have access to it." />
+              <EmptyState title={t("org.teamDetail.notFoundTitle")} description={t("org.teamDetail.notFoundDescription")} />
             ) : (
             <>
               {/* Header / rename / delete */}
@@ -325,7 +321,7 @@ export function TeamDetail() {
                         size="sm"
                         onClick={handleEditOpen}
                       >
-                        Edit
+                        {t("common.edit")}
                       </Button>
                       <Button
                         type="button"
@@ -333,7 +329,7 @@ export function TeamDetail() {
                         size="sm"
                         onClick={() => setConfirmDelete(true)}
                       >
-                        Delete team
+                        {t("org.teamDetail.deleteTeamButton")}
                       </Button>
                     </>
                   ) : null
@@ -344,7 +340,7 @@ export function TeamDetail() {
                 <Dialog open={editing} onOpenChange={handleEditOpenChange}>
                   <DialogContent className="max-w-md">
                     <DialogHeader>
-                      <DialogTitle>Edit team</DialogTitle>
+                      <DialogTitle>{t("org.teamDetail.editDialogTitle")}</DialogTitle>
                     </DialogHeader>
                     <form
                       id="edit-team-form"
@@ -360,14 +356,14 @@ export function TeamDetail() {
                             const invalid = isFieldInvalid(field)
                             return (
                               <Field data-invalid={invalid}>
-                                <FieldLabel htmlFor="edit-team-name">Team name</FieldLabel>
+                                <FieldLabel htmlFor="edit-team-name">{t("org.teamForm.nameLabel")}</FieldLabel>
                                 <Input
                                   id="edit-team-name"
                                   name={field.name}
                                   value={field.state.value}
                                   onBlur={field.handleBlur}
                                   onChange={(e) => field.handleChange(e.target.value)}
-                                  placeholder="Team name"
+                                  placeholder={t("org.teamForm.nameLabel")}
                                   aria-invalid={invalid}
                                   autoFocus
                                 />
@@ -380,14 +376,14 @@ export function TeamDetail() {
                           name="description"
                           children={(field) => (
                             <Field>
-                              <FieldLabel htmlFor="edit-team-desc">Description (optional)</FieldLabel>
+                              <FieldLabel htmlFor="edit-team-desc">{t("org.teamForm.descriptionOptionalLabel")}</FieldLabel>
                               <Input
                                 id="edit-team-desc"
                                 name={field.name}
                                 value={field.state.value}
                                 onBlur={field.handleBlur}
                                 onChange={(e) => field.handleChange(e.target.value)}
-                                placeholder="Description (optional)"
+                                placeholder={t("org.teamForm.descriptionOptionalLabel")}
                               />
                             </Field>
                           )}
@@ -401,11 +397,11 @@ export function TeamDetail() {
                     </form>
                     <DialogFooter>
                       <Button type="button" variant="outline" onClick={() => handleEditOpenChange(false)}>
-                        Cancel
+                        {t("common.cancel")}
                       </Button>
                       <Button type="submit" form="edit-team-form">
                         {editTeamForm.state.isSubmitting && <Spinner data-icon="inline-start" />}
-                        {editTeamForm.state.isSubmitting ? "Saving…" : "Save"}
+                        {editTeamForm.state.isSubmitting ? t("common.saving") : t("common.save")}
                       </Button>
                     </DialogFooter>
                   </DialogContent>
@@ -416,17 +412,17 @@ export function TeamDetail() {
                 <Dialog open={confirmDelete} onOpenChange={(o) => { if (!o) setConfirmDelete(false) }}>
                   <DialogContent className="max-w-md">
                     <DialogHeader>
-                      <DialogTitle>Delete &apos;{team.name}&apos;?</DialogTitle>
+                      <DialogTitle>{t("org.teamDetail.deleteConfirmTitle", { name: team.name })}</DialogTitle>
                     </DialogHeader>
                     <p className="text-sm text-muted-foreground">
-                      This removes the team and all its grants.
+                      {t("org.teamDetail.deleteConfirmBody")}
                     </p>
                     <DialogFooter>
                       <Button type="button" variant="outline" onClick={() => setConfirmDelete(false)} disabled={deleting}>
-                        Cancel
+                        {t("common.cancel")}
                       </Button>
                       <Button type="button" variant="destructive" onClick={handleDelete} disabled={deleting}>
-                        {deleting ? "Deleting…" : "Confirm"}
+                        {deleting ? t("org.teamDetail.deletingButton") : t("common.confirm")}
                       </Button>
                     </DialogFooter>
                   </DialogContent>
@@ -437,12 +433,12 @@ export function TeamDetail() {
               <Section
                 title={
                   <span className="flex items-center gap-1.5">
-                    Members
+                    {t("editor.navTitle.members")}
                       {/* "?" tooltip summarising all access levels — hover or focus to read */}
-                      <AppTooltip content={Object.values(ROLE_DESCRIPTIONS).join("\n")} className="max-w-xs">
+                      <AppTooltip content={ROLE_OPTIONS.map((r) => t(ROLE_DESCRIPTION_KEYS[r.level])).join("\n")} className="max-w-xs">
                         <span
                           className="inline-flex h-4 w-4 cursor-help items-center justify-center rounded-lg border text-[10px] leading-none text-muted-foreground"
-                          aria-label="Access level definitions"
+                          aria-label={t("org.teamDetail.accessLevelDefinitionsAriaLabel")}
                           tabIndex={0}
                         >
                           ?
@@ -458,7 +454,7 @@ export function TeamDetail() {
                         variant="outline"
                         onClick={() => { setAddingMember(true); setStagedUsernames([]); setAddError(null) }}
                       >
-                        Add member
+                        {t("org.teamDetail.addMemberButton")}
                       </Button>
                     ) : null
                   }
@@ -467,7 +463,7 @@ export function TeamDetail() {
                     <Dialog open={addingMember} onOpenChange={(o) => { if (!o) closeAddMember() }}>
                       <DialogContent className="max-w-md">
                         <DialogHeader>
-                          <DialogTitle>Add members to &apos;{team.name}&apos;</DialogTitle>
+                          <DialogTitle>{t("org.teamDetail.addMembersDialogTitle", { name: team.name })}</DialogTitle>
                         </DialogHeader>
                         <div className="space-y-2">
                           <TeamMemberCombobox
@@ -486,7 +482,7 @@ export function TeamDetail() {
                                   {username}
                                   <button
                                     type="button"
-                                    aria-label={`Remove ${username}`}
+                                    aria-label={t("org.teamDetail.removeAriaLabel", { name: username })}
                                     onClick={() => toggleStaged(username)}
                                     className="inline-flex h-3.5 w-3.5 items-center justify-center rounded-full text-muted-foreground hover:text-foreground"
                                   >
@@ -498,18 +494,18 @@ export function TeamDetail() {
                           )}
                           {availableOrgMembers.length === 0 && stagedUsernames.length === 0 && (
                             <p className="text-xs text-muted-foreground">
-                              All org members are already in this team.
+                              {t("org.teamDetail.allMembersAddedNotice")}
                             </p>
                           )}
                           {addError && (
                             <p role="alert" className="text-xs text-destructive">
-                              Couldn&apos;t add: {addError}
+                              {t("org.teamDetail.addErrorPrefix", { error: addError })}
                             </p>
                           )}
                         </div>
                         <DialogFooter>
                           <Button type="button" variant="outline" onClick={closeAddMember}>
-                            Cancel
+                            {t("common.cancel")}
                           </Button>
                           <Button
                             type="button"
@@ -517,7 +513,7 @@ export function TeamDetail() {
                             disabled={stagedUsernames.length === 0 || addBusy}
                           >
                             {addBusy && <Spinner data-icon="inline-start" />}
-                            {addBusy ? "Adding…" : "Add"}
+                            {addBusy ? t("org.teamDetail.addingButton") : t("common.add")}
                           </Button>
                         </DialogFooter>
                       </DialogContent>
@@ -528,8 +524,8 @@ export function TeamDetail() {
                     <EmptyState
                       variant="inline"
                       icon={Users}
-                      title="No members."
-                      description={isAdmin ? "Add org members to this team to grant them shared project access." : undefined}
+                      title={t("org.teamDetail.noMembersTitle")}
+                      description={isAdmin ? t("org.teamDetail.noMembersAdminDescription") : undefined}
                     />
                   ) : (
                     <ul className="space-y-2">
@@ -547,7 +543,7 @@ export function TeamDetail() {
                                 <SelectTrigger
                                   size="sm"
                                   className="text-xs"
-                                  aria-label={`Role for ${m.username}`}
+                                  aria-label={t("org.teamDetail.roleForAriaLabel", { name: m.username })}
                                 >
                                   <SelectValue />
                                 </SelectTrigger>
@@ -563,11 +559,11 @@ export function TeamDetail() {
                               </Select>
                             ) : (
                               /* Non-owners see the org-level role but cannot edit it here. */
-                              <AppTooltip content={lockedOrgRoleTooltip(m.roleLevel)} className="max-w-xs">
+                              <AppTooltip content={lockedOrgRoleTooltip(t, m.roleLevel)} className="max-w-xs">
                                 <span
                                   tabIndex={0}
                                   className="inline-flex cursor-help items-center gap-1 rounded-md border border-border bg-muted/40 px-2 py-1 text-xs text-muted-foreground"
-                                  aria-label={`Org-level role: ${roleLabel(t, m.roleLevel)}`}
+                                  aria-label={t("org.teamDetail.orgLevelRoleAriaLabel", { role: roleLabel(t, m.roleLevel) })}
                                 >
                                   {roleLabel(t, m.roleLevel)}
                                   <span className="inline-flex h-3.5 w-3.5 items-center justify-center rounded-lg border text-[10px] leading-none text-muted-foreground" aria-hidden="true">?</span>
@@ -578,23 +574,23 @@ export function TeamDetail() {
                               <button
                                 type="button"
                                 className="text-xs text-destructive underline"
-                                aria-label={`Remove ${m.username}`}
+                                aria-label={t("org.teamDetail.removeAriaLabel", { name: m.username })}
                                 onClick={() => handleRemoveMember(m.userId)}
                               >
-                                Remove
+                                {t("org.membersPage.remove")}
                               </button>
                             ) : (
                               /* AQU-789: removing a team member is a maintainer+ action. Show a
                                  disabled control with the reason rather than omitting it, so it
                                  doesn't read as a missing feature. */
-                              <AppTooltip content={REMOVE_REQUIRES_MAINTAINER_TOOLTIP} className="max-w-xs">
+                              <AppTooltip content={t("org.teamDetail.removeRequiresMaintainerTooltip")} className="max-w-xs">
                                 <span
                                   tabIndex={0}
                                   aria-disabled="true"
-                                  aria-label={`Remove ${m.username} — maintainers only`}
+                                  aria-label={t("org.teamDetail.removeMaintainersOnlyAriaLabel", { username: m.username })}
                                   className="inline-flex cursor-not-allowed items-center text-xs text-muted-foreground/70 underline decoration-dotted"
                                 >
-                                  Remove
+                                  {t("org.membersPage.remove")}
                                 </span>
                               </AppTooltip>
                             )}
@@ -612,7 +608,7 @@ export function TeamDetail() {
                 (sidebar nav also has "Projects") that would cause getByText to throw in tests. */}
             {jwt != null && (
                   <Section
-                    title={!loading ? "Projects" : undefined}
+                    title={!loading ? t("nav.projects") : undefined}
                     action={
                       isAdmin && !attachingProject ? (
                         <Button
@@ -629,7 +625,7 @@ export function TeamDetail() {
                             setAttachingProject(true)
                           }}
                         >
-                          Attach project
+                          {t("org.teamDetail.attachProjectButton")}
                         </Button>
                       ) : null
                     }
@@ -643,7 +639,7 @@ export function TeamDetail() {
                           value={selectedProjectId}
                           onValueChange={(v) => setSelectedProjectId(v ?? "")}
                         >
-                          <SelectTrigger aria-label="Project to attach">
+                          <SelectTrigger aria-label={t("org.teamDetail.projectToAttachAriaLabel")}>
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
@@ -661,7 +657,7 @@ export function TeamDetail() {
                           value={selectedRole}
                           onValueChange={(v) => setSelectedRole(v ?? "")}
                         >
-                          <SelectTrigger aria-label="Granted role">
+                          <SelectTrigger aria-label={t("org.teamDetail.grantedRoleAriaLabel")}>
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
@@ -672,14 +668,14 @@ export function TeamDetail() {
                             </SelectGroup>
                           </SelectContent>
                         </Select>
-                        <Button type="button" size="sm" onClick={handleAttachProject}>Attach</Button>
+                        <Button type="button" size="sm" onClick={handleAttachProject}>{t("editor.media.attach")}</Button>
                         <Button
                           type="button"
                           size="sm"
                           variant="ghost"
                           onClick={() => { setAttachingProject(false); setSelectedProjectId("") }}
                         >
-                          Cancel
+                          {t("common.cancel")}
                         </Button>
                       </div>
                     )}
@@ -688,8 +684,8 @@ export function TeamDetail() {
                       <EmptyState
                         variant="inline"
                         icon={FolderGit2}
-                        title="No projects."
-                        description={isAdmin ? "Attach a project to grant this team access at a chosen role." : undefined}
+                        title={t("org.teamDetail.noProjectsTitle")}
+                        description={isAdmin ? t("org.teamDetail.noProjectsAdminDescription") : undefined}
                       />
                     ) : (
                       <ul className="space-y-2">
@@ -710,7 +706,7 @@ export function TeamDetail() {
                                     value={String(p.grantedRoleLevel)}
                                     onValueChange={(v) => { if (v) void handleChangeProjectRole(p.id, Number(v)) }}
                                   >
-                                    <SelectTrigger size="sm" className="text-xs" aria-label={`Role for ${p.name}`}>
+                                    <SelectTrigger size="sm" className="text-xs" aria-label={t("org.teamDetail.roleForAriaLabel", { name: p.name })}>
                                       <SelectValue />
                                     </SelectTrigger>
                                     <SelectContent>
@@ -724,10 +720,10 @@ export function TeamDetail() {
                                   <button
                                     type="button"
                                     className="text-xs text-destructive underline"
-                                    aria-label={`Detach ${p.name}`}
+                                    aria-label={t("org.teamDetail.detachAriaLabel", { name: p.name })}
                                     onClick={() => handleDetachProject(p.id)}
                                   >
-                                    Detach
+                                    {t("org.teamDetail.detachButton")}
                                   </button>
                                 </>
                               ) : (
@@ -765,6 +761,7 @@ function TeamMemberCombobox({
   onToggle: (username: string) => void
   disabled?: boolean
 }) {
+  const t = useT()
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState("")
   const filteredMembers = useMemo(() => {
@@ -782,8 +779,8 @@ function TeamMemberCombobox({
 
   const triggerLabel =
     staged.length === 0
-      ? "Search members..."
-      : `${staged.length} selected`
+      ? t("org.teamDetail.searchMembersPlaceholder")
+      : t("org.teamDetail.selectedCount", { count: staged.length })
 
   return (
     <Popover open={open} onOpenChange={handleOpenChange}>
@@ -792,7 +789,7 @@ function TeamMemberCombobox({
           <button
             type="button"
             role="combobox"
-            aria-label="Members to add"
+            aria-label={t("org.teamDetail.membersToAddAriaLabel")}
             aria-expanded={open}
             aria-controls="team-member-combobox-list"
             disabled={disabled}
@@ -813,8 +810,8 @@ function TeamMemberCombobox({
           <InputGroupInput
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search org members..."
-            aria-label="Search org members"
+            placeholder={t("org.teamDetail.searchOrgMembersPlaceholder")}
+            aria-label={t("org.teamDetail.searchOrgMembersAriaLabel")}
             autoComplete="off"
             autoCorrect="off"
             autoCapitalize="none"
@@ -825,12 +822,12 @@ function TeamMemberCombobox({
         <div
           id="team-member-combobox-list"
           role="group"
-          aria-label="Org members"
+          aria-label={t("org.teamDetail.orgMembersGroupAriaLabel")}
           className="max-h-56 overflow-y-auto rounded-md border bg-background p-1"
         >
           {filteredMembers.length === 0 ? (
             <p className="px-2 py-2 text-xs text-muted-foreground">
-              No available members match.
+              {t("org.teamDetail.noMembersMatch")}
             </p>
           ) : (
             filteredMembers.map((member) => {

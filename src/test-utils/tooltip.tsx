@@ -40,6 +40,22 @@ export async function expectTooltip(trigger: Element, expected: string | RegExp)
   // when the full Cloudflare suite was under load (AQU-824).
   await userEvent.setup().hover(trigger)
   await waitFor(() => {
-    expect(screen.getByRole("tooltip")).toHaveTextContent(expected)
+    const text = stripBidiControls(screen.getByRole("tooltip").textContent ?? "")
+    if (typeof expected === "string") expect(text).toContain(expected)
+    else expect(text).toMatch(expected)
   })
+}
+
+/**
+ * Drop Unicode bidi controls before comparing tooltip text.
+ *
+ * Tooltips that interpolate a number into translated prose wrap it in isolates
+ * (`bidiIsolate` in `@/lib/i18n/format`) so Arabic's bidi algorithm cannot drag
+ * the digits out of place. Those are zero-width formatting characters: they
+ * change nothing a reader sees, so a test asserting the visible sentence should
+ * not have to spell them out — and every such assertion would otherwise break
+ * the moment a string gains isolation.
+ */
+function stripBidiControls(s: string): string {
+  return s.replace(/[⁦-⁩‎‏؜]/g, "")
 }

@@ -93,6 +93,8 @@ import {
 } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
 import { LoadingTemplate } from "@/components/ui/loading-overlay"
+import { useT } from "@/lib/i18n/I18nProvider"
+import { bidiIsolate } from "@/lib/i18n/format"
 
 /** Max per-file rows shown on the overview; the rest are counted as "+N more". */
 const FILE_ROW_CAP = 12
@@ -263,7 +265,7 @@ function StatBar({ label, value, total, fillClass, suffix }: {
         </span>
       </div>
       <span className="w-28 shrink-0 text-end text-[11px] tabular-nums text-muted-foreground/70">
-        {value}/{total}{suffix ?? ""}
+        {value}/{total}{suffix ? ` ${suffix}` : ""}
       </span>
     </div>
   )
@@ -346,6 +348,7 @@ function ChapterRow({
   chapter: ChapterRollup
   loadVerses: (sectionKey: string) => Promise<VerseRollup[]>
 }) {
+  const t = useT()
   const [open, setOpen] = useState(false)
   const [verses, setVerses] = useState<VerseRollup[] | null>(chapter.verses.length > 0 ? chapter.verses : null)
   const [loading, setLoading] = useState(false)
@@ -386,14 +389,14 @@ function ChapterRow({
           {chapter.filledCount}/{chapter.approvedCount}/{chapter.cellCount}
         </span>
       </button>
-      {open && loading && <p className="ms-5 py-1 text-[10px] text-muted-foreground">Loading verses…</p>}
+      {open && loading && <p className="ms-5 py-1 text-[10px] text-muted-foreground">{t("org.projectOverview.loadingVerses")}</p>}
       {open && failed && (
         <button type="button" className="ms-5 py-1 text-[10px] text-destructive underline" onClick={() => void load()}>
-          Verse progress unavailable. Retry
+          {t("org.projectOverview.verseProgressUnavailable")}
         </button>
       )}
       {open && verses != null && (
-        <ul className="ms-5 mt-0.5 mb-1 grid grid-cols-[repeat(auto-fill,minmax(2.5rem,1fr))] gap-1" aria-label={`${chapter.chapter} verses`}>
+        <ul className="ms-5 mt-0.5 mb-1 grid grid-cols-[repeat(auto-fill,minmax(2.5rem,1fr))] gap-1" aria-label={t("org.projectOverview.versesAria", { chapter: chapter.chapter })}>
           {verses.map((verse, index) => (
             <AppTooltip key={`${verse.ref}:${index}`} content={verse.ref}>
             <li
@@ -422,6 +425,7 @@ function BookRow({
   book: BookRollup
   loadVerses: (sectionKey: string) => Promise<VerseRollup[]>
 }) {
+  const t = useT()
   const [open, setOpen] = useState(false)
   return (
     <li>
@@ -440,7 +444,7 @@ function BookRow({
         </span>
       </button>
       {open && (
-        <ul className="ms-5 mt-0.5" aria-label={`${book.book} chapters`}>
+        <ul className="ms-5 mt-0.5" aria-label={t("org.projectOverview.chaptersAria", { book: book.book })}>
           {book.chapters.map((c) => (
             <ChapterRow key={c.chapter} chapter={c} loadVerses={loadVerses} />
           ))}
@@ -469,26 +473,27 @@ function FileCanonicalRollup({
   onRetry: () => void
   loadVerses: (sectionKey: string) => Promise<VerseRollup[]>
 }) {
+  const t = useT()
   if (loading) {
-    return <p className="ms-7 mt-1 text-xs text-muted-foreground">Loading chapter breakdown…</p>
+    return <p className="ms-7 mt-1 text-xs text-muted-foreground">{t("org.projectOverview.loadingChapterBreakdown")}</p>
   }
   if (error) {
     return (
       <button type="button" className="ms-7 mt-1 text-xs text-destructive underline" onClick={onRetry}>
-        Chapter progress unavailable. Retry
+        {t("org.projectOverview.chapterProgressUnavailable")}
       </button>
     )
   }
   if (!rollup || (rollup.books === null && rollup.sections.length === 0)) {
     return (
       <p className="ms-7 mt-1 text-xs text-muted-foreground">
-        No chapter structure detected for this file.
+        {t("org.projectOverview.noChapterStructure")}
       </p>
     )
   }
   if (rollup.books === null) {
     return (
-      <ul className="ms-7 mt-1 border-s ps-3" data-testid="flat-section-rollup" aria-label="Section breakdown">
+      <ul className="ms-7 mt-1 border-s ps-3" data-testid="flat-section-rollup" aria-label={t("org.projectOverview.sectionBreakdownAria")}>
         {rollup.sections.map((section) => (
           <FlatSectionRow key={section.key} section={section} />
         ))}
@@ -497,7 +502,7 @@ function FileCanonicalRollup({
   }
   if (rollup.books.length === 0) return null
   return (
-    <ul className="ms-7 mt-1 border-s ps-3" data-testid="canonical-rollup-books" aria-label="Chapter breakdown">
+    <ul className="ms-7 mt-1 border-s ps-3" data-testid="canonical-rollup-books" aria-label={t("org.projectOverview.chapterBreakdownAria")}>
       {rollup.books.map((b) => (
         <BookRow key={b.book} book={b} loadVerses={loadVerses} />
       ))}
@@ -508,6 +513,7 @@ function FileCanonicalRollup({
 // ── Main component ────────────────────────────────────────────────────────────
 
 export function ProjectOverview() {
+  const t = useT()
   const { id = "" } = useParams()
   const navigate = useNavigate()
   // AQU-737: the workspace is a lazy route; surface the load on the Open project
@@ -804,7 +810,7 @@ export function ProjectOverview() {
     selectedLaneTag != null ? projectLanes.find((l) => l.lane === selectedLaneTag) ?? null : null
   const tileTranslatedPct = activeLane ? laneTranslatedPct(activeLane) : audio ? translatedPct(audio) : 0
   const tileValidatedPct = activeLane ? laneValidatedPct(activeLane) : audio ? validatedPct(audio) : 0
-  const CROSS_LANE_TOOLTIP = "Cross-language stat — not broken down per language."
+  const CROSS_LANE_TOOLTIP = t("org.projectOverview.crossLaneTooltip")
 
   // AQU-593: which stat widgets are applicable to this project (drives the
   // Customize menu). Audio tiles only apply to audio projects; the AI-Drafted
@@ -857,7 +863,7 @@ export function ProjectOverview() {
     if (!jwt || !project) return
     const fileId = project.files[0]?.id
     if (!fileId) {
-      setError("This project has no files to export yet.")
+      setError(t("org.projectOverview.noFilesToExport"))
       return
     }
     setBusy(true)
@@ -880,7 +886,7 @@ export function ProjectOverview() {
     if (res.kind === "archived" || res.kind === "local-only") {
       navigate("/projects")
     } else if (res.kind === "forbidden") {
-      setError(res.message ?? "Only owners can archive a project.")
+      setError(res.message ?? t("org.projectOverview.archiveForbidden"))
     } else if (res.kind === "error") {
       setError(res.message)
     }
@@ -895,7 +901,7 @@ export function ProjectOverview() {
     if (res.kind === "restored" || res.kind === "local-only") {
       await refresh()
     } else if (res.kind === "forbidden") {
-      setError(res.message ?? "Only owners can restore a project.")
+      setError(res.message ?? t("org.projectOverview.restoreForbidden"))
     } else if (res.kind === "error") {
       setError(res.message)
     }
@@ -915,7 +921,7 @@ export function ProjectOverview() {
   const nonReadyContent =
     status === "loading" ? (
       <LoadingTemplate
-        label="Loading project details"
+        label={t("org.projectOverview.loadingProjectDetails")}
         className="min-h-[34rem] max-w-5xl"
         data-testid="project-overview-loading"
       >
@@ -924,7 +930,7 @@ export function ProjectOverview() {
     ) : status === "unreachable" ? (
       <div className="flex items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm dark:border-amber-800 dark:bg-amber-950">
         <span className="text-amber-800 dark:text-amber-200">
-          Can't reach the server — this project may still be available.
+          {t("org.projectOverview.unreachableMessage")}
         </span>
         <Button
           type="button"
@@ -932,12 +938,12 @@ export function ProjectOverview() {
           onClick={refresh}
           className="shrink-0 bg-amber-800 text-white hover:bg-amber-700 dark:bg-amber-700 dark:hover:bg-amber-600"
         >
-          Retry
+          {t("common.retry")}
         </Button>
       </div>
     ) : status === "no-session" ? (
       <div className="rounded-lg border bg-card px-4 py-3 text-sm text-muted-foreground">
-        <p>Sign in to open this project from the cloud.</p>
+        <p>{t("org.projectOverview.signInMessage")}</p>
         <Button
           type="button"
           size="sm"
@@ -945,7 +951,7 @@ export function ProjectOverview() {
           className="mt-3"
           onClick={() => navigate(`/login?next=${encodeURIComponent(`/projects/${id}`)}`)}
         >
-          Sign in
+          {t("auth.login.title")}
         </Button>
       </div>
     ) : null
@@ -953,7 +959,7 @@ export function ProjectOverview() {
   return (
     <AppShell
       sidebar={<OrgSidebar />}
-      header={<OrgBreadcrumb section={project?.name ?? "Project"} orgId={project?.orgId} />}
+      header={<OrgBreadcrumb section={project?.name ?? t("common.project")} orgId={project?.orgId} />}
       statusBar={null}
       main={
         <div className="h-full overflow-y-auto">
@@ -985,7 +991,7 @@ export function ProjectOverview() {
                           className="shrink-0 border-transparent bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
                           data-testid="overview-inactive-badge"
                         >
-                          Inactive
+                          {t("org.projectOverview.inactiveBadge")}
                         </Badge>
                       )}
                     </div>
@@ -993,7 +999,9 @@ export function ProjectOverview() {
                     {languagePair && (
                       <p className="mt-0.5 text-sm text-muted-foreground">{languagePair}</p>
                     )}
-                    <p className="mt-0.5 text-sm text-muted-foreground">{project?.files.length ?? 0} files</p>
+                    <p className="mt-0.5 text-sm text-muted-foreground">
+                      {t("search.expanded.fileCount", { count: project?.files.length ?? 0 })}
+                    </p>
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
                     <Button
@@ -1005,15 +1013,15 @@ export function ProjectOverview() {
                       {openPending ? (
                         <>
                           <Spinner className="size-4" />
-                          Opening…
+                          {t("auth.accessLink.submitOpening")}
                         </>
                       ) : (
-                        "Open project"
+                        t("auth.accessLink.submitDefault")
                       )}
                     </Button>
                     {isOwner && isArchived && (
                       <Button size="sm" variant="outline" onClick={handleRestore} disabled={busy}>
-                        Restore
+                        {t("org.projectOverview.restore")}
                       </Button>
                     )}
                     {/* Archive + Download + Lifecycle moved into overflow menu */}
@@ -1025,7 +1033,7 @@ export function ProjectOverview() {
                               type="button"
                               size="icon-sm"
                               variant="outline"
-                              aria-label="More actions"
+                              aria-label={t("org.projectOverview.moreActionsAria")}
                             >
                               <MoreHorizontal className="h-4 w-4" />
                             </Button>
@@ -1037,7 +1045,7 @@ export function ProjectOverview() {
                               onClick={handleDownloadBundle}
                               disabled={busy || (project?.files.length ?? 0) === 0}
                             >
-                              Download deliverable
+                              {t("org.projectOverview.downloadDeliverable")}
                             </DropdownMenuItem>
                           )}
                           {canToggleLifecycle && (
@@ -1045,7 +1053,7 @@ export function ProjectOverview() {
                               onClick={handleToggleLifecycle}
                               disabled={lifecycleBusy}
                             >
-                              {isFrozen ? "Mark as Active" : "Mark as Inactive"}
+                              {isFrozen ? t("org.projectOverview.markAsActive") : t("org.projectOverview.markAsInactive")}
                             </DropdownMenuItem>
                           )}
                           {isOwner && (
@@ -1054,7 +1062,7 @@ export function ProjectOverview() {
                               disabled={busy}
                               variant="destructive"
                             >
-                              Archive
+                              {t("org.projectOverview.archive")}
                             </DropdownMenuItem>
                           )}
                         </DropdownMenuContent>
@@ -1085,14 +1093,14 @@ export function ProjectOverview() {
               {audio && audio.totalCells > 0 && (
                 <div className="rounded-xl border bg-card p-5" data-testid="progress-card">
                   <div className="mb-3 flex items-center justify-between gap-2">
-                    <h2 className="text-xs font-semibold text-muted-foreground">Progress</h2>
+                    <h2 className="text-xs font-semibold text-muted-foreground">{t("fileDetails.progress")}</h2>
                     <div className="flex items-center gap-1.5">
                       {/* AQU-593: hide stat widgets you don't find helpful. */}
                       {availableStatKeys.length > 0 && (
                         <DropdownMenu>
                           <DropdownMenuTrigger
                             data-testid="customize-stats-trigger"
-                            aria-label="Customize stats"
+                            aria-label={t("org.projectOverview.customizeStatsAria")}
                             render={
                               <button
                                 type="button"
@@ -1101,11 +1109,11 @@ export function ProjectOverview() {
                             }
                           >
                             <SlidersHorizontal className="size-3.5" aria-hidden />
-                            Customize
+                            {t("org.projectOverview.customize")}
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end" className="w-48">
                             <DropdownMenuGroup>
-                              <DropdownMenuLabel>Show stats</DropdownMenuLabel>
+                              <DropdownMenuLabel>{t("org.projectOverview.showStats")}</DropdownMenuLabel>
                               <DropdownMenuSeparator />
                               {STAT_WIDGETS.filter((w) => availableStatKeys.includes(w.key)).map((w) => (
                                 <DropdownMenuCheckboxItem
@@ -1136,11 +1144,11 @@ export function ProjectOverview() {
                         onClick={() => setSelectedLaneTag(null)}
                         testId="lane-pill-all"
                       >
-                        All
+                        {t("org.orgHome.statusFilter.all")}
                       </LanePill>
                       {projectLanes.map((l) => {
                         const tagId = l.lane === "" ? "default" : l.lane
-                        const label = l.lane === "" ? (project?.targetLanguage || "Default") : l.lane
+                        const label = l.lane === "" ? (project?.targetLanguage || t("org.projectOverview.laneDefaultFallback")) : l.lane
                         return (
                           <LanePill
                             key={tagId}
@@ -1160,18 +1168,18 @@ export function ProjectOverview() {
                     {showText && (
                       <>
                         {statVisible("translated") && (
-                          <StatTile label="Translated" pct={tileTranslatedPct} colorClass="text-amber-600" />
+                          <StatTile label={t("org.orgHome.table.translatedHeaderLabel")} pct={tileTranslatedPct} colorClass="text-amber-600" />
                         )}
                         {audio.aiDraftedCells > 0 && statVisible("ai-drafted") && (
                           <StatTile
-                            label="AI Drafted"
+                            label={t("org.projectOverview.aiDrafted")}
                             pct={aiDraftedPct(audio)}
                             colorClass={activeLane ? "text-muted-foreground/60" : "text-violet-600"}
-                            tooltip={activeLane ? CROSS_LANE_TOOLTIP : "Cells drafted by AI (via 'Translate all') that have not yet been human-edited or validated. A human edit or validation will move them into the Translated or Validated counts. Only cells committed after this marker was introduced are tracked — earlier AI commits are indistinguishable from human edits."}
+                            tooltip={activeLane ? CROSS_LANE_TOOLTIP : t("org.projectOverview.aiDraftedTooltip")}
                           />
                         )}
                         {statVisible("validated") && (
-                          <StatTile label="Validated" pct={tileValidatedPct} colorClass="text-emerald-600" />
+                          <StatTile label={t("org.orgHome.table.validatedHeaderLabel")} pct={tileValidatedPct} colorClass="text-emerald-600" />
                         )}
                       </>
                     )}
@@ -1179,10 +1187,10 @@ export function ProjectOverview() {
                       <>
                         {statVisible("has-audio") && (
                           <StatTile
-                            label="Has Audio"
+                            label={t("org.orgHome.table.audioHeaderLabel")}
                             pct={audioPct(audio)}
                             colorClass={activeLane ? "text-muted-foreground/60" : "text-sky-600"}
-                            tooltip={activeLane ? CROSS_LANE_TOOLTIP : "Percentage of cells that have at least one audio recording attached. This is coverage, not validation — see 'Audio Validated' for review status."}
+                            tooltip={activeLane ? CROSS_LANE_TOOLTIP : t("org.projectOverview.hasAudioTooltip")}
                           />
                         )}
                         {/*
@@ -1210,11 +1218,11 @@ export function ProjectOverview() {
                          */}
                         {statVisible("audio-validated") && (
                           <StatTile
-                            label="Audio Validated"
+                            label={t("org.projectOverview.audioValidated")}
                             pct={0}
                             display="N/A"
                             colorClass="text-muted-foreground"
-                            tooltip="Not tracked yet — the server does not record whether a validation applies to text or audio content (see AQU-490)."
+                            tooltip={t("org.projectOverview.audioValidatedTooltip")}
                           />
                         )}
                       </>
@@ -1229,29 +1237,29 @@ export function ProjectOverview() {
                       <>
                         {statVisible("translated") && (
                           <StatBar
-                            label="Translated"
+                            label={t("org.orgHome.table.translatedHeaderLabel")}
                             value={activeLane ? activeLane.filledCells : audio.filledCells}
                             total={activeLane ? activeLane.totalCells : audio.totalCells}
                             fillClass="bg-amber-500"
-                            suffix=" cells"
+                            suffix={t("org.projectOverview.cellsSuffix")}
                           />
                         )}
                         {!activeLane && audio.aiDraftedCells > 0 && statVisible("ai-drafted") && (
                           <StatBar
-                            label="AI Drafted"
+                            label={t("org.projectOverview.aiDrafted")}
                             value={audio.aiDraftedCells}
                             total={audio.totalCells}
                             fillClass="bg-violet-500"
-                            suffix=" cells"
+                            suffix={t("org.projectOverview.cellsSuffix")}
                           />
                         )}
                         {statVisible("validated") && (
                           <StatBar
-                            label="Validated"
+                            label={t("org.orgHome.table.validatedHeaderLabel")}
                             value={activeLane ? activeLane.validatedCells : audio.validatedCells}
                             total={activeLane ? activeLane.totalCells : audio.totalCells}
                             fillClass="bg-emerald-500"
-                            suffix=" cells"
+                            suffix={t("org.projectOverview.cellsSuffix")}
                           />
                         )}
                       </>
@@ -1259,11 +1267,11 @@ export function ProjectOverview() {
                     {showAudio && !activeLane && statVisible("has-audio") && (
                       <>
                         <StatBar
-                          label="Has Audio"
+                          label={t("org.orgHome.table.audioHeaderLabel")}
                           value={audio.audioCells}
                           total={audio.totalCells}
                           fillClass="bg-sky-500"
-                          suffix=" cells"
+                          suffix={t("org.projectOverview.cellsSuffix")}
                         />
                         {/* TODO: confirm whether legacy GitLab project import populated audio (cell_audio) — see AQU-160 data gap */}
                       </>
@@ -1271,8 +1279,10 @@ export function ProjectOverview() {
                   </div>
                   {!activeLane && audio.recordedMs > 0 && statVisible("has-audio") && (
                     <p className="mt-3 text-xs text-muted-foreground">
-                      {recordedMinutes(audio)} min recorded ·{" "}
-                      {Math.round(audioPct(audio) * 100)}% of cells have audio
+                      {t("org.projectOverview.audioRecordedSummary", {
+                        minutes: recordedMinutes(audio),
+                        percent: bidiIsolate(`${Math.round(audioPct(audio) * 100)}%`),
+                      })}
                     </p>
                   )}
                 </div>
@@ -1287,7 +1297,7 @@ export function ProjectOverview() {
                   orgId={portfolioOrgId}
                   jwt={jwt}
                   lanes={projectLanes}
-                  defaultLanguageLabel={project?.targetLanguage || "Default"}
+                  defaultLanguageLabel={project?.targetLanguage || t("org.projectOverview.laneDefaultFallback")}
                   extraLanes={project?.targetLanes ?? []}
                   files={project?.files ?? []}
                   roleLevel={project?.syncRole?.level ?? 0}
@@ -1337,7 +1347,7 @@ export function ProjectOverview() {
                     setCsvCopied(true)
                     setTimeout(() => setCsvCopied(false), 1500)
                   } catch (e) {
-                    setError(e instanceof Error ? e.message : "Couldn't copy to clipboard.")
+                    setError(e instanceof Error ? e.message : t("org.projectOverview.copyCsvFailed"))
                   }
                 }
 
@@ -1351,14 +1361,16 @@ export function ProjectOverview() {
                   <div className="rounded-xl border bg-card p-5">
                     <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                       <h2 className="text-xs font-semibold text-muted-foreground">
-                        Files {!showAllFiles && hidden > 0 ? `(top ${FILE_ROW_CAP} of ${sorted.length})` : `(${sorted.length})`}
+                        {!showAllFiles && hidden > 0
+                          ? t("org.projectOverview.filesHeadingTruncated", { cap: FILE_ROW_CAP, total: sorted.length })
+                          : t("org.projectOverview.filesHeadingCount", { count: sorted.length })}
                       </h2>
                       <span className="flex items-center gap-3 text-[10px] text-muted-foreground">
                         <span className="flex items-center gap-1">
-                          <span className="h-1.5 w-3 rounded-full bg-amber-500" />translated
+                          <span className="h-1.5 w-3 rounded-full bg-amber-500" />{t("org.projectOverview.legendTranslated")}
                         </span>
                         <span className="flex items-center gap-1">
-                          <span className="h-1.5 w-3 rounded-full bg-emerald-500" />validated
+                          <span className="h-1.5 w-3 rounded-full bg-emerald-500" />{t("editor.state.validated")}
                         </span>
                       </span>
                     </div>
@@ -1377,7 +1389,7 @@ export function ProjectOverview() {
                     */}
                     {orgSettings.canExport && sorted.length > 0 && (
                       <div className="mb-3 flex items-center gap-2">
-                        <AppTooltip content="Copy the file list below as CSV">
+                        <AppTooltip content={t("org.projectOverview.copyCsvTooltip")}>
                           <Button
                             type="button"
                             size="sm"
@@ -1386,10 +1398,10 @@ export function ProjectOverview() {
                             data-testid="export-csv-copy"
                           >
                             {csvCopied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-                            {csvCopied ? "Copied" : "Copy CSV"}
+                            {csvCopied ? t("nav.version.copiedLabel") : t("org.projectOverview.copyCsv")}
                           </Button>
                         </AppTooltip>
-                        <AppTooltip content="Download the file list below as a .csv file">
+                        <AppTooltip content={t("org.projectOverview.downloadCsvTooltip")}>
                           <Button
                             type="button"
                             size="sm"
@@ -1398,7 +1410,7 @@ export function ProjectOverview() {
                             data-testid="export-csv-download"
                           >
                             <Download className="h-3.5 w-3.5" />
-                            Download CSV
+                            {t("org.projectOverview.downloadCsv")}
                           </Button>
                         </AppTooltip>
                       </div>
@@ -1421,8 +1433,8 @@ export function ProjectOverview() {
                         </InputGroupAddon>
                         <InputGroupInput
                           type="text"
-                          placeholder="Filter files by name…"
-                          aria-label="Filter files by name"
+                          placeholder={t("org.projectOverview.filterFilesPlaceholder")}
+                          aria-label={t("org.projectOverview.filterFilesAria")}
                           value={fileNameFilter}
                           onChange={(e) => setFileNameFilter(e.target.value)}
                         />
@@ -1432,7 +1444,7 @@ export function ProjectOverview() {
                         value={fileSortMode}
                         onValueChange={(v) => setFileSortMode((v as FileSortMode) ?? "last-updated")}
                       >
-                        <SelectTrigger aria-label="Sort files by" className="w-44">
+                        <SelectTrigger aria-label={t("org.projectOverview.sortFilesByAria")} className="w-44">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
@@ -1445,7 +1457,9 @@ export function ProjectOverview() {
                       </Select>
                     </div>
                     {sorted.length === 0 ? (
-                      <p className="text-sm text-muted-foreground">No files match “{fileNameFilter}”.</p>
+                      <p className="text-sm text-muted-foreground">
+                        {t("org.projectOverview.noFilesMatch", { query: fileNameFilter })}
+                      </p>
                     ) : (
                     <>
                       {/*
@@ -1461,16 +1475,16 @@ export function ProjectOverview() {
                         data-testid="file-breakdown-header"
                       >
                         <span className="w-5 shrink-0" />
-                        <span className="w-32 shrink-0">File</span>
-                        <span className="flex-1">Progress</span>
+                        <span className="w-32 shrink-0">{t("common.file")}</span>
+                        <span className="flex-1">{t("fileDetails.progress")}</span>
                         <span className="flex shrink-0 items-center gap-4">
-                          <span className="w-10 text-end">Filled</span>
-                          <span className="w-14 text-end">Approved</span>
-                          <span className="w-10 text-end">Total</span>
-                          <span className="w-12 text-end">Words</span>
+                          <span className="w-10 text-end">{t("org.projectOverview.columnFilled")}</span>
+                          <span className="w-14 text-end">{t("org.projectOverview.columnApproved")}</span>
+                          <span className="w-10 text-end">{t("org.projectOverview.columnTotal")}</span>
+                          <span className="w-12 text-end">{t("org.projectOverview.columnWords")}</span>
                         </span>
                       </div>
-                      <ul className="space-y-2" aria-label="Files">
+                      <ul className="space-y-2" aria-label={t("org.projectOverview.filesListAria")}>
                         {shown.map((f) => {
                           const tPct = f.cellCount > 0 ? Math.round((f.filledCount / f.cellCount) * 100) : 0
                           const vPct = f.cellCount > 0 ? Math.round((f.approvedCount / f.cellCount) * 100) : 0
@@ -1480,7 +1494,11 @@ export function ProjectOverview() {
                               <div className="flex items-center gap-3 text-sm">
                                 <button
                                   type="button"
-                                  aria-label={isExpanded ? `Collapse ${f.name}` : `Expand ${f.name}`}
+                                  aria-label={
+                                    isExpanded
+                                      ? t("org.projectOverview.collapseFileAria", { fileName: f.name })
+                                      : t("org.projectOverview.expandFileAria", { fileName: f.name })
+                                  }
                                   aria-expanded={isExpanded}
                                   onClick={() => void toggleFileRollup(f)}
                                   className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-accent/40 hover:text-foreground"
@@ -1497,10 +1515,15 @@ export function ProjectOverview() {
                                   </span>
                                 </AppTooltip>
                                 <FileProgressBars tPct={tPct} vPct={vPct} />
-                                <AppTooltip content="Cells filled / cells approved / total cells · word count">
+                                <AppTooltip content={t("org.projectOverview.fileStatsTooltip")}>
                                   <span
                                     className="flex shrink-0 items-center gap-4 text-xs tabular-nums text-muted-foreground"
-                                    aria-label={`${f.filledCount} filled, ${f.approvedCount} approved, ${f.cellCount} total cells, ${f.wordCount} words`}
+                                    aria-label={t("org.projectOverview.fileStatsAria", {
+                                      filled: f.filledCount,
+                                      approved: f.approvedCount,
+                                      total: f.cellCount,
+                                      words: f.wordCount,
+                                    })}
                                   >
                                     <span className="w-10 text-end">{f.filledCount}</span>
                                     <span className="w-14 text-end">{f.approvedCount}</span>
@@ -1529,7 +1552,7 @@ export function ProjectOverview() {
                         className="mt-3 text-xs text-muted-foreground hover:text-foreground underline"
                         onClick={() => setShowAllFiles(true)}
                       >
-                        +{hidden} more files — show all
+                        {t("org.projectOverview.moreFilesShowAll", { count: hidden })}
                       </button>
                     )}
                     {showAllFiles && sorted.length > FILE_ROW_CAP && (
@@ -1537,7 +1560,7 @@ export function ProjectOverview() {
                         className="mt-3 text-xs text-muted-foreground hover:text-foreground underline"
                         onClick={() => setShowAllFiles(false)}
                       >
-                        Show fewer
+                        {t("org.projectOverview.showFewer")}
                       </button>
                     )}
                   </div>
@@ -1546,7 +1569,7 @@ export function ProjectOverview() {
 
               {/* ── Deadline card ── */}
               <div className="rounded-xl border bg-card p-5">
-                <h2 className="mb-2 text-xs font-semibold text-muted-foreground">Deadline</h2>
+                <h2 className="mb-2 text-xs font-semibold text-muted-foreground">{t("org.projectOverview.deadlineHeading")}</h2>
                 <div className="flex flex-wrap items-center gap-2 text-sm">
                   {audio?.deadlineAt ? (
                     <span className="flex items-center gap-2 font-medium">
@@ -1554,7 +1577,7 @@ export function ProjectOverview() {
                       <DeadlineChip status={dstatus} />
                     </span>
                   ) : (
-                    <span className="text-muted-foreground">No deadline set</span>
+                    <span className="text-muted-foreground">{t("org.projectOverview.noDeadlineSet")}</span>
                   )}
                   {canManage && (
                     <ButtonGroup>
@@ -1568,7 +1591,7 @@ export function ProjectOverview() {
                           setDeadlineDialogOpen(true)
                         }}
                       >
-                        {audio?.deadlineAt ? "Change" : "Set deadline"}
+                        {audio?.deadlineAt ? t("org.projectOverview.change") : t("org.projectOverview.setDeadline")}
                       </Button>
                       {audio?.deadlineAt && (
                         <Button
@@ -1578,7 +1601,7 @@ export function ProjectOverview() {
                           disabled={busy}
                           onClick={() => saveDeadline(null)}
                         >
-                          Clear
+                          {t("common.clear")}
                         </Button>
                       )}
                     </ButtonGroup>
@@ -1590,21 +1613,21 @@ export function ProjectOverview() {
                 <DialogContent className="sm:max-w-sm">
                   <DialogHeader>
                     <DialogTitle>
-                      {audio?.deadlineAt ? "Change project deadline" : "Set project deadline"}
+                      {audio?.deadlineAt ? t("org.projectOverview.changeDeadlineDialogTitle") : t("org.projectOverview.setDeadlineDialogTitle")}
                     </DialogTitle>
                     <DialogDescription>
-                      The deadline is inclusive through the end of that day anywhere on Earth.
+                      {t("org.projectOverview.deadlineDialogDescription")}
                     </DialogDescription>
                   </DialogHeader>
                   <FieldGroup>
                     <Field>
-                      <FieldLabel htmlFor="project-deadline">Deadline date</FieldLabel>
+                      <FieldLabel htmlFor="project-deadline">{t("org.projectOverview.deadlineDateLabel")}</FieldLabel>
                       <DatePicker
                         id="project-deadline"
                         value={deadlineDate}
                         onChange={setDeadlineDate}
                         disabled={busy}
-                        placeholder="July 03, 2026"
+                        placeholder={t("org.projectOverview.deadlineDatePlaceholder")}
                       />
                     </Field>
                   </FieldGroup>
@@ -1615,14 +1638,14 @@ export function ProjectOverview() {
                       disabled={busy}
                       onClick={() => setDeadlineDialogOpen(false)}
                     >
-                      Cancel
+                      {t("common.cancel")}
                     </Button>
                     <Button
                       type="button"
                       disabled={busy || !deadlineDate}
                       onClick={() => saveDeadline(deadlineDate ? dateToDeadlineString(deadlineDate) : null)}
                     >
-                      Save
+                      {t("common.save")}
                     </Button>
                   </DialogFooter>
                 </DialogContent>
@@ -1630,12 +1653,12 @@ export function ProjectOverview() {
 
               {/* ── Project manager card (AQU-507) ── */}
               <div className="rounded-xl border bg-card p-5">
-                <h2 className="mb-2 text-xs font-semibold tracking-wide text-muted-foreground">Project manager</h2>
+                <h2 className="mb-2 text-xs font-semibold tracking-wide text-muted-foreground">{t("org.projectOverview.projectManagerHeading")}</h2>
                 <div className="flex flex-wrap items-center gap-2 text-sm">
                   {pm ? (
                     <span className="font-medium" data-testid="overview-pm-name">{pm.username}</span>
                   ) : (
-                    <span className="text-muted-foreground" data-testid="overview-pm-name">Unassigned</span>
+                    <span className="text-muted-foreground" data-testid="overview-pm-name">{t("org.projectOverview.unassigned")}</span>
                   )}
                   {canManage && (
                     <ButtonGroup>
@@ -1650,7 +1673,7 @@ export function ProjectOverview() {
                           setPmDialogOpen(true)
                         }}
                       >
-                        {pm ? "Change" : "Assign"}
+                        {pm ? t("org.projectOverview.change") : t("dialog.assign.submit")}
                       </Button>
                       {pm && (
                         <Button
@@ -1660,7 +1683,7 @@ export function ProjectOverview() {
                           disabled={busy}
                           onClick={() => savePm(null)}
                         >
-                          Clear
+                          {t("common.clear")}
                         </Button>
                       )}
                     </ButtonGroup>
@@ -1671,34 +1694,33 @@ export function ProjectOverview() {
               <Dialog open={pmDialogOpen} onOpenChange={setPmDialogOpen}>
                 <DialogContent className="sm:max-w-sm">
                   <DialogHeader>
-                    <DialogTitle>{pm ? "Change project manager" : "Assign project manager"}</DialogTitle>
+                    <DialogTitle>{pm ? t("org.projectOverview.changeProjectManagerDialogTitle") : t("org.projectOverview.assignProjectManagerDialogTitle")}</DialogTitle>
                     <DialogDescription>
-                      The project manager is responsible for this project. They must be a member
-                      of the project.
+                      {t("org.projectOverview.pmDialogDescription")}
                     </DialogDescription>
                   </DialogHeader>
                   <FieldGroup>
                     <Field>
-                      <FieldLabel htmlFor="project-pm">Project manager</FieldLabel>
+                      <FieldLabel htmlFor="project-pm">{t("org.projectOverview.projectManagerHeading")}</FieldLabel>
                       {/* `items` maps values → labels so the trigger shows the
                           member's username, not the raw stringified userId. */}
                       <Select
                         value={pmSelection}
                         onValueChange={(v) => setPmSelection(v ?? "")}
                         items={[
-                          { value: "", label: "Unassigned" },
+                          { value: "", label: t("org.projectOverview.unassigned") },
                           ...pmCandidates.map((m) => ({
                             value: String(m.userId),
                             label: m.username,
                           })),
                         ]}
                       >
-                        <SelectTrigger id="project-pm" aria-label="Project manager">
-                          <SelectValue placeholder="Select a member" />
+                        <SelectTrigger id="project-pm" aria-label={t("org.projectOverview.projectManagerHeading")}>
+                          <SelectValue placeholder={t("org.projectOverview.selectMemberPlaceholder")} />
                         </SelectTrigger>
                         <SelectContent>
                           <SelectGroup>
-                            <SelectItem value="">Unassigned</SelectItem>
+                            <SelectItem value="">{t("org.projectOverview.unassigned")}</SelectItem>
                             {pmCandidates.map((m) => (
                               <SelectItem key={m.userId} value={String(m.userId)}>
                                 {m.username}
@@ -1716,14 +1738,14 @@ export function ProjectOverview() {
                       disabled={busy}
                       onClick={() => setPmDialogOpen(false)}
                     >
-                      Cancel
+                      {t("common.cancel")}
                     </Button>
                     <Button
                       type="button"
                       disabled={busy}
                       onClick={() => savePm(pmSelection === "" ? null : Number(pmSelection))}
                     >
-                      Save
+                      {t("common.save")}
                     </Button>
                   </DialogFooter>
                 </DialogContent>
@@ -1742,16 +1764,16 @@ export function ProjectOverview() {
               >
                 <div className={cn("relative rounded-xl border bg-card p-5", sectionTintClass(orgSettings.memberProgressViewMinRole))}>
                   <div className="mb-3 flex items-center justify-between gap-2">
-                    <h2 className="text-xs font-semibold text-muted-foreground">Team</h2>
+                    <h2 className="text-xs font-semibold text-muted-foreground">{t("editor.navTitle.team")}</h2>
                     <SectionVisibilityBadge
                       minRole={orgSettings.memberProgressViewMinRole}
                       canEdit={canEditVisibility}
                       onChangeMinRole={async (next) => { await orgSettings.patch({ memberProgressViewMinRole: next }) }}
-                      description="Who can see each teammate's assignment progress on this project."
+                      description={t("org.projectOverview.teamVisibilityDescription")}
                     />
                   </div>
                   {workload.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">No open assignments in this project yet.</p>
+                    <p className="text-sm text-muted-foreground">{t("org.projectOverview.noOpenAssignments")}</p>
                   ) : (
                     <ul className="space-y-2">
                       {workload.map((w) => {
@@ -1762,14 +1784,17 @@ export function ProjectOverview() {
                             {/* AQU-491: click-to-reveal affordance, see file-name cell above. */}
                             <AppTooltip content={w.username ?? String(w.userId)}>
                               <span className="w-32 shrink-0 font-medium">
-                                <ExpandableName name={w.username ?? `User ${w.userId}`} />
+                                <ExpandableName name={w.username ?? t("org.workloadRollup.unknownUser", { id: w.userId })} />
                               </span>
                             </AppTooltip>
                             <span className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
                               <span className="block h-full rounded-full bg-primary transition-all" style={{ width: `${donePct}%` }} />
                             </span>
                             <span className="w-20 shrink-0 text-end text-xs tabular-nums text-muted-foreground">
-                              {w.openAssignments} open · {donePct}%
+                              {t("org.projectOverview.openAssignmentsStat", {
+                                count: w.openAssignments,
+                                percent: bidiIsolate(`${donePct}%`),
+                              })}
                             </span>
                             {/* AQU-498: select a teammate to see their recent actions +
                                 files-worked-on rollup. Sits inside this SAME
@@ -1781,11 +1806,11 @@ export function ProjectOverview() {
                                 variant="ghost"
                                 size="sm"
                                 className="h-6 shrink-0 px-2 text-xs text-muted-foreground"
-                                aria-label={`View activity for ${w.username}`}
+                                aria-label={t("org.projectOverview.viewActivityAria", { username: w.username })}
                                 aria-pressed={isSelected}
                                 onClick={() => setSelectedMemberUsername(isSelected ? null : (w.username as string))}
                               >
-                                {isSelected ? "Hide" : "Activity"}
+                                {isSelected ? t("org.projectOverview.hide") : t("autopilot.inspector.activity.title")}
                               </Button>
                             )}
                           </li>
@@ -1835,12 +1860,12 @@ export function ProjectOverview() {
                     data-testid="overview-members-card"
                   >
                     <div className="mb-3 flex items-center justify-between gap-2">
-                      <h2 className="text-xs font-semibold text-muted-foreground">Members</h2>
+                      <h2 className="text-xs font-semibold text-muted-foreground">{t("editor.navTitle.members")}</h2>
                       <SectionVisibilityBadge
                         minRole={orgSettings.rosterViewMinRole}
                         canEdit={canEditVisibility}
                         onChangeMinRole={async (next) => { await orgSettings.patch({ rosterViewMinRole: next }) }}
-                        description="Who can see the member roster on this project."
+                        description={t("org.projectOverview.membersVisibilityDescription")}
                       />
                     </div>
                     <MembersTab projectId={id} className="space-y-6" />

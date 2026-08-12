@@ -410,7 +410,7 @@ describe("ProjectOverview per-metric conditionality (AQU-168)", () => {
     // Neither audio tile may appear (audioCells === 0) — AQU-490: this also
     // guards against a false-positive "Audio Validated" figure on a
     // text-only project, since neither field exists to fabricate one from.
-    expect(screen.queryByText("Has Audio")).not.toBeInTheDocument()
+    expect(screen.queryByText("Has audio")).not.toBeInTheDocument()
     expect(screen.queryByText("Audio Validated")).not.toBeInTheDocument()
   })
 
@@ -434,7 +434,7 @@ describe("ProjectOverview per-metric conditionality (AQU-168)", () => {
     renderOverview()
 
     // Has Audio (coverage) tile should appear
-    await waitFor(() => expect(screen.getAllByText("Has Audio").length).toBeGreaterThan(0))
+    await waitFor(() => expect(screen.getAllByText("Has audio").length).toBeGreaterThan(0))
     // Translated and Validated must NOT appear (filledCells === 0 means showText is false,
     // but note: totalCells > 0 means hasText=true in current logic which guards on totalCells.
     // The real guard is audioCells > 0 for audio, and totalCells > 0 for text.
@@ -443,7 +443,7 @@ describe("ProjectOverview per-metric conditionality (AQU-168)", () => {
     // totalCells > 0 means there IS translatable content, so text bars appear even if empty.
     // The audio-only guard is specifically: audioCells > 0 shows Has Audio, always shows text when totalCells > 0.
     // This test therefore confirms Has Audio appears when audioCells > 0.
-    expect(screen.getAllByText("Has Audio").length).toBeGreaterThan(0)
+    expect(screen.getAllByText("Has audio").length).toBeGreaterThan(0)
     // AQU-490: a distinct audio-validated count doesn't exist server-side
     // (see the in-component comment for the full investigation). The tile
     // must appear — labeled, honest, and reading "N/A" — never a fabricated
@@ -475,7 +475,7 @@ describe("ProjectOverview per-metric conditionality (AQU-168)", () => {
     }])
     renderOverview()
 
-    for (const label of ["Translated", "Validated", "Has Audio", "Audio Validated"]) {
+    for (const label of ["Translated", "Validated", "Has audio", "Audio Validated"]) {
       await waitFor(() => expect(screen.getAllByText(label).length).toBeGreaterThan(0))
     }
   })
@@ -785,7 +785,7 @@ describe("ProjectOverview audio progress (AQU-160)", () => {
 
     // The progress section should be present (totalCells > 0).
     // The "Has Audio" label must appear in the StatBar list (AQU-490 relabel).
-    await waitFor(() => expect(screen.getAllByText("Has Audio").length).toBeGreaterThan(0))
+    await waitFor(() => expect(screen.getAllByText("Has audio").length).toBeGreaterThan(0))
     // The audio StatBar displays "30%" in its percentage column.
     // getAllByText because translated (80%) and validated (50%) also render %.
     const pctLabels = screen.getAllByText(/^\d+%$/)
@@ -823,7 +823,7 @@ describe("ProjectOverview audio progress (AQU-160)", () => {
     // So we just confirm the progress section renders with text metrics.
     await waitFor(() => expect(screen.getAllByText("Translated").length).toBeGreaterThan(0))
     // Audio tiles should be hidden
-    expect(screen.queryByText("Has Audio")).not.toBeInTheDocument()
+    expect(screen.queryByText("Has audio")).not.toBeInTheDocument()
     expect(screen.queryByText("Audio Validated")).not.toBeInTheDocument()
   })
 })

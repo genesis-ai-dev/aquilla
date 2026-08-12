@@ -22,6 +22,7 @@ import {
   fetchProjectSettings,
   patchProjectSettings,
 } from "@/lib/sync/project-settings"
+import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
 
 const MAX_LANE_LENGTH = 64
 
@@ -36,19 +37,22 @@ export interface AddLanguagePopoverProps {
 /** Mirrors LanguagesSection.validateNewLane — kept local so this org-dashboard
  * control doesn't depend on the ProjectSettings module. */
 function validateNewLane(
+  t: TFunction,
   candidate: string,
   defaultTargetLanguage: string,
   existingLanes: string[],
 ): string | null {
   const trimmed = candidate.trim()
-  if (!trimmed) return "Enter a language tag."
-  if (trimmed.length > MAX_LANE_LENGTH) return `Must be ${MAX_LANE_LENGTH} characters or fewer.`
+  if (!trimmed) return t("org.addLanguagePopover.emptyError")
+  if (trimmed.length > MAX_LANE_LENGTH) {
+    return t("org.addLanguagePopover.tooLongError", { max: MAX_LANE_LENGTH })
+  }
   const lower = trimmed.toLowerCase()
   if (lower === defaultTargetLanguage.trim().toLowerCase()) {
-    return "This is already the default target language."
+    return t("org.addLanguagePopover.isDefaultError")
   }
   if (existingLanes.some((l) => l.toLowerCase() === lower)) {
-    return "This lane already exists."
+    return t("org.addLanguagePopover.alreadyExistsError")
   }
   return null
 }
@@ -56,6 +60,7 @@ function validateNewLane(
 type Phase = "idle" | "loading" | "ready" | "saving"
 
 export function AddLanguagePopover({ projectId, jwt, onAdded }: AddLanguagePopoverProps) {
+  const t = useT()
   const [open, setOpen] = useState(false)
   const [phase, setPhase] = useState<Phase>("idle")
   const [value, setValue] = useState("")
@@ -74,7 +79,7 @@ export function AddLanguagePopover({ projectId, jwt, onAdded }: AddLanguagePopov
     const res = await fetchProjectSettings(jwt, projectId)
     if (!res) {
       setSnapshot(null)
-      setError("Couldn't load this project's languages. Try again.")
+      setError(t("org.addLanguagePopover.loadError"))
       setPhase("ready")
       return
     }
@@ -100,11 +105,12 @@ export function AddLanguagePopover({ projectId, jwt, onAdded }: AddLanguagePopov
 
   async function handleAdd() {
     if (!snapshot) {
-      setError("Couldn't load this project's languages. Try again.")
+      setError(t("org.addLanguagePopover.loadError"))
       return
     }
     const trimmed = value.trim()
     const validationError = validateNewLane(
+      t,
       trimmed,
       snapshot.defaultTargetLanguage,
       snapshot.targetLanes,
@@ -139,16 +145,16 @@ export function AddLanguagePopover({ projectId, jwt, onAdded }: AddLanguagePopov
         defaultTargetLanguage: result.latest.settings.targetLanguage ?? snapshot.defaultTargetLanguage,
         targetLanes: result.latest.settings.targetLanes ?? snapshot.targetLanes,
       })
-      setError("Languages changed elsewhere. Reloaded — try adding again.")
+      setError(t("org.addLanguagePopover.conflictError"))
       setPhase("ready")
       return
     }
     if (result.kind === "forbidden") {
-      setError("You don't have permission to add languages to this project.")
+      setError(t("org.addLanguagePopover.forbiddenError"))
       setPhase("ready")
       return
     }
-    setError(result.message || "Saving failed.")
+    setError(result.message || t("org.addLanguagePopover.genericSaveError"))
     setPhase("ready")
   }
 
@@ -162,13 +168,13 @@ export function AddLanguagePopover({ projectId, jwt, onAdded }: AddLanguagePopov
             type="button"
             data-testid={`org-add-lang-${projectId}`}
             className="inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-xs text-muted-foreground hover:bg-muted"
-            aria-label="Add a target language lane"
+            aria-label={t("org.addLanguagePopover.triggerAriaLabel")}
             onClick={(e) => e.stopPropagation()}
           />
         }
       >
         <Languages className="size-3.5" aria-hidden />
-        Language
+        {t("org.addLanguagePopover.triggerLabel")}
       </PopoverTrigger>
       <PopoverContent
         data-testid={`org-add-lang-popover-${projectId}`}
@@ -177,15 +183,15 @@ export function AddLanguagePopover({ projectId, jwt, onAdded }: AddLanguagePopov
         onClick={(e) => e.stopPropagation()}
       >
         <div>
-          <p className="text-xs font-medium">Add a target language</p>
+          <p className="text-xs font-medium">{t("org.addLanguagePopover.heading")}</p>
           <p className="text-[11px] text-muted-foreground">
-            Registers a new lane on this project. Manage or remove lanes in project settings.
+            {t("org.addLanguagePopover.description")}
           </p>
         </div>
         {phase === "loading" ? (
           <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
             <Spinner className="size-3.5" />
-            Loading languages…
+            {t("org.addLanguagePopover.loadingLanguages")}
           </div>
         ) : (
           <div className="flex items-end gap-2">
@@ -202,14 +208,14 @@ export function AddLanguagePopover({ projectId, jwt, onAdded }: AddLanguagePopov
                   void handleAdd()
                 }
               }}
-              placeholder="e.g. fr-CA"
-              aria-label="New target language tag"
+              placeholder={t("org.addLanguagePopover.inputPlaceholder")}
+              aria-label={t("org.addLanguagePopover.inputAriaLabel")}
               className="h-8 text-xs"
               disabled={busy}
             />
             <Button size="sm" onClick={() => void handleAdd()} disabled={busy || !snapshot}>
               {busy ? <Spinner className="me-1 size-3.5" /> : <Plus className="me-1 size-3.5" />}
-              Add
+              {t("common.add")}
             </Button>
           </div>
         )}

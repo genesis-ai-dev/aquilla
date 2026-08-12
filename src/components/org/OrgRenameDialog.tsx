@@ -16,12 +16,8 @@ import { Spinner } from "@/components/ui/spinner"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { renameOrg } from "@/lib/frontier/orgs"
 import { isFieldInvalid } from "@/lib/forms/field-state"
-import { requiredString } from "@/lib/forms/schemas"
 import { useSubmitError } from "@/lib/forms/submit-error"
-
-const formSchema = z.object({
-  name: requiredString("Organization name"),
-})
+import { useT } from "@/lib/i18n/I18nProvider"
 
 interface OrgRenameDialogProps {
   open: boolean
@@ -38,9 +34,16 @@ export function OrgRenameDialog({
   currentName,
   onRenamed,
 }: OrgRenameDialogProps) {
+  const t = useT()
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
   const { submitError, setSubmitError, clearSubmitError } = useSubmitError()
+
+  const formSchema = z.object({
+    name: z.string().refine((val) => val.trim().length > 0, {
+      message: t("org.createDialog.nameRequiredError"),
+    }),
+  })
 
   const form = useForm({
     defaultValues: { name: currentName },
@@ -53,7 +56,7 @@ export function OrgRenameDialog({
         await onRenamed?.()
         onOpenChange(false)
       } catch (err) {
-        setSubmitError(err instanceof Error ? err.message : "Couldn't rename your organization.")
+        setSubmitError(err instanceof Error ? err.message : t("org.renameDialog.genericError"))
       }
     },
   })
@@ -69,9 +72,9 @@ export function OrgRenameDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Rename organization</DialogTitle>
+          <DialogTitle>{t("org.renameDialog.title")}</DialogTitle>
           <DialogDescription>
-            This name is shown across the workspace — in the sidebar, settings, and member lists.
+            {t("org.renameDialog.description")}
           </DialogDescription>
         </DialogHeader>
         <form
@@ -88,7 +91,7 @@ export function OrgRenameDialog({
                 const invalid = isFieldInvalid(field)
                 return (
                   <Field data-invalid={invalid}>
-                    <FieldLabel htmlFor="org-name">Organization name</FieldLabel>
+                    <FieldLabel htmlFor="org-name">{t("org.createDialog.nameLabel")}</FieldLabel>
                     <Input
                       id="org-name"
                       name={field.name}
@@ -107,11 +110,11 @@ export function OrgRenameDialog({
           {submitError ? <FieldError role="alert" className="mt-3">{submitError}</FieldError> : null}
           <DialogFooter className="mt-4">
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-              Cancel
+              {t("common.cancel")}
             </Button>
             <Button type="submit" form="org-rename-form">
               {form.state.isSubmitting && <Spinner data-icon="inline-start" />}
-              {form.state.isSubmitting ? "Saving…" : "Save"}
+              {form.state.isSubmitting ? t("common.saving") : t("common.save")}
             </Button>
           </DialogFooter>
         </form>

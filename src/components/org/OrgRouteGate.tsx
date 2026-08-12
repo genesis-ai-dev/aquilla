@@ -7,8 +7,10 @@ import { Link, Navigate, Outlet, useLocation, useParams } from "react-router-dom
 import { useActiveOrg } from "@/context/OrgContext"
 import { orgKeyFromParam, ALL_ORGS_PARAM, orgHomePath, parseOrgPath } from "@/lib/navigation/org-paths"
 import { Button } from "@/components/ui/button"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 export function OrgRouteGate() {
+  const t = useT()
   const { orgId: orgIdParam } = useParams<{ orgId: string }>()
   const orgKey = orgKeyFromParam(orgIdParam)
   const { orgs, guestOrgs, isLoading, accessibleProjectsLoading, error } = useActiveOrg()
@@ -22,7 +24,7 @@ export function OrgRouteGate() {
   if (isLoading) {
     return (
       <div className="flex h-screen items-center justify-center text-sm text-muted-foreground">
-        Loading…
+        {t("common.loading")}
       </div>
     )
   }
@@ -40,7 +42,7 @@ export function OrgRouteGate() {
     if (accessibleProjectsLoading) {
       return (
         <div className="flex h-screen items-center justify-center text-sm text-muted-foreground">
-          Loading…
+          {t("common.loading")}
         </div>
       )
     }
@@ -67,18 +69,19 @@ function OrgAccessProblem({
   orgId?: number
   detail?: string
 }) {
+  const t = useT()
   const title =
     reason === "error"
-      ? "Couldn’t load organizations"
+      ? t("org.routeGate.errorTitle")
       : reason === "invalid"
-        ? "Invalid organization"
-        : "Organization not found"
+        ? t("org.routeGate.invalidTitle")
+        : t("org.routeGate.missingTitle")
   const body =
     reason === "error"
-      ? (detail ?? "Something went wrong loading your organizations.")
+      ? (detail ?? t("org.routeGate.errorFallbackBody"))
       : reason === "invalid"
-        ? "That organization URL isn’t valid."
-        : `You don’t have access to organization #${orgId}, or it doesn’t exist.`
+        ? t("org.routeGate.invalidBody")
+        : t("org.routeGate.missingBody", { orgId: orgId ?? "" })
 
   return (
     <div className="flex h-screen flex-col items-center justify-center gap-4 px-6 text-center">
@@ -87,7 +90,7 @@ function OrgAccessProblem({
         <p className="max-w-md text-sm text-muted-foreground">{body}</p>
       </div>
       <Button nativeButton={false} render={<Link to={orgHomePath(ALL_ORGS_PARAM)} />}>
-        All organizations
+        {t("org.breadcrumb.allOrganizations")}
       </Button>
     </div>
   )

@@ -134,4 +134,131 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "speech in languages that mark that distinction; the English capitalization " +
     "difference is incidental, not the reason (a case-only split alone would not " +
     "justify this entry).",
+  "org.orgHome.table.languageHeader":
+    "Column heading over the source→target language pair of each project row. " +
+    "language.label is the accessible name of the UI-LANGUAGE switcher — the " +
+    "language the interface itself is drawn in, a different thing entirely from " +
+    "the languages a project translates between. Collapsing them would make a " +
+    "translator render this column with interface-language wording, which is " +
+    "wrong for a content column, and several languages distinguish the two " +
+    "senses lexically rather than by context.",
+  "org.addLanguagePopover.triggerLabel":
+    "Visible text of a small chip BUTTON beside a project row that opens the " +
+    "add-a-language-lane popover; it names an action's object, not a heading. " +
+    "org.orgHome.table.languageHeader is the noun heading of a table column, and " +
+    "language.label names the interface-language switcher. Button object, column " +
+    "heading, and interface-chrome name take different forms in languages that " +
+    "inflect for grammatical role, so one shared string cannot serve all three.",
+
+  // -- AQU-511/AQU-832 org-namespace dedupe (WS-11) --------------------------
+  // The org.ts sweep left 41+ keys re-minting English another namespace (or
+  // org.ts itself) already had. Most were genuine dupes and got deleted in
+  // favor of the existing key; the entries below are the ones a close read
+  // showed carry a real meaning split, so both sides stay.
+  "editor.ebible.selectAll":
+    "A tiny underlined LINK that ticks every matched verse in the eBible import " +
+    "review flow — an imperative select-all action. org.orgHome.statusFilter.all " +
+    "(reused for the org project-status filter, the TeamsList visibility filter, " +
+    "and the ProjectOverview lane picker) is the resting VALUE of a segmented " +
+    "filter meaning 'no filter applied' — a noun-like option, not a command. " +
+    "Imperative verb vs. filter-option noun take different forms in most " +
+    "languages, so collapsing them would mislabel one of the two.",
+  "org.orgHome.table.validatedHeaderLabel":
+    "Nominal column heading over a stat/table cell (paired with 'Filled', " +
+    "'Total', 'Words' as sibling headings, and reused as a StatTile label) — a " +
+    "noun naming a metric. editor.state.validated is the lower-case per-cell " +
+    "status word reused in badges and screen-reader names (contrasts with " +
+    "'unvalidated', and is now also reused for the ProjectOverview chart-legend " +
+    "swatch label). A title-case table heading and a lower-case status adjective " +
+    "read as different parts of speech in languages that inflect for that, so " +
+    "one shared string would be wrong for one of the two roles.",
+  "org.projectOverview.legendTranslated":
+    "Lower-case label read beside a colored swatch in a chart legend ('● " +
+    "translated'), functioning adjectivally — it describes what the color means, " +
+    "the same register as editor.state.validated/unvalidated. " +
+    "org.orgHome.table.translatedHeaderLabel is the nominal, title-case column/" +
+    "stat heading naming the same metric. A legend's adjectival state word and a " +
+    "table's nominal heading take different forms in many languages, mirroring " +
+    "the validated/legendValidated split right above it in this catalog.",
+  "org.teamDetail.selectedCount":
+    "Structurally different from editor.selection.count, not just differently " +
+    "worded: this key is a plural({one, other}) MessageValue so languages with " +
+    "real plural rules (Polish, Russian, Arabic, …) can render '1 selected' vs " +
+    "'5 selected' with different words, while editor.selection.count is a single " +
+    "fixed string with no plural branching. Reusing the editor key would " +
+    "silently drop plural support for the TeamDetail add-member combobox trigger " +
+    "in every language that needs it — a translatability loss, not a style " +
+    "choice, and editor.ts is out of scope here to add plural support to it.",
+  "org.overviewLaneTable.openAction":
+    "Capitalized imperative BUTTON/link text ('Open') that navigates into a " +
+    "project lane's editor — an action a person takes. comments.status.open is " +
+    "a lower-case adjectival status badge on a comment thread ('this thread is " +
+    "open'), matching the visual weight of its sibling comments.status.resolved. " +
+    "Imperative verb vs. adjectival status take different forms in most " +
+    "languages, so one shared string would be wrong for one of the two roles.",
+  "org.projectOverview.columnApproved":
+    "Plain column heading over a raw cell count in the per-file breakdown table " +
+    "(sibling of 'Filled', 'Total', 'Words') — no review workflow implied, just " +
+    "a count of cells marked approved. autopilot.evidence.status.approved is one " +
+    "member of a stable enum of an AI agent's evidence-review lifecycle " +
+    "(Proposed/Applied/Rejected/Superseded/Approved/Archived/Unknown), a term of " +
+    "art for that specific workflow. A generic count-column heading and a named " +
+    "state in a review pipeline are different concepts that happen to share an " +
+    "English participle; collapsing them would leak review-workflow wording into " +
+    "a plain stats column in languages that lexicalize the two differently.",
+  "org.orgSidebar.archived":
+    "Sidebar nav-link text AND breadcrumb section name for the org's permanent " +
+    "archived-projects route — a page/section identity, the same grammatical " +
+    "role as the editor.navTitle.* page titles it sits beside in the sidebar. " +
+    "autopilot.evidence.status.archived is a lifecycle state of one piece of AI " +
+    "evidence in the same stable status enum as .approved above. A destination " +
+    "name and an item's lifecycle status are different concepts sharing one " +
+    "English participle; several languages would render a place-name and a " +
+    "state-of-an-item differently.",
+  "org.membersPage.orgPage.unknownInviter":
+    "Lower-case filler substituted into the middle of a byline sentence ('by " +
+    "{username}') when the inviter is unavailable — grammatically the object of " +
+    "a preposition, not a standalone word. autopilot.evidence.status.unknown is " +
+    "a capitalized, standalone member of the evidence-status enum discussed " +
+    "above (also reused for org.teamDetail's unknown-role fallback, a role-badge " +
+    "context). A lower-case mid-sentence filler and a capitalized standalone " +
+    "enum/badge value take different forms in languages that case- or " +
+    "register-mark that distinction.",
+  "org.membersPage.addMemberHeading":
+    "Static <h2> SECTION HEADING introducing the add-member area of the " +
+    "per-project Members page — a nominal label naming what's below it. " +
+    "org.teamDetail.addMemberButton is the imperative text of an actual clickable " +
+    "button/menu item that starts the add-member flow. This is the same " +
+    "nominalized-heading-vs-imperative-button split already documented for " +
+    "auth.login.title vs auth.login.submitDefault above: languages that " +
+    "nominalize headings while keeping buttons imperative need both forms even " +
+    "though English spells them identically.",
+  "org.membersPage.orgPage.noExpiry":
+    "Lower-case inline status caption ('no expiry') standing in for a computed " +
+    "relative-time phrase on a pending-invite row, in the same register as its " +
+    "lower-case sibling org.membersPage.orgPage.expired — a sentence fragment, " +
+    "not a menu choice. org.membersPage.expiryNone is a Title-Case SELECT-MENU " +
+    "OPTION ('No expiry') alongside sibling options '1 day', '7 days (default)', " +
+    "'30 days' in the invite-link expiry dropdown. A dropdown choice and an " +
+    "inline status sentence fragment are read as different grammatical roles in " +
+    "many languages, so one shared string would fit only one of the two spots.",
+  "org.memberAccessPanel.viaOrgRoleLabel":
+    "Lower-case fragment ('org role') comma-joined into org.memberAccessPanel." +
+    "alsoViaNote's 'Also via {paths}' sentence alongside 'team \"X\"' and " +
+    "'project creator' — an inline list item, not a standalone label. " +
+    "org.inviteByEmail.roleLabel is the Title-Case form-field label ('Org role') " +
+    "above a role <select> in the invite-by-email dialog. A comma-joined lower- " +
+    "case list fragment and a standalone form label take different forms in " +
+    "most languages, so one shared string would be wrong in one of the two " +
+    "positions.",
+  "org.membersPage.lockedHintCreator":
+    "Standalone, sentence-like TOOLTIP content ('Project creator') explaining " +
+    "why a locked role control is disabled — read on its own, the short-form " +
+    "sibling of org.membersPage.lockedHintOrgAccess's full sentence. " +
+    "org.membersPage.sourceProjectCreator is a lower-case fragment ('project " +
+    "creator') from the parallel source* badge set (sourceDirectInvite/" +
+    "sourceViaTeam/sourceViaOrg), always rendered as one item in a small access-" +
+    "source badge, never alone as an explanatory sentence. A standalone tooltip " +
+    "phrase and an inline badge fragment take different forms in languages that " +
+    "mark that register distinction.",
 }

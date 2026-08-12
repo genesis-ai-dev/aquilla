@@ -76,10 +76,24 @@ describe("OrgBreadcrumb", () => {
     orgContext.activeOrgId = null
     orgContext.isAllOrgs = true
 
-    renderBreadcrumb(<OrgBreadcrumb section="Projects" />, "/orgs/all")
+    renderBreadcrumb(<OrgBreadcrumb section="Projects" isProjectsLanding />, "/orgs/all")
 
     expect(screen.queryByRole("link", { name: "All organizations" })).not.toBeInTheDocument()
     expect(screen.getByText("All organizations")).toHaveAttribute("aria-current", "page")
+  })
+
+  // AQU-832: `isProjectsLanding` replaced an implicit `section === "Projects"`
+  // string comparison — translating `section` must not silently duplicate a
+  // crumb. A section whose ENGLISH TEXT happens to be "Projects" but that
+  // isn't flagged as the landing page must still render its own crumb.
+  it("does not infer the landing page from the section text — only from isProjectsLanding", () => {
+    orgContext.activeOrgId = null
+    orgContext.isAllOrgs = true
+
+    renderBreadcrumb(<OrgBreadcrumb section="Projects" />, "/orgs/all")
+
+    expect(screen.getByText("Projects")).toHaveAttribute("aria-current", "page")
+    expect(screen.getByRole("link", { name: "All organizations" })).toBeInTheDocument()
   })
 
   // AQU-790: viewing a guest org (`/orgs/:guestId`), the guest org is a sibling
@@ -89,7 +103,7 @@ describe("OrgBreadcrumb", () => {
     orgContext.orgs = [{ id: 7, name: "Dev Org" }]
     orgContext.guestOrgs = [{ id: 2, name: "Guest Org" }]
 
-    renderBreadcrumb(<OrgBreadcrumb section="Projects" />, "/orgs/2")
+    renderBreadcrumb(<OrgBreadcrumb section="Projects" isProjectsLanding />, "/orgs/2")
 
     // The guest org is the current page, directly under All organizations.
     expect(screen.getByRole("link", { name: "All organizations" })).toHaveAttribute("href", "/orgs/all")

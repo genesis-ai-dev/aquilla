@@ -10,6 +10,7 @@ import { OrgBreadcrumb } from "./OrgBreadcrumb"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { getMyAssignmentsForOrg, type MyOrgAssignment } from "@/lib/sync/assignments"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 /**
  * The assignee's "Assigned to me" inbox — the caller's open assignments across
@@ -18,6 +19,7 @@ import { getMyAssignmentsForOrg, type MyOrgAssignment } from "@/lib/sync/assignm
  * connections); the server now returns all of them in a single query.
  */
 export function AssignedToMe() {
+  const t = useT()
   const { activeOrgId } = useActiveOrg()
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
@@ -51,27 +53,27 @@ export function AssignedToMe() {
   return (
     <AppShell
       sidebar={<OrgSidebar />}
-      header={<OrgBreadcrumb section="Assigned to me" />}
+      header={<OrgBreadcrumb section={t("editor.navTitle.assignedToMe")} />}
       statusBar={null}
       main={
         // Match Members / Teams: Page size="wide" (max-w-6xl) inside AppShell.
         // data-testid kept on the Page scroll root for the existing scroll helper.
         <Page size="wide" data-testid="assigned-to-me-scroll" className="overscroll-contain">
-          <PageHeader title="Assigned to me" />
+          <PageHeader title={t("editor.navTitle.assignedToMe")} />
           {activeOrgId == null ? (
             <EmptyState
               icon={Building2}
-              title="Select an organization"
-              description="Assignments are scoped to a single organization."
+              title={t("org.teamsList.selectOrgTitle")}
+              description={t("org.assignedToMe.selectOrgDescription")}
             />
           ) : loading ? (
-            <LoadingPanel label="Loading assignments" className="min-h-80" />
+            <LoadingPanel label={t("org.assignedToMe.loadingLabel")} className="min-h-80" />
           ) : error ? (
             <p className="text-sm text-destructive">{error}</p>
           ) : rows.length === 0 ? (
             <EmptyState
               icon={ClipboardList}
-              title="You have no open assignments."
+              title={t("org.assignedToMe.emptyTitle")}
             />
           ) : (
             <div className="divide-y rounded-lg border">
@@ -92,7 +94,7 @@ export function AssignedToMe() {
                       )}
                       {a.deadline && (
                         <Badge variant="secondary" className="shrink-0">
-                          Due {a.deadline}
+                          {t("org.orgHome.dueDate", { date: a.deadline })}
                         </Badge>
                       )}
                     </div>
@@ -100,7 +102,7 @@ export function AssignedToMe() {
                       <div className="h-full rounded-full bg-primary" style={{ width: `${pct}%` }} />
                     </div>
                     <p className="mt-1 text-xs text-muted-foreground">
-                      {a.cellsDone}/{a.cellsTotal} cells · {pct}%
+                      {t("org.assignedToMe.cellsProgress", { done: a.cellsDone, total: a.cellsTotal, pct })}
                     </p>
                   </Link>
                 )

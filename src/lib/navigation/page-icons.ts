@@ -172,6 +172,8 @@ export function deriveNavIcon(pathname: string): LucideIcon {
       case "editor":
         return seg[3] === "file" ? FileText : BookOpenText
       case "settings":
+        if (seg[3] === "rules") return SpellCheck
+        if (seg[3] === "memory") return BrainCircuit
         return NAV_PAGE_ICONS.settings
       case "rules":
         return SpellCheck

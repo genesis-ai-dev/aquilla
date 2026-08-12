@@ -9,7 +9,7 @@ import {
 import {
   Check, CheckCircle, XCircle, ChevronDown, Save, Sparkles,
   SlidersHorizontal, Link2, BarChart3, ShieldCheck, AudioLines, Plug, FlaskConical,
-  Users,
+  Users, SpellCheck, BrainCircuit,
 } from "lucide-react"
 import { toast } from "@/components/ui/toast"
 import { Button } from "@/components/ui/button"
@@ -75,6 +75,8 @@ import { SourceLinkSection } from "./ProjectSettings/SourceLinkSection"
 import { ExperimentalFlagsSection } from "./ProjectSettings/ExperimentalFlagsSection"
 import { LanguagesSection } from "./ProjectSettings/LanguagesSection"
 import { MembersSection } from "./ProjectSettings/MembersSection"
+import { RulesSettingsSection } from "./ProjectSettings/RulesSection"
+import { LivingMemoryPage } from "./LivingMemoryPage"
 import { DcsUpstreamPanel } from "@/components/dcs/DcsUpstreamPanel"
 import { readCursor } from "@/lib/dcs/cursor"
 import { UpstreamChangesPanel } from "./linked/UpstreamChangesPanel"
@@ -887,6 +889,8 @@ export function ProjectSettings() {
     { id: "section-advanced-llm", label: "Advanced LLM", keywords: ["provider", "endpoint", "api key", "model", "temperature", "max tokens", "health penalty", "frontier", "openai", "custom"] },
     { id: "section-voice", label: "Voice", keywords: ["tts", "voice studio", "audio", "gemini", "api key", "tts key"] },
     { id: "section-local-models", label: "Local AI models", keywords: ["whisper", "kokoro", "mms", "transcription", "model", "download", "offline", "local ai"] },
+    { id: "section-rules", label: "Rules", keywords: ["rules", "checks", "lqa", "autofix", "forbidden", "pattern", "org rules"] },
+    { id: "section-memory", label: "Living Memory", keywords: ["living memory", "memory", "brief", "instructions", "standards", "examples", "validated"] },
     { id: "section-validation", label: "Validation", keywords: ["validation count", "approvals", "audio validation"] },
     { id: "section-decay", label: "Retrieval support", keywords: ["decay", "decay threshold", "half life", "retrieval support", "max hops", "attention threshold"] },
     { id: "section-audio-media", label: "Audio Media", keywords: ["audio media strategy", "lazy", "eager"] },
@@ -993,6 +997,22 @@ export function ProjectSettings() {
       sectionIds: ["section-system-prompt"],
     },
     {
+      id: "rules",
+      label: "Rules",
+      description: "Translation checks, custom rules, and org-wide rules",
+      icon: SpellCheck,
+      hub: "Quality",
+      sectionIds: ["section-rules"],
+    },
+    {
+      id: "memory",
+      label: "Living Memory",
+      description: "Instructions, standards, and validated examples the AI draws on",
+      icon: BrainCircuit,
+      hub: "Quality",
+      sectionIds: ["section-memory"],
+    },
+    {
       id: "validation",
       label: "Validation & health",
       description: "Approvals, harmonization, staleness decay",
@@ -1076,6 +1096,8 @@ export function ProjectSettings() {
       "section-bible-resources",
       "section-user",
       "section-members",
+      "section-rules",
+      "section-memory",
       "section-system-prompt",
       "section-ai-instructions",
       "section-draft-context",
@@ -1129,6 +1151,8 @@ export function ProjectSettings() {
   const groupHints: Record<string, string> = {
     general: name.trim() || "Untitled",
     members: "Roles & invites",
+    rules: "Checks",
+    memory: "Brief & examples",
     "source-sync": hasSourceLink ? "Linked" : hasGitOrigin ? "Git" : "None",
     ai: provider === "frontier" ? "Frontier" : "Custom",
     validation: validationRoleFloor.replace(/_/g, " "),
@@ -1501,6 +1525,20 @@ export function ProjectSettings() {
         {searchGroupLabel("section-members")}
         {id && sectionsToRender.some((s) => s.id === "section-members") && (
           <MembersSection projectId={id} />
+        )}
+
+        {searchGroupLabel("section-rules")}
+        {id && sectionsToRender.some((s) => s.id === "section-rules") && (
+          <div id="section-rules">
+            <RulesSettingsSection projectId={id} />
+          </div>
+        )}
+
+        {searchGroupLabel("section-memory")}
+        {sectionsToRender.some((s) => s.id === "section-memory") && (
+          <div id="section-memory">
+            <LivingMemoryPage embedded />
+          </div>
         )}
 
         {searchGroupLabel("section-system-prompt")}

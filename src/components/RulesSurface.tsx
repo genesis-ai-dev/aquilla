@@ -54,6 +54,8 @@ interface Props {
   requestPromotion?: (rule: TranslationRule, sourceProjectId: string) => Promise<PromotionRequestResult | { kind: "blocked" }>
   editingRuleId: string | "new" | null
   setEditingRuleId: (id: string | "new" | null) => void
+  /** Settings pane: skip the in-main title toolbar; PageHeader owns the title. */
+  embedded?: boolean
 }
 
 function SeverityBadge({ severity }: { severity: string }) {
@@ -94,6 +96,7 @@ export function RulesSurface({
   requestPromotion,
   editingRuleId,
   setEditingRuleId,
+  embedded = false,
 }: Props) {
   const navigate = useNavigate()
   const location = useLocation()
@@ -202,42 +205,52 @@ export function RulesSurface({
     setSearchParams(next, { replace: true })
   }
 
+  const toolbarActions = (
+    <>
+      <Button
+        variant="outline"
+        onClick={() => navigate(withEditorReturn(
+          `/project/${projectId}/terminology`,
+          editorReturnFromLocation(location.pathname, location.search, projectId),
+        ))}
+      >
+        <BookOpen data-icon="inline-start" />
+        Terminology
+      </Button>
+      <RuleImportDialog
+        completionSettings={completionSettings}
+        onAdd={addRule}
+        projectId={projectId}
+      />
+      <RuleSuggestFromEditsDialog
+        completionSettings={completionSettings}
+        onAdd={addRule}
+        projectId={projectId}
+        cells={cells}
+      />
+      <Button
+        onClick={() => setEditingRuleId("new")}
+        disabled={editingRuleId !== null}
+      >
+        <Plus className="size-4" aria-hidden />
+        Add Rule
+      </Button>
+    </>
+  )
+
   return (
-    <div className="flex h-full flex-col bg-background">
-      {/* In-main toolbar — matches Glossary/Terminology: actions live in the
-          surface, not the workspace header. */}
-      <header className="flex shrink-0 items-center gap-2 border-b px-4 py-3">
-        <ScrollText className="h-5 w-5 text-muted-foreground" aria-hidden />
-        <h1 className="flex-1 text-base font-semibold">Rules</h1>
-        <Button
-          variant="outline"
-          onClick={() => navigate(withEditorReturn(
-            `/project/${projectId}/terminology`,
-            editorReturnFromLocation(location.pathname, location.search, projectId),
-          ))}
-        >
-          <BookOpen data-icon="inline-start" />
-          Terminology
-        </Button>
-        <RuleImportDialog
-          completionSettings={completionSettings}
-          onAdd={addRule}
-          projectId={projectId}
-        />
-        <RuleSuggestFromEditsDialog
-          completionSettings={completionSettings}
-          onAdd={addRule}
-          projectId={projectId}
-          cells={cells}
-        />
-        <Button
-          onClick={() => setEditingRuleId("new")}
-          disabled={editingRuleId !== null}
-        >
-          <Plus className="size-4" aria-hidden />
-          Add Rule
-        </Button>
-      </header>
+    <div className={embedded ? "flex flex-col gap-6" : "flex h-full flex-col bg-background"}>
+      {embedded ? (
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {toolbarActions}
+        </div>
+      ) : (
+        <header className="flex shrink-0 items-center gap-2 border-b px-4 py-3">
+          <ScrollText className="h-5 w-5 text-muted-foreground" aria-hidden />
+          <h1 className="flex-1 text-base font-semibold">Rules</h1>
+          {toolbarActions}
+        </header>
+      )}
 
       {/* Create project rule — dialog, not inline */}
       <Dialog
@@ -289,8 +302,8 @@ export function RulesSurface({
         </DialogContent>
       </Dialog>
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto flex max-w-2xl flex-col gap-6 p-6">
+      <div className={embedded ? "flex flex-col gap-6" : "min-h-0 flex-1 overflow-y-auto"}>
+        <div className={embedded ? "flex flex-col gap-6" : "mx-auto flex max-w-2xl flex-col gap-6 p-6"}>
         {usageSummary && (
           <AppTooltip content="LLM usage on this project">
             <p className="text-xs text-muted-foreground">{usageSummary}</p>

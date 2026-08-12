@@ -69,6 +69,8 @@ export function deriveNavTitle(pathname: string): string {
       case "editor":
         return seg[3] === "file" ? "File" : "Editor"
       case "settings":
+        if (seg[3] === "rules") return "Checks & rules"
+        if (seg[3] === "memory") return "Project memory"
         return "Project settings"
       case "rules":
         return "Checks & rules"

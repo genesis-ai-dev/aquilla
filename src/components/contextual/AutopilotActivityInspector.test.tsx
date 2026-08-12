@@ -755,7 +755,7 @@ describe("AutopilotActivityInspector", () => {
         blockingGaps: 2,
         items: [
           { id: "terminology", label: "Key terms", level: "missing", detail: "Missing", href: "terminology" },
-          { id: "brief", label: "Translation brief", level: "missing", detail: "Missing", href: "memory" },
+          { id: "brief", label: "Translation brief", level: "missing", detail: "Missing", href: "settings/memory" },
         ],
       },
     })
@@ -766,7 +766,7 @@ describe("AutopilotActivityInspector", () => {
     )
     expect(screen.getByRole("link", { name: "Set up Translation brief" })).toHaveAttribute(
       "href",
-      "/project/p1/memory",
+      "/project/p1/settings/memory",
     )
   })
 

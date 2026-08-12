@@ -32,6 +32,8 @@ describe("deriveNavIcon", () => {
   it("maps project workspace surfaces", () => {
     expect(deriveNavIcon("/project/abc/editor")).toBe(navIconForLabel("Editor"))
     expect(deriveNavIcon("/project/abc/settings")).toBe(NAV_PAGE_ICONS.settings)
+    expect(deriveNavIcon("/project/abc/settings/rules")).toBe(navIconForLabel("Checks & rules"))
+    expect(deriveNavIcon("/project/abc/settings/memory")).toBe(navIconForLabel("Project memory"))
     expect(deriveNavIcon("/project/abc/comments")).toBe(navIconForLabel("Comments"))
     expect(deriveNavIcon("/project/abc/terminology")).toBe(navIconForLabel("Terminology"))
     expect(deriveNavIcon("/project/abc/memory")).toBe(navIconForLabel("Project memory"))

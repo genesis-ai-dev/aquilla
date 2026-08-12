@@ -8,9 +8,8 @@
  * Below-floor users see read-only affordances with a tooltip naming the
  * required role, mirroring the AQU-255 pattern in useProjectSettings.
  *
- * Layout: AQU-254 renders this page inside the ProjectWorkspace shell
- * (centerSurface === "memory"). Matches Rules/Glossary: in-main toolbar
- * + scrollable max-width body — no full-page header, no back button.
+ * Layout: rendered as a Project Settings pane (`/project/:id/settings/memory`).
+ * Pass `embedded` so PageHeader owns the title; the page keeps its action row.
  */
 
 import React, { useMemo, useState } from "react"
@@ -441,11 +440,10 @@ function AuthoredEntriesSection({
 }
 
 // ── Page ──────────────────────────────────────────────────────────────────
-// AQU-254: rendered inside ProjectWorkspace's AppShell (centerSurface===
-// "memory"). Layout matches Rules/Glossary: in-main toolbar + scrollable
-// body. No back-button chrome — the shell owns nav.
+// Project Settings pane (`/project/:id/settings/memory`). `embedded` skips
+// the in-main title toolbar so PageHeader owns the heading.
 
-export function LivingMemoryPage() {
+export function LivingMemoryPage({ embedded = false }: { embedded?: boolean }) {
   const { id: projectId } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const location = useLocation()
@@ -532,48 +530,59 @@ export function LivingMemoryPage() {
     await patchSettings({ livingMemoryEntries: next })
   }
 
+  const statusAndActions = (
+    <>
+      <AppTooltip content={livenessLabel}>
+        <span
+          aria-label={livenessLabel}
+          className={[
+            "h-2 w-2 shrink-0 rounded-full transition-colors",
+            livenessState === "offline"
+              ? "bg-red-500"
+              : livenessState === "updating"
+                ? "bg-amber-400 animate-pulse"
+                : "bg-emerald-500",
+          ].join(" ")}
+        />
+      </AppTooltip>
+      {isLoading ? (
+        <Skeleton className="h-4 w-20 rounded-md" aria-label="Loading count" />
+      ) : (
+        <Badge variant="secondary" className="text-[10px] tabular-nums">
+          {cells.length.toLocaleString()} validated
+        </Badge>
+      )}
+      <div className="flex-1" />
+      <Button
+        variant="outline"
+        onClick={() => {
+          if (!projectId) return
+          navigate(withEditorReturn(
+            `/project/${projectId}/terminology`,
+            editorReturnFromLocation(location.pathname, location.search, projectId),
+          ))
+        }}
+        aria-label="Go to Terminology page"
+      >
+        <BookOpen data-icon="inline-start" />
+        Terminology
+      </Button>
+    </>
+  )
+
   return (
-    <div className="flex h-full flex-col bg-background">
-      {/* In-main toolbar — matches Rules/Glossary */}
-      <header className="flex shrink-0 items-center gap-2 border-b px-4 py-3">
-        <Brain className="h-5 w-5 text-muted-foreground" aria-hidden />
-        <h1 className="text-base font-semibold">Living Memory</h1>
-        <AppTooltip content={livenessLabel}>
-          <span
-            aria-label={livenessLabel}
-            className={[
-              "h-2 w-2 shrink-0 rounded-full transition-colors",
-              livenessState === "offline"
-                ? "bg-red-500"
-                : livenessState === "updating"
-                  ? "bg-amber-400 animate-pulse"
-                  : "bg-emerald-500",
-            ].join(" ")}
-          />
-        </AppTooltip>
-        {isLoading ? (
-          <Skeleton className="h-4 w-20 rounded-md" aria-label="Loading count" />
-        ) : (
-          <Badge variant="secondary" className="text-[10px] tabular-nums">
-            {cells.length.toLocaleString()} validated
-          </Badge>
-        )}
-        <div className="flex-1" />
-        <Button
-          variant="outline"
-          onClick={() => {
-            if (!projectId) return
-            navigate(withEditorReturn(
-              `/project/${projectId}/terminology`,
-              editorReturnFromLocation(location.pathname, location.search, projectId),
-            ))
-          }}
-          aria-label="Go to Terminology page"
-        >
-          <BookOpen data-icon="inline-start" />
-          Terminology
-        </Button>
-      </header>
+    <div className={embedded ? "flex flex-col gap-6" : "flex h-full flex-col bg-background"}>
+      {embedded ? (
+        <div className="flex flex-wrap items-center gap-2">
+          {statusAndActions}
+        </div>
+      ) : (
+        <header className="flex shrink-0 items-center gap-2 border-b px-4 py-3">
+          <Brain className="h-5 w-5 text-muted-foreground" aria-hidden />
+          <h1 className="text-base font-semibold">Living Memory</h1>
+          {statusAndActions}
+        </header>
+      )}
 
       {cellsError && (
         <div
@@ -585,8 +594,8 @@ export function LivingMemoryPage() {
         </div>
       )}
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto flex max-w-2xl flex-col gap-6 p-6">
+      <div className={embedded ? "flex flex-col gap-6" : "min-h-0 flex-1 overflow-y-auto"}>
+        <div className={embedded ? "flex flex-col gap-6" : "mx-auto flex max-w-2xl flex-col gap-6 p-6"}>
           <p className="text-xs text-muted-foreground leading-relaxed">
             Your team&apos;s encoded voice and standards — the project context the AI draws on
             for every new draft. It grows with each validation, correction, and instruction

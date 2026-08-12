@@ -41,7 +41,7 @@ export function RuleDrawer({
 
   function onAmendRule() {
     navigate(withEditorReturn(
-      `/project/${project!.id}/rules?ruleId=${rule!.id}&focus=autofix`,
+      `/project/${project!.id}/settings/rules?ruleId=${rule!.id}&focus=autofix`,
       editorReturnFromLocation(location.pathname, location.search, project!.id),
     ))
   }

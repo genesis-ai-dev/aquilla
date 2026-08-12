@@ -1,5 +1,5 @@
 import { Suspense, lazy } from "react"
-import { Navigate, Routes, Route } from "react-router-dom"
+import { Navigate, Routes, Route, useParams, useLocation } from "react-router-dom"
 import { hasAuthHintCookie } from "@/lib/frontier/session-store"
 import { OrgHome } from "@/components/org/OrgHome"
 import { OrgHomeRoute } from "@/components/org/OrgHomeRoute"
@@ -11,7 +11,7 @@ import { ArchivedProjects } from "@/components/org/ArchivedProjects"
 import { ProjectOverview } from "@/components/org/ProjectOverview"
 import { AssignedToMe } from "@/components/org/AssignedToMe"
 import { SharedProjectsPage } from "@/components/org/SharedProjectsPage"
-import { resumeOrgPath } from "@/lib/navigation/org-paths"
+import { resumeOrgPath, projectSettingsPath } from "@/lib/navigation/org-paths"
 import { JoinPage } from "@/components/JoinPage"
 import { AccessLinkPage } from "@/components/AccessLinkPage"
 import { JoinOrgPage } from "@/components/JoinOrgPage"
@@ -151,6 +151,13 @@ function RouteLoadingFallback() {
   return <LoadingOverlay />
 }
 
+/** Preserve bookmarks and e2e gotos to the old workspace overlay URLs. */
+function RedirectToProjectSettingsSection({ section }: { section: string }) {
+  const { id } = useParams<{ id: string }>()
+  const { search } = useLocation()
+  return <Navigate to={`${projectSettingsPath(id!, section)}${search}`} replace />
+}
+
 export default function App() {
   return (
     // Single app-wide tooltip delay group: once one tooltip opens, adjacent
@@ -256,12 +263,12 @@ function AppRoutes() {
         <Route path="/project/:id/editor/file/:fileId" element={<ProjectWorkspace />} />
         <Route path="/project/:id/settings" element={<ProjectSettings />} />
         <Route path="/project/:id/settings/:section" element={<ProjectSettings />} />
-        <Route path="/project/:id/rules" element={<ProjectWorkspace />} />
+        <Route path="/project/:id/rules" element={<RedirectToProjectSettingsSection section="rules" />} />
         <Route path="/project/:id/agent" element={<ProjectWorkspace />} />
         <Route path="/project/:id/voice" element={<ProjectWorkspace />} />
         <Route path="/project/:id/terminology" element={<ProjectWorkspace />} />
         <Route path="/project/:id/comments" element={<ProjectWorkspace />} />
-        <Route path="/project/:id/memory" element={<ProjectWorkspace />} />
+        <Route path="/project/:id/memory" element={<RedirectToProjectSettingsSection section="memory" />} />
 
         {/* Monday.com OAuth redirect URI. Stays top-level and un-scoped: the
             path is registered with Monday, so it cannot carry an org segment. */}

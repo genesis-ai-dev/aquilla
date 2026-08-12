@@ -14,6 +14,8 @@ const PROJECT_ROUTES = [
   `/project/${SEEDED_PROJECT_ID}/editor`,
   `/project/${SEEDED_PROJECT_ID}/settings`,
   `/project/${SEEDED_PROJECT_ID}/settings/members`,
+  `/project/${SEEDED_PROJECT_ID}/settings/rules`,
+  `/project/${SEEDED_PROJECT_ID}/settings/memory`,
   `/project/${SEEDED_PROJECT_ID}/rules`,
   `/project/${SEEDED_PROJECT_ID}/terminology`,
   `/project/${SEEDED_PROJECT_ID}/comments`,

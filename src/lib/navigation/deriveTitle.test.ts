@@ -23,6 +23,8 @@ describe("deriveNavTitle", () => {
     expect(deriveNavTitle("/project/abc/editor/file/7")).toBe("File")
     expect(deriveNavTitle("/project/abc/settings")).toBe("Project settings")
     expect(deriveNavTitle("/project/abc/settings/ai")).toBe("Project settings")
+    expect(deriveNavTitle("/project/abc/settings/rules")).toBe("Checks & rules")
+    expect(deriveNavTitle("/project/abc/settings/memory")).toBe("Project memory")
     expect(deriveNavTitle("/project/abc/rules")).toBe("Checks & rules")
     expect(deriveNavTitle("/project/abc/terminology")).toBe("Terminology")
     expect(deriveNavTitle("/project/abc/comments")).toBe("Comments")

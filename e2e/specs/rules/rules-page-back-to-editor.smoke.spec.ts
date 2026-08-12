@@ -2,41 +2,35 @@ import { test, expect } from "../../helpers/multi-user"
 import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
- * Rules surface — returning to the editor.
+ * Rules — settings pane navigation back to the editor.
  *
- * AQU-194 moved Rules INSIDE the ProjectWorkspace shell: /project/:id/rules
- * swaps only the main content area while the sidebar/header stay mounted.
- * The old standalone RulesPage "Back to Editor" button is gone — the way
- * back to the editor is selecting a file in the always-visible sidebar
- * (navigates to /project/:id/editor/file/:fileId, centerSurface flips to "editor").
+ * Rules lives under Project Settings (`/project/:id/settings/rules`).
+ * Opening Settings from the editor stamps `?return=` so the breadcrumb includes
+ * a clickable Editor crumb.
  *
- * This spec: import a file → open the rules surface → verify it rendered
- * (Built-in checks card) → click the file in the sidebar → verify the URL
- * changes to the file route and the editor cells render again.
+ * This spec: import a file → open Settings from the sidebar More menu →
+ * open Rules → verify Built-in checks → click Editor → return to the file editor.
  */
-test("rules surface returns to editor via sidebar file selection", async ({ alice }) => {
-  const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `RulesBack ${Date.now()}` })
+test("rules settings pane returns to editor via breadcrumb", async ({ alice }) => {
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `BackNav ${Date.now()}` })
   const ws = await openSeededProject(alice, seeded)
 
-  await alice.goto(`/project/${seeded.projectId}/rules`)
-  // The rules surface rendered inside the shell ("Built-in checks" card).
+  await alice.getByRole("button", { name: /More project options/i }).click()
+  await alice.getByRole("button", { name: /^Settings$/ }).click()
+  await alice.waitForURL(/\/project\/[^/]+\/settings/, { timeout: 10_000 })
+
+  await alice.getByRole("link", { name: /Rules Checks/i }).click()
+  await alice.waitForURL(/\/project\/[^/]+\/settings\/rules/, { timeout: 5_000 })
   await expect(alice.getByText("Built-in checks")).toBeVisible({ timeout: 10_000 })
 
-  // The shell sidebar is still mounted — click the imported file to return
-  // to the editor. Target the FileRow ROOT precisely (div[tabindex="0"],
-  // FileRow.tsx) rather than Workspace.openFileBySubstring's broad
-  // `aside div` filter: that filter also matches ancestor containers and
-  // its .first() center-point click can land on empty sidebar space on the
-  // rules route, never firing onSelect.
-  await alice
-    .locator('aside div[tabindex="0"]')
-    .filter({ has: alice.locator('button[aria-label="File actions"]') })
-    .filter({ hasText: /sample/i })
-    .first()
-    .click()
+  const breadcrumb = alice.getByRole("navigation", { name: /breadcrumb/i })
+  const editorCrumb = breadcrumb.getByRole("link", { name: /^Editor$/i }).or(
+    breadcrumb.getByRole("button", { name: /^Editor$/i }),
+  )
+  await expect(editorCrumb).toBeVisible()
+  await editorCrumb.click()
 
-  // URL changes to the editor file route and cells render.
-  await alice.waitForURL(/\/project\/[^/]+\/editor\/file\/[^/]+/, { timeout: 10_000 })
+  await alice.waitForURL(/\/project\/[^/]+\/editor(?:\/file\/[^/]+)?/, { timeout: 10_000 })
   await ws.waitForEditor()
   await expect(alice.getByText("Built-in checks")).not.toBeVisible()
 })

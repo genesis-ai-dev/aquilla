@@ -82,7 +82,6 @@ import { generateCellVoice } from "@/lib/audio/voice-generate-helpers"
 import { CombinedBoundaryEditor } from "./voice/CombinedBoundaryEditor"
 import { useProjectTts } from "@/hooks/useProjectTts"
 import { RuleDrawer } from "./RuleDrawer"
-import { RulesSurface } from "./RulesSurface"
 import { CommentsDrawer } from "./CommentsDrawer"
 import { HistoryDrawer } from "./HistoryDrawer"
 import { VideoPlayer, type VideoPlayerHandle } from "./VideoPlayer"
@@ -128,7 +127,7 @@ import { getVoiceLibrary, newVoiceId, VOICE_PALETTE } from "@/lib/audio/voices"
 import { attachMediaFileToTimeline, attachMediaUrlToTimeline } from "@/lib/timeline/attach-media"
 import { useCellsAuditStatsWithOverlay } from "@/hooks/useCellsAuditStatsWithOverlay"
 import { useComments } from "@/hooks/useComments"
-import { Film, Scale, Bot, MessagesSquare, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, BookMarked, BookOpen, Users, UserCheck, ArrowRight, PanelLeftClose, Mic, Plus, Pencil, FolderInput, Download } from "lucide-react"
+import { Film, Bot, MessagesSquare, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, BookOpen, Users, UserCheck, ArrowRight, PanelLeftClose, Mic, Plus, Pencil, FolderInput, Download } from "lucide-react"
 import { toast } from "@/components/ui/toast"
 import { AgentDockPanel } from "./AgentDockPanel"
 import { agentSessionStore } from "@/lib/agent/session-store"
@@ -245,9 +244,6 @@ const FileTargetImportDialog = lazy(() =>
 // the heavy workspace chunk doesn't pull them in for every route.
 const CommentsPageContent = lazy(() =>
   import("./CommentsPage").then((mod) => ({ default: mod.CommentsPage })),
-)
-const LivingMemoryPageContent = lazy(() =>
-  import("./LivingMemoryPage").then((mod) => ({ default: mod.LivingMemoryPage })),
 )
 const GlossaryEditorContent = lazy(() =>
   import("./GlossaryEditor").then((mod) => ({ default: mod.GlossaryEditor })),
@@ -729,15 +725,14 @@ export function ProjectWorkspace() {
   useEffect(() => {
     if (!project || !projectId) return
 
-    // The in-project overlay surfaces (/rules, /comments, /memory, /terminology,
-    // /agent) deliberately carry no file in the URL — don't treat that as
+    // The in-project overlay surfaces (/comments, /terminology, /agent)
+    // deliberately carry no file in the URL — don't treat that as
     // "no file selected" and bounce back to the editor, or these surfaces become
-    // unreachable. (FRO-194 added /rules; FRO-254 adds the others.)
+    // unreachable. (FRO-254 added comments/terminology; agent is a takeover.)
+    // Rules and Living Memory live at /project/:id/settings/{rules,memory}.
     // Members live at /project/:id/settings/members (not a workspace surface).
     if (
-      location.pathname.endsWith("/rules") ||
       location.pathname.endsWith("/comments") ||
-      location.pathname.endsWith("/memory") ||
       location.pathname.endsWith("/terminology") ||
       location.pathname.endsWith("/agent")
     ) return
@@ -805,12 +800,10 @@ export function ProjectWorkspace() {
 
   // Center surface — derived from the URL path so deep-links work and the
   // shell (sidebar + top bar + bottom status bar) never unmounts.
-  // FRO-194 added "rules"; FRO-254 adds "comments", "memory", "terminology".
-  // Members live under /project/:id/settings/members (ProjectSettings), not here.
-  const centerSurface: "editor" | "rules" | "comments" | "memory" | "terminology" | "agent" =
-    location.pathname.endsWith("/rules") ? "rules" :
+  // FRO-254: comments / terminology. Agent is a takeover surface.
+  // Rules and Living Memory live under /project/:id/settings/{rules,memory}.
+  const centerSurface: "editor" | "comments" | "terminology" | "agent" =
     location.pathname.endsWith("/comments") ? "comments" :
-    location.pathname.endsWith("/memory") ? "memory" :
     location.pathname.endsWith("/terminology") ? "terminology" :
     location.pathname.endsWith("/agent") ? "agent" :
     "editor"
@@ -822,13 +815,11 @@ export function ProjectWorkspace() {
   }, [projectId, centerSurface, activeFileId, location.pathname, location.search])
 
   const openOverlay = useCallback((
-    surface: "rules" | "comments" | "terminology" | "memory" | "agent",
+    surface: "comments" | "terminology" | "agent",
   ) => {
     if (!projectId) return
     navigate(withEditorReturn(`/project/${projectId}/${surface}`, editorReturnPath))
   }, [projectId, navigate, editorReturnPath])
-
-  const [editingRuleId, setEditingRuleId] = useState<string | "new" | null>(null)
 
   useEffect(() => {
     const open = searchParams.get("openRule")
@@ -1975,12 +1966,6 @@ export function ProjectWorkspace() {
   // Org-level rules: fetch from org settings and merge with project rules.
   const {
     orgRules,
-    promotionRequests,
-    canEdit: canEditOrgSettings,
-    canRequestPromotion,
-    requestPromotion,
-    patch: patchOrgSettings,
-    version: orgSettingsVersion,
     canExport: canExportByOrgPolicy,
     hasFetched: orgSettingsFetched,
     // AQU-496: whether below-lead members may self-assign work.
@@ -1995,9 +1980,7 @@ export function ProjectWorkspace() {
     project?.syncRole?.level ?? null,
   )
 
-  // FRO-194: also destructure rule CRUD for RulesSurface (patchSettings is the
-  // sync function; it matches the PatchSharedFn signature from useProjectSettings).
-  const { rules, userRules, builtinRules, addRule, updateRule, deleteRule, setBuiltinOverride } = useRules(
+  const { rules } = useRules(
     project ?? null,
     refresh,
     patchSettings as Parameters<typeof useRules>[2],
@@ -4426,8 +4409,6 @@ export function ProjectWorkspace() {
 
   const projectNavItems = useMemo(() => {
     const items = [
-      { id: "rules", label: "Rules", icon: Scale,
-        onClick: () => openOverlay("rules") },
       // Pinned below Comments: Terminology is a frequent destination, so it
       // stays visible; everything else unpinned collapses into "More".
       { id: "comments", label: "Comments", icon: MessagesSquare, pinned: true,
@@ -4435,8 +4416,6 @@ export function ProjectWorkspace() {
         onClick: () => openOverlay("comments") },
       { id: "terminology", label: "Terminology", icon: BookOpen, pinned: true,
         onClick: () => openOverlay("terminology") },
-      { id: "living-memory", label: "Memory", icon: BookMarked,
-        onClick: () => openOverlay("memory") },
       // Audio/Media lens lives in the header EditorModeToggle — keep it out of
       // the sidebar More menu so the overflow list stays structural (settings,
       // trash) rather than view-mode toggles. Sharing lives in Settings → Members.
@@ -4671,7 +4650,6 @@ export function ProjectWorkspace() {
   }, [project?.id, activeFileId, timelineAudioByCellId, frontierSession, currentUsername])
 
   const legacyCellsNeeded =
-    centerSurface === "rules" ||
     dockTab === "voices" ||
     timelineEditorVisible ||
     lens === "audio" ||
@@ -5714,7 +5692,7 @@ export function ProjectWorkspace() {
         aboveCard={
           <TabStrip
             tabs={workspaceTabs.tabs}
-            // While a non-editor surface (Rules / Agent) is showing, no file
+            // While a non-editor surface (Agent) is showing, no file
             // tab is "active" even though selectedFileId still remembers the
             // last file — the surface tab is the active one.
             activeTabId={centerSurface === "editor" ? workspaceTabs.activeTabId : null}
@@ -5722,18 +5700,6 @@ export function ProjectWorkspace() {
             onActivate={workspaceTabs.activateTab}
             onClose={handleCloseTab}
             surfaceTabs={[
-              ...(centerSurface === "rules" && projectId
-                ? [{
-                    id: "rules",
-                    label: "Rules",
-                    icon: Scale,
-                    active: true as const,
-                    // Navigating to the bare project route lets the
-                    // restore-location effect re-open the last active file.
-                    onActivate: () => openOverlay("rules"),
-                    onClose: () => navigate(editorReturnPath ?? `/project/${projectId}/editor`),
-                  }]
-                : []),
               ...(agentTabOpen && projectId
                 ? [{
                     id: "agent",
@@ -5938,31 +5904,7 @@ export function ProjectWorkspace() {
             />
           ) : undefined
         }
-        main={centerSurface === "rules" ? (
-          // FRO-194: Rules surface renders inside the shell; shell stays mounted.
-          <RulesSurface
-            project={project}
-            projectId={projectId!}
-            userRules={userRules}
-            builtinRules={builtinRules}
-            addRule={addRule}
-            updateRule={updateRule}
-            deleteRule={deleteRule}
-            setBuiltinOverride={setBuiltinOverride}
-            infractions={infractions}
-            cells={legacyCells}
-            completionSettings={project.completionSettings}
-            orgRules={orgRules}
-            canEditOrgRules={canEditOrgSettings}
-            patchOrgSettings={patchOrgSettings}
-            orgSettingsVersion={orgSettingsVersion}
-            promotionRequests={promotionRequests}
-            canRequestPromotion={canRequestPromotion}
-            requestPromotion={requestPromotion}
-            editingRuleId={editingRuleId}
-            setEditingRuleId={setEditingRuleId}
-          />
-        ) : centerSurface === "comments" ? (
+        main={centerSurface === "comments" ? (
           // FRO-254: Comments page inside the shell — no page-level back
           // button; breadcrumb + history arrows + sidebar own navigation.
           <div className="h-full overflow-y-auto">
@@ -5970,12 +5912,6 @@ export function ProjectWorkspace() {
               <CommentsPageContent />
             </Suspense>
           </div>
-        ) : centerSurface === "memory" ? (
-          // FRO-254: Living Memory page inside the shell — page owns its own
-          // toolbar + scroll like Rules/Glossary.
-          <Suspense fallback={<LoadingPanel label="Loading living memory" />}>
-            <LivingMemoryPageContent />
-          </Suspense>
         ) : centerSurface === "terminology" ? (
           // FRO-254: Terminology page inside the shell.
           <div className="h-full overflow-y-auto">
@@ -6303,7 +6239,7 @@ export function ProjectWorkspace() {
         statusBar={
           (() => {
             // Audio playback chrome belongs to the open file — hide it on
-            // overlay surfaces (Rules / Terminology / …) even if the audio
+            // overlay surfaces (Terminology / Agent / …) even if the audio
             // lens is still selected from a prior editor visit.
             const showAudioToolbar =
               lens === "audio" && centerSurface === "editor" && !!project

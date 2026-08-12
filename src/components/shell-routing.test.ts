@@ -12,18 +12,19 @@
  * ProjectWorkspace (which pulls in every editor dependency). The intent is to
  * catch regressions where a new subroute accidentally falls through to the
  * editor or re-triggers the redirect loop.
+ *
+ * Rules and Living Memory live under /project/:id/settings/{rules,memory}
+ * (ProjectSettings), not as workspace overlay surfaces.
  */
 import { describe, it, expect } from "vitest"
 
 // ── Replicate the pure derivation logic from ProjectWorkspace ──────────────
 // Keep in sync with the `centerSurface` derivation in ProjectWorkspace.tsx.
 
-type CenterSurface = "editor" | "rules" | "comments" | "memory" | "terminology" | "agent"
+type CenterSurface = "editor" | "comments" | "terminology" | "agent"
 
 function deriveCenterSurface(pathname: string): CenterSurface {
-  if (pathname.endsWith("/rules")) return "rules"
   if (pathname.endsWith("/comments")) return "comments"
-  if (pathname.endsWith("/memory")) return "memory"
   if (pathname.endsWith("/terminology")) return "terminology"
   if (pathname.endsWith("/agent")) return "agent"
   return "editor"
@@ -32,9 +33,7 @@ function deriveCenterSurface(pathname: string): CenterSurface {
 // Keep in sync with the redirect-guard condition in ProjectWorkspace.tsx.
 function isOverlaySurface(pathname: string): boolean {
   return (
-    pathname.endsWith("/rules") ||
     pathname.endsWith("/comments") ||
-    pathname.endsWith("/memory") ||
     pathname.endsWith("/terminology") ||
     pathname.endsWith("/agent")
   )
@@ -43,16 +42,8 @@ function isOverlaySurface(pathname: string): boolean {
 // ── Tests ──────────────────────────────────────────────────────────────────
 
 describe("deriveCenterSurface", () => {
-  it("returns 'rules' for /project/:id/rules", () => {
-    expect(deriveCenterSurface("/project/proj1/rules")).toBe("rules")
-  })
-
   it("returns 'comments' for /project/:id/comments", () => {
     expect(deriveCenterSurface("/project/proj1/comments")).toBe("comments")
-  })
-
-  it("returns 'memory' for /project/:id/memory", () => {
-    expect(deriveCenterSurface("/project/proj1/memory")).toBe("memory")
   })
 
   it("returns 'terminology' for /project/:id/terminology", () => {
@@ -74,21 +65,18 @@ describe("deriveCenterSurface", () => {
   it("returns 'editor' for /voice (audio lens — still the editor surface)", () => {
     expect(deriveCenterSurface("/project/proj1/voice")).toBe("editor")
   })
+
+  it("does not treat settings panes as workspace overlays", () => {
+    expect(deriveCenterSurface("/project/proj1/settings/rules")).toBe("editor")
+    expect(deriveCenterSurface("/project/proj1/settings/memory")).toBe("editor")
+  })
 })
 
 describe("isOverlaySurface (redirect-guard exclusion)", () => {
   // Each overlay surface must be excluded from the "no file → bounce" redirect
   // so navigating to /comments etc. doesn't get clobbered by the restore effect.
-  it("excludes /rules from the redirect", () => {
-    expect(isOverlaySurface("/project/proj1/rules")).toBe(true)
-  })
-
   it("excludes /comments from the redirect", () => {
     expect(isOverlaySurface("/project/proj1/comments")).toBe(true)
-  })
-
-  it("excludes /memory from the redirect", () => {
-    expect(isOverlaySurface("/project/proj1/memory")).toBe(true)
   })
 
   it("excludes /terminology from the redirect", () => {
@@ -106,15 +94,20 @@ describe("isOverlaySurface (redirect-guard exclusion)", () => {
   it("does NOT exclude a file path (redirect must fire to validate the fileId)", () => {
     expect(isOverlaySurface("/project/proj1/editor/file/GEN.sfm")).toBe(false)
   })
+
+  it("does NOT exclude settings panes (they are not workspace overlays)", () => {
+    expect(isOverlaySurface("/project/proj1/settings/rules")).toBe(false)
+    expect(isOverlaySurface("/project/proj1/settings/memory")).toBe(false)
+  })
 })
 
 describe("shell-routing: back-nav contract", () => {
-  // Overlay surfaces (comments / memory / terminology / rules / agent) live
-  // inside the workspace shell. Page-level back buttons were removed — the
-  // breadcrumb, history arrows, and sidebar own navigation. Returning to the
-  // editor still lands on `/project/:id/editor` (no fileId), where the
-  // restore-location effect reads readLastLocation() and bounces to the last
-  // open file + scroll position:
+  // Overlay surfaces (comments / terminology / agent) live inside the
+  // workspace shell. Page-level back buttons were removed — the breadcrumb,
+  // history arrows, and sidebar own navigation. Returning to the editor still
+  // lands on `/project/:id/editor` (no fileId), where the restore-location
+  // effect reads readLastLocation() and bounces to the last open file +
+  // scroll position:
   //
   //   navigate("/project/:id/editor")
   //   → isOverlaySurface = false (redirect fires)
@@ -127,7 +120,7 @@ describe("shell-routing: back-nav contract", () => {
   })
 
   it("overlay surface derivation covers all shell overlay subroutes", () => {
-    const overlayRoutes = ["/comments", "/memory", "/terminology", "/rules", "/agent"]
+    const overlayRoutes = ["/comments", "/terminology", "/agent"]
     for (const suffix of overlayRoutes) {
       const path = `/project/proj1${suffix}`
       expect(deriveCenterSurface(path)).not.toBe("editor")
@@ -147,7 +140,7 @@ describe("shouldShowAudioToolbar", () => {
   })
 
   it("hides the playback bar on overlay surfaces even when audio lens is sticky", () => {
-    for (const surface of ["rules", "comments", "memory", "terminology", "agent"] as const) {
+    for (const surface of ["comments", "terminology", "agent"] as const) {
       expect(shouldShowAudioToolbar("audio", surface)).toBe(false)
     }
   })

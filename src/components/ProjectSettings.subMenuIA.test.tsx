@@ -25,6 +25,16 @@ import { MemoryRouter, Route, Routes, Link } from "react-router-dom"
 import { ProjectSettings } from "./ProjectSettings"
 
 
+vi.mock("./ProjectSettings/RulesSection", () => ({
+  RulesSettingsSection: () => <div data-testid="settings-rules-section">Built-in checks</div>,
+}))
+vi.mock("./LivingMemoryPage", () => ({
+  LivingMemoryPage: () => (
+    <div data-testid="settings-memory-section">
+      <section aria-label="Instructions" />
+    </div>
+  ),
+}))
 vi.mock("@/components/org/OrgSidebar", () => ({
   OrgSidebar: () => <div data-testid="org-sidebar">sidebar</div>,
 }))
@@ -206,6 +216,8 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
     expect(screen.getByText("Members")).toBeTruthy()
     expect(screen.getByText("AI & completion")).toBeTruthy()
     expect(screen.getByText("Validation & health")).toBeTruthy()
+    expect(screen.getByText("Rules")).toBeTruthy()
+    expect(screen.getByText("Living Memory")).toBeTruthy()
 
     // ...not the controls themselves. Project Title (General) and AI
     // Instructions (AI & completion) must NOT both be in the document at once
@@ -343,6 +355,14 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
     renderAt(`/project/${PROJECT_ID}/settings/metrics`)
     // PostEditMetricsSection renders its own heading regardless of loading state.
     expect(screen.getByText(/approved ai review effort/i)).toBeTruthy()
+
+    renderAt(`/project/${PROJECT_ID}/settings/rules`)
+    expect(screen.getByTestId("settings-rules-section")).toBeTruthy()
+    expect(screen.queryByLabelText(/project title/i)).toBeNull()
+
+    renderAt(`/project/${PROJECT_ID}/settings/memory`)
+    expect(screen.getByTestId("settings-memory-section")).toBeTruthy()
+    expect(screen.queryByLabelText(/project title/i)).toBeNull()
   })
 
   // The hidden termbase-sharing section (SHOW_TERMBASE_SHARING_IN_SETTINGS

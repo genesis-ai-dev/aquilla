@@ -29,6 +29,7 @@ import {
 } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import type { CandidateTerm } from "@/lib/terminology/candidates"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 export interface CandidateTermsPanelProps {
   /** Ranked candidate terms (already sorted, typically by NC-value desc). */
@@ -63,15 +64,16 @@ export function CandidateTermsPanel({
   candidates,
   onPromote,
 }: CandidateTermsPanelProps) {
+  const t = useT()
   if (candidates.length === 0) {
     return (
       <EmptyState
         variant="panel"
         className="rounded-lg py-10"
         icon={Sparkles}
-        title="No candidate terms"
+        title={t("terminology.candidates.emptyTitle")}
         titleClassName="sr-only"
-        description="No candidate terms found in the loaded cells."
+        description={t("terminology.candidates.emptyDescription")}
       />
     )
   }
@@ -81,8 +83,7 @@ export function CandidateTermsPanel({
       <div className="flex items-center gap-2 px-1 text-sm text-muted-foreground">
         <Sparkles className="h-4 w-4" aria-hidden />
         <span>
-          {candidates.length} candidate term
-          {candidates.length === 1 ? "" : "s"}, ranked by NC-value
+          {t("terminology.candidates.countRankedByNc", { count: candidates.length })}
         </span>
       </div>
 
@@ -99,16 +100,16 @@ export function CandidateTermsPanel({
               <div className="flex items-center gap-2">
                 <span className="truncate font-medium">{c.term}</span>
                 <Badge variant="outline" className="shrink-0 text-[10px]">
-                  {c.ngramLength === 1 ? "1 word" : `${c.ngramLength} words`}
+                  {t("terminology.candidates.ngramLength", { count: c.ngramLength })}
                 </Badge>
                 {c.isManaged && (
                   <Badge variant="secondary" className="shrink-0 text-[10px]">
-                    managed
+                    {t("terminology.common.managed")}
                   </Badge>
                 )}
               </div>
               <div className="text-xs text-muted-foreground">
-                {c.frequency} occurrence{c.frequency === 1 ? "" : "s"}
+                {t("terminology.common.occurrenceCount", { count: c.frequency })}
               </div>
             </div>
 
@@ -116,17 +117,17 @@ export function CandidateTermsPanel({
               <ScoreCell
                 label="NC"
                 value={c.ncValue}
-                title="NC-value — termhood with context weighting (default rank)"
+                title={t("terminology.candidates.ncTooltip")}
               />
               <ScoreCell
                 label="C"
                 value={c.cValue}
-                title="C-value — nestedness-adjusted termhood"
+                title={t("terminology.candidates.cTooltip")}
               />
               <ScoreCell
                 label="G²"
                 value={c.g2}
-                title="G² keyness — how unexpectedly frequent vs the reference corpus"
+                title={t("terminology.candidates.g2Tooltip")}
               />
             </div>
 
@@ -138,7 +139,9 @@ export function CandidateTermsPanel({
               className="shrink-0"
             >
               <ArrowUpRight className="me-1 h-3.5 w-3.5" aria-hidden />
-              {c.isManaged ? "Managed" : "Promote to managed"}
+              {c.isManaged
+                ? t("terminology.common.managed")
+                : t("terminology.candidates.promoteButton")}
             </Button>
           </li>
         ))}

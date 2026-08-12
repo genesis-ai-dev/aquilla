@@ -14,7 +14,8 @@ import { X, CheckCircle2, AlertCircle, Minus } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
-import type { Concept, TermRendering, RenderingStatus } from "@/lib/terminology/types"
+import type { Concept, TermRendering } from "@/lib/terminology/types"
+import { renderingStatusLabelKey } from "@/lib/terminology/types"
 import type { CellData } from "@/hooks/useCells"
 import { TranslatedEditor } from "@/components/TranslatedEditor"
 import type { TranslatedEditorCommit } from "@/components/TranslatedEditor"
@@ -22,16 +23,13 @@ import { emitTargetCellCommit } from "@/lib/sync/events-emit"
 import { EquivalentsPanel } from "@/components/EquivalentsPanel"
 import { predictEquivalents } from "@/lib/terminology/equivalents"
 import { matchesTerm } from "@/lib/terminology/match"
+import { useT } from "@/lib/i18n/I18nProvider"
+import { RichMessage } from "@/lib/i18n/RichMessage"
 
-// ─── Status label helpers (mirror TerminologyPage) ───────────────────────────
-
-const statusLabel: Record<RenderingStatus, string> = {
-  preferred: "required",
-  admitted: "alternate",
-  forbidden: "forbidden",
-}
+// ─── Status label helper ──────────────────────────────────────────────────────
 
 function RenderingChip({ rendering }: { rendering: TermRendering }) {
+  const t = useT()
   const chipClass = cn(
     "inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium",
     rendering.status === "preferred" &&
@@ -43,7 +41,7 @@ function RenderingChip({ rendering }: { rendering: TermRendering }) {
   return (
     <span className={chipClass}>
       {rendering.rendering}
-      <span className="opacity-60">·{statusLabel[rendering.status]}</span>
+      <span className="opacity-60">·{t(renderingStatusLabelKey(rendering.status))}</span>
     </span>
   )
 }
@@ -73,11 +71,12 @@ function deriveVerdict(concept: Concept, original: string, translated: string): 
 // ─── Verdict chip ─────────────────────────────────────────────────────────────
 
 function VerdictChip({ verdict }: { verdict: Verdict }) {
+  const t = useT()
   if (verdict === "na") {
     return (
       <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
         <Minus className="h-3 w-3" />
-        n/a
+        {t("terminology.termDetail.verdictNa")}
       </span>
     )
   }
@@ -85,14 +84,14 @@ function VerdictChip({ verdict }: { verdict: Verdict }) {
     return (
       <span className="inline-flex items-center gap-1 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
         <CheckCircle2 className="h-3 w-3" />
-        enforced
+        {t("terminology.termDetail.verdictEnforced")}
       </span>
     )
   }
   return (
     <span className="inline-flex items-center gap-1 text-[10px] font-medium text-destructive">
       <AlertCircle className="h-3 w-3" />
-      infringed
+      {t("terminology.termDetail.verdictInfringed")}
     </span>
   )
 }
@@ -121,6 +120,7 @@ function OccurrenceRow({
   onOptimisticEdit,
   onCellCommitted,
 }: OccurrenceRowProps) {
+  const t = useT()
   const verdict = deriveVerdict(concept, cell.original, translated)
   const [editing, setEditing] = useState(false)
 
@@ -200,7 +200,7 @@ function OccurrenceRow({
             )}
             onClick={() => canEdit && setEditing(true)}
           >
-            {translated.trim() || "(empty)"}
+            {translated.trim() || t("editor.note.empty")}
           </button>
         )}
       </div>
@@ -245,6 +245,7 @@ export function TerminologyTermDetail({
   canManageTermbase = false,
   onPromoteRendering,
 }: TerminologyTermDetailProps) {
+  const t = useT()
   // Per-cell translated values — optimistic updates are already reflected via
   // the parent's useCells applyOptimisticTargetEdit before this renders.
   const occurrences = useMemo(
@@ -285,7 +286,12 @@ export function TerminologyTermDetail({
     <div className="flex flex-col min-h-screen bg-background">
       {/* Header */}
       <header className="flex items-center gap-3 border-b px-4 py-3">
-        <Button variant="ghost" size="icon-sm" onClick={onClose} aria-label="Close detail">
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          onClick={onClose}
+          aria-label={t("terminology.termDetail.closeAria")}
+        >
           <X />
         </Button>
         <div className="flex flex-1 items-center gap-2 min-w-0">
@@ -301,10 +307,10 @@ export function TerminologyTermDetail({
             className="text-[10px]"
           >
             {concept.status === "active"
-              ? "approved"
+              ? t("terminology.common.statusApproved")
               : concept.status === "draft"
-                ? "suggested"
-                : "old"}
+                ? t("terminology.common.statusSuggested")
+                : t("terminology.common.statusOld")}
           </Badge>
         </div>
       </header>
@@ -326,16 +332,23 @@ export function TerminologyTermDetail({
         {/* Stats summary */}
         <div className="flex items-center gap-4 text-xs text-muted-foreground">
           <span>
-            <span className="font-medium text-foreground">{occurrences.length}</span> occurrence
-            {occurrences.length !== 1 ? "s" : ""}
+            <RichMessage
+              k="terminology.common.occurrenceCount"
+              count={occurrences.length}
+              values={{
+                count: <span className="font-medium text-foreground">{occurrences.length}</span>,
+              }}
+            />
           </span>
           {occurrences.length > 0 && (
             <>
               <span className="text-emerald-600 dark:text-emerald-400 font-medium">
-                {enforced} enforced
+                {t("terminology.termDetail.enforcedCount", { count: enforced })}
               </span>
               {infringed > 0 && (
-                <span className="text-destructive font-medium">{infringed} infringed</span>
+                <span className="text-destructive font-medium">
+                  {t("terminology.termDetail.infringedCount", { count: infringed })}
+                </span>
               )}
             </>
           )}
@@ -358,16 +371,16 @@ export function TerminologyTermDetail({
         {occurrences.length === 0 ? (
           <div className="flex flex-col items-center gap-2 py-16 text-center text-muted-foreground">
             <Minus className="h-8 w-8 opacity-30" />
-            <p className="text-sm">No occurrences found in the loaded cells.</p>
+            <p className="text-sm">{t("terminology.termDetail.noOccurrences")}</p>
           </div>
         ) : (
           <>
             {/* Column headers */}
             <div className="mb-2 hidden items-start gap-4 text-xs text-muted-foreground sm:flex">
-              <span className="w-24 shrink-0">Ref</span>
-              <span className="flex-1">Source</span>
-              <span className="w-20 shrink-0">Verdict</span>
-              <span className="flex-1">Target</span>
+              <span className="w-24 shrink-0">{t("terminology.termDetail.columnRef")}</span>
+              <span className="flex-1">{t("editor.column.source")}</span>
+              <span className="w-20 shrink-0">{t("terminology.common.columnVerdict")}</span>
+              <span className="flex-1">{t("editor.column.target")}</span>
             </div>
             <ul>
               {occurrences.map((cell) => (

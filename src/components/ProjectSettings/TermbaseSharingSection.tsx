@@ -17,6 +17,7 @@ import {
   type PublishedTermbase,
   type TermbaseSubscription,
 } from "@/lib/terminology/subscriptions-api"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 interface Props {
   projectId: string
@@ -57,6 +58,7 @@ function errMsg(e: unknown): string {
  * this component manages the subscription rows only.
  */
 export function TermbaseSharingSection({ projectId, orgId, roleLevel }: Props) {
+  const t = useT()
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
   const canManage = (roleLevel ?? 0) >= MAINTAINER && orgId != null
@@ -203,13 +205,11 @@ export function TermbaseSharingSection({ projectId, orgId, roleLevel }: Props) {
     return (
       <Card id="section-termbase-sharing">
         <CardHeader>
-          <CardTitle>Term Base Sharing</CardTitle>
+          <CardTitle>{t("terminology.sharing.title")}</CardTitle>
         </CardHeader>
         <CardContent>
           <p className="text-sm text-muted-foreground">
-            Term base sharing is available for org-owned projects only. Move this
-            project into an organization to publish or subscribe to shared
-            term bases.
+            {t("terminology.sharing.notOrgOwnedDescription")}
           </p>
         </CardContent>
       </Card>
@@ -219,7 +219,7 @@ export function TermbaseSharingSection({ projectId, orgId, roleLevel }: Props) {
   return (
     <Card id="section-termbase-sharing">
       <CardHeader>
-        <CardTitle>Termbase Sharing</CardTitle>
+        <CardTitle>{t("terminology.sharing.title")}</CardTitle>
       </CardHeader>
       <CardContent className="flex flex-col gap-6">
         {error && (
@@ -234,40 +234,40 @@ export function TermbaseSharingSection({ projectId, orgId, roleLevel }: Props) {
         {/* Publish toggle */}
         <div className="flex items-start justify-between gap-4">
           <div>
-            <p className="text-sm font-medium">Publish this term base to the org</p>
+            <p className="text-sm font-medium">{t("terminology.sharing.publishLabel")}</p>
             <p className="text-sm text-muted-foreground">
-              Lets other projects in your organization subscribe to this
-              project&apos;s approved terms.
+              {t("terminology.sharing.publishDescription")}
             </p>
           </div>
           <Switch
             checked={published}
             onCheckedChange={togglePublish}
             disabled={!canManage || busy || loading}
-            aria-label="Publish term base to org"
+            aria-label={t("terminology.sharing.publishAria")}
           />
         </div>
 
         {!canManage && (
           <p className="text-xs text-muted-foreground">
-            Maintainer (or higher) on an org-owned project is required to manage
-            term base sharing.
+            {t("terminology.sharing.needsMaintainer")}
           </p>
         )}
 
         {/* Current subscriptions */}
         <div>
           <p className="mb-2 text-sm font-medium">
-            Subscribed term bases{" "}
+            {t("terminology.sharing.subscribedLabel")}{" "}
             <span className="font-normal text-muted-foreground">
-              (drag to set priority — top = highest precedence)
+              {t("terminology.sharing.subscribedHint")}
             </span>
           </p>
           {loading ? (
-            <p className="text-sm text-muted-foreground">Loading subscriptions…</p>
+            <p className="text-sm text-muted-foreground">
+              {t("terminology.sharing.loadingSubscriptions")}
+            </p>
           ) : subscriptions.length === 0 ? (
             <p className="text-sm text-muted-foreground">
-              Not subscribed to any term bases yet.
+              {t("terminology.sharing.noneSubscribed")}
             </p>
           ) : (
             <ul className="flex flex-col gap-1">
@@ -286,7 +286,7 @@ export function TermbaseSharingSection({ projectId, orgId, roleLevel }: Props) {
                   <span className="flex-1 truncate">{s.termbaseName}</span>
                   {!s.published && (
                     <Badge variant="outline" className="shrink-0 text-muted-foreground">
-                      upstream unpublished
+                      {t("terminology.sharing.upstreamUnpublished")}
                     </Badge>
                   )}
                   <span className="shrink-0 text-xs text-muted-foreground">
@@ -299,7 +299,7 @@ export function TermbaseSharingSection({ projectId, orgId, roleLevel }: Props) {
                       className="h-7 w-7 shrink-0"
                       disabled={busy}
                       onClick={() => unsubscribe(s.termbaseProjectId)}
-                      aria-label={`Unsubscribe from ${s.termbaseName}`}
+                      aria-label={t("terminology.sharing.unsubscribeAria", { name: s.termbaseName })}
                     >
                       <Trash2 className="h-4 w-4" />
                     </Button>
@@ -313,33 +313,33 @@ export function TermbaseSharingSection({ projectId, orgId, roleLevel }: Props) {
         {/* Available to subscribe */}
         {canManage && (
           <div>
-            <p className="mb-2 text-sm font-medium">Available in your org</p>
+            <p className="mb-2 text-sm font-medium">{t("terminology.sharing.availableLabel")}</p>
             {loading ? (
-              <p className="text-sm text-muted-foreground">Loading…</p>
+              <p className="text-sm text-muted-foreground">{t("common.loading")}</p>
             ) : available.length === 0 ? (
               <p className="text-sm text-muted-foreground">
-                No other published term bases in your organization.
+                {t("terminology.sharing.noneAvailable")}
               </p>
             ) : (
               <ul className="flex flex-col gap-1">
-                {available.map((t) => (
+                {available.map((tb) => (
                   <li
-                    key={t.projectId}
+                    key={tb.projectId}
                     className="flex items-center gap-2 rounded border bg-card px-2 py-1.5 text-sm"
                   >
-                    <span className="flex-1 truncate">{t.name}</span>
+                    <span className="flex-1 truncate">{tb.name}</span>
                     <span className="shrink-0 text-xs text-muted-foreground">
-                      by {t.createdBy}
+                      {t("editor.history.author", { author: tb.createdBy })}
                     </span>
                     <Button
                       variant="outline"
                       size="sm"
                       className="shrink-0"
                       disabled={busy}
-                      onClick={() => subscribe(t.projectId)}
+                      onClick={() => subscribe(tb.projectId)}
                     >
                       <Plus className="me-1 h-3.5 w-3.5" />
-                      Subscribe
+                      {t("terminology.sharing.subscribeButton")}
                     </Button>
                   </li>
                 ))}

@@ -31,21 +31,19 @@ import { ChevronRight, ChevronDown, ShieldCheck, Sparkles, ArrowUp } from "lucid
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
-import type { TermRendering, RenderingStatus } from "@/lib/terminology/types"
+import type { TermRendering } from "@/lib/terminology/types"
+import { renderingStatusLabelKey } from "@/lib/terminology/types"
 import type {
   PredictedEquivalent,
   EquivalentConfidence,
 } from "@/lib/terminology/equivalents"
+import { useT } from "@/lib/i18n/I18nProvider"
+import type { TFunction } from "@/lib/i18n/I18nProvider"
 
 // ─── Managed rendering chip (mirrors TerminologyTermDetail.RenderingChip) ─────
 
-const statusLabel: Record<RenderingStatus, string> = {
-  preferred: "required",
-  admitted: "alternate",
-  forbidden: "forbidden",
-}
-
 function ManagedChip({ rendering }: { rendering: TermRendering }) {
+  const t = useT()
   return (
     <span
       className={cn(
@@ -58,14 +56,26 @@ function ManagedChip({ rendering }: { rendering: TermRendering }) {
       )}
     >
       {rendering.rendering}
-      <span className="opacity-60">·{statusLabel[rendering.status]}</span>
+      <span className="opacity-60">·{t(renderingStatusLabelKey(rendering.status))}</span>
     </span>
   )
 }
 
 // ─── Confidence band chip ─────────────────────────────────────────────────────
 
+function confidenceLabelKey(confidence: EquivalentConfidence): Parameters<TFunction>[0] {
+  switch (confidence) {
+    case "HIGH":
+      return "terminology.equivalents.confidenceHigh"
+    case "AMBER":
+      return "terminology.equivalents.confidenceAmber"
+    case "LOW":
+      return "terminology.equivalents.confidenceLow"
+  }
+}
+
 function ConfidenceChip({ confidence }: { confidence: EquivalentConfidence }) {
+  const t = useT()
   return (
     <span
       className={cn(
@@ -77,7 +87,7 @@ function ConfidenceChip({ confidence }: { confidence: EquivalentConfidence }) {
         confidence === "LOW" && "bg-muted text-muted-foreground",
       )}
     >
-      {confidence}
+      {t(confidenceLabelKey(confidence))}
     </span>
   )
 }
@@ -93,14 +103,15 @@ function PredictedRow({
   canPromote: boolean
   onPromote?: (target: string) => void
 }) {
+  const t = useT()
   const [open, setOpen] = useState(false)
   const hasExamples = prediction.examples.length > 0
   const sourceLabel =
     prediction.source === "both"
-      ? "χ² + EM agree"
+      ? t("terminology.equivalents.sourceBoth")
       : prediction.source === "em"
-        ? "EM only"
-        : "χ² only"
+        ? t("terminology.equivalents.sourceEm")
+        : t("terminology.equivalents.sourceChi2")
 
   return (
     <li className="flex flex-col gap-1.5 border-b py-2 last:border-0">
@@ -138,7 +149,7 @@ function PredictedRow({
         </span>
 
         {canPromote && onPromote && (
-          <AppTooltip content="Promote to a managed rendering (crosses the deterministic line)">
+          <AppTooltip content={t("terminology.equivalents.promoteTooltip")}>
             <Button
               variant="ghost"
               size="sm"
@@ -146,7 +157,7 @@ function PredictedRow({
               onClick={() => onPromote(prediction.target)}
             >
               <ArrowUp className="h-3 w-3" />
-              Promote
+              {t("terminology.equivalents.promoteButton")}
             </Button>
           </AppTooltip>
         )}
@@ -194,6 +205,7 @@ export function EquivalentsPanel({
   onPromote,
   className,
 }: EquivalentsPanelProps) {
+  const t = useT()
   return (
     <div className={cn("flex flex-col gap-4 text-sm", className)}>
       {/* ── Managed (deterministic decisions) ── */}
@@ -201,13 +213,15 @@ export function EquivalentsPanel({
         <header className="mb-2 flex items-center gap-1.5">
           <ShieldCheck className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
           <h3 className="text-xs font-semibold text-foreground">
-            Managed
+            {t("terminology.common.managed")}
           </h3>
-          <span className="text-[10px] text-muted-foreground">(your decisions)</span>
+          <span className="text-[10px] text-muted-foreground">
+            {t("terminology.equivalents.managedSubtitle")}
+          </span>
         </header>
         {managed.length === 0 ? (
           <p className="text-xs text-muted-foreground italic">
-            No managed renderings yet for “{sourceTerm}”.
+            {t("terminology.equivalents.noManagedRenderings", { term: sourceTerm })}
           </p>
         ) : (
           <div className="flex flex-wrap gap-1.5">
@@ -223,13 +237,15 @@ export function EquivalentsPanel({
         <header className="mb-2 flex items-center gap-1.5">
           <Sparkles className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" />
           <h3 className="text-xs font-semibold text-foreground">
-            AI-assumed
+            {t("terminology.equivalents.aiAssumedHeading")}
           </h3>
-          <span className="text-[10px] text-muted-foreground">(predicted)</span>
+          <span className="text-[10px] text-muted-foreground">
+            {t("terminology.equivalents.aiAssumedSubtitle")}
+          </span>
         </header>
         {predicted.length === 0 ? (
           <p className="text-xs text-muted-foreground italic">
-            No predicted equivalents — the corpus has too little signal yet.
+            {t("terminology.equivalents.noPredicted")}
           </p>
         ) : (
           <ul>

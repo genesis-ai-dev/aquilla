@@ -10,9 +10,13 @@ import {
   buildContextSidecarJson,
   catalogJsonPath,
   contextNote,
+  importCatalog,
+  mergeCatalogs,
   messageKeyForPath,
   parseTranslatedCatalog,
   renderCatalogModule,
+  sourceHash,
+  type SourceHashes,
 } from "./catalog-export"
 import {
   MESSAGE_KEYS,
@@ -20,7 +24,7 @@ import {
   namespaceOf,
   pluralMessageFor,
 } from "./context"
-import { type MessageKey } from "./messages/en"
+import { type Catalog, type MessageKey } from "./messages/en"
 import { isPluralMessage, type PluralCategory } from "./plurals"
 import { translate } from "./translate"
 
@@ -342,5 +346,140 @@ describe("renderCatalogModule", () => {
   it("escapes values so quotes and newlines cannot break the module", () => {
     const module = renderCatalogModule("ar", { "common.save": 'He said "no"\n' })
     expect(module).toContain('"common.save": "He said \\"no\\"\\n"')
+  })
+})
+
+// ─── merge on import ─────────────────────────────────────────────────────────
+//
+// The regression these tests guard: `i18n-catalog.ts import` used to overwrite
+// `messages/<locale>.ts` with ONLY the keys in the file just handed to it, so
+// importing a file that carried just the newly-added keys silently destroyed
+// every previously-translated key — while the CLI reported those destroyed
+// keys as "Untranslated (safe to ship)". `mergeCatalogs` / `importCatalog` are
+// the fix: merge by default, an explicit `--replace` for the real thing, and
+// reporting driven by the merged result instead of the one file just imported.
+
+describe("sourceHash", () => {
+  it("is deterministic for the same key", () => {
+    expect(sourceHash("common.save")).toBe(sourceHash("common.save"))
+  })
+
+  it("differs for keys with different English source", () => {
+    expect(sourceHash("common.save")).not.toBe(sourceHash("common.cancel"))
+  })
+})
+
+describe("mergeCatalogs", () => {
+  it("keeps a key the existing catalog already translated when this import doesn't touch it", () => {
+    const existing: Catalog = { "common.save": "บันทึก", "nav.projects": "โครงการ" }
+    const incoming: Catalog = { "nav.settings": "การตั้งค่า" }
+    const { catalog } = mergeCatalogs(existing, {}, incoming)
+    expect(catalog["common.save"]).toBe("บันทึก")
+    expect(catalog["nav.projects"]).toBe("โครงการ")
+    expect(catalog["nav.settings"]).toBe("การตั้งค่า")
+  })
+
+  it("lets a fresh translation in this import override the existing one for the same key", () => {
+    const existing: Catalog = { "common.save": "old" }
+    const { catalog } = mergeCatalogs(existing, {}, { "common.save": "new" })
+    expect(catalog["common.save"]).toBe("new")
+  })
+
+  it("produces a pure replacement when the caller passes an empty existing catalog (--replace)", () => {
+    // This is exactly what the CLI does for `--replace`: it skips loading the
+    // real existing catalog and hands mergeCatalogs {} instead. What must be
+    // true is that nothing from before survives.
+    const incoming: Catalog = { "nav.settings": "การตั้งค่า" }
+    const { catalog } = mergeCatalogs({}, {}, incoming)
+    expect(catalog).toEqual(incoming)
+  })
+
+  it("flags a carried-over translation stale when its recorded hash no longer matches its English source", () => {
+    const existing: Catalog = { "common.save": "บันทึก" }
+    // Stands in for "the English string changed after this was translated" —
+    // the sidecar still has the hash of the OLD source.
+    const staleHashes: SourceHashes = { "common.save": "0000000000000000" }
+    const { catalog, staleKeys } = mergeCatalogs(existing, staleHashes, {})
+    // Stale still ships — it is the best translation available — but it must
+    // be reported, not silently trusted.
+    expect(catalog["common.save"]).toBe("บันทึก")
+    expect(staleKeys).toContain("common.save")
+  })
+
+  it("does not flag a translation stale when the recorded hash still matches its source", () => {
+    const existing: Catalog = { "common.save": "บันทึก" }
+    const currentHashes: SourceHashes = { "common.save": sourceHash("common.save") }
+    const { staleKeys } = mergeCatalogs(existing, currentHashes, {})
+    expect(staleKeys).not.toContain("common.save")
+  })
+
+  it("never flags a key retranslated in this import as stale, and refreshes its hash", () => {
+    const existing: Catalog = { "common.save": "old" }
+    const wrongHashes: SourceHashes = { "common.save": "0000000000000000" }
+    const { staleKeys, hashes } = mergeCatalogs(existing, wrongHashes, {
+      "common.save": "new",
+    })
+    expect(staleKeys).not.toContain("common.save")
+    expect(hashes["common.save"]).toBe(sourceHash("common.save"))
+  })
+
+  it("does not flag a translation stale when no hash was ever recorded for it", () => {
+    // Every catalog that shipped before this feature has no sidecar entry —
+    // that must read as "unknown", not "stale everywhere".
+    const existing: Catalog = { "common.save": "บันทึก" }
+    const { staleKeys } = mergeCatalogs(existing, {}, {})
+    expect(staleKeys).not.toContain("common.save")
+  })
+})
+
+describe("importCatalog", () => {
+  function translatedJson(entries: Record<string, string>): string {
+    return JSON.stringify({ [CATALOG_SOURCE_ROOT]: entries })
+  }
+
+  it("preserves keys an earlier import already translated (the data-loss regression)", () => {
+    const existing: Catalog = { "common.save": "บันทึก", "nav.projects": "โครงการ" }
+    const outcome = importCatalog(
+      translatedJson({ "nav.settings": "การตั้งค่า" }),
+      existing,
+      {},
+    )
+    expect(outcome.catalog["common.save"]).toBe("บันทึก")
+    expect(outcome.catalog["nav.projects"]).toBe("โครงการ")
+    expect(outcome.catalog["nav.settings"]).toBe("การตั้งค่า")
+  })
+
+  it("does not report a key preserved from an earlier import as untranslated", () => {
+    // This is the misleading-report half of the bug: a key already translated,
+    // merely absent from THIS file, used to print under "Untranslated (falls
+    // back to English, safe to ship)" right after actually being destroyed.
+    const existing: Catalog = { "common.save": "บันทึก" }
+    const outcome = importCatalog(translatedJson({ "nav.settings": "การตั้งค่า" }), existing, {})
+    expect(outcome.untranslatedKeys).not.toContain("common.save")
+  })
+
+  it("--replace discards keys not present in the imported file", () => {
+    const existing: Catalog = { "common.save": "บันทึก" }
+    const outcome = importCatalog(
+      translatedJson({ "nav.settings": "การตั้งค่า" }),
+      existing,
+      {},
+      { replace: true },
+    )
+    expect(outcome.catalog["common.save"]).toBeUndefined()
+    expect(outcome.untranslatedKeys).toContain("common.save")
+  })
+
+  it("reports a key whose English source changed as stale, separately from untranslated", () => {
+    const existing: Catalog = { "common.save": "บันทึก" }
+    const staleHashes: SourceHashes = { "common.save": "0000000000000000" }
+    const outcome = importCatalog(translatedJson({}), existing, staleHashes)
+    expect(outcome.staleKeys).toContain("common.save")
+    expect(outcome.untranslatedKeys).not.toContain("common.save")
+  })
+
+  it("still reports keys from the imported file that no longer exist in the base catalog", () => {
+    const outcome = importCatalog(translatedJson({ "nav.retired": "Retired" }), {}, {})
+    expect(outcome.unknownKeys).toEqual(["nav.retired"])
   })
 })

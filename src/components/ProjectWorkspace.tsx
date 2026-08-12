@@ -1,5 +1,6 @@
 import { Suspense, lazy, useState, useMemo, useRef, useEffect, useLayoutEffect, useCallback } from "react"
 import { useParams, useNavigate, useSearchParams, useLocation } from "react-router-dom"
+import { useT } from "@/lib/i18n/I18nProvider"
 import { useProject } from "@/hooks/useProject"
 import { describePatchFailure, SETTINGS_EDIT_ROLE_FLOOR } from "@/hooks/useProjectSettings"
 import { useNavHistoryTitle } from "@/context/NavHistoryContext"
@@ -421,6 +422,7 @@ export async function reconcileContextualDraftsAfterAppliedEvent(args: {
 }
 
 export function ProjectWorkspace() {
+  const t = useT()
   const { id: projectId, fileId: routeFileId } = useParams<{ id: string; fileId?: string }>()
   const navigate = useNavigate()
   const { orgs, activeOrg, activeOrgId, isAllOrgs, refresh: refreshOrgs } = useActiveOrg()
@@ -4206,10 +4208,10 @@ export function ProjectWorkspace() {
     }
     refresh()
     const applied = effective
-    toast("Applied renames.", {
+    toast(t("nav.renameSuggestions.appliedToast"), {
       duration: 10_000,
       action: {
-        label: "Undo",
+        label: t("nav.renameSuggestions.undo"),
         onClick: () => {
           const p = projectForUndoRef.current
           if (!p) return
@@ -4237,7 +4239,7 @@ export function ProjectWorkspace() {
         },
       },
     })
-  }, [project, currentUsername, refresh])
+  }, [project, currentUsername, refresh, t])
 
   const handleApplyOneSuggestion = useCallback(async (fileId: string) => {
     if (!project) return
@@ -4341,23 +4343,23 @@ export function ProjectWorkspace() {
 
   const projectNavItems = useMemo(() => {
     const items = [
-      { id: "rules", label: "Rules", icon: Scale,
+      { id: "rules", labelKey: "nav.sidebarSection.rules" as const, icon: Scale,
         onClick: () => navigate(`/project/${projectId}/rules`) },
       // Pinned below Comments: Terminology is a frequent destination, so it
       // stays visible; everything else unpinned collapses into "More".
-      { id: "comments", label: "Comments", icon: MessagesSquare, pinned: true,
+      { id: "comments", labelKey: "common.comments" as const, icon: MessagesSquare, pinned: true,
         badge: Array.from(openCommentCount.values()).reduce((a, b) => a + b, 0),
         onClick: () => navigate(`/project/${projectId}/comments`) },
-      { id: "terminology", label: "Terminology", icon: BookOpen, pinned: true,
+      { id: "terminology", labelKey: "nav.sidebarSection.terminology" as const, icon: BookOpen, pinned: true,
         onClick: () => navigate(`/project/${projectId}/terminology`) },
-      { id: "living-memory", label: "Memory", icon: BookMarked,
+      { id: "living-memory", labelKey: "nav.sidebarSection.memory" as const, icon: BookMarked,
         onClick: () => navigate(`/project/${projectId}/memory`) },
       // Audio/Media lens lives in the header EditorModeToggle — keep it out of
       // the sidebar More menu so the overflow list stays structural (share,
       // settings, trash) rather than view-mode toggles.
-      { id: "share", label: "Share", icon: Share2,
+      { id: "share", labelKey: "nav.sidebarSection.share" as const, icon: Share2,
         onClick: () => setShareOpen(true) },
-      { id: "settings", label: "Settings", icon: SettingsIcon,
+      { id: "settings", labelKey: "nav.settings" as const, icon: SettingsIcon,
         onClick: () => {
           if (!projectId) return
           window.location.assign(buildProjectSettingsHandoffUrl({
@@ -4368,7 +4370,7 @@ export function ProjectWorkspace() {
       // FRO-272: trash moved out of the always-visible files footer into the
       // "More" menu — it opens a dialog now (project_lead+ only).
       ...(currentRoleLevel >= ROLE.PROJECT_LEAD
-        ? [{ id: "trash", label: "Recently deleted", icon: Trash2,
+        ? [{ id: "trash", labelKey: "nav.sidebarSection.trash" as const, icon: Trash2,
             onClick: () => setTrashOpen(true) }]
         : []),
     ]
@@ -4905,18 +4907,18 @@ export function ProjectWorkspace() {
 
     const diarizeLabel =
       diarizePhase === "starting" || diarizePhase === "running"
-        ? "Diarizing…"
+        ? t("nav.fileMenu.diarizing")
         : diarizePhase === "applying"
-          ? "Applying…"
+          ? t("nav.fileMenu.applying")
           : diarizeError
-            ? "Diarize failed"
-            : "Diarize"
+            ? t("nav.fileMenu.diarizeFailed")
+            : t("nav.fileMenu.diarize")
 
     const actionItems: OverflowMenuItem[] = project === null ? [] : getVisibleActions(workspaceActions, actionCtx)
       .filter((a) => a.id !== "import-new")
       .map((a) => ({
         id: `action-${a.id}`,
-        label: a.label,
+        label: t(a.labelKey),
         icon: a.icon,
         disabled: a.comingSoon,
         onClick: () => handleWorkspaceAction(a),
@@ -4927,7 +4929,7 @@ export function ProjectWorkspace() {
     items.push(
       {
         id: "view-settings",
-        label: "Editor settings",
+        label: t("editor.view.settings"),
         icon: SettingsIcon,
         onClick: () => {
           // Let the file-options dropdown close before anchoring the popover.
@@ -4936,7 +4938,7 @@ export function ProjectWorkspace() {
       },
       {
         id: "next-unfinished",
-        label: "Next unfinished",
+        label: t("nav.fileMenu.nextUnfinished"),
         icon: ArrowRight,
         disabled: !hasUnfinished,
         onClick: handleJumpNextUnfinished,
@@ -4946,7 +4948,7 @@ export function ProjectWorkspace() {
     if (canAssignWork) {
       items.push({
         id: "assign-work",
-        label: "Assign work",
+        label: t("dialog.assign.title"),
         icon: UserCheck,
         onClick: () => setAssignModalOpen(true),
       })
@@ -4962,7 +4964,9 @@ export function ProjectWorkspace() {
       })
       items.push({
         id: "adopt-speaker-voice",
-        label: adoptingSpeaker ? "Extracting voice…" : "Use file's speaker as a voice",
+        label: adoptingSpeaker
+          ? t("nav.fileMenu.extractingVoice")
+          : t("nav.fileMenu.useFileSpeakerAsVoice"),
         icon: Mic,
         disabled: adoptingSpeaker || diarizeBusy,
         onClick: () => void handleAdoptSpeakerVoice(),
@@ -4973,7 +4977,9 @@ export function ProjectWorkspace() {
       ...(isSubtitleFile
         ? [{
             id: "attach-video",
-            label: "Attach video",
+            // Reuses the video-attachment dialog's own title (this item opens
+            // it) rather than minting a duplicate "Attach video" string.
+            label: t("editor.video.title"),
             icon: Film,
             onClick: () => setVideoDialogOpen(true),
           }]
@@ -4981,7 +4987,7 @@ export function ProjectWorkspace() {
       ...(suggestions.length > 0 && (suggestionsDismissed || project?.suggestionsDismissedAt)
         ? [{
             id: "redetect-suggestions",
-            label: `Show ${suggestions.length} file name suggestion${suggestions.length === 1 ? "" : "s"}`,
+            label: t("nav.fileMenu.showFileNameSuggestions", { count: suggestions.length }),
             icon: Sparkles,
             onClick: handleReinviteSuggestions,
           }]
@@ -4997,13 +5003,13 @@ export function ProjectWorkspace() {
     items.push(
       {
         id: "file-rename",
-        label: "Rename",
+        label: t("fileDetails.rename"),
         icon: Pencil,
         onClick: () => setRenameSignal({ fileId: activeFileId, nonce: Date.now() }),
       },
       {
         id: "file-move",
-        label: "Move to corpus…",
+        label: t("fileDetails.moveToCorpus"),
         icon: FolderInput,
         onClick: () => {
           setMoveTargetId(activeFileId)
@@ -5014,7 +5020,7 @@ export function ProjectWorkspace() {
     if (activeFile && canExportSourceFile(activeFile, canExportByOrgPolicy)) {
       items.push({
         id: "file-export-source",
-        label: "Export source (.SFM)",
+        label: t("fileDetails.exportSource"),
         icon: Download,
         onClick: () => {
           if (!projectId) return
@@ -5031,7 +5037,7 @@ export function ProjectWorkspace() {
       items.push({ id: "sep-file-delete", type: "separator" })
       items.push({
         id: "file-delete",
-        label: "Delete",
+        label: t("common.delete"),
         icon: Trash2,
         destructive: true,
         onClick: () => setPendingDeleteId(activeFileId),
@@ -5065,6 +5071,7 @@ export function ProjectWorkspace() {
     projectId,
     suggestions.length,
     suggestionsDismissed,
+    t,
   ])
 
   const handleHeaderImport = useCallback(() => {
@@ -5495,11 +5502,19 @@ export function ProjectWorkspace() {
                       >
                         <ClipboardList className="h-3 w-3" />
                         {checklistDismissed
-                          ? "Setup"
-                          : `Setup: ${checklistState.completedCount}/${checklistState.totalCount}`}
+                          ? t("nav.sidebarSection.setupChipDismissed")
+                          : t("nav.sidebarSection.setupChipProgress", {
+                              // AQU-511 bidi: the "n/N" run must stay LTR digit-slash-
+                              // digit even under Arabic's RTL bidi algorithm, so it's
+                              // wrapped in Unicode isolates (FSI…PDI) before being
+                              // interpolated — the catalog string never juxtaposes the
+                              // digits against RTL text directly.
+                              ratio: `⁨${checklistState.completedCount}/${checklistState.totalCount}⁩`,
+                              totalCount: checklistState.totalCount,
+                            })}
                       </TooltipTrigger>
                       <TooltipContent side="right">
-                        Reopen the setup checklist anytime from here.
+                        {t("nav.sidebarSection.setupChipTooltip")}
                       </TooltipContent>
                     </Tooltip>
                   </div>
@@ -5609,7 +5624,7 @@ export function ProjectWorkspace() {
             surfaceTab={
               centerSurface === "rules" && projectId
                 ? {
-                    label: "Rules",
+                    label: t("nav.sidebarSection.rules"),
                     // Navigating to the bare project route lets the
                     // restore-location effect re-open the last active file.
                     onClose: () => navigate(`/project/${projectId}/editor`),
@@ -6435,10 +6450,10 @@ export function ProjectWorkspace() {
         <ConfirmActionDialog
           open={true}
           onOpenChange={(v) => { if (!v) setPendingActionConfirm(null) }}
-          title={pendingActionConfirm.requiresConfirmation.title}
-          description={pendingActionConfirm.requiresConfirmation.description(actionCtx)}
-          confirmLabel={pendingActionConfirm.requiresConfirmation.confirmLabel}
-          checkboxLabel="I understand this change will be attributed to my account."
+          title={t(pendingActionConfirm.requiresConfirmation.titleKey)}
+          description={pendingActionConfirm.requiresConfirmation.description(actionCtx, t)}
+          confirmLabel={t(pendingActionConfirm.requiresConfirmation.confirmLabelKey)}
+          checkboxLabel={t("nav.workspaceActions.confirmAttribution")}
           onConfirm={() => { pendingActionConfirm.run(actionCtx, actionArgs); setPendingActionConfirm(null) }}
         />
       )}
@@ -6481,12 +6496,12 @@ export function ProjectWorkspace() {
       <ConfirmActionDialog
         open={pendingDeleteId !== null}
         onOpenChange={(v) => { if (!v) setPendingDeleteId(null) }}
-        title="Move file to Recently deleted"
+        title={t("nav.workspaceActions.deleteFile.title")}
         description={(() => {
           const f = pendingDeleteId ? project.files.find((x) => x.id === pendingDeleteId) : null
-          return f ? `Move "${f.name}" to Recently deleted? Cells and audio are kept for 30 days. You can restore the file or permanently delete it from "Recently deleted" in the sidebar's More menu.` : ""
+          return f ? t("nav.workspaceActions.deleteFile.description", { name: f.name }) : ""
         })()}
-        confirmLabel="Move to Recently deleted"
+        confirmLabel={t("nav.workspaceActions.deleteFile.confirmLabel")}
         variant="destructive"
         onConfirm={() => { if (pendingDeleteId) { void handleDeleteFile(pendingDeleteId) } setPendingDeleteId(null) }}
       />

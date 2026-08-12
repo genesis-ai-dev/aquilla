@@ -1,6 +1,8 @@
 import type { LucideIcon } from "lucide-react"
 import type { NavigateFunction } from "react-router-dom"
 import type { ProjectRecord } from "@/lib/parsers/types"
+import type { MessageKey } from "@/lib/i18n/messages/en"
+import type { TFunction } from "@/lib/i18n/I18nProvider"
 
 export interface FileProgressEntry {
   translated: number
@@ -39,15 +41,23 @@ export interface WorkspaceActionRunArgs {
 
 export interface WorkspaceAction {
   id: string
-  label: string
+  /** i18n catalog key for the visible label — a `MessageKey`-typed field makes
+   *  an unkeyed action a compile error (same pattern as LeftDock's `TabMeta`). */
+  labelKey: MessageKey
   icon?: LucideIcon
   group: "primary" | "secondary"
   isAvailable: (ctx: WorkspaceActionContext) => boolean
   isDefault?: (ctx: WorkspaceActionContext) => boolean
   requiresConfirmation?: {
-    title: string
-    description: (ctx: WorkspaceActionContext) => string
-    confirmLabel: string
+    titleKey: MessageKey
+    /**
+     * The confirmation body has per-run counts baked in (how many cells, what
+     * batch size), so it can't be a static key — it's resolved at render by
+     * calling the injected `t` here, same as everywhere else in the app,
+     * rather than returning pre-resolved English from the registry.
+     */
+    description: (ctx: WorkspaceActionContext, t: TFunction) => string
+    confirmLabelKey: MessageKey
   }
   comingSoon?: boolean
   run: (ctx: WorkspaceActionContext, args: WorkspaceActionRunArgs) => void

@@ -91,4 +91,20 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "resuming it automatically. autopilot.status.paused is a person deliberately " +
     "pausing an autopilot run. Automatic vs deliberate pausing are different " +
     "concepts a translator would render with different verbs in most languages.",
+  "nav.fileMenu.applying":
+    "Transient state of the file-options-menu 'Diarize' item while its speaker-" +
+    "detection results are being written back to cells. search.replace.applying " +
+    "is the transient state of the unrelated find-and-replace panel's Apply " +
+    "button while it rewrites matched cells. Two independent async operations " +
+    "that happen to share an English gerund; nothing ties their wording together.",
+  "nav.lens.audio":
+    "Standalone tab label of the header Text/Audio segmented lens switch — a " +
+    "primary navigation control read on its own, alongside its sibling 'Text'. " +
+    "nav.outbox.previewAudio is a one-word fallback preview for an audio-attach " +
+    "event row deep in the outbox diagnostics popover, standing in for a missing " +
+    "text body among noun-phrase siblings like 'edit {id}'. A standalone control " +
+    "name and a placeholder noun in a technical log read as different parts of " +
+    "speech in languages that mark that distinction; the English capitalization " +
+    "difference is incidental, not the reason (a case-only split alone would not " +
+    "justify this entry).",
 }

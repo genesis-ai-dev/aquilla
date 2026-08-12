@@ -3,6 +3,22 @@ import { getDefaultAction, getVisibleActions, workspaceActions, completionBatchS
 import type { WorkspaceAction, WorkspaceActionContext } from "./types"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { ROLE } from "@/lib/frontier/roles"
+import { en } from "@/lib/i18n/messages/en"
+import { translate } from "@/lib/i18n/translate"
+import type { TFunction } from "@/lib/i18n/I18nProvider"
+
+// English-only `t`, standing in for the real I18nProvider hook — description()
+// is resolved outside React (registry.ts has no component tree), so tests
+// call it the same way ProjectWorkspace does: inject a `t`, don't hardcode
+// English strings here.
+const t: TFunction = (key, vars) => translate(undefined, key, vars)
+
+// `en` values are `string | PluralMessage`; every labelKey used below resolves
+// to a plain string, so this narrows without a plural-form branch.
+function englishOf(key: WorkspaceAction["labelKey"]): string {
+  const v = en[key]
+  return typeof v === "string" ? v : ""
+}
 
 const project: ProjectRecord = {
   id: "p1", name: "t", sourceLanguage: "en", targetLanguage: "fr",
@@ -23,14 +39,14 @@ function ctx(overrides: Partial<WorkspaceActionContext> = {}): WorkspaceActionCo
 function mockActions(): WorkspaceAction[] {
   return [
     {
-      id: "import-new", label: "+ Import",
+      id: "import-new", labelKey: "nav.workspaceActions.import",
       group: "primary",
       isAvailable: () => true,
       isDefault: (c) => c.activeFileId == null,
       run: vi.fn(),
     },
     {
-      id: "run-completions", label: "Run completions",
+      id: "run-completions", labelKey: "nav.workspaceActions.runCompletions.label",
       group: "primary",
       isAvailable: (c) => c.activeFileId != null,
       isDefault: (c) => {
@@ -41,7 +57,7 @@ function mockActions(): WorkspaceAction[] {
       run: vi.fn(),
     },
     {
-      id: "export", label: "Export",
+      id: "export", labelKey: "nav.workspaceActions.export",
       group: "primary",
       isAvailable: (c) => c.activeFileId != null,
       isDefault: (c) => {
@@ -71,8 +87,8 @@ describe("getDefaultAction", () => {
   })
   it("falls back to first available when no isDefault matches", () => {
     const acts: WorkspaceAction[] = [
-      { id: "a", label: "A", group: "primary", isAvailable: () => false, run: vi.fn() },
-      { id: "b", label: "B", group: "primary", isAvailable: () => true, run: vi.fn() },
+      { id: "a", labelKey: "common.save", group: "primary", isAvailable: () => false, run: vi.fn() },
+      { id: "b", labelKey: "common.cancel", group: "primary", isAvailable: () => true, run: vi.fn() },
     ]
     const def = getDefaultAction(acts, ctx())
     expect(def.id).toBe("b")
@@ -149,7 +165,7 @@ describe("AQU-503: target import is discoverable by wording", () => {
     // A PM (Anna) searching for the "Target Import" option must recognize this
     // entry by its wording. The label must name the TARGET column so it is not
     // confused with the primary "Import" (source) action.
-    expect(importIntoFile.label.toLowerCase()).toContain("target")
+    expect(englishOf(importIntoFile.labelKey).toLowerCase()).toContain("target")
   })
 
   it("shows the target importer whenever a file is open, for any role (not permission-gated)", () => {
@@ -188,6 +204,7 @@ describe("completionBatchSizeFor", () => {
     const action = workspaceActions.find((a) => a.id === "run-completions")!
     const desc = action.requiresConfirmation!.description(
       ctx({ project: p, activeFileId: "f1", fileProgress: new Map([["f1", { translated: 0, validated: 0, total: 10 }]]) }),
+      t,
     )
     expect(desc).toContain("next 3 untranslated cells")
     expect(desc).toContain("7 more after this")
@@ -198,6 +215,7 @@ describe("completionBatchSizeFor", () => {
     const action = workspaceActions.find((a) => a.id === "batch-validate")!
     const desc = action.requiresConfirmation!.description(
       ctx({ project: p, activeFileId: "f1", fileProgress: new Map([["f1", { translated: 10, validated: 0, total: 10 }]]) }),
+      t,
     )
     expect(desc).toContain("At most 5 eligible cells are validated per run")
   })
@@ -206,8 +224,8 @@ describe("completionBatchSizeFor", () => {
 describe("getVisibleActions", () => {
   it("filters out unavailable actions", () => {
     const acts: WorkspaceAction[] = [
-      { id: "a", label: "A", group: "primary", isAvailable: () => false, run: vi.fn() },
-      { id: "b", label: "B", group: "primary", isAvailable: () => true, run: vi.fn() },
+      { id: "a", labelKey: "common.save", group: "primary", isAvailable: () => false, run: vi.fn() },
+      { id: "b", labelKey: "common.cancel", group: "primary", isAvailable: () => true, run: vi.fn() },
     ]
     const visible = getVisibleActions(acts, ctx())
     expect(visible.map((a) => a.id)).toEqual(["b"])

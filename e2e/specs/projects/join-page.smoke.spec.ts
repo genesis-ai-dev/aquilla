@@ -28,9 +28,11 @@ test("join page with invalid token shows error state and Back to projects", asyn
 
   // "Back to projects" navigates through RootRedirect to the user's scoped
   // organization home. Assert the durable destination, not the transient "/"
-  // route that immediately redirects and may never be observable.
+  // route that immediately redirects and may never be observable. Members
+  // settle on /orgs/:id/overview (the org index redirects there); guests
+  // stay on the bare /orgs/:id index.
   await alice.getByRole("button", { name: /Back to projects/i }).click()
-  await expect(alice).toHaveURL(/\/orgs\/[^/?]+$/, { timeout: 10_000 })
+  await expect(alice).toHaveURL(/\/orgs\/[^/?]+(\/overview)?$/, { timeout: 10_000 })
   await expect(alice.getByRole("heading", { name: "Acme", exact: true })).toBeVisible()
 })
 

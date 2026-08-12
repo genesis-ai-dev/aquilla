@@ -31,14 +31,44 @@ export const error = defineNamespace({
     "error.network.unknownStatus": "The request failed ({status}). Please try again.",
     "error.network.offline": "You're offline — changes will sync when you reconnect.",
     "error.network.genericFailure": "Something went wrong. Please try again.",
+    "error.upload.emptyFile": "That file is empty — pick one with content in it.",
+    "error.upload.tooLarge": "That file is {size}MB — the limit is {limit}MB.",
+    "error.parseDocument.failed":
+      "We couldn't read that file. It may be image-only, encrypted, or not a valid PDF or DOCX.",
+    "error.changeset.notAuthorized": "You aren't authorized to view this approval.",
+    "error.changeset.notFound": "This changeset couldn't be found.",
+    "error.changeset.notApprovable": "This changeset can no longer be approved.",
+    "error.monday.loadConnection": "Couldn't load the Monday connection status.",
+    "error.monday.startConnection": "Couldn't start the Monday connection.",
+    "error.monday.disconnect": "Couldn't disconnect Monday.",
+    "error.monday.loadBoards": "Couldn't load your Monday boards.",
+    "error.monday.loadBoardStructure": "Couldn't load that board's columns and groups.",
+    "error.monday.loadLink": "Couldn't load this project's Monday board link.",
+    "error.monday.saveLink": "Couldn't save the Monday board link.",
+    "error.monday.updateLink": "Couldn't update the Monday board link.",
+    "error.monday.removeLink": "Couldn't remove the Monday board link.",
+    "error.monday.analyze": "Couldn't build a board mapping suggestion.",
+    "error.monday.sync": "Couldn't push this project to Monday.",
+    "error.termbase.publish": "Couldn't share this termbase with the organization.",
+    "error.termbase.unpublish": "Couldn't stop sharing this termbase.",
+    "error.termbase.listPublished": "Couldn't load the termbases shared in this organization.",
+    "error.termbase.listSubscriptions": "Couldn't load this project's termbase subscriptions.",
+    "error.termbase.subscribe": "Couldn't subscribe to that termbase.",
+    "error.termbase.unsubscribe": "Couldn't unsubscribe from that termbase.",
+    "error.termbase.reorder": "Couldn't save the new termbase order.",
   },
   context: {
     _context: {
       description:
         "Failure surfaces — the error boundary, permission-denied alerts, the " +
-        "private-browsing storage notice, and the 404 page. Wording is reassuring " +
+        "private-browsing storage notice, the 404 page, and the messages our API " +
+        "clients throw when a request fails, which land in a toast or a red line " +
+        "of text beside the control the user just used. Wording is reassuring " +
         "and non-technical: it tells the user something broke or isn't available " +
-        "without blaming them and without exposing internals.",
+        "without blaming them and without exposing internals. In particular these " +
+        "strings REPLACE the server's own raw error text, which is untranslated " +
+        "and often a developer diagnostic — so never write one as if the reader " +
+        "will also see a technical reason next to it.",
       screenshot: "error-state",
     },
     keys: {
@@ -216,6 +246,22 @@ export const error = defineNamespace({
         description:
           "Last-resort fallback shown when a caught error can't be classified as " +
           "an HTTP status or an offline failure.",
+      },
+      "error.upload.tooLarge": {
+        description:
+          "Shown beside the agent composer's attach-file control when the chosen " +
+          "file exceeds the server's size ceiling, before any upload is attempted. " +
+          "Both numbers are megabytes; the app formats them, so don't add a unit.",
+        placeholders: {
+          size: "Size of the chosen file in megabytes, already rounded to one decimal place, e.g. '31.4'.",
+          limit: "The maximum allowed size in whole megabytes, e.g. '25'.",
+        },
+      },
+      "error.parseDocument.failed": {
+        description:
+          "Shown in the rule-import dialog when the server can't extract text " +
+          "from an uploaded PDF or DOCX. Names the likely causes because the " +
+          "server's own reason is a raw diagnostic we deliberately don't show.",
       },
     },
   },

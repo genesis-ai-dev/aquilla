@@ -12,6 +12,7 @@
 
 import { AUTH_BASE } from "@/lib/frontier/auth"
 import { fetchWithTimeout } from "@/lib/frontier/orgs"
+import { t } from "@/lib/i18n/standalone"
 import type { UploadedArtifact } from "./protocol"
 
 /** Client-side ceiling mirroring the server's MAX_AGENT_ARTIFACT_BYTES (25MB),
@@ -40,11 +41,14 @@ export async function uploadAgentArtifact(
   file: File,
 ): Promise<UploadedArtifact> {
   if (file.size === 0) {
-    throw new ArtifactUploadError("The selected file is empty.", 400)
+    throw new ArtifactUploadError(t("error.upload.emptyFile"), 400)
   }
   if (file.size > MAX_AGENT_ARTIFACT_BYTES) {
     throw new ArtifactUploadError(
-      `That file is ${(file.size / (1024 * 1024)).toFixed(1)}MB — the limit is 25MB.`,
+      t("error.upload.tooLarge", {
+        size: (file.size / (1024 * 1024)).toFixed(1),
+        limit: MAX_AGENT_ARTIFACT_BYTES / (1024 * 1024),
+      }),
       413,
     )
   }
@@ -64,14 +68,19 @@ export async function uploadAgentArtifact(
   )
 
   if (!res.ok) {
-    let message = `Upload failed (HTTP ${res.status}).`
+    // AQU-820: the server's error.message is untranslated and often a raw
+    // diagnostic — AgentDockView renders `err.message` verbatim, so keep it on
+    // `cause` for DevTools and show our own translated sentence.
+    let detail = ""
     try {
       const body = (await res.json()) as { error?: { message?: string } }
-      if (body.error?.message) message = body.error.message
+      detail = body.error?.message ?? ""
     } catch {
-      /* non-JSON error body — keep the generic message */
+      /* non-JSON error body — nothing to preserve */
     }
-    throw new ArtifactUploadError(message, res.status)
+    const err = new ArtifactUploadError(t("common.uploadFailed"), res.status)
+    err.cause = `HTTP ${res.status}${detail ? ` — ${detail.slice(0, 400)}` : ""}`
+    throw err
   }
 
   const out = (await res.json()) as UploadedArtifact

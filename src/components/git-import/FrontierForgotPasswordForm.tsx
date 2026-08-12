@@ -14,6 +14,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { requestPasswordReset, FrontierAuthError } from "@/lib/frontier/auth"
 import { isFieldInvalid } from "@/lib/forms/field-state"
 import { useSubmitError } from "@/lib/forms/submit-error"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 const formSchema = z.object({
   email: z
@@ -33,6 +34,7 @@ export function FrontierForgotPasswordForm({
 }) {
   const [sentEmail, setSentEmail] = useState<string | null>(null)
   const { submitError, setSubmitError, clearSubmitError } = useSubmitError()
+  const t = useT()
 
   const form = useForm({
     defaultValues: { email: "" },
@@ -43,7 +45,7 @@ export function FrontierForgotPasswordForm({
         await requestPasswordReset(value.email.trim())
         setSentEmail(value.email.trim())
       } catch (err) {
-        setSubmitError(err instanceof FrontierAuthError ? err.message : "Failed to send reset email")
+        setSubmitError(err instanceof FrontierAuthError ? err.message : t("auth.resetPassword.failedToSend"))
       }
     },
   })

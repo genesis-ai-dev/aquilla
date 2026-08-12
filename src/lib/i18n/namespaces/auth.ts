@@ -45,6 +45,8 @@ export const auth = defineNamespace({
       "First-time sign-in may take a moment while we securely migrate your account.",
     "auth.login.newHerePrefix": "New here?",
     "auth.login.createAccountLink": "Create an account",
+    "auth.login.invalidCredentials": "Invalid username or password",
+    "auth.login.failed": "Couldn't sign you in. Please try again.",
 
     // --- Sign up (account creation, e.g. git-import linked-account flow) ---
     "auth.signup.failedGeneric": "Couldn't create your account. Please try again.",

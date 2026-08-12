@@ -30,6 +30,7 @@ import {
 } from "@/components/ui/dialog"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
+import { toUserFacingError, UserError } from "@/lib/errors/user-error"
 import { FRONTIER_API_URL } from "@/lib/sync/sync-token"
 import { DcsUpstreamPanel } from "@/components/dcs/DcsUpstreamPanel"
 
@@ -88,14 +89,16 @@ export function SourceLinkSection({
         },
       )
       if (!res.ok) {
-        const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` })) as { error?: string }
-        throw new Error(body.error ?? `HTTP ${res.status}`)
+        // AQU-820: the server's `error` is untranslated and this message is
+        // rendered verbatim below — throw the keyed status sentence instead,
+        // with the raw body preserved on `.raw`/`.cause`.
+        throw new UserError(res.status, await res.text().catch(() => ""), "project")
       }
       setDialogOpen(false)
       setConfirmInput("")
       onDetached()
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      setError(toUserFacingError(err, "project").message)
     } finally {
       setLoading(false)
     }

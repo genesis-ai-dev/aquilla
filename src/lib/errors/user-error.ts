@@ -7,21 +7,9 @@
 // (sync-worker, frontier, auth-worker). See AQU-281.
 //
 // This module runs outside React (plain fetch-helper code, no hooks), so it
-// can't call useT(). `t()` below resolves the active locale straight from
-// storage (the same source I18nProvider seeds its initial state from) and
-// falls back to English exactly like the provider-less FALLBACK_CONTEXT in
-// I18nProvider.tsx — see AQU-832.
+// can't call useT(); it uses the standalone `t()` instead — see AQU-832.
 
-import { CATALOGS } from "../i18n/messages"
-import type { MessageKey } from "../i18n/messages/en"
-import { DEFAULT_LOCALE, normalizeLocale } from "../i18n/locales"
-import { readStoredLocale } from "../i18n/store"
-import { translate, type TVars } from "../i18n/translate"
-
-function t(key: MessageKey, vars?: TVars): string {
-  const locale = normalizeLocale(readStoredLocale())
-  return translate(CATALOGS[locale] ?? CATALOGS[DEFAULT_LOCALE], key, vars, locale)
-}
+import { t } from "../i18n/standalone"
 
 export type NetworkErrorCategory =
   | "forbidden"

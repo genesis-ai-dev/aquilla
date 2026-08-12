@@ -56,7 +56,7 @@ export function Login() {
         })
         navigate(next, { replace: true })
       } catch (err) {
-        setSubmitError(err instanceof FrontierAuthError ? err.message : "Login failed")
+        setSubmitError(err instanceof FrontierAuthError ? err.message : t("auth.login.failed"))
       }
     },
   })

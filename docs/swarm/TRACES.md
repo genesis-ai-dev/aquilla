@@ -16,8 +16,10 @@
 - [OPEN] (admin) ~50 strings in src/components/admin/**. SKIP: staff-only, operational
   jargon. Recorded as a decision, not neglect.
 - [OPEN] (server-contract) 91 API error sentences. Defer the code+params contract change.
-  The cheap client-side half shipped in wave 2 (WS-07, AQU-820) — see the WS-07 section
-  below for what landed and what's left of the 36 `body.error` call sites.
+  The cheap client-side half is now complete (WS-07, AQU-820): no audited call site
+  still shows server text verbatim. What the contract change would BUY is now a
+  concrete list — see `server-contract-codes` in the WS-07 section for the three
+  distinctions the client had to collapse for want of an error code.
 
 ## Known hazards for any agent touching these
 - [OPEN] (control-flow-string) OrgBreadcrumb.tsx:115 branches on `section !== "Projects"`,
@@ -69,36 +71,87 @@
   the count is a ceiling, not a fingerprint.
 
 ## WS-07 handoff (AQU-820, error-message i18n wiring)
-- [OPEN] (verbatim-bypass-remainder) `messageForStatus()` (src/lib/errors/user-error.ts) is
-  now keyed and every UserError-throwing call site inherits translation for free. The
-  auth.ts cluster (6 sites) and 6 keyed-but-dead sites are fixed (see DONE below). Of the
-  ~36-site audit, these still lift `body.error`/`body.detail`/`body.message` from a server
-  response and show it verbatim, unlocalized, instead of routing through
-  messageForStatus/UserError or a keyed frame — not verified case-by-case whether each
-  variable actually reaches the DOM, so treat as "needs a look", not "confirmed bug":
-  - src/components/ProjectSettings/SourceLinkSection.tsx:92
-  - src/lib/monday/api.ts:35-36
-  - src/lib/terminology/subscriptions-api.ts:36
-  - src/lib/agent/artifact-upload.ts:70
-  - src/lib/frontier/admin.ts:142
-  - src/lib/frontier/parse-document.ts:29
-  - src/lib/sync/archive.ts:78
-  - src/lib/diarization/run-diarization.ts:114
-  - src/pages/ApproveChangeset/ApproveChangeset.tsx:74
-  Also non-keyed (not server-text, but still untranslated hardcoded fallback strings),
-  same "err instanceof FrontierAuthError ? err.message : <hardcoded>" shape as the
-  auth.ts/Login.tsx precedent this wave deliberately left alone:
-  - src/components/git-import/FrontierLoginForm.tsx:55 ("Login failed")
-  - src/components/git-import/FrontierSignupForm.tsx:143 ("Sign up failed")
-  - src/components/git-import/FrontierForgotPasswordForm.tsx:46 ("Failed to send reset email")
-  - src/pages/Login.tsx:59 ("Login failed") — login()'s own messages
-    ("Invalid username or password" etc.) were kept as-is per the brief: they're the
-    in-file precedent for "never show raw server text", just not yet keyed themselves.
-  `src/lib/sync/cloud-projects.ts:366` was in the original grep hit but is a false
-  positive — it already routes through `UserError`, which never puts the raw body in
-  `.message` (only `.raw`/`.cause`), so it needed no change.
+- [DONE] (verbatim-bypass-remainder) All 9 remaining sites were checked
+  case-by-case against the DOM. 7 reached the user and are fixed; 2 were false
+  positives. See the DONE entries below for what each became.
+- [OPEN] (server-contract-codes) Three of the fixes had to COLLAPSE a
+  distinction the server does make, because the server expresses it only in
+  untranslated prose:
+  - `parse-document`: the worker separates "unsupported type" / "image-only or
+    encrypted" / "extractor threw" (auth-worker/src/routes/parse-document.ts
+    :170,196,201). The client now shows one keyed sentence naming the likely
+    causes, because the 422 case interpolates a raw exception and there is no
+    code to branch on.
+  - `monday`, `termbase`: the server's reason string is the only signal for
+    *why* a call failed; the client now shows a per-call-site keyed sentence
+    ("Couldn't save the Monday board link.") which says WHAT failed, not why.
+  Each is a strictly better user-facing outcome than untranslated server prose,
+  but the lost precision is real and comes back only with the deferred
+  `server-contract` item (error CODE + params). Do not "fix" these by
+  re-introducing the passthrough.
+- [OPEN] (approve-changeset-unkeyed) `src/pages/ApproveChangeset/ApproveChangeset.tsx`
+  now uses keyed error messages but the REST of the page is still hardcoded
+  English (0 other `t()` calls in the file). It is a standalone route with no
+  owning workstream — nobody's sweep currently includes it.
+- [OPEN] (monday-section-unkeyed) Same shape: `MondayIntegrationSection.tsx` and
+  `OrgSettingsMonday.tsx` now render translated errors, but their own labels and
+  the `Sync failed: {err}` / `Sync failed{: reason}` notice built inline at
+  MondayIntegrationSection.tsx:274,278 are unkeyed and still interpolate raw
+  server text from `MondaySyncResult.error` (a 200-response field, so it never
+  passed through `readError`). That notice is the one remaining raw-server-text
+  path in the Monday surface.
+- [OPEN] (dev-login-message) `devLogin()` in src/lib/frontier/auth.ts still
+  throws `Dev login failed (${res.status})`. Left alone deliberately: it is
+  `import.meta.env.DEV`-gated and never reachable in a production build.
 
 ## [DONE] resolved traces
+- [DONE] (AQU-820) `src/lib/i18n/standalone.ts` — the provider-less `t()` that
+  WS-07 had copy-pasted into `user-error.ts` and `frontier/auth.ts` is now one
+  shared module, and both files import it. Nine more non-React modules needed
+  the same helper; a tenth copy was not the answer.
+- [DONE] (AQU-820) 7 verbatim-bypass sites fixed. The shape is the same
+  everywhere: the thrown `.message` is now a client-chosen keyed sentence, and
+  the server's raw string moves to `.cause` (or `UserError.raw`) so DevTools
+  keeps it.
+  - `SourceLinkSection.tsx` → throws `UserError`, catch renders
+    `toUserFacingError(err, "project").message` (which also covers the offline
+    case the old `err.message` catch showed as "Failed to fetch").
+  - `monday/api.ts` → `readError()` takes a `MessageKey`; 11 new
+    `error.monday.*` keys replace 11 hardcoded English fallbacks.
+  - `terminology/subscriptions-api.ts` → same, 7 `error.termbase.*` keys. Its
+    old fallbacks were bare diagnostics (`publishTermbase failed: HTTP 500`),
+    i.e. worse than the server text they were falling back from.
+  - `agent/artifact-upload.ts` → `common.uploadFailed` + new
+    `error.upload.emptyFile`/`tooLarge` (the two client-side pre-checks were
+    also unkeyed English).
+  - `frontier/parse-document.ts` → new `error.parseDocument.failed`. The 200-
+    with-no-`text` branch ("Worker returned empty text.") folds into the same
+    message: identical dead end for the user.
+  - `sync/archive.ts` → `parseError()` returns
+    `messageForStatus(status, raw, "project").message`. `linkProjectSource()`
+    now really throws `UserError`, which its doc comment had claimed all along.
+  - `ApproveChangeset.tsx` → 3 new `error.changeset.*` keys; the status-based
+    branch it already had is now the ONLY branch.
+- [DONE] (AQU-820) 2 of the 9 audited sites are FALSE POSITIVES, verified, no
+  change made — same reason as `cloud-projects.ts:366`:
+  - `frontier/admin.ts:142` — `readError(res)`'s return feeds
+    `new UserError(res.status, <here>)`, i.e. the `rawBody` parameter. It lands
+    on `.raw`/`.cause`, never on `.message`.
+  - `diarization/run-diarization.ts:114` — `ProjectWorkspace` stores the thrown
+    message in `diarizeError` but only ever reads it as a BOOLEAN (line 4913,
+    picking the keyed `nav.fileMenu.diarizeFailed` label). The string itself
+    never renders. The module's other messages ("diarization cancelled",
+    "diarization timed out") confirm the intent: these are diagnostics.
+- [DONE] (AQU-820) The 4 non-keyed hardcoded fallbacks are keyed, plus
+  `login()`'s own messages which wave 2 deliberately left:
+  `auth.login.failed` (new) covers Login.tsx, FrontierLoginForm, and both of
+  `login()`'s non-401 throws; `auth.login.invalidCredentials` (new) covers the
+  401. FrontierSignupForm reuses `auth.signup.failedGeneric` and
+  FrontierForgotPasswordForm reuses `auth.resetPassword.failedToSend` rather
+  than minting near-duplicates. `login()` no longer puts `(${res.status})` in
+  the visible message — `FrontierAuthError.status` already carried it.
+  Regression coverage: the 6 lib/page tests that ASSERTED the old passthrough
+  are inverted (they encoded the bug), and `parse-document.test.ts` is new.
 - [DONE] (AQU-820) `messageForStatus()` in src/lib/errors/user-error.ts — the 9 hardcoded
   HTTP-status sentences (400/401/403/404/409/410/429/5xx/default) plus the 2 in
   `toUserFacingError` (offline, generic fallback) are now keyed under `error.network.*` in
@@ -171,10 +224,8 @@
   words `nav.*` also owns; one collision ("Terminology") already surfaced and was deduped.
   Several more (`Members`, `Teams`, `Project settings`) will collide once the org/settings
   sweeps add their keys. Decide ownership before wave 4 rather than minting exceptions.
-- [OPEN] (ws07-remainder) ~9 verbatim `body.error` sites remain, listed in WS-07's handoff
-  section: SourceLinkSection, monday/api, terminology/subscriptions-api, agent/artifact-upload,
-  frontier/admin, frontier/parse-document, sync/archive, diarization/run-diarization,
-  ApproveChangeset.
+- [DONE] (ws07-remainder) All 9 closed: 7 fixed, 2 false positives (frontier/admin,
+  diarization/run-diarization — neither string reaches the DOM). See the WS-07 section.
 - [OPEN] (ungrouped-sentinel) `group-by-corpus.ts` / `section-index.ts` "Ungrouped" is a
   load-bearing sentinel compared by `AssignModal.tsx:293,608` and `ExpandableFileList.tsx:132`.
   Needs a stable identity key split from the display label before it can be localized.

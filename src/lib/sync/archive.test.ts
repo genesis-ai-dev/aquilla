@@ -38,17 +38,21 @@ describe("archiveProjectRemote", () => {
     expect((await archiveProjectRemote("p1", "jwt", API)).kind).toBe("local-only")
   })
 
-  it("returns forbidden with parsed message on 403", async () => {
+  // AQU-820: ProjectOverview/ArchivedProjects render `res.message` verbatim, so
+  // it is the keyed status sentence, never the raw (untranslated) server string.
+  it("returns forbidden with our keyed message, not the server's text, on 403", async () => {
     globalThis.fetch = vi.fn(
       async () =>
         new Response(JSON.stringify({ error: "only owners can archive" }), { status: 403 })
     ) as typeof fetch
     const r = await archiveProjectRemote("p1", "jwt", API)
     expect(r.kind).toBe("forbidden")
-    if (r.kind === "forbidden") expect(r.message).toBe("only owners can archive")
+    if (r.kind === "forbidden") {
+      expect(r.message).toBe("You don't have permission to do that for this project.")
+    }
   })
 
-  it("returns error for other statuses", async () => {
+  it("returns error with our keyed message for other statuses", async () => {
     globalThis.fetch = vi.fn(
       async () => new Response(JSON.stringify({ error: "boom" }), { status: 500 })
     ) as typeof fetch
@@ -56,7 +60,7 @@ describe("archiveProjectRemote", () => {
     expect(r.kind).toBe("error")
     if (r.kind === "error") {
       expect(r.status).toBe(500)
-      expect(r.message).toBe("boom")
+      expect(r.message).toBe("Something went wrong on the server. Please try again in a moment.")
     }
   })
 

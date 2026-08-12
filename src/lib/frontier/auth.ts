@@ -24,19 +24,9 @@ import {
   patchSessionEmails,
   saveSession,
 } from "./session-store";
-import { CATALOGS } from "../i18n/messages";
-import type { MessageKey } from "../i18n/messages/en";
-import { DEFAULT_LOCALE, normalizeLocale } from "../i18n/locales";
-import { readStoredLocale } from "../i18n/store";
-import { translate, type TVars } from "../i18n/translate";
-
-// This module runs outside React (plain fetch-helper code, no hooks). `t()`
-// resolves the active locale straight from storage, mirroring the
-// provider-less fallback in I18nProvider.tsx — see AQU-820/AQU-832.
-function t(key: MessageKey, vars?: TVars): string {
-  const locale = normalizeLocale(readStoredLocale());
-  return translate(CATALOGS[locale] ?? CATALOGS[DEFAULT_LOCALE], key, vars, locale);
-}
+// This module runs outside React (plain fetch-helper code, no hooks), so it
+// uses the standalone `t()` — see AQU-820/AQU-832.
+import { t } from "../i18n/standalone";
 
 export class FrontierAuthError extends Error {
   public status: number;
@@ -77,16 +67,18 @@ export async function login(
   if (res.status === 202) {
     const body = (await res.json()) as { status?: string };
     if (body.status !== "migration_required") {
-      throw new FrontierAuthError("Login failed (202)", 202);
+      throw new FrontierAuthError(t("auth.login.failed"), 202);
     }
     options.onMigrationRequired?.();
     res = await requestLogin(args, true);
   }
   if (res.status === 401) {
-    throw new FrontierAuthError("Invalid username or password", 401);
+    throw new FrontierAuthError(t("auth.login.invalidCredentials"), 401);
   }
   if (!res.ok) {
-    throw new FrontierAuthError(`Login failed (${res.status})`, res.status);
+    // The status stays on the error object for diagnostics; it isn't in the
+    // message, which is the string components render verbatim (AQU-820).
+    throw new FrontierAuthError(t("auth.login.failed"), res.status);
   }
   const data = (await res.json()) as AuthResponse;
   return finalizeSession(args.username, data);

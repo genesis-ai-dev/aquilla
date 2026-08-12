@@ -9,6 +9,8 @@
  */
 
 import { AUTH_BASE } from "../frontier/auth"
+import type { MessageKey } from "../i18n/messages/en"
+import { t } from "../i18n/standalone"
 import type { MondayMapping } from "./types"
 
 function authHeaders(jwt: string): HeadersInit {
@@ -28,16 +30,22 @@ export class MondayApiError extends Error {
   }
 }
 
-async function readError(res: Response, fallback: string): Promise<never> {
-  let detail = fallback
+/**
+ * AQU-820: the message is OURS — a translated sentence chosen by the call site.
+ * The server's `{ error, detail }` is untranslated and often a raw diagnostic,
+ * so it is kept on `cause` for DevTools rather than shown to the user.
+ */
+async function readError(res: Response, fallbackKey: MessageKey): Promise<never> {
+  let detail = ""
   try {
     const body = (await res.json()) as { error?: string; detail?: string }
-    if (body?.error) detail = body.error
-    else if (body?.detail) detail = body.detail
+    detail = body?.error || body?.detail || ""
   } catch {
-    // non-JSON body; keep fallback
+    // non-JSON body; nothing to preserve
   }
-  throw new MondayApiError(detail, res.status)
+  const err = new MondayApiError(t(fallbackKey), res.status)
+  err.cause = `HTTP ${res.status}${detail ? ` — ${detail.slice(0, 400)}` : ""}`
+  throw err
 }
 
 // ── Shapes (mirror the contract) ───────────────────────────────────────────
@@ -105,7 +113,7 @@ export async function fetchMondayConnection(
   const res = await fetch(`${AUTH_BASE}/api/v2/monday/orgs/${orgId}/connection`, {
     headers: authHeaders(jwt),
   })
-  if (!res.ok) await readError(res, "Failed to load Monday connection status")
+  if (!res.ok) await readError(res, "error.monday.loadConnection")
   return (await res.json()) as MondayConnectionStatus
 }
 
@@ -124,7 +132,7 @@ export async function startMondayConnect(
     headers: authHeaders(jwt),
     body: JSON.stringify(backTo ? { backTo } : {}),
   })
-  if (!res.ok) await readError(res, "Failed to start Monday connection")
+  if (!res.ok) await readError(res, "error.monday.startConnection")
   return (await res.json()) as { url: string }
 }
 
@@ -163,7 +171,7 @@ export async function deleteMondayConnection(jwt: string, orgId: number): Promis
     method: "DELETE",
     headers: authHeaders(jwt),
   })
-  if (!res.ok) await readError(res, "Failed to disconnect Monday")
+  if (!res.ok) await readError(res, "error.monday.disconnect")
 }
 
 // ── Boards ─────────────────────────────────────────────────────────────────
@@ -173,7 +181,7 @@ export async function fetchMondayBoards(jwt: string, orgId: number): Promise<Mon
   const res = await fetch(`${AUTH_BASE}/api/v2/monday/orgs/${orgId}/boards`, {
     headers: authHeaders(jwt),
   })
-  if (!res.ok) await readError(res, "Failed to load Monday boards")
+  if (!res.ok) await readError(res, "error.monday.loadBoards")
   const body = (await res.json()) as { boards?: MondayBoard[] }
   return body.boards ?? []
 }
@@ -188,7 +196,7 @@ export async function fetchMondayBoardStructure(
     `${AUTH_BASE}/api/v2/monday/orgs/${orgId}/boards/${encodeURIComponent(boardId)}/structure`,
     { headers: authHeaders(jwt) },
   )
-  if (!res.ok) await readError(res, "Failed to load board structure")
+  if (!res.ok) await readError(res, "error.monday.loadBoardStructure")
   return (await res.json()) as MondayBoardStructure
 }
 
@@ -199,7 +207,7 @@ export async function fetchMondayLink(jwt: string, projectId: string): Promise<M
   const res = await fetch(`${AUTH_BASE}/api/v2/monday/projects/${projectId}/link`, {
     headers: authHeaders(jwt),
   })
-  if (!res.ok) await readError(res, "Failed to load Monday link")
+  if (!res.ok) await readError(res, "error.monday.loadLink")
   return (await res.json()) as MondayLinkStatus
 }
 
@@ -217,7 +225,7 @@ export async function putMondayLink(
     headers: authHeaders(jwt),
     body: JSON.stringify(body),
   })
-  if (!res.ok) await readError(res, "Failed to save Monday link")
+  if (!res.ok) await readError(res, "error.monday.saveLink")
   const out = (await res.json()) as { link: MondayBoardLink; warnings?: string[] }
   return { link: out.link, warnings: out.warnings ?? [] }
 }
@@ -233,7 +241,7 @@ export async function patchMondayLink(
     headers: authHeaders(jwt),
     body: JSON.stringify(body),
   })
-  if (!res.ok) await readError(res, "Failed to update Monday link")
+  if (!res.ok) await readError(res, "error.monday.updateLink")
   // Accept both `{ link }` (PUT-style envelope) and a bare link object.
   const out = (await res.json()) as MondayBoardLink | { link: MondayBoardLink }
   return "link" in out && typeof out.link === "object" ? out.link : (out as MondayBoardLink)
@@ -245,7 +253,7 @@ export async function deleteMondayLink(jwt: string, projectId: string): Promise<
     method: "DELETE",
     headers: authHeaders(jwt),
   })
-  if (!res.ok) await readError(res, "Failed to remove Monday link")
+  if (!res.ok) await readError(res, "error.monday.removeLink")
 }
 
 // ── AI configure + sync ────────────────────────────────────────────────────
@@ -264,7 +272,7 @@ export async function analyzeMondayMapping(
     headers: authHeaders(jwt),
     body: JSON.stringify(body),
   })
-  if (!res.ok) await readError(res, "AI configuration failed")
+  if (!res.ok) await readError(res, "error.monday.analyze")
   return (await res.json()) as { proposal: MondayMapping; summary: string }
 }
 
@@ -274,6 +282,6 @@ export async function syncMondayNow(jwt: string, projectId: string): Promise<Mon
     method: "POST",
     headers: authHeaders(jwt),
   })
-  if (!res.ok) await readError(res, "Sync failed")
+  if (!res.ok) await readError(res, "error.monday.sync")
   return (await res.json()) as MondaySyncResult
 }

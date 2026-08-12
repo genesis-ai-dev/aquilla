@@ -75,6 +75,8 @@ Gate:
 | --- | --- | --- | --- |
 | 1 | 2026-08-12 | WS-01 import-merge, WS-02 lint-guard, WS-03 dead-code, WS-04 standard-relax | **MERGED, gate green** |
 | 2 | 2026-08-12 | WS-05 trunk-tables, WS-06 lib-labels, WS-07 error-wiring | **MERGED, gate green** |
+| 2b | 2026-08-12 | translation of the 106 new keys (4 locales) + e2e-note fixup | **MERGED, verified live in Arabic** |
+| 3 | 2026-08-12 | WS-08 roles, WS-09 formatters, WS-10 RTL | **MERGED, gate green** |
 
 ## §3 Workstream registry
 
@@ -102,6 +104,17 @@ Gate:
 
 **Wave 1 gate: tsc 0 · vitest 768 files / 7109 tests green · i18n:check 1337 covered · eslint exit 0.**
 **Wave 2 gate: tsc 0 · vitest 769 files / 7121 tests green · i18n:check 1441 covered · eslint exit 0.**
+
+| 08-12 | ext session | c9686cffc | 0 | green | AQU-820: closed 7 of WS-07's 9 handoff sites; found 2 were false positives and left them |
+| 08-12 | WS-09 formatters | ede940eb2 | 0 | green | 58/70 locale-blind sites migrated; Intl.ListFormat; bidi isolate; forced latn numbering to protect plural selection |
+| 08-12 | WS-08 roles | d2a659331 | 0 | green | common.role.* (16 keys); 30 files migrated; roleName() stays canonical for comparisons; 2nd `+"s"` bug fixed |
+| 08-12 | WS-10 RTL | 98d645b08 | 0 | green | 520/677 utilities → logical; documented leave-list for media timelines and dir=ltr panes |
+| 08-12 | orchestrator | — | 0 | green | resolved 3 formatter-vs-direction conflicts by keeping WS-09's formatting AND applying WS-10's logical classes |
+
+**Wave 3 gate: tsc 0 · vitest 7141 tests green · i18n:check 1483 covered · eslint exit 0.**
+Residual after wave 3: physical-direction utilities in `components/org` 69+ → **5**;
+locale-blind formatter calls 66 → **6** (all documented exclusions: date-picker/calendar
+locked to en-US, and 4 sandboxed parser modules with no locale across the boundary).
 
 ### Lesson for wave 3 — isolated worktrees cannot see each other's new keys
 WS-05 and WS-06 each minted a key for the English "Terminology" and neither could

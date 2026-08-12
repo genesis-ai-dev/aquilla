@@ -5801,6 +5801,13 @@ function EditorRow({
         ) : (
           <div
             data-showcase="editor.source"
+            // Session-replay mask (docs/OPSEC.md). PostHog masks inputs, but
+            // scripture source and draft target text are rendered as page
+            // text, not into an <input> — so without this attribute they were
+            // replayed verbatim to a third-party processor. Scoped to the two
+            // text surfaces rather than the whole table so replays stay
+            // diagnosable: chrome, controls and status still record.
+            data-ph-mask=""
             ref={sourceColRef}
             className={cn(
               // The showcase node IS the text surface so it fills the whole
@@ -5940,6 +5947,8 @@ function EditorRow({
             ever-present chevron at the right edge. */}
         <div
           data-showcase="editor.target"
+          // See the source column above — same session-replay mask.
+          data-ph-mask=""
           className={cn(
             "relative flex flex-col pl-3 pr-9 transition-opacity",
             isSynthBusy && "opacity-70",

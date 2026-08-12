@@ -7,8 +7,58 @@ import { secureCompare as constantTimeEqual } from "./lib/secure-compare"
 
 export interface AdminEnv {
   SNAPSHOTS: R2Bucket
+  /**
+   * Dedicated admin bearer. Preferred over SYNC_SECRET_KEY; see
+   * `adminCredential` for the migration ordering.
+   */
+  ADMIN_SECRET?: string
   SYNC_SECRET_KEY?: string
   R2_KEY_PREFIX?: string
+}
+
+/**
+ * Which secret guards `/admin/*`, and why there are two.
+ *
+ * `SYNC_SECRET_KEY` is the *token-signing key*: anything holding it can mint a
+ * sync token for any project. Accepting it as a plaintext bearer means every
+ * ops invocation of an admin route puts that key into shell history, terminal
+ * scrollback, and any intermediary's request log — a single careless paste is
+ * a full compromise of the trust tree. That is OPS-2 of
+ * docs/OPSEC-REVIEW-2026-08-10.md, and it is a secrets-provisioning problem
+ * rather than a code bug: the code would be fine if the value were dedicated.
+ *
+ * So this prefers `ADMIN_SECRET` and falls back to `SYNC_SECRET_KEY` when it
+ * is unbound. The fallback is what makes the change deployable unattended —
+ * flipping the check over outright would 401 every admin call in any
+ * environment where the new secret had not been provisioned yet, i.e. lock ops
+ * out of the routes they would need to fix it. The intended order is:
+ *
+ *   1. deploy this (both accepted; nothing breaks),
+ *   2. `wrangler secret put ADMIN_SECRET` per environment,
+ *   3. cut callers over,
+ *   4. delete the fallback branch below — at which point the signing key stops
+ *      being an admin credential.
+ *
+ * Until step 4 the exposure is unchanged; what this buys is that step 2 can
+ * happen whenever an operator gets to it, without a coordinated deploy.
+ */
+export function adminCredential(
+  env: Pick<AdminEnv, "ADMIN_SECRET" | "SYNC_SECRET_KEY">,
+): { secret: string; source: "admin-secret" | "sync-secret-key-fallback" } | null {
+  // ADMIN_SECRET is trimmed so an unset-but-present secret ("" or whitespace,
+  // which is how a cleared Cloudflare secret can surface) does not shadow the
+  // fallback and lock ops out of the routes they would use to fix it.
+  const dedicated = env.ADMIN_SECRET?.trim()
+  if (dedicated) return { secret: dedicated, source: "admin-secret" }
+  // SYNC_SECRET_KEY is deliberately NOT trimmed: it is compared against a
+  // bearer that auth-worker builds from its own copy of the same value,
+  // untrimmed. Trimming on one side only would 401 every call if the secret
+  // ever carried stray whitespace. This preserves the pre-ADMIN_SECRET
+  // behaviour exactly, which is the point of a fallback.
+  if (env.SYNC_SECRET_KEY) {
+    return { secret: env.SYNC_SECRET_KEY, source: "sync-secret-key-fallback" }
+  }
+  return null
 }
 
 function r2KeyPrefix(env: Pick<AdminEnv, "R2_KEY_PREFIX">): string {
@@ -20,9 +70,9 @@ function r2KeyPrefix(env: Pick<AdminEnv, "R2_KEY_PREFIX">): string {
  * Handles DELETE /admin/files/:projectId/:fileId. Returns null when the path
  * isn't an admin route so the caller can fall through to partyserver.
  *
- * Auth: Authorization: Bearer ${SYNC_SECRET_KEY}. Reuses the JWT-signing
- * secret as a shared admin key — only frontier-server (which already holds
- * SYNC_SECRET_KEY for token signing) can call this.
+ * Auth: `Authorization: Bearer ${ADMIN_SECRET}`, falling back to
+ * `SYNC_SECRET_KEY` while that secret is still being provisioned. See
+ * `adminCredential` for why both are accepted and how the fallback retires.
  */
 export async function handleAdminRequest(
   request: Request,
@@ -39,8 +89,8 @@ export async function handleAdminRequest(
 
   // Auth gate applies to every recognized admin route.
   const auth = request.headers.get("Authorization") ?? ""
-  const expected = env.SYNC_SECRET_KEY ? `Bearer ${env.SYNC_SECRET_KEY}` : null
-  if (!expected || !constantTimeEqual(auth, expected)) {
+  const credential = adminCredential(env)
+  if (!credential || !constantTimeEqual(auth, `Bearer ${credential.secret}`)) {
     return new Response("unauthorized", { status: 401 })
   }
 

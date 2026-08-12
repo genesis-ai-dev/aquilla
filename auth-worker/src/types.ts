@@ -46,9 +46,14 @@ export interface Env {
   ALGORITHM: string
   ACCESS_TOKEN_EXPIRE_MINUTES: string
 
-  // Sync-token signing AND admin auth to aquilla-sync-worker. Shared
-  // between identity and the sync worker.
+  // Sync-token signing, and — until ADMIN_SECRET is provisioned on both
+  // workers — admin auth to aquilla-sync-worker. Shared between identity and
+  // the sync worker.
   SYNC_SECRET_KEY?: string
+
+  /** Dedicated bearer for aquilla-sync-worker's /admin/* routes. Must match
+   *  the sync worker's own ADMIN_SECRET; provision both together (OPS-2). */
+  ADMIN_SECRET?: string
 
   /** aquilla-sync-worker base URL for archive / file-delete notifications. */
   SYNC_WORKER_URL?: string

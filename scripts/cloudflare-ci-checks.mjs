@@ -7,11 +7,17 @@ const ROOT_LANE = { name: "root", steps: [["pnpm", ["test"]]] }
 // its own so it shares an already-required check — a secret scan that can be
 // merged past is decoration. This script is the gate that actually runs on
 // pull requests (AQU-564); the ci.yml lint job mirrors it for dispatch runs.
+// The dependency audit rides here for the same reason as the secret scan, and
+// gates on *triage* rather than on the advisory count — see
+// scripts/dependency-audit.ts. Closes OPS-6 of docs/OPSEC-REVIEW-2026-08-10.md,
+// which recorded that nothing prevented the next advisory; the next advisory
+// (a DOMPurify XSS) landed two days later.
 const LINT_LANE = {
   name: "lint",
   steps: [
     ["pnpm", ["lint"]],
     ["pnpm", ["run", "scan:secrets"]],
+    ["pnpm", ["run", "audit:deps"]],
   ],
 }
 const IDENTITY_LANE = { name: "identity", steps: [["pnpm", ["run", "build:workers-build:identity"]]] }

@@ -485,6 +485,10 @@ function truncateUtf8(value: string, maxBytes: number): string {
  * field through which model output could slip. */
 function safeEventString(value: unknown, maxChars = CONTEXTUAL_EVENT_DETAIL_STRING_MAX_CHARS): string | null {
   if (typeof value !== "string") return null
+  /* Stripping control characters is the point here: this sanitises model
+   * output before storage so NULs and escape sequences cannot ride into a
+   * log line or a terminal. */
+  // eslint-disable-next-line no-control-regex
   const collapsed = value.replace(/[\u0000-\u001f\u007f]+/g, " ").trim().slice(0, maxChars)
   if (!collapsed) return null
   return detectSecret(collapsed) ? "[redacted]" : collapsed
@@ -977,6 +981,9 @@ const REDACTED_RUN_ERROR = "Autopilot error details were redacted because they m
 function sanitizeRunError(value: string | null | undefined): string | null {
   if (value == null) return null
   const collapsed = value
+    // Stripping control characters is the point here: run errors are echoed
+    // back and stored, so NULs and escape sequences must not ride along.
+    // eslint-disable-next-line no-control-regex
     .replace(/[\u0000-\u001f\u007f]+/g, " ")
     .replace(/\s+/g, " ")
     .trim()

@@ -10,3 +10,8 @@ SYNC_SECRET_KEY="test-sync-secret-key"
 # local dev while the client isn't yet fetching /sync-token. DO NOT set this
 # in production — prod default (unset) enforces strict auth.
 ALLOW_UNAUTHENTICATED="true"
+
+# Dedicated bearer for /admin/* routes. When unset, those routes fall back to
+# accepting SYNC_SECRET_KEY (see sync-worker/src/admin.ts). Set the SAME value
+# in auth-worker's .dev.vars — it calls /admin/files/* for R2 cleanup.
+ADMIN_SECRET="test-admin-secret"

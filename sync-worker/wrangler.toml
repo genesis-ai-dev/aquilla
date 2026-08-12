@@ -97,6 +97,25 @@ id = "69bcc10e67464f2eaf4fe91a9141e7cd"
 #   strict auth (reject all WS connections without a valid sync-token JWT)
 #   — the intended prod default. If you need to disable auth in prod for
 #   some reason, set ALLOW_UNAUTHENTICATED="true" via `wrangler secret put`.
+#
+#   ADMIN_SECRET guards /admin/*. PROVISION THIS — until it is set, those
+#   routes fall back to accepting SYNC_SECRET_KEY as a plaintext bearer, which
+#   puts the token-signing key into shell history on every ops call (OPS-2 of
+#   docs/OPSEC-REVIEW-2026-08-12.md).
+#
+#   PROVISION ON BOTH WORKERS, SAME VALUE, IN ONE SITTING. auth-worker calls
+#   DELETE /admin/files/... to clean up R2 when a file is deleted, and that
+#   call only logs a warning if it fails. Setting ADMIN_SECRET here takes
+#   effect immediately and stops the signing key from being accepted, so
+#   setting it here alone makes every file delete leave its blobs in R2 with
+#   nothing but a log line to say so. Per environment:
+#     secret=$(openssl rand -base64 32)
+#     printf %s "$secret" | wrangler secret put ADMIN_SECRET [--env <env>]
+#     printf %s "$secret" | wrangler secret put ADMIN_SECRET [--env <env>] \
+#       --config ../auth-worker/wrangler.toml
+#   Generate a value for this purpose only — never a copy of SYNC_SECRET_KEY,
+#   which would preserve the exact property the dedicated secret removes.
+#   See sync-worker/src/admin.ts (`adminCredential`) for the retirement steps.
 
 [observability]
 enabled = true

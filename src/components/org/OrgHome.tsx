@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
-import { Link, useNavigate } from "react-router-dom"
+import { Link, Navigate, useLocation, useNavigate } from "react-router-dom"
 import { AppShell } from "@/components/AppShell"
 import { LoadingOverlay } from "@/components/ui/loading-overlay"
 import { Skeleton } from "@/components/ui/skeleton"
 import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
 import { useActiveOrg } from "@/context/OrgContext"
-import { membersPath, orgHomePath } from "@/lib/navigation/org-paths"
+import { ALL_ORGS_PARAM, membersPath, orgHomePath, parseOrgPath } from "@/lib/navigation/org-paths"
+import { resolveAllOrgsLanding } from "@/lib/navigation/all-orgs-landing"
 import type { OrgSummary } from "@/lib/frontier/orgs"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { getPortfolio, getPortfolios, translatedPct, validatedPct, attentionRank, audioPct, deadlineStatus, languagePairLabel, type PortfolioProject } from "@/lib/frontier/portfolio"
@@ -27,6 +28,7 @@ import { RoleLabel } from "@/components/RoleLabel"
 import { UserError } from "@/lib/errors/user-error"
 import { notifySessionExpired } from "@/lib/errors/session-expired-signal"
 import { ProjectCreateDialog } from "@/components/ProjectCreateDialog"
+import { OrgCreateDialog } from "./OrgCreateDialog"
 import { OrgSetupChecklist } from "./OrgSetupChecklist"
 import { OrgProjectsDataTable } from "./OrgProjectsDataTable"
 import { LaneChips } from "./LaneChips"
@@ -555,11 +557,20 @@ export function OrgHome() {
     accessibleProjects,
     accessibleProjectsLoading,
     isLoading: orgLoading,
+    error: orgsError,
     setActiveOrg,
+    refresh: refreshOrgs,
     refreshAccessibleProjects,
   } = useActiveOrg()
   const { session, loading: sessionLoading } = useFrontierSession()
   const navigate = useNavigate()
+  const location = useLocation()
+  // AQU-864: this component is mounted both at `/orgs/all` and (via
+  // OrgHomeRoute) at `/orgs/:orgId`. The landing guard below must only ever
+  // apply to the former — `activeOrgId` is briefly null on the first render
+  // after navigating into a concrete org, and redirecting on that would hijack
+  // a perfectly good org route.
+  const isAllOrgsRoute = parseOrgPath(location.pathname)?.orgKey === ALL_ORGS_PARAM
   const jwt = session?.jwt ?? null
   const portfolioScopeKey = !jwt || orgLoading
     ? null
@@ -589,6 +600,9 @@ export function OrgHome() {
   const [resolvedPortfolioScopeKey, setResolvedPortfolioScopeKey] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [projectQuery, setProjectQuery] = useState("")
+  // AQU-864: the no-organization empty state needs a working action; without a
+  // real org there is nothing to create a project in, so the offer is the org.
+  const [orgCreateOpen, setOrgCreateOpen] = useState(false)
   const [orgQuery, setOrgQuery] = useState("")
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all")
   const [projectLens, setProjectLens] = useState<ProjectLens>(readProjectLens)
@@ -731,6 +745,47 @@ export function OrgHome() {
         <OrgHomeLoadingTemplate />
       </LoadingOverlay>
     )
+  }
+
+  // AQU-864: `/orgs/all` has something to aggregate only at 2+ memberships.
+  // Below that it used to render the single-org dashboard with no org in
+  // scope — a "Your organization is ready" card with 0/0/0 stats, no create
+  // dialog (it needs an org id) and an "Invite your team" button that
+  // navigated nowhere. Send the caller to the surface that does list what they
+  // can reach instead of stranding them on a page with nothing clickable.
+  if (isAllOrgsRoute) {
+    const landing = resolveAllOrgsLanding({ orgs, accessibleProjects, orgsError })
+    if (landing.kind === "org") {
+      return <Navigate to={orgHomePath(landing.orgId)} replace />
+    }
+    if (landing.kind === "shared") {
+      return <Navigate to="/shared" replace />
+    }
+    if (landing.kind === "error") {
+      // An org-list failure leaves `orgs` empty just like a genuine zero.
+      // Say so and offer a retry rather than painting a fake-empty workspace.
+      return (
+        <AppShell
+          sidebar={<OrgSidebar />}
+          header={<OrgBreadcrumb section="Projects" />}
+          statusBar={null}
+          main={
+            <Page size="wide">
+              <PageHeader title="All organizations" />
+              <EmptyState
+                icon={Building2}
+                title="Couldn't load your organizations"
+                description={orgsError ?? "Something went wrong loading your workspace."}
+                action={
+                  <Button onClick={() => { void refreshOrgs() }}>Try again</Button>
+                }
+              />
+            </Page>
+          }
+        />
+      )
+    }
+    // "portfolio" and "empty" both render below.
   }
 
   // Rollup stats
@@ -1145,7 +1200,23 @@ export function OrgHome() {
                   </div>
 
                   {/* Status filter + admin-style project table */}
-                  {projects.length === 0 ? (
+                  {projects.length === 0 && activeOrgId == null ? (
+                    /* AQU-864: no org in scope at all — the caller is a member
+                       of none. "Your organization is ready" was a lie here, and
+                       both its actions needed an org id they didn't have. Offer
+                       the only thing that moves them forward: create one. */
+                    <EmptyState
+                      data-testid="no-organizations-empty"
+                      icon={Building2}
+                      title="You're not part of an organization yet"
+                      description="Create one to start a translation project, or ask a teammate to invite you to theirs."
+                      action={
+                        <Button onClick={() => setOrgCreateOpen(true)}>
+                          Create organization
+                        </Button>
+                      }
+                    />
+                  ) : projects.length === 0 ? (
                     <EmptyState
                       icon={FolderPlus}
                       title="Your organization is ready"
@@ -1204,6 +1275,17 @@ export function OrgHome() {
                   )}
                 </>
               )}
+
+              {/* AQU-864: the action behind the no-organization empty state. */}
+              <OrgCreateDialog
+                open={orgCreateOpen}
+                onOpenChange={setOrgCreateOpen}
+                onCreated={(orgId) => {
+                  setActiveOrg(orgId)
+                  void refreshOrgs()
+                  navigate(orgHomePath(orgId))
+                }}
+              />
 
               {jwt && !isAllOrgs && activeOrgId != null && (
                 <SectionVisibilityGate

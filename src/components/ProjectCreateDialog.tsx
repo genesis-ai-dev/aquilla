@@ -47,6 +47,9 @@ import { ROLE } from "@/lib/frontier/roles"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import type { CloudProjectSummary } from "@/lib/sync/cloud-projects"
 import posthog from "@/lib/posthog"
+import { useT } from "@/lib/i18n/I18nProvider"
+import { RichMessage } from "@/lib/i18n/RichMessage"
+import type { TFunction } from "@/lib/i18n/I18nProvider"
 
 interface ProjectCreateDialogProps {
   onCreated: (project: ProjectRecord) => void
@@ -90,53 +93,51 @@ const FIELD_CLASS = "h-9 px-3 focus-visible:ring-2 focus-visible:ring-ring/35"
 /** Same cap as LanguagesSection's lane registry (settings.targetLanes entries). */
 const MAX_EXTRA_LANGUAGE_LENGTH = 64
 
-/**
- * AQU-538 creation fix (spec §5): the self-contained shape's target field
- * becomes multi-entry — first/primary stays the project's targetLanguage,
- * the rest land in settings.targetLanes via a follow-up PATCH after create.
- * That PATCH is best-effort: the project itself is already created and
- * should not be rolled back if it fails.
- */
-const EXTRA_LANGUAGES_WARNING =
-  "Project created; adding extra languages failed — add them in Settings → Languages."
-
 /** AQU-478: clone vs live — "a checkbox, not a fork" per the design spec §9.2. */
 type LinkMode = "clone" | "live"
 /** Which upstream lane becomes this project's source: sibling-language case
  *  ("use its source") vs chain case ("use its translations"). */
 type LinkConsumes = "source" | "target"
 
-const projectSchema = z
-  .object({
-    name: requiredString("Project name"),
-    sourceLanguage: requiredString("Source language"),
-    targetLanguage: optionalString,
-    // Self-contained shape only (spec §5): extras beyond the primary target,
-    // applied as settings.targetLanes after create. Ignored for other shapes.
-    extraLanguages: z.array(z.string()),
-    shape: z.enum(["self-contained", "source-only", "linked-target"]),
-    upstreamProjectId: optionalString,
-    linkMode: z.enum(["clone", "live"]),
-    linkConsumes: z.enum(["source", "target"]),
-  })
-  .superRefine((data, ctx) => {
-    if (data.shape !== "source-only" && !data.targetLanguage.trim()) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "Target language is required",
-        path: ["targetLanguage"],
-      })
-    }
-    if (data.shape === "linked-target" && !data.upstreamProjectId) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "Choose an upstream project",
-        path: ["upstreamProjectId"],
-      })
-    }
-  })
+// AQU-832: built inside the component (needs `t()` for the two superRefine
+// messages) rather than at module scope. `requiredString()`/`optionalString`
+// (src/lib/forms/schemas.ts) are a shared cross-workstream utility whose own
+// generated "X is required" messages are NOT localized here — see
+// docs/swarm/TRACES.md (SWARM-TODO: zod-validation-messages).
+function buildProjectSchema(t: TFunction) {
+  return z
+    .object({
+      name: requiredString("Project name"),
+      sourceLanguage: requiredString("Source language"),
+      targetLanguage: optionalString,
+      // Self-contained shape only (spec §5): extras beyond the primary target,
+      // applied as settings.targetLanes after create. Ignored for other shapes.
+      extraLanguages: z.array(z.string()),
+      shape: z.enum(["self-contained", "source-only", "linked-target"]),
+      upstreamProjectId: optionalString,
+      linkMode: z.enum(["clone", "live"]),
+      linkConsumes: z.enum(["source", "target"]),
+    })
+    .superRefine((data, ctx) => {
+      if (data.shape !== "source-only" && !data.targetLanguage.trim()) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: t("projectSettings.create.validationTargetLanguageRequired"),
+          path: ["targetLanguage"],
+        })
+      }
+      if (data.shape === "linked-target" && !data.upstreamProjectId) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: t("projectSettings.create.validationUpstreamProjectRequired"),
+          path: ["upstreamProjectId"],
+        })
+      }
+    })
+}
 
 export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppliedProjects }: ProjectCreateDialogProps) {
+  const t = useT()
   const { session } = useFrontierSession()
   const { projects: discoveredProjects } = useProjectsForNavigation(suppliedProjects == null)
   const linkableProjects = suppliedProjects ?? discoveredProjects
@@ -155,6 +156,7 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
     () => linkableProjects.filter((p) => !p.archivedAt),
     [linkableProjects],
   )
+  const projectSchema = useMemo(() => buildProjectSchema(t), [t])
 
   const form = useForm({
     defaultValues: {
@@ -174,7 +176,7 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
 
       const jwt = session?.jwt
       if (!jwt) {
-        setSubmitError("You need to be signed in to create a project.")
+        setSubmitError(t("projectSettings.create.errorSignInRequired"))
         return
       }
 
@@ -234,7 +236,7 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
         }
       } catch (err) {
         console.error("[project-create] failed:", err)
-        setSubmitError(err instanceof Error ? err.message : "Failed to create project. Please try again.")
+        setSubmitError(err instanceof Error ? err.message : t("projectSettings.create.errorGeneric"))
         return
       }
 
@@ -257,7 +259,7 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
         // in the still-open dialog is a NEW project: mint a fresh draft id so
         // it doesn't false-dedup onto the row we just created (AQU-712).
         draftProjectId.current = uuid()
-        setSubmitWarning(EXTRA_LANGUAGES_WARNING)
+        setSubmitWarning(t("projectSettings.create.extraLanguagesWarning"))
       } else {
         setOpen(false)
       }
@@ -284,11 +286,11 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger render={<Button />}>
         <Plus className="size-4" aria-hidden />
-        New Project
+        {t("projectSettings.create.trigger")}
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Create New Project</DialogTitle>
+          <DialogTitle>{t("projectSettings.create.dialogTitle")}</DialogTitle>
         </DialogHeader>
         <form
           id="project-create-form"
@@ -311,7 +313,7 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
                   const invalid = isFieldInvalid(field)
                   return (
                     <Field data-invalid={invalid}>
-                      <FieldLabel htmlFor="name">Project name</FieldLabel>
+                      <FieldLabel htmlFor="name">{t("projectSettings.info.nameLabel")}</FieldLabel>
                       <Input
                         id="name"
                         name={field.name}
@@ -319,7 +321,7 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
                         value={field.state.value}
                         onBlur={field.handleBlur}
                         onChange={(e) => field.handleChange(e.target.value)}
-                        placeholder="My Translation Project"
+                        placeholder={t("projectSettings.create.namePlaceholder")}
                         aria-invalid={invalid}
                       />
                       {invalid && <FieldError errors={field.state.meta.errors} />}
@@ -335,7 +337,7 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
                   return (
                     <Field data-invalid={invalid}>
                       <div className="flex items-center gap-1.5">
-                        <FieldLabel htmlFor="source">Source language</FieldLabel>
+                        <FieldLabel htmlFor="source">{t("projectSettings.info.sourceLanguageLabel")}</FieldLabel>
                         <LanguageFieldHint />
                       </div>
                       <Input
@@ -345,7 +347,7 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
                         value={field.state.value}
                         onBlur={field.handleBlur}
                         onChange={(e) => field.handleChange(e.target.value)}
-                        placeholder="English, Grade 7 English, es-419…"
+                        placeholder={t("projectSettings.create.sourceLanguagePlaceholder")}
                         aria-invalid={invalid}
                       />
                       {invalid && <FieldError errors={field.state.meta.errors} />}
@@ -366,7 +368,9 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
                           <Field data-invalid={invalid}>
                             <div className="flex items-center gap-1.5">
                               <FieldLabel htmlFor="target">
-                                {shape === "self-contained" ? "Target language(s)" : "Target language"}
+                                {shape === "self-contained"
+                                  ? t("projectSettings.create.targetLanguagesLabel")
+                                  : t("projectSettings.info.targetLanguageLabel")}
                               </FieldLabel>
                               <LanguageFieldHint />
                             </div>
@@ -377,7 +381,7 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
                               value={field.state.value}
                               onBlur={field.handleBlur}
                               onChange={(e) => field.handleChange(e.target.value)}
-                              placeholder="French, conversational Swahili, zh-Hant…"
+                              placeholder={t("projectSettings.create.targetLanguagePlaceholder")}
                               aria-invalid={invalid}
                             />
                             {invalid && <FieldError errors={field.state.meta.errors} />}
@@ -404,7 +408,7 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
 
             <details className="rounded-xl border px-3 py-2.5 [&[open]>summary]:mb-3">
               <summary className="text-xs font-medium text-muted-foreground select-none">
-                Advanced: project shape
+                {t("projectSettings.create.advancedShapeSummary")}
               </summary>
               <form.Field
                 name="shape"
@@ -417,21 +421,28 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
                     <label className="flex items-start gap-2.5 text-sm">
                       <RadioGroupItem value="self-contained" className="mt-0.5" />
                       <span>
-                        <strong>Self-contained</strong> — owns its source and target.
+                        <RichMessage
+                          k="projectSettings.create.shapeSelfContained"
+                          values={{ name: <strong>{t("projectSettings.create.shapeSelfContainedName")}</strong> }}
+                        />
                       </span>
                     </label>
                     <label className="flex items-start gap-2.5 text-sm">
                       <RadioGroupItem value="source-only" className="mt-0.5" />
                       <span>
-                        <strong>Source-only</strong> — a canonical source others link
-                        against. No target.
+                        <RichMessage
+                          k="projectSettings.create.shapeSourceOnly"
+                          values={{ name: <strong>{t("projectSettings.create.shapeSourceOnlyName")}</strong> }}
+                        />
                       </span>
                     </label>
                     <label className="flex items-start gap-2.5 text-sm">
                       <RadioGroupItem value="linked-target" className="mt-0.5" />
                       <span>
-                        <strong>Linked target</strong> — reads source from another
-                        project; owns only its target.
+                        <RichMessage
+                          k="projectSettings.create.shapeLinkedTarget"
+                          values={{ name: <strong>{t("projectSettings.create.shapeLinkedTargetName")}</strong> }}
+                        />
                       </span>
                     </label>
                   </RadioGroup>
@@ -449,13 +460,13 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
                           const invalid = isFieldInvalid(field)
                           return (
                             <Field data-invalid={invalid}>
-                              <FieldLabel htmlFor="upstream-project">Upstream project</FieldLabel>
+                              <FieldLabel htmlFor="upstream-project">{t("projectSettings.create.upstreamProjectLabel")}</FieldLabel>
                               <Select
                                 value={field.state.value}
                                 onValueChange={(value) => field.handleChange(value ?? "")}
                               >
                                 <SelectTrigger id="upstream-project" className="w-full" aria-invalid={invalid}>
-                                  <SelectValue placeholder="Choose a project to link from…" />
+                                  <SelectValue placeholder={t("projectSettings.create.upstreamProjectPlaceholder")} />
                                 </SelectTrigger>
                                 <SelectContent>
                                   <SelectGroup>
@@ -477,7 +488,7 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
                         name="linkMode"
                         children={(field) => (
                           <Field>
-                            <FieldLabel>Clone or live?</FieldLabel>
+                            <FieldLabel>{t("projectSettings.create.linkModeLabel")}</FieldLabel>
                             <RadioGroup
                               value={field.state.value}
                               onValueChange={(value) => field.handleChange(value as LinkMode)}
@@ -486,15 +497,19 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
                               <label className="flex items-start gap-2.5 text-sm">
                                 <RadioGroupItem value="live" className="mt-0.5" />
                                 <span>
-                                  <strong>Live</strong> — stays subscribed; upstream fixes
-                                  propagate here automatically.
+                                  <RichMessage
+                                    k="projectSettings.create.linkModeLive"
+                                    values={{ name: <strong>{t("projectSettings.sourceLink.modeLive")}</strong> }}
+                                  />
                                 </span>
                               </label>
                               <label className="flex items-start gap-2.5 text-sm">
                                 <RadioGroupItem value="clone" className="mt-0.5" />
                                 <span>
-                                  <strong>Clone</strong> — one-time snapshot; this project
-                                  becomes independent immediately.
+                                  <RichMessage
+                                    k="projectSettings.create.linkModeClone"
+                                    values={{ name: <strong>{t("projectSettings.sourceLink.modeClone")}</strong> }}
+                                  />
                                 </span>
                               </label>
                             </RadioGroup>
@@ -506,7 +521,7 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
                         name="linkConsumes"
                         children={(field) => (
                           <Field>
-                            <FieldLabel>What should become this project&apos;s source?</FieldLabel>
+                            <FieldLabel>{t("projectSettings.create.linkConsumesLabel")}</FieldLabel>
                             <RadioGroup
                               value={field.state.value}
                               onValueChange={(value) => field.handleChange(value as LinkConsumes)}
@@ -515,18 +530,19 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
                               <label className="flex items-start gap-2.5 text-sm">
                                 <RadioGroupItem value="source" className="mt-0.5" />
                                 <span>
-                                  <strong>Its source</strong> — sibling-translation case
-                                  (this project translates the same original text).
-                                  For same-org sibling languages, a target lane on the
-                                  upstream project is the recommended shape instead.
+                                  <RichMessage
+                                    k="projectSettings.create.linkConsumesSource"
+                                    values={{ name: <strong>{t("projectSettings.create.linkConsumesSourceName")}</strong> }}
+                                  />
                                 </span>
                               </label>
                               <label className="flex items-start gap-2.5 text-sm">
                                 <RadioGroupItem value="target" className="mt-0.5" />
                                 <span>
-                                  <strong>Its translations</strong> — chain case (this
-                                  project translates the upstream project&apos;s target,
-                                  e.g. French → Chaluba).
+                                  <RichMessage
+                                    k="projectSettings.create.linkConsumesTarget"
+                                    values={{ name: <strong>{t("projectSettings.create.linkConsumesTargetName")}</strong> }}
+                                  />
                                 </span>
                               </label>
                             </RadioGroup>
@@ -592,8 +608,12 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
               >
                 {isSubmitting && <Spinner data-icon="inline-start" />}
                 {isSubmitting
-                  ? (shape === "linked-target" ? "Creating & linking…" : "Creating…")
-                  : (shape === "linked-target" ? "Create & Link" : "Create Project")}
+                  ? (shape === "linked-target"
+                      ? t("projectSettings.create.submitCreatingAndLinking")
+                      : t("projectSettings.create.submitCreating"))
+                  : (shape === "linked-target"
+                      ? t("projectSettings.create.submitCreateAndLink")
+                      : t("projectSettings.create.submitCreate"))}
               </Button>
             )}
           />
@@ -629,6 +649,7 @@ function AddAsLaneRecommendation({
   targetLanguage: string
   onAdded: () => void
 }) {
+  const t = useT()
   const [status, setStatus] = useState<"idle" | "loading" | "success" | "error">("idle")
   const [message, setMessage] = useState<string | null>(null)
   // Auto-close is deferred so the success hint is actually perceivable
@@ -657,13 +678,13 @@ function AddAsLaneRecommendation({
     if (!project) return
     if (!jwt) {
       setStatus("error")
-      setMessage("You need to be signed in to add a lane.")
+      setMessage(t("projectSettings.create.laneRecommendationSignInError"))
       return
     }
     const trimmed = targetLanguage.trim()
     if (!trimmed) {
       setStatus("error")
-      setMessage("Enter a target language above first.")
+      setMessage(t("projectSettings.create.laneRecommendationEmptyTargetError"))
       return
     }
 
@@ -676,12 +697,12 @@ function AddAsLaneRecommendation({
       const lower = trimmed.toLowerCase()
       if (lower === defaultLane.toLowerCase()) {
         setStatus("error")
-        setMessage(`"${trimmed}" is already ${project.name}'s default target language.`)
+        setMessage(t("projectSettings.create.laneRecommendationAlreadyDefaultError", { lane: trimmed, projectName: project.name }))
         return
       }
       if (existingLanes.some((l) => l.toLowerCase() === lower)) {
         setStatus("error")
-        setMessage(`"${trimmed}" is already a lane on ${project.name}.`)
+        setMessage(t("projectSettings.create.laneRecommendationAlreadyLaneError", { lane: trimmed, projectName: project.name }))
         return
       }
 
@@ -693,7 +714,7 @@ function AddAsLaneRecommendation({
       )
       if (result.kind === "ok") {
         setStatus("success")
-        setMessage(`Added "${trimmed}" as a lane on ${project.name}. Open that project to start translating.`)
+        setMessage(t("projectSettings.create.laneRecommendationSuccess", { lane: trimmed, projectName: project.name }))
         posthog.capture("sibling lane added from create dialog", {
           upstream_project_id: project.id,
           lane: trimmed,
@@ -705,19 +726,19 @@ function AddAsLaneRecommendation({
       }
       if (result.kind === "conflict") {
         setStatus("error")
-        setMessage("Someone else updated that project's settings just now. Try again.")
+        setMessage(t("projectSettings.create.laneRecommendationConflictError"))
         return
       }
       if (result.kind === "forbidden") {
         setStatus("error")
-        setMessage(`You need maintainer access on ${project.name} to add a lane there.`)
+        setMessage(t("projectSettings.create.laneRecommendationForbiddenError", { projectName: project.name }))
         return
       }
       setStatus("error")
-      setMessage("Couldn't add the lane. Please try again.")
+      setMessage(t("projectSettings.create.laneRecommendationGenericError"))
     } catch (err) {
       setStatus("error")
-      setMessage(err instanceof Error ? err.message : "Couldn't add the lane. Please try again.")
+      setMessage(err instanceof Error ? err.message : t("projectSettings.create.laneRecommendationGenericError"))
     }
   }
 
@@ -727,9 +748,13 @@ function AddAsLaneRecommendation({
       data-testid="add-as-lane-panel"
     >
       <p className="text-sm">
-        <strong>Same source, new language?</strong> Add it as a target lane on{" "}
-        <strong>{upstreamProject.name}</strong> instead — no separate project to keep in
-        sync.
+        <RichMessage
+          k="projectSettings.create.laneRecommendation"
+          values={{
+            heading: <strong>{t("projectSettings.create.laneRecommendationHeading")}</strong>,
+            projectName: <strong>{upstreamProject.name}</strong>,
+          }}
+        />
       </p>
       <Button
         type="button"
@@ -741,7 +766,9 @@ function AddAsLaneRecommendation({
         onClick={() => void handleAddAsLane()}
       >
         {status === "loading" && <Spinner data-icon="inline-start" />}
-        {status === "loading" ? "Adding lane…" : `Add as lane on ${upstreamProject.name}`}
+        {status === "loading"
+          ? t("projectSettings.create.laneRecommendationAdding")
+          : t("projectSettings.create.laneRecommendationAddButton", { projectName: upstreamProject.name })}
       </Button>
       {message && status === "error" && (
         <FieldError className="mt-2 text-xs">{message}</FieldError>
@@ -768,18 +795,19 @@ function validateExtraLanguageDraft(
   candidate: string,
   primaryLanguage: string,
   languages: string[],
+  t: TFunction,
 ): string | null {
   const trimmed = candidate.trim()
-  if (!trimmed) return "Enter a language tag."
+  if (!trimmed) return t("projectSettings.create.extraLanguagesEmptyError")
   if (trimmed.length > MAX_EXTRA_LANGUAGE_LENGTH) {
-    return `Must be ${MAX_EXTRA_LANGUAGE_LENGTH} characters or fewer.`
+    return t("projectSettings.create.extraLanguagesTooLongError", { max: MAX_EXTRA_LANGUAGE_LENGTH })
   }
   const lower = trimmed.toLowerCase()
   if (lower === primaryLanguage.trim().toLowerCase()) {
-    return "This is already the primary target language."
+    return t("projectSettings.create.extraLanguagesDuplicatePrimaryError")
   }
   if (languages.some((l) => l.toLowerCase() === lower)) {
-    return "Already added."
+    return t("projectSettings.create.extraLanguagesAlreadyAddedError")
   }
   return null
 }
@@ -793,11 +821,12 @@ function ExtraTargetLanguages({
   languages: string[]
   onChange: (next: string[]) => void
 }) {
+  const t = useT()
   const [input, setInput] = useState("")
   const [error, setError] = useState<string | null>(null)
 
   function handleAdd() {
-    const validationError = validateExtraLanguageDraft(input, primaryLanguage, languages)
+    const validationError = validateExtraLanguageDraft(input, primaryLanguage, languages, t)
     if (validationError) {
       setError(validationError)
       return
@@ -812,8 +841,7 @@ function ExtraTargetLanguages({
   return (
     <div className="mt-2 flex flex-col gap-2">
       <FieldDescription>
-        Optional — add more target languages for this project (e.g. dialect variants
-        or parallel drafts of the same source).
+        {t("projectSettings.create.extraLanguagesDescription")}
       </FieldDescription>
       {languages.length > 0 && (
         <ul className="flex flex-wrap gap-1.5">
@@ -826,7 +854,7 @@ function ExtraTargetLanguages({
                 {lang}
                 <button
                   type="button"
-                  aria-label={`Remove ${lang}`}
+                  aria-label={t("projectSettings.create.extraLanguagesRemoveAriaLabel", { lang })}
                   className="text-muted-foreground hover:text-foreground"
                   onClick={() => onChange(languages.filter((l) => l !== lang))}
                 >
@@ -853,12 +881,12 @@ function ExtraTargetLanguages({
                 handleAdd()
               }
             }}
-            placeholder="e.g. fr-CA"
+            placeholder={t("projectSettings.create.extraLanguagesPlaceholder")}
             aria-invalid={invalid}
           />
           <Button type="button" variant="secondary" size="sm" data-testid="create-extra-lang-add" onClick={handleAdd}>
             <Plus className="me-1 h-3.5 w-3.5" />
-            Add
+            {t("common.add")}
           </Button>
         </div>
         {error && <FieldError className="text-xs">{error}</FieldError>}
@@ -868,13 +896,14 @@ function ExtraTargetLanguages({
 }
 
 function LanguageFieldHint() {
+  const t = useT()
   return (
     <Tooltip>
       <TooltipTrigger
         render={
           <button
             type="button"
-            aria-label="What can I enter here?"
+            aria-label={t("projectSettings.create.languageHintAriaLabel")}
             className="text-muted-foreground hover:text-foreground"
           />
         }
@@ -882,8 +911,7 @@ function LanguageFieldHint() {
         <Info className="h-3.5 w-3.5" aria-hidden="true" />
       </TooltipTrigger>
       <TooltipContent className="max-w-xs">
-        Any label works — a BCP-47 tag, a language name, or a register
-        description (e.g. "Grade 7 English", "conversational Swahili").
+        {t("projectSettings.create.languageHintTooltip")}
       </TooltipContent>
     </Tooltip>
   )

@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils"
 import {
   AUDIO_MEDIA_STRATEGY_LABELS, type AudioMediaStrategy,
 } from "@/lib/parsers/types"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 interface Props {
   value: AudioMediaStrategy
@@ -17,16 +18,15 @@ interface Props {
 const ORDER: AudioMediaStrategy[] = ["lazy", "eager", "stream", "manual"]
 
 export function AudioMediaStrategySection({ value, onChange }: Props) {
+  const t = useT()
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Audio loading</CardTitle>
+        <CardTitle>{t("projectSettings.audioMedia.title")}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
         <p className="text-sm text-muted-foreground">
-          Decide when audio recordings are downloaded from storage to this device.
-          You can switch any time without re-recording — only future loads are
-          affected.
+          {t("projectSettings.audioMedia.description")}
         </p>
         <div className="grid gap-2 sm:grid-cols-2">
           {ORDER.map((id) => {
@@ -45,8 +45,8 @@ export function AudioMediaStrategySection({ value, onChange }: Props) {
                 )}
                 aria-pressed={selected}
               >
-                <span className="font-medium">{label.name}</span>
-                <span className="text-xs text-muted-foreground">{label.description}</span>
+                <span className="font-medium">{t(label.nameKey)}</span>
+                <span className="text-xs text-muted-foreground">{t(label.descriptionKey)}</span>
               </button>
             )
           })}

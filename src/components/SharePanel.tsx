@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from "react"
 import { Copy, AlertCircle, Trash2 } from "lucide-react"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { formatDate } from "@/lib/i18n/format"
+import { RichMessage } from "@/lib/i18n/RichMessage"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -44,6 +45,7 @@ import {
 } from "@/lib/frontier/roles"
 import { RoleLabel } from "@/components/RoleLabel"
 import { useT } from "@/lib/i18n/I18nProvider"
+import type { MessageKey } from "@/lib/i18n/messages/en"
 
 interface SharePanelProps {
   open: boolean
@@ -63,13 +65,14 @@ const DEFAULT_INVITE_ROLE = ROLE.CONTRIBUTOR
 type Tab = "members" | "link"
 
 export function SharePanel({ open, onOpenChange, projectId, onSharesChanged }: SharePanelProps) {
+  const t = useT()
   const [tab, setTab] = useState<Tab>("members")
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="flex max-h-[90dvh] w-full max-w-xl flex-col overflow-hidden sm:max-w-xl">
         <DialogHeader>
-          <DialogTitle>Share Project</DialogTitle>
+          <DialogTitle>{t("projectSettings.share.dialogTitle")}</DialogTitle>
         </DialogHeader>
 
         <div className="mb-3 flex gap-2 border-b">
@@ -82,7 +85,7 @@ export function SharePanel({ open, onOpenChange, projectId, onSharesChanged }: S
                 : "text-muted-foreground"
             }`}
           >
-            Members
+            {t("projectSettings.share.tabMembers")}
           </button>
           <button
             type="button"
@@ -93,7 +96,7 @@ export function SharePanel({ open, onOpenChange, projectId, onSharesChanged }: S
                 : "text-muted-foreground"
             }`}
           >
-            Invite link
+            {t("projectSettings.share.tabInviteLink")}
           </button>
         </div>
 
@@ -113,6 +116,7 @@ export function SharePanel({ open, onOpenChange, projectId, onSharesChanged }: S
 }
 
 function MembersTab({ projectId }: { projectId: string }) {
+  const t = useT()
   // FrontierSession has no userId — server enforces self-grant rejection so we
   // pass null and skip the local self-block.
   const callerUserId = null
@@ -178,9 +182,9 @@ function MembersTab({ projectId }: { projectId: string }) {
     isLocked: m.role.source === "org" || m.role.source === "creator",
     lockedHint:
       m.role.source === "org"
-        ? "Remove from org to revoke"
+        ? t("projectSettings.share.lockedHintOrg")
         : m.role.source === "creator"
-          ? "Project creator"
+          ? t("projectSettings.share.lockedHintCreator")
           : undefined,
   }))
 
@@ -260,7 +264,7 @@ function MembersTab({ projectId }: { projectId: string }) {
     <div>
       {error && <p className="mb-2 text-xs text-destructive">{error}</p>}
       {isLoading && members.length === 0 ? (
-        <p className="text-xs text-muted-foreground">Loading…</p>
+        <p className="text-xs text-muted-foreground">{t("common.loading")}</p>
       ) : (
         <MembersPanel
           members={panelMembers}
@@ -280,7 +284,7 @@ function MembersTab({ projectId }: { projectId: string }) {
           onChangeRole={async (username, role) => { await add(username, role) }}
           scopeConfig={scopeConfig}
           suggestions={suggestions}
-          emptySuggestionsHint="All org members already have access to this project."
+          emptySuggestionsHint={t("projectSettings.share.emptySuggestionsHint")}
         />
       )}
     </div>
@@ -297,11 +301,11 @@ interface InviteLinkTabProps {
  * Active (unused + unexpired) invites are listed below with a revoke button.
  */
 /** Expiry options: days (number) or null = no expiry. Server default is 30 days. */
-const EXPIRY_OPTIONS: { label: string; value: number | null }[] = [
-  { label: "1 day", value: 1 },
-  { label: "7 days", value: 7 },
-  { label: "30 days (default)", value: 30 },
-  { label: "No expiry", value: null },
+const EXPIRY_OPTIONS: { labelKey: MessageKey; value: number | null }[] = [
+  { labelKey: "projectSettings.share.expiryOneDay", value: 1 },
+  { labelKey: "projectSettings.share.expirySevenDays", value: 7 },
+  { labelKey: "projectSettings.share.expiryThirtyDaysDefault", value: 30 },
+  { labelKey: "projectSettings.share.expiryNoExpiry", value: null },
 ]
 const DEFAULT_EXPIRY_DAYS = 30
 
@@ -325,11 +329,11 @@ function InviteLinkTab({ projectId, onSharesChanged }: InviteLinkTabProps) {
     setIssuedUrl(null)
     const trimmedEmail = inviteEmail.trim()
     if (trimmedEmail.length > 0 && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
-      setEmailError("Enter a valid email address, or leave blank for an open link.")
+      setEmailError(t("projectSettings.share.inviteEmailInvalid"))
       return
     }
     if (!session?.jwt) {
-      setServerError("Sign in to create an invite link.")
+      setServerError(t("projectSettings.share.signInToInvite"))
       return
     }
     setBusy(true)
@@ -343,7 +347,7 @@ function InviteLinkTab({ projectId, onSharesChanged }: InviteLinkTabProps) {
         expiresInDays
       )
       if (!serverInvite) {
-        setServerError("Couldn't create invite. You may not have permission, or the server is unreachable.")
+        setServerError(t("projectSettings.share.createInviteFailed"))
         return
       }
       const url = `${window.location.origin}/join/${serverInvite.token}`
@@ -378,35 +382,41 @@ function InviteLinkTab({ projectId, onSharesChanged }: InviteLinkTabProps) {
     <div className="space-y-4">
       {issuedUrl ? (
         <div className="space-y-3">
-          <p className="text-sm">Invite link ready. Send it to the recipient.</p>
+          <p className="text-sm">{t("projectSettings.share.inviteLinkReady")}</p>
           <div className="flex items-center gap-1">
             <Input value={issuedUrl} readOnly className="text-xs font-mono" />
-            <AppTooltip content="Copy URL">
-              <Button size="sm" variant="ghost" onClick={() => copyUrl(issuedUrl)} aria-label="Copy URL">
+            <AppTooltip content={t("projectSettings.share.copyUrlLabel")}>
+              <Button size="sm" variant="ghost" onClick={() => copyUrl(issuedUrl)} aria-label={t("projectSettings.share.copyUrlLabel")}>
                 <Copy className="h-3.5 w-3.5" />
               </Button>
             </AppTooltip>
           </div>
-          {copied && <p className="text-xs text-green-600">Copied!</p>}
+          {copied && <p className="text-xs text-green-600">{t("projectSettings.share.copied")}</p>}
           <p className="text-[10px] text-muted-foreground">
-            The recipient signs in (or signs up) and is added as{" "}
-            {(() => {
-              const opt = LINK_ROLE_OPTIONS.find((o) => o.level === inviteRole)
-              return opt ? resolveRoleName(t, opt.name) : "a member"
-            })()}.
-            This link is single-use — once redeemed, click{" "}
-            <strong className="font-medium">Create another link</strong> to generate
-            a fresh one for the next person.
-            To revoke before it is redeemed, use the Active links list below.
+            {t("projectSettings.share.recipientJoinsAs", {
+              role: (() => {
+                const opt = LINK_ROLE_OPTIONS.find((o) => o.level === inviteRole)
+                return opt ? resolveRoleName(t, opt.name) : t("projectSettings.share.recipientJoinsAsFallbackRole")
+              })(),
+            })}{" "}
+            <RichMessage
+              k="projectSettings.share.singleUseNote"
+              values={{
+                createAnotherLink: (
+                  <strong className="font-medium">{t("projectSettings.share.createAnotherLinkButton")}</strong>
+                ),
+              }}
+            />{" "}
+            {t("projectSettings.share.revokeBeforeRedeemedNote")}
           </p>
           <Button size="sm" variant="outline" onClick={reset} className="w-full">
-            Create another link
+            {t("projectSettings.share.createAnotherLinkButton")}
           </Button>
         </div>
       ) : (
         <div className="space-y-3">
           <div className="space-y-1">
-            <FieldLabel className="text-xs">Role</FieldLabel>
+            <FieldLabel className="text-xs">{t("projectSettings.share.roleFieldLabel")}</FieldLabel>
             <Select
               items={LINK_ROLE_OPTIONS.map((opt) => ({
                 value: String(opt.level),
@@ -416,7 +426,7 @@ function InviteLinkTab({ projectId, onSharesChanged }: InviteLinkTabProps) {
               onValueChange={(v) => setInviteRole(Number(v ?? ""))}
               disabled={!session?.jwt}
             >
-              <SelectTrigger className="w-full" aria-label="Role">
+              <SelectTrigger className="w-full" aria-label={t("projectSettings.share.roleFieldLabel")}>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -435,12 +445,13 @@ function InviteLinkTab({ projectId, onSharesChanged }: InviteLinkTabProps) {
                     const opt = LINK_ROLE_OPTIONS.find((o) => o.level === inviteRole)
                     return opt ? t(opt.descriptionKey) : ""
                   })()
-                : "Sign in to create an invite link"}
+                : t("projectSettings.share.signInToCreateLink")}
             </p>
           </div>
           <div className="space-y-1">
             <FieldLabel htmlFor="invite-email" className="text-xs">
-              Recipient email <span className="text-muted-foreground font-normal">(optional)</span>
+              {t("projectSettings.share.recipientEmailLabel")}{" "}
+              <span className="text-muted-foreground font-normal">{t("projectSettings.share.optionalFieldNote")}</span>
             </FieldLabel>
             <Input
               id="invite-email"
@@ -452,7 +463,7 @@ function InviteLinkTab({ projectId, onSharesChanged }: InviteLinkTabProps) {
                 setInviteEmail(e.target.value)
                 setEmailError(null)
               }}
-              placeholder="name@example.com"
+              placeholder={t("projectSettings.share.emailPlaceholder")}
               disabled={!session?.jwt}
             />
             {emailError ? (
@@ -460,17 +471,17 @@ function InviteLinkTab({ projectId, onSharesChanged }: InviteLinkTabProps) {
             ) : (
               <p className="text-[10px] text-muted-foreground">
                 {inviteEmail.trim()
-                  ? "Only an account with this email can redeem this link."
-                  : "Leave blank for an open link anyone signed in can redeem."}
+                  ? t("projectSettings.share.emailRestrictedNote")
+                  : t("projectSettings.share.openLinkNote")}
               </p>
             )}
           </div>
           <div className="space-y-1">
-            <FieldLabel className="text-xs">Link expires</FieldLabel>
+            <FieldLabel className="text-xs">{t("projectSettings.share.linkExpiresLabel")}</FieldLabel>
             <Select
               items={EXPIRY_OPTIONS.map((opt) => ({
                 value: String(opt.value),
-                label: opt.label,
+                label: t(opt.labelKey),
               }))}
               value={expiresInDays === null ? "null" : String(expiresInDays)}
               onValueChange={(v) =>
@@ -478,14 +489,14 @@ function InviteLinkTab({ projectId, onSharesChanged }: InviteLinkTabProps) {
               }
               disabled={!session?.jwt}
             >
-              <SelectTrigger className="w-full" aria-label="Link expires">
+              <SelectTrigger className="w-full" aria-label={t("projectSettings.share.linkExpiresLabel")}>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
                 <SelectGroup>
                   {EXPIRY_OPTIONS.map((opt) => (
                     <SelectItem key={String(opt.value)} value={String(opt.value)}>
-                      {opt.label}
+                      {t(opt.labelKey)}
                     </SelectItem>
                   ))}
                 </SelectGroup>
@@ -504,7 +515,7 @@ function InviteLinkTab({ projectId, onSharesChanged }: InviteLinkTabProps) {
             disabled={busy || !session?.jwt}
             className="w-full"
           >
-            {busy ? "Creating…" : "Create invite link"}
+            {busy ? t("projectSettings.create.submitCreating") : t("projectSettings.share.createInviteLinkButton")}
           </Button>
         </div>
       )}
@@ -533,6 +544,7 @@ interface ActiveInvitesListProps {
 
 function ActiveInvitesList({ projectId, jwt, version, onRevoked }: ActiveInvitesListProps) {
   const { locale } = useI18n()
+  const t = useT()
   const [invites, setInvites] = useState<ActiveProjectInvite[] | null>(null)
   const [loading, setLoading] = useState(false)
   const [revokeTarget, setRevokeTarget] = useState<string | null>(null)
@@ -566,12 +578,14 @@ function ActiveInvitesList({ projectId, jwt, version, onRevoked }: ActiveInvites
   }
 
   function formatExpiry(expiresAt: string | null): string {
-    if (!expiresAt) return "No expiry"
-    return `Expires ${formatDate(expiresAt, locale, { month: "short", day: "numeric", year: "numeric" })}`
+    if (!expiresAt) return t("projectSettings.share.expiryNoExpiry")
+    return t("projectSettings.share.expiresOn", {
+      date: formatDate(expiresAt, locale, { month: "short", day: "numeric", year: "numeric" }),
+    })
   }
 
   if (loading && !invites) {
-    return <p className="text-[10px] text-muted-foreground">Loading active links…</p>
+    return <p className="text-[10px] text-muted-foreground">{t("projectSettings.share.loadingActiveLinks")}</p>
   }
   if (!invites || invites.length === 0) {
     return null
@@ -579,7 +593,7 @@ function ActiveInvitesList({ projectId, jwt, version, onRevoked }: ActiveInvites
 
   return (
     <div className="space-y-2 border-t pt-3">
-      <p className="text-xs font-medium">Active links</p>
+      <p className="text-xs font-medium">{t("projectSettings.share.activeLinksHeading")}</p>
       <ul className="space-y-1.5">
         {invites.map((inv) => (
           <li key={inv.token} className="flex items-start justify-between gap-2 rounded border px-2 py-1.5">
@@ -589,7 +603,7 @@ function ActiveInvitesList({ projectId, jwt, version, onRevoked }: ActiveInvites
               </p>
               <p className="text-[10px] text-muted-foreground">
                 <RoleLabel name={inv.role.name} />
-                {inv.email ? ` · ${inv.email}` : " · open link"}
+                {inv.email ? ` · ${inv.email}` : ` · ${t("projectSettings.share.openLinkConnector")}`}
                 {" · "}
                 {formatExpiry(inv.expiresAt)}
               </p>
@@ -602,7 +616,7 @@ function ActiveInvitesList({ projectId, jwt, version, onRevoked }: ActiveInvites
                     checked={revokeConfirm}
                     onCheckedChange={(checked) => setRevokeConfirm(checked)}
                   />
-                  Confirm
+                  {t("common.confirm")}
                 </label>
                 <Button
                   size="sm"
@@ -611,7 +625,7 @@ function ActiveInvitesList({ projectId, jwt, version, onRevoked }: ActiveInvites
                   disabled={!revokeConfirm || revoking}
                   onClick={() => void handleRevoke(inv.token)}
                 >
-                  {revoking ? "…" : "Revoke"}
+                  {revoking ? "…" : t("projectSettings.share.revokeButton")}
                 </Button>
                 <Button
                   size="sm"
@@ -619,17 +633,17 @@ function ActiveInvitesList({ projectId, jwt, version, onRevoked }: ActiveInvites
                   className="h-6 px-1 text-[10px]"
                   onClick={() => { setRevokeTarget(null); setRevokeConfirm(false) }}
                 >
-                  Cancel
+                  {t("common.cancel")}
                 </Button>
               </div>
             ) : (
-              <AppTooltip content="Revoke this invite link">
+              <AppTooltip content={t("projectSettings.share.revokeLinkAriaLabel")}>
                 <Button
                   size="sm"
                   variant="ghost"
                   className="h-6 shrink-0 px-1 text-muted-foreground hover:text-destructive"
                   onClick={() => { setRevokeTarget(inv.token); setRevokeConfirm(false) }}
-                  aria-label="Revoke this invite link"
+                  aria-label={t("projectSettings.share.revokeLinkAriaLabel")}
                 >
                   <Trash2 className="h-3 w-3" />
                 </Button>

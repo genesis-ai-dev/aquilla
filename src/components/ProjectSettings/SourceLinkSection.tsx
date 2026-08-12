@@ -33,6 +33,8 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { toUserFacingError, UserError } from "@/lib/errors/user-error"
 import { FRONTIER_API_URL } from "@/lib/sync/sync-token"
 import { DcsUpstreamPanel } from "@/components/dcs/DcsUpstreamPanel"
+import { useT } from "@/lib/i18n/I18nProvider"
+import { RichMessage } from "@/lib/i18n/RichMessage"
 
 export interface SourceLinkSectionProps {
   projectId: string
@@ -64,6 +66,7 @@ export function SourceLinkSection({
   onDetached,
   roleLevel,
 }: SourceLinkSectionProps) {
+  const t = useT()
   const { session } = useFrontierSession()
   const [dialogOpen, setDialogOpen] = useState(false)
   const [confirmInput, setConfirmInput] = useState("")
@@ -114,17 +117,15 @@ export function SourceLinkSection({
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Link2Off className="h-4 w-4 text-muted-foreground" />
-            Source link
+            {t("projectSettings.section.sourceLink")}
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="text-sm text-muted-foreground">
-            This project is linked to an upstream source project.
-            Source cells are read from the upstream; translators work on the
-            target side here.
+            {t("projectSettings.sourceLink.description")}
           </div>
           <div className="flex items-center gap-2 rounded border px-3 py-2 text-sm">
-            <span className="font-medium text-foreground shrink-0">Upstream project ID:</span>
+            <span className="font-medium text-foreground shrink-0">{t("projectSettings.sourceLink.upstreamIdLabel")}</span>
             <code className="flex-1 truncate font-mono text-xs text-muted-foreground">
               {sourceProjectId}
             </code>
@@ -133,26 +134,30 @@ export function SourceLinkSection({
               link/creation time, not editable from here. */}
           <div className="flex flex-wrap items-center gap-1.5 text-xs">
             <Badge variant={sourceLinkMode === "clone" ? "secondary" : "default"}>
-              {sourceLinkMode === "clone" ? "Clone" : "Live"}
+              {sourceLinkMode === "clone" ? t("projectSettings.sourceLink.modeClone") : t("projectSettings.sourceLink.modeLive")}
             </Badge>
             {sourceLinkConsumes === "target" && (
-              <Badge variant="outline">consumes translations</Badge>
+              <Badge variant="outline">{t("projectSettings.sourceLink.consumesTranslations")}</Badge>
             )}
             {sourceLinkConsumes !== "target" && (
-              <Badge variant="outline">consumes source</Badge>
+              <Badge variant="outline">{t("projectSettings.sourceLink.consumesSource")}</Badge>
             )}
             {sourceLinkConsumes === "target" && sourceLinkGate && (
               <Badge variant="outline">
-                gate: {sourceLinkGate === "validated" ? "validated only" : "every commit"}
+                {t("projectSettings.sourceLink.gateLabel", {
+                  value: sourceLinkGate === "validated"
+                    ? t("projectSettings.sourceLink.gateValidatedOnly")
+                    : t("projectSettings.sourceLink.gateEveryCommit"),
+                })}
               </Badge>
             )}
             {sourceLinkMode !== "clone" && (
-              <Badge variant="outline">cursor: {sourceLinkCursor ?? 0}</Badge>
+              <Badge variant="outline">{t("projectSettings.sourceLink.cursorLabel", { value: sourceLinkCursor ?? 0 })}</Badge>
             )}
           </div>
           {sourceLinkMode === "clone" && (
             <p className="text-xs text-muted-foreground">
-              This is a one-time snapshot — upstream changes do not propagate here.
+              {t("projectSettings.sourceLink.cloneNote")}
             </p>
           )}
           {canDetach ? (
@@ -160,18 +165,16 @@ export function SourceLinkSection({
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
               <div className="space-y-1">
                 <p className="font-medium text-amber-900 dark:text-amber-100">
-                  Detaching is irreversible
+                  {t("projectSettings.sourceLink.irreversibleTitle")}
                 </p>
                 <p className="text-amber-800 dark:text-amber-200">
-                  Detaching snapshots the current upstream source cells into
-                  this project and severs the live link. Stale-source markers
-                  will clear. This action cannot be undone.
+                  {t("projectSettings.sourceLink.irreversibleDescription")}
                 </p>
               </div>
             </div>
           ) : (
             <p className="text-xs text-muted-foreground">
-              Project lead or above required to detach from source.
+              {t("projectSettings.sourceLink.roleGateNote")}
             </p>
           )}
           <div className="flex justify-end">
@@ -185,7 +188,7 @@ export function SourceLinkSection({
                 setDialogOpen(true)
               }}
             >
-              Detach from source
+              {t("projectSettings.sourceLink.detachButton")}
             </Button>
           </div>
         </CardContent>
@@ -202,23 +205,23 @@ export function SourceLinkSection({
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Detach from source project?</DialogTitle>
+            <DialogTitle>{t("projectSettings.sourceLink.detachDialogTitle")}</DialogTitle>
             <DialogDescription>
-              This will snapshot the upstream source cells into this project and
-              permanently sever the link. Stale-source markers will clear. You
-              cannot re-attach automatically — a project lead would need to
-              re-link manually.
+              {t("projectSettings.sourceLink.detachDialogDescription")}
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-2 py-1">
             <p className="text-sm text-muted-foreground">
-              Type <span className="font-mono font-bold">DETACH</span> to confirm.
+              <RichMessage
+                k="projectSettings.sourceLink.typeToConfirm"
+                values={{ word: <span className="font-mono font-bold">{DETACH_CONFIRM_WORD}</span> }}
+              />
             </p>
             <Input
               value={confirmInput}
               onChange={(e) => setConfirmInput(e.target.value)}
-              placeholder="DETACH"
+              placeholder={DETACH_CONFIRM_WORD}
               disabled={loading}
               autoFocus
             />
@@ -236,14 +239,14 @@ export function SourceLinkSection({
               }}
               disabled={loading}
             >
-              Cancel
+              {t("common.cancel")}
             </Button>
             <Button
               variant="destructive"
               onClick={handleDetach}
               disabled={!confirmed || loading || !session}
             >
-              {loading ? "Detaching…" : "Detach"}
+              {loading ? t("projectSettings.sourceLink.detachingButton") : t("projectSettings.sourceLink.detachConfirmButton")}
             </Button>
           </DialogFooter>
         </DialogContent>

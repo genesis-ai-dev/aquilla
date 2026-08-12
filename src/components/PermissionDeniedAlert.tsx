@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { RichMessage } from "@/lib/i18n/RichMessage"
+import type { MessageKey } from "@/lib/i18n/messages/en"
+import { resolveRoleName, type RoleLevel } from "@/lib/frontier/roles"
 
 // AQU-623: link denials to the docs page describing permission levels, so a
 // blocked user can learn what each role can do and how to get a higher one.
@@ -23,16 +25,21 @@ const PERMISSION_DOCS_URL =
 
 export interface PermissionDeniedAlertProps {
   /**
-   * What the active account was blocked from doing, woven into the sentence:
-   * "…doesn't have permission to {action}". Use a bare verb phrase, e.g.
-   * "change shared settings" or "add members to this project".
+   * MessageKey for what the active account was blocked from doing, woven
+   * into the sentence: "…doesn't have permission to {action}". The key's
+   * resolved text must be a bare verb phrase, e.g. "change shared settings"
+   * or "add members to this project" — this is a MessageKey (not a raw
+   * string) so a caller can't leak untranslated English into an otherwise
+   * fully localized alert (AQU-832).
    */
-  action: string
+  action: MessageKey
   /**
-   * Optional role requirement, rendered as "(needs {requiredRole})", e.g.
-   * "Maintainer or higher".
+   * Optional minimum role level required, rendered as "(needs {role} or
+   * higher)". Resolved through `resolveRoleName()`/`common.role.*` so the
+   * role's own catalog entry is reused rather than a duplicate label being
+   * minted here.
    */
-  requiredRole?: string
+  requiredRoleLevel?: RoleLevel
   /**
    * AQU-623 — the active account's current role on this project, as a display
    * label (e.g. "Viewer"). When provided, the alert speaks the permission
@@ -50,15 +57,20 @@ export interface PermissionDeniedAlertProps {
  * already-signed-in accounts, or the full AccountSwitcher to add/switch when
  * there's no other session.
  */
-export function PermissionDeniedAlert({ action, requiredRole, currentRole, className }: PermissionDeniedAlertProps) {
+export function PermissionDeniedAlert({ action, requiredRoleLevel, currentRole, className }: PermissionDeniedAlertProps) {
   const t = useT()
   const { session } = useFrontierSession()
   const { sessions, activate } = useAccounts()
   const otherSessions = useMemo(() => sessions.filter((s) => !s.active), [sessions])
 
   const account = `${session?.username ?? "local"}${session?.email ? ` (${session.email})` : ""}`
-  const requiredRoleNote = requiredRole
-    ? t("error.permissionDenied.requiredRoleNote", { requiredRole })
+  const actionText = t(action)
+  const requiredRoleNote = requiredRoleLevel
+    ? t("error.permissionDenied.requiredRoleNote", {
+        requiredRole: t("projectSettings.permission.roleOrHigher", {
+          role: resolveRoleName(t, requiredRoleLevel),
+        }),
+      })
     : ""
   // AQU-511 wave-3 finding 4: the account name and the role are the two facts
   // this alert exists to convey — restore font-medium on both so they stay
@@ -81,14 +93,14 @@ export function PermissionDeniedAlert({ action, requiredRole, currentRole, class
             values={{
               account: accountNode,
               role: <span className="font-medium">{currentRole}</span>,
-              action,
+              action: actionText,
               requiredRoleNote,
             }}
           />
         ) : (
           <RichMessage
             k="error.permissionDenied.messageWithoutRole"
-            values={{ account: accountNode, action, requiredRoleNote }}
+            values={{ account: accountNode, action: actionText, requiredRoleNote }}
           />
         )}
       </p>

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType }
 import { useParams, useNavigate, useSearchParams } from "react-router-dom"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { formatDate, formatList } from "@/lib/i18n/format"
+import { RichMessage } from "@/lib/i18n/RichMessage"
 import { projectSettingsPath } from "@/lib/navigation/org-paths"
 import {
   Check, CheckCircle, XCircle, ChevronDown, Sparkles, Save, HardDriveDownload,
@@ -87,6 +88,7 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { PermissionDeniedAlert } from "@/components/PermissionDeniedAlert"
 import { resolveRoleName, ROLE } from "@/lib/frontier/roles"
 import { useT } from "@/lib/i18n/I18nProvider"
+import type { MessageKey } from "@/lib/i18n/messages/en"
 import { renameProject } from "@/lib/sync/cloud-projects"
 import { UserError } from "@/lib/errors/user-error"
 import { usePostEditMetrics } from "@/lib/metrics/use-post-edit-metrics"
@@ -112,16 +114,19 @@ import { PostEditMetricsSection } from "@/components/metrics/PostEditMetricsSect
  */
 const SHOW_TERMBASE_SHARING_IN_SETTINGS = false
 
-// Well-known OpenAI-compatible providers.
-const CUSTOM_PRESETS: { id: string; label: string; endpoint: string; requiresKey: boolean; keyHint?: string }[] = [
-  { id: "local", label: "Local / self-hosted (no key)", endpoint: "http://localhost:8000", requiresKey: false },
+// Well-known OpenAI-compatible providers. Most `label`s are third-party brand
+// names (OpenRouter, OpenAI, Groq, ...) — DATA, not UI copy, so they're never
+// keyed. "local" and "custom" are genuine descriptive UI text and carry a
+// `labelKey` the render site resolves through `t()` instead (AQU-832).
+const CUSTOM_PRESETS: { id: string; label: string; labelKey?: MessageKey; endpoint: string; requiresKey: boolean; keyHint?: string }[] = [
+  { id: "local", label: "Local / self-hosted (no key)", labelKey: "projectSettings.advancedLlm.presetLocalLabel", endpoint: "http://localhost:8000", requiresKey: false },
   { id: "openrouter", label: "OpenRouter", endpoint: "https://openrouter.ai/api/v1", requiresKey: true, keyHint: "sk-or-..." },
   { id: "openai", label: "OpenAI", endpoint: "https://api.openai.com/v1", requiresKey: true, keyHint: "sk-..." },
   { id: "groq", label: "Groq", endpoint: "https://api.groq.com/openai/v1", requiresKey: true, keyHint: "gsk_..." },
   { id: "together", label: "Together AI", endpoint: "https://api.together.xyz/v1", requiresKey: true },
   { id: "mistral", label: "Mistral", endpoint: "https://api.mistral.ai/v1", requiresKey: true },
   { id: "deepseek", label: "DeepSeek", endpoint: "https://api.deepseek.com/v1", requiresKey: true },
-  { id: "custom", label: "Other (enter URL manually)", endpoint: "", requiresKey: false },
+  { id: "custom", label: "Other (enter URL manually)", labelKey: "projectSettings.advancedLlm.presetCustomLabel", endpoint: "", requiresKey: false },
 ]
 
 function presetIdForEndpoint(endpoint: string): string {
@@ -288,9 +293,12 @@ export function ProjectSettings() {
 
   // Server enforces MAINTAINER (600) for settings writes — show the correct
   // floor in the read-only tooltip so users know what role they need.
+  const maintainerOrHigher = t("projectSettings.permission.roleOrHigher", {
+    role: resolveRoleName(t, ROLE.MAINTAINER),
+  })
   const sharedDisabledTooltip =
-    reasonCannotEdit === "offline" ? "Reconnect to edit shared settings."
-    : reasonCannotEdit === "role" ? "Maintainer or higher can edit shared settings."
+    reasonCannotEdit === "offline" ? t("projectSettings.permission.reconnectToEdit")
+    : reasonCannotEdit === "role" ? t("projectSettings.permission.editSharedSettingsRequiresRole", { roleFloor: maintainerOrHigher })
     : null
 
   // AQU-623: a below-floor member's shared inputs are disabled up-front, so a
@@ -310,7 +318,7 @@ export function ProjectSettings() {
     !isCloudProject || (projectRoleLevel != null && projectRoleLevel >= ROLE.MAINTAINER)
   const renameDisabledTooltip = canRenameProject
     ? null
-    : "Maintainer or higher can rename this project."
+    : t("projectSettings.permission.renameRequiresRole", { roleFloor: maintainerOrHigher })
 
   // Baseline is the last-saved snapshot of every field on the page. The diff
   // between baseline and the form state determines `isDirty` and which writes
@@ -473,11 +481,11 @@ export function ProjectSettings() {
       if (lastModelFetchKeyRef.current !== fetchKey) return
       setModels([])
       setConnected(false)
-      setConnectionError(err instanceof Error ? err.message : "Connection failed")
+      setConnectionError(err instanceof Error ? err.message : t("projectSettings.advancedLlm.connectionFailedError"))
     } finally {
       if (lastModelFetchKeyRef.current === fetchKey) setConnecting(false)
     }
-  }, [effectiveCompletionApiKey, endpoint, model])
+  }, [effectiveCompletionApiKey, endpoint, model, t])
 
   const isDirty = useMemo(() => {
     if (!baseline) return false
@@ -581,7 +589,7 @@ export function ProjectSettings() {
 
   async function handleConnect() {
     if (!endpoint.trim()) {
-      setConnectionError("Endpoint URL is required")
+      setConnectionError(t("projectSettings.advancedLlm.endpointRequiredError"))
       return
     }
     await loadModels({ force: true })
@@ -625,20 +633,20 @@ export function ProjectSettings() {
     const changedFieldLabels: string[] = []
     try {
       const completionUpdates: Partial<CompletionSettings> = {}
-      if (provider !== baseline.provider) { completionUpdates.provider = provider; changedFieldLabels.push("AI provider") }
-      if (endpoint.trim() !== baseline.endpoint) { completionUpdates.endpoint = endpoint.trim(); changedFieldLabels.push("endpoint") }
-      if (apiKey !== baseline.apiKey) { completionUpdates.apiKey = apiKey || undefined; changedFieldLabels.push("API key") }
-      if (model !== baseline.model) { completionUpdates.model = model; changedFieldLabels.push("model") }
-      if (maxTokens !== baseline.maxTokens) { completionUpdates.maxTokens = maxTokens; changedFieldLabels.push("max tokens") }
-      if (temperature !== baseline.temperature) { completionUpdates.temperature = temperature; changedFieldLabels.push("temperature") }
-      if (llmHealthPenalty !== baseline.llmHealthPenalty) { completionUpdates.llmHealthPenalty = llmHealthPenalty; changedFieldLabels.push("health penalty") }
-      if (topK !== baseline.top_k) { completionUpdates.top_k = topK; changedFieldLabels.push("examples retrieved") }
-      if (contextSize !== baseline.contextSize) { completionUpdates.contextSize = contextSize; changedFieldLabels.push("context window") }
-      if (useOnlyValidatedExamples !== baseline.useOnlyValidatedExamples) { completionUpdates.useOnlyValidatedExamples = useOnlyValidatedExamples; changedFieldLabels.push("validated examples only") }
-      if (fewShotExampleFormat !== baseline.fewShotExampleFormat) { completionUpdates.fewShotExampleFormat = fewShotExampleFormat; changedFieldLabels.push("reference example format") }
-      if (mainChatLanguage !== baseline.main_chat_language) { completionUpdates.main_chat_language = mainChatLanguage || undefined; changedFieldLabels.push("assisted language") }
-      if (completionBatchSize !== baseline.completionBatchSize) { completionUpdates.completionBatchSize = completionBatchSize; changedFieldLabels.push("AI completions batch size") }
-      if (validationBatchSize !== baseline.validationBatchSize) { completionUpdates.validationBatchSize = validationBatchSize; changedFieldLabels.push("batch validation size") }
+      if (provider !== baseline.provider) { completionUpdates.provider = provider; changedFieldLabels.push(t("projectSettings.field.aiProvider")) }
+      if (endpoint.trim() !== baseline.endpoint) { completionUpdates.endpoint = endpoint.trim(); changedFieldLabels.push(t("projectSettings.field.endpoint")) }
+      if (apiKey !== baseline.apiKey) { completionUpdates.apiKey = apiKey || undefined; changedFieldLabels.push(t("projectSettings.field.apiKey")) }
+      if (model !== baseline.model) { completionUpdates.model = model; changedFieldLabels.push(t("projectSettings.advancedLlm.modelLabel")) }
+      if (maxTokens !== baseline.maxTokens) { completionUpdates.maxTokens = maxTokens; changedFieldLabels.push(t("projectSettings.advancedLlm.maxTokensLabel")) }
+      if (temperature !== baseline.temperature) { completionUpdates.temperature = temperature; changedFieldLabels.push(t("projectSettings.field.temperature")) }
+      if (llmHealthPenalty !== baseline.llmHealthPenalty) { completionUpdates.llmHealthPenalty = llmHealthPenalty; changedFieldLabels.push(t("projectSettings.field.healthPenalty")) }
+      if (topK !== baseline.top_k) { completionUpdates.top_k = topK; changedFieldLabels.push(t("projectSettings.field.examplesRetrieved")) }
+      if (contextSize !== baseline.contextSize) { completionUpdates.contextSize = contextSize; changedFieldLabels.push(t("projectSettings.ai.contextWindowLabel")) }
+      if (useOnlyValidatedExamples !== baseline.useOnlyValidatedExamples) { completionUpdates.useOnlyValidatedExamples = useOnlyValidatedExamples; changedFieldLabels.push(t("projectSettings.field.validatedExamplesOnly")) }
+      if (fewShotExampleFormat !== baseline.fewShotExampleFormat) { completionUpdates.fewShotExampleFormat = fewShotExampleFormat; changedFieldLabels.push(t("projectSettings.ai.referenceExampleFormatLabel")) }
+      if (mainChatLanguage !== baseline.main_chat_language) { completionUpdates.main_chat_language = mainChatLanguage || undefined; changedFieldLabels.push(t("projectSettings.field.assistedLanguage")) }
+      if (completionBatchSize !== baseline.completionBatchSize) { completionUpdates.completionBatchSize = completionBatchSize; changedFieldLabels.push(t("projectSettings.ai.completionBatchSizeLabel")) }
+      if (validationBatchSize !== baseline.validationBatchSize) { completionUpdates.validationBatchSize = validationBatchSize; changedFieldLabels.push(t("projectSettings.ai.validationBatchSizeLabel")) }
 
       const localUpdates: Partial<ProjectRecord> = {}
       // AQU-765: rename. Trim first so a whitespace-only entry is rejected
@@ -650,13 +658,13 @@ export function ProjectSettings() {
       const trimmedName = name.trim()
       if (trimmedName !== baseline.name) {
         if (!trimmedName) {
-          setNameError("Enter a project name.")
+          setNameError(t("projectSettings.save.nameRequired"))
           return false
         }
         if (isCloudProject) {
           const jwt = getJwt()
           if (!jwt) {
-            setSaveError("You're signed out. Sign in again to rename this project.")
+            setSaveError(t("projectSettings.save.signedOutRenameError"))
             return false
           }
           try {
@@ -665,17 +673,17 @@ export function ProjectSettings() {
             if (err instanceof UserError && err.status === 403) {
               setPermissionBlocked(true)
             } else {
-              setSaveError(err instanceof Error ? err.message : "Renaming the project failed.")
+              setSaveError(err instanceof Error ? err.message : t("projectSettings.save.renameFailedGeneric"))
             }
             return false
           }
         }
         localUpdates.name = trimmedName
-        changedFieldLabels.push("project name")
+        changedFieldLabels.push(t("projectSettings.info.nameLabel"))
       }
-      if (username !== baseline.username) { localUpdates.username = username; changedFieldLabels.push("username") }
-      if (!decayEqual(decaySettings, baseline.decaySettings)) { localUpdates.decaySettings = decaySettings; changedFieldLabels.push("decay settings") }
-      if (audioMediaStrategy !== baseline.audioMediaStrategy) { localUpdates.audioMediaStrategy = audioMediaStrategy; changedFieldLabels.push("audio media strategy") }
+      if (username !== baseline.username) { localUpdates.username = username; changedFieldLabels.push(t("projectSettings.user.usernameLabel")) }
+      if (!decayEqual(decaySettings, baseline.decaySettings)) { localUpdates.decaySettings = decaySettings; changedFieldLabels.push(t("projectSettings.field.decaySettings")) }
+      if (audioMediaStrategy !== baseline.audioMediaStrategy) { localUpdates.audioMediaStrategy = audioMediaStrategy; changedFieldLabels.push(t("projectSettings.field.audioMediaStrategy")) }
       // geminiApiKey handled below after `latest` is fetched, so voices/castAssignments are preserved.
       if (
         autoSyncEnabled !== baseline.autoSyncEnabled ||
@@ -684,16 +692,16 @@ export function ProjectSettings() {
         localUpdates.syncSettings = {
           autoSync: { enabled: autoSyncEnabled, intervalMinutes: Math.max(1, autoSyncInterval) },
         }
-        changedFieldLabels.push("auto-sync")
+        changedFieldLabels.push(t("projectSettings.field.autoSync"))
       }
 
       const geminiKeyChanged = geminiApiKey !== baseline.geminiApiKey
-      if (geminiKeyChanged) changedFieldLabels.push("voice API key")
+      if (geminiKeyChanged) changedFieldLabels.push(t("projectSettings.field.voiceApiKey"))
       const hasLocalWork =
         Object.keys(localUpdates).length > 0 || Object.keys(completionUpdates).length > 0 || geminiKeyChanged
       if (hasLocalWork) {
         const latest = (await getProject(id)) ?? project ?? undefined
-        if (!latest) throw new Error("Project not found")
+        if (!latest) throw new Error(t("projectSettings.save.projectNotFoundError"))
         const nextCompletion = Object.keys(completionUpdates).length
           ? buildCompletionSettings(latest.completionSettings, completionUpdates)
           : latest.completionSettings
@@ -705,40 +713,42 @@ export function ProjectSettings() {
       }
 
       const sharedUpdates: ProjectWideSettings = {}
-      if (sourceLanguage !== baseline.sourceLanguage) { sharedUpdates.sourceLanguage = sourceLanguage; changedFieldLabels.push("source language") }
-      if (targetLanguage !== baseline.targetLanguage) { sharedUpdates.targetLanguage = targetLanguage; changedFieldLabels.push("target language") }
-      if (systemPrompt !== baseline.systemPrompt) { sharedUpdates.systemPrompt = systemPrompt; changedFieldLabels.push("AI instructions") }
-      if (validationCount !== baseline.validationCount) { sharedUpdates.validationCount = validationCount; changedFieldLabels.push("validation count") }
+      if (sourceLanguage !== baseline.sourceLanguage) { sharedUpdates.sourceLanguage = sourceLanguage; changedFieldLabels.push(t("projectSettings.info.sourceLanguageLabel")) }
+      if (targetLanguage !== baseline.targetLanguage) { sharedUpdates.targetLanguage = targetLanguage; changedFieldLabels.push(t("projectSettings.info.targetLanguageLabel")) }
+      if (systemPrompt !== baseline.systemPrompt) { sharedUpdates.systemPrompt = systemPrompt; changedFieldLabels.push(t("projectSettings.section.aiInstructions")) }
+      if (validationCount !== baseline.validationCount) { sharedUpdates.validationCount = validationCount; changedFieldLabels.push(t("projectSettings.field.validationCount")) }
       if (validationCountAudio !== baseline.validationCountAudio) {
         sharedUpdates.validationCountAudio = validationCountAudio
-        changedFieldLabels.push("audio validation count")
+        changedFieldLabels.push(t("projectSettings.field.audioValidationCount"))
       }
-      if (validationRoleFloor !== baseline.validationRoleFloor) { sharedUpdates.validationRoleFloor = validationRoleFloor; changedFieldLabels.push("validation role floor") }
+      if (validationRoleFloor !== baseline.validationRoleFloor) { sharedUpdates.validationRoleFloor = validationRoleFloor; changedFieldLabels.push(t("projectSettings.field.validationRoleFloor")) }
       if (JSON.stringify(validationNamedUsers) !== JSON.stringify(baseline.validationNamedUsers)) {
         sharedUpdates.validationNamedUsers = validationNamedUsers
-        changedFieldLabels.push("named validators")
+        changedFieldLabels.push(t("projectSettings.field.namedValidators"))
       }
-      if (allowSelfValidation !== baseline.allowSelfValidation) { sharedUpdates.allowSelfValidation = allowSelfValidation; changedFieldLabels.push("self-validation") }
-      if (harmonizeMinRole !== baseline.harmonize_min_role) { sharedUpdates.harmonize_min_role = harmonizeMinRole; changedFieldLabels.push("harmonize min role") }
-      if (bibleResourcesEnabled !== baseline.bibleResourcesEnabled) { sharedUpdates.bibleResourcesEnabled = bibleResourcesEnabled; changedFieldLabels.push("Bible resources") }
-      if (importExcludeFrontMatter !== baseline.importExcludeFrontMatter) { sharedUpdates.importExcludeFrontMatter = importExcludeFrontMatter; changedFieldLabels.push("USFM front matter") }
+      if (allowSelfValidation !== baseline.allowSelfValidation) { sharedUpdates.allowSelfValidation = allowSelfValidation; changedFieldLabels.push(t("projectSettings.field.selfValidation")) }
+      if (harmonizeMinRole !== baseline.harmonize_min_role) { sharedUpdates.harmonize_min_role = harmonizeMinRole; changedFieldLabels.push(t("projectSettings.field.harmonizeMinRole")) }
+      if (bibleResourcesEnabled !== baseline.bibleResourcesEnabled) { sharedUpdates.bibleResourcesEnabled = bibleResourcesEnabled; changedFieldLabels.push(t("projectSettings.section.bibleResources")) }
+      if (importExcludeFrontMatter !== baseline.importExcludeFrontMatter) { sharedUpdates.importExcludeFrontMatter = importExcludeFrontMatter; changedFieldLabels.push(t("projectSettings.field.usfmFrontMatter")) }
       if (precedingTargetCells !== baseline.precedingTargetCells) {
         sharedUpdates.draftContext = { precedingTargetCells }
-        changedFieldLabels.push("draft context")
+        changedFieldLabels.push(t("projectSettings.section.draftContext"))
       }
 
       if (Object.keys(sharedUpdates).length > 0) {
         const out = await patchShared(sharedUpdates)
         if (out.kind === "conflict") {
           toast.warning(
-            `Synced settings update from ${out.latest.updatedBy?.username ?? "another collaborator"}.`,
+            t("projectSettings.save.conflictToast", {
+              username: out.latest.updatedBy?.username ?? t("projectSettings.save.conflictFallbackUsername"),
+            }),
           )
-          setSaveError("Someone else updated shared settings. Refresh to reapply your edits.")
+          setSaveError(t("projectSettings.save.conflictError"))
           return false
         }
         if (out.kind === "blocked") {
           if (out.reason === "offline") {
-            setSaveError("You're offline. Reconnect to save shared fields.")
+            setSaveError(t("projectSettings.save.offlineError"))
           } else {
             // Permission (role) block — surface the enriched alert that names
             // the active account and offers an account switch, instead of the
@@ -748,7 +758,7 @@ export function ProjectSettings() {
           return false
         }
         if (out.kind === "error") {
-          setSaveError(out.message || "Saving shared settings failed.")
+          setSaveError(out.message || t("projectSettings.save.sharedSettingsFailedGeneric"))
           return false
         }
       }
@@ -807,10 +817,14 @@ export function ProjectSettings() {
       // to also navigate away (see handleSaveAndClose).
       const message =
         changedFieldLabels.length === 0
-          ? "No changes to save."
+          ? t("projectSettings.save.noChanges")
           : changedFieldLabels.length <= 3
-            ? `Saved: ${formatList(changedFieldLabels, locale)}.`
-            : `Saved ${changedFieldLabels.length} changes: ${formatList(changedFieldLabels.slice(0, 3), locale)}, +${changedFieldLabels.length - 3} more.`
+            ? t("projectSettings.save.savedShort", { list: formatList(changedFieldLabels, locale) })
+            : t("projectSettings.save.savedMany", {
+                count: changedFieldLabels.length,
+                list: formatList(changedFieldLabels.slice(0, 3), locale),
+                more: changedFieldLabels.length - 3,
+              })
       setSavedMessage(message)
       if (savedMessageTimerRef.current != null) window.clearTimeout(savedMessageTimerRef.current)
       savedMessageTimerRef.current = window.setTimeout(() => setSavedMessage(null), 4000)
@@ -829,7 +843,7 @@ export function ProjectSettings() {
     autoSyncEnabled, autoSyncInterval, validationCount, validationCountAudio,
     validationRoleFloor, validationNamedUsers, allowSelfValidation, harmonizeMinRole,
     bibleResourcesEnabled, audioMediaStrategy, decaySettings, geminiApiKey, patchShared, refresh, applyBaseline, project,
-    precedingTargetCells, importExcludeFrontMatter, getJwt, isCloudProject,
+    precedingTargetCells, importExcludeFrontMatter, getJwt, isCloudProject, t, locale,
   ])
 
   const handleSaveAndClose = useCallback(async () => {
@@ -869,31 +883,36 @@ export function ProjectSettings() {
   // this guard prevents a double mount.
   const hasDcsUpstream = !hasSourceLink && !!readCursor((sharedSettingsBlob ?? {}) as Record<string, unknown>)
 
+  // AQU-832: `label` is translated; `keywords` stays English-only for now —
+  // it's a search-matching index, not rendered UI text, and the audit tracked
+  // it as a separate ~110-string item to localize in its own pass (matching
+  // against a translated query would need per-locale keyword lists, not a
+  // 1:1 t() swap). See docs/swarm/TRACES.md.
   const ALL_SECTIONS: SettingsSection[] = [
-    { id: "section-source-link", label: "Source link", keywords: ["source", "linked", "upstream", "detach"], visible: hasSourceLink },
-    { id: "section-upstream-changes", label: "Upstream changes", keywords: ["upstream", "changes", "repin", "review", "mirror", "stale"], visible: hasLiveSourceLink },
-    { id: "section-dcs-upstream", label: "Door43 upstream", keywords: ["door43", "dcs", "unfoldingword", "upstream", "check for updates", "import changes", "release"], visible: hasDcsUpstream },
-    { id: "section-project-info", label: "Project Info", keywords: ["name", "source language", "target language"] },
-    { id: "section-languages", label: "Languages", keywords: ["languages", "target lanes", "lane", "target language", "dialect"] },
-    { id: "section-bible-resources", label: "Bible resources", keywords: ["bible resources", "aquifer", "bibletranslation", "reference", "scholarly", "translation notes"] },
-    { id: "section-import", label: "Import", keywords: ["import", "usfm", "front matter", "book title", "book name", "introduction", "toc", "running header", "paratext", "door43"] },
-    { id: "section-user", label: "User", keywords: ["username", "author"] },
-    { id: "section-ai-instructions", label: "AI Instructions", keywords: ["system prompt", "ai", "llm", "instructions", "batch size", "completions batch", "validation batch", "batch validate"] },
-    { id: "section-draft-context", label: "Draft Context", keywords: ["draft context", "preceding cells", "left context", "paragraph drafting", "context budget"] },
-    { id: "section-advanced-llm", label: "Advanced LLM", keywords: ["provider", "endpoint", "api key", "model", "temperature", "max tokens", "health penalty", "frontier", "openai", "custom"] },
-    { id: "section-voice", label: "Voice", keywords: ["tts", "voice studio", "audio", "gemini", "api key", "tts key"] },
-    { id: "section-local-models", label: "Local AI models", keywords: ["whisper", "kokoro", "mms", "transcription", "model", "download", "offline", "local ai"] },
-    { id: "section-decay", label: "Decay", keywords: ["decay", "decay threshold", "half life"] },
-    { id: "section-validation", label: "Validation", keywords: ["validation count", "approvals", "audio validation"] },
-    { id: "section-audio-media", label: "Audio Media", keywords: ["audio media strategy", "lazy", "eager"] },
-    { id: "section-git-sync", label: "Git Sync", keywords: ["git", "sync", "auto sync", "interval", "branch", "clone"], visible: hasGitOrigin },
-    { id: "section-terminology", label: "Terminology", keywords: ["terminology", "termbase", "glossary", "concepts"] },
-    { id: "section-termbase-sharing", label: "Term Base Sharing", keywords: ["term base", "termbase", "publish", "subscribe", "org", "shared", "glossary"], visible: SHOW_TERMBASE_SHARING_IN_SETTINGS },
-    { id: "section-ai-metrics", label: "AI Metrics", keywords: ["post-edit", "edit distance", "ai metrics", "magnitude", "levenshtein", "ned", "biblica"] },
+    { id: "section-source-link", label: t("projectSettings.section.sourceLink"), keywords: ["source", "linked", "upstream", "detach"], visible: hasSourceLink },
+    { id: "section-upstream-changes", label: t("projectSettings.section.upstreamChanges"), keywords: ["upstream", "changes", "repin", "review", "mirror", "stale"], visible: hasLiveSourceLink },
+    { id: "section-dcs-upstream", label: t("projectSettings.section.dcsUpstream"), keywords: ["door43", "dcs", "unfoldingword", "upstream", "check for updates", "import changes", "release"], visible: hasDcsUpstream },
+    { id: "section-project-info", label: t("projectSettings.section.projectInfo"), keywords: ["name", "source language", "target language"] },
+    { id: "section-languages", label: t("projectSettings.section.languages"), keywords: ["languages", "target lanes", "lane", "target language", "dialect"] },
+    { id: "section-bible-resources", label: t("projectSettings.section.bibleResources"), keywords: ["bible resources", "aquifer", "bibletranslation", "reference", "scholarly", "translation notes"] },
+    { id: "section-import", label: t("projectSettings.section.import"), keywords: ["import", "usfm", "front matter", "book title", "book name", "introduction", "toc", "running header", "paratext", "door43"] },
+    { id: "section-user", label: t("projectSettings.section.user"), keywords: ["username", "author"] },
+    { id: "section-ai-instructions", label: t("projectSettings.section.aiInstructions"), keywords: ["system prompt", "ai", "llm", "instructions", "batch size", "completions batch", "validation batch", "batch validate"] },
+    { id: "section-draft-context", label: t("projectSettings.section.draftContext"), keywords: ["draft context", "preceding cells", "left context", "paragraph drafting", "context budget"] },
+    { id: "section-advanced-llm", label: t("projectSettings.section.advancedLlm"), keywords: ["provider", "endpoint", "api key", "model", "temperature", "max tokens", "health penalty", "frontier", "openai", "custom"] },
+    { id: "section-voice", label: t("projectSettings.section.voice"), keywords: ["tts", "voice studio", "audio", "gemini", "api key", "tts key"] },
+    { id: "section-local-models", label: t("projectSettings.section.localModels"), keywords: ["whisper", "kokoro", "mms", "transcription", "model", "download", "offline", "local ai"] },
+    { id: "section-decay", label: t("projectSettings.section.decay"), keywords: ["decay", "decay threshold", "half life"] },
+    { id: "section-validation", label: t("projectSettings.section.validation"), keywords: ["validation count", "approvals", "audio validation"] },
+    { id: "section-audio-media", label: t("projectSettings.section.audioMedia"), keywords: ["audio media strategy", "lazy", "eager"] },
+    { id: "section-git-sync", label: t("projectSettings.section.gitSync"), keywords: ["git", "sync", "auto sync", "interval", "branch", "clone"], visible: hasGitOrigin },
+    { id: "section-terminology", label: t("projectSettings.section.terminology"), keywords: ["terminology", "termbase", "glossary", "concepts"] },
+    { id: "section-termbase-sharing", label: t("projectSettings.section.termbaseSharing"), keywords: ["term base", "termbase", "publish", "subscribe", "org", "shared", "glossary"], visible: SHOW_TERMBASE_SHARING_IN_SETTINGS },
+    { id: "section-ai-metrics", label: t("projectSettings.section.aiMetrics"), keywords: ["post-edit", "edit distance", "ai metrics", "magnitude", "levenshtein", "ned", "biblica"] },
     // Monday.com board sync — cloud (synced) projects only: the link lives on
     // the server against the project's org connection.
-    { id: "section-monday", label: "Monday.com", keywords: ["monday", "integration", "board", "push", "progress sync", "project management"], visible: isCloudProject },
-    { id: "section-experimental", label: "Experimental", keywords: ["experimental", "flags", "beta", "preview", "contextual", "contextual drafting"] },
+    { id: "section-monday", label: t("projectSettings.section.monday"), keywords: ["monday", "integration", "board", "push", "progress sync", "project management"], visible: isCloudProject },
+    { id: "section-experimental", label: t("projectSettings.section.experimental"), keywords: ["experimental", "flags", "beta", "preview", "contextual", "contextual drafting"] },
   ]
 
   // ── Search filter ──────────────────────────────────────────────────────────
@@ -929,15 +948,15 @@ export function ProjectSettings() {
   }[] = [
     {
       id: "general",
-      label: "General",
-      description: "Name, languages, username, Bible resources",
+      label: t("projectSettings.group.generalLabel"),
+      description: t("projectSettings.group.generalDescription"),
       icon: SlidersHorizontal,
       sectionIds: ["section-project-info", "section-languages", "section-bible-resources", "section-import", "section-user"],
     },
     {
       id: "source-sync",
-      label: "Source & sync",
-      description: "Linked source project, upstream changes, git sync",
+      label: t("projectSettings.group.sourceSyncLabel"),
+      description: t("projectSettings.group.sourceSyncDescription"),
       icon: Link2,
       sectionIds: [
         "section-source-link",
@@ -948,8 +967,8 @@ export function ProjectSettings() {
     },
     {
       id: "ai",
-      label: "AI & completion",
-      description: "Instructions, draft context, provider, voice, terminology",
+      label: t("projectSettings.group.aiLabel"),
+      description: t("projectSettings.group.aiDescription"),
       icon: Sparkles,
       sectionIds: [
         "section-ai-instructions", "section-draft-context", "section-advanced-llm",
@@ -958,36 +977,36 @@ export function ProjectSettings() {
     },
     {
       id: "validation",
-      label: "Validation & health",
-      description: "Approvals, harmonization, staleness decay",
+      label: t("projectSettings.group.validationLabel"),
+      description: t("projectSettings.group.validationDescription"),
       icon: ShieldCheck,
       sectionIds: ["section-validation", "section-decay"],
     },
     {
       id: "audio-media",
-      label: "Audio media",
-      description: "How audio is fetched from storage",
+      label: t("projectSettings.section.audioMedia"),
+      description: t("projectSettings.group.audioMediaDescription"),
       icon: AudioLines,
       sectionIds: ["section-audio-media"],
     },
     {
       id: "metrics",
-      label: "AI metrics",
-      description: "Post-edit distance and AI usage",
+      label: t("projectSettings.section.aiMetrics"),
+      description: t("projectSettings.group.metricsDescription"),
       icon: BarChart3,
       sectionIds: ["section-ai-metrics"],
     },
     {
       id: "integrations",
-      label: "Integrations",
-      description: "Monday.com board sync",
+      label: t("projectSettings.group.integrationsLabel"),
+      description: t("projectSettings.group.integrationsDescription"),
       icon: Plug,
       sectionIds: ["section-monday"],
     },
     {
       id: "experimental",
-      label: "Experimental",
-      description: "Early features, this device only",
+      label: t("projectSettings.section.experimental"),
+      description: t("projectSettings.group.experimentalDescription"),
       icon: FlaskConical,
       sectionIds: ["section-experimental"],
     },
@@ -1066,10 +1085,10 @@ export function ProjectSettings() {
   }
 
   const pageTitle = lowerQuery || !activeGroup
-    ? "Project settings"
+    ? t("projectSettings.pageTitle")
     : activeGroup.label
   const pageDescription = lowerQuery || !activeGroup
-    ? "Configure this project. Changes apply to everyone with access."
+    ? t("projectSettings.pageDescription")
     : activeGroup.description
 
   const headerActions = (
@@ -1082,7 +1101,7 @@ export function ProjectSettings() {
             ) : (
               <Save data-icon="inline-start" />
             )}
-            Save changes
+            {t("projectSettings.saveChanges")}
           </Button>
           <ButtonGroupSeparator />
           <DropdownMenu>
@@ -1091,7 +1110,7 @@ export function ProjectSettings() {
                 <Button
                   size="icon-sm"
                   disabled={saving}
-                  aria-label="More save options"
+                  aria-label={t("projectSettings.moreSaveOptionsAriaLabel")}
                 >
                   <ChevronDown />
                 </Button>
@@ -1100,10 +1119,10 @@ export function ProjectSettings() {
             <DropdownMenuContent align="end" className="min-w-56">
               <DropdownMenuGroup>
                 <DropdownMenuItem onClick={handleSaveAndClose}>
-                  Save and close
+                  {t("projectSettings.saveAndClose")}
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => setDiscardOpen(true)}>
-                  Close without saving
+                  {t("projectSettings.closeWithoutSaving")}
                 </DropdownMenuItem>
               </DropdownMenuGroup>
             </DropdownMenuContent>
@@ -1111,7 +1130,7 @@ export function ProjectSettings() {
         </ButtonGroup>
       ) : null}
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
-        {isDirty && !saving && <span>Unsaved changes</span>}
+        {isDirty && !saving && <span>{t("projectSettings.unsavedChanges")}</span>}
         {!isDirty && savedMessage && (
           <span
             role="status"
@@ -1127,12 +1146,12 @@ export function ProjectSettings() {
 
   const breadcrumb = (
     <OrgBreadcrumb
-      section={project?.name ?? "Project"}
+      section={project?.name ?? t("common.project")}
       sectionTo={id ? `/projects/${id}` : undefined}
       orgId={project?.orgId}
       trail={[
-        { label: "Editor", onClick: () => requestNavigate(editorPath) },
-        { label: "Settings" },
+        { label: t("projectSettings.breadcrumbEditor"), onClick: () => requestNavigate(editorPath) },
+        { label: t("projectSettings.backLinkLabel") },
       ]}
     />
   )
@@ -1145,7 +1164,7 @@ export function ProjectSettings() {
         statusBar={null}
         main={
           <Page>
-            <LoadingPanel label="Loading project settings" />
+            <LoadingPanel label={t("projectSettings.loadingLabel")} />
           </Page>
         }
       />
@@ -1162,7 +1181,7 @@ export function ProjectSettings() {
           <div className="space-y-6">
             {!showIndex && (
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                <BackLink to={projectSettingsPath(id!)} label="Settings" />
+                <BackLink to={projectSettingsPath(id!)} label={t("projectSettings.backLinkLabel")} />
               </div>
             )}
             <PageHeader
@@ -1188,13 +1207,13 @@ export function ProjectSettings() {
             ) : null}
 
             {showIndex && lowerQuery && sectionsToRender.length === 0 ? (
-              <p className="px-2 py-1.5 text-sm text-muted-foreground">No matching settings.</p>
+              <p className="px-2 py-1.5 text-sm text-muted-foreground">{t("projectSettings.noMatchingSettings")}</p>
             ) : null}
 
         {(permissionBlocked || roleBlocked) && (
           <PermissionDeniedAlert
-            action="change shared settings"
-            requiredRole="Maintainer or higher"
+            action="projectSettings.permission.changeSharedSettingsAction"
+            requiredRoleLevel={ROLE.MAINTAINER}
             currentRole={
               project?.syncRole ? resolveRoleName(t, project.syncRole.level) : undefined
             }
@@ -1205,10 +1224,10 @@ export function ProjectSettings() {
             role="alert"
             className="flex items-start justify-between gap-3 rounded border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100"
           >
-            <span>Settings changed elsewhere — refresh to reapply.</span>
+            <span>{t("projectSettings.settingsChangedElsewhere")}</span>
             <button
               type="button"
-              aria-label="Dismiss conflict notice"
+              aria-label={t("projectSettings.dismissConflictAriaLabel")}
               onClick={dismissConflict}
               className="shrink-0 text-amber-700 hover:text-amber-900 dark:text-amber-400 dark:hover:text-amber-200"
             >
@@ -1246,10 +1265,10 @@ export function ProjectSettings() {
         {searchGroupLabel("section-project-info")}
         {sectionsToRender.some((s) => s.id === "section-project-info") && (
           <Card id="section-project-info">
-            <CardHeader><CardTitle>Project Info</CardTitle></CardHeader>
+            <CardHeader><CardTitle>{t("projectSettings.section.projectInfo")}</CardTitle></CardHeader>
             <CardContent className="space-y-4">
               <div>
-                <FieldLabel htmlFor="pname">Project Name</FieldLabel>
+                <FieldLabel htmlFor="pname">{t("projectSettings.info.nameLabel")}</FieldLabel>
                 {/* AQU-765: a synced project's name lives in the server
                     `projects.name` row (the source of truth for the org list,
                     breadcrumbs, portfolio, and search). Renaming now PATCHes
@@ -1284,19 +1303,21 @@ export function ProjectSettings() {
               </div>
               {sharedUpdatedBy && sharedUpdatedAt && sharedVersion != null && sharedVersion > 0 && (
                 <p className="text-xs text-muted-foreground">
-                  Last edited by {sharedUpdatedBy.username} ·{" "}
-                  {formatDate(sharedUpdatedAt, locale, { month: "short", day: "numeric", year: "numeric" })}
+                  {t("projectSettings.info.lastEditedBy", {
+                    username: sharedUpdatedBy.username,
+                    date: formatDate(sharedUpdatedAt, locale, { month: "short", day: "numeric", year: "numeric" }),
+                  })}
                 </p>
               )}
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <FieldLabel htmlFor="sl">Source Language</FieldLabel>
+                  <FieldLabel htmlFor="sl">{t("projectSettings.info.sourceLanguageLabel")}</FieldLabel>
                   <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip}>
                     <Input id="sl" value={sourceLanguage} onChange={(e) => setSourceLanguage(e.target.value)} disabled={!canEditShared} />
                   </DisabledFieldTooltip>
                 </div>
                 <div>
-                  <FieldLabel htmlFor="tl">Target Language</FieldLabel>
+                  <FieldLabel htmlFor="tl">{t("projectSettings.info.targetLanguageLabel")}</FieldLabel>
                   <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip}>
                     <Input id="tl" value={targetLanguage} onChange={(e) => setTargetLanguage(e.target.value)} disabled={!canEditShared} />
                   </DisabledFieldTooltip>
@@ -1322,33 +1343,33 @@ export function ProjectSettings() {
         {sectionsToRender.some((s) => s.id === "section-bible-resources") && (
           <Card id="section-bible-resources">
             <CardHeader>
-              <CardTitle>Bible resources</CardTitle>
+              <CardTitle>{t("projectSettings.section.bibleResources")}</CardTitle>
             </CardHeader>
             <CardContent>
               <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip ?? null}>
                 <div className="flex items-start justify-between gap-4">
                   <div className="space-y-0.5">
                     <FieldLabel htmlFor="bible-resources-enabled" className="text-sm">
-                      Enable Bible resources
+                      {t("projectSettings.bible.enableLabel")}
                     </FieldLabel>
                     <p className="text-xs text-muted-foreground">
-                      Scholarly reference data from bibletranslation.org in Search and the agent.
+                      {t("projectSettings.bible.description")}
                     </p>
                     {/* AQU-460 derive-on-read: nothing is written just by viewing this
                         page — the hint below only describes what's already true. */}
                     {bibleResourcesEnabled === undefined && projectHasScriptureFiles(project?.files) && (
                       <p className="text-xs text-muted-foreground">
-                        Available by default for scripture projects — turn off to disable.
+                        {t("projectSettings.bible.scriptureDefaultHint")}
                       </p>
                     )}
                     {bibleResourcesEnabled === undefined && !projectHasScriptureFiles(project?.files) && (
                       <p className="text-xs text-muted-foreground">
-                        Off by default for non-scripture projects — turn on to enable.
+                        {t("projectSettings.bible.nonScriptureDefaultHint")}
                       </p>
                     )}
                     {bibleResourcesEnabled === false && (
                       <p className="text-xs text-muted-foreground">
-                        Turned off for this project. This is always respected, even for scripture projects.
+                        {t("projectSettings.bible.disabledHint")}
                       </p>
                     )}
                   </div>
@@ -1368,19 +1389,17 @@ export function ProjectSettings() {
         {sectionsToRender.some((s) => s.id === "section-import") && (
           <Card id="section-import">
             <CardHeader>
-              <CardTitle>Import</CardTitle>
+              <CardTitle>{t("projectSettings.section.import")}</CardTitle>
             </CardHeader>
             <CardContent>
               <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip ?? null}>
                 <div className="flex items-start justify-between gap-4">
                   <div className="space-y-0.5">
                     <FieldLabel htmlFor="import-exclude-front-matter" className="text-sm">
-                      Exclude USFM front matter
+                      {t("projectSettings.import.excludeFrontMatterLabel")}
                     </FieldLabel>
                     <p className="text-xs text-muted-foreground">
-                      When on, USFM imports drop the book name, running header, TOC, main
-                      title, and introduction paragraphs. Section headings and Psalm titles
-                      still import. Off (the default) imports front matter as translatable cells.
+                      {t("projectSettings.import.excludeFrontMatterDescription")}
                     </p>
                   </div>
                   <Switch
@@ -1398,11 +1417,11 @@ export function ProjectSettings() {
         {searchGroupLabel("section-user")}
         {sectionsToRender.some((s) => s.id === "section-user") && (
           <Card id="section-user">
-            <CardHeader><CardTitle>User</CardTitle></CardHeader>
+            <CardHeader><CardTitle>{t("projectSettings.section.user")}</CardTitle></CardHeader>
             <CardContent>
-              <FieldLabel htmlFor="un">Username</FieldLabel>
-              <Input id="un" value={username} onChange={(e) => setUsername(e.target.value)} placeholder="local" />
-              <p className="mt-1 text-xs text-muted-foreground">Used as author name in translation history.</p>
+              <FieldLabel htmlFor="un">{t("projectSettings.user.usernameLabel")}</FieldLabel>
+              <Input id="un" value={username} onChange={(e) => setUsername(e.target.value)} placeholder={t("projectSettings.user.usernamePlaceholder")} />
+              <p className="mt-1 text-xs text-muted-foreground">{t("projectSettings.user.usernameDescription")}</p>
             </CardContent>
           </Card>
         )}
@@ -1413,7 +1432,7 @@ export function ProjectSettings() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Sparkles className="h-4 w-4 text-primary" />
-                AI Instructions
+                {t("projectSettings.section.aiInstructions")}
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
@@ -1429,14 +1448,18 @@ export function ProjectSettings() {
                 />
               </DisabledFieldTooltip>
               <p className="text-xs text-muted-foreground">
-                Describe what this project is producing and how translations should read — the AI uses this on every
-                completion. Use <code className="rounded bg-muted px-1">{"{sourceLanguage}"}</code> and{" "}
-                <code className="rounded bg-muted px-1">{"{targetLanguage}"}</code> as placeholders.
+                <RichMessage
+                  k="projectSettings.ai.instructionsHelp"
+                  values={{
+                    sourceVar: <code className="rounded bg-muted px-1">{"{sourceLanguage}"}</code>,
+                    targetVar: <code className="rounded bg-muted px-1">{"{targetLanguage}"}</code>,
+                  }}
+                />
               </p>
 
               <div className="grid grid-cols-1 gap-4 pt-2 sm:grid-cols-2">
                 <div className="space-y-1">
-                  <FieldLabel htmlFor="top-k">Examples retrieved (top_k)</FieldLabel>
+                  <FieldLabel htmlFor="top-k">{t("projectSettings.ai.topKLabel")}</FieldLabel>
                   <Input
                     id="top-k"
                     type="number"
@@ -1446,14 +1469,14 @@ export function ProjectSettings() {
                     onChange={(e) => setTopK(Math.max(1, Math.min(20, Number(e.target.value))))}
                   />
                   <p className="text-xs text-muted-foreground">
-                    How many reference examples the AI retrieves per translation (1–20). Default: 5.
+                    {t("projectSettings.ai.topKDescription")}
                   </p>
                 </div>
 
                 {/* AQU-586: configurable batch sizes for the Run AI completions
                     and Batch validate workspace actions. */}
                 <div className="space-y-1">
-                  <FieldLabel htmlFor="completion-batch-size">AI completions batch size</FieldLabel>
+                  <FieldLabel htmlFor="completion-batch-size">{t("projectSettings.ai.completionBatchSizeLabel")}</FieldLabel>
                   <Input
                     id="completion-batch-size"
                     type="number"
@@ -1466,13 +1489,12 @@ export function ProjectSettings() {
                     className="w-24"
                   />
                   <p className="text-xs text-muted-foreground">
-                    How many untranslated cells one "Run AI completions" package drafts (1–50).
-                    Run again to advance further. Default: {MAX_BATCH_COMPLETIONS}.
+                    {t("projectSettings.ai.completionBatchSizeDescription", { defaultSize: MAX_BATCH_COMPLETIONS })}
                   </p>
                 </div>
 
                 <div className="space-y-1">
-                  <FieldLabel htmlFor="validation-batch-size">Batch validation size</FieldLabel>
+                  <FieldLabel htmlFor="validation-batch-size">{t("projectSettings.ai.validationBatchSizeLabel")}</FieldLabel>
                   <Input
                     id="validation-batch-size"
                     type="number"
@@ -1485,19 +1507,22 @@ export function ProjectSettings() {
                     className="w-24"
                   />
                   <p className="text-xs text-muted-foreground">
-                    How many eligible cells one "Batch validate" run approves (0–500).
-                    <strong> 0 validates all eligible cells</strong> (default); set a cap to
-                    validate in bounded batches.
+                    <RichMessage
+                      k="projectSettings.ai.validationBatchSizeHelp"
+                      values={{
+                        zeroNote: <strong> {t("projectSettings.ai.validationBatchSizeZeroNote")}</strong>,
+                      }}
+                    />
                   </p>
                 </div>
 
                 <div className="space-y-1">
-                  <FieldLabel htmlFor="context-size">Context window</FieldLabel>
+                  <FieldLabel htmlFor="context-size">{t("projectSettings.ai.contextWindowLabel")}</FieldLabel>
                   <Select
                     items={{
-                      small: "Small — tight window",
-                      medium: "Medium — paragraph (default)",
-                      large: "Large — chapter",
+                      small: t("projectSettings.ai.contextWindowSmall"),
+                      medium: t("projectSettings.ai.contextWindowMedium"),
+                      large: t("projectSettings.ai.contextWindowLarge"),
                     }}
                     value={contextSize}
                     onValueChange={(value) => setContextSize(value as ContextSize)}
@@ -1507,27 +1532,27 @@ export function ProjectSettings() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectGroup>
-                        <SelectItem value="small">Small — tight window</SelectItem>
-                        <SelectItem value="medium">Medium — paragraph (default)</SelectItem>
-                        <SelectItem value="large">Large — chapter</SelectItem>
+                        <SelectItem value="small">{t("projectSettings.ai.contextWindowSmall")}</SelectItem>
+                        <SelectItem value="medium">{t("projectSettings.ai.contextWindowMedium")}</SelectItem>
+                        <SelectItem value="large">{t("projectSettings.ai.contextWindowLarge")}</SelectItem>
                       </SelectGroup>
                     </SelectContent>
                   </Select>
                   <p className="text-xs text-muted-foreground">
-                    Controls how much surrounding passage context is included.
+                    {t("projectSettings.ai.contextWindowDescription")}
                   </p>
                 </div>
 
                 <div className="space-y-1">
-                  <FieldLabel htmlFor="main-chat-language">Assistant language</FieldLabel>
+                  <FieldLabel htmlFor="main-chat-language">{t("projectSettings.ai.assistantLanguageLabel")}</FieldLabel>
                   <Input
                     id="main-chat-language"
                     value={mainChatLanguage}
                     onChange={(e) => setMainChatLanguage(e.target.value)}
-                    placeholder="e.g. English, Français, Español…"
+                    placeholder={t("projectSettings.ai.assistantLanguagePlaceholder")}
                   />
                   <p className="text-xs text-muted-foreground">
-                    Language the AI assistant uses in chat responses. Independent of the UI locale.
+                    {t("projectSettings.ai.assistantLanguageDescription")}
                   </p>
                 </div>
 
@@ -1539,19 +1564,19 @@ export function ProjectSettings() {
                     disabled
                   />
                   <div>
-                    <FieldLabel htmlFor="validated-only">Approved examples only</FieldLabel>
+                    <FieldLabel htmlFor="validated-only">{t("projectSettings.ai.approvedExamplesOnlyLabel")}</FieldLabel>
                     <p className="mt-0.5 text-xs text-muted-foreground">
-                      Drafting always retrieves human-validated project translations. Raw machine drafts never enter the trusted example pool.
+                      {t("projectSettings.ai.approvedExamplesOnlyDescription")}
                     </p>
                   </div>
                 </div>
 
                 <div className="space-y-1">
-                  <FieldLabel htmlFor="few-shot-example-format">Reference example format</FieldLabel>
+                  <FieldLabel htmlFor="few-shot-example-format">{t("projectSettings.ai.referenceExampleFormatLabel")}</FieldLabel>
                   <Select
                     items={{
-                      "source-and-target": "Source + target (default)",
-                      "target-only": "Target only",
+                      "source-and-target": t("projectSettings.ai.referenceExampleFormatSourceAndTarget"),
+                      "target-only": t("projectSettings.ai.referenceExampleFormatTargetOnly"),
                     }}
                     value={fewShotExampleFormat}
                     onValueChange={(value) => setFewShotExampleFormat(value as "source-and-target" | "target-only")}
@@ -1561,13 +1586,13 @@ export function ProjectSettings() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectGroup>
-                        <SelectItem value="source-and-target">Source + target (default)</SelectItem>
-                        <SelectItem value="target-only">Target only</SelectItem>
+                        <SelectItem value="source-and-target">{t("projectSettings.ai.referenceExampleFormatSourceAndTarget")}</SelectItem>
+                        <SelectItem value="target-only">{t("projectSettings.ai.referenceExampleFormatTargetOnly")}</SelectItem>
                       </SelectGroup>
                     </SelectContent>
                   </Select>
                   <p className="text-xs text-muted-foreground">
-                    "Target only" shows only the target text of each example, useful when source alignment is unavailable or undesirable. The model is told these are reference translations to imitate.
+                    {t("projectSettings.ai.referenceExampleFormatDescription")}
                   </p>
                 </div>
               </div>
@@ -1579,11 +1604,11 @@ export function ProjectSettings() {
         {sectionsToRender.some((s) => s.id === "section-draft-context") && (
           <Card id="section-draft-context">
             <CardHeader>
-              <CardTitle>Draft Context</CardTitle>
+              <CardTitle>{t("projectSettings.section.draftContext")}</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
               <div className="space-y-1">
-                <FieldLabel htmlFor="preceding-target-cells">Preceding committed-target cells</FieldLabel>
+                <FieldLabel htmlFor="preceding-target-cells">{t("projectSettings.draftContext.precedingCellsLabel")}</FieldLabel>
                 <Input
                   id="preceding-target-cells"
                   type="number"
@@ -1598,9 +1623,9 @@ export function ProjectSettings() {
                   className="w-24"
                 />
                 <p className="text-xs text-muted-foreground">
-                  How many immediately preceding committed target cells to include as discourse
-                  left-context when drafting. 0 disables preceding-context. Default:{" "}
-                  {DEFAULT_DRAFT_CONTEXT.precedingTargetCells}.
+                  {t("projectSettings.draftContext.precedingCellsDescription", {
+                    defaultCount: DEFAULT_DRAFT_CONTEXT.precedingTargetCells,
+                  })}
                 </p>
               </div>
             </CardContent>
@@ -1612,15 +1637,19 @@ export function ProjectSettings() {
           <details id="section-advanced-llm" className="group rounded-lg border bg-card">
             <summary className="select-none list-none px-6 py-4 text-sm font-medium marker:hidden">
               <span className="flex items-center justify-between">
-                <span>Advanced LLM settings</span>
+                <span>{t("projectSettings.advancedLlm.summary")}</span>
                 <span className="text-xs text-muted-foreground">
-                  {provider === "frontier" ? "Frontier (default)" : `Custom: ${endpoint || "not set"}`}
+                  {provider === "frontier"
+                    ? t("projectSettings.advancedLlm.frontierDefaultStatus")
+                    : t("projectSettings.advancedLlm.customEndpointStatus", {
+                        endpoint: endpoint || t("projectSettings.advancedLlm.notSet"),
+                      })}
                 </span>
               </span>
             </summary>
             <div className="space-y-4 border-t px-6 py-4">
               <div className="space-y-2">
-                <FieldLabel>Provider</FieldLabel>
+                <FieldLabel>{t("projectSettings.advancedLlm.providerLabel")}</FieldLabel>
                 <RadioGroup
                   name="provider"
                   value={provider}
@@ -1630,15 +1659,22 @@ export function ProjectSettings() {
                   <label className="flex items-start gap-2 text-sm">
                     <RadioGroupItem value="frontier" className="mt-1" />
                     <span>
-                      <strong>Frontier</strong> (recommended) — calls <code className="rounded bg-muted px-1">api.frontierrnd.com</code>{" "}
-                      using your Frontier login. Works out of the box.
+                      <RichMessage
+                        k="projectSettings.advancedLlm.providerFrontier"
+                        values={{
+                          name: <strong>{t("projectSettings.advancedLlm.providerFrontierName")}</strong>,
+                          domain: <code className="rounded bg-muted px-1">api.frontierrnd.com</code>,
+                        }}
+                      />
                     </span>
                   </label>
                   <label className="flex items-start gap-2 text-sm">
                     <RadioGroupItem value="custom" className="mt-1" />
                     <span>
-                      <strong>Custom endpoint</strong> — localhost, self-hosted, or a third-party OpenAI-compatible
-                      API (OpenRouter, OpenAI, Groq, Together, ...). Bring your own key.
+                      <RichMessage
+                        k="projectSettings.advancedLlm.providerCustom"
+                        values={{ name: <strong>{t("projectSettings.advancedLlm.providerCustomName")}</strong> }}
+                      />
                     </span>
                   </label>
                 </RadioGroup>
@@ -1647,9 +1683,9 @@ export function ProjectSettings() {
               {provider === "custom" && (
                 <>
                   <div>
-                    <FieldLabel htmlFor="preset">Provider preset</FieldLabel>
+                    <FieldLabel htmlFor="preset">{t("projectSettings.advancedLlm.presetLabel")}</FieldLabel>
                     <Select
-                      items={CUSTOM_PRESETS.map((p) => ({ value: p.id, label: p.label }))}
+                      items={CUSTOM_PRESETS.map((p) => ({ value: p.id, label: p.labelKey ? t(p.labelKey) : p.label }))}
                       value={presetId}
                       onValueChange={(value) => handlePresetChange(value ?? "")}
                     >
@@ -1659,14 +1695,14 @@ export function ProjectSettings() {
                       <SelectContent>
                         <SelectGroup>
                           {CUSTOM_PRESETS.map((p) => (
-                            <SelectItem key={p.id} value={p.id}>{p.label}</SelectItem>
+                            <SelectItem key={p.id} value={p.id}>{p.labelKey ? t(p.labelKey) : p.label}</SelectItem>
                           ))}
                         </SelectGroup>
                       </SelectContent>
                     </Select>
                   </div>
                   <div>
-                    <FieldLabel htmlFor="ep">Endpoint URL</FieldLabel>
+                    <FieldLabel htmlFor="ep">{t("projectSettings.advancedLlm.endpointLabel")}</FieldLabel>
                     <div className="flex gap-2">
                       <Input
                         id="ep"
@@ -1679,35 +1715,45 @@ export function ProjectSettings() {
                           setModels([])
                           lastModelFetchKeyRef.current = null
                         }}
-                        placeholder="http://localhost:8000"
+                        placeholder={t("projectSettings.advancedLlm.endpointPlaceholder")}
                         className="flex-1"
                       />
                       <Button size="sm" onClick={handleConnect} disabled={connecting}>
-                        {connecting ? <Spinner /> : "Connect"}
+                        {connecting ? <Spinner /> : t("projectSettings.advancedLlm.connectButton")}
                       </Button>
                     </div>
                     <p className="mt-1 text-xs text-muted-foreground">
-                      Base URL. Trailing <code className="rounded bg-muted px-1">/v1</code> or
-                      {" "}<code className="rounded bg-muted px-1">/chat/completions</code> is accepted.
+                      <RichMessage
+                        k="projectSettings.advancedLlm.endpointHelp"
+                        values={{
+                          v1Path: <code className="rounded bg-muted px-1">/v1</code>,
+                          // i18n-exempt literal API path fragment, not prose — never translated
+                          chatCompletionsPath: <code className="rounded bg-muted px-1">/chat/completions</code>,
+                        }}
+                      />
                     </p>
-                    {connected && <p className="mt-1 flex items-center gap-1 text-xs text-green-600"><CheckCircle className="h-3 w-3" /> Connected — {models.length} model(s)</p>}
+                    {connected && (
+                      <p className="mt-1 flex items-center gap-1 text-xs text-green-600">
+                        <CheckCircle className="h-3 w-3" /> {t("projectSettings.advancedLlm.connectedStatus", { count: models.length })}
+                      </p>
+                    )}
                     {connectionError && <p className="mt-1 flex items-center gap-1 text-xs text-destructive"><XCircle className="h-3 w-3" /> {connectionError}</p>}
                   </div>
                   <ApiKeyField
-                    label={`API key${preset.requiresKey ? " *" : " (optional)"}`}
-                    placeholder={preset.keyHint ?? (preset.requiresKey ? "Paste your API key" : "Leave blank for no auth")}
+                    label={preset.requiresKey ? t("projectSettings.advancedLlm.apiKeyLabelRequired") : t("projectSettings.advancedLlm.apiKeyLabelOptional")}
+                    placeholder={preset.keyHint ?? (preset.requiresKey ? t("projectSettings.advancedLlm.apiKeyPlaceholderRequired") : t("projectSettings.advancedLlm.apiKeyPlaceholderNoAuth"))}
                     projectKey={apiKey}
                     userKey={completionUserKey}
                     onProjectKeyChange={setApiKey}
                     onUserKeyChange={(v) => setUserApiKey("completion", v)}
-                    help="Sent as Authorization: Bearer <key>. Stored locally in your browser; never uploaded to Frontier."
+                    help={t("projectSettings.advancedLlm.apiKeyHelp")}
                   />
                   <p className="text-xs text-muted-foreground">
-                    Stays on this device — not shared with collaborators.
+                    {t("projectSettings.advancedLlm.apiKeyDeviceOnlyNote")}
                   </p>
                   {models.length > 0 && (
                     <div>
-                      <FieldLabel htmlFor="mdl">Model</FieldLabel>
+                      <FieldLabel htmlFor="mdl">{t("projectSettings.advancedLlm.modelLabel")}</FieldLabel>
                       <Select value={model} onValueChange={(value) => setModel(value ?? "")}>
                         <SelectTrigger id="mdl" className="w-full">
                           <SelectValue />
@@ -1722,15 +1768,19 @@ export function ProjectSettings() {
                   )}
                   {models.length === 0 && (
                     <div>
-                      <FieldLabel htmlFor="mdl-manual">Model (if not listed)</FieldLabel>
+                      <FieldLabel htmlFor="mdl-manual">{t("projectSettings.advancedLlm.modelManualLabel")}</FieldLabel>
                       <Input
                         id="mdl-manual"
                         value={model}
                         onChange={(e) => setModel(e.target.value)}
-                        placeholder={presetId === "openrouter" ? "anthropic/claude-3.5-sonnet" : "Type a model id"}
+                        placeholder={presetId === "openrouter" ? t("projectSettings.advancedLlm.modelManualPlaceholderOpenRouter") : t("projectSettings.advancedLlm.modelManualPlaceholderGeneric")}
                       />
                       <p className="mt-1 text-xs text-muted-foreground">
-                        Click Connect to discover models, or type one manually (required for providers that don't expose <code className="rounded bg-muted px-1">/models</code>).
+                        <RichMessage
+                          k="projectSettings.advancedLlm.modelManualHelp"
+                          // i18n-exempt literal API path fragment, not prose — never translated
+                          values={{ modelsPath: <code className="rounded bg-muted px-1">/models</code> }}
+                        />
                       </p>
                     </div>
                   )}
@@ -1739,26 +1789,29 @@ export function ProjectSettings() {
 
               {provider === "frontier" && (
                 <div>
-                  <FieldLabel htmlFor="mdl-frontier">Model override (optional)</FieldLabel>
+                  <FieldLabel htmlFor="mdl-frontier">{t("projectSettings.advancedLlm.modelOverrideLabel")}</FieldLabel>
                   <Input
                     id="mdl-frontier"
                     value={model}
                     onChange={(e) => setModel(e.target.value)}
-                    placeholder="Leave blank for Frontier's default"
+                    placeholder={t("projectSettings.advancedLlm.modelOverridePlaceholder")}
                   />
                   <p className="mt-1 text-xs text-muted-foreground">
-                    Optionally specify an OpenRouter model (e.g. <code className="rounded bg-muted px-1">anthropic/claude-3.5-sonnet</code>).
+                    <RichMessage
+                      k="projectSettings.advancedLlm.modelOverrideHelp"
+                      values={{ example: <code className="rounded bg-muted px-1">anthropic/claude-3.5-sonnet</code> }}
+                    />
                   </p>
                 </div>
               )}
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <FieldLabel htmlFor="mt">Max Tokens</FieldLabel>
+                  <FieldLabel htmlFor="mt">{t("projectSettings.advancedLlm.maxTokensLabel")}</FieldLabel>
                   <Input id="mt" type="number" value={maxTokens} onChange={(e) => setMaxTokens(Number(e.target.value))} />
                 </div>
                 <Field>
-                  <FieldLabel>Temperature ({temperature})</FieldLabel>
+                  <FieldLabel>{t("projectSettings.advancedLlm.temperatureLabel", { value: temperature })}</FieldLabel>
                   <Slider
                     min={0}
                     max={1}
@@ -1770,7 +1823,7 @@ export function ProjectSettings() {
               </div>
 
               <Field>
-                <FieldLabel>LLM Health Penalty ({Math.round(llmHealthPenalty * 100)}%)</FieldLabel>
+                <FieldLabel>{t("projectSettings.advancedLlm.healthPenaltyLabel", { percent: Math.round(llmHealthPenalty * 100) })}</FieldLabel>
                 <Slider
                   min={0}
                   max={0.5}
@@ -1779,7 +1832,7 @@ export function ProjectSettings() {
                   onValueChange={(next) => setLlmHealthPenalty(Array.isArray(next) ? next[0] : next)}
                 />
                 <FieldDescription>
-                  LLM translations are penalized by this amount in health calculations. 0% = full trust, 50% = heavy penalty. Default: 10%.
+                  {t("projectSettings.advancedLlm.healthPenaltyDescription")}
                 </FieldDescription>
               </Field>
             </div>
@@ -1791,29 +1844,29 @@ export function ProjectSettings() {
           <Card id="section-voice">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                <Sparkles className="h-4 w-4 text-primary" /> Voice
+                <Sparkles className="h-4 w-4 text-primary" /> {t("projectSettings.section.voice")}
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               <ApiKeyField
-                label="Gemini API key"
-                placeholder="AIza..."
+                label={t("projectSettings.voice.geminiKeyLabel")}
+                placeholder={t("projectSettings.voice.geminiKeyPlaceholder")}
                 projectKey={geminiApiKey}
                 userKey={geminiUserKey}
                 onProjectKeyChange={setGeminiApiKey}
                 onUserKeyChange={(v) => setUserApiKey("gemini-tts", v)}
-                help="Used for Gemini-powered text-to-speech. Get a key at aistudio.google.com/apikey. Sent directly to Google; never uploaded to Frontier."
+                help={t("projectSettings.voice.geminiKeyHelp")}
               />
               <div className="flex items-center justify-between gap-4 pt-1">
                 <p className="text-sm text-muted-foreground">
-                  Voice library and cast assignments live in the Voice Studio.
+                  {t("projectSettings.voice.libraryNote")}
                 </p>
                 <Button variant="outline" onClick={() => {
                   // Set the Audio lens preference before navigating so the workspace opens in audio mode.
                   try { window.localStorage.setItem(`codex:editorLens:${id}`, "audio") } catch { /* ignore */ }
                   requestNavigate(`/project/${id}/editor`)
                 }} className="shrink-0">
-                  Open Voice Studio
+                  {t("projectSettings.voice.openStudioButton")}
                 </Button>
               </div>
             </CardContent>
@@ -1825,22 +1878,20 @@ export function ProjectSettings() {
           <Card id="section-local-models">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                <HardDriveDownload className="h-4 w-4 text-primary" /> Local AI models
+                <HardDriveDownload className="h-4 w-4 text-primary" /> {t("projectSettings.section.localModels")}
               </CardTitle>
             </CardHeader>
             <CardContent>
               <div className="flex items-center justify-between gap-4">
                 <p className="text-sm text-muted-foreground">
-                  Whisper transcription and the local voices run in your browser and
-                  are shared across every project on this device. Manage downloads in
-                  your personal preferences.
+                  {t("projectSettings.localModels.description")}
                 </p>
                 <Button
                   variant="outline"
                   onClick={() => requestNavigate("/preferences")}
                   className="shrink-0"
                 >
-                  Manage models
+                  {t("projectSettings.localModels.manageButton")}
                 </Button>
               </div>
             </CardContent>
@@ -1884,16 +1935,16 @@ export function ProjectSettings() {
         {sectionsToRender.some((s) => s.id === "section-validation") && (
           <Card>
             <CardHeader>
-              <CardTitle>Harmonization</CardTitle>
+              <CardTitle>{t("projectSettings.harmonization.title")}</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
-                <FieldLabel htmlFor="harmonize-min-role">Minimum role to run a harmonization sweep</FieldLabel>
+                <FieldLabel htmlFor="harmonize-min-role">{t("projectSettings.harmonization.minRoleLabel")}</FieldLabel>
                 <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip ?? null}>
                   <Select
                     items={{
-                      project_lead: "Project Lead (default)",
-                      maintainer: "Maintainer",
+                      project_lead: t("projectSettings.harmonization.defaultRoleSuffix", { role: resolveRoleName(t, ROLE.PROJECT_LEAD) }),
+                      maintainer: resolveRoleName(t, ROLE.MAINTAINER),
                     }}
                     disabled={!canEditShared}
                     value={harmonizeMinRole}
@@ -1904,15 +1955,14 @@ export function ProjectSettings() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectGroup>
-                        <SelectItem value="project_lead">Project Lead (default)</SelectItem>
-                        <SelectItem value="maintainer">Maintainer</SelectItem>
+                        <SelectItem value="project_lead">{t("projectSettings.harmonization.defaultRoleSuffix", { role: resolveRoleName(t, ROLE.PROJECT_LEAD) })}</SelectItem>
+                        <SelectItem value="maintainer">{resolveRoleName(t, ROLE.MAINTAINER)}</SelectItem>
                       </SelectGroup>
                     </SelectContent>
                   </Select>
                 </DisabledFieldTooltip>
                 <p className="text-xs text-muted-foreground">
-                  Only users with at least this role can open a harmonization sweep on this project.
-                  The floor cannot be lowered below Project Lead (hard floor per spec).
+                  {t("projectSettings.harmonization.description")}
                 </p>
               </div>
             </CardContent>
@@ -1932,10 +1982,16 @@ export function ProjectSettings() {
         {searchGroupLabel("section-git-sync")}
         {project?.origin?.kind === "git" && sectionsToRender.some((s) => s.id === "section-git-sync") && (
           <Card id="section-git-sync">
-            <CardHeader><CardTitle>Git Sync</CardTitle></CardHeader>
+            <CardHeader><CardTitle>{t("projectSettings.section.gitSync")}</CardTitle></CardHeader>
             <CardContent className="space-y-3">
               <p className="text-xs text-muted-foreground">
-                Origin: <span className="font-mono">{project.origin.cloneUrl}</span> (branch: <span className="font-mono">{project.origin.branch}</span>)
+                <RichMessage
+                  k="projectSettings.gitSync.originLabel"
+                  values={{
+                    url: <span className="font-mono">{project.origin.cloneUrl}</span>,
+                    branch: <span className="font-mono">{project.origin.branch}</span>,
+                  }}
+                />
               </p>
               <div className="flex items-center gap-2">
                 <Checkbox
@@ -1943,7 +1999,7 @@ export function ProjectSettings() {
                   checked={autoSyncEnabled}
                   onCheckedChange={(checked) => setAutoSyncEnabled(checked)}
                 />
-                <FieldLabel htmlFor="auto-sync" className="text-sm">Auto-sync every</FieldLabel>
+                <FieldLabel htmlFor="auto-sync" className="text-sm">{t("projectSettings.gitSync.autoSyncLabel")}</FieldLabel>
                 <Input
                   type="number"
                   min={1}
@@ -1952,10 +2008,10 @@ export function ProjectSettings() {
                   value={autoSyncInterval}
                   onChange={(e) => setAutoSyncInterval(Math.max(1, Number(e.target.value) || 1))}
                 />
-                <span className="text-sm">minutes (only when there are changes)</span>
+                <span className="text-sm">{t("projectSettings.gitSync.minutesSuffix")}</span>
               </div>
               <p className="text-xs text-muted-foreground">
-                Interval is floored at 1 minute. Sync will only push when there are local changes.
+                {t("projectSettings.gitSync.intervalNote")}
               </p>
             </CardContent>
           </Card>
@@ -1965,15 +2021,15 @@ export function ProjectSettings() {
           <Card id="section-terminology">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                Terminology Library
+                {t("projectSettings.terminology.title")}
               </CardTitle>
             </CardHeader>
             <CardContent className="flex items-center justify-between gap-4">
               <p className="text-sm text-muted-foreground">
-                Manage approved terms, renderings, and the project glossary (term base).
+                {t("projectSettings.terminology.description")}
               </p>
               <Button variant="outline" onClick={() => requestNavigate(`/project/${id}/terminology`)} className="shrink-0">
-                Open Terminology Library
+                {t("projectSettings.terminology.openButton")}
               </Button>
             </CardContent>
           </Card>
@@ -2024,14 +2080,14 @@ export function ProjectSettings() {
       <Dialog open={discardOpen} onOpenChange={(open) => (open ? setDiscardOpen(true) : handleDiscardCancel())}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Discard changes?</DialogTitle>
+            <DialogTitle>{t("projectSettings.discardDialogTitle")}</DialogTitle>
             <DialogDescription>
-              You have unsaved changes to project settings. They will be lost if you leave now.
+              {t("projectSettings.discardDialogDescription")}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="ghost" onClick={handleDiscardCancel}>Keep editing</Button>
-            <Button variant="destructive" onClick={handleDiscardConfirm}>Discard</Button>
+            <Button variant="ghost" onClick={handleDiscardCancel}>{t("projectSettings.keepEditing")}</Button>
+            <Button variant="destructive" onClick={handleDiscardConfirm}>{t("common.discard")}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

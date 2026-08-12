@@ -9,6 +9,13 @@
 // MAINTAINER (600) to mutate; any member sees a read-only status summary.
 // Board list / structure fetches require ORG maintainer server-side — when
 // they 403 we degrade gracefully (raw column ids instead of titles).
+//
+// SWARM-TODO(AQU-832, i18n): this file plus MondayLinkedView.tsx and
+// MondayMappingEditor.tsx (~50 unkeyed strings total) are deliberately left
+// unkeyed by the WS-14 project-settings/creation/sharing i18n wave — the
+// audit scoped the Monday.com integration trio to a later wave rather than
+// this pass. Key with a `projectSettings.monday.*` (or dedicated `monday`)
+// namespace when that wave starts; see docs/swarm/TRACES.md.
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Link } from "react-router-dom"

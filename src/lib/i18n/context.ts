@@ -15,9 +15,17 @@
  *   - **per-key entry** — only where the namespace note isn't enough (a
  *     placeholder to explain, a length limit, a non-obvious action).
  *
- * A key is *covered* when its namespace has a `_context.description`; per-key
- * entries refine, they don't gate. `catalogContextIssues()` is the lint that
- * enforces coverage plus placeholder agreement, and is run both by
+ * A key is *covered* when its namespace has a `_context.description`.
+ * Per-key entries refine that note where present, but they're only
+ * REQUIRED for a key in one of four classes — see `ContextRequirement` /
+ * `requiresOwnContextEntry()` below (AQU-832 relaxation): a `{placeholder}`
+ * to explain, a `plural()` form to reason about, a `maxLength` ceiling, or an
+ * accessibility name a screen reader announces with no layout to lean on.
+ * Everything else may skip an entry and inherit the namespace note — that's
+ * what keeps coverage a class test instead of a per-key tax; see
+ * `docs/I18N-CONTEXT-CATALOG.md` "why this changed" for the measured effect.
+ * `catalogContextIssues()` is the lint that enforces coverage, class
+ * membership, and placeholder agreement, and is run both by
  * `context.test.ts` (so `pnpm test` is the CI gate) and by
  * `scripts/i18n-catalog.ts check`.
  *
@@ -173,16 +181,137 @@ export function resolveKeyContext(key: MessageKey): ResolvedContext {
 export const MESSAGE_KEYS = Object.keys(en) as MessageKey[]
 
 /**
+ * The four classes of key that a generic namespace description cannot cover
+ * (AQU-832 relaxation). A `{placeholder}` needs its meaning explained; a
+ * count-governed message needs a translator to reason about its forms; a
+ * length ceiling is a per-string layout fact, not a namespace-wide one; an
+ * accessibility name is read by a screen reader with none of the surrounding
+ * layout to lean on. Every other key — the overwhelming majority — is
+ * adequately described by its namespace alone.
+ *
+ * This is what turns "context" from a per-key tax into a class test: at 1,337
+ * keys, 1,143 (85.5%) had an authored per-key entry under the old convention;
+ * under this test only 653 (48.8%) are classified as needing one — and that
+ * number is the true floor, not an estimate, because it's the same corpus the
+ * old convention already covered (see docs/I18N-CONTEXT-CATALOG.md "why this
+ * changed" for the full before/after).
+ */
+export interface ContextRequirement {
+  /** The English string (or a plural form of it) uses a `{placeholder}`. */
+  placeholder: boolean
+  /** The key is count-governed — authored with `plural()`. */
+  plural: boolean
+  /** The key's resolved context (its own or its namespace's) sets `maxLength`. */
+  maxLength: boolean
+  /** The key's name marks it as an accessibility name — see `looksLikeAccessibilityName`. */
+  accessibilityName: boolean
+}
+
+/**
+ * Key-name convention for an accessibility name: the segment naming what the
+ * string is (an `aria-label`, `screenReader`-only text, an `sr-only`/
+ * `visuallyHidden` node) rather than what surface it's on. Already the
+ * dominant naming convention in this catalog — 80+ existing keys match it
+ * (`nav.version.copyAriaLabel`, `editor.row.selectedAria`,
+ * `search.ariaLabelProject`) — so this makes an existing practice load-bearing
+ * rather than inventing a new one.
+ *
+ * This is a heuristic, not a certainty: it reads the catalog's own key names,
+ * which is the only signal available to a module that deliberately doesn't
+ * import the component tree (see the module doc). A string wired to
+ * `aria-label` under a name that doesn't match — `autopilot.pill.stopRun`, a
+ * plain imperative reused as its own accessible name — won't be caught here.
+ * Where that matters, name the key so it says so; `catalogContextIssues()`
+ * only sees what the name tells it.
+ */
+const ACCESSIBILITY_NAME_TOKENS = new Set([
+  "aria",
+  "arialabel",
+  "screenreader",
+  "sronly",
+  "visuallyhidden",
+])
+
+export function looksLikeAccessibilityName(key: string): boolean {
+  // Split into dot- and camelCase-delimited tokens rather than substring-
+  // matching the whole key, so "logAria" → […, "Aria"] matches but a word
+  // that merely CONTAINS "aria" — "librarian", "invariant", "aquarian" — does
+  // not: those stay single un-split tokens because they have no camelCase
+  // boundary of their own.
+  const tokens = key
+    .split(/[.\-_]|(?=[A-Z])/)
+    .map((t) => t.toLowerCase())
+    .filter(Boolean)
+  return tokens.some((t) => ACCESSIBILITY_NAME_TOKENS.has(t))
+}
+
+/**
+ * Which of the four context-requiring classes `key` falls into. Pure function
+ * of the base catalog (`en.ts`) and the resolved sidecar — never of whether an
+ * entry already exists, so it can't be satisfied by writing an entry rather
+ * than by the key actually needing one.
+ */
+export function contextRequirementFor(key: MessageKey): ContextRequirement {
+  const hasPlaceholder = englishFormsFor(key).some((form) => placeholdersIn(form).length > 0)
+  return {
+    placeholder: hasPlaceholder,
+    plural: pluralMessageFor(key) !== undefined,
+    maxLength: resolveKeyContext(key).maxLength !== undefined,
+    accessibilityName: looksLikeAccessibilityName(key),
+  }
+}
+
+/** Human-readable reasons for a `ContextRequirement`, for lint messages. */
+export function contextRequirementReasons(req: ContextRequirement): string[] {
+  const reasons: string[] = []
+  if (req.placeholder) reasons.push("uses a {placeholder}")
+  if (req.plural) reasons.push("is count-governed (plural())")
+  if (req.maxLength) reasons.push("carries a maxLength ceiling")
+  if (req.accessibilityName) reasons.push("is an accessibility name (aria-label/screen-reader)")
+  return reasons
+}
+
+/**
+ * Keys that predate this class-based requirement and still lack their own
+ * entry, in a namespace module out of scope for this change to edit (see
+ * docs/I18N-CONTEXT-CATALOG.md "why this changed"). This is not a blanket
+ * exemption: `catalogContextIssues()` still requires each listed key to
+ * actually need one — if a namespace owner adds the missing entry, the SAME
+ * check reports that the listing is now stale and should be removed (see the
+ * maintenance pass at the end of `catalogContextIssues()`), so this list
+ * can't rot the way an unenforced convention could.
+ *
+ * `autopilot.inspector.activity.logAria` is real, not a classifier false
+ * positive: it's wired to `aria-label` in `AutopilotActivityInspector.tsx`
+ * with no per-key entry today.
+ */
+export const LEGACY_CONTEXT_GAPS: readonly MessageKey[] = ["autopilot.inspector.activity.logAria"]
+
+/**
+ * Does `key` need its own context entry, beyond inheriting the namespace
+ * `_context.description`? True when any class in `ContextRequirement` holds.
+ */
+export function requiresOwnContextEntry(key: MessageKey): boolean {
+  const req = contextRequirementFor(key)
+  return req.placeholder || req.plural || req.maxLength || req.accessibilityName
+}
+
+/**
  * Lint the sidecar against the base catalog. Returns a human-readable issue per
  * problem; an empty array means the catalog is fully covered and consistent.
  *
  * Checks, in order:
  *  1. every message key's namespace has a usable `_context.description`;
  *  2. per-key descriptions are present and non-trivial when the entry exists;
- *  3. no orphan entries — every context key and namespace maps to a real key;
- *  4. every referenced screenshot id is declared in `screenshots.ts`;
- *  5. placeholders agree in both directions between the string and its context;
- *  6. every declared screenshot surface is actually referenced by the metadata.
+ *  3. a key in a context-requiring class (placeholder, plural, maxLength, or
+ *     accessibility name — see `ContextRequirement`) has an entry of its own;
+ *     namespace inheritance alone is not enough for it. This is the check
+ *     that makes coverage a class test instead of a per-key tax: everything
+ *     NOT in one of those classes may skip an entry entirely and still pass;
+ *  4. no orphan entries — every context key and namespace maps to a real key;
+ *  5. every referenced screenshot id is declared in `screenshots.ts`;
+ *  6. placeholders agree in both directions between the string and its context;
+ *  7. every declared screenshot surface is actually referenced by the metadata.
  */
 export function catalogContextIssues(): string[] {
   const issues: string[] = []
@@ -212,6 +341,23 @@ export function catalogContextIssues(): string[] {
         `${key}: description is too short (< ${MIN_DESCRIPTION_LENGTH} chars); ` +
           `drop the entry to inherit the namespace note instead`,
       )
+    }
+
+    // Check 3: the class test. A key outside every context-requiring class
+    // may have zero entry at all and still pass — that's the relaxation. A
+    // key inside one or more classes must have its own entry; a missing
+    // description is caught above once it exists, so this only needs to
+    // catch the entry being absent entirely. `LEGACY_CONTEXT_GAPS` is the one
+    // deliberate carve-out — see its doc comment — and is verified separately
+    // below rather than silently skipped here.
+    if (!entry && !LEGACY_CONTEXT_GAPS.includes(key)) {
+      const req = contextRequirementFor(key)
+      if (req.placeholder || req.plural || req.maxLength || req.accessibilityName) {
+        issues.push(
+          `${key}: needs its own context entry (${contextRequirementReasons(req).join("; ")}) ` +
+            `— the namespace description alone isn't specific enough for it`,
+        )
+      }
     }
 
     const resolved = resolveKeyContext(key)
@@ -298,6 +444,27 @@ export function catalogContextIssues(): string[] {
       issues.push(
         `screenshot surface "${surface.id}" is declared but no context entry ` +
           `references it — link it or remove it so the capture spec stays honest`,
+      )
+    }
+  }
+
+  // Maintenance pass: keep LEGACY_CONTEXT_GAPS honest in both directions. A
+  // listed key that isn't real, or that has since gotten its own entry (or
+  // stopped needing one — e.g. the namespace maxLength that required it was
+  // removed), must be dropped from the list rather than left to quietly keep
+  // exempting a key that no longer needs it.
+  for (const key of LEGACY_CONTEXT_GAPS) {
+    if (!MESSAGE_KEYS.includes(key)) {
+      issues.push(`LEGACY_CONTEXT_GAPS lists "${key}", which is not a real message key — drop it`)
+      continue
+    }
+    const namespace = namespaceOf(key)
+    const hasEntry = CATALOG_CONTEXT[namespace]?.keys?.[key] !== undefined
+    const stillNeedsOne = requiresOwnContextEntry(key)
+    if (hasEntry || !stillNeedsOne) {
+      issues.push(
+        `LEGACY_CONTEXT_GAPS lists "${key}", which no longer needs the exemption ` +
+          `(${hasEntry ? "it now has its own entry" : "it no longer falls into a context-requiring class"}) — drop it`,
       )
     }
   }

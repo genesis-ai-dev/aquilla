@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import {
   Upload, Library, Globe, Table2, Languages, ArrowLeft, ArrowLeftRight, Tags, StickyNote, Database,
-  BookImage, BookA, BookOpen, Search, Cloud,
+  BookImage, BookA, BookOpen, Search, Cloud, CloudDownload,
   type LucideIcon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -57,6 +57,7 @@ import {
   type ImportResult,
 } from "@/lib/import"
 import type { PreparedImportFile } from "@/lib/import/import-service"
+import { GoogleDrivePanel } from "@/components/import/GoogleDrivePanel"
 import { importSdbh, type SdbhImportProgress } from "@/lib/import-sdbh"
 import { assertSourceUploadByteLength } from "@/lib/sync/source-upload"
 import { PreviewPanel, type ImportUploadProgress } from "@/components/import/PreviewPanel"
@@ -109,7 +110,7 @@ import { importDcsResource } from "@/lib/dcs/import-dcs"
 import { DcsClient } from "@/lib/dcs/catalog"
 import type { DcsCatalogEntry, DcsCursor } from "@/lib/dcs/types"
 
-type Screen = "landing" | "upload" | "preview" | "ebible" | "helloao" | "obs" | "macula" | "tn" | "biblica" | "direction" | "result" | "collision" | "spreadsheet" | "labels" | "paired" | "sdbh" | "dcs"
+type Screen = "landing" | "upload" | "preview" | "ebible" | "helloao" | "obs" | "macula" | "tn" | "biblica" | "direction" | "result" | "collision" | "spreadsheet" | "labels" | "paired" | "sdbh" | "dcs" | "gdrive"
 
 interface ImportDialogProps {
   open: boolean
@@ -236,10 +237,10 @@ export function ImportDialog({
     /** Commits the parsed results to the server once user confirms. */
     commit: () => void | Promise<void>
     /** Surface to restore if the user cancels the preview. */
-    returnScreen: "upload" | "spreadsheet"
+    returnScreen: "upload" | "spreadsheet" | "gdrive"
   } | null>(null)
   const [spreadsheetSeedFile, setSpreadsheetSeedFile] = useState<File | null>(null)
-  const [spreadsheetReturnScreen, setSpreadsheetReturnScreen] = useState<"landing" | "upload">("landing")
+  const [spreadsheetReturnScreen, setSpreadsheetReturnScreen] = useState<"landing" | "upload" | "gdrive">("landing")
   // AQU-430: upload progress surfaced from UploadPanel's doCommit while the
   // preview screen is active (UploadPanel is unmounted; these live here so
   // PreviewPanel can render an in-flight indicator).
@@ -477,6 +478,7 @@ export function ImportDialog({
                   label="Back to import types"
                 />
                 {screen === "upload" ? "Upload Files"
+                  : screen === "gdrive" ? "Google Drive"
                   : screen === "helloao" ? "Bible API (helloao.org)"
                   : screen === "obs" ? "Open Bible Stories"
                   : screen === "dcs" ? "Door43 (DCS)"
@@ -539,6 +541,47 @@ export function ImportDialog({
             onSpreadsheetFile={(file) => {
               setSpreadsheetSeedFile(file)
               setSpreadsheetReturnScreen("upload")
+              setScreen("spreadsheet")
+            }}
+            onCommitPhase={setPreviewUploadPhase}
+            onCommitProgress={setPreviewUploadProgress}
+            onCommitError={setPreviewCommitError}
+            onImported={handleChildImported}
+            excludeFrontMatter={excludeFrontMatter}
+          />
+        )}
+
+        {screen === "gdrive" && (
+          <UploadPanel
+            variant="gdrive"
+            projectId={projectId}
+            username={username}
+            sourceLanguage={sourceLanguage}
+            targetLanguage={targetLanguage}
+            targetLang={targetLang}
+            identityToken={identityToken}
+            getToken={getToken}
+            ttsSettings={ttsSettings}
+            onCastUpdated={onCastUpdated}
+            existingFiles={existingFiles}
+            onCollision={(collisions, proceed) => {
+              posthog.capture(IMPORT_COLLISION_DETECTED, {
+                collision_count: collisions.length,
+                project_id: projectId,
+              })
+              setCollisionState({ collisions, proceed })
+              setScreen("collision")
+            }}
+            onPreview={(results, commit) => {
+              setPreviewUploadPhase("")
+              setPreviewUploadProgress(null)
+              setPreviewCommitError(null)
+              setPreviewState({ results, commit, returnScreen: "gdrive" })
+              setScreen("preview")
+            }}
+            onSpreadsheetFile={(file) => {
+              setSpreadsheetSeedFile(file)
+              setSpreadsheetReturnScreen("gdrive")
               setScreen("spreadsheet")
             }}
             onCommitPhase={setPreviewUploadPhase}
@@ -840,6 +883,8 @@ type ImportOption = {
 const POPULAR_OPTIONS: ImportOption[] = [
   { id: "upload", title: "Upload files", icon: Upload,
     description: "USFM, DOCX, PPTX, IDML, TXT, subtitles, spreadsheets, audio/video, or a Paratext project." },
+  { id: "gdrive", title: "Google Drive", hint: "files or a folder", icon: CloudDownload, badge: "beta",
+    description: "Pick documents or a whole folder from your Drive — Google Docs import as DOCX." },
   { id: "ebible", title: "eBible Corpus", hint: "public library", icon: Library,
     description: "Openly-licensed Bible translations, imported directly — no download." },
   { id: "helloao", title: "Bible API", hint: "helloao.org", icon: Globe,
@@ -1041,6 +1086,9 @@ interface UploadPanelProps {
   /** AQU-634: per-project USFM front-matter opt-out (forwarded to parseFile /
    *  the Paratext preview). */
   excludeFrontMatter?: boolean
+  /** AQU-823: "gdrive" swaps the dropzone for the Google Drive picker while
+   *  reusing this panel's preview/collision/commit machinery unchanged. */
+  variant?: "upload" | "gdrive"
 }
 
 /** Sorted, deduped extension list ("mp3,usfm") for import telemetry breakdowns. */
@@ -1063,13 +1111,16 @@ function idmlParsePhase(
   return `${action} ${fileName}${count}…`
 }
 
-function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targetLang, identityToken, getToken, onImported, ttsSettings, onCastUpdated, existingFiles, onCollision, onPreview, onCommitPhase, onCommitProgress, onCommitError, onSpreadsheetFile, excludeFrontMatter }: UploadPanelProps) {
+function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targetLang, identityToken, getToken, onImported, ttsSettings, onCastUpdated, existingFiles, onCollision, onPreview, onCommitPhase, onCommitProgress, onCommitError, onSpreadsheetFile, excludeFrontMatter, variant = "upload" }: UploadPanelProps) {
   const [importing, setImporting] = useState(false)
   const [dragOver, setDragOver] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [phase, setPhase] = useState<string>("")
   const [progress, setProgress] = useState<ImportUploadProgress | null>(null)
   const parseAbortRef = useRef<AbortController | null>(null)
+  // AQU-823: per-file Drive provenance (normalized name → origin), set by the
+  // gdrive variant just before handleFiles and stamped into importManifest.
+  const originsRef = useRef<Map<string, Record<string, unknown>> | null>(null)
   const finalizationCheckpointRef = useRef<{
     files: File[]
     refs: FileReference[]
@@ -1289,6 +1340,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
             targetLang,
             identityToken,
             reimportFileIds,
+            origins: originsRef.current ?? undefined,
             getToken,
             onCellEnqueued: (count, total) => {
               const p = `Uploading ${file.name}`
@@ -1370,6 +1422,9 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
           onCommitError?.(message)
         }
       } finally {
+        // AQU-823: one-shot Drive provenance — a later plain upload must not
+        // inherit origins from a previous Google Drive batch.
+        originsRef.current = null
         setImporting(false)
         setProgress(null)
         onCommitProgress?.(null)
@@ -1411,6 +1466,24 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
         onCollision={onCollision}
         excludeFrontMatter={excludeFrontMatter}
       />
+    )
+  }
+
+  // AQU-823: Google Drive variant — same panel state machine (importing,
+  // progress, error, Paratext choice above), different file source.
+  if (variant === "gdrive" && !importing) {
+    return (
+      <div>
+        <GoogleDrivePanel
+          onFiles={async (files, origins) => {
+            // Cleared in doCommit's finally — the preview flow commits later
+            // from a closure, so clearing here would race the actual upload.
+            originsRef.current = origins
+            await handleFiles(files)
+          }}
+        />
+        {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
+      </div>
     )
   }
 

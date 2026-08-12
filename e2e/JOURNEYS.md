@@ -191,6 +191,7 @@
 | Editor      | No-file placeholder renders when no file open         | `e2e/specs/editor/editor-no-file-placeholder.smoke.spec.ts`   |   ✅   |
 | Editor      | Sidebar corpus collapse toggle                        | `e2e/specs/editor/sidebar-corpus-collapse.smoke.spec.ts`      |   ✅   |
 | Editor      | Import dialog opens and shows upload/eBible options   | `e2e/specs/editor/import-dialog.smoke.spec.ts`                |   ✅   |
+| Editor      | Import dialog offers Google Drive; picker/OAuth flow itself is manual-QA only (external Google dependency, AQU-823) | `e2e/specs/editor/import-dialog.smoke.spec.ts`                |   ✅   |
 | Editor      | eBible import search/select and imported file persists across reload | `e2e/specs/editor/import-dialog-ebible.smoke.spec.ts` + `import-dialog-ebible-search.smoke.spec.ts` + `import-ebible-persists-reload.smoke.spec.ts` | ✅ |
 | Editor      | Export scope toggle (file vs project)                 | `e2e/specs/editor/export-scope-toggle.smoke.spec.ts`          |   ✅   |
 | Editor      | Export lossy format warning badge                     | `e2e/specs/editor/export-lossy-warning.smoke.spec.ts`         |   ✅   |

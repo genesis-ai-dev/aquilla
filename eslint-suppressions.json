@@ -324,11 +324,6 @@
       "count": 5
     }
   },
-  "src/components/RuleCreateDialog.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 25
-    }
-  },
   "src/components/RuleDrawer.tsx": {
     "i18n/no-unkeyed-string": {
       "count": 10
@@ -349,19 +344,9 @@
       "count": 8
     }
   },
-  "src/components/RuleSuggestDialog.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 14
-    }
-  },
   "src/components/RuleSuggestFromEditsDialog.tsx": {
     "i18n/no-unkeyed-string": {
       "count": 6
-    }
-  },
-  "src/components/RulesPage.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 20
     }
   },
   "src/components/RulesSurface.tsx": {
@@ -402,11 +387,6 @@
   "src/components/TerminologyMergeDialog.tsx": {
     "i18n/no-unkeyed-string": {
       "count": 13
-    }
-  },
-  "src/components/TerminologyPage.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 47
     }
   },
   "src/components/TerminologyReviewQueue.tsx": {

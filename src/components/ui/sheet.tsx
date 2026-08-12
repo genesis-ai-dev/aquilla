@@ -2,6 +2,7 @@ import * as React from "react"
 import { Dialog as SheetPrimitive } from "@base-ui/react/dialog"
 
 import { cn } from "@/lib/utils"
+import { useT } from "@/lib/i18n/I18nProvider"
 import { Button } from "@/components/ui/button"
 import { XIcon } from "lucide-react"
 
@@ -44,6 +45,7 @@ function SheetContent({
   side?: "top" | "right" | "bottom" | "left"
   showCloseButton?: boolean
 }) {
+  const t = useT()
   return (
     <SheetPortal>
       <SheetOverlay />
@@ -65,7 +67,7 @@ function SheetContent({
                 variant="ghost"
                 className="absolute top-3 right-3"
                 size="icon-sm"
-                aria-label="Close"
+                aria-label={t("common.close")}
               />
             }
           >

@@ -269,8 +269,11 @@ describe("wrangler.toml — asset router must not preempt the Worker at /", () =
   const assetBlocks = toml.split(/^\[.*assets\]$/m).slice(1)
 
   it("declares an assets block per environment", () => {
-    // top-level + production + development + staging + preview
-    expect(assetBlocks).toHaveLength(5)
+    // top-level + preview + production + development. Was 5 until AQU-799
+    // retired the staging environment (7c2c3b5) without updating this count —
+    // the assertion has been failing ever since, unnoticed because no CI job
+    // runs this suite (see docs/OPSEC-REVIEW-2026-08-10.md, OPS-4).
+    expect(assetBlocks).toHaveLength(4)
   })
 
   it("runs the Worker first for / in every environment", () => {
@@ -285,5 +288,79 @@ describe("wrangler.toml — asset router must not preempt the Worker at /", () =
     for (const block of assetBlocks) {
       expect(block).toContain('not_found_handling = "single-page-application"')
     }
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Security headers (docs/OPSEC-REVIEW-2026-08-10.md, OPS-1).
+//
+// The browser build shipped with no CSP and no framing/transport hardening
+// while the Tauri shell had a real CSP. These guard the split rollout: the
+// enforced policy stays limited to directives that cannot break a working
+// page, and the full policy ships report-only until its violations are clean.
+describe("worker/index — security headers", () => {
+  it("sets the enforced CSP on every response it serves", async () => {
+    for (const path of ["/", "/homepage", "/beta", "/app", "/project/abc"]) {
+      const res = await fetchWorker(path)
+      const csp = res.headers.get("Content-Security-Policy") ?? ""
+      expect(csp, `${path} must carry a CSP`).toContain("object-src 'none'")
+      expect(csp).toContain("base-uri 'self'")
+      expect(csp).toContain("frame-ancestors 'self'")
+      expect(csp).toContain("form-action 'self'")
+    }
+  })
+
+  it("keeps script-src/connect-src report-only so a wrong host cannot break prod", async () => {
+    const res = await fetchWorker("/app")
+    const enforced = res.headers.get("Content-Security-Policy") ?? ""
+    const reportOnly = res.headers.get("Content-Security-Policy-Report-Only") ?? ""
+    expect(enforced).not.toContain("script-src")
+    expect(enforced).not.toContain("connect-src")
+    expect(reportOnly).toContain("script-src 'self' 'wasm-unsafe-eval'")
+    expect(reportOnly).toContain("connect-src")
+    expect(reportOnly).toContain("default-src 'self'")
+  })
+
+  it("sets nosniff, framing, referrer and permissions headers", async () => {
+    const res = await fetchWorker("/app")
+    expect(res.headers.get("X-Content-Type-Options")).toBe("nosniff")
+    expect(res.headers.get("X-Frame-Options")).toBe("SAMEORIGIN")
+    expect(res.headers.get("Referrer-Policy")).toBe("strict-origin-when-cross-origin")
+    const pp = res.headers.get("Permissions-Policy") ?? ""
+    // Audio recording (getUserMedia) must keep working; nothing else is used.
+    expect(pp).toContain("microphone=(self)")
+    expect(pp).toContain("camera=()")
+    expect(pp).toContain("geolocation=()")
+  })
+
+  it("sends HSTS on real hosts and never on localhost", async () => {
+    const { default: worker } = await import("./index")
+    const prod = await worker.fetch(new Request("https://aquilla.app/app"), makeEnv())
+    expect(prod.headers.get("Strict-Transport-Security")).toContain("max-age=31536000")
+    const local = await worker.fetch(new Request("http://localhost:5173/app"), makeEnv())
+    expect(local.headers.get("Strict-Transport-Security")).toBeNull()
+  })
+
+  it("still applies X-Robots-Tag on non-canonical hosts alongside the new headers", async () => {
+    const { default: worker } = await import("./index")
+    const res = await worker.fetch(new Request("https://dev.aquilla.app/app"), makeEnv())
+    expect(res.headers.get("X-Robots-Tag")).toBe("noindex")
+    expect(res.headers.get("Content-Security-Policy")).toContain("frame-ancestors 'self'")
+  })
+
+  it("does not throw when the asset binding returns a null-body status (304)", async () => {
+    const { default: worker } = await import("./index")
+    const env = {
+      ASSETS: { fetch: async (): Promise<Response> => new Response(null, { status: 304 }) },
+    }
+    const res = await worker.fetch(new Request("https://aquilla.app/app"), env)
+    expect(res.status).toBe(304)
+    expect(res.headers.get("X-Content-Type-Options")).toBe("nosniff")
+  })
+
+  it("leaves the routed body and cache policy untouched", async () => {
+    const res = await fetchWorker("/")
+    expect(await res.text()).toBe("served:/homepage.html")
+    expect(res.headers.get("Cache-Control") ?? "").toContain("s-maxage=600")
   })
 })

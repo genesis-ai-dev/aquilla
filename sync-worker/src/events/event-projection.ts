@@ -1044,24 +1044,35 @@ case 'cell.audio.attach': {
           )
           .bind(event.projectId, event.fileId, event.cellId, p.slot, p.audioId),
       )
+      // SUB-49: a re-attach may only ADD to what is known about a clip. The
+      // COALESCE'd columns describe the clip ITSELF, and producers routinely
+      // send a partial payload — transcription re-attaches carrying only its
+      // timings, a trim carrying only trims. Plain `excluded.x` read "field
+      // absent" as "erase it", so finishing a transcription silently nulled a
+      // recording's duration (its chip lost its length), its mime type and its
+      // voice; a later trim then nulled the timings straight back. `label` was
+      // the only protected column, which is why names survived and everything
+      // else didn't. Trims stay plain assignments on purpose: dragging an edge
+      // back to the clip boundary CLEARS them, and that must keep working.
       stmts.push(
         db
           .prepare(
             `INSERT INTO cell_audio (
               project_id, file_id, cell_id, audio_id, slot, url, mime_type,
-              voice_id, reference_audio_id, duration_ms, trim_start_ms, trim_end_ms,
+              voice_id, reference_audio_id, duration_ms, label, trim_start_ms, trim_end_ms,
               timings_json, selected, deleted, event_id, created_ts
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?)
             ON CONFLICT(project_id, file_id, cell_id, audio_id) DO UPDATE SET
               slot               = excluded.slot,
               url                = excluded.url,
-              mime_type          = excluded.mime_type,
-              voice_id           = excluded.voice_id,
-              reference_audio_id = excluded.reference_audio_id,
-              duration_ms        = excluded.duration_ms,
+              mime_type          = COALESCE(excluded.mime_type, cell_audio.mime_type),
+              voice_id           = COALESCE(excluded.voice_id, cell_audio.voice_id),
+              reference_audio_id = COALESCE(excluded.reference_audio_id, cell_audio.reference_audio_id),
+              duration_ms        = COALESCE(excluded.duration_ms, cell_audio.duration_ms),
+              label              = COALESCE(excluded.label, cell_audio.label),
               trim_start_ms      = excluded.trim_start_ms,
               trim_end_ms        = excluded.trim_end_ms,
-              timings_json       = excluded.timings_json,
+              timings_json       = COALESCE(excluded.timings_json, cell_audio.timings_json),
               selected           = 1,
               deleted            = 0,
               event_id           = excluded.event_id`,
@@ -1077,6 +1088,9 @@ case 'cell.audio.attach': {
             p.voiceId ?? null,
             p.referenceAudioId ?? null,
             p.durationMs ?? null,
+            // AQU-646 round 8: a take's permanent name. Re-attaches without a
+            // label (trim persists) keep the existing one (COALESCE above).
+            p.label ?? null,
             p.trimStartMs ?? null,
             p.trimEndMs ?? null,
             p.timings ? JSON.stringify(p.timings) : null,
@@ -1124,6 +1138,47 @@ case 'cell.audio.attach': {
               WHERE project_id = ? AND file_id = ? AND cell_id = ? AND audio_id = ?`,
           )
           .bind(event.projectId, event.fileId, event.cellId, p.audioId),
+      )
+      return ['cell_audio']
+    }
+
+    case 'cell.audio.rename': {
+      // AQU-646 round 8: label-only rename — deliberately NOT a re-attach
+      // (which would also re-select the clip). Selection, trims, timings,
+      // everything else untouched. null clears back to unnamed.
+      const p = event.payload as EventPayloads['cell.audio.rename']
+      if (!event.fileId || !event.cellId) {
+        throw new Error(`cell.audio.rename event ${event.id} is missing fileId or cellId`)
+      }
+      stmts.push(
+        db
+          .prepare(
+            `UPDATE cell_audio SET label = ?
+              WHERE project_id = ? AND file_id = ? AND cell_id = ? AND audio_id = ?`,
+          )
+          .bind(p.label, event.projectId, event.fileId, event.cellId, p.audioId),
+      )
+      return ['cell_audio']
+    }
+
+    case 'cell.audio.measure': {
+      // Duration backfill for takes that predate duration capture. COALESCE
+      // makes it fill-only: a row that already knows its length keeps it, so
+      // replays and races with a genuine re-attach are no-ops. Selection,
+      // url, slot, trims, timings: untouched by design (the attach UPSERT
+      // re-selects and plain-assigns trims — exactly what a backfill of an
+      // arbitrary, possibly non-selected take must never do).
+      const p = event.payload as EventPayloads['cell.audio.measure']
+      if (!event.fileId || !event.cellId) {
+        throw new Error(`cell.audio.measure event ${event.id} is missing fileId or cellId`)
+      }
+      stmts.push(
+        db
+          .prepare(
+            `UPDATE cell_audio SET duration_ms = COALESCE(duration_ms, ?)
+              WHERE project_id = ? AND file_id = ? AND cell_id = ? AND audio_id = ?`,
+          )
+          .bind(p.durationMs, event.projectId, event.fileId, event.cellId, p.audioId),
       )
       return ['cell_audio']
     }
@@ -1538,6 +1593,53 @@ case 'cell.audio.attach': {
       return ['cells']
     }
 
+    case 'cell.lane.retime': {
+      // AQU-646 round 6: per-LANE presentation timing, stored as metadata keys
+      // on the source-side row (same JSONB merge discipline as cast.assign —
+      // per-key merges commute, so concurrent cast/lane writes can't clobber
+      // each other). The cell's start_ms/end_ms (the frozen source split) is
+      // NEVER touched here. Per key: number sets, null clears (reset to the
+      // default = follow the source split / section start), undefined no-ops.
+      const p = event.payload as EventPayloads['cell.lane.retime']
+      if (!event.fileId || !event.cellId) {
+        throw new Error(`cell.lane.retime event ${event.id} is missing fileId or cellId`)
+      }
+      const laneKeys: Array<[key: string, value: number | null | undefined]> = [
+        ['subtitle_start_ms', p.subtitleStartMs],
+        ['subtitle_end_ms', p.subtitleEndMs],
+        ['target_start_ms', p.targetStartMs],
+      ]
+      for (const [key, value] of laneKeys) {
+        if (value === undefined) continue
+        if (typeof value === 'number' && Number.isFinite(value)) {
+          stmts.push(
+            db
+              .prepare(
+                `UPDATE cells
+                 SET metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object('${key}', ?::bigint)
+                 WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'source'`,
+              )
+              .bind(Math.round(value), event.projectId, event.fileId, event.cellId),
+          )
+        } else if (value === null) {
+          stmts.push(
+            db
+              .prepare(
+                `UPDATE cells
+                 SET metadata = CASE
+                   WHEN metadata IS NULL THEN NULL
+                   ELSE metadata - '${key}'
+                 END
+                 WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'source'`,
+              )
+              .bind(event.projectId, event.fileId, event.cellId),
+          )
+        }
+        // Non-number, non-null values (corrupt replay data) are skipped.
+      }
+      return ['cells']
+    }
+
     case 'cell.retime': {
       // Timeline editor: move/stretch. Updates start_ms/end_ms on BOTH sides
       // (timing is a property of the segment, shared by source + target rows).
@@ -1568,6 +1670,17 @@ case 'cell.audio.attach': {
         throw new Error(`file.video.set event ${event.id} is missing fileId`)
       }
       stmts.push(buildFileVideoSetStmt(db, event.projectId, event.fileId, event.id, p.coreMediaUrl))
+      return ['files']
+    }
+
+    case 'file.timing.set': {
+      // File-level timing mode — rebuild path; the dispatch path
+      // (handlers/file-timing-set.ts) uses the same shared SQL builder.
+      const p = event.payload as EventPayloads['file.timing.set']
+      if (!event.fileId) {
+        throw new Error(`file.timing.set event ${event.id} is missing fileId`)
+      }
+      stmts.push(buildFileTimingSetStmt(db, event.projectId, event.fileId, event.id, p.timingMode))
       return ['files']
     }
 
@@ -1810,6 +1923,41 @@ case 'cell.audio.attach': {
       )
     }
   }
+}
+
+/**
+ * Shared meta-merge for the file's audio timing mode. Same shape as
+ * buildFileVideoSetStmt below (one files.meta JSON key, merged or removed);
+ * used by both the live handler (handlers/file-timing-set.ts) and the rebuild
+ * projection case. Null clears the key — the file falls back to the
+ * project-level default.
+ */
+export function buildFileTimingSetStmt(
+  db: AquillaDb,
+  projectId: string,
+  fileId: string,
+  eventId: string,
+  timingMode: 'dubbing' | 'audioFirst' | null,
+): AquillaStatement {
+  const NOW = "(extract(epoch from now()) * 1000)::bigint"
+  if (timingMode == null) {
+    return db
+      .prepare(
+        `UPDATE files
+            SET meta = (COALESCE(NULLIF(meta, ''), '{}')::jsonb - 'timingMode')::text,
+                event_id = ?, updated_at = ${NOW}
+          WHERE id = ? AND project_id = ?`,
+      )
+      .bind(eventId, fileId, projectId)
+  }
+  return db
+    .prepare(
+      `UPDATE files
+          SET meta = (COALESCE(NULLIF(meta, ''), '{}')::jsonb || jsonb_build_object('timingMode', ?::text))::text,
+              event_id = ?, updated_at = ${NOW}
+        WHERE id = ? AND project_id = ?`,
+    )
+    .bind(timingMode, eventId, fileId, projectId)
 }
 
 /**

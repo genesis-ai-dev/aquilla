@@ -100,7 +100,10 @@ worker binds D1; workers fail fast if `HYPERDRIVE` is unbound and query through
   durable DO state), comments (+ email notifications via CF Email Service), `/audio/*`,
   diarization, voice-convert, and the external **Agent API** under `/api/v1/external/*`
   (changeset engine + apply gate, artifacts, tools-only MCP server, self-describing
-  discovery — see `docs/AGENT-API.md`). Per-PR fork template `wrangler.pr.toml.tpl`.
+  discovery — see `docs/AGENT-API.md`). PR previews do **not** get an isolated per-PR
+  sync-worker/auth-worker fork — non-draft PRs deploy to the single shared, route-free
+  `aquilla-web-preview` Worker (`wrangler.toml` `[env.preview]`) and point at the shared
+  `development` API backend; see `docs/DEPLOYMENT-ENVIRONMENTS.md`.
 - **`agent-worker/`** — Worker `aquilla-agent-sandbox`: container-backed Durable Object for
   sandboxed agent code execution (see `docs/AGENT-SANDBOX.md`). Server-side only — auth-worker
   calls it via `AGENT_SANDBOX_URL` + shared `AGENT_SANDBOX_KEY`; no zone routes. Reads

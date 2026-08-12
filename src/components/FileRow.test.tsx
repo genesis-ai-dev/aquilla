@@ -6,6 +6,7 @@
 import { describe, it, expect, vi } from "vitest"
 import { render, within } from "@testing-library/react"
 import { FileRow } from "./FileRow"
+import { I18nProvider } from "@/lib/i18n/I18nProvider"
 import type { FileReference } from "@/lib/parsers/types"
 
 const LONG_NAME = "Berean Standard Bible (English) — very long corpus name that overflows"
@@ -35,7 +36,9 @@ const NOOP_PROPS = {
 
 function renderRow(props: Partial<React.ComponentProps<typeof FileRow>> = {}) {
   return render(
-    <FileRow file={makeFile()} {...NOOP_PROPS} {...props} />,
+    <I18nProvider>
+      <FileRow file={makeFile()} {...NOOP_PROPS} {...props} />
+    </I18nProvider>,
   )
 }
 

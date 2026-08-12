@@ -57,7 +57,7 @@ function apiMap(): Record<string, unknown> {
       'GET /api/v1/external/me': 'Who am I: userId, username, mode, scope. Start here.',
       'GET /api/v1/external/projects': 'List accessible projects (up to 100).',
       'GET /api/v1/external/projects/:projectId/files': 'List a project’s files.',
-      'GET /api/v1/external/projects/:projectId/files/:fileId/cells': 'Read a file’s cells (source + target). Supports since/limit/cursor.',
+      'GET /api/v1/external/projects/:projectId/files/:fileId/cells': 'Read a file’s cells (source + target). Supports since/limit/cursor, and lane=<tag> to filter targets to one target-language lane (see multiLanguage).',
       'GET /api/v1/external/projects/:projectId/search?q=': 'Full-text search cells. Optional side=source|target.',
       'GET /api/v1/external/projects/:projectId/cells/:cellId/history': 'Append-only event history for one cell.',
       'POST /api/v1/external/projects/:projectId/artifacts': 'Upload raw bytes (max 25MB). Headers: x-artifact-name (required), content-type, x-artifact-kind (source|audio).',
@@ -67,6 +67,16 @@ function apiMap(): Record<string, unknown> {
       'POST /api/v1/external/projects/:projectId/changesets/:id/commit': 'Commit a prepared changeset. Idempotent; safe to retry.',
       'POST /api/v1/external/projects/:projectId/changesets/:id/discard': 'Discard a staged changeset.',
       'POST /api/v1/external/mcp': 'MCP server (JSON-RPC 2.0, streamable HTTP, same bearer token). Tools mirror the REST surface — see "mcp" below.',
+    },
+    multiLanguage: {
+      note:
+        'A project can hold MULTIPLE target languages at once via target-language lanes. A lane is a language tag (e.g. "es", "pt") registered in the project settings array settings.targetLanes; every cell keeps one shared source plus one independent target per lane. Omitting the lane everywhere uses the default lane — single-language callers need no changes. Preconditions/drift are lane-scoped: edits to the same cell in different lanes never invalidate each other\'s changesets.',
+      workflow: [
+        `1. Register the lanes once: stage { "kind": "UpdateProjectSettings", "projectId": "...", "settings": { ...existing settings, "targetLanes": ["es", "pt"] }, "ifMatchVersion": <live version> } (the write replaces the whole settings blob — merge, don't overwrite).`,
+        '2. Write per lane: add "laneId": "es" (or "pt") to each SetTranslation command. An unregistered laneId is rejected at prepare with validation_failed.',
+        `3. Read per lane: GET .../files/:fileId/cells?lane=es returns source cells plus only that lane's target cells; omit lane for all lanes (each target row carries its targetLang).`,
+        '4. Importing a file can seed several lanes at once: each PlanImport cell takes "variants": [{ "laneId": "es", "content": "..." }, { "laneId": "pt", "content": "..." }].',
+      ],
     },
     mcp: {
       endpoint: `${EXTERNAL_ROOT}/mcp`,

@@ -556,6 +556,11 @@ CREATE TABLE cell_audio (
     created_ts         BIGINT NOT NULL,
     trim_start_ms      BIGINT,
     trim_end_ms        BIGINT,
+    -- AQU-646 round 8: a take's PERMANENT display name ("Take 3", or whatever
+    -- the user renamed it to). Never derived from list position — deleting a
+    -- take must not renumber the rest. Set at attach, changed by
+    -- cell.audio.rename only.
+    label              TEXT,
     -- AQU-508: audio validation, distinct from text validation (cells.validated).
     -- A reviewer approves the *selected* clip of a cell via cell.audio.validate;
     -- cell.audio.unvalidate clears it. The audio-validated rollup counts cells

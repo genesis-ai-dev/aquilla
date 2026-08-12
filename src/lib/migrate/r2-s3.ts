@@ -14,9 +14,6 @@ import crypto from "node:crypto"
 const sha256hex = (data: string): string => crypto.createHash("sha256").update(data).digest("hex")
 const hmac = (key: crypto.BinaryLike, data: string): Buffer => crypto.createHmac("sha256", key).update(data).digest()
 
-/** sha256 of an empty body — used when there is no payload (GET/DELETE/CopyObject). */
-export const EMPTY_PAYLOAD_SHA = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-
 export interface SigV4Input {
   method: string
   /** Percent-encoded path, e.g. "/bucket/key". */

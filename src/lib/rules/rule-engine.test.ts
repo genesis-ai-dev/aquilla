@@ -191,6 +191,26 @@ describe("rule engine — builtin variant", () => {
     expect(out[0].ruleId).toBe("builtin-empty-target")
   })
 
+  // AQU-646: a line added into a silence and dubbed has no text ON PURPOSE.
+  // Flagging it as a MAJOR infraction told the user their finished work was
+  // broken. The check functions take (source, target) strings and structurally
+  // cannot see audio, so the engine makes the distinction for them.
+  it("empty-target does NOT fire on a line whose deliverable is a recording", () => {
+    const rule = makeRule({
+      id: "builtin-empty-target",
+      name: "Empty target",
+      source: "algorithmic",
+      check: { type: "builtin", checkId: "empty-target" },
+    })
+    const dubbed = makeCell({ id: "c1", original: "Hello", translated: "", status: "unvalidated", hasOwnTake: true })
+    expect(checkRulesForCell(dubbed, "f1", [rule])).toHaveLength(0)
+
+    // ...and still fires on the same cell without the take, so the carve-out
+    // is the take and nothing else.
+    const silent = makeCell({ id: "c1", original: "Hello", translated: "", status: "empty" })
+    expect(checkRulesForCell(silent, "f1", [rule])).toHaveLength(1)
+  })
+
   it("non-empty-aware builtins skip empty cells", () => {
     const rule = makeRule({
       id: "builtin-tes",

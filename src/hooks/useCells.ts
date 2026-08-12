@@ -99,6 +99,14 @@ export interface CellData {
   backtranslationForText?: string
   attachments?: Record<string, CodexCellAttachment>
   selectedAudioId?: string
+  /**
+   * AQU-646: this line carries a recording of its OWN (not the shared imported
+   * source clip). Set by the cell store from the workspace's attachment map;
+   * absent everywhere audio is not loaded. Consumers that must distinguish
+   * "silent on purpose" from "not done yet" read this rather than re-deriving
+   * it — notably the empty-target check.
+   */
+  hasOwnTake?: boolean
   selectedGeneratedVoiceAudioId?: string
   audioTimings?: Record<string, WordTiming[]>
   ttsSettings?: CellTtsSettings

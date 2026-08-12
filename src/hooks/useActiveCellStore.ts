@@ -14,6 +14,7 @@ import { deriveMilestoneNavigation } from "@/lib/milestone-navigation"
 import type { ImportMilestoneKind } from "../../shared/import-contract"
 
 const EMPTY_STATS: ReadonlyMap<string, CellAuditStats> = new Map()
+const EMPTY_TAKES: ReadonlySet<string> = new Set()
 const EMPTY_CELL_IDS: readonly string[] = Object.freeze([])
 const EMPTY_SUMMARIES: readonly CellSummary[] = Object.freeze([])
 const EMPTY_TEXT_PAIRS: readonly CellTextPair[] = Object.freeze([])
@@ -71,6 +72,8 @@ export interface CellSummary {
   sequenceIndex?: number
   medium?: CellData["medium"]
   selectedGeneratedVoiceAudioId?: string
+  /** AQU-646: this line carries a recording of its own — see `applyOwnTake`. */
+  hasOwnTake?: boolean
 }
 
 export interface CellTextPair {
@@ -169,6 +172,17 @@ interface RuntimeContext {
   requiredValidations: number
   auditStats: ReadonlyMap<string, CellAuditStats>
   /**
+   * AQU-646: cells that carry a recording of their OWN (a clip seeded with the
+   * cell's id, not the file-seeded imported source clip).
+   *
+   * A line added into a silence may never get text — the dub is the
+   * deliverable — and it still has to count as translated work. Audio does not
+   * live in the cell projection at all, so the workspace feeds this in from
+   * the attachment hook; without it the store would have to be taught about
+   * `cell_audio`, which is a much bigger change for the same answer.
+   */
+  ownTakeCellIds?: ReadonlySet<string>
+  /**
    * AQU-538: the active target LANE the view renders. `''`/undefined = the
    * default lane (byte-identical to pre-lane behaviour). Optional so existing
    * `setRuntime` callers that predate lanes keep compiling; normalized to `''`.
@@ -200,6 +214,7 @@ export class CellStore {
     username: "local",
     requiredValidations: 1,
     auditStats: EMPTY_STATS,
+    ownTakeCellIds: EMPTY_TAKES,
     lane: "",
   }
 
@@ -245,13 +260,39 @@ export class CellStore {
   }>()
   private derivedCache: DerivedCache = { baseVersion: -1, summaries: [], textPairs: [] }
 
+  /**
+   * AQU-646: which cells carry a recording of their own.
+   *
+   * Separate from `setRuntime` because audio is not part of the cell
+   * projection — it is fetched by `useFileAudioAttachments`, which resolves
+   * after the store is constructed. Changing it re-derives every affected
+   * cell's status, so it bumps and emits exactly the cells whose membership
+   * changed, keeping the version/emit pairing the audit-stats path documents
+   * above.
+   */
+  setOwnTakeCellIds(ids: ReadonlySet<string>): void {
+    const prev = this.ctx.ownTakeCellIds ?? EMPTY_TAKES
+    if (prev === ids) return
+    const changed = new Set<string>()
+    for (const id of ids) if (!prev.has(id)) changed.add(id)
+    for (const id of prev) if (!ids.has(id)) changed.add(id)
+    this.ctx = { ...this.ctx, ownTakeCellIds: ids }
+    if (changed.size === 0) return
+    this.bumpCells(changed)
+    this.fileVersion++
+    this.rebuildDerivedIndexes()
+    this.emit(changed)
+  }
+
   setRuntime(next: RuntimeContext): void {
     const prevStats = this.ctx.auditStats
     const nextLane = next.lane ?? ""
     const statsChanged = prevStats !== next.auditStats
     const userChanged = this.ctx.username !== next.username || this.ctx.requiredValidations !== next.requiredValidations
     const laneChanged = (this.ctx.lane ?? "") !== nextLane
-    this.ctx = { ...next, lane: nextLane }
+    // AQU-646: the take set arrives from the attachment hook via its own
+    // setter, not from these options, so a runtime update must not blank it.
+    this.ctx = { ...next, lane: nextLane, ownTakeCellIds: next.ownTakeCellIds ?? this.ctx.ownTakeCellIds }
     if (laneChanged) {
       // AQU-538: re-partition the already-loaded rows against the new active
       // lane. `toRows()` retains every lane's rows, so switching lane re-derives
@@ -456,7 +497,41 @@ export class CellStore {
       this.ctx.auditStats.get(cellId),
     )
     this.applyContentOverlays(cell)
+    this.applyOwnTake(cell)
     return cell
+  }
+
+  /**
+   * AQU-646: a line whose only target content is a recording.
+   *
+   * ONE place, deliberately. `deriveStatus` is left alone — it takes only
+   * (text, validated) and is called from a dozen contexts, several of which
+   * genuinely mean "has text" (few-shot corpora, terminology checks, batch
+   * synthesis). Flipping it there would have quietly changed all of them.
+   * Flipping the assembled VIEW instead carries the change to exactly the
+   * things that ask "is this line done": the status bar, file progress,
+   * validation status, the health cache key (status is part of it), and the
+   * rule engine's empty-target short-circuit.
+   *
+   * `hasOwnTake` rides along so consumers that need the distinction — the
+   * empty-target check, which must not fire on a deliberately silent line —
+   * can see WHY the status is what it is.
+   */
+  private applyOwnTake(cell: CellData): void {
+    if (!this.ctx.ownTakeCellIds?.has(cell.id)) return
+    cell.hasOwnTake = true
+    if (cell.status !== "empty") return
+    // Read the row, not the view: `deriveStatus` answers "empty" for a target
+    // row with no text even when it IS validated, which is exactly the row an
+    // empty commit plus a validation produces.
+    const validated = this.targetById.get(cell.id)?.validated ?? false
+    cell.status = validated ? "validated" : "unvalidated"
+    cell.validationStatus = deriveValidationStatus(
+      cell.status,
+      cell.activeValidators,
+      this.ctx.username,
+      this.ctx.requiredValidations,
+    )
   }
 
   getCellDetailsSummary(cellId: string): CellDetailsSummary | null {
@@ -553,6 +628,7 @@ export class CellStore {
       sequenceIndex: view.sequenceIndex,
       medium: view.medium,
       selectedGeneratedVoiceAudioId: view.selectedGeneratedVoiceAudioId,
+      hasOwnTake: view.hasOwnTake,
     }
   }
 
@@ -1200,7 +1276,9 @@ export class CellStore {
           ?? this.pendingOverlay.get(cellId)?.value
           ?? target?.value
           ?? ""
-        if (targetValue.trim()) translated += 1
+        // AQU-646: a dub with no text is translated work too — same rule the
+        // status bar and file progress follow via applyOwnTake.
+        if (targetValue.trim() || this.ctx.ownTakeCellIds?.has(cellId)) translated += 1
         if (target?.validated) validated += 1
       }
       return { translated, validated, total: cellIds.length }

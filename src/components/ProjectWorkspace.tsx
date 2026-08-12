@@ -92,6 +92,7 @@ import { v7 as uuidv7 } from "uuid"
 import { sequenceBetween } from "@/lib/timeline/derive"
 import { isLineEmpty, isUserAddedLine, userLineOrigin } from "@/lib/timeline/user-lines"
 import { MIN_ADDABLE_SPAN_SEC, targetOffsetMsFor } from "@/lib/timeline/lane-timing"
+import { audioIdSeededWith } from "@/lib/audio/upload"
 import { deriveSourceRegions, insertSlotsByCell, EMPTY_INSERT_SLOTS } from "@/lib/timeline/source-regions"
 import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
 import { isBulkValidationEligible } from "@/lib/review/review-eligibility"
@@ -4554,6 +4555,26 @@ export function ProjectWorkspace() {
     lens === "audio" ? activeFileId : null,
   )
   workspaceAudioByCellIdRef.current = workspaceAudioByCellId
+
+  // AQU-646: tell the cell store which lines carry a recording of their OWN, so
+  // a dub with no text counts as translated work in the status bar, file
+  // progress, validation status and the rule engine.
+  //
+  // `audioIdSeededWith` is what keeps this honest: the imported source clip is
+  // seeded with the FILE's id and shared across every cell, so only a
+  // cell-seeded take can put a cell in this set. Without that check a subtitle
+  // file with one attached video would report itself fully translated.
+  const ownTakeCellIds = useMemo(() => {
+    const ids = new Set<string>()
+    for (const [cellId, entry] of workspaceAudioByCellId) {
+      const selected = entry.selectedAudioId
+      if (selected && audioIdSeededWith(selected, cellId)) ids.add(cellId)
+    }
+    return ids
+  }, [workspaceAudioByCellId])
+  useEffect(() => {
+    cellStore.setOwnTakeCellIds(ownTakeCellIds)
+  }, [cellStore, ownTakeCellIds])
 
   // AQU-646: real counts for the "Transcribe all" / "Synth all" menu items,
   // sharing the exact filters the batch runners use (needsTranscription /

@@ -1,13 +1,19 @@
 import { useMemo } from "react"
 import type { CellData } from "./useCells"
 
-type UnfinishedCellShape = Pick<CellData, "translated" | "activeValidators">
+type UnfinishedCellShape = Pick<CellData, "translated" | "activeValidators"> &
+  Partial<Pick<CellData, "hasOwnTake">>
 
 function isUnfinished(
   cell: UnfinishedCellShape,
   validationCount: number,
 ): boolean {
-  if (!cell.translated || !cell.translated.trim()) return true
+  // AQU-646: a line whose deliverable is a recording is not unfinished for
+  // want of text — "next unfinished" must not park the user on a dub that is
+  // already done. It can still be unfinished for want of VALIDATION, which is
+  // the same bar every other line is held to.
+  const hasContent = Boolean(cell.translated?.trim()) || Boolean(cell.hasOwnTake)
+  if (!hasContent) return true
   return (cell.activeValidators?.length ?? 0) < validationCount
 }
 

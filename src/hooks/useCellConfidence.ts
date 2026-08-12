@@ -41,8 +41,12 @@ export function useCellConfidence(args: {
   const [topNeighbor, setTopNeighbor] = useState<Map<string, string | null>>(new Map())
   const [lastTookMs, setLastTookMs] = useState<number | null>(null)
 
+  // AQU-646: `status` alone no longer implies "has text" — a line carrying only
+  // a recording now reads as unvalidated rather than empty. Confidence is a
+  // TEXT model, so it needs the text test explicitly or every dubbed-but-
+  // unwritten line would be sent to the scorer with nothing to score.
   const toQuery = cells
-    .filter((c) => c.status !== "validated" && c.status !== "empty")
+    .filter((c) => c.status !== "validated" && c.status !== "empty" && Boolean(c.translated?.trim()))
     .map((c) => c.id)
     .slice(0, MAX_QUERY_CELLS)
 

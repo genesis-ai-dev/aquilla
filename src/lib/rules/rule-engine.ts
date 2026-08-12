@@ -55,6 +55,11 @@ export function checkRulesForCell(
     if (rule.check.type !== "builtin") continue
     const def = BUILTIN_CHECKS[rule.check.checkId]
     if (!def?.runsOnEmptyTarget) continue
+    // AQU-646: a line carrying a recording is not an untranslated line. The
+    // check functions take (source, target) strings and cannot see audio, so
+    // the caller has to make the distinction — a dub with no text was being
+    // reported as a MAJOR infraction on work that is finished.
+    if (rule.check.checkId === "empty-target" && cell.hasOwnTake) continue
     const infraction = checkRule(rule, cell, fileId)
     if (infraction) out.push(infraction)
   }

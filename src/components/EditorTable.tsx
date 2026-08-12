@@ -114,6 +114,7 @@ import { CellVoicePanel } from "./cell/CellVoicePanel"
 import { getUnsupportedReason } from "./CellAudioRecordButton"
 // AQU-513: plain file-picker upload next to the mic — works on mobile too.
 import { CellAudioUploadButton } from "./CellAudioUploadButton"
+import { resolveTargetAudio } from "@/lib/audio/track-audio"
 import { useMicPermission } from "@/hooks/useMicPermission"
 import { assignedCastVoiceId, findVoice, getVoiceLibrary, resolveCastVoice } from "@/lib/audio/voices"
 import { useNavigate } from "react-router-dom"
@@ -4932,7 +4933,13 @@ function EditorRow({
       console.warn("[validate] aborting: cell out of the caller's assigned scope")
       return
     }
-    const editEventId = cell.targetEventId ?? pendingTargetEventIdRef.current
+    // AQU-646: `getPendingTargetEventId` covers the take case. Recording emits an
+    // empty target commit to create the row, and the projection has not come
+    // back by the time the control appears — without this, validating a
+    // just-recorded line would silently do nothing, which is the exact failure
+    // the empty commit exists to prevent.
+    const editEventId =
+      cell.targetEventId ?? pendingTargetEventIdRef.current ?? getPendingTargetEventId?.(cell.id) ?? null
     if (!project.id || !editEventId) return
     setOptimisticSelfValidation(validated)
     // AQU-538: scope the validation to the active lane. emitCellValidate/
@@ -4954,7 +4961,7 @@ function EditorRow({
       // FRO-274: surface enqueue failure inline.
       setWriteError("Couldn't save this change locally — copy your text and reload.")
     })
-  }, [cell.fileId, cell.id, cell.targetEventId, project.id, project.syncRole?.level, username, activeLane, myScopes, onCellCommitted])
+  }, [cell.fileId, cell.id, cell.targetEventId, project.id, project.syncRole?.level, username, activeLane, myScopes, onCellCommitted, getPendingTargetEventId])
 
   const editorFocusedRef = useRef(false)
   const requestTargetEdit = useCallback((pointerSelection?: IdmlPointerSelection | null) => {
@@ -5233,7 +5240,14 @@ function EditorRow({
     vs === "others" ? "text-muted-foreground/60" :
     "text-muted-foreground/30"
 
-  const hasContent = Boolean(visibleTranslated && visibleTranslated.trim())
+  // AQU-646: a recorded take IS target content. A line added into a silence may
+  // never get text — the dub is the deliverable — and it still has to be
+  // validatable and countable. `resolveTargetAudio` is the take-aware test: it
+  // matches a clip seeded with THIS cell's id, so the shared imported source
+  // clip (seeded with the file's id) can never masquerade as somebody's work.
+  // The row's `cell` already carries attachments via applyRowOverlays.
+  const hasContent =
+    Boolean(visibleTranslated && visibleTranslated.trim()) || Boolean(resolveTargetAudio(cell))
 
   // AD-14 amendment 2026-06-04: use server-derived confidence score from
   // healthMap when available (set by the confidence overlay in ProjectWorkspace

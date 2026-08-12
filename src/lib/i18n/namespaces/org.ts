@@ -145,7 +145,6 @@ export const org = defineNamespace({
     "org.membersPage.addMemberHeading": "Add member",
     "org.membersPage.allOrgMembersAdded": "All org members are already on this project.",
     "org.membersPage.addMembersAction": "add members to this project",
-    "org.membersPage.requiredRoleMaintainerOrHigher": "Maintainer or higher",
     "org.membersPage.removeMemberTitle": "Remove member",
     "org.membersPage.removeMemberDescription":
       "Remove {username}'s direct {role} access to this project? Any access via org, team, or creator status is unaffected — use \"Revoke all\" to review every path.",

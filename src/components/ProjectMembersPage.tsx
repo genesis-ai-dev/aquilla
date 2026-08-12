@@ -479,8 +479,8 @@ export function MembersTab({
         />
         {addForbidden && (
           <PermissionDeniedAlert
-            action={t("org.membersPage.addMembersAction")}
-            requiredRole={t("org.membersPage.requiredRoleMaintainerOrHigher")}
+            action="org.membersPage.addMembersAction"
+            requiredRoleLevel={ROLE.MAINTAINER}
           />
         )}
       </div>

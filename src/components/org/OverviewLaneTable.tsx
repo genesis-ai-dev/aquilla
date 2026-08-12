@@ -2,7 +2,7 @@
 // under the header StatTiles, rendered ONLY when the project has more than one
 // target-language lane (N=1 projects see no change). One row per lane:
 //
-//   Language | Translated % | Validated % | People | Last activity | Actions
+//   Language | Translated % | Validated % | People | Last activity | ⋯
 //
 // - Translated/Validated come from the project's PortfolioProject.lanes[]
 //   (laneTranslatedPct / laneValidatedPct — §3.1 foundation, already in base).
@@ -11,20 +11,32 @@
 //   same way SharePanel loads them (GET scopes per sub-500 member, tolerating
 //   individual failures as "unscoped"). Leads (500+) are unscoped by design —
 //   they see every lane and so are not attributed to any single row.
-// - Actions per lane: Open (deep-links the workspace at that lane, §3.1),
-//   Assign… (the existing AssignModal pinned to the lane via defaultLane, §3.5),
-//   Staff… (the shared StaffLanePopover, §3.4).
+// - Actions live in the row ⋯ menu (and right-click): Open (deep-links the
+//   workspace at that lane, §3.1), Assign… (AssignModal pinned via defaultLane,
+//   §3.5), Staff… (StaffLanePopover, §3.4).
 // - "+ Add language" routes to the project's settings Languages section.
 
 import { useEffect, useMemo, useState } from "react"
-import { Link } from "react-router-dom"
-import { Languages, Plus } from "lucide-react"
+import { Link, useNavigate } from "react-router-dom"
+import { type ColumnDef } from "@tanstack/react-table"
+import { ExternalLink, UserPlus, Users } from "lucide-react"
 import { projectSettingsPath } from "@/lib/navigation/org-paths"
-import { Button, buttonVariants } from "@/components/ui/button"
+import {
+  ADMIN_TABLE_CLASS,
+  ADMIN_TABLE_SECTION_CONTENT,
+  ADMIN_TABLE_SECTION_HEADER,
+} from "@/components/admin/shared"
+import { Button } from "@/components/ui/button"
+import {
+  DataTable,
+  DataTableColumnHeader,
+  DataTableRowActionsButton,
+} from "@/components/ui/data-table"
+import { MenuItem, MenuSeparator } from "@/components/ui/menu-parts"
+import { Section } from "@/components/ui/page"
 import { AvatarGroup, AvatarGroupCount } from "@/components/ui/avatar"
 import { InitialsAvatar } from "@/components/InitialsAvatar"
 import { AppTooltip } from "@/components/ui/tooltip"
-import { cn } from "@/lib/utils"
 import { StaffLanePopover } from "@/components/StaffLanePopover"
 import { AssignModal } from "@/components/AssignModal"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
@@ -67,11 +79,17 @@ function laneTagId(lane: string): string {
   return lane === "" ? "default" : lane
 }
 
+function laneOpenTo(projectId: string, lane: string): string {
+  return lane
+    ? `/project/${projectId}/editor?lane=${encodeURIComponent(lane)}`
+    : `/project/${projectId}/editor`
+}
+
 /** People avatars for a lane, with an overflow "+N" bubble past the cap. */
 function LanePeople({ members }: { members: ProjectMember[] }) {
   const CAP = 4
   if (members.length === 0) {
-    return <span className="text-[11px] text-muted-foreground">—</span>
+    return <span className="text-sm text-muted-foreground">—</span>
   }
   const shown = members.slice(0, CAP)
   const extra = members.length - shown.length
@@ -94,7 +112,7 @@ function LaneProgressBar({ pct, fillClass }: { pct: number; fillClass: string })
       <span className="h-1.5 w-16 overflow-hidden rounded-full bg-muted">
         <span className={`block h-full rounded-full ${fillClass}`} style={{ width: `${width}%` }} />
       </span>
-      <span className="w-9 text-right text-xs tabular-nums text-muted-foreground">{width}%</span>
+      <span className="w-9 text-right text-sm tabular-nums text-muted-foreground">{width}%</span>
     </span>
   )
 }
@@ -114,12 +132,14 @@ export function OverviewLaneTable({
   onChanged,
   now,
 }: OverviewLaneTableProps) {
+  const navigate = useNavigate()
   const { members, refresh: refreshMembers } = useProjectMembers(projectId)
   const [scopesByUser, setScopesByUser] = useState<Record<number, MemberScope[]>>({})
 
-  // AssignModal is a single instance driven by the lane row it was launched
-  // from (defaultLane), matching the workspace's one-modal pattern.
+  // AssignModal / StaffLanePopover are single instances driven by the lane row
+  // they were launched from (⋯ menu), matching the workspace's one-modal pattern.
   const [assignLane, setAssignLane] = useState<string | null>(null)
+  const [staffLane, setStaffLane] = useState<string | null>(null)
 
   // Scopable members = below project_lead (leads are unscoped, see every lane).
   const scopableUserIds = useMemo(
@@ -162,104 +182,187 @@ export function OverviewLaneTable({
 
   const laneLabel = (lane: string) => (lane === "" ? defaultLanguageLabel : lane)
 
-  return (
-    <div className="rounded-lg border bg-card p-5" data-testid="overview-lane-table">
-      <div className="mb-3 flex items-center gap-2">
-        <Languages className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
-        <h2 className="text-xs font-semibold text-muted-foreground">Languages</h2>
-      </div>
-
-      <div
-        className="mb-1.5 flex items-center gap-3 text-xs font-medium text-muted-foreground"
-        data-testid="overview-lane-header"
-      >
-        <span className="w-28 shrink-0">Language</span>
-        <span className="w-[104px] shrink-0">Translated</span>
-        <span className="w-[104px] shrink-0">Validated</span>
-        <span className="w-24 shrink-0">People</span>
-        <span className="flex-1">Last activity</span>
-        <span className="shrink-0 text-right">Actions</span>
-      </div>
-
-      <ul className="space-y-2" aria-label="Languages">
-        {lanes.map((lane) => {
-          const tagId = laneTagId(lane.lane)
-          const label = laneLabel(lane.lane)
-          const people = membersByLane.get(lane.lane) ?? []
-          const rel = lane.lastEditAt != null
-            ? formatRelativeTime(new Date(lane.lastEditAt).toISOString(), now)
+  const columns = useMemo<ColumnDef<PortfolioLane>[]>(
+    () => [
+      {
+        id: "language",
+        accessorFn: (l) => laneLabel(l.lane).toLowerCase(),
+        header: ({ column }) => <DataTableColumnHeader column={column} title="Language" />,
+        meta: { className: "min-w-[7rem]" },
+        cell: ({ row }) => (
+          <span className="text-sm font-medium text-foreground">{laneLabel(row.original.lane)}</span>
+        ),
+      },
+      {
+        id: "translated",
+        accessorFn: (l) => laneTranslatedPct(l),
+        header: ({ column }) => <DataTableColumnHeader column={column} title="Translated" />,
+        meta: { className: "w-[9rem]" },
+        cell: ({ row }) => (
+          <LaneProgressBar pct={laneTranslatedPct(row.original)} fillClass="bg-amber-500" />
+        ),
+      },
+      {
+        id: "validated",
+        accessorFn: (l) => laneValidatedPct(l),
+        header: ({ column }) => <DataTableColumnHeader column={column} title="Validated" />,
+        meta: { className: "w-[9rem]" },
+        cell: ({ row }) => (
+          <LaneProgressBar pct={laneValidatedPct(row.original)} fillClass="bg-emerald-500" />
+        ),
+      },
+      {
+        id: "people",
+        enableSorting: false,
+        header: ({ column }) => <DataTableColumnHeader column={column} title="People" />,
+        meta: { className: "w-[6.5rem]" },
+        cell: ({ row }) => (
+          <LanePeople members={membersByLane.get(row.original.lane) ?? []} />
+        ),
+      },
+      {
+        id: "activity",
+        accessorFn: (l) => l.lastEditAt ?? 0,
+        header: ({ column }) => <DataTableColumnHeader column={column} title="Last activity" />,
+        meta: { className: "min-w-[7rem]" },
+        cell: ({ row }) => {
+          const at = row.original.lastEditAt
+          const rel = at != null
+            ? formatRelativeTime(new Date(at).toISOString(), now)
             : null
-          const openTo = lane.lane
-            ? `/project/${projectId}/editor?lane=${encodeURIComponent(lane.lane)}`
-            : `/project/${projectId}/editor`
           return (
-            <li
-              key={tagId}
-              data-testid={`overview-lane-row-${tagId}`}
-              className="flex flex-wrap items-center gap-3 text-sm"
-            >
-              <span className="w-28 shrink-0 font-medium">{label}</span>
-              <span className="w-[104px] shrink-0">
-                <LaneProgressBar pct={laneTranslatedPct(lane)} fillClass="bg-amber-500" />
-              </span>
-              <span className="w-[104px] shrink-0">
-                <LaneProgressBar pct={laneValidatedPct(lane)} fillClass="bg-emerald-500" />
-              </span>
-              <span className="w-24 shrink-0">
-                <LanePeople members={people} />
-              </span>
-              <span className="flex-1 text-xs text-muted-foreground">
-                {rel ?? "No activity yet"}
-              </span>
-              <span className="flex shrink-0 items-center gap-1.5">
-                <Link
-                  to={openTo}
-                  data-testid={`overview-lane-open-${tagId}`}
-                  className={cn(buttonVariants({ variant: "outline" }))}
-                >
-                  Open
-                </Link>
-                {canManageLanes && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    data-testid={`overview-lane-assign-${tagId}`}
-                    onClick={() => setAssignLane(lane.lane)}
-                  >
-                    Assign…
-                  </Button>
-                )}
-                {canManageLanes && (
-                  <StaffLanePopover
-                    projectId={projectId}
-                    lane={lane.lane}
-                    laneLabel={label}
-                    orgId={orgId}
-                    trigger={<span data-testid={`overview-lane-staff-${tagId}`}>Staff…</span>}
-                    onDone={() => { void refreshMembers(); onChanged?.() }}
-                  />
-                )}
-              </span>
-            </li>
+            <span className="text-sm text-muted-foreground">
+              {rel ?? "No activity yet"}
+            </span>
           )
-        })}
-      </ul>
+        },
+      },
+      {
+        id: "actions",
+        enableSorting: false,
+        header: () => <span className="sr-only">Actions</span>,
+        meta: { align: "right" as const, className: "w-10" },
+        cell: ({ row }) => {
+          const tagId = laneTagId(row.original.lane)
+          const label = laneLabel(row.original.lane)
+          return (
+            <span className="inline-flex items-center justify-end gap-0.5">
+              <DataTableRowActionsButton
+                label={`Actions for ${label}`}
+                data-testid={`overview-lane-actions-${tagId}`}
+                revealOnHover
+              />
+              {/* Hidden anchor so Staff… from the ⋯ menu can open the popover
+                  beside the actions cell without a second visible button. */}
+              {canManageLanes && (
+                <StaffLanePopover
+                  projectId={projectId}
+                  lane={row.original.lane}
+                  laneLabel={label}
+                  orgId={orgId}
+                  anchorOnly
+                  open={staffLane === row.original.lane}
+                  onOpenChange={(next) => {
+                    setStaffLane(next ? row.original.lane : null)
+                  }}
+                  trigger={
+                    <span
+                      data-testid={`overview-lane-staff-${tagId}`}
+                      className="sr-only"
+                    >
+                      Staff {label}
+                    </span>
+                  }
+                  onDone={() => { void refreshMembers(); onChanged?.() }}
+                />
+              )}
+            </span>
+          )
+        },
+      },
+    ],
+    [
+      canManageLanes,
+      defaultLanguageLabel,
+      membersByLane,
+      now,
+      onChanged,
+      orgId,
+      projectId,
+      refreshMembers,
+      staffLane,
+    ],
+  )
 
-      {canAddLanguage && (
-        <div className="mt-3 border-t pt-3">
-          <Link
-            to={projectSettingsPath(projectId, "general")}
-            data-testid="overview-lane-add-language"
-            className={cn(
-              buttonVariants({ variant: "ghost" }),
-              "text-xs text-muted-foreground",
-            )}
+  return (
+    <Section
+      data-testid="overview-lane-table"
+      title="Languages"
+      description="Progress, people, and actions for each target language on this project."
+      headerClassName={ADMIN_TABLE_SECTION_HEADER}
+      contentClassName={ADMIN_TABLE_SECTION_CONTENT}
+      action={
+        canAddLanguage ? (
+          <Button
+            variant="outline"
+            size="sm"
+            render={
+              <Link
+                to={projectSettingsPath(projectId, "general")}
+                data-testid="overview-lane-add-language"
+              />
+            }
           >
-            <Plus className="h-3.5 w-3.5" />
             Add language
-          </Link>
-        </div>
-      )}
+          </Button>
+        ) : null
+      }
+    >
+      <DataTable
+        columns={columns}
+        data={lanes}
+        getRowId={(l) => laneTagId(l.lane)}
+        getRowAttributes={(l) => ({
+          "data-testid": `overview-lane-row-${laneTagId(l.lane)}`,
+        })}
+        dense
+        className={ADMIN_TABLE_CLASS}
+        initialSorting={[{ id: "language", desc: false }]}
+        onRowClick={(l) => navigate(laneOpenTo(projectId, l.lane))}
+        renderRowMenuItems={(l) => {
+          const tagId = laneTagId(l.lane)
+          const openTo = laneOpenTo(projectId, l.lane)
+          return (
+            <>
+              <MenuItem
+                render={<Link to={openTo} data-testid={`overview-lane-open-${tagId}`} />}
+              >
+                <ExternalLink className="size-4" />
+                Open
+              </MenuItem>
+              {canManageLanes && (
+                <>
+                  <MenuSeparator />
+                  <MenuItem
+                    data-testid={`overview-lane-assign-${tagId}`}
+                    onClick={() => setAssignLane(l.lane)}
+                  >
+                    <Users className="size-4" />
+                    Assign…
+                  </MenuItem>
+                  <MenuItem
+                    data-testid={`overview-lane-staff-menu-${tagId}`}
+                    onClick={() => setStaffLane(l.lane)}
+                  >
+                    <UserPlus className="size-4" />
+                    Staff…
+                  </MenuItem>
+                </>
+              )}
+            </>
+          )
+        }}
+      />
 
       {/* One shared AssignModal, pinned to the lane row it was launched from. */}
       <AssignModal
@@ -278,7 +381,7 @@ export function OverviewLaneTable({
         author={author}
         onAssigned={() => { setAssignLane(null); onChanged?.() }}
       />
-    </div>
+    </Section>
   )
 }
 

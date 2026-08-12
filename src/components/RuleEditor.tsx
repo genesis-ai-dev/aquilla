@@ -23,6 +23,8 @@ import type { CellData } from "@/hooks/useCells"
 import { checkRulesForCell } from "@/lib/rules/rule-engine"
 import posthog from "@/lib/posthog"
 import { cn } from "@/lib/utils"
+import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
+import { t as standaloneT } from "@/lib/i18n/standalone"
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
@@ -31,14 +33,20 @@ export function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 }
 
-/** Validate a regex string. Returns null if valid, error message if invalid. */
+/**
+ * Validate a regex string. Returns null if valid, error message if invalid.
+ * `new RegExp()`'s own message is a JS engine error (content, not chrome) and
+ * is passed through verbatim; only the "couldn't even tell you why" fallback
+ * is app copy. Standalone `t()`: called directly in RuleEditor.test.ts with no
+ * provider/component in scope.
+ */
 export function validateRegex(pattern: string): string | null {
   if (!pattern) return null
   try {
     new RegExp(pattern)
     return null
   } catch (e) {
-    return e instanceof Error ? e.message : "Invalid regex"
+    return e instanceof Error ? e.message : standaloneT("rules.editor.invalidRegexFallback")
   }
 }
 
@@ -73,10 +81,14 @@ function buildCheck(
   return null
 }
 
-function humanSentence(side: Side, mode: Mode): string {
-  if (mode === "forbidden") return `On the ${side}, this pattern is forbidden.`
-  if (mode === "required") return `When the source matches a pattern, the target must contain this pattern.`
-  if (mode === "match") return `This pattern must appear in both source and target.`
+function humanSentence(side: Side, mode: Mode, t: TFunction): string {
+  if (mode === "forbidden") {
+    return side === "source"
+      ? t("rules.editor.sentence.forbiddenSource")
+      : t("rules.editor.sentence.forbiddenTarget")
+  }
+  if (mode === "required") return t("rules.editor.sentence.required")
+  if (mode === "match") return t("rules.editor.sentence.match")
   return ""
 }
 
@@ -119,6 +131,7 @@ interface RuleEditorProps {
 }
 
 export function RuleEditor({ initialRule, cells, onSave, onCancel, className }: RuleEditorProps) {
+  const t = useT()
   // ── Field state ──
   const [name, setName] = useState(initialRule?.name ?? "")
   const [description, setDescription] = useState(initialRule?.description ?? "")
@@ -198,11 +211,11 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel, className }: 
   // ── Submit ──
   // Keep Create/Save clickable; surface why submit failed instead of disabling.
   const [attempted, setAttempted] = useState(false)
-  const nameError = !name.trim() ? "Rule name is required" : null
+  const nameError = !name.trim() ? t("rules.editor.nameRequired") : null
   const checkError = !currentCheck
     ? mode === "required" && side === "target"
-      ? "Source pattern and target pattern are required"
-      : "Pattern is required"
+      ? t("rules.editor.sourceAndTargetPatternRequired")
+      : t("rules.editor.patternRequired")
     : null
   const canSave = !nameError && !!currentCheck && !patternError && !sourcePatternError
 
@@ -232,16 +245,16 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel, className }: 
     })
   }
 
-  const sentence = humanSentence(side, mode)
+  const sentence = humanSentence(side, mode, t)
 
   return (
     <div className={cn("rounded-lg border bg-card p-4 space-y-4", className)}>
       {/* Header */}
       <div className="flex items-center justify-between">
         <p className="text-sm font-semibold text-foreground">
-          {initialRule ? "Edit rule" : "New rule"}
+          {initialRule ? t("rules.editor.editRuleHeading") : t("rules.editor.newRuleHeading")}
         </p>
-        <Button variant="ghost" size="icon-sm" onClick={onCancel} aria-label="Cancel">
+        <Button variant="ghost" size="icon-sm" onClick={onCancel} aria-label={t("common.cancel")}>
           <X />
         </Button>
       </div>
@@ -252,24 +265,24 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel, className }: 
       {/* Name + Description */}
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         <Field data-invalid={attempted && !!nameError}>
-          <FieldLabel htmlFor="re-name" className="text-xs">Rule name</FieldLabel>
+          <FieldLabel htmlFor="re-name" className="text-xs">{t("rules.editor.nameLabel")}</FieldLabel>
           <Input
             id="re-name"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="e.g. Preserve numbers"
+            placeholder={t("rules.editor.namePlaceholder")}
             className="mt-1"
             aria-invalid={attempted && !!nameError}
           />
           {attempted && nameError && <FieldError>{nameError}</FieldError>}
         </Field>
         <Field>
-          <FieldLabel htmlFor="re-desc" className="text-xs">Description (optional)</FieldLabel>
+          <FieldLabel htmlFor="re-desc" className="text-xs">{t("rules.editor.descriptionLabel")}</FieldLabel>
           <Input
             id="re-desc"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            placeholder="Numbers in source must appear in target"
+            placeholder={t("rules.editor.descriptionPlaceholder")}
             className="mt-1"
           />
         </Field>
@@ -278,7 +291,7 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel, className }: 
       {/* Mode selectors */}
       <div className="flex flex-wrap gap-3">
         <div>
-          <FieldLabel className="text-xs">Mode</FieldLabel>
+          <FieldLabel className="text-xs">{t("rules.editor.modeLabel")}</FieldLabel>
           <div className="mt-1 flex gap-1">
             {(["forbidden", "required", "match"] as Mode[]).map((m) => (
               <button
@@ -291,7 +304,11 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel, className }: 
                     : "bg-muted text-muted-foreground hover:bg-muted/80"
                 }`}
               >
-                {m === "forbidden" ? "Forbidden" : m === "required" ? "Required" : "Must match"}
+                {m === "forbidden"
+                  ? t("rules.editor.mode.forbidden")
+                  : m === "required"
+                    ? t("rules.editor.mode.required")
+                    : t("rules.editor.mode.match")}
               </button>
             ))}
           </div>
@@ -300,7 +317,7 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel, className }: 
         {/* Side only shows when not "match" (match implies both sides) */}
         {mode !== "match" && (
           <div>
-            <FieldLabel className="text-xs">Side</FieldLabel>
+            <FieldLabel className="text-xs">{t("rules.editor.sideLabel")}</FieldLabel>
             <div className="mt-1 flex gap-1">
               {(["source", "target"] as Side[]).map((s) => (
                 <button
@@ -313,7 +330,7 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel, className }: 
                       : "bg-muted text-muted-foreground hover:bg-muted/80"
                   }`}
                 >
-                  {s === "source" ? "Source" : "Target"}
+                  {s === "source" ? t("editor.column.source") : t("editor.column.target")}
                 </button>
               ))}
             </div>
@@ -321,7 +338,7 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel, className }: 
         )}
 
         <div>
-          <FieldLabel className="text-xs">Severity</FieldLabel>
+          <FieldLabel className="text-xs">{t("rules.editor.severityLabel")}</FieldLabel>
           <div className="mt-1 flex gap-1">
             {(["minor", "major"] as const).map((sv) => (
               <button
@@ -336,7 +353,7 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel, className }: 
                     : "bg-muted text-muted-foreground hover:bg-muted/80"
                 }`}
               >
-                {sv === "major" ? "Major" : "Minor"}
+                {sv === "major" ? t("rules.severity.major") : t("rules.severity.minor")}
               </button>
             ))}
           </div>
@@ -349,7 +366,7 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel, className }: 
               checked={enabled}
               onCheckedChange={(checked) => setEnabled(checked)}
             />
-            <span className="text-muted-foreground">Enabled</span>
+            <span className="text-muted-foreground">{t("rules.surface.enabledLabel")}</span>
           </label>
         </div>
       </div>
@@ -358,14 +375,14 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel, className }: 
       {mode === "required" && (
         <div>
           <FieldLabel htmlFor="re-src-pat" className="text-xs">
-            Source pattern — when source contains this…
+            {t("rules.editor.sourcePatternLabel")}
           </FieldLabel>
           <div className="mt-1 flex gap-2 items-center">
             <Input
               id="re-src-pat"
               value={sourcePattern}
               onChange={(e) => setSourcePattern(e.target.value)}
-              placeholder={isLiteral ? "text to match" : "\\d+"}
+              placeholder={isLiteral ? t("rules.editor.textToMatchPlaceholder") : "\\d+"}
               className={`font-mono text-xs flex-1 ${sourcePatternError ? "border-destructive" : ""}`}
             />
           </div>
@@ -379,21 +396,21 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel, className }: 
       <div>
         <div className="flex items-center justify-between">
           <FieldLabel htmlFor="re-pat" className="text-xs">
-            {mode === "required" ? "…target must contain this pattern" : "Pattern"}
+            {mode === "required" ? t("rules.editor.targetPatternLabel") : t("rules.editor.patternLabel")}
           </FieldLabel>
           <button
             type="button"
             onClick={() => setIsLiteral((v) => !v)}
             className="text-[10px] text-muted-foreground underline underline-offset-2 hover:text-foreground"
           >
-            {isLiteral ? "Switch to regex" : "Switch to literal text"}
+            {isLiteral ? t("rules.editor.switchToRegex") : t("rules.editor.switchToLiteral")}
           </button>
         </div>
         <Input
           id="re-pat"
           value={pattern}
           onChange={(e) => setPattern(e.target.value)}
-          placeholder={isLiteral ? "exact text to match" : "\\d+"}
+          placeholder={isLiteral ? t("rules.editor.exactTextPlaceholder") : "\\d+"}
           className={`mt-1 font-mono text-xs ${patternError ? "border-destructive" : ""}`}
         />
         {patternError && (
@@ -401,7 +418,7 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel, className }: 
         )}
         {!patternError && pattern && (
           <p className="mt-1 text-[10px] text-muted-foreground">
-            {isLiteral ? "Treated as literal text (auto-escaped)" : "Interpreted as regular expression"}
+            {isLiteral ? t("rules.editor.literalTextNote") : t("rules.editor.regexNote")}
           </p>
         )}
       </div>
@@ -410,21 +427,24 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel, className }: 
       {pattern && !patternError && !sourcePatternError && (
         <div className="rounded border bg-muted/30 p-3 space-y-2">
           <p className="text-xs text-muted-foreground">
-            Live preview — current file
+            {t("rules.editor.livePreviewHeading")}
           </p>
           {preview.count === 0 ? (
-            <p className="text-xs text-muted-foreground">No matches in the current file.</p>
+            <p className="text-xs text-muted-foreground">{t("rules.editor.noMatches")}</p>
           ) : (
             <>
               <p className="text-xs font-medium">
-                {preview.count >= 3 ? "3+" : preview.count} cell{preview.count !== 1 ? "s" : ""} would be flagged
+                {t("rules.editor.wouldBeFlagged", {
+                  label: preview.count >= 3 ? "3+" : String(preview.count),
+                  count: preview.count,
+                })}
               </p>
               <ul className="space-y-1">
                 {preview.samples.map((cell) => (
                   <li key={cell.id} className="rounded border bg-background p-2 text-xs">
-                    <span className="text-muted-foreground">src: </span>
+                    <span className="text-muted-foreground">{t("rules.editor.srcLabel")} </span>
                     <span className="line-clamp-1">{cell.original}</span>
-                    <span className="text-muted-foreground"> tgt: </span>
+                    <span className="text-muted-foreground"> {t("rules.editor.tgtLabel")} </span>
                     <span className="line-clamp-1">{cell.translated}</span>
                   </li>
                 ))}
@@ -441,34 +461,34 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel, className }: 
           onClick={() => setShowAutofix((v) => !v)}
           className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
         >
-          {showAutofix ? "Hide autofix" : "Add autofix (optional)"}
+          {showAutofix ? t("rules.editor.hideAutofix") : t("rules.editor.addAutofix")}
         </button>
         {showAutofix && (
           <div className="mt-2 space-y-2 rounded border p-3">
             <p className="text-xs text-muted-foreground">
-              Autofix — regex replace
+              {t("rules.editor.autofixRegexReplaceHeading")}
             </p>
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
               <div>
-                <FieldLabel className="text-[10px]">Find pattern</FieldLabel>
+                <FieldLabel className="text-[10px]">{t("rules.editor.findPatternLabel")}</FieldLabel>
                 <Input
                   value={afPattern}
                   onChange={(e) => setAfPattern(e.target.value)}
-                  placeholder="pattern"
+                  placeholder={t("rules.editor.patternLabel")}
                   className="mt-1 font-mono text-xs"
                 />
               </div>
               <div>
-                <FieldLabel className="text-[10px]">Replace with</FieldLabel>
+                <FieldLabel className="text-[10px]">{t("rules.editor.replaceWithLabel")}</FieldLabel>
                 <Input
                   value={afReplacement}
                   onChange={(e) => setAfReplacement(e.target.value)}
-                  placeholder="replacement"
+                  placeholder={t("rules.surface.autofixEditor.replacementPlaceholder")}
                   className="mt-1 font-mono text-xs"
                 />
               </div>
               <div>
-                <FieldLabel className="text-[10px]">Flags</FieldLabel>
+                <FieldLabel className="text-[10px]">{t("rules.editor.flagsLabel")}</FieldLabel>
                 <Input
                   value={afFlags}
                   onChange={(e) => setAfFlags(e.target.value)}
@@ -479,11 +499,11 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel, className }: 
             </div>
             {/* Sample before/after */}
             <div>
-              <FieldLabel className="text-[10px]">Preview on sample text</FieldLabel>
+              <FieldLabel className="text-[10px]">{t("rules.editor.previewOnSampleLabel")}</FieldLabel>
               <Input
                 value={afSample}
                 onChange={(e) => setAfSample(e.target.value)}
-                placeholder="Type sample text to see before/after…"
+                placeholder={t("rules.editor.sampleTextPlaceholder")}
                 className="mt-1 text-xs"
               />
               {afSample && afPreview !== null && (
@@ -494,7 +514,7 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel, className }: 
                 </div>
               )}
               {afSample && afPreview === null && afPattern && (
-                <p className="mt-1 text-xs text-destructive">Invalid autofix pattern</p>
+                <p className="mt-1 text-xs text-destructive">{t("rules.editor.invalidAutofixPattern")}</p>
               )}
             </div>
           </div>
@@ -510,10 +530,10 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel, className }: 
         )}
         <div className="flex gap-2">
           <Button size="sm" onClick={handleSave}>
-            {initialRule ? "Save changes" : "Create rule"}
+            {initialRule ? t("rules.editor.saveChangesButton") : t("rules.editor.createRuleButton")}
           </Button>
           <Button size="sm" variant="ghost" onClick={onCancel}>
-            Cancel
+            {t("common.cancel")}
           </Button>
         </div>
       </div>

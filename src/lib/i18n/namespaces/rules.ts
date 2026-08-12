@@ -145,6 +145,136 @@ export const rules = defineNamespace({
       one: "{count} issue",
       other: "{count} issues",
     }),
+
+    // ── RulesSurface (the /project/:id/rules view) ──────────────────────────
+    "rules.usageSummary": "{fixes} fixes applied · {calls} LLM calls this project",
+    "rules.promotion.requested": "Requested ✓",
+    "rules.promotion.alreadyRequested": "Already requested",
+    "rules.promotion.requestFailed": "Failed — try again",
+    "rules.surface.addRuleButton": "Add Rule",
+    "rules.surface.createRuleDialog.title": "Create translation rule",
+    "rules.surface.createRuleDialog.description": "Create a project translation rule.",
+    "rules.surface.createOrgRuleDialog.title": "Create org rule",
+    "rules.surface.createOrgRuleDialog.description": "Create an org-scoped translation rule.",
+    "rules.surface.usageTooltip": "LLM usage on this project",
+    "rules.surface.orgRulesCardTitle": "Org Rules ({count})",
+    "rules.surface.addOrgRuleButton": "Add Org Rule",
+    "rules.surface.readOnly": "Read-only",
+    "rules.surface.noOrgRules.title": "No org-level rules yet",
+    "rules.surface.noOrgRules.description": "Add one or promote a project rule.",
+    "rules.surface.orgBadge": "Org",
+    "rules.surface.editOrgRuleTooltip": "Edit org rule",
+    "rules.surface.disableOrgRuleAriaLabel": "Disable org rule: {name}",
+    "rules.surface.enableOrgRuleAriaLabel": "Enable org rule: {name}",
+    "rules.surface.enabledLabel": "Enabled",
+    "rules.surface.pendingRequests": "Pending requests ({count})",
+    "rules.surface.requestedBy": "Requested by {requester}",
+    "rules.surface.requestedByFallback": "user {userId}",
+    "rules.surface.approveRequestTooltip": "Promote this rule to org scope",
+    "rules.surface.approveButton": "Approve",
+    "rules.surface.dismissRequestTooltip": "Dismiss this request",
+    "rules.surface.promoteDialog.title": "Promote rule to org?",
+    "rules.surface.promoteDialog.body":
+      "A copy of {name} will be added to the org's rule library. The project copy is kept.",
+    "rules.surface.promoteDialog.promoting": "Promoting…",
+    "rules.surface.projectRulesCardTitle": "Project Rules ({count})",
+    "rules.surface.noProjectRules.title": "No project rules yet",
+    "rules.surface.noProjectRules.description":
+      "Add a rule, import a style guide, or suggest rules from your edits using the buttons above.",
+    "rules.surface.noProjectRules.orgRulesNote": "Org rules above also apply to this project.",
+    "rules.surface.autofixBadge": "autofix",
+    "rules.surface.tryToFixAllTooltip": "Opens the editor with this rule's drawer",
+    "rules.surface.tryToFixAllButton": "Try to fix all",
+    "rules.surface.promoteToOrgTooltip": "Copy this rule to the org's rule library",
+    "rules.surface.promoteToOrgButton": "Promote to org",
+    "rules.surface.requestedBadge": "Requested",
+    "rules.surface.requestPromotionTooltip": "Ask an org maintainer to promote this rule to org scope",
+    "rules.surface.requestingButton": "Requesting…",
+    "rules.surface.requestPromotionButton": "Request promotion",
+    "rules.surface.disableRuleAriaLabel": "Disable rule: {name}",
+    "rules.surface.enableRuleAriaLabel": "Enable rule: {name}",
+    "rules.surface.autofixEditor.heading": "Saved autofix (regex)",
+    "rules.surface.autofixEditor.replacementPlaceholder": "Replacement",
+    "rules.surface.autofixEditor.flagsPlaceholder": "Flags (e.g. gi)",
+    "rules.surface.autofixEditor.saveButton": "Save autofix",
+
+    // ── RuleDrawer (editor sidebar — one rule's breaking/passing cells) ────
+    "rules.drawer.closeAriaLabel": "Close rule details",
+    "rules.drawer.autofixUnavailable": "Autofix is unavailable in this build",
+    "rules.drawer.autofixUnavailableAriaLabel": "Autofix unavailable",
+    "rules.drawer.amendRuleButton": "Amend rule",
+    "rules.drawer.savedAutofix": "Saved autofix: /{pattern}/{flags} → {replacement}",
+    "rules.drawer.noSavedFix": "No saved fix yet",
+    "rules.drawer.breakingThisRule": "Breaking this rule ({count})",
+    "rules.drawer.followingThisRule": "Following this rule ({count})",
+    "rules.drawer.noTranslatedCellsYet": "No translated cells yet",
+
+    // ── RuleImportReview (draft rules extracted from a style guide) ────────
+    "rules.importReview.draftsExtracted": plural({
+      one: "{count} rule draft extracted. Toggle to include or exclude.",
+      other: "{count} rule drafts extracted. Toggle to include or exclude.",
+    }),
+    "rules.importReview.checkLabel.sourceTargetMatch": "match both:",
+    "rules.importReview.checkLabel.targetForbids": "target forbids:",
+    "rules.importReview.checkLabel.sourceRequiresTargetPrefix": "if source has",
+    "rules.importReview.checkLabel.sourceRequiresTargetSuffix": "→ target needs",
+    "rules.importReview.fromDoc": "From doc: {evidence}",
+    "rules.importReview.adding": "Adding…",
+    "rules.importReview.addButton": plural({
+      one: "Add {count} rule",
+      other: "Add {count} rules",
+    }),
+
+    // ── RuleEditor (plain-language rule builder, create + edit) ────────────
+    "rules.editor.invalidRegexFallback": "Invalid regex",
+    "rules.editor.sentence.forbiddenSource": "On the source, this pattern is forbidden.",
+    "rules.editor.sentence.forbiddenTarget": "On the target, this pattern is forbidden.",
+    "rules.editor.sentence.required":
+      "When the source matches a pattern, the target must contain this pattern.",
+    "rules.editor.sentence.match": "This pattern must appear in both source and target.",
+    "rules.editor.nameRequired": "Rule name is required",
+    "rules.editor.sourceAndTargetPatternRequired": "Source pattern and target pattern are required",
+    "rules.editor.patternRequired": "Pattern is required",
+    "rules.editor.editRuleHeading": "Edit rule",
+    "rules.editor.newRuleHeading": "New rule",
+    "rules.editor.nameLabel": "Rule name",
+    "rules.editor.namePlaceholder": "e.g. Preserve numbers",
+    "rules.editor.descriptionLabel": "Description (optional)",
+    "rules.editor.descriptionPlaceholder": "Numbers in source must appear in target",
+    "rules.editor.modeLabel": "Mode",
+    "rules.editor.mode.forbidden": "Forbidden",
+    "rules.editor.mode.required": "Required",
+    "rules.editor.mode.match": "Must match",
+    "rules.editor.sideLabel": "Side",
+    "rules.editor.severityLabel": "Severity",
+    "rules.editor.sourcePatternLabel": "Source pattern — when source contains this…",
+    "rules.editor.targetPatternLabel": "…target must contain this pattern",
+    "rules.editor.patternLabel": "Pattern",
+    "rules.editor.textToMatchPlaceholder": "text to match",
+    "rules.editor.switchToRegex": "Switch to regex",
+    "rules.editor.switchToLiteral": "Switch to literal text",
+    "rules.editor.exactTextPlaceholder": "exact text to match",
+    "rules.editor.literalTextNote": "Treated as literal text (auto-escaped)",
+    "rules.editor.regexNote": "Interpreted as regular expression",
+    "rules.editor.livePreviewHeading": "Live preview — current file",
+    "rules.editor.noMatches": "No matches in the current file.",
+    "rules.editor.wouldBeFlagged": plural(
+      { one: "{label} cell would be flagged", other: "{label} cells would be flagged" },
+      "count",
+    ),
+    "rules.editor.srcLabel": "src:",
+    "rules.editor.tgtLabel": "tgt:",
+    "rules.editor.hideAutofix": "Hide autofix",
+    "rules.editor.addAutofix": "Add autofix (optional)",
+    "rules.editor.autofixRegexReplaceHeading": "Autofix — regex replace",
+    "rules.editor.findPatternLabel": "Find pattern",
+    "rules.editor.replaceWithLabel": "Replace with",
+    "rules.editor.flagsLabel": "Flags",
+    "rules.editor.previewOnSampleLabel": "Preview on sample text",
+    "rules.editor.sampleTextPlaceholder": "Type sample text to see before/after…",
+    "rules.editor.invalidAutofixPattern": "Invalid autofix pattern",
+    "rules.editor.saveChangesButton": "Save changes",
+    "rules.editor.createRuleButton": "Create rule",
   },
   context: {
     _context: {
@@ -295,6 +425,100 @@ export const rules = defineNamespace({
       "rules.checkFileButton.issueCount": {
         description: "Issue count embedded in the 'Check file' button's last-run tooltip.",
         placeholders: { count: "Total findings from the last check run." },
+      },
+      "rules.usageSummary": {
+        description: "Small usage footnote at the top of the Rules surface, above the built-in checks list.",
+        placeholders: {
+          fixes: "How many autofixes have been applied on this project.",
+          calls: "How many LLM calls the project has made (rule suggestion, harmonization, etc).",
+        },
+      },
+      "rules.surface.orgRulesCardTitle": {
+        description: "Card heading for the org-scoped rules list.",
+        placeholders: { count: "Number of org rules." },
+      },
+      "rules.surface.disableOrgRuleAriaLabel": {
+        description: "Accessible label for the enable/disable switch on an org rule row, when currently enabled.",
+        placeholders: { name: "The org rule's own name — content, never translated." },
+      },
+      "rules.surface.enableOrgRuleAriaLabel": {
+        description: "Accessible label for the enable/disable switch on an org rule row, when currently disabled.",
+        placeholders: { name: "The org rule's own name — content, never translated." },
+      },
+      "rules.surface.pendingRequests": {
+        description: "Heading above the list of pending org-promotion requests (maintainer view).",
+        placeholders: { count: "Number of pending requests." },
+      },
+      "rules.surface.requestedBy": {
+        description: "Attribution line on a pending org-promotion request, naming who requested it.",
+        placeholders: { requester: "The requester's display name, or the requestedByFallback string." },
+      },
+      "rules.surface.requestedByFallback": {
+        description: "Fallback attribution when a promotion request has no stored display name.",
+        placeholders: { userId: "The requesting user's numeric id." },
+      },
+      "rules.surface.promoteDialog.body": {
+        description:
+          "Confirmation body in the 'Promote rule to org?' dialog, naming the rule about to be copied to the org library.",
+        placeholders: { name: "The rule's own name, rendered bold via RichMessage — content, never translated." },
+      },
+      "rules.surface.projectRulesCardTitle": {
+        description: "Card heading for the project-scoped (user-authored) rules list.",
+        placeholders: { count: "Number of project rules." },
+      },
+      "rules.surface.disableRuleAriaLabel": {
+        description: "Accessible label for the enable/disable switch on a project rule row, when currently enabled.",
+        placeholders: { name: "The rule's own name — content, never translated." },
+      },
+      "rules.surface.enableRuleAriaLabel": {
+        description: "Accessible label for the enable/disable switch on a project rule row, when currently disabled.",
+        placeholders: { name: "The rule's own name — content, never translated." },
+      },
+      "rules.drawer.closeAriaLabel": {
+        description: "Accessible label for the rule drawer's close button.",
+      },
+      "rules.drawer.autofixUnavailableAriaLabel": {
+        description: "Accessible label for a disabled per-cell autofix button in the rule drawer.",
+      },
+      "rules.drawer.savedAutofix": {
+        description:
+          "Footer strip in the rule drawer, showing the rule's saved autofix as a literal /pattern/flags → replacement expression.",
+        placeholders: {
+          pattern: "The saved regex pattern — content, never translated.",
+          flags: "The saved regex flags — content, never translated.",
+          replacement: "The saved replacement text — content, never translated.",
+        },
+      },
+      "rules.drawer.breakingThisRule": {
+        description: "Section heading in the rule drawer, counting cells that currently break this rule.",
+        placeholders: { count: "Number of cells breaking the rule." },
+      },
+      "rules.drawer.followingThisRule": {
+        description:
+          "Section heading in the rule drawer, counting cells that pass this rule (sample of up to 10, so may show a trailing '+').",
+        placeholders: { count: "Number of passing cells shown, e.g. '10+' when the sample is capped." },
+      },
+      "rules.importReview.fromDoc": {
+        description:
+          "Small italic caption on a draft rule card, showing the source-document evidence it was extracted from.",
+        placeholders: { evidence: "Quoted excerpt from the source document — content, never translated." },
+      },
+      "rules.importReview.draftsExtracted": {
+        description: "Intro line above the list of draft rules extracted from an imported style guide.",
+        placeholders: { count: "Number of draft rules extracted." },
+      },
+      "rules.importReview.addButton": {
+        description: "Primary button committing the accepted draft rules from the import-review screen.",
+        placeholders: { count: "Number of accepted draft rules to add." },
+      },
+      "rules.editor.wouldBeFlagged": {
+        description:
+          "Live-preview result in the rule editor: how many cells in the current file the draft rule would flag. " +
+          "Plural form is selected from the real count (a separate `count` var, not rendered in the string) " +
+          "rather than from `label`, which may read '3+' when the preview sample is capped.",
+        placeholders: {
+          label: "Display label for the count, e.g. '2' or '3+' (preview samples cap at 3).",
+        },
       },
     },
   },

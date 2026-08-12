@@ -4,6 +4,8 @@ import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
 import type { TranslationRule, RuleInfraction, ProjectRecord } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
+import { useT } from "@/lib/i18n/I18nProvider"
+import { translateRuleName, translateRuleDescription } from "@/lib/lqa/builtin-resolver"
 
 interface RuleDrawerProps {
   rule: TranslationRule | null
@@ -21,6 +23,7 @@ export function RuleDrawer({
   rule, infractions, cells, onClose, onNavigateToCell,
   project,
 }: RuleDrawerProps) {
+  const t = useT()
   const navigate = useNavigate()
   // Phase 2c-gamma: autofix applied via Y.Doc edits; the writeback path is
   // gone. The "Try to fix" buttons render disabled until the event-grammar
@@ -45,9 +48,9 @@ export function RuleDrawer({
       <div className="flex items-center justify-between border-b p-2">
         <div className="flex items-center gap-2">
           <SeverityIcon className={`h-4 w-4 ${severityColor}`} />
-          <h3 className="text-sm font-semibold">{rule.name}</h3>
+          <h3 className="text-sm font-semibold">{translateRuleName(rule, t)}</h3>
         </div>
-        <Button variant="ghost" size="icon-sm" onClick={onClose} aria-label="Close rule details">
+        <Button variant="ghost" size="icon-sm" onClick={onClose} aria-label={t("rules.drawer.closeAriaLabel")}>
           <X />
         </Button>
       </div>
@@ -56,32 +59,38 @@ export function RuleDrawer({
         {/* The span carries the hover: a disabled button has
             pointer-events: none, so a tooltip on the button itself never fires
             and the reason it is disabled stays unreachable. */}
-        <AppTooltip content="Autofix is unavailable in this build">
+        <AppTooltip content={t("rules.drawer.autofixUnavailable")}>
           <span className="inline-flex">
             <Button size="sm" disabled>
               <Wand2 className="me-1 h-3.5 w-3.5" />
-              Try to fix all
+              {t("rules.surface.tryToFixAllButton")}
             </Button>
           </span>
         </AppTooltip>
-        <Button variant="ghost" size="sm" onClick={onAmendRule}>Amend rule</Button>
+        <Button variant="ghost" size="sm" onClick={onAmendRule}>{t("rules.drawer.amendRuleButton")}</Button>
       </div>
 
       <div className="border-b px-3 py-1 text-[10px] text-muted-foreground">
         {rule.autofix
-          ? `Saved autofix: /${rule.autofix.pattern}/${rule.autofix.flags} → ${rule.autofix.replacement}`
-          : "No saved fix yet"}
+          ? t("rules.drawer.savedAutofix", {
+              pattern: rule.autofix.pattern,
+              flags: rule.autofix.flags,
+              replacement: rule.autofix.replacement,
+            })
+          : t("rules.drawer.noSavedFix")}
       </div>
 
       <div className="flex-1 overflow-auto p-3 space-y-4">
-        {rule.description && <p className="text-xs text-muted-foreground">{rule.description}</p>}
+        {rule.description && (
+          <p className="text-xs text-muted-foreground">{translateRuleDescription(rule, t)}</p>
+        )}
 
         <div>
           <p className="text-xs text-muted-foreground mb-1">
-            Breaking this rule ({infractionCells.length})
+            {t("rules.drawer.breakingThisRule", { count: infractionCells.length })}
           </p>
           {infractionCells.length === 0 ? (
-            <p className="text-xs text-muted-foreground">None</p>
+            <p className="text-xs text-muted-foreground">{t("common.none")}</p>
           ) : (
             <ul className="space-y-1">
               {infractionCells.slice(0, 20).map(({ infraction, cell }) => (
@@ -93,9 +102,9 @@ export function RuleDrawer({
                     <div className="truncate text-muted-foreground">{cell!.original.slice(0, 60)}...</div>
                     <div className="truncate font-medium">{cell!.translated.slice(0, 60)}...</div>
                   </button>
-                  <AppTooltip content="Autofix is unavailable in this build">
+                  <AppTooltip content={t("rules.drawer.autofixUnavailable")}>
                     <span className="inline-flex">
-                      <Button variant="ghost" size="sm" className="h-6 px-1" disabled aria-label="Autofix unavailable">
+                      <Button variant="ghost" size="sm" className="h-6 px-1" disabled aria-label={t("rules.drawer.autofixUnavailableAriaLabel")}>
                         <Sparkles className="h-3 w-3" />
                       </Button>
                     </span>
@@ -108,10 +117,12 @@ export function RuleDrawer({
 
         <div>
           <p className="text-xs text-muted-foreground mb-1">
-            Following this rule ({passingCells.length}{passingCells.length >= 10 ? "+" : ""})
+            {t("rules.drawer.followingThisRule", {
+              count: `${passingCells.length}${passingCells.length >= 10 ? "+" : ""}`,
+            })}
           </p>
           {passingCells.length === 0 ? (
-            <p className="text-xs text-muted-foreground">No translated cells yet</p>
+            <p className="text-xs text-muted-foreground">{t("rules.drawer.noTranslatedCellsYet")}</p>
           ) : (
             <ul className="space-y-1">
               {passingCells.map((cell) => (

@@ -81,7 +81,15 @@ export interface NamespaceBlock {
  * multi-segment keys (`error.generic.title`) stay unambiguous.
  */
 export const CATALOG_CONTEXT: Record<string, NamespaceBlock> = Object.fromEntries(
-  NAMESPACES.map((ns) => [namespaceOf(Object.keys(ns.keys)[0]), ns.context]),
+  NAMESPACES
+    // A namespace's name is derived from its first key's prefix, so a namespace
+    // that has been registered but not yet filled has no name to derive and is
+    // simply absent here — it owns no keys, so nothing can look it up. This
+    // makes it safe to register a namespace module (and its `_context`) ahead of
+    // the strings that will live in it, which is how parallel authoring avoids
+    // every agent contending on the `messages/en.ts` barrel.
+    .filter((ns) => Object.keys(ns.keys).length > 0)
+    .map((ns) => [namespaceOf(Object.keys(ns.keys)[0]), ns.context]),
 )
 
 /** Namespace of a message key: everything before the first `.`. */

@@ -31,6 +31,12 @@ import { search } from "../namespaces/search"
 import { audio } from "../namespaces/audio"
 import { fileDetails } from "../namespaces/fileDetails"
 import { autopilot } from "../namespaces/autopilot"
+import { org } from "../namespaces/org"
+import { onboarding } from "../namespaces/onboarding"
+import { importExport } from "../namespaces/importExport"
+import { projectSettings } from "../namespaces/projectSettings"
+import { rules } from "../namespaces/rules"
+import { terminology } from "../namespaces/terminology"
 import type { MessageValue } from "../plurals"
 
 export const en = {
@@ -46,6 +52,12 @@ export const en = {
   ...audio.keys,
   ...fileDetails.keys,
   ...autopilot.keys,
+  ...org.keys,
+  ...onboarding.keys,
+  ...importExport.keys,
+  ...projectSettings.keys,
+  ...rules.keys,
+  ...terminology.keys,
 } as const
 
 export type MessageKey = keyof typeof en

@@ -330,7 +330,7 @@ CRUD surface with MCP bolted on.
 | Discovery | `get_capabilities`, `get_identity_and_scope` |
 | Projects | `list_projects`, `get_project`, `create_project`, `update_project` |
 | Artifacts | `create_artifact_upload`, `inspect_artifact` |
-| Ingestion | `preview_import`, `prepare_import` |
+| Ingestion | `preview_import`, `prepare_import` — **implemented**: both parse an already-uploaded source artifact server-side with the built-in DOM-free parsers (txt, md, json, po, properties, obs, vtt, srt, sbv, csv, tsv, usfm; 5000-cell cap) — preview returns cells without staging, prepare stages a `PlanImport` changeset linking the artifact. Upload stays REST-only (`POST …/artifacts`, 25MB). REST equivalent: `POST …/artifacts/:artifactId/parse` (body `{ "stage": true }` to stage). DOM-bound formats (docx, pptx, html, xliff, tmx, usx, idml) are not yet server-parseable. |
 | Reading | `search_project`, `read_content`, `read_history` |
 | Translation | `prepare_translations` |
 | Verification | `run_checks` — structured, actionable failures (e.g. `"term 'covenant' rendered 3 ways: [refs]"`), never a bare 400 |
@@ -368,7 +368,9 @@ passable: an agent must be able to learn what it may do before trying to do it.
 
 ## 5. Ingestion and artifact model
 
-Aquilla's parsers largely run client-side today; the server import endpoint receives
+Aquilla's DOM-bound parsers run client-side; the worker-safe text parse core
+(`src/lib/parsers/parse-text-formats.ts`) now ALSO runs server-side behind
+`preview_import` / `prepare_import`, and the raw import endpoint still accepts
 already-parsed cells. A magical server-side `import_file` would overpromise. Ingestion
 is instead an **explicit workflow** the agent drives:
 

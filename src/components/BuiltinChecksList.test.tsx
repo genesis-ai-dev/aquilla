@@ -40,8 +40,8 @@ describe("BuiltinChecksList", () => {
 
   it("displays infraction counts per check", () => {
     const infractions = new Map([
-      ["c1", [{ ruleId: "builtin:empty-target", cellId: "c1", fileId: "f1", message: "x", spans: [] }]],
-      ["c2", [{ ruleId: "builtin:empty-target", cellId: "c2", fileId: "f1", message: "x", spans: [] }]],
+      ["c1", [{ ruleId: "builtin:empty-target", cellId: "c1", fileId: "f1", reason: "builtin:empty-target" as const, spans: [] }]],
+      ["c2", [{ ruleId: "builtin:empty-target", cellId: "c2", fileId: "f1", reason: "builtin:empty-target" as const, spans: [] }]],
     ])
     render(
       <BuiltinChecksList

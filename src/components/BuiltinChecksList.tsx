@@ -18,12 +18,8 @@ import type {
   AlgorithmicCheckOverride,
   BuiltinCheckId,
 } from "@/lib/parsers/types"
-import { BUILTIN_CHECKS } from "@/lib/lqa/builtin-registry"
-
-const SEVERITY_OPTIONS: { value: "major" | "minor"; label: string }[] = [
-  { value: "major", label: "Major" },
-  { value: "minor", label: "Minor" },
-]
+import { translateRuleName, translateRuleDescription } from "@/lib/lqa/builtin-resolver"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 interface Props {
   builtinRules: TranslationRule[]
@@ -41,6 +37,11 @@ interface Props {
 }
 
 export function BuiltinChecksList({ builtinRules, infractions, onSetOverride, onHarmonize, canHarmonize = true, canManage = true }: Props) {
+  const t = useT()
+  const SEVERITY_OPTIONS: { value: "major" | "minor"; label: string }[] = [
+    { value: "major", label: t("rules.severity.major") },
+    { value: "minor", label: t("rules.severity.minor") },
+  ]
   const counts = useMemo(() => {
     const c = new Map<string, number>()
     for (const cellInfractions of infractions.values()) {
@@ -54,13 +55,14 @@ export function BuiltinChecksList({ builtinRules, infractions, onSetOverride, on
   return (
     <div className="rounded-md border">
       <div className="border-b bg-muted/30 px-4 py-2 text-sm font-medium">
-        Built-in checks
+        {t("rules.builtinChecks.heading")}
       </div>
       <ul className="divide-y">
         {builtinRules.map((rule) => {
           if (rule.check.type !== "builtin") return null
           const checkId = rule.check.checkId
-          const def = BUILTIN_CHECKS[checkId]
+          const name = translateRuleName(rule, t)
+          const description = translateRuleDescription(rule, t)
           const count = counts.get(rule.id) ?? 0
           const showHarmonize = onHarmonize != null && count > 0
           return (
@@ -70,20 +72,20 @@ export function BuiltinChecksList({ builtinRules, infractions, onSetOverride, on
               className="flex items-center gap-3 px-4 py-3 text-sm"
             >
               <div className="min-w-0 flex-1">
-                <div className="font-medium">{def.name}</div>
-                <div className="text-xs text-muted-foreground truncate">{def.description}</div>
+                <div className="font-medium">{name}</div>
+                <div className="text-xs text-muted-foreground truncate">{description}</div>
               </div>
               {count > 0 && (
                 <Badge variant="secondary" className="tabular-nums">
-                  {count} violation{count === 1 ? "" : "s"}
+                  {t("rules.builtinChecks.violationCount", { count })}
                 </Badge>
               )}
               {showHarmonize && (
                 <AppTooltip
                   content={
                     !canHarmonize
-                      ? "You need project lead role to run a harmonization sweep"
-                      : `Harmonize all ${count} violation${count === 1 ? "" : "s"} for this check`
+                      ? t("editor.selection.harmonizeNeedLead")
+                      : t("rules.builtinChecks.harmonizeAllTooltip", { count })
                   }
                 >
                   <Button
@@ -94,7 +96,7 @@ export function BuiltinChecksList({ builtinRules, infractions, onSetOverride, on
                     data-testid="harmonize-all-btn"
                   >
                     <Wand2 data-icon="inline-start" />
-                    Harmonize all ({count})
+                    {t("rules.builtinChecks.harmonizeAllButton", { count })}
                   </Button>
                 </AppTooltip>
               )}
@@ -108,10 +110,14 @@ export function BuiltinChecksList({ builtinRules, infractions, onSetOverride, on
                 })}
               >
                 <AppTooltip
-                  content={!canManage ? "Only maintainers and owners can change built-in checks" : undefined}
+                  content={!canManage ? t("rules.builtinChecks.manageNeedsMaintainer") : undefined}
                   disabled={canManage}
                 >
-                  <SelectTrigger size="sm" className="text-xs" aria-label={`${def.name} severity`}>
+                  <SelectTrigger
+                    size="sm"
+                    className="text-xs"
+                    aria-label={t("rules.builtinChecks.severitySelectAriaLabel", { name })}
+                  >
                     <SelectValue />
                   </SelectTrigger>
                 </AppTooltip>
@@ -129,7 +135,7 @@ export function BuiltinChecksList({ builtinRules, infractions, onSetOverride, on
                 size="sm"
                 checked={rule.enabled}
                 disabled={!canManage}
-                aria-label={`${def.name} enabled`}
+                aria-label={t("rules.builtinChecks.enabledSwitchAriaLabel", { name })}
                 onCheckedChange={(checked) => onSetOverride(checkId, {
                   enabled: checked,
                   severity: rule.severity,

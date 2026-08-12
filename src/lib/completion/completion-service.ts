@@ -3,6 +3,7 @@ import type { FrontierSession } from "@/lib/frontier/types"
 import { resolveApiKey } from "@/lib/store/user-api-keys"
 import { effectiveSourceText, type SourceTextCell } from "@/lib/cell-text"
 import { getUserProviderOverride } from "@/lib/store/user-provider-override"
+import { t } from "@/lib/i18n/standalone"
 
 // ---------------------------------------------------------------------------
 // Memory primitives
@@ -551,7 +552,7 @@ export async function fetchModels(endpoint: string, apiKey?: string): Promise<st
   const headers: Record<string, string> = {}
   if (apiKey?.trim()) headers.Authorization = `Bearer ${apiKey.trim()}`
   const res = await fetch(modelsUrl, { headers })
-  if (!res.ok) throw new Error(`Failed to fetch models: ${res.status} ${res.statusText}`)
+  if (!res.ok) throw new Error(t("rules.completion.failedToFetchModels", { status: res.status, statusText: res.statusText }))
   const data = await res.json()
   return data.data.map((m: { id: string }) => m.id)
 }
@@ -632,9 +633,9 @@ export async function complete(options: CompleteOptions): Promise<string> {
       const text = await res.text().catch(() => "")
       // Frontier returns 402 when subscription/credits are exhausted; surface message.
       if (provider === "frontier" && res.status === 402) {
-        throw new Error(`Frontier AI limit reached: ${text || "Out of credits."}`)
+        throw new Error(t("rules.completion.frontierLimitReached", { detail: text || t("rules.completion.outOfCredits") }))
       }
-      throw new Error(`Completion failed: ${res.status} ${text}`)
+      throw new Error(t("rules.completion.completionFailed", { status: res.status, text }))
     }
 
     // A/B experiment assignment (frontier default-model traffic only): surface
@@ -658,7 +659,7 @@ export async function complete(options: CompleteOptions): Promise<string> {
     return data.choices[0]?.message?.content?.trim() || ""
   } catch (error) {
     if (request.didTimeout()) {
-      throw new Error("The AI request timed out. Please try again.")
+      throw new Error(t("rules.completion.requestTimedOut"))
     }
     throw error
   } finally {
@@ -735,7 +736,7 @@ async function consumeStream(
     if (parsed.error) {
       const msg = typeof parsed.error === "string"
         ? (parsed.message || parsed.error)
-        : (parsed.error.message || parsed.message || "Completion stream error")
+        : (parsed.error.message || parsed.message || t("rules.completion.streamError"))
       throw new Error(msg)
     }
     const delta = parsed.choices?.[0]?.delta?.content || ""
@@ -749,7 +750,7 @@ async function consumeStream(
   while (true) {
     if (signal?.aborted) {
       reader.cancel().catch(() => { /* ignore */ })
-      throw new DOMException("Completion aborted", "AbortError")
+      throw new DOMException(t("rules.completion.completionAborted"), "AbortError")
     }
     const { done, value } = await reader.read()
     if (done) {
@@ -775,7 +776,7 @@ async function buildRequestTarget(
 ): Promise<{ url: string; headers: Record<string, string> }> {
   if (provider === "frontier") {
     if (!session?.jwt) {
-      throw new Error("Sign in to use Frontier AI.")
+      throw new Error(t("rules.completion.signInRequired"))
     }
     return {
       url: FRONTIER_CHAT_URL,
@@ -785,7 +786,7 @@ async function buildRequestTarget(
   // custom: local, self-hosted, or third-party OpenAI-compatible (OpenRouter, OpenAI, Groq, ...)
   const customEndpoint = (settings.endpoint ?? "").trim()
   if (!customEndpoint) {
-    throw new Error("No custom endpoint configured.")
+    throw new Error(t("rules.completion.noCustomEndpoint"))
   }
   const { chatUrl } = normalizeOpenAIBaseUrl(customEndpoint)
   const headers: Record<string, string> = {}

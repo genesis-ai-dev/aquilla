@@ -28,6 +28,9 @@ import {
   type WorkingSetRow,
 } from "@/lib/agent/working-set"
 import { checkRulesForCell } from "@/lib/rules/rule-engine"
+import { formatInfractionMessage } from "@/lib/rules/format-infraction"
+import { translateRuleName } from "@/lib/lqa/builtin-resolver"
+import { useT } from "@/lib/i18n/I18nProvider"
 import { AgentDockView, type AgentDockViewProps } from "./AgentDockView"
 import { CreditsDial, type CreditsDialProps } from "./CreditsDial"
 import { lintCellFor } from "./ProposalCard"
@@ -54,6 +57,7 @@ export interface AgentWorkbenchProps {
 }
 
 export function AgentWorkbench({ agent, credits, onClose, onJumpToCell }: AgentWorkbenchProps) {
+  const t = useT()
   const { state, stop, reset, decide } = useAgentSession(agent.projectId)
   // Decisions per proposal row (key: proposalId:cellId) live in the SESSION
   // store, not here — closing/reopening the workbench must not forget what
@@ -96,15 +100,18 @@ export function AgentWorkbench({ agent, credits, onClose, onJumpToCell }: AgentW
 
   // ── Rule lint (same engine as the editor / ProposalCard) ────────────────
   const enabledRules = useMemo(() => agent.rules.filter((r) => r.enabled), [agent.rules])
+  const ruleById = useMemo(() => new Map(agent.rules.map((r) => [r.id, r])), [agent.rules])
   const lintRow = useCallback(
     (row: WorkingSetRow, text: string): string[] => {
       if (!row.stagedEvent || enabledRules.length === 0) return []
       const cell = lintCellFor(row.stagedEvent, agent.resolveCell, text)
-      return checkRulesForCell(cell, row.stagedEvent.fileId ?? row.fileId ?? "", enabledRules).map(
-        (inf) => inf.message,
-      )
+      return checkRulesForCell(cell, row.stagedEvent.fileId ?? row.fileId ?? "", enabledRules).map((inf) => {
+        const rule = ruleById.get(inf.ruleId)
+        const ruleName = rule ? translateRuleName(rule, t) : inf.ruleId
+        return formatInfractionMessage(inf, ruleName, t)
+      })
     },
-    [enabledRules, agent.resolveCell],
+    [enabledRules, ruleById, agent.resolveCell, t],
   )
 
   // ── Accept / reject ──────────────────────────────────────────────────────

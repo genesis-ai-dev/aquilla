@@ -12,6 +12,7 @@ import type { CompletionSettings } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
 import type { RuleSuggestion } from "./rule-suggester"
 import type { UsageCallback } from "./rule-suggester"
+import { t } from "@/lib/i18n/standalone"
 
 /** Max input size in bytes (~200 KB of UTF-8 text). */
 export const MAX_INPUT_BYTES = 200 * 1024
@@ -22,7 +23,7 @@ export function checkInputSize(text: string): { ok: true } | { ok: false; messag
     const kb = Math.round(bytes / 1024)
     return {
       ok: false,
-      message: `Document is too large (${kb} KB). Please keep it under 200 KB of text.`,
+      message: t("rules.importDialog.documentTooLarge", { kb }),
     }
   }
   return { ok: true }

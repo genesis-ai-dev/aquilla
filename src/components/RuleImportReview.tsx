@@ -16,6 +16,7 @@ import { AlertTriangle, AlertCircle, Check, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import type { RuleSuggestion } from "@/lib/rules/rule-suggester"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 export interface RuleImportReviewProps {
   drafts: RuleSuggestion[]
@@ -33,6 +34,7 @@ export function RuleImportReview({
   onBack,
   committing = false,
 }: RuleImportReviewProps) {
+  const t = useT()
   const [accepted, setAccepted] = useState<Set<number>>(
     () => new Set(drafts.map((_, i) => i)),
   )
@@ -56,7 +58,7 @@ export function RuleImportReview({
   return (
     <div className="space-y-3">
       <p className="text-xs text-muted-foreground">
-        {drafts.length} rule draft{drafts.length !== 1 ? "s" : ""} extracted. Toggle to include or exclude.
+        {t("rules.importReview.draftsExtracted", { count: drafts.length })}
       </p>
 
       <ul className="max-h-[400px] overflow-auto space-y-2">
@@ -88,7 +90,7 @@ export function RuleImportReview({
                       disabled={!isAccepted}
                     />
                     <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${badgeColor}`}>
-                      {draft.severity}
+                      {draft.severity === "major" ? t("rules.severity.major") : t("rules.severity.minor")}
                     </span>
                   </div>
                   {draft.description && (
@@ -100,20 +102,21 @@ export function RuleImportReview({
                     <p className="font-mono text-[11px] leading-relaxed break-all">
                       {draft.check.type === "source-target-match" && (
                         <>
-                          match both: <span className="font-semibold">{draft.check.pattern}</span>
+                          {t("rules.importReview.checkLabel.sourceTargetMatch")}{" "}
+                          <span className="font-semibold">{draft.check.pattern}</span>
                         </>
                       )}
                       {draft.check.type === "target-forbids" && (
                         <>
-                          target forbids:{" "}
+                          {t("rules.importReview.checkLabel.targetForbids")}{" "}
                           <span className="font-semibold">{draft.check.targetPattern}</span>
                         </>
                       )}
                       {draft.check.type === "source-requires-target" && (
                         <>
-                          if source has{" "}
+                          {t("rules.importReview.checkLabel.sourceRequiresTargetPrefix")}{" "}
                           <span className="font-semibold">{draft.check.sourcePattern}</span>{" "}
-                          → target needs{" "}
+                          {t("rules.importReview.checkLabel.sourceRequiresTargetSuffix")}{" "}
                           <span className="font-semibold">{draft.check.targetPattern}</span>
                         </>
                       )}
@@ -121,7 +124,7 @@ export function RuleImportReview({
                   </div>
                   {evidence?.[i] && (
                     <p className="mt-1 text-[10px] text-muted-foreground italic">
-                      From doc: {evidence[i]}
+                      {t("rules.importReview.fromDoc", { evidence: evidence[i] })}
                     </p>
                   )}
                 </div>
@@ -145,7 +148,7 @@ export function RuleImportReview({
 
       <div className="flex gap-2">
         <Button variant="outline" onClick={onBack} className="flex-1" disabled={committing}>
-          Back
+          {t("common.back")}
         </Button>
         <Button
           onClick={handleCommit}
@@ -153,8 +156,8 @@ export function RuleImportReview({
           className="flex-1"
         >
           {committing
-            ? "Adding…"
-            : `Add ${accepted.size} rule${accepted.size !== 1 ? "s" : ""}`}
+            ? t("rules.importReview.adding")
+            : t("rules.importReview.addButton", { count: accepted.size })}
         </Button>
       </div>
     </div>

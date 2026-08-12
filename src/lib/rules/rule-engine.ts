@@ -98,7 +98,7 @@ function checkRule(rule: TranslationRule, cell: CellData, fileId: string): RuleI
       if (spans.length === 0) return null
       return {
         ruleId: rule.id, cellId: cell.id, fileId,
-        message: `"${rule.name}": target contains forbidden pattern`,
+        reason: "target-forbids",
         spans,
       }
     }
@@ -117,7 +117,7 @@ function checkRule(rule: TranslationRule, cell: CellData, fileId: string): RuleI
       if (targetRe.test(cell.translated)) return null // target satisfies the requirement
       return {
         ruleId: rule.id, cellId: cell.id, fileId,
-        message: `"${rule.name}": source matches pattern but target does not`,
+        reason: "source-requires-target",
         spans: sourceSpans,
       }
     }
@@ -137,7 +137,7 @@ function checkRule(rule: TranslationRule, cell: CellData, fileId: string): RuleI
       if (targetHasMatch) return null
       return {
         ruleId: rule.id, cellId: cell.id, fileId,
-        message: `"${rule.name}": pattern found in source but missing in target`,
+        reason: "source-target-match",
         spans: sourceSpans,
       }
     }
@@ -146,14 +146,27 @@ function checkRule(rule: TranslationRule, cell: CellData, fileId: string): RuleI
       if (!def) return null
       const spans = def.run(source, cell.translated)
       if (!spans || spans.length === 0) return null
-      const message = typeof def.message === "function" ? def.message(spans) : def.message
       return {
         ruleId: rule.id,
         cellId: cell.id,
         fileId,
-        message: `"${rule.name}": ${message}`,
+        reason: `builtin:${check.checkId}`,
+        reasonParams:
+          check.checkId === "placeholder-integrity" ? placeholderIntegrityParams(spans) : undefined,
         spans,
       }
     }
   }
+}
+
+/**
+ * `builtin:placeholder-integrity` names the missing token(s) so the
+ * translator can act (FRO-345) — the identity is already on each span's
+ * `matchedText`, which is raw cell content and must never be routed through
+ * `t()`. `count` drives the plural form ("Placeholder X" vs "Placeholders
+ * X, Y") at render time.
+ */
+function placeholderIntegrityParams(spans: import("@/lib/parsers/types").InfractionSpan[]): Record<string, string> {
+  const tokens = spans.map((s) => s.matchedText).filter(Boolean)
+  return { tokens: tokens.join(", "), count: String(tokens.length) }
 }

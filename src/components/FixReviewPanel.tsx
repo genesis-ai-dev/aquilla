@@ -5,6 +5,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import type { FixProposal } from "@/lib/rules/autofix"
 import type { TranslationRule } from "@/lib/parsers/types"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 interface Props {
   open: boolean
@@ -23,6 +24,7 @@ interface Props {
 }
 
 export function FixReviewPanel({ open, rule, proposal, onClose, onApply, onAmendRule, confirmPhrase }: Props) {
+  const t = useT()
   const previews = proposal.kind === "none" ? [] : proposal.previews
   const initialSelected = useMemo(() => new Set(previews.map((p) => p.cellId)), [previews])
   const [selected, setSelected] = useState<Set<string>>(initialSelected)
@@ -40,8 +42,10 @@ export function FixReviewPanel({ open, rule, proposal, onClose, onApply, onAmend
 
   const modeLabel =
     proposal.kind === "regex-replace"
-      ? previews.some((p) => p.source === "cached-regex") ? "Cached regex" : "Batch regex"
-      : proposal.kind === "per-cell" ? "Per-cell rewrite" : ""
+      ? previews.some((p) => p.source === "cached-regex")
+        ? t("rules.fixReview.modeCachedRegex")
+        : t("rules.fixReview.modeBatchRegex")
+      : proposal.kind === "per-cell" ? t("rules.fixReview.modePerCellRewrite") : ""
 
   // AQU-186: Apply is gated on typed confirmation when confirmPhrase is set.
   const confirmOk = confirmPhrase == null || confirmInput === confirmPhrase
@@ -58,7 +62,9 @@ export function FixReviewPanel({ open, rule, proposal, onClose, onApply, onAmend
         <SheetHeader>
           <SheetTitle className="flex items-center gap-2">
             <span>{rule.name}</span>
-            <span className="rounded px-1.5 py-0.5 text-[10px] font-medium bg-muted">{rule.severity}</span>
+            <span className="rounded px-1.5 py-0.5 text-[10px] font-medium bg-muted">
+              {rule.severity === "major" ? t("rules.severity.major") : t("rules.severity.minor")}
+            </span>
             {modeLabel && <span className="rounded px-1.5 py-0.5 text-[10px] font-medium bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300">{modeLabel}</span>}
           </SheetTitle>
         </SheetHeader>
@@ -66,16 +72,18 @@ export function FixReviewPanel({ open, rule, proposal, onClose, onApply, onAmend
         {proposal.kind === "none" ? (
           <div className="mt-4 space-y-3">
             <p className="text-sm text-muted-foreground">{proposal.reason}</p>
-            <Button variant="outline" onClick={onAmendRule}>Amend rule</Button>
+            <Button variant="outline" onClick={onAmendRule}>{t("rules.drawer.amendRuleButton")}</Button>
           </div>
         ) : (
           <>
             <div className="mt-2 flex items-center justify-between">
-              <p className="text-sm text-muted-foreground">{previews.length} previews ready</p>
+              <p className="text-sm text-muted-foreground">
+                {t("rules.fixReview.previewsReady", { count: previews.length })}
+              </p>
               {previews.length > 1 && (
                 <div className="flex gap-2 text-xs">
-                  <button className="underline" onClick={selectAll}>Select all</button>
-                  <button className="underline" onClick={selectNone}>Select none</button>
+                  <button className="underline" onClick={selectAll}>{t("common.selectAll")}</button>
+                  <button className="underline" onClick={selectNone}>{t("search.replace.selectNone")}</button>
                 </div>
               )}
             </div>
@@ -86,7 +94,9 @@ export function FixReviewPanel({ open, rule, proposal, onClose, onApply, onAmend
                   <label className="flex items-start gap-2">
                     <Checkbox checked={selected.has(p.cellId)} onCheckedChange={() => toggle(p.cellId)} />
                     <div className="min-w-0 flex-1">
-                      <div className="text-[10px] text-muted-foreground">Cell {p.cellId}</div>
+                      <div className="text-[10px] text-muted-foreground">
+                        {t("rules.fixReview.cellLabel", { cellId: p.cellId })}
+                      </div>
                       <div className="truncate line-through text-red-600 dark:text-red-400">{p.before}</div>
                       <div className="truncate text-green-700 dark:text-green-400">{p.after}</div>
                       {p.rationale && <div className="mt-1 text-[10px] text-muted-foreground">{p.rationale}</div>}
@@ -100,12 +110,12 @@ export function FixReviewPanel({ open, rule, proposal, onClose, onApply, onAmend
             {confirmPhrase != null && (
               <div className="mt-3 space-y-1">
                 <p className="text-xs text-muted-foreground">
-                  This action is irreversible. Type{" "}
+                  {t("rules.fixReview.irreversibleConfirmPrefix")}{" "}
                   <strong className="font-semibold text-foreground">{confirmPhrase}</strong>{" "}
-                  to confirm.
+                  {t("rules.fixReview.irreversibleConfirmSuffix")}
                 </p>
                 <Input
-                  aria-label="Type the rule name to confirm"
+                  aria-label={t("rules.fixReview.confirmInputAriaLabel")}
                   placeholder={confirmPhrase}
                   value={confirmInput}
                   onChange={(e) => setConfirmInput(e.target.value)}
@@ -115,7 +125,7 @@ export function FixReviewPanel({ open, rule, proposal, onClose, onApply, onAmend
             )}
 
             <div className="mt-4 flex items-center justify-end gap-2">
-              <Button variant="ghost" onClick={handleClose}>Cancel</Button>
+              <Button variant="ghost" onClick={handleClose}>{t("common.cancel")}</Button>
               <Button
                 onClick={() => {
                   setConfirmInput("")
@@ -123,7 +133,7 @@ export function FixReviewPanel({ open, rule, proposal, onClose, onApply, onAmend
                 }}
                 disabled={applyDisabled}
               >
-                Apply {selected.size} selected
+                {t("rules.fixReview.applyButton", { count: selected.size })}
               </Button>
             </div>
           </>

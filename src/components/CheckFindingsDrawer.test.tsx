@@ -19,6 +19,8 @@ import {
 } from "./CheckFindingsDrawer"
 import type { CheckRunResult, TermConsistencyFinding } from "@/lib/check/deterministic-check"
 import type { CellData } from "@/hooks/useCells"
+import { t as en } from "@/lib/i18n/standalone"
+import { DEFAULT_LOCALE } from "@/lib/i18n/locales"
 
 function makeCell(id: string, cellLabel: string, translated: string): CellData {
   return {
@@ -42,9 +44,14 @@ const baseResult: CheckRunResult = {
 
 describe("checkScopeSummary", () => {
   it("names exactly what was checked", () => {
-    expect(checkScopeSummary(baseResult)).toBe("32 cells · 12 rules · 8 terms")
-    expect(checkScopeSummary({ ...baseResult, checkedCellCount: 1, checkedRuleCount: 1, checkedTermCount: 1 }))
-      .toBe("1 cell · 1 rule · 1 term")
+    expect(checkScopeSummary(baseResult, en, DEFAULT_LOCALE)).toBe("32 cells · 12 rules · 8 terms")
+    expect(
+      checkScopeSummary(
+        { ...baseResult, checkedCellCount: 1, checkedRuleCount: 1, checkedTermCount: 1 },
+        en,
+        DEFAULT_LOCALE,
+      ),
+    ).toBe("1 cell · 1 rule · 1 term")
   })
 })
 
@@ -60,14 +67,14 @@ describe("termFindingHeadline", () => {
   }
 
   it("reads as 'N of M occurrences use X, K use something else'", () => {
-    expect(termFindingHeadline(finding)).toBe(
+    expect(termFindingHeadline(finding, en, DEFAULT_LOCALE)).toBe(
       '14 of 18 occurrences use "Kristo" (14), 4 use something else',
     )
   })
 
   it("handles the zero-consistent case without a bogus usage list", () => {
     expect(
-      termFindingHeadline({ ...finding, consistentCount: 0, renderingUsage: [] }),
+      termFindingHeadline({ ...finding, consistentCount: 0, renderingUsage: [] }, en, DEFAULT_LOCALE),
     ).toBe("none of 18 occurrences use an approved rendering")
   })
 })
@@ -98,7 +105,7 @@ describe("CheckFindingsDrawer", () => {
         },
         infractions: [{
           ruleId: "r1", cellId: "c1", fileId: "f1",
-          message: '"No double bang": target contains forbidden pattern',
+          reason: "target-forbids",
           spans: [{ side: "target", start: 6, end: 8, matchedText: "!!" }],
         }],
       }],

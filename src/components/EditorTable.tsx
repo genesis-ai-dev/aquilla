@@ -35,6 +35,8 @@ import type { CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
 import { getCellPref, setCellPref } from "@/lib/store/audio-cell-prefs"
 import type { ScoredPair } from "@/lib/search/dual-index"
 import type { TranslationRule, RuleInfraction, ProjectRecord, Voice, ProjectTtsSettings, OrderedBy, FileType } from "@/lib/parsers/types"
+import { translateRuleName } from "@/lib/lqa/builtin-resolver"
+import { formatInfractionReason } from "@/lib/rules/format-infraction"
 import { deriveParagraphs } from "@/lib/parsers/paragraphs"
 import { hasTiming } from "@/lib/timeline/derive"
 import { useEditorCapabilities } from "@/hooks/useProjectPermissions"
@@ -7168,10 +7170,10 @@ function EditorRow({
                             />
                             <span className="flex-1">
                               <span className="font-medium text-foreground">
-                                {rule?.name ?? inf.ruleId}
+                                {rule ? translateRuleName(rule, t) : inf.ruleId}
                               </span>
                               <span className="ms-1 text-muted-foreground">
-                                — {inf.message}
+                                — {formatInfractionReason(inf, t)}
                               </span>
                             </span>
                             <ArrowRight className="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground/50" />
@@ -7194,7 +7196,7 @@ function EditorRow({
                               >
                                 <Check className="mt-0.5 h-3 w-3 shrink-0" />
                                 <span className="flex-1">
-                                  {rule?.name ?? inf.ruleId}
+                                  {rule ? translateRuleName(rule, t) : inf.ruleId}
                                 </span>
                               </button>
                             )
@@ -7240,7 +7242,7 @@ function EditorRow({
               }
             }}
             infraction={inf}
-            ruleName={rule.name}
+            ruleName={translateRuleName(rule, t)}
             waivers={cell.waivers ?? []}
             anchor={openRuleAnchor}
             onOpenRule={(ruleId) => {
@@ -7272,8 +7274,8 @@ function EditorRow({
               finalFocus={false}
               className="pointer-events-none w-72 space-y-1 p-3 text-sm"
             >
-              <div className="font-medium">{rule.name}</div>
-              <p className="text-xs text-muted-foreground">{inf.message}</p>
+              <div className="font-medium">{translateRuleName(rule, t)}</div>
+              <p className="text-xs text-muted-foreground">{formatInfractionReason(inf, t)}</p>
             </PopoverContent>
           </Popover>
         )

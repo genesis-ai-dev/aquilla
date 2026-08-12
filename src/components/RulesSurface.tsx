@@ -29,6 +29,8 @@ import type { useRules } from "@/hooks/useRules"
 import type { CellData } from "@/hooks/useCells"
 import type { OrgWideSettings, OrgPatchResult, PromotionRequestResult } from "@/lib/sync/org-settings"
 import { v4 as uuid } from "uuid"
+import { useT } from "@/lib/i18n/I18nProvider"
+import { RichMessage } from "@/lib/i18n/RichMessage"
 
 type UseRulesReturn = ReturnType<typeof useRules>
 
@@ -56,9 +58,10 @@ interface Props {
 }
 
 function SeverityBadge({ severity }: { severity: string }) {
+  const t = useT()
   return (
     <Badge variant={severity === "major" ? "destructive" : "outline"}>
-      {severity}
+      {severity === "major" ? t("rules.severity.major") : t("rules.severity.minor")}
     </Badge>
   )
 }
@@ -94,6 +97,7 @@ export function RulesSurface({
   editingRuleId,
   setEditingRuleId,
 }: Props) {
+  const t = useT()
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const [expandedRuleId, setExpandedRuleId] = useState<string | null>(null)
@@ -119,8 +123,8 @@ export function RulesSurface({
     const u = project?.usage
     if (!u) return null
     const calls = Object.values(u.llmCalls).reduce((s, v) => s + v.total, 0)
-    return `${u.fixesApplied} fixes applied · ${calls} LLM calls this project`
-  }, [project?.usage])
+    return t("rules.usageSummary", { fixes: u.fixesApplied, calls })
+  }, [project?.usage, t])
 
   async function handlePromoteToOrg(rule: TranslationRule) {
     if (!patchOrgSettings) return
@@ -145,12 +149,12 @@ export function RulesSurface({
     setRequestingRuleId(null)
     if (result.kind === "ok") {
       setRequestedRuleIds((prev) => new Set([...prev, rule.id]))
-      setRequestNotice((prev) => new Map(prev).set(rule.id, "Requested ✓"))
+      setRequestNotice((prev) => new Map(prev).set(rule.id, t("rules.promotion.requested")))
     } else if (result.kind === "duplicate") {
       setRequestedRuleIds((prev) => new Set([...prev, rule.id]))
-      setRequestNotice((prev) => new Map(prev).set(rule.id, "Already requested"))
+      setRequestNotice((prev) => new Map(prev).set(rule.id, t("rules.promotion.alreadyRequested")))
     } else {
-      setRequestNotice((prev) => new Map(prev).set(rule.id, "Failed — try again"))
+      setRequestNotice((prev) => new Map(prev).set(rule.id, t("rules.promotion.requestFailed")))
     }
   }
 
@@ -206,10 +210,10 @@ export function RulesSurface({
           surface, not the workspace header. */}
       <header className="flex shrink-0 items-center gap-2 border-b px-4 py-3">
         <ScrollText className="h-5 w-5 text-muted-foreground" aria-hidden />
-        <h1 className="flex-1 text-base font-semibold">Rules</h1>
+        <h1 className="flex-1 text-base font-semibold">{t("nav.sidebarSection.rules")}</h1>
         <Button variant="outline" size="sm" onClick={() => navigate(`/project/${projectId}/terminology`)}>
           <BookOpen data-icon="inline-start" />
-          Terminology
+          {t("nav.sidebarSection.terminology")}
         </Button>
         <RuleImportDialog
           completionSettings={completionSettings}
@@ -228,7 +232,7 @@ export function RulesSurface({
           disabled={editingRuleId !== null}
         >
           <Plus className="size-4" aria-hidden />
-          Add Rule
+          {t("rules.surface.addRuleButton")}
         </Button>
       </header>
 
@@ -242,8 +246,8 @@ export function RulesSurface({
           className="max-h-[90vh] max-w-2xl gap-0 overflow-y-auto p-0 sm:max-w-2xl"
         >
           <DialogHeader className="sr-only">
-            <DialogTitle>Create translation rule</DialogTitle>
-            <DialogDescription>Create a project translation rule.</DialogDescription>
+            <DialogTitle>{t("rules.surface.createRuleDialog.title")}</DialogTitle>
+            <DialogDescription>{t("rules.surface.createRuleDialog.description")}</DialogDescription>
           </DialogHeader>
           <RuleEditor
             className="rounded-none border-0"
@@ -267,8 +271,8 @@ export function RulesSurface({
           className="max-h-[90vh] max-w-2xl gap-0 overflow-y-auto p-0 sm:max-w-2xl"
         >
           <DialogHeader className="sr-only">
-            <DialogTitle>Create org rule</DialogTitle>
-            <DialogDescription>Create an org-scoped translation rule.</DialogDescription>
+            <DialogTitle>{t("rules.surface.createOrgRuleDialog.title")}</DialogTitle>
+            <DialogDescription>{t("rules.surface.createOrgRuleDialog.description")}</DialogDescription>
           </DialogHeader>
           <RuleEditor
             className="rounded-none border-0"
@@ -285,7 +289,7 @@ export function RulesSurface({
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex max-w-2xl flex-col gap-6 p-6">
         {usageSummary && (
-          <AppTooltip content="LLM usage on this project">
+          <AppTooltip content={t("rules.surface.usageTooltip")}>
             <p className="text-xs text-muted-foreground">{usageSummary}</p>
           </AppTooltip>
         )}
@@ -302,7 +306,7 @@ export function RulesSurface({
             <CardHeader>
               <div className="flex items-center gap-2">
                 <Building2 className="size-4 text-muted-foreground" />
-                <CardTitle>Org Rules ({orgRules.length})</CardTitle>
+                <CardTitle>{t("rules.surface.orgRulesCardTitle", { count: orgRules.length })}</CardTitle>
                 {canEditOrgRules && (
                   <Button
                     size="sm"
@@ -312,13 +316,13 @@ export function RulesSurface({
                     disabled={editingOrgRuleId !== null}
                   >
                     <Plus className="size-4" aria-hidden />
-                    Add Org Rule
+                    {t("rules.surface.addOrgRuleButton")}
                   </Button>
                 )}
                 {!canEditOrgRules && (
                   <Badge variant="secondary" className="ms-auto">
                     <Lock data-icon="inline-start" />
-                    Read-only
+                    {t("rules.surface.readOnly")}
                   </Badge>
                 )}
               </div>
@@ -329,8 +333,8 @@ export function RulesSurface({
                   variant="inline"
                   className="px-0 py-4"
                   icon={Building2}
-                  title="No org-level rules yet"
-                  description="Add one or promote a project rule."
+                  title={t("rules.surface.noOrgRules.title")}
+                  description={t("rules.surface.noOrgRules.description")}
                 />
               ) : (
                 <ul className="flex flex-col gap-2">
@@ -342,19 +346,19 @@ export function RulesSurface({
                           <div className="flex items-center gap-2">
                             <span className="text-sm font-medium">{rule.name}</span>
                             <SeverityBadge severity={rule.severity} />
-                            <Badge>Org</Badge>
+                            <Badge>{t("rules.surface.orgBadge")}</Badge>
                           </div>
                           {rule.description && <p className="mt-0.5 text-xs text-muted-foreground truncate">{rule.description}</p>}
                         </div>
                         {canEditOrgRules && (
                           <>
-                            <AppTooltip content="Edit org rule">
+                            <AppTooltip content={t("rules.surface.editOrgRuleTooltip")}>
                               <Button
                                 variant="ghost"
                                 size="sm"
                                 onClick={() => setEditingOrgRuleId(editingOrgRuleId === rule.id ? null : rule.id)}
                                 disabled={editingOrgRuleId !== null && editingOrgRuleId !== rule.id}
-                                aria-label="Edit org rule"
+                                aria-label={t("rules.surface.editOrgRuleTooltip")}
                               >
                                 <Pencil />
                               </Button>
@@ -364,9 +368,13 @@ export function RulesSurface({
                                 size="sm"
                                 checked={rule.enabled}
                                 onCheckedChange={(checked) => updateOrgRule(rule.id, { enabled: checked })}
-                                aria-label={`${rule.enabled ? "Disable" : "Enable"} org rule: ${rule.name}`}
+                                aria-label={
+                                  rule.enabled
+                                    ? t("rules.surface.disableOrgRuleAriaLabel", { name: rule.name })
+                                    : t("rules.surface.enableOrgRuleAriaLabel", { name: rule.name })
+                                }
                               />
-                              Enabled
+                              {t("rules.surface.enabledLabel")}
                             </label>
                             <Button variant="ghost" size="sm" onClick={() => deleteOrgRule(rule.id)}>
                               <Trash2 />
@@ -398,7 +406,7 @@ export function RulesSurface({
                   <Separator className="my-4" />
                   <p className="mb-2 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
                     <Clock className="size-3.5" />
-                    Pending requests ({promotionRequests.length})
+                    {t("rules.surface.pendingRequests", { count: promotionRequests.length })}
                   </p>
                   <ul className="flex flex-col gap-2">
                     {promotionRequests.map((req) => (
@@ -410,18 +418,20 @@ export function RulesSurface({
                               <p className="mt-0.5 text-xs text-muted-foreground truncate">{req.rule.description}</p>
                             )}
                             <p className="mt-1 text-xs text-muted-foreground">
-                              Requested by {req.requestedByName ?? `user ${req.requestedBy}`}
+                              {t("rules.surface.requestedBy", {
+                                requester: req.requestedByName ?? t("rules.surface.requestedByFallback", { userId: req.requestedBy }),
+                              })}
                             </p>
                           </div>
                           <div className="flex items-center gap-2 shrink-0">
-                            <AppTooltip content="Promote this rule to org scope">
+                            <AppTooltip content={t("rules.surface.approveRequestTooltip")}>
                               <Button size="sm" onClick={() => handleApproveRequest(req)}>
-                                Approve
+                                {t("rules.surface.approveButton")}
                               </Button>
                             </AppTooltip>
-                            <AppTooltip content="Dismiss this request">
+                            <AppTooltip content={t("rules.surface.dismissRequestTooltip")}>
                               <Button size="sm" variant="ghost" onClick={() => handleDismissRequest(req.id)}>
-                                Dismiss
+                                {t("common.dismiss")}
                               </Button>
                             </AppTooltip>
                           </div>
@@ -440,15 +450,18 @@ export function RulesSurface({
           <Dialog open onOpenChange={(open) => { if (!open) setPromoteRule(null) }}>
             <DialogContent>
               <DialogHeader>
-                <DialogTitle>Promote rule to org?</DialogTitle>
+                <DialogTitle>{t("rules.surface.promoteDialog.title")}</DialogTitle>
               </DialogHeader>
               <p className="text-sm text-muted-foreground">
-                A copy of <strong>{promoteRule.name}</strong> will be added to the org's rule library. The project copy is kept.
+                <RichMessage
+                  k="rules.surface.promoteDialog.body"
+                  values={{ name: <strong>{promoteRule.name}</strong> }}
+                />
               </p>
               <DialogFooter>
-                <Button variant="outline" onClick={() => setPromoteRule(null)}>Cancel</Button>
+                <Button variant="outline" onClick={() => setPromoteRule(null)}>{t("common.cancel")}</Button>
                 <Button onClick={() => handlePromoteToOrg(promoteRule)} disabled={promoting}>
-                  {promoting ? "Promoting…" : "Promote to org"}
+                  {promoting ? t("rules.surface.promoteDialog.promoting") : t("rules.surface.promoteToOrgButton")}
                 </Button>
               </DialogFooter>
             </DialogContent>
@@ -456,18 +469,18 @@ export function RulesSurface({
         )}
 
         <Card>
-          <CardHeader><CardTitle>Project Rules ({userRules.length})</CardTitle></CardHeader>
+          <CardHeader><CardTitle>{t("rules.surface.projectRulesCardTitle", { count: userRules.length })}</CardTitle></CardHeader>
           <CardContent>
             {userRules.length === 0 ? (
               <EmptyState
                 variant="inline"
                 className="px-0 py-4"
                 icon={ScrollText}
-                title="No project rules yet"
+                title={t("rules.surface.noProjectRules.title")}
                 description={
                   <>
-                    Add a rule, import a style guide, or suggest rules from your edits using the buttons above.
-                    {canEditOrgRules && orgRules.length > 0 && " Org rules above also apply to this project."}
+                    {t("rules.surface.noProjectRules.description")}
+                    {canEditOrgRules && orgRules.length > 0 && ` ${t("rules.surface.noProjectRules.orgRulesNote")}`}
                   </>
                 }
               />
@@ -484,29 +497,29 @@ export function RulesSurface({
                             <span className="text-sm font-medium">{rule.name}</span>
                             <SeverityBadge severity={rule.severity} />
                             <Badge variant="secondary">{rule.source}</Badge>
-                            {rule.autofix && <Badge variant="outline">autofix</Badge>}
+                            {rule.autofix && <Badge variant="outline">{t("rules.surface.autofixBadge")}</Badge>}
                           </div>
                           {rule.description && <p className="mt-0.5 text-xs text-muted-foreground truncate">{rule.description}</p>}
                         </div>
-                        <AppTooltip content="Opens the editor with this rule's drawer">
+                        <AppTooltip content={t("rules.surface.tryToFixAllTooltip")}>
                           <Button
                             size="sm"
                             variant="outline"
                             onClick={() => navigate(`/project/${projectId}/editor?openRule=${rule.id}`)}
                           >
                             <Wand2 data-icon="inline-start" />
-                            Try to fix all
+                            {t("rules.surface.tryToFixAllButton")}
                           </Button>
                         </AppTooltip>
                         {canEditOrgRules && patchOrgSettings && (
-                          <AppTooltip content="Copy this rule to the org's rule library">
+                          <AppTooltip content={t("rules.surface.promoteToOrgTooltip")}>
                           <Button
                             size="sm"
                             variant="outline"
                             onClick={() => setPromoteRule(rule)}
                           >
                             <ArrowUpCircle data-icon="inline-start" />
-                            Promote to org
+                            {t("rules.surface.promoteToOrgButton")}
                           </Button>
                           </AppTooltip>
                         )}
@@ -519,10 +532,10 @@ export function RulesSurface({
                             return alreadyRequested || notice ? (
                               <Badge variant="secondary">
                                 <Clock data-icon="inline-start" />
-                                {notice ?? "Requested"}
+                                {notice ?? t("rules.surface.requestedBadge")}
                               </Badge>
                             ) : (
-                              <AppTooltip content="Ask an org maintainer to promote this rule to org scope">
+                              <AppTooltip content={t("rules.surface.requestPromotionTooltip")}>
                                 <Button
                                   size="sm"
                                   variant="outline"
@@ -530,19 +543,19 @@ export function RulesSurface({
                                   disabled={isRequesting}
                                 >
                                   <ArrowUpCircle data-icon="inline-start" />
-                                  {isRequesting ? "Requesting…" : "Request promotion"}
+                                  {isRequesting ? t("rules.surface.requestingButton") : t("rules.surface.requestPromotionButton")}
                                 </Button>
                               </AppTooltip>
                             )
                           })()
                         )}
-                        <AppTooltip content="Edit rule">
+                        <AppTooltip content={t("rules.editor.editRuleHeading")}>
                           <Button
                             variant="ghost"
                             size="sm"
                             onClick={() => setEditingRuleId(editingRuleId === rule.id ? null : rule.id)}
                             disabled={editingRuleId !== null && editingRuleId !== rule.id}
-                            aria-label="Edit rule"
+                            aria-label={t("rules.editor.editRuleHeading")}
                           >
                             <Pencil />
                           </Button>
@@ -555,9 +568,13 @@ export function RulesSurface({
                             size="sm"
                             checked={rule.enabled}
                             onCheckedChange={(checked) => updateRule(rule.id, { enabled: checked })}
-                            aria-label={`${rule.enabled ? "Disable" : "Enable"} rule: ${rule.name}`}
+                            aria-label={
+                              rule.enabled
+                                ? t("rules.surface.disableRuleAriaLabel", { name: rule.name })
+                                : t("rules.surface.enableRuleAriaLabel", { name: rule.name })
+                            }
                           />
-                          Enabled
+                          {t("rules.surface.enabledLabel")}
                         </label>
                         <Button variant="ghost" size="sm" onClick={() => deleteRule(rule.id)}>
                           <Trash2 />
@@ -595,6 +612,7 @@ export function RulesSurface({
 }
 
 function AutofixEditor({ rule, onUpdate }: { rule: TranslationRule; onUpdate: (af: RuleAutofix | undefined) => void }) {
+  const t = useT()
   const [pattern, setPattern] = useState(rule.autofix?.pattern ?? "")
   const [replacement, setReplacement] = useState(rule.autofix?.replacement ?? "")
   const [flags, setFlags] = useState(rule.autofix?.flags ?? "gi")
@@ -603,17 +621,17 @@ function AutofixEditor({ rule, onUpdate }: { rule: TranslationRule; onUpdate: (a
     <>
       <Separator className="my-3" />
       <div className="flex flex-col gap-2">
-        <p className="text-xs text-muted-foreground">Saved autofix (regex)</p>
+        <p className="text-xs text-muted-foreground">{t("rules.surface.autofixEditor.heading")}</p>
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-          <Input data-autofix-field="pattern" placeholder="Pattern" value={pattern} onChange={(e) => setPattern(e.target.value)} />
-          <Input placeholder="Replacement" value={replacement} onChange={(e) => setReplacement(e.target.value)} />
-          <Input placeholder="Flags (e.g. gi)" value={flags} onChange={(e) => setFlags(e.target.value)} />
+          <Input data-autofix-field="pattern" placeholder={t("rules.editor.patternLabel")} value={pattern} onChange={(e) => setPattern(e.target.value)} />
+          <Input placeholder={t("rules.surface.autofixEditor.replacementPlaceholder")} value={replacement} onChange={(e) => setReplacement(e.target.value)} />
+          <Input placeholder={t("rules.surface.autofixEditor.flagsPlaceholder")} value={flags} onChange={(e) => setFlags(e.target.value)} />
         </div>
         <div className="flex gap-2">
           <Button size="sm" onClick={() => onUpdate(pattern ? { kind: "regex-replace", pattern, replacement, flags } : undefined)}>
-            Save autofix
+            {t("rules.surface.autofixEditor.saveButton")}
           </Button>
-          <Button size="sm" variant="ghost" onClick={() => onUpdate(undefined)}>Clear</Button>
+          <Button size="sm" variant="ghost" onClick={() => onUpdate(undefined)}>{t("common.clear")}</Button>
         </div>
       </div>
     </>

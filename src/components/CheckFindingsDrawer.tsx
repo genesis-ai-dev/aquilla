@@ -15,8 +15,8 @@ import { AppTooltip } from "@/components/ui/tooltip"
 import { Spinner } from "@/components/ui/spinner"
 import { cellTextForDisplay, truncateCellText } from "@/lib/cell-text"
 import { parseTimestampRange } from "@/lib/video/vtt-generator"
-import { useI18n } from "@/lib/i18n/I18nProvider"
-import { formatTime } from "@/lib/i18n/format"
+import { useI18n, useT, type TFunction } from "@/lib/i18n/I18nProvider"
+import { formatTime, formatCount } from "@/lib/i18n/format"
 import type { CellData } from "@/hooks/useCells"
 import type {
   CheckRunResult,
@@ -35,28 +35,36 @@ interface CheckFindingsDrawerProps {
 }
 
 /** "32 cells · 12 rules · 8 terms" — the spec's what-was-checked summary. */
-export function checkScopeSummary(result: CheckRunResult): string {
-  const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`
+export function checkScopeSummary(result: CheckRunResult, t: TFunction, locale: string): string {
   return [
-    plural(result.checkedCellCount, "cell"),
-    plural(result.checkedRuleCount, "rule"),
-    plural(result.checkedTermCount, "term"),
+    t("rules.checkDrawer.cellCount", { count: formatCount(result.checkedCellCount, locale) }),
+    t("rules.checkDrawer.scopeRules", { count: formatCount(result.checkedRuleCount, locale) }),
+    t("rules.checkDrawer.scopeTerms", { count: formatCount(result.checkedTermCount, locale) }),
   ].join(" · ")
 }
 
 /** Headline for a term card: "Χριστός: 14 of 18 occurrences use "Kristo", 4 use something else". */
-export function termFindingHeadline(f: TermConsistencyFinding): string {
+export function termFindingHeadline(f: TermConsistencyFinding, t: TFunction, locale: string): string {
   const used = f.renderingUsage
     .filter((u) => u.cellIds.length > 0)
     .map((u) => `"${u.rendering}" (${u.cellIds.length})`)
     .join(", ")
   const usePart =
     f.consistentCount === 0
-      ? `none of ${f.totalOccurrences} occurrence${f.totalOccurrences === 1 ? "" : "s"} use an approved rendering`
-      : `${f.consistentCount} of ${f.totalOccurrences} occurrences use ${used}`
+      ? t("rules.checkDrawer.termHeadline.noneApproved", {
+          total: formatCount(f.totalOccurrences, locale),
+        })
+      : t("rules.checkDrawer.termHeadline.someApproved", {
+          consistent: formatCount(f.consistentCount, locale),
+          total: formatCount(f.totalOccurrences, locale),
+          used,
+        })
   const flagged = f.flaggedCells.length
   return flagged > 0 && f.consistentCount > 0
-    ? `${usePart}, ${flagged} use something else`
+    ? t("rules.checkDrawer.termHeadline.someUseSomethingElse", {
+        usePart,
+        flagged: formatCount(flagged, locale),
+      })
     : usePart
 }
 
@@ -93,13 +101,14 @@ interface CellRefButtonProps {
 }
 
 function CellRefButton({ cellId, label, cell, onNavigateToCell, onOpenComments, detail }: CellRefButtonProps) {
+  const t = useT()
   return (
     // min-w-0 on the flex item + button (SUB-5): without it, long unbroken
     // content (raw HTML snippets, UUIDs) sets the intrinsic width and the card
     // punches through the fixed-width drawer; the inner `truncate`s only work
     // once their flex ancestors are allowed to shrink.
     <li className="flex min-w-0 items-start gap-1">
-      <AppTooltip content="Go to cell">
+      <AppTooltip content={t("rules.checkDrawer.goToCell")}>
         <button
           type="button"
           className="min-w-0 flex-1 rounded border-s-2 border-amber-400 bg-amber-50 p-1.5 text-start text-xs hover:bg-amber-100 dark:bg-amber-950/20 dark:hover:bg-amber-950/40"
@@ -115,13 +124,13 @@ function CellRefButton({ cellId, label, cell, onNavigateToCell, onOpenComments, 
       </button>
       </AppTooltip>
       {onOpenComments && (
-        <AppTooltip content="Comment on this cell">
+        <AppTooltip content={t("rules.checkDrawer.commentOnCell")}>
           <Button
             variant="ghost"
             size="sm"
             className="h-6 px-1"
             onClick={() => onOpenComments(cellId)}
-            aria-label={`Comment on ${label}`}
+            aria-label={t("rules.checkDrawer.commentOnCellAriaLabel", { label })}
           >
             <MessageSquare className="h-3 w-3" />
           </Button>
@@ -142,15 +151,19 @@ function RuleFindingCard({
   onNavigateToCell: (cellId: string) => void
   onOpenComments?: (cellId: string) => void
 }) {
+  const t = useT()
   const SeverityIcon = group.rule.severity === "major" ? AlertTriangle : AlertCircle
   const severityColor = group.rule.severity === "major" ? "text-red-500" : "text-amber-500"
   return (
     <div className="min-w-0 rounded-md border p-2">
       <div className="mb-1 flex min-w-0 items-center gap-1.5">
         <SeverityIcon className={`h-3.5 w-3.5 shrink-0 ${severityColor}`} />
+        {/* group.rule.name is the user's OWN rule name (or, for a built-in
+            check, app-authored chrome resolved by translateRuleName) —
+            content, never keyed here. */}
         <span className="min-w-0 truncate text-xs font-semibold">{group.rule.name}</span>
         <span className="ms-auto shrink-0 text-[10px] text-muted-foreground">
-          {group.infractions.length} cell{group.infractions.length === 1 ? "" : "s"}
+          {t("rules.checkDrawer.cellCount", { count: group.infractions.length })}
         </span>
       </div>
       <ul className="min-w-0 space-y-1">
@@ -162,7 +175,11 @@ function RuleFindingCard({
               cellId={inf.cellId}
               label={findingCellLabel(cell, inf.cellId)}
               cell={cell}
-              detail={inf.spans[0]?.matchedText ? `matched "${inf.spans[0].matchedText}"` : undefined}
+              detail={
+                inf.spans[0]?.matchedText
+                  ? t("rules.checkDrawer.matchedDetail", { text: inf.spans[0].matchedText })
+                  : undefined
+              }
               onNavigateToCell={onNavigateToCell}
               onOpenComments={onOpenComments}
             />
@@ -184,16 +201,21 @@ function TermFindingCard({
   onNavigateToCell: (cellId: string) => void
   onOpenComments?: (cellId: string) => void
 }) {
+  const t = useT()
+  const { locale } = useI18n()
   return (
     <div className="min-w-0 rounded-md border p-2">
       <div className="mb-1 flex min-w-0 items-center gap-1.5">
         <BookA className="h-3.5 w-3.5 shrink-0 text-amber-500" />
+        {/* finding.sourceTerm is content (the term itself) — never keyed. */}
         <span className="min-w-0 truncate text-xs font-semibold">{finding.sourceTerm}</span>
         <span className="ms-auto shrink-0 text-[10px] text-muted-foreground">
-          {finding.flaggedCells.length} cell{finding.flaggedCells.length === 1 ? "" : "s"}
+          {t("rules.checkDrawer.cellCount", { count: finding.flaggedCells.length })}
         </span>
       </div>
-      <p className="mb-1.5 break-words text-xs text-muted-foreground">{termFindingHeadline(finding)}</p>
+      <p className="mb-1.5 break-words text-xs text-muted-foreground">
+        {termFindingHeadline(finding, t, locale)}
+      </p>
       <ul className="min-w-0 space-y-1">
         {finding.flaggedCells.map((fc) => (
           <CellRefButton
@@ -218,6 +240,7 @@ export function CheckFindingsDrawer({
   onNavigateToCell,
   onOpenComments,
 }: CheckFindingsDrawerProps) {
+  const t = useT()
   const { locale } = useI18n()
   const cellMap = new Map(cells.map((c) => [c.id, c]))
 
@@ -231,13 +254,13 @@ export function CheckFindingsDrawer({
       <div className="flex shrink-0 items-center justify-between gap-2 border-b p-2">
         {/* Wording tracks the "Check file" button and its "Close file check"
             tooltip — the drawer is that button's result surface. */}
-        <h3 className="min-w-0 truncate text-sm font-semibold">File check</h3>
+        <h3 className="min-w-0 truncate text-sm font-semibold">{t("rules.checkDrawer.title")}</h3>
         <Button
           variant="ghost"
           size="icon-sm"
           className="shrink-0"
           onClick={onClose}
-          aria-label="Close file check"
+          aria-label={t("rules.checkDrawer.closeAriaLabel")}
         >
           <X />
         </Button>
@@ -246,30 +269,33 @@ export function CheckFindingsDrawer({
       {running ? (
         <div className="flex flex-1 items-center justify-center gap-2 p-4 text-sm text-muted-foreground">
           <Spinner className="size-4" />
-          Checking…
+          {t("autopilot.phase.checking")}
         </div>
       ) : !result ? (
         <div className="flex flex-1 items-center justify-center p-4 text-center text-sm text-muted-foreground">
-          Run a check to see results for the open file.
+          {t("rules.checkDrawer.emptyPrompt")}
         </div>
       ) : (
         <>
           <div className="shrink-0 truncate border-b px-3 py-2 text-xs text-muted-foreground">
-            Checked {checkScopeSummary(result)} · {formatRunTime(result.ranAt, locale)}
+            {t("rules.checkDrawer.checkedSummary", {
+              summary: checkScopeSummary(result, t, locale),
+              time: formatRunTime(result.ranAt, locale),
+            })}
           </div>
 
           {result.totalFindingCount === 0 ? (
             <div className="flex flex-1 items-center justify-center p-4 text-center text-sm text-muted-foreground">
-              Checked {checkScopeSummary(result)} — no issues found.
+              {t("rules.checkDrawer.checkedNoIssues", { summary: checkScopeSummary(result, t, locale) })}
             </div>
           ) : (
             <div className="min-h-0 min-w-0 flex-1 space-y-4 overflow-auto p-3">
               <div className="min-w-0">
                 <p className="mb-1 text-xs text-muted-foreground">
-                  Rule violations ({ruleIssueCount})
+                  {t("rules.checkDrawer.ruleViolations", { count: ruleIssueCount })}
                 </p>
                 {result.ruleFindings.length === 0 ? (
-                  <p className="text-xs text-muted-foreground">None</p>
+                  <p className="text-xs text-muted-foreground">{t("common.none")}</p>
                 ) : (
                   <div className="min-w-0 space-y-2">
                     {result.ruleFindings.map((group) => (
@@ -287,10 +313,10 @@ export function CheckFindingsDrawer({
 
               <div className="min-w-0">
                 <p className="mb-1 text-xs text-muted-foreground">
-                  Term consistency ({termIssueCount})
+                  {t("rules.checkDrawer.termConsistency", { count: termIssueCount })}
                 </p>
                 {flaggedTermFindings.length === 0 ? (
-                  <p className="text-xs text-muted-foreground">None</p>
+                  <p className="text-xs text-muted-foreground">{t("common.none")}</p>
                 ) : (
                   <div className="min-w-0 space-y-2">
                     {flaggedTermFindings.map((finding) => (
@@ -306,7 +332,7 @@ export function CheckFindingsDrawer({
                 )}
                 {cleanTermCount > 0 && (
                   <p className="mt-1.5 text-[10px] text-muted-foreground">
-                    {cleanTermCount} other term{cleanTermCount === 1 ? "" : "s"} checked with no issues.
+                    {t("rules.checkDrawer.otherTermsClean", { count: cleanTermCount })}
                   </p>
                 )}
               </div>

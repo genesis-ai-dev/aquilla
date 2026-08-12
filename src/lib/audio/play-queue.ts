@@ -1820,7 +1820,25 @@ function wireOverlayElement(
   audio.muted = !audibility.target
   const applySeek = () => {
     const d = audio.duration
-    audio.currentTime = Number.isFinite(d) ? Math.max(0, Math.min(startAtClipSec, d)) : startAtClipSec
+    // A RECORDED take is a MediaRecorder webm, and that container carries no
+    // duration — `duration` reads Infinity until the browser has indexed the
+    // whole clip. Seeking one in that state does not do what it looks like:
+    // Chrome settles `duration` to however much it has indexed so far (a
+    // fraction of a second), lands the playhead past that, and fires `ended`
+    // immediately. The take is thrown away without a word of it being heard.
+    //
+    // Measured 2026-08-12 on a take recorded against a linked picture:
+    //   loadedmetadata dur=Infinity → set currentTime=0.213
+    //   → seeked@0.21 dur=0.24 → ended@0.24
+    // ...against a clip with three real seconds in it. It reproduces roughly
+    // one play in three, whenever the fire lands far enough past the anchor to
+    // ask for an offset at all — which makes it a coin toss in the dubbing
+    // view too, not just over a film.
+    //
+    // So: no seek until the clip's length is known. Starting a fraction of a
+    // second early is a far smaller error than a dub that never sounds.
+    if (!Number.isFinite(d)) return
+    audio.currentTime = Math.max(0, Math.min(startAtClipSec, d))
   }
   if (audio.readyState >= 1) {
     // Metadata already loaded (adopted element): position it NOW — its

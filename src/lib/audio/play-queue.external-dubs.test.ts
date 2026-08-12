@@ -31,8 +31,16 @@ import type { CellData } from "@/hooks/useCells"
 
 class FakeAudio {
   static instances: FakeAudio[] = []
-  currentTime = 0
-  duration = 600
+  /** A MediaRecorder webm reports Infinity until the whole clip is indexed. */
+  static duration = 600
+  seekLog: number[] = []
+  #currentTime = 0
+  get currentTime(): number { return this.#currentTime }
+  set currentTime(v: number) {
+    this.seekLog.push(v)
+    this.#currentTime = v
+  }
+  duration = FakeAudio.duration
   paused = true
   muted = false
   volume = 1
@@ -105,6 +113,7 @@ const poolIds = (): string[] => getExternalDubsSnapshot().pool.map((e) => e.cell
 
 beforeEach(() => {
   FakeAudio.instances = []
+  FakeAudio.duration = 600
   vi.stubGlobal("Audio", FakeAudio)
   setQueueAudibility({ source: true, target: true })
 })
@@ -289,6 +298,35 @@ describe("dubs driven by a linked picture", () => {
     expect(poolIds()).toEqual([])
     expect(el?.paused).toBe(true)
     expect(getExternalDubsSnapshot().driving).toBe(false)
+  })
+
+  it("joins a take mid-clip when the master is past its anchor", async () => {
+    // The control for the case below: with a known length, the offset is real.
+    startExternalDubs(ctxFor([line("a", 10, 20, 8000)]))
+    setExternalDubsPlaying(true)
+    tickExternalDubs(11)
+    await settle()
+    const el = dubEl("a")
+    expect(el?.seekLog.length).toBeGreaterThan(0)
+    expect(el?.currentTime).toBeCloseTo(1, 1)
+  })
+
+  it("does NOT seek a clip whose length is unknown — it would end the take", async () => {
+    // A recorded take is a MediaRecorder webm, and that container carries no
+    // duration: `duration` reads Infinity until the whole clip is indexed.
+    // Seeking one makes Chrome settle the duration to however much it has
+    // indexed (a fraction of a second), land past that, and fire `ended`
+    // immediately — the take is thrown away unheard. Measured against a real
+    // take over a linked picture, 2026-08-12; roughly one play in three.
+    FakeAudio.duration = Infinity
+    startExternalDubs(ctxFor([line("a", 10, 20, 8000)]))
+    setExternalDubsPlaying(true)
+    tickExternalDubs(11)
+    await settle()
+    const el = dubEl("a")
+    expect(el?.paused).toBe(false)
+    expect(el?.seekLog).toEqual([])
+    expect(el?.currentTime).toBe(0)
   })
 
   it("ticks are ignored once the picture has handed back", async () => {

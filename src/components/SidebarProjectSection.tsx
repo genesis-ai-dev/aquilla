@@ -2,11 +2,14 @@ import { useState } from "react"
 import { MoreHorizontal, type LucideIcon } from "lucide-react"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
-import { useT } from "@/lib/i18n/I18nProvider"
+import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
+import type { MessageKey } from "@/lib/i18n/messages/en"
 
 export interface ProjectNavItem {
   id: string
-  label: string
+  /** i18n catalog key for the visible label — a `MessageKey`-typed field makes
+   *  an unkeyed row a compile error (same pattern as LeftDock's `TabMeta`). */
+  labelKey: MessageKey
   icon: LucideIcon
   badge?: number
   /** Pinned items render as always-visible rows; the rest live in "More". */
@@ -18,7 +21,9 @@ interface Props {
   items: ProjectNavItem[]
 }
 
-function NavRow({ item, onAfterClick }: { item: ProjectNavItem; onAfterClick?: () => void }) {
+function NavRow({
+  item, t, onAfterClick,
+}: { item: ProjectNavItem; t: TFunction; onAfterClick?: () => void }) {
   return (
     <button
       className={cn(
@@ -31,7 +36,7 @@ function NavRow({ item, onAfterClick }: { item: ProjectNavItem; onAfterClick?: (
       }}
     >
       <item.icon className="h-3.5 w-3.5 shrink-0" />
-      <span className="flex-1 truncate text-left">{item.label}</span>
+      <span className="flex-1 truncate text-left">{t(item.labelKey)}</span>
       {item.badge != null && item.badge > 0 && (
         <span className="rounded-md px-1.5 text-[10px] tabular-nums text-primary">
           {item.badge}
@@ -54,7 +59,7 @@ export function SidebarProjectSection({ items }: Props) {
     <div className="px-2 py-1">
       <div className="space-y-0.5">
         {pinned.map((item) => (
-          <NavRow key={item.id} item={item} />
+          <NavRow key={item.id} item={item} t={t} />
         ))}
         {overflow.length > 0 && (
           <Popover open={moreOpen} onOpenChange={setMoreOpen}>
@@ -83,7 +88,7 @@ export function SidebarProjectSection({ items }: Props) {
             <PopoverContent side="top" align="start" className="min-w-[180px] rounded-xl p-1">
               <div className="flex flex-col">
                 {overflow.map((item) => (
-                  <NavRow key={item.id} item={item} onAfterClick={() => setMoreOpen(false)} />
+                  <NavRow key={item.id} item={item} t={t} onAfterClick={() => setMoreOpen(false)} />
                 ))}
               </div>
             </PopoverContent>

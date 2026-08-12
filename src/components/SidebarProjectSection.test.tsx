@@ -8,22 +8,22 @@ describe("SidebarProjectSection", () => {
     render(
       <SidebarProjectSection
         items={[
-          { id: "rules", label: "Rules", icon: Scale, onClick: vi.fn() },
+          { id: "rules", labelKey: "nav.sidebarSection.rules", icon: Scale, onClick: vi.fn() },
           {
             id: "comments",
-            label: "Comments",
+            labelKey: "common.comments",
             icon: MessagesSquare,
             pinned: true,
             onClick: vi.fn(),
           },
           {
             id: "terminology",
-            label: "Terminology",
+            labelKey: "nav.sidebarSection.terminology",
             icon: BookOpen,
             pinned: true,
             onClick: vi.fn(),
           },
-          { id: "settings", label: "Settings", icon: Settings, onClick: vi.fn() },
+          { id: "settings", labelKey: "nav.settings", icon: Settings, onClick: vi.fn() },
         ]}
       />,
     )

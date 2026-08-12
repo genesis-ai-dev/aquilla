@@ -6,6 +6,12 @@ export const nav = defineNamespace({
     "nav.settings": "Settings",
     "nav.search": "Search",
 
+    // -- EditorModeToggle / audio-lens-label.ts: header Text/Audio(Media) lens
+    // switch (AQU-353). Shared by every entry point that toggles this lens so
+    // the name can never drift ("Audio" vs the old sidebar "Voice"). --
+    "nav.lens.audio": "Audio",
+    "nav.lens.media": "Media",
+
     // -- NavHistoryControls: back/forward arrows + hold-for-history popover --
     "nav.historyControls.groupLabel": "Page history",
     "nav.historyControls.back": "Back",
@@ -52,6 +58,152 @@ export const nav = defineNamespace({
     // -- SidebarProjectSection: pinned rows + "More" overflow popover --
     "nav.sidebarSection.more": "More",
     "nav.sidebarSection.moreOptions": "More project options",
+
+    // -- ProjectWorkspace: projectNavItems feeding SidebarProjectSection above --
+    "nav.sidebarSection.rules": "Rules",
+    "nav.sidebarSection.terminology": "Terminology",
+    "nav.sidebarSection.memory": "Memory",
+    "nav.sidebarSection.share": "Share",
+    "nav.sidebarSection.trash": "Recently deleted",
+
+    // -- ProjectWorkspace: sidebar-footer onboarding "Setup" chip (AQU-695) --
+    "nav.sidebarSection.setupChipDismissed": "Setup",
+    // {ratio} arrives pre-formatted and bidi-isolated ("⁨2/4⁩") by the caller —
+    // see editor.completion.failed for the two-count plural() precedent this
+    // follows. `other`/`one` read identically in English (the noun-free "n/N"
+    // shorthand doesn't inflect) but the key is still plural()-governed on
+    // totalCount so a locale whose equivalent phrasing DOES need agreement can
+    // supply distinct forms.
+    "nav.sidebarSection.setupChipProgress": plural(
+      { one: "Setup: {ratio}", other: "Setup: {ratio}" },
+      "totalCount",
+    ),
+    "nav.sidebarSection.setupChipTooltip": "Reopen the setup checklist anytime from here.",
+
+    // -- workspace-actions/registry.ts: the file-scoped action menu (⋯) and its
+    // per-action confirmation dialogs, rendered through ConfirmActionDialog. --
+    "nav.workspaceActions.import": "Import",
+    "nav.workspaceActions.runCompletions.label": "Run AI completions",
+    "nav.workspaceActions.runCompletions.title": "Run completions",
+    "nav.workspaceActions.runCompletions.description": plural(
+      {
+        one: "Generate an approved-example draft package for the next {next} untranslated cell",
+        other: "Generate an approved-example draft package for the next {next} untranslated cells",
+      },
+      "next",
+    ),
+    // Optional inline clause, spliced in (plain concatenation, not a nested
+    // placeholder — see dialog.assign.error.bulkSucceededSuffix for the same
+    // "resolve a fragment, concatenate it" composition) between the sentence
+    // above and descriptionTail below, only when more cells remain after this
+    // package. Leading space is intentional (joins directly onto "cells").
+    "nav.workspaceActions.moreAfterThis": " ({count} more after this)",
+    "nav.workspaceActions.runCompletions.descriptionTail":
+      ". Every draft still needs individual human review.",
+    "nav.workspaceActions.completeAll.label": "Draft all (review required)",
+    "nav.workspaceActions.completeAll.title": "Draft all untranslated cells",
+    "nav.workspaceActions.completeAll.description": plural(
+      {
+        one:
+          "Generate drafts for all {untranslated} untranslated cell, split into " +
+          "packages of at most {batchSize}. Packaging preserves context but is not a " +
+          "quality guarantee; every draft remains unapproved until a human reviews " +
+          "it individually.",
+        other:
+          "Generate drafts for all {untranslated} untranslated cells, split into " +
+          "packages of at most {batchSize}. Packaging preserves context but is not a " +
+          "quality guarantee; every draft remains unapproved until a human reviews " +
+          "it individually.",
+      },
+      "untranslated",
+    ),
+    "nav.workspaceActions.completeAll.confirmLabel": "Draft all",
+    "nav.workspaceActions.batchValidate.label": "Batch validate…",
+    "nav.workspaceActions.batchValidate.title": "Batch validate",
+    "nav.workspaceActions.batchValidate.description": plural(
+      {
+        one:
+          "This marks eligible human-authored or human-edited cells as validated " +
+          "under your name. Untouched AI drafts are excluded and still need " +
+          "individual review. ({unvalidated} cell is currently unvalidated.)",
+        other:
+          "This marks eligible human-authored or human-edited cells as validated " +
+          "under your name. Untouched AI drafts are excluded and still need " +
+          "individual review. ({unvalidated} cells are currently unvalidated.)",
+      },
+      "unvalidated",
+    ),
+    // Optional trailing clause (AQU-586 per-run cap), concatenated after the
+    // description above — same composition as moreAfterThis.
+    "nav.workspaceActions.batchValidate.capNote": plural(
+      {
+        one:
+          " At most {cap} eligible cell are validated per run (project batch " +
+          "size); run again to continue.",
+        other:
+          " At most {cap} eligible cells are validated per run (project batch " +
+          "size); run again to continue.",
+      },
+      "cap",
+    ),
+    "nav.workspaceActions.export": "Export",
+    "nav.workspaceActions.importIntoFile": "Import target translations into this file",
+    "nav.workspaceActions.transcribeAll.label": "Transcribe all audio",
+    "nav.workspaceActions.transcribeAll.title": "Transcribe all audio in this file",
+    "nav.workspaceActions.transcribeAll.description": plural(
+      {
+        one: "Run Whisper on {n} cell that already has a recording but no karaoke timings yet.",
+        other: "Run Whisper on {n} cells that already have a recording but no karaoke timings yet.",
+      },
+      "n",
+    ),
+    "nav.workspaceActions.transcribeAll.confirmLabel": "Transcribe all",
+    "nav.workspaceActions.synthAll.label": "Generate AI voice for empty cells",
+    "nav.workspaceActions.synthAll.title": "Generate AI voice",
+    "nav.workspaceActions.synthAll.description": plural(
+      {
+        one:
+          "Generate AI voice audio for {n} cell that has translated text but no " +
+          "recording yet. Existing recordings are not touched.",
+        other:
+          "Generate AI voice audio for {n} cells that have translated text but no " +
+          "recording yet. Existing recordings are not touched.",
+      },
+      "n",
+    ),
+    "nav.workspaceActions.synthAll.confirmLabel": "Generate audio",
+    // AQU-365: the checkbox on the workspace-action confirmation dialog above
+    // (distinct from ConfirmActionDialog's generic default, since this one
+    // names WHY the checkbox matters — attribution). e2e asserts this exact
+    // English text (ai-completion-dialog.smoke.spec.ts).
+    "nav.workspaceActions.confirmAttribution":
+      "I understand this change will be attributed to my account.",
+
+    // -- ProjectWorkspace: soft-delete confirmation (FRO-272). e2e asserts this
+    // exact English text (delete-file-confirm-dialog / file-delete smoke specs). --
+    "nav.workspaceActions.deleteFile.title": "Move file to Recently deleted",
+    "nav.workspaceActions.deleteFile.description":
+      "Move \"{name}\" to Recently deleted? Cells and audio are kept for 30 days. " +
+      "You can restore the file or permanently delete it from \"Recently deleted\" " +
+      "in the sidebar's More menu.",
+    "nav.workspaceActions.deleteFile.confirmLabel": "Move to Recently deleted",
+
+    // -- ProjectWorkspace: fileMenuItems (chapter-row "File options" ⋯ menu) --
+    "nav.fileMenu.diarizing": "Diarizing…",
+    "nav.fileMenu.applying": "Applying…",
+    "nav.fileMenu.diarizeFailed": "Diarize failed",
+    "nav.fileMenu.diarize": "Diarize",
+    "nav.fileMenu.nextUnfinished": "Next unfinished",
+    "nav.fileMenu.extractingVoice": "Extracting voice…",
+    "nav.fileMenu.useFileSpeakerAsVoice": "Use file's speaker as a voice",
+    "nav.fileMenu.showFileNameSuggestions": plural({
+      one: "Show {count} file name suggestion",
+      other: "Show {count} file name suggestions",
+    }),
+
+    // -- ProjectWorkspace: rename-suggestions undo toast --
+    "nav.renameSuggestions.appliedToast": "Applied renames.",
+    "nav.renameSuggestions.undo": "Undo",
 
     // -- VersionBadge / VersionTag: build-info copy control --
     "nav.version.copiedAriaLabel": "Build info copied",
@@ -232,6 +384,21 @@ export const nav = defineNamespace({
           "on what reads naturally as a nav label in the target language. Reused as the " +
           "Search tab label in the left dock's tab rail (icon-only when collapsed, so a " +
           "long translation there only affects the tooltip/aria-label, not layout).",
+      },
+
+      // -- EditorModeToggle / audio-lens-label.ts (AQU-353) --
+      "nav.lens.audio": {
+        description:
+          "Second tab of the header Text/Audio segmented lens switch, for a cell-" +
+          "ordered file: reveals the cast library, transport and per-line speaker " +
+          "chips over the same cells the Text tab edits. Short — sits beside a Pencil-" +
+          "icon 'Text' tab in a two-tab segmented control.",
+      },
+      "nav.lens.media": {
+        description:
+          "Same second lens tab as nav.lens.audio, relabelled for a time-ordered " +
+          "(timeline) file where the lens shows separate media segments rather than " +
+          "audio attached to text cells.",
       },
 
       // -- NavHistoryControls --
@@ -415,6 +582,313 @@ export const nav = defineNamespace({
           "Accessible name for the 'More' row above. Deliberately distinct from the " +
           "visible 'More' text because another 'More' button already exists elsewhere " +
           "in the workspace header — screen-reader users need to tell them apart.",
+      },
+      "nav.sidebarSection.rules": {
+        description:
+          "Project nav row opening the project's translation rules surface. Noun " +
+          "naming a destination, not an action.",
+      },
+      "nav.sidebarSection.terminology": {
+        description:
+          "Project nav row opening the project's termbase/glossary surface. Noun " +
+          "naming a destination.",
+      },
+      "nav.sidebarSection.memory": {
+        description:
+          "Project nav row opening the agent's living-memory surface for this " +
+          "project. Noun naming a destination.",
+      },
+      "nav.sidebarSection.share": {
+        description:
+          "Project nav row that opens the project-sharing dialog. Imperative verb.",
+      },
+      "nav.sidebarSection.trash": {
+        description:
+          "Project nav row that opens the soft-deleted-files panel (30-day " +
+          "retention). Must match the heading text of that panel exactly, so keep " +
+          "'Recently deleted' rather than a shorter synonym like 'Trash'.",
+      },
+      "nav.sidebarSection.setupChipDismissed": {
+        description:
+          "Sidebar-footer chip opening the onboarding setup checklist, once the " +
+          "user has dismissed the checklist's progress count (de-emphasised, no " +
+          "ratio shown). Bare noun.",
+      },
+      "nav.sidebarSection.setupChipProgress": {
+        description:
+          "Same sidebar-footer chip as nav.sidebarSection.setupChipDismissed, " +
+          "before dismissal: shows how many onboarding steps are complete. The " +
+          "'Setup:' lead-in must stay, since e2e locates the chip by that prefix.",
+        placeholders: {
+          ratio: "Already-formatted 'done/total' count (e.g. '2/4'), pre-wrapped in " +
+            "Unicode bidi isolate characters by the caller — reproduce it verbatim, " +
+            "do not add surrounding punctuation.",
+        },
+      },
+      "nav.sidebarSection.setupChipTooltip": {
+        description:
+          "Tooltip shown on hover/focus of the sidebar-footer setup chip above.",
+        maxLength: 64,
+      },
+
+      // -- workspace-actions/registry.ts --
+      "nav.workspaceActions.import": {
+        description:
+          "Primary header action that opens the source-file import flow. Imperative " +
+          "verb.",
+      },
+      "nav.workspaceActions.runCompletions.label": {
+        description:
+          "File-scoped action-menu item that runs a package of AI translation drafts " +
+          "for the next several untranslated cells. Also reused verbatim as the " +
+          "confirmation dialog's confirm button.",
+        maxLength: 32,
+      },
+      "nav.workspaceActions.runCompletions.title": {
+        description: "Heading of the confirmation dialog for the action above.",
+        maxLength: 40,
+      },
+      "nav.workspaceActions.runCompletions.description": {
+        description:
+          "Body of the confirmation dialog above, stating how many cells the next " +
+          "AI-draft package covers. `nav.workspaceActions.moreAfterThis` (if any " +
+          "cells remain after this package) and `nav.workspaceActions." +
+          "runCompletions.descriptionTail` are concatenated directly after this " +
+          "string with no added space — end this string mid-clause, right after " +
+          "the cell count, with no trailing punctuation.",
+        placeholders: {
+          next: "How many untranslated cells this package will draft (already clamped " +
+            "to the project's batch size).",
+        },
+        maxLength: 400,
+      },
+      "nav.workspaceActions.moreAfterThis": {
+        description:
+          "Optional clause spliced into nav.workspaceActions.runCompletions." +
+          "description (see that key's note on the concatenation order) when more " +
+          "cells remain after the package being confirmed. Leading space is " +
+          "intentional; do not add trailing punctuation.",
+        placeholders: {
+          count: "How many further untranslated cells remain after this package.",
+        },
+        maxLength: 60,
+      },
+      "nav.workspaceActions.runCompletions.descriptionTail": {
+        description:
+          "Fixed closing sentence of nav.workspaceActions.runCompletions." +
+          "description, concatenated after it (and after nav.workspaceActions." +
+          "moreAfterThis when present). Starts with its own period.",
+        maxLength: 80,
+      },
+      "nav.workspaceActions.completeAll.label": {
+        description:
+          "File-scoped action-menu item that drafts AI translations for every " +
+          "remaining untranslated cell in the file, packaged into batches.",
+        maxLength: 40,
+      },
+      "nav.workspaceActions.completeAll.title": {
+        description: "Heading of the confirmation dialog for the action above.",
+        maxLength: 40,
+      },
+      "nav.workspaceActions.completeAll.description": {
+        description: "Body of the confirmation dialog above.",
+        placeholders: {
+          untranslated: "Total count of untranslated cells the run will cover.",
+          batchSize: "Package size each batch is split into (a plain number, not " +
+            "itself grammatically pluralized in English).",
+        },
+        maxLength: 400,
+      },
+      "nav.workspaceActions.completeAll.confirmLabel": {
+        description: "Confirm button of the dialog above.",
+        maxLength: 24,
+      },
+      "nav.workspaceActions.batchValidate.label": {
+        description:
+          "File-scoped action-menu item that marks eligible human-authored/edited " +
+          "cells as validated in bulk. Trailing ellipsis marks it as opening a " +
+          "confirmation, per this catalog's convention.",
+        maxLength: 24,
+      },
+      "nav.workspaceActions.batchValidate.title": {
+        description: "Heading of the confirmation dialog for the action above.",
+        maxLength: 24,
+      },
+      "nav.workspaceActions.batchValidate.description": {
+        description:
+          "Body of the confirmation dialog above. nav.workspaceActions." +
+          "batchValidate.capNote (if the project caps per-run batch size) is " +
+          "concatenated directly after this string with no added space — end this " +
+          "string with its own closing parenthesis and no trailing space.",
+        placeholders: {
+          unvalidated: "How many cells in the file are not yet validated.",
+        },
+        maxLength: 500,
+      },
+      "nav.workspaceActions.batchValidate.capNote": {
+        description:
+          "Optional clause appended after nav.workspaceActions.batchValidate." +
+          "description (see that key's note) when the project caps how many " +
+          "cells one batch-validate run processes. Leading space is intentional.",
+        placeholders: {
+          cap: "The project's configured per-run validation cap.",
+        },
+        maxLength: 120,
+      },
+      "nav.workspaceActions.export": {
+        description:
+          "Primary file-scoped action that opens the export dialog. Imperative verb.",
+      },
+      "nav.workspaceActions.importIntoFile": {
+        description:
+          "AQU-503: secondary action-menu item, distinct from " +
+          "nav.workspaceActions.import — this one is file-scoped and populates the " +
+          "open file's TARGET column from an already-translated document. Must keep " +
+          "a word equivalent to 'target' so it isn't confused with the primary " +
+          "source import.",
+        maxLength: 60,
+      },
+      "nav.workspaceActions.transcribeAll.label": {
+        description:
+          "Secondary action-menu item (Audio lens) that runs Whisper transcription " +
+          "on every recorded-but-untimed cell in the file.",
+        maxLength: 32,
+      },
+      "nav.workspaceActions.transcribeAll.title": {
+        description: "Heading of the confirmation dialog for the action above.",
+        maxLength: 40,
+      },
+      "nav.workspaceActions.transcribeAll.description": {
+        description: "Body of the confirmation dialog above.",
+        placeholders: {
+          n: "How many cells have a recording but no karaoke timings yet.",
+        },
+        maxLength: 200,
+      },
+      "nav.workspaceActions.transcribeAll.confirmLabel": {
+        description: "Confirm button of the dialog above.",
+        maxLength: 24,
+      },
+      "nav.workspaceActions.synthAll.label": {
+        description:
+          "Secondary action-menu item (Audio lens) that generates AI voice for " +
+          "every translated-but-unrecorded cell in the file.",
+        maxLength: 40,
+      },
+      "nav.workspaceActions.synthAll.title": {
+        description: "Heading of the confirmation dialog for the action above.",
+        maxLength: 32,
+      },
+      "nav.workspaceActions.synthAll.description": {
+        description: "Body of the confirmation dialog above.",
+        placeholders: {
+          n: "How many cells have translated text but no recording yet.",
+        },
+        maxLength: 200,
+      },
+      "nav.workspaceActions.synthAll.confirmLabel": {
+        description: "Confirm button of the dialog above.",
+        maxLength: 24,
+      },
+      "nav.workspaceActions.confirmAttribution": {
+        description:
+          "Checkbox label on the workspace-action confirmation dialog gating its " +
+          "confirm button. Must keep this exact English wording — an e2e spec " +
+          "(ai-completion-dialog.smoke.spec.ts) asserts it verbatim.",
+        maxLength: 120,
+      },
+
+      // -- ProjectWorkspace: soft-delete confirmation (FRO-272) --
+      "nav.workspaceActions.deleteFile.title": {
+        description:
+          "Heading of the file soft-delete confirmation dialog. Must keep this " +
+          "exact English wording — e2e specs (delete-file-confirm-dialog, file-" +
+          "delete) assert it verbatim.",
+        maxLength: 40,
+      },
+      "nav.workspaceActions.deleteFile.description": {
+        description:
+          "Body of the file soft-delete confirmation dialog. Must keep the " +
+          "'Move \"{name}\" to Recently deleted?' opening exactly — e2e specs match " +
+          "it by regex.",
+        placeholders: {
+          name: "The file's display name, already quoted by the template — do not " +
+            "add another layer of quoting around {name} in translation.",
+        },
+        maxLength: 400,
+      },
+      "nav.workspaceActions.deleteFile.confirmLabel": {
+        description:
+          "Confirm button of the dialog above. Must keep this exact English " +
+          "wording — e2e specs match the button by exact accessible name.",
+        maxLength: 32,
+      },
+
+      // -- ProjectWorkspace: fileMenuItems (chapter-row 'File options' ⋯ menu) --
+      "nav.fileMenu.diarizing": {
+        description:
+          "Transient state of the 'Diarize' action-menu item while speaker " +
+          "diarization is running on the file's audio.",
+        maxLength: 24,
+      },
+      "nav.fileMenu.applying": {
+        description:
+          "Transient state of the 'Diarize' action-menu item while its results are " +
+          "being written back to cells, right after nav.fileMenu.diarizing.",
+        maxLength: 24,
+      },
+      "nav.fileMenu.diarizeFailed": {
+        description:
+          "State of the 'Diarize' action-menu item after a diarization run errored.",
+        maxLength: 24,
+      },
+      "nav.fileMenu.diarize": {
+        description:
+          "Action-menu item (Audio lens) that runs speaker diarization on the " +
+          "file's audio. Default/idle state of nav.fileMenu.diarizing.",
+        maxLength: 24,
+      },
+      "nav.fileMenu.nextUnfinished": {
+        description:
+          "Action-menu item that jumps the editor to the next untranslated cell. " +
+          "Also the accessible name an e2e spec locates it by.",
+        maxLength: 24,
+      },
+      "nav.fileMenu.extractingVoice": {
+        description:
+          "Transient state of nav.fileMenu.useFileSpeakerAsVoice while the file's " +
+          "diarized speaker audio is being adopted as a reusable TTS voice.",
+        maxLength: 32,
+      },
+      "nav.fileMenu.useFileSpeakerAsVoice": {
+        description:
+          "Action-menu item (Audio lens, after diarization) that adopts the file's " +
+          "detected speaker as a reusable cast voice.",
+        maxLength: 40,
+      },
+      "nav.fileMenu.showFileNameSuggestions": {
+        description:
+          "Action-menu item that re-surfaces previously-dismissed file-rename " +
+          "suggestions (detected book/chapter names).",
+        placeholders: {
+          count: "How many rename suggestions are available to re-show.",
+        },
+        maxLength: 60,
+      },
+
+      // -- ProjectWorkspace: rename-suggestions undo toast --
+      "nav.renameSuggestions.appliedToast": {
+        description:
+          "Toast confirming a batch of file-rename suggestions was applied. Full " +
+          "sentence with a period; paired with the nav.renameSuggestions.undo " +
+          "action button. e2e matches this exact text.",
+        maxLength: 40,
+      },
+      "nav.renameSuggestions.undo": {
+        description:
+          "Action button on the toast above that reverts the applied renames. " +
+          "e2e matches this exact text as a button's accessible name.",
+        maxLength: 16,
       },
 
       // -- VersionBadge / VersionTag --

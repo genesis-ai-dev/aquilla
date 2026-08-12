@@ -261,4 +261,90 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "source badge, never alone as an explanatory sentence. A standalone tooltip " +
     "phrase and an inline badge fragment take different forms in languages that " +
     "mark that register distinction.",
+
+  // AQU-832 (WS-14 project-settings/creation/sharing wave): each entry below
+  // pairs a projectSettings.* key against a key in a namespace this wave is
+  // forbidden to edit (audio/autopilot/editor/fileDetails/nav/search), so the
+  // duplicate can only be resolved on this side. Within projectSettings itself
+  // the equivalent same-string duplicates were consolidated onto one shared
+  // key instead of excepted — see the namespace file's "AQU-832" comments.
+  "projectSettings.sourceLink.modeClone":
+    "Badge naming the AD-9 link-mode ('Clone' vs 'Live') on a linked project's " +
+    "Source Link card, and reused for the same radio option in the create-project " +
+    "dialog. audio.library.cloneEngineLabel names a voice-cloning TTS engine in " +
+    "the Voice Studio's engine picker. A project-linking term of art and an " +
+    "audio-engine brand-ish label that happen to share the English word 'Clone'.",
+  "projectSettings.section.experimental":
+    "Section/nav-group heading for this project's device-local experimental " +
+    "feature flags. autopilot.settings.experimentalTitle is the same heading for " +
+    "the unrelated Autopilot agent's own experimental-flags card. Two different " +
+    "features' settings panels that both happen to be called 'Experimental'.",
+  "projectSettings.info.targetLanguageLabel":
+    "Field label on the Project Info card (and reused by the create-project " +
+    "dialog) for the project's target language. autopilot.inspector.details." +
+    "targetLanguage is a read-only detail row in the Autopilot run inspector " +
+    "showing which language a specific run drafted into. A settings input label " +
+    "vs a report-style detail-row label for the same underlying value read very " +
+    "differently in languages that distinguish an editable field from a fact.",
+  "projectSettings.decay.summary":
+    "Collapsed-details summary for this project's AD-14 confidence-propagation " +
+    "tuning (max hops / attention threshold). editor.expansion.retrievalSupport " +
+    "is the cell-level badge shown on an individual cell's expansion panel. A " +
+    "settings-panel heading and a per-cell status badge naming the same feature " +
+    "at two different granularities read as different parts of speech.",
+  "projectSettings.share.tabMembers":
+    "Tab label in the Share dialog switching to the per-project member list. " +
+    "editor.navTitle.members is the breadcrumb/nav title for the standalone " +
+    "Members page. A tab within a dialog and a full page's nav title are " +
+    "different UI roles that happen to share the plain noun 'Members'.",
+  "projectSettings.breadcrumbEditor":
+    "Breadcrumb trail segment in Project Settings linking back to the workspace " +
+    "editor. editor.navTitle.editor is the editor's own nav-title/tab label when " +
+    "it is the active surface. A link naming a DIFFERENT page vs a page naming " +
+    "ITSELF are different grammatical roles in languages that mark that split.",
+  "projectSettings.pageTitle":
+    "Page heading of the Project Settings index. editor.navTitle.projectSettings " +
+    "is the breadcrumb/nav label used while inside the editor to link TO " +
+    "settings. A page naming itself vs a link naming its destination.",
+  "projectSettings.section.voice":
+    "Card heading for this project's Voice/TTS API-key configuration. " +
+    "editor.navTitle.voice is the editor's own audio-lens tab label. A settings " +
+    "card and a workspace lens switch that happen to share the word 'Voice'.",
+  "projectSettings.sourceLink.modeLive":
+    "Badge naming the AD-9 link-mode ('Live' vs 'Clone') on a linked project's " +
+    "Source Link card, and reused for the same radio option in the create-project " +
+    "dialog. editor.sync.live is the websocket-connection status indicator in " +
+    "the editor's sync badge. A project-linking term of art vs a connectivity " +
+    "status word that happen to share the English word 'Live'.",
+  "projectSettings.section.languages":
+    "Card heading for this project's target-language lanes. fileDetails.languages " +
+    "is a plain data label in a file-info panel naming which languages a file " +
+    "covers. A settings-card heading vs a file-metadata field label.",
+  "projectSettings.backLinkLabel":
+    "Back-link label returning from a settings sub-pane to the settings index, " +
+    "and the breadcrumb trail's terminal 'Settings' crumb. nav.settings is the " +
+    "left-sidebar navigation entry that opens settings in the first place. A " +
+    "'go back to X' affordance and 'X' the sidebar destination read differently " +
+    "in languages that distinguish a navigation link from the place it leads.",
+  "projectSettings.section.terminology":
+    "Card heading linking to this project's Terminology Library from within " +
+    "Project Settings. nav.sidebarSection.terminology is the left-sidebar's own " +
+    "top-level entry for the same destination. A settings-card link and the " +
+    "primary nav entry it duplicates read as different UI roles.",
+  "projectSettings.section.import":
+    "Section heading for this project's USFM-import front-matter preference. " +
+    "nav.workspaceActions.import is the imperative 'Import' button that starts a " +
+    "new file import. A settings-card noun heading vs an action-triggering verb " +
+    "button — languages that nominalize headings but keep buttons imperative " +
+    "need both spelled differently even though English collapses them.",
+  "projectSettings.share.copied":
+    "Transient confirmation after copying a minted invite link's URL in the " +
+    "Share dialog. nav.report.copied is the equivalent confirmation for the " +
+    "unrelated diagnostics-report copy action. Two independent copy-to-clipboard " +
+    "confirmations that happen to share the same short exclamation.",
+  "projectSettings.section.bibleResources":
+    "Card heading toggling this project's Bible-resources (bibletranslation.org) " +
+    "integration on/off. search.mode.bibleTooltip is the tooltip on the search " +
+    "panel's Bible-resources search-mode toggle. A settings on/off card heading " +
+    "vs a tooltip naming a search filter mode for the same underlying dataset.",
 }

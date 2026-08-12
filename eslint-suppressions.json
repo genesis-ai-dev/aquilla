@@ -239,34 +239,9 @@
       "count": 11
     }
   },
-  "src/components/ProjectCreateDialog.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 32
-    }
-  },
   "src/components/ProjectMembersPage.tsx": {
     "i18n/no-unkeyed-string": {
       "count": 1
-    }
-  },
-  "src/components/ProjectSettings.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 110
-    }
-  },
-  "src/components/ProjectSettings/AudioMediaStrategySection.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 2
-    }
-  },
-  "src/components/ProjectSettings/DecaySettingsSection.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 6
-    }
-  },
-  "src/components/ProjectSettings/LanguagesSection.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 13
     }
   },
   "src/components/ProjectSettings/LocalModelsSection.tsx": {
@@ -289,24 +264,9 @@
       "count": 11
     }
   },
-  "src/components/ProjectSettings/SettingsNav.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 2
-    }
-  },
-  "src/components/ProjectSettings/SourceLinkSection.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 17
-    }
-  },
   "src/components/ProjectSettings/TermbaseSharingSection.tsx": {
     "i18n/no-unkeyed-string": {
       "count": 17
-    }
-  },
-  "src/components/ProjectSettings/ValidationSettingsSection.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 11
     }
   },
   "src/components/ProjectWorkspace.tsx": {
@@ -352,11 +312,6 @@
   "src/components/RulesSurface.tsx": {
     "i18n/no-unkeyed-string": {
       "count": 44
-    }
-  },
-  "src/components/SharePanel.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 26
     }
   },
   "src/components/SourceSelectionToolbar.tsx": {

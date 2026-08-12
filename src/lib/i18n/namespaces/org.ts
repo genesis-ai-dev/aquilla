@@ -444,11 +444,6 @@ export const org = defineNamespace({
     "org.addLanguagePopover.genericSaveError": "Saving failed.",
 
     // -- CreditsPanel: org credits/usage panel --
-    "org.creditsPanel.title": "Compute credits",
-    "org.creditsPanel.description": "Usage against daily & weekly caps, broken out by rail",
-    "org.creditsPanel.today": "Today",
-    "org.creditsPanel.thisWeek": "This week",
-    "org.creditsPanel.agentSpendLabel": "Agent spend (elevated rail — own cap, 5× markup)",
 
     // -- OrgSetupChecklist: org onboarding checklist --
     "org.setupChecklist.heading": "Get your organization started",

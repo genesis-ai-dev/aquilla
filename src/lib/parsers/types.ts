@@ -9,6 +9,7 @@ export type {
   ParsedTextFileResult,
   ExportCellFields,
 } from "./core-types"
+import type { MessageKey } from "@/lib/i18n/messages/en"
 
 export type FileType = "md" | "docx" | "pptx" | "idml" | "xlsx" | "txt" | "html" | "json" | "po" | "properties" | "vtt" | "srt" | "sbv" | "usfm" | "ebible" | "helloao" | "xliff" | "tmx" | "csv" | "tsv" | "audio" | "video" | "obs" | "sdbh" | "custom"
 
@@ -166,22 +167,26 @@ export type AudioMediaStrategy =
    *  button the user has to click. */
   | "manual"
 
-export const AUDIO_MEDIA_STRATEGY_LABELS: Record<AudioMediaStrategy, { name: string; description: string }> = {
+// AQU-832: this is a pure lib (no React, no `useT()`) so labels are catalog
+// keys a component resolves with `t()` — same "return a descriptor, let the
+// caller localize" shape as `roleNameKey()`/`roleDescriptionKey()` in
+// src/lib/frontier/roles.ts. Only AudioMediaStrategySection.tsx renders these.
+export const AUDIO_MEDIA_STRATEGY_LABELS: Record<AudioMediaStrategy, { nameKey: MessageKey; descriptionKey: MessageKey }> = {
   stream: {
-    name: "Stream",
-    description: "Play directly from the network. No local cache, no waveforms unless you opt in.",
+    nameKey: "projectSettings.audioMedia.strategyStreamName",
+    descriptionKey: "projectSettings.audioMedia.strategyStreamDescription",
   },
   lazy: {
-    name: "Lazy (default)",
-    description: "Download a cell's audio when you scroll to it or press play. Caches locally.",
+    nameKey: "projectSettings.audioMedia.strategyLazyName",
+    descriptionKey: "projectSettings.audioMedia.strategyLazyDescription",
   },
   eager: {
-    name: "Eager",
-    description: "Prefetch every cell's waveform when the file opens. Best for offline review.",
+    nameKey: "projectSettings.audioMedia.strategyEagerName",
+    descriptionKey: "projectSettings.audioMedia.strategyEagerDescription",
   },
   manual: {
-    name: "Manual",
-    description: "Don't auto-download anything. You click a button per cell to load it.",
+    nameKey: "projectSettings.audioMedia.strategyManualName",
+    descriptionKey: "projectSettings.audioMedia.strategyManualDescription",
   },
 }
 

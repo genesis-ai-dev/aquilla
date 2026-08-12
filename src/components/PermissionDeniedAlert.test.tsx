@@ -7,6 +7,15 @@ import { PermissionDeniedAlert } from "./PermissionDeniedAlert"
 import {
   _resetDbForTesting, addSession, loadActiveSession,
 } from "@/lib/frontier/session-store"
+import { ROLE } from "@/lib/frontier/roles"
+
+// AQU-832: `action`/`requiredRoleLevel` are typed against the real catalog
+// (MessageKey / RoleLevel) now, not raw strings — every render below uses the
+// actual production key/level ProjectSettings.tsx passes, so a regression
+// that reverts the component to rendering its props verbatim (instead of
+// through `t()`/`resolveRoleName()`) shows up as literal key text in the
+// alert rather than "change shared settings" / "Maintainer or higher".
+const CHANGE_SHARED_SETTINGS_ACTION = "projectSettings.permission.changeSharedSettingsAction"
 
 // AccountSwitcher pulls in the full auth-dialog tree; stub it so the test
 // focuses on the alert's own identity + switch-user affordance (AQU-560).
@@ -30,7 +39,7 @@ describe("PermissionDeniedAlert", () => {
   it("names the active account and the required role", async () => {
     await addSession({ jwt: "j", username: "translator", email: "t@example.com", createdAt: "2026-01-01T00:00:00Z" })
     render(
-      <PermissionDeniedAlert action="change shared settings" requiredRole="Maintainer or higher" />,
+      <PermissionDeniedAlert action={CHANGE_SHARED_SETTINGS_ACTION} requiredRoleLevel={ROLE.MAINTAINER} />,
       { wrapper },
     )
     const alert = await screen.findByRole("alert")
@@ -43,11 +52,11 @@ describe("PermissionDeniedAlert", () => {
 
   it("omits the role clause when requiredRole is not given", async () => {
     await addSession({ jwt: "j", username: "translator", createdAt: "2026-01-01T00:00:00Z" })
-    render(<PermissionDeniedAlert action="add members to this project" />, { wrapper })
+    render(<PermissionDeniedAlert action={CHANGE_SHARED_SETTINGS_ACTION} />, { wrapper })
     const alert = await screen.findByRole("alert")
     await waitFor(() =>
       expect(alert).toHaveTextContent(
-        "You're signed in as translator, which doesn't have permission to add members to this project.",
+        "You're signed in as translator, which doesn't have permission to change shared settings.",
       ),
     )
     expect(alert.textContent).not.toContain("needs")
@@ -57,8 +66,8 @@ describe("PermissionDeniedAlert", () => {
     await addSession({ jwt: "j", username: "translator", email: "t@example.com", createdAt: "2026-01-01T00:00:00Z" })
     render(
       <PermissionDeniedAlert
-        action="change shared settings"
-        requiredRole="Maintainer or higher"
+        action={CHANGE_SHARED_SETTINGS_ACTION}
+        requiredRoleLevel={ROLE.MAINTAINER}
         currentRole="Viewer"
       />,
       { wrapper },
@@ -77,7 +86,7 @@ describe("PermissionDeniedAlert", () => {
     // the actionable fact in the sentence. A text-only assertion would still
     // pass on that flattened version, so assert the styled element itself.
     await addSession({ jwt: "j", username: "translator", email: "t@example.com", createdAt: "2026-01-01T00:00:00Z" })
-    render(<PermissionDeniedAlert action="add members to this project" />, { wrapper })
+    render(<PermissionDeniedAlert action={CHANGE_SHARED_SETTINGS_ACTION} />, { wrapper })
     const alert = await screen.findByRole("alert")
     await waitFor(() => expect(alert).toHaveTextContent("translator (t@example.com)"))
     const styled = alert.querySelector(".font-medium")
@@ -92,8 +101,8 @@ describe("PermissionDeniedAlert", () => {
     await addSession({ jwt: "j", username: "translator", email: "t@example.com", createdAt: "2026-01-01T00:00:00Z" })
     render(
       <PermissionDeniedAlert
-        action="change shared settings"
-        requiredRole="Maintainer or higher"
+        action={CHANGE_SHARED_SETTINGS_ACTION}
+        requiredRoleLevel={ROLE.MAINTAINER}
         currentRole="Viewer"
       />,
       { wrapper },
@@ -116,7 +125,7 @@ describe("PermissionDeniedAlert", () => {
 
   it("AQU-623: links to the permission-levels docs page", async () => {
     await addSession({ jwt: "j", username: "translator", createdAt: "2026-01-01T00:00:00Z" })
-    render(<PermissionDeniedAlert action="change shared settings" />, { wrapper })
+    render(<PermissionDeniedAlert action={CHANGE_SHARED_SETTINGS_ACTION} />, { wrapper })
     const link = await screen.findByRole("link", { name: /learn about permission levels/i })
     expect(link).toHaveAttribute("href", expect.stringContaining("/permissions"))
     expect(link).toHaveAttribute("target", "_blank")
@@ -128,7 +137,7 @@ describe("PermissionDeniedAlert", () => {
     await addSession({ jwt: "j1", username: "translator", createdAt: "2026-01-01T00:00:00Z" })
     await addSession({ jwt: "j2", username: "owner", createdAt: "2026-01-02T00:00:00Z" })
 
-    render(<PermissionDeniedAlert action="change shared settings" />, { wrapper })
+    render(<PermissionDeniedAlert action={CHANGE_SHARED_SETTINGS_ACTION} />, { wrapper })
 
     const switchBtn = await screen.findByRole("button", { name: "Switch to owner" })
     fireEvent.click(switchBtn)
@@ -139,9 +148,38 @@ describe("PermissionDeniedAlert", () => {
     })
   })
 
+  it("AQU-832: resolves `action` through the message catalog rather than rendering it verbatim", async () => {
+    // The regression this guards: `action` used to be a raw string rendered
+    // straight into the sentence, so ProjectSettings.tsx and ProjectMembersPage.tsx
+    // could (and did) pass untranslated English into an otherwise fully
+    // localized alert. `action` is now a MessageKey — if a future change
+    // reverts the component to interpolating the prop directly instead of
+    // calling `t(action)`, this test catches it: the alert would render the
+    // literal key string instead of the catalog's English value.
+    await addSession({ jwt: "j", username: "translator", createdAt: "2026-01-01T00:00:00Z" })
+    render(<PermissionDeniedAlert action={CHANGE_SHARED_SETTINGS_ACTION} />, { wrapper })
+    const alert = await screen.findByRole("alert")
+    await waitFor(() => expect(alert).toHaveTextContent("doesn't have permission to change shared settings"))
+    expect(alert.textContent).not.toContain(CHANGE_SHARED_SETTINGS_ACTION)
+  })
+
+  it("AQU-832: resolves `requiredRoleLevel` through resolveRoleName()/common.role.*, not a hardcoded label", async () => {
+    // Regression guard for the companion fix: requiredRole used to be a raw
+    // "Maintainer or higher" string. requiredRoleLevel is now a RoleLevel the
+    // component resolves itself, reusing common.role.maintainer instead of a
+    // second, independently-translated copy of the same word.
+    await addSession({ jwt: "j", username: "translator", createdAt: "2026-01-01T00:00:00Z" })
+    render(
+      <PermissionDeniedAlert action={CHANGE_SHARED_SETTINGS_ACTION} requiredRoleLevel={ROLE.MAINTAINER} />,
+      { wrapper },
+    )
+    const alert = await screen.findByRole("alert")
+    await waitFor(() => expect(alert).toHaveTextContent("(needs Maintainer or higher)"))
+  })
+
   it("falls back to the account switcher when no other account is signed in", async () => {
     await addSession({ jwt: "j", username: "translator", createdAt: "2026-01-01T00:00:00Z" })
-    render(<PermissionDeniedAlert action="change shared settings" />, { wrapper })
+    render(<PermissionDeniedAlert action={CHANGE_SHARED_SETTINGS_ACTION} />, { wrapper })
     await screen.findByRole("alert")
     expect(screen.getByText("Have another account? Add or switch:")).toBeInTheDocument()
     expect(screen.getByTestId("account-switcher")).toBeInTheDocument()

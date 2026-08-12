@@ -6,6 +6,20 @@
   Sends are async so only the ACTOR's locale is in scope, not the recipient's — and invite
   recipients often have no user row. Needs a schema migration + a product decision on what
   locale an invite is sent in. — auth-worker/src, sync-worker/src
+- [OPEN] (permission-denied-alert-contract) WS-14 changed the shared
+  `PermissionDeniedAlert` component's props: `action: string` → `action: MessageKey`,
+  `requiredRole?: string` → `requiredRoleLevel?: RoleLevel` (src/components/
+  PermissionDeniedAlert.tsx), so a caller can't leak untranslated English into an
+  otherwise-localized alert. `src/components/ProjectSettings.tsx`'s call site (mine) is
+  updated. `src/components/ProjectMembersPage.tsx:480-483` (WS-11's file, forbidden to
+  WS-14) still passes the old raw strings (`action="add members to this project"`,
+  `requiredRole="Maintainer or higher"`) and now fails `tsc -b --noEmit` with TS2322 —
+  the one remaining type error in the tree as of this handoff. Precedent: the
+  orchestrator log (WS-02/03 handoff row, 08-12) already resolved one cross-workstream
+  `PermissionDeniedAlert` conflict the same way (fix the shared contract, patch the other
+  call site at integration). Two-line fix once picked up: `action="projectMembers.<a
+  new key naming 'add members to this project'>"` (or a shared key WS-11 mints) and
+  `requiredRoleLevel={ROLE.MAINTAINER}` (from `@/lib/frontier/roles`).
 
 ## Deferred (decided, not forgotten)
 - [OPEN] (marketing) 670 strings across src/pages/Homepage|CaseStudy|PrivacyPolicy.
@@ -32,8 +46,14 @@
   namespace and this file are WS-06 territory, not because it's fine.
 - [OPEN] (bidi) "cells · 0 translated (0%) 3" reorders under RTL — that trailing number is
   the bidi algorithm, not a missing translation. Needs FSI/PDI isolation, not a key.
-- [OPEN] (megafiles) ImportDialog.tsx is 3,618 lines / 14 components; ProjectSettings.tsx
-  ~195 keys. Split BEFORE keying, not during.
+- [OPEN] (megafiles) ImportDialog.tsx is 3,618 lines / 14 components. WS-14 (project
+  settings) considered this same advice for ProjectSettings.tsx (2,041 lines) and
+  deliberately did NOT split it before keying: the file is a single component with
+  heavy shared local state (~30 `useState`s feeding one `handleSave`), so a split would
+  be a real refactor with its own regression risk, not a mechanical extraction — see the
+  WS-14 handoff section below for the reasoning. It stayed one file, fully keyed
+  (~330 keys once duplicates were consolidated, not the ~195 originally estimated). The
+  advice still holds for whichever wave picks up ImportDialog.tsx.
 - [OPEN] (stale-surface) The `project-settings` screenshot surface is already wrong: its
   driver stops at /settings which now renders an 8-card index, not the ~150 form strings
   its notes promise. Nothing detects this.
@@ -103,6 +123,115 @@
 - [OPEN] (dev-login-message) `devLogin()` in src/lib/frontier/auth.ts still
   throws `Dev login failed (${res.status})`. Left alone deliberately: it is
   `import.meta.env.DEV`-gated and never reachable in a production build.
+
+## WS-14 handoff (AQU-832, project creation / settings / sharing)
+
+Scope: `ProjectCreateDialog.tsx`, `SharePanel.tsx`, `ProjectSettings.tsx` + its
+`ProjectSettings/*` sub-panels (`SettingsNav`, `ValidationSettingsSection`,
+`DecaySettingsSection`, `AudioMediaStrategySection`, `SourceLinkSection`,
+`LanguagesSection`, `ExperimentalFlagsSection` — already fully keyed by a prior wave,
+verified not re-touched), and `PermissionDeniedAlert.tsx`'s project-settings call site.
+Namespace `projectSettings`, ~330 keys (not the ~195 originally estimated for
+ProjectSettings.tsx alone — the audit undercounted; ProjectCreateDialog.tsx and
+SharePanel.tsx together contributed roughly as many again).
+
+- [DONE] (formatList-verified) The brief's structural blocker #1 — "verify a prior wave
+  converted the 'Saved: X, Y, Z.' call site to `formatList`" — was already true
+  (`ProjectSettings.tsx:812-813` pre-dates this wave). What was NOT done: the 32
+  `changedFieldLabels.push("lowercase english")` field-noun literals feeding that list.
+  All 32 are now `t("projectSettings.field.*")` or reuse an existing FieldLabel/section
+  key (see the no-duplicates note below). The `>3 changed` branch ("Saved N changes: …
+  +M more.") is now `plural({ other: "Saved {count} changes: …" })` —
+  `projectSettings.save.savedMany` — since it wasn't counted-string-safe before (a raw
+  template literal with no CLDR forms).
+- [DONE] (permission-denied-alert) Structural blocker #2. `PermissionDeniedAlert.tsx`'s
+  `action`/`requiredRole` props were raw `string`s a caller could (and did) pass
+  untranslated English into. Now `action: MessageKey` and `requiredRoleLevel?: RoleLevel`
+  — the component resolves both itself via `t()`/`resolveRoleName()`, so a caller
+  physically cannot pass raw English and have it compile. New composed key
+  `projectSettings.permission.roleOrHigher` ("{role} or higher") reuses
+  `resolveRoleName()`/`common.role.*` rather than minting a duplicate "Maintainer"
+  label, per the brief's "roles are done, don't mint labels" instruction — same pattern
+  now covers the two `sharedDisabledTooltip`/`renameDisabledTooltip` strings on
+  ProjectSettings.tsx that also used to say "Maintainer or higher" by hand. This is a
+  **shared component** — see the BLOCKERS entry above for the one cross-workstream call
+  site (ProjectMembersPage.tsx, WS-11) this leaves broken until picked up.
+- [DONE] (no-duplicates-sweep) `no-duplicates.test.ts`'s third assertion
+  ("does not let one exception excuse a second unrelated collision") turned out to be a
+  **hard block** on any 2+-key unexcused collision, not the warn-only first assertion the
+  doc narrative leads with — this wave's first ~250-key draft tripped it 3 different ways
+  (SharePanel's "Loading…" vs `common.loading`, a stray "Add" vs `common.add`, and a
+  breadcrumb "Project" vs `common.project`), then a systematic audit found 30 more
+  collision groups once the whole file was written. Resolution split two ways: (1)
+  **within `projectSettings` itself** — mostly a Title-Case FieldLabel and a lowercase
+  `field.*` delta-list noun for the same concept (e.g. "Model"/"model",
+  "Bible resources"/"Bible resources") — consolidated onto ONE key each (13 nouns
+  deleted from `field.*`, the call site now reuses the label/section key; the delta-list
+  sentence loses its all-lowercase styling for those items — e.g. "Saved: Model, Max
+  Tokens." rather than "Saved: model, max tokens." — a minor, accepted English cosmetic
+  regression, not a translation-fidelity one). "Target language"/"Source language"/
+  "Project name" each had a THIRD, sentence-case copy in `ProjectCreateDialog.tsx` too —
+  also consolidated onto the settings-page Title-Case key, so the create dialog's
+  labels are now Title Case where they used to be sentence case (see
+  `ProjectCreateDialog.extraLanguages.test.tsx`, updated). (2) **cross-namespace**, where
+  the colliding key lives in a namespace this wave is forbidden to edit (audio/
+  autopilot/editor/fileDetails/nav/search) — 15 reviewed entries added to
+  `duplicate-exceptions.ts`, each justified by a genuine surface/role difference (a
+  settings-card heading vs a nav-title, a term of art vs an everyday word), never by
+  case alone (the doc explicitly forbids that reason, and it's checked mechanically —
+  `no-duplicates.test.ts`'s second assertion hard-fails a case-only-justified entry the
+  moment the string stops colliding).
+- [DONE] (audio-media-labels) `AUDIO_MEDIA_STRATEGY_LABELS` in
+  `src/lib/parsers/types.ts` (a pure-lib data table, only consumed by
+  `AudioMediaStrategySection.tsx`) changed from `{ name, description }` string pairs to
+  `{ nameKey, descriptionKey }` `MessageKey`s, mirroring `roleNameKey()`/
+  `roleDescriptionKey()` in `src/lib/frontier/roles.ts` — same "pure lib returns a
+  descriptor, caller resolves it" shape already established there.
+- [DEFERRED] (monday-trio) `MondayIntegrationSection.tsx` + `MondayLinkedView.tsx` +
+  `MondayMappingEditor.tsx` (~50 strings, per the audit's own scope call) — left
+  entirely unkeyed, per instruction. Added a SWARM-TODO comment naming the deferral at
+  the top of `MondayIntegrationSection.tsx` so the next wave finds it without re-auditing.
+- [SKIPPED] (termbase-sharing) `TermbaseSharingSection.tsx` — gated behind
+  `SHOW_TERMBASE_SHARING_IN_SETTINGS = false` in `ProjectSettings.tsx`; per instruction,
+  untouched.
+- [SKIPPED] (local-models) `ProjectSettings/LocalModelsSection.tsx` — per instruction,
+  this is dead code from the settings surface's perspective (it actually mounts on
+  `/preferences`, another agent's area per `docs/swarm/ORCHESTRATION.md`); untouched.
+- [DEFERRED] (settings-search-keywords) `ALL_SECTIONS[].label` in `ProjectSettings.tsx`
+  is fully keyed (also reused as the matching Card's `<CardTitle>` where the text
+  matches exactly). `ALL_SECTIONS[].keywords` — the ~110-string English-only
+  search-matching index the audit counted separately from the 483 — was left as
+  literal English on purpose: it's compared against the raw (English) search-box input,
+  not rendered, so keying the array without ALSO building a per-locale keyword index and
+  reworking the match to try every locale's terms would be pure catalog bloat with zero
+  UX effect. Real localization of settings search is its own follow-up (translate the
+  query, or maintain keyword lists per locale) — flagging, not silently skipping.
+- [DEFERRED] (zod-validation-messages) `src/lib/forms/schemas.ts`'s `requiredString()`/
+  `optionalString` build a hardcoded `"${label} is required"` message consumed by
+  `<FieldError>` across MANY forms outside this wave's scope (org create/rename, team
+  create, login, onboarding steps, AddConceptDialog, provider sections — see the
+  file's other callers). `ProjectCreateDialog.tsx`'s own two `superRefine` custom
+  messages ("Target language is required", "Choose an upstream project") ARE this
+  wave's own code and are now keyed (`projectSettings.create.validation*`), built via a
+  new `buildProjectSchema(t)` — `useMemo`'d in the component since Zod schemas are
+  normally built at module scope where `useT()` isn't callable. The shared
+  `requiredString()`/`optionalString` helper itself was left untouched: fixing it
+  properly needs either a `MessageKey`-accepting variant or routing `FieldError`'s
+  rendering through `t()`, and touching it here would silently affect every other
+  workstream's forms without their review. Flagging for a coordinated follow-up, not
+  fixing in isolation.
+- [DONE] (permission-alert-test) Added two explicit regression tests to
+  `PermissionDeniedAlert.test.tsx` (`AQU-832: resolves \`action\` through the message
+  catalog rather than rendering it verbatim`, and the equivalent for
+  `requiredRoleLevel`) — the brief specifically asked for proof the component renders
+  translated action/role rather than raw English, which is the failure mode the old
+  `string` props allowed.
+- [DONE] (eslint-i18n-guard) `eslint-suppressions.json` pruned for every file this wave
+  touched — `i18n/no-unkeyed-string` now reports 0 remaining unkeyed strings in
+  `ProjectCreateDialog.tsx`, `SharePanel.tsx`, `ProjectSettings.tsx`, and all 5 keyed
+  `ProjectSettings/*.tsx` sub-panels (2 residual literal API path fragments in
+  `ProjectSettings.tsx`, `/chat/completions` and `/models`, marked
+  `// i18n-exempt` — technical path text inside `<code>`, not prose).
 
 ## [DONE] resolved traces
 - [DONE] (AQU-820) `src/lib/i18n/standalone.ts` — the provider-less `t()` that

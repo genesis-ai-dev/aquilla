@@ -577,6 +577,20 @@ describe("isOwnWriteEcho", () => {
     expect(isOwnWriteEcho({}, "ryder")).toBe(false)
     expect(isOwnWriteEcho({ by: "" }, "ryder")).toBe(false)
   })
+
+  it("treats an Agent API commit as remote even when `by` is this user", () => {
+    // An external agent commits an ask-mode changeset via the Agent API; the
+    // sync-worker routes it through /events with a token minted for the
+    // credential OWNER, so `by` is the owner's own username. If that owner has
+    // the project open, NO outbox write happened in this client — suppressing
+    // the echo would silently hide the agent's committed translation until a
+    // manual reload. `via: "external"` must defeat the `by` match.
+    expect(isOwnWriteEcho({ by: "ryder", via: "external" }, "ryder")).toBe(false)
+  })
+
+  it("`via: external` on another user's write stays remote (no accidental flip)", () => {
+    expect(isOwnWriteEcho({ by: "alice", via: "external" }, "ryder")).toBe(false)
+  })
 })
 
 describe("createLinkUpstreamChangedHandler (AQU-479 push accelerator)", () => {

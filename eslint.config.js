@@ -4,6 +4,14 @@ import reactHooks from 'eslint-plugin-react-hooks'
 import reactRefresh from 'eslint-plugin-react-refresh'
 import tseslint from 'typescript-eslint'
 import { defineConfig, globalIgnores } from 'eslint/config'
+import { createRequire } from 'node:module'
+
+// tools/eslint-rules/*.cjs are CommonJS (ESLint rule modules use `module.exports`
+// and `require`; the .cjs extension keeps Node from treating them as ESM under
+// this package's "type": "module"). eslint.config.js is ESM, so load the rule
+// via createRequire rather than adding a second module system to the repo.
+const require = createRequire(import.meta.url)
+const noUnkeyedString = require('./tools/eslint-rules/no-unkeyed-string.cjs')
 
 // Minimal stub so that existing `eslint-disable-next-line react/no-danger`
 // comments in source files don't trigger "definition not found" errors.
@@ -120,6 +128,22 @@ export default defineConfig([
           }),
         ),
       ],
+    },
+  },
+  // i18n regrowth guard (AQU-832 follow-up): user-visible strings in .tsx must
+  // come from the i18n catalog. Scoped to src/**/*.tsx only — the rule itself
+  // also excludes tests, marketing/admin/legal surfaces (tools/eslint-rules/
+  // allowlist.cjs IGNORED_FILE_PATTERNS) and untranslatable atomic terms/shapes.
+  // Ratcheted by ESLint's native bulk suppressions (eslint-suppressions.json,
+  // committed at repo root) rather than a hand-rolled baseline — see
+  // docs/swarm/TRACES.md for the ratchet mechanics and known limitations.
+  {
+    files: ['src/**/*.tsx'],
+    plugins: {
+      i18n: { rules: { 'no-unkeyed-string': noUnkeyedString } },
+    },
+    rules: {
+      'i18n/no-unkeyed-string': 'error',
     },
   },
   // Test files: allow `any` for test stubs/mocks, relax unused-vars (many tests

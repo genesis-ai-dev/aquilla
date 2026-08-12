@@ -66,10 +66,13 @@ without re-import.
 
 ## Provenance (linked-later hook)
 
-Each imported file records `{ provider: 'google-drive', driveFileId, revisionId,
-mimeType }` via the existing `ImportSourceLocator` mechanism in
-`shared/import-contract.ts`. A future linked-sync feature uses this to locate the
-upstream doc; re-auth at relink time replaces any need for stored tokens.
+Each imported file records `{ provider: 'google-drive', driveFileId, mimeType,
+exportedAs? }` as an `origin` key inside the existing `importManifest`, which the
+sync-worker `/import` route already projects verbatim into
+`files.meta.aquillaImport` — so no worker changes are needed. (Design note:
+`ImportSourceLocator` was considered but is a per-cell locator, not file
+provenance.) A future linked-sync feature uses this to locate the upstream doc;
+re-auth at relink time replaces any need for stored tokens.
 
 ## Errors & limits
 

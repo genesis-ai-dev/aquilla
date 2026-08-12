@@ -39,18 +39,26 @@ async function seedScope(t: TestDb): Promise<void> {
 
 async function seedDraft(
   t: TestDb,
-  input: { id: string; runId?: string; cellId: string; text: string; createdAt?: number },
+  input: {
+    id: string
+    runId?: string
+    cellId: string
+    text: string
+    createdAt?: number
+    targetLang?: string
+  },
 ): Promise<void> {
   await t.pg.query(
     `INSERT INTO contextual_drafts
-        (id, run_id, project_id, file_id, cell_id, text, status, created_at)
-     VALUES ($1, $2, $3, $4, $5, $6, 'proposed', to_timestamp($7::double precision / 1000.0))`,
+        (id, run_id, project_id, file_id, cell_id, target_lang, text, status, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, 'proposed', to_timestamp($8::double precision / 1000.0))`,
     [
       input.id,
       input.runId ?? "run-default",
       PROJECT,
       FILE,
       input.cellId,
+      input.targetLang ?? "",
       input.text,
       input.createdAt ?? COMMIT_TIME - 60_000,
     ],
@@ -222,6 +230,44 @@ describe("target.cell.commit contextual draft reconciliation", () => {
       )
       expect(loserCell.rows).toHaveLength(0)
       expect(await t.pg.query(`SELECT 1 FROM contextual_run_events`)).toMatchObject({ rows: [] })
+    } finally {
+      await t.close()
+    }
+  })
+
+  it("applies a French proposal only when the French cell commit wins", async () => {
+    const t = await makeTestDb()
+    try {
+      await seedScope(t)
+      await seedDraft(t, {
+        id: "draft-french",
+        runId: "run-french",
+        cellId: "cell-fr",
+        text: "Proposition française",
+        targetLang: "fr",
+      })
+      await seedDraft(t, {
+        id: "draft-default-sibling",
+        cellId: "cell-fr",
+        text: "Default sibling",
+      })
+
+      await project(t, targetCommit({
+        id: "0198a123-0000-7000-8000-000000000005",
+        cellId: "cell-fr",
+        value: "Proposition française",
+        targetLang: "fr",
+      }))
+
+      expect(await draftRow(t, "draft-french")).toMatchObject({
+        status: "applied",
+        reviewed_by: REVIEWER,
+      })
+      expect(await draftRow(t, "draft-default-sibling")).toMatchObject({
+        status: "proposed",
+        reviewed_at: null,
+        reviewed_by: null,
+      })
     } finally {
       await t.close()
     }

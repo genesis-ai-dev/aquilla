@@ -370,7 +370,7 @@ export async function reconcileContextualAfterRealtimeOpen(args: {
   projectId: string
   currentFileId: string | null
   draftScope: ContextualDraftsScope | null
-  attachRun: (projectId: string, fileId: string) => Promise<void>
+  attachRun: (projectId: string, fileId: string, targetLang?: string) => Promise<void>
   refreshDrafts: (scope: ContextualDraftsScope) => Promise<void>
 }): Promise<void> {
   const { projectId, currentFileId, draftScope } = args
@@ -378,21 +378,20 @@ export async function reconcileContextualAfterRealtimeOpen(args: {
     !draftScope ||
     !currentFileId ||
     draftScope.projectId !== projectId ||
-    draftScope.fileId !== currentFileId ||
-    draftScope.targetLang !== ""
+    draftScope.fileId !== currentFileId
   ) return
   await Promise.all([
-    args.attachRun(projectId, currentFileId),
+    args.attachRun(projectId, currentFileId, draftScope.targetLang),
     args.refreshDrafts(draftScope),
   ])
 }
 
 /**
  * A target commit and contextual-draft reconciliation land atomically in the
- * sync projection. Re-read the durable default-lane proposal list when that
- * applied-event echo reaches the exact editor scope, including for our own
- * writes. The echo is the first point at which the server-side projection is
- * known to be authoritative; an earlier client review request may have raced
+ * sync projection. Re-read the durable proposal list for the open lane when
+ * that applied-event echo reaches the exact editor scope, including for our
+ * own writes. The echo is the first point at which the server-side projection
+ * is known to be authoritative; an earlier client review request may have raced
  * it or failed independently.
  */
 export async function reconcileContextualDraftsAfterAppliedEvent(args: {
@@ -414,8 +413,7 @@ export async function reconcileContextualDraftsAfterAppliedEvent(args: {
     event.fileId !== args.currentFileId ||
     !draftScope ||
     draftScope.projectId !== args.projectId ||
-    draftScope.fileId !== event.fileId ||
-    draftScope.targetLang !== ""
+    draftScope.fileId !== event.fileId
   ) return
   await args.refreshDrafts(draftScope)
 }
@@ -1332,9 +1330,9 @@ export function ProjectWorkspace() {
   const contextualDraftScopeRef = useRef<ContextualDraftsScope | null>(null)
   const refreshContextualDrafts = useCallback(async (requestedScope?: ContextualDraftsScope) => {
     const scope = requestedScope ?? contextualDraftScopeRef.current
-    if (!scope || scope.targetLang !== "") return
+    if (!scope) return
     try {
-      const drafts = await fetchContextualDrafts(scope.projectId, scope.fileId)
+      const drafts = await fetchContextualDrafts(scope.projectId, scope.fileId, scope.targetLang)
       hydrateContextualDrafts(scope, drafts)
     } catch {
       /* backend not deployed, offline, or signed out — pill reports the run */
@@ -1345,8 +1343,7 @@ export function ProjectWorkspace() {
 
   // Attach before paint on every project/file/lane switch. The scope token
   // race-guards the later snapshot, including the same file id reused across
-  // projects and A → B → A navigation. Non-default lanes deliberately do
-  // not fetch v1's default-lane-only draft endpoint.
+  // projects and A → B → A navigation.
   useLayoutEffect(() => {
     if (!contextualAutopilotEnabled || !project?.id || !activeFileId) {
       contextualDraftScopeRef.current = null
@@ -1355,7 +1352,7 @@ export function ProjectWorkspace() {
     }
     const scope = attachContextualDrafts(project.id, activeFileId, activeLane)
     contextualDraftScopeRef.current = scope
-    if (activeLane === "") void refreshContextualDrafts(scope)
+    void refreshContextualDrafts(scope)
   }, [activeFileId, activeLane, contextualAutopilotEnabled, project?.id, refreshContextualDrafts])
 
   useEffect(() => () => {

@@ -30,11 +30,13 @@ interface SteeringProps {
   projectId: string
   fileId: string
   runId: string
+  /** Empty string is Project default. Must match the attached editor lane. */
+  targetLang?: string
   /** Directions queued for the next passage (store `activeDirections`). */
   directions: string[]
 }
 
-export function ContextualSteering({ projectId, fileId, runId, directions }: SteeringProps) {
+export function ContextualSteering({ projectId, fileId, runId, targetLang = "", directions }: SteeringProps) {
   const t = useT()
   const [text, setText] = useState("")
   const [sending, setSending] = useState(false)
@@ -64,7 +66,7 @@ export function ContextualSteering({ projectId, fileId, runId, directions }: Ste
       // immediately and let the snapshot refresh reconcile.
       noteContextualDirectionQueued(trimmed)
       setText("")
-      void attachContextualRun(projectId, fileId)
+      void attachContextualRun(projectId, fileId, targetLang)
     } catch (error) {
       setSendError(error instanceof ContextualAuthError ? "auth" : "failed")
     } finally {

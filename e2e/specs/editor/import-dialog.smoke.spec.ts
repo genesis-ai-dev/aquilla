@@ -15,6 +15,11 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
  *
  * This spec exercises the dialog navigation without actually uploading a file
  * (covered by import-and-edit.smoke.spec.ts).
+ *
+ * AQU-823: also covers the Google Drive entry point. The picker/OAuth flow
+ * itself is manual-QA only (external Google dependency); the e2e stack has no
+ * VITE_GOOGLE_CLIENT_ID, so the panel deterministically shows the
+ * not-configured notice.
  */
 test("import dialog shows Upload Files and eBible Corpus options", async ({ alice }) => {
   const dash = new Dashboard(alice)
@@ -45,6 +50,22 @@ test("import dialog shows Upload Files and eBible Corpus options", async ({ alic
   })
 
   // Back button returns to landing with "Import" title.
+  await dialog.getByRole("button", { name: /Back to import types/i }).click()
+  await expect(dialog.getByRole("heading", { name: /^Import$/i })).toBeVisible({
+    timeout: 3_000,
+  })
+
+  // AQU-823: Google Drive option routes to its panel. Without
+  // VITE_GOOGLE_CLIENT_ID in the e2e stack the panel shows the deterministic
+  // not-configured notice instead of the connect button.
+  await expect(dialog.getByText("Google Drive").first()).toBeVisible({ timeout: 3_000 })
+  await dialog.getByText("Google Drive").first().click()
+  await expect(dialog.getByRole("heading", { name: /Google Drive/i })).toBeVisible({
+    timeout: 3_000,
+  })
+  await expect(dialog.getByText(/isn't configured for this deployment/i)).toBeVisible({
+    timeout: 3_000,
+  })
   await dialog.getByRole("button", { name: /Back to import types/i }).click()
   await expect(dialog.getByRole("heading", { name: /^Import$/i })).toBeVisible({
     timeout: 3_000,

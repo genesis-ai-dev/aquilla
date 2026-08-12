@@ -191,6 +191,7 @@
 | Editor      | No-file placeholder renders when no file open         | `e2e/specs/editor/editor-no-file-placeholder.smoke.spec.ts`   |   ✅   |
 | Editor      | Sidebar corpus collapse toggle                        | `e2e/specs/editor/sidebar-corpus-collapse.smoke.spec.ts`      |   ✅   |
 | Editor      | Import dialog opens and shows upload/eBible options   | `e2e/specs/editor/import-dialog.smoke.spec.ts`                |   ✅   |
+| Editor      | Import dialog offers Google Drive; picker/OAuth flow itself is manual-QA only (external Google dependency, AQU-823) | `e2e/specs/editor/import-dialog.smoke.spec.ts`                |   ✅   |
 | Editor      | eBible import search/select and imported file persists across reload | `e2e/specs/editor/import-dialog-ebible.smoke.spec.ts` + `import-dialog-ebible-search.smoke.spec.ts` + `import-ebible-persists-reload.smoke.spec.ts` | ✅ |
 | Editor      | Export scope toggle (file vs project)                 | `e2e/specs/editor/export-scope-toggle.smoke.spec.ts`          |   ✅   |
 | Editor      | Export lossy format warning badge                     | `e2e/specs/editor/export-lossy-warning.smoke.spec.ts`         |   ✅   |
@@ -287,7 +288,7 @@
 | Terminology | Violations tab shows inbox content                    | `e2e/specs/projects/terminology-violations-tab.smoke.spec.ts` |   ✅   |
 | Terminology | Wildcard source term 'samp*' creates chip for 'sample' | `e2e/specs/terminology/wildcard-term-chip.smoke.spec.ts`     |   ✅   |
 | Terminology | Violations inbox concept group expand/collapse        | `e2e/specs/terminology/violations-inbox-expand-group.smoke.spec.ts` | ✅ |
-| Projects    | Add target language → switch lane → translate per lane; Autopilot stays explicitly default-lane-only (AQU-538/AQU-826) | `e2e/specs/projects/add-target-language.spec.ts` |   |
+| Projects    | Add target language → switch lane → translate per lane; Autopilot follows the open language lane | `e2e/specs/projects/add-target-language.spec.ts` |   |
 | Editor      | Setup checklist AI instructions edit + reset          | `e2e/specs/editor/setup-checklist-ai-instructions-edit.smoke.spec.ts` |   ✅   |
 | Editor      | Workspace actions dropdown lists available actions    | `e2e/specs/editor/workspace-actions-dropdown.smoke.spec.ts`   |   ✅   |
 | Editor      | Workspace actions cell scroll to target cell          | `e2e/specs/editor/workspace-actions-cell-scroll.smoke.spec.ts` |   ✅   |

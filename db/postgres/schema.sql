@@ -1161,7 +1161,9 @@ CREATE INDEX IF NOT EXISTS scene_briefs_run_provenance_time
 -- makes every tick resumable from Postgres. contextual_steering: the human
 -- steering inbox (consumed, never deleted). contextual_drafts: staged span
 -- drafts awaiting review (v1 deviation: NOT the changesets table); a
--- re-propose supersedes the old proposed row in the same batch.
+-- re-propose supersedes the old proposed row in the same batch. Each
+-- proposal carries target_lang so sibling language lanes keep independent
+-- review queues.
 CREATE TABLE IF NOT EXISTS contextual_runs (
   id text PRIMARY KEY,                  -- uuidv7 (time-ordered; client store compares lexicographically)
   project_id text NOT NULL,
@@ -1222,6 +1224,7 @@ CREATE TABLE IF NOT EXISTS contextual_drafts (
   project_id text NOT NULL,
   file_id text NOT NULL,
   cell_id text NOT NULL,
+  target_lang text NOT NULL DEFAULT '', -- lane ('' = project default); copied from the owning run
   scene_brief_id text,
   text text NOT NULL,
   verdicts jsonb,                       -- verifier verdict summary for the review card
@@ -1232,10 +1235,11 @@ CREATE TABLE IF NOT EXISTS contextual_drafts (
   reviewed_at timestamptz,
   reviewed_by text
 );
--- One live proposal per cell; a re-propose supersedes the old row first
--- (same batch) so this index never conflicts.
+-- One live proposal per cell per lane; a re-propose supersedes the old row
+-- first (same batch) so this index never conflicts. Sibling languages on the
+-- same cell keep independent review queues (0075).
 CREATE UNIQUE INDEX IF NOT EXISTS contextual_drafts_live
-  ON contextual_drafts(project_id, file_id, cell_id)
+  ON contextual_drafts(project_id, file_id, cell_id, target_lang)
   WHERE status = 'proposed';
 CREATE INDEX IF NOT EXISTS contextual_drafts_run
   ON contextual_drafts(run_id, status);

@@ -150,6 +150,13 @@ describe("ContextualRunPill", () => {
     expect(screen.queryByText("Idle · no work queued")).not.toBeInTheDocument()
   })
 
+  it("parked with failed passages and no remaining work reports complete with attention", () => {
+    applyRemoteFrame(frame("parked", { done: 7, failed: 2, total: 9 }))
+    render(<ContextualRunPill projectId="p1" fileId="file-1" canControl />)
+    expect(screen.getByText("7/9 complete · 2 need attention")).toBeInTheDocument()
+    expect(screen.queryByText("Idle · no work queued")).not.toBeInTheDocument()
+  })
+
   it("done: reports completion and does not offer an invalid stop command", () => {
     applyRemoteFrame(frame("done", { done: 10, total: 10 }))
     render(<ContextualRunPill projectId="p1" fileId="file-1" canControl />)
@@ -196,23 +203,19 @@ describe("ContextualRunPill", () => {
     expect(screen.getByRole("button", { name: "View Autopilot activity" })).toBeInTheDocument()
   })
 
-  it("makes the default-lane boundary explicit and exposes no mutations in a multilingual lane", () => {
+  it("starts Autopilot on the editor's named target-language lane", async () => {
     const transport = makeTransport()
     setContextualTransport(transport)
-    hydrateContextualDrafts(attachContextualDrafts("p1", "file-1", ""), [
-      { draftId: "draft-1", cellId: "cell-1", text: "Default lane draft" },
-    ])
-
+    await act(async () => { await attachContextualRun("p1", "file-1", "fr") })
     render(<ContextualRunPill projectId="p1" fileId="file-1" activeLane="fr" canControl />)
 
-    expect(screen.getByText("Autopilot works in Project default only. Switch to that lane to run it.")).toBeInTheDocument()
-    expect(screen.queryByRole("button", { name: "Run Autopilot" })).not.toBeInTheDocument()
-    expect(screen.queryByRole("button", { name: "View Autopilot activity" })).not.toBeInTheDocument()
-    expect(screen.queryByTestId("contextual-pending-drafts")).not.toBeInTheDocument()
-    expect(transport.start).not.toHaveBeenCalled()
+    expect(screen.queryByText(/Project default only/)).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Run Autopilot" }))
+
+    expect(transport.start).toHaveBeenCalledWith("p1", "file-1", undefined, "fr")
   })
 
-  it("closes the default-run inspector when the editor switches to a multilingual lane", () => {
+  it("closes the default-run inspector when the editor switches to another language lane", async () => {
     applyRemoteFrame(frame("running", { done: 3, total: 12 }))
     const view = render(<ContextualRunPill projectId="p1" fileId="file-1" activeLane="" canControl />)
     fireEvent.click(screen.getByRole("button", { name: "View Autopilot activity" }))
@@ -222,7 +225,7 @@ describe("ContextualRunPill", () => {
 
     expect(screen.queryByRole("dialog", { name: "Autopilot activity" })).not.toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "Pause after this passage" })).not.toBeInTheDocument()
-    expect(screen.getByText(/Project default only/)).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Run Autopilot" })).toBeInTheDocument()
 
     view.rerender(<ContextualRunPill projectId="p1" fileId="file-1" activeLane="" canControl />)
     expect(screen.queryByRole("dialog", { name: "Autopilot activity" })).not.toBeInTheDocument()

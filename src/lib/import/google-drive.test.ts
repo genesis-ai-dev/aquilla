@@ -7,6 +7,7 @@ import {
   expandDriveFolders,
   fetchDriveFile,
   driveOrigin,
+  googleAppIdFromClientId,
   MAX_DRIVE_IMPORT_FILES,
   GOOGLE_FOLDER_MIME,
   type DrivePickedItem,
@@ -154,6 +155,19 @@ describe("fetchDriveFile", () => {
         fetchImpl as unknown as typeof fetch,
       ),
     ).rejects.toThrow(/Huge\.docx.*403/)
+  })
+})
+
+describe("googleAppIdFromClientId", () => {
+  it("extracts the project-number prefix of an OAuth client ID", () => {
+    expect(googleAppIdFromClientId("123456789012-h5xyz.apps.googleusercontent.com")).toBe(
+      "123456789012",
+    )
+  })
+
+  it("returns null for strings without a numeric prefix", () => {
+    expect(googleAppIdFromClientId("bogus.apps.googleusercontent.com")).toBe(null)
+    expect(googleAppIdFromClientId("")).toBe(null)
   })
 })
 

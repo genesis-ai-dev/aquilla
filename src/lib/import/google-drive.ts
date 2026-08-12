@@ -38,6 +38,14 @@ export interface DriveOrigin {
   exportedAs?: "docx"
 }
 
+/** The Picker "app ID" is the Cloud project number — the leading digit run of
+ *  an OAuth client ID (`123456789-abc.apps.googleusercontent.com`). With the
+ *  drive.file scope the Picker must carry it (setAppId), or picking never
+ *  grants the app access and every follow-up Drive fetch 404s. */
+export function googleAppIdFromClientId(clientId: string): string | null {
+  return /^(\d+)-/.exec(clientId)?.[1] ?? null
+}
+
 export const GOOGLE_FOLDER_MIME = "application/vnd.google-apps.folder"
 const GOOGLE_DOC_MIME = "application/vnd.google-apps.document"
 const GOOGLE_NATIVE_PREFIX = "application/vnd.google-apps."

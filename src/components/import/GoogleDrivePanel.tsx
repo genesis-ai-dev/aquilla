@@ -44,7 +44,11 @@ export function GoogleDrivePanel({
     setStage({ kind: "picking" })
     try {
       const accessToken = await requestDriveAccessToken(config.clientId)
-      const picked = await openDrivePicker({ accessToken, apiKey: config.apiKey })
+      const picked = await openDrivePicker({
+        accessToken,
+        apiKey: config.apiKey,
+        clientId: config.clientId,
+      })
       if (picked.length === 0) {
         setStage({ kind: "idle" })
         return

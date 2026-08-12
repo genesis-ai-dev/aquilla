@@ -5,7 +5,7 @@
 // which keeps us out of Google's restricted-scope verification.
 
 import type { DriveListPage, DrivePickedItem } from "./google-drive"
-import { GOOGLE_FOLDER_MIME } from "./google-drive"
+import { GOOGLE_FOLDER_MIME, googleAppIdFromClientId } from "./google-drive"
 
 const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file"
 
@@ -28,6 +28,7 @@ interface PickerCallbackData {
 }
 interface PickerBuilderish {
   addView: (view: unknown) => PickerBuilderish
+  setAppId: (appId: string) => PickerBuilderish
   setOAuthToken: (token: string) => PickerBuilderish
   setDeveloperKey: (key: string) => PickerBuilderish
   enableFeature: (feature: string) => PickerBuilderish
@@ -101,6 +102,8 @@ async function ensureGis(): Promise<NonNullable<GoogleGlobal["accounts"]>> {
 }
 
 async function ensurePicker(): Promise<NonNullable<GoogleGlobal["picker"]>> {
+  const loaded = window.google?.picker
+  if (loaded) return loaded
   await loadScript("https://apis.google.com/js/api.js")
   const gapi = window.gapi
   if (!gapi) throw new Error("Google Picker failed to initialize.")
@@ -129,7 +132,17 @@ export async function requestDriveAccessToken(clientId: string): Promise<string>
 export async function openDrivePicker(args: {
   accessToken: string
   apiKey: string
+  clientId: string
 }): Promise<DrivePickedItem[]> {
+  // drive.file grants are keyed to the app ID: omit setAppId and the pick
+  // never authorizes the app, so every subsequent download 404s.
+  const appId = googleAppIdFromClientId(args.clientId)
+  if (!appId) {
+    throw new Error(
+      "VITE_GOOGLE_CLIENT_ID doesn't look like a Google OAuth client ID " +
+        "(expected <project-number>-….apps.googleusercontent.com).",
+    )
+  }
   const picker = await ensurePicker()
   return new Promise<DrivePickedItem[]>((resolve) => {
     const view = new picker.DocsView(picker.ViewId.DOCS)
@@ -137,6 +150,7 @@ export async function openDrivePicker(args: {
     view.setSelectFolderEnabled(true)
     const dialog = new picker.PickerBuilder()
       .addView(view)
+      .setAppId(appId)
       .setOAuthToken(args.accessToken)
       .setDeveloperKey(args.apiKey)
       .enableFeature(picker.Feature.MULTISELECT_ENABLED)

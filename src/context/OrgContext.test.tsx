@@ -2,6 +2,8 @@ import { describe, it, expect, afterEach, beforeEach, vi } from "vitest"
 import { render, screen, waitFor, act } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
 import { OrgProvider, useActiveOrg } from "./OrgContext"
+import { UserError } from "@/lib/errors/user-error"
+import { onSessionExpired } from "@/lib/errors/session-expired-signal"
 
 // This vitest/happy-dom env doesn't provide localStorage (the reason this
 // suite was red before FRO-367 added the shim). OrgContext reads/writes it
@@ -38,7 +40,7 @@ vi.mock("@/lib/sync/cloud-projects", () => ({
 }))
 
 function Probe() {
-  const { orgs, activeOrg, activeGuestOrg, isAllOrgs, guestOrgs, setActiveOrg, setAllOrgs } = useActiveOrg()
+  const { orgs, activeOrg, activeGuestOrg, isAllOrgs, guestOrgs, setActiveOrg, setAllOrgs, error, isLoading, retryOrgLoad } = useActiveOrg()
   return (
     <div>
       <span data-testid="count">{orgs.length}</span>
@@ -47,8 +49,12 @@ function Probe() {
       <span data-testid="all">{isAllOrgs ? "yes" : "no"}</span>
       <span data-testid="guest-count">{guestOrgs.length}</span>
       <span data-testid="guest-names">{guestOrgs.map((g) => g.name ?? `#${g.id}`).join(",")}</span>
+      {/* AQU-882: a failed load must be distinguishable from an empty list. */}
+      <span data-testid="error">{error ?? "none"}</span>
+      <span data-testid="loading">{isLoading ? "yes" : "no"}</span>
       <button onClick={() => setActiveOrg(2)}>switch</button>
       <button onClick={() => setAllOrgs()}>all</button>
+      <button onClick={() => { void retryOrgLoad() }}>retry</button>
     </div>
   )
 }
@@ -255,5 +261,54 @@ describe("OrgProvider", () => {
     await waitFor(() => expect(screen.getByTestId("all").textContent).toBe("yes"))
     expect(screen.getByTestId("active").textContent).toBe("none")
     expect(localStorage.getItem("org:active")).toBe("all")
+  })
+
+  // AQU-882: a failed org load must stay distinguishable from "zero orgs", and
+  // must be recoverable in place rather than only by a full page reload.
+  describe("org load failure (AQU-882)", () => {
+    it("records an error a failed load can be told apart by, and leaves the org list empty", async () => {
+      listMyOrgs.mockRejectedValue(new Error("network down"))
+      render(<MemoryRouter><OrgProvider><Probe /></OrgProvider></MemoryRouter>)
+      await waitFor(() => expect(screen.getByTestId("error").textContent).toBe("network down"))
+      expect(screen.getByTestId("count").textContent).toBe("0")
+      expect(screen.getByTestId("loading").textContent).toBe("no")
+    })
+
+    it("leaves error null when the fetch succeeds with an empty list", async () => {
+      listMyOrgs.mockResolvedValue([])
+      render(<MemoryRouter><OrgProvider><Probe /></OrgProvider></MemoryRouter>)
+      await waitFor(() => expect(screen.getByTestId("loading").textContent).toBe("no"))
+      expect(screen.getByTestId("count").textContent).toBe("0")
+      expect(screen.getByTestId("error").textContent).toBe("none")
+    })
+
+    it("retryOrgLoad re-issues both the org and project-directory fetches and clears the error", async () => {
+      listMyOrgs.mockRejectedValueOnce(new Error("network down"))
+      render(<MemoryRouter><OrgProvider><Probe /></OrgProvider></MemoryRouter>)
+      await waitFor(() => expect(screen.getByTestId("error").textContent).toBe("network down"))
+      expect(listMyOrgs).toHaveBeenCalledTimes(1)
+      const directoryCallsBeforeRetry = fetchAccessibleProjects.mock.calls.length
+
+      // Backend is reachable again.
+      listMyOrgs.mockResolvedValue([{ id: 1, name: "A", role: { level: 700, name: "owner" } }])
+      await act(async () => { screen.getByText("retry").click() })
+
+      await waitFor(() => expect(screen.getByTestId("count").textContent).toBe("1"))
+      expect(screen.getByTestId("error").textContent).toBe("none")
+      expect(listMyOrgs).toHaveBeenCalledTimes(2)
+      // The dependent project directory is re-fetched too, not just the orgs.
+      expect(fetchAccessibleProjects.mock.calls.length).toBeGreaterThan(directoryCallsBeforeRetry)
+    })
+
+    it("still signals session-expired on a 401 (AQU-293 path intact)", async () => {
+      const expired = vi.fn()
+      const unsubscribe = onSessionExpired(expired)
+      listMyOrgs.mockRejectedValue(new UserError(401, "token expired"))
+      render(<MemoryRouter><OrgProvider><Probe /></OrgProvider></MemoryRouter>)
+      await waitFor(() => expect(expired).toHaveBeenCalledTimes(1))
+      // Still an error state — the banner and the retry affordance coexist.
+      expect(screen.getByTestId("error").textContent).not.toBe("none")
+      unsubscribe()
+    })
   })
 })

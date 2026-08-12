@@ -55,7 +55,7 @@ import { Page, PageHeader, StatTile, EmptyState } from "@/components/ui/page"
 import { SegmentTabs } from "@/components/ui/tabs"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
-import { FolderPlus, Search, X, Building2, Sparkles, CircleCheck, Mic } from "lucide-react"
+import { FolderPlus, Search, X, Building2, Sparkles, CircleCheck, Mic, AlertTriangle } from "lucide-react"
 
 function DashboardRowTemplate() {
   return (
@@ -561,6 +561,7 @@ export function OrgHome() {
     setActiveOrg,
     refresh: refreshOrgs,
     refreshAccessibleProjects,
+    retryOrgLoad,
   } = useActiveOrg()
   const { session, loading: sessionLoading } = useFrontierSession()
   const navigate = useNavigate()
@@ -764,6 +765,9 @@ export function OrgHome() {
     if (landing.kind === "error") {
       // An org-list failure leaves `orgs` empty just like a genuine zero.
       // Say so and offer a retry rather than painting a fake-empty workspace.
+      // AQU-882: retry must re-issue the project-directory fetch too — the
+      // resolver reads `accessibleProjects`, so refreshing orgs alone could
+      // land a project-only user on "empty" instead of /shared.
       return (
         <AppShell
           sidebar={<OrgSidebar />}
@@ -773,11 +777,12 @@ export function OrgHome() {
             <Page size="wide">
               <PageHeader title="All organizations" />
               <EmptyState
-                icon={Building2}
-                title="Couldn't load your organizations"
+                data-testid="org-load-error"
+                icon={AlertTriangle}
+                title="Couldn’t load your organizations"
                 description={orgsError ?? "Something went wrong loading your workspace."}
                 action={
-                  <Button onClick={() => { void refreshOrgs() }}>Try again</Button>
+                  <Button onClick={() => { void retryOrgLoad() }}>Retry</Button>
                 }
               />
             </Page>

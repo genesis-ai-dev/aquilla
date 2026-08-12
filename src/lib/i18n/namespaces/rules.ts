@@ -339,6 +339,26 @@ export const rules = defineNamespace({
     "rules.completion.completionAborted": "Completion aborted",
     "rules.completion.signInRequired": "Sign in to use Frontier AI.",
     "rules.completion.noCustomEndpoint": "No custom endpoint configured.",
+
+    // ── autofix.ts (LLM autofix proposal, lib/) — fallbacks only; the LLM's
+    // own `reason` text, when present, is LLM-extracted content and is never
+    // translated ────────────────────────────────────────────────────────────
+    "rules.autofix.noReasonGiven": "No reason given",
+    "rules.autofix.couldNotApplyFixes": "Could not apply fixes",
+
+    // ── FixReviewPanel (harmonize / bulk-fix review sheet) ──────────────────
+    "rules.fixReview.modeCachedRegex": "Cached regex",
+    "rules.fixReview.modeBatchRegex": "Batch regex",
+    "rules.fixReview.modePerCellRewrite": "Per-cell rewrite",
+    "rules.fixReview.previewsReady": plural({
+      one: "{count} preview ready",
+      other: "{count} previews ready",
+    }),
+    "rules.fixReview.cellLabel": "Cell {cellId}",
+    "rules.fixReview.irreversibleConfirmPrefix": "This action is irreversible. Type",
+    "rules.fixReview.irreversibleConfirmSuffix": "to confirm.",
+    "rules.fixReview.confirmInputAriaLabel": "Type the rule name to confirm",
+    "rules.fixReview.applyButton": "Apply {count} selected",
   },
   context: {
     _context: {
@@ -660,6 +680,21 @@ export const rules = defineNamespace({
           status: "HTTP status code — content, never translated.",
           text: "Raw response body text — content, never translated.",
         },
+      },
+      "rules.fixReview.previewsReady": {
+        description: "Count of ready-to-apply fix previews in the harmonize/bulk-fix review sheet.",
+        placeholders: { count: "Number of fix previews ready to apply." },
+      },
+      "rules.fixReview.confirmInputAriaLabel": {
+        description: "Accessible label for the typed-confirmation input gating a bulk harmonize Apply.",
+      },
+      "rules.fixReview.cellLabel": {
+        description: "Compact label above each fix preview row, identifying which cell it applies to.",
+        placeholders: { cellId: "The cell's id — content, never translated." },
+      },
+      "rules.fixReview.applyButton": {
+        description: "Primary button applying the selected fix previews.",
+        placeholders: { count: "Number of previews currently selected to apply." },
       },
       "rules.editor.wouldBeFlagged": {
         description:

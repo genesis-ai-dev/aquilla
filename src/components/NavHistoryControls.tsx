@@ -55,12 +55,12 @@ function HistoryMenuButton({ nav }: { nav: NavHistoryValue }) {
         <Button
           type="button"
           variant="ghost"
-          size="icon-xs"
+          size="icon-sm"
           disabled
           aria-label={previouslyViewedLabel}
           className="cursor-default text-muted-foreground/30"
         >
-          <Clock />
+          <Clock className="size-3.5" />
         </Button>
       </AppTooltip>
     )
@@ -74,10 +74,10 @@ function HistoryMenuButton({ nav }: { nav: NavHistoryValue }) {
             <Button
               type="button"
               variant="ghost"
-              size="icon-xs"
+              size="icon-sm"
               aria-label={previouslyViewedLabel}
             >
-              <Clock />
+              <Clock className="size-3.5" />
             </Button>
           }
         />
@@ -167,7 +167,7 @@ function NavArrowButton({ direction, nav }: { direction: "back" | "forward"; nav
       <Button
         type="button"
         variant="ghost"
-        size="icon-xs"
+        size="icon-sm"
         disabled={!enabled}
         aria-label={
           enabled && nearest
@@ -182,7 +182,7 @@ function NavArrowButton({ direction, nav }: { direction: "back" | "forward"; nav
         }}
         className={enabled ? undefined : "cursor-default text-muted-foreground/30"}
       >
-        <Icon />
+        <Icon className="size-3.5" />
       </Button>
     </AppTooltip>
   )

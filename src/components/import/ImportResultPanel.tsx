@@ -78,7 +78,7 @@ export function ImportResultPanel({ importedCount, skipped, onDismiss, error }: 
       {error ? <FieldError role="alert">{error}</FieldError> : null}
       <div className="flex justify-between gap-2">
         <Button variant="outline" size="sm" onClick={handleCopy} disabled={dismissing}>
-          {copied ? t("importExport.result.copied") : t("importExport.result.copyReport")}
+          {copied ? t("nav.report.copied") : t("nav.report.copyReport")}
         </Button>
         <Button size="sm" onClick={handleDismiss} disabled={dismissing}>
           {dismissing ? t("importExport.result.closing") : t("common.close")}

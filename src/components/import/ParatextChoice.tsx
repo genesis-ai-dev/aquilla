@@ -90,7 +90,7 @@ export function ParatextChoice({
           total: p.booksTotal,
         })
       : t("importExport.paratext.booksProgressLabel", { done: p.booksDone, total: p.booksTotal })
-    setPhase(p.book ? t("importExport.paratext.uploadingBook", { book: p.book }) : t("importExport.paratext.uploading"))
+    setPhase(p.book ? t("importExport.paratext.uploadingBook", { book: p.book }) : t("common.uploading"))
     // Prefer the per-chunk cell counts (smooth bar); fall back to books.
     if (p.cellsTotal != null && p.cellsTotal > 0) {
       setProgress({ count: p.cellsDone ?? 0, total: p.cellsTotal, bookLabel })
@@ -115,7 +115,7 @@ export function ParatextChoice({
 
   async function runSourceWithResolution(resolution: CollisionResolution) {
     if (!plan) return
-    setMode("importing"); setError(null); setPhase(t("importExport.paratext.uploading")); setProgress(null)
+    setMode("importing"); setError(null); setPhase(t("common.uploading")); setProgress(null)
     try {
       const { refs, settings, skipped } = await commitParatextProject(plan, {
         ...ctx,

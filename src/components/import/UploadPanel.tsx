@@ -525,10 +525,10 @@ export function UploadPanel({ projectId, username, sourceLanguage, targetLanguag
           </div>
           <div className="mt-3 space-y-1 text-xs text-muted-foreground">
             <p><span className="font-medium text-foreground/70">{t("importExport.upload.categoryScripture")}</span> — USFM, USX, SFM</p>
-            <p><span className="font-medium text-foreground/70">{t("importExport.upload.categoryTranslation")}</span> — XLIFF/XLF, TMX, CSV/TSV</p>
-            <p><span className="font-medium text-foreground/70">{t("importExport.upload.categoryDocuments")}</span> — DOCX, TXT, MD, HTML, JSON/ARB, PPTX, IDML (InDesign)</p>
-            <p><span className="font-medium text-foreground/70">{t("importExport.upload.categoryLocalization")}</span> — PO/POT, Java properties</p>
-            <p><span className="font-medium text-foreground/70">{t("importExport.upload.categorySubtitles")}</span> — VTT, SRT, SBV</p>
+            <p><span className="font-medium text-foreground/70">{t("importExport.upload.categoryTranslation")}</span> — {t("importExport.upload.formatsTranslation")}</p>
+            <p><span className="font-medium text-foreground/70">{t("importExport.upload.categoryDocuments")}</span> — {t("importExport.upload.formatsDocuments")}</p>
+            <p><span className="font-medium text-foreground/70">{t("importExport.upload.categoryLocalization")}</span> — {t("importExport.upload.formatsLocalization")}</p>
+            <p><span className="font-medium text-foreground/70">{t("importExport.upload.categorySubtitles")}</span> — {t("importExport.upload.formatsSubtitles")}</p>
             <p><span className="font-medium text-foreground/70">{t("importExport.upload.categoryParatextProject")}</span> — {t("importExport.upload.zipOrFolder")}</p>
             <p><span className="font-medium text-foreground/70">{t("importExport.upload.categoryOtherFormats")}</span> — {t("importExport.upload.otherFormatsHint")}</p>
           </div>

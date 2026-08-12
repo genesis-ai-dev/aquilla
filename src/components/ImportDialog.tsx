@@ -369,7 +369,7 @@ export function ImportDialog({
         <DialogHeader>
           <DialogTitle>
             {screen === "landing" ? (
-              t("importExport.dialog.titleImport")
+              t("nav.workspaceActions.import")
             ) : screen === "direction" ? (
               t("importExport.dialog.titleDirection")
             ) : screen === "result" ? (
@@ -387,7 +387,7 @@ export function ImportDialog({
                   }}
                   label={t("importExport.dialog.backToFileSelection")}
                 />
-                {t("importExport.dialog.titlePreview")}
+                {t("common.preview")}
               </div>
             ) : (
               <div className="flex items-center gap-2">
@@ -395,18 +395,18 @@ export function ImportDialog({
                   onClick={() => setScreen("landing")}
                   label={t("importExport.dialog.backToImportTypes")}
                 />
-                {screen === "upload" ? t("importExport.dialog.titleUpload")
+                {screen === "upload" ? t("importExport.landing.upload.title")
                   : screen === "helloao" ? t("importExport.dialog.titleHelloao")
-                  : screen === "obs" ? t("importExport.dialog.titleObs")
-                  : screen === "dcs" ? t("importExport.dialog.titleDcs")
-                  : screen === "macula" ? t("importExport.dialog.titleMacula")
+                  : screen === "obs" ? t("importExport.landing.obs.title")
+                  : screen === "dcs" ? t("importExport.landing.dcs.title")
+                  : screen === "macula" ? t("importExport.landing.macula.title")
                   : screen === "tn" ? t("importExport.dialog.titleTn")
-                  : screen === "biblica" ? t("importExport.dialog.titleBiblica")
+                  : screen === "biblica" ? t("importExport.landing.biblica.title")
                   : screen === "spreadsheet" ? t("importExport.dialog.titleSpreadsheet")
-                  : screen === "labels" ? t("importExport.dialog.titleLabels")
+                  : screen === "labels" ? t("importExport.landing.labels.title")
                   : screen === "paired" ? t("importExport.dialog.titlePaired")
-                  : screen === "sdbh" ? t("importExport.dialog.titleSdbh")
-                  : t("importExport.dialog.titleEbible")}
+                  : screen === "sdbh" ? t("importExport.landing.sdbh.title")
+                  : t("importExport.landing.ebible.title")}
               </div>
             )}
           </DialogTitle>

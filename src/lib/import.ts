@@ -486,6 +486,19 @@ type PrepareImportContext = Pick<
   excludeFrontMatter?: boolean
 }
 
+/**
+ * Renders a caught error for a per-book `skipped[].reason` field — plain-text
+ * diagnostic data shown in the import result report, not a translated UI
+ * string. `.message` is now a clean keyed frame (see source-upload.ts); the
+ * HTTP status/body detail it used to splice into `.message` lives on `.cause`
+ * instead, so append it here to keep the report as informative as before.
+ */
+function errorDetailForSkipReason(error: unknown): string {
+  if (!(error instanceof Error)) return String(error)
+  const cause = typeof error.cause === "string" ? error.cause : undefined
+  return cause ? `${error.message} (${cause})` : error.message
+}
+
 function preparedParsedFile(
   file: File,
   fileType: FileType,
@@ -2041,7 +2054,7 @@ export async function commitParatextProject(
   try {
     await preserveParatextPackage(plan, packageBindings, baseCtx)
   } catch (error) {
-    packagePreservationError = error instanceof Error ? error.message : String(error)
+    packagePreservationError = errorDetailForSkipReason(error)
   }
   const visibleRefs: FileReference[] = []
   const freshRefs = refs.filter((ref) => !existingFileIds.has(ref.id))
@@ -2229,7 +2242,7 @@ export async function importParatextAsTarget(
       targetLang: ctx.targetLang,
     })
   } catch (error) {
-    packagePreservationError = error instanceof Error ? error.message : String(error)
+    packagePreservationError = errorDetailForSkipReason(error)
   }
 
   const visibleRefs: FileReference[] = []

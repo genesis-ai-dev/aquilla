@@ -27,8 +27,6 @@ export const importExport = defineNamespace({
     }),
     "importExport.result.summarySkipped": "{count} could not be imported.",
     "importExport.result.summaryReviewHint": "Review the list below and copy it before closing.",
-    "importExport.result.copied": "Copied!",
-    "importExport.result.copyReport": "Copy report",
     "importExport.result.closing": "Closing…",
 
     // — Direction panel (post-import prompt to confirm source/target language) —
@@ -40,12 +38,12 @@ export const importExport = defineNamespace({
     "importExport.direction.targetLabel": "Target language",
     "importExport.direction.targetPlaceholder": "e.g. Spanish, fra, swh",
     "importExport.direction.changeLaterHint": "You can change these later in {path}.",
+    "importExport.direction.settingsBreadcrumb": "Project Settings → Project Info",
     "importExport.direction.skip": "Skip for now",
     "importExport.direction.setting": "Setting…",
     "importExport.direction.setDirection": "Set direction",
 
     // — Shared across format panels —
-    "importExport.action.import": "Import",
     "importExport.action.importing": "Importing…",
     "importExport.errors.importFailed": "Import failed",
 
@@ -54,6 +52,7 @@ export const importExport = defineNamespace({
       "Upload a Macula TSV file obtained from {link}. Each TSV file represents one " +
       "biblical book. The Hebrew and Greek word-level morphology (lemma, morph code, " +
       "Strong's) will be preserved alongside the verse text.",
+    "importExport.macula.linkText": "Clear Bible's Macula project",
     "importExport.macula.chooseFile": "Choose Macula TSV file",
     "importExport.macula.parsing": "Parsing verse data…",
     "importExport.macula.uploadingCells": plural(
@@ -65,6 +64,7 @@ export const importExport = defineNamespace({
     "importExport.tn.description":
       "Upload an {link} TSV file. Each row becomes a note cell; notes appear in a " +
       "sidebar when you focus a translation cell at the matching verse reference.",
+    "importExport.tn.linkText": "unfoldingWord-style Translation Notes",
     "importExport.tn.chooseFile": "Choose Translation Notes TSV",
     "importExport.tn.parsing": "Parsing translation notes…",
     "importExport.tn.uploadingNotes": plural(
@@ -93,6 +93,7 @@ export const importExport = defineNamespace({
       "{localizedFile}) to pre-fill the target column with the translation so far. " +
       "Entries import one file per Hebrew letter plus a semantic-domain label file; " +
       "each sense groups as one paragraph with a cell per definition, gloss list, and comment.",
+    "importExport.sdbh.dictionaryName": "Semantic Dictionary of Biblical Hebrew",
     "importExport.sdbh.chooseMaster": "Choose master edition (SDBH-en.JSON)",
     "importExport.sdbh.chooseLocalized": "Choose localized edition (optional)",
     "importExport.sdbh.parsingLexicon": "Parsing lexicon…",
@@ -113,15 +114,10 @@ export const importExport = defineNamespace({
       "sentence; export puts each block back together as InDesign set it.",
     "importExport.biblica.chooseFile": "Choose study Bible IDML file",
     "importExport.biblica.splitSentencesLabel": "Split long notes into one cell per sentence",
-    "importExport.biblica.splitSentencesAriaLabel": "Split long notes into one cell per sentence",
     "importExport.biblica.splitSentencesHint":
       "Leave unchecked to import each note line as one larger cell. Lists still split per line either way.",
     "importExport.biblica.readingPackage": "Reading the InDesign package…",
     "importExport.biblica.readingPackageWithProgress": "Reading the InDesign package… ({completed} / {total})",
-    "importExport.biblica.uploadingNotes": plural(
-      { one: "Uploading: {enqueued} / {total} note", other: "Uploading: {enqueued} / {total} notes" },
-      "total",
-    ),
     "importExport.biblica.paragraphsSkipped": plural({
       one: "{count} scripture paragraph skipped.",
       other: "{count} scripture paragraphs skipped.",
@@ -133,7 +129,6 @@ export const importExport = defineNamespace({
     "importExport.dcs.filesProgress": "{uploaded} / {total} files",
     "importExport.dcs.fetchingAndParsing": "Fetching & parsing from Door43…",
     "importExport.dcs.importComplete": "Import complete",
-    "importExport.dcs.filesCount": plural({ one: "{count} file", other: "{count} files" }),
     "importExport.dcs.cellsCount": plural({ one: "{count} cell", other: "{count} cells" }),
     "importExport.dcs.pinnedToRelease": "Pinned to release {ref}",
     "importExport.dcs.couldNotPin":
@@ -234,7 +229,6 @@ export const importExport = defineNamespace({
     "importExport.helloao.presetOldTestament": "Old Testament",
     "importExport.helloao.presetNewTestament": "New Testament",
     "importExport.helloao.booksSelected": "{checked} of {total} books",
-    "importExport.helloao.downloading": "Downloading {id}… {progress}",
     "importExport.helloao.parsingVerses": "Parsing verses…",
     "importExport.helloao.uploadingVerses": "Uploading verses: {enqueued} / {total}",
     "importExport.helloao.approxVerseCount": plural(
@@ -276,7 +270,6 @@ export const importExport = defineNamespace({
     "importExport.paratext.bookProgressLabel": "{book} · book {done} of {total}",
     "importExport.paratext.booksProgressLabel": "{done} / {total} books",
     "importExport.paratext.uploadingBook": "Uploading {book}…",
-    "importExport.paratext.uploading": "Uploading…",
     "importExport.paratext.couldNotLoadSourceList": "Couldn't load the source list",
     "importExport.paratext.fetchingSource": "Fetching source: {title}…",
     "importExport.paratext.cellsProgress": "{count} / {total} cells · {bookLabel}",
@@ -330,34 +323,28 @@ export const importExport = defineNamespace({
     "importExport.upload.chooseFolder": "Choose Folder",
     "importExport.upload.categoryScripture": "Scripture",
     "importExport.upload.categoryTranslation": "Translation",
+    "importExport.upload.formatsTranslation": "XLIFF/XLF, TMX, CSV/TSV",
     "importExport.upload.categoryDocuments": "Documents",
+    "importExport.upload.formatsDocuments": "DOCX, TXT, MD, HTML, JSON/ARB, PPTX, IDML (InDesign)",
     "importExport.upload.categoryLocalization": "Localization",
+    "importExport.upload.formatsLocalization": "PO/POT, Java properties",
     "importExport.upload.categorySubtitles": "Subtitles",
+    "importExport.upload.formatsSubtitles": "VTT, SRT, SBV",
     "importExport.upload.categoryParatextProject": "Paratext project",
     "importExport.upload.zipOrFolder": ".zip or folder",
     "importExport.upload.categoryOtherFormats": "Other formats",
     "importExport.upload.otherFormatsHint": "AI-assisted when configured, always reviewed before import",
 
     // — Main ImportDialog shell (title bar + top-level error frames) —
-    "importExport.dialog.titleImport": "Import",
     "importExport.dialog.titleDirection": "Set translation direction",
     "importExport.dialog.titleResult": "Import complete — some items skipped",
     "importExport.dialog.titleCollision": "Re-import detected",
-    "importExport.dialog.titlePreview": "Preview",
     "importExport.dialog.backToFileSelection": "Back to file selection",
     "importExport.dialog.backToImportTypes": "Back to import types",
-    "importExport.dialog.titleUpload": "Upload Files",
     "importExport.dialog.titleHelloao": "Bible API (helloao.org)",
-    "importExport.dialog.titleObs": "Open Bible Stories",
-    "importExport.dialog.titleDcs": "Door43 (DCS)",
-    "importExport.dialog.titleMacula": "Macula Hebrew + Greek",
     "importExport.dialog.titleTn": "Translation Notes (TSV)",
-    "importExport.dialog.titleBiblica": "Biblica Study Bible Notes",
     "importExport.dialog.titleSpreadsheet": "Spreadsheet (CSV / XLSX)",
-    "importExport.dialog.titleLabels": "Cell Labels / Cast",
     "importExport.dialog.titlePaired": "Paired Translation Import",
-    "importExport.dialog.titleSdbh": "SDBH Hebrew Lexicon",
-    "importExport.dialog.titleEbible": "eBible Corpus",
     "importExport.dialog.finishSaveFailed": "Couldn't finish saving your import — please try again. ({message})",
     "importExport.dialog.saveFailed": "Couldn't save your import — please try again. ({message})",
     "importExport.dialog.labelsNeedSourceFile":
@@ -449,7 +436,6 @@ export const importExport = defineNamespace({
     "importExport.dialog.someFormattingMayNotCarryOver": "Some inline formatting may not carry over.",
     "importExport.dialog.formatOptionAriaLabel": "{label} ({ext})",
     "importExport.dialog.lossyBadge": "lossy",
-    "importExport.dialog.exportTitle": "Export",
     "importExport.dialog.permissionRequiredAriaLabel": "Export permission required",
     "importExport.dialog.noExportPermission": "You don't have export permission",
     "importExport.dialog.permissionExplanation":
@@ -467,7 +453,6 @@ export const importExport = defineNamespace({
     "importExport.dialog.formatGroupAriaLabel": "Export format",
     "importExport.dialog.scopeLegend": "Scope",
     "importExport.dialog.scopeGroupAriaLabel": "Export scope",
-    "importExport.dialog.scopeFile": "Current file",
     "importExport.dialog.scopeProject": "Whole project",
     "importExport.dialog.scopeNotSupportedHint": "Project scope not supported for this format.",
     "importExport.dialog.scopeAlwaysProjectHint": "This format always exports the whole project.",
@@ -480,7 +465,6 @@ export const importExport = defineNamespace({
     "importExport.dialog.allVoices": "All voices",
     "importExport.dialog.voiceFilterHint": "Export will include only cells assigned to {voice}, across all camera angles.",
     "importExport.dialog.filenameLegend": "Filename",
-    "importExport.dialog.filenamePlaceholder": "filename",
     "importExport.dialog.filenameAriaLabel": "Export filename (without extension)",
     "importExport.dialog.projectScopeUsesProjectName": "Project-scope exports use the project name.",
     "importExport.dialog.appendTimestamp": "Append timestamp",
@@ -513,7 +497,6 @@ export const importExport = defineNamespace({
     "importExport.dialog.andMore": "…and {count} more",
     "importExport.dialog.done": "Done",
     "importExport.dialog.exportAgain": "Export again",
-    "importExport.dialog.exportButton": "Export",
 
     // — Export dialog: handleExport status messages —
     "importExport.status.exporting": "Exporting…",
@@ -663,7 +646,7 @@ export const importExport = defineNamespace({
         placeholders: { link: "Hyperlink reading 'unfoldingWord-style Translation Notes'." },
       },
       "importExport.tn.uploadingNotes": {
-        description: "Upload progress line on the Translation Notes panel: how many note cells have been enqueued.",
+        description: "Upload progress line on the Translation Notes and Biblica panels: how many note cells have been enqueued.",
         placeholders: {
           enqueued: "Number of note cells enqueued so far, already locale-formatted.",
           total: "Total note count; also governs the plural form.",
@@ -711,21 +694,15 @@ export const importExport = defineNamespace({
           total: "Total cell count, already locale-formatted.",
         },
       },
-      "importExport.biblica.splitSentencesAriaLabel": {
-        description: "Accessible name for the checkbox that splits long Biblica study notes into one cell per sentence.",
+      "importExport.biblica.splitSentencesLabel": {
+        description:
+          "Visible label AND the checkbox's own accessible name (identical text, reused directly rather than duplicated as a separate aria-label key) for splitting long Biblica study notes into one cell per sentence.",
       },
       "importExport.biblica.readingPackageWithProgress": {
         description: "Parse-phase progress line on the Biblica panel while unpacking the IDML package, once a file count is known.",
         placeholders: {
           completed: "Number of internal IDML parts processed so far.",
           total: "Total number of internal IDML parts.",
-        },
-      },
-      "importExport.biblica.uploadingNotes": {
-        description: "Upload-phase progress line on the Biblica panel: how many note cells have been enqueued.",
-        placeholders: {
-          enqueued: "Number of note cells enqueued so far, already locale-formatted.",
-          total: "Total note count; also governs the plural form.",
         },
       },
       "importExport.biblica.paragraphsSkipped": {
@@ -747,12 +724,8 @@ export const importExport = defineNamespace({
           total: "Total file count, already locale-formatted.",
         },
       },
-      "importExport.dcs.filesCount": {
-        description: "First half of the Door43 (DCS) import-complete summary — how many files landed. Joined with cellsCount by ' · '.",
-        placeholders: { count: "Number of files imported, already locale-formatted." },
-      },
       "importExport.dcs.cellsCount": {
-        description: "Second half of the Door43 (DCS) import-complete summary — how many cells landed. Joined with filesCount by ' · '.",
+        description: "Second half of the Door43 (DCS) import-complete summary — how many cells landed. Joined with search.expanded.fileCount by ' · '.",
         placeholders: { count: "Number of cells imported, already locale-formatted." },
       },
       "importExport.dcs.pinnedToRelease": {
@@ -804,11 +777,6 @@ export const importExport = defineNamespace({
         description: "Selection counter above the book checklist on the helloao.org book-selection step.",
         placeholders: { checked: "Number of books currently checked.", total: "Total number of books available." },
       },
-      "importExport.helloao.downloading": {
-        description:
-          "Download-phase progress line on the helloao.org book-selection step. {progress} is a pre-formatted byte-transfer string — do not re-format the number inside it.",
-        placeholders: { id: "The translation's short id (e.g. 'BSB').", progress: "Pre-formatted byte transfer progress string." },
-      },
       "importExport.helloao.uploadingVerses": {
         description: "Upload-phase progress line on the helloao.org book-selection step.",
         placeholders: {
@@ -847,8 +815,8 @@ export const importExport = defineNamespace({
       },
       "importExport.ebible.downloading": {
         description:
-          "Download-phase progress line on the eBible panel (source or target mode). {progress} is a pre-formatted byte-transfer string — do not re-format the number inside it.",
-        placeholders: { id: "The translation's short id (e.g. 'KJV').", progress: "Pre-formatted byte transfer progress string." },
+          "Download-phase progress line, shared by the eBible panel (source or target mode) and the helloao.org panel. {progress} is a pre-formatted byte-transfer string — do not re-format the number inside it.",
+        placeholders: { id: "The translation's short id (e.g. 'KJV' or 'BSB').", progress: "Pre-formatted byte transfer progress string." },
       },
       "importExport.ebible.committingVerses": {
         description: "Progress line while target-mode verse matches are being committed to the project.",

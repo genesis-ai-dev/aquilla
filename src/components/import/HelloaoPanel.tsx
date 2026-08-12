@@ -220,7 +220,7 @@ export function HelloaoPanel({ projectId, username, sourceLanguage, targetLangua
           <div className="text-xs text-muted-foreground">
             <p>
               {progress.phase === "download"
-                ? t("importExport.helloao.downloading", {
+                ? t("importExport.ebible.downloading", {
                     id: selected.id,
                     progress: formatProgress(progress.received, progress.total, locale),
                   })
@@ -255,7 +255,7 @@ export function HelloaoPanel({ projectId, username, sourceLanguage, targetLangua
             </span>
           )}
           <Button onClick={handleImport} disabled={!books || checkedBooks.size === 0 || importing}>
-            {importing ? t("importExport.action.importing") : t("importExport.action.import")}
+            {importing ? t("importExport.action.importing") : t("nav.workspaceActions.import")}
           </Button>
         </div>
       </div>

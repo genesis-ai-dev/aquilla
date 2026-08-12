@@ -79,7 +79,7 @@ export function SdbhPanel({ projectId, username, getToken, onImported }: SdbhPan
         <RichMessage
           k="importExport.sdbh.description"
           values={{
-            dictName: <span className="font-medium">Semantic Dictionary of Biblical Hebrew</span>,
+            dictName: <span className="font-medium">{t("importExport.sdbh.dictionaryName")}</span>,
             masterFile: <code>SDBH-en.JSON</code>,
             localizedFile: <code>SDBH-es.JSON</code>,
           }}
@@ -143,7 +143,7 @@ export function SdbhPanel({ projectId, username, getToken, onImported }: SdbhPan
       {error && <p className="text-sm text-destructive">{error}</p>}
       <div className="flex justify-end">
         <Button onClick={handleImport} disabled={!masterFile || importing}>
-          {importing ? t("importExport.action.importing") : t("importExport.action.import")}
+          {importing ? t("importExport.action.importing") : t("nav.workspaceActions.import")}
         </Button>
       </div>
     </div>

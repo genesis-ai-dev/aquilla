@@ -88,7 +88,7 @@ export function BiblicaPanel({
             checked={splitSentences}
             disabled={importing}
             onCheckedChange={(checked) => setSplitSentences(checked === true)}
-            aria-label={t("importExport.biblica.splitSentencesAriaLabel")}
+            aria-label={t("importExport.biblica.splitSentencesLabel")}
           />
           <span className="flex flex-col gap-0.5">
             <span>{t("importExport.biblica.splitSentencesLabel")}</span>
@@ -113,7 +113,7 @@ export function BiblicaPanel({
           {progress.phase === "save" && progress.cellsTotal && (
             <>
               <p>
-                {t("importExport.biblica.uploadingNotes", {
+                {t("importExport.tn.uploadingNotes", {
                   enqueued: formatNumber(progress.cellsEnqueued ?? 0, locale),
                   total: formatNumber(progress.cellsTotal, locale),
                 })}
@@ -138,7 +138,7 @@ export function BiblicaPanel({
       {error && <p className="text-sm text-destructive">{error}</p>}
       <div className="flex justify-end">
         <Button onClick={handleImport} disabled={!file || importing}>
-          {importing ? t("importExport.action.importing") : t("importExport.action.import")}
+          {importing ? t("importExport.action.importing") : t("nav.workspaceActions.import")}
         </Button>
       </div>
     </div>

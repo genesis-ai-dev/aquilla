@@ -54,7 +54,7 @@ export function TnPanel({ projectId, username, getToken, onImported }: TnPanelPr
                 rel="noreferrer"
                 className="underline"
               >
-                unfoldingWord-style Translation Notes
+                {t("importExport.tn.linkText")}
               </a>
             ),
           }}
@@ -108,7 +108,7 @@ export function TnPanel({ projectId, username, getToken, onImported }: TnPanelPr
       {error && <p className="text-sm text-destructive">{error}</p>}
       <div className="flex justify-end">
         <Button onClick={handleImport} disabled={!file || importing}>
-          {importing ? t("importExport.action.importing") : t("importExport.action.import")}
+          {importing ? t("importExport.action.importing") : t("nav.workspaceActions.import")}
         </Button>
       </div>
     </div>

@@ -50,7 +50,7 @@ export function MaculaPanel({ projectId, username, getToken, onImported }: Macul
                 rel="noreferrer"
                 className="underline"
               >
-                Clear Bible's Macula project
+                {t("importExport.macula.linkText")}
               </a>
             ),
           }}
@@ -99,7 +99,7 @@ export function MaculaPanel({ projectId, username, getToken, onImported }: Macul
       {error && <p className="text-sm text-destructive">{error}</p>}
       <div className="flex justify-end">
         <Button onClick={handleImport} disabled={!file || importing}>
-          {importing ? t("importExport.action.importing") : t("importExport.action.import")}
+          {importing ? t("importExport.action.importing") : t("nav.workspaceActions.import")}
         </Button>
       </div>
     </div>

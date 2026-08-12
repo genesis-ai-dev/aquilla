@@ -71,7 +71,7 @@ export function DirectionPanel({
       <p className="text-xs text-muted-foreground">
         <RichMessage
           k="importExport.direction.changeLaterHint"
-          values={{ path: <strong>Project Settings → Project Info</strong> }}
+          values={{ path: <strong>{t("importExport.direction.settingsBreadcrumb")}</strong> }}
         />
       </p>
       {/* AQU-249: restore direction screen on failure so the user can retry */}

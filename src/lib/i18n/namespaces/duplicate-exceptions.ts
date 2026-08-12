@@ -107,4 +107,50 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "speech in languages that mark that distinction; the English capitalization " +
     "difference is incidental, not the reason (a case-only split alone would not " +
     "justify this entry).",
+  "importExport.landing.badgeBeta":
+    "Per-format maturity pill on one import-option card on the landing screen " +
+    "('this specific importer is beta'). nav.beta.badge is the app-chrome pill " +
+    "for the whole product ('Aquilla itself is in beta') that opens a heads-up " +
+    "dialog when clicked. A language that marks the scope of 'beta' (a single " +
+    "feature vs. the whole application) would render these two differently.",
+  "importExport.dialog.scopeLegend":
+    "Field-group legend above the file/project scope toggle on the Export " +
+    "dialog. dialog.assign.scopeLabel is the unrelated cast/voice-assignment " +
+    "modal's scope selector (which camera angles an assignment applies to). " +
+    "Two independent 'what does this apply to' concepts that only share the " +
+    "English noun; a language that names the axis being scoped would diverge.",
+  "importExport.landing.tn.title":
+    "Import-format option title on the landing screen ('choose Translation " +
+    "Notes as your import source'). editor.tn.title is the reference-panel " +
+    "heading shown beside the cell being translated, once notes already exist " +
+    "in the project. A picker label and a reading-pane heading are different " +
+    "grammatical roles many languages would not render identically.",
+  "importExport.dialog.andMore":
+    "Truncation notice at the end of the export inline-style fidelity-warnings " +
+    "list. editor.ebible.andMore is the unrelated truncation notice at the end " +
+    "of the eBible target-import book preview list. Two independent 'n more' " +
+    "counters in unrelated flows that only happen to share English wording.",
+  "importExport.upload.categorySubtitles":
+    "Format-category label ('Subtitles') in the main Upload files panel's " +
+    "supported-formats legend. editor.timeline.laneSubtitle names the subtitle " +
+    "track in the audio timeline editor. A format-picker category and a " +
+    "timeline lane name are different parts of the UI that happen to share " +
+    "the English noun.",
+  "importExport.paratext.sourceTextTitle":
+    "Card title on the Paratext preview screen offering 'import as source' " +
+    "('Source text'). editor.source.textAria is the unrelated accessible name " +
+    "for the source-column text region inside the cell editor. A choice-card " +
+    "heading and an accessibility name for an existing pane serve different " +
+    "purposes and different audiences (sighted vs. screen-reader users).",
+  "importExport.dialog.voiceLegend":
+    "Field-group legend above the cast-voice export filter on the Export " +
+    "dialog ('Voice: <select>'). editor.navTitle.voice is the unrelated tab " +
+    "title for the Voices panel in the editor's left dock. A filter-field " +
+    "legend and a navigation-tab title are different UI roles.",
+  "importExport.direction.targetLabel":
+    "Form-field label on the post-import direction prompt, where the user " +
+    "types the project's target language. autopilot.inspector.details." +
+    "targetLanguage is the unrelated read-only detail-row label in the " +
+    "autopilot run inspector. An editable field label and a read-only detail " +
+    "row are different grammatical roles many languages would not share.",
 }

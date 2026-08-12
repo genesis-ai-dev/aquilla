@@ -134,7 +134,7 @@ export function DcsPanel({ projectId, getToken, defaultLang, patchDcsCursor, onI
           <p>
             {/* Two independent counts (files, cells) — each pluralized on its own and
              *  joined, rather than one template agreeing with two numbers at once. */}
-            {t("importExport.dcs.filesCount", { count: formatNumber(summary.files, locale) })}
+            {t("search.expanded.fileCount", { count: formatNumber(summary.files, locale) })}
             {" · "}
             {t("importExport.dcs.cellsCount", { count: formatNumber(summary.cells, locale) })}
           </p>

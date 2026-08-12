@@ -364,7 +364,7 @@ export function EBiblePanel({ projectId, username, sourceLanguage, targetLanguag
       <div className="flex justify-end">
         {mode === "source" ? (
           <Button onClick={handleImport} disabled={!selected || importing}>
-            {importing ? t("importExport.action.importing") : t("importExport.action.import")}
+            {importing ? t("importExport.action.importing") : t("nav.workspaceActions.import")}
           </Button>
         ) : (
           <Button onClick={handlePrepareTarget} disabled={!selected || importing || !sourceCells?.length}>

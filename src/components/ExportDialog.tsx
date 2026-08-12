@@ -790,7 +790,7 @@ export function ExportDialog({
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>{t("importExport.dialog.exportTitle")}</DialogTitle>
+          <DialogTitle>{t("nav.workspaceActions.export")}</DialogTitle>
         </DialogHeader>
 
         {/* AQU-458: the whole body scrolls as one region (DialogBody =
@@ -955,7 +955,7 @@ export function ExportDialog({
             aria-label={t("importExport.dialog.scopeGroupAriaLabel")}
             className="self-start"
             options={[
-              { label: t("importExport.dialog.scopeFile"), value: "file", disabled: isProjectOnlyFormat },
+              { label: t("search.dialog.scopeCurrentFile"), value: "file", disabled: isProjectOnlyFormat },
               { label: t("importExport.dialog.scopeProject"), value: "project", disabled: isFileOnlyFormat },
             ]}
             onValueChange={setScope}
@@ -1037,7 +1037,7 @@ export function ExportDialog({
               value={effectiveScope === "project" ? projectName.replace(/[^\w.-]+/g, "-").replace(/^-+|-+$/g, "") || "project" : customBaseName}
               onChange={(e) => setCustomBaseName(e.target.value)}
               disabled={effectiveScope === "project"}
-              placeholder={t("importExport.dialog.filenamePlaceholder")}
+              placeholder={t("importExport.dialog.filenameLegend")}
               aria-label={t("importExport.dialog.filenameAriaLabel")}
               className="h-7 text-sm font-mono"
             />
@@ -1326,7 +1326,7 @@ export function ExportDialog({
                 ) : (
                   <Download className="h-4 w-4" aria-hidden="true" />
                 )}
-                {isBusy ? t("importExport.status.exporting") : isDone ? t("importExport.dialog.exportAgain") : t("importExport.dialog.exportButton")}
+                {isBusy ? t("importExport.status.exporting") : isDone ? t("importExport.dialog.exportAgain") : t("nav.workspaceActions.export")}
               </Button>
             </>
           )}

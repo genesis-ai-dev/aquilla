@@ -123,6 +123,35 @@ describe("mergeCellsDelta", () => {
     expect(merged.filter((r) => r.anchorCellId == null)).toHaveLength(1)
   })
 
+  // Round 4: the SAME bug one position along. The head fix only re-pointed the
+  // old head, so a MID-FILE insert left the successor still anchored to the
+  // cell before it — two siblings on one anchor. Invisible in the table
+  // (time-sorted) and invisible until the file is exported, which reads chain
+  // order.
+  it("WITHOUT re-pointing the successor, a mid-file insert lands at the TAIL", () => {
+    const cached = chain("source", "a", "b", "c")
+    // x inserted between a and b, but b still points at a.
+    const merged = mergeCellsDelta(cached, ["x"], [
+      row("x", "source", { anchorCellId: "a", eventId: "e-zzz-newer" }),
+    ])
+    // b (lower event id) is emitted first AND drags its whole subtree — the
+    // rest of the file — before x gets a turn.
+    expect(merged.map((r) => r.cellId)).toEqual(["a", "b", "c", "x"])
+  })
+
+  it("re-pointing the successor puts the new line where the clock says", () => {
+    const cached = chain("source", "a", "b", "c")
+    const merged = mergeCellsDelta(cached, ["x", "b"], [
+      row("x", "source", { anchorCellId: "a", eventId: "e-zzz-newer" }),
+      row("b", "source", { anchorCellId: "x", eventId: "e-b2" }),
+    ])
+    expect(merged.map((r) => r.cellId)).toEqual(["a", "x", "b", "c"])
+    // Still exactly one head, and no cell claims an anchor twice.
+    expect(merged.filter((r) => r.anchorCellId == null)).toHaveLength(1)
+    const anchors = merged.map((r) => r.anchorCellId).filter(Boolean)
+    expect(new Set(anchors).size).toBe(anchors.length)
+  })
+
   it("replaces a changed row in place without disturbing order (validate flip)", () => {
     const cached = chain("target", "a", "b", "c")
     const merged = mergeCellsDelta(cached, ["b"], [

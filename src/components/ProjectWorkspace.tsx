@@ -3701,6 +3701,15 @@ export function ProjectWorkspace() {
       // That is a data-order bug in its own right: store order is what the
       // exporters and findIndexByCellId read, not just what the table scrolls to.
       const oldHead = before ? null : cellStore.getChainHeadCellId()
+      // ...and the SAME bug one position along, which the head fix did not
+      // cover. Inserting mid-file leaves `after` still anchored to `before`, so
+      // `after` and the new line are siblings on one anchor — walkAnchorChain
+      // emits the lower event id first AND its whole subtree with it, which is
+      // the rest of the file, so the new line lands at the tail again. Only the
+      // symptom differed: the head case jumped the table, this one is invisible
+      // until the file is exported. Re-point `after` onto the new line and the
+      // chain matches the clock in every insert position.
+      const successor = before && after ? after : null
       // ONE batch, create first, so there is never a tick where the row exists
       // at the tail. The two chain-mutating events sit on different cells, so
       // neither waits on the other's head. source.cell.reorder carries the same
@@ -3736,6 +3745,19 @@ export function ProjectWorkspace() {
                 fileId: activeFileId,
                 cellId: oldHead.cellId,
                 parentId: oldHead.eventId,
+                author: currentUsername,
+                payload: { anchorCellId: cellId },
+              },
+            ]
+          : []),
+        ...(successor?.sourceEventId
+          ? [
+              {
+                kind: "source.cell.reorder" as const,
+                projectId: project.id,
+                fileId: activeFileId,
+                cellId: successor.id,
+                parentId: successor.sourceEventId,
                 author: currentUsername,
                 payload: { anchorCellId: cellId },
               },

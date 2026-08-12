@@ -15,6 +15,7 @@ const idleQueue: QueueForFile = {
   running: false,
   cellId: null,
   kind: "idle",
+  errorMessage: null,
   progress: { currentTime: 0, duration: 0, rate: 1, volume: 1 },
 }
 
@@ -24,6 +25,7 @@ const runningQueue: QueueForFile = {
   running: true,
   cellId: "c9",
   kind: "playing",
+  errorMessage: null,
   progress: { currentTime: 4, duration: 10, rate: 1.5, volume: 0.8 },
 }
 
@@ -32,6 +34,8 @@ const video = (over: Partial<VideoTransportInput> = {}): VideoTransportInput => 
   playing: true,
   durationSec: 4212,
   soundingCellId: "cue-3",
+  rate: 1,
+  volume: 1,
   ...over,
 })
 
@@ -114,11 +118,14 @@ describe("selectTransportForFile", () => {
   })
 
   it("reports the picture's own rate and volume, not the queue's stale ones", () => {
-    // The native controls own both in this arrangement, and nothing publishes
-    // them — so showing the queue's 1.5x would be a readout about a transport
-    // that is not sounding.
-    const t = selectTransportForFile({ ...idleQueue, progress: runningQueue.progress }, video())
-    expect(t.progress.rate).toBe(1)
-    expect(t.progress.volume).toBe(1)
+    // Showing an idle queue's 1.5x would be a readout about a transport that is
+    // not sounding. The picture's values are mirrored from the element, so the
+    // bar and the native controls can never disagree.
+    const t = selectTransportForFile(
+      { ...idleQueue, progress: runningQueue.progress },
+      video({ rate: 0.5, volume: 0.25 }),
+    )
+    expect(t.progress.rate).toBe(0.5)
+    expect(t.progress.volume).toBe(0.25)
   })
 })

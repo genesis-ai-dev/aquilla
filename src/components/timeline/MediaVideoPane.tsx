@@ -24,7 +24,8 @@ import { queueClockIsFileTime, useQueueAudibility, useQueueForFile } from "@/lib
 import { effectiveSourceText } from "@/lib/cell-text"
 import type { DirectionMode, TextDirection } from "@/lib/text-direction"
 import { cellIdAtSec } from "@/lib/timeline/source-regions"
-import { setVideoSoundingCellId, useVideoSoundingCellId } from "@/lib/timeline/video-clock"
+import { setVideoRate, setVideoSoundingCellId, setVideoVolume, useVideoSoundingCellId } from "@/lib/timeline/video-clock"
+import { clearVideoControllerIf, setVideoController, type VideoController } from "@/lib/timeline/video-controller"
 import { videoSyncAction } from "./video-sync"
 import { DEFAULT_VIDEO_ASPECT, fitPictureRect, intrinsicAspect } from "./video-frame"
 import { VideoPaneHeader } from "./VideoPaneHeader"
@@ -319,6 +320,47 @@ export function MediaVideoPane({
     }
   }, [seekNonce, seekTarget])
 
+  // Round 5: the playback bar has to DRIVE the picture it reports, so the pane
+  // registers a controller reading the element live. Registered only in the
+  // STANDALONE arrangement — a slaved picture is the queue's to command, and a
+  // second driver would fight it.
+  useEffect(() => {
+    if (slaved) return
+    const controller: VideoController = {
+      play: () => {
+        const video = videoRef.current
+        if (!video) return
+        wantPlayRef.current = true
+        requestPlay(video)
+      },
+      pause: () => {
+        wantPlayRef.current = false
+        videoRef.current?.pause()
+      },
+      isPaused: () => videoRef.current?.paused ?? true,
+      seek: (sec) => {
+        const video = videoRef.current
+        if (!video) return
+        try {
+          video.currentTime = Math.max(0, sec)
+          prevTickRef.current = null
+        } catch {
+          /* not seekable yet */
+        }
+      },
+      setRate: (rate) => {
+        const video = videoRef.current
+        if (video) video.playbackRate = rate
+      },
+      setVolume: (volume) => {
+        const video = videoRef.current
+        if (video) video.volume = Math.max(0, Math.min(1, volume))
+      },
+    }
+    setVideoController(controller)
+    return () => clearVideoControllerIf(controller)
+  }, [slaved, requestPlay])
+
   // Space from the timeline. Only in the STANDALONE arrangement: when the queue
   // is the transport it owns play/pause, and two writers would fight. Toggling
   // against the element's own `paused` means the app and the picture's native
@@ -484,7 +526,11 @@ export function MediaVideoPane({
           // Standalone only: the queue is idle here, so it cannot tell the
           // playhead whether anything is running. `ended` is included because
           // it does not imply `pause` on every engine.
-          onPlay={slaved ? undefined : () => onVideoPlaying?.(true)}
+          // Mirror the element's own rate/volume so the bar and these native
+        // controls always agree — whichever the user reaches for.
+        onRateChange={slaved ? undefined : (e) => setVideoRate((e.currentTarget as HTMLVideoElement).playbackRate)}
+        onVolumeChange={slaved ? undefined : (e) => setVideoVolume((e.currentTarget as HTMLVideoElement).volume)}
+        onPlay={slaved ? undefined : () => onVideoPlaying?.(true)}
           onPause={slaved ? undefined : () => onVideoPlaying?.(false)}
           onEnded={slaved ? undefined : () => onVideoPlaying?.(false)}
         />

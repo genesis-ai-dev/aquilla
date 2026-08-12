@@ -39,6 +39,10 @@ export interface VideoTransportInput {
   durationSec: number | null | undefined
   /** `cellIdAtSec`, published by the pane. Null in a silence. */
   soundingCellId: string | null
+  /** The element's own rate/volume, mirrored from `ratechange`/`volumechange`
+   *  so the bar and the picture's native controls always show the same number. */
+  rate: number
+  volume: number
 }
 
 /**
@@ -81,15 +85,16 @@ export function selectTransportForFile(
     running: active && video.playing,
     cellId: active ? video.soundingCellId : null,
     kind: active ? (video.playing ? "playing" : "paused") : "idle",
+    // A picture reports its own failures through the pane's error card; the
+    // bar never has an error of its own to show for the video.
+    errorMessage: null,
     progress: {
       currentTime: video.currentSec ?? 0,
       duration,
-      // Nothing publishes the picture's rate or volume — the native controls
-      // own both in the standalone arrangement. Reporting the defaults keeps
-      // the bar's readouts honest rather than showing a queue value that has
-      // nothing to do with what is sounding.
-      rate: 1,
-      volume: 1,
+      // The PICTURE's rate and volume, never the queue's — showing an idle
+      // queue's 1.5x would be a readout about a transport that is not sounding.
+      rate: video.rate,
+      volume: video.volume,
     },
     source: "video",
   }

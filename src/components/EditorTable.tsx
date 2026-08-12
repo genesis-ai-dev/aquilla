@@ -66,6 +66,7 @@ import { useIsMediaCursorCell, useMediaSyncActive } from "@/lib/timeline/media-c
 import { useUiSlot } from "@/lib/ui-slots"
 import { CastGutterVoice } from "@/components/voice/CastGutterVoice"
 import { useIsQueueCurrentCell, useQueueCurrentCellId } from "@/lib/audio/play-queue"
+import { useVideoClockPlaying, useVideoSoundingCellId } from "@/lib/timeline/video-clock"
 import { useRailIdleHide } from "@/hooks/useRailIdleHide"
 import {
   computeRailPinned,
@@ -231,10 +232,18 @@ export function MediaFollowDriver({
    *  its follow-hover lock. */
   onFollowRest: () => void
 }) {
+  // AQU-646 round 5: EITHER transport. This subscribed to the queue alone,
+  // which is why the dialogue table never scrolled on a file whose transport is
+  // the linked picture — the queue is idle there by construction, so the scroll
+  // effect below could never pass its guard. The queue still wins when it is
+  // genuinely running, matching the video pane's caption precedence.
   const queueCellId = useQueueCurrentCellId()
-  // Same stale-singleton guard as the timeline: a queue running another
+  const videoCellId = useVideoSoundingCellId()
+  const videoPlaying = useVideoClockPlaying()
+  const runningCellId = queueCellId ?? (videoPlaying ? videoCellId : null)
+  // Same stale-singleton guard as the timeline: a transport running another
   // file's cells must not scroll this table.
-  const queueRunning = queueCellId != null && isCellDisplayed(queueCellId)
+  const queueRunning = runningCellId != null && isCellDisplayed(runningCellId)
   const [follow, setFollow] = useState(true)
   // Rising edge of running (play, resume) re-engages following — a user who
   // scrolled away re-opts-in by pressing play, exactly like the track view.
@@ -257,8 +266,8 @@ export function MediaFollowDriver({
   }, [followCommand])
   // A cell boundary IS the page-flip: bring the running row to ~1/3 height.
   useEffect(() => {
-    if (follow && queueRunning && queueCellId != null) scrollToCell(queueCellId)
-  }, [follow, queueRunning, queueCellId, scrollToCell])
+    if (follow && queueRunning && runningCellId != null) scrollToCell(runningCellId)
+  }, [follow, queueRunning, runningCellId, scrollToCell])
   // The truce: a scroll more than 250ms after our own programmatic scroll is
   // the USER moving away — stop following until the next play/resume. 250ms
   // (vs the track's 150ms) absorbs LegendList's post-scrollToIndex settling
@@ -4160,8 +4169,11 @@ function EditorRow({
   // lens keeps its existing scroll-and-flash behavior unchanged). Both hooks
   // run unconditionally; only the combination is conditional.
   const isQueueCurrentCell = useIsQueueCurrentCell(cell.id)
+  // Round 5: the same "either transport" rule the follow driver uses — without
+  // it the sounding row went unmarked on a file the picture is driving.
+  const videoSoundingCellId = useVideoSoundingCellId()
   const rowMediaSyncActive = useMediaSyncActive()
-  const isQueueRow = isQueueCurrentCell && rowMediaSyncActive
+  const isQueueRow = (isQueueCurrentCell || videoSoundingCellId === cell.id) && rowMediaSyncActive
   const remoteCellPresence = useCellPresence(presenceStore, cell.id)
   // A focus lock admits one active writer. Prefer its newest ephemeral draft
   // so the read surface and remote caret advance together between commits.

@@ -16,9 +16,11 @@ import { AppTooltip } from "@/components/ui/tooltip"
 import { VoiceAvatar } from "@/components/voice/VoiceAvatar"
 import { cn } from "@/lib/utils"
 import {
-  hasAnyPlayableAudio, pauseQueue, resumeQueue, seekQueueToTime, setQueueRate, setQueueVolume,
-  skipBack, skipForward, startQueue, updateQueueCells, useQueueProgress, useQueueState,
+  hasAnyPlayableAudio, pauseQueue, queueClockIsFileTime, resumeQueue, seekQueueToTime,
+  setQueueRate, setQueueVolume, skipBack, skipForward, startQueue, updateQueueCells,
 } from "@/lib/audio/play-queue"
+import { useTransportForFile } from "@/hooks/useTransportForFile"
+import { useVideoController } from "@/lib/timeline/video-controller"
 import { spacebarShouldToggle } from "@/lib/audio/playback-keys"
 import { isTopAudioShortcutOwner, pushAudioShortcutOverride } from "@/lib/audio/audio-coordinator"
 import { resolveCastVoice } from "@/lib/audio/voices"
@@ -40,6 +42,10 @@ interface Props {
    *  set, pressing Play starts from this section instead of the file's start
    *  (AQU-666). */
   startCellId?: string | null
+  /** AQU-646 round 5: the linked picture, when this file has one. With it, the
+   *  bar reports and drives the FILM rather than a queue that is idle — the
+   *  arrangement where it used to read "paused / 0:00" over a running video. */
+  coreMediaUrl?: string | null
   /** Status chips / stats nested under "now playing" so transport stays vertically centered. */
   below?: ReactNode
 }
@@ -52,10 +58,8 @@ function fmtTime(s: number): string {
 }
 
 export function VoicePlaybackBar({
-  cells: rawCells, projectId, session, settings, onActiveCell, startCellId, below,
+  cells: rawCells, projectId, session, settings, onActiveCell, startCellId, coreMediaUrl, below,
 }: Props) {
-  const queue = useQueueState()
-  const { currentTime, duration, rate, volume } = useQueueProgress()
 
   // The cells handed down from useCells carry no audio attachments — those are
   // read per-file by useFileAudioAttachments and merged in (the editor table
@@ -69,22 +73,31 @@ export function VoicePlaybackBar({
     [rawCells, audioByCellId],
   )
 
-  const canPlay = useMemo(() => hasAnyPlayableAudio(cells), [cells])
-  const activeIndex =
-    queue.kind === "playing" || queue.kind === "paused" || queue.kind === "loading"
-      ? queue.cellIndex
-      : -1
+  // WHICH ENGINE owns this file. On a subtitle file timed against footage the
+  // picture is the transport; everywhere else this is the queue, scoped to
+  // these cells (it was previously read unscoped, so another file's playback
+  // drove this bar).
+  const cellIds = useMemo(() => new Set(cells.map((c) => c.id)), [cells])
+  const anyCellClockIsFileTime = useMemo(() => cells.some((c) => queueClockIsFileTime(c)), [cells])
+  const transport = useTransportForFile({ cellIds, coreMediaUrl, anyCellClockIsFileTime })
+  const videoController = useVideoController()
+  const drivesVideo = transport.source === "video"
+  const { currentTime, duration, rate, volume } = transport.progress
+
+  // A picture is always playable; the queue needs a clip to play.
+  const canPlay = useMemo(() => drivesVideo || hasAnyPlayableAudio(cells), [drivesVideo, cells])
+  const activeIndex = transport.cellId ? cells.findIndex((c) => c.id === transport.cellId) : -1
   const activeCell = activeIndex >= 0 ? cells[activeIndex] : undefined
   const activeVoice = activeCell ? resolveCastVoice(settings, activeCell.id) : undefined
 
   // Keep the running queue's snapshot fresh so a mid-playback generate is heard
   // on the next advance.
   useEffect(() => {
-    if (queue.kind !== "idle") updateQueueCells(cells)
-  }, [cells, queue.kind])
+    if (transport.source === "queue" && transport.kind !== "idle") updateQueueCells(cells)
+  }, [cells, transport.source, transport.kind])
 
-  const isPlaying = queue.kind === "playing"
-  const isLoading = queue.kind === "loading"
+  const isPlaying = transport.playing
+  const isLoading = transport.kind === "loading"
 
   const startAt = useCallback((from: number, explicit = false) => {
     if (!session?.jwt) return
@@ -92,20 +105,28 @@ export function VoicePlaybackBar({
   }, [cells, projectId, session, onActiveCell])
 
   const onPlayPause = useCallback(() => {
+    // The picture owns this file: drive the element, never the queue. Starting
+    // the queue here is what played a lone recorded take with no film behind it.
+    if (drivesVideo) {
+      if (!videoController) return
+      if (videoController.isPaused()) videoController.play()
+      else videoController.pause()
+      return
+    }
     if (isPlaying) { pauseQueue(); return }
     // FORTIFY: during a cold load the button shows a spinner — clicking it (or
     // Space) must CANCEL the pending start, not dispose the in-flight load and
     // start over from the top (which also made the transport unstoppable
     // until sound was already playing).
-    if (queue.kind === "loading") { pauseQueue(); return }
-    if (queue.kind === "paused") { void resumeQueue(); return }
+    if (transport.kind === "loading") { pauseQueue(); return }
+    if (transport.kind === "paused") { void resumeQueue(); return }
     // Start from the highlighted section when one is selected, else the top of
     // the file (AQU-666). A selected start is "explicit": if that clip's audio
     // is missing, surface it there instead of skipping to a neighbour (AQU-660);
     // plain play-all keeps skipping forward past a missing clip.
     const from = startCellId ? cells.findIndex((c) => c.id === startCellId) : -1
     startAt(from >= 0 ? from : 0, from >= 0)
-  }, [isPlaying, queue.kind, startAt, cells, startCellId])
+  }, [drivesVideo, videoController, isPlaying, transport.kind, startAt, cells, startCellId])
 
   // Spacebar toggles play/pause while the Audio-lens bar is mounted (this bar
   // only renders in the audio lens, so the binding is naturally scoped to it).
@@ -152,7 +173,7 @@ export function VoicePlaybackBar({
       <BarScrubber
         fraction={progressFraction}
         disabled={activeIndex < 0 || duration <= 0}
-        onSeek={(f) => seekQueueToTime(f * duration)}
+        onSeek={(f) => (drivesVideo ? videoController?.seek(f * duration) : seekQueueToTime(f * duration))}
       />
 
       {/* Equal flex side columns keep the transport truly centered; stretch +
@@ -167,8 +188,8 @@ export function VoicePlaybackBar({
                 {activeCell ? (activeCell.cellLabel || "Line") : "Nothing playing"}
               </div>
               <div className="truncate text-[10px] leading-tight text-muted-foreground">
-                {queue.kind === "error"
-                  ? queue.message
+                {transport.errorMessage != null
+                  ? transport.errorMessage
                   : activeVoice
                     ? activeVoice.name
                     : canPlay ? "Press play to listen" : "No voiced lines yet"}
@@ -180,7 +201,7 @@ export function VoicePlaybackBar({
 
         {/* Transport */}
         <div className="flex shrink-0 items-center gap-0.5 self-center">
-          <SpeedButton rate={rate} onChange={setQueueRate} />
+          <SpeedButton rate={rate} onChange={(r) => (drivesVideo ? videoController?.setRate(r) : setQueueRate(r))} />
           <IconButton title="Previous line" disabled={!canPlay} onClick={skipBack}>
             <SkipBack className="h-4 w-4" />
           </IconButton>
@@ -207,7 +228,7 @@ export function VoicePlaybackBar({
 
         {/* Volume — matching flex-1 balances the left column for true center */}
         <div className="flex min-w-0 flex-1 items-center justify-end self-center">
-          <VolumeControl volume={volume} onChange={setQueueVolume} />
+          <VolumeControl volume={volume} onChange={(v) => (drivesVideo ? videoController?.setVolume(v) : setQueueVolume(v))} />
         </div>
       </div>
     </div>

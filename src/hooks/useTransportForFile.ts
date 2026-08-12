@@ -12,7 +12,13 @@ import {
   videoOwnsFile,
   type TransportForFile,
 } from "@/lib/audio/transport"
-import { useVideoClockPlaying, useVideoClockSec, useVideoSoundingCellId } from "@/lib/timeline/video-clock"
+import {
+  useVideoClockPlaying,
+  useVideoClockSec,
+  useVideoRate,
+  useVideoSoundingCellId,
+  useVideoVolume,
+} from "@/lib/timeline/video-clock"
 import { useVideoDurationSec } from "@/lib/timeline/video-duration"
 
 export interface UseTransportForFileArgs {
@@ -43,14 +49,16 @@ export function useTransportForFile({
   const playing = useVideoClockPlaying()
   const soundingCellId = useVideoSoundingCellId()
   const durationSec = useVideoDurationSec(coreMediaUrl ?? null)
+  const rate = useVideoRate()
+  const volume = useVideoVolume()
   const ownedByVideo = videoOwnsFile(coreMediaUrl, anyCellClockIsFileTime)
 
   return useMemo(
     () =>
       selectTransportForFile(
         queue,
-        ownedByVideo ? { currentSec, playing, durationSec, soundingCellId } : null,
+        ownedByVideo ? { currentSec, playing, durationSec, soundingCellId, rate, volume } : null,
       ),
-    [queue, ownedByVideo, currentSec, playing, durationSec, soundingCellId],
+    [queue, ownedByVideo, currentSec, playing, durationSec, soundingCellId, rate, volume],
   )
 }

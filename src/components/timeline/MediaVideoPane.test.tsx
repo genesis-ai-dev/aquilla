@@ -13,6 +13,7 @@ let mockQueue: QueueForFile = {
   running: false,
   cellId: null,
   kind: "idle",
+  errorMessage: null,
   progress: { currentTime: 0, duration: 0, rate: 1, volume: 1 },
 }
 let mockAudibility: { source: boolean; target: boolean } = { source: true, target: true }
@@ -71,6 +72,7 @@ describe("MediaVideoPane", () => {
       running: false,
       cellId: null,
       kind: "idle",
+      errorMessage: null,
       progress: { currentTime: 0, duration: 0, rate: 1, volume: 1 },
     }
     mockAudibility = { source: true, target: true }

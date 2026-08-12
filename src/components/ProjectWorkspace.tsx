@@ -6564,6 +6564,7 @@ export function ProjectWorkspace() {
                   settings={tts.settings}
                   onActiveCell={handleBarActiveCell}
                   startCellId={timelineSelectedCellId}
+            coreMediaUrl={activeFile?.coreMediaUrl ?? null}
                   below={
                     <>
                       {syncStatus}

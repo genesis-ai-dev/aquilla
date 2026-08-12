@@ -299,8 +299,14 @@ export function TimelineEditor({
     // Starting playback is an explicit "watch this" — re-engage follow. Keyed
     // on running (playing OR loading) so a gate's brief "loading" dip doesn't
     // count as a fresh start.
-    if (queueRunning) setFollow(true)
-  }, [queueRunning])
+    //
+    // Round 5: EITHER transport. This was queue-only, so on a file the picture
+    // drives there was no rising edge to key on — once the user scrolled away
+    // or jumped, follow was released for good and pressing play never took it
+    // back. The follow SCROLL below was already video-aware; only its
+    // re-engagement was not, which is why the track looked half-fixed.
+    if (queueRunning || videoPlaying) setFollow(true)
+  }, [queueRunning, videoPlaying])
 
   // Measure the scroll viewport before first paint + on resizes — the
   // windowing math and follow-scroll both need a real clientWidth.
@@ -605,7 +611,9 @@ export function TimelineEditor({
     // following live playback, otherwise the viewport center.
     const el = scrollRef.current
     if (el && viewportPx > 0) {
-      const followAnchor = follow && queueActive
+      // Round 5: a video-driven follow keeps its anchor too — zooming used to
+      // recentre on the viewport middle instead of the playhead.
+      const followAnchor = follow && (queueActive || videoPlaying)
       const anchorSec = followAnchor ? clock.currentSec : pxToSec(scrollLeft + viewportPx / 2, pxPerSec)
       const target = Math.max(0, secToPx(anchorSec, z) - (followAnchor ? viewportPx * 0.1 : viewportPx / 2))
       setPxPerSec(z)

@@ -25,6 +25,9 @@ export interface QueueForFile {
   /** Scoped state: another file's playback reads as `idle` here, so a consumer
    *  that switches on `kind` alone still cannot be hijacked. */
   kind: QueueState["kind"]
+  /** The engine's own words when `kind === "error"`, so a consumer can show the
+   *  real reason rather than a generic line. Null otherwise. */
+  errorMessage: string | null
   progress: QueueProgress
 }
 
@@ -42,6 +45,7 @@ export function selectQueueForFile(
     running: mine && (state.kind === "playing" || state.kind === "loading"),
     cellId,
     kind: mine ? state.kind : "idle",
+    errorMessage: mine && state.kind === "error" ? state.message : null,
     progress,
   }
 }

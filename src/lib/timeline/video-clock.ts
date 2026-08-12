@@ -29,6 +29,13 @@ let playing = false
 // film. Kept as an ID (not the second) so subscribers re-render on a LINE
 // change, not on every one of timeupdate's ~4 ticks a second.
 let soundingCellId: string | null = null
+// Round 5: the playback bar reports and drives the picture, so its rate and
+// volume have to be readable. Published from the element's own `ratechange` /
+// `volumechange`, so the bar and the video's native controls can never
+// disagree about what is set — whichever one the user reaches for, both show
+// the same number.
+let rate = 1
+let volume = 1
 const listeners = new Set<() => void>()
 
 function notify(): void {
@@ -84,6 +91,27 @@ export function getVideoSoundingCellId(): string | null {
   return soundingCellId
 }
 
+export function setVideoRate(next: number): void {
+  if (!Number.isFinite(next) || next <= 0 || rate === next) return
+  rate = next
+  notify()
+}
+
+export function setVideoVolume(next: number): void {
+  const clamped = Math.max(0, Math.min(1, next))
+  if (!Number.isFinite(next) || volume === clamped) return
+  volume = clamped
+  notify()
+}
+
+export function useVideoRate(): number {
+  return useSyncExternalStore(subscribe, () => rate, () => 1)
+}
+
+export function useVideoVolume(): number {
+  return useSyncExternalStore(subscribe, () => volume, () => 1)
+}
+
 /** TimelineEditor reads this and writes it into its clock ONLY while the queue
  *  is inactive, so the two drivers can never both be writing. */
 export function useVideoClockSec(): number | null {
@@ -102,5 +130,7 @@ export function resetVideoClockForTests(): void {
   currentSec = null
   playing = false
   soundingCellId = null
+  rate = 1
+  volume = 1
   notify()
 }

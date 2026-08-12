@@ -43,7 +43,7 @@ export function CompletionBulkProgressBanner() {
             size="icon-xs"
             onClick={dismissBatchCompletionSummary}
             aria-label={t("common.dismiss")}
-            className="ml-1 text-muted-foreground"
+            className="ms-1 text-muted-foreground"
           >
             <X />
           </Button>
@@ -74,7 +74,7 @@ export function CompletionBulkProgressBanner() {
             size="icon-xs"
             onClick={cancelBatchCompletion}
             aria-label={t("editor.completion.stop")}
-            className="ml-1 text-muted-foreground"
+            className="ms-1 text-muted-foreground"
           >
             <X />
           </Button>

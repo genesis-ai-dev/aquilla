@@ -78,9 +78,9 @@ describe("OrgProjectsDataTable lane chips (AQU-538 §3.2)", () => {
     expect(screen.getByTestId("project-table-translated-header")).toHaveAttribute("aria-label", "Translated")
     expect(screen.getByTestId("project-table-validated-header")).toHaveAttribute("aria-label", "Validated")
     expect(screen.getByTestId("project-table-audio-header")).toHaveAttribute("aria-label", "Has audio")
-    expect(screen.getByTestId("project-table-translated-value")).toHaveClass("text-left")
-    expect(screen.getByTestId("project-table-validated-value")).toHaveClass("text-left")
-    expect(screen.getByTestId("project-table-audio-value")).toHaveClass("text-left")
+    expect(screen.getByTestId("project-table-translated-value")).toHaveClass("text-start")
+    expect(screen.getByTestId("project-table-validated-value")).toHaveClass("text-start")
+    expect(screen.getByTestId("project-table-audio-value")).toHaveClass("text-start")
   })
 
   it("renders one chip per lane with the '' default lane first, labeled with the target language", () => {

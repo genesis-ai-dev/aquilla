@@ -86,13 +86,13 @@ export const CellTranscriptPreview = forwardRef<HTMLDivElement, Props>(function 
       ref={ref}
       tabIndex={-1}
       className={cn(
-        "relative mt-2 overflow-hidden rounded-xl py-2.5 pr-3 pl-4 text-xs scroll-mt-16 outline-none",
+        "relative mt-2 overflow-hidden rounded-xl py-2.5 pe-3 ps-4 text-xs scroll-mt-16 outline-none",
         "focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
         surface,
       )}
     >
       {/* Soft tone bar instead of a hard bordered box. */}
-      <span aria-hidden className={cn("absolute inset-y-0 left-0 w-[3px] rounded-md", accent)} />
+      <span aria-hidden className={cn("absolute inset-y-0 start-0 w-[3px] rounded-md", accent)} />
 
       <div className="flex items-center gap-1.5">
         <Icon className={cn("h-3.5 w-3.5 shrink-0", iconTone)} />
@@ -110,9 +110,9 @@ export const CellTranscriptPreview = forwardRef<HTMLDivElement, Props>(function 
             : "text-[13px] text-foreground/90",
         )}
       >
-        <span aria-hidden className="select-none pr-0.5 text-foreground/25">&ldquo;</span>
+        <span aria-hidden className="select-none pe-0.5 text-foreground/25">&ldquo;</span>
         {transcript}
-        <span aria-hidden className="select-none pl-0.5 text-foreground/25">&rdquo;</span>
+        <span aria-hidden className="select-none ps-0.5 text-foreground/25">&rdquo;</span>
       </p>
 
       {editable && state !== "match" && (

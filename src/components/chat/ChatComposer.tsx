@@ -191,7 +191,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
             {isEmpty && (
               <span
                 className={cn(
-                  "pointer-events-none absolute left-3 top-2 text-muted-foreground",
+                  "pointer-events-none absolute start-3 top-2 text-muted-foreground",
                   compact ? "text-xs" : "text-sm",
                 )}
                 aria-hidden
@@ -206,7 +206,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
               Enter to send · Shift+Enter for newline
             </InputGroupText>
             {isStreaming ? (
-              <span className="ml-auto flex items-center gap-1">
+              <span className="ms-auto flex items-center gap-1">
                 {queueWhileStreaming && (
                   <AppTooltip content="Queue — sends when the current run finishes">
                     <InputGroupButton
@@ -230,7 +230,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
               <AppTooltip content="Send">
                 <InputGroupButton
                   type="button" variant="default" size="icon-sm" onClick={handleSendClick}
-                  disabled={isEmpty || !isConfigured} className="ml-auto" aria-label="Send"
+                  disabled={isEmpty || !isConfigured} className="ms-auto" aria-label="Send"
                 >
                   <ArrowUp />
                 </InputGroupButton>

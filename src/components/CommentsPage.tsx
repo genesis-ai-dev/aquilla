@@ -308,7 +308,7 @@ function MentionTextarea({
         className={cn("resize-none", className)}
       />
       {mentionOpen && (
-        <div className="absolute left-0 right-0 top-full mt-0.5 z-50 max-h-48 overflow-y-auto rounded-md border bg-popover shadow-md">
+        <div className="absolute start-0 end-0 top-full mt-0.5 z-50 max-h-48 overflow-y-auto rounded-md border bg-popover shadow-md">
           {needsMorePrefix && (
             <p className="px-3 py-2 text-[11px] text-muted-foreground">{t("comments.mention.typeMore")}</p>
           )}
@@ -327,7 +327,7 @@ function MentionTextarea({
                   <button
                     type="button"
                     onClick={() => insertMention(u)}
-                    className="flex w-full items-center px-3 py-1.5 text-left text-sm hover:bg-muted"
+                    className="flex w-full items-center px-3 py-1.5 text-start text-sm hover:bg-muted"
                   >
                     @{u.username}
                   </button>
@@ -357,7 +357,7 @@ function CommentBubble({ comment, currentUsername, onEdit, onDelete }: CommentBu
   const canMutate = isOwn && !isDeleted
 
   return (
-    <div className={cn("flex flex-col gap-0.5", comment.parentCommentId ? "pl-6" : "")}>
+    <div className={cn("flex flex-col gap-0.5", comment.parentCommentId ? "ps-6" : "")}>
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
         <span className="font-medium text-foreground">{comment.authorLabel ?? comment.authorId}</span>
         <span>{formatTs(comment.createdAt)}</span>
@@ -372,7 +372,7 @@ function CommentBubble({ comment, currentUsername, onEdit, onDelete }: CommentBu
                   type="button"
                   variant="ghost"
                   size="icon-xs"
-                  className="ml-auto size-5"
+                  className="ms-auto size-5"
                   aria-label={t("comments.bubble.actionsLabel")}
                 >
                   <MoreHorizontal className="h-3 w-3" />
@@ -532,7 +532,7 @@ function CommentThreadCard({
                 )}
                 {root.resolved && (
                   <Badge variant="secondary" className="h-4 px-1 text-[10px]">
-                    <CheckCircle className="mr-0.5 h-2.5 w-2.5" />
+                    <CheckCircle className="me-0.5 h-2.5 w-2.5" />
                     {t("comments.status.resolved")}
                   </Badge>
                 )}
@@ -549,7 +549,7 @@ function CommentThreadCard({
                       className="h-6 px-2 text-xs"
                       onClick={() => onNavigate(root)}
                     >
-                      <ArrowUpRight className="mr-0.5 h-3 w-3" />
+                      <ArrowUpRight className="me-0.5 h-3 w-3" />
                       {t("comments.openFile")}
                     </Button>
                   </AppTooltip>
@@ -561,7 +561,7 @@ function CommentThreadCard({
                       className="h-6 px-2 text-xs cursor-not-allowed opacity-50"
                       disabled
                     >
-                      <ArrowUpRight className="mr-0.5 h-3 w-3" />
+                      <ArrowUpRight className="me-0.5 h-3 w-3" />
                       {t("comments.openFile")}
                     </Button>
                   </AppTooltip>
@@ -934,7 +934,7 @@ export function CommentsPage() {
     <div className="mx-auto max-w-3xl space-y-6 p-8">
       <div className="flex items-center justify-between">
         <Button variant="ghost" size="sm" onClick={() => navigate(`/project/${projectId}/editor`)}>
-          <ArrowLeft className="mr-2 h-4 w-4" /> {t("comments.backToProject")}
+          <ArrowLeft className="me-2 h-4 w-4" /> {t("comments.backToProject")}
         </Button>
         <Button variant="outline" size="sm" onClick={refresh} disabled={isLoading}>
           {isLoading ? <Spinner className="size-3.5" /> : t("common.refresh")}

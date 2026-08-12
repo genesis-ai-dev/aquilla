@@ -216,7 +216,8 @@ export function ProjectCard({
       <CardContent>
         {project.sourceLanguage || project.targetLanguage ? (
           <p className="text-sm text-muted-foreground">
-            {project.sourceLanguage || "?"} → {project.targetLanguage || "?"}
+            {project.sourceLanguage || "?"} <span className="inline-block rtl:-scale-x-100">→</span>{" "}
+            {project.targetLanguage || "?"}
           </p>
         ) : hasServerSideExistence(project) ? (
           <p className="text-sm text-muted-foreground italic">
@@ -244,7 +245,7 @@ export function ProjectCard({
             </span>
             {onRestore && (
               <Button size="sm" variant="outline" onClick={onRestore}>
-                <Undo2 className="mr-1 h-3.5 w-3.5" />
+                <Undo2 className="me-1 h-3.5 w-3.5" />
                 Restore
               </Button>
             )}

@@ -259,7 +259,7 @@ export function UpstreamChangesPanel({
           <div className="flex items-center justify-between rounded border bg-muted/40 px-3 py-2">
             <span className="text-sm">{selectedItems.length} selected</span>
             <Button size="sm" onClick={() => void handleBulkRepin()}>
-              <CheckCheck className="mr-1.5 h-4 w-4" />
+              <CheckCheck className="me-1.5 h-4 w-4" />
               Accept as-is ({selectedItems.length})
             </Button>
           </div>
@@ -275,7 +275,7 @@ export function UpstreamChangesPanel({
               open={isOpen}
               onOpenChange={() => toggleBatch(group.batchId)}
             >
-              <CollapsibleTrigger className="flex w-full items-center justify-between rounded border px-3 py-2 text-left text-sm font-medium hover:bg-muted/40">
+              <CollapsibleTrigger className="flex w-full items-center justify-between rounded border px-3 py-2 text-start text-sm font-medium hover:bg-muted/40">
                 <span>
                   Sync batch — {new Date(group.serverTs).toLocaleString()}
                 </span>
@@ -336,7 +336,7 @@ export function UpstreamChangesPanel({
                       </div>
                       <div className="flex shrink-0 items-center gap-1.5">
                         <Button variant="outline" size="sm" onClick={() => openToRetranslate(item)}>
-                          <ArrowRight className="mr-1 h-3.5 w-3.5" />
+                          <ArrowRight className="me-1 h-3.5 w-3.5" />
                           Open
                         </Button>
                         {item.target && (
@@ -346,7 +346,7 @@ export function UpstreamChangesPanel({
                             disabled={!canRepin || busy}
                             onClick={() => void handleRepinSingle(item)}
                           >
-                            {busy ? <Spinner className="h-3.5 w-3.5" /> : <CheckCheck className="mr-1 h-3.5 w-3.5" />}
+                            {busy ? <Spinner className="h-3.5 w-3.5" /> : <CheckCheck className="me-1 h-3.5 w-3.5" />}
                             Accept as-is
                           </Button>
                         )}

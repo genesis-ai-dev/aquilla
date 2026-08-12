@@ -123,7 +123,7 @@ function SortButton({
     <button
       type="button"
       onClick={() => onSort(colKey)}
-      className={`inline-flex justify-self-start select-none text-left text-xs font-medium ${
+      className={`inline-flex justify-self-start select-none text-start text-xs font-medium ${
         active
           ? "text-foreground"
           : "text-muted-foreground hover:text-foreground"
@@ -153,7 +153,7 @@ function ProjectRow({
       <button
         type="button"
         onClick={onOpen}
-        className="grid w-full grid-cols-[minmax(0,1fr)_7rem] items-center gap-x-6 px-4 py-3 text-left transition-colors hover:bg-muted/50"
+        className="grid w-full grid-cols-[minmax(0,1fr)_7rem] items-center gap-x-6 px-4 py-3 text-start transition-colors hover:bg-muted/50"
       >
         {/* Name + status badge */}
         <span className="flex min-w-0 items-center gap-2">
@@ -346,7 +346,7 @@ export function ProjectsList() {
       <AppShell
         sidebar={<OrgSidebar />}
         header={
-          <div className="flex items-center justify-between pr-4">
+          <div className="flex items-center justify-between pe-4">
             <OrgBreadcrumb section="Projects" />
           </div>
         }
@@ -375,7 +375,7 @@ export function ProjectsList() {
     <AppShell
       sidebar={<OrgSidebar />}
       header={
-        <div className="flex items-center justify-between pr-4">
+        <div className="flex items-center justify-between pe-4">
           <OrgBreadcrumb section="Projects" />
           {activeOrgId != null ? (
             <ProjectCreateDialog orgId={activeOrgId} onCreated={handleCreated} />

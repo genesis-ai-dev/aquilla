@@ -194,7 +194,7 @@ function OccurrenceRow({
           <button
             type="button"
             className={cn(
-              "w-full text-left text-sm leading-relaxed",
+              "w-full text-start text-sm leading-relaxed",
               canEdit && "hover:bg-muted/50 rounded px-1 -mx-1 transition-colors",
               !translated.trim() && "text-muted-foreground italic",
             )}

@@ -48,7 +48,7 @@ export function UsageRollup({ jwt, orgId, action }: { jwt: string; orgId: number
               <div className="min-w-0 flex-1">
                 <p className="truncate font-medium">{m.username ?? `User ${m.userId}`}</p>
               </div>
-              <div className="shrink-0 text-right">
+              <div className="shrink-0 text-end">
                 <p className="text-sm font-semibold tabular-nums">{audioLabel}</p>
                 <p className="text-xs text-muted-foreground tabular-nums">
                   {requests} AI request{requests !== 1 ? "s" : ""}

@@ -101,7 +101,7 @@ function CellRefButton({ cellId, label, cell, onNavigateToCell, onOpenComments, 
       <AppTooltip content="Go to cell">
         <button
           type="button"
-          className="min-w-0 flex-1 rounded border-l-2 border-amber-400 bg-amber-50 p-1.5 text-left text-xs hover:bg-amber-100 dark:bg-amber-950/20 dark:hover:bg-amber-950/40"
+          className="min-w-0 flex-1 rounded border-s-2 border-amber-400 bg-amber-50 p-1.5 text-start text-xs hover:bg-amber-100 dark:bg-amber-950/20 dark:hover:bg-amber-950/40"
           onClick={() => onNavigateToCell(cellId)}
         >
         <div className="truncate font-medium">{label}</div>
@@ -148,7 +148,7 @@ function RuleFindingCard({
       <div className="mb-1 flex min-w-0 items-center gap-1.5">
         <SeverityIcon className={`h-3.5 w-3.5 shrink-0 ${severityColor}`} />
         <span className="min-w-0 truncate text-xs font-semibold">{group.rule.name}</span>
-        <span className="ml-auto shrink-0 text-[10px] text-muted-foreground">
+        <span className="ms-auto shrink-0 text-[10px] text-muted-foreground">
           {group.infractions.length} cell{group.infractions.length === 1 ? "" : "s"}
         </span>
       </div>
@@ -188,7 +188,7 @@ function TermFindingCard({
       <div className="mb-1 flex min-w-0 items-center gap-1.5">
         <BookA className="h-3.5 w-3.5 shrink-0 text-amber-500" />
         <span className="min-w-0 truncate text-xs font-semibold">{finding.sourceTerm}</span>
-        <span className="ml-auto shrink-0 text-[10px] text-muted-foreground">
+        <span className="ms-auto shrink-0 text-[10px] text-muted-foreground">
           {finding.flaggedCells.length} cell{finding.flaggedCells.length === 1 ? "" : "s"}
         </span>
       </div>
@@ -225,7 +225,7 @@ export function CheckFindingsDrawer({
   const termIssueCount = flaggedTermFindings.reduce((n, f) => n + f.flaggedCells.length, 0)
 
   return (
-    <div className="flex h-full min-w-0 max-w-80 shrink basis-80 flex-col overflow-hidden border-l bg-card">
+    <div className="flex h-full min-w-0 max-w-80 shrink basis-80 flex-col overflow-hidden border-s bg-card">
       <div className="flex shrink-0 items-center justify-between gap-2 border-b p-2">
         {/* Wording tracks the "Check file" button and its "Close file check"
             tooltip — the drawer is that button's result surface. */}

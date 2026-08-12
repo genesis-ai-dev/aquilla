@@ -97,7 +97,7 @@ export function OrgSetupChecklist({
           <span className="flex-1 text-sm">Invite a teammate to your organization</span>
           {!invitedTeammate && (
             <Button size="sm" variant="outline" onClick={() => navigate(membersPath(orgId))}>
-              <Users className="mr-1.5 h-4 w-4" /> Invite
+              <Users className="me-1.5 h-4 w-4" /> Invite
             </Button>
           )}
         </li>

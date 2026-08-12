@@ -26,7 +26,7 @@ export function PeerPresence({ peers, onJumpToPeer }: PeerPresenceProps) {
         <PopoverTrigger
           render={
             <button
-              className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border/70 bg-background/80 px-1.5 pr-2 text-xs text-muted-foreground shadow-sm transition-colors hover:border-border hover:bg-muted/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+              className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border/70 bg-background/80 px-1.5 pe-2 text-xs text-muted-foreground shadow-sm transition-colors hover:border-border hover:bg-muted/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
             >
               <AvatarGroup className="-space-x-1 *:data-[slot=avatar]:ring-background">
                 {visible.map((peer) => (
@@ -62,7 +62,7 @@ export function PeerPresence({ peers, onJumpToPeer }: PeerPresenceProps) {
               <button
                 type="button"
                 disabled={!peer.currentFileId && !peer.focusedCell}
-                className="flex w-full items-center gap-2 rounded px-1.5 py-1 text-left text-xs transition-colors hover:bg-muted disabled:cursor-default disabled:hover:bg-transparent"
+                className="flex w-full items-center gap-2 rounded px-1.5 py-1 text-start text-xs transition-colors hover:bg-muted disabled:cursor-default disabled:hover:bg-transparent"
                 onClick={() => {
                   if (!peer.currentFileId && !peer.focusedCell) return
                   onJumpToPeer?.(peer)
@@ -71,7 +71,7 @@ export function PeerPresence({ peers, onJumpToPeer }: PeerPresenceProps) {
               >
                 <InitialsAvatar name={peer.username} size="xs" color={peer.color} />
                 <span className="truncate">{peer.username}</span>
-                <span className="ml-auto shrink-0 text-[10px] text-muted-foreground">
+                <span className="ms-auto shrink-0 text-[10px] text-muted-foreground">
                   {peer.focusedCell ? "editing" : peer.currentFileId ? "viewing" : "online"}
                 </span>
               </button>

@@ -330,7 +330,7 @@ export function TeamsList() {
                 <button
                   key={t.id}
                   onClick={() => activeOrgId != null && navigate(orgPath(activeOrgId, `/teams/${t.id}`))}
-                  className="rounded-2xl border bg-card p-4 text-left transition-colors hover:bg-accent/40"
+                  className="rounded-2xl border bg-card p-4 text-start transition-colors hover:bg-accent/40"
                 >
                   <span className="block truncate font-medium text-foreground">{t.name}</span>
                   <span className="mt-1 block text-sm tabular-nums text-muted-foreground">

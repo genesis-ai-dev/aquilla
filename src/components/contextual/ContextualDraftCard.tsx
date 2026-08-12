@@ -152,7 +152,7 @@ export function ContextualDraftCard({
             {t("autopilot.draft.suggested")}
           </span>
         </AppTooltip>
-        <div className="ml-auto flex items-center gap-0.5">
+        <div className="ms-auto flex items-center gap-0.5">
           {editable && (
             <AppTooltip content={t("autopilot.draft.useTranslation")}>
               <Button

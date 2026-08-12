@@ -270,7 +270,7 @@ export function CombinedBoundaryEditor(props: CombinedBoundaryEditorProps) {
                   type="button"
                   onClick={() => previewSeg(i)}
                   className={cn(
-                    "flex w-full items-center gap-2 rounded px-2 py-1 text-left hover:bg-accent/50",
+                    "flex w-full items-center gap-2 rounded px-2 py-1 text-start hover:bg-accent/50",
                     activeSeg === i && "bg-primary/10",
                   )}
                 >
@@ -286,7 +286,7 @@ export function CombinedBoundaryEditor(props: CombinedBoundaryEditorProps) {
         <div className="mt-4 flex items-center justify-end gap-2">
           <Button type="button" variant="ghost" size="sm" onClick={onClose} disabled={saving}>{t("common.cancel")}</Button>
           <Button type="button" size="sm" onClick={() => void onSave()} disabled={saving || !cuts}>
-            {saving ? <Spinner className="mr-1 size-3.5" /> : null}
+            {saving ? <Spinner className="me-1 size-3.5" /> : null}
             {t("audio.boundaryEditor.saveSplits")}
           </Button>
         </div>

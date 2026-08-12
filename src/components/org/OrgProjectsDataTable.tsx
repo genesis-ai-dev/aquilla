@@ -216,7 +216,7 @@ export function OrgProjectsDataTable({
           return (
             <div
               data-testid="project-table-translated-value"
-              className="text-left font-medium tabular-nums text-foreground"
+              className="text-start font-medium tabular-nums text-foreground"
               aria-label={`${pct}% translated`}
             >
               {pct}%
@@ -242,7 +242,7 @@ export function OrgProjectsDataTable({
           return (
             <div
               data-testid="project-table-validated-value"
-              className="text-left tabular-nums text-muted-foreground"
+              className="text-start tabular-nums text-muted-foreground"
               aria-label={`${pct}% validated`}
             >
               {pct}%
@@ -268,7 +268,7 @@ export function OrgProjectsDataTable({
           return (
             <div
               data-testid="project-table-audio-value"
-              className="text-left tabular-nums text-muted-foreground"
+              className="text-start tabular-nums text-muted-foreground"
               aria-label={`${pct}% audio`}
             >
               {pct}%
@@ -282,7 +282,7 @@ export function OrgProjectsDataTable({
         enableSorting: false,
         header: ({ column }) => <DataTableColumnHeader column={column} title="Role" />,
         cell: ({ row }) => (
-          <div className="truncate text-left text-xs text-muted-foreground">
+          <div className="truncate text-start text-xs text-muted-foreground">
             {roleByProjectId?.get(row.original.id)?.name.replace(/_/g, " ") ?? "—"}
           </div>
         ),
@@ -304,9 +304,9 @@ export function OrgProjectsDataTable({
         cell: ({ row }) => {
           const username = row.original.pm?.username
           return username ? (
-            <div className="truncate text-left text-xs text-muted-foreground">{username}</div>
+            <div className="truncate text-start text-xs text-muted-foreground">{username}</div>
           ) : (
-            <div className="truncate text-left text-xs text-muted-foreground/60">Unassigned</div>
+            <div className="truncate text-start text-xs text-muted-foreground/60">Unassigned</div>
           )
         },
       },
@@ -328,7 +328,7 @@ export function OrgProjectsDataTable({
           if (label) {
             return (
               <div
-                className={`truncate text-left text-xs ${
+                className={`truncate text-start text-xs ${
                   status === "stalled" ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"
                 }`}
               >
@@ -337,7 +337,7 @@ export function OrgProjectsDataTable({
             )
           }
           return (
-            <div className="truncate text-left text-xs text-muted-foreground">
+            <div className="truncate text-start text-xs text-muted-foreground">
               <DateTooltip
                 value={row.original.lastEditAt}
                 label="Updated"
@@ -451,7 +451,7 @@ export function OrgProjectsDataTable({
           return `${p.name} ${p.orgName ?? ""} ${p.pm?.username ?? ""}`.toLowerCase().includes(q)
         }}
         toolbar={(table) => (
-          <span className="ml-auto text-xs tabular-nums text-muted-foreground">
+          <span className="ms-auto text-xs tabular-nums text-muted-foreground">
             {table.getFilteredRowModel().rows.length === tableData.length
               ? `${tableData.length}`
               : `${table.getFilteredRowModel().rows.length} of ${tableData.length}`}

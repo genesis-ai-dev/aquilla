@@ -77,7 +77,7 @@ export function PersonalProviderSection() {
   return (
     <SettingsGroup label="Personal override">
       <Collapsible open={open} onOpenChange={setOpen}>
-        <CollapsibleTrigger className="flex w-full items-start gap-3 px-5 py-4 text-left hover:bg-accent/40 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none focus-visible:ring-inset">
+        <CollapsibleTrigger className="flex w-full items-start gap-3 px-5 py-4 text-start hover:bg-accent/40 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none focus-visible:ring-inset">
           {open ? (
             <ChevronDown className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
           ) : (

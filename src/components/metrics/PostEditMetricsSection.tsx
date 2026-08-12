@@ -86,16 +86,16 @@ function WeeklyChart({ weeks }: { weeks: WeekBucket[] }) {
               className={`h-full rounded ${nedColor(w.avgNed)} opacity-80 transition-all`}
               style={{ width: `${Math.max(2, w.avgNed * 100)}%` }}
             />
-            <span className="absolute inset-0 flex items-center pl-2 text-[11px] font-medium leading-none text-foreground/80">
+            <span className="absolute inset-0 flex items-center ps-2 text-[11px] font-medium leading-none text-foreground/80">
               {pct(w.avgNed)} avg NED
             </span>
           </div>
           {/* Count pill */}
-          <span className="w-16 shrink-0 text-right text-muted-foreground">
+          <span className="w-16 shrink-0 text-end text-muted-foreground">
             {w.count} {w.count === 1 ? "edit" : "edits"}
             {/* Tiny bar proportional to count */}
             <span
-              className="ml-1 inline-block h-1.5 rounded bg-muted-foreground/40 align-middle"
+              className="ms-1 inline-block h-1.5 rounded bg-muted-foreground/40 align-middle"
               style={{ width: `${Math.round((w.count / maxCount) * 32)}px` }}
             />
           </span>
@@ -120,8 +120,8 @@ function UserTable({ users, activeUser, onSelectUser }: {
         <TableHeader>
           <TableRow>
             <TableHead>Reviewer</TableHead>
-            <TableHead className="text-right">Approvals</TableHead>
-            <TableHead className="text-right">Avg edit distance</TableHead>
+            <TableHead className="text-end">Approvals</TableHead>
+            <TableHead className="text-end">Avg edit distance</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -134,8 +134,8 @@ function UserTable({ users, activeUser, onSelectUser }: {
                 onClick={() => onSelectUser(isActive ? null : u.author)}
               >
                 <TableCell className="font-mono text-xs">{u.author}</TableCell>
-                <TableCell className="text-right text-muted-foreground">{u.count}</TableCell>
-                <TableCell className="text-right">
+                <TableCell className="text-end text-muted-foreground">{u.count}</TableCell>
+                <TableCell className="text-end">
                   <span className="inline-flex items-center gap-1.5">
                     <span
                       className={`inline-block size-2 rounded-lg ${nedColor(u.avgNed)}`}
@@ -323,7 +323,7 @@ export function PostEditMetricsSection({
                 <h4 className="text-xs font-medium text-muted-foreground">
                   Weekly trend
                   {activeUser && (
-                    <span className="ml-1 normal-case font-normal">
+                    <span className="ms-1 normal-case font-normal">
                       — filtered to <span className="font-mono">{activeUser}</span>
                       {" "}
                       <button
@@ -348,7 +348,7 @@ export function PostEditMetricsSection({
                 <div className="mt-5">
                   <h4 className="text-xs font-medium text-muted-foreground">
                     By reviewer
-                    <span className="ml-1 normal-case font-normal text-muted-foreground">
+                    <span className="ms-1 normal-case font-normal text-muted-foreground">
                       (click a row to filter the trend above)
                     </span>
                   </h4>

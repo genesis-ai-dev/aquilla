@@ -43,7 +43,7 @@ export function ViolationPopover({
       >
         <button
           type="button"
-          className="text-left font-medium hover:underline"
+          className="text-start font-medium hover:underline"
           onClick={() => onOpenRule(infraction.ruleId)}
         >
           {ruleName}

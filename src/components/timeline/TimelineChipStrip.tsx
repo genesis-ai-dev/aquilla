@@ -83,7 +83,7 @@ function StripNavSlot() {
       data-testid="tl-strip-nav"
       // w-72 = the nav's xl-mode width exactly (fixed 224px trigger + two
       // 32px arrows) — anything narrower and the buttons run off-screen.
-      className="ml-auto w-72 max-w-[45%] shrink-0 empty:hidden [&_button]:h-7 [&_button]:text-[11px]"
+      className="ms-auto w-72 max-w-[45%] shrink-0 empty:hidden [&_button]:h-7 [&_button]:text-[11px]"
     />
   )
 }

@@ -210,7 +210,7 @@ export function OrgSwitcher() {
         >
           <OrgMark name={title} allOrgs={!guestSelected && isAllOrgs} />
           <span className="truncate">{title}</span>
-          <ChevronDown className="ml-auto size-4 opacity-50" />
+          <ChevronDown className="ms-auto size-4 opacity-50" />
         </DropdownMenuTrigger>
         <DropdownMenuContent
           className="w-72 overflow-hidden rounded-lg p-0 flex flex-col"
@@ -222,7 +222,7 @@ export function OrgSwitcher() {
           <InputGroup className="h-10 w-auto rounded-none border-0 bg-transparent shadow-none outline-none dark:bg-transparent ring-0 hover:border-0! focus-within:border-0! has-[[data-slot=input-group-control]:focus-visible]:border-0! has-[[data-slot=input-group-control]:focus-visible]:ring-0!">
             <InputGroupAddon
               align="inline-start"
-              className="ml-3 w-5 justify-center p-0!"
+              className="ms-3 w-5 justify-center p-0!"
             >
               <SearchIcon className="size-4 text-muted-foreground" />
             </InputGroupAddon>
@@ -245,8 +245,8 @@ export function OrgSwitcher() {
               <InputGroupAddon
                 align="inline-end"
                 // Match Create row inset (list `p-1` + item `px-2`); kill addon’s
-                // default `has-[>button]:mr-[-0.3rem]` that pulls the X flush.
-                className="p-0! pr-2! has-[>button]:mr-0!"
+                // default `has-[>button]:me-[-0.3rem]` that pulls the X flush.
+                className="p-0! pe-2! has-[>button]:me-0!"
               >
                 <InputGroupButton
                   type="button"

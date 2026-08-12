@@ -178,7 +178,7 @@ export function JoinOrgPage() {
     return (
       <JoinOrgShell>
         <CardContent className="flex items-center justify-center py-10">
-          <Spinner className="mr-2" /> <span className="text-sm">Loading…</span>
+          <Spinner className="me-2" /> <span className="text-sm">Loading…</span>
         </CardContent>
       </JoinOrgShell>
     )

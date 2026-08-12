@@ -83,7 +83,7 @@ export function AquiferProposalCard({ proposal, projectId, jwt }: AquiferProposa
           <button
             type="button"
             onClick={() => setExpanded((v) => !v)}
-            className="ml-1 inline-flex items-center align-baseline text-[10px] text-muted-foreground underline underline-offset-2 hover:text-foreground"
+            className="ms-1 inline-flex items-center align-baseline text-[10px] text-muted-foreground underline underline-offset-2 hover:text-foreground"
           >
             {expanded ? "Show less" : "Show more"}
           </button>

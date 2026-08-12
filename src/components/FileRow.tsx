@@ -149,7 +149,7 @@ export function FileRow(props: FileRowProps) {
               <button
                 type="button"
                 tabIndex={-1}
-                className="block w-full truncate text-left"
+                className="block w-full truncate text-start"
                 onClick={(e) => {
                   e.stopPropagation()
                   onSelect()

@@ -67,13 +67,13 @@ export function ProjectAssignedToMe({
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
-        className="flex w-full items-center gap-1.5 rounded px-1 py-0.5 text-left text-xs font-medium text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+        className="flex w-full items-center gap-1.5 rounded px-1 py-0.5 text-start text-xs font-medium text-muted-foreground hover:bg-muted/60 hover:text-foreground"
       >
         {expanded ? <ChevronDown className="h-3 w-3 shrink-0" /> : <ChevronRight className="h-3 w-3 shrink-0" />}
         <ClipboardList className="h-3 w-3 shrink-0" />
         <span className="truncate">My assignments</span>
         {assignments.length > 0 && (
-          <Badge className="ml-auto shrink-0">{assignments.length}</Badge>
+          <Badge className="ms-auto shrink-0">{assignments.length}</Badge>
         )}
       </button>
 
@@ -95,7 +95,7 @@ export function ProjectAssignedToMe({
                     type="button"
                     onClick={() => handleRowClick(a)}
                     className={cn(
-                      "group w-full rounded px-2 py-1.5 text-left transition-colors hover:bg-muted/60",
+                      "group w-full rounded px-2 py-1.5 text-start transition-colors hover:bg-muted/60",
                       !onJumpToAssignment && "cursor-default",
                     )}
                   >

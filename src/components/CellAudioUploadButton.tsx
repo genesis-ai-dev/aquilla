@@ -166,7 +166,7 @@ export function CellAudioUploadButton({ projectId, fileId, cellId, username, dis
       {error && (
         <span
           role="tooltip"
-          className="absolute bottom-full right-0 z-50 mb-1 w-52 rounded-md border bg-popover px-3 py-2 text-[11px] leading-snug text-popover-foreground shadow-md"
+          className="absolute bottom-full end-0 z-50 mb-1 w-52 rounded-md border bg-popover px-3 py-2 text-[11px] leading-snug text-popover-foreground shadow-md"
         >
           <strong className="block font-semibold">{t("common.uploadFailed")}</strong>
           <span className="mt-0.5 block text-muted-foreground">{error}</span>

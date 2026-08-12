@@ -267,7 +267,7 @@ export function MembersTab({
           </span>
         )}
 
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ms-auto flex items-center gap-2">
           {/* Role change dropdown — only for direct grants, not self */}
           {!isLocked && !isSelf && (
             <Select
@@ -370,7 +370,7 @@ export function MembersTab({
           <span>{error}</span>
           <button
             type="button"
-            className="ml-auto text-xs underline"
+            className="ms-auto text-xs underline"
             onClick={() => void refresh()}
           >
             Retry

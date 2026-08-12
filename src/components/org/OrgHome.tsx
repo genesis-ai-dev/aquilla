@@ -196,7 +196,7 @@ function ProjectTableName({ name }: { name: string }) {
         <span
           aria-hidden="true"
           data-testid="project-table-name-expanded"
-          className="pointer-events-none absolute top-1/2 -left-2 z-50 -translate-y-1/2 whitespace-nowrap rounded-md bg-popover px-2 py-1 font-medium text-popover-foreground opacity-0 shadow-md ring-1 ring-border/60 transition-opacity duration-100 group-hover/name:opacity-100"
+          className="pointer-events-none absolute top-1/2 -start-2 z-50 -translate-y-1/2 whitespace-nowrap rounded-md bg-popover px-2 py-1 font-medium text-popover-foreground opacity-0 shadow-md ring-1 ring-border/60 transition-opacity duration-100 group-hover/name:opacity-100"
         >
           {name}
         </span>
@@ -391,7 +391,7 @@ export function ProjectTable({
     <div data-testid="project-table" className="@container/project-table overflow-hidden">
       <div className="w-full">
         <div
-          className={`sticky top-0 z-20 grid ${PROJECT_TABLE_COLS} items-center gap-x-2 border-b bg-muted/95 py-2 pr-2 pl-4 text-xs font-medium text-muted-foreground backdrop-blur-sm`}
+          className={`sticky top-0 z-20 grid ${PROJECT_TABLE_COLS} items-center gap-x-2 border-b bg-muted/95 py-2 pe-2 ps-4 text-xs font-medium text-muted-foreground backdrop-blur-sm`}
         >
           <span
             className={cn(
@@ -400,7 +400,7 @@ export function ProjectTable({
             )}
           >
             <span>Project</span>
-            {showOrg && <span className="hidden text-left @md/project-table:block">Org</span>}
+            {showOrg && <span className="hidden text-start @md/project-table:block">Org</span>}
           </span>
           {/* AQU-538: lane chips column (see the LaneChips cell in each row). */}
           <span className="hidden @md/project-table:block">Language</span>
@@ -435,7 +435,7 @@ export function ProjectTable({
                 key={p.id}
                 to={`/projects/${p.id}`}
                 data-project-id={p.id}
-                className={`grid ${PROJECT_TABLE_COLS} items-center gap-x-2 overflow-hidden py-2 pr-2 pl-4 text-sm transition-colors hover:bg-muted/50`}
+                className={`grid ${PROJECT_TABLE_COLS} items-center gap-x-2 overflow-hidden py-2 pe-2 ps-4 text-sm transition-colors hover:bg-muted/50`}
               >
                 <span
                   data-testid="project-table-identity"
@@ -478,7 +478,20 @@ export function ProjectTable({
                         className="flex min-w-0 items-center text-xs leading-4 text-muted-foreground"
                       >
                         <span className="truncate" aria-label="Source and target language">
-                          {languagePairLabel(p)}
+                          {/* AQU-i18n: the lib-generated label uses a literal " → "
+                              separator; wrap that glyph so it mirrors under RTL
+                              instead of pointing away from the target language. */}
+                          {(() => {
+                            const label = languagePairLabel(p)
+                            const parts = label?.split(" → ")
+                            return parts?.length === 2 ? (
+                              <>
+                                {parts[0]} <span className="inline-block rtl:-scale-x-100">→</span> {parts[1]}
+                              </>
+                            ) : (
+                              label
+                            )
+                          })()}
                         </span>
                       </span>
                     )}
@@ -492,7 +505,7 @@ export function ProjectTable({
                       >
                         <Badge
                           variant="secondary"
-                          className="absolute top-0 left-0 z-10 min-w-0 max-w-full justify-start overflow-hidden transition-[max-width,box-shadow] duration-150 group-hover/org:max-w-80 group-hover/org:shadow-sm"
+                          className="absolute top-0 start-0 z-10 min-w-0 max-w-full justify-start overflow-hidden transition-[max-width,box-shadow] duration-150 group-hover/org:max-w-80 group-hover/org:shadow-sm"
                         >
                           <span className="min-w-0 flex-1 truncate group-hover/org:overflow-visible group-hover/org:whitespace-nowrap">
                             {p.orgName}
@@ -518,21 +531,21 @@ export function ProjectTable({
 
                 <span
                   data-testid="project-table-translated-value"
-                  className="justify-self-start text-left font-medium tabular-nums text-foreground"
+                  className="justify-self-start text-start font-medium tabular-nums text-foreground"
                   aria-label={`${tpct}% translated`}
                 >
                   {tpct}%
                 </span>
                 <span
                   data-testid="project-table-validated-value"
-                  className="justify-self-start text-left tabular-nums text-muted-foreground"
+                  className="justify-self-start text-start tabular-nums text-muted-foreground"
                   aria-label={`${pct}% validated`}
                 >
                   {pct}%
                 </span>
                 <span
                   data-testid="project-table-audio-value"
-                  className="hidden justify-self-start text-left tabular-nums text-muted-foreground @md/project-table:block"
+                  className="hidden justify-self-start text-start tabular-nums text-muted-foreground @md/project-table:block"
                   aria-label={`${apct}% audio`}
                 >
                   {apct}%
@@ -866,7 +879,7 @@ export function OrgHome() {
     <AppShell
       sidebar={<OrgSidebar />}
       header={
-        <div className="flex items-center justify-between pr-4">
+        <div className="flex items-center justify-between pe-4">
           <OrgBreadcrumb section="Projects" />
           {activeOrgId != null ? (
             <ProjectCreateDialog
@@ -997,7 +1010,7 @@ export function OrgHome() {
                                 key={summary.org.id}
                                 type="button"
                                 onClick={() => openOrg(summary.org.id)}
-                                className="flex w-full items-center gap-4 p-4 text-left transition-colors hover:bg-muted/50"
+                                className="flex w-full items-center gap-4 p-4 text-start transition-colors hover:bg-muted/50"
                               >
                                 <div className="min-w-0 flex-1">
                                   <div className="flex flex-wrap items-center gap-2">
@@ -1071,7 +1084,7 @@ export function OrgHome() {
                               options={STATUS_FILTERS}
                             />
                           </div>
-                          <div className="ml-auto flex shrink-0 items-center gap-2" aria-label="Project sort">
+                          <div className="ms-auto flex shrink-0 items-center gap-2" aria-label="Project sort">
                             <span className="text-xs font-medium text-muted-foreground">Sort by</span>
                             <Select
                               items={PROJECT_LENSES.map((lens) => ({ value: lens.value, label: lens.label }))}

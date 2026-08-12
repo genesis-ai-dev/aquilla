@@ -91,7 +91,7 @@ export function ExternalCollaboratorsSection({
             <Badge className="border-transparent bg-amber-500/15 text-[10px] text-amber-700 dark:text-amber-300">
               external
             </Badge>
-            <div className="ml-auto flex flex-wrap items-center gap-1.5">
+            <div className="ms-auto flex flex-wrap items-center gap-1.5">
               {e.grants.map((g) => (
                 <Badge
                   key={`${g.projectId}:${e.userId}`}

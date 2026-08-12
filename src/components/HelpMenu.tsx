@@ -73,7 +73,7 @@ export function HelpMenu({ compact = false, showTour = true }: HelpMenuProps) {
               {/* AQU-699: advertise that the trigger expands, so the Tour housed
                   inside it stays discoverable. Omitted when collapsed to an icon. */}
               <ChevronDown
-                className="ml-auto h-3.5 w-3.5 opacity-50"
+                className="ms-auto h-3.5 w-3.5 opacity-50"
                 aria-hidden
               />
             </>
@@ -104,7 +104,7 @@ export function HelpMenu({ compact = false, showTour = true }: HelpMenuProps) {
             >
               <BookOpen />
               {t("nav.help.docs")}
-              <ExternalLink className="ml-auto opacity-60" />
+              <ExternalLink className="ms-auto opacity-60" />
             </DropdownMenuItem>
             <DropdownMenuItem
               render={
@@ -118,7 +118,7 @@ export function HelpMenu({ compact = false, showTour = true }: HelpMenuProps) {
             >
               <Discord className="size-4 shrink-0" />
               {t("nav.help.discord")}
-              <ExternalLink className="ml-auto opacity-60" />
+              <ExternalLink className="ms-auto opacity-60" />
             </DropdownMenuItem>
             <DropdownMenuItem
               render={
@@ -127,7 +127,7 @@ export function HelpMenu({ compact = false, showTour = true }: HelpMenuProps) {
             >
               <Mail />
               {t("nav.help.contactSupport")}
-              <ExternalLink className="ml-auto opacity-60" />
+              <ExternalLink className="ms-auto opacity-60" />
             </DropdownMenuItem>
             <DropdownMenuItem onClick={handleReport}>
               <Flag />

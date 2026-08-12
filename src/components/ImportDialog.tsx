@@ -916,7 +916,7 @@ function OptionCard({ option, onSelect }: { option: ImportOption; onSelect: (s: 
           <div className="flex items-center gap-1.5">
             <span className="text-sm font-medium leading-none">{option.title}</span>
             {option.hint && <span className="text-xs text-muted-foreground">{option.hint}</span>}
-            {option.badge && <span className="ml-auto shrink-0"><OptionBadge kind={option.badge} /></span>}
+            {option.badge && <span className="ms-auto shrink-0"><OptionBadge kind={option.badge} /></span>}
           </div>
           <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">{option.description}</p>
         </div>
@@ -1737,7 +1737,7 @@ function ParatextChoice({
             <ul className="divide-y">
               {filtered.map((t) => (
                 <li key={t.id}>
-                  <button type="button" onClick={() => runTarget(t)} className="flex w-full flex-col items-start px-3 py-2 text-left hover:bg-accent">
+                  <button type="button" onClick={() => runTarget(t)} className="flex w-full flex-col items-start px-3 py-2 text-start hover:bg-accent">
                     <span className="text-sm">{t.title}</span>
                     <span className="text-xs text-muted-foreground">{t.languageNameInEnglish} · {t.id}</span>
                   </button>
@@ -1798,7 +1798,7 @@ function ParatextChoice({
                     <button
                       type="button"
                       onClick={() => setExpandedBook(expanded ? null : key)}
-                      className="flex min-w-0 flex-1 items-baseline gap-2 text-left"
+                      className="flex min-w-0 flex-1 items-baseline gap-2 text-start"
                       aria-label="Show the first parsed cells"
                     >
                       <span className={`truncate text-sm ${included ? "" : "text-muted-foreground line-through"}`}>{b.book.displayName}</span>
@@ -1809,7 +1809,7 @@ function ParatextChoice({
                     </button>
                   </div>
                   {expanded && (
-                    <ul className="space-y-1 px-3 pb-2 pl-9">
+                    <ul className="space-y-1 px-3 pb-2 ps-9">
                       {b.strings.slice(0, 4).map((s) => (
                         <li key={s.id} className="truncate text-xs text-muted-foreground">
                           {/* AQU-580: Paratext books are raw USFM — strip the
@@ -1833,11 +1833,11 @@ function ParatextChoice({
       )}
       <p className="text-xs text-muted-foreground">How should we bring it in?</p>
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-        <button type="button" onClick={runSource} disabled={!plan || includedBooks.length === 0} className="rounded-lg border p-3 text-left transition-colors hover:border-primary hover:bg-primary/5 disabled:cursor-not-allowed disabled:opacity-50">
+        <button type="button" onClick={runSource} disabled={!plan || includedBooks.length === 0} className="rounded-lg border p-3 text-start transition-colors hover:border-primary hover:bg-primary/5 disabled:cursor-not-allowed disabled:opacity-50">
           <p className="text-sm font-medium">Source text</p>
           <p className="mt-1 text-xs text-muted-foreground">A reference Bible to translate from. Books import as source cells.</p>
         </button>
-        <button type="button" onClick={startTarget} disabled={!plan || includedBooks.length === 0} className="rounded-lg border p-3 text-left transition-colors hover:border-primary hover:bg-primary/5 disabled:cursor-not-allowed disabled:opacity-50">
+        <button type="button" onClick={startTarget} disabled={!plan || includedBooks.length === 0} className="rounded-lg border p-3 text-start transition-colors hover:border-primary hover:bg-primary/5 disabled:cursor-not-allowed disabled:opacity-50">
           <p className="text-sm font-medium">Translation in progress</p>
           <p className="mt-1 text-xs text-muted-foreground">Your team's target text. We'll pair it with a source Bible by verse.</p>
         </button>
@@ -2111,7 +2111,7 @@ function EBiblePanel({ projectId, username, sourceLanguage, targetLanguage, targ
                     disabled={importing}
                     onClick={() => setSelected(t)}
                     className={cn(
-                      "flex w-full flex-col items-start gap-0.5 px-3 py-2 text-left text-sm transition-colors hover:bg-accent",
+                      "flex w-full flex-col items-start gap-0.5 px-3 py-2 text-start text-sm transition-colors hover:bg-accent",
                       isSelected && "bg-accent"
                     )}
                   >
@@ -2379,7 +2379,7 @@ function HelloaoPanel({ projectId, username, sourceLanguage, targetLanguage, get
                   { value: "NT", label: "New Testament", disabled: importing },
                 ]}
               />
-              <span className="ml-auto text-xs text-muted-foreground">
+              <span className="ms-auto text-xs text-muted-foreground">
                 {checkedBooks.size} of {books.length} books
               </span>
             </div>
@@ -2483,7 +2483,7 @@ function HelloaoPanel({ projectId, username, sourceLanguage, targetLanguage, get
                 <button
                   type="button"
                   onClick={() => handleSelect(t)}
-                  className="flex w-full flex-col items-start gap-0.5 px-3 py-2 text-left text-sm transition-colors hover:bg-accent"
+                  className="flex w-full flex-col items-start gap-0.5 px-3 py-2 text-start text-sm transition-colors hover:bg-accent"
                 >
                   <div className="flex w-full items-center justify-between gap-2">
                     <span className="font-medium">{t.englishName || t.name}</span>
@@ -3605,7 +3605,7 @@ function ImportDialogBackButton({
       disabled={disabled}
       onClick={onClick}
       aria-label={label}
-      className="-ml-2"
+      className="-ms-2"
     >
       <ArrowLeft />
     </Button>

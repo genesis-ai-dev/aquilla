@@ -90,7 +90,7 @@ export function AiProviderStep({ project, onUpdated, onSaved }: AiProviderStepPr
       />
 
       {selected === "custom" && (
-        <div className="ml-7 space-y-2 rounded-md bg-muted/30 p-2">
+        <div className="ms-7 space-y-2 rounded-md bg-muted/30 p-2">
           <div>
             <FieldLabel htmlFor="ai-endpoint" className="text-xs">
               Endpoint URL
@@ -154,7 +154,7 @@ function ProviderOption({
       onClick={onClick}
       aria-pressed={selected}
       className={
-        "flex w-full items-start gap-3 rounded-lg border p-3 text-left transition-colors " +
+        "flex w-full items-start gap-3 rounded-lg border p-3 text-start transition-colors " +
         (selected
           ? "border-primary bg-primary/5"
           : "hover:bg-accent/40")

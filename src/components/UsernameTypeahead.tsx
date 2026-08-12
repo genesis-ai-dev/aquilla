@@ -501,7 +501,7 @@ export function UsernameTypeahead({
                         role="checkbox"
                         aria-checked={checked}
                         onClick={() => multiSelect.onToggleResult(u)}
-                        className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-muted ${
+                        className={`flex w-full items-center gap-2 px-3 py-1.5 text-start text-sm hover:bg-muted ${
                           checked ? "bg-muted/60" : ""
                         }`}
                       >
@@ -527,7 +527,7 @@ export function UsernameTypeahead({
                     <button
                       type="button"
                       onClick={() => handlePick(u)}
-                      className={`flex w-full items-center justify-between px-3 py-1.5 text-left text-sm hover:bg-muted ${
+                      className={`flex w-full items-center justify-between px-3 py-1.5 text-start text-sm hover:bg-muted ${
                         isSelected ? "bg-muted/60" : ""
                       }`}
                     >

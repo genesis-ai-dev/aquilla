@@ -160,7 +160,7 @@ export function VoiceCloneSection({ voice, projectId, fileId, session, onChange,
             onClick={removeReference}
             className="text-destructive hover:bg-destructive/10 hover:text-destructive"
           >
-            <Trash2 className="mr-1 h-3.5 w-3.5" /> {t("audio.clone.removeButton")}
+            <Trash2 className="me-1 h-3.5 w-3.5" /> {t("audio.clone.removeButton")}
           </Button>
           <Button
             type="button"
@@ -169,14 +169,14 @@ export function VoiceCloneSection({ voice, projectId, fileId, session, onChange,
             onClick={() => fileInputRef.current?.click()}
             disabled={status.kind === "uploading"}
           >
-            <Upload className="mr-1 h-3.5 w-3.5" /> {t("audio.clone.replaceButton")}
+            <Upload className="me-1 h-3.5 w-3.5" /> {t("audio.clone.replaceButton")}
           </Button>
         </div>
       ) : (
         <div className="flex flex-wrap items-center gap-2">
           {isRecording ? (
             <Button type="button" size="sm" variant="destructive" onClick={() => recorder.stop()}>
-              <Square className="mr-1 h-3.5 w-3.5" /> {t("audio.clone.stopRecordingButton", { seconds: (recorder.elapsedMs / 1000).toFixed(1) })}
+              <Square className="me-1 h-3.5 w-3.5" /> {t("audio.clone.stopRecordingButton", { seconds: (recorder.elapsedMs / 1000).toFixed(1) })}
             </Button>
           ) : (
             <Button
@@ -185,7 +185,7 @@ export function VoiceCloneSection({ voice, projectId, fileId, session, onChange,
               onClick={() => void recorder.start()}
               disabled={status.kind === "uploading"}
             >
-              <Mic className="mr-1 h-3.5 w-3.5" /> {t("audio.clone.recordButton")}
+              <Mic className="me-1 h-3.5 w-3.5" /> {t("audio.clone.recordButton")}
             </Button>
           )}
           <Button
@@ -195,7 +195,7 @@ export function VoiceCloneSection({ voice, projectId, fileId, session, onChange,
             onClick={() => fileInputRef.current?.click()}
             disabled={status.kind === "uploading" || isRecording}
           >
-            <Upload className="mr-1 h-3.5 w-3.5" /> {t("audio.clone.uploadButton")}
+            <Upload className="me-1 h-3.5 w-3.5" /> {t("audio.clone.uploadButton")}
           </Button>
           {status.kind === "uploading" && (
             <span className="flex items-center gap-1 text-xs text-muted-foreground">
@@ -283,11 +283,11 @@ export function ReferencePreview({ projectId, fileId, referenceAudioId, session 
         className={cn(state === "error" && "text-destructive")}
       >
       {state === "loading" ? (
-        <Spinner className="mr-1 size-3.5" />
+        <Spinner className="me-1 size-3.5" />
       ) : state === "playing" ? (
-        <Pause className="mr-1 h-3.5 w-3.5" />
+        <Pause className="me-1 h-3.5 w-3.5" />
       ) : (
-        <Play className="mr-1 h-3.5 w-3.5" />
+        <Play className="me-1 h-3.5 w-3.5" />
       )}
       {state === "error" ? t("audio.clone.previewFailed") : t("common.preview")}
     </Button>

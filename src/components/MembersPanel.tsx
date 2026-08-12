@@ -156,7 +156,7 @@ export function MembersPanel({
                 <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">creator</span>
               )}
               <LastActiveChip lastActiveAt={m.lastActiveAt} />
-              <div className="ml-auto flex items-center gap-2">
+              <div className="ms-auto flex items-center gap-2">
                 {onChangeRole && !m.isLocked && !isSelf && (
                   <Select
                     items={[
@@ -322,7 +322,7 @@ function MemberScopesEditor({
         aria-expanded={expanded}
         aria-controls={bodyId}
         onClick={() => setExpanded((v) => !v)}
-        className="flex w-full items-center gap-2 px-2 py-1.5 text-left"
+        className="flex w-full items-center gap-2 px-2 py-1.5 text-start"
       >
         <ChevronRight
           className={`h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform ${
@@ -331,7 +331,7 @@ function MemberScopesEditor({
           aria-hidden
         />
         <span className="font-medium text-muted-foreground">Scopes</span>
-        <span className="ml-auto truncate text-muted-foreground">
+        <span className="ms-auto truncate text-muted-foreground">
           {scopeSummary(savedLaneCount, savedFileCount)}
         </span>
       </button>

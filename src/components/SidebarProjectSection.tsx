@@ -36,7 +36,7 @@ function NavRow({
       }}
     >
       <item.icon className="h-3.5 w-3.5 shrink-0" />
-      <span className="flex-1 truncate text-left">{t(item.labelKey)}</span>
+      <span className="flex-1 truncate text-start">{t(item.labelKey)}</span>
       {item.badge != null && item.badge > 0 && (
         <span className="rounded-md px-1.5 text-[10px] tabular-nums text-primary">
           {item.badge}
@@ -76,7 +76,7 @@ export function SidebarProjectSection({ items }: Props) {
                   )}
                 >
                   <MoreHorizontal className="h-3.5 w-3.5 shrink-0" />
-                  <span className="flex-1 truncate text-left">{t("nav.sidebarSection.more")}</span>
+                  <span className="flex-1 truncate text-start">{t("nav.sidebarSection.more")}</span>
                   {overflowBadge > 0 && (
                     <span className="rounded-md px-1.5 text-[10px] tabular-nums text-primary">
                       {overflowBadge}

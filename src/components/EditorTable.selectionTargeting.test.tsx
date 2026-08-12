@@ -256,7 +256,7 @@ describe("EditorTable — selection targeting (AQU-348)", () => {
     expect(sourceColumn.contains(control)).toBe(false)
     expect(control).not.toHaveClass("absolute")
 
-    // The remaining right padding clears the floating source-edit pencil.
-    expect(sourceColumn).toHaveClass("pr-7")
+    // The remaining trailing padding clears the floating source-edit pencil.
+    expect(sourceColumn).toHaveClass("pe-7")
   })
 })

@@ -1093,7 +1093,7 @@ export function ExportDialog({
             </span>
             Advanced
           </summary>
-          <div className="mt-2.5 flex flex-col gap-2.5 pl-3 border-l border-border/40">
+          <div className="mt-2.5 flex flex-col gap-2.5 ps-3 border-s border-border/40">
             {/* Plain-text dump — shares the `format` state with the main list
                 above, but lives in its own RadioGroup wrapper since Base UI
                 radios need a group ancestor. */}
@@ -1254,7 +1254,7 @@ export function ExportDialog({
                 ? "1 segment lost inline formatting in this export"
                 : `${fidelityWarnings.length} segments lost inline formatting in this export`}
             </span>
-            <ul className="ml-4 list-disc space-y-0.5">
+            <ul className="ms-4 list-disc space-y-0.5">
               {fidelityWarnings.slice(0, 6).map((w, i) => (
                 <li key={i}>
                   <span className="font-medium">{w.segment}</span>: {w.detail}

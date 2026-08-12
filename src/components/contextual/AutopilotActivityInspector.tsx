@@ -298,7 +298,7 @@ function Disclosure({
             aria-hidden
           />
           {title}
-          {badge && <span className="ml-auto">{badge}</span>}
+          {badge && <span className="ms-auto">{badge}</span>}
         </Button>
       </CollapsibleTrigger>
       <CollapsibleContent className="flex flex-col gap-3 px-2 pb-2">{children}</CollapsibleContent>
@@ -643,7 +643,7 @@ function SceneBriefEvidence({ brief }: { brief: ContextualActivitySceneBrief }) 
             {t("autopilot.inspector.context.ambiguities", { count: ambiguities.length })}
           </p>
           {ambiguities.length > 0 ? (
-            <ul className="mt-1 flex list-disc flex-col gap-1 pl-4 text-sm text-muted-foreground">
+            <ul className="mt-1 flex list-disc flex-col gap-1 ps-4 text-sm text-muted-foreground">
               {ambiguities.map((item, index) => (
                 <li key={item.id ?? index}>
                   {item.question ?? t("autopilot.inspector.context.unlabelledAmbiguity")}
@@ -1120,7 +1120,7 @@ export function AutopilotActivityInspector({
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent side="right" className="w-full sm:max-w-2xl!" data-testid="autopilot-activity-inspector">
-        <SheetHeader className="pr-12">
+        <SheetHeader className="pe-12">
           <SheetTitle>{t("autopilot.inspector.title")}</SheetTitle>
           <SheetDescription>
             {t("autopilot.inspector.description")}
@@ -1193,7 +1193,7 @@ export function AutopilotActivityInspector({
                       key={run.runId}
                       type="button"
                       variant={run.runId === selectedRun?.runId ? "secondary" : "outline"}
-                      className="h-auto min-w-0 justify-start whitespace-normal px-3 py-2 text-left"
+                      className="h-auto min-w-0 justify-start whitespace-normal px-3 py-2 text-start"
                       aria-pressed={run.runId === selectedRun?.runId}
                       onClick={() => {
                         selectionOverrideRef.current = run.runId

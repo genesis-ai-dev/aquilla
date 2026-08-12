@@ -29,7 +29,7 @@ export function CodeActivityBlock({ item }: { item: CodeActivityItem }) {
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        className="flex w-full items-center gap-1.5 px-2 py-1 text-left text-[11px]"
+        className="flex w-full items-center gap-1.5 px-2 py-1 text-start text-[11px]"
       >
         <ChevronRight
           className={cn("h-3 w-3 shrink-0 text-muted-foreground transition-transform", open && "rotate-90")}

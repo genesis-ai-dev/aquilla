@@ -35,7 +35,7 @@ function DetailRow({ label, children }: { label: string; children: React.ReactNo
   return (
     <div className="flex items-baseline justify-between gap-4 py-1">
       <dt className="shrink-0 text-muted-foreground">{label}</dt>
-      <dd className="min-w-0 truncate text-right" title={typeof children === "string" ? children : undefined}>
+      <dd className="min-w-0 truncate text-end" title={typeof children === "string" ? children : undefined}>
         {children}
       </dd>
     </div>
@@ -103,13 +103,22 @@ export function FileDetailsModal({
     ? undefined
     : t("fileDetails.deleteRequiresRole")
 
-  const languages = [file.sourceLanguage, file.targetLanguage].filter(Boolean).join(" → ")
+  // AQU-i18n: arrow glyph is wrapped so it visually mirrors under RTL instead
+  // of pointing away from the target language.
+  const languages =
+    file.sourceLanguage && file.targetLanguage ? (
+      <>
+        {file.sourceLanguage} <span className="inline-block rtl:-scale-x-100">→</span> {file.targetLanguage}
+      </>
+    ) : (
+      file.sourceLanguage || file.targetLanguage || null
+    )
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle className="truncate pr-8">{file.name}</DialogTitle>
+          <DialogTitle className="truncate pe-8">{file.name}</DialogTitle>
           {file.originalName && file.originalName !== file.name && (
             <DialogDescription>{t("fileDetails.importedAs", { name: file.originalName })}</DialogDescription>
           )}

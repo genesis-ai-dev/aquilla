@@ -74,7 +74,7 @@ export function EBibleTargetReviewPanel({ translation, matchResult, onApply, onC
           <p className="text-xs text-muted-foreground">
             {t("editor.ebible.selectedCount", { selected: selected.size, total: matched.length })}
             {selectedConflictCount > 0 && (
-              <span className="ml-1 text-amber-600 dark:text-amber-400">
+              <span className="ms-1 text-amber-600 dark:text-amber-400">
                 {t("editor.ebible.willOverwrite", { count: selectedConflictCount })}
               </span>
             )}
@@ -113,7 +113,7 @@ export function EBibleTargetReviewPanel({ translation, matchResult, onApply, onC
           <summary className="select-none text-muted-foreground">
             {t("editor.ebible.orphanSummary", { count: orphans.length })}
           </summary>
-          <ul className="mt-2 max-h-32 space-y-0.5 overflow-auto pl-2">
+          <ul className="mt-2 max-h-32 space-y-0.5 overflow-auto ps-2">
             {orphans.slice(0, 30).map((o) => (
               <li key={o.ref} className="text-muted-foreground">
                 <span className="font-mono">{o.ref}</span>

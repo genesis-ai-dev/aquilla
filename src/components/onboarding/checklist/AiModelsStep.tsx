@@ -194,7 +194,7 @@ export function AiModelsStep({ project, onUpdated }: AiModelsStepProps) {
         <button
           type="button"
           onClick={() => setExpanded(true)}
-          className="flex w-full items-center justify-between rounded-lg border bg-muted/20 px-3 py-2 text-left text-sm hover:bg-accent/40"
+          className="flex w-full items-center justify-between rounded-lg border bg-muted/20 px-3 py-2 text-start text-sm hover:bg-accent/40"
         >
           <span className="flex flex-col">
             <span className="font-medium">Set up transcription & voice</span>
@@ -239,7 +239,7 @@ export function AiModelsStep({ project, onUpdated }: AiModelsStepProps) {
               />
               {voiceChoice === "gemini" && (
                 hasSavedGeminiKey && !editingKey ? (
-                  <div className="ml-6 flex items-center justify-between gap-2 rounded-md bg-muted/30 p-2">
+                  <div className="ms-6 flex items-center justify-between gap-2 rounded-md bg-muted/30 p-2">
                     <span className="inline-flex items-center gap-1.5 text-xs text-emerald-700 dark:text-emerald-400">
                       <CheckCircle2 className="h-3.5 w-3.5" />
                       Gemini key saved
@@ -255,7 +255,7 @@ export function AiModelsStep({ project, onUpdated }: AiModelsStepProps) {
                     </Button>
                   </div>
                 ) : (
-                  <div className="ml-6 space-y-1 rounded-md bg-muted/30 p-2">
+                  <div className="ms-6 space-y-1 rounded-md bg-muted/30 p-2">
                     <FieldLabel htmlFor="setup-gemini-tts-key" className="text-xs">
                       Gemini API key
                     </FieldLabel>

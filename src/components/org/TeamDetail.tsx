@@ -697,7 +697,7 @@ export function TeamDetail() {
                           <li key={p.id} className="flex items-center justify-between rounded-2xl border px-4 py-2 text-sm">
                             <button
                               type="button"
-                              className="text-left font-medium hover:underline"
+                              className="text-start font-medium hover:underline"
                               onClick={() => navigate(`/projects/${p.id}`)}
                             >
                               {p.name}
@@ -796,7 +796,7 @@ function TeamMemberCombobox({
             aria-expanded={open}
             aria-controls="team-member-combobox-list"
             disabled={disabled}
-            className="inline-flex h-8 min-w-64 items-center justify-between gap-2 rounded-lg border border-input bg-background px-2.5 text-left text-sm outline-none transition-colors hover:bg-muted/40 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+            className="inline-flex h-8 min-w-64 items-center justify-between gap-2 rounded-lg border border-input bg-background px-2.5 text-start text-sm outline-none transition-colors hover:bg-muted/40 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
           />
         }
       >
@@ -838,7 +838,7 @@ function TeamMemberCombobox({
               return (
                 <label
                   key={member.userId}
-                  className="flex w-full cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-muted"
+                  className="flex w-full cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-start text-sm hover:bg-muted"
                 >
                   <input
                     type="checkbox"

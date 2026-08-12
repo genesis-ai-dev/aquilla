@@ -56,7 +56,7 @@ export function ValidationQueueCard({ proposal, applyContext, onApplied, canVali
         <span className="font-medium">
           {validations.length} validation{validations.length === 1 ? "" : "s"} prepared
         </span>
-        <span className="ml-auto text-[10px] text-muted-foreground">
+        <span className="ms-auto text-[10px] text-muted-foreground">
           {doneCount}/{validations.length} confirmed
         </span>
       </div>

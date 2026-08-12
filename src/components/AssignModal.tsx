@@ -726,7 +726,7 @@ export function AssignModal({
             {t("common.cancel")}
           </Button>
           <Button onClick={handleSubmit} disabled={submitting}>
-            {submitting ? <Spinner className="mr-1" /> : null}
+            {submitting ? <Spinner className="me-1" /> : null}
             {t("dialog.assign.submit")}
           </Button>
         </DialogFooter>

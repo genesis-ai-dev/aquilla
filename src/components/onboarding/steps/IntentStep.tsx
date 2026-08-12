@@ -28,7 +28,7 @@ export function IntentStep({
         <button
           type="button"
           onClick={onChoosePersonal}
-          className="flex items-start gap-3 rounded-lg border p-4 text-left hover:border-primary hover:bg-accent"
+          className="flex items-start gap-3 rounded-lg border p-4 text-start hover:border-primary hover:bg-accent"
         >
           <User className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" aria-hidden />
           <span>
@@ -41,7 +41,7 @@ export function IntentStep({
         <button
           type="button"
           onClick={onChooseTeam}
-          className="flex items-start gap-3 rounded-lg border p-4 text-left hover:border-primary hover:bg-accent"
+          className="flex items-start gap-3 rounded-lg border p-4 text-start hover:border-primary hover:bg-accent"
         >
           <Users className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" aria-hidden />
           <span>

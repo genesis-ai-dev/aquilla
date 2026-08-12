@@ -28,7 +28,7 @@ export function MemberAccessDrillDown({ orgId, userId, username, onClose }: Prop
   const state = useMemberAccess(orgId, userId)
 
   return (
-    <div className="flex flex-col h-full border-l bg-background">
+    <div className="flex flex-col h-full border-s bg-background">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b">
         <div>

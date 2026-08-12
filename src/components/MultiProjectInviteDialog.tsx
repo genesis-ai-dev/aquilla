@@ -284,7 +284,7 @@ export function MultiProjectInviteDialog({
                               type="button"
                               onClick={() => toggleProject(p.id)}
                               disabled={busy}
-                              className="min-w-0 truncate text-left hover:text-foreground disabled:opacity-50"
+                              className="min-w-0 truncate text-start hover:text-foreground disabled:opacity-50"
                             >
                               {p.name}
                             </button>
@@ -329,7 +329,7 @@ export function MultiProjectInviteDialog({
                       </div>
                       {errorMsg && (
                         <AppTooltip content={errorMsg} className="max-w-xs">
-                          <p className="mt-1 pl-7 text-[10px] text-destructive break-words">
+                          <p className="mt-1 ps-7 text-[10px] text-destructive break-words">
                             {errorMsg}
                           </p>
                         </AppTooltip>
@@ -360,13 +360,13 @@ export function MultiProjectInviteDialog({
 
           <div className="flex justify-end gap-2 pt-2 border-t">
             <Button variant="outline" onClick={handleClose} disabled={busy}>
-              <X className="mr-1 h-4 w-4" />
+              <X className="me-1 h-4 w-4" />
               {done ? "Close" : "Cancel"}
             </Button>
             <Button onClick={handleInvite} disabled={!canSubmit}>
               {busy ? (
                 <>
-                  <Spinner className="mr-1" />
+                  <Spinner className="me-1" />
                   {isEmailMode ? "Sending…" : "Adding…"}
                 </>
               ) : isEmailMode ? (

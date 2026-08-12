@@ -412,7 +412,7 @@ function ShowOnceTokenDialog({
               {result.token}
             </code>
             <Button size="sm" variant="outline" onClick={copy}>
-              <Copy className="mr-1 size-3.5" />
+              <Copy className="me-1 size-3.5" />
               {copied ? "Copied" : "Copy"}
             </Button>
           </div>
@@ -424,7 +424,7 @@ function ShowOnceTokenDialog({
         </DialogBody>
         <DialogFooter>
           <Button variant="outline" onClick={copyInstructions}>
-            <Copy className="mr-1 size-3.5" />
+            <Copy className="me-1 size-3.5" />
             {copiedPrompt ? "Copied" : "Copy agent instructions"}
           </Button>
           <Button onClick={onClose}>Done</Button>
@@ -488,7 +488,7 @@ function AgentInstructionsDialog({
             Close
           </Button>
           <Button onClick={copy}>
-            <Copy className="mr-1 size-3.5" />
+            <Copy className="me-1 size-3.5" />
             {copied ? "Copied" : "Copy instructions"}
           </Button>
         </DialogFooter>

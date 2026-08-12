@@ -191,7 +191,7 @@ export function MemberMultiAddRow({
         <ul className="flex flex-wrap gap-1.5" aria-label="People to add">
           {staged.map((s) => (
             <li key={s.username}>
-              <span className="inline-flex items-center gap-1 rounded-full border bg-muted/40 py-0.5 pl-2.5 pr-1 text-xs">
+              <span className="inline-flex items-center gap-1 rounded-full border bg-muted/40 py-0.5 ps-2.5 pe-1 text-xs">
                 <span className="max-w-[12rem] truncate">{s.username}</span>
                 <button
                   type="button"

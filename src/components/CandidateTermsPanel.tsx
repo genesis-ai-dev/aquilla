@@ -137,7 +137,7 @@ export function CandidateTermsPanel({
               onClick={() => onPromote(c)}
               className="shrink-0"
             >
-              <ArrowUpRight className="mr-1 h-3.5 w-3.5" aria-hidden />
+              <ArrowUpRight className="me-1 h-3.5 w-3.5" aria-hidden />
               {c.isManaged ? "Managed" : "Promote to managed"}
             </Button>
           </li>

@@ -81,4 +81,14 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "Names the find-and-replace mode, a term of art paired with 'Find' and usually " +
     "fixed by local software convention. audio.clone.replaceButton is an everyday " +
     "imperative that swaps an attached reference clip for another file.",
+  "editor.milestone.vocab.startLabel":
+    "Names the synthetic first division in the milestone navigator — a noun for " +
+    "'the beginning of the file'. audio.recordingModal.startButton is the " +
+    "imperative button that begins recording. Noun vs verb; several target " +
+    "languages spell the two differently even though English collapses them.",
+  "editor.sync.paused":
+    "The app pausing an idle websocket connection while the tab is hidden, and " +
+    "resuming it automatically. autopilot.status.paused is a person deliberately " +
+    "pausing an autopilot run. Automatic vs deliberate pausing are different " +
+    "concepts a translator would render with different verbs in most languages.",
 }

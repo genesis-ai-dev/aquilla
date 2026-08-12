@@ -1,5 +1,7 @@
 import { cn } from "@/lib/utils"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { useT } from "@/lib/i18n/I18nProvider"
+import type { MessageKey } from "@/lib/i18n/messages/en"
 
 export type SyncStatus = "live" | "connecting" | "offline" | "idle" | "disabled"
 
@@ -19,7 +21,10 @@ interface SyncStatusIndicatorProps {
  *   disabled   — grey   → no session, no project/file selected, or sync turned off
  */
 export function SyncStatusIndicator({ status, className }: SyncStatusIndicatorProps) {
-  const { dot, label, tooltip } = describeStatus(status)
+  const t = useT()
+  const { dot, labelKey, tooltipKey } = describeStatus(status)
+  const label = t(labelKey)
+  const tooltip = t(tooltipKey)
   return (
     <AppTooltip content={tooltip}>
       <span
@@ -42,37 +47,43 @@ export function SyncStatusIndicator({ status, className }: SyncStatusIndicatorPr
   )
 }
 
-function describeStatus(status: SyncStatus): { dot: string; label: string; tooltip: string } {
+/** Pure — no hook access, so it returns message keys rather than text; the
+ *  component above resolves them with `useT()`. */
+function describeStatus(status: SyncStatus): {
+  dot: string
+  labelKey: MessageKey
+  tooltipKey: MessageKey
+} {
   switch (status) {
     case "live":
       return {
         dot: "bg-green-500",
-        label: "Live",
-        tooltip: "Live — changes are syncing to Cloudflare and across devices",
+        labelKey: "editor.sync.live",
+        tooltipKey: "editor.sync.liveTooltip",
       }
     case "connecting":
       return {
         dot: "bg-amber-500",
-        label: "Connecting",
-        tooltip: "Connecting to the sync server…",
+        labelKey: "editor.sync.connecting",
+        tooltipKey: "editor.sync.connectingTooltip",
       }
     case "offline":
       return {
         dot: "bg-red-500",
-        label: "Offline",
-        tooltip: "Offline — changes are saved locally and will sync when reconnected",
+        labelKey: "editor.sync.offline",
+        tooltipKey: "editor.sync.offlineTooltip",
       }
     case "idle":
       return {
         dot: "bg-muted-foreground/40",
-        label: "Paused",
-        tooltip: "Sync paused while the tab is hidden — will resume when you return",
+        labelKey: "editor.sync.paused",
+        tooltipKey: "editor.sync.pausedTooltip",
       }
     case "disabled":
       return {
         dot: "bg-muted-foreground/40",
-        label: "No file open",
-        tooltip: "Open a file to start editing and syncing",
+        labelKey: "editor.sync.noFileOpen",
+        tooltipKey: "editor.sync.noFileOpenTooltip",
       }
   }
 }

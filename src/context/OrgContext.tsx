@@ -35,6 +35,16 @@ interface OrgContextValue {
   /** One app-wide project discovery result, shared by dashboard/sidebar users. */
   accessibleProjects: CloudProjectSummary[]
   accessibleProjectsLoading: boolean
+  /**
+   * AQU-883: the project-directory fetch failed. Tracked separately from
+   * `error` (the organizations fetch) because the two fail independently —
+   * orgs can load fine while the directory 401s/5xxs, and the directory is the
+   * *only* source of guest orgs and shared projects. Without this, every such
+   * failure collapsed into an empty list and read as "nothing is shared with
+   * you". Consumers surface it with a Retry that calls
+   * `refreshAccessibleProjects`.
+   */
+  accessibleProjectsError: string | null
   setActiveOrg: (id: number) => void
   setAllOrgs: () => void
   isLoading: boolean
@@ -67,6 +77,7 @@ export function OrgProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string | null>(null)
   const [accessibleProjects, setAccessibleProjects] = useState<CloudProjectSummary[]>([])
   const [accessibleProjectsLoading, setAccessibleProjectsLoading] = useState(true)
+  const [accessibleProjectsError, setAccessibleProjectsError] = useState<string | null>(null)
   const [resolvedProjectsJwt, setResolvedProjectsJwt] = useState<string | null>(null)
   const orgRequestRef = useRef(0)
   const projectsRequestRef = useRef(0)
@@ -136,6 +147,7 @@ export function OrgProvider({ children }: { children: ReactNode }) {
       projectsRequestRef.current += 1
       projectsInFlightRef.current = null
       setAccessibleProjects([])
+      setAccessibleProjectsError(null)
       setResolvedProjectsJwt(null)
       setAccessibleProjectsLoading(false)
       return []
@@ -149,14 +161,24 @@ export function OrgProvider({ children }: { children: ReactNode }) {
 
     const requestId = ++projectsRequestRef.current
     setAccessibleProjectsLoading(true)
+    // AQU-883: clear the previous failure up front so a retry drops consumers
+    // back through their loading state instead of leaving a stale error card
+    // on screen next to a spinner.
+    setAccessibleProjectsError(null)
     const promise = (async () => {
       try {
         const projects = await fetchAccessibleProjects(jwt)
         if (projectsRequestRef.current !== requestId) return []
         setAccessibleProjects(projects)
         return projects
-      } catch {
-        if (projectsRequestRef.current === requestId) setAccessibleProjects([])
+      } catch (e) {
+        // AQU-883: this used to swallow every failure into an empty list, so a
+        // blocked/401/5xx directory fetch was indistinguishable from "you have
+        // no shared projects" — guest orgs and shared projects just vanished.
+        if (projectsRequestRef.current === requestId) {
+          setAccessibleProjects([])
+          setAccessibleProjectsError(e instanceof Error ? e.message : String(e))
+        }
         return []
       } finally {
         if (projectsInFlightRef.current?.requestId === requestId) {
@@ -256,6 +278,7 @@ export function OrgProvider({ children }: { children: ReactNode }) {
       guestOrgs,
       accessibleProjects,
       accessibleProjectsLoading: accessibleProjectsLoading || !projectsReady,
+      accessibleProjectsError,
       setActiveOrg,
       setAllOrgs,
       isLoading: isLoading || !orgsReady,

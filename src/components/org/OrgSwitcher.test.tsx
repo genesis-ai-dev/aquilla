@@ -316,4 +316,84 @@ describe("OrgSwitcher", () => {
     // Org scope is path-based for both, so the overview is `/orgs/1`.
     await waitFor(() => expect(screen.getByTestId("loc")).toHaveTextContent("/orgs/1"))
   })
+  // AQU-883: guest orgs are derived ENTIRELY from the project-directory fetch.
+  // When that fetch failed the section simply vanished, reading as "you are a
+  // guest nowhere" — and for a project-only invitee the whole switcher
+  // unmounted, removing the last affordance that could re-issue the fetch.
+  describe("project-directory load failure (AQU-883)", () => {
+    it("shows a retry row in place of the guest section instead of silently dropping it", async () => {
+      listMyOrgs.mockResolvedValue([
+        { id: 1, name: "Alpha Org", role: { level: 700, name: "owner" } },
+        { id: 2, name: "Bravo Org", role: { level: 700, name: "owner" } },
+      ])
+      fetchAccessibleProjects.mockRejectedValue(new Error("Failed to fetch"))
+
+      render(<MemoryRouter><OrgProvider><OrgSwitcher /></OrgProvider></MemoryRouter>)
+      await screen.findByRole("button", { name: /organization switcher/i })
+      await openOrgSwitcher(/organization switcher/i)
+
+      // Member orgs still list — the two fetches fail independently.
+      expect(screen.getByText("Alpha Org")).toBeInTheDocument()
+      expect(await screen.findByTestId("guest-orgs-error")).toBeInTheDocument()
+      expect(screen.queryByTestId("guest-orgs")).not.toBeInTheDocument()
+    })
+
+    it("Retry re-fetches in place and the recovered guest orgs appear without a reload", async () => {
+      listMyOrgs.mockResolvedValue([
+        { id: 1, name: "Alpha Org", role: { level: 700, name: "owner" } },
+        { id: 2, name: "Bravo Org", role: { level: 700, name: "owner" } },
+      ])
+      fetchAccessibleProjects.mockRejectedValueOnce(new Error("Failed to fetch"))
+
+      render(<MemoryRouter><OrgProvider><OrgSwitcher /></OrgProvider></MemoryRouter>)
+      await screen.findByRole("button", { name: /organization switcher/i })
+      await openOrgSwitcher(/organization switcher/i)
+      await screen.findByTestId("guest-orgs-error")
+
+      fetchAccessibleProjects.mockResolvedValue([
+        { id: "pg", name: "P", orgId: 9, orgName: "Golf Guest", role: { level: 100, name: "viewer", source: "override" } },
+      ])
+      fireEvent.click(screen.getByRole("button", { name: /retry loading shared organizations/i }))
+
+      // Menu stays open, so the recovered guest org lands in place.
+      await waitFor(() => expect(screen.getByText("Golf Guest")).toBeInTheDocument())
+      expect(screen.queryByTestId("guest-orgs-error")).not.toBeInTheDocument()
+    })
+
+    it("keeps a retry affordance for a project-only invitee whose switcher would otherwise unmount", async () => {
+      // Zero member orgs: guest orgs were the ONLY reason the switcher rendered.
+      listMyOrgs.mockResolvedValue([])
+      fetchAccessibleProjects.mockRejectedValueOnce(new Error("Failed to fetch"))
+
+      render(<MemoryRouter><OrgProvider><OrgSwitcher /></OrgProvider></MemoryRouter>)
+      const retry = await screen.findByTestId("org-switcher-projects-error")
+      expect(retry).toBeInTheDocument()
+
+      fetchAccessibleProjects.mockResolvedValue([
+        { id: "pg", name: "P", orgId: 9, orgName: "Golf Guest", role: { level: 100, name: "viewer", source: "override" } },
+      ])
+      fireEvent.click(retry)
+
+      // Recovered: the real switcher returns, scoped to the guest org.
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: /organization switcher/i })).toBeInTheDocument(),
+      )
+    })
+
+    it("negative case: a successful empty directory still renders no guest section and no error", async () => {
+      listMyOrgs.mockResolvedValue([
+        { id: 1, name: "Alpha Org", role: { level: 700, name: "owner" } },
+        { id: 2, name: "Bravo Org", role: { level: 700, name: "owner" } },
+      ])
+      fetchAccessibleProjects.mockResolvedValue([])
+
+      render(<MemoryRouter><OrgProvider><OrgSwitcher /></OrgProvider></MemoryRouter>)
+      await screen.findByRole("button", { name: /organization switcher/i })
+      await openOrgSwitcher(/organization switcher/i)
+
+      expect(screen.getByText("Alpha Org")).toBeInTheDocument()
+      expect(screen.queryByTestId("guest-orgs-error")).not.toBeInTheDocument()
+      expect(screen.queryByTestId("guest-orgs")).not.toBeInTheDocument()
+    })
+  })
 })

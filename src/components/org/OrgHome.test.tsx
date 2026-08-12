@@ -27,6 +27,9 @@ vi.mock("@/lib/frontier/portfolio", async (importActual) => {
   const now = Date.now()
   return {
     ...actual,
+    // AQU-883: the all-orgs dashboard fans out through getPortfolios; default
+    // it to empty so only the tests that exercise that scope opt in.
+    getPortfolios: vi.fn(async () => []),
     getPortfolio: vi.fn(async () => [
       // Stalled, low validated — should rank first
       {
@@ -634,5 +637,66 @@ describe("activityStatus", () => {
 
   it("treats a recently edited project as active", () => {
     expect(activityStatus({ ...base, lastEditAt: now, filledCells: 5 }, now)).toBe("active")
+  })
+})
+
+// AQU-883: the project directory (accessible-projects) is the only source of
+// shared/guest projects and the guest orgs derived from them. Its fetch used to
+// collapse every failure into an empty list with no error recorded anywhere, so
+// the all-orgs overview was indistinguishable from "nothing is shared with you".
+describe("OrgHome — project-directory load failure (AQU-883)", () => {
+  const twoOrgs = [
+    { id: 1, name: "Come and See", role: { level: 700, name: "owner" } },
+    { id: 2, name: "Side Org", role: { level: 700, name: "owner" } },
+  ]
+
+  async function renderAllOrgs() {
+    const { listMyOrgs } = await import("@/lib/frontier/orgs")
+    vi.mocked(listMyOrgs).mockResolvedValue(twoOrgs)
+    const { getPortfolios } = await import("@/lib/frontier/portfolio")
+    vi.mocked(getPortfolios).mockResolvedValue([])
+    return render(
+      <MemoryRouter initialEntries={["/orgs/all"]}>
+        <OrgProvider><OrgHome /></OrgProvider>
+      </MemoryRouter>,
+    )
+  }
+
+  it("surfaces the failure in the projects panel instead of a plain empty state", async () => {
+    fetchAccessibleProjectsMock.mockRejectedValue(new Error("Failed to fetch"))
+    await renderAllOrgs()
+
+    const errorCard = await screen.findByTestId("project-directory-error")
+    expect(errorCard).toBeInTheDocument()
+    // Member orgs loaded fine, so the org panel must NOT claim a failure...
+    expect(screen.getByText("Come and See")).toBeInTheDocument()
+    // ...and the misleading "No projects yet." must not stand in for the error.
+    expect(screen.queryByText("No projects yet.")).not.toBeInTheDocument()
+    expect(within(errorCard).getByRole("button", { name: /retry/i })).toBeInTheDocument()
+  })
+
+  it("Retry re-fetches the directory in place and clears the error", async () => {
+    fetchAccessibleProjectsMock.mockRejectedValueOnce(new Error("Failed to fetch"))
+    await renderAllOrgs()
+
+    const errorCard = await screen.findByTestId("project-directory-error")
+    fetchAccessibleProjectsMock.mockResolvedValue([])
+    await act(async () => {
+      fireEvent.click(within(errorCard).getByRole("button", { name: /retry/i }))
+    })
+
+    await waitFor(() =>
+      expect(screen.queryByTestId("project-directory-error")).not.toBeInTheDocument(),
+    )
+    expect(fetchAccessibleProjectsMock.mock.calls.length).toBeGreaterThan(1)
+  })
+
+  it("negative case: a genuinely empty directory keeps the normal empty presentation", async () => {
+    fetchAccessibleProjectsMock.mockResolvedValue([])
+    await renderAllOrgs()
+
+    await waitFor(() => expect(screen.getByText("Come and See")).toBeInTheDocument())
+    expect(screen.queryByTestId("project-directory-error")).not.toBeInTheDocument()
+    expect(screen.getByText("No projects yet.")).toBeInTheDocument()
   })
 })

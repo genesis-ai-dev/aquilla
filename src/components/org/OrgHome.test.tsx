@@ -478,13 +478,9 @@ describe("OrgOverview / OrgProjects", () => {
   it("labels every compact metric heading for assistive technology", async () => {
     renderMemberProjects()
     await waitFor(() => expect(screen.getByText("Legacy Translation")).toBeInTheDocument())
-    for (const [testId, label] of [
-      ["project-table-translated-header", "Translated"],
-      ["project-table-validated-header", "Validated"],
-      ["project-table-audio-header", "Has audio"],
-    ]) {
-      const el = screen.getByTestId(testId)
-      expect(el).toHaveAttribute("aria-label", label)
+    // Projects page uses OrgProjectsDataTable sortable headers (not ProjectTable's icon headers).
+    for (const name of [/^Translated$/i, /^Validated$/i, /^Audio$/i]) {
+      expect(screen.getByRole("button", { name })).toBeInTheDocument()
     }
   })
 

@@ -136,8 +136,19 @@ export function TeamsList() {
     let cancelled = false
     setLoading(true)
     listTeams(jwt, activeOrgId)
-      .then((list) => { if (!cancelled) setTeams(list) })
-      .finally(() => { if (!cancelled) setLoading(false) })
+      .then((list) => {
+        if (cancelled) return
+        // Set data + clear loading in one turn so the empty-state frame never
+        // flashes under org-teams-table (tests that wait only on the testId
+        // would otherwise race the header buttons).
+        setTeams(list)
+        setLoading(false)
+      })
+      .catch(() => {
+        if (cancelled) return
+        setTeams([])
+        setLoading(false)
+      })
     return () => { cancelled = true }
   }, [jwt, activeOrgId])
 

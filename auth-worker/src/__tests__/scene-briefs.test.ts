@@ -175,8 +175,7 @@ describe("scene-brief run evidence", () => {
   it("passes provenance and ambiguity evidence as structured JSON at the Postgres adapter boundary", async () => {
     let adapterRegister: unknown
     let adapterProvenance: unknown
-    let executor: PgExecutor
-    executor = {
+    const executor: PgExecutor = {
       async run(_sql, params) {
         adapterRegister = params[7]
         adapterProvenance = params[11]

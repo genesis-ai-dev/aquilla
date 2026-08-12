@@ -202,7 +202,7 @@ describe("TeamsList — AQU-166: search + sort", () => {
   it("sort by Members (most first) reorders correctly", async () => {
     listTeams.mockResolvedValue(teams)
     render(<MemoryRouter><OrgProvider><TeamsList /></OrgProvider></MemoryRouter>)
-    await waitFor(() => expect(screen.getByTestId("org-teams-table")).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText("Alpha")).toBeInTheDocument())
     await sortByColumn(/^Members$/i, "descending")
     expect(teamNamesInOrder()).toEqual(["beta", "Alpha", "Gamma"])
   })
@@ -210,7 +210,7 @@ describe("TeamsList — AQU-166: search + sort", () => {
   it("sort by Projects (most first) reorders correctly", async () => {
     listTeams.mockResolvedValue(teams)
     render(<MemoryRouter><OrgProvider><TeamsList /></OrgProvider></MemoryRouter>)
-    await waitFor(() => expect(screen.getByTestId("org-teams-table")).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText("Alpha")).toBeInTheDocument())
     await sortByColumn(/^Projects$/i, "descending")
     expect(teamNamesInOrder()).toEqual(["Gamma", "Alpha", "beta"])
   })

@@ -61,11 +61,15 @@ export function AssignedToMe() {
     void (async () => {
       try {
         const all = await getMyAssignmentsForOrg(jwt, activeOrgId)
-        if (!cancelled) setRows(all)
+        if (cancelled) return
+        // Pair rows + loading so org-assigned-table never mounts empty while
+        // the fetch result is already in hand (avoids a race with content asserts).
+        setRows(all)
+        setLoading(false)
       } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e.message : String(e))
-      } finally {
-        if (!cancelled) setLoading(false)
+        if (cancelled) return
+        setError(e instanceof Error ? e.message : String(e))
+        setLoading(false)
       }
     })()
     return () => { cancelled = true }

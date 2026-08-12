@@ -64,8 +64,7 @@ describe("AssignedToMe", () => {
     ])
     renderInbox()
 
-    await waitFor(() => expect(screen.getByTestId("org-assigned-table")).toBeInTheDocument())
-    expect(screen.getByText("Mark · MRK 1")).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByText("Mark · MRK 1")).toBeInTheDocument())
     expect(screen.getByText("01-JHN.usfm")).toBeInTheDocument()
     expect(screen.getByText("02-MRK.usfm")).toBeInTheDocument()
     expect(screen.getByText("4/10 cells · 40%")).toBeInTheDocument()

@@ -664,7 +664,7 @@ describe("ProjectOverview archive/restore", () => {
     fireEvent.click(screen.getByRole("button", { name: "Archive" }))
 
     await waitFor(() => expect(archiveProjectRemote).toHaveBeenCalledWith("p1", "jwt"))
-    expect(navigate).toHaveBeenCalledWith("/projects")
+    expect(navigate).toHaveBeenCalledWith("/orgs/1/projects")
   })
 
   it("canceling the archive dialog does not archive", async () => {

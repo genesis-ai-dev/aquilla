@@ -11,26 +11,51 @@
 
 import { describe, it, expect, beforeEach } from "vitest"
 import {
-  applyContextualDraftsFrame,
-  getContextualDraftFor,
+  applyContextualDraftsFrame as applyFrame,
+  attachContextualDrafts,
+  getContextualDraftFor as getDraft,
   getContextualDrafts,
   getContextualDraftsSummary,
-  hydrateContextualDrafts,
+  hydrateContextualDrafts as hydrateScope,
   listPendingDrafts,
   resetContextualDraftsStore,
-  resolveContextualDraft,
+  resolveContextualDraft as resolveDraft,
 } from "./drafts-store"
 
 const RUN = "01920000-0000-7000-8000-000000000001"
+const PROJECT = "project-1"
+
+function hydrateContextualDrafts(
+  fileId: string,
+  drafts: { draftId: string; runId?: string; cellId: string; text: string; spanLabel?: string }[],
+  projectId = PROJECT,
+  targetLang = "",
+) {
+  return hydrateScope(attachContextualDrafts(projectId, fileId, targetLang), drafts)
+}
+
+function applyContextualDraftsFrame(frame: ReturnType<typeof burst>, projectId = PROJECT) {
+  return applyFrame(projectId, frame, RUN)
+}
+
+function getContextualDraftFor(cellId: string, projectId = PROJECT, fileId = "file-1", targetLang = "") {
+  return getDraft(projectId, fileId, targetLang, cellId)
+}
+
+function resolveContextualDraft(cellId: string, action: "accepted" | "rejected") {
+  const draftId = getContextualDraftFor(cellId)?.draftId ?? "missing"
+  return resolveDraft(PROJECT, "file-1", "", cellId, draftId, action)
+}
 
 function burst(
   drafts: { draftId: string; cellId: string; text: string }[],
-  opts: { fileId?: string; spanLabel?: string; truncated?: boolean } = {},
+  opts: { fileId?: string; targetLang?: string; spanLabel?: string; truncated?: boolean } = {},
 ) {
   return {
     type: "contextual.drafts" as const,
     runId: RUN,
     fileId: opts.fileId ?? "file-1",
+    targetLang: opts.targetLang ?? "",
     spanLabel: opts.spanLabel ?? "LUK 1:1–1:8",
     drafts,
     ...(opts.truncated ? { truncated: true } : {}),
@@ -80,12 +105,26 @@ describe("draft bursts", () => {
     expect(getContextualDraftFor("c1")).toMatchObject({ draftId: "d2", text: "after steering" })
   })
 
+  it("refetches instead of applying a delayed burst from a superseded run", () => {
+    hydrateContextualDrafts("file-1", [
+      { draftId: "new", runId: "run-b", cellId: "c1", text: "run B text" },
+    ])
+    const delayedA = { ...burst([{ draftId: "old", cellId: "c1", text: "stale run A text" }]), runId: "run-a" }
+
+    const result = applyFrame(PROJECT, delayedA, "run-b")
+
+    expect(result.needsRefetch).toBe(true)
+    expect(getContextualDraftFor("c1")?.text).toBe("run B text")
+    expect(getContextualDraftFor("c1")?.runId).toBe("run-b")
+  })
+
   it("asks for a refetch when the burst was truncated", () => {
     hydrateContextualDrafts("file-1", [])
     const partial = applyContextualDraftsFrame(
       burst([{ draftId: "d1", cellId: "c1", text: "one of many" }], { truncated: true }),
     )
     expect(partial.needsRefetch).toBe(true)
+    expect(getContextualDraftFor("c1")).toBeUndefined()
 
     const whole = applyContextualDraftsFrame(burst([{ draftId: "d2", cellId: "c2", text: "all" }]))
     expect(whole.needsRefetch).toBe(false)
@@ -99,9 +138,44 @@ describe("draft bursts", () => {
     expect(getContextualDrafts().size).toBe(0)
   })
 
-  it("accepts a burst before any file is bound (frame beats hydration)", () => {
+  it("fails closed when a frame arrives before an editor scope is bound", () => {
     applyContextualDraftsFrame(burst([{ draftId: "d1", cellId: "c1", text: "early" }]))
-    expect(getContextualDraftFor("c1")).toBeTruthy()
+    expect(getContextualDraftFor("c1")).toBeUndefined()
+  })
+
+  it("drops project-wide frames outside the exact attached project and file", () => {
+    hydrateContextualDrafts("shared-file", [], "project-b")
+
+    applyContextualDraftsFrame(
+      burst([{ draftId: "from-a", cellId: "c1", text: "project A text" }], { fileId: "shared-file" }),
+      "project-a",
+    )
+    applyContextualDraftsFrame(
+      burst([{ draftId: "wrong-file", cellId: "c1", text: "other file text" }], { fileId: "other-file" }),
+      "project-b",
+    )
+
+    expect(getContextualDrafts()).toHaveLength(0)
+  })
+
+  it("drops default-lane frames while a multilingual lane is open", () => {
+    attachContextualDrafts(PROJECT, "file-1", "fr")
+
+    applyContextualDraftsFrame(burst([{ draftId: "d1", cellId: "c1", text: "default text" }]))
+
+    expect(getContextualDrafts()).toHaveLength(0)
+    expect(getContextualDraftsSummary()).toMatchObject({ targetLang: "fr", pending: 0 })
+  })
+
+  it("drops a frame that declares a non-default producer lane", () => {
+    hydrateContextualDrafts("file-1", [])
+
+    applyContextualDraftsFrame(burst(
+      [{ draftId: "d1", cellId: "c1", text: "legacy lane text" }],
+      { targetLang: "fr" },
+    ))
+
+    expect(getContextualDrafts().size).toBe(0)
   })
 
   it("orders the review queue newest first", () => {
@@ -137,6 +211,38 @@ describe("hydration", () => {
     expect(getContextualDraftsSummary().acceptedThisSession).toBe(0)
     expect(getContextualDraftsSummary().fileId).toBe("file-2")
   })
+
+  it("rejects a late project-A response after switching to project B with the same file id", async () => {
+    let releaseA!: (drafts: { draftId: string; cellId: string; text: string }[]) => void
+    const responseA = new Promise<{ draftId: string; cellId: string; text: string }[]>((resolve) => {
+      releaseA = resolve
+    })
+    const scopeA = attachContextualDrafts("project-a", "shared-file", "")
+    const lateHydration = responseA.then((drafts) => hydrateScope(scopeA, drafts))
+
+    const scopeB = attachContextualDrafts("project-b", "shared-file", "")
+    expect(hydrateScope(scopeB, [{ draftId: "b", cellId: "c1", text: "project B text" }])).toBe(true)
+    releaseA([{ draftId: "a", cellId: "c1", text: "project A text" }])
+
+    expect(await lateHydration).toBe(false)
+    expect(getContextualDraftsSummary()).toMatchObject({
+      projectId: "project-b",
+      fileId: "shared-file",
+      targetLang: "",
+      pending: 1,
+    })
+    expect(getDraft("project-b", "shared-file", "", "c1")?.text).toBe("project B text")
+    expect(getDraft("project-a", "shared-file", "", "c1")).toBeUndefined()
+  })
+
+  it("rejects a default-lane snapshot after switching the same project/file to another lane", () => {
+    const defaultScope = attachContextualDrafts(PROJECT, "file-1", "")
+    attachContextualDrafts(PROJECT, "file-1", "fr")
+
+    expect(hydrateScope(defaultScope, [{ draftId: "d1", cellId: "c1", text: "default text" }])).toBe(false)
+    expect(getContextualDraftsSummary()).toMatchObject({ targetLang: "fr", pending: 0 })
+    expect(getContextualDrafts()).toHaveLength(0)
+  })
 })
 
 describe("decisions", () => {
@@ -171,5 +277,21 @@ describe("decisions", () => {
     resolveContextualDraft("nope", "accepted")
 
     expect(getContextualDraftsSummary()).toMatchObject({ pending: 1, acceptedThisSession: 0 })
+  })
+
+  it("cannot resolve a draft through a stale project, file, or lane control", () => {
+    hydrateContextualDrafts("shared-file", [{ draftId: "d1", cellId: "c1", text: "safe" }], "project-b")
+
+    expect(resolveDraft("project-a", "shared-file", "", "c1", "d1", "accepted")).toBe(false)
+    expect(resolveDraft("project-b", "other-file", "", "c1", "d1", "accepted")).toBe(false)
+    expect(resolveDraft("project-b", "shared-file", "fr", "c1", "d1", "accepted")).toBe(false)
+    expect(getContextualDraftsSummary()).toMatchObject({ pending: 1, acceptedThisSession: 0 })
+  })
+
+  it("never removes a replacement draft with the same cell id", () => {
+    hydrateContextualDrafts("file-1", [{ draftId: "draft-b", cellId: "c1", text: "newer" }])
+
+    expect(resolveDraft(PROJECT, "file-1", "", "c1", "draft-a", "accepted")).toBe(false)
+    expect(getContextualDraftFor("c1")).toMatchObject({ draftId: "draft-b", text: "newer" })
   })
 })

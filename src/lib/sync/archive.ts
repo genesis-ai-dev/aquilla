@@ -1,4 +1,4 @@
-// Client helpers for frontier-server's project archive endpoints. The archive
+// Client helpers for auth-worker's project archive endpoints. The archive
 // ("move to Trash") action is server-authoritative for cloud-synced projects
 // so all collaborators see the tombstone. Purely local projects (no server
 // row) get a 404 — callers should fall through to an IDB-only tombstone.
@@ -40,6 +40,8 @@ export interface ProjectStateResponse {
   name: string
   gitlabProjectId: number | null
   orgId: number | null
+  /** AQU-822: the org's effective termbase-edit floor (absent on older servers). */
+  termbaseEditMinRole?: number | null
   archivedAt: string | null
   archivedBy: { id: number; username: string } | null
   /** Active/inactive lifecycle (migration 0033). Absent = active (compat). */

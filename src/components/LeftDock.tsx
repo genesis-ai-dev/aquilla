@@ -31,6 +31,7 @@ import { AccountSwitcher } from "@/components/AccountSwitcher"
 import { useDockRailPosition } from "@/hooks/useDockRailPosition"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Button } from "@/components/ui/button"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -57,12 +58,12 @@ export interface LeftDockProps {
 // Constants
 // ---------------------------------------------------------------------------
 
-type TabMeta = { id: DockTab; icon: typeof Files; label: string }
+type TabMeta = { id: DockTab; icon: typeof Files; labelKey: Parameters<ReturnType<typeof useT>>[0] }
 
 const TAB_META: TabMeta[] = [
-  { id: "files", icon: Files, label: "Files" },
-  { id: "voices", icon: AudioLines, label: "Voices" },
-  { id: "search", icon: Search, label: "Search" },
+  { id: "files", icon: Files, labelKey: "nav.dock.filesTab" },
+  { id: "voices", icon: AudioLines, labelKey: "common.voices" },
+  { id: "search", icon: Search, labelKey: "nav.search" },
 ]
 
 // ---------------------------------------------------------------------------
@@ -77,6 +78,7 @@ interface TabRailProps {
 }
 
 function TabRail({ tabs, activeTab, onTabClick, orientation }: TabRailProps) {
+  const t = useT()
   const isTop = orientation === "top"
 
   return (
@@ -87,7 +89,8 @@ function TabRail({ tabs, activeTab, onTabClick, orientation }: TabRailProps) {
           : "flex h-full w-10 shrink-0 flex-col items-center gap-1 pt-2",
       )}
     >
-      {tabs.map(({ id, icon: Icon, label }) => {
+      {tabs.map(({ id, icon: Icon, labelKey }) => {
+        const label = t(labelKey)
         const isActive = activeTab === id
         const button = (
           <button
@@ -142,6 +145,7 @@ export function LeftDock({
   activeTab: controlledTab,
   onActiveTabChange,
 }: LeftDockProps) {
+  const t = useT()
   const { position: railPosition } = useDockRailPosition()
   const isTopRail = railPosition === "top"
 
@@ -186,12 +190,12 @@ export function LeftDock({
   // AppShell's logoAccessory slot. The dock only renders the EXPAND affordance
   // on the collapsed 40px icon strip.
   const expandButton = (
-    <AppTooltip content="Expand sidebar" side="right">
+    <AppTooltip content={t("nav.dock.expandSidebar")} side="right">
       <Button
         type="button"
         variant="ghost"
         size="icon-sm"
-        aria-label="Expand sidebar"
+        aria-label={t("nav.dock.expandSidebar")}
         onClick={() => setActiveTab("files")}
         className="mt-3"
       >

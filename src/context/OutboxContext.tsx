@@ -26,7 +26,8 @@ export interface OutboxContextValue {
   failureStreak: number
   /** Reset backoff + force an immediate flush (Retry / reconnect / re-auth). */
   flushNow: () => void
-  refreshPending: () => Promise<void>
+  /** Re-reads the queue sizes; resolves with the total (pending + failed). */
+  refreshPending: () => Promise<number>
   /** Reactive view of PENDING outbox records. NOT all records — `failed`
    *  (quarantined) are excluded (AQU-274): overlay + pending-count consumers
    *  (useReconcileOnDrain) depend on this reaching zero when the queue drains. */

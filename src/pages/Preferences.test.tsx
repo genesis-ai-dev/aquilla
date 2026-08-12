@@ -1,8 +1,10 @@
 import { describe, it, expect, afterEach, vi } from "vitest"
 import { fireEvent, render, screen } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { OrgProvider } from "@/context/OrgContext"
 import { ThemeModeProvider } from "@/branding/ThemeMode"
+import { I18nProvider } from "@/lib/i18n/I18nProvider"
 import { Preferences } from "./Preferences"
 
 vi.mock("@/hooks/useFrontierSession", () => ({
@@ -29,14 +31,16 @@ afterEach(() => {
 function renderAt(path: string) {
   return render(
     <MemoryRouter initialEntries={[path]}>
-      <ThemeModeProvider>
-        <OrgProvider>
-          <Routes>
-            <Route path="/preferences" element={<Preferences />} />
-            <Route path="/preferences/:section" element={<Preferences />} />
-          </Routes>
-        </OrgProvider>
-      </ThemeModeProvider>
+      <I18nProvider>
+        <ThemeModeProvider>
+          <OrgProvider>
+            <Routes>
+              <Route path="/preferences" element={<Preferences />} />
+              <Route path="/preferences/:section" element={<Preferences />} />
+            </Routes>
+          </OrgProvider>
+        </ThemeModeProvider>
+      </I18nProvider>
     </MemoryRouter>,
   )
 }
@@ -91,5 +95,29 @@ describe("Preferences", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Dark" }))
     expect(window.localStorage.getItem("codex-theme")).toBe("dark")
     expect(document.documentElement).toHaveClass("dark")
+  })
+
+  it("offers a UI-language control with an accessible name distinct from the chrome switcher", async () => {
+    renderAt("/preferences/language")
+    // AppShell also mounts a global chrome switcher (finding 8), so this page
+    // has TWO language controls on screen at once. A screen reader announcing
+    // the same name twice with nothing to tell them apart is the bug — so each
+    // control must have its own accessible name, and we assert the page's
+    // control by that specific name rather than scoping to <main> to dodge the
+    // duplicate.
+    const trigger = await screen.findByRole("button", { name: "UI language" })
+    expect(trigger).toBeInTheDocument()
+
+    // Exactly one control per distinct accessible name: the generic "Language"
+    // name must not appear at all (both instances now use their specific
+    // names), and each specific name must resolve to exactly one control.
+    expect(screen.queryAllByRole("button", { name: "Language" })).toHaveLength(0)
+    expect(screen.getAllByRole("button", { name: "UI language" })).toHaveLength(1)
+    expect(screen.getAllByRole("button", { name: "Quick language switch" })).toHaveLength(1)
+
+    // The picker must list endonyms, not English names — a Burmese speaker
+    // looking for their language will not scan for the word "Burmese".
+    await userEvent.click(trigger)
+    expect(await screen.findByRole("menuitemradio", { name: /မြန်မာ/ })).toBeInTheDocument()
   })
 })

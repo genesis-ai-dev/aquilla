@@ -476,6 +476,11 @@ export interface ImportContext {
   /** Advanced orchestrators can keep fresh files hidden while persisting
    * package-level or format-specific secondary data. */
   deferPublication?: boolean
+  /** Per-file import provenance, keyed by normalized file name
+   *  (`name.trim().toLowerCase()` — the skipKeys vocabulary). A matching
+   *  entry is stamped as `importManifest.origin` and projected verbatim to
+   *  `files.meta.aquillaImport.origin` (linked-sync hook, e.g. Google Drive). */
+  origins?: ReadonlyMap<string, Record<string, unknown>>
 }
 
 type PrepareImportContext = Pick<
@@ -546,6 +551,16 @@ export interface ImportFileResult {
  * deterministic parser id remains `tmx`. */
 export function importedFileKind(fileType: FileType): string {
   return fileType === "tmx" ? "translation-memory" : fileType
+}
+
+/** Merge caller-supplied provenance into the versioned import summary. */
+function manifestWithOrigin(
+  manifest: object,
+  origins: ReadonlyMap<string, Record<string, unknown>> | undefined,
+  fileName: string,
+): object {
+  const origin = origins?.get(fileName.trim().toLowerCase())
+  return origin ? { ...manifest, origin } : manifest
 }
 
 /**
@@ -1506,7 +1521,7 @@ export async function emitParsedFile(
       kind: importedFileKind(fileType),
       importFormat: fileType,
       parserVersion: `${normalized.profileId}@${normalized.profileVersion}`,
-      importManifest: summarizeNormalizedImport(normalized),
+      importManifest: manifestWithOrigin(summarizeNormalizedImport(normalized), ctx.origins, result.name),
       sourceLanguage: ctx.sourceLanguage,
       targetLanguage: ctx.targetLanguage,
       sourceTextDirection: ctx.sourceTextDirection,
@@ -1762,7 +1777,7 @@ async function decodeAudioFile(
  * Rejects on failure; callers treat that as "unknown timing" (the segment is
  * flagged untimed, never given synthetic timecodes).
  */
-export function probeMediaDurationMs(file: File): Promise<number> {
+export function probeMediaDurationMs(file: Blob): Promise<number> {
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(file)
     const isVideo = file.type.startsWith("video/")
@@ -1781,6 +1796,45 @@ export function probeMediaDurationMs(file: File): Promise<number> {
     }
     el.src = url
   })
+}
+
+/**
+ * Round 6: best-effort duration probe for attach-time metadata. Races the
+ * probe against a timeout (happy-dom never fires loadedmetadata; a corrupt
+ * blob must not block the attach) and degrades to undefined — the attachment
+ * simply carries no durationMs, exactly today's behavior.
+ */
+export async function probeDurationMsSafe(blob: Blob, timeoutMs = 15_000): Promise<number | undefined> {
+  try {
+    return await Promise.race([
+      // MediaRecorder webm blobs carry NO duration header (Chrome writes no
+      // Cues element), so the metadata probe sees Infinity and rejects — every
+      // mic take then attached without a length and its chip fell back to
+      // section width. Decoding the samples is authoritative; takes are short
+      // so the cost is negligible.
+      probeMediaDurationMs(blob).catch(() => decodeDurationMs(blob)),
+      new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), timeoutMs)),
+    ])
+  } catch {
+    return undefined
+  }
+}
+
+/** Exact duration by decoding the samples. Throws when the platform can't. */
+async function decodeDurationMs(blob: Blob): Promise<number> {
+  const AC: typeof AudioContext | undefined =
+    typeof window !== "undefined"
+      ? window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+      : undefined
+  if (!AC) throw new Error("no AudioContext")
+  const ctx = new AC()
+  try {
+    const audio = await ctx.decodeAudioData(await blob.arrayBuffer())
+    if (!(audio.duration > 0)) throw new Error("empty decode")
+    return audio.duration * 1000
+  } finally {
+    void ctx.close?.()
+  }
 }
 
 export interface ParatextImportProgress {
@@ -2142,7 +2196,7 @@ export async function importParatextAsTarget(
           kind: "usfm",
           importFormat: "usfm",
           parserVersion: `${normalized.profileId}@${normalized.profileVersion}`,
-          importManifest: summarizeNormalizedImport(normalized),
+          importManifest: manifestWithOrigin(summarizeNormalizedImport(normalized), ctx.origins, bookPlan.displayName),
           sourceLanguage: ctx.sourceLanguage,
           targetLanguage: ctx.targetLanguage,
           targetTextDirection: plan.project.settings.rightToLeft ? "rtl" : ctx.targetTextDirection,

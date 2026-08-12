@@ -76,6 +76,11 @@ export type ProjectWsServerMessage =
       cell?: string
       /** Actor username — populated by post-2c-γ sync workers. */
       by?: string
+      /** Set when the write arrived via the external Agent API channel
+       *  (server-verified from the token-bridge minted JWT). Such writes made
+       *  no local outbox write, so they are never own-write echoes — even
+       *  when `by` matches this client's identity. */
+      via?: "external"
     }
   | { t: "event.stale"; id: string; reason: string }
   | { t: "presence"; users: PresenceUser[] }
@@ -114,8 +119,19 @@ export type ProjectWsServerMessage =
  * attribute the write, so we report `false` (treat as remote) — older servers
  * keep their pre-existing "always refetch" behavior rather than risk dropping a
  * real remote change.
+ *
+ * `via: "external"` marks an Agent API commit (sync-worker external/commit.ts
+ * routes agent changesets through /events with a token minted for the
+ * credential OWNER, so `by` is the owner's username). If that owner has the
+ * project open, no outbox write happened in this client — there is no prior
+ * targeted refetch to dedupe against, and suppressing the echo would hide the
+ * agent's committed translation until a manual reload. Always remote.
  */
-export function isOwnWriteEcho(msg: { by?: string }, currentUserId: string): boolean {
+export function isOwnWriteEcho(
+  msg: { by?: string; via?: string },
+  currentUserId: string,
+): boolean {
+  if (msg.via === "external") return false
   return !!msg.by && msg.by === currentUserId
 }
 
@@ -519,10 +535,10 @@ export function parseProjectWsMessage(raw: string): ProjectWsServerMessage | nul
 }
 
 // Statuses a `contextual.run.state` frame may carry — the broadcast subset of
-// ContextualRunStatus (client-only phases "idle"/"starting"/"pausing" never
-// arrive over the wire). Mirrors sync-worker/src/contextual-frames.ts.
+// ContextualRunStatus (client-only phases "idle"/"starting" never arrive over
+// the wire). Mirrors sync-worker/src/contextual-frames.ts.
 const CONTEXTUAL_FRAME_STATUSES: ReadonlySet<string> = new Set([
-  "running", "paused", "parked", "done", "failed", "terminated",
+  "running", "pausing", "paused", "parked", "done", "failed", "terminated",
 ])
 
 /** Within-span phases a `contextual.phase` frame may carry. */
@@ -544,6 +560,7 @@ function parseContextualFrame(value: unknown): ContextualActivityFrame | null {
   if (f.type === "contextual.run.state") {
     if (
       typeof f.fileId !== "string" ||
+      typeof f.targetLang !== "string" ||
       typeof f.status !== "string" ||
       !CONTEXTUAL_FRAME_STATUSES.has(f.status) ||
       typeof f.done !== "number" ||
@@ -556,7 +573,8 @@ function parseContextualFrame(value: unknown): ContextualActivityFrame | null {
       type: "contextual.run.state",
       runId: f.runId,
       fileId: f.fileId,
-      status: f.status as Exclude<ContextualRunStatus, "idle" | "starting" | "pausing">,
+      targetLang: f.targetLang,
+      status: f.status as Exclude<ContextualRunStatus, "idle" | "starting">,
       done: f.done,
       total: f.total,
       ...(typeof f.failed === "number" ? { failed: f.failed } : {}),
@@ -618,9 +636,10 @@ function parseContextualFrame(value: unknown): ContextualActivityFrame | null {
   if (f.type === "contextual.drafts") {
     if (
       typeof f.fileId !== "string" ||
+      typeof f.targetLang !== "string" ||
       typeof f.spanLabel !== "string" ||
       !Array.isArray(f.drafts) ||
-      f.drafts.length === 0 ||
+      (f.drafts.length === 0 && f.truncated !== true) ||
       f.drafts.length > MAX_CONTEXTUAL_DRAFTS_PER_FRAME ||
       (f.truncated !== undefined && typeof f.truncated !== "boolean")
     ) {
@@ -639,6 +658,7 @@ function parseContextualFrame(value: unknown): ContextualActivityFrame | null {
       type: "contextual.drafts",
       runId: f.runId,
       fileId: f.fileId,
+      targetLang: f.targetLang,
       spanLabel: f.spanLabel,
       drafts,
       ...(f.truncated === true ? { truncated: true } : {}),

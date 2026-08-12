@@ -361,6 +361,9 @@ export function ProjectSettings() {
   const [precedingTargetCells, setPrecedingTargetCells] = useState(DEFAULT_DRAFT_CONTEXT.precedingTargetCells)
   // AQU-634: per-project USFM front-matter opt-out.
   const [importExcludeFrontMatter, setImportExcludeFrontMatter] = useState(false)
+  // Pre-merge round: the Media timeline's timing mode moved OUT of Project
+  // Settings — it is FILE-level now (file.timing.set), controlled from the
+  // timeline toolbar with the same maintainer floor.
 
   // Per-device user-scoped key — not part of the project record, not server-
   // synced, no race with the project save flow. Kept on its own immediate-save
@@ -2033,6 +2036,7 @@ export function ProjectSettings() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
     </>
   )
 }

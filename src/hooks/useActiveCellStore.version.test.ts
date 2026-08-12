@@ -13,6 +13,7 @@
 // kept updating.
 import { describe, expect, it } from "vitest"
 import type { CellRow } from "@/lib/sync/cells-read-types"
+import { mergeCellsDelta } from "@/lib/sync/cells-cache"
 import type { CellAuditStats } from "./useCellsAuditStats"
 import { CellStore } from "./useActiveCellStore"
 
@@ -28,7 +29,12 @@ function stats(cellId: string, activeValidators: string[]): CellAuditStats {
   }
 }
 
-function row(cellId: string, side: "source" | "target", value: string): CellRow {
+function row(
+  cellId: string,
+  side: "source" | "target",
+  value: string,
+  over: Partial<CellRow> = {},
+): CellRow {
   return {
     cellId,
     side,
@@ -44,6 +50,7 @@ function row(cellId: string, side: "source" | "target", value: string): CellRow 
     validated: false,
     wordCount: value ? 1 : 0,
     endorsementCount: 0,
+    ...over,
   }
 }
 
@@ -161,5 +168,144 @@ describe("CellStore per-cell versions", () => {
     store.reset("p1", "f2")
     expect(notified).toBeGreaterThan(0)
     expect(store.getCellView("a")).toBeNull()
+  })
+
+  it("keeps every target-language lane when a protected delta races a lane commit", () => {
+    const store = new CellStore()
+    store.setRuntime({
+      projectId: "p1",
+      fileId: "f1",
+      username: "alice",
+      requiredValidations: 1,
+      auditStats: new Map(),
+      lane: "es",
+    })
+    const current = [
+      row("a", "source", "Heading"),
+      row("a", "target", "Bonjour", { targetLang: "" }),
+      row("a", "target", "Hola", { targetLang: "es" }),
+    ]
+    store.replaceRows(current, { full: true })
+
+    // Mirrors the escaped browser race: a targeted read makes the cell fresh
+    // after the delta captured its sequence, so mergeProtectedRows preserves
+    // the current row set instead of accepting a possibly stale response.
+    const deltaStartSeq = store.getWriteSeq()
+    store.markCellFresh("a")
+    const delta = mergeCellsDelta(current, ["a"], current)
+    const protectedMerge = store.mergeProtectedRows(delta, deltaStartSeq)
+
+    expect(protectedMerge.rows
+      .filter((candidate) => candidate.side === "target")
+      .map((candidate) => [candidate.targetLang ?? "", candidate.value]))
+      .toEqual([
+        ["", "Bonjour"],
+        ["es", "Hola"],
+      ])
+
+    store.replaceRows(protectedMerge.rows, { full: true })
+    expect(store.getCellView("a")?.translated).toBe("Hola")
+    store.setRuntime({
+      projectId: "p1",
+      fileId: "f1",
+      username: "alice",
+      requiredValidations: 1,
+      auditStats: new Map(),
+      lane: "",
+    })
+    expect(store.getCellView("a")?.translated).toBe("Bonjour")
+  })
+
+  it("never paints a default-lane optimistic or queued edit onto a named lane", () => {
+    const store = new CellStore()
+    store.setRuntime({
+      projectId: "p1",
+      fileId: "f1",
+      username: "alice",
+      requiredValidations: 1,
+      auditStats: new Map(),
+      lane: "",
+    })
+    store.replaceRows([
+      row("a", "source", "Heading"),
+      row("a", "target", "Bonjour", { targetLang: "" }),
+    ], { full: true })
+    store.applyOptimisticTargetEdit("a", { value: "Default suggestion" })
+    store.setPendingOverlay(new Map([[
+      "a",
+      { value: "Queued default suggestion", targetLang: "" },
+    ]]))
+
+    store.setRuntime({
+      projectId: "p1",
+      fileId: "f1",
+      username: "alice",
+      requiredValidations: 1,
+      auditStats: new Map(),
+      lane: "es",
+    })
+    expect(store.getCellView("a")?.translated).toBe("")
+
+    store.setRuntime({
+      projectId: "p1",
+      fileId: "f1",
+      username: "alice",
+      requiredValidations: 1,
+      auditStats: new Map(),
+      lane: "",
+    })
+    expect(store.getCellView("a")?.translated).toBe("Default suggestion")
+  })
+
+  it("stamps a synthesized named-lane target and keeps it out of Project default", () => {
+    const store = new CellStore()
+    store.setRuntime({
+      projectId: "p1",
+      fileId: "f1",
+      username: "alice",
+      requiredValidations: 1,
+      auditStats: new Map(),
+      lane: "es",
+    })
+    store.replaceRows([
+      row("a", "source", "Heading"),
+      row("a", "target", "Bonjour", { targetLang: "" }),
+    ], { full: true })
+    store.applyOptimisticTargetEdit("a", { value: "Hola" })
+
+    expect(store.toRows().find((candidate) => candidate.value === "Hola")?.targetLang).toBe("es")
+    expect(store.getCellView("a")?.translated).toBe("Hola")
+
+    store.setRuntime({
+      projectId: "p1",
+      fileId: "f1",
+      username: "alice",
+      requiredValidations: 1,
+      auditStats: new Map(),
+      lane: "",
+    })
+    expect(store.getCellView("a")?.translated).toBe("Bonjour")
+  })
+
+  it("clears an optimistic shadow only from the matching server lane", () => {
+    const store = new CellStore()
+    store.setRuntime({
+      projectId: "p1",
+      fileId: "f1",
+      username: "alice",
+      requiredValidations: 1,
+      auditStats: new Map(),
+      lane: "",
+    })
+    store.replaceRows([row("a", "source", "Heading")], { full: true })
+    store.applyOptimisticTargetEdit("a", { value: "Shared text" })
+    const fetchStartSeq = store.getWriteSeq()
+
+    store.clearConfirmedShadows([
+      row("a", "target", "Shared text", { targetLang: "es" }),
+    ], fetchStartSeq)
+
+    expect(store.getMemorySnapshot().optimisticEdits).toBe(1)
+    expect(store.getCellView("a")?.translated).toBe("Shared text")
   })
 })

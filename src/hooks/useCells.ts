@@ -1,4 +1,4 @@
-// Phase 2c-β: useCells reads from the sync-worker `cells` projection (D1)
+// Phase 2c-β: useCells reads from the sync-worker `cells` projection (Postgres)
 // via HTTP and surfaces AD-2 chain pointers (`event_id`, `source_event_id`)
 // on each cell so the editor's commit path can pin `parentId` + `sourceEventId`
 // at emit time. Writes flow through the outbox via `events-emit.ts`;
@@ -284,7 +284,7 @@ export function buildCellData(
 
   // Prefer the target row's `validated` flag as the source of truth for the
   // simple "is it green?" UI. When no stats are present, this is the only
-  // available signal — D1 encodes the "validators-meet-threshold" gate at the
+  // available signal — Postgres encodes the "validators-meet-threshold" gate at the
   // projection layer (AQU-279 made this threshold-aware; AQU-280 aligns all
   // client progress surfaces to consume this flag). Falls back to the
   // activeValidators count only when the server flag is absent (local projects
@@ -397,7 +397,7 @@ export interface UseCellsOptions {
   fileId: string | null
   username?: string
   requiredValidations?: number
-  /** Optional D1 audit stats overlay. When present, `activeValidators` /
+  /** Optional audit stats overlay. When present, `activeValidators` /
    *  `validationStatus` come from here. */
   auditStats?: ReadonlyMap<string, CellAuditStats>
   /** Mints a sync-token JWT for the (projectId, fileId) the hook reads.
@@ -442,7 +442,7 @@ export interface UseCellsResult {
  * Phase 2a primary entry point. Fetches cells from the sync-worker's
  * `cells` projection on mount, on focus, and on `revalidate()`.
  *
- * No subscription; D1 is the load path (AD-3 v1 thin client). Refetch on
+ * No subscription; the Postgres projection is the load path (AD-3 v1 thin client). Refetch on
  * focus is the cheap drift mitigation while we're still on Y.Doc for writes
  * — once Phase 2c lands an outbox-driven invalidation, this becomes
  * smarter.
@@ -544,7 +544,7 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
   enabledRef.current = enabled
 
   const rebuildFromCache = useCallback(() => {
-    // AD-3 v1 thin client: the view is exactly the D1 projection. Pending
+    // AD-3 v1 thin client: the view is exactly the Postgres projection. Pending
     // local writes live in the outbox and surface only after the reconciler
     // delivers them and `revalidate()` refetches — never as a client-side
     // read overlay (that's the v2 progressive-caching tier).

@@ -106,7 +106,7 @@
   },
   "src/components/ExportDialog.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 55
+      "count": 1
     }
   },
   "src/components/FileActionMenu.tsx": {
@@ -137,11 +137,6 @@
   "src/components/GlossaryRow.tsx": {
     "i18n/no-unkeyed-string": {
       "count": 10
-    }
-  },
-  "src/components/ImportDialog.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 146
     }
   },
   "src/components/InactiveProjectBanner.tsx": {

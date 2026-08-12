@@ -221,7 +221,7 @@ describe("Biblica study-notes import", () => {
     await expect(importBiblicaStudyNotes(
       { name: "huge.idml", size: 96 * 1024 * 1024, arrayBuffer } as unknown as File,
       { projectId: "p1", author: "alice", getToken: async () => "tok" },
-    )).rejects.toThrow(/95 MB limit/)
+    )).rejects.toThrow(/95\.0 MB limit/)
     expect(arrayBuffer).not.toHaveBeenCalled()
     expect(fetchMock).not.toHaveBeenCalled()
   })

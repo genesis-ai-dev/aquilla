@@ -555,6 +555,47 @@ export const importExport = defineNamespace({
     "importExport.status.downloadedFilesCount": plural({ one: "Downloaded {count} file", other: "Downloaded {count} files" }),
     "importExport.status.downloadedFile": "Downloaded {fileName}",
     "importExport.status.exportFailed": "Export failed.",
+
+    // — Thrown-error triage: src/lib/import.ts (AQU-832 wave 3 error sweep) —
+    // These are messages parser/upload helpers throw that reach the user
+    // verbatim via a panel's `catch (err) { setError(err.message) }`. Keyed
+    // via the standalone t() since import.ts runs outside React.
+    "importExport.errors.ebibleEmptyCorpus":
+      "\"{title}\" is not available for download. The eBible corpus file exists but contains no " +
+      "text — this translation may be restricted due to copyright.",
+    "importExport.errors.noImportableContent": "{fileName} did not contain any content the {fileType} adapter could import.",
+    "importExport.errors.sandboxFallbackFailed": "{primary}. Sandbox fallback also failed: {fallback}",
+    "importExport.errors.importCouldNotPublish": "Import could not publish any files: {reason}",
+    "importExport.errors.emptyFile": "{fileName} is empty.",
+    "importExport.errors.unsupportedFileTypeSignIn": "Unsupported file type: {fileName}. Sign in to use AI-assisted format detection.",
+    "importExport.errors.obsListFailed": "Failed to list Open Bible Stories content.",
+    "importExport.errors.importCancelled": "Import cancelled",
+    "importExport.errors.obsDownloadIncomplete": "Open Bible Stories download was incomplete: {files}. Nothing was imported.",
+    "importExport.errors.obsNoFilesDownloaded": "No OBS story files could be downloaded",
+    "importExport.errors.obsNoFrames": "Open Bible Stories downloaded but produced no frames — check the source.",
+    "importExport.errors.helloaoNoVerses": "\"{title}\" downloaded but produced no verses — check the book selection and try again.",
+    "importExport.errors.maculaNoVerses": "Macula file parsed but no verses were found — check the file format.",
+    "importExport.errors.tnNoValidRows":
+      "TN file parsed but no valid note rows were found — check that the first three columns are book, chapter, and verse.",
+    "importExport.errors.tnNoValidRowsWithSkipped": plural({
+      one:
+        "TN file parsed but no valid note rows were found — check that the first three columns are " +
+        "book, chapter, and verse. ({count} row skipped due to missing canonical reference)",
+      other:
+        "TN file parsed but no valid note rows were found — check that the first three columns are " +
+        "book, chapter, and verse. ({count} rows skipped due to missing canonical reference)",
+    }),
+    "importExport.errors.biblicaExpectsIdml": "Biblica study notes import expects an InDesign .idml package.",
+    "importExport.errors.biblicaNoStudyNotes":
+      "{fileName} parsed successfully but contained no study notes. Biblica notes live in `intro:*` " +
+      "paragraph styles — check that this is the notes document.",
+    "importExport.errors.invalidIdmlPackage": "{fileName} is not a valid IDML package. IDML files are ZIP archives and start with \"PK\".",
+    "importExport.errors.mediaFileTooLarge": "{fileName} exceeds the 95 MB media import limit.",
+    "importExport.errors.couldNotDecodeAudio":
+      "Couldn't decode {fileName} — the file may be corrupt or in an unsupported codec. Try " +
+      "re-exporting it as mp3 or wav.",
+    "importExport.errors.notAParatextProject":
+      "That doesn't look like a Paratext project — no Settings.xml (or .ssf) with USFM books was found.",
   },
   context: {
     _context: {
@@ -1042,6 +1083,59 @@ export const importExport = defineNamespace({
       "importExport.status.downloadedFile": {
         description: "Success-status message after a single-file client-side export (txt/md/tsv/csv/xlf/tmx/vtt/srt/plain-text-dump/metadata-csv).",
         placeholders: { fileName: "Name of the downloaded file — not translated." },
+      },
+      "importExport.errors.ebibleEmptyCorpus": {
+        description: "Thrown when a chosen eBible translation's corpus file downloads but contains no text (often copyright-restricted).",
+        placeholders: { title: "Title of the eBible translation the user chose — not translated." },
+      },
+      "importExport.errors.noImportableContent": {
+        description: "Thrown when a parsed file produced zero usable content for its detected format.",
+        placeholders: { fileName: "Name of the file — not translated.", fileType: "Detected format name (e.g. 'usfm') — not translated." },
+      },
+      "importExport.errors.sandboxFallbackFailed": {
+        description:
+          "Thrown when both the primary parse attempt and the AI-assisted sandbox fallback fail. {primary} and {fallback} are raw upstream error messages, interpolated as data, not translated.",
+        placeholders: { primary: "Raw message from the primary parse failure.", fallback: "Raw message from the sandbox fallback failure." },
+      },
+      "importExport.errors.importCouldNotPublish": {
+        description: "Thrown when every file in a batch failed to publish; {reason} is the first failure's raw reason, interpolated as data.",
+        placeholders: { reason: "Raw failure reason for the first file — not translated." },
+      },
+      "importExport.errors.emptyFile": {
+        description: "Thrown when a selected file has zero bytes.",
+        placeholders: { fileName: "Name of the empty file — not translated." },
+      },
+      "importExport.errors.unsupportedFileTypeSignIn": {
+        description: "Thrown when a file's format can't be detected and the user isn't signed in for AI-assisted detection.",
+        placeholders: { fileName: "Name of the file — not translated." },
+      },
+      "importExport.errors.obsDownloadIncomplete": {
+        description: "Thrown when some Open Bible Stories files failed to download. {files} is a raw '<name> (<status>)' data list, interpolated as-is.",
+        placeholders: { files: "Comma-separated list of failed filenames with their HTTP status — not translated." },
+      },
+      "importExport.errors.helloaoNoVerses": {
+        description: "Thrown when a helloao.org translation downloads but the selected books produced no verses.",
+        placeholders: { title: "Title of the translation the user chose — not translated." },
+      },
+      "importExport.errors.tnNoValidRowsWithSkipped": {
+        description: "Thrown when a Translation Notes TSV parsed to zero valid rows, and some rows were skipped for a known reason (missing reference).",
+        placeholders: { count: "Number of rows skipped for missing a canonical reference." },
+      },
+      "importExport.errors.biblicaNoStudyNotes": {
+        description: "Thrown when a Biblica IDML package parses successfully but contains no study-note paragraphs.",
+        placeholders: { fileName: "Name of the file — not translated." },
+      },
+      "importExport.errors.invalidIdmlPackage": {
+        description: "Thrown when an uploaded file claiming to be IDML doesn't have a ZIP header.",
+        placeholders: { fileName: "Name of the file — not translated." },
+      },
+      "importExport.errors.mediaFileTooLarge": {
+        description: "Thrown when an audio/video file exceeds the media import size ceiling.",
+        placeholders: { fileName: "Name of the file — not translated." },
+      },
+      "importExport.errors.couldNotDecodeAudio": {
+        description: "Thrown when the browser's Web Audio API fails to decode an uploaded audio/video file.",
+        placeholders: { fileName: "Name of the file — not translated." },
       },
       "importExport.dialog.finishSaveFailed": {
         description:

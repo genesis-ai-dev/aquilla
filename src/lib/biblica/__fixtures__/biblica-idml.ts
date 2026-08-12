@@ -65,6 +65,27 @@ export function note(self: string, body: string, style = "intro%3aip"): string {
 }
 
 /**
+ * A note paragraph carrying the chapter/verse markers InDesign flushed out of
+ * the preceding verse — the shape that puts Matthew's closing "28:20" inside
+ * Mark's preface. With no `body` the paragraph holds nothing but the markers.
+ */
+export function noteWithBledMarkers(
+  self: string,
+  chapter: string,
+  verse: string,
+  body = "",
+  style = "intro%3aie",
+): string {
+  return paragraph(
+    self,
+    style,
+    run("meta%3ac", `${chapter}:`)
+      + run("meta%3av", verse)
+      + (body ? run(PLAIN, body) : ""),
+  )
+}
+
+/**
  * One note paragraph whose lines are separated by `<Br/>` — how Biblica sets a
  * cross-reference list, a glossary, or an outline.
  */

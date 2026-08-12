@@ -53,6 +53,20 @@ export function isMetaVerseCharacterStyle(characterStyle: string): boolean {
   return hasStyleToken(characterStyle, "meta", "v")
 }
 
+/**
+ * Chapter/verse delimiter runs (`meta:c`, `meta:v`).
+ *
+ * InDesign flushes the closing markers of a verse into the next paragraph of the
+ * text flow, so a note paragraph routinely carries markers that belong to the
+ * scripture before it — a book's final "28:20" landing in the following book's
+ * preface. The package needs them to delimit verses, so they must survive export
+ * untouched, but they are never note text.
+ */
+export function isBiblicaMarkerCharacterStyle(characterStyle: string): boolean {
+  return isMetaChapterCharacterStyle(characterStyle)
+    || isMetaVerseCharacterStyle(characterStyle)
+}
+
 /** True for InDesign "source serif" apostrophe glue. */
 export function isSourceSerifCharacterStyle(characterStyle: string): boolean {
   return characterStyle.toLowerCase().includes("source serif")

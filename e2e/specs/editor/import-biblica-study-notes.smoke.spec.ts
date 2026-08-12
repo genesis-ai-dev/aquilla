@@ -23,6 +23,9 @@ const NOTE_BLOCK_SENTENCES = [
   "Each day is introduced by the same formula and closed by an evening refrain.",
 ] as const
 const NOTE_BLOCK = NOTE_BLOCK_SENTENCES.join("")
+/** Chapter/verse markers InDesign bled out of the preceding verse (AQU-860). */
+const BLED_MARKER_CHAPTER = "28"
+const BLED_MARKER_VERSE = "20"
 
 const PLAIN = "$ID/[No character style]"
 
@@ -82,6 +85,15 @@ async function writeBiblicaFixture(filePath: string): Promise<void> {
           + `</CharacterStyleRange>`,
       ),
       paragraph("p-n2", "intro%3aip", run(PLAIN, NOTE_BLOCK)),
+      // AQU-860: InDesign flushes a verse's closing markers into the paragraph
+      // that follows it, so a note paragraph can hold nothing but the previous
+      // book's last chapter:verse. It owns no cell — appended last so every
+      // cell above keeps its row index.
+      paragraph(
+        "p-bleed",
+        "intro%3aie",
+        run("meta%3ac", `${BLED_MARKER_CHAPTER}:`) + run("meta%3av", BLED_MARKER_VERSE),
+      ),
       "</Story></idPkg:Story>",
     ].join(""),
     { compression: "DEFLATE", createFolders: false },
@@ -153,6 +165,12 @@ test("Biblica study Bible import brings in the notes and leaves the scripture ou
   // The whole point of this importer: the Bible text is not imported for
   // translation, even though it was present in the package.
   await expect(alice.getByText(SCRIPTURE)).toHaveCount(0)
+
+  // AQU-860: the bled marker paragraph produced no seventh cell (asserted by
+  // the count above) and its fragment reached no cell that does exist.
+  await expect(
+    alice.getByText(`${BLED_MARKER_CHAPTER}:${BLED_MARKER_VERSE}`, { exact: false }),
+  ).toHaveCount(0)
 
   // AQU-742: reproduce the real replace failure — an existing multi-style
   // target, followed by a model response that keeps every slot identity/text

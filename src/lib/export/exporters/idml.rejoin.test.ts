@@ -20,6 +20,9 @@ import {
   BIBLICA_STORY_PATH,
   SAMPLE_NOTES,
   makeBiblicaIdml,
+  noteWithBledMarkers,
+  paragraph,
+  run,
 } from "@/lib/biblica/__fixtures__/biblica-idml"
 import { buildBulkCellsWithSpeakers } from "@/lib/import"
 import { extractBiblicaStudyNoteStrings } from "@/lib/parsers/biblica"
@@ -37,13 +40,16 @@ const directExecutor: IdmlExportExecutor = {
  * paragraphs — and it is the only path that produces the sub-paragraph cells
  * this rejoin contract exists for.
  */
-async function importBiblicaCells(): Promise<{ bytes: ArrayBuffer; cells: CellData[] }> {
-  const bytes = await makeBiblicaIdml()
+async function importBiblicaCells(
+  paragraphs?: readonly string[],
+  splitSentences = true,
+): Promise<{ bytes: ArrayBuffer; cells: CellData[] }> {
+  const bytes = await makeBiblicaIdml(paragraphs)
   const parsed = await parseIdml(bytes.slice(0))
   const { strings } = await extractBiblicaStudyNoteStrings(
     bytes.slice(0),
     async () => parsed,
-    { splitSentences: true },
+    { splitSentences },
   )
   const { cells: bulk } = buildBulkCellsWithSpeakers(strings, {
     fileName: "Genesis-notes.idml",
@@ -187,5 +193,79 @@ describe("IDML export of a note block that was imported as several cells", () =>
 
     await expect(exportIdml(bytes, cells, directExecutor))
       .rejects.toBeInstanceOf(IdmlWebExportError)
+  })
+})
+
+/**
+ * AQU-860. InDesign flushes a verse's closing markers into the paragraph that
+ * follows it, so the markers of a book's last verse arrive inside the next
+ * book's preface. They own no cell — but the package still needs them to
+ * delimit verses, so the exporter has to write them back exactly as the
+ * publisher set them, whether or not the note beside them was translated.
+ */
+describe("IDML export of notes whose paragraphs carry bled chapter/verse markers", () => {
+  const PREFACE = "Mark opens with John the Baptist."
+  const MARKER_STORY = [
+    paragraph("p-bk", "meta%3abk", run("$ID/[No character style]", "MRK")),
+    // Matthew's closing "28:20" alone in a paragraph of Mark's front matter.
+    noteWithBledMarkers("p-bleed", "28", "20"),
+    // …and the same markers glued to the front of a real note.
+    noteWithBledMarkers("p-pref", "28", "20", PREFACE),
+  ]
+
+  /** Every marker run the fixture puts in the package, as the XML holds it. */
+  function markerRuns(story: string): { chapters: number; verses: number } {
+    return {
+      chapters: (story.match(/<Content>28:<\/Content>/g) ?? []).length,
+      verses: (story.match(/<Content>20<\/Content>/g) ?? []).length,
+    }
+  }
+
+  it("imports the note without its markers and the marker-only paragraph not at all", async () => {
+    const { cells } = await importBiblicaCells(MARKER_STORY, false)
+
+    expect(cells.map((cell) => cell.original)).toEqual([PREFACE])
+  })
+
+  it("returns the package untouched when the note has not been translated", async () => {
+    const { bytes, cells } = await importBiblicaCells(MARKER_STORY, false)
+
+    const result = await exportIdml(bytes.slice(0), cells, directExecutor)
+
+    expect(result.report).toMatchObject({ missing: 0, rejected: 0, translated: 0 })
+    expect(new Uint8Array(await result.blob.arrayBuffer())).toEqual(new Uint8Array(bytes))
+  })
+
+  it("keeps both marker runs in the package when the note beside them is translated", async () => {
+    const { bytes, cells } = await importBiblicaCells(MARKER_STORY, false)
+    const source = await storyOf(new Blob([bytes.slice(0)]))
+    translate(cells[0]!)
+
+    const result = await exportIdml(bytes, cells, directExecutor)
+    const story = await storyOf(result.blob)
+
+    expect(story).toContain(`<Content>${PREFACE.toUpperCase()}</Content>`)
+    expect(story).not.toContain(`<Content>${PREFACE}</Content>`)
+    // Unlike a structural apostrophe, a marker slot is never cleared or
+    // replaced: both paragraphs keep the runs the publisher shipped.
+    expect(markerRuns(story)).toEqual(markerRuns(source))
+    expect(markerRuns(story)).toEqual({ chapters: 2, verses: 2 })
+    expect(result.report).toMatchObject({ missing: 0, rejected: 0 })
+  })
+
+  it("rejoins the sentences of a marked note block without disturbing the markers", async () => {
+    const { bytes, cells } = await importBiblicaCells([
+      paragraph("p-bk", "meta%3abk", run("$ID/[No character style]", "MRK")),
+      noteWithBledMarkers("p-block", "28", "20", SAMPLE_NOTES.noteBlock),
+    ], true)
+    // The markers are cut away first, so the sentences are numbered over the
+    // cells that exist rather than over the slices the line was cut into.
+    expect(cells.map((cell) => cell.original)).toEqual([...SAMPLE_NOTES.noteBlockSentences])
+    for (const cell of cells) translate(cell)
+
+    const story = await storyOf((await exportIdml(bytes, cells, directExecutor)).blob)
+
+    expect(story).toContain(`<Content>${SAMPLE_NOTES.noteBlock.toUpperCase()}</Content>`)
+    expect(markerRuns(story)).toEqual({ chapters: 1, verses: 1 })
   })
 })

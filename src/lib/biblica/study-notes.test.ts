@@ -8,9 +8,11 @@ import { selectBiblicaStudyNotes } from "./study-notes"
 import {
   SAMPLE_NOTES,
   biblicaSampleStory,
+  closedVerse,
   makeBiblicaIdml,
   note,
   noteList,
+  noteWithBledMarkers,
   openVerse,
   paragraph,
   run,
@@ -299,6 +301,70 @@ describe("Biblica study-note selection", () => {
     expect(selection.notes).toHaveLength(1)
     expect(selection.notes[0].unit.slots).toHaveLength(3)
     expect(selection.otherUnitCount).toBe(3)
+  })
+
+  // AQU-860: InDesign flushes a verse's closing markers into the paragraph that
+  // follows it, so the markers of a book's last verse land in the next book's
+  // preface. They delimit verses in the package and must never be cell text.
+  it("gives no cell to a note paragraph that holds nothing but bled chapter/verse markers", async () => {
+    const parsed = await parseIdml(await makeBiblicaIdml([
+      paragraph("p-bk-mat", "meta%3abk", run("$ID/[No character style]", "MAT")),
+      closedVerse("p-v", "20", "And surely I am with you always.", "28"),
+      paragraph("p-bk-mrk", "meta%3abk", run("$ID/[No character style]", "MRK")),
+      // Matthew's closing "28:20", flushed into Mark's preface paragraph.
+      noteWithBledMarkers("p-bleed", "28", "20"),
+      note("p-pref", "Mark opens with John the Baptist.", "intro%3aie"),
+    ]))
+    const selection = selectBiblicaStudyNotes(parsed.units)
+
+    expect(selection.notes.map((entry) => entry.unit.sourceText))
+      .toEqual(["Mark opens with John the Baptist."])
+    expect(selection.notes[0]!.bookCode).toBe("MRK")
+    expect(selection.notes[0]!.chapterLabel).toBe("Preface")
+    // The marker paragraph is accounted for as skipped furniture, not dropped
+    // silently and not turned into a blank cell.
+    expect(selection.otherUnitCount).toBe(3)
+  })
+
+  it("keeps only the note text when bled markers share a paragraph with a real note", async () => {
+    const body = "Mark opens with John the Baptist."
+    const parsed = await parseIdml(await makeBiblicaIdml([
+      paragraph("p-bk", "meta%3abk", run("$ID/[No character style]", "MRK")),
+      noteWithBledMarkers("p-pref", "28", "20", body),
+    ]))
+    const selection = selectBiblicaStudyNotes(parsed.units)
+
+    expect(selection.notes).toHaveLength(1)
+    expect(selection.notes[0]!.unit.sourceText).toBe(body)
+    // The cell is no longer the whole paragraph, so it says which part of it it
+    // owns. The markers' slots are claimed by nobody, which is what makes the
+    // exporter write the publisher's own bytes back for them.
+    expect(selection.notes[0]!.rejoin).toEqual({
+      index: 0,
+      count: 1,
+      ranges: [{ slot: 2, start: 0, end: body.length }],
+    })
+  })
+
+  it("keeps markers out of the cell when they trail the note text", () => {
+    const units = [
+      syntheticUnit("ParagraphStyle/meta%3abk", [["MRK", PLAIN]], 0),
+      syntheticUnit("ParagraphStyle/intro%3aip", [
+        ["A note about the passage.", PLAIN],
+        ["28:", "CharacterStyle/meta%3ac"],
+        ["20", "CharacterStyle/meta%3av"],
+      ], 1),
+    ]
+
+    const selection = selectBiblicaStudyNotes(units)
+
+    expect(selection.notes.map((entry) => entry.unit.sourceText))
+      .toEqual(["A note about the passage."])
+    expect(selection.notes[0]!.rejoin).toEqual({
+      index: 0,
+      count: 1,
+      ranges: [{ slot: 0, start: 0, end: "A note about the passage.".length }],
+    })
   })
 
   it("classifies a paragraph with no applied style as neither scripture nor a note", () => {

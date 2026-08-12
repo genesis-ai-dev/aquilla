@@ -85,7 +85,7 @@ export function SharedProjectsPage() {
   return (
     <AppShell
       sidebar={<OrgSidebar />}
-      header={<OrgBreadcrumb section={scopedOrgName ?? t("org.projectsList.sharedWithYouHeading")} />}
+      header={<OrgBreadcrumb section={scopedOrgName ?? t("editor.navTitle.sharedWithYou")} />}
       statusBar={null}
       main={
         // See ProjectsList.tsx / AssignedToMe.tsx for why `h-full overflow-y-auto
@@ -95,7 +95,7 @@ export function SharedProjectsPage() {
           data-testid="shared-projects-scroll"
         >
           <div>
-            <h1 className="text-lg font-semibold">{scopedOrgName ?? t("org.projectsList.sharedWithYouHeading")}</h1>
+            <h1 className="text-lg font-semibold">{scopedOrgName ?? t("editor.navTitle.sharedWithYou")}</h1>
             <p className="text-sm text-muted-foreground">
               {scopedOrgName
                 ? t("org.sharedProjectsPage.scopedDescription", { org: scopedOrgName })

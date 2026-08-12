@@ -93,7 +93,6 @@ export const org = defineNamespace({
     "org.orgHome.lens.mostProgressLabel": "Most progress",
     "org.orgHome.lens.mostProgressDescription": "Projects with the highest translation progress",
     "org.orgHome.lens.nameDescription": "Projects sorted alphabetically",
-    "org.orgHome.lens.pmLabel": "Project manager",
     "org.orgHome.lens.pmDescription": "Projects grouped by their designated project manager",
 
     "org.orgHome.table.orgHeader": "Org",
@@ -133,7 +132,6 @@ export const org = defineNamespace({
     "org.membersPage.rosterHiddenTitle": "Roster hidden",
     "org.membersPage.rosterHiddenBody":
       "This organization has restricted who can view the member list. Ask an owner or maintainer if you need access.",
-    "org.membersPage.projectMembersHeading": "Project members",
     "org.membersPage.currentMembersHeading": "Current members",
     "org.membersPage.rosterHint":
       "Everyone who currently has access to this project. Each row shows how they got it — direct invite, org membership, or team.",
@@ -194,21 +192,15 @@ export const org = defineNamespace({
     "org.membersPage.expiry7DaysDefault": "7 days (default)",
     "org.membersPage.expiry30Days": "30 days",
     "org.membersPage.expiryNone": "No expiry",
-    "org.membersPage.creating": "Creating…",
-
     // -- TeamsList: org's list of teams --
-    "org.teamsList.pageTitle": "Teams",
     "org.teamsList.pageDescription": "Group members and grant project access together.",
     "org.teamsList.newTeamButton": "New team",
-    "org.teamsList.creatingButton": "Creating…",
-    "org.teamsList.createButton": "Create",
     "org.teamsList.searchPlaceholder": "Search teams…",
     "org.teamsList.sortByAriaLabel": "Sort teams by",
     "org.teamsList.sortNameLabel": "Name (A–Z)",
     "org.teamsList.sortMembersLabel": "Members (most first)",
     "org.teamsList.sortProjectsLabel": "Projects (most first)",
     "org.teamsList.visibilityFilterAriaLabel": "Filter teams by visibility",
-    "org.teamsList.visibilityAllLabel": "All",
     "org.teamsList.visibilityInternalLabel": "Internal only",
     "org.teamsList.visibilityPublicLabel": "Public only",
     "org.teamsList.selectOrgTitle": "Select an organization",
@@ -226,7 +218,6 @@ export const org = defineNamespace({
     "org.teamsList.publicBadge": "Public",
     "org.teamsList.memberBadge": "Member",
     "org.teamsList.memberCount": plural({ one: "{count} member", other: "{count} members" }),
-    "org.teamsList.projectCount": plural({ one: "{count} project", other: "{count} projects" }),
     "org.teamsList.createErrorFallback": "Couldn't create team.",
 
     // -- Shared team-form fields (TeamsList create dialog + TeamDetail edit dialog) --
@@ -234,7 +225,6 @@ export const org = defineNamespace({
     "org.teamForm.descriptionOptionalLabel": "Description (optional)",
 
     // -- TeamDetail: a single team's page --
-    "org.teamDetail.teamFallback": "Team",
     "org.teamDetail.notFoundTitle": "Team not found.",
     "org.teamDetail.notFoundDescription":
       "This team may have been deleted, or you may not have access to it.",
@@ -243,7 +233,6 @@ export const org = defineNamespace({
     "org.teamDetail.deleteConfirmTitle": "Delete '{name}'?",
     "org.teamDetail.deleteConfirmBody": "This removes the team and all its grants.",
     "org.teamDetail.deletingButton": "Deleting…",
-    "org.teamDetail.membersHeading": "Members",
     "org.teamDetail.accessLevelDefinitionsAriaLabel": "Access level definitions",
     "org.teamDetail.addMemberButton": "Add member",
     "org.teamDetail.addMembersDialogTitle": "Add members to '{name}'",
@@ -257,11 +246,9 @@ export const org = defineNamespace({
       "Add org members to this team to grant them shared project access.",
     "org.teamDetail.roleForAriaLabel": "Role for {name}",
     "org.teamDetail.orgLevelRoleAriaLabel": "Org-level role: {role}",
-    "org.teamDetail.removeButton": "Remove",
     "org.teamDetail.removeMaintainersOnlyAriaLabel": "Remove {username} — maintainers only",
     "org.teamDetail.removeRequiresMaintainerTooltip":
       "Only maintainers and org owners can remove members from a team. Ask a maintainer to remove someone.",
-    "org.teamDetail.unknownRoleLabel": "Unknown",
     "org.teamDetail.roleDescriptionViewer":
       "Viewer (100) — can read all org projects. No edit or management actions.",
     "org.teamDetail.roleDescriptionCommenter":
@@ -282,7 +269,6 @@ export const org = defineNamespace({
     "org.teamDetail.attachProjectButton": "Attach project",
     "org.teamDetail.projectToAttachAriaLabel": "Project to attach",
     "org.teamDetail.grantedRoleAriaLabel": "Granted role",
-    "org.teamDetail.attachButton": "Attach",
     "org.teamDetail.noProjectsTitle": "No projects.",
     "org.teamDetail.noProjectsAdminDescription":
       "Attach a project to grant this team access at a chosen role.",
@@ -313,11 +299,9 @@ export const org = defineNamespace({
     "org.memberAccessPanel.teamGrantLabel": "team {name}:",
     "org.memberAccessPanel.orgGrantLabel": "org:",
     "org.memberAccessPanel.creatorGrantLabel": "creator",
-    "org.memberAccessPanel.revokingButton": "Revoking…",
     "org.memberAccessPanel.revokeButton": "Revoke direct grant",
     "org.memberAccessPanel.viaTeamLabel": "team \"{name}\"",
     "org.memberAccessPanel.viaOrgRoleLabel": "org role",
-    "org.memberAccessPanel.viaCreatorLabel": "project creator",
     "org.memberAccessPanel.alsoViaNote": "Also via {paths} — manage in Teams / Members.",
 
     // -- MemberActivityPanel: a member's recent activity panel --
@@ -354,8 +338,6 @@ export const org = defineNamespace({
     "org.projectOverview.chapterProgressUnavailable": "Chapter progress unavailable. Retry",
     "org.projectOverview.signInMessage": "Sign in to open this project from the cloud.",
     "org.projectOverview.inactiveBadge": "Inactive",
-    "org.projectOverview.opening": "Opening…",
-    "org.projectOverview.openProject": "Open project",
     "org.projectOverview.restore": "Restore",
     "org.projectOverview.moreActionsAria": "More actions",
     "org.projectOverview.downloadDeliverable": "Download deliverable",
@@ -365,12 +347,9 @@ export const org = defineNamespace({
     "org.projectOverview.customizeStatsAria": "Customize stats",
     "org.projectOverview.customize": "Customize",
     "org.projectOverview.showStats": "Show stats",
-    "org.projectOverview.translated": "Translated",
     "org.projectOverview.aiDrafted": "AI Drafted",
     "org.projectOverview.aiDraftedTooltip":
       "Cells drafted by AI (via 'Translate all') that have not yet been human-edited or validated. A human edit or validation will move them into the Translated or Validated counts. Only cells committed after this marker was introduced are tracked — earlier AI commits are indistinguishable from human edits.",
-    "org.projectOverview.validated": "Validated",
-    "org.projectOverview.hasAudio": "Has Audio",
     "org.projectOverview.hasAudioTooltip":
       "Percentage of cells that have at least one audio recording attached. This is coverage, not validation — see 'Audio Validated' for review status.",
     "org.projectOverview.audioValidated": "Audio Validated",
@@ -378,14 +357,11 @@ export const org = defineNamespace({
       "Not tracked yet — the server does not record whether a validation applies to text or audio content (see AQU-490).",
     "org.projectOverview.crossLaneTooltip": "Cross-language stat — not broken down per language.",
     "org.projectOverview.cellsSuffix": "cells",
-    "org.projectOverview.laneAll": "All",
     "org.projectOverview.laneDefaultFallback": "Default",
     "org.projectOverview.legendTranslated": "translated",
-    "org.projectOverview.legendValidated": "validated",
     "org.projectOverview.filesHeadingTruncated": "Files (top {cap} of {total})",
     "org.projectOverview.filesHeadingCount": "Files ({count})",
     "org.projectOverview.filesListAria": "File list",
-    "org.projectOverview.filesCount": plural({ one: "{count} file", other: "{count} files" }),
     "org.projectOverview.copyCsvTooltip": "Copy the file list below as CSV",
     "org.projectOverview.copyCsv": "Copy CSV",
     "org.projectOverview.downloadCsvTooltip": "Download the file list below as a .csv file",
@@ -426,16 +402,12 @@ export const org = defineNamespace({
     "org.projectOverview.pmDialogDescription":
       "The project manager is responsible for this project. They must be a member of the project.",
     "org.projectOverview.selectMemberPlaceholder": "Select a member",
-    "org.projectOverview.teamHeading": "Team",
     "org.projectOverview.teamVisibilityDescription":
       "Who can see each teammate's assignment progress on this project.",
     "org.projectOverview.noOpenAssignments": "No open assignments in this project yet.",
-    "org.projectOverview.userFallback": "User {id}",
     "org.projectOverview.openAssignmentsStat": "{count} open · {percent}",
     "org.projectOverview.viewActivityAria": "View activity for {username}",
     "org.projectOverview.hide": "Hide",
-    "org.projectOverview.activity": "Activity",
-    "org.projectOverview.membersHeading": "Members",
     "org.projectOverview.membersVisibilityDescription": "Who can see the member roster on this project.",
     "org.projectOverview.noFilesToExport": "This project has no files to export yet.",
     "org.projectOverview.archiveForbidden": "Only owners can archive a project.",
@@ -452,7 +424,6 @@ export const org = defineNamespace({
     // -- OrgSidebar: left nav for org-scoped routes --
     "org.orgSidebar.archived": "Archived",
     "org.orgSidebar.admin": "Admin",
-    "org.orgSidebar.newSharedBadge": "New",
 
     // -- AddLanguagePopover: "+ Language" quick action on an OrgHome project row --
     "org.addLanguagePopover.triggerLabel": "Language",
@@ -515,7 +486,6 @@ export const org = defineNamespace({
     "org.inviteByEmail.emailPlaceholder": "teammate@example.com (optional)",
     "org.inviteByEmail.roleLabel": "Org role",
     "org.inviteByEmail.submit": "Send invite",
-    "org.inviteByEmail.sending": "Sending…",
     "org.inviteByEmail.invalidEmailError": "Enter a valid email, or leave blank for an open link.",
     "org.inviteByEmail.notSignedInError": "Sign in to invite teammates.",
     "org.inviteByEmail.sentToEmail": "Invitation sent to {email}.",
@@ -536,16 +506,16 @@ export const org = defineNamespace({
 
     // -- MembersPage (AQU-538): org-level Members page. `org.membersPage.*` is
     // already used by ProjectMembersPage (per-project), so this org-level page
-    // is scoped under `org.membersPage.orgPage.*` to avoid name collisions —
-    // some English strings below are deliberately the same as sibling
-    // per-project keys (e.g. "Roster hidden"); that's an intentional
-    // catalog-wide duplicate (see no-duplicates.test.ts), not an oversight. --
-    "org.membersPage.orgPage.title": "Members",
+    // is scoped under `org.membersPage.orgPage.*` to avoid name collisions.
+    // AQU-511/AQU-832 dedupe: several strings below that duplicated a sibling
+    // per-project `org.membersPage.*` key (or `editor.navTitle.members`, the
+    // page-title owner per docs/swarm/TRACES.md's `derivetitle-parallel-source`
+    // note) were NOT a deliberate exception — they were removed and their call
+    // sites now reuse the existing key directly. --
     "org.membersPage.orgPage.description": "People in this organization and their access.",
     "org.membersPage.orgPage.loadErrorTitle": "Couldn't load your organization",
     "org.membersPage.orgPage.loadErrorHint":
       "Common causes: the Frontier worker is unreachable, your session expired, or the request timed out. Check your network and try again.",
-    "org.membersPage.orgPage.selectOrgTitle": "Select an organization",
     "org.membersPage.orgPage.signInTitle": "Sign in to manage members",
     "org.membersPage.orgPage.selectOrgDescription":
       "Member access is managed within a single organization. Choose one from the switcher to continue.",
@@ -564,16 +534,12 @@ export const org = defineNamespace({
     "org.membersPage.orgPage.inviteSectionDescription":
       "Bring someone new into this organization. They don't need an Aquilla account yet — they'll be guided to create one when they accept.",
     "org.membersPage.orgPage.loadingMembers": "Loading members…",
-    "org.membersPage.orgPage.rosterHiddenTitle": "Roster hidden",
-    "org.membersPage.orgPage.rosterHiddenDescription":
-      "This organization has restricted who can view the member list. Ask an owner or maintainer if you need access.",
     "org.membersPage.orgPage.rosterSectionDescription":
       "Org members and their org-wide role. Add by username, change a role, or remove someone.",
     "org.membersPage.orgPage.projectAccessTitle": "Project access",
     "org.membersPage.orgPage.projectAccessDescription": "Expand a member to see their per-project roles.",
     "org.membersPage.orgPage.matrixHint":
       "Every member × every project you can see, at a glance. Click a cell to change a role; hover a row to load its lane scopes.",
-    "org.membersPage.orgPage.pendingInvitesTitle": "Pending invitations",
     "org.membersPage.orgPage.pendingInvitesDescription":
       "Share-link invitations that haven't been redeemed yet. Revoke to cancel.",
     "org.membersPage.orgPage.invitedByLabel": "by {username}",
@@ -602,17 +568,14 @@ export const org = defineNamespace({
     "org.membersPage.orgPage.orgOwnerHint": "Org owner",
 
     // -- ProjectsList: org-wide "all projects" list --
-    "org.projectsList.lensAttentionLabel": "Needs attention",
     "org.projectsList.signedOutTitle": "Sign in to see your projects",
     "org.projectsList.signedOutBody":
       "Your session has ended or you are not signed in. Sign in to access your projects.",
     "org.projectsList.unreachableBanner": "Can't reach the server — project list unavailable.",
     "org.projectsList.noFilterMatch": "No projects match your filter.",
     "org.projectsList.noOrgProjectsYet": "No projects in this org yet.",
-    "org.projectsList.inactiveBadge": "inactive",
     "org.projectsList.noOrgLabel": "No org",
     "org.projectsList.externalOrgLabel": "External org",
-    "org.projectsList.sharedWithYouHeading": "Shared with you",
     "org.projectsList.sharedWithYouDescription": "Projects from organizations outside the current scope.",
     "org.projectsList.shownOfTotal": "{visible} shown of {total}",
     "org.projectsList.lensGroupAriaLabel": "Project list view",
@@ -623,10 +586,8 @@ export const org = defineNamespace({
     "org.orgProjectsDataTable.updatedColumn": "Updated",
     "org.orgProjectsDataTable.actionsColumnSrOnly": "Project actions",
     "org.orgProjectsDataTable.moreActionsAriaLabel": "More actions for {name}",
-    "org.orgProjectsDataTable.notStarted": "Not started",
 
     // -- OverviewLaneTable: per-project lane table on the project overview --
-    "org.overviewLaneTable.heading": "Languages",
     "org.overviewLaneTable.peopleColumn": "People",
     "org.overviewLaneTable.lastActivityColumn": "Last activity",
     "org.overviewLaneTable.actionsColumn": "Actions",
@@ -653,18 +614,15 @@ export const org = defineNamespace({
       "When someone invites you to a project in another organization, it shows up here.",
 
     // -- AssignWork: manager assign-a-scope-to-a-member affordance --
+    // AQU-511/AQU-832 dedupe: title/submit/selectMemberPlaceholder/deadlineLabel/
+    // youSuffix/the two error sentences/chaptersLabel all re-minted an existing
+    // dialog.assign.* or editor.milestone.vocab.* key — call sites now reuse
+    // those directly instead of duplicating them here.
     "org.assignWork.assignButtonLabel": "Assign…",
-    "org.assignWork.assignSubmit": "Assign",
     "org.assignWork.chooseAssignee": "Choose an assignee.",
     "org.assignWork.chooseFile": "Choose a file.",
-    "org.assignWork.onlyProjectMember": "You can only assign work to a project member.",
-    "org.assignWork.onlySelf": "You can only assign work to yourself.",
-    "org.assignWork.groupAriaLabel": "Assign work",
     "org.assignWork.assigneeLabel": "Assignee",
-    "org.assignWork.youSuffix": "{username} (you)",
-    "org.assignWork.selectMemberPlaceholder": "Select member…",
     "org.assignWork.bookLabel": "Book",
-    "org.assignWork.chaptersLabel": "Chapters",
     "org.assignWork.wholeBookNoChapters": "Whole book — this file has no chapters to narrow to.",
     "org.assignWork.wholeBookNoneChecked": "Whole book (none checked)",
     "org.assignWork.chaptersSelectedCount": plural({
@@ -672,7 +630,6 @@ export const org = defineNamespace({
       other: "{count} chapters selected",
     }),
     "org.assignWork.clearAllChapters": "Clear all",
-    "org.assignWork.deadlineLabel": "Deadline (optional)",
     "org.assignWork.selfAssignNote": "Self-assignment is on — you can claim this work for yourself.",
 
     // -- AssignedToMe: assignee's open-assignments inbox --
@@ -778,9 +735,10 @@ export const org = defineNamespace({
       },
       "org.orgHome.organizationsPanel.projectCount": {
         description:
-          "Project count shown under an organization's name in the all-orgs org list (e.g. '3 projects').",
+          "Project count shown under an organization's name in the all-orgs org list (e.g. '3 " +
+          "projects'), also reused on a TeamsList team card paired with org.teamsList.memberCount.",
         placeholders: {
-          count: "How many projects the organization contains; also selects the plural form.",
+          count: "How many projects are being counted; also selects the plural form.",
         },
       },
       "org.orgHome.organizationsPanel.filterAria": {
@@ -888,12 +846,10 @@ export const org = defineNamespace({
           "Accessible name for the All / Internal only / Public only segmented button group that filters TeamsList by visibility.",
       },
       "org.teamsList.memberCount": {
-        description: "Member-count line on a team card in TeamsList (e.g. '3 members'), paired with the project count.",
+        description:
+          "Member-count line on a team card in TeamsList (e.g. '3 members'), paired with " +
+          "org.orgHome.organizationsPanel.projectCount's project count.",
         placeholders: { count: "How many members belong to the team; also selects the plural form." },
-      },
-      "org.teamsList.projectCount": {
-        description: "Project-count line on a team card in TeamsList (e.g. '2 projects'), paired with the member count.",
-        placeholders: { count: "How many projects the team has access to; also selects the plural form." },
       },
       "org.teamDetail.deleteConfirmTitle": {
         description: "Title of the confirm-delete dialog for a team, naming the team about to be deleted.",
@@ -1033,10 +989,6 @@ export const org = defineNamespace({
           "Heading over the per-file breakdown list when every matching file is shown, e.g. 'Files (16)'.",
         placeholders: { count: "The number of files matching the current filter." },
       },
-      "org.projectOverview.filesCount": {
-        description: "Count of files in the project, shown beside the project title on the overview header.",
-        placeholders: { count: "The number of files in the project." },
-      },
       "org.projectOverview.noFilesMatch": {
         description:
           "Empty state shown below the file filter/sort controls when the typed filter query matches no files.",
@@ -1065,11 +1017,6 @@ export const org = defineNamespace({
       "org.projectOverview.moreFilesShowAll": {
         description: "Link below the per-file breakdown list that reveals the files hidden past the display cap.",
         placeholders: { count: "The number of additional files not currently shown." },
-      },
-      "org.projectOverview.userFallback": {
-        description:
-          "Fallback display name for a Team-card row when the assignee's username isn't available, only their numeric id.",
-        placeholders: { id: "The user's numeric id." },
       },
       "org.projectOverview.openAssignmentsStat": {
         description:
@@ -1204,10 +1151,6 @@ export const org = defineNamespace({
         description:
           "Accessible name for the row of lens buttons (Recently updated / Needs attention / Overdue / Least translated) above the all-orgs projects list.",
       },
-      "org.assignWork.groupAriaLabel": {
-        description:
-          "Accessible name (aria-label) for the expanded Assign work panel's outer role=group container — also reused as visible menu-item text elsewhere ('Assign work').",
-      },
       "org.orgProjectsDataTable.actionsColumnSrOnly": {
         description:
           "Screen-reader-only column heading for the trailing '…' row-actions column in the org projects data table — no visible header text, just this announced label.",
@@ -1221,11 +1164,6 @@ export const org = defineNamespace({
         description:
           "Subheading on the shared-with-you page when arriving scoped to one guest organization (via the org switcher), naming that organization.",
         placeholders: { org: "Display name of the guest organization — not translated." },
-      },
-      "org.assignWork.youSuffix": {
-        description:
-          "Assignee-picker option label in self-assign mode, appending '(you)' after the caller's own username so it reads as a claim for themselves rather than assigning someone else.",
-        placeholders: { username: "The caller's own username — not translated." },
       },
       "org.assignWork.chaptersSelectedCount": {
         description:
@@ -1256,8 +1194,8 @@ export const org = defineNamespace({
       },
       "org.workloadRollup.unknownUser": {
         description:
-          "Fallback shown in place of a username when an assignment row's assignee username isn't available — the org Overview team-workload rollup and the per-member usage rollup.",
-        placeholders: { id: "The assignee's numeric user id, used only when their username is unavailable." },
+          "Fallback shown in place of a username when a username isn't available — the org Overview team-workload rollup, the per-member usage rollup, and the project overview Team card.",
+        placeholders: { id: "The user's numeric id, used only when their username is unavailable." },
       },
       "org.usageRollup.audioSecondsOnly": {
         description:

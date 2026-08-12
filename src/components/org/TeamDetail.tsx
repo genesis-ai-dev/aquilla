@@ -81,7 +81,7 @@ const ROLE_DESCRIPTION_KEYS: Record<number, MessageKey> = {
 }
 
 function roleLabel(t: ReturnType<typeof useT>, roleLevel: number | null | undefined): string {
-  if (roleLevel == null) return t("org.teamDetail.unknownRoleLabel")
+  if (roleLevel == null) return t("autopilot.evidence.status.unknown")
   // Falls back to the canonical humanized name — never a raw numeric (FRO-368).
   return resolveRoleName(t, roleLevel)
 }
@@ -294,7 +294,7 @@ export function TeamDetail() {
   return (
     <AppShell
       sidebar={<OrgSidebar />}
-      header={<OrgBreadcrumb parent={{ label: t("org.teamsList.pageTitle"), to: activeOrgId != null ? orgPath(activeOrgId, "/teams") : "/orgs/all" }} section={team?.name ?? t("org.teamDetail.teamFallback")} />}
+      header={<OrgBreadcrumb parent={{ label: t("editor.navTitle.teams"), to: activeOrgId != null ? orgPath(activeOrgId, "/teams") : "/orgs/all" }} section={team?.name ?? t("editor.navTitle.team")} />}
       statusBar={null}
       main={
         <Page size="wide">
@@ -433,7 +433,7 @@ export function TeamDetail() {
               <Section
                 title={
                   <span className="flex items-center gap-1.5">
-                    {t("org.teamDetail.membersHeading")}
+                    {t("editor.navTitle.members")}
                       {/* "?" tooltip summarising all access levels — hover or focus to read */}
                       <AppTooltip content={ROLE_OPTIONS.map((r) => t(ROLE_DESCRIPTION_KEYS[r.level])).join("\n")} className="max-w-xs">
                         <span
@@ -577,7 +577,7 @@ export function TeamDetail() {
                                 aria-label={t("org.teamDetail.removeAriaLabel", { name: m.username })}
                                 onClick={() => handleRemoveMember(m.userId)}
                               >
-                                {t("org.teamDetail.removeButton")}
+                                {t("org.membersPage.remove")}
                               </button>
                             ) : (
                               /* AQU-789: removing a team member is a maintainer+ action. Show a
@@ -590,7 +590,7 @@ export function TeamDetail() {
                                   aria-label={t("org.teamDetail.removeMaintainersOnlyAriaLabel", { username: m.username })}
                                   className="inline-flex cursor-not-allowed items-center text-xs text-muted-foreground/70 underline decoration-dotted"
                                 >
-                                  {t("org.teamDetail.removeButton")}
+                                  {t("org.membersPage.remove")}
                                 </span>
                               </AppTooltip>
                             )}
@@ -668,7 +668,7 @@ export function TeamDetail() {
                             </SelectGroup>
                           </SelectContent>
                         </Select>
-                        <Button type="button" size="sm" onClick={handleAttachProject}>{t("org.teamDetail.attachButton")}</Button>
+                        <Button type="button" size="sm" onClick={handleAttachProject}>{t("editor.media.attach")}</Button>
                         <Button
                           type="button"
                           size="sm"

@@ -171,7 +171,7 @@ function AccessProjectRow({
   const otherPaths = [
     ...p.groups.map((g) => t("org.memberAccessPanel.viaTeamLabel", { name: g.name })),
     ...(p.org != null ? [t("org.memberAccessPanel.viaOrgRoleLabel")] : []),
-    ...(p.creator ? [t("org.memberAccessPanel.viaCreatorLabel")] : []),
+    ...(p.creator ? [t("org.membersPage.sourceProjectCreator")] : []),
   ]
   return (
     <li className="rounded border bg-background p-2">
@@ -216,7 +216,7 @@ function AccessProjectRow({
               data-testid="revoke-direct-grant"
               className="rounded border px-2 py-0.5 text-[10px] hover:bg-destructive/10 hover:text-destructive disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {revoking ? t("org.memberAccessPanel.revokingButton") : t("org.memberAccessPanel.revokeButton")}
+              {revoking ? t("org.membersPage.revoking") : t("org.memberAccessPanel.revokeButton")}
             </button>
           </AppTooltip>
         )}

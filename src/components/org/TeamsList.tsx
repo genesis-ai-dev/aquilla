@@ -57,7 +57,7 @@ const SORT_OPTIONS: { value: SortOption; labelKey: MessageKey }[] = [
 type Visibility = "all" | "internal" | "public"
 
 const VISIBILITY_OPTIONS: { value: Visibility; labelKey: MessageKey }[] = [
-  { value: "all", labelKey: "org.teamsList.visibilityAllLabel" },
+  { value: "all", labelKey: "org.orgHome.statusFilter.all" },
   { value: "internal", labelKey: "org.teamsList.visibilityInternalLabel" },
   { value: "public", labelKey: "org.teamsList.visibilityPublicLabel" },
 ]
@@ -145,12 +145,12 @@ export function TeamsList() {
   return (
     <AppShell
       sidebar={<OrgSidebar />}
-      header={<OrgBreadcrumb section={t("org.teamsList.pageTitle")} />}
+      header={<OrgBreadcrumb section={t("editor.navTitle.teams")} />}
       statusBar={null}
       main={
         <Page size="wide">
           <PageHeader
-            title={t("org.teamsList.pageTitle")}
+            title={t("editor.navTitle.teams")}
             description={t("org.teamsList.pageDescription")}
             actions={
               isAdmin ? (
@@ -230,7 +230,7 @@ export function TeamsList() {
                   </Button>
                   <Button type="submit" form="create-team-form">
                     {createTeamForm.state.isSubmitting && <Spinner data-icon="inline-start" />}
-                    {createTeamForm.state.isSubmitting ? t("org.teamsList.creatingButton") : t("org.teamsList.createButton")}
+                    {createTeamForm.state.isSubmitting ? t("org.createDialog.submitCreating") : t("org.switcher.create")}
                   </Button>
                 </DialogFooter>
               </DialogContent>
@@ -337,7 +337,7 @@ export function TeamsList() {
                 >
                   <span className="block truncate font-medium text-foreground">{team.name}</span>
                   <span className="mt-1 block text-sm tabular-nums text-muted-foreground">
-                    {t("org.teamsList.memberCount", { count: team.memberCount })} · {t("org.teamsList.projectCount", { count: team.projectCount })}
+                    {t("org.teamsList.memberCount", { count: team.memberCount })} · {t("org.orgHome.organizationsPanel.projectCount", { count: team.projectCount })}
                   </span>
                   <span className="mt-2 flex flex-wrap gap-1">
                     {!team.isInternal && (

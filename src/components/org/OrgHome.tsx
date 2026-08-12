@@ -266,7 +266,7 @@ const PROJECT_LENSES: { value: ProjectLens; labelKey: MessageKey; descriptionKey
   {
     // AQU-507: group projects by their designated Project Manager.
     value: "pm",
-    labelKey: "org.orgHome.lens.pmLabel",
+    labelKey: "org.projectOverview.projectManagerHeading",
     descriptionKey: "org.orgHome.lens.pmDescription",
     emptyKey: "org.orgHome.noProjectsYet",
   },

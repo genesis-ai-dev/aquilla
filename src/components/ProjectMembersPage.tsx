@@ -393,7 +393,7 @@ export function MembersTab({
         <div className="mb-2 flex items-center justify-between">
           <h2 className="text-sm font-medium">
             {orgAccessMembers.length > 0
-              ? t("org.membersPage.projectMembersHeading")
+              ? t("editor.navTitle.projectMembers")
               : t("org.membersPage.currentMembersHeading")}
           </h2>
           <Button
@@ -903,7 +903,7 @@ function InviteLinkTab({ projectId }: { projectId: string }) {
           disabled={busy || !session?.jwt}
           className="w-full"
         >
-          {busy ? t("org.membersPage.creating") : t("org.membersPage.createInviteLink")}
+          {busy ? t("org.createDialog.submitCreating") : t("org.membersPage.createInviteLink")}
         </Button>
       </div>
     </div>

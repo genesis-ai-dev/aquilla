@@ -1000,7 +1000,7 @@ export function ProjectOverview() {
                       <p className="mt-0.5 text-sm text-muted-foreground">{languagePair}</p>
                     )}
                     <p className="mt-0.5 text-sm text-muted-foreground">
-                      {t("org.projectOverview.filesCount", { count: project?.files.length ?? 0 })}
+                      {t("search.expanded.fileCount", { count: project?.files.length ?? 0 })}
                     </p>
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
@@ -1013,10 +1013,10 @@ export function ProjectOverview() {
                       {openPending ? (
                         <>
                           <Spinner className="size-4" />
-                          {t("org.projectOverview.opening")}
+                          {t("auth.accessLink.submitOpening")}
                         </>
                       ) : (
-                        t("org.projectOverview.openProject")
+                        t("auth.accessLink.submitDefault")
                       )}
                     </Button>
                     {isOwner && isArchived && (
@@ -1144,7 +1144,7 @@ export function ProjectOverview() {
                         onClick={() => setSelectedLaneTag(null)}
                         testId="lane-pill-all"
                       >
-                        {t("org.projectOverview.laneAll")}
+                        {t("org.orgHome.statusFilter.all")}
                       </LanePill>
                       {projectLanes.map((l) => {
                         const tagId = l.lane === "" ? "default" : l.lane
@@ -1168,7 +1168,7 @@ export function ProjectOverview() {
                     {showText && (
                       <>
                         {statVisible("translated") && (
-                          <StatTile label={t("org.projectOverview.translated")} pct={tileTranslatedPct} colorClass="text-amber-600" />
+                          <StatTile label={t("org.orgHome.table.translatedHeaderLabel")} pct={tileTranslatedPct} colorClass="text-amber-600" />
                         )}
                         {audio.aiDraftedCells > 0 && statVisible("ai-drafted") && (
                           <StatTile
@@ -1179,7 +1179,7 @@ export function ProjectOverview() {
                           />
                         )}
                         {statVisible("validated") && (
-                          <StatTile label={t("org.projectOverview.validated")} pct={tileValidatedPct} colorClass="text-emerald-600" />
+                          <StatTile label={t("org.orgHome.table.validatedHeaderLabel")} pct={tileValidatedPct} colorClass="text-emerald-600" />
                         )}
                       </>
                     )}
@@ -1187,7 +1187,7 @@ export function ProjectOverview() {
                       <>
                         {statVisible("has-audio") && (
                           <StatTile
-                            label={t("org.projectOverview.hasAudio")}
+                            label={t("org.orgHome.table.audioHeaderLabel")}
                             pct={audioPct(audio)}
                             colorClass={activeLane ? "text-muted-foreground/60" : "text-sky-600"}
                             tooltip={activeLane ? CROSS_LANE_TOOLTIP : t("org.projectOverview.hasAudioTooltip")}
@@ -1237,7 +1237,7 @@ export function ProjectOverview() {
                       <>
                         {statVisible("translated") && (
                           <StatBar
-                            label={t("org.projectOverview.translated")}
+                            label={t("org.orgHome.table.translatedHeaderLabel")}
                             value={activeLane ? activeLane.filledCells : audio.filledCells}
                             total={activeLane ? activeLane.totalCells : audio.totalCells}
                             fillClass="bg-amber-500"
@@ -1255,7 +1255,7 @@ export function ProjectOverview() {
                         )}
                         {statVisible("validated") && (
                           <StatBar
-                            label={t("org.projectOverview.validated")}
+                            label={t("org.orgHome.table.validatedHeaderLabel")}
                             value={activeLane ? activeLane.validatedCells : audio.validatedCells}
                             total={activeLane ? activeLane.totalCells : audio.totalCells}
                             fillClass="bg-emerald-500"
@@ -1267,7 +1267,7 @@ export function ProjectOverview() {
                     {showAudio && !activeLane && statVisible("has-audio") && (
                       <>
                         <StatBar
-                          label={t("org.projectOverview.hasAudio")}
+                          label={t("org.orgHome.table.audioHeaderLabel")}
                           value={audio.audioCells}
                           total={audio.totalCells}
                           fillClass="bg-sky-500"
@@ -1370,7 +1370,7 @@ export function ProjectOverview() {
                           <span className="h-1.5 w-3 rounded-full bg-amber-500" />{t("org.projectOverview.legendTranslated")}
                         </span>
                         <span className="flex items-center gap-1">
-                          <span className="h-1.5 w-3 rounded-full bg-emerald-500" />{t("org.projectOverview.legendValidated")}
+                          <span className="h-1.5 w-3 rounded-full bg-emerald-500" />{t("editor.state.validated")}
                         </span>
                       </span>
                     </div>
@@ -1764,7 +1764,7 @@ export function ProjectOverview() {
               >
                 <div className={cn("relative rounded-xl border bg-card p-5", sectionTintClass(orgSettings.memberProgressViewMinRole))}>
                   <div className="mb-3 flex items-center justify-between gap-2">
-                    <h2 className="text-xs font-semibold text-muted-foreground">{t("org.projectOverview.teamHeading")}</h2>
+                    <h2 className="text-xs font-semibold text-muted-foreground">{t("editor.navTitle.team")}</h2>
                     <SectionVisibilityBadge
                       minRole={orgSettings.memberProgressViewMinRole}
                       canEdit={canEditVisibility}
@@ -1784,7 +1784,7 @@ export function ProjectOverview() {
                             {/* AQU-491: click-to-reveal affordance, see file-name cell above. */}
                             <AppTooltip content={w.username ?? String(w.userId)}>
                               <span className="w-32 shrink-0 font-medium">
-                                <ExpandableName name={w.username ?? t("org.projectOverview.userFallback", { id: w.userId })} />
+                                <ExpandableName name={w.username ?? t("org.workloadRollup.unknownUser", { id: w.userId })} />
                               </span>
                             </AppTooltip>
                             <span className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
@@ -1810,7 +1810,7 @@ export function ProjectOverview() {
                                 aria-pressed={isSelected}
                                 onClick={() => setSelectedMemberUsername(isSelected ? null : (w.username as string))}
                               >
-                                {isSelected ? t("org.projectOverview.hide") : t("org.projectOverview.activity")}
+                                {isSelected ? t("org.projectOverview.hide") : t("autopilot.inspector.activity.title")}
                               </Button>
                             )}
                           </li>
@@ -1860,7 +1860,7 @@ export function ProjectOverview() {
                     data-testid="overview-members-card"
                   >
                     <div className="mb-3 flex items-center justify-between gap-2">
-                      <h2 className="text-xs font-semibold text-muted-foreground">{t("org.projectOverview.membersHeading")}</h2>
+                      <h2 className="text-xs font-semibold text-muted-foreground">{t("editor.navTitle.members")}</h2>
                       <SectionVisibilityBadge
                         minRole={orgSettings.rosterViewMinRole}
                         canEdit={canEditVisibility}

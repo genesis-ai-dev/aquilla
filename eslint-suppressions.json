@@ -246,7 +246,7 @@
   },
   "src/components/ProjectMembersPage.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 51
+      "count": 1
     }
   },
   "src/components/ProjectSettings.tsx": {
@@ -724,144 +724,19 @@
       "count": 1
     }
   },
-  "src/components/org/AddLanguagePopover.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 8
-    }
-  },
-  "src/components/org/ArchivedProjects.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 5
-    }
-  },
-  "src/components/org/AssignWork.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 13
-    }
-  },
-  "src/components/org/AssignedToMe.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 7
-    }
-  },
-  "src/components/org/CreditsPanel.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 7
-    }
-  },
-  "src/components/org/ExternalCollaboratorsSection.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 4
-    }
-  },
-  "src/components/org/GuestOrgHome.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 5
-    }
-  },
-  "src/components/org/MemberAccessPanel.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 11
-    }
-  },
   "src/components/org/MemberActivityPanel.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 10
-    }
-  },
-  "src/components/org/OrgCreateDialog.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 5
-    }
-  },
-  "src/components/org/OrgHome.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 58
-    }
-  },
-  "src/components/org/OrgInviteByEmail.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 3
-    }
-  },
-  "src/components/org/OrgProjectsDataTable.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 15
-    }
-  },
-  "src/components/org/OrgRenameDialog.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 4
-    }
-  },
-  "src/components/org/OrgRouteGate.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 3
-    }
-  },
-  "src/components/org/OrgSetupChecklist.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 6
-    }
-  },
-  "src/components/org/OrgSidebar.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 9
-    }
-  },
-  "src/components/org/OrgSwitcher.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 7
+      "count": 2
     }
   },
   "src/components/org/OverviewLaneTable.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 12
-    }
-  },
-  "src/components/org/ProjectLaneSubRows.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 4
+      "count": 1
     }
   },
   "src/components/org/ProjectOverview.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 81
-    }
-  },
-  "src/components/org/ProjectsList.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 18
-    }
-  },
-  "src/components/org/SectionVisibilityBadge.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 2
-    }
-  },
-  "src/components/org/SharedProjectsPage.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 3
-    }
-  },
-  "src/components/org/TeamDetail.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 35
-    }
-  },
-  "src/components/org/TeamsList.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 21
-    }
-  },
-  "src/components/org/UsageRollup.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 2
-    }
-  },
-  "src/components/org/WorkloadRollup.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 2
+      "count": 1
     }
   },
   "src/components/settings/ApiTokensSection.tsx": {
@@ -952,11 +827,6 @@
   "src/pages/ApproveChangeset/ApproveChangeset.tsx": {
     "i18n/no-unkeyed-string": {
       "count": 21
-    }
-  },
-  "src/pages/MembersPage.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 35
     }
   },
   "src/pages/Preferences.tsx": {

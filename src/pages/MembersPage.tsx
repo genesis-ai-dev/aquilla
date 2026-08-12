@@ -70,7 +70,7 @@ export function MembersPage() {
     return (
       <MembersShell>
         <Page size="wide">
-          <PageHeader title={t("org.membersPage.orgPage.title")} description={t("org.membersPage.orgPage.description")} />
+          <PageHeader title={t("editor.navTitle.members")} description={t("org.membersPage.orgPage.description")} />
           <div className="space-y-4">
             <div className="h-24 animate-pulse rounded-2xl border bg-card" />
             <div className="h-40 animate-pulse rounded-2xl border bg-card" />
@@ -84,7 +84,7 @@ export function MembersPage() {
     return (
       <MembersShell>
         <Page size="wide">
-          <PageHeader title={t("org.membersPage.orgPage.title")} description={t("org.membersPage.orgPage.description")} />
+          <PageHeader title={t("editor.navTitle.members")} description={t("org.membersPage.orgPage.description")} />
           <div className="rounded-2xl border border-destructive/30 bg-destructive/5 p-4">
             <p className="text-sm font-medium text-destructive">{t("org.membersPage.orgPage.loadErrorTitle")}</p>
             <p className="mt-1 text-xs text-muted-foreground">{error}</p>
@@ -101,10 +101,10 @@ export function MembersPage() {
     return (
       <MembersShell>
         <Page size="wide">
-          <PageHeader title={t("org.membersPage.orgPage.title")} description={t("org.membersPage.orgPage.description")} />
+          <PageHeader title={t("editor.navTitle.members")} description={t("org.membersPage.orgPage.description")} />
           <EmptyState
             icon={AlertTriangle}
-            title={isAllOrgs ? t("org.membersPage.orgPage.selectOrgTitle") : t("org.membersPage.orgPage.signInTitle")}
+            title={isAllOrgs ? t("org.teamsList.selectOrgTitle") : t("org.membersPage.orgPage.signInTitle")}
             description={
               isAllOrgs
                 ? t("org.membersPage.orgPage.selectOrgDescription")
@@ -131,7 +131,7 @@ function MembersShell({ children }: { children: React.ReactNode }) {
   return (
     <AppShell
       sidebar={<OrgSidebar />}
-      header={<OrgBreadcrumb section={t("org.membersPage.orgPage.title")} />}
+      header={<OrgBreadcrumb section={t("editor.navTitle.members")} />}
       statusBar={null}
       main={children}
     />
@@ -183,7 +183,7 @@ function MembersPageContent({ orgId, orgName }: MembersPageContentProps) {
     <MembersShell>
       <Page size="wide">
       <PageHeader
-        title={t("org.membersPage.orgPage.title")}
+        title={t("editor.navTitle.members")}
         description={
           <>
             {t("org.membersPage.orgPage.pageDescriptionPrefix")}{" "}
@@ -242,8 +242,8 @@ function MembersPageContent({ orgId, orgName }: MembersPageContentProps) {
                 <EmptyState
                   variant="inline"
                   icon={Lock}
-                  title={t("org.membersPage.orgPage.rosterHiddenTitle")}
-                  description={t("org.membersPage.orgPage.rosterHiddenDescription")}
+                  title={t("org.membersPage.rosterHiddenTitle")}
+                  description={t("org.membersPage.rosterHiddenBody")}
                 />
               </Section>
             ) : (
@@ -428,7 +428,7 @@ function PendingInvitesSection({ orgId }: { orgId: number }) {
       title={
         <span className="flex items-center gap-1.5">
           <Mail className="size-4 text-muted-foreground" aria-hidden />
-          {t("org.membersPage.orgPage.pendingInvitesTitle")}
+          {t("org.orgHome.pendingInvitations.heading")}
         </span>
       }
       description={t("org.membersPage.orgPage.pendingInvitesDescription")}

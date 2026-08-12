@@ -170,11 +170,11 @@ export function AssignWork({
     // members, but re-check on submit so a stale/forced selection can't route
     // an assignment to someone outside the project.
     if (!isSelfAssignMode && !eligibleMembers.some((m) => m.userId === Number(assigneeId))) {
-      setError(t("org.assignWork.onlyProjectMember"))
+      setError(t("dialog.assign.error.notProjectMember"))
       return
     }
     if (!canSubmitAssignment(roleLevel, allowSelfAssignment, callerUserId, Number(assigneeId))) {
-      setError(t("org.assignWork.onlySelf"))
+      setError(t("dialog.assign.error.selfOnly"))
       return
     }
     // AQU-678: label the assignment with the spelled-out canonical book name.
@@ -222,7 +222,7 @@ export function AssignWork({
   }
 
   return (
-    <div role="group" aria-label={t("org.assignWork.groupAriaLabel")} className="mt-3 w-full rounded-md border p-3">
+    <div role="group" aria-label={t("dialog.assign.title")} className="mt-3 w-full rounded-md border p-3">
       <FieldGroup className="gap-4">
         <div className="grid gap-4 sm:grid-cols-2">
           <Field>
@@ -232,9 +232,9 @@ export function AssignWork({
                 isSelfAssignMode
                   ? members
                       .filter((m) => m.userId === callerUserId)
-                      .map((m) => ({ value: String(m.userId), label: t("org.assignWork.youSuffix", { username: m.username }) }))
+                      .map((m) => ({ value: String(m.userId), label: t("dialog.assign.assigneeSelfSuffix", { username: m.username }) }))
                   : [
-                      { value: "", label: t("org.assignWork.selectMemberPlaceholder") },
+                      { value: "", label: t("dialog.assign.selectMemberPlaceholder") },
                       // AQU-676: project members only — org-baseline-only people are excluded.
                       ...eligibleMembers.map((m) => ({ value: String(m.userId), label: m.username })),
                     ]
@@ -252,11 +252,11 @@ export function AssignWork({
                     members
                       .filter((m) => m.userId === callerUserId)
                       .map((m) => (
-                        <SelectItem key={m.userId} value={String(m.userId)}>{t("org.assignWork.youSuffix", { username: m.username })}</SelectItem>
+                        <SelectItem key={m.userId} value={String(m.userId)}>{t("dialog.assign.assigneeSelfSuffix", { username: m.username })}</SelectItem>
                       ))
                   ) : (
                     <>
-                      <SelectItem value="">{t("org.assignWork.selectMemberPlaceholder")}</SelectItem>
+                      <SelectItem value="">{t("dialog.assign.selectMemberPlaceholder")}</SelectItem>
                       {eligibleMembers.map((m) => (
                         <SelectItem key={m.userId} value={String(m.userId)}>{m.username}</SelectItem>
                       ))}
@@ -292,7 +292,7 @@ export function AssignWork({
             </Select>
           </Field>
           <Field>
-            <FieldLabel htmlFor="assign-work-chapters">{t("org.assignWork.chaptersLabel")}</FieldLabel>
+            <FieldLabel htmlFor="assign-work-chapters">{t("editor.milestone.vocab.chapterPlural")}</FieldLabel>
             {chapters.length === 0 ? (
               <FieldDescription>
                 {t("org.assignWork.wholeBookNoChapters")}
@@ -323,7 +323,7 @@ export function AssignWork({
                 <div
                   id="assign-work-chapters"
                   role="group"
-                  aria-label={t("org.assignWork.chaptersLabel")}
+                  aria-label={t("editor.milestone.vocab.chapterPlural")}
                   className="max-h-40 overflow-y-auto rounded-md border p-2"
                 >
                   {chapters.map((ch) => (
@@ -344,7 +344,7 @@ export function AssignWork({
             )}
           </Field>
           <Field>
-            <FieldLabel htmlFor="assign-work-deadline">{t("org.assignWork.deadlineLabel")}</FieldLabel>
+            <FieldLabel htmlFor="assign-work-deadline">{t("dialog.assign.deadlineLabel")}</FieldLabel>
             <DatePicker
               id="assign-work-deadline"
               value={deadlineDate}
@@ -360,7 +360,7 @@ export function AssignWork({
             onClick={() => void submit()}
             disabled={busy}
           >
-            {t("org.assignWork.assignSubmit")}
+            {t("dialog.assign.submit")}
           </Button>
           <Button
             type="button"

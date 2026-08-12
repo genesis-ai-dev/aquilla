@@ -38,7 +38,7 @@ const PROJECT_LENS_VALUES: ProjectLens[] = ["recent", "attention", "overdue", "l
 
 const PROJECT_LENSES: { value: ProjectLens; labelKey: MessageKey; emptyKey: MessageKey }[] = [
   { value: "recent", labelKey: "org.orgHome.lens.recentLabel", emptyKey: "org.orgHome.lens.recentEmpty" },
-  { value: "attention", labelKey: "org.projectsList.lensAttentionLabel", emptyKey: "org.orgHome.lens.attentionEmpty" },
+  { value: "attention", labelKey: "autopilot.status.needsAttention", emptyKey: "org.orgHome.lens.attentionEmpty" },
   { value: "overdue", labelKey: "org.orgHome.overdue", emptyKey: "org.orgHome.emptyTitle.overdue" },
   { value: "least-translated", labelKey: "org.orgHome.lens.leastTranslatedLabel", emptyKey: "org.orgHome.noProjectsYet" },
 ]
@@ -173,7 +173,7 @@ function ProjectRow({
           )}
           {p.isActive === false && (
             <Badge variant="secondary" className="shrink-0">
-              {t("org.projectsList.inactiveBadge")}
+              {t("org.projectOverview.inactiveBadge")}
             </Badge>
           )}
         </span>
@@ -514,7 +514,7 @@ export function ProjectsList() {
               {filteredShared.length > 0 && (
                 <section className="rounded-lg border bg-card" data-testid="shared-with-you">
                   <div className="border-b px-4 py-3">
-                    <h2 className="text-sm font-medium">{t("org.projectsList.sharedWithYouHeading")}</h2>
+                    <h2 className="text-sm font-medium">{t("editor.navTitle.sharedWithYou")}</h2>
                     <p className="text-xs text-muted-foreground">
                       {t("org.projectsList.sharedWithYouDescription")}
                     </p>

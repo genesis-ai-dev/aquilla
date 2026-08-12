@@ -117,7 +117,7 @@ export function OrgSidebar() {
                 {t("editor.navTitle.sharedWithYou")}
                 {hasNewSharedProjects && (
                   <Badge className="shrink-0" data-testid="new-shared-nav-badge">
-                    {t("org.orgSidebar.newSharedBadge")}
+                    {t("org.guestOrgHome.newBadge")}
                   </Badge>
                 )}
               </span>

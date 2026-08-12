@@ -109,7 +109,7 @@ export function OrgInviteByEmail({ orgId }: { orgId: number }) {
           </select>
         </Field>
         <Button size="sm" onClick={submit} disabled={busy}>
-          {busy ? t("org.inviteByEmail.sending") : t("org.inviteByEmail.submit")}
+          {busy ? t("auth.resetPassword.sending") : t("org.inviteByEmail.submit")}
         </Button>
       </FieldGroup>
       {error && <FieldError className="text-xs">{error}</FieldError>}

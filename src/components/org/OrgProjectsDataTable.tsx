@@ -47,7 +47,7 @@ export type OrgProjectRow = PortfolioProject & {
 
 function activityLabel(project: PortfolioProject, now: number, t: TFunction): string | null {
   const status = portfolioActivityStatus(project, now)
-  if (status === "not-started") return t("org.orgProjectsDataTable.notStarted")
+  if (status === "not-started") return t("autopilot.status.notStarted")
   if (status === "stalled") return t("org.orgHome.stalled")
   return null
 }
@@ -384,7 +384,7 @@ export function OrgProjectsDataTable({
                     onClick={() => setAssignTarget({ projectId: p.id, lane: "" })}
                   >
                     <UserPlus className="size-4" />
-                    {t("org.assignWork.groupAriaLabel")}
+                    {t("dialog.assign.title")}
                   </DropdownMenuItem>
                 )}
                 <DropdownMenuItem

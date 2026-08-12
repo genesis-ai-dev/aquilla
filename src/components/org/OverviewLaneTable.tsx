@@ -169,7 +169,7 @@ export function OverviewLaneTable({
     <div className="rounded-xl border bg-card p-5" data-testid="overview-lane-table">
       <div className="mb-3 flex items-center gap-2">
         <Languages className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
-        <h2 className="text-xs font-semibold text-muted-foreground">{t("org.overviewLaneTable.heading")}</h2>
+        <h2 className="text-xs font-semibold text-muted-foreground">{t("fileDetails.languages")}</h2>
       </div>
 
       <div

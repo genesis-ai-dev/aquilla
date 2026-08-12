@@ -193,6 +193,12 @@ then **OPS-10**, then SEC-1. OPS-8, OPS-9 and OPS-11 are closed in code.
    a deadline instead of becoming permanent silence. The allowlist's own test rejects
    one-word reasons and refuses to let `dompurify` be triaged at all.
 
+   The parser **throws rather than reporting clean** when `pnpm audit`'s payload carries
+   neither `advisories` nor `metadata` — an output-format change, or anything else writing
+   unexpected JSON to stdout, must not read as "no advisories found". A gate that passes
+   because it could not read its input is the one thing that would make it worse than no
+   gate, and that is the failure this whole document is about.
+
    The last pass recommended a *weekly, non-blocking* `pnpm audit` job for exactly the
    false-positive reason above. This solves the same problem the other way: blocking, but
    only on the part a human has not yet looked at. A non-blocking weekly job produces a

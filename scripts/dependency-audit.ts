@@ -95,7 +95,16 @@ export function evaluate(
   return verdicts
 }
 
-/** Normalise `pnpm audit --json` into the shape `evaluate` wants. */
+/**
+ * Normalise `pnpm audit --json` into the shape `evaluate` wants.
+ *
+ * Throws rather than returning `[]` when the payload carries neither
+ * `advisories` nor `metadata`. A clean audit emits `advisories: {}` alongside
+ * `metadata`, so a payload with neither is an unrecognised format — pnpm
+ * changed its output, or something wrote a different JSON document to stdout.
+ * Reporting that as "no advisories" would make this gate pass while checking
+ * nothing, which is the precise failure mode it exists to prevent.
+ */
 export function parseAuditJson(raw: string): Advisory[] {
   const parsed = JSON.parse(raw) as {
     advisories?: Record<string, {
@@ -105,6 +114,13 @@ export function parseAuditJson(raw: string): Advisory[] {
       title?: string
       findings?: Array<{ paths?: string[] }>
     }>
+    metadata?: unknown
+  }
+  if (parsed.advisories === undefined && parsed.metadata === undefined) {
+    throw new Error(
+      "unrecognised `pnpm audit --json` output: no `advisories` and no `metadata` key. " +
+        "Refusing to report a clean result from a payload this script cannot read.",
+    )
   }
   const advisories: Advisory[] = []
   for (const [key, value] of Object.entries(parsed.advisories ?? {})) {

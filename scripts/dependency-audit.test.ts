@@ -89,8 +89,21 @@ describe("parseAuditJson", () => {
     expect(parseAuditJson(raw)[0].id).toBe("999")
   })
 
-  it("handles an audit with no advisories at all", () => {
-    expect(parseAuditJson(JSON.stringify({}))).toEqual([])
+  it("handles a clean audit, which reports an empty advisories map", () => {
+    expect(parseAuditJson(JSON.stringify({ advisories: {}, metadata: { foo: 1 } }))).toEqual([])
+  })
+
+  it("accepts a payload carrying metadata alone", () => {
+    expect(parseAuditJson(JSON.stringify({ metadata: { vulnerabilities: {} } }))).toEqual([])
+  })
+
+  it("throws on an unrecognised payload rather than reporting it clean", () => {
+    // The gate passing because it could not read the output is the one failure
+    // mode that would make it worse than having no gate.
+    expect(() => parseAuditJson(JSON.stringify({}))).toThrow(/unrecognised/)
+    expect(() => parseAuditJson(JSON.stringify({ error: "registry unreachable" }))).toThrow(
+      /unrecognised/,
+    )
   })
 })
 

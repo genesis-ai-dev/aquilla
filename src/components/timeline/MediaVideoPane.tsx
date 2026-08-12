@@ -24,7 +24,13 @@ import { queueClockIsFileTime, useQueueAudibility, useQueueForFile } from "@/lib
 import { effectiveSourceText } from "@/lib/cell-text"
 import type { DirectionMode, TextDirection } from "@/lib/text-direction"
 import { cellIdAtSec } from "@/lib/timeline/source-regions"
-import { setVideoRate, setVideoSoundingCellId, setVideoVolume, useVideoSoundingCellId } from "@/lib/timeline/video-clock"
+import {
+  setVideoBuffering,
+  setVideoRate,
+  setVideoSoundingCellId,
+  setVideoVolume,
+  useVideoSoundingCellId,
+} from "@/lib/timeline/video-clock"
 import { clearVideoControllerIf, setVideoController, type VideoController } from "@/lib/timeline/video-controller"
 import { videoSyncAction } from "./video-sync"
 import { DEFAULT_VIDEO_ASPECT, fitPictureRect, intrinsicAspect } from "./video-frame"
@@ -49,6 +55,14 @@ export {
   type CaptionPlacement,
   type SubtitleMode,
 } from "./video-pane-prefs"
+
+/** `HAVE_FUTURE_DATA` — enough decoded to start and keep going for a moment.
+ *  The same bar the play queue's cue gate uses for its audio elements. */
+const VIDEO_READY_STATE = 3
+/** How long to wait for the picture before starting it anyway. Long enough for
+ *  an ordinary seek into an unbuffered range over a slow link, short enough
+ *  that a stream which will never report ready is not a dead button. */
+const VIDEO_READY_TIMEOUT_MS = 4000
 
 export interface MediaVideoPaneProps {
   src: string
@@ -195,6 +209,35 @@ export function MediaVideoPane({
   }, [cells, queue.cellId, slaved, standaloneCellId])
   const clockIsFileTime = queueClockIsFileTime(soundingCell)
 
+  /**
+   * Publish where the picture is, for everything that is not this pane: the
+   * playhead, the bar's readout, the dialogue table's marked row, and the dub
+   * driver's tick all read the video clock.
+   *
+   * Round 6: `timeupdate` used to be the ONLY caller. That event does not fire
+   * while a seek is in flight, and browsers may not fire it at all for a
+   * `currentTime` write against an element that has not opened yet — so after
+   * scrubbing a paused film every one of those surfaces sat on the position the
+   * film used to be at, until the element happened to tick. The seek paths now
+   * publish where they are going, and `seeked` confirms where they landed.
+   */
+  const publishPosition = useCallback(
+    (sec: number) => {
+      if (slaved || !Number.isFinite(sec)) return
+      onVideoTime?.(sec)
+      // Setting the same id is a no-op re-render in React, so subscribers only
+      // repaint when the LINE changes, not on every one of timeupdate's ticks.
+      setVideoSoundingCellId(cellIdAtSec(cells, sec))
+    },
+    [slaved, onVideoTime, cells],
+  )
+  // The seek paths below are keyed on a command nonce and must not re-run when
+  // the cell list changes, so they reach the latest publisher through a ref.
+  const publishPositionRef = useRef(publishPosition)
+  useEffect(() => {
+    publishPositionRef.current = publishPosition
+  }, [publishPosition])
+
   const prevTickRef = useRef<{ sec: number; at: number } | null>(null)
   const lastSeekAtRef = useRef<number | null>(null)
   const playFailuresRef = useRef(0)
@@ -202,10 +245,13 @@ export function MediaVideoPane({
    *  below so a rejection that arrives after a pause cannot restart it. */
   const wantPlayRef = useRef(false)
   const retryTimerRef = useRef<number | null>(null)
+  /** Abandons a readiness wait in progress. Null when nothing is waiting. */
+  const pendingPlayRef = useRef<(() => void) | null>(null)
 
   useEffect(
     () => () => {
       if (retryTimerRef.current != null) window.clearTimeout(retryTimerRef.current)
+      pendingPlayRef.current?.()
     },
     [],
   )
@@ -241,6 +287,87 @@ export function MediaVideoPane({
       }, 0)
     })
   }, [])
+
+  /** Give up on a readiness wait, and stop reporting one. Safe to call when
+   *  nothing is waiting. */
+  const cancelPendingPlay = useCallback(() => {
+    const abandon = pendingPlayRef.current
+    if (abandon) abandon()
+    else setVideoBuffering(false)
+  }, [])
+
+  /**
+   * Start the picture — once it is actually able to start.
+   *
+   * Round 6. Sam's report: pause mid-film, drag the playhead back, press play
+   * immediately, and the picture would start with sound while the playhead and
+   * the bar sat still. Part of that was the queue being cued behind our backs
+   * (fixed in ProjectWorkspace), and part was this: the play command went
+   * straight to `element.play()` with a seek still in flight. Nothing here ever
+   * read `readyState`, and nothing listened for `seeked` or `canplay`, so the
+   * app had no idea the picture was not ready and no way to say so.
+   *
+   * The shape is the play queue's own cue gate (`progCueSource`): wait on
+   * `canplay` AND `seeked`, because they cover different cases — `seeked` is
+   * what arrives when a streamed, unbuffered range finally lands, `canplay` is
+   * what a freshly opened element reports — and give up after a patience
+   * window rather than leaving the user with a spinner and no film.
+   */
+  const requestPlayWhenReady = useCallback(
+    (video: HTMLVideoElement) => {
+      // A second press or a fresh seek supersedes whatever was waiting.
+      cancelPendingPlay()
+      // HAVE_FUTURE_DATA with no seek outstanding: it can start this instant,
+      // which is the overwhelmingly common case and behaves exactly as before.
+      if (video.readyState >= VIDEO_READY_STATE && !video.seeking) {
+        requestPlay(video)
+        return
+      }
+      setVideoBuffering(true)
+      let settled = false
+      let timer: number | null = null
+      // Declarations, not consts: `settle` names the listeners it detaches.
+      function detach(): void {
+        if (timer != null) window.clearTimeout(timer)
+        timer = null
+        video.removeEventListener("canplay", onReady)
+        video.removeEventListener("seeked", onReady)
+        video.removeEventListener("error", onUnplayable)
+      }
+      function settle(start: boolean): void {
+        if (settled) return
+        settled = true
+        detach()
+        if (pendingPlayRef.current === abandon) pendingPlayRef.current = null
+        setVideoBuffering(false)
+        // The transport may have changed its mind while we waited — a pause, a
+        // file switch, the recorder opening. Only start if it still wants this.
+        if (start && wantPlayRef.current && videoRef.current === video) requestPlay(video)
+      }
+      function onReady(): void { settle(true) }
+      function onUnplayable(): void { settle(false) }
+      function abandon(): void { settle(false) }
+      video.addEventListener("canplay", onReady)
+      video.addEventListener("seeked", onReady)
+      video.addEventListener("error", onUnplayable)
+      // Patience, not a promise. A stream that never says it is ready still
+      // gets asked to play; `requestPlay`'s own retry then owns the outcome.
+      timer = window.setTimeout(() => settle(true), VIDEO_READY_TIMEOUT_MS)
+      pendingPlayRef.current = abandon
+    },
+    [requestPlay, cancelPendingPlay],
+  )
+
+  // Handing the transport to the queue abandons any start we were waiting for.
+  //
+  // Deliberately its own effect keyed on `slaved` alone, rather than folded
+  // into the clock-clearing effect further down. That one depends on the
+  // `onVideoTime`/`onVideoPlaying` props, so cancelling from its cleanup would
+  // tear down a perfectly good wait on any re-render where a caller passed a
+  // fresh arrow — which is exactly what a test caught when this lived there.
+  useEffect(() => {
+    if (slaved) cancelPendingPlay()
+  }, [slaved, cancelPendingPlay])
 
   // ── The transport. One effect owns play/pause AND position, so the two can
   // never disagree about what the queue is doing.
@@ -311,13 +438,20 @@ export function MediaVideoPane({
     // moved the playhead but not the frame would leave the two contradicting
     // each other on screen.
     if (!video) return
+    const sec = Math.max(0, seekTarget)
     try {
-      video.currentTime = Math.max(0, seekTarget)
+      video.currentTime = sec
       lastSeekAtRef.current = Date.now()
       prevTickRef.current = null
     } catch {
       /* not seekable yet */
     }
+    // Say where we are going without waiting to be told we arrived. `seeked`
+    // confirms it below, but a browser may not fire it at all when the element
+    // has not opened yet, and `timeupdate` is silent throughout a seek — so
+    // this is what stops the playhead and the bar's readout from sitting on the
+    // old position after scrubbing a paused film.
+    publishPositionRef.current(sec)
   }, [seekNonce, seekTarget])
 
   // Round 5: the playback bar has to DRIVE the picture it reports, so the pane
@@ -331,22 +465,30 @@ export function MediaVideoPane({
         const video = videoRef.current
         if (!video) return
         wantPlayRef.current = true
-        requestPlay(video)
+        requestPlayWhenReady(video)
       },
       pause: () => {
         wantPlayRef.current = false
+        // Also abandons a readiness wait: a press during the spinner has to
+        // mean "stop waiting", or the only way out of it is to sit through it.
+        cancelPendingPlay()
         videoRef.current?.pause()
       },
       isPaused: () => videoRef.current?.paused ?? true,
       seek: (sec) => {
         const video = videoRef.current
         if (!video) return
+        const at = Math.max(0, sec)
         try {
-          video.currentTime = Math.max(0, sec)
+          video.currentTime = at
+          // The prop-seek path stamps this and this one did not, so the slaved
+          // arrangement's seek-storm guard had a blind spot on bar scrubs.
+          lastSeekAtRef.current = Date.now()
           prevTickRef.current = null
         } catch {
           /* not seekable yet */
         }
+        publishPositionRef.current(at)
       },
       setRate: (rate) => {
         const video = videoRef.current
@@ -359,7 +501,7 @@ export function MediaVideoPane({
     }
     setVideoController(controller)
     return () => clearVideoControllerIf(controller)
-  }, [slaved, requestPlay])
+  }, [slaved, requestPlayWhenReady, cancelPendingPlay])
 
   // Space from the timeline. Only in the STANDALONE arrangement: when the queue
   // is the transport it owns play/pause, and two writers would fight. Toggling
@@ -370,15 +512,25 @@ export function MediaVideoPane({
     if (toggleNonce == null || slaved) return
     const video = videoRef.current
     if (!video) return
+    // Space during a readiness wait CANCELS it. The element is still `paused`
+    // throughout that wait, so without this the press would re-arm the gate and
+    // the only way to stop a picture you had asked for would be to let it start.
+    // Matches the bar's button and the queue's own press-while-loading rule.
+    if (pendingPlayRef.current) {
+      wantPlayRef.current = false
+      cancelPendingPlay()
+      return
+    }
     if (video.paused) {
       wantPlayRef.current = true
-      requestPlay(video)
+      requestPlayWhenReady(video)
     } else {
       wantPlayRef.current = false
       video.pause()
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- the NONCE is the
-    // command; re-running on `slaved`/`requestPlay` would replay a stale press.
+    // The NONCE is the command; re-running on `slaved` or on either callback
+    // would replay a stale press.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [toggleNonce])
 
   // The recorder is open: stop the picture, and keep stopping it. Re-asserted
@@ -390,12 +542,15 @@ export function MediaVideoPane({
     const video = videoRef.current
     if (!video) return
     wantPlayRef.current = false
+    // A play waiting on a seek must die here too, or it would start the film
+    // mid-take the moment the seek landed.
+    cancelPendingPlay()
     video.pause()
     const t = window.setInterval(() => {
       if (videoRef.current && !videoRef.current.paused) videoRef.current.pause()
     }, 250)
     return () => window.clearInterval(t)
-  }, [suspended])
+  }, [suspended, cancelPendingPlay])
 
   // A new source is a fresh element as far as we're concerned.
   useEffect(() => {
@@ -405,7 +560,10 @@ export function MediaVideoPane({
     playFailuresRef.current = 0
     prevTickRef.current = null
     lastSeekAtRef.current = null
-  }, [src])
+    // A wait belongs to the element that was open when it started; the new one
+    // will never fire that element's events.
+    cancelPendingPlay()
+  }, [src, cancelPendingPlay])
 
   // The fallback clock is a module store, so a position left in it would keep
   // re-writing the playhead long after this pane is gone — on another file, or
@@ -512,17 +670,11 @@ export function MediaVideoPane({
             setMediaEpoch((n) => n + 1)
             onVideoDuration?.(src, e.currentTarget.duration)
           }}
-          onTimeUpdate={
-            slaved
-              ? undefined
-              : (e) => {
-                  const sec = e.currentTarget.currentTime
-                  onVideoTime?.(sec)
-                  // Setting the same id is a no-op re-render in React, so the
-                  // caption only repaints when the line actually changes.
-                  setVideoSoundingCellId(cellIdAtSec(cells, sec))
-                }
-          }
+          onTimeUpdate={slaved ? undefined : (e) => publishPosition(e.currentTarget.currentTime)}
+          // Round 6: a seek's own landing. `timeupdate` is silent for the whole
+          // duration of a seek, so on a paused film this is the ONLY event that
+          // says where the picture actually ended up.
+          onSeeked={slaved ? undefined : (e) => publishPosition(e.currentTarget.currentTime)}
           // Standalone only: the queue is idle here, so it cannot tell the
           // playhead whether anything is running. `ended` is included because
           // it does not imply `pause` on every engine.
@@ -530,7 +682,18 @@ export function MediaVideoPane({
         // controls always agree — whichever the user reaches for.
         onRateChange={slaved ? undefined : (e) => setVideoRate((e.currentTarget as HTMLVideoElement).playbackRate)}
         onVolumeChange={slaved ? undefined : (e) => setVideoVolume((e.currentTarget as HTMLVideoElement).volume)}
-        onPlay={slaved ? undefined : () => onVideoPlaying?.(true)}
+          onPlay={
+            slaved
+              ? undefined
+              : () => {
+                  // A start that worked clears the failure tally. Without this,
+                  // two refusals over the life of one src armed the
+                  // click-to-start overlay permanently, however well the
+                  // picture played afterwards.
+                  playFailuresRef.current = 0
+                  onVideoPlaying?.(true)
+                }
+          }
           onPause={slaved ? undefined : () => onVideoPlaying?.(false)}
           onEnded={slaved ? undefined : () => onVideoPlaying?.(false)}
         />
@@ -545,7 +708,15 @@ export function MediaVideoPane({
             onClick={() => {
               setNeedsGesture(false)
               playFailuresRef.current = 0
+              // The click IS the transport asking for it — say so, or a second
+              // refusal would find `wantPlayRef` false and never re-offer this.
+              wantPlayRef.current = true
               const video = videoRef.current
+              // NOT through the readiness gate, deliberately. This overlay only
+              // exists because autoplay was refused, and the one thing that
+              // gets past that is a play() call inside the click's own task —
+              // user activation does not survive being deferred to a `canplay`
+              // listener. Waiting here would break the only escape hatch.
               if (video) requestPlay(video)
             }}
             className="absolute inset-0 z-20 flex items-center justify-center bg-black/40 text-xs font-medium text-white"

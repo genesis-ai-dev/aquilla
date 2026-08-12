@@ -43,23 +43,37 @@ export interface VideoTransportInput {
    *  so the bar and the picture's native controls always show the same number. */
   rate: number
   volume: number
+  /** Round 6: asked to play, not able to yet — opening, or a seek still
+   *  landing. The queue has always had this state; the picture reported only
+   *  playing-or-paused, so a press during a slow seek looked like nothing
+   *  happening at all. */
+  buffering: boolean
 }
 
 /**
- * Does the PICTURE own this file?
+ * Does the PICTURE own this file's transport?
  *
- * The same test the video pane uses to decide it is standalone, and the same
- * one Space is routed by — written once here so a fourth copy cannot drift.
- * A file has a linked video and no cell whose clock is file time (i.e. no
- * imported source recording); in that arrangement the queue can still be made
- * to run, but its clock is a per-take clock starting at 0 and it means nothing
- * against the film.
+ * Three things have to hold, and the third is the one that kept getting left
+ * out. There must be a linked video; no cell may have a file-time clock (an
+ * imported source recording, which makes the queue the master and slaves the
+ * picture to it); and the PANE MUST BE ON SCREEN.
+ *
+ * That last one is not a detail about layout. The pane is what registers the
+ * `VideoController`, so where it is hidden — Free timing, or a file that is not
+ * time-ordered — there is nothing to drive. Round 5 taught this to Space and
+ * to the dub driver but not to the playback bar, which went on claiming the
+ * video transport in Free timing and then found no controller behind it: every
+ * control on the bar dead, on a file whose queue could have played it.
+ *
+ * So this is now the single rule, and ProjectWorkspace's `videoIsTransport`
+ * is this function. There is nowhere left for a copy to drift.
  */
 export function videoOwnsFile(
   coreMediaUrl: string | null | undefined,
   anyCellClockIsFileTime: boolean,
+  paneOnScreen: boolean,
 ): boolean {
-  return Boolean(coreMediaUrl) && !anyCellClockIsFileTime
+  return Boolean(coreMediaUrl) && !anyCellClockIsFileTime && paneOnScreen
 }
 
 /**
@@ -75,16 +89,26 @@ export function selectTransportForFile(
   video: VideoTransportInput | null,
 ): TransportForFile {
   if (!video || queue.active) return { ...queue, source: "queue" }
-  const active = video.currentSec != null
+  // A picture that has been ASKED to play is the transport, even before it has
+  // published a position. On a file just opened nothing has ticked or seeked
+  // yet, so `currentSec` is still null — and gating on that alone meant the
+  // very first press showed no spinner and, worse, left the bar's
+  // press-again-to-cancel branch unreachable, so each further press re-armed
+  // the wait instead of ending it.
+  const active = video.currentSec != null || video.buffering
   const duration = video.durationSec != null && Number.isFinite(video.durationSec) ? video.durationSec : 0
+  // Waiting to start. Not reported while it is already sounding: a picture that
+  // rebuffers mid-play is the element's own business, and flipping the bar's
+  // button to a spinner under a running film would be a lie about the transport.
+  const loading = active && video.buffering && !video.playing
   return {
     active,
     playing: active && video.playing,
-    // The video has no cold-load dip to protect: `running` and `playing` are
-    // the same thing for a picture that is already streaming.
-    running: active && video.playing,
+    // A cold start IS a dip to protect, exactly as it is for the queue —
+    // follow/re-engage must not read the wait for a seek to land as a stop.
+    running: active && (video.playing || loading),
     cellId: active ? video.soundingCellId : null,
-    kind: active ? (video.playing ? "playing" : "paused") : "idle",
+    kind: active ? (video.playing ? "playing" : loading ? "loading" : "paused") : "idle",
     // A picture reports its own failures through the pane's error card; the
     // bar never has an error of its own to show for the video.
     errorMessage: null,

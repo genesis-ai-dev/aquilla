@@ -29,6 +29,11 @@ vi.mock("@/lib/audio/play-queue", () => ({
 }))
 
 import { MediaVideoPane, readCaptionPlacement, readSubtitleMode } from "./MediaVideoPane"
+import {
+  getVideoBuffering,
+  getVideoSoundingCellId,
+  resetVideoClockForTests,
+} from "@/lib/timeline/video-clock"
 
 const cell = (o: Partial<CellData>): CellData =>
   ({ id: "c1", fileId: "f1", original: "", translated: "", medium: "media", ...o }) as unknown as CellData
@@ -128,6 +133,11 @@ describe("MediaVideoPane", () => {
         const { rerender } = renderStandalone({ togglePlay: { nonce: 0 } })
         const video = screen.getByTestId("video-pane-media") as HTMLVideoElement
         Object.defineProperty(video, "paused", { value: true, configurable: true })
+        // Round 6: an element that cannot start yet is HELD rather than played
+        // blind (see "play waits for the picture to be ready" below), and
+        // happy-dom reports readyState 0 for everything. This test is about the
+        // toggle, so give it a picture that is genuinely ready.
+        Object.defineProperty(video, "readyState", { value: 4, configurable: true })
         rerender(<MediaVideoPane src="https://cdn/episode.webm" cells={subs} togglePlay={{ nonce: 1 }} />)
         expect(play).toHaveBeenCalled()
 
@@ -385,5 +395,214 @@ describe("MediaVideoPane", () => {
     expect(screen.getByText("https://cdn/episode.webm")).toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: "Change video" }))
     expect(onChangeVideo).toHaveBeenCalledTimes(1)
+  })
+
+  // ── Round 6: waiting for the picture before starting it ──────────────────
+  //
+  // Sam's report: pause mid-film, drag the playhead back, press play
+  // immediately — the picture starts with sound while the playhead and the bar
+  // sit still, then everything lurches. Part of that was the queue being cued
+  // behind our backs (fixed in ProjectWorkspace, which is not unit-testable),
+  // and part was here: the play command went straight to `element.play()` with
+  // a seek still in flight, and nothing in the app knew or could say so.
+  describe("play waits for the picture to be ready", () => {
+    /** A subtitle file with footage linked — the standalone arrangement. */
+    const subs = [
+      cell({ id: "s1", medium: "text", original: "Line one", translated: "Ligne un", startTime: 0, endTime: 5 }),
+      cell({ id: "s2", medium: "text", original: "Line two", translated: "Ligne deux", startTime: 10, endTime: 15 }),
+    ]
+
+    /** happy-dom has no media pipeline: readiness and play() have to be planted. */
+    const plant = (video: HTMLVideoElement, o: { readyState?: number; seeking?: boolean } = {}) => {
+      Object.defineProperty(video, "readyState", { value: o.readyState ?? 0, configurable: true })
+      Object.defineProperty(video, "seeking", { value: o.seeking ?? false, configurable: true })
+      const play = vi.fn(() => Promise.resolve())
+      video.play = play as unknown as HTMLVideoElement["play"]
+      video.pause = vi.fn() as unknown as HTMLVideoElement["pause"]
+      return play
+    }
+
+    /** Mount standalone, then arm the element, then press. */
+    const pressPlay = (o: { readyState?: number; seeking?: boolean } = {}) => {
+      const view = render(
+        <MediaVideoPane src="https://cdn/episode.webm" cells={subs} onVideoTime={vi.fn()} />,
+      )
+      const video = screen.getByTestId("video-pane-media") as HTMLVideoElement
+      const play = plant(video, o)
+      const press = (nonce: number) =>
+        view.rerender(
+          <MediaVideoPane
+            src="https://cdn/episode.webm"
+            cells={subs}
+            onVideoTime={vi.fn()}
+            togglePlay={{ nonce }}
+          />,
+        )
+      press(1)
+      return { video, play, press, view }
+    }
+
+    beforeEach(() => {
+      resetVideoClockForTests()
+    })
+
+    it("starts at once when the picture is already able to", () => {
+      // The overwhelmingly common case has to behave exactly as it always did:
+      // no wait, no spinner, no deferral.
+      const { play } = pressPlay({ readyState: 4 })
+      expect(play).toHaveBeenCalledTimes(1)
+      expect(getVideoBuffering()).toBe(false)
+    })
+
+    it("holds the start while a seek is still landing, and says it is waiting", () => {
+      // `readyState` alone is not enough: an element that has the old position
+      // buffered reports 4 while seeking somewhere it does not.
+      const { play } = pressPlay({ readyState: 4, seeking: true })
+      expect(play).not.toHaveBeenCalled()
+      expect(getVideoBuffering()).toBe(true)
+    })
+
+    it("starts when the seek lands", () => {
+      const { video, play } = pressPlay({ readyState: 0 })
+      expect(play).not.toHaveBeenCalled()
+      fireEvent.seeked(video)
+      expect(play).toHaveBeenCalledTimes(1)
+      expect(getVideoBuffering()).toBe(false)
+    })
+
+    it("starts when a freshly opened element reports it can play", () => {
+      // Both events are needed and they are not interchangeable: `seeked` is
+      // what a streamed, unbuffered range fires; `canplay` is what a fresh open
+      // reports. Waiting on either alone hangs half the time.
+      const { video, play } = pressPlay({ readyState: 0 })
+      fireEvent.canPlay(video)
+      expect(play).toHaveBeenCalledTimes(1)
+    })
+
+    it("only starts once, however many events arrive", () => {
+      const { video, play } = pressPlay({ readyState: 0 })
+      fireEvent.seeked(video)
+      fireEvent.canPlay(video)
+      fireEvent.seeked(video)
+      expect(play).toHaveBeenCalledTimes(1)
+    })
+
+    it("a second press during the wait CANCELS it", () => {
+      // The element stays `paused` all through the wait, so a toggle that only
+      // looked at `paused` would re-arm the gate and the spinner would be the
+      // only way out of a start you had changed your mind about.
+      const { video, play, press } = pressPlay({ readyState: 0 })
+      expect(getVideoBuffering()).toBe(true)
+      press(2)
+      expect(getVideoBuffering()).toBe(false)
+      fireEvent.seeked(video)
+      expect(play).not.toHaveBeenCalled()
+    })
+
+    it("gives up if the picture turns out to be unplayable", () => {
+      const { video, play } = pressPlay({ readyState: 0 })
+      fireEvent.error(video)
+      expect(play).not.toHaveBeenCalled()
+      expect(getVideoBuffering()).toBe(false)
+    })
+
+    it("starts anyway rather than waiting forever", () => {
+      // Patience, not a promise: a stream that never reports ready must not
+      // leave a dead button and a spinner.
+      vi.useFakeTimers()
+      try {
+        const { play } = pressPlay({ readyState: 0 })
+        expect(play).not.toHaveBeenCalled()
+        vi.advanceTimersByTime(4000)
+        expect(play).toHaveBeenCalledTimes(1)
+        expect(getVideoBuffering()).toBe(false)
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it("does not start a picture the recorder has since silenced", () => {
+      // The transport can change its mind while we wait, and the take must not
+      // pick up the film starting behind it.
+      const view = render(
+        <MediaVideoPane src="https://cdn/episode.webm" cells={subs} onVideoTime={vi.fn()} />,
+      )
+      const video = screen.getByTestId("video-pane-media") as HTMLVideoElement
+      const play = plant(video, { readyState: 0 })
+      view.rerender(
+        <MediaVideoPane src="https://cdn/episode.webm" cells={subs} onVideoTime={vi.fn()} togglePlay={{ nonce: 1 }} />,
+      )
+      expect(getVideoBuffering()).toBe(true)
+      view.rerender(
+        <MediaVideoPane src="https://cdn/episode.webm" cells={subs} onVideoTime={vi.fn()} togglePlay={{ nonce: 1 }} suspended />,
+      )
+      fireEvent.seeked(video)
+      expect(play).not.toHaveBeenCalled()
+      expect(getVideoBuffering()).toBe(false)
+    })
+  })
+
+  // ── Round 6: publishing where the picture is ─────────────────────────────
+  describe("the position it publishes", () => {
+    const subs = [
+      cell({ id: "s1", medium: "text", original: "Line one", translated: "Ligne un", startTime: 0, endTime: 5 }),
+      cell({ id: "s2", medium: "text", original: "Line two", translated: "Ligne deux", startTime: 10, endTime: 15 }),
+    ]
+
+    beforeEach(() => {
+      resetVideoClockForTests()
+    })
+
+    it("says where a seek is going without waiting to be told it arrived", () => {
+      // `timeupdate` is silent for the whole duration of a seek, and a browser
+      // may not fire it at all against an element that has not opened yet — so
+      // on a PAUSED film this is what stops the playhead, the bar's readout and
+      // the marked row from sitting on the position the film used to be at.
+      const onVideoTime = vi.fn()
+      const view = render(
+        <MediaVideoPane src="https://cdn/episode.webm" cells={subs} onVideoTime={onVideoTime} />,
+      )
+      onVideoTime.mockClear()
+      view.rerender(
+        <MediaVideoPane
+          src="https://cdn/episode.webm"
+          cells={subs}
+          onVideoTime={onVideoTime}
+          seekSec={{ sec: 12, nonce: 1 }}
+        />,
+      )
+      expect(onVideoTime).toHaveBeenCalledWith(12)
+      // ...and the line under the new position comes with it, so the dialogue
+      // table's marked row moves on a scrub rather than on the next tick.
+      expect(getVideoSoundingCellId()).toBe("s2")
+    })
+
+    it("confirms where it actually landed", () => {
+      const onVideoTime = vi.fn()
+      render(<MediaVideoPane src="https://cdn/episode.webm" cells={subs} onVideoTime={onVideoTime} />)
+      const video = screen.getByTestId("video-pane-media") as HTMLVideoElement
+      Object.defineProperty(video, "currentTime", { value: 11.5, configurable: true })
+      onVideoTime.mockClear()
+      fireEvent.seeked(video)
+      expect(onVideoTime).toHaveBeenCalledWith(11.5)
+    })
+
+    it("publishes nothing while the queue owns the clock", () => {
+      // A slaved picture is the queue's to report; two writers would fight.
+      const onVideoTime = vi.fn()
+      const view = render(
+        <MediaVideoPane src="https://cdn/episode.webm" cells={CELLS} onVideoTime={onVideoTime} />,
+      )
+      onVideoTime.mockClear()
+      view.rerender(
+        <MediaVideoPane
+          src="https://cdn/episode.webm"
+          cells={CELLS}
+          onVideoTime={onVideoTime}
+          seekSec={{ sec: 12, nonce: 1 }}
+        />,
+      )
+      expect(onVideoTime).not.toHaveBeenCalledWith(12)
+    })
   })
 })

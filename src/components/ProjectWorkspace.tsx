@@ -60,6 +60,7 @@ import { AudioRecordingModal } from "./AudioRecorder/AudioRecordingModal"
 import { VoiceSidebar } from "./voice/VoiceSidebar"
 import { VoicePlaybackBar } from "./voice/VoicePlaybackBar"
 import { startQueue, getQueueState, seekQueueToTime, setQueueTimingMode, startQueueAtTime, pauseQueue, pauseAllPlayback, resumeQueue, queueClockIsFileTime, startExternalDubs, stopExternalDubs, updateExternalDubCells, tickExternalDubs, setExternalDubsPlaying } from "@/lib/audio/play-queue"
+import { videoOwnsFile } from "@/lib/audio/transport"
 import { generateCombinedVoice, type CombinedVoiceResult } from "@/lib/audio/combined-voice"
 import { generateCellVoice } from "@/lib/audio/voice-generate-helpers"
 import { CombinedBoundaryEditor } from "./voice/CombinedBoundaryEditor"
@@ -4915,6 +4916,29 @@ export function ProjectWorkspace() {
     timingMode,
   })
 
+  /**
+   * Does the PICTURE own this file's transport?
+   *
+   * A subtitle file timed against footage has no imported source recording, so
+   * the play queue's clock means nothing here and the video is the player. The
+   * pane being on screen is part of the test, not just a video being linked: in
+   * Free timing the pane is hidden and the queue owns playback.
+   *
+   * Round 6: written once. Three places needed this answer and only two had it
+   * — the third (an explicit timeline seek) went on cueing the queue, which is
+   * what made the playhead and the bar detach from the film. One expression
+   * means they cannot drift apart again.
+   */
+  const videoIsTransport = useMemo(
+    () =>
+      videoOwnsFile(
+        activeFile?.coreMediaUrl,
+        audioMergedCells.some((c) => queueClockIsFileTime(c)),
+        showVideoPane,
+      ),
+    [activeFile?.coreMediaUrl, audioMergedCells, showVideoPane],
+  )
+
   // AQU-646 round 5: DUBS OVER THE PICTURE.
   //
   // A take recorded against the film could not be heard against it — the queue
@@ -4925,7 +4949,7 @@ export function ProjectWorkspace() {
   //
   // Driving is gated on the pane being on screen: in Free timing there is no
   // picture to be in sync with, and the queue owns playback there.
-  const videoDrivesDubs = showVideoPane && !audioMergedCells.some((c) => queueClockIsFileTime(c))
+  const videoDrivesDubs = videoIsTransport
   useEffect(() => {
     if (!videoDrivesDubs || !project?.id || !frontierSession) {
       stopExternalDubs()
@@ -5089,6 +5113,24 @@ export function ProjectWorkspace() {
   useEffect(() => { setVideoSeek(null); setVideoToggle(null) }, [activeFileId])
   const handleTimelineSeekToTime = useCallback((sec: number) => {
     setVideoSeek((prev) => ({ sec: Math.max(0, sec), nonce: (prev?.nonce ?? 0) + 1 }))
+    // ROUND 6 — the picture is the transport, so the seek ends here.
+    //
+    // This function was written for audio files, where an explicit seek should
+    // also cue the queue at that time so play starts where you dropped the
+    // playhead. On a file the picture owns, that cue was actively harmful and
+    // was the real cause of Sam's "pause, track back, press play and nothing
+    // moves". A subtitle cell can never match by time (the queue's time lookup
+    // only understands media cells), so the cue fell through to "start at the
+    // first cell with any playable audio" — which, once a take existed, was a
+    // recorded take. The queue then reported itself paused ON THIS FILE, and
+    // being merely CUED is enough to count as active: the timeline hands the
+    // playhead to the queue's clock, the bottom bar reports the queue's state,
+    // and both stop following the film. Space meanwhile still routed to the
+    // picture, so it played on with sound while every readout sat frozen.
+    //
+    // One scrub, three surfaces listening to the wrong engine. Nothing about
+    // the audio arrangement changes — there the pane is not on screen.
+    if (videoIsTransport) return
     if (!project?.id) return
     const qs = getQueueState()
     const activeForThisFile =
@@ -5104,7 +5146,7 @@ export function ProjectWorkspace() {
       sec,
       { play: false },
     )
-  }, [project?.id, audioMergedCells, frontierSession])
+  }, [project?.id, audioMergedCells, frontierSession, videoIsTransport])
 
   // Round 7 (SUB-44): Space in the media lens — the transport bar's 3-state
   // toggle against the QUEUE: playing → pause, paused → resume, idle → start
@@ -5119,7 +5161,7 @@ export function ProjectWorkspace() {
     // In Free timing the pane is hidden, so this used to hand the press to a
     // nonce nothing consumes and Space went dead — the queue owns the transport
     // there and should get it.
-    if (showVideoPane && !audioMergedCells.some((c) => queueClockIsFileTime(c))) {
+    if (videoIsTransport) {
       setVideoToggle((prev) => ({ nonce: (prev?.nonce ?? 0) + 1 }))
       return
     }
@@ -5147,7 +5189,7 @@ export function ProjectWorkspace() {
     const ctx = { cells: audioMergedCells, projectId: project.id, session: frontierSession }
     if (from >= 0) startQueue(ctx, from, true)
     else startQueueAtTime(ctx, 0, { play: true })
-  }, [project?.id, audioMergedCells, frontierSession, timelineSelectedCellId, showVideoPane])
+  }, [project?.id, audioMergedCells, frontierSession, timelineSelectedCellId, videoIsTransport])
 
   // AQU-654: count outstanding (non-waived) LQA/validation infractions on the
   // active file. Export never hard-blocks on these — the count only drives a
@@ -6612,7 +6654,8 @@ export function ProjectWorkspace() {
                   settings={tts.settings}
                   onActiveCell={handleBarActiveCell}
                   startCellId={timelineSelectedCellId}
-            coreMediaUrl={activeFile?.coreMediaUrl ?? null}
+                  coreMediaUrl={activeFile?.coreMediaUrl ?? null}
+                  videoPaneOnScreen={showVideoPane}
                   below={
                     <>
                       {syncStatus}

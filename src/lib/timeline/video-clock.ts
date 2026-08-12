@@ -36,6 +36,13 @@ let soundingCellId: string | null = null
 // the same number.
 let rate = 1
 let volume = 1
+// Round 6: the picture has been asked to play and is not ready to yet — it is
+// opening, or a seek is still landing. Until now nothing anywhere read the
+// element's readiness, so pressing play right after scrubbing called play() on
+// an element mid-seek and every surface had to guess from `timeupdate`, which
+// does not fire while a seek is in flight. Published so the bar can show the
+// same spinner it already shows for a cold-loading queue.
+let buffering = false
 const listeners = new Set<() => void>()
 
 function notify(): void {
@@ -58,10 +65,19 @@ export function setVideoClockSec(sec: number | null): void {
   const nextPlaying = next == null ? false : playing
   // A cleared clock is on no line either.
   const nextCell = next == null ? null : soundingCellId
-  if (currentSec === next && playing === nextPlaying && soundingCellId === nextCell) return
+  // ...nor is it waiting to start. A pane that hands the transport back mid-wait
+  // would otherwise leave the bar spinning on a picture nobody is driving.
+  const nextBuffering = next == null ? false : buffering
+  if (
+    currentSec === next
+    && playing === nextPlaying
+    && soundingCellId === nextCell
+    && buffering === nextBuffering
+  ) return
   currentSec = next
   playing = nextPlaying
   soundingCellId = nextCell
+  buffering = nextBuffering
   notify()
 }
 
@@ -89,6 +105,18 @@ export function getVideoClockPlaying(): boolean {
 
 export function getVideoSoundingCellId(): string | null {
   return soundingCellId
+}
+
+/** The pane sets this while it is waiting for the element to be able to start,
+ *  and clears it the moment it either starts or gives up. */
+export function setVideoBuffering(next: boolean): void {
+  if (buffering === next) return
+  buffering = next
+  notify()
+}
+
+export function getVideoBuffering(): boolean {
+  return buffering
 }
 
 export function setVideoRate(next: number): void {
@@ -126,11 +154,16 @@ export function useVideoSoundingCellId(): string | null {
   return useSyncExternalStore(subscribe, () => soundingCellId, () => null)
 }
 
+export function useVideoBuffering(): boolean {
+  return useSyncExternalStore(subscribe, () => buffering, () => false)
+}
+
 export function resetVideoClockForTests(): void {
   currentSec = null
   playing = false
   soundingCellId = null
   rate = 1
   volume = 1
+  buffering = false
   notify()
 }

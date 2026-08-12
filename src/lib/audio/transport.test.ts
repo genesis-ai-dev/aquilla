@@ -36,23 +36,33 @@ const video = (over: Partial<VideoTransportInput> = {}): VideoTransportInput => 
   soundingCellId: "cue-3",
   rate: 1,
   volume: 1,
+  buffering: false,
   ...over,
 })
 
 describe("videoOwnsFile", () => {
   it("a linked picture with no imported recording — the video-first file", () => {
-    expect(videoOwnsFile("https://cdn/master.m3u8", false)).toBe(true)
+    expect(videoOwnsFile("https://cdn/master.m3u8", false, true)).toBe(true)
   })
 
   it("no picture — the queue owns it, as everywhere else in the app", () => {
-    expect(videoOwnsFile(null, false)).toBe(false)
-    expect(videoOwnsFile(undefined, false)).toBe(false)
+    expect(videoOwnsFile(null, false, true)).toBe(false)
+    expect(videoOwnsFile(undefined, false, true)).toBe(false)
   })
 
   it("a picture AND an imported recording — the recording is the master", () => {
     // A dubbing file that also has footage linked: the queue's clock IS file
     // time there, so the picture is slaved to it rather than driving.
-    expect(videoOwnsFile("https://cdn/master.m3u8", true)).toBe(false)
+    expect(videoOwnsFile("https://cdn/master.m3u8", true, true)).toBe(false)
+  })
+
+  it("a picture with NO PANE on screen — the queue owns it", () => {
+    // Round 6. The pane is what registers the controller, so where it is hidden
+    // (Free timing, or a file that is not time-ordered) there is nothing to
+    // drive. The bar used to claim the video transport here anyway and then
+    // find no controller behind it — every control on it dead, on a file whose
+    // queue could have played it perfectly well.
+    expect(videoOwnsFile("https://cdn/master.m3u8", false, false)).toBe(false)
   })
 })
 
@@ -115,6 +125,62 @@ describe("selectTransportForFile", () => {
     expect(t.source).toBe("queue")
     expect(t.cellId).toBe("c9")
     expect(t.progress.currentTime).toBe(4)
+  })
+
+  it("a picture getting ready to start reports LOADING, not paused", () => {
+    // Round 6. Pressing play right after scrubbing used to look like nothing
+    // happening at all: the element was seeking, the bar had only
+    // playing-or-paused to say, and it said paused.
+    const t = selectTransportForFile(idleQueue, video({ playing: false, buffering: true }))
+    expect(t.kind).toBe("loading")
+    expect(t.active).toBe(true)
+    expect(t.playing).toBe(false)
+    // A cold start is a dip to protect, exactly as it is for the queue:
+    // follow/re-engage must not read the wait for a seek as a stop.
+    expect(t.running).toBe(true)
+    // ...and it still reports where the film is, so the readout does not blank.
+    expect(t.progress.currentTime).toBe(41.8)
+  })
+
+  it("a picture that is already sounding is never LOADING", () => {
+    // Rebuffering mid-play is the element's own business. Flipping the bar's
+    // button to a spinner under a running film would be a lie about the
+    // transport, and would make the button mean "cancel" while it plays.
+    expect(selectTransportForFile(idleQueue, video({ playing: true, buffering: true })).kind).toBe("playing")
+  })
+
+  it("the FIRST press on a freshly opened film reports loading, not idle", () => {
+    // Caught in review. On a file just opened, nothing has ticked or seeked, so
+    // the clock has no position yet — and `active` used to require one. The
+    // press armed the readiness wait but the bar reported `idle`, which cost
+    // two things: no spinner, and — because the bar's press-again-to-cancel
+    // branch keys on `loading` — every further press re-armed the wait instead
+    // of ending it. An impatient user could defer their own playback forever
+    // and never cancel it, while Space (which reads the pane directly) did
+    // cancel. The two controls disagreed about what a press meant.
+    // Nothing has published a position OR a line — both come from the same
+    // events, so a cold clock has neither.
+    const t = selectTransportForFile(
+      idleQueue,
+      video({ currentSec: null, soundingCellId: null, playing: false, buffering: true }),
+    )
+    expect(t.kind).toBe("loading")
+    expect(t.active).toBe(true)
+    expect(t.running).toBe(true)
+    // No position to report yet, and no line under a playhead that has none.
+    expect(t.progress.currentTime).toBe(0)
+    expect(t.cellId).toBeNull()
+  })
+
+  it("a cleared clock with nothing pending is idle", () => {
+    const t = selectTransportForFile(idleQueue, video({ currentSec: null, playing: false }))
+    expect(t.kind).toBe("idle")
+    expect(t.active).toBe(false)
+    expect(t.running).toBe(false)
+  })
+
+  it("a RUNNING queue still wins over a buffering picture", () => {
+    expect(selectTransportForFile(runningQueue, video({ playing: false, buffering: true })).source).toBe("queue")
   })
 
   it("reports the picture's own rate and volume, not the queue's stale ones", () => {

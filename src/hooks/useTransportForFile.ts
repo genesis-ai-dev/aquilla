@@ -13,6 +13,7 @@ import {
   type TransportForFile,
 } from "@/lib/audio/transport"
 import {
+  useVideoBuffering,
   useVideoClockPlaying,
   useVideoClockSec,
   useVideoRate,
@@ -30,6 +31,9 @@ export interface UseTransportForFileArgs {
    *  master). Callers pass `cells.some(queueClockIsFileTime)` — the same test
    *  the pane and Space already use. */
   anyCellClockIsFileTime: boolean
+  /** Whether the video pane is actually mounted. The pane registers the
+   *  controller, so without it there is nothing to drive — see `videoOwnsFile`. */
+  paneOnScreen: boolean
 }
 
 /**
@@ -43,6 +47,7 @@ export function useTransportForFile({
   cellIds,
   coreMediaUrl,
   anyCellClockIsFileTime,
+  paneOnScreen,
 }: UseTransportForFileArgs): TransportForFile {
   const queue = useQueueForFile(cellIds)
   const currentSec = useVideoClockSec()
@@ -51,14 +56,17 @@ export function useTransportForFile({
   const durationSec = useVideoDurationSec(coreMediaUrl ?? null)
   const rate = useVideoRate()
   const volume = useVideoVolume()
-  const ownedByVideo = videoOwnsFile(coreMediaUrl, anyCellClockIsFileTime)
+  const buffering = useVideoBuffering()
+  const ownedByVideo = videoOwnsFile(coreMediaUrl, anyCellClockIsFileTime, paneOnScreen)
 
   return useMemo(
     () =>
       selectTransportForFile(
         queue,
-        ownedByVideo ? { currentSec, playing, durationSec, soundingCellId, rate, volume } : null,
+        ownedByVideo
+          ? { currentSec, playing, durationSec, soundingCellId, rate, volume, buffering }
+          : null,
       ),
-    [queue, ownedByVideo, currentSec, playing, durationSec, soundingCellId, rate, volume],
+    [queue, ownedByVideo, currentSec, playing, durationSec, soundingCellId, rate, volume, buffering],
   )
 }

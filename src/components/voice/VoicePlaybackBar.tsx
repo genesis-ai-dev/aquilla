@@ -46,6 +46,10 @@ interface Props {
    *  bar reports and drives the FILM rather than a queue that is idle — the
    *  arrangement where it used to read "paused / 0:00" over a running video. */
   coreMediaUrl?: string | null
+  /** Round 6: whether the video PANE is on screen. A linked video is not enough
+   *  — the pane is what registers the controller, so in Free timing the bar was
+   *  claiming a transport with nothing behind it and every control went dead. */
+  videoPaneOnScreen?: boolean
   /** Status chips / stats nested under "now playing" so transport stays vertically centered. */
   below?: ReactNode
 }
@@ -58,7 +62,8 @@ function fmtTime(s: number): string {
 }
 
 export function VoicePlaybackBar({
-  cells: rawCells, projectId, session, settings, onActiveCell, startCellId, coreMediaUrl, below,
+  cells: rawCells, projectId, session, settings, onActiveCell, startCellId, coreMediaUrl,
+  videoPaneOnScreen = false, below,
 }: Props) {
 
   // The cells handed down from useCells carry no audio attachments — those are
@@ -79,7 +84,12 @@ export function VoicePlaybackBar({
   // drove this bar).
   const cellIds = useMemo(() => new Set(cells.map((c) => c.id)), [cells])
   const anyCellClockIsFileTime = useMemo(() => cells.some((c) => queueClockIsFileTime(c)), [cells])
-  const transport = useTransportForFile({ cellIds, coreMediaUrl, anyCellClockIsFileTime })
+  const transport = useTransportForFile({
+    cellIds,
+    coreMediaUrl,
+    anyCellClockIsFileTime,
+    paneOnScreen: videoPaneOnScreen,
+  })
   const videoController = useVideoController()
   const drivesVideo = transport.source === "video"
   const { currentTime, duration, rate, volume } = transport.progress
@@ -109,6 +119,11 @@ export function VoicePlaybackBar({
     // the queue here is what played a lone recorded take with no film behind it.
     if (drivesVideo) {
       if (!videoController) return
+      // Round 6: a press while the picture is getting ready CANCELS the start,
+      // the same as it does during the queue's cold load below. The element is
+      // still `paused` all through that wait, so without this the press would
+      // just re-ask and the spinner would be the only way out.
+      if (transport.kind === "loading") { videoController.pause(); return }
       if (videoController.isPaused()) videoController.play()
       else videoController.pause()
       return

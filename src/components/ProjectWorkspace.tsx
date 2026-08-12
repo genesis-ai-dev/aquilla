@@ -5929,9 +5929,8 @@ export function ProjectWorkspace() {
             setEditingRuleId={setEditingRuleId}
           />
         ) : centerSurface === "comments" ? (
-          // FRO-254: Comments page inside the shell — back button in the page
-          // navigates to /project/:id,/editor which the restore-location effect turns
-          // into the user's last open file (including scroll position).
+          // FRO-254: Comments page inside the shell — no page-level back
+          // button; breadcrumb + history arrows + sidebar own navigation.
           <div className="h-full overflow-y-auto">
             <Suspense fallback={<LoadingPanel label="Loading comments" />}>
               <CommentsPageContent />

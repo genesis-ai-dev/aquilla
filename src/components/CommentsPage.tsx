@@ -8,7 +8,7 @@
 import { useMemo, useState, useRef, useEffect } from "react"
 import { useNavigate, useParams } from "react-router-dom"
 import {
-  ArrowLeft, MessageCircle, CheckCircle, ChevronDown, ChevronRight,
+  MessageCircle, CheckCircle, ChevronDown, ChevronRight,
   AlertCircle, Search, SlidersHorizontal, ArrowUpRight,
   MoreHorizontal, Pencil, Trash2,
 } from "lucide-react"
@@ -929,15 +929,6 @@ export function CommentsPage() {
 
   return (
     <div className="mx-auto max-w-3xl space-y-6 p-8">
-      <div className="flex items-center justify-between">
-        <Button variant="ghost" onClick={() => navigate(`/project/${projectId}/editor`)}>
-          <ArrowLeft className="mr-2 h-4 w-4" /> {t("comments.backToProject")}
-        </Button>
-        <Button variant="outline" onClick={refresh} disabled={isLoading}>
-          {isLoading ? <Spinner className="size-3.5" /> : t("common.refresh")}
-        </Button>
-      </div>
-
       <div className="flex items-center gap-2">
         <MessageCircle className="h-5 w-5 text-muted-foreground" />
         <h1 className="text-xl font-semibold">
@@ -957,6 +948,10 @@ export function CommentsPage() {
               : t("comments.filterCount.one", { count: activeFilterCount })}
           </Badge>
         )}
+        <div className="flex-1" />
+        <Button variant="outline" onClick={refresh} disabled={isLoading}>
+          {isLoading ? <Spinner className="size-3.5" /> : t("common.refresh")}
+        </Button>
       </div>
 
       <FilterControls

@@ -1,7 +1,6 @@
 import { useState, useMemo, useCallback, useRef, useEffect } from "react"
 import { useParams, useNavigate } from "react-router-dom"
 import {
-  ArrowLeft,
   Plus,
   Trash2,
   Pencil,
@@ -1103,13 +1102,6 @@ export function TerminologyPage() {
     <div className="min-h-screen bg-background">
       {/* Header */}
       <header className="flex items-center gap-4 border-b px-4 py-2">
-        <Button
-          variant="ghost"
-          onClick={() => navigate(`/project/${id}/editor`)}
-        >
-          <ArrowLeft className="mr-1 h-4 w-4" />
-          Back to Editor
-        </Button>
         <BookOpen className="h-4 w-4 text-muted-foreground" />
         <h2 className="font-semibold">Terminology</h2>
         <div className="flex-1" />

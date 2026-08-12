@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo } from "react"
 import { useParams, useNavigate, useSearchParams } from "react-router-dom"
-import { ArrowLeft, AlertTriangle, AlertCircle, Trash2, Wand2, ChevronDown, ChevronUp, BookOpen } from "lucide-react"
+import { AlertTriangle, AlertCircle, Trash2, Wand2, ChevronDown, ChevronUp, BookOpen } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { LoadingPanel } from "@/components/ui/loading-overlay"
 import { Input } from "@/components/ui/input"
@@ -188,9 +188,6 @@ export function RulesPage() {
         />
       )}
       <header className="flex items-center gap-4 border-b px-4 py-2">
-        <Button variant="ghost" onClick={() => navigate(`/project/${id}/editor`)}>
-          <ArrowLeft className="mr-1 h-4 w-4" /> Back to Editor
-        </Button>
         <h2 className="font-semibold">Translation Rules</h2>
         <div className="flex-1" />
         <Button variant="outline" onClick={() => navigate(`/project/${id}/terminology`)}>

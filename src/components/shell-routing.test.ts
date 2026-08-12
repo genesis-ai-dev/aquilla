@@ -109,10 +109,12 @@ describe("isOverlaySurface (redirect-guard exclusion)", () => {
 })
 
 describe("shell-routing: back-nav contract", () => {
-  // The back buttons in CommentsPage / LivingMemoryPage / TerminologyPage all
-  // navigate to `/project/:id/editor` (no fileId). From there the restore-location
-  // effect in ProjectWorkspace reads readLastLocation() and bounces the user
-  // to their last open file + scroll position. Verify the logic handles this:
+  // Overlay surfaces (comments / memory / terminology / rules / agent) live
+  // inside the workspace shell. Page-level back buttons were removed — the
+  // breadcrumb, history arrows, and sidebar own navigation. Returning to the
+  // editor still lands on `/project/:id/editor` (no fileId), where the
+  // restore-location effect reads readLastLocation() and bounces to the last
+  // open file + scroll position:
   //
   //   navigate("/project/:id/editor")
   //   → isOverlaySurface = false (redirect fires)

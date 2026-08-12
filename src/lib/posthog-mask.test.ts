@@ -1,5 +1,5 @@
-import { execFileSync } from "node:child_process"
-import { readFileSync } from "node:fs"
+import { readdirSync, readFileSync } from "node:fs"
+import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 
 // OPS-3 of docs/OPSEC-REVIEW-2026-08-10.md asked for the editor's text surface
@@ -34,15 +34,28 @@ function attributeFromSelector(selector: string): string {
   return match[1]
 }
 
-function filesUsing(attribute: string): string[] {
-  try {
-    return execFileSync("git", ["grep", "-l", "--", attribute, "src"], { encoding: "utf8" })
-      .split("\n")
-      .filter(Boolean)
-      .filter((f) => f !== CONFIG && !f.endsWith(".test.ts") && !f.endsWith(".test.tsx"))
-  } catch {
-    return [] // git grep exits 1 on no matches
+/**
+ * Walk `src` for source files carrying the attribute.
+ *
+ * Deliberately does NOT shell out to `git grep`: that would report "no files
+ * use the mask" whenever git is missing or the checkout is not a repository,
+ * turning a broken tool into a false claim that the control is gone. Reporting
+ * a control as absent because the check could not run is the same defect this
+ * test exists to catch.
+ */
+function filesUsing(attribute: string, dir = "src"): string[] {
+  const found: string[] = []
+  for (const item of readdirSync(dir, { withFileTypes: true })) {
+    const path = join(dir, item.name)
+    if (item.isDirectory()) {
+      found.push(...filesUsing(attribute, path))
+      continue
+    }
+    if (!/\.(?:ts|tsx)$/.test(item.name)) continue
+    if (path === CONFIG || /\.test\.tsx?$/.test(item.name)) continue
+    if (readFileSync(path, "utf8").includes(attribute)) found.push(path)
   }
+  return found
 }
 
 describe("session-replay masking", () => {

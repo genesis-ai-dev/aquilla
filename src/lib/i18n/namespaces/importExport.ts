@@ -364,6 +364,197 @@ export const importExport = defineNamespace({
       "Cell labels require an existing source file in this project. Import source files first, then return here.",
     "importExport.dialog.pairedNeedsSourceCells":
       "Paired translation import requires existing source cells in this project. Import source files first.",
+
+    // — IDML export format copy (src/lib/idml/release-gate.ts rollout stages) —
+    "importExport.idml.labelNative": "InDesign (.idml)",
+    "importExport.idml.descriptionNative":
+      "Adobe-validated native IDML round-trip. Protected translations are written only into their " +
+      "original text slots; layout reflow and overset remain possible when translated text length " +
+      "or font coverage changes.",
+    "importExport.idml.labelBeta": "InDesign IDML (beta)",
+    "importExport.idml.descriptionBeta":
+      "Protected IDML round-trip beta. Export is blocked if any locator or anchor cannot be proven, " +
+      "and Adobe validation evidence is required for every release.",
+    "importExport.idml.labelInternal": "InDesign IDML (internal preview)",
+    "importExport.idml.descriptionInternal": "Internal protected-content preview. Native formatting fidelity is not claimed.",
+    "importExport.idml.labelExperimental": "InDesign IDML (experimental)",
+    "importExport.idml.descriptionExperimental":
+      "Protected translations are written only into their original text slots while the rest of the " +
+      "IDML package stays unchanged. Export is blocked if any locator or protected anchor cannot be " +
+      "proven. Adobe-native fidelity is not claimed until the automated InDesign gate passes.",
+
+    // — Export dialog: format list (BASE_FORMAT_OPTIONS) —
+    "importExport.format.usfm.label": "USFM",
+    "importExport.format.usfm.description":
+      "Round-trip USFM with translations injected back into the original markup. Requires the " +
+      "original file data on the server (re-import to enable for older files).",
+    "importExport.format.docx.label": "Word (.docx)",
+    "importExport.format.docx.description":
+      "Translations injected back into the original Word document. Paragraph/heading structure is " +
+      "preserved; per-run bold/italic inside translated paragraphs is not preserved. Requires the " +
+      "original file to have been imported after round-trip export support was added — files " +
+      "imported before then may lack a stored original (re-import to enable).",
+    "importExport.format.pptx.label": "PowerPoint (.pptx)",
+    "importExport.format.pptx.description":
+      "Translations injected back into the original slide deck. Slide/shape/paragraph structure is " +
+      "preserved; mixed per-run formatting inside a translated paragraph keeps the first run's " +
+      "styling. Requires the original file to have been imported after round-trip export support " +
+      "was added — re-import older files to enable.",
+    "importExport.format.sdbhXml.label": "SDBH XML (MARBLE)",
+    "importExport.format.sdbhXml.description":
+      "Localized lexicon reinjected into the original MARBLE XML edition — pick the original " +
+      "SDBH-<lang>.XML as the skeleton. Whole-project export across all lexicon files.",
+    "importExport.format.txt.label": "Plain text",
+    "importExport.format.txt.description":
+      "Round-trip plain text: paragraph structure preserved; untranslated paragraphs keep source " +
+      "(media lines use their transcription).",
+    "importExport.format.md.label": "Markdown",
+    "importExport.format.md.description":
+      "Round-trip markdown: headings, ordered/unordered lists and quotes reconstructed; untranslated " +
+      "blocks keep source (media lines use their transcription).",
+    "importExport.format.tsv.label": "Bilingual TSV",
+    "importExport.format.tsv.description": "id/source/target tab-separated, one row per segment.",
+    "importExport.format.csv.label": "Bilingual CSV",
+    "importExport.format.csv.description": "RFC 4180 id/source/target, one row per segment.",
+    "importExport.format.xlf.label": "XLIFF 1.2",
+    "importExport.format.xlf.description":
+      "Bilingual XLIFF for CAT tools — schema-valid, segment states mapped, imported inline tags " +
+      "preserved for unedited segments.",
+    "importExport.format.tmx.label": "TMX 1.4b",
+    "importExport.format.tmx.description":
+      "Translation memory exchange — DTD-valid, imported inline tags preserved for unedited pairs.",
+    "importExport.format.srt.label": "SRT (subtitles)",
+    "importExport.format.srt.description":
+      "SubRip subtitles: numbered cues with millisecond timecodes; translated text per cue, source " +
+      "kept for untranslated cues (media lines use their transcription).",
+    "importExport.format.vtt.label": "WebVTT (subtitles)",
+    "importExport.format.vtt.description":
+      "Subtitle file with timed cues. Cast-assigned cells are wrapped in <v Name> voice tags for " +
+      "round-trip speaker identity.",
+    "importExport.format.audioByCharacter.label": "Audio by character",
+    "importExport.format.audioByCharacter.description":
+      "One WAV per cast member — each character's clips concatenated, best-available audio " +
+      "(recording → generated). Concatenated order = document order. Trim-honoring deferred; clips " +
+      "export full-length.",
+    "importExport.format.plainTextDump.label": "Plain-text dump",
+    "importExport.format.plainTextDump.description": "Every translated segment, one per line. Quick content extraction only.",
+    "importExport.format.metadataCsv.label": "Metadata spreadsheet",
+    "importExport.format.metadataCsv.description":
+      "Cast (voice/character), camera angle, and cell ref — one row per cell. Export only; the " +
+      "project remains the source of truth.",
+
+    // — Export dialog shell —
+    "importExport.dialog.downloadFile": "Download {fileName}",
+    "importExport.dialog.nativeFormatHint": "{label} — your file in its original format, with current translations.",
+    "importExport.dialog.someFormattingMayNotCarryOver": "Some inline formatting may not carry over.",
+    "importExport.dialog.formatOptionAriaLabel": "{label} ({ext})",
+    "importExport.dialog.lossyBadge": "lossy",
+    "importExport.dialog.exportTitle": "Export",
+    "importExport.dialog.permissionRequiredAriaLabel": "Export permission required",
+    "importExport.dialog.noExportPermission": "You don't have export permission",
+    "importExport.dialog.permissionExplanation":
+      "An organization owner has restricted exporting to higher roles. Ask an owner to raise your " +
+      "role, or read how roles and permissions work.",
+    "importExport.dialog.permissionsLinkText": "Roles & permissions — help.aquilla.app",
+    "importExport.dialog.validationDoesNotBlockAriaLabel": "Validation flags do not block export",
+    "importExport.dialog.outstandingFlagsNote": plural({
+      one: "This file has {count} outstanding validation flag (terminology, HTML/markup, punctuation, etc.). These {wontBlock} — download now and resolve them anytime.",
+      other: "This file has {count} outstanding validation flags (terminology, HTML/markup, punctuation, etc.). These {wontBlock} — download now and resolve them anytime.",
+    }),
+    "importExport.dialog.wontBlockExport": "won't block your export",
+    "importExport.dialog.exportToAnotherFormat": "Export to another format",
+    "importExport.dialog.formatLegend": "Format",
+    "importExport.dialog.formatGroupAriaLabel": "Export format",
+    "importExport.dialog.scopeLegend": "Scope",
+    "importExport.dialog.scopeGroupAriaLabel": "Export scope",
+    "importExport.dialog.scopeFile": "Current file",
+    "importExport.dialog.scopeProject": "Whole project",
+    "importExport.dialog.scopeNotSupportedHint": "Project scope not supported for this format.",
+    "importExport.dialog.scopeAlwaysProjectHint": "This format always exports the whole project.",
+    "importExport.dialog.chooseSdbhSkeleton": "Choose skeleton (SDBH-<lang>.XML)",
+    "importExport.dialog.sdbhSkeletonHint":
+      "Usually the same edition you imported — its structure is preserved byte-for-byte; only the " +
+      "localized definition, gloss, comment, and domain-label text is replaced.",
+    "importExport.dialog.voiceLegend": "Voice",
+    "importExport.dialog.voiceFilterAriaLabel": "Filter export by voice",
+    "importExport.dialog.allVoices": "All voices",
+    "importExport.dialog.voiceFilterHint": "Export will include only cells assigned to {voice}, across all camera angles.",
+    "importExport.dialog.filenameLegend": "Filename",
+    "importExport.dialog.filenamePlaceholder": "filename",
+    "importExport.dialog.filenameAriaLabel": "Export filename (without extension)",
+    "importExport.dialog.projectScopeUsesProjectName": "Project-scope exports use the project name.",
+    "importExport.dialog.appendTimestamp": "Append timestamp",
+    "importExport.dialog.appendLangTag": "Append language tag",
+    "importExport.dialog.noCellsWithAudio": "No cells with audio found in this file.",
+    "importExport.dialog.clipCount": plural({ one: "{count} clip", other: "{count} clips" }),
+    "importExport.dialog.lossyWarningAriaLabel": "Lossy format warning",
+    "importExport.dialog.lossyWarningText":
+      "This format is lossy — inline markup, paragraph structure, and some metadata will not " +
+      "round-trip back to the original format.",
+    "importExport.dialog.advanced": "Advanced",
+    "importExport.dialog.advancedFormatsAriaLabel": "Advanced export formats",
+    "importExport.dialog.whatThisLoses": "What this loses:",
+    "importExport.dialog.plainTextDumpDetail":
+      "Every translated segment, one per line — for quick content extraction. {whatThisLoses} " +
+      "footnotes, cross-references, poetry layout, headings, paragraph markers, bold/italic " +
+      "character markup, back-translations, validation state, and untranslated segments. Not " +
+      "suitable for re-import.",
+    "importExport.dialog.prefixWithRef": "Prefix each line with canonical ref (e.g. {example})",
+    "importExport.dialog.downloadOriginalUnchanged": "Download original unchanged",
+    "importExport.dialog.repairByReimporting": "Repair by re-importing",
+    "importExport.dialog.lossyVerseCount": plural({
+      one: "{count} verse contained footnotes, poetry, or character markers in the source USFM — its structure is replaced by plain translated text.",
+      other: "{count} verses contained footnotes, poetry, or character markers in the source USFM — their structure is replaced by plain translated text.",
+    }),
+    "importExport.dialog.fidelityWarningsHeader": plural({
+      one: "{count} segment lost inline formatting in this export",
+      other: "{count} segments lost inline formatting in this export",
+    }),
+    "importExport.dialog.andMore": "…and {count} more",
+    "importExport.dialog.done": "Done",
+    "importExport.dialog.exportAgain": "Export again",
+    "importExport.dialog.exportButton": "Export",
+
+    // — Export dialog: handleExport status messages —
+    "importExport.status.exporting": "Exporting…",
+    "importExport.status.downloadingCount": "Downloading {done}/{total}…",
+    "importExport.status.exportedFilesCount": plural({ one: "Exported {count} file", other: "Exported {count} files" }),
+    "importExport.status.skippedOlderImports": "skipped {count} (older imports — re-import to enable)",
+    "importExport.status.exportedFile": "Exported {fileName}",
+    "importExport.status.fetchingOriginalDocument": "Fetching original document…",
+    "importExport.status.fetchingOriginalPresentation": "Fetching original presentation…",
+    "importExport.status.injectingTranslations": "Injecting translations…",
+    "importExport.status.downloadedNoTranslations": "Downloaded {fileName} (no translations to inject — download original structure)",
+    "importExport.status.downloadedParagraphsTranslated": plural({
+      one: "Downloaded {fileName} ({count} paragraph translated)",
+      other: "Downloaded {fileName} ({count} paragraphs translated)",
+    }),
+    "importExport.status.validatingProtectedTranslations": "Validating protected translations…",
+    "importExport.status.downloadedIdmlUnchanged": "Downloaded {fileName} (no translations — original bytes returned unchanged)",
+    "importExport.status.decodingAudio": "Decoding audio…",
+    "importExport.status.decodingCount": "Decoding {done}/{total}…",
+    "importExport.status.exportedAudioByCharacter": "Exported audio by character",
+    "importExport.status.exportedAudioByCharacterWithSkipped": plural({
+      one: "Exported audio by character ({count} clip skipped)",
+      other: "Exported audio by character ({count} clips skipped)",
+    }),
+    "importExport.status.chooseSkeletonFirst": "Choose the original SDBH-<lang>.XML file as the skeleton first.",
+    "importExport.status.stillLoadingCells": "Still loading file cells, please wait…",
+    "importExport.status.couldNotLoadProject": "Couldn't load the complete project: {message}",
+    "importExport.status.noLexMeaningEntries": "No LEXMeaning entries found — is that file a MARBLE SDBH XML edition?",
+    "importExport.status.reinjectedTranslations": "Reinjected {translations} translations into {senses} senses",
+    "importExport.status.glossWarnings": plural({
+      one: " — {count} gloss warning, check semicolons",
+      other: " — {count} gloss warnings, check semicolons",
+    }),
+    "importExport.status.downloadedMetadataCsvRows": plural({
+      one: "Downloaded {fileName} ({count} row)",
+      other: "Downloaded {fileName} ({count} rows)",
+    }),
+    "importExport.status.buildingZip": "Building zip for {count} files…",
+    "importExport.status.downloadedFilesCount": plural({ one: "Downloaded {count} file", other: "Downloaded {count} files" }),
+    "importExport.status.downloadedFile": "Downloaded {fileName}",
+    "importExport.status.exportFailed": "Export failed.",
   },
   context: {
     _context: {
@@ -710,6 +901,147 @@ export const importExport = defineNamespace({
           count: "Number of cells uploaded so far, already locale-formatted.",
           total: "Total cell count, already locale-formatted.",
         },
+      },
+      "importExport.dialog.downloadFile": {
+        description: "Label of the primary download button on the Export dialog, naming the exact file it will produce.",
+        placeholders: { fileName: "Filename (with extension) the download will produce — not translated." },
+      },
+      "importExport.dialog.nativeFormatHint": {
+        description: "Caption below the primary download button, naming the file's own format.",
+        placeholders: { label: "The native format's own translated label (e.g. 'USFM')." },
+      },
+      "importExport.dialog.formatOptionAriaLabel": {
+        description: "Accessible name for one radio option in the export-format list.",
+        placeholders: { label: "The format's translated label.", ext: "The format's file extension — not translated." },
+      },
+      "importExport.dialog.permissionRequiredAriaLabel": {
+        description: "Accessible name for the permission-gate note shown when org policy forbids export.",
+      },
+      "importExport.dialog.validationDoesNotBlockAriaLabel": {
+        description: "Accessible name for the note reassuring users that outstanding validation flags do not block export.",
+      },
+      "importExport.dialog.outstandingFlagsNote": {
+        description:
+          "Body of the non-blocking validation-flags note on the Export dialog. {wontBlock} is a bold-styled phrase rendered by RichMessage.",
+        placeholders: {
+          count: "Number of outstanding validation flags on the active file.",
+          wontBlock: "Bold-styled phrase reading 'won't block your export'.",
+        },
+      },
+      "importExport.dialog.formatGroupAriaLabel": {
+        description: "Accessible name for the export-format radio group.",
+      },
+      "importExport.dialog.scopeGroupAriaLabel": {
+        description: "Accessible name for the file/project scope toggle.",
+      },
+      "importExport.dialog.voiceFilterAriaLabel": {
+        description: "Accessible name for the voice-filter select on the Export dialog.",
+      },
+      "importExport.dialog.voiceFilterHint": {
+        description: "Hint below the voice filter once a specific voice is chosen. {voice} is bold-styled, rendered by RichMessage.",
+        placeholders: { voice: "Bold-styled name of the selected cast voice." },
+      },
+      "importExport.dialog.filenameAriaLabel": {
+        description: "Accessible name for the export filename input.",
+      },
+      "importExport.dialog.clipCount": {
+        description: "Clip count in the audio-by-character export preview, per cast member.",
+        placeholders: { count: "Number of audio clips for this cast member." },
+      },
+      "importExport.dialog.lossyWarningAriaLabel": {
+        description: "Accessible name for the lossy-format warning banner on the Export dialog.",
+      },
+      "importExport.dialog.advancedFormatsAriaLabel": {
+        description: "Accessible name for the Advanced section's export-format radio group.",
+      },
+      "importExport.dialog.plainTextDumpDetail": {
+        description:
+          "Extended description of the plain-text-dump export format in the Advanced section. {whatThisLoses} is a bold-styled lead-in phrase, rendered by RichMessage.",
+        placeholders: { whatThisLoses: "Bold-styled phrase reading 'What this loses:'." },
+      },
+      "importExport.dialog.prefixWithRef": {
+        description:
+          "Label for the 'include canonical ref' checkbox under the plain-text-dump option. {example} is a monospaced example reference, rendered by RichMessage.",
+        placeholders: { example: "Monospaced example canonical reference ('GEN 1:1') — not translated." },
+      },
+      "importExport.dialog.lossyVerseCount": {
+        description: "Detail line shown after a USFM export when some verses could not round-trip losslessly.",
+        placeholders: { count: "Number of affected verses." },
+      },
+      "importExport.dialog.fidelityWarningsHeader": {
+        description: "Heading of the inline-style fidelity report shown after a successful export.",
+        placeholders: { count: "Number of segments that lost inline formatting." },
+      },
+      "importExport.dialog.andMore": {
+        description: "Truncation notice at the end of the fidelity-warnings list.",
+        placeholders: { count: "Number of additional warnings not shown." },
+      },
+      "importExport.status.downloadingCount": {
+        description: "Busy-status message while downloading a project-scope USFM zip, file by file.",
+        placeholders: { done: "Number of files downloaded so far.", total: "Total number of files to download." },
+      },
+      "importExport.status.exportedFilesCount": {
+        description: "Success-status message after a project-scope USFM export, or a single-file-scope USFM export whose count is 1.",
+        placeholders: { count: "Number of files exported." },
+      },
+      "importExport.status.skippedOlderImports": {
+        description: "Second half of the USFM project-export success message, appended after exportedFilesCount when some files were skipped.",
+        placeholders: { count: "Number of files skipped because they predate round-trip export support." },
+      },
+      "importExport.status.exportedFile": {
+        description: "Success-status message after a single-file USFM export.",
+        placeholders: { fileName: "Name of the exported file — not translated." },
+      },
+      "importExport.status.downloadedNoTranslations": {
+        description: "Success-status message after a DOCX/PPTX round-trip export that had no translations to inject.",
+        placeholders: { fileName: "Name of the downloaded file — not translated." },
+      },
+      "importExport.status.downloadedParagraphsTranslated": {
+        description: "Success-status message after a DOCX/PPTX/IDML round-trip export that injected at least one translated paragraph.",
+        placeholders: { fileName: "Name of the downloaded file — not translated.", count: "Number of paragraphs translated." },
+      },
+      "importExport.status.downloadedIdmlUnchanged": {
+        description: "Success-status message after an IDML export with no translations — the original bytes were returned unchanged.",
+        placeholders: { fileName: "Name of the downloaded file — not translated." },
+      },
+      "importExport.status.decodingCount": {
+        description: "Busy-status message while decoding audio clips for the audio-by-character export.",
+        placeholders: { done: "Number of clips decoded so far.", total: "Total number of clips to decode." },
+      },
+      "importExport.status.exportedAudioByCharacterWithSkipped": {
+        description: "Success-status message after an audio-by-character export where some clips were skipped (missing audio).",
+        placeholders: { count: "Number of clips skipped." },
+      },
+      "importExport.status.couldNotLoadProject": {
+        description: "Error-status message when loading all project files for a project-scope export fails.",
+        placeholders: { message: "Raw underlying error message." },
+      },
+      "importExport.status.reinjectedTranslations": {
+        description: "First half of the SDBH XML export success message, naming how many translations and senses were reinjected.",
+        placeholders: {
+          translations: "Number of translated cells reinjected, already locale-formatted.",
+          senses: "Number of lexicon senses touched, already locale-formatted.",
+        },
+      },
+      "importExport.status.glossWarnings": {
+        description: "Optional second half of the SDBH XML export success message, appended after reinjectedTranslations when gloss warnings occurred.",
+        placeholders: { count: "Number of gloss warnings." },
+      },
+      "importExport.status.downloadedMetadataCsvRows": {
+        description: "Success-status message after a project-scope metadata-CSV export.",
+        placeholders: { fileName: "Name of the downloaded file — not translated.", count: "Number of data rows in the CSV." },
+      },
+      "importExport.status.buildingZip": {
+        description: "Busy-status message while building a project-scope export zip.",
+        placeholders: { count: "Number of files being zipped." },
+      },
+      "importExport.status.downloadedFilesCount": {
+        description: "Success-status message after a project-scope client-side (non-USFM) export.",
+        placeholders: { count: "Number of files exported." },
+      },
+      "importExport.status.downloadedFile": {
+        description: "Success-status message after a single-file client-side export (txt/md/tsv/csv/xlf/tmx/vtt/srt/plain-text-dump/metadata-csv).",
+        placeholders: { fileName: "Name of the downloaded file — not translated." },
       },
       "importExport.dialog.finishSaveFailed": {
         description:

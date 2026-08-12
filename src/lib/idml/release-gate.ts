@@ -1,3 +1,5 @@
+import type { MessageKey } from "@/lib/i18n/messages/en"
+
 export type IdmlFidelityStage = "experimental" | "internal" | "beta" | "native"
 
 export interface IdmlReleaseEnvironment {
@@ -7,10 +9,14 @@ export interface IdmlReleaseEnvironment {
   VITE_IDML_BETA_ORGS?: string
 }
 
+// AQU-832: label/description are catalog keys, not English strings —
+// `CURRENT_IDML_FORMAT_COPY` below is a module-level constant evaluated
+// before any I18nProvider exists, so it cannot call t() itself. The caller
+// (ExportDialog) resolves these keys at render time.
 export interface IdmlFormatCopy {
   stage: IdmlFidelityStage
-  label: string
-  description: string
+  label: MessageKey
+  description: MessageKey
   nativeFidelity: boolean
 }
 
@@ -21,31 +27,31 @@ export function idmlFormatCopy(
   if (stage === "native") {
     return {
       stage,
-      label: "InDesign (.idml)",
-      description: "Adobe-validated native IDML round-trip. Protected translations are written only into their original text slots; layout reflow and overset remain possible when translated text length or font coverage changes.",
+      label: "importExport.idml.labelNative",
+      description: "importExport.idml.descriptionNative",
       nativeFidelity: true,
     }
   }
   if (stage === "beta") {
     return {
       stage,
-      label: "InDesign IDML (beta)",
-      description: "Protected IDML round-trip beta. Export is blocked if any locator or anchor cannot be proven, and Adobe validation evidence is required for every release.",
+      label: "importExport.idml.labelBeta",
+      description: "importExport.idml.descriptionBeta",
       nativeFidelity: false,
     }
   }
   if (stage === "internal") {
     return {
       stage,
-      label: "InDesign IDML (internal preview)",
-      description: "Internal protected-content preview. Native formatting fidelity is not claimed.",
+      label: "importExport.idml.labelInternal",
+      description: "importExport.idml.descriptionInternal",
       nativeFidelity: false,
     }
   }
   return {
     stage,
-    label: "InDesign IDML (experimental)",
-    description: "Protected translations are written only into their original text slots while the rest of the IDML package stays unchanged. Export is blocked if any locator or protected anchor cannot be proven. Adobe-native fidelity is not claimed until the automated InDesign gate passes.",
+    label: "importExport.idml.labelExperimental",
+    description: "importExport.idml.descriptionExperimental",
     nativeFidelity: false,
   }
 }

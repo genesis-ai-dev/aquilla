@@ -79,6 +79,25 @@ export async function login(
   return finalizeSession(args.username, data);
 }
 
+/**
+ * [Pen test] Auth & session mgmt (2026-08-03): best-effort server-side
+ * logout — denylists the current access token (POST /api/v2/auth/logout)
+ * so a copy that leaked elsewhere (shared device, synced browser history)
+ * stops authenticating immediately instead of surviving up to its full
+ * 30-day expiry. Never throws: the local sign-out the user asked for
+ * (clearSession) must proceed even if this network call fails.
+ */
+export async function logout(jwt: string): Promise<void> {
+  try {
+    await fetch(`${AUTH_BASE}/api/v2/auth/logout`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${jwt}` },
+    });
+  } catch {
+    // Best-effort — offline or backend hiccup shouldn't block local logout.
+  }
+}
+
 export async function register(args: RegisterArgs): Promise<FrontierSession> {
   const res = await fetch(`${AUTH_BASE}/api/v2/auth/register`, {
     method: "POST",

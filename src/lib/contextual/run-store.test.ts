@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest"
 import {
-  applyRemoteFrame,
+  applyRemoteFrame as applyFrame,
   attachContextualRun,
   dismissContextualRunSummary,
   getContextualRunProgress,
@@ -12,12 +12,17 @@ import {
   startContextualRun,
   terminateContextualRun,
   type ContextualRunSnapshot,
+  type ContextualFrame,
   type ContextualTransport,
 } from "./run-store"
 
 // UUIDv7-ish ids: time-ordered ⇒ lexicographic order is chronological.
 const RUN_A = "01920000-0000-7000-8000-000000000001"
 const RUN_B = "01930000-0000-7000-8000-000000000002" // newer than RUN_A
+
+function applyRemoteFrame(frame: ContextualFrame): void {
+  applyFrame("p1", frame)
+}
 
 function makeTransport(overrides: Partial<ContextualTransport> = {}): ContextualTransport {
   return {
@@ -30,11 +35,15 @@ function makeTransport(overrides: Partial<ContextualTransport> = {}): Contextual
   }
 }
 
-function runningFrame(runId: string, patch: Partial<{ done: number; total: number; failed: number }> = {}) {
+function runningFrame(
+  runId: string,
+  patch: Partial<{ done: number; total: number; failed: number; targetLang: string }> = {},
+) {
   return {
     type: "contextual.run.state" as const,
     runId,
     fileId: "file-1",
+    targetLang: patch.targetLang ?? "",
     status: "running" as const,
     done: patch.done ?? 0,
     total: patch.total ?? 10,
@@ -42,8 +51,11 @@ function runningFrame(runId: string, patch: Partial<{ done: number; total: numbe
   }
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   resetContextualRunStore()
+  // ProjectWorkspace attaches the open file before accepting its project-wide
+  // WebSocket fan-out. Mirror that producer boundary in every frame test.
+  await attachContextualRun("p1", "file-1")
 })
 
 describe("transport stub (default)", () => {
@@ -106,6 +118,86 @@ describe("snapshot hydration", () => {
     await p1
     expect(getContextualRunState()).toMatchObject({ available: true, fileId: "file-new" })
   })
+
+  it("adopts an older valid snapshot after switching away from a newer run on another file", async () => {
+    applyRemoteFrame({ ...runningFrame(RUN_B), fileId: "file-1" })
+    const olderOtherFile: ContextualRunSnapshot = {
+      runId: RUN_A,
+      fileId: "file-2",
+      status: "paused",
+      phase: null,
+      spanLabel: null,
+      done: 2,
+      total: 8,
+      failed: 0,
+      activeDirections: [],
+    }
+    setContextualTransport(makeTransport({
+      fetchSnapshot: async () => ({ available: true, run: olderOtherFile }),
+    }))
+
+    await attachContextualRun("p1", "file-2")
+
+    expect(getContextualRunState()).toMatchObject({
+      fileId: "file-2",
+      runId: RUN_A,
+      status: "paused",
+    })
+    expect(getContextualRunProgress()).toEqual({ done: 2, total: 8, failed: 0 })
+  })
+
+  it("resets the monotonic guard when projects reuse the same file id", async () => {
+    const newerProjectARun: ContextualRunSnapshot = {
+      runId: RUN_B,
+      fileId: "shared-file-id",
+      status: "running",
+      phase: "Drafting…",
+      spanLabel: "A 1:1",
+      done: 7,
+      total: 9,
+      failed: 0,
+      activeDirections: [],
+    }
+    const olderProjectBRun: ContextualRunSnapshot = {
+      ...newerProjectARun,
+      runId: RUN_A,
+      status: "paused",
+      phase: null,
+      spanLabel: null,
+      done: 2,
+      total: 6,
+    }
+    const fetchSnapshot = vi.fn(async (projectId: string) => ({
+      available: true,
+      run: projectId === "project-a" ? newerProjectARun : olderProjectBRun,
+    }))
+    setContextualTransport(makeTransport({ fetchSnapshot }))
+
+    await attachContextualRun("project-a", "shared-file-id")
+    await attachContextualRun("project-b", "shared-file-id")
+
+    expect(getContextualRunState()).toMatchObject({
+      projectId: "project-b",
+      fileId: "shared-file-id",
+      runId: RUN_A,
+      status: "paused",
+    })
+    expect(getContextualRunProgress()).toEqual({ done: 2, total: 6, failed: 0 })
+  })
+
+  it("rejects a late project-A frame after project B attaches the same file id", async () => {
+    await attachContextualRun("project-b", "file-1")
+
+    applyFrame("project-a", runningFrame(RUN_B, { done: 8, total: 9 }))
+
+    expect(getContextualRunState()).toMatchObject({
+      projectId: "project-b",
+      fileId: "file-1",
+      runId: null,
+      status: "idle",
+    })
+    expect(getContextualRunProgress()).toEqual({ done: 0, total: 0, failed: 0 })
+  })
 })
 
 describe("frame application", () => {
@@ -115,6 +207,31 @@ describe("frame application", () => {
     expect(s).toMatchObject({ available: true, runId: RUN_A, fileId: "file-1", status: "running" })
     expect(s.phase).toBe("Reading context…")
     expect(getContextualRunProgress()).toEqual({ done: 2, total: 8, failed: 1 })
+  })
+
+  it("fails closed on non-default or missing run-state lane provenance", () => {
+    applyRemoteFrame(runningFrame(RUN_A, { done: 2, total: 8 }))
+
+    applyRemoteFrame(runningFrame(RUN_B, {
+      done: 7,
+      total: 9,
+      targetLang: "fr",
+    }))
+    applyRemoteFrame({
+      type: "contextual.run.state",
+      runId: RUN_B,
+      fileId: "file-1",
+      status: "failed",
+      done: 9,
+      total: 9,
+    } as unknown as ContextualFrame)
+
+    expect(getContextualRunState()).toMatchObject({
+      runId: RUN_A,
+      fileId: "file-1",
+      status: "running",
+    })
+    expect(getContextualRunProgress()).toEqual({ done: 2, total: 8, failed: 0 })
   })
 
   it("scene frame sets span label and drafting phase; span frame moves on", () => {
@@ -147,6 +264,25 @@ describe("frame application", () => {
     applyRemoteFrame(runningFrame(RUN_A))
     applyRemoteFrame({ ...runningFrame(RUN_A, { done: 10 }), status: "parked" })
     expect(getContextualRunState()).toMatchObject({ status: "parked", phase: null })
+  })
+
+  it("drops another file's newer run and all file-less frames for it", () => {
+    applyRemoteFrame(runningFrame(RUN_A, { done: 2, total: 8 }))
+    applyRemoteFrame({ ...runningFrame(RUN_B, { done: 7, total: 9 }), fileId: "file-2" })
+    applyRemoteFrame({
+      type: "contextual.scene",
+      runId: RUN_B,
+      sceneBriefId: "other-scene",
+      spanLabel: "OTHER 1:1",
+      ambiguityCount: 0,
+    })
+
+    expect(getContextualRunState()).toMatchObject({
+      fileId: "file-1",
+      runId: RUN_A,
+      spanLabel: null,
+    })
+    expect(getContextualRunProgress()).toEqual({ done: 2, total: 8, failed: 0 })
   })
 })
 
@@ -182,6 +318,26 @@ describe("runId supersession (monotonic UUIDv7 guard)", () => {
 })
 
 describe("pause vs terminate", () => {
+  it("accepts the backend's producer-shaped pausing frame", () => {
+    applyRemoteFrame({
+      type: "contextual.run.state",
+      runId: RUN_A,
+      fileId: "file-1",
+      targetLang: "",
+      status: "pausing",
+      done: 3,
+      total: 10,
+      failed: 1,
+    })
+
+    expect(getContextualRunState()).toMatchObject({
+      runId: RUN_A,
+      fileId: "file-1",
+      status: "pausing",
+    })
+    expect(getContextualRunProgress()).toEqual({ done: 3, total: 10, failed: 1 })
+  })
+
   it("pause request shows 'pausing' and sticks over running frames until parked", async () => {
     const transport = makeTransport()
     setContextualTransport(transport)
@@ -239,7 +395,15 @@ describe("start", () => {
     await attachContextualRun("p1", "file-1")
     const ok = await startContextualRun("p1", "file-1")
     expect(ok).toBe(true)
-    expect(transport.start).toHaveBeenCalledWith("p1", "file-1")
+    expect(transport.start).toHaveBeenCalledWith("p1", "file-1", undefined)
     expect(getContextualRunState()).toMatchObject({ runId: RUN_A, status: "running" })
+  })
+
+  it("forwards the anchor cell so the first wave starts where the user is looking", async () => {
+    const transport = makeTransport()
+    setContextualTransport(transport)
+    await attachContextualRun("p1", "file-1")
+    await startContextualRun("p1", "file-1", "cell-42")
+    expect(transport.start).toHaveBeenCalledWith("p1", "file-1", "cell-42")
   })
 })

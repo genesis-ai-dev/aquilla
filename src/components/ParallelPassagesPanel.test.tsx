@@ -328,3 +328,28 @@ describe("ParallelPassagesPanel — Replace button state", () => {
     expect(payload.totalSkipped).toBe(0)
   })
 })
+
+// ── Accessible names distinct from placeholders (AQU-511 wave-3 finding 6) ────
+//
+// Both inputs previously reused the placeholder key as their aria-label, so
+// the accessible name announced by a screen reader ended in "…" — a trailing
+// ellipsis is legible visual affordance but nonsense read aloud as a field's
+// name. These assert the accessible name has NO trailing ellipsis while the
+// placeholder text (a separate key) keeps it, proving the two are no longer
+// the same string.
+
+describe("ParallelPassagesPanel — accessible names vs placeholders", () => {
+  it("the replace input's accessible name has no trailing ellipsis, unlike its placeholder", () => {
+    render(<ParallelPassagesPanel {...baseProps()} />)
+    const input = screen.getByRole("textbox", { name: /^Replacement text$/ })
+    expect(input.getAttribute("placeholder")).toBe("Replacement text…")
+    expect(input.getAttribute("aria-label")).toBe("Replacement text")
+  })
+
+  it("the find input's accessible name has no trailing ellipsis in project-scope Replace mode", () => {
+    render(<ParallelPassagesPanel {...baseProps({ mode: "replace", scope: "project" })} />)
+    const input = getFindInput()
+    expect(input.getAttribute("placeholder")).toBe("Find in project…")
+    expect(input.getAttribute("aria-label")).toBe("Find in project")
+  })
+})

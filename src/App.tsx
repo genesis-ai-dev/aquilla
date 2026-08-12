@@ -2,6 +2,7 @@ import { Suspense, lazy } from "react"
 import { Navigate, Routes, Route } from "react-router-dom"
 import { hasAuthHintCookie } from "@/lib/frontier/session-store"
 import { OrgHome } from "@/components/org/OrgHome"
+import { OrgHomeRoute } from "@/components/org/OrgHomeRoute"
 import { OrgRouteGate } from "@/components/org/OrgRouteGate"
 import { ProductTourProvider } from "@/context/ProductTourContext"
 import { ArchivedProjects } from "@/components/org/ArchivedProjects"
@@ -75,6 +76,9 @@ const MondayOAuthCallback = lazy(() =>
 )
 const OrgSettingsRoster = lazy(() =>
   import("@/pages/Settings").then((m) => ({ default: m.OrgSettingsRoster })),
+)
+const OrgSettingsTerminology = lazy(() =>
+  import("@/pages/Settings").then((m) => ({ default: m.OrgSettingsTerminology })),
 )
 const OrgSettingsAssignment = lazy(() =>
   import("@/pages/Settings").then((m) => ({ default: m.OrgSettingsAssignment })),
@@ -215,7 +219,8 @@ function AppRoutes() {
         {/* Org shell — path is authoritative for active org. `/orgs/all` is home-only. */}
         <Route path="/orgs/all" element={<OrgHome />} />
         <Route path="/orgs/:orgId" element={<OrgRouteGate />}>
-          <Route index element={<OrgHome />} />
+          {/* AQU-790: member orgs → full dashboard; guest orgs → reduced overview. */}
+          <Route index element={<OrgHomeRoute />} />
           <Route path="assigned" element={<AssignedToMe />} />
           <Route path="archived" element={<ArchivedProjects />} />
           <Route path="teams" element={<TeamsList />} />
@@ -227,6 +232,7 @@ function AppRoutes() {
           <Route path="settings/export" element={<OrgSettingsExport />} />
           <Route path="settings/roster" element={<OrgSettingsRoster />} />
           <Route path="settings/assignment" element={<OrgSettingsAssignment />} />
+          <Route path="settings/terminology" element={<OrgSettingsTerminology />} />
           <Route path="settings/providers" element={<OrgSettingsProviders />} />
           <Route path="settings/monday" element={<OrgSettingsMonday />} />
         </Route>

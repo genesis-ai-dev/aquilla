@@ -44,6 +44,11 @@ export type EventKind =
   | 'cell.audio.attach'
   | 'cell.audio.select'
   | 'cell.audio.remove'
+  | 'cell.audio.rename'
+  // Backfill a measured duration onto a take that predates duration capture.
+  // Fills only a NULL duration_ms — never selects, never touches url/slot/
+  // trims (a re-attach would re-select the clip and plain-assign trims).
+  | 'cell.audio.measure'
   // Audio validation (reviewer-level). Non-chain-mutating — approves/withdraws
   // approval of a cell's selected clip; does not move cells.event_id. Distinct
   // from cell.validate, which is text-side (cells.validated / cell_validators).
@@ -87,9 +92,15 @@ export type EventKind =
   // Timeline editor: retime a cell (move/stretch). Non-chain-mutating — updates
   // start_ms/end_ms on both the source and target rows without moving cells.event_id.
   | 'cell.retime'
+  | 'cell.lane.retime'
   // Timeline editor: set/clear a file's core video URL (timeline preview master
   // clock), stored in files.meta JSON. Non-chain-mutating; file-level.
   | 'file.video.set'
+  // Pre-merge round: the file's audio timing mode (Original vs Free), stored
+  // in files.meta JSON. A FILE-level distinction — the video link it interacts
+  // with is per-file too. Non-chain-mutating; maintainer floor (structural,
+  // same clearance as project settings).
+  | 'file.timing.set'
   // AQU-476: live source links — mirror engine. Server-emitted only (the
   // mirror sync engine in link-sync.ts; never a client outbox kind). Mirror
   // events replicate an ordering the UPSTREAM already arbitrated, so they
@@ -323,6 +334,8 @@ export interface EventPayloads {
     voiceId?: string
     referenceAudioId?: string
     durationMs?: number
+    /** AQU-646 round 8: the take's PERMANENT display name ("Take 3"). */
+    label?: string
     /** Non-destructive playback trim window into the clip, in ms. */
     trimStartMs?: number
     trimEndMs?: number
@@ -340,6 +353,19 @@ export interface EventPayloads {
   'cell.audio.select': {
     audioId: string
     slot: 'recording' | 'generatedVoice'
+  }
+  // AQU-646 round 8: rename a take — label only, deliberately NOT a
+  // re-attach (which would also re-select the clip). null clears.
+  'cell.audio.rename': {
+    audioId: string
+    label: string | null
+  }
+  // Measured duration for a take that predates duration capture. Fills only
+  // a NULL duration_ms; a repeat delivery or a race with a real re-attach is
+  // a no-op, so the event is idempotent and can never overwrite fresher data.
+  'cell.audio.measure': {
+    audioId: string
+    durationMs: number
   }
   'cell.audio.remove': {
     audioId: string
@@ -521,10 +547,25 @@ export interface EventPayloads {
     startMs: number
     endMs: number
   }
+  // AQU-646 round 6: per-LANE presentation timing (subtitle span / target-audio
+  // start), merged into the source-side cell's metadata JSONB. The frozen
+  // source split (start_ms/end_ms) is untouched. Per key: number sets (absolute
+  // file ms), null clears back to the default, undefined = not provided.
+  'cell.lane.retime': {
+    subtitleStartMs?: number | null
+    subtitleEndMs?: number | null
+    targetStartMs?: number | null
+  }
   // Set/clear a file's core video URL (timeline preview master clock), stored
   // in files.meta JSON; null clears it. File-level.
   'file.video.set': {
     coreMediaUrl: string | null
+  }
+  // Set/clear the file's audio timing mode, stored in files.meta JSON; null
+  // clears it back to the project-level default (legacy
+  // ProjectWideSettings.audioTimingMode, else "dubbing").
+  'file.timing.set': {
+    timingMode: 'dubbing' | 'audioFirst' | null
   }
 
   // ── AQU-476: live source links — mirror engine (server-emitted) ────────

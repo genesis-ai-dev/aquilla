@@ -18,9 +18,14 @@ import { isFieldInvalid } from "@/lib/forms/field-state"
 import { requiredString } from "@/lib/forms/schemas"
 import { useSubmitError } from "@/lib/forms/submit-error"
 import { useState } from "react"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 type Mode = "login" | "forgot"
 
+// The messages requiredString() composes ("<label> is required") are built
+// inside lib/forms/schemas.ts, which cannot call the t() hook (AQU-510,
+// out of scope) — these labels stay English there even though the visible
+// FieldLabels below are translated.
 const loginSchema = z.object({
   username: requiredString("Username or email"),
   password: requiredString("Password"),
@@ -30,6 +35,7 @@ export function Login() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const { login } = useFrontierSession()
+  const t = useT()
 
   const rawNext = searchParams.get("next") ?? ""
   const next = rawNext.startsWith("/") ? rawNext : "/"
@@ -59,7 +65,7 @@ export function Login() {
     <div className="min-h-screen flex items-center justify-center p-8">
       <div className="flex w-full max-w-sm flex-col gap-6">
         <h1 className="text-center text-2xl font-semibold">
-          {mode === "login" ? "Sign in" : "Reset your password"}
+          {mode === "login" ? t("auth.login.title") : t("auth.resetPassword.title")}
         </h1>
 
         {mode === "forgot" ? (
@@ -80,7 +86,7 @@ export function Login() {
                   const invalid = isFieldInvalid(field)
                   return (
                     <Field data-invalid={invalid}>
-                      <FieldLabel htmlFor="login-user">Username or email</FieldLabel>
+                      <FieldLabel htmlFor="login-user">{t("auth.login.usernameLabel")}</FieldLabel>
                       <Input
                         id="login-user"
                         name={field.name}
@@ -103,13 +109,13 @@ export function Login() {
                   return (
                     <Field data-invalid={invalid}>
                       <div className="flex items-center justify-between">
-                        <FieldLabel htmlFor="login-pass">Password</FieldLabel>
+                        <FieldLabel htmlFor="login-pass">{t("auth.login.passwordLabel")}</FieldLabel>
                         <button
                           type="button"
                           onClick={() => setMode("forgot")}
                           className="text-xs text-muted-foreground underline-offset-4 hover:underline"
                         >
-                          Forgot password?
+                          {t("auth.login.forgotPasswordLink")}
                         </button>
                       </div>
                       <RevealableInput
@@ -148,9 +154,9 @@ export function Login() {
                     )}
                     {isSubmitting
                       ? isMigrating
-                        ? "Setting up your account and permissions…"
-                        : "Signing in…"
-                      : "Sign in"}
+                        ? t("auth.login.submitMigrating")
+                        : t("auth.login.submitSigningIn")
+                      : t("auth.login.submitDefault")}
                   </Button>
                   {isSubmitting && isMigrating && (
                     <p
@@ -159,8 +165,7 @@ export function Login() {
                       aria-live="polite"
                       className="text-center text-xs text-muted-foreground"
                     >
-                      First-time sign-in may take a moment while we securely
-                      migrate your account.
+                      {t("auth.login.migratingNote")}
                     </p>
                   )}
                 </>
@@ -171,12 +176,12 @@ export function Login() {
 
         {mode === "login" && (
           <p className="text-center text-sm text-muted-foreground">
-            New here?{" "}
+            {t("auth.login.newHerePrefix")}{" "}
             <a
               href="/onboarding"
               className="font-medium text-foreground underline-offset-4 hover:underline"
             >
-              Create an account
+              {t("auth.login.createAccountLink")}
             </a>
           </p>
         )}

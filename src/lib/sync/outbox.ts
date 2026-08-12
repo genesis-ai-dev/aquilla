@@ -346,6 +346,49 @@ export async function getOutboxRecords(ids: readonly string[]): Promise<OutboxRe
  * this instead of a capped global peek so a busy project cannot push the
  * current cell's unflushed commit outside an arbitrary batch window.
  */
+/**
+ * FORTIFY (SUB-48 across reloads): every still-PENDING cell.audio.* record for
+ * a file, in enqueue order. The optimistic-shadow registry is memory-only, so
+ * after a reload a queued attach/remove was invisible until the flusher
+ * delivered it — the take "vanished" for up to minutes. The bus rehydrates
+ * shadows from these on a file's first read of the session.
+ */
+export async function getOutboxFileAudioRecords(
+  projectId: string,
+  fileId: string,
+): Promise<OutboxRecord[]> {
+  try {
+    const db = await openDb()
+    return await new Promise((resolve, reject) => {
+      const records: OutboxRecord[] = []
+      const tx = db.transaction(STORE, "readonly")
+      tx.onerror = () => reject(tx.error ?? new Error("file audio outbox lookup failed"))
+      const request = tx.objectStore(STORE).index("enqueuedAt").openCursor()
+      request.onsuccess = () => {
+        const cursor = request.result
+        if (!cursor) {
+          resolve(records)
+          return
+        }
+        const record = cursor.value as OutboxRecord
+        const event = record.event
+        if (
+          record.status === "pending" &&
+          event.projectId === projectId &&
+          event.fileId === fileId &&
+          typeof event.kind === "string" &&
+          event.kind.startsWith("cell.audio.")
+        ) {
+          records.push(record)
+        }
+        cursor.continue()
+      }
+    })
+  } catch {
+    return []
+  }
+}
+
 export async function getOutboxRecordsForCell(
   projectId: string,
   fileId: string,

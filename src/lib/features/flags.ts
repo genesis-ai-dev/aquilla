@@ -8,22 +8,28 @@
 // on one machine never changes a collaborator's app.
 
 import type { ProjectRecord } from "@/lib/parsers/types"
+import type { MessageKey } from "@/lib/i18n/messages/en"
 
 export interface FeatureFlagDefinition {
-  /** Short user-facing name shown next to the settings toggle. */
-  label: string
-  /** One-sentence user-facing explanation (plain words, no internal jargon). */
-  description: string
+  /** Typed key for the short user-facing name shown next to the settings toggle. */
+  labelKey: MessageKey
+  /** Typed key for the plain-language explanation shown below the toggle. */
+  descriptionKey: MessageKey
   /** Value used when the project record has no stored entry for the key. */
   default: boolean
 }
 
 export const FLAGS: Record<string, FeatureFlagDefinition> = {
   contextualTranslation: {
-    label: "Contextual drafting",
-    description:
-      "An assistant that reads whole passages, drafts translations from the surrounding context, and stages them for your review. Early preview — stays on this device.",
-    default: false,
+    labelKey: "autopilot.settings.controlsLabel",
+    descriptionKey: "autopilot.settings.controlsDescription",
+    // Default ON: this flag gates DISCOVERY, not spend. It decides whether the
+    // play button is visible; a run only starts, and only costs anything, when
+    // someone deliberately clicks it. Defaulting it off meant the feature could
+    // only be found by someone who already knew it existed and went looking in
+    // project settings for it — which is not a discovery path, it's a hiding
+    // place. Flip this single line to hide it again.
+    default: true,
   },
 }
 

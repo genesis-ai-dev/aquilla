@@ -18,6 +18,7 @@ import { handleCellEvent, type CellEventKind } from './handlers/cell-events'
 import { handleFileCreate } from './handlers/file-create'
 import { handleFileRename } from './handlers/file-rename'
 import { handleFileVideoSet } from './handlers/file-video-set'
+import { handleFileTimingSet } from './handlers/file-timing-set'
 import { handleFileDelete, handleFileRestore } from './handlers/file-delete-restore'
 import { handleCommentEvent, type CommentEventKind } from './handlers/comment-events'
 import { handleAssignmentEvent, type AssignmentEventKind } from './handlers/assignment-events'
@@ -81,6 +82,8 @@ export function dispatchEvent(
     case 'cell.audio.attach':
     case 'cell.audio.select':
     case 'cell.audio.remove':
+    case 'cell.audio.rename':
+    case 'cell.audio.measure':
     case 'cell.audio.validate':
     case 'cell.audio.unvalidate':
       return {
@@ -143,6 +146,16 @@ export function dispatchEvent(
         ),
       }
 
+    case 'file.timing.set':
+      return {
+        ok: true,
+        result: handleFileTimingSet(
+          db,
+          authed as AuthorizedEvent<'file.timing.set'>,
+          serverTs,
+        ),
+      }
+
     case 'comment.create':
     case 'comment.edit':
     case 'comment.delete':
@@ -159,6 +172,7 @@ export function dispatchEvent(
     case 'cell.backtranslation.set':
     case 'cast.assign':
     case 'cell.retime':
+    case 'cell.lane.retime':
     case 'source.cell.mirror':
     case 'file.mirror':
     case 'link.cursor.advance':

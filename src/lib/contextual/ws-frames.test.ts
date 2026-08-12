@@ -8,14 +8,23 @@
  * the run-store mirror lands in the right state.
  */
 
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { parseProjectWsMessage } from "@/lib/sync/ws-reconciler"
 import {
   applyRemoteFrame,
+  attachContextualRun,
   getContextualRunProgress,
   getContextualRunState,
   resetContextualRunStore,
+  setContextualTransport,
 } from "./run-store"
+import {
+  applyContextualDraftsFrame,
+  attachContextualDrafts,
+  getContextualDraftFor,
+  hydrateContextualDrafts,
+  resetContextualDraftsStore,
+} from "./drafts-store"
 
 const PROJECT = "proj-1"
 const RUN_ID = "0198c0de-0000-7000-8000-000000000001"
@@ -25,16 +34,32 @@ function dispatch(raw: object): void {
   const parsed = parseProjectWsMessage(JSON.stringify(raw))
   if (!parsed) throw new Error("frame did not parse — wire contract broken")
   if (parsed.t !== "contextual.activity") throw new Error(`unexpected frame type ${parsed.t}`)
-  // ProjectWorkspace's onMessage branch: project match, then straight to the store.
+  // ProjectWorkspace's onMessage branch: project match, split draft bursts off
+  // to the drafts store, then straight to the run store.
   expect(parsed.project).toBe(PROJECT)
-  applyRemoteFrame(parsed.frame)
+  if (parsed.frame.type === "contextual.drafts") {
+    throw new Error("draft bursts are covered by drafts-store.test.ts, not here")
+  }
+  applyRemoteFrame(parsed.project, parsed.frame)
 }
 
 afterEach(() => {
   resetContextualRunStore()
+  resetContextualDraftsStore()
 })
 
 describe("contextual.activity WS frames → run-store", () => {
+  beforeEach(async () => {
+    setContextualTransport({
+      fetchSnapshot: async () => ({ available: true, run: null }),
+      start: async () => ({ runId: RUN_ID }),
+      pause: async () => {},
+      resume: async () => {},
+      terminate: async () => {},
+    })
+    await attachContextualRun(PROJECT, "file-1")
+  })
+
   it("run.state frame adopts the run and updates progress", () => {
     dispatch({
       t: "contextual.activity",
@@ -43,6 +68,7 @@ describe("contextual.activity WS frames → run-store", () => {
         type: "contextual.run.state",
         runId: RUN_ID,
         fileId: "file-1",
+        targetLang: "",
         status: "running",
         done: 3,
         total: 12,
@@ -65,6 +91,7 @@ describe("contextual.activity WS frames → run-store", () => {
         type: "contextual.run.state",
         runId: RUN_ID,
         fileId: "file-1",
+        targetLang: "",
         status: "running",
         done: 0,
         total: 12,
@@ -94,6 +121,7 @@ describe("contextual.activity WS frames → run-store", () => {
         type: "contextual.run.state",
         runId: RUN_ID,
         fileId: "file-1",
+        targetLang: "",
         status: "running",
         done: 4,
         total: 12,
@@ -120,6 +148,7 @@ describe("contextual.activity WS frames → run-store", () => {
         type: "contextual.run.state",
         runId: RUN_ID,
         fileId: "file-1",
+        targetLang: "",
         status: "paused",
         done: 5,
         total: 12,
@@ -137,6 +166,7 @@ describe("contextual.activity WS frames → run-store", () => {
         type: "contextual.run.state",
         runId: RUN_ID,
         fileId: "file-1",
+        targetLang: "",
         status: "running",
         done: 6,
         total: 12,
@@ -150,6 +180,7 @@ describe("contextual.activity WS frames → run-store", () => {
         type: "contextual.run.state",
         runId: olderRunId,
         fileId: "file-1",
+        targetLang: "",
         status: "failed",
         done: 1,
         total: 2,
@@ -165,7 +196,14 @@ describe("contextual.activity WS frames → run-store", () => {
     expect(parseProjectWsMessage(JSON.stringify({
       t: "contextual.activity",
       project: PROJECT,
-      frame: { type: "contextual.run.state", runId: RUN_ID, fileId: "f", status: "starting", done: 0, total: 1 },
+      frame: { type: "contextual.run.state", runId: RUN_ID, fileId: "f", targetLang: "", status: "starting", done: 0, total: 1 },
+    }))).toBeNull()
+    // Lane provenance is mandatory during rolling deploys; guessing the
+    // default lane could let a legacy multilingual failure replace this pill.
+    expect(parseProjectWsMessage(JSON.stringify({
+      t: "contextual.activity",
+      project: PROJECT,
+      frame: { type: "contextual.run.state", runId: RUN_ID, fileId: "f", status: "failed", done: 0, total: 1 },
     }))).toBeNull()
     // Missing runId
     expect(parseProjectWsMessage(JSON.stringify({
@@ -185,5 +223,108 @@ describe("contextual.activity WS frames → run-store", () => {
       project: PROJECT,
     }))).toBeNull()
     expect(getContextualRunState().runId).toBeNull()
+  })
+
+  it("parses lane provenance but keeps a non-default run out of the default-lane mirror", () => {
+    dispatch({
+      t: "contextual.activity",
+      project: PROJECT,
+      frame: {
+        type: "contextual.run.state",
+        runId: RUN_ID,
+        fileId: "file-1",
+        targetLang: "fr",
+        status: "failed",
+        done: 0,
+        total: 1,
+        failed: 1,
+      },
+    })
+
+    expect(getContextualRunState()).toMatchObject({ runId: null, status: "idle" })
+    expect(getContextualRunProgress()).toEqual({ done: 0, total: 0, failed: 0 })
+  })
+})
+
+describe("contextual.activity WS draft frames → scoped draft mirror", () => {
+  function parsedDraft(project: string, text: string, targetLang = "", runId = RUN_ID) {
+    const parsed = parseProjectWsMessage(JSON.stringify({
+      t: "contextual.activity",
+      project,
+      frame: {
+        type: "contextual.drafts",
+        runId,
+        fileId: "shared-file",
+        targetLang,
+        spanLabel: "LUK 1:1–1:8",
+        drafts: [{ draftId: `draft-${project}`, cellId: "cell-1", text }],
+      },
+    }))
+    if (!parsed || parsed.t !== "contextual.activity" || parsed.frame.type !== "contextual.drafts") {
+      throw new Error("draft frame did not survive the real WebSocket ingress parser")
+    }
+    return { project: parsed.project, frame: parsed.frame }
+  }
+
+  it("accepts only the attached project/file default lane, even when projects reuse a file id", () => {
+    attachContextualDrafts("project-a", "shared-file", "")
+    const current = parsedDraft("project-a", "project A text")
+    applyContextualDraftsFrame(current.project, current.frame, RUN_ID)
+    expect(getContextualDraftFor("project-a", "shared-file", "", "cell-1")?.text).toBe("project A text")
+
+    attachContextualDrafts("project-b", "shared-file", "")
+    const lateA = parsedDraft("project-a", "late private project A text")
+    applyContextualDraftsFrame(lateA.project, lateA.frame, RUN_ID)
+
+    expect(getContextualDraftFor("project-b", "shared-file", "", "cell-1")).toBeUndefined()
+    expect(getContextualDraftFor("project-a", "shared-file", "", "cell-1")).toBeUndefined()
+  })
+
+  it("drops the default-lane wire payload while a multilingual editor lane is attached", () => {
+    attachContextualDrafts(PROJECT, "shared-file", "fr")
+    const parsed = parsedDraft(PROJECT, "default-only text")
+
+    applyContextualDraftsFrame(parsed.project, parsed.frame, RUN_ID)
+
+    expect(getContextualDraftFor(PROJECT, "shared-file", "fr", "cell-1")).toBeUndefined()
+  })
+
+  it("rejects missing lane provenance at ingress and drops an explicit legacy lane", () => {
+    expect(parseProjectWsMessage(JSON.stringify({
+      t: "contextual.activity",
+      project: PROJECT,
+      frame: {
+        type: "contextual.drafts",
+        runId: RUN_ID,
+        fileId: "shared-file",
+        spanLabel: "LUK 1:1–1:8",
+        drafts: [{ draftId: "missing-lane", cellId: "cell-1", text: "ambiguous" }],
+      },
+    }))).toBeNull()
+
+    attachContextualDrafts(PROJECT, "shared-file", "")
+    const legacyLane = parsedDraft(PROJECT, "legacy fr text", "fr")
+    applyContextualDraftsFrame(legacyLane.project, legacyLane.frame, RUN_ID)
+
+    expect(getContextualDraftFor(PROJECT, "shared-file", "", "cell-1")).toBeUndefined()
+  })
+
+  it("keeps run B REST truth when a delayed run A wire burst arrives", () => {
+    const scope = attachContextualDrafts(PROJECT, "shared-file", "")
+    hydrateContextualDrafts(scope, [{
+      draftId: "draft-b",
+      runId: "run-b",
+      cellId: "cell-1",
+      text: "current run B proposal",
+    }])
+    const delayedA = parsedDraft(PROJECT, "stale run A proposal", "", "run-a")
+
+    const result = applyContextualDraftsFrame(delayedA.project, delayedA.frame, "run-b")
+
+    expect(result.needsRefetch).toBe(true)
+    expect(getContextualDraftFor(PROJECT, "shared-file", "", "cell-1")).toMatchObject({
+      runId: "run-b",
+      text: "current run B proposal",
+    })
   })
 })

@@ -69,11 +69,6 @@ export function storeAllFeaturesConsent(): void {
   } catch { /* private mode */ }
 }
 
-export function hasAllFeaturesConsent(): boolean {
-  if (typeof localStorage === "undefined") return false
-  try { return localStorage.getItem(ALL_FEATURES_KEY) === "1" } catch { return false }
-}
-
 export function clearStoredConsent(id?: AiModelInfo["id"]): void {
   if (typeof localStorage === "undefined") return
   try {

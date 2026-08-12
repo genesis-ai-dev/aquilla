@@ -84,7 +84,8 @@ function parseCommonParams(
 
 /**
  * Map a caught DB error to a Response. FTS5 syntax errors become 400; all
- * other failures become 500.
+ * other failures become 500. The raw driver/DB message is logged server-side
+ * but never echoed to the caller — it can leak schema or query internals.
  */
 function mapSearchError(err: unknown): Response {
   // FTS5 syntax errors (e.g. the user wrote `"` un-balanced before our
@@ -92,10 +93,11 @@ function mapSearchError(err: unknown): Response {
   // them as a 400 rather than 500 so the client can fall back to a
   // "no results" UI instead of an error banner.
   const message = err instanceof Error ? err.message : String(err)
+  console.error('search request failed:', message)
   if (/syntax error|fts5/i.test(message)) {
-    return new Response(`invalid search query: ${message}`, { status: 400 })
+    return new Response('invalid search query', { status: 400 })
   }
-  return new Response(`search failed: ${message}`, { status: 500 })
+  return new Response('search failed', { status: 500 })
 }
 
 // ---------------------------------------------------------------------------

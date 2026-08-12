@@ -60,6 +60,21 @@ export interface OrgWideSettings {
    */
   allowSelfAssignment?: boolean
   /**
+   * AQU-822: Minimum role level allowed to manage a project's termbase —
+   * add, edit, delete, and archive concepts. Default (when absent) =
+   * PROJECT_LEAD (500), the level the terminology UI has always shown the
+   * editor at. Org owners can lower it (e.g. CONTRIBUTOR = 400, so
+   * translators own their own terminology) or raise it.
+   *
+   * Lowering the floor grants FULL terminology management at that level —
+   * there is no draft/suggestion/approval layer. It does NOT widen any other
+   * project setting: the server carve-out applies only to a write whose sole
+   * changed key is `terminology` (auth-worker project-settings route).
+   *
+   * Same OWNER-only write gate as exportMinRole / rosterViewMinRole.
+   */
+  termbaseEditMinRole?: number
+  /**
    * AQU-433: Org-scoped provider API keys. Set once by an org owner/maintainer;
    * used as the baseline for all members and projects in the org.
    * Precedence: project key > user (localStorage) key > org key.

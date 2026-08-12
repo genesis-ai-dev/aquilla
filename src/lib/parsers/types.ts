@@ -1,71 +1,16 @@
-import type { ImportMilestone, ImportSourceLocator } from "../../../shared/import-contract"
+// The parse-core data types (TranslatableString and friends) live in
+// core-types.ts (pure — importable by the parse Web Worker and the sync-worker
+// without dragging in this module's deeper workspace type graph). Re-exported
+// here so every existing "@/lib/parsers/types" import keeps working unchanged.
+export type {
+  CellType,
+  SourceLocation,
+  TranslatableString,
+  ParsedTextFileResult,
+  ExportCellFields,
+} from "./core-types"
 
 export type FileType = "md" | "docx" | "pptx" | "idml" | "xlsx" | "txt" | "html" | "json" | "po" | "properties" | "vtt" | "srt" | "sbv" | "usfm" | "ebible" | "helloao" | "xliff" | "tmx" | "csv" | "tsv" | "audio" | "video" | "obs" | "sdbh" | "custom"
-
-export type CellType =
-  | "text"
-  | "heading"
-  | "list"
-  | "blockquote"
-  | "cue"
-  | "verse"
-  | "paratext"
-
-export interface SourceLocation {
-  file: string       // e.g. "word/document.xml", "ppt/slides/slide3.xml"
-  blockPath: string  // indexed path to block, e.g. "w:p[2]" or "p:sp[1]/p:txBody/a:p[3]"
-}
-
-export interface TranslatableString {
-  id: string
-  original: string
-  originalHtml?: string
-  translated: string
-  /** Rich target initialized by format-aware parsers. IDML uses this for its
-   * protected empty slot anchors even before any translated words exist. */
-  translatedHtml?: string
-  context: string
-  group: string
-  /** Optional section label for navigation/progress. USFM/ebible set this to "BOOK CHAPTER" (e.g. "GEN 1"). */
-  section?: string
-  /** Explicit semantic milestone supplied by a specialized parser. The shared
-   * planner validates/fills this into every normalized import unit. */
-  milestone?: ImportMilestone
-  /**
-   * Semantic tags external to cell identity. For scripture, the verse ref(s) this cell represents,
-   * e.g. ["LUK 1:1"] or ["LUK 1:1", "LUK 1:2"] for a verse range. Mirrors the codex-editor
-   * extension's `metadata.data.globalReferences`. Empty/omitted for non-scripture content.
-   * Section labels in the sidebar are derived from these when present.
-   */
-  globalReferences?: string[]
-  /** Cue start/end in seconds, parsed from a subtitle timestamp line. Present
-   *  only for `type: "cue"` strings from VTT/SRT import; drives `start_ms`/
-   *  `end_ms` persistence. */
-  start?: number
-  end?: number
-  /** Speaker extracted from a `<v Name>` VTT voice tag, if present. Maps to a
-   *  Cast member on import. */
-  speaker?: string
-  /** Timeline-segment-model: primary content kind. Absent ⇒ 'text'. Set to
-   *  'media' only by the audio/video media-import path (Part B). */
-  medium?: "text" | "media"
-  /** D1: true on the first cell of a paragraph block. Absent/false = continuation.
-   *  Drives paragraph grouping for multi-cell draft operations. */
-  paragraphStart?: boolean
-  /**
-   * Extensible per-cell metadata bucket, mirrored through the import path into
-   * `BulkImportCell.metadata` → `source.cell.create` payload → `cells.metadata`
-   * (JSONB). OBS populates `{ attachments: [{ type: "image", url, alt }] }` —
-   * one frame's reference image per cell. Future attachment kinds (gif/video/
-   * audio) reuse the same bucket without a schema change. Absent for content
-   * with no attachments.
-   */
-  metadata?: Record<string, unknown>
-  type: CellType
-  sourceLocation?: SourceLocation
-  /** Exact format locator when a package-block locator would lose identity. */
-  sourceLocator?: ImportSourceLocator
-}
 
 /** File types whose parsers produce scripture-style sections (globalReferences populated, section labels meaningful). */
 export const SCRIPTURE_FILE_TYPES: ReadonlySet<FileType> = new Set(["usfm", "ebible", "helloao"])
@@ -309,11 +254,51 @@ export interface CellTtsSettings {
   voiceId?: string
 }
 
+/**
+ * AQU-646 SUB-53: which job the Media lens is for.
+ *
+ * - `"dubbing"` (also the meaning of ABSENT — every project before SUB-53) —
+ *   the translation has to fit inside the original's window. The timeline is
+ *   drawn against the imported file's clock, a dub that runs past its section
+ *   is flagged, and the original plays continuously underneath.
+ * - `"audioFirst"` — the translation IS the deliverable and the original is a
+ *   reference. Verses are laid out end to end, each taking as much room as its
+ *   longer side, so a translation running 2× the original stops reading as a
+ *   misalignment. Nothing about the recordings or the imported file changes:
+ *   the layout is derived (see lib/timeline/programme.ts), so switching back
+ *   reproduces the dubbing view exactly.
+ */
+export type AudioTimingMode = "dubbing" | "audioFirst"
+
+/** The one place the two modes' user-facing names live — consumed by the
+ *  Project Settings card AND the media-lens toolbar note (2026-08-05: the
+ *  control moved into settings; the toolbar shows a note). */
+export const AUDIO_TIMING_MODE_LABELS: Record<AudioTimingMode, { name: string; description: string }> = {
+  dubbing: {
+    name: "Original's timing",
+    description: "The translation is fitted to the original recording's timing.",
+  },
+  audioFirst: {
+    name: "Free timing",
+    description: "Verses are laid end to end — each takes as much room as its longer side.",
+  },
+}
+
 export interface ProjectRecord {
   id: string
   name: string
   /** Owning org id when the project was hydrated from the server. */
   orgId?: number | null
+  /**
+   * AQU-822: the org's effective `termbaseEditMinRole` — the minimum role
+   * allowed to manage this project's termbase (add/edit/delete/archive
+   * concepts). Sent by the single-project endpoint so the terminology UI and
+   * its settings write share one floor without a second org-settings fetch.
+   * Absent (older server / local-only project) ⇒ the PROJECT_LEAD default in
+   * `src/lib/terminology/glossary-view.ts`. The server re-resolves it on
+   * every terminology write, so this is an affordance value, not authority.
+   */
+  termbaseEditMinRole?: number | null
   sourceLanguage: string
   targetLanguage: string
   /**
@@ -411,6 +396,14 @@ export interface ProjectRecord {
   harmonize_min_role?: "project_lead" | "maintainer"
   /** Cached flag — set true when any cell first writes audio. Avoids scanning every file's Y.Doc on load. */
   hasAnyAudioData?: boolean
+  /**
+   * AQU-646 SUB-53: which job the Media lens is for — "dubbing" (the
+   * translation must fit the original's window; absent means this) or
+   * "audioFirst" (the translation is the deliverable, so verses are laid out
+   * end to end at their real lengths). Overlaid from
+   * ProjectWideSettings.audioTimingMode by useProject's overlaySettings.
+   */
+  audioTimingMode?: AudioTimingMode
   /** When and how to fetch audio bytes from the storage backend. Default: "lazy". */
   audioMediaStrategy?: AudioMediaStrategy
   /** Soft-delete marker. When present the project is in Trash; the Dashboard
@@ -535,6 +528,13 @@ export interface FileReference {
    * files.meta JSON (set via the `file.video.set` event). Absent ⇒ no video.
    */
   coreMediaUrl?: string | null
+  /**
+   * The file's audio timing mode (pre-merge round: a FILE-level distinction —
+   * the video link it interacts with is per-file too). Stored in files.meta
+   * JSON (set via the `file.timing.set` event). Absent ⇒ the project-level
+   * default applies (see `resolveFileTimingMode`).
+   */
+  timingMode?: AudioTimingMode | null
 }
 
 /** Which key is authoritative for ordering a file's segments. */
@@ -543,6 +543,24 @@ export type OrderedBy = "time" | "sequence"
 /** Resolve a file's order lens, defaulting absent → 'sequence'. */
 export function fileOrderedBy(file: Pick<FileReference, "orderedBy">): OrderedBy {
   return file.orderedBy ?? "sequence"
+}
+
+/**
+ * Resolve a file's audio timing mode: the file's own choice, else the
+ * project-level value (the legacy Project Settings field, kept as a read-only
+ * fallback so pre-existing projects keep the mode they had chosen), else
+ * Original timing. Mixed-mode projects are allowed by design.
+ */
+export function resolveFileTimingMode(
+  file: Pick<FileReference, "timingMode"> | null | undefined,
+  project: Pick<ProjectRecord, "audioTimingMode"> | null | undefined,
+): AudioTimingMode {
+  if (file?.timingMode === "audioFirst" || file?.timingMode === "dubbing") return file.timingMode
+  // Only "audioFirst" opts out of the original behaviour — anything else,
+  // including a value the settings blob happens to carry (the server accepts
+  // arbitrary top-level keys), reads as Original timing. Same normalization
+  // as resolveAudioTimingMode, inlined to keep this module import-free.
+  return project?.audioTimingMode === "audioFirst" ? "audioFirst" : "dubbing"
 }
 
 export interface ProjectMember {

@@ -60,6 +60,7 @@ import {
 import { computeProjectMetrics } from "../lib/monday/metrics"
 import { analyzeBoardMapping, AnalyzeUpstreamError } from "../lib/monday/analyze"
 import { pushBoardLink, schedulePush } from "../lib/monday/push"
+import { secureCompare } from "../utils/secure-compare"
 
 const monday = new Hono<AuthHonoEnv>()
 
@@ -711,7 +712,7 @@ const internalPushSchema = z.object({ projectId: z.string().min(1) })
 monday.post("/internal/push", zValidator("json", internalPushSchema), async (c) => {
   // Same shared-secret pattern as sync-worker's __broadcast.
   const authHeader = c.req.header("Authorization")
-  if (!c.env.SYNC_SECRET_KEY || authHeader !== `Bearer ${c.env.SYNC_SECRET_KEY}`) {
+  if (!c.env.SYNC_SECRET_KEY || !secureCompare(authHeader ?? "", `Bearer ${c.env.SYNC_SECRET_KEY}`)) {
     return c.json({ error: "unauthorized" }, 401)
   }
   const { projectId } = c.req.valid("json")

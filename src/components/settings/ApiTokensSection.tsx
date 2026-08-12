@@ -10,6 +10,8 @@
 
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react"
 import { Copy } from "lucide-react"
+import { buildAgentInstructions } from "@/lib/sync/agent-instructions"
+import { syncWorkerHttpOrigin } from "@/lib/sync/sync-worker-url"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -133,6 +135,7 @@ export function ApiTokensSection() {
   const [refreshKey, setRefreshKey] = useState(0)
   const [mintResult, setMintResult] = useState<MintCredentialResult | null>(null)
   const [revokeTarget, setRevokeTarget] = useState<ApiCredential | null>(null)
+  const [instructionsFor, setInstructionsFor] = useState<ApiCredential | null>(null)
 
   useEffect(() => {
     if (!jwt) {
@@ -200,6 +203,7 @@ export function ApiTokensSection() {
                   orgs={orgs}
                   projects={projects}
                   onRevoke={() => setRevokeTarget(cred)}
+                  onShowInstructions={() => setInstructionsFor(cred)}
                 />
               ))}
             </ul>
@@ -219,8 +223,20 @@ export function ApiTokensSection() {
         />
       )}
 
+      {instructionsFor && (
+        <AgentInstructionsDialog
+          mode={instructionsFor.mode}
+          scopeLabel={scopeLabel(instructionsFor, orgs, projects)}
+          onClose={() => setInstructionsFor(null)}
+        />
+      )}
+
       {mintResult && (
-        <ShowOnceTokenDialog result={mintResult} onClose={() => setMintResult(null)} />
+        <ShowOnceTokenDialog
+          result={mintResult}
+          scopeLabel={scopeLabel(mintResult.credential, orgs, projects)}
+          onClose={() => setMintResult(null)}
+        />
       )}
     </div>
   )
@@ -231,11 +247,13 @@ function CredentialRow({
   orgs,
   projects,
   onRevoke,
+  onShowInstructions,
 }: {
   credential: ApiCredential
   orgs: OrgSummary[]
   projects: CloudProjectSummary[]
   onRevoke: () => void
+  onShowInstructions: () => void
 }) {
   const revoked = Boolean(credential.revokedAt)
   const expired =
@@ -261,14 +279,19 @@ function CredentialRow({
         </p>
       </div>
       {!revoked && (
-        <Button
-          size="sm"
-          variant="ghost"
-          className="shrink-0 text-muted-foreground hover:text-destructive"
-          onClick={onRevoke}
-        >
-          Revoke
-        </Button>
+        <div className="flex shrink-0 items-center gap-1">
+          <Button size="sm" variant="ghost" onClick={onShowInstructions}>
+            Agent setup
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="text-muted-foreground hover:text-destructive"
+            onClick={onRevoke}
+          >
+            Revoke
+          </Button>
+        </div>
       )}
     </li>
   )
@@ -337,17 +360,35 @@ function RevokeCredentialDialog({
  * it's gone once closed. */
 function ShowOnceTokenDialog({
   result,
+  scopeLabel,
   onClose,
 }: {
   result: MintCredentialResult
+  scopeLabel: string
   onClose: () => void
 }) {
   const [copied, setCopied] = useState(false)
+  const [copiedPrompt, setCopiedPrompt] = useState(false)
 
   function copy() {
     void navigator.clipboard.writeText(result.token)
     setCopied(true)
     setTimeout(() => setCopied(false), 1500)
+  }
+
+  // Copies the token *inside* a ready-to-paste prompt. This is the only moment
+  // we hold the plaintext, so it's the only moment the prompt can be complete.
+  function copyInstructions() {
+    void navigator.clipboard.writeText(
+      buildAgentInstructions({
+        syncOrigin: syncWorkerHttpOrigin(),
+        token: result.token,
+        mode: result.credential.mode,
+        scopeLabel,
+      }),
+    )
+    setCopiedPrompt(true)
+    setTimeout(() => setCopiedPrompt(false), 1500)
   }
 
   return (
@@ -375,9 +416,81 @@ function ShowOnceTokenDialog({
               {copied ? "Copied" : "Copy"}
             </Button>
           </div>
+          <p className="text-xs text-muted-foreground">
+            Handing this to an agent? Copy the token wrapped in a ready-to-paste prompt that
+            sends the agent to the API&apos;s self-describing endpoint to learn what it can do,
+            and spells out this token&apos;s {result.credential.mode} mode.
+          </p>
         </DialogBody>
         <DialogFooter>
+          <Button variant="outline" onClick={copyInstructions}>
+            <Copy className="mr-1 size-3.5" />
+            {copiedPrompt ? "Copied" : "Copy agent instructions"}
+          </Button>
           <Button onClick={onClose}>Done</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+/** The copy-and-paste prompt a user hands to their agent. Rendered with the real
+ * token right after mint (the only moment we hold it) and with a placeholder
+ * from the section header, for anyone who already closed that dialog. */
+function AgentInstructionsDialog({
+  token,
+  mode,
+  scopeLabel,
+  onClose,
+}: {
+  token?: string
+  mode: CredentialMode
+  scopeLabel: string
+  onClose: () => void
+}) {
+  const [copied, setCopied] = useState(false)
+  const text = useMemo(
+    () => buildAgentInstructions({ syncOrigin: syncWorkerHttpOrigin(), token, mode, scopeLabel }),
+    [token, mode, scopeLabel],
+  )
+
+  function copy() {
+    void navigator.clipboard.writeText(text)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1500)
+  }
+
+  return (
+    <Dialog
+      open
+      onOpenChange={(next) => {
+        if (!next) onClose()
+      }}
+    >
+      <DialogContent className="sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>Instructions for your agent</DialogTitle>
+        </DialogHeader>
+        <DialogBody className="space-y-3">
+          <p className="text-sm text-muted-foreground">
+            Paste this into Claude Code, Codex, or any agent chat. It gives the agent the
+            token, points it at the API&apos;s own self-describing endpoint so it discovers
+            what&apos;s available rather than trusting a snapshot, and tells it how this
+            token&apos;s {mode} mode limits what it can do without you.
+            {!token && " Replace the placeholder with the token you copied when you minted it."}
+          </p>
+          <pre className="max-h-72 overflow-auto rounded-lg bg-muted p-3 text-xs whitespace-pre-wrap">
+            {text}
+          </pre>
+        </DialogBody>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>
+            Close
+          </Button>
+          <Button onClick={copy}>
+            <Copy className="mr-1 size-3.5" />
+            {copied ? "Copied" : "Copy instructions"}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

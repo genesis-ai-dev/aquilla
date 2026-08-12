@@ -4,7 +4,7 @@ import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/se
 /**
  * Contextual drafting run: enable the experimental flag, press play on the
  * floating pill, and watch the autonomous run drive the seeded file to
- * "Watching for changes" (parked) with staged drafts + scene briefs persisted.
+ * "Idle · no work queued" (parked) with staged drafts + scene briefs persisted.
  *
  * The pipeline's LLM calls happen SERVER-SIDE (auth-worker tick → mock
  * OpenRouter via OPENROUTER_BASE_URL, routed by the [[ctx:*]] prompt
@@ -15,13 +15,14 @@ test("contextual run pill drives a seeded file to parked with staged drafts", as
   const jwt = await jwtFor("alice")
   const seeded = await seedProjectWithFile(jwt, { name: `Contextual ${Date.now()}` })
 
-  // Enable the device-local flag through the Experimental settings section
-  // (the settings surface renders one section at a time via its side nav).
+  // The device-local flag is ON by default (it gates discovery of the play
+  // button, not spend). Assert that through the real settings UI rather than
+  // assuming it: if the default is ever flipped back, this fails here with an
+  // obvious cause instead of as a missing pill fifty lines down.
   await alice.goto(`/project/${seeded.projectId}/settings`)
   await alice.getByRole("link", { name: /Experimental/ }).click()
-  const flagSwitch = alice.getByRole("switch", { name: "Contextual drafting" })
+  const flagSwitch = alice.getByRole("switch", { name: "Show Autopilot controls" })
   await expect(flagSwitch).toBeVisible()
-  await flagSwitch.click()
   await expect(flagSwitch).toBeChecked()
 
   // The pill is visible while its server capability snapshot is still
@@ -39,7 +40,7 @@ test("contextual run pill drives a seeded file to parked with staged drafts", as
   // Idle pill: play affordance visible inside the editor viewport.
   const pill = alice.getByTestId("contextual-run-pill")
   await expect(pill).toBeVisible()
-  const play = alice.getByRole("button", { name: "Contextual draft" })
+  const play = alice.getByRole("button", { name: "Run Autopilot" })
   await expect(play).toBeVisible()
 
   const runCreated = alice.waitForResponse((r) =>
@@ -51,7 +52,7 @@ test("contextual run pill drives a seeded file to parked with staged drafts", as
   // The run works span by span server-side; the pill mirrors DO frames.
   // Cold multi-service pipeline (tick loop + mock LLM round-trips per span):
   // justified 30s readiness watchdog, waiting on observable pill state.
-  await expect(pill).toContainText(/Watching for changes/, { timeout: 30_000 })
+  await expect(pill).toContainText(/Idle · no work queued/, { timeout: 30_000 })
 
   // Cross-boundary: the run persisted its work product — proposed drafts and
   // at least one scene brief — reachable through the real API as the same user.

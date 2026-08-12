@@ -219,7 +219,17 @@ export class PostgresDb implements AquillaDb {
    */
   withUser(userId: number | string | null): PostgresDb {
     if (userId == null) return new PostgresDb(this.executor, { kind: "none" })
-    return new PostgresDb(this.executor, { kind: "user", userId: String(userId) })
+    // userId is embedded directly into `SET LOCAL app.user_id = '<userId>'`
+    // (see withIdentity below — SET LOCAL can't take a bind parameter), so it
+    // MUST be validated here rather than trusted from the caller: this is the
+    // one place standing between an unvalidated string and a GUC-injection
+    // primitive. users.id is BIGINT; reject anything that isn't a bare
+    // non-negative integer literal.
+    const id = String(userId)
+    if (!/^\d+$/.test(id)) {
+      throw new Error(`withUser: userId must be a non-negative integer, got ${JSON.stringify(userId)}`)
+    }
+    return new PostgresDb(this.executor, { kind: "user", userId: id })
   }
 
   /**

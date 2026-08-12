@@ -19,20 +19,23 @@ export const DEFAULT_PROMPT_TEMPLATE = [
  * default speaker. Everything else is a character the user crafts (a preset
  * engine voice, or a cloned reference), so the cast starts clean instead of
  * pre-stuffed with stock moods. Editable in place.
+ *
+ * Round 5 (AQU-646): deliberately NO `provider` — the Narrator follows the
+ * project's engine setting (a pinned "gemini" here silently overrode the
+ * OmniVoice default and demanded a Gemini key on every fresh project). The
+ * voiceName only applies when the resolved engine is Gemini; other engines
+ * normalize it away (normalizeVoiceForProvider).
  */
 export const PRESET_VOICES: readonly Voice[] = [
   {
     id: "preset-narrator",
     name: "Narrator",
     color: "#475569",
-    provider: "gemini",
     voiceName: "Charon",
     prompt: "Read this {target} passage as a steady, clear narrator. Preserve names and punctuation; do not translate.\n\n{text}",
     builtIn: true,
   },
 ] as const
-
-export const DEFAULT_VOICE_ID = PRESET_VOICES[0].id
 
 // Voice accent colors. Leads with calm slate / steel-blue / teal / amber tones —
 // deliberately NOT purple-forward (the cliché AI-voice violet is pushed to the
@@ -96,14 +99,4 @@ export function assignedCastVoiceId(
 
 export function newVoiceId(): string {
   return globalThis.crypto?.randomUUID?.() ?? `voice-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-}
-
-/** Fork a built-in voice into a user-editable copy. */
-export function forkVoice(voice: Voice, name?: string): Voice {
-  return {
-    ...voice,
-    id: newVoiceId(),
-    name: name ?? `${voice.name} (copy)`,
-    builtIn: false,
-  }
 }

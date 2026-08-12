@@ -2,11 +2,24 @@
 # Lint: python3 scripts/graph_lint.py docs/superpowers/specs/2026-07-25-contextual-translation.graph.yaml
 # (lint script lives in the graph-engineering skill bundle, not this repo)
 #
-# One graph instance == ONE SPAN of one file. A durable Cloudflare Workflow instance
-# (one per project/file/lane run) sequences spans, reading the steering channel between
-# spans; the play/pause FAB is a transport control on the instance, not a client loop.
+# One graph instance == ONE SPAN of one file. The durable run engine drives spans in
+# WAVES — several instances at once — reading the steering channel between waves; the
+# play/pause FAB is a transport control on the run, not a client loop.
 # Non-discourse files (json-i18n, po, properties, csv without scripture content) are
 # routed to the existing plain batch drafter BEFORE this graph starts — see design doc.
+#
+# Concurrency (added 2026-08, see auth-worker/src/lib/contextual/tick.ts):
+#   - ACROSS spans: the only cross-span edge is the backward read of ADJACENT APPROVED
+#     briefs in expand_window. Approval is a human act outside any run, so no span in a
+#     wave can read another's output — spans in one file are independent, and files in
+#     one project share nothing at all. Wave width scales with remaining work and stops
+#     at a provider-rate ceiling; small files stay serial, because a graph pays
+#     scheduling overhead a chain does not.
+#   - WITHIN a span: the three verifiers are `independent: true` and dispatch together.
+#     Everything else on the span's path is a genuine edge (output feeds input) and
+#     stays ordered.
+#   - Budget survives concurrency unchanged: chargeBudget is synchronous, so on JS's
+#     single thread each charge is atomic and the caps below still bind exactly.
 
 task_type: "Contextually translate one span of a discourse file: construe its scene, draft target cells from the construal, verify fidelity, stage for human approval"
 codebase: "genesis-ai-dev/aquilla — React SPA + CF Workers; agent loop in auth-worker/src/lib/agent, drafting in src/lib/completion, event perimeter emit-stage.ts"

@@ -5823,6 +5823,11 @@ function EditorRow({
         // AQU-590: exposes AI-translation-in-progress on the row itself so the
         // signal is testable and not only carried by a transient CSS ring.
         data-ai-translating={isLoading ? "true" : undefined}
+        // AQU-646 round 5: the row the TRANSPORT is on — the queue's cell, or
+        // the line the linked picture is playing over. Exposed for the same
+        // reason as the line above: the ring it draws is the same gold as
+        // multi-select's, so a class check cannot tell the two apart.
+        data-queue-row={isQueueRow ? "true" : undefined}
         tabIndex={0}
         aria-label={`${cellRef} cell`}
         className={cn(

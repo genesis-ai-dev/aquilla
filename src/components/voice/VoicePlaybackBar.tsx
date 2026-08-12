@@ -165,14 +165,47 @@ export function VoicePlaybackBar({
     return () => window.removeEventListener("keydown", onKeyDown)
   }, [canPlay, onPlayPause])
 
+  // PREV/NEXT on a picture step between LINES of the film, which is what the
+  // buttons say. Left on the queue's `skipBack`/`skipForward` they walked a
+  // programme that is not running, so on a video-first file they did nothing.
+  const lineStarts = useMemo(() => {
+    if (!drivesVideo) return []
+    return cells
+      .map((c) => c.startTime)
+      .filter((t): t is number => typeof t === "number" && Number.isFinite(t))
+      .sort((a, b) => a - b)
+  }, [drivesVideo, cells])
+  const stepLine = useCallback(
+    (dir: -1 | 1) => {
+      if (!drivesVideo) {
+        if (dir < 0) skipBack()
+        else skipForward()
+        return
+      }
+      if (!videoController) return
+      // A small lead-in on the way back, so pressing Previous just after a line
+      // starts returns to the line before it rather than jumping in place —
+      // the same courtesy every media player extends.
+      const from = dir < 0 ? currentTime - 0.75 : currentTime
+      const next = dir < 0
+        ? [...lineStarts].reverse().find((t) => t < from)
+        : lineStarts.find((t) => t > from)
+      videoController.seek(Math.max(0, next ?? (dir < 0 ? 0 : duration)))
+    },
+    [drivesVideo, videoController, currentTime, duration, lineStarts],
+  )
+
   const progressFraction = duration > 0 ? Math.min(1, currentTime / duration) : 0
 
   return (
     <div className="border-t">
       {/* Full-width progress line doubling as a scrubber. */}
+      {/* Gated on the TRANSPORT being active, not on a line being under the
+          playhead: a film sitting in a silence has a real position and a real
+          duration, and `activeIndex < 0` used to make the scrubber dead there. */}
       <BarScrubber
         fraction={progressFraction}
-        disabled={activeIndex < 0 || duration <= 0}
+        disabled={!transport.active || duration <= 0}
         onSeek={(f) => (drivesVideo ? videoController?.seek(f * duration) : seekQueueToTime(f * duration))}
       />
 
@@ -202,7 +235,7 @@ export function VoicePlaybackBar({
         {/* Transport */}
         <div className="flex shrink-0 items-center gap-0.5 self-center">
           <SpeedButton rate={rate} onChange={(r) => (drivesVideo ? videoController?.setRate(r) : setQueueRate(r))} />
-          <IconButton title="Previous line" disabled={!canPlay} onClick={skipBack}>
+          <IconButton title="Previous line" disabled={!canPlay} onClick={() => stepLine(-1)}>
             <SkipBack className="h-4 w-4" />
           </IconButton>
           <AppTooltip content={isPlaying ? "Pause" : "Play all"}>
@@ -218,7 +251,7 @@ export function VoicePlaybackBar({
               {isLoading ? <Spinner /> : isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4 translate-x-px" />}
             </Button>
           </AppTooltip>
-          <IconButton title="Next line" disabled={!canPlay} onClick={skipForward}>
+          <IconButton title="Next line" disabled={!canPlay} onClick={() => stepLine(1)}>
             <SkipForward className="h-4 w-4" />
           </IconButton>
           <span className="ml-1.5 shrink-0 text-[11px] tabular-nums text-muted-foreground">

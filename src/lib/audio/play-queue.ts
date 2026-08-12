@@ -1716,6 +1716,7 @@ if (import.meta.env.DEV && typeof window !== "undefined") {
   ;(window as unknown as Record<string, unknown>).__aqDubDebugSnapshot = getDubDebugSnapshot
   ;(window as unknown as Record<string, unknown>).__aqQueueState = getQueueState
   ;(window as unknown as Record<string, unknown>).__aqQueueProgress = getQueueProgress
+  ;(window as unknown as Record<string, unknown>).__aqExternalDubs = getExternalDubsSnapshot
 }
 
 /** Execute an overlay plan. Overlay failures are non-fatal — a dub that can't
@@ -2977,7 +2978,7 @@ export function tickExternalDubs(sec: number): void {
 export function getExternalDubsSnapshot(): {
   driving: boolean
   playing: boolean
-  pool: { cellId: string; audioId: string; paused: boolean | null }[]
+  pool: { cellId: string; audioId: string; paused: boolean | null; muted: boolean | null }[]
 } {
   return {
     driving: externalDubs != null,
@@ -2986,6 +2987,7 @@ export function getExternalDubsSnapshot(): {
       cellId: e.cellId,
       audioId: e.audioId,
       paused: e.element ? e.element.paused : null,
+      muted: e.element ? e.element.muted : null,
     })),
   }
 }

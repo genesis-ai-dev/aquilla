@@ -27,6 +27,7 @@ import { addLlmCall } from "@/lib/usage/record-usage"
 import { getProject, updateProject } from "@/lib/store/project-index"
 import type { CompletionSettings, TranslationRule } from "@/lib/parsers/types"
 import type { RuleSuggestion } from "@/lib/rules/rule-suggester"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 const FALLBACK_SETTINGS: CompletionSettings = {
   provider: "frontier",
@@ -62,6 +63,7 @@ export function RuleSuggestFromEditsDialog({
   onAdd,
   projectId,
 }: Props) {
+  const t = useT()
   const { session } = useFrontierSession()
   const { available: frontierAvailable } = useFrontierHealth()
 
@@ -101,9 +103,7 @@ export function RuleSuggestFromEditsDialog({
       setMiningStats({ repeated, recent, pairs, human })
 
       if (candidates.length === 0) {
-        setError(
-          "No edit patterns found. Translate some cells in this file to generate suggestions.",
-        )
+        setError(t("rules.suggestFromEdits.noPatternsFound"))
         setStage("idle")
         return
       }
@@ -121,9 +121,7 @@ export function RuleSuggestFromEditsDialog({
       )
 
       if (result.suggestions.length === 0) {
-        setError(
-          "The LLM didn't find any testable patterns in your edits. Try validating more diverse translations.",
-        )
+        setError(t("rules.suggestFromEdits.noTestablePatterns"))
         setStage("idle")
         return
       }
@@ -132,7 +130,7 @@ export function RuleSuggestFromEditsDialog({
       setEvidence(result.evidence)
       setStage("review")
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Analysis failed")
+      setError(err instanceof Error ? err.message : t("rules.suggestFromEdits.analysisFailed"))
       setStage("idle")
     }
   }
@@ -184,10 +182,10 @@ export function RuleSuggestFromEditsDialog({
   const miningLabel =
     miningStats
       ? [
-          miningStats.repeated > 0 && `${miningStats.repeated} repeated`,
-          miningStats.recent > 0 && `${miningStats.recent} recent`,
-          miningStats.pairs > 0 && `${miningStats.pairs} from pairs`,
-          miningStats.human > 0 && `${miningStats.human} human-authored`,
+          miningStats.repeated > 0 && t("rules.suggestFromEdits.stats.repeated", { count: miningStats.repeated }),
+          miningStats.recent > 0 && t("rules.suggestFromEdits.stats.recent", { count: miningStats.recent }),
+          miningStats.pairs > 0 && t("rules.suggestFromEdits.stats.pairs", { count: miningStats.pairs }),
+          miningStats.human > 0 && t("rules.suggestFromEdits.stats.human", { count: miningStats.human }),
         ]
           .filter(Boolean)
           .join(", ")
@@ -198,8 +196,8 @@ export function RuleSuggestFromEditsDialog({
       <AppTooltip
         content={
           isConfigured
-            ? "Mine your edits for rule patterns"
-            : "Configure LLM in project settings first"
+            ? t("rules.suggestFromEdits.tooltip")
+            : t("rules.suggestFromEdits.tooltipUnconfigured")
         }
       >
         <span className="inline-flex">
@@ -213,7 +211,7 @@ export function RuleSuggestFromEditsDialog({
             }
           >
             <Sparkles className="me-1 h-3.5 w-3.5" />
-            Suggest from edits
+            {t("rules.suggestFromEdits.triggerButton")}
           </DialogTrigger>
         </span>
       </AppTooltip>
@@ -222,26 +220,25 @@ export function RuleSuggestFromEditsDialog({
         <DialogHeader>
           <DialogTitle>
             {stage === "review"
-              ? `Review ${suggestions.length} suggested rule${suggestions.length !== 1 ? "s" : ""}`
-              : "Suggest rules from your edits"}
+              ? t("rules.suggestFromEdits.reviewTitle", { count: suggestions.length })
+              : t("rules.suggestFromEdits.title")}
           </DialogTitle>
         </DialogHeader>
 
         {stage === "idle" && (
           <div className="space-y-3">
             <p className="text-sm text-muted-foreground">
-              Analyzes your repeated corrections, recent edits, and human-authored translations
-              to propose testable rules. You'll review each suggestion before anything is saved.
+              {t("rules.suggestFromEdits.description")}
             </p>
             {error && <p className="text-sm text-destructive">{error}</p>}
             {!isConfigured && (
               <p className="text-xs text-muted-foreground">
-                Configure your LLM endpoint in project settings first.
+                {t("rules.importDialog.configureLlmFirst")}
               </p>
             )}
             <Button onClick={handleAnalyze} disabled={!isConfigured} className="w-full">
               <Sparkles className="me-1 h-4 w-4" />
-              Analyze my edits
+              {t("rules.suggestFromEdits.analyzeButton")}
             </Button>
           </div>
         )}
@@ -249,7 +246,7 @@ export function RuleSuggestFromEditsDialog({
         {stage === "loading" && (
           <div className="flex flex-col items-center gap-2 py-6">
             <Spinner className="size-6 text-primary" />
-            <p className="text-sm text-muted-foreground">Mining edit patterns…</p>
+            <p className="text-sm text-muted-foreground">{t("rules.suggestFromEdits.miningLabel")}</p>
           </div>
         )}
 
@@ -257,7 +254,7 @@ export function RuleSuggestFromEditsDialog({
           <div className="space-y-1">
             {miningLabel && (
               <p className="text-xs text-muted-foreground mb-2">
-                Mined patterns: {miningLabel}
+                {t("rules.suggestFromEdits.minedPatterns", { patterns: miningLabel })}
               </p>
             )}
             <RuleImportReview

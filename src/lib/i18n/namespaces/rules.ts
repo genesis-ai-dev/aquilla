@@ -275,6 +275,59 @@ export const rules = defineNamespace({
     "rules.editor.invalidAutofixPattern": "Invalid autofix pattern",
     "rules.editor.saveChangesButton": "Save changes",
     "rules.editor.createRuleButton": "Create rule",
+
+    // ── RuleImportDialog ("Import from doc" — LLM-extracted rule drafts) ───
+    "rules.importDialog.noRulesFound": "No verifiable rules found in the document. Try a style guide or glossary.",
+    "rules.importDialog.extractionFailed": "Extraction failed",
+    "rules.importDialog.unsupportedFileType": "Unsupported file type. Drop a .txt, .md, .pdf, or .docx file.",
+    "rules.importDialog.binaryFileTooLarge": "File too large ({size} MB). Maximum is 2 MB for PDF/DOCX.",
+    "rules.importDialog.signInRequiredForBinary": "You must be signed in to import PDF or DOCX files.",
+    "rules.importDialog.couldNotParseFile": "Could not parse file.",
+    "rules.importDialog.textFileTooLarge": "File too large ({size} KB). Maximum is 200 KB for text files.",
+    "rules.importDialog.fileEmpty": "File appears to be empty.",
+    "rules.importDialog.extractingRules": "Extracting rules from document…",
+    "rules.importDialog.structuring": "Structuring {structured} / {candidates} rules…",
+    "rules.importDialog.tooltip": "Import rules from a document",
+    "rules.importDialog.tooltipUnconfigured": "Configure LLM in settings first",
+    "rules.importDialog.triggerButton": "Import from doc",
+    "rules.importDialog.reviewTitle": plural({
+      one: "Review {count} extracted rule",
+      other: "Review {count} extracted rules",
+    }),
+    "rules.importDialog.title": "Import rules from document",
+    "rules.importDialog.description":
+      "Drop a style guide, glossary, or translation guidelines document and the LLM will extract structured rules you can review and accept. Supports plain text and Markdown (max 200 KB) or PDF/DOCX (max 2 MB).",
+    "rules.importDialog.dropZoneText": "Drop a {txt}, {md}, {pdf}, or {docx} file here",
+    "rules.importDialog.browseButton": "Browse file",
+    "rules.importDialog.pasteZoneLabel": "Or paste document text:",
+    "rules.importDialog.pastePlaceholder": "Paste text here and it will be processed automatically…",
+    "rules.importDialog.configureLlmFirst": "Configure your LLM endpoint in project settings first.",
+    "rules.importDialog.candidatesProcessed": "{structured} of {candidates} candidates processed",
+    "rules.importDialog.documentTooLarge": "Document is too large ({kb} KB). Please keep it under 200 KB of text.",
+
+    // ── RuleSuggestFromEditsDialog ("Suggest from edits") ──────────────────
+    "rules.suggestFromEdits.noPatternsFound":
+      "No edit patterns found. Translate some cells in this file to generate suggestions.",
+    "rules.suggestFromEdits.noTestablePatterns":
+      "The LLM didn't find any testable patterns in your edits. Try validating more diverse translations.",
+    "rules.suggestFromEdits.analysisFailed": "Analysis failed",
+    "rules.suggestFromEdits.stats.repeated": "{count} repeated",
+    "rules.suggestFromEdits.stats.recent": "{count} recent",
+    "rules.suggestFromEdits.stats.pairs": "{count} from pairs",
+    "rules.suggestFromEdits.stats.human": "{count} human-authored",
+    "rules.suggestFromEdits.tooltip": "Mine your edits for rule patterns",
+    "rules.suggestFromEdits.tooltipUnconfigured": "Configure LLM in project settings first",
+    "rules.suggestFromEdits.triggerButton": "Suggest from edits",
+    "rules.suggestFromEdits.reviewTitle": plural({
+      one: "Review {count} suggested rule",
+      other: "Review {count} suggested rules",
+    }),
+    "rules.suggestFromEdits.title": "Suggest rules from your edits",
+    "rules.suggestFromEdits.description":
+      "Analyzes your repeated corrections, recent edits, and human-authored translations to propose testable rules. You'll review each suggestion before anything is saved.",
+    "rules.suggestFromEdits.analyzeButton": "Analyze my edits",
+    "rules.suggestFromEdits.miningLabel": "Mining edit patterns…",
+    "rules.suggestFromEdits.minedPatterns": "Mined patterns: {patterns}",
   },
   context: {
     _context: {
@@ -510,6 +563,73 @@ export const rules = defineNamespace({
       "rules.importReview.addButton": {
         description: "Primary button committing the accepted draft rules from the import-review screen.",
         placeholders: { count: "Number of accepted draft rules to add." },
+      },
+      "rules.importDialog.binaryFileTooLarge": {
+        description: "Error shown when a dropped PDF/DOCX exceeds the 2 MB import cap.",
+        placeholders: { size: "The file's size in MB, one decimal place." },
+      },
+      "rules.importDialog.textFileTooLarge": {
+        description: "Error shown when a dropped .txt/.md file exceeds the 200 KB import cap.",
+        placeholders: { size: "The file's size in KB, whole number." },
+      },
+      "rules.importDialog.structuring": {
+        description:
+          "Progress label during the import dialog's second LLM pass, converting raw candidates into structured rules.",
+        placeholders: {
+          structured: "How many candidates have been structured so far.",
+          candidates: "Total candidates from the first extraction pass.",
+        },
+      },
+      "rules.importDialog.reviewTitle": {
+        description: "Dialog title once extraction finishes and the drafts are ready for review.",
+        placeholders: { count: "Number of rule drafts extracted." },
+      },
+      "rules.importDialog.dropZoneText": {
+        description:
+          "Instruction in the import dialog's drop zone, naming the accepted file extensions (each rendered bold via RichMessage).",
+        placeholders: {
+          txt: "The literal '.txt' extension, rendered bold.",
+          md: "The literal '.md' extension, rendered bold.",
+          pdf: "The literal '.pdf' extension, rendered bold.",
+          docx: "The literal '.docx' extension, rendered bold.",
+        },
+      },
+      "rules.importDialog.candidatesProcessed": {
+        description: "Sub-progress line during structuring, under the main progress label.",
+        placeholders: {
+          structured: "How many candidates have been structured so far.",
+          candidates: "Total candidates from the first extraction pass.",
+        },
+      },
+      "rules.importDialog.documentTooLarge": {
+        description:
+          "Error from checkInputSize() (rule-extractor.ts) when a pasted/loaded document exceeds the 200 KB extraction limit.",
+        placeholders: { kb: "The document's size in KB, whole number." },
+      },
+      "rules.suggestFromEdits.stats.repeated": {
+        description:
+          "One segment of the comma-joined mining-stats summary ('N repeated, N recent, …') after analyzing edits.",
+        placeholders: { count: "Number of repeated-correction candidates mined." },
+      },
+      "rules.suggestFromEdits.stats.recent": {
+        description: "Mining-stats segment counting recently-edited-cell candidates.",
+        placeholders: { count: "Number of recent-edit candidates mined." },
+      },
+      "rules.suggestFromEdits.stats.pairs": {
+        description: "Mining-stats segment counting candidates from validated source/target pairs.",
+        placeholders: { count: "Number of validated-pair candidates mined." },
+      },
+      "rules.suggestFromEdits.stats.human": {
+        description: "Mining-stats segment counting human-authored (non-AI-drafted) candidates.",
+        placeholders: { count: "Number of human-authored candidates mined." },
+      },
+      "rules.suggestFromEdits.reviewTitle": {
+        description: "Dialog title once edit-mining + LLM suggestion finishes and drafts are ready for review.",
+        placeholders: { count: "Number of suggested rule drafts." },
+      },
+      "rules.suggestFromEdits.minedPatterns": {
+        description: "Summary line above the review list, showing the mining-stats breakdown.",
+        placeholders: { patterns: "Already-localized, comma-joined stats segments (see rules.suggestFromEdits.stats.*)." },
       },
       "rules.editor.wouldBeFlagged": {
         description:

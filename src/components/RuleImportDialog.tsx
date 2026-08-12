@@ -33,6 +33,8 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 import type { CompletionSettings, TranslationRule } from "@/lib/parsers/types"
 import type { RuleSuggestion } from "@/lib/rules/rule-suggester"
 import { parseDocumentFile, MAX_PARSE_FILE_BYTES } from "@/lib/frontier/parse-document"
+import { useT } from "@/lib/i18n/I18nProvider"
+import { RichMessage } from "@/lib/i18n/RichMessage"
 
 const ACCEPTED_TEXT_TYPES = [".txt", ".md"]
 const ACCEPTED_MIME = ["text/plain", "text/markdown"]
@@ -63,6 +65,7 @@ interface Props {
 type Stage = "idle" | "extracting" | "review"
 
 export function RuleImportDialog({ completionSettings, onAdd, projectId }: Props) {
+  const t = useT()
   const { session } = useFrontierSession()
   const { available: frontierAvailable } = useFrontierHealth()
   const [open, setOpen] = useState(false)
@@ -111,7 +114,7 @@ export function RuleImportDialog({ completionSettings, onAdd, projectId }: Props
       )
 
       if (results.length === 0) {
-        setError("No verifiable rules found in the document. Try a style guide or glossary.")
+        setError(t("rules.importDialog.noRulesFound"))
         setStage("idle")
         return
       }
@@ -119,7 +122,7 @@ export function RuleImportDialog({ completionSettings, onAdd, projectId }: Props
       setDrafts(results)
       setStage("review")
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Extraction failed")
+      setError(err instanceof Error ? err.message : t("rules.importDialog.extractionFailed"))
       setStage("idle")
     }
   }
@@ -145,7 +148,7 @@ export function RuleImportDialog({ completionSettings, onAdd, projectId }: Props
       ACCEPTED_BINARY_TYPES.some((e) => ext.endsWith(e))
 
     if (!isText && !isBinary) {
-      setError(`Unsupported file type. Drop a .txt, .md, .pdf, or .docx file.`)
+      setError(t("rules.importDialog.unsupportedFileType"))
       return
     }
 
@@ -153,13 +156,13 @@ export function RuleImportDialog({ completionSettings, onAdd, projectId }: Props
       // Client-side size cap before upload
       if (file.size > MAX_PARSE_FILE_BYTES) {
         setError(
-          `File too large (${(file.size / 1024 / 1024).toFixed(1)} MB). Maximum is 2 MB for PDF/DOCX.`,
+          t("rules.importDialog.binaryFileTooLarge", { size: (file.size / 1024 / 1024).toFixed(1) }),
         )
         return
       }
       const jwt = session?.jwt
       if (!jwt) {
-        setError("You must be signed in to import PDF or DOCX files.")
+        setError(t("rules.importDialog.signInRequiredForBinary"))
         return
       }
       setStage("extracting")
@@ -172,7 +175,7 @@ export function RuleImportDialog({ completionSettings, onAdd, projectId }: Props
           return runExtraction(text)
         })
         .catch((err) => {
-          setError(err instanceof Error ? err.message : "Could not parse file.")
+          setError(err instanceof Error ? err.message : t("rules.importDialog.couldNotParseFile"))
           setStage("idle")
         })
       return
@@ -181,7 +184,7 @@ export function RuleImportDialog({ completionSettings, onAdd, projectId }: Props
     // Plain text / markdown: existing path
     if (file.size > MAX_TEXT_BYTES) {
       setError(
-        `File too large (${(file.size / 1024).toFixed(0)} KB). Maximum is 200 KB for text files.`,
+        t("rules.importDialog.textFileTooLarge", { size: (file.size / 1024).toFixed(0) }),
       )
       return
     }
@@ -189,7 +192,7 @@ export function RuleImportDialog({ completionSettings, onAdd, projectId }: Props
     reader.onload = (ev) => {
       const text = ev.target?.result as string
       if (!text?.trim()) {
-        setError("File appears to be empty.")
+        setError(t("rules.importDialog.fileEmpty"))
         return
       }
       runExtraction(text)
@@ -240,10 +243,10 @@ export function RuleImportDialog({ completionSettings, onAdd, projectId }: Props
   }
 
   function progressLabel(): string {
-    if (!progress) return "Starting…"
-    if (progress.phase === "extracting") return "Extracting rules from document…"
+    if (!progress) return t("autopilot.pill.starting")
+    if (progress.phase === "extracting") return t("rules.importDialog.extractingRules")
     const { candidateCount, structuredCount } = progress
-    return `Structuring ${structuredCount} / ${candidateCount} rules…`
+    return t("rules.importDialog.structuring", { structured: structuredCount, candidates: candidateCount })
   }
 
   return (
@@ -251,8 +254,8 @@ export function RuleImportDialog({ completionSettings, onAdd, projectId }: Props
       <AppTooltip
         content={
           isConfigured
-            ? "Import rules from a document"
-            : "Configure LLM in settings first"
+            ? t("rules.importDialog.tooltip")
+            : t("rules.importDialog.tooltipUnconfigured")
         }
       >
         {/* Span wrapper so the tooltip still receives hover when the button is disabled. */}
@@ -267,7 +270,7 @@ export function RuleImportDialog({ completionSettings, onAdd, projectId }: Props
             }
           >
             <Upload className="me-1 h-3.5 w-3.5" />
-            Import from doc
+            {t("rules.importDialog.triggerButton")}
           </DialogTrigger>
         </span>
       </AppTooltip>
@@ -276,17 +279,15 @@ export function RuleImportDialog({ completionSettings, onAdd, projectId }: Props
         <DialogHeader>
           <DialogTitle>
             {stage === "review"
-              ? `Review ${drafts.length} extracted rule${drafts.length !== 1 ? "s" : ""}`
-              : "Import rules from document"}
+              ? t("rules.importDialog.reviewTitle", { count: drafts.length })
+              : t("rules.importDialog.title")}
           </DialogTitle>
         </DialogHeader>
 
         {stage === "idle" && (
           <div className="space-y-4">
             <p className="text-sm text-muted-foreground">
-              Drop a style guide, glossary, or translation guidelines document and the
-              LLM will extract structured rules you can review and accept.
-              Supports plain text and Markdown (max 200 KB) or PDF/DOCX (max 2 MB).
+              {t("rules.importDialog.description")}
             </p>
 
             {/* Drop zone */}
@@ -302,14 +303,22 @@ export function RuleImportDialog({ completionSettings, onAdd, projectId }: Props
             >
               <Upload className="h-8 w-8 text-muted-foreground" />
               <p className="text-sm text-muted-foreground text-center">
-                Drop a <strong>.txt</strong>, <strong>.md</strong>, <strong>.pdf</strong>, or <strong>.docx</strong> file here
+                <RichMessage
+                  k="rules.importDialog.dropZoneText"
+                  values={{
+                    txt: <strong>.txt</strong>,
+                    md: <strong>.md</strong>,
+                    pdf: <strong>.pdf</strong>,
+                    docx: <strong>.docx</strong>,
+                  }}
+                />
               </p>
               <Button
                 variant="outline"
                 size="sm"
                 onClick={() => fileInputRef.current?.click()}
               >
-                Browse file
+                {t("rules.importDialog.browseButton")}
               </Button>
               <input
                 ref={fileInputRef}
@@ -327,10 +336,10 @@ export function RuleImportDialog({ completionSettings, onAdd, projectId }: Props
 
             {/* Paste zone */}
             <div className="space-y-1">
-              <p className="text-xs text-muted-foreground">Or paste document text:</p>
+              <p className="text-xs text-muted-foreground">{t("rules.importDialog.pasteZoneLabel")}</p>
               <Textarea
                 className="min-h-[80px] font-mono resize-y"
-                placeholder="Paste text here and it will be processed automatically…"
+                placeholder={t("rules.importDialog.pastePlaceholder")}
                 onPaste={handlePaste}
                 readOnly={false}
                 rows={4}
@@ -340,7 +349,7 @@ export function RuleImportDialog({ completionSettings, onAdd, projectId }: Props
             {error && <p className="text-sm text-destructive">{error}</p>}
             {!isConfigured && (
               <p className="text-xs text-muted-foreground">
-                Configure your LLM endpoint in project settings first.
+                {t("rules.importDialog.configureLlmFirst")}
               </p>
             )}
           </div>
@@ -352,7 +361,10 @@ export function RuleImportDialog({ completionSettings, onAdd, projectId }: Props
             <p className="text-sm text-muted-foreground">{progressLabel()}</p>
             {progress && progress.phase === "structuring" && progress.candidateCount > 0 && (
               <p className="text-xs text-muted-foreground">
-                {progress.structuredCount} of {progress.candidateCount} candidates processed
+                {t("rules.importDialog.candidatesProcessed", {
+                  structured: progress.structuredCount,
+                  candidates: progress.candidateCount,
+                })}
               </p>
             )}
           </div>

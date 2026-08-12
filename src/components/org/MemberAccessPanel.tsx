@@ -9,6 +9,7 @@ import { RoleLevelLabel } from "@/components/RoleLabel"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { denialMessage } from "@/lib/permissions/denial"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 /**
  * AD-12 effective-access panel for one org member. Expands to show, per project,
@@ -165,6 +166,7 @@ function AccessProjectRow({
   callerOrgRoleLevel: number | null
   onRevokeDirect: () => void
 }) {
+  const t = useT()
   const otherPaths = [
     ...p.groups.map((g) => `team "${g.name}"`),
     ...(p.org != null ? ["org role"] : []),
@@ -203,7 +205,7 @@ function AccessProjectRow({
       <div className="mt-1.5 flex flex-wrap items-center gap-2">
         {p.direct != null && (
           <AppTooltip
-            content={!canRevoke ? denialMessage(ROLE.MAINTAINER, callerOrgRoleLevel) : undefined}
+            content={!canRevoke ? denialMessage(t, ROLE.MAINTAINER, callerOrgRoleLevel) : undefined}
             disabled={canRevoke}
           >
             <button

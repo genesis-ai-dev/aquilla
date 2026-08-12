@@ -14,8 +14,7 @@ import {
   ROLE,
   PROJECT_ROLE_OPTIONS,
   LINK_ROLE_OPTIONS,
-  roleName,
-  roleDisplayText,
+  resolveRoleName,
   type RoleLevel,
 } from "@/lib/frontier/roles"
 import { addProjectMember, lookupUser } from "@/lib/frontier/members"
@@ -24,6 +23,7 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { toUserFacingError } from "@/lib/errors/user-error"
 import { UsernameTypeahead, type RecipientValue } from "@/components/UsernameTypeahead"
 import { RoleLabel } from "@/components/RoleLabel"
+import { useT } from "@/lib/i18n/I18nProvider"
 import type { CloudProjectSummary } from "@/lib/sync/cloud-projects"
 
 interface MultiProjectInviteDialogProps {
@@ -62,6 +62,7 @@ export function MultiProjectInviteDialog({
   projects,
   onSuccess,
 }: MultiProjectInviteDialogProps) {
+  const t = useT()
   const { session } = useFrontierSession()
   const [recipient, setRecipient] = useState<RecipientValue>({
     mode: "username",
@@ -298,7 +299,7 @@ export function MultiProjectInviteDialog({
                           <Select
                             items={roleChoices.map((r) => ({
                               value: String(r.level),
-                              label: roleDisplayText(r.name),
+                              label: resolveRoleName(t, r.name),
                             }))}
                             value={String(selections[p.id])}
                             onValueChange={(v) =>
@@ -346,7 +347,7 @@ export function MultiProjectInviteDialog({
                   <>
                     {" "}— roles:{" "}
                     {[...new Set(selectedIds.map((id) => selections[id]!))]
-                      .map((lvl) => roleDisplayText(roleName(lvl)))
+                      .map((lvl) => resolveRoleName(t, lvl))
                       .join(", ")}
                   </>
                 )}

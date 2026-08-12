@@ -11,7 +11,14 @@
 import { describe, it, expect, vi } from "vitest"
 import { render } from "@testing-library/react"
 import { ValidationSettingsSection } from "./ValidationSettingsSection"
-import { roleDisplayText, roleName } from "@/lib/frontier/roles"
+import { resolveRoleName } from "@/lib/frontier/roles"
+import { translate } from "@/lib/i18n/translate"
+import type { DenialT } from "@/lib/permissions/denial"
+
+// Real English resolution — this component renders without an I18nProvider
+// (useT() falls back to the English catalog), so this asserts against the
+// same source the component actually resolves.
+const t: DenialT = (key, vars) => translate(undefined, key, vars)
 
 function renderFloor(validationRoleFloor: "reviewer" | "project_lead" | "maintainer") {
   return render(
@@ -36,18 +43,18 @@ describe("ValidationSettingsSection — validator-role taxonomy (AQU-352)", () =
   it("shows the capitalized canonical role name for project_lead", () => {
     const { container } = renderFloor("project_lead")
     const text = floorValueText(container)
-    expect(text).toContain(roleDisplayText(roleName(500))) // "Project Lead"
+    expect(text).toContain(resolveRoleName(t, 500)) // "Project lead"
   })
 
   it("shows 'Reviewer' without a '(default)' suffix baked into the label", () => {
     const { container } = renderFloor("reviewer")
     const text = floorValueText(container)
-    expect(text).toContain(roleDisplayText(roleName(300))) // "Reviewer"
+    expect(text).toContain(resolveRoleName(t, 300)) // "Reviewer"
     expect(text).not.toMatch(/\(default\)/)
   })
 
   it("shows the capitalized canonical name for maintainer", () => {
     const { container } = renderFloor("maintainer")
-    expect(floorValueText(container)).toContain(roleDisplayText(roleName(600))) // "Maintainer"
+    expect(floorValueText(container)).toContain(resolveRoleName(t, 600)) // "Maintainer"
   })
 })

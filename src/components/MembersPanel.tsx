@@ -8,7 +8,8 @@ import {
 } from "@/components/ui/select";
 import { formatRelativeTime, isStale } from "@/lib/time/relative";
 import { RoleLabel } from "@/components/RoleLabel";
-import { roleDisplayText } from "@/lib/frontier/roles";
+import { resolveRoleName } from "@/lib/frontier/roles";
+import { useT } from "@/lib/i18n/I18nProvider";
 import { MemberMultiAddRow, type MemberAddOutcome } from "@/components/MemberMultiAddRow";
 import type { UserSearchResult } from "@/hooks/useUserSearch";
 
@@ -58,7 +59,11 @@ export interface MembersPanelMember {
 export interface MembersPanelRoleOption {
   level: number;
   name: string;
-  description: string;
+  // No `description` field — MembersPanel never renders one. (It used to be
+  // declared here even though unused; dropped in AQU-832 wave 3/WS-08 so this
+  // interface doesn't force every caller — including roles.ts's `RoleOption`,
+  // which now carries `descriptionKey` instead of a plain string — to shim a
+  // field nothing reads.)
 }
 
 interface MembersPanelProps {
@@ -119,6 +124,7 @@ export function MembersPanel({
   // AQU-553: the scopes editor is shown only when project context is supplied
   // AND the caller is a lead+ (500). Leads themselves are never scopable, so
   // per-row the editor is further gated on the member being below 500.
+  const t = useT();
   const canManageScopes =
     scopeConfig != null && callerMaxRole >= SCOPE_MANAGE_MIN_ROLE;
 
@@ -165,8 +171,8 @@ export function MembersPanel({
                       // renders the role name instead of the raw level.
                       ...(grantableRoles.some((r) => r.level === m.roleLevel)
                         ? []
-                        : [{ value: String(m.roleLevel), label: roleDisplayText(m.roleName) }]),
-                      ...grantableRoles.map((r) => ({ value: String(r.level), label: roleDisplayText(r.name) })),
+                        : [{ value: String(m.roleLevel), label: resolveRoleName(t, m.roleName) }]),
+                      ...grantableRoles.map((r) => ({ value: String(r.level), label: resolveRoleName(t, r.name) })),
                     ]}
                     value={String(m.roleLevel)}
                     onValueChange={(v) => onChangeRole(m.username, parseInt(v ?? "", 10))}

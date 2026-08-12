@@ -44,11 +44,11 @@ import {
   ROLE,
   LINK_ROLE_OPTIONS,
   PROJECT_ROLE_OPTIONS,
-  humanRoleName,
-  roleDisplayText,
+  resolveRoleName,
 } from "@/lib/frontier/roles"
 import { ConfirmActionDialog } from "@/components/ConfirmActionDialog"
 import { RoleLabel } from "@/components/RoleLabel"
+import { useT } from "@/lib/i18n/I18nProvider"
 import type { ProjectMember } from "@/lib/frontier/members"
 import { toUserFacingError } from "@/lib/errors/user-error"
 
@@ -159,6 +159,7 @@ export function MembersTab({
   /** Layout wrapper classes; override when embedding outside the members page. */
   className?: string
 }) {
+  const t = useT()
   const { session } = useFrontierSession()
   const { members, isLoading, error, rosterHidden, refresh, add, addMany, remove } = useProjectMembers(projectId)
   const callerMaxRole = ROLE.MAINTAINER
@@ -277,10 +278,10 @@ export function MembersTab({
                 // role name instead of the raw level.
                 ...(grantableRoles.some((r) => r.level === m.role.level)
                   ? []
-                  : [{ value: String(m.role.level), label: roleDisplayText(m.role.name) }]),
+                  : [{ value: String(m.role.level), label: resolveRoleName(t, m.role.name) }]),
                 ...grantableRoles.map((r) => ({
                   value: String(r.level),
-                  label: roleDisplayText(r.name),
+                  label: resolveRoleName(t, r.name),
                 })),
               ]}
               value={String(m.role.level)}
@@ -489,7 +490,7 @@ export function MembersTab({
         title="Remove member"
         description={
           removeTarget
-            ? `Remove ${removeTarget.username}'s direct ${humanRoleName(removeTarget.role.level)} access to this project? Any access via org, team, or creator status is unaffected — use "Revoke all" to review every path.`
+            ? `Remove ${removeTarget.username}'s direct ${resolveRoleName(t, removeTarget.role.level)} access to this project? Any access via org, team, or creator status is unaffected — use "Revoke all" to review every path.`
             : ""
         }
         confirmLabel="Remove"
@@ -675,6 +676,7 @@ function RevokeAllDialog({
 // ──────────────────────────────────────────────────────────────────────────
 
 function InviteLinkTab({ projectId }: { projectId: string }) {
+  const t = useT()
   const { session } = useFrontierSession()
   const [inviteRole, setInviteRole] = useState<number>(DEFAULT_INVITE_ROLE)
   const [inviteEmail, setInviteEmail] = useState<string>("")
@@ -761,7 +763,10 @@ function InviteLinkTab({ projectId }: { projectId: string }) {
         {copied && <p className="text-xs text-green-600">Copied!</p>}
         <p className="text-[10px] text-muted-foreground">
           The recipient signs in (or signs up) and is added as{" "}
-          {LINK_ROLE_OPTIONS.find((o) => o.level === inviteRole)?.name ?? "a member"}.
+          {(() => {
+            const opt = LINK_ROLE_OPTIONS.find((o) => o.level === inviteRole)
+            return opt ? resolveRoleName(t, opt.name) : "a member"
+          })()}.
           To revoke later, use the Members tab to remove them.
         </p>
         <Button size="sm" variant="outline" onClick={reset} className="w-full">
@@ -785,7 +790,7 @@ function InviteLinkTab({ projectId }: { projectId: string }) {
           <Select
             items={LINK_ROLE_OPTIONS.map((opt) => ({
               value: String(opt.level),
-              label: roleDisplayText(opt.name),
+              label: resolveRoleName(t, opt.name),
             }))}
             value={String(inviteRole)}
             onValueChange={(v) => setInviteRole(Number(v ?? ""))}
@@ -806,7 +811,10 @@ function InviteLinkTab({ projectId }: { projectId: string }) {
           </Select>
           <p className="text-[10px] text-muted-foreground">
             {session?.jwt
-              ? LINK_ROLE_OPTIONS.find((o) => o.level === inviteRole)?.description
+              ? (() => {
+                  const opt = LINK_ROLE_OPTIONS.find((o) => o.level === inviteRole)
+                  return opt ? t(opt.descriptionKey) : ""
+                })()
               : "Sign in to create an invite link"}
           </p>
         </div>
@@ -920,13 +928,14 @@ function GrantPathRow({
   level: number
   removable: boolean
 }) {
+  const t = useT()
   return (
     <div className="flex items-center gap-2 text-xs">
       <span className={cn("font-medium capitalize", removable ? "text-foreground" : "text-muted-foreground")}>
         {source}
       </span>
       {/* Role LABEL only — numeric levels are internal (FRO-368). */}
-      <span className="text-muted-foreground">→ {humanRoleName(level)}</span>
+      <span className="text-muted-foreground">→ {resolveRoleName(t, level)}</span>
       {removable ? (
         <span className="text-xs text-destructive/70">will be removed</span>
       ) : (

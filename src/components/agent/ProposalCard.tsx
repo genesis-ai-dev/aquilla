@@ -30,6 +30,7 @@ import { applyStagedEvents, type ApplyContext } from "@/lib/agent/apply"
 import { ValidationQueueCard } from "./cards/ValidationQueueCard"
 import { isValidationProposal } from "./cards/registry"
 import { canApply, isSupportedApplyKind } from "@/lib/agent/role-floors"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 // ── Lint ───────────────────────────────────────────────────────────────────
 
@@ -211,6 +212,7 @@ export function ProposalCard({
   applyContext,
   onApplied,
 }: ProposalCardProps) {
+  const t = useT()
   // Tier 2 (testimony): all-validation proposals get the per-item queue —
   // one Confirm per cell, no apply-all (agent-complete design §3/§6).
   // Before any hooks: a proposal's composition never changes, but React
@@ -221,7 +223,7 @@ export function ProposalCard({
         proposal={proposal}
         applyContext={applyContext}
         onApplied={onApplied}
-        canValidate={canApply("cell.validate", roleLevel).allowed}
+        canValidate={canApply(t, "cell.validate", roleLevel).allowed}
       />
     )
   }
@@ -237,6 +239,7 @@ function StagedProposalCard({
   applyContext,
   onApplied,
 }: ProposalCardProps) {
+  const t = useT()
   const [state, setState] = useState<CardState>("idle")
   const [applyError, setApplyError] = useState<string | null>(null)
 
@@ -257,11 +260,11 @@ function StagedProposalCard({
   const hasUnsupported = proposal.events.some((ev) => !isSupportedApplyKind(ev.kind))
   const roleBlock = useMemo(() => {
     for (const ev of proposal.events) {
-      const verdict = canApply(ev.kind, roleLevel)
+      const verdict = canApply(t, ev.kind, roleLevel)
       if (!verdict.allowed) return verdict
     }
     return null
-  }, [proposal.events, roleLevel])
+  }, [proposal.events, roleLevel, t])
 
   const blockedReason = hasUnsupported
     ? "Contains event kinds this app can't apply yet"

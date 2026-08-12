@@ -74,7 +74,7 @@ export function CommentsDrawer({ project, cell, liveComments, onClose, onNewThre
   const canResolve = roleLevel !== null ? cloudCanResolve : permissions.canResolveComments
   // Build a helpful denial message for viewers who cannot comment.
   const commentDenialReason = !canComment
-    ? denialMessage(ROLE.COMMENTER, roleLevel)
+    ? denialMessage(t, ROLE.COMMENTER, roleLevel)
     : null
 
   function handleCreate() {

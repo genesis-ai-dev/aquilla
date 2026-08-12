@@ -36,7 +36,8 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { RoleLabel } from "@/components/RoleLabel"
-import { ROLE, roleName, roleDisplayText } from "@/lib/frontier/roles"
+import { ROLE, roleName, resolveRoleName } from "@/lib/frontier/roles"
+import { useT } from "@/lib/i18n/I18nProvider"
 import { useOrgMembers } from "@/hooks/useOrg"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
@@ -69,6 +70,7 @@ export function StaffLanePopover({
   trigger,
   onDone,
 }: StaffLanePopoverProps) {
+  const t = useT()
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
   const { members: orgMembers } = useOrgMembers(orgId)
@@ -145,7 +147,7 @@ export function StaffLanePopover({
       }
       await refreshProjectMembers()
       setPhase("done")
-      setMessage(`${selected.username} is now ${roleDisplayText(roleName(role))} on ${laneLabel}.`)
+      setMessage(`${selected.username} is now ${resolveRoleName(t, role)} on ${laneLabel}.`)
       onDone?.()
     } catch (err) {
       setPhase("error")
@@ -276,7 +278,7 @@ export function StaffLanePopover({
             <Select
               items={STAFFABLE_ROLES.map((level) => ({
                 value: String(level),
-                label: roleDisplayText(roleName(level)),
+                label: resolveRoleName(t, level),
               }))}
               value={String(role)}
               onValueChange={(v) => setRole(parseInt(v ?? String(ROLE.REVIEWER), 10))}

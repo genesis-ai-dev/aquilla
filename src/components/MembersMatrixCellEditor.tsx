@@ -17,6 +17,7 @@ import {
   roleName,
   type RoleLevel,
 } from "@/lib/frontier/roles"
+import { useT } from "@/lib/i18n/I18nProvider"
 import { addProjectMember, removeProjectMember } from "@/lib/frontier/members"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import type { MatrixCell } from "@/hooks/useProjectsMembersMatrix"
@@ -263,6 +264,7 @@ function RolePickerBody({
   status: Status
   errorMsg: string | null
 }) {
+  const t = useT()
   return (
     <div className="space-y-1.5">
       <div className="px-1 pb-1 text-xs font-medium border-b">{title}</div>
@@ -285,7 +287,7 @@ function RolePickerBody({
                   <span className="ml-1.5 text-[9px] text-muted-foreground">current</span>
                 )}
               </span>
-              <span className="text-[10px] text-muted-foreground">{opt.description}</span>
+              <span className="text-[10px] text-muted-foreground">{t(opt.descriptionKey)}</span>
             </button>
           )
         })}

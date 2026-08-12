@@ -24,22 +24,33 @@ import type { CellData } from "@/hooks/useCells"
 const MIN_DUR_SEC = 0.2
 
 /**
- * Below these widths a chip stops rendering text. (AQU-646 round 9)
+ * Below this a chip renders no text at all — no label, no clock, no remove
+ * button. It is a plain block, which is what it should be at that size.
+ * (AQU-646 round 9)
  *
- * Fully zoomed out a chip is 10–20px wide, and it was still rendering its label
- * AND its clock range: every chip a column of one or two truncated glyphs, and
- * the source band's time ranges reading as if they bled across their
- * neighbours. Sam's word for the result was "rendering issues", and he was
- * being generous.
- *
- * Two thresholds because the two texts fail at different widths. The clock line
- * ("0:41.8–0:43.0") needs ~85px and has no `truncate`, so it is the first to
- * turn to mush; the label has `truncate` and survives down to about 40px, below
- * which even an ellipsis is noise. Under 40 the card is what it should have
- * been all along at that zoom: a plain block.
+ * ONE threshold, not two. The first cut staggered it — the clock left at 72px
+ * and the label at 40 — because the clock has no `truncate` and slices
+ * mid-glyph while the label degrades politely to an ellipsis. Measured against
+ * the real episode that was far too eager: 1,064 cues with a median of 1.67s,
+ * and at Sam's working zoom 30% of them lost their text and 69% lost their
+ * timing, on chips that were perfectly readable. Sam asked for both at 40, and
+ * the honest way to give him that is to make the clock degrade the same way the
+ * label already does (see `truncate` on the meta row below) rather than to keep
+ * hiding it early to hide a rendering flaw.
  */
-export const MIN_CARD_META_PX = 72
-const MIN_CARD_TEXT_PX = 40
+export const MIN_CARD_TEXT_PX = 40
+
+/**
+ * Below this a chip drops its horizontal padding.
+ *
+ * SEPARATE from the text threshold on purpose, though both were one number for
+ * a while. px-2.5 plus two 1px borders is 22px of chrome, and under border-box
+ * that is a hard FLOOR on the rendered width — a chip narrower than that gets
+ * drawn too wide and spills into its neighbour. So this gate is load-bearing
+ * for geometry, not decoration, and it must never be lowered past 22 no matter
+ * where the text threshold moves.
+ */
+const MIN_CARD_PADDING_PX = 24
 
 /**
  * The colored stripe down a chip's left edge. A shared constant because the
@@ -185,7 +196,6 @@ export function TimelineCard({
   // shows its text — you are looking straight at it, and its own drag chip is
   // the readout that matters.
   const showsText = width >= MIN_CARD_TEXT_PX || Boolean(drag)
-  const showsMeta = width >= MIN_CARD_META_PX || Boolean(drag)
   // Grips stay while a drag is live, or a resize would cancel itself the moment
   // it dragged the chip below the threshold.
   const showsGrips = canRetime && (width >= MIN_CARD_GRIP_PX || Boolean(drag))
@@ -276,7 +286,7 @@ export function TimelineCard({
         // the chip was positioned correctly and simply drawn too big. Keyed on
         // width alone rather than `showsText`, so a chip being dragged cannot
         // re-inflate itself while you are placing it.
-        width >= MIN_CARD_TEXT_PX ? "px-2.5" : "px-0",
+        width >= MIN_CARD_PADDING_PX ? "px-2.5" : "px-0",
         // SUB-11: the drag chip renders above the card bounds, so overflow can't
         // be hidden mid-drag; inner text stays contained by its own `truncate`s.
         drag ? "z-20 overflow-visible" : "overflow-hidden",
@@ -355,8 +365,12 @@ export function TimelineCard({
         </span>
       )}
       {showsText && <div className="truncate pl-1 text-[11px] leading-tight">{label}</div>}
-      {showsMeta && (
-      <div className="flex items-center gap-1.5 pl-1 text-[9px] text-muted-foreground">
+      {showsText && (
+      // min-w-0 + truncate: the clock now shrinks to an ellipsis like the label
+      // above it instead of wrapping onto extra lines and being sliced
+      // mid-glyph by the card's overflow — which is what made narrow chips look
+      // like garbage and what the old 72px threshold was really hiding.
+      <div className="flex min-w-0 items-center gap-1.5 pl-1 text-[9px] text-muted-foreground">
         {isDialogue && cell.cameraState && (
           <span
             className={cn(
@@ -370,7 +384,7 @@ export function TimelineCard({
           </span>
         )}
         {castName && <span className="font-medium text-foreground/80">{castName}</span>}
-        <span className="font-mono tabular-nums">
+        <span className="truncate font-mono tabular-nums">
           {/* SUB-11: while dragging, show the live preview bounds (ms) rather
               than the stale committed props. */}
           {drag

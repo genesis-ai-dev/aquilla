@@ -16,7 +16,7 @@ import { memo } from "react"
 import { secToPx, isVisible, chipRadiusPx } from "@/lib/timeline/scale"
 import { MIN_ADDABLE_SPAN_SEC } from "@/lib/timeline/lane-timing"
 import { fmtClock } from "./format"
-import { MIN_CARD_META_PX, TimelineCard } from "./TimelineCard"
+import { MIN_CARD_TEXT_PX, TimelineCard } from "./TimelineCard"
 import type { CellData } from "@/hooks/useCells"
 import type { SourceRegionMap } from "@/lib/timeline/source-regions"
 
@@ -106,9 +106,9 @@ function SourceRegionLaneImpl({
               the `bottom-1` anchor pushes those lines up out of the 46px chip
               where overflow-hidden slices them mid-glyph. Fully zoomed out that
               read as time ranges bleeding across neighbouring chips. Same
-              threshold as a card's own clock line — it is the same question,
-              "is there room for a clock string here". */}
-          {widthPx >= MIN_CARD_META_PX && (
+              threshold as a card's own text — one number for "is there room
+              to say anything here", across every chip on the timeline. */}
+          {widthPx >= MIN_CARD_TEXT_PX && (
             <span className="absolute bottom-1 left-2.5 font-mono text-[9px] tabular-nums whitespace-nowrap text-muted-foreground">
               {fmtClock(g.startSec, true)}–{fmtClock(g.endSec, true)}
             </span>

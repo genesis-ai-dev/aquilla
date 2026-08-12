@@ -358,12 +358,25 @@ describe("TimelineCard", () => {
       expect(screen.getByTestId("tl-card-c1-remove")).toBeInTheDocument()
     })
 
-    it("below the meta threshold the CLOCK goes but the label stays", () => {
-      // 60px: the label truncates gracefully, the clock string (~85px) would not.
+    it("label and clock live or die together — ONE threshold, not two", () => {
+      // The first cut staggered them (clock at 72px, label at 40) because the
+      // clock had no truncate and sliced mid-glyph. Measured against the real
+      // episode that hid the timing on 69% of cues at Sam's working zoom. The
+      // clock now truncates like the label, so one number covers both.
       atWidth(60)
       const card = screen.getByTestId("tl-card-c1")
       expect(card).toHaveTextContent("Go get the man")
-      expect(card.textContent).not.toContain("–")
+      expect(card.textContent).toContain("–")
+    })
+
+    it("the clock truncates rather than wrapping or slicing", () => {
+      // What makes the single threshold safe: at any width the clock stays on
+      // one line and ends in an ellipsis instead of wrapping onto extra lines
+      // and being cut mid-glyph by the card's overflow.
+      atWidth(60)
+      const clock = screen.getByTestId("tl-card-c1").querySelector("span.font-mono") as HTMLElement
+      expect(clock.className).toContain("truncate")
+      expect(clock.parentElement!.className).toContain("min-w-0")
     })
 
     it("below the text threshold the card is a plain block", () => {
@@ -423,6 +436,10 @@ describe("TimelineCard", () => {
       expect(cls(200)).toContain("px-2.5")
       expect(cls(20)).toContain("px-0")
       expect(cls(20)).not.toContain("px-2.5")
+      // Its own constant (24px), deliberately NOT the text threshold: this gate
+      // is load-bearing for geometry, so moving the text threshold must not be
+      // able to drag it under the 22px overlap floor.
+      expect(cls(30)).toContain("px-2.5")
     })
 
     it("the left grip clears the accent stripe instead of sitting flush to it", () => {

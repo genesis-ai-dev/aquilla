@@ -6,6 +6,7 @@
 
 import { formatCredits } from "@/lib/credits"
 import { type Rail, RAIL_META, RAIL_ORDER } from "./rails"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 /**
  * One bar that does double duty: total fill = spend/cap (how full), and the
@@ -54,6 +55,7 @@ export function RailLegend({
   byRail: Record<string, number>
   chipTestId?: (rail: Rail) => string | undefined
 }) {
+  const t = useT()
   return (
     <div className="flex flex-wrap gap-x-3 gap-y-1">
       {RAIL_ORDER.map((rail) => (
@@ -63,7 +65,7 @@ export function RailLegend({
           className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground"
         >
           <span className={`h-1.5 w-1.5 rounded-full ${RAIL_META[rail].dot}`} />
-          {RAIL_META[rail].label}
+          {t(RAIL_META[rail].labelKey)}
           <span className="font-medium tabular-nums text-foreground">
             {formatCredits(byRail[rail] ?? 0)}
           </span>

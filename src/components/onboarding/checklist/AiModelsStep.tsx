@@ -18,35 +18,39 @@ import type { ProjectRecord, ProjectTtsSettings, TtsProvider } from "@/lib/parse
 import { DEFAULT_MMS_LANGUAGE, DEFAULT_TTS_PROVIDER } from "@/lib/audio/tts-providers"
 import { cn } from "@/lib/utils"
 import { isValidGeminiKey, describeModelDownload } from "./ai-setup-utils"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 type VoiceChoice = "none" | TtsProvider
 
+/** MessageKey, without importing from the generated catalog — see LeftDock.tsx. */
+type ModelMessageKey = Parameters<ReturnType<typeof useT>>[0]
+
 interface ModelMeta {
   id: "whisper" | "kokoro" | "mms"
-  label: string
+  labelKey: ModelMessageKey
   sizeMb: number
-  blurb: string
+  blurbKey: ModelMessageKey
 }
 
 const TRANSCRIBE_MODEL: ModelMeta = {
   id: "whisper",
-  label: "Whisper transcription",
+  labelKey: "onboarding.checklist.aiModels.whisper.label",
   sizeMb: 140,
-  blurb: "Word-level timing for recorded audio. Runs locally; no network after download.",
+  blurbKey: "onboarding.checklist.aiModels.whisper.blurb",
 }
 
 const KOKORO_MODEL: ModelMeta = {
   id: "kokoro",
-  label: "Kokoro voices",
+  labelKey: "onboarding.checklist.aiModels.kokoro.label",
   sizeMb: 80,
-  blurb: "English voices that run in the browser after a one-time download.",
+  blurbKey: "onboarding.checklist.aiModels.kokoro.blurb",
 }
 
 const MMS_MODEL: ModelMeta = {
   id: "mms",
-  label: "MMS multilingual voices",
+  labelKey: "onboarding.checklist.aiModels.mms.label",
   sizeMb: 130,
-  blurb: "Local voices for many languages — one language model per download.",
+  blurbKey: "onboarding.checklist.aiModels.mms.blurb",
 }
 
 interface AiModelsStepProps {
@@ -55,6 +59,7 @@ interface AiModelsStepProps {
 }
 
 export function AiModelsStep({ project, onUpdated }: AiModelsStepProps) {
+  const t = useT()
   const whisper = useModelStatus("whisper")
   const kokoro = useModelStatus("kokoro")
   const mms = useModelStatus("mms")
@@ -130,11 +135,11 @@ export function AiModelsStep({ project, onUpdated }: AiModelsStepProps) {
   function commitGeminiKey() {
     const k = geminiKey.trim()
     if (!k) {
-      setGeminiError("Enter your Gemini API key, or choose “None — set up later” above.")
+      setGeminiError(t("onboarding.checklist.aiModels.geminiKeyMissing"))
       return
     }
     if (!isValidGeminiKey(k)) {
-      setGeminiError("That doesn’t look like a Gemini key — they start with “AIza”. Double-check and paste again.")
+      setGeminiError(t("onboarding.checklist.aiModels.geminiKeyInvalid"))
       return
     }
     setGeminiError(null)
@@ -186,8 +191,7 @@ export function AiModelsStep({ project, onUpdated }: AiModelsStepProps) {
   return (
     <div className="space-y-3">
       <p className="text-xs text-muted-foreground">
-        AI features are optional. Pick what you want — nothing downloads until
-        you tap the button.
+        {t("onboarding.checklist.aiModels.intro")}
       </p>
 
       {!expanded ? (
@@ -197,9 +201,9 @@ export function AiModelsStep({ project, onUpdated }: AiModelsStepProps) {
           className="flex w-full items-center justify-between rounded-lg border bg-muted/20 px-3 py-2 text-start text-sm hover:bg-accent/40"
         >
           <span className="flex flex-col">
-            <span className="font-medium">Set up transcription & voice</span>
+            <span className="font-medium">{t("onboarding.checklist.aiModels.expandTitle")}</span>
             <span className="text-xs text-muted-foreground">
-              Click to choose specific features
+              {t("onboarding.checklist.aiModels.expandHint")}
             </span>
           </span>
           <ChevronDown className="h-4 w-4 text-muted-foreground" />
@@ -208,7 +212,7 @@ export function AiModelsStep({ project, onUpdated }: AiModelsStepProps) {
         <>
           <fieldset className="space-y-1.5 rounded-lg border p-3">
             <legend className="px-1 text-xs font-medium text-muted-foreground">
-              Transcription
+              {t("onboarding.checklist.aiModels.transcriptionLegend")}
             </legend>
             <ModelCheckRow
               checked={wantWhisper}
@@ -220,7 +224,7 @@ export function AiModelsStep({ project, onUpdated }: AiModelsStepProps) {
 
           <fieldset className="space-y-1.5 rounded-lg border p-3">
             <legend className="px-1 text-xs font-medium text-muted-foreground">
-              Voice generation
+              {t("onboarding.checklist.aiModels.voiceLegend")}
             </legend>
             <RadioGroup
               value={voiceChoice}
@@ -229,20 +233,20 @@ export function AiModelsStep({ project, onUpdated }: AiModelsStepProps) {
             >
               <RadioRow
                 value="none"
-                label="None — set up later"
-                hint="Skip voice generation entirely. You can come back from project settings."
+                label={t("onboarding.checklist.aiModels.noneLabel")}
+                hint={t("onboarding.checklist.aiModels.noneHint")}
               />
               <RadioRow
                 value="gemini"
-                label="Gemini (cloud, BYOK)"
-                hint="Highest quality, promptable voices. Needs a Google AI Studio API key. No local download."
+                label={t("onboarding.checklist.aiModels.geminiLabel")}
+                hint={t("onboarding.checklist.aiModels.geminiHint")}
               />
               {voiceChoice === "gemini" && (
                 hasSavedGeminiKey && !editingKey ? (
                   <div className="ms-6 flex items-center justify-between gap-2 rounded-md bg-muted/30 p-2">
                     <span className="inline-flex items-center gap-1.5 text-xs text-emerald-700 dark:text-emerald-400">
                       <CheckCircle2 className="h-3.5 w-3.5" />
-                      Gemini key saved
+                      {t("onboarding.checklist.aiModels.geminiKeySaved")}
                       <span className="font-mono text-muted-foreground">••••{savedGeminiKey.slice(-4)}</span>
                     </span>
                     <Button
@@ -251,13 +255,13 @@ export function AiModelsStep({ project, onUpdated }: AiModelsStepProps) {
                       className="h-6 px-2 text-xs"
                       onClick={() => { setGeminiError(null); setEditingKey(true) }}
                     >
-                      Replace
+                      {t("audio.clone.replaceButton")}
                     </Button>
                   </div>
                 ) : (
                   <div className="ms-6 space-y-1 rounded-md bg-muted/30 p-2">
                     <FieldLabel htmlFor="setup-gemini-tts-key" className="text-xs">
-                      Gemini API key
+                      {t("onboarding.checklist.aiModels.geminiKeyLabel")}
                     </FieldLabel>
                     <div className="flex items-center gap-1.5">
                       <Input
@@ -274,15 +278,14 @@ export function AiModelsStep({ project, onUpdated }: AiModelsStepProps) {
                         className="font-mono text-sm"
                       />
                       <Button size="sm" className="h-8 shrink-0" onClick={commitGeminiKey}>
-                        Save key
+                        {t("onboarding.checklist.aiModels.saveKey")}
                       </Button>
                     </div>
                     {geminiError ? (
                       <p className="text-[10px] text-destructive">{geminiError}</p>
                     ) : (
                       <p className="text-[10px] text-muted-foreground">
-                        Get a key at aistudio.google.com/apikey. Stored locally and sent
-                        directly to Google.
+                        {t("onboarding.checklist.aiModels.geminiKeyHelp")}
                       </p>
                     )}
                   </div>
@@ -305,11 +308,9 @@ export function AiModelsStep({ project, onUpdated }: AiModelsStepProps) {
             <div className="flex items-start gap-2 rounded-md border border-amber-300/60 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-500/30 dark:bg-amber-950/30 dark:text-amber-200">
               <Wifi className="mt-0.5 h-3.5 w-3.5 shrink-0" />
               <div className="space-y-0.5">
-                <div className="font-medium">~{totalSizeMb} MB to download</div>
+                <div className="font-medium">{t("onboarding.checklist.aiModels.downloadNotice", { size: totalSizeMb })}</div>
                 <p className="text-amber-800/90 dark:text-amber-300/80">
-                  Large downloads can take several minutes on slow or metered
-                  connections. The download keeps going in the background — you
-                  can keep working.
+                  {t("onboarding.checklist.aiModels.downloadWarning")}
                 </p>
               </div>
             </div>
@@ -324,23 +325,25 @@ export function AiModelsStep({ project, onUpdated }: AiModelsStepProps) {
           disabled={!expanded || nothingSelected || allReady || anyDownloading}
         >
           {nothingSelected
-            ? "Nothing selected"
+            ? t("onboarding.checklist.aiModels.nothingSelected")
             : allReady
-              ? "Ready"
+              ? t("autopilot.readiness.level.ready")
               : anyDownloading
-                ? "Downloading…"
+                ? t("onboarding.checklist.aiModels.downloadingButton")
                 : voiceChoice === "gemini" && !wantWhisper
-                  ? "Save key"
-                  : `Download${totalSizeMb > 0 ? ` ~${totalSizeMb} MB` : ""}`}
+                  ? t("onboarding.checklist.aiModels.saveKey")
+                  : totalSizeMb > 0
+                    ? t("onboarding.checklist.aiModels.downloadButtonWithSize", { size: totalSizeMb })
+                    : t("onboarding.checklist.aiModels.downloadButton")}
         </Button>
         {anyDownloading && (
           <span className="text-xs text-muted-foreground">
-            You can keep working — this won't block you.
+            {t("onboarding.checklist.aiModels.keepWorking")}
           </span>
         )}
         {allReady && !nothingSelected && (
           <span className="text-xs text-emerald-600 dark:text-emerald-400">
-            Ready to use.
+            {t("onboarding.checklist.aiModels.readyToUse")}
           </span>
         )}
       </div>
@@ -351,7 +354,7 @@ export function AiModelsStep({ project, onUpdated }: AiModelsStepProps) {
         <div className="flex items-center justify-between gap-2 rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground">
           <span className="inline-flex items-center gap-1.5">
             <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
-            Voice &amp; transcription skipped for this project.
+            {t("onboarding.checklist.aiModels.skippedNotice")}
           </span>
           <Button
             variant="ghost"
@@ -359,7 +362,7 @@ export function AiModelsStep({ project, onUpdated }: AiModelsStepProps) {
             className="h-6 px-2 text-xs"
             onClick={() => void setSkipped(false)}
           >
-            Set up anyway
+            {t("onboarding.checklist.aiModels.setUpAnyway")}
           </Button>
         </div>
       ) : (
@@ -368,7 +371,7 @@ export function AiModelsStep({ project, onUpdated }: AiModelsStepProps) {
           onClick={() => void setSkipped(true)}
           className="text-xs text-muted-foreground underline-offset-2 hover:underline"
         >
-          We don’t use voice or transcription — skip this
+          {t("onboarding.checklist.aiModels.skipLink")}
         </button>
       )}
     </div>
@@ -385,6 +388,7 @@ interface ModelCheckRowProps {
 }
 
 function ModelCheckRow({ checked, onChange, meta, status }: ModelCheckRowProps) {
+  const t = useT()
   return (
     <label
       className={cn(
@@ -398,10 +402,10 @@ function ModelCheckRow({ checked, onChange, meta, status }: ModelCheckRowProps) 
       />
       <div className="flex-1">
         <div className="flex items-center gap-2 text-sm">
-          <span className="font-medium">{meta.label}</span>
+          <span className="font-medium">{t(meta.labelKey)}</span>
           <SizeOrStatus meta={meta} status={status} />
         </div>
-        <p className="text-xs text-muted-foreground">{meta.blurb}</p>
+        <p className="text-xs text-muted-foreground">{t(meta.blurbKey)}</p>
         {status.kind === "downloading" && <DownloadBar status={status} sizeMb={meta.sizeMb} />}
         {status.kind === "error" && (
           <p className="mt-0.5 text-xs text-destructive">{status.message}</p>
@@ -436,15 +440,16 @@ interface ModelRadioRowProps {
 }
 
 function ModelRadioRow({ value, meta, status }: ModelRadioRowProps) {
+  const t = useT()
   return (
     <label className="flex items-start gap-2 rounded-md px-1 py-1 hover:bg-accent/40">
       <RadioGroupItem value={value} className="mt-1" />
       <div className="flex-1">
         <div className="flex items-center gap-2 text-sm">
-          <span className="font-medium">{meta.label}</span>
+          <span className="font-medium">{t(meta.labelKey)}</span>
           <SizeOrStatus meta={meta} status={status} />
         </div>
-        <p className="text-xs text-muted-foreground">{meta.blurb}</p>
+        <p className="text-xs text-muted-foreground">{t(meta.blurbKey)}</p>
         {status.kind === "downloading" && <DownloadBar status={status} sizeMb={meta.sizeMb} />}
         {status.kind === "error" && (
           <p className="mt-0.5 text-xs text-destructive">{status.message}</p>
@@ -457,11 +462,12 @@ function ModelRadioRow({ value, meta, status }: ModelRadioRowProps) {
 function SizeOrStatus({
   meta, status,
 }: { meta: ModelMeta; status: ReturnType<typeof useModelStatus> }) {
+  const t = useT()
   if (status.kind === "ready") {
     return (
       <span className="inline-flex items-center gap-0.5 text-[10px] text-emerald-600 dark:text-emerald-400">
         <CheckCircle2 className="h-3 w-3" />
-        Ready
+        {t("autopilot.readiness.level.ready")}
       </span>
     )
   }
@@ -469,7 +475,7 @@ function SizeOrStatus({
     return (
       <span className="inline-flex items-center gap-0.5 text-[10px] text-destructive">
         <AlertCircle className="h-3 w-3" />
-        Failed
+        {t("onboarding.checklist.aiModels.statusFailed")}
       </span>
     )
   }
@@ -478,14 +484,14 @@ function SizeOrStatus({
     return (
       <span className="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground tabular-nums">
         <Spinner className="h-3 w-3" />
-        {pct !== null ? `${pct}%` : "downloading"}
+        {pct !== null ? `${pct}%` : t("onboarding.checklist.aiModels.statusDownloading")}
       </span>
     )
   }
   return (
     <span className="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground">
       <Download className="h-3 w-3" />
-      {meta.sizeMb} MB
+      {t("onboarding.checklist.aiModels.sizeMb", { size: meta.sizeMb })}
     </span>
   )
 }

@@ -19,6 +19,7 @@ import { formatCredits, capUsagePct } from "@/lib/credits"
 import { ROLE } from "@/lib/frontier/roles"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 export interface CreditsDialProps {
   jwt: string
@@ -35,6 +36,7 @@ function ringClass(pct: number): string {
 }
 
 export function CreditsDial({ jwt, orgId, orgRoleLevel }: CreditsDialProps) {
+  const t = useT()
   const [data, setData] = useState<OrgCredits | null>(null)
   const [open, setOpen] = useState(false)
 
@@ -62,7 +64,7 @@ export function CreditsDial({ jwt, orgId, orgRoleLevel }: CreditsDialProps) {
   const r = (12 - stroke) / 2
   const C = 2 * Math.PI * r
 
-  const summary = `Agent credits used today: ${formatCredits(day.agentCredits)}`
+  const summary = t("onboarding.credits.dialSummary", { credits: formatCredits(day.agentCredits) })
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -105,18 +107,18 @@ export function CreditsDial({ jwt, orgId, orgRoleLevel }: CreditsDialProps) {
         </PopoverTrigger>
       </AppTooltip>
       <PopoverContent align="end" className="w-64 p-3 text-xs" data-testid="credits-dial-popover">
-        <p className="mb-2 font-medium">Agent credits</p>
+        <p className="mb-2 font-medium">{t("onboarding.credits.popoverAgentTitle")}</p>
         <div className="space-y-1.5">
-          <DialRow label="Today" used={day.agentCredits} cap={config.agentDailyCap} testId="dial-agent-day" />
-          <DialRow label="This week" used={week.agentCredits} cap={config.agentWeeklyCap} testId="dial-agent-week" />
+          <DialRow label={t("onboarding.timeWindow.today")} used={day.agentCredits} cap={config.agentDailyCap} testId="dial-agent-day" />
+          <DialRow label={t("onboarding.timeWindow.thisWeek")} used={week.agentCredits} cap={config.agentWeeklyCap} testId="dial-agent-week" />
         </div>
-        <p className="mb-1.5 mt-3 font-medium text-muted-foreground">All AI usage (every rail)</p>
+        <p className="mb-1.5 mt-3 font-medium text-muted-foreground">{t("onboarding.credits.popoverAllUsageTitle")}</p>
         <div className="space-y-1.5">
-          <DialRow label="Today" used={day.totalCredits} cap={config.dailyCap} testId="dial-total-day" />
-          <DialRow label="This week" used={week.totalCredits} cap={config.weeklyCap} testId="dial-total-week" />
+          <DialRow label={t("onboarding.timeWindow.today")} used={day.totalCredits} cap={config.dailyCap} testId="dial-total-day" />
+          <DialRow label={t("onboarding.timeWindow.thisWeek")} used={week.totalCredits} cap={config.weeklyCap} testId="dial-total-week" />
         </div>
         <p className="mt-3 text-[10px] text-muted-foreground">
-          {formatCredits(Math.max(0, remaining.agentDaily))} agent credits left today · caps set by your org
+          {t("onboarding.credits.dialFooter", { remaining: formatCredits(Math.max(0, remaining.agentDaily)) })}
         </p>
       </PopoverContent>
     </Popover>

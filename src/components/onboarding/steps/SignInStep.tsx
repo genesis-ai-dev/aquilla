@@ -5,7 +5,8 @@ import { FrontierSignupForm } from "@/components/git-import/FrontierSignupForm"
 import { FrontierForgotPasswordForm } from "@/components/git-import/FrontierForgotPasswordForm"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { devLogin } from "@/lib/frontier/auth"
-import { Check } from "lucide-react"
+import { Check, ChevronLeft } from "lucide-react"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 type Mode = "signup" | "login" | "forgot"
 
@@ -23,6 +24,7 @@ export function SignInStep({
    */
   onLoginComplete?: () => void
 }) {
+  const t = useT()
   const { session } = useFrontierSession()
   // Default new visitors to signup; the loop's "joiner" path is rare here
   // (joiners arrive via invite links, not the onboarding wizard).
@@ -35,13 +37,13 @@ export function SignInStep({
           <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-lg bg-green-100 text-green-600">
             <Check className="h-6 w-6" />
           </div>
-          <h2 className="text-2xl font-semibold">Signed in as {session.username}</h2>
+          <h2 className="text-2xl font-semibold">{t("onboarding.step.signIn.signedInAs", { username: session.username })}</h2>
           <p className="text-sm text-muted-foreground">
-            AI translations, sync, and cloud import are available.
+            {t("onboarding.step.signIn.readyBlurb")}
           </p>
         </div>
         <Button size="lg" onClick={onNext} className="w-full">
-          Continue
+          {t("onboarding.common.continue")}
         </Button>
       </div>
     )
@@ -51,9 +53,9 @@ export function SignInStep({
   const isForgot = mode === "forgot"
 
   const headings: Record<Mode, string> = {
-    signup: "Create your Frontier account",
-    login: "Sign in to Frontier",
-    forgot: "Reset your password",
+    signup: t("onboarding.step.signIn.headingSignup"),
+    login: t("onboarding.step.signIn.headingLogin"),
+    forgot: t("auth.resetPassword.title"),
   }
 
   return (
@@ -61,7 +63,7 @@ export function SignInStep({
       <div className="text-center space-y-2">
         <h2 className="text-2xl font-semibold">{headings[mode]}</h2>
         <p className="text-sm text-muted-foreground">
-          Unlock AI-powered translations, sync across devices, and import projects from the cloud.
+          {t("onboarding.step.signIn.unlockBlurb")}
         </p>
       </div>
 
@@ -78,13 +80,13 @@ export function SignInStep({
 
       {!isForgot && (
         <p className="text-center text-sm text-muted-foreground">
-          {isSignup ? "Already have an account?" : "New to Frontier?"}{" "}
+          {isSignup ? t("auth.join.alreadyHaveAccount") : t("nav.account.newToFrontier")}{" "}
           <button
             type="button"
             onClick={() => setMode(isSignup ? "login" : "signup")}
             className="font-medium text-foreground underline-offset-4 hover:underline"
           >
-            {isSignup ? "Log in" : "Create one"}
+            {isSignup ? t("common.logIn") : t("onboarding.step.signIn.createOne")}
           </button>
         </p>
       )}
@@ -95,7 +97,7 @@ export function SignInStep({
           onClick={onNext}
           className="text-sm text-muted-foreground underline-offset-4 hover:underline"
         >
-          Skip for now
+          {t("onboarding.common.skipForNow")}
         </button>
       </div>
       {import.meta.env.DEV && (
@@ -109,11 +111,12 @@ export function SignInStep({
           }}
           className="w-full"
         >
-          Dev login (skip auth)
+          {t("onboarding.step.signIn.devLogin")}
         </Button>
       )}
       <Button variant="ghost" size="sm" onClick={onBack} className="w-full">
-        ← Back
+        <ChevronLeft className="h-4 w-4 rtl:rotate-180" />
+        {t("common.back")}
       </Button>
     </div>
   )

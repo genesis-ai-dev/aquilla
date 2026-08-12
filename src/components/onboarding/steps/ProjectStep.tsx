@@ -17,6 +17,8 @@ import { isFieldInvalid } from "@/lib/forms/field-state"
 import { requiredString } from "@/lib/forms/schemas"
 import { useSubmitError } from "@/lib/forms/submit-error"
 import type { ProjectRecord } from "@/lib/parsers/types"
+import { ChevronLeft } from "lucide-react"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 const formSchema = z.object({
   name: requiredString("Project name"),
@@ -38,6 +40,7 @@ export function ProjectStep({
   /** When set (Team onboarding), the project is created inside this org. */
   orgId?: number
 }) {
+  const t = useT()
   const { session } = useFrontierSession()
   const { submitError, setSubmitError, clearSubmitError } = useSubmitError()
 
@@ -72,7 +75,7 @@ export function ProjectStep({
         await createLocalProject(project)
         onCreated(project)
       } catch (err) {
-        setSubmitError(err instanceof Error ? err.message : "Failed to create project.")
+        setSubmitError(err instanceof Error ? err.message : t("onboarding.step.project.createFailed"))
       }
     },
   })
@@ -86,18 +89,17 @@ export function ProjectStep({
     return (
       <div className="flex flex-col gap-6">
         <div className="flex flex-col gap-2 text-center">
-          <h2 className="text-2xl font-semibold">Sign in to create a project</h2>
+          <h2 className="text-2xl font-semibold">{t("onboarding.step.project.signInHeading")}</h2>
           <p className="text-sm text-muted-foreground">
-            Projects are stored on the server. You need to be signed in so the
-            project is accessible on all your devices and won't 403 when you
-            open it.
+            {t("onboarding.step.project.signInDescription")}
           </p>
         </div>
         <Button variant="outline" size="lg" className="w-full" onClick={onBack}>
-          ← Back to sign in
+          <ChevronLeft className="h-4 w-4 rtl:rotate-180" />
+          {t("onboarding.step.project.backToSignIn")}
         </Button>
         <Button variant="ghost" size="lg" className="w-full" onClick={onSkip}>
-          Do this later
+          {t("onboarding.step.project.doThisLater")}
         </Button>
       </div>
     )
@@ -106,9 +108,9 @@ export function ProjectStep({
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-2 text-center">
-        <h2 className="text-2xl font-semibold">Create your first project</h2>
+        <h2 className="text-2xl font-semibold">{t("onboarding.step.project.heading")}</h2>
         <p className="text-sm text-muted-foreground">
-          You can import files and invite collaborators after setup.
+          {t("onboarding.step.project.description")}
         </p>
       </div>
       <form
@@ -126,14 +128,14 @@ export function ProjectStep({
               const invalid = isFieldInvalid(field)
               return (
                 <Field data-invalid={invalid}>
-                  <FieldLabel htmlFor="proj-name">Project name</FieldLabel>
+                  <FieldLabel htmlFor="proj-name">{t("onboarding.step.project.nameLabel")}</FieldLabel>
                   <Input
                     id="proj-name"
                     name={field.name}
                     value={field.state.value}
                     onBlur={field.handleBlur}
                     onChange={(e) => field.handleChange(e.target.value)}
-                    placeholder="My Translation Project"
+                    placeholder={t("onboarding.step.project.namePlaceholder")}
                     aria-invalid={invalid}
                     autoFocus
                   />
@@ -148,14 +150,14 @@ export function ProjectStep({
               const invalid = isFieldInvalid(field)
               return (
                 <Field data-invalid={invalid}>
-                  <FieldLabel htmlFor="src-lang">Source language</FieldLabel>
+                  <FieldLabel htmlFor="src-lang">{t("onboarding.step.project.sourceLanguageLabel")}</FieldLabel>
                   <Input
                     id="src-lang"
                     name={field.name}
                     value={field.state.value}
                     onBlur={field.handleBlur}
                     onChange={(e) => field.handleChange(e.target.value)}
-                    placeholder="English"
+                    placeholder={t("onboarding.step.project.sourceLanguagePlaceholder")}
                     aria-invalid={invalid}
                   />
                   {invalid && <FieldError errors={field.state.meta.errors} />}
@@ -169,14 +171,14 @@ export function ProjectStep({
               const invalid = isFieldInvalid(field)
               return (
                 <Field data-invalid={invalid}>
-                  <FieldLabel htmlFor="tgt-lang">Target language</FieldLabel>
+                  <FieldLabel htmlFor="tgt-lang">{t("autopilot.inspector.details.targetLanguage")}</FieldLabel>
                   <Input
                     id="tgt-lang"
                     name={field.name}
                     value={field.state.value}
                     onBlur={field.handleBlur}
                     onChange={(e) => field.handleChange(e.target.value)}
-                    placeholder="French"
+                    placeholder={t("onboarding.step.project.targetLanguagePlaceholder")}
                     aria-invalid={invalid}
                   />
                   {invalid && <FieldError errors={field.state.meta.errors} />}
@@ -190,7 +192,7 @@ export function ProjectStep({
         )}
         <Button type="submit" form="project-step-form" size="lg" className="w-full">
           {form.state.isSubmitting && <Spinner data-icon="inline-start" />}
-          {form.state.isSubmitting ? "Creating…" : "Create Project"}
+          {form.state.isSubmitting ? t("onboarding.common.creating") : t("onboarding.step.project.createButton")}
         </Button>
         <Button
           type="button"
@@ -200,11 +202,12 @@ export function ProjectStep({
           onClick={onSkip}
           disabled={form.state.isSubmitting}
         >
-          Do this later
+          {t("onboarding.step.project.doThisLater")}
         </Button>
       </form>
       <Button variant="ghost" size="sm" onClick={onBack} className="w-full">
-        ← Back
+        <ChevronLeft className="h-4 w-4 rtl:rotate-180" />
+        {t("common.back")}
       </Button>
     </div>
   )

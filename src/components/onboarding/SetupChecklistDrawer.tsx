@@ -20,6 +20,7 @@ import { InviteStep } from "./checklist/InviteStep"
 import { ComingSoonStep } from "./checklist/ComingSoonStep"
 import { AiModelsStep } from "./checklist/AiModelsStep"
 import { RoleGatedStep } from "./checklist/RoleGatedStep"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 interface SetupChecklistDrawerProps {
   open: boolean
@@ -59,6 +60,7 @@ export function SetupChecklistDrawer({
   onDismiss,
   onOpenImport,
 }: SetupChecklistDrawerProps) {
+  const t = useT()
   const allDone = state.completedCount === state.totalCount && state.totalCount > 0
   const progress = state.totalCount === 0 ? 0 : state.completedCount / state.totalCount
 
@@ -78,22 +80,21 @@ export function SetupChecklistDrawer({
         <SheetHeader className="border-b">
           <SheetTitle className="flex items-center gap-2">
             <Sparkles className="h-4 w-4 text-primary" aria-hidden />
-            Project setup
+            {t("onboarding.checklist.drawer.title")}
           </SheetTitle>
           <SheetDescription>
-            A few quick steps so AI suggestions, voice, and collaboration are
-            ready before you dive in.
+            {t("onboarding.checklist.drawer.description")}
           </SheetDescription>
           <ProgressBar value={progress} />
           <p className="text-xs text-muted-foreground">
-            {state.completedCount} of {state.totalCount} complete
+            {t("onboarding.checklist.drawer.progress", { completed: state.completedCount, total: state.totalCount })}
           </p>
         </SheetHeader>
 
         <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-3">
           <ChecklistItem
-            title="Import files"
-            description="Bring in your source text first — USFM, plain text, or other supported formats. Everything else works on specific files."
+            title={t("onboarding.checklist.importFiles.title")}
+            description={t("onboarding.checklist.importFiles.stepDescription")}
             complete={state.importFiles}
           >
             <ImportFilesStep
@@ -113,28 +114,28 @@ export function SetupChecklistDrawer({
           </ChecklistItem>
 
           <ChecklistItem
-            title="Set translation instructions"
-            description="A short system prompt that shapes tone, formality, and style. Shared with everyone in this project."
+            title={t("onboarding.checklist.aiInstructions.title")}
+            description={t("onboarding.checklist.aiInstructions.stepDescription")}
             complete={state.aiInstructions}
           >
             <RoleGatedStep
               roleLevel={roleLevel}
               requiredRole={ROLE.MAINTAINER}
-              actionLabel="Editing translation instructions"
+              actionLabel={t("onboarding.checklist.aiInstructions.actionLabel")}
             >
               <AiInstructionsStep project={project} onUpdated={onProjectUpdated} />
             </RoleGatedStep>
           </ChecklistItem>
 
           <ChecklistItem
-            title="Invite collaborators"
-            description="Translators and reviewers join with the same permissions you choose."
+            title={t("onboarding.checklist.invite.title")}
+            description={t("onboarding.checklist.invite.stepDescription")}
             complete={state.collaborators}
           >
             <RoleGatedStep
               roleLevel={roleLevel}
               requiredRole={ROLE.PROJECT_LEAD}
-              actionLabel="Inviting collaborators"
+              actionLabel={t("onboarding.checklist.invite.actionLabel")}
             >
               <InviteStep
                 projectId={project.id}
@@ -144,26 +145,26 @@ export function SetupChecklistDrawer({
           </ChecklistItem>
 
           <ChecklistItem
-            title="Configure voice & transcription"
-            description="Gemini TTS is recommended for voice; Whisper transcription runs locally."
+            title={t("onboarding.checklist.aiModels.title")}
+            description={t("onboarding.checklist.aiModels.stepDescription")}
             complete={state.aiModels}
           >
             <RoleGatedStep
               roleLevel={roleLevel}
               requiredRole={ROLE.MAINTAINER}
-              actionLabel="Configuring voice and transcription"
+              actionLabel={t("onboarding.checklist.aiModels.actionLabel")}
             >
               <AiModelsStep project={project} onUpdated={onProjectUpdated} />
             </RoleGatedStep>
           </ChecklistItem>
 
           <ComingSoonStep
-            title="Upload project standards"
-            description="Style guides and translation standards the AI will follow."
+            title={t("onboarding.checklist.comingSoon.standards.title")}
+            description={t("onboarding.checklist.comingSoon.standards.description")}
           />
           <ComingSoonStep
-            title="Import glossary / translation memory"
-            description="Existing TM or glossaries to keep terminology consistent."
+            title={t("onboarding.checklist.comingSoon.glossary.title")}
+            description={t("onboarding.checklist.comingSoon.glossary.description")}
           />
         </div>
 
@@ -172,18 +173,18 @@ export function SetupChecklistDrawer({
             <div className="space-y-2">
               <div className="flex items-center gap-2 text-sm font-medium text-emerald-700 dark:text-emerald-400">
                 <CheckCircle2 className="h-4 w-4" />
-                You're all set
+                {t("onboarding.checklist.drawer.allSetTitle")}
               </div>
               <p className="text-xs text-muted-foreground">
-                You can reopen this checklist any time from the project header.
+                {t("onboarding.checklist.drawer.allSetDescription")}
               </p>
               <Button onClick={onDismiss} className="w-full">
-                Hide checklist and start translating
+                {t("onboarding.checklist.drawer.hideButton")}
               </Button>
             </div>
           ) : (
             <Button variant="ghost" onClick={onDismiss} className="w-full">
-              Skip for now
+              {t("onboarding.common.skipForNow")}
             </Button>
           )}
         </div>

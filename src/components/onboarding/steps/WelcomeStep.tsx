@@ -1,7 +1,9 @@
 import { Button } from "@/components/ui/button"
 import { useBrand } from "@/branding/use-brand"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 export function WelcomeStep({ onNext }: { onNext: () => void }) {
+  const t = useT()
   const brand = useBrand()
   const Logo = brand.logo.Mark
   return (
@@ -14,7 +16,7 @@ export function WelcomeStep({ onNext }: { onNext: () => void }) {
         </p>
       </div>
       <Button size="lg" onClick={onNext} className="w-full">
-        Get Started
+        {t("onboarding.step.welcome.getStarted")}
       </Button>
     </div>
   )

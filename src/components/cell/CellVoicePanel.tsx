@@ -15,31 +15,25 @@
 // play-queue, so each line gets an independent scrubber + volume; the app-wide
 // audio-coordinator still guarantees only one source plays at a time.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import {
-  Check, ChevronsUpDown, Pause, Play, Search, UserPlus, Volume2, VolumeX,
-} from "lucide-react"
+import { useCallback, useEffect, useMemo, useRef } from "react"
+import { Pause, Play, UserPlus, Volume2, VolumeX } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
-import { VoiceAvatar } from "@/components/voice/VoiceAvatar"
 import { useVoiceRecency, touchVoice } from "@/lib/store/voice-recency"
 import { CropButton } from "./CropEditor"
+import { VoiceCombobox } from "@/components/voice/VoiceCombobox"
+import { audioIdSeededWith } from "@/lib/audio/upload"
 import { cn } from "@/lib/utils"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Slider } from "@/components/ui/slider"
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupInput,
-} from "@/components/ui/input-group"
 import { generateCellVoice } from "@/lib/audio/voice-generate-helpers"
 import { resolveCastVoice } from "@/lib/audio/voices"
 import { ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
 import { useCellAudio } from "@/hooks/useCellAudio"
 import { setCellPref, useCellPref } from "@/lib/store/audio-cell-prefs"
 import { emitCellAudioAttach } from "@/lib/sync/events-emit"
-import { notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
+import { injectOptimisticAudioAttachment, notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
 import type { CellData } from "@/hooks/useCells"
 import type { CodexCell } from "@/lib/codex-editor/types"
 import type { FrontierSession } from "@/lib/frontier/types"
@@ -264,14 +258,33 @@ export function CellVoicePanel({
   const audio = useCellAudio(project, cellForAudio, cell.fileId)
   const { currentTime, duration, isPlaying, seek, play, pause, setVolume, setTrim, state: audioState } = audio
 
+  // Round 5: is the panel playing the SHARED imported source clip? Then the
+  // playback window is the cell's section on the film timeline (never the
+  // whole film), and the crop tool goes away — a crop here would silently
+  // overwrite the section's stored source trim (retime the section in the
+  // timeline instead).
+  const isSourceClip =
+    cell.medium === "media" &&
+    playableId != null &&
+    playableId === cell.selectedAudioId &&
+    !audioIdSeededWith(playableId, cell.id)
+  const sectionWindow =
+    isSourceClip &&
+    typeof cell.startTime === "number" && Number.isFinite(cell.startTime) &&
+    typeof cell.endTime === "number" && Number.isFinite(cell.endTime) &&
+    cell.endTime > cell.startTime
+      ? { start: cell.startTime, end: cell.endTime }
+      : null
+
   // Per-cell volume + non-destructive crop, client-owned (localStorage) and
   // reactive — a write from here OR from "voice together" (which writes slices
   // across many cells at once) updates this player live. Pushed into the
-  // controller; null trim bounds = no constraint.
+  // controller; null trim bounds = no constraint. Source clips ignore the
+  // crop pref: their window IS the section.
   const pref = useCellPref(projectId, cell.id)
   const volume = pref.volume ?? 1
-  const trimStart = pref.trimStart ?? null
-  const trimEnd = pref.trimEnd ?? null
+  const trimStart = sectionWindow ? sectionWindow.start : (pref.trimStart ?? null)
+  const trimEnd = sectionWindow ? sectionWindow.end : (pref.trimEnd ?? null)
   useEffect(() => { setVolume(volume) }, [volume, setVolume])
   useEffect(() => { setTrim(trimStart, trimEnd) }, [trimStart, trimEnd, setTrim])
   const changeVolume = useCallback((v: number) => {
@@ -283,17 +296,26 @@ export function CellVoicePanel({
   const trimEmitTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const persistTrimToServer = useCallback((start: number | null, end: number | null) => {
     if (!playableId) return
+    // Round 5 guard: never rewrite the SOURCE clip's per-section trims — the
+    // crop UI is hidden for source clips, this is the belt-and-braces.
+    if (isSourceClip) return
     const att = cell.attachments?.[playableId]
     if (!att) return
     const slot = playableId === cell.selectedAudioId ? "recording" : "generatedVoice"
-    void emitCellAudioAttach({
+    // Round 7: overlay the new trims onto the merged cells instantly so the
+    // timeline chip resizes without waiting on flush + refetch. SUB-48: the
+    // overlay rides the emit promise so it lives exactly as long as the event.
+    // Fortify pass: no mimeType on a trim re-attach — `att.type` here is the
+    // literal discriminator "audio" (mergeCellsWithAudio hardcodes it), NOT a
+    // MIME; sending it permanently overwrote the clip's real container type.
+    // The projection COALESCEs, so omitting the field keeps the stored value.
+    const trimP = emitCellAudioAttach({
       projectId,
       fileId: cell.fileId,
       cellId: cell.id,
       audioId: playableId,
       url: att.url,
       slot,
-      ...(att.type ? { mimeType: att.type } : {}),
       ...(att.voiceId ? { voiceId: att.voiceId } : {}),
       ...(att.referenceAudioId ? { referenceAudioId: att.referenceAudioId } : {}),
       ...(att.durationMs != null ? { durationMs: att.durationMs } : {}),
@@ -301,8 +323,20 @@ export function CellVoicePanel({
       trimEndMs: end != null ? Math.round(end * 1000) : undefined,
       author: username,
     })
+    injectOptimisticAudioAttachment(cell.fileId, cell.id, {
+      audioId: playableId,
+      url: att.url,
+      slot,
+      mimeType: null,
+      voiceId: att.voiceId ?? null,
+      referenceAudioId: att.referenceAudioId ?? null,
+      durationMs: att.durationMs ?? null,
+      trimStartMs: start != null ? Math.round(start * 1000) : null,
+      trimEndMs: end != null ? Math.round(end * 1000) : null,
+    }, trimP)
+    void trimP
     notifyAudioAttachmentsChanged(cell.fileId)
-  }, [playableId, cell.attachments, cell.selectedAudioId, cell.id, cell.fileId, projectId, username])
+  }, [playableId, isSourceClip, cell.attachments, cell.selectedAudioId, cell.id, cell.fileId, projectId, username])
 
   const changeTrim = useCallback((start: number | null, end: number | null) => {
     setCellPref(projectId, cell.id, { trimStart: start ?? undefined, trimEnd: end ?? undefined })
@@ -387,7 +421,11 @@ export function CellVoicePanel({
       {hasTake && (
         <>
           <div className="absolute right-1.5 top-1.5 z-10 flex items-center gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover/voice:opacity-100">
-            <CropButton controller={audio} trim={{ start: trimStart, end: trimEnd }} onChange={changeTrim} />
+            {/* Round 5: no crop on the shared source clip — its window is the
+                section's timing; retime the section in the timeline. */}
+            {!isSourceClip && (
+              <CropButton controller={audio} trim={{ start: trimStart, end: trimEnd }} onChange={changeTrim} />
+            )}
             <VolumeButton volume={volume} onChange={changeVolume} />
             <HeaderIconButton title="Clone a voice from this take" onClick={onMakeCharacter}>
               <UserPlus className="h-3.5 w-3.5" />
@@ -439,88 +477,5 @@ export function CellVoicePanel({
   )
 }
 
-/** The cast combobox: a single trigger showing the active voice that opens a
- *  searchable list of the whole cast. Picking one (re)voices the line instantly
- *  — same one-click action as before, just collapsed so a large cast (60+
- *  voices) stays usable. The active voice spins while voicing. */
-function VoiceCombobox({
-  voices, active, busy, onPick,
-}: {
-  voices: Voice[]
-  active: Voice
-  busy: boolean
-  onPick: (voiceId: string) => void
-}) {
-  const [open, setOpen] = useState(false)
-  const [query, setQuery] = useState("")
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    return q ? voices.filter((v) => v.name.toLowerCase().includes(q)) : voices
-  }, [voices, query])
-  // Forget the search between openings so the next open starts on the full cast.
-  useEffect(() => {
-    if (!open) setQuery("")
-  }, [open])
-  return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <AppTooltip content="Choose a voice">
-        <PopoverTrigger
-          render={
-            <Button
-              type="button"
-              size="xs"
-              variant="outline"
-              disabled={busy}
-              aria-label={`Voice: ${active.name}. Choose a voice`}
-              className="w-full justify-start gap-1.5"
-            />
-          }
-        >
-          <span className="relative shrink-0">
-            <VoiceAvatar voice={active} size={18} />
-            {busy && (
-              <span className="absolute inset-0 grid place-items-center rounded-full bg-background/75">
-                <Spinner className="h-3 w-3" />
-              </span>
-            )}
-          </span>
-          <span className="min-w-0 flex-1 truncate text-left font-medium text-foreground">{active.name}</span>
-          <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-        </PopoverTrigger>
-      </AppTooltip>
-      <PopoverContent align="start" side="top" className="w-60 p-2">
-        <InputGroup className="mb-1.5">
-          <InputGroupAddon>
-            <Search />
-          </InputGroupAddon>
-          <InputGroupInput
-            type="text"
-            autoFocus
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search voices…"
-          />
-        </InputGroup>
-        <div className="max-h-56 space-y-0.5 overflow-y-auto">
-          {filtered.length === 0 ? (
-            <p className="px-2 py-3 text-center text-xs italic text-muted-foreground">No matches</p>
-          ) : (
-            filtered.map((v) => (
-              <button
-                key={v.id}
-                type="button"
-                disabled={busy}
-                onClick={() => { onPick(v.id); setOpen(false) }}
-                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent/50 disabled:opacity-60"
-              >
-                <VoiceAvatar voice={v} size={20} />
-                <span className="min-w-0 flex-1 truncate">{v.name}</span>
-                {v.id === active.id && <Check className="h-3.5 w-3.5 shrink-0 text-primary" />}
-              </button>
-            ))
-          )}
-        </div>
-      </PopoverContent>
-    </Popover>
-  )
-}
+// Round 6: VoiceCombobox moved to src/components/voice/VoiceCombobox.tsx so
+// the timeline's source cards can reuse the picker (SUB-38).

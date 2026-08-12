@@ -35,6 +35,7 @@ import { completionBatchSizeFor, workspaceActions, getVisibleActions } from "@/l
 import type { WorkspaceAction } from "@/lib/workspace-actions/types"
 import type { FileReference } from "@/lib/parsers/types"
 import { fileHasSections, fileOrderedBy, isMediaFileType, projectHasScriptureFiles, resolveBibleResourcesEnabled } from "@/lib/parsers/types"
+import { resolveFileTimingMode, type AudioTimingMode } from "@/lib/parsers/types"
 import { isFlagEnabled } from "@/lib/features/flags"
 import { isDiscourseFile } from "@/lib/contextual/discourse-file"
 import { applyRemoteFrame as applyContextualFrame } from "@/lib/contextual/run-store"
@@ -48,6 +49,7 @@ import { ContextualRunPillMount } from "./contextual/ContextualRunPill"
 import type { CellData } from "@/hooks/useCells"
 import { useFileAudioAttachments, mergeCellsWithAudio } from "@/hooks/useFileAudioAttachments"
 import { consumeMediaImportSeed, autoTranscribeImportedMedia } from "@/lib/audio/auto-transcribe"
+import { warmFileDubs } from "@/lib/audio/warm-dubs"
 import { effectiveSourceText } from "@/lib/cell-text"
 import { resolveDeepLinkLane } from "./project-workspace-lane-deeplink"
 import { resolveActiveTargetLanguage } from "./project-workspace-lane-target"
@@ -63,7 +65,7 @@ import { FootnotesTray } from "./footnotes/FootnoteInline"
 import { AudioRecordingModal } from "./AudioRecorder/AudioRecordingModal"
 import { VoiceSidebar } from "./voice/VoiceSidebar"
 import { VoicePlaybackBar } from "./voice/VoicePlaybackBar"
-import { startQueue, getQueueState, seekQueueToTime, startQueueAtTime } from "@/lib/audio/play-queue"
+import { startQueue, getQueueState, seekQueueToTime, setQueueTimingMode, startQueueAtTime, pauseQueue, pauseAllPlayback, resumeQueue } from "@/lib/audio/play-queue"
 import { generateCombinedVoice, type CombinedVoiceResult } from "@/lib/audio/combined-voice"
 import { generateCellVoice } from "@/lib/audio/voice-generate-helpers"
 import { CombinedBoundaryEditor } from "./voice/CombinedBoundaryEditor"
@@ -82,9 +84,8 @@ import { useCellLabelsPreference } from "@/hooks/useCellLabelsPreference"
 import { useProjectPermissions } from "@/hooks/useProjectPermissions"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { eagerlyPrefetchPeaks } from "@/lib/audio/eager-peaks"
-import { runTranscribeAll as runBatchTranscribeAll, runSynthAll as runBatchSynthAll, needsTranscription, needsSynthesis, isSourceSegmentSelected } from "@/lib/audio/batch-audio"
-import { transcribeCell } from "@/lib/audio/transcribe"
-import { notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
+import { runTranscribeAll as runBatchTranscribeAll, runSynthAll as runBatchSynthAll, needsTranscription, needsSynthesis, takesNeedingMeasure, runMeasureAll } from "@/lib/audio/batch-audio"
+import { injectOptimisticAudioAttachment, notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
 import { useOutbox } from "@/context/OutboxContext"
 import { useReconcileOnDrain } from "@/hooks/useReconcileOnDrain"
 import {
@@ -92,10 +93,10 @@ import {
   buildFileScopedTokenFetcher,
   buildProjectAwareMinter,
 } from "@/lib/sync/cqrs-bridge"
-import { emitTargetCellCommit, emitCellBacktranslationSet, emitFileRename, emitFileDelete, emitFileRestore, emitCellValidate, emitCellRetime, emitFileVideoSet } from "@/lib/sync/events-emit"
+import { emitTargetCellCommit, emitCellBacktranslationSet, emitFileRename, emitFileDelete, emitFileRestore, emitCellValidate, emitCellRetime, emitCellLaneRetime, emitCellAudioAttach, emitFileVideoSet, emitFileTimingSet } from "@/lib/sync/events-emit"
 import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
 import { isBulkValidationEligible } from "@/lib/review/review-eligibility"
-import { TimelineEditor, type TimelineDetailActions } from "@/components/timeline/TimelineEditor"
+import { TimelineEditor } from "@/components/timeline/TimelineEditor"
 import { applyPresenceFrame, applyLockClaimed, applyLockReleased } from "@/lib/sync/cell-lock-state"
 import { canPerform, canOpenAssignUi } from "@/lib/sync/role-policy"
 import { useFocusLock } from "@/hooks/useFocusLock"
@@ -143,9 +144,14 @@ import type { EditorLens } from "@/components/EditorModeToggle"
 import { SelectionBar } from "./SelectionBar"
 import { WorkspaceStatusBar } from "./WorkspaceStatusBar"
 import { ExpandableFileList } from "./ExpandableFileList"
+import { FileDetailsModal } from "./FileDetailsModal"
 import { SidebarProjectSection } from "./SidebarProjectSection"
 import { SuggestionBanner } from "./SuggestionBanner"
 import { ConfirmActionDialog } from "./ConfirmActionDialog"
+import { LinkVideoTimingDialog } from "./timeline/LinkVideoTimingDialog"
+import { TimingVideoWarningDialog } from "./timeline/TimingVideoWarningDialog"
+import { TimingModeChangedDialog } from "./timeline/TimingModeChangedDialog"
+import { useTimingModeAck } from "@/hooks/useTimingModeAck"
 import { PeerPresence } from "./PeerPresence"
 import { ViewSettingsMenu, type ViewSettingsMenuHandle } from "./ViewSettingsMenu"
 import type { OverflowMenuItem } from "./OverflowMenu"
@@ -387,7 +393,7 @@ export function ProjectWorkspace() {
           : orgHomePath(ALL_ORGS_PARAM),
     )
   }, [activeOrgId, isAllOrgs, navigate])
-  const { project: loadedProject, status, refresh, patchSettings, roleLevel: serverRoleLevel } = useProject(projectId!)
+  const { project: loadedProject, status, refresh, patchSettings, roleLevel: serverRoleLevel, settingsFetched } = useProject(projectId!)
   // Client-local overlays (corpusMarker, originalName, suggestionsDismissedAt,
   // aiSetupSkipped) live in IDB; merge them onto the server-fetched record on
   // load and after each local patch so rename suggestions don't loop on every
@@ -1100,6 +1106,7 @@ export function ProjectWorkspace() {
     revalidateCell,
     applyOptimisticTargetEdit,
     applyOptimisticTargetEdits,
+    applyOptimisticCellTiming,
     isLoading: cellsLoading,
     isError: cellsError,
   } = useActiveCellStore({
@@ -1126,6 +1133,11 @@ export function ProjectWorkspace() {
   }, [activeFileId, cellStore, cellStoreVersion, localFileProgress, project?.id])
   const getActiveCells = useCallback(() => cellStore.getAllCellViews(), [cellStore])
   const getActiveCell = useCallback((cellId: string) => cellStore.getCellView(cellId), [cellStore])
+  // Fortify pass: raw store cells carry NO audio attachments — any handler
+  // that reads `cell.attachments` must merge them in first. The per-file map
+  // rides a ref so early-declared callbacks can reach it without stale-closure
+  // or dependency-ordering problems (it is assigned where the hook runs).
+  const workspaceAudioByCellIdRef = useRef<Parameters<typeof mergeCellsWithAudio>[1]>(new Map())
 
   // FRO-IMPORT-OPT: when the active file's queued target commits finish draining
   // to the server, do ONE soft refetch to reconcile the read model and clear the
@@ -1342,9 +1354,34 @@ export function ProjectWorkspace() {
     () => (project ? { ...project, ttsSettings: tts.settings } : null),
     [project, tts.settings],
   )
+  // 2026-08-07: on a TIME-ORDERED file the Media lens stacks the timeline over
+  // the plain text table — audioLens (the per-row voice-panel mode) applies
+  // only to sequence-ordered voice-over files now. With it null, useCellIds
+  // serves the full time-sorted list (text mode) under the timeline.
+  const activeFileForLens = activeFileId ? project?.files.find((f) => f.id === activeFileId) : null
+  const activeFileTimeOrdered = Boolean(activeFileForLens && fileOrderedBy(activeFileForLens) === "time")
+  /** Media lens on a time-ordered file = the timeline STACKED over the always-
+   *  rendered text table (one EditorTable instance across both lenses — the
+   *  imperative ref, selection singleton, and presence claims stay single). */
+  const timelineStacked = lens === "audio" && activeFileTimeOrdered
+  // 2026-08-07 (wire b): a text-table row click points the timeline at that
+  // cell. Nonce'd so repeat clicks on the same row re-center; the callback is
+  // identity-stable (mirror ref) because it rides in editorActionsValue.
+  const [timelineActivateRequest, setTimelineActivateRequest] = useState<{ cellId: string; nonce: number } | null>(null)
+  const timelineStackedRef = useRef(timelineStacked)
+  timelineStackedRef.current = timelineStacked
+  const activateNonceRef = useRef(0)
+  const handleMediaRowActivate = useCallback((cellId: string) => {
+    if (!timelineStackedRef.current) return
+    activateNonceRef.current += 1
+    setTimelineActivateRequest({ cellId, nonce: activateNonceRef.current })
+    // 2026-08-08: pointing playback somewhere is "watch this" — re-engage the
+    // table's playback follow even if an earlier scroll had released it.
+    editorRef.current?.setMediaFollow?.("engage")
+  }, [])
   const audioLens = useMemo<AudioLensContext | null>(
     () =>
-      lens === "audio" && audioProject
+      lens === "audio" && audioProject && !activeFileTimeOrdered
         ? {
             voices: tts.voices,
             settings: tts.settings,
@@ -1366,7 +1403,9 @@ export function ProjectWorkspace() {
               const cell = enrichedCell ?? cellStore.getCellView(cellId)
               if (!cell) return
               startQueue(
-                { cells: [cell], projectId: audioProject.id, session: frontierSession },
+                // snapshot: the bar's keep-cells-fresh effect must not swap
+                // the full file in — this is "play just this line", full stop.
+                { cells: [cell], projectId: audioProject.id, session: frontierSession, snapshot: true },
                 0,
               )
             },
@@ -1378,8 +1417,8 @@ export function ProjectWorkspace() {
           }
         : null,
     [
-      lens, audioProject, tts.voices, tts.settings, tts.defaultVoiceId, tts.assignCells,
-      frontierSession, currentUsername, cellStore, refresh,
+      lens, audioProject, activeFileTimeOrdered, tts.voices, tts.settings, tts.defaultVoiceId,
+      tts.assignCells, frontierSession, currentUsername, cellStore, refresh,
     ],
   )
 
@@ -1597,67 +1636,149 @@ export function ProjectWorkspace() {
     revalidateCells()
   }, [project?.id, activeFileId, currentUsername, getTokenForFile, getTokenForProjectFile, revalidateCells])
 
-  // Timeline editor: move/stretch a clip → cell.retime (timing on both sides).
-  const handleRetime = useCallback(
+  // Timeline editor, round 6 (SUB-36): retiming exists only on the SUBTITLE
+  // row. A TEXT cell's own timing IS its subtitle timing → cell.retime as
+  // before; a MEDIA cell keeps its frozen source split and gets an
+  // independent subtitle span in metadata → cell.lane.retime.
+  const handleRetimeSubtitle = useCallback(
     async (cellId: string, startSec: number, endSec: number) => {
       if (!project?.id || !activeFileId) return
-      await emitCellRetime({
+      const cell = getActiveCells().find((c) => c.id === cellId)
+      const startMs = Math.round(startSec * 1000)
+      const endMs = Math.round(endSec * 1000)
+      if (cell?.medium === "media") {
+        // Round 7: apply instantly — no snap-back while the event round-trips.
+        applyOptimisticCellTiming(cellId, { metadata: { subtitle_start_ms: startMs, subtitle_end_ms: endMs } })
+        await emitCellLaneRetime({
+          projectId: project.id,
+          fileId: activeFileId,
+          cellId,
+          subtitleStartMs: startMs,
+          subtitleEndMs: endMs,
+          author: currentUsername,
+        })
+      } else {
+        applyOptimisticCellTiming(cellId, { startMs, endMs })
+        await emitCellRetime({
+          projectId: project.id,
+          fileId: activeFileId,
+          cellId,
+          startMs,
+          endMs,
+          author: currentUsername,
+        })
+      }
+      await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+      revalidateCells()
+    },
+    [project?.id, activeFileId, currentUsername, getActiveCells, applyOptimisticCellTiming, getTokenForProjectFile, revalidateCells],
+  )
+
+  // Round 7: trim a dub chip (edge drag) — re-attach the take with the new
+  // trims. Order matters: optimistic inject first (instant chip width), then
+  // the durable event, then flush BEFORE the bus notify so the refetch can't
+  // read pre-projection state and flash the old trim back.
+  const handleTrimTarget = useCallback(
+    async (cellId: string, audioId: string, trims: { trimStartMs?: number; trimEndMs?: number }) => {
+      if (!project?.id || !activeFileId) return
+      // Fortify pass: raw store cells never carry attachments/selectedAudioId
+      // — reading them unmerged made every timeline chip trim a SILENT NO-OP
+      // (att was always undefined). Merge the per-file audio reads in, the
+      // same way runTranscribeAll does.
+      const cell = mergeCellsWithAudio(getActiveCells(), workspaceAudioByCellIdRef.current)
+        .find((c) => c.id === cellId)
+      const att = cell?.attachments?.[audioId]
+      if (!cell || !att) return
+      const slot = audioId === cell.selectedAudioId ? "recording" : "generatedVoice"
+      // No mimeType on a trim re-attach — the merged attachment's `type` field
+      // is the literal discriminator "audio", NOT a MIME; sending it would
+      // permanently overwrite the clip's real container type (the projection
+      // COALESCEs, so an ABSENT field keeps the stored value — exactly what a
+      // trim wants for every clip property it isn't changing).
+      const trimP = emitCellAudioAttach({
         projectId: project.id,
         fileId: activeFileId,
         cellId,
-        startMs: Math.round(startSec * 1000),
-        endMs: Math.round(endSec * 1000),
+        audioId,
+        url: att.url,
+        slot,
+        ...(att.voiceId ? { voiceId: att.voiceId } : {}),
+        ...(att.referenceAudioId ? { referenceAudioId: att.referenceAudioId } : {}),
+        ...(att.durationMs != null ? { durationMs: att.durationMs } : {}),
+        trimStartMs: trims.trimStartMs,
+        trimEndMs: trims.trimEndMs,
+        author: currentUsername,
+      })
+      injectOptimisticAudioAttachment(activeFileId, cellId, {
+        audioId,
+        url: att.url,
+        slot,
+        mimeType: null,
+        voiceId: att.voiceId ?? null,
+        referenceAudioId: att.referenceAudioId ?? null,
+        durationMs: att.durationMs ?? null,
+        trimStartMs: trims.trimStartMs ?? null,
+        trimEndMs: trims.trimEndMs ?? null,
+      }, trimP)
+      await trimP
+      await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+      notifyAudioAttachmentsChanged(activeFileId)
+    },
+    [project?.id, activeFileId, currentUsername, getActiveCells, getTokenForProjectFile],
+  )
+
+  // Round 6 (SUB-38), re-homed 2026-08-07: assign a voice/character from the
+  // gutter's picker. PURE assignment (no auto-synthesis — generation stays an
+  // explicit act); apply-to-speaker covers every line sharing the diarized
+  // name. Ref-wrapped below so the context value stays identity-stable.
+  const handleTimelineAssignVoice = useCallback(
+    (cell: CellData, voiceId: string, opts?: { applyToSpeaker?: boolean }) => {
+      const castName =
+        cell.metadata && typeof cell.metadata.cast_name === "string" ? (cell.metadata.cast_name as string) : null
+      if (opts?.applyToSpeaker && castName) {
+        const ids = getActiveCells()
+          .filter((c) => c.metadata && (c.metadata.cast_name as unknown) === castName)
+          .map((c) => c.id)
+        tts.assignCells(ids.length > 0 ? ids : [cell.id], voiceId)
+        return
+      }
+      tts.assignCells([cell.id], voiceId)
+    },
+    [tts, getActiveCells],
+  )
+  const timelineAssignVoiceRef = useRef(handleTimelineAssignVoice)
+  timelineAssignVoiceRef.current = handleTimelineAssignVoice
+  const handleAssignCastVoice = useCallback(
+    (cell: CellData, voiceId: string, opts?: { applyToSpeaker?: boolean }) =>
+      timelineAssignVoiceRef.current(cell, voiceId, opts),
+    [],
+  )
+
+  // Round 6: move a section's dub chip → target_start_ms (the clip-zero
+  // anchor, absolute file ms). Round 7: applied optimistically first.
+  const handleRetimeTarget = useCallback(
+    async (cellId: string, anchorSec: number) => {
+      if (!project?.id || !activeFileId) return
+      // The drag clamp already floors the anchor at 0; enforce it again at the
+      // single persistence point so no caller can store a chip before file zero.
+      const targetStartMs = Math.max(0, Math.round(anchorSec * 1000))
+      applyOptimisticCellTiming(cellId, { metadata: { target_start_ms: targetStartMs } })
+      await emitCellLaneRetime({
+        projectId: project.id,
+        fileId: activeFileId,
+        cellId,
+        targetStartMs,
         author: currentUsername,
       })
       await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
       revalidateCells()
     },
-    [project?.id, activeFileId, currentUsername, getTokenForProjectFile, revalidateCells],
-  )
-
-  // Timeline editor detail pane: commit a target edit (same path as the table).
-  const handleTimelineCommitTarget = useCallback(
-    async (cellId: string, value: string, valueHtml?: string) => {
-      if (!project?.id) return
-      const cell = cellStore.getCellView(cellId)
-      if (!cell) return
-      // AQU-659: carry the rich-text form so media-pane edits persist
-      // identically to the main table (footnotes, marks, violation blots).
-      applyOptimisticTargetEdit(cellId, valueHtml !== undefined ? { value, valueHtml } : { value })
-      const parentId = resolveTargetCommitParentId(cell)
-      const eventId = await emitTargetCellCommit({
-        projectId: project.id,
-        fileId: cell.fileId,
-        cellId,
-        parentId,
-        sourceEventId: cell.sourceEventId ?? null,
-        value,
-        ...(valueHtml !== undefined ? { valueHtml } : {}),
-        author: currentUsername,
-        targetLang: activeLane, // AQU-538: '' omitted on the wire by the emit
-      })
-      rememberPendingTargetCommit(cellId, eventId, parentId)
-      await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
-      await refreshOutboxPending()
-      revalidateCell(cellId)
-    },
-    [
-      project?.id,
-      cellStore,
-      applyOptimisticTargetEdit,
-      currentUsername,
-      activeLane,
-      resolveTargetCommitParentId,
-      rememberPendingTargetCommit,
-      getTokenForProjectFile,
-      refreshOutboxPending,
-      revalidateCell,
-    ],
+    [project?.id, activeFileId, currentUsername, applyOptimisticCellTiming, getTokenForProjectFile, revalidateCells],
   )
 
   // Timeline editor: set/clear the file's core video URL (preview master clock).
   // coreMediaUrl lives on the file row, so refresh the project (not just cells).
-  const handleLinkVideo = useCallback(
+  const applyLinkVideo = useCallback(
     async (url: string | null) => {
       if (!project?.id || !activeFileId) return
       await emitFileVideoSet({
@@ -1670,6 +1791,22 @@ export function ProjectWorkspace() {
       refresh()
     },
     [project?.id, activeFileId, currentUsername, getTokenForProjectFile, refresh],
+  )
+  // Flow B (2026-08-05): linking a video while in Free timing prompts to
+  // switch back (declinable, with the video-stays-hidden warning). NOTE the
+  // mode is computed INLINE — the `timingMode` const is declared ~2,700 lines
+  // below this callback (a temporal-dead-zone hazard in the deps). Pre-merge
+  // round: the mode is per-FILE now, resolved off the active file.
+  const [pendingVideoUrl, setPendingVideoUrl] = useState<string | null>(null)
+  const handleLinkVideo = useCallback(
+    (url: string | null) => {
+      if (url && resolveFileTimingMode(activeFile, project ?? undefined) === "audioFirst") {
+        setPendingVideoUrl(url)
+        return
+      }
+      void applyLinkVideo(url) // clearing never prompts
+    },
+    [activeFile, project, applyLinkVideo],
   )
 
   const [videoDialogOpen, setVideoDialogOpen] = useState(false)
@@ -2765,6 +2902,18 @@ export function ProjectWorkspace() {
   const jumpToCellId = useCallback((cellId: string) => {
     editorRef.current?.scrollToCellId(cellId, { flash: true })
   }, [])
+  // 2026-08-08 (wire a): a chip click is "watch this" — same jump, but it
+  // ENGAGES the playback follow instead of the inspection default (release).
+  const jumpToCellIdFollowing = useCallback((cellId: string) => {
+    editorRef.current?.scrollToCellId(cellId, { flash: true, follow: "engage" })
+  }, [])
+  // The bottom bar's per-advance jump: startQueue captures this ONCE, but the
+  // lens can change mid-run — so the "driver owns follow while stacked" gate
+  // must be evaluated per call (ref), not baked in at render time.
+  const handleBarActiveCell = useCallback((cellId: string) => {
+    if (timelineStackedRef.current) return
+    editorRef.current?.scrollToCellId(cellId, { flash: true })
+  }, [])
 
   // ── AQU-646 round 3: two-way cell tracing across the Text/Media switch ────
   // timelineSelectedCellIdRef mirrors TimelineEditor's local selection (a ref,
@@ -3491,7 +3640,13 @@ export function ProjectWorkspace() {
     setDrawerRuleId(null); setCommentsCellId(null); setHistoryCellId(cellId)
   }, [])
   const handleAiSetupNeeded = useCallback(() => setAiSetupOpen(true), [])
-  const handleOpenRecording = useCallback((cellId: string) => setRecordingCellId(cellId), [])
+  const handleOpenRecording = useCallback((cellId: string) => {
+    // Opening the recorder always pauses playback — queue and single-cell
+    // clip both — so the mic never records over sounding audio. Module
+    // functions, so deps stay [] and the editor-actions memo contract holds.
+    pauseAllPlayback()
+    setRecordingCellId(cellId)
+  }, [])
 
   // FRO perf cleanup: the five openers above are pure pass-throughs through
   // EditorTable -> MemoizedRow -> EditorRow with no intermediate consumer, so
@@ -3509,34 +3664,10 @@ export function ProjectWorkspace() {
     onOpenHistory: handleOpenHistory,
     onAiSetupNeeded: handleAiSetupNeeded,
     onOpenRecording: handleOpenRecording,
+    onMediaRowActivate: handleMediaRowActivate, // 2026-08-07: row click → timeline (stacked lens only)
+    onAssignCastVoice: handleAssignCastVoice, // 2026-08-07: gutter picker (pure assignment)
     myScopes, // AQU-633: per-cell validate scope gate
-  }), [handleInfractionClick, handleOpenComments, handleOpenHistory, handleAiSetupNeeded, handleOpenRecording, myScopes])
-
-  // AQU-646 round 3: the media detail pane's action bundle — the same
-  // handlers/state the text rail uses, grouped as one prop instead of ten.
-  // Identity changes as completions stream; the timeline subtree is small and
-  // un-memoized, so that's fine.
-  const timelineDetailActions = useMemo<TimelineDetailActions | null>(() => project ? {
-    isCompletionConfigured: isConfigured,
-    isCompletionAvailable,
-    isAnonymous: !frontierSession,
-    completing,
-    previews,
-    errors,
-    onCompleteSingle: handleCompleteSingle,
-    onAiSetupNeeded: handleAiSetupNeeded,
-    onOpenComments: handleOpenComments,
-    onOpenHistory: handleOpenHistory,
-    onOpenRecording: handleOpenRecording,
-    openCommentCounts: liveCellOpenCommentCount,
-    projectId: project.id,
-    sourceLanguage: project.sourceLanguage,
-    targetLanguage: project.targetLanguage,
-    projectTtsSettings: project.ttsSettings,
-    username: currentUsername,
-  } : null, [project, isConfigured, isCompletionAvailable, frontierSession, completing, previews, errors,
-    handleCompleteSingle, handleAiSetupNeeded, handleOpenComments, handleOpenHistory,
-    handleOpenRecording, liveCellOpenCommentCount, currentUsername])
+  }), [handleInfractionClick, handleOpenComments, handleOpenHistory, handleAiSetupNeeded, handleOpenRecording, handleMediaRowActivate, handleAssignCastVoice, myScopes])
 
   const handleAssignVoice = useCallback(async (cellId: string, voiceId: string) => {
     if (!audioProject || !frontierSession) return
@@ -3779,6 +3910,8 @@ export function ProjectWorkspace() {
     return Array.from(set).sort((a, b) => a.localeCompare(b))
   }, [project?.files])
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null)
+  // "File details" modal (sidebar file row ⋯ menu).
+  const [detailsFileId, setDetailsFileId] = useState<string | null>(null)
   // Latest project for the suggestion-apply undo toast action (avoids stale closure).
   const projectForUndoRef = useRef(project)
   projectForUndoRef.current = project
@@ -4209,6 +4342,7 @@ export function ProjectWorkspace() {
     project?.id ?? null,
     lens === "audio" ? activeFileId : null,
   )
+  workspaceAudioByCellIdRef.current = workspaceAudioByCellId
 
   // AQU-646: real counts for the "Transcribe all" / "Synth all" menu items,
   // sharing the exact filters the batch runners use (needsTranscription /
@@ -4379,6 +4513,33 @@ export function ProjectWorkspace() {
     project?.id ?? null,
     timelineEditorVisible ? activeFileId : null,
   )
+  // Pre-merge round: takes that predate duration capture (duration_ms NULL).
+  // The timeline shows a deliberate fix-it notice; the count and the batch's
+  // work-list come from the same enumeration.
+  const legacyMeasureCount = useMemo(
+    () => (activeFileId ? takesNeedingMeasure(activeFileId, timelineAudioByCellId).length : 0),
+    [activeFileId, timelineAudioByCellId],
+  )
+  const handleMeasureLegacy = useCallback(() => {
+    const pid = project?.id
+    if (!pid || !activeFileId) return
+    void runMeasureAll({
+      projectId: pid,
+      fileId: activeFileId,
+      byCellId: timelineAudioByCellId,
+      session: frontierSession ?? null,
+      username: currentUsername,
+    }).then((r) => {
+      if (r.failed > 0) {
+        toast.warning(
+          `Measured ${r.measured} recording${r.measured === 1 ? "" : "s"}; ${r.failed} could not be measured — re-record to fix those.`,
+        )
+      } else if (r.measured > 0) {
+        toast.success(`Measured ${r.measured} recording${r.measured === 1 ? "" : "s"}.`)
+      }
+    })
+  }, [project?.id, activeFileId, timelineAudioByCellId, frontierSession, currentUsername])
+
   const legacyCellsNeeded =
     centerSurface === "rules" ||
     dockTab === "voices" ||
@@ -4400,6 +4561,137 @@ export function ProjectWorkspace() {
     [legacyCells, workspaceAudioByCellId],
   )
 
+  // AQU-646 SUB-53 / pre-merge round: which job THIS FILE is for. The mode is
+  // file-level (files.meta via file.timing.set); a file with no mode of its
+  // own inherits the legacy project-level value (so projects that chose Free
+  // timing in Project Settings keep it), else Original timing.
+  const timingMode = resolveFileTimingMode(activeFile, project ?? undefined)
+  // Pre-merge round: the control returned to the timeline toolbar, gated by
+  // the same clearance the setting had in Project Settings (maintainer). The
+  // gate is "don't pass the callback": below the floor the toolbar renders
+  // the active mode as a plain label.
+  const canEditTimingMode = (serverRoleLevel ?? project?.syncRole?.level ?? 0) >= ROLE.MAINTAINER
+  // Flow A (file-scoped): switching a file that HAS a linked video to Free
+  // timing hides the video — confirm before emitting. Holds the FILE the
+  // warning was raised for, not a bare flag, so the confirm can only ever
+  // apply to that file.
+  const [timingVideoWarnFor, setTimingVideoWarnFor] = useState<string | null>(null)
+  // A REMOTE mode change gets an acknowledged heads-up — deferred while the
+  // user is in the text view or has the recorder open (a cell transition
+  // inside the recorder ends the wait; the take is confirmed by then).
+  // `centerSurface` matters too: the workspace shell stays mounted across
+  // rules/comments/members/…, and `lens` is just a persisted preference — the
+  // modal must only surface where the timeline is actually on screen. And the
+  // mode is only OBSERVABLE once the project record has loaded AND the
+  // settings overlay's fetch has confirmed — before either, `timingMode` is
+  // just the default: reloading a Free-timing project straight into the Media
+  // lens (lens is persisted, the editor route mounts eligible) would baseline
+  // "dubbing" off the not-yet-loaded project and then read its own hydration
+  // as a remote change — a false "Timing mode changed" modal on every reload.
+  const timingAck = useTimingModeAck({
+    timingMode,
+    fileId: activeFileId,
+    eligible:
+      project != null &&
+      settingsFetched &&
+      centerSurface === "editor" &&
+      lens === "audio" &&
+      recordingCellId === null,
+  })
+  // Apply THIS FILE's mode: register the change as our own first (so the
+  // changer never gets the "timing mode changed" modal for their own click),
+  // then emit + flush + refresh — the same shape as applyLinkVideo, and the
+  // same files.meta home. Collaborators get it live off the file.* WS frame.
+  // On failure the own-write registration is withdrawn: leaving it standing
+  // would make the abandoned attempt resurface later as somebody else's.
+  const applyTimingMode = useCallback(
+    async (mode: AudioTimingMode, forFileId: string) => {
+      if (!project?.id) return
+      timingAck.noteOwnWrite(mode)
+      try {
+        await emitFileTimingSet({
+          projectId: project.id,
+          fileId: forFileId,
+          timingMode: mode,
+          author: currentUsername,
+        })
+        await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+        refresh()
+      } catch (e) {
+        timingAck.clearOwnWrite()
+        toast.error(
+          e instanceof Error ? `Couldn't change the timing mode: ${e.message}` : "Couldn't change the timing mode.",
+        )
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the ack callbacks are stable (useCallback([]))
+    [project?.id, currentUsername, getTokenForProjectFile, refresh, timingAck.noteOwnWrite, timingAck.clearOwnWrite],
+  )
+  const handleChangeTimingMode = useCallback(
+    (mode: AudioTimingMode) => {
+      if (!activeFileId) return
+      // The mode rides the outbox, so offline it would sit queued while the
+      // toolbar kept reading the old value — say so instead of half-doing it.
+      if (!navigator.onLine) {
+        toast.error("The timing mode can't be changed while offline.")
+        return
+      }
+      if (mode === "audioFirst" && activeFile?.coreMediaUrl) {
+        // Bind the warning to the file it was raised for: the dialog can
+        // outlive the active file (history navigation is not blocked by the
+        // modal overlay), and confirming must never switch a different file.
+        setTimingVideoWarnFor(activeFileId)
+        return
+      }
+      void applyTimingMode(mode, activeFileId)
+    },
+    [activeFileId, activeFile?.coreMediaUrl, applyTimingMode],
+  )
+  // The transport speaks file seconds in dubbing and programme seconds in
+  // audio-first, so it has to know which before anything seeks.
+  useEffect(() => {
+    setQueueTimingMode(timingMode)
+  }, [timingMode])
+
+  // Smooth-playback layer 1: while the Media lens is open, quietly stock the
+  // on-device byte cache with the open file's dub clips (nearest the selection
+  // first, budget-aware, abandoned on lens exit). Clip ids are immutable, so
+  // this is a once-per-device cost — afterwards playback, scrubbing and seeks
+  // never wait on the network. The sweep is connection-adaptive and always
+  // yields to live playback (policy in lib/audio/warm-policy.ts) — no gate
+  // needed here; every warm fetch re-asks before it starts. Cells/selection are read through refs: the
+  // sweep keys on the FILE, not on every cell revalidation.
+  const warmCellsRef = useRef<CellData[]>([])
+  warmCellsRef.current = audioMergedCells
+  const warmNearRef = useRef<string | null>(null)
+  warmNearRef.current = timelineSelectedCellId
+  // FORTIFY: the sweep must wait for the per-file AUDIO ATTACHMENTS to arrive
+  // — store cells carry none, so a fixed-delay sweep on a slow connection saw
+  // attachment-less cells, found zero warm targets, and silently never ran
+  // for the whole session (exactly when warming matters most). Keying on
+  // "attachments have arrived" re-arms it once per file; the skip-cached fast
+  // path makes any extra run cheap.
+  const warmHasAttachments = workspaceAudioByCellId.size > 0
+  useEffect(() => {
+    if (lens !== "audio" || !activeFileId || !project?.id || !frontierSession?.jwt) return
+    if (!warmHasAttachments) return
+    const controller = new AbortController()
+    // Give the lens a beat to render before spending bandwidth.
+    const t = setTimeout(() => {
+      void warmFileDubs({
+        cells: warmCellsRef.current,
+        projectId: project.id,
+        session: frontierSession,
+        signal: controller.signal,
+        nearCellId: warmNearRef.current,
+      }).catch(() => { /* best-effort — playback streams on a cache miss */ })
+    }, 1_500)
+    return () => {
+      clearTimeout(t)
+      controller.abort()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- cells/selection via refs; keyed on the open file + attachments-arrived
+  }, [lens, activeFileId, project?.id, frontierSession?.jwt, warmHasAttachments])
   // AQU-646: timeline seeks (ruler click, clean card click) drive the audio
   // queue in file-timeline seconds. Live queue → jump preserving play/pause;
   // idle queue → CUE paused at the position (Sam's decision: clicking while
@@ -4421,6 +4713,36 @@ export function ProjectWorkspace() {
       { play: false },
     )
   }, [project?.id, audioMergedCells, frontierSession])
+
+  // Round 7 (SUB-44): Space in the media lens — the transport bar's 3-state
+  // toggle against the QUEUE: playing → pause, paused → resume, idle → start
+  // cued-at-zero-then-play (so Space from cold plays from the beginning).
+  const handleTimelineTogglePlay = useCallback(() => {
+    if (!project?.id) return
+    const qs = getQueueState()
+    const activeForThisFile =
+      (qs.kind === "playing" || qs.kind === "paused" || qs.kind === "loading") &&
+      audioMergedCells.some((c) => c.id === qs.cellId)
+    if (activeForThisFile) {
+      // "loading" counts as playing for the toggle: Space during a readiness
+      // gate cancels the pending start rather than futilely resuming it.
+      if (qs.kind === "playing" || qs.kind === "loading") pauseQueue()
+      else void resumeQueue()
+      return
+    }
+    if (!frontierSession?.jwt) return
+    // MERGE 2026-07-27: the timeline owns Space in the media lens (the
+    // playback bar stands down while it is claimed), so it must behave like
+    // the bar's own button — start at the highlighted section when there is
+    // one (AQU-666), and mark that explicit so a missing clip is surfaced
+    // there rather than skipped past (AQU-660).
+    const from = timelineSelectedCellId
+      ? audioMergedCells.findIndex((c) => c.id === timelineSelectedCellId)
+      : -1
+    const ctx = { cells: audioMergedCells, projectId: project.id, session: frontierSession }
+    if (from >= 0) startQueue(ctx, from, true)
+    else startQueueAtTime(ctx, 0, { play: true })
+  }, [project?.id, audioMergedCells, frontierSession, timelineSelectedCellId])
 
   // AQU-654: count outstanding (non-waived) LQA/validation infractions on the
   // active file. Export never hard-blocks on these — the count only drives a
@@ -5090,6 +5412,7 @@ export function ProjectWorkspace() {
                     }
                     workspaceTabs.openFile(fileId, opts)
                   }}
+                  onShowDetails={setDetailsFileId}
                   onRename={handleRename}
                   onMove={(fileId) => {
                     setMoveTargetId(fileId)
@@ -5559,46 +5882,54 @@ export function ProjectWorkspace() {
                 anchorCellId={focusedCellId}
               />
             )}
-            {activeFileId && lens === "audio" && activeFile && fileOrderedBy(activeFile) === "time" ? (
+            {timelineStacked ? (
               <div className="relative flex shrink-0 items-center justify-end gap-3 border-b border-border bg-background/90 py-2 pl-2 pr-2 backdrop-blur-xl">
                 {fileChapterToolbar}
               </div>
             ) : null}
             <div className="min-h-0 flex-1">
-              {lens === "audio" && activeFile && fileOrderedBy(activeFile) === "time" ? (
-                <TimelineEditor
-                  cells={audioMergedCells}
-                  detailActions={timelineDetailActions ?? undefined}
-                  initialSelectedCellId={mediaTraceCellId}
-                  onSelectedCellChange={handleTimelineSelectedCell}
-                  coreMediaUrl={activeFile.coreMediaUrl ?? null}
-                  editable={!isReadOnly}
-                  fileId={activeFile.id}
-                  onRetime={handleRetime}
-                  onCommitTarget={handleTimelineCommitTarget}
-                  onLinkVideo={handleLinkVideo}
-                  onSeekToTime={handleTimelineSeekToTime}
-                  // AQU-646/SUB-29: transcribe from the detail pane — language by
-                  // attachment provenance (source segment → source language;
-                  // a dub take on a media cell → target language).
-                  onTranscribe={(cell) => {
-                    if (!project) return
-                    void transcribeCell({
-                      cell,
-                      session: frontierSession ?? null,
-                      projectId: project.id,
-                      language: isSourceSegmentSelected(cell) ? project.sourceLanguage : project.targetLanguage,
-                    })
-                  }}
-                  project={editorProject ?? project ?? undefined}
-                  terminologyConcepts={(editorProject ?? project)?.terminology ?? []}
-                  infractions={infractions}
-                  onSelectCell={setTimelineSelectedCellId}
-                  session={frontierSession ?? null}
-                  audioByCellId={timelineAudioByCellId}
-                />
-              ) : (
+              {/* 2026-08-07: ONE EditorTable across both lenses; the media lens
+                  stacks the timeline above it. The provider wraps both so the
+                  table's row actions work identically in either position. */}
               <EditorActionsProvider value={editorActionsValue}>
+              <div className="flex h-full min-h-0 flex-col">
+              {timelineStacked && activeFile ? (
+                <div className="shrink-0">
+                  <TimelineEditor
+                    cells={audioMergedCells}
+                    initialSelectedCellId={mediaTraceCellId}
+                    onSelectedCellChange={handleTimelineSelectedCell}
+                    onChipActivated={jumpToCellIdFollowing}
+                    activateRequest={timelineActivateRequest}
+                    coreMediaUrl={activeFile.coreMediaUrl ?? null}
+                    editable={!isReadOnly}
+                    fileId={activeFile.id}
+                    onRetimeSubtitle={handleRetimeSubtitle}
+                    onRetimeTarget={handleRetimeTarget}
+                    onTrimTarget={handleTrimTarget}
+                    onTogglePlay={handleTimelineTogglePlay}
+                    onLinkVideo={handleLinkVideo}
+                    onSeekToTime={handleTimelineSeekToTime}
+                    timingMode={timingMode}
+                    onChangeTimingMode={canEditTimingMode ? handleChangeTimingMode : undefined}
+                    onOpenRecording={handleOpenRecording}
+                    project={editorProject ?? project ?? undefined}
+                    onSelectCell={setTimelineSelectedCellId}
+                    session={frontierSession ?? null}
+                    audioByCellId={timelineAudioByCellId}
+                    legacyMeasure={
+                      // Measuring emits contributor-level events, so a viewer
+                      // or reviewer must not even be offered it — the emit
+                      // would reject per take and the run would report a
+                      // success that saved nothing.
+                      legacyMeasureCount > 0 && !isReadOnly
+                        ? { count: legacyMeasureCount, onMeasure: handleMeasureLegacy }
+                        : undefined
+                    }
+                  />
+                </div>
+              ) : null}
+              <div className="min-h-0 flex-1">
               <EditorTable
             ref={editorRef} project={editorProject ?? project} cellStore={cellStore}
             fileType={activeFile?.type}
@@ -5646,6 +5977,8 @@ export function ProjectWorkspace() {
             isAnonymous={!frontierSession}
             onJumpToCell={jumpToCellId}
             audioLens={audioLens}
+            castGutter={timelineStacked}
+            ttsSettings={tts.settings}
             orderedBy={activeFile ? fileOrderedBy(activeFile) : undefined}
             onOpenAudioSetup={openAudioSetup}
             onAssignVoice={handleAssignVoice}
@@ -5670,10 +6003,13 @@ export function ProjectWorkspace() {
             upstreamStaleCellIds={upstreamStaleCellIds}
             assignmentsByCellId={assignmentsByCellId}
             onVisibleRefChange={setTrackedCellRef}
-            chapterNavTrailing={fileChapterToolbar ?? undefined}
+            // Stacked mode already shows the toolbar in the media header row
+            // above the timeline — don't render it twice.
+            chapterNavTrailing={timelineStacked ? undefined : fileChapterToolbar ?? undefined}
           />
+              </div>
+              </div>
               </EditorActionsProvider>
-              )}
             </div>
             {footnoteViewMode === "tray" && (
               <FootnotesTray
@@ -5859,7 +6195,7 @@ export function ProjectWorkspace() {
                   projectId={project.id}
                   session={frontierSession ?? null}
                   settings={tts.settings}
-                  onActiveCell={jumpToCellId}
+                  onActiveCell={handleBarActiveCell}
                   startCellId={timelineSelectedCellId}
                   below={
                     <>
@@ -5946,6 +6282,9 @@ export function ProjectWorkspace() {
             // when the modal closes.
             const idx = cellStore.findIndexByCellId(cellId)
             if (idx >= 0) editorRef.current?.scrollToCellIndex(idx)
+            // A cell transition (auto-advance or Next/Prev) means the take is
+            // confirmed — stop deferring a pending timing-mode heads-up.
+            timingAck.surfaceNow()
           }}
           onClose={() => setRecordingCellId(null)}
         />
@@ -6107,6 +6446,41 @@ export function ProjectWorkspace() {
           onConfirm={() => { pendingActionConfirm.run(actionCtx, actionArgs); setPendingActionConfirm(null) }}
         />
       )}
+      {/* "File details" modal — metadata plus permission-aware actions for a sidebar file row. */}
+      <FileDetailsModal
+        open={detailsFileId !== null}
+        onOpenChange={(v) => { if (!v) setDetailsFileId(null) }}
+        file={detailsFileId ? project.files.find((f) => f.id === detailsFileId) ?? null : null}
+        progress={detailsFileId ? fileProgress.get(detailsFileId) : undefined}
+        roleLevel={currentRoleLevel}
+        canExportByOrgPolicy={canExportByOrgPolicy}
+        onRename={() => {
+          if (detailsFileId) setRenameSignal({ fileId: detailsFileId, nonce: Date.now() })
+          setDetailsFileId(null)
+        }}
+        onMove={() => {
+          if (detailsFileId) {
+            setMoveTargetId(detailsFileId)
+            setMoveCorpus(project.files.find((f) => f.id === detailsFileId)?.corpusMarker ?? "")
+          }
+          setDetailsFileId(null)
+        }}
+        onExportSource={() => {
+          const f = detailsFileId ? project.files.find((x) => x.id === detailsFileId) : null
+          if (f) {
+            void exportSourceFile({
+              projectId: project.id,
+              file: f,
+              getToken: getTokenForFile,
+              targetLang: activeLane,
+            })
+          }
+        }}
+        onDelete={() => {
+          if (detailsFileId) setPendingDeleteId(detailsFileId)
+          setDetailsFileId(null)
+        }}
+      />
       {/* FRO-272: soft-delete confirmation — file moves to "Recently deleted" (30-day retention). */}
       <ConfirmActionDialog
         open={pendingDeleteId !== null}
@@ -6119,6 +6493,33 @@ export function ProjectWorkspace() {
         confirmLabel="Move to Recently deleted"
         variant="destructive"
         onConfirm={() => { if (pendingDeleteId) { void handleDeleteFile(pendingDeleteId) } setPendingDeleteId(null) }}
+      />
+      {/* A remote timing-mode change, acknowledged (2026-08-06). */}
+      <TimingModeChangedDialog ack={timingAck.ack} onAcknowledge={timingAck.acknowledge} />
+      {/* Flow B (2026-08-05, simplified 2026-08-06): linking a video under
+          Free timing warns that it will stay hidden. Mode changes stay in
+          Project Settings only — no combined switch-and-link action. */}
+      <LinkVideoTimingDialog
+        open={pendingVideoUrl !== null}
+        onCancel={() => setPendingVideoUrl(null)}
+        onLinkAnyway={() => {
+          const u = pendingVideoUrl
+          setPendingVideoUrl(null)
+          if (u) void applyLinkVideo(u)
+        }}
+      />
+      {/* Flow A (file-scoped): switching a video-bearing file to Free timing
+          hides the video — confirm before the mode changes. */}
+      <TimingVideoWarningDialog
+        // Only while the warned-about file is still the open one — navigating
+        // away answers the question by abandoning it.
+        open={timingVideoWarnFor != null && timingVideoWarnFor === activeFileId}
+        onCancel={() => setTimingVideoWarnFor(null)}
+        onConfirm={() => {
+          const target = timingVideoWarnFor
+          setTimingVideoWarnFor(null)
+          if (target) void applyTimingMode("audioFirst", target)
+        }}
       />
       {/* FRO-272: "Recently deleted" trash list — opened from the sidebar's
           More menu (project_lead+); was an inline expander in the files panel. */}
@@ -6266,8 +6667,8 @@ function MoveToCorpusDialog({
 
 // ── ScrollToGroupHandler ───────────────────────────────────────────────────
 // Must render inside <EditorScrollProvider> so useEditorScroll() has context.
-// Watches pendingGroup and scrolls the first matching cell into view via the
-// forwarded editorRef.
+// Watches editorScroll.pending and scrolls the first matching cell into view
+// via the forwarded editorRef.
 
 interface ScrollToGroupHandlerProps {
   cellStore: CellStore

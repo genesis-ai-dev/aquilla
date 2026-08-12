@@ -31,6 +31,8 @@ interface Props {
   /** Storage lane used when exporting translated source files. */
   targetLang?: string
   onSelectFile: (fileId: string, opts?: { sectionLabel?: string }) => void
+  /** Opens the FileDetailsModal for the given file (rendered by the caller). */
+  onShowDetails?: (fileId: string) => void
   onRename: (fileId: string, newName: string) => void
   onMove: (fileId: string) => void
   /** AQU-271: Optional — pass undefined to hide delete for roles below project_lead (500). */
@@ -50,7 +52,7 @@ interface Props {
 
 export function ExpandableFileList({
   projectId, files, activeFileId, fileProgress,
-  suggestionFileIds, validationCount, getTokenForFile, onSelectFile, onRename, onMove, onDelete,
+  suggestionFileIds, validationCount, getTokenForFile, onSelectFile, onShowDetails, onRename, onMove, onDelete,
   targetLang = "",
   onApplySuggestion, onRenameCorpus, canExportByOrgPolicy = true,
   renameSignal,
@@ -202,6 +204,7 @@ export function ExpandableFileList({
                             onEditCancel={() => setEditingFileId(null)}
                             onToggleExpand={() => toggle(file.id)}
                             onSelect={() => onSelectFile(file.id)}
+                            onShowDetails={onShowDetails ? () => onShowDetails(file.id) : undefined}
                             onStartRename={() => setEditingFileId(file.id)}
                             onMove={() => onMove(file.id)}
                             onDelete={onDelete ? () => onDelete(file.id) : undefined}

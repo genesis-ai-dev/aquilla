@@ -1,4 +1,5 @@
-import { Pencil, FolderInput, Trash2, Download } from "lucide-react"
+import { Pencil, FolderInput, Trash2, Download, Info } from "lucide-react"
+import { useT } from "@/lib/i18n/I18nProvider"
 import {
   MenuGroup,
   MenuItem,
@@ -6,6 +7,8 @@ import {
 } from "@/components/ui/menu-parts"
 
 interface FileActionMenuProps {
+  /** Opens the FileDetailsModal (metadata + permission-aware actions). */
+  onShowDetails?: () => void
   onRename: () => void
   onMove: () => void
   /** AQU-271: Optional — only shown for project_lead+ (level >= 500). */
@@ -20,11 +23,17 @@ interface FileActionMenuProps {
  * once per way of opening it (row right-click, ⋯ button).
  */
 export function FileActionMenu({
-  onRename, onMove, onDelete, onExportSource,
+  onShowDetails, onRename, onMove, onDelete, onExportSource,
 }: FileActionMenuProps) {
+  const t = useT()
   return (
     <>
       <MenuGroup>
+        {onShowDetails && (
+          <MenuItem onClick={onShowDetails}>
+            <Info /> {t("fileDetails.menuItem")}
+          </MenuItem>
+        )}
         <MenuItem onClick={onRename}>
           <Pencil /> Rename
         </MenuItem>

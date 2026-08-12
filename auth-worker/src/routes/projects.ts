@@ -109,6 +109,14 @@ interface FileProjection {
   targetLanguage?: string
   sourceTextDirection?: "ltr" | "rtl"
   targetTextDirection?: "ltr" | "rtl"
+  /** Linked core video, read from files.meta like the fields above. AQU-646:
+   *  the client has mapped this since the timeline shipped, but it was never
+   *  sent — so a linked video never reached the app at all, and the editor's
+   *  video surface was dead on every cold load. */
+  coreMediaUrl?: string
+  /** The file's audio timing mode (file.timing.set), read from files.meta.
+   *  Omitted when unset → client falls back to the project-level default. */
+  timingMode?: "dubbing" | "audioFirst"
 }
 
 /**
@@ -151,10 +159,14 @@ async function loadFilesByProject(
     let sourceTextDirection: "ltr" | "rtl" | undefined
     let targetTextDirection: "ltr" | "rtl" | undefined
     let hasScriptureContent: boolean | undefined
+    let coreMediaUrl: string | undefined
+    let timingMode: "dubbing" | "audioFirst" | undefined
     if (f.meta) {
       try {
         const m = JSON.parse(f.meta) as {
           orderedBy?: string
+          coreMediaUrl?: unknown
+          timingMode?: unknown
           source_language?: string
           target_language?: string
           sourceLanguage?: string
@@ -171,6 +183,8 @@ async function loadFilesByProject(
         sourceTextDirection = normalizeTextDirection(m.source_text_direction ?? m.sourceTextDirection)
         targetTextDirection = normalizeTextDirection(m.target_text_direction ?? m.targetTextDirection)
         if (m.aquillaImport?.hasScriptureContent === true) hasScriptureContent = true
+        if (typeof m.coreMediaUrl === "string" && m.coreMediaUrl.trim()) coreMediaUrl = m.coreMediaUrl
+        if (m.timingMode === "dubbing" || m.timingMode === "audioFirst") timingMode = m.timingMode
       } catch {
         // malformed meta → leave orderedBy unset (client defaults to sequence)
       }
@@ -188,6 +202,8 @@ async function loadFilesByProject(
       ...(targetLanguage ? { targetLanguage } : {}),
       ...(sourceTextDirection ? { sourceTextDirection } : {}),
       ...(targetTextDirection ? { targetTextDirection } : {}),
+      ...(coreMediaUrl ? { coreMediaUrl } : {}),
+      ...(timingMode ? { timingMode } : {}),
     })
     byProject.set(f.project_id, list)
   }

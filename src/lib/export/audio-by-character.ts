@@ -130,17 +130,46 @@ export async function exportAudioByCharacter(args: ExportAudioArgs): Promise<{ b
   let done = 0
   let skipped = 0
 
+  // A COMBINED generation is attached to every cell it covers under the same
+  // base id — fetch and decode each unique clip ONCE, not once per cell (with
+  // the WAV preference below that difference is a dozen multi-minute
+  // downloads). A failure stays cached too, so retries per cell don't hammer.
+  const pcmByClip = new Map<string, Promise<Float32Array | null>>()
+
   for (const group of groups) {
     const pcmClips: Float32Array[] = []
     for (const clip of group.clips) {
       const cell = args.cells.find((c) => c.id === clip.cellId)!
       const parsed = parseFrontierAudioUrl(clip.url)
       if (!parsed) { done++; args.onProgress?.(done, totalClips); continue }
+      const clipKey = `${parsed.audioId}.${parsed.ext}`
+      let pcmPromise = pcmByClip.get(clipKey)
+      if (!pcmPromise) {
+        pcmPromise = (async () => {
+          // Lossless preference (meeting 2026-08-05): client-synth generated
+          // voices keep the original WAV as an unattached sibling (same base
+          // id, ext "wav") — exports ALWAYS prefer it, regardless of the
+          // device playback pref, so the zip isn't a lossy transcode. Any
+          // failure falls back to the attached bytes.
+          const generated = clip.audioId === cell.selectedGeneratedVoiceAudioId
+          let bytes: Uint8Array | null = null
+          if (generated && parsed.ext === "webm") {
+            bytes = await args
+              .fetchBytes({ projectId: args.projectId, fileId: cell.fileId, audioId: parsed.audioId, ext: "wav" })
+              .catch(() => null)
+          }
+          if (bytes == null || bytes.length === 0) {
+            bytes = await args.fetchBytes({
+              projectId: args.projectId, fileId: cell.fileId, audioId: parsed.audioId, ext: parsed.ext,
+            })
+          }
+          return bytes.length > 0 ? await args.decode(bytes) : null
+        })()
+        pcmByClip.set(clipKey, pcmPromise)
+      }
       try {
-        const bytes = await args.fetchBytes({
-          projectId: args.projectId, fileId: cell.fileId, audioId: parsed.audioId, ext: parsed.ext,
-        })
-        if (bytes.length > 0) pcmClips.push(await args.decode(bytes))
+        const pcm = await pcmPromise
+        if (pcm) pcmClips.push(pcm)
       } catch (err) {
         console.warn(`[audio-by-character] skipping clip ${clip.audioId} (${clip.cellId}):`, err)
         skipped++

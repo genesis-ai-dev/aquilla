@@ -131,6 +131,7 @@ describe("context sidecar", () => {
     expect(Object.keys(parsed.namespaces).sort()).toEqual([
       "common",
       "error",
+      "fileDetails",
       "language",
       "nav",
     ])

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { Link, useNavigate } from "react-router-dom"
 import { type ColumnDef } from "@tanstack/react-table"
-import { ArrowRight, ShieldAlert } from "lucide-react"
+import { ShieldAlert } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { LoadingOverlay } from "@/components/ui/loading-overlay"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -282,12 +282,11 @@ export function OrgOverview() {
                     <button
                       type="button"
                       onClick={openProjects}
-                      className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+                      className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
                     >
                       {atRiskTotal > atRiskPreview.length
                         ? `View all ${atRiskTotal}`
-                        : "View projects"}{" "}
-                      <ArrowRight className="size-3" />
+                        : "View projects"}
                     </button>
                   ) : null
                 }

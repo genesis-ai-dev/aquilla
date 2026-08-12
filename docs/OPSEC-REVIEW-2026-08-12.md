@@ -23,10 +23,12 @@ the correction is stated explicitly.
 Nothing changed in the asset inventory, and nothing changed in the threat model. Two
 things changed in the world:
 
-1. **Eight new advisories** landed in the production dependency tree, one of them against
-   the SPA's only HTML sanitizer. This is OPS-6 — the detection gap the last pass recorded
-   as "nothing yet prevents the next advisory" — being demonstrated rather than argued.
-   See OPS-8.
+1. **Nine advisories were sitting in the production dependency tree**, one of them against
+   the SPA's only HTML sanitizer. The last pass did not enumerate them — not because it
+   judged them acceptable, but because nothing was looking. This is OPS-6, the detection gap
+   it recorded as "nothing yet prevents the next advisory", being demonstrated rather than
+   argued. (How many are strictly *new* since 2026-08-10 is unknown and not worth
+   establishing: the point is that the count was unobserved either way.) See OPS-8.
 2. **A control that read as implemented turned out to match nothing.** OPS-3's session-replay
    masking had a `maskTextSelector` in the PostHog config, which is what a reader checking
    for the control would find; the attribute it names existed nowhere in the tree. See OPS-9.
@@ -170,7 +172,7 @@ expressions. `pnpm lint` now exits 0 (353 warnings, which do not fail the lane).
 | OPS-10 | Medium — needs an error path an authenticated caller can trigger | Low-Medium — schema disclosure, no credentials | **Low-Medium** | Long-standing; the June rating was right, it had just never been checked. |
 | OPS-11 | Certain — it was the state of `dev` | Medium — degraded the signal of the lane this change adds a security gate to | **Medium** | Not a vulnerability. A control-effectiveness problem, which is what §6 of these reviews is for. |
 
-Ranked action order for the owner, of what remains: **OPS-2 provisioning** (§5 item 5),
+Ranked action order for the owner, of what remains: **OPS-2 provisioning** (§5 item 6),
 then **OPS-10**, then SEC-1. OPS-8, OPS-9 and OPS-11 are closed in code.
 
 ## 5. Countermeasures

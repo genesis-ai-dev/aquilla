@@ -4407,6 +4407,14 @@ export function ProjectWorkspace() {
     rebuildSearchIndex()
   }, [project?.id, isReadOnly, getActiveCell, activeFileId, applyOptimisticTargetEdit, activeLane, resolveTargetCommitParentId, rememberPendingTargetCommit, currentUsername, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell, rebuildSearchIndex])
 
+  const openProjectSettings = useCallback(() => {
+    if (!projectId) return
+    window.location.assign(buildProjectSettingsHandoffUrl({
+      projectId,
+      returnTo: workspaceReturnPath(projectId, activeFileId),
+    }))
+  }, [projectId, activeFileId])
+
   const projectNavItems = useMemo(() => {
     const items = [
       // Pinned below Comments: Terminology is a frequent destination, so it
@@ -4416,17 +4424,8 @@ export function ProjectWorkspace() {
         onClick: () => openOverlay("comments") },
       { id: "terminology", label: "Terminology", icon: BookOpen, pinned: true,
         onClick: () => openOverlay("terminology") },
-      // Audio/Media lens lives in the header EditorModeToggle — keep it out of
-      // the sidebar More menu so the overflow list stays structural (settings,
-      // trash) rather than view-mode toggles. Sharing lives in Settings → Members.
-      { id: "settings", label: "Settings", icon: SettingsIcon,
-        onClick: () => {
-          if (!projectId) return
-          window.location.assign(buildProjectSettingsHandoffUrl({
-            projectId,
-            returnTo: workspaceReturnPath(projectId, activeFileId),
-          }))
-        } },
+      // Project settings is a header cog beside Import. Audio/Media lens lives
+      // in the header EditorModeToggle. Sharing lives in Settings → Members.
       // FRO-272: trash moved out of the always-visible files footer into the
       // "More" menu — it opens a dialog now (project_lead+ only).
       ...(currentRoleLevel >= ROLE.PROJECT_LEAD
@@ -4435,7 +4434,7 @@ export function ProjectWorkspace() {
         : []),
     ]
     return items
-  }, [projectId, activeFileId, navigate, openCommentCount, currentRoleLevel, openOverlay])
+  }, [openCommentCount, currentRoleLevel, openOverlay])
 
   // AQU-646 P0: cells from the store never carry audio attachments — only
   // mergeCellsWithAudio adds them (EditorTable and VoicePlaybackBar each merge
@@ -5670,6 +5669,7 @@ export function ProjectWorkspace() {
           <WorkspaceHeader
             project={project}
             onImport={project ? handleHeaderImport : undefined}
+            onSettings={project ? openProjectSettings : undefined}
             overviewHref={projectId ? `/projects/${projectId}` : undefined}
             surfaceLabel={workspaceBreadcrumb.surfaceLabel}
             editorHref={workspaceBreadcrumb.editorHref}

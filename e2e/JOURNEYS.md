@@ -108,7 +108,7 @@
 | Terminology | Archive hides an active term while preserving it for restore | `e2e/specs/projects/terminology-delete-concept.smoke.spec.ts` | ✅ |
 | Editor      | Terminology violation shows only the inline blot (no advisory band), live + explained on hover | `e2e/specs/editor/terminology-inline-blot.smoke.spec.ts` | ✅ |
 | Editor      | Manual direction mismatch offers Auto repair and restores content-driven direction | `e2e/specs/editor/rtl-hint-adjust-opens-settings.smoke.spec.ts` | ✅ |
-| Editor      | Workspace "Settings" dropdown item navigates to project settings; breadcrumb includes Editor | `e2e/specs/editor/workspace-settings-navigate.smoke.spec.ts`   |   ✅   |
+| Editor      | Workspace header Settings cog navigates to project settings; breadcrumb includes Editor | `e2e/specs/editor/workspace-settings-navigate.smoke.spec.ts`   |   ✅   |
 | Projects    | Settings sub-menu link navigates to its pane and back via breadcrumb (AQU-501); Editor crumb only from /editor | `e2e/specs/projects/project-settings-nav-link-click.smoke.spec.ts` | ✅ |
 | Editor      | Next unfinished navigation basic flow                 | `e2e/specs/editor/next-unfinished.smoke.spec.ts`              |   ✅   |
 | Editor      | "Next unfinished" button enabled after import; navigates without error | `e2e/specs/editor/next-unfinished-button.smoke.spec.ts` | ✅ |

@@ -121,7 +121,7 @@ export class Dashboard {
     // workspace-only readiness marker and guarantees callers interact after
     // the destination route has mounted.
     await expect(
-      this.page.getByRole("button", { name: /^More project options$/i }),
+      this.page.getByTestId("workspace-import-button"),
     ).toBeVisible({ timeout: 15_000 })
     const setupSheet = this.page.getByRole("dialog", { name: /project setup/i })
     if (await setupSheet.isVisible().catch(() => false)) {

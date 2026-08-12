@@ -18,18 +18,13 @@ export class ProjectSettings {
 
   /**
    * Navigate from the open workspace ("/project/:id/editor") into Settings →
-   * General, where the Languages section renders. Mirrors the sidebar
-   * "More project options" → "Settings" flow already exercised by
-   * `workspace-settings-navigate.smoke.spec.ts`.
+   * General, where the Languages section renders. Mirrors the header Settings
+   * cog flow already exercised by `workspace-settings-navigate.smoke.spec.ts`.
    */
   async openSettings(): Promise<void> {
-    const moreBtn = this.page.getByRole("button", { name: /^More project options$/i })
-    await expect(moreBtn).toBeVisible({ timeout: 10_000 })
-    await moreBtn.click()
-
-    const settingsItem = this.page.getByRole("button", { name: /^Settings$/i })
-    await expect(settingsItem).toBeVisible({ timeout: 3_000 })
-    await settingsItem.click()
+    const settingsBtn = this.page.getByRole("button", { name: /^Settings$/i })
+    await expect(settingsBtn).toBeVisible({ timeout: 10_000 })
+    await settingsBtn.click()
     await this.page.waitForURL(/\/project\/[^/]+\/settings/, { timeout: 10_000 })
 
     // Lands on the settings index (index path — no section segment yet) — drill into "General",

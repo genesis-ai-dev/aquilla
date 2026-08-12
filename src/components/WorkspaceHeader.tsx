@@ -10,6 +10,8 @@ interface Props {
   extraMenuItems?: OverflowMenuItem[]
   /** When set, renders Import in a button group beside the ⋯ overflow menu. */
   onImport?: () => void
+  /** When set, renders a Settings cog beside Import. */
+  onSettings?: () => void
   /**
    * AQU-428: When provided, the project name in the breadcrumb becomes a
    * clickable link to the project overview page (`/projects/:id`), giving
@@ -33,6 +35,7 @@ export function WorkspaceHeader({
   children,
   extraMenuItems,
   onImport,
+  onSettings,
   overviewHref,
   surfaceLabel,
   editorHref,
@@ -56,7 +59,7 @@ export function WorkspaceHeader({
       <div className="flex shrink-0 items-center gap-1">
         {children}
         {onImport ? (
-          <WorkspaceHeaderActions onImport={onImport} menuItems={items} />
+          <WorkspaceHeaderActions onImport={onImport} onSettings={onSettings} menuItems={items} />
         ) : items.length > 0 ? (
           <OverflowMenu items={items} />
         ) : null}

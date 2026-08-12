@@ -8,15 +8,15 @@ import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/se
  * Opening Settings from the editor stamps `?return=` so the breadcrumb includes
  * a clickable Editor crumb.
  *
- * This spec: import a file → open Settings from the sidebar More menu →
+ * This spec: import a file → open Settings from the header cog →
  * open Rules → verify Built-in checks → click Editor → return to the file editor.
  */
 test("rules settings pane returns to editor via breadcrumb", async ({ alice }) => {
   const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `BackNav ${Date.now()}` })
   const ws = await openSeededProject(alice, seeded)
 
-  await alice.getByRole("button", { name: /More project options/i }).click()
-  await alice.getByRole("button", { name: /^Settings$/ }).click()
+  await expect(alice.getByRole("button", { name: /^Settings$/i })).toBeVisible({ timeout: 10_000 })
+  await alice.getByRole("button", { name: /^Settings$/i }).click()
   await alice.waitForURL(/\/project\/[^/]+\/settings/, { timeout: 10_000 })
 
   await alice.getByRole("link", { name: /Rules Checks/i }).click()

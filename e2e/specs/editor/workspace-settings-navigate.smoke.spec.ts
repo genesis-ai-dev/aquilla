@@ -4,16 +4,15 @@ import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/se
 /**
  * Workspace "Settings" action navigates to project settings.
  *
- * "Settings" lives in the sidebar project-nav overflow (SidebarProjectSection):
- * unpinned nav items collapse into a popover behind the button labelled
- * "More project options". Clicking the Settings row calls:
+ * "Settings" is a cog beside Import in the workspace header
+ * (`WorkspaceHeaderActions`). Clicking it calls:
  *   window.location.assign(buildProjectSettingsHandoffUrl({...}))
  * which navigates to `/project/:id/settings?return=...`.
  *
- * This spec: import a file → open the sidebar "More project options" popover →
- * click "Settings" → verify the URL changes to /project/:id/settings.
+ * This spec: import a file → click the header Settings cog → verify the URL
+ * changes to /project/:id/settings.
  */
-test("sidebar More project options Settings item navigates to project settings", async ({ alice }) => {
+test("workspace header Settings cog navigates to project settings", async ({ alice }) => {
   const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `WsSettings ${Date.now()}` })
   await openSeededProject(alice, seeded)
 
@@ -21,17 +20,11 @@ test("sidebar More project options Settings item navigates to project settings",
   const projectId = alice.url().match(/\/project\/([^/?]+)/)?.[1]
   expect(projectId).toBeTruthy()
 
-  // Open the sidebar project-nav overflow popover.
-  const moreBtn = alice.getByRole("button", { name: /^More project options$/i })
-  await expect(moreBtn).toBeVisible({ timeout: 10_000 })
-  await moreBtn.click()
-
-  // Click the "Settings" row (plain button inside the portaled popover).
   await expect(alice.getByRole("button", { name: /^Share$/i })).toHaveCount(0)
 
-  const settingsItem = alice.getByRole("button", { name: /^Settings$/i })
-  await expect(settingsItem).toBeVisible({ timeout: 3_000 })
-  await settingsItem.click()
+  const settingsBtn = alice.getByRole("button", { name: /^Settings$/i })
+  await expect(settingsBtn).toBeVisible({ timeout: 10_000 })
+  await settingsBtn.click()
 
   // Should navigate to /project/:id/settings.
   await alice.waitForURL(/\/project\/[^/]+\/settings/, { timeout: 5_000 })

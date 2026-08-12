@@ -1,16 +1,18 @@
-import { Plus } from "lucide-react"
+import { Plus, Settings } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ButtonGroup } from "@/components/ui/button-group"
 import { OverflowMenu, type OverflowMenuItem } from "./OverflowMenu"
 
 interface WorkspaceHeaderActionsProps {
   onImport: () => void
+  onSettings?: () => void
   menuItems: OverflowMenuItem[]
 }
 
-/** Header right-side actions: prominent Import + ⋯ overflow for the rest. */
+/** Header right-side actions: Import + Settings cog, then ⋯ overflow for the rest. */
 export function WorkspaceHeaderActions({
   onImport,
+  onSettings,
   menuItems,
 }: WorkspaceHeaderActionsProps) {
   return (
@@ -26,6 +28,19 @@ export function WorkspaceHeaderActions({
         <Plus data-icon="inline-start" />
         Import
       </Button>
+      {onSettings ? (
+        <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          className="bg-card"
+          onClick={onSettings}
+          aria-label="Settings"
+          data-testid="workspace-settings-button"
+        >
+          <Settings className="h-4 w-4" />
+        </Button>
+      ) : null}
       {menuItems.length > 0 ? (
         <OverflowMenu
           items={menuItems}

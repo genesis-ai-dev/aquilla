@@ -11,6 +11,8 @@
  */
 
 import { FRONTIER_BASE } from "../frontier/auth"
+import type { MessageKey } from "../i18n/messages/en"
+import { t } from "../i18n/standalone"
 
 function authHeaders(jwt: string): HeadersInit {
   return {
@@ -29,15 +31,23 @@ export class TermbaseApiError extends Error {
   }
 }
 
-async function readError(res: Response, fallback: string): Promise<never> {
-  let detail = fallback
+/**
+ * AQU-820: the message is OURS — a translated sentence chosen by the call site
+ * (TermbaseSharingSection renders `e.message` verbatim). The server's `error`
+ * string is untranslated and often a raw diagnostic, so it is kept on `cause`
+ * for DevTools rather than shown to the user.
+ */
+async function readError(res: Response, fallbackKey: MessageKey): Promise<never> {
+  let detail = ""
   try {
     const body = (await res.json()) as { error?: string }
-    if (body?.error) detail = body.error
+    detail = body?.error ?? ""
   } catch {
-    // non-JSON body; keep fallback
+    // non-JSON body; nothing to preserve
   }
-  throw new TermbaseApiError(detail, res.status)
+  const err = new TermbaseApiError(t(fallbackKey), res.status)
+  err.cause = `HTTP ${res.status}${detail ? ` — ${detail.slice(0, 400)}` : ""}`
+  throw err
 }
 
 // ── Shapes (mirror the contract) ───────────────────────────────────────────
@@ -78,7 +88,7 @@ export async function publishTermbase(
     `${FRONTIER_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/termbase/publish`,
     { method: "POST", headers: authHeaders(jwt) },
   )
-  if (!res.ok) return readError(res, `publishTermbase failed: HTTP ${res.status}`)
+  if (!res.ok) return readError(res, "error.termbase.publish")
   return (await res.json()) as { projectId: string; published: true }
 }
 
@@ -93,7 +103,7 @@ export async function unpublishTermbase(
     `${FRONTIER_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/termbase/publish`,
     { method: "DELETE", headers: authHeaders(jwt) },
   )
-  if (!res.ok) return readError(res, `unpublishTermbase failed: HTTP ${res.status}`)
+  if (!res.ok) return readError(res, "error.termbase.unpublish")
   return (await res.json()) as { projectId: string; published: false }
 }
 
@@ -108,7 +118,7 @@ export async function listPublishedTermbases(
     `${FRONTIER_BASE}/api/v2/orgs/${encodeURIComponent(String(orgId))}/published-termbases`,
     { headers: authHeaders(jwt) },
   )
-  if (!res.ok) return readError(res, `listPublishedTermbases failed: HTTP ${res.status}`)
+  if (!res.ok) return readError(res, "error.termbase.listPublished")
   const body = (await res.json()) as { termbases: PublishedTermbase[] }
   return body.termbases ?? []
 }
@@ -124,7 +134,7 @@ export async function listSubscriptions(
     `${FRONTIER_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/termbase/subscriptions`,
     { headers: authHeaders(jwt) },
   )
-  if (!res.ok) return readError(res, `listSubscriptions failed: HTTP ${res.status}`)
+  if (!res.ok) return readError(res, "error.termbase.listSubscriptions")
   const body = (await res.json()) as { subscriptions: TermbaseSubscription[] }
   return body.subscriptions ?? []
 }
@@ -147,7 +157,7 @@ export async function subscribeTermbase(
     `${FRONTIER_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/termbase/subscriptions`,
     { method: "POST", headers: authHeaders(jwt), body: JSON.stringify(body) },
   )
-  if (!res.ok) return readError(res, `subscribeTermbase failed: HTTP ${res.status}`)
+  if (!res.ok) return readError(res, "error.termbase.subscribe")
   const json = (await res.json()) as { subscription: CreatedSubscription }
   return json.subscription
 }
@@ -164,7 +174,7 @@ export async function unsubscribeTermbase(
     `${FRONTIER_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/termbase/subscriptions/${encodeURIComponent(termbaseProjectId)}`,
     { method: "DELETE", headers: authHeaders(jwt) },
   )
-  if (!res.ok) return readError(res, `unsubscribeTermbase failed: HTTP ${res.status}`)
+  if (!res.ok) return readError(res, "error.termbase.unsubscribe")
   return (await res.json()) as { ok: true }
 }
 
@@ -184,7 +194,7 @@ export async function reorderSubscriptions(
     `${FRONTIER_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/termbase/subscriptions`,
     { method: "PATCH", headers: authHeaders(jwt), body: JSON.stringify({ order }) },
   )
-  if (!res.ok) return readError(res, `reorderSubscriptions failed: HTTP ${res.status}`)
+  if (!res.ok) return readError(res, "error.termbase.reorder")
   const body = (await res.json()) as { subscriptions: TermbaseSubscription[] }
   return body.subscriptions ?? []
 }

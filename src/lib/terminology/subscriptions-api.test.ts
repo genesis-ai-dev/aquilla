@@ -33,15 +33,19 @@ describe("publishTermbase", () => {
     expect((init.headers as any).Authorization).toBe("Bearer jwt")
   })
 
-  it("throws TermbaseApiError with server error message on 409", async () => {
+  // AQU-820: TermbaseSharingSection renders `e.message` verbatim, so the raw
+  // (untranslated) server string must stay off `.message` and live on `.cause`.
+  it("throws TermbaseApiError with our keyed message, server text only on .cause", async () => {
     ;(global.fetch as any).mockResolvedValueOnce(
       ok({ error: "project is not org-owned; cannot publish to an org" }, 409),
     )
-    await expect(publishTermbase("jwt", "p1")).rejects.toMatchObject({
+    const err = await publishTermbase("jwt", "p1").catch((e: unknown) => e)
+    expect(err).toMatchObject({
       name: "TermbaseApiError",
       status: 409,
-      message: "project is not org-owned; cannot publish to an org",
+      message: "Couldn't share this termbase with the organization.",
     })
+    expect(String((err as Error).cause)).toContain("not org-owned")
   })
 })
 

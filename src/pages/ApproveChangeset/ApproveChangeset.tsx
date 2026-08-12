@@ -14,7 +14,9 @@ import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
+import { messageForStatus } from "@/lib/errors/user-error"
 import { AUTH_BASE } from "@/lib/frontier/auth"
+import { t } from "@/lib/i18n/standalone"
 import {
   ChangeList,
   ImportPreviewView,
@@ -68,17 +70,16 @@ function humanizeKey(key: string): string {
   return spaced.charAt(0).toUpperCase() + spaced.slice(1)
 }
 
+/**
+ * AQU-820: the returned string is rendered verbatim, so it is always ours and
+ * keyed — the server's `error.message` is untranslated and often a raw
+ * diagnostic. The status alone distinguishes the three cases worth naming.
+ */
 async function parseErrorMessage(res: Response): Promise<string> {
-  try {
-    const body = (await res.json()) as { error?: { message?: string } }
-    if (body.error?.message) return body.error.message
-  } catch {
-    // fall through to status-based messages
-  }
-  if (res.status === 403) return "You aren't authorized to view this approval."
-  if (res.status === 404) return "This changeset couldn't be found."
-  if (res.status === 409) return "This changeset can no longer be approved."
-  return `Something went wrong (${res.status}).`
+  if (res.status === 403) return t("error.changeset.notAuthorized")
+  if (res.status === 404) return t("error.changeset.notFound")
+  if (res.status === 409) return t("error.changeset.notApprovable")
+  return messageForStatus(res.status, "", "changeset").message
 }
 
 export function ApproveChangeset() {

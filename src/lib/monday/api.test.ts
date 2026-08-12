@@ -51,13 +51,23 @@ describe("fetchMondayConnection", () => {
     expect((init.headers as Record<string, string>).Authorization).toBe("Bearer jwt")
   })
 
-  it("throws MondayApiError with server error message on failure", async () => {
+  // AQU-820: the raw server string is untranslated and is rendered verbatim by
+  // MondayIntegrationSection/OrgSettingsMonday, so it must NOT reach `.message`
+  // — only `.cause`, which is developer-facing.
+  it("throws MondayApiError with our keyed message, keeping server text off .message", async () => {
     fetchMock().mockResolvedValueOnce(ok({ error: "not a member" }, 403))
     await expect(fetchMondayConnection("jwt", 7)).rejects.toMatchObject({
       name: "MondayApiError",
       status: 403,
-      message: "not a member",
+      message: "Couldn't load the Monday connection status.",
     })
+  })
+
+  it("keeps the server's error text on .cause for DevTools", async () => {
+    fetchMock().mockResolvedValueOnce(ok({ error: "not a member" }, 403))
+    const err = await fetchMondayConnection("jwt", 7).catch((e: unknown) => e)
+    expect((err as Error).message).not.toContain("not a member")
+    expect(String((err as Error).cause)).toContain("not a member")
   })
 })
 

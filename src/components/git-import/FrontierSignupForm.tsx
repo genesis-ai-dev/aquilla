@@ -13,6 +13,7 @@ import { Check, X } from "lucide-react"
 import { RevealableInput } from "@/components/ui/revealable-input"
 import { Spinner } from "@/components/ui/spinner"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
+import { useT } from "@/lib/i18n/I18nProvider"
 import { FrontierAuthError } from "@/lib/frontier/auth"
 import { isFieldInvalid } from "@/lib/forms/field-state"
 import { useSubmitError } from "@/lib/forms/submit-error"
@@ -127,6 +128,7 @@ interface FrontierSignupFormProps {
 
 export function FrontierSignupForm({ onSuccess, initialEmail }: FrontierSignupFormProps) {
   const { register } = useFrontierSession()
+  const t = useT()
   const { submitError, setSubmitError, clearSubmitError } = useSubmitError()
   const [isOnline, setIsOnline] = useState(() => navigator.onLine)
   const emailEditedRef = useRef(false)
@@ -140,7 +142,7 @@ export function FrontierSignupForm({ onSuccess, initialEmail }: FrontierSignupFo
         await register(value.username.trim(), value.email.trim(), value.password)
         onSuccess()
       } catch (err) {
-        setSubmitError(err instanceof FrontierAuthError ? err.message : "Sign up failed")
+        setSubmitError(err instanceof FrontierAuthError ? err.message : t("auth.signup.failedGeneric"))
       }
     },
   })

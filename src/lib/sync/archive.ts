@@ -4,6 +4,7 @@
 // row) get a 404 — callers should fall through to an IDB-only tombstone.
 
 import type { CloudFileSummary } from "./cloud-projects"
+import { messageForStatus, UserError } from "../errors/user-error"
 import { FRONTIER_API_URL } from "./sync-token"
 
 export interface ArchiveSuccess {
@@ -72,13 +73,21 @@ export interface ProjectStateResponse {
   files?: CloudFileSummary[]
 }
 
+/**
+ * AQU-820: ProjectOverview / ArchivedProjects render this string verbatim, so
+ * it has to be ours. The server's `error` is untranslated and the old
+ * `HTTP ${status}` fallback was a bare diagnostic; `messageForStatus` maps the
+ * status to a keyed sentence and keeps the server text on `.raw` for DevTools.
+ */
 async function parseError(res: Response): Promise<string> {
+  let raw = ""
   try {
     const body = (await res.json()) as { error?: string }
-    return body.error ?? `HTTP ${res.status}`
+    raw = body.error ?? ""
   } catch {
-    return `HTTP ${res.status}`
+    // non-JSON body — the status alone decides the message
   }
+  return messageForStatus(res.status, raw, "project").message
 }
 
 export async function archiveProjectRemote(
@@ -176,8 +185,9 @@ export async function linkProjectSource(
     },
   )
   if (!res.ok) {
-    const message = await parseError(res)
-    throw new Error(message)
+    // Actually a UserError, as the doc above promises — its message is the
+    // keyed status sentence and the server body stays on `.raw`/`.cause`.
+    throw new UserError(res.status, await res.text().catch(() => ""), "project")
   }
   return (await res.json()) as LinkProjectSourceResult
 }

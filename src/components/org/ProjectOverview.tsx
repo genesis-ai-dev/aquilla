@@ -32,6 +32,7 @@ import { fetchSyncToken } from "@/lib/sync/sync-token"
 import {
   progressToCanonicalRollup,
   sectionProgressToVerseRollup,
+  formatFlatSectionKey,
   type BookRollup,
   type ChapterRollup,
   type VerseRollup,
@@ -330,7 +331,7 @@ function FlatSectionRow({ section }: { section: FlatSectionRollup }) {
       data-testid="section-row"
       className="flex w-full items-center gap-2 py-0.5 text-xs"
     >
-      <span className="w-10 shrink-0 font-medium">{section.key}</span>
+      <span className="w-14 shrink-0 font-medium">{formatFlatSectionKey(section.key)}</span>
       <MiniRollupBar filledPct={section.filledPct} approvedPct={section.approvedPct} />
       <span className="text-[10px] tabular-nums text-muted-foreground">
         {section.filledCount}/{section.approvedCount}/{section.totalCount}
@@ -470,19 +471,19 @@ function FileCanonicalRollup({
   loadVerses: (sectionKey: string) => Promise<VerseRollup[]>
 }) {
   if (loading) {
-    return <p className="ml-7 mt-1 text-xs text-muted-foreground">Loading chapter breakdown…</p>
+    return <p className="ml-7 mt-1 text-xs text-muted-foreground">Loading breakdown…</p>
   }
   if (error) {
     return (
       <button type="button" className="ml-7 mt-1 text-xs text-destructive underline" onClick={onRetry}>
-        Chapter progress unavailable. Retry
+        Progress unavailable. Retry
       </button>
     )
   }
   if (!rollup || (rollup.books === null && rollup.sections.length === 0)) {
     return (
       <p className="ml-7 mt-1 text-xs text-muted-foreground">
-        No chapter structure detected for this file.
+        No section breakdown available for this file.
       </p>
     )
   }

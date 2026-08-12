@@ -3,6 +3,35 @@ import type { AquillaDb, AquillaStatement } from '../../../db/shim/postgres'
 export const MAX_VALIDATOR_HISTOGRAM_BUCKET = 15
 
 /**
+ * AQU-805: bucket size for time-based (media/timeline) sections — 5 minutes,
+ * mirroring the in-app jump navigation's TIMELINE_MILESTONE_MS so the
+ * project-overview file breakdown groups media progress the same way.
+ */
+export const TIMELINE_SECTION_MS = 5 * 60 * 1000
+
+/**
+ * AQU-805: the section grouping key for a source cell, as a SQL expression.
+ *
+ * Canonical (Scripture) files key by "<BOOK> <CHAPTER>" — the canonical_ref
+ * before the verse colon — exactly as before. Media / timeline files carry no
+ * canonical_ref but do carry start_ms; they key into ~5-minute time buckets
+ * ("t:<zero-padded bucket-start ms>") so a single-episode media file shows a
+ * per-section breakdown instead of only a flat cell count. The bucket-start ms
+ * is zero-padded to a fixed width so the key sorts lexically in time order and
+ * the read route's string sort needs no time-awareness. Cells with neither a
+ * canonical ref nor a start_ms produce '' and are filtered out (untimed).
+ */
+export function sectionKeyExpr(alias: string): string {
+  const canonical = `TRIM(SPLIT_PART(COALESCE(${alias}.canonical_ref, ''), ':', 1))`
+  return `CASE
+    WHEN ${canonical} <> '' THEN ${canonical}
+    WHEN ${alias}.start_ms IS NOT NULL
+      THEN 't:' || LPAD(((${alias}.start_ms / ${TIMELINE_SECTION_MS}) * ${TIMELINE_SECTION_MS})::text, 12, '0')
+    ELSE ''
+  END`
+}
+
+/**
  * Recompute the file-level progress row from authoritative source/target
  * projection rows. Source rows define the denominator; target-only rows are
  * intentionally ignored to preserve the existing sidebar semantics.
@@ -117,10 +146,10 @@ export function sectionsProgressRecomputeStmt(
   const uniqueCellIds = cellIds ? [...new Set(cellIds.filter(Boolean))] : []
   const affectedFilter = uniqueCellIds.length > 0
     ? `AND section_key IN (
-         SELECT DISTINCT TRIM(SPLIT_PART(COALESCE(canonical_ref, ''), ':', 1))
-           FROM cells
-          WHERE project_id = ? AND file_id = ? AND side = 'source'
-            AND cell_id IN (${uniqueCellIds.map(() => '?').join(', ')})
+         SELECT DISTINCT ${sectionKeyExpr('src')}
+           FROM cells src
+          WHERE src.project_id = ? AND src.file_id = ? AND src.side = 'source'
+            AND src.cell_id IN (${uniqueCellIds.map(() => '?').join(', ')})
        )`
     : ''
 
@@ -138,7 +167,7 @@ export function sectionsProgressRecomputeStmt(
        UNION SELECT ''
      ), paired AS (
        SELECT lanes.lane AS lane,
-              TRIM(SPLIT_PART(COALESCE(s.canonical_ref, ''), ':', 1)) AS section_key,
+              ${sectionKeyExpr('s')} AS section_key,
               CASE WHEN TRIM(COALESCE(t.value, '')) <> '' THEN 1 ELSE 0 END AS filled,
               LEAST(COALESCE(t.endorsement_count, 0), ${MAX_VALIDATOR_HISTOGRAM_BUCKET}) AS validator_bucket
          FROM cells s
@@ -212,7 +241,7 @@ export function fullProgressRecomputeStmts(
          UNION SELECT ''
        ), paired AS MATERIALIZED (
          SELECT lanes.lane AS lane,
-                TRIM(SPLIT_PART(COALESCE(s.canonical_ref, ''), ':', 1)) AS section_key,
+                ${sectionKeyExpr('s')} AS section_key,
                 CASE WHEN TRIM(COALESCE(t.value, '')) <> '' THEN 1 ELSE 0 END AS filled,
                 LEAST(
                   COALESCE(t.endorsement_count, 0),
@@ -306,7 +335,7 @@ export function fullProgressRecomputeStmts(
              WHERE source.project_id = progress.project_id
                AND source.file_id = progress.file_id
                AND source.side = 'source'
-               AND TRIM(SPLIT_PART(COALESCE(source.canonical_ref, ''), ':', 1)) = progress.section_key
+               AND ${sectionKeyExpr('source')} = progress.section_key
           )`,
     ).bind(projectId, fileId),
   ]

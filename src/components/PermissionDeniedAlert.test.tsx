@@ -99,7 +99,12 @@ describe("PermissionDeniedAlert", () => {
       { wrapper },
     )
     const alert = await screen.findByRole("alert")
-    await waitFor(() => expect(alert).toHaveTextContent("your role on this project is Viewer"))
+    // The role clause is prop-driven and renders immediately; the account name
+    // arrives only once useFrontierSession resolves from IDB. Wait on the
+    // account text (like the sibling test above) or the styled assertions
+    // below race the session load under full-suite CPU pressure.
+    await waitFor(() => expect(alert).toHaveTextContent("translator (t@example.com)"))
+    expect(alert).toHaveTextContent("your role on this project is Viewer")
     const styled = Array.from(alert.querySelectorAll(".font-medium"))
     expect(styled).toHaveLength(2)
     expect(styled.some((el) => el.textContent === "translator (t@example.com)")).toBe(true)

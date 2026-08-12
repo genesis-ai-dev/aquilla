@@ -139,7 +139,7 @@ jobs:
         run: rm -f dist/_redirects
       - name: Verify deployment artifact exclusion policy
         run: node scripts/verify-deployment-artifacts.mjs dist
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: aquilla-web-${{ needs.target.outputs.live_environment }}-${{ github.sha }}
           path: dist
@@ -241,7 +241,7 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: aquilla-web-${{ needs.target.outputs.live_environment }}-${{ github.sha }}
           path: dist

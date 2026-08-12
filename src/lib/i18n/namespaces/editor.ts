@@ -341,6 +341,16 @@ export const editor = defineNamespace({
     "editor.milestone.vocab.groupPlural": "Groups",
     "editor.milestone.vocab.milestonePlural": "Milestones",
 
+    // — Milestone-navigator fallback labels (AQU-914) — assigned when a division
+    // has no persisted label of its own (legacy imports, deterministic re-derive).
+    "editor.milestone.vocab.startLabel": "Start",
+    "editor.milestone.vocab.story": "Story",
+    "editor.milestone.vocab.group": "Group",
+    "editor.milestone.vocab.section": "Section",
+    "editor.milestone.label.slide": "Slide {number}",
+    "editor.milestone.label.story": "Story {number}",
+    "editor.milestone.label.part": "Part {number}",
+
     // — Column names, reused wherever the two sides are named ——————————
     "editor.column.source": "Source",
     "editor.column.target": "Target",
@@ -817,6 +827,60 @@ export const editor = defineNamespace({
       "Draft this paragraph? {draftable} of {total} cells will be drafted; " +
       "already-validated cells are kept as-is.",
     "editor.paragraph.confirmAction": "Draft paragraph",
+
+    // — Workspace navigation titles (AQU-914) — the back/forward history
+    // popover and the workspace tab breadcrumb. Not editor-table strings, but
+    // this pass's new keys are scoped to this namespace file; a dedicated
+    // nav-history namespace is a reasonable follow-up once that ownership is
+    // free (see src/lib/navigation/deriveTitle.ts).
+    "editor.navTitle.home": "Home",
+    "editor.navTitle.adminConsole": "Admin console",
+    "editor.navTitle.sharedWithYou": "Shared with you",
+    "editor.navTitle.archivedProjects": "Archived projects",
+    "editor.navTitle.assignedToMe": "Assigned to me",
+    "editor.navTitle.organizationSettings": "Organization settings",
+    "editor.navTitle.membersMatrix": "Members matrix",
+    "editor.navTitle.members": "Members",
+    "editor.navTitle.team": "Team",
+    "editor.navTitle.teams": "Teams",
+    "editor.navTitle.projectOverview": "Project overview",
+    "editor.navTitle.editor": "Editor",
+    "editor.navTitle.projectSettings": "Project settings",
+    "editor.navTitle.checksAndRules": "Checks & rules",
+    "editor.navTitle.voice": "Voice",
+    "editor.navTitle.terminology": "Terminology",
+    "editor.navTitle.projectMemory": "Project memory",
+    "editor.navTitle.projectMembers": "Project members",
+
+    // — Per-file sync status chip (WS connection to the sync-worker) ————
+    "editor.sync.live": "Live",
+    "editor.sync.liveTooltip": "Live — changes are syncing to Cloudflare and across devices",
+    "editor.sync.connecting": "Connecting",
+    "editor.sync.connectingTooltip": "Connecting to the sync server…",
+    "editor.sync.offline": "Offline",
+    "editor.sync.offlineTooltip": "Offline — changes are saved locally and will sync when reconnected",
+    "editor.sync.paused": "Paused",
+    "editor.sync.pausedTooltip": "Sync paused while the tab is hidden — will resume when you return",
+    "editor.sync.noFileOpen": "No file open",
+    "editor.sync.noFileOpenTooltip": "Open a file to start editing and syncing",
+
+    // — Outbox (unsynced local writes) status chip in the status bar ————
+    // "N failed" is nav.outbox.failedCount (reused — same popover this chip
+    // opens already uses it for the identical count).
+    "editor.outbox.backlogLabel": "Sync backlog",
+    "editor.outbox.queuedLabel": plural({ other: "Queued {count}" }),
+    "editor.outbox.syncedLabel": "Synced",
+    "editor.outbox.failedTooltip": plural({
+      one: "{count} change could not be synced after repeated attempts. Click to inspect.",
+      other: "{count} changes could not be synced after repeated attempts. Click to inspect.",
+    }),
+    "editor.outbox.backlogTooltip":
+      "Could not sync changes to the server. Edits are still saved locally. Click to review.",
+    "editor.outbox.queuedTooltip": plural({
+      one: "{count} change queued for server sync. Click to review.",
+      other: "{count} changes queued for server sync. Click to review.",
+    }),
+    "editor.outbox.syncedTooltip": "All changes synced. Click to review pending changes.",
   },
   context: {
     _context: {
@@ -1786,6 +1850,60 @@ export const editor = defineNamespace({
           "none of the specific words fits. Choose a neutral word for 'marked " +
           "points or stretches in the file'. Group heading; heading form.",
         maxLength: 20,
+      },
+      "editor.milestone.vocab.startLabel": {
+        description:
+          "Full label of the synthetic first division inserted before any cell " +
+          "carries a real division tag, for a file with section-based (not " +
+          "scripture) divisions — it stands for 'the beginning of the file'. A " +
+          "noun naming a position, not the imperative 'begin' — distinct from " +
+          "audio.recordingModal.startButton, which starts a recording.",
+        maxLength: 16,
+      },
+      "editor.milestone.vocab.story": {
+        description:
+          "Singular fallback label for a story-set division whose source path " +
+          "yields no friendlier name. Standalone noun — see " +
+          "editor.milestone.vocab.storyPlural for the picker's group heading.",
+        maxLength: 16,
+      },
+      "editor.milestone.vocab.group": {
+        description:
+          "Singular fallback label for a generic (IDML/InDesign) grouping " +
+          "division whose source path yields no friendlier name.",
+        maxLength: 16,
+      },
+      "editor.milestone.vocab.section": {
+        description:
+          "Fallback label for a heading-based division whose own heading text is " +
+          "empty, so there is nothing to summarize into a label.",
+        maxLength: 16,
+      },
+      "editor.milestone.label.slide": {
+        description:
+          "Full label of one division in a presentation-shaped file, naming the " +
+          "slide by number. Shown as the picker's current-selection text and in " +
+          "its row list.",
+        placeholders: {
+          number: "The slide's 1-based position in the file. Numbers only — do not translate.",
+        },
+      },
+      "editor.milestone.label.story": {
+        description:
+          "Full label of one division in an Open Bible Stories file, naming the " +
+          "story by number. Shown as the picker's current-selection text and in " +
+          "its row list.",
+        placeholders: {
+          number: "The story's number within the set. Numbers only — do not translate.",
+        },
+      },
+      "editor.milestone.label.part": {
+        description:
+          "Full label of one division created by splitting a file with no real " +
+          "structure into fixed-size chunks, naming the chunk by number.",
+        placeholders: {
+          number: "The part's 1-based position. Numbers only — do not translate.",
+        },
       },
       "editor.column.source": {
         description:
@@ -3856,6 +3974,192 @@ export const editor = defineNamespace({
           "match the wording of editor.ai.draftParagraph's tooltip closely enough " +
           "that the user recognises the same action.",
         maxLength: 22,
+      },
+      "editor.navTitle.home": {
+        description:
+          "Label for the app's root route in the back/forward history popover and " +
+          "the workspace tab title.",
+        screenshot: "workspace-nav",
+        maxLength: 20,
+      },
+      "editor.navTitle.adminConsole": {
+        description: "Label for the platform admin console route.",
+        screenshot: "workspace-nav",
+        maxLength: 24,
+      },
+      "editor.navTitle.sharedWithYou": {
+        description: "Label for the page listing projects shared with the current user.",
+        screenshot: "workspace-nav",
+        maxLength: 24,
+      },
+      "editor.navTitle.archivedProjects": {
+        description: "Label for the archived-projects list within an organization.",
+        screenshot: "workspace-nav",
+        maxLength: 24,
+      },
+      "editor.navTitle.assignedToMe": {
+        description:
+          "Label for the list of work assigned to the current user within an organization.",
+        screenshot: "workspace-nav",
+        maxLength: 24,
+      },
+      "editor.navTitle.organizationSettings": {
+        description:
+          "Label for an organization's settings area when no specific section is open.",
+        screenshot: "workspace-nav",
+        maxLength: 28,
+      },
+      "editor.navTitle.membersMatrix": {
+        description:
+          "Label for the organization members matrix — the per-project role grid view.",
+        screenshot: "workspace-nav",
+        maxLength: 24,
+      },
+      "editor.navTitle.members": {
+        description: "Label for an organization's member list.",
+        screenshot: "workspace-nav",
+        maxLength: 20,
+      },
+      "editor.navTitle.team": {
+        description: "Label for a single team's page within an organization.",
+        screenshot: "workspace-nav",
+        maxLength: 16,
+      },
+      "editor.navTitle.teams": {
+        description: "Label for an organization's list of teams.",
+        screenshot: "workspace-nav",
+        maxLength: 16,
+      },
+      "editor.navTitle.projectOverview": {
+        description:
+          "Label for a single project's overview card page, outside the workspace.",
+        screenshot: "workspace-nav",
+        maxLength: 24,
+      },
+      "editor.navTitle.editor": {
+        description:
+          "Label for the translation editor surface within a project workspace.",
+        screenshot: "workspace-nav",
+        maxLength: 16,
+      },
+      "editor.navTitle.projectSettings": {
+        description: "Label for a project's settings surface within the workspace.",
+        screenshot: "workspace-nav",
+        maxLength: 24,
+      },
+      "editor.navTitle.checksAndRules": {
+        description: "Label for the project's translation checks & rules surface.",
+        screenshot: "workspace-nav",
+        maxLength: 24,
+      },
+      "editor.navTitle.voice": {
+        description: "Label for the project's voice/audio production surface.",
+        screenshot: "workspace-nav",
+        maxLength: 16,
+      },
+      "editor.navTitle.terminology": {
+        description: "Label for a project's shared term-base management surface.",
+        screenshot: "workspace-nav",
+        maxLength: 20,
+      },
+      "editor.navTitle.projectMemory": {
+        description: "Label for the project's AI agent memory surface.",
+        screenshot: "workspace-nav",
+        maxLength: 24,
+      },
+      "editor.navTitle.projectMembers": {
+        description: "Label for a project's member list.",
+        screenshot: "workspace-nav",
+        maxLength: 24,
+      },
+      "editor.sync.live": {
+        description:
+          "Label of the per-file sync status chip in the editor header when the " +
+          "websocket connection to the sync server is up and the initial sync has " +
+          "completed. A state adjective beside a colored dot.",
+        maxLength: 12,
+      },
+      "editor.sync.liveTooltip": {
+        description: "Tooltip/aria-label of the sync chip in the editor.sync.live state.",
+      },
+      "editor.sync.connecting": {
+        description:
+          "Label of the sync status chip while the websocket connection to the sync " +
+          "server is being established.",
+        maxLength: 16,
+      },
+      "editor.sync.connectingTooltip": {
+        description: "Tooltip/aria-label of the sync chip in the editor.sync.connecting state.",
+      },
+      "editor.sync.offline": {
+        description:
+          "Label of the sync status chip after a previously-live connection has " +
+          "dropped and the app is retrying with backoff.",
+        maxLength: 12,
+      },
+      "editor.sync.offlineTooltip": {
+        description: "Tooltip/aria-label of the sync chip in the editor.sync.offline state.",
+      },
+      "editor.sync.paused": {
+        description:
+          "Label of the sync status chip when the connection was deliberately " +
+          "dropped because the browser tab is hidden — resumes automatically when " +
+          "the user returns to the tab. Distinct from autopilot.status.paused, " +
+          "which is an autopilot run a person paused; this is the app pausing an " +
+          "idle connection, not a person pausing work.",
+        maxLength: 12,
+      },
+      "editor.sync.pausedTooltip": {
+        description: "Tooltip/aria-label of the sync chip in the editor.sync.paused state.",
+      },
+      "editor.sync.noFileOpen": {
+        description:
+          "Label of the sync status chip when there is nothing open to sync yet — " +
+          "no session, no project/file selected, or sync turned off.",
+        maxLength: 16,
+      },
+      "editor.sync.noFileOpenTooltip": {
+        description: "Tooltip/aria-label of the sync chip in the editor.sync.noFileOpen state.",
+      },
+      "editor.outbox.backlogLabel": {
+        description:
+          "Short chip text when queued local writes are retrying but have failed " +
+          "several times in a row (not yet permanent failures).",
+        maxLength: 16,
+      },
+      "editor.outbox.queuedLabel": {
+        description:
+          "Short chip text showing how many local writes are queued to sync to the " +
+          "server. Same implicit-noun shape as editor.outbox.failedLabel.",
+        placeholders: { count: "Number of local writes waiting to sync." },
+        maxLength: 16,
+      },
+      "editor.outbox.syncedLabel": {
+        description:
+          "Short chip text when the outbox is empty — everything has synced. " +
+          "Always visible (not just on failure) so the chip doubles as reassurance.",
+        maxLength: 12,
+      },
+      "editor.outbox.failedTooltip": {
+        description:
+          "Tooltip/aria-label of the outbox chip in its failed state. Full " +
+          "sentence(s); the second sentence is the same 'click to inspect' " +
+          "invitation on every outbox tooltip.",
+        placeholders: { count: "Number of writes that permanently failed to sync." },
+      },
+      "editor.outbox.backlogTooltip": {
+        description:
+          "Tooltip/aria-label of the outbox chip in its backlog (retrying) state. " +
+          "Reassures that edits are safe locally before inviting a click.",
+      },
+      "editor.outbox.queuedTooltip": {
+        description:
+          "Tooltip/aria-label of the outbox chip in its queued state.",
+        placeholders: { count: "Number of local writes waiting to sync." },
+      },
+      "editor.outbox.syncedTooltip": {
+        description:
+          "Tooltip/aria-label of the outbox chip when the queue is empty.",
       },
     },
   },

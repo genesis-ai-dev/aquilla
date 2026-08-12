@@ -179,6 +179,21 @@ describe("DataTable", () => {
     expect(ascIcon).toHaveClass("lucide-arrow-down")
   })
 
+  it("lets fillHeight tables shrink inside a flex card instead of overflowing", () => {
+    render(
+      <DataTable
+        columns={columns}
+        data={rows}
+        getRowId={(r) => String(r.id)}
+        fillHeight
+        testId="fill-table"
+      />,
+    )
+    const shell = screen.getByTestId("fill-table")
+    expect(shell).toHaveClass("min-w-0")
+    expect(shell.parentElement).toHaveClass("min-w-0")
+  })
+
   it("applies dense row padding when dense is set", () => {
     const { container } = render(
       <DataTable columns={columns} data={rows} getRowId={(r) => String(r.id)} dense />,

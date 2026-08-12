@@ -129,6 +129,8 @@ interface DataTableProps<TData, TValue> {
   dense?: boolean
   /** Class on the bordered table wrapper (e.g. `border-0` when nested in a card). */
   className?: string
+  /** Class on the inner `<table>` (e.g. `table-fixed` so columns share card width). */
+  tableClassName?: string
   /**
    * Fill a flex parent and scroll only the table body — keeps search/toolbar
    * pinned above while rows scroll (in-card portfolio panels).
@@ -153,6 +155,7 @@ function DataTable<TData, TValue>({
   emptyState,
   dense = false,
   className,
+  tableClassName,
   fillHeight = false,
 }: DataTableProps<TData, TValue>) {
   const [sorting, setSorting] = React.useState<SortingState>(
@@ -190,7 +193,7 @@ function DataTable<TData, TValue>({
   return (
     <div
       className={cn(
-        "flex w-full flex-col",
+        "flex w-full min-w-0 flex-col",
         fillHeight && "min-h-0 flex-1",
         dense ? "gap-2.5" : "gap-3",
       )}
@@ -224,7 +227,7 @@ function DataTable<TData, TValue>({
           // After `className` so fillHeight scroll wins over admin
           // `overflow-visible` chrome.
           fillHeight
-            ? "min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain [&_thead]:sticky [&_thead]:top-0 [&_thead]:z-10 [&_thead]:bg-card"
+            ? "min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain [&_thead]:sticky [&_thead]:top-0 [&_thead]:z-10 [&_thead]:bg-card"
             : "overflow-hidden",
         )}
         data-testid={testId}
@@ -232,7 +235,7 @@ function DataTable<TData, TValue>({
         {!hasRows && emptyStateNode ? (
           emptyStateNode
         ) : (
-          <Table>
+          <Table className={tableClassName}>
             <TableHeader>
               {table.getHeaderGroups().map((headerGroup) => (
                 <TableRow key={headerGroup.id} className="hover:bg-transparent">

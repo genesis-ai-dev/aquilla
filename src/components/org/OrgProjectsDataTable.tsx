@@ -144,7 +144,7 @@ export function OrgProjectsDataTable({
           id: "name",
           accessorFn: (p) => p.name.toLowerCase(),
           header: ({ column }) => <DataTableColumnHeader column={column} title="Project" />,
-          meta: { className: "min-w-0" },
+          meta: { className: embedded ? "min-w-0 max-w-0" : "min-w-0" },
           cell: ({ row }) => {
             const p = row.original
             return (
@@ -165,16 +165,18 @@ export function OrgProjectsDataTable({
           accessorFn: (p) => missingLast((p.orgName ?? "").toLowerCase()),
           sortUndefined: SORT_MISSING_LAST,
           header: ({ column }) => <DataTableColumnHeader column={column} title="Org" />,
-          meta: { className: "min-w-0 w-[9rem]" },
+          meta: { className: embedded ? "min-w-0 w-[7.5rem] max-w-[7.5rem]" : "min-w-0 w-[9rem]" },
           cell: ({ row }) =>
             row.original.orgName ? (
               <span
                 data-testid="project-table-organization"
                 data-org-name={row.original.orgName}
+                className="block min-w-0 max-w-full"
               >
                 <OrgWithAvatar
                   name={row.original.orgName}
                   size="xs"
+                  className="w-full max-w-full"
                   nameClassName="font-normal"
                 />
               </span>
@@ -189,7 +191,7 @@ export function OrgProjectsDataTable({
           id: "languages",
           enableSorting: false,
           header: ({ column }) => <DataTableColumnHeader column={column} title="Language" />,
-          meta: { className: "min-w-0" },
+          meta: { className: embedded ? "min-w-0 w-[9rem] max-w-[9rem]" : "min-w-0" },
           cell: ({ row }) => {
             const p = row.original
             return (
@@ -200,7 +202,7 @@ export function OrgProjectsDataTable({
                   defaultLaneLabel={defaultLaneLabelByProjectId?.get(p.id) ?? ""}
                   onOverflowClick={embedded ? undefined : () => toggleExpand(p.id)}
                   maxVisible={embedded ? 2 : undefined}
-                  className="w-full"
+                  className={cn("w-full", embedded && "flex-nowrap")}
                 />
               </div>
             )
@@ -217,7 +219,7 @@ export function OrgProjectsDataTable({
               data-testid="project-table-translated-header"
             />
           ),
-          meta: { align: "right", className: "w-[6.5rem]" },
+          meta: { align: "right", className: embedded ? "w-[6rem]" : "w-[6.5rem]" },
           cell: ({ row }) => {
             const pct = Math.round(translatedPct(row.original) * 100)
             return (
@@ -242,7 +244,7 @@ export function OrgProjectsDataTable({
               data-testid="project-table-validated-header"
             />
           ),
-          meta: { align: "right", className: "w-[6.5rem]" },
+          meta: { align: "right", className: embedded ? "w-[6rem]" : "w-[6.5rem]" },
           cell: ({ row }) => {
             const pct = Math.round(validatedPct(row.original) * 100)
             return (
@@ -267,7 +269,7 @@ export function OrgProjectsDataTable({
               data-testid="project-table-audio-header"
             />
           ),
-          meta: { align: "right", className: "w-[6.5rem]" },
+          meta: { align: "right", className: embedded ? "w-[4.5rem]" : "w-[6.5rem]" },
           cell: ({ row }) => {
             const pct = Math.round(audioPct(row.original) * 100)
             return (
@@ -332,11 +334,11 @@ export function OrgProjectsDataTable({
         id: "status",
         accessorFn: (p) => attentionRank(p, tableNow),
         header: ({ column }) => <DataTableColumnHeader column={column} title="Status" />,
-        meta: { className: "w-[9.5rem] whitespace-nowrap" },
+        meta: { className: embedded ? "w-[6.75rem] overflow-hidden" : "w-[9.5rem] whitespace-nowrap" },
         cell: ({ row }) => {
           const p = row.original
           return (
-            <span data-testid="project-table-deadline-status">
+            <span data-testid="project-table-deadline-status" className="block min-w-0 overflow-hidden">
               <ProjectStatus
                 archived={false}
                 reasons={portfolioAttentionReasons(p, tableNow)}
@@ -400,7 +402,7 @@ export function OrgProjectsDataTable({
     : null
 
   return (
-    <div className={cn(embedded && "flex min-h-0 flex-1 flex-col")}>
+    <div className={cn(embedded && "flex min-h-0 min-w-0 w-full flex-1 flex-col")}>
       <DataTable
         key={`${layout}:${initialLens}`}
         columns={columns}
@@ -489,13 +491,17 @@ export function OrgProjectsDataTable({
           )
         }}
         testId={testId}
+        tableClassName={embedded ? "table-fixed" : undefined}
         className={
           embedded
             ? cn(
                 ADMIN_TABLE_CLASS,
-                // Same as orgs card: kill -mx-2 bleed + nested table-container
-                // scrollport so only one vertical scrollbar shows on the shell.
-                "mx-0 [&_[data-slot=table-container]]:overflow-hidden",
+                // Fit the Section card: no -mx-2 bleed, no nested scrollport,
+                // and table-fixed so columns share the card width instead of
+                // growing to min-content and clipping Status off the edge.
+                "mx-0 min-w-0 w-full",
+                "[&_[data-slot=table-container]]:min-w-0 [&_[data-slot=table-container]]:overflow-hidden",
+                "[&_th]:overflow-hidden [&_td]:overflow-hidden",
               )
             : ADMIN_TABLE_PANEL_CLASS
         }

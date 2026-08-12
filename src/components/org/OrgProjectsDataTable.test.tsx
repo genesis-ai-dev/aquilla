@@ -114,6 +114,42 @@ describe("OrgProjectsDataTable lane chips (AQU-538 §3.2)", () => {
     )
   })
 
+  it("fits the embedded overview table to the card instead of overflowing", () => {
+    render(
+      <MemoryRouter>
+        <OrgProjectsDataTable
+          layout="embedded"
+          showOrg
+          testId="project-table"
+          projects={[
+            {
+              ...baseProject({
+                id: "wide",
+                name: "Retry Test for AQU-712 with a deliberately long project name",
+              }),
+              orgName: "Dev Org",
+            },
+          ]}
+          now={now}
+        />
+      </MemoryRouter>,
+    )
+
+    const table = screen.getByTestId("project-table")
+    expect(table).toHaveClass("min-w-0", "w-full")
+    expect(table.className).toContain("[&_[data-slot=table-container]]:overflow-hidden")
+    expect(table.className).not.toContain("overflow-x-auto")
+
+    const htmlTable = table.querySelector('[data-slot="table"]')
+    expect(htmlTable).toHaveClass("table-fixed")
+
+    const nameCell = screen.getByTestId("project-table-name").closest("td")
+    expect(nameCell).toHaveClass("min-w-0", "max-w-0")
+    expect(table.className).toContain("[&_td]:overflow-hidden")
+    expect(screen.getByTestId("project-table-organization")).toHaveClass("min-w-0", "max-w-full")
+    expect(screen.getByRole("button", { name: /^Status$/i })).toBeInTheDocument()
+  })
+
   it("renders teams-style panel chrome and team-detail cell typography", () => {
     renderTable([baseProject({ id: "chrome", name: "Gospels" })])
     expect(screen.getByTestId("org-projects-table")).toHaveClass("rounded-lg!", "bg-card")

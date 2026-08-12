@@ -19,6 +19,18 @@ export const error = defineNamespace({
     "error.notFound.title": "Page not found",
     "error.notFound.description": "The link you followed doesn't exist or may have moved.",
     "error.notFound.goHome": "Go home",
+    "error.network.contextSuffix": " for this {context}",
+    "error.network.badRequest": "The request was invalid{contextSuffix}. Check your input and try again.",
+    "error.network.sessionExpired": "Your session expired — sign in again.",
+    "error.network.forbidden": "You don't have permission to do that{contextSuffix}.",
+    "error.network.notFound": "That item no longer exists{contextSuffix}.",
+    "error.network.conflict": "A conflict occurred{contextSuffix} — please refresh and try again.",
+    "error.network.gone": "That item has been permanently removed{contextSuffix}.",
+    "error.network.tooManyRequests": "Too many requests — please wait a moment and try again.",
+    "error.network.serverError": "Something went wrong on the server. Please try again in a moment.",
+    "error.network.unknownStatus": "The request failed ({status}). Please try again.",
+    "error.network.offline": "You're offline — changes will sync when you reconnect.",
+    "error.network.genericFailure": "Something went wrong. Please try again.",
   },
   context: {
     _context: {
@@ -119,6 +131,91 @@ export const error = defineNamespace({
         description:
           "Button on the 404 page that navigates back to the app's home/root route. " +
           "Short imperative label.",
+      },
+      "error.network.contextSuffix": {
+        description:
+          "Trailing clause appended to several error.network.* sentences when the " +
+          "caller knows what kind of thing failed (e.g. 'project', 'invite'), e.g. " +
+          "' for this project'. Never shown alone — always substituted into another " +
+          "key's {contextSuffix} placeholder. Keep the leading space so it reads " +
+          "correctly appended to the sentence.",
+        placeholders: {
+          context: "Short lowercase noun naming what failed, e.g. 'project' or 'member'.",
+        },
+      },
+      "error.network.badRequest": {
+        description:
+          "Generic message for an HTTP 400 response from any of our fetch helpers " +
+          "(sync-worker, auth-worker, agent API) shown inline or in a toast. Non-" +
+          "technical — never shows the raw server validation string.",
+        placeholders: {
+          contextSuffix: "Either empty, or the rendered error.network.contextSuffix string — insert exactly as given, do not add extra spacing.",
+        },
+      },
+      "error.network.sessionExpired": {
+        description:
+          "Message shown when a request fails with HTTP 401 — the session token is " +
+          "no longer valid. Tells the user what to do next (sign in again).",
+      },
+      "error.network.forbidden": {
+        description:
+          "Generic message for an HTTP 403 response — the signed-in account isn't " +
+          "allowed to perform the action. Non-technical, doesn't blame the user.",
+        placeholders: {
+          contextSuffix: "Either empty, or the rendered error.network.contextSuffix string — insert exactly as given, do not add extra spacing.",
+        },
+      },
+      "error.network.notFound": {
+        description:
+          "Generic message for an HTTP 404 response — the requested item is gone " +
+          "or was never there.",
+        placeholders: {
+          contextSuffix: "Either empty, or the rendered error.network.contextSuffix string — insert exactly as given, do not add extra spacing.",
+        },
+      },
+      "error.network.conflict": {
+        description:
+          "Generic message for an HTTP 409 response — another change landed first. " +
+          "Tells the user what to do next (refresh and retry).",
+        placeholders: {
+          contextSuffix: "Either empty, or the rendered error.network.contextSuffix string — insert exactly as given, do not add extra spacing.",
+        },
+      },
+      "error.network.gone": {
+        description:
+          "Generic message for an HTTP 410 response — the item was intentionally " +
+          "and permanently removed (distinct from 404's 'no longer exists').",
+        placeholders: {
+          contextSuffix: "Either empty, or the rendered error.network.contextSuffix string — insert exactly as given, do not add extra spacing.",
+        },
+      },
+      "error.network.tooManyRequests": {
+        description:
+          "Message shown when a request fails with HTTP 429 (rate limited). Tells " +
+          "the user what to do next (wait and retry).",
+      },
+      "error.network.serverError": {
+        description:
+          "Generic message for an HTTP 5xx response — something failed on our " +
+          "servers, not something the user did wrong.",
+      },
+      "error.network.unknownStatus": {
+        description:
+          "Fallback message for any HTTP status code without a more specific " +
+          "error.network.* message above.",
+        placeholders: {
+          status: "The raw HTTP status code, e.g. '418'.",
+        },
+      },
+      "error.network.offline": {
+        description:
+          "Shown when a request fails before reaching the server (browser is " +
+          "offline / DNS failure / etc). Reassures the user their change is queued.",
+      },
+      "error.network.genericFailure": {
+        description:
+          "Last-resort fallback shown when a caught error can't be classified as " +
+          "an HTTP status or an offline failure.",
       },
     },
   },

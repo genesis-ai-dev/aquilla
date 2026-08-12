@@ -47,12 +47,16 @@ export function AccessLinkPage() {
       }
       navigate(`/project/${projectId}/editor`, { replace: true })
     } catch (err) {
-      // Show the generic dead-link message regardless of the specific failure
-      // (no PIN/token oracle). Only a genuine network error gets its own text.
-      const message =
-        err instanceof Error && err.message && !/^Login failed/.test(err.message)
-          ? err.message
-          : t("auth.accessLink.genericError")
+      // AQU-820: redeemAccessLink() (lib/frontier/auth.ts) always throws with
+      // an already-translated, keyed message now — either the generic
+      // dead-link text or the network-unreachable text — never raw server
+      // English, so it's safe to display directly. The `!/^Login failed/`
+      // check this replaced was dead: redeemAccessLink never produces that
+      // string, so err.message unconditionally won regardless, which was
+      // exactly the keyed-but-dead bug (auth.accessLink.genericError could
+      // never render). Only a genuinely unexpected non-Error throw falls
+      // back to the generic key here.
+      const message = err instanceof Error ? err.message : t("auth.accessLink.genericError")
       setError(message)
       setPin("")
       setSubmitting(false)

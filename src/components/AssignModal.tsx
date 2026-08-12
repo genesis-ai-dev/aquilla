@@ -467,7 +467,12 @@ export function AssignModal({
       if (e instanceof AssignmentEmitError) {
         setError(e.message)
       } else {
-        setError(e instanceof Error ? e.message : t("dialog.assign.error.unknown"))
+        // AQU-820: any error that isn't an AssignmentEmitError (the type
+        // createAssignment uses for its own known failure modes, handled
+        // above) is unexpected — a raw JS error, not something curated for
+        // display. Previously `e instanceof Error` was true for those too, so
+        // dialog.assign.error.unknown never actually rendered.
+        setError(t("dialog.assign.error.unknown"))
       }
     } finally {
       setSubmitting(false)

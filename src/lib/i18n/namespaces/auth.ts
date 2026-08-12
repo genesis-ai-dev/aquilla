@@ -46,6 +46,10 @@ export const auth = defineNamespace({
     "auth.login.newHerePrefix": "New here?",
     "auth.login.createAccountLink": "Create an account",
 
+    // --- Sign up (account creation, e.g. git-import linked-account flow) ---
+    "auth.signup.failedGeneric": "Couldn't create your account. Please try again.",
+    "auth.signup.failedWithDetail": "Couldn't create your account: {detail}",
+
     // --- Reset password (/reset-password) ----------------------------------
     "auth.resetPassword.title": "Reset your password",
     "auth.resetPassword.accountPrefix": "Account:",
@@ -60,6 +64,7 @@ export const auth = defineNamespace({
     "auth.resetPassword.passwordTooShort": "Password must be at least 8 characters",
     "auth.resetPassword.failedToReset": "Failed to reset password",
     "auth.resetPassword.failedToSend": "Failed to send reset email",
+    "auth.resetPassword.tokenNoLongerValid": "This reset link is no longer valid. Please request a new one.",
     "auth.resetPassword.expiredBody":
       "This reset link has expired or is invalid. Enter your email address to request a new one",
     "auth.resetPassword.expiredForAccount": "for account",
@@ -234,6 +239,25 @@ export const auth = defineNamespace({
           "the sign-in page, on the invite landing page, and in the account dialog — same " +
           "intent everywhere: start the sign-up flow.",
       },
+      "auth.signup.failedGeneric": {
+        description:
+          "Form-level error shown when account creation fails for a reason that " +
+          "isn't a specific, safe-to-show field validation (network problem, " +
+          "server error). Never includes raw server diagnostics.",
+      },
+      "auth.signup.failedWithDetail": {
+        description:
+          "Form-level error shown when account creation fails validation (e.g. " +
+          "username or email already taken, password rejected). {detail} is the " +
+          "server's own short explanation of what's wrong, which IS shown here — " +
+          "unlike auth.signup.failedGeneric — because it's the only way the user " +
+          "learns which field to fix. The server always answers in English " +
+          "regardless of the UI locale, so this sentence's frame is translated " +
+          "but the substituted detail is not.",
+        placeholders: {
+          detail: "Short server-supplied validation reason, e.g. 'username already taken'. Always English, never translated by this key.",
+        },
+      },
       "auth.resetPassword.title": {
         description:
           "Names the action the whole password-reset form performs, as its heading. Shared " +
@@ -301,6 +325,12 @@ export const auth = defineNamespace({
         description:
           "Fallback form-level error shown when requesting a fresh reset-link email " +
           "fails for a reason the server didn't describe in a friendlier message.",
+      },
+      "auth.resetPassword.tokenNoLongerValid": {
+        description:
+          "Error shown when submitting a new password fails because the reset " +
+          "token became invalid or expired between page load and submit (a race " +
+          "with the initial token check). Tells the user what to do next.",
       },
       "auth.resetPassword.expiredBody": {
         description:

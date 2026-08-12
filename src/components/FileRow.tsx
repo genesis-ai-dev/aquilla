@@ -66,6 +66,8 @@ export function FileRow(props: FileRowProps) {
     }
   }, [editing, file.name])
 
+  const translatedPct = progress && progress.total > 0
+    ? Math.round((progress.translated / progress.total) * 100) : 0
   const validatedPct = progress && progress.total > 0
     ? Math.round((progress.validated / progress.total) * 100) : 0
   const canExpand = props.expandable ?? fileHasSections(file)

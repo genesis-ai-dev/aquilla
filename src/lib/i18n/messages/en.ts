@@ -30,6 +30,7 @@ import { auth } from "../namespaces/auth"
 import { search } from "../namespaces/search"
 import { audio } from "../namespaces/audio"
 import { fileDetails } from "../namespaces/fileDetails"
+import { autopilot } from "../namespaces/autopilot"
 import type { MessageValue } from "../plurals"
 
 export const en = {
@@ -44,6 +45,7 @@ export const en = {
   ...search.keys,
   ...audio.keys,
   ...fileDetails.keys,
+  ...autopilot.keys,
 } as const
 
 export type MessageKey = keyof typeof en

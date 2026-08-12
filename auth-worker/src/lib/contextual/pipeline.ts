@@ -53,6 +53,9 @@ export interface RunSpanDeps {
   scope: Scope
   /** The whole file's pairs in display order. */
   pairs: CellPair[]
+  /** Cells already carrying a live proposal from another run. Recovery may
+   * fill their siblings but cannot supersede these before human review. */
+  excludedCellIds?: ReadonlySet<string>
   /** Closure context beyond the raw pairs. */
   neighborBriefs: ClosureContext["neighborBriefs"]
   layerAbove: ClosureContext["layerAbove"]
@@ -174,7 +177,9 @@ export async function runSpan(deps: RunSpanDeps): Promise<SpanReport> {
   })
 
   const inSpan = spanPairs(deps.seed, deps.pairs)
-  const work = inSpan.filter((p) => statusOf(p) === "untranslated")
+  const work = inSpan.filter(
+    (p) => statusOf(p) === "untranslated" && !deps.excludedCellIds?.has(p.cellId),
+  )
   if (work.length === 0) {
     notes.push("no untranslated cells in span")
     return report([], 0)

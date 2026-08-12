@@ -16,10 +16,12 @@ import { Textarea } from "@/components/ui/textarea"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import {
   attachContextualRun,
+  getContextualRunState,
   noteContextualDirectionQueued,
 } from "@/lib/contextual/run-store"
 import { ContextualAuthError, sendContextualSteering } from "@/lib/contextual/transport"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 /** UI cap — well under the server's hard limit on a steering entry. */
 export const MAX_DIRECTION_LENGTH = 2000
@@ -33,9 +35,10 @@ interface SteeringProps {
 }
 
 export function ContextualSteering({ projectId, fileId, runId, directions }: SteeringProps) {
+  const t = useT()
   const [text, setText] = useState("")
   const [sending, setSending] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [sendError, setSendError] = useState<"auth" | "failed" | null>(null)
 
   const trimmed = text.trim()
   const canSend = trimmed.length > 0 && !sending
@@ -43,20 +46,27 @@ export function ContextualSteering({ projectId, fileId, runId, directions }: Ste
   const handleSend = async () => {
     if (!canSend) return
     setSending(true)
-    setError(null)
+    setSendError(null)
     try {
       await sendContextualSteering(runId, trimmed)
+      const current = getContextualRunState()
+      if (
+        current.projectId !== projectId ||
+        current.fileId !== fileId ||
+        current.runId !== runId
+      ) {
+        // The server accepted the old run's direction, but the editor moved
+        // on while the request was in flight. Never inject that direction or
+        // reattach the abandoned file into the current editor mirror.
+        return
+      }
       // The server accepted the direction — it is queued now; show the chip
       // immediately and let the snapshot refresh reconcile.
       noteContextualDirectionQueued(trimmed)
       setText("")
       void attachContextualRun(projectId, fileId)
-    } catch (err) {
-      setError(
-        err instanceof ContextualAuthError
-          ? err.message
-          : "That direction didn't reach the agent. Try again.",
-      )
+    } catch (error) {
+      setSendError(error instanceof ContextualAuthError ? "auth" : "failed")
     } finally {
       setSending(false)
     }
@@ -70,7 +80,7 @@ export function ContextualSteering({ projectId, fileId, runId, directions }: Ste
             type="button"
             size="icon-sm"
             variant="ghost"
-            aria-label="Direct the run"
+            aria-label={t("autopilot.steering.direct")}
             className="relative"
           >
             <MessageSquarePlus className="h-3.5 w-3.5" />
@@ -78,8 +88,9 @@ export function ContextualSteering({ projectId, fileId, runId, directions }: Ste
               <span
                 data-testid="contextual-steering-count"
                 className="absolute -top-0.5 -right-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-lg bg-primary px-0.5 text-[9px] leading-none tabular-nums text-primary-foreground"
+                aria-label={t("autopilot.steering.queuedDirections", { count: directions.length })}
               >
-                {directions.length}
+                <span aria-hidden>{directions.length}</span>
               </span>
             )}
           </Button>
@@ -92,7 +103,7 @@ export function ContextualSteering({ projectId, fileId, runId, directions }: Ste
         data-testid="contextual-steering-popover"
       >
         <p className="text-xs text-muted-foreground">
-          Directions apply to the next passage the agent drafts.
+          {t("autopilot.steering.appliesNext")}
         </p>
         {directions.length > 0 && (
           <div className="flex flex-wrap gap-1">
@@ -110,13 +121,13 @@ export function ContextualSteering({ projectId, fileId, runId, directions }: Ste
           </div>
         )}
         <Textarea
-          aria-label="Direction for the agent"
-          placeholder="e.g. Keep the tone formal in dialogue"
+          aria-label={t("autopilot.steering.directionLabel")}
+          placeholder={t("autopilot.steering.placeholder")}
           value={text}
           maxLength={MAX_DIRECTION_LENGTH}
           onChange={(e) => {
             setText(e.target.value)
-            if (error) setError(null)
+            if (sendError) setSendError(null)
           }}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
@@ -126,9 +137,11 @@ export function ContextualSteering({ projectId, fileId, runId, directions }: Ste
           }}
           className="min-h-14 text-xs"
         />
-        {error && (
+        {sendError && (
           <p role="alert" className="text-xs text-destructive">
-            {error}
+            {sendError === "auth"
+              ? t("autopilot.error.authRequired")
+              : t("autopilot.steering.sendFailed")}
           </p>
         )}
         <div className="flex justify-end">
@@ -138,7 +151,7 @@ export function ContextualSteering({ projectId, fileId, runId, directions }: Ste
             disabled={!canSend}
             onClick={() => void handleSend()}
           >
-            {sending ? "Sending…" : "Send"}
+            {sending ? t("autopilot.steering.sending") : t("autopilot.steering.send")}
           </Button>
         </div>
       </PopoverContent>

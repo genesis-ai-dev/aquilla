@@ -10,9 +10,10 @@
 //   - module pub-sub + useSyncExternalStore (batch-completion.ts)
 //   - split state/progress stores so frequent progress frames don't re-render
 //     the pill chrome (play-queue.ts QueueState vs QueueProgress)
-//   - monotonic runId guard: run ids are server-minted UUIDv7 (time-ordered,
-//     so lexicographic compare is chronological). Frames from a superseded
-//     run are dropped; frames from a newer run adopt it.
+//   - project/file-scoped monotonic runId guard: run ids are server-minted UUIDv7
+//     (time-ordered, so lexicographic compare is chronological). Frames from
+//     a superseded run of the attached file are dropped; project fan-out
+//     frames for other files never enter this single-editor mirror.
 //   - retain-on-failure: a failed run's summary stays visible until dismissed.
 //
 // The backend Workflow does not exist yet — the default transport stub reports
@@ -57,7 +58,8 @@ export interface ContextualRunStateFrame {
   type: "contextual.run.state"
   runId: string
   fileId: string
-  status: Exclude<ContextualRunStatus, "idle" | "starting" | "pausing">
+  targetLang: string
+  status: Exclude<ContextualRunStatus, "idle" | "starting">
   done: number
   total: number
   failed?: number
@@ -157,6 +159,7 @@ export function setContextualTransport(t: ContextualTransport | null): void {
 export interface ContextualRunState {
   /** False until a transport snapshot reports the backend is reachable. */
   available: boolean
+  projectId: string | null
   runId: string | null
   fileId: string | null
   status: ContextualRunStatus
@@ -175,6 +178,7 @@ export interface ContextualRunProgress {
 
 const IDLE_STATE: ContextualRunState = {
   available: false,
+  projectId: null,
   runId: null,
   fileId: null,
   status: "idle",
@@ -188,6 +192,10 @@ const IDLE_PROGRESS: ContextualRunProgress = { done: 0, total: 0, failed: 0 }
 
 let _state: ContextualRunState = IDLE_STATE
 let _progress: ContextualRunProgress = IDLE_PROGRESS
+/** The file mounted by ContextualRunPillMount. Kept separately because a
+ * snapshot request is asynchronous, while WebSocket fan-out starts at once. */
+let _attachedFileId: string | null = null
+let _attachedProjectId: string | null = null
 
 const _stateListeners = new Set<() => void>()
 const _progressListeners = new Set<() => void>()
@@ -276,23 +284,41 @@ function leadPhase(lanes: ContextualLane[]): string | null {
 // Remote frames (project DO → WebSocket → here)
 // ---------------------------------------------------------------------------
 
-export function applyRemoteFrame(frame: ContextualFrame): void {
-  if (isStaleRunId(frame.runId)) return
+export function applyRemoteFrame(projectId: string, frame: ContextualFrame): void {
+  if (projectId !== _attachedProjectId) return
+  if (frame.type === "contextual.run.state" || frame.type === "contextual.span.start") {
+    if (frame.fileId !== _attachedFileId || isStaleRunId(frame.runId)) return
+    if (
+      frame.type === "contextual.run.state" &&
+      (typeof frame.targetLang !== "string" || frame.targetLang !== "")
+    ) return
+  } else if (!_state.runId || frame.runId !== _state.runId) {
+    // Scene/phase/span frames intentionally omit fileId on the wire. They are
+    // safe only after a project/file-scoped frame or snapshot established this run.
+    return
+  }
 
   // ── Lane frames (a wave runs several passages at once) ──
   if (frame.type === "contextual.span.start") {
-    if (_state.lanes.some((l) => l.spanId === frame.spanId)) return
+    const sameRun = frame.runId === _state.runId
+    if (sameRun && _state.lanes.some((l) => l.spanId === frame.spanId)) return
     const lanes = [
-      ..._state.lanes.slice(-(MAX_TRACKED_LANES - 1)),
+      ...(sameRun ? _state.lanes.slice(-(MAX_TRACKED_LANES - 1)) : []),
       { spanId: frame.spanId, spanLabel: frame.spanLabel, phase: "reading" as const },
     ]
     setState({
       ..._state,
-      runId: _state.runId ?? frame.runId,
+      available: true,
+      projectId: _attachedProjectId,
+      runId: frame.runId,
+      fileId: frame.fileId,
+      status: sameRun ? _state.status : "running",
+      activeDirections: sameRun ? _state.activeDirections : [],
       lanes,
       spanLabel: frame.spanLabel,
       phase: leadPhase(lanes),
     })
+    if (!sameRun) setProgress(IDLE_PROGRESS)
     return
   }
 
@@ -325,6 +351,7 @@ export function applyRemoteFrame(frame: ContextualFrame): void {
     setState({
       ..._state,
       available: true,
+      projectId: _attachedProjectId,
       runId: frame.runId,
       fileId: frame.fileId,
       status,
@@ -357,7 +384,6 @@ export function applyRemoteFrame(frame: ContextualFrame): void {
       : _state.lanes
     setState({
       ..._state,
-      runId: _state.runId ?? frame.runId,
       spanLabel: frame.spanLabel,
       lanes,
       phase: leadPhase(lanes) ?? PHASE_DRAFTING,
@@ -371,7 +397,6 @@ export function applyRemoteFrame(frame: ContextualFrame): void {
     : _state.lanes.slice(1)
   setState({
     ..._state,
-    runId: _state.runId ?? frame.runId,
     spanLabel: frame.spanLabel,
     lanes,
     phase: leadPhase(lanes) ?? PHASE_READING,
@@ -386,32 +411,49 @@ let _fetchSeq = 0
 
 /**
  * Hydrate the mirror for a file. Race-guarded: only the latest attach call
- * may write (a stale fetch resolving after a file switch is discarded), and a
+ * may write (a stale fetch resolving after a project/file switch is discarded), and a
  * snapshot never rolls the store back to an older runId than a frame already
  * delivered.
  */
 export async function attachContextualRun(projectId: string, fileId: string): Promise<void> {
   const seq = ++_fetchSeq
+  if (_attachedProjectId !== projectId || _attachedFileId !== fileId) {
+    _attachedProjectId = projectId
+    _attachedFileId = fileId
+    // Scope changes synchronously, before the fetch, so a project-wide frame
+    // cannot flash another file's run or expose commands for it meanwhile.
+    setState({ ...IDLE_STATE, available: _state.available, projectId, fileId })
+    setProgress(IDLE_PROGRESS)
+  }
   let snap: ContextualTransportSnapshot
   try {
     snap = await _transport.fetchSnapshot(projectId, fileId)
   } catch {
     snap = { available: false }
   }
-  if (seq !== _fetchSeq) return
+  if (seq !== _fetchSeq || _attachedProjectId !== projectId || _attachedFileId !== fileId) return
   if (!snap.available) {
-    setState({ ...IDLE_STATE, fileId })
+    setState({ ...IDLE_STATE, projectId, fileId })
     setProgress(IDLE_PROGRESS)
     return
   }
   const run = snap.run
-  if (!run || isStaleRunId(run.runId)) {
-    setState({ ...IDLE_STATE, available: true, fileId })
+  if (!run) {
+    // A live frame may have raced ahead of an older empty snapshot. It is
+    // already scoped to this project/file, so retain it instead of rolling back.
+    if (_state.fileId === fileId && _state.runId) return
+    setState({ ...IDLE_STATE, available: true, projectId, fileId })
     setProgress(IDLE_PROGRESS)
     return
   }
+  if (run.fileId !== fileId) return
+  // Same-file frames can race ahead of the snapshot; an older snapshot is
+  // stale, but a valid older run on a newly attached project/file is not (the scope
+  // reset above cleared the prior file's monotonic guard).
+  if (isStaleRunId(run.runId)) return
   setState({
     available: true,
+    projectId,
     runId: run.runId,
     fileId: run.fileId,
     status: run.status,
@@ -439,16 +481,22 @@ export async function startContextualRun(
   fileId: string,
   anchorCellId?: string,
 ): Promise<boolean> {
+  if (_attachedProjectId !== projectId || _attachedFileId !== fileId) {
+    _attachedProjectId = projectId
+    _attachedFileId = fileId
+    ++_fetchSeq
+    setState({ ...IDLE_STATE, available: _state.available, projectId, fileId })
+  }
   setState({ ..._state, fileId, status: "starting", lanes: [] })
   setProgress(IDLE_PROGRESS)
   try {
     const { runId } = await _transport.start(projectId, fileId, anchorCellId)
-    if (!isStaleRunId(runId)) {
-      setState({ ..._state, runId, fileId, status: "running", phase: _state.phase ?? PHASE_READING })
+    if (_attachedProjectId === projectId && _attachedFileId === fileId && !isStaleRunId(runId)) {
+      setState({ ..._state, projectId, runId, fileId, status: "running", phase: _state.phase ?? PHASE_READING })
     }
     return true
   } catch {
-    setState({ ..._state, status: "idle" })
+    if (_attachedProjectId === projectId && _attachedFileId === fileId) setState({ ..._state, status: "idle" })
     return false
   }
 }
@@ -463,7 +511,7 @@ export async function requestPauseContextualRun(): Promise<void> {
     await _transport.pause(runId)
   } catch {
     // Pause request failed — the run is still going; reflect that honestly.
-    setState({ ..._state, status: "running" })
+    if (_state.runId === runId) setState({ ..._state, status: "running" })
   }
 }
 
@@ -474,7 +522,7 @@ export async function resumeContextualRun(): Promise<void> {
   try {
     await _transport.resume(runId)
   } catch {
-    setState({ ..._state, status: "paused" })
+    if (_state.runId === runId) setState({ ..._state, status: "paused" })
   }
 }
 
@@ -487,7 +535,7 @@ export async function terminateContextualRun(): Promise<void> {
   try {
     await _transport.terminate(runId)
   } catch {
-    setState({ ..._state, status: prior })
+    if (_state.runId === runId) setState({ ..._state, status: prior })
   }
 }
 
@@ -503,7 +551,12 @@ export function noteContextualDirectionQueued(text: string): void {
 
 /** Dismiss a retained failed/terminated summary back to idle (keeps availability). */
 export function dismissContextualRunSummary(): void {
-  setState({ ...IDLE_STATE, available: _state.available, fileId: _state.fileId })
+  setState({
+    ...IDLE_STATE,
+    available: _state.available,
+    projectId: _state.projectId,
+    fileId: _state.fileId,
+  })
   setProgress(IDLE_PROGRESS)
 }
 
@@ -511,6 +564,8 @@ export function dismissContextualRunSummary(): void {
 export function resetContextualRunStore(): void {
   _transport = stubTransport
   _fetchSeq = 0
+  _attachedFileId = null
+  _attachedProjectId = null
   _state = IDLE_STATE
   _progress = IDLE_PROGRESS
 }

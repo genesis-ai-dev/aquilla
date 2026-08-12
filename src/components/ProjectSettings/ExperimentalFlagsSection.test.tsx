@@ -28,19 +28,22 @@ beforeEach(async () => {
 })
 
 describe("ExperimentalFlagsSection", () => {
-  it("renders the contextual drafting toggle, on by default", async () => {
+  it("renders the Autopilot controls toggle, on by default", async () => {
     // Default-on: the flag gates whether the play button is discoverable, and
     // a run still costs nothing until someone clicks it.
     await createProject(makeProject())
     render(<ExperimentalFlagsSection projectId="p1" />)
-    const toggle = await screen.findByRole("switch", { name: "Contextual drafting" })
+    const toggle = await screen.findByRole("switch", { name: "Show Autopilot controls" })
     expect(toggle).toBeChecked()
+    expect(screen.getByText(/Turning this on does not start work/)).toBeInTheDocument()
+    expect(screen.getByText(/hiding the controls does not stop a run/)).toBeInTheDocument()
+    expect(screen.getByText(/suggestions stay in review/)).toBeInTheDocument()
   })
 
   it("toggle persists the opt-out to the IDB record and isFlagEnabled reads it back", async () => {
     await createProject(makeProject())
     render(<ExperimentalFlagsSection projectId="p1" />)
-    const toggle = await screen.findByRole("switch", { name: "Contextual drafting" })
+    const toggle = await screen.findByRole("switch", { name: "Show Autopilot controls" })
     fireEvent.click(toggle)
     await waitFor(async () => {
       const stored = await getProject("p1")
@@ -55,7 +58,7 @@ describe("ExperimentalFlagsSection", () => {
     // device that never cached the project the toggle persisted nothing.
     const server = makeProject({ id: "p-server-only" })
     render(<ExperimentalFlagsSection projectId="p-server-only" serverProject={server} />)
-    const toggle = await screen.findByRole("switch", { name: "Contextual drafting" })
+    const toggle = await screen.findByRole("switch", { name: "Show Autopilot controls" })
     fireEvent.click(toggle)
     await waitFor(async () => {
       const stored = await getProject("p-server-only")
@@ -69,7 +72,7 @@ describe("ExperimentalFlagsSection", () => {
     await createProject(makeProject({ experimentalFlags: { contextualTranslation: true } }))
     render(<ExperimentalFlagsSection projectId="p1" />)
     await waitFor(() => {
-      expect(screen.getByRole("switch", { name: "Contextual drafting" })).toBeChecked()
+      expect(screen.getByRole("switch", { name: "Show Autopilot controls" })).toBeChecked()
     })
   })
 })

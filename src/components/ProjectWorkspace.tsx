@@ -1,4 +1,4 @@
-import { Suspense, lazy, useState, useMemo, useRef, useEffect, useCallback } from "react"
+import { Suspense, lazy, useState, useMemo, useRef, useEffect, useLayoutEffect, useCallback } from "react"
 import { useParams, useNavigate, useSearchParams, useLocation } from "react-router-dom"
 import { useProject } from "@/hooks/useProject"
 import { describePatchFailure, SETTINGS_EDIT_ROLE_FLOOR } from "@/hooks/useProjectSettings"
@@ -38,11 +38,17 @@ import { fileHasSections, fileOrderedBy, isMediaFileType, projectHasScriptureFil
 import { resolveFileTimingMode, type AudioTimingMode } from "@/lib/parsers/types"
 import { isFlagEnabled } from "@/lib/features/flags"
 import { isDiscourseFile } from "@/lib/contextual/discourse-file"
-import { applyRemoteFrame as applyContextualFrame } from "@/lib/contextual/run-store"
+import {
+  applyRemoteFrame as applyContextualFrame,
+  attachContextualRun,
+  getContextualRunState,
+} from "@/lib/contextual/run-store"
 import {
   applyContextualDraftsFrame,
+  attachContextualDrafts,
   hydrateContextualDrafts,
   resetContextualDraftsStore,
+  type ContextualDraftsScope,
 } from "@/lib/contextual/drafts-store"
 import { fetchContextualDrafts } from "@/lib/contextual/transport"
 import { ContextualRunPillMount } from "./contextual/ContextualRunPill"
@@ -51,7 +57,7 @@ import { useFileAudioAttachments, mergeCellsWithAudio } from "@/hooks/useFileAud
 import { consumeMediaImportSeed, autoTranscribeImportedMedia } from "@/lib/audio/auto-transcribe"
 import { warmFileDubs } from "@/lib/audio/warm-dubs"
 import { effectiveSourceText } from "@/lib/cell-text"
-import { resolveDeepLinkLane } from "./project-workspace-lane-deeplink"
+import { resolveDeepLinkLaneFromSearchParams } from "./project-workspace-lane-deeplink"
 import { resolveActiveTargetLanguage } from "./project-workspace-lane-target"
 import { useWorkspaceSearch } from "@/hooks/useWorkspaceSearch"
 import { ParallelPassagesPanel, type ParallelPanelMode, type ParallelPanelScope, type ReplaceAllPayload } from "./ParallelPassagesPanel"
@@ -352,6 +358,66 @@ function writePersistedActiveLane(projectId: string, lane: string): void {
   } catch {
     /* storage unavailable (private mode / quota) — lane stays in-memory only */
   }
+}
+
+/**
+ * Reconcile Autopilot's lossy realtime mirrors whenever the project socket
+ * opens, including reconnects on the same route. The captured draft scope is
+ * a generation token, so both consumers independently discard late results
+ * if navigation wins the race.
+ */
+export async function reconcileContextualAfterRealtimeOpen(args: {
+  projectId: string
+  currentFileId: string | null
+  draftScope: ContextualDraftsScope | null
+  attachRun: (projectId: string, fileId: string) => Promise<void>
+  refreshDrafts: (scope: ContextualDraftsScope) => Promise<void>
+}): Promise<void> {
+  const { projectId, currentFileId, draftScope } = args
+  if (
+    !draftScope ||
+    !currentFileId ||
+    draftScope.projectId !== projectId ||
+    draftScope.fileId !== currentFileId ||
+    draftScope.targetLang !== ""
+  ) return
+  await Promise.all([
+    args.attachRun(projectId, currentFileId),
+    args.refreshDrafts(draftScope),
+  ])
+}
+
+/**
+ * A target commit and contextual-draft reconciliation land atomically in the
+ * sync projection. Re-read the durable default-lane proposal list when that
+ * applied-event echo reaches the exact editor scope, including for our own
+ * writes. The echo is the first point at which the server-side projection is
+ * known to be authoritative; an earlier client review request may have raced
+ * it or failed independently.
+ */
+export async function reconcileContextualDraftsAfterAppliedEvent(args: {
+  projectId: string
+  currentFileId: string | null
+  draftScope: ContextualDraftsScope | null
+  event: {
+    kind: string | undefined
+    projectId: string
+    fileId: string | null | undefined
+  }
+  refreshDrafts: (scope: ContextualDraftsScope) => Promise<void>
+}): Promise<void> {
+  const { draftScope, event } = args
+  if (
+    event.kind !== "target.cell.commit" ||
+    event.projectId !== args.projectId ||
+    !event.fileId ||
+    event.fileId !== args.currentFileId ||
+    !draftScope ||
+    draftScope.projectId !== args.projectId ||
+    draftScope.fileId !== event.fileId ||
+    draftScope.targetLang !== ""
+  ) return
+  await args.refreshDrafts(draftScope)
 }
 
 export function ProjectWorkspace() {
@@ -1260,29 +1326,42 @@ export function ProjectWorkspace() {
   // authoritative one. Called on file open, and whenever a burst reports it
   // carried only part of a wave. Failing soft is deliberate — a missing
   // review surface must never keep a file from opening.
-  const refreshContextualDrafts = useCallback(async () => {
-    const projectId = project?.id
-    const fileId = activeFileId
-    if (!projectId || !fileId) return
+  const contextualAutopilotEnabled = Boolean(
+    project && isFlagEnabled(project, "contextualTranslation"),
+  )
+  const contextualDraftScopeRef = useRef<ContextualDraftsScope | null>(null)
+  const refreshContextualDrafts = useCallback(async (requestedScope?: ContextualDraftsScope) => {
+    const scope = requestedScope ?? contextualDraftScopeRef.current
+    if (!scope || scope.targetLang !== "") return
     try {
-      const drafts = await fetchContextualDrafts(projectId, fileId)
-      hydrateContextualDrafts(fileId, drafts)
+      const drafts = await fetchContextualDrafts(scope.projectId, scope.fileId)
+      hydrateContextualDrafts(scope, drafts)
     } catch {
       /* backend not deployed, offline, or signed out — pill reports the run */
     }
-  }, [project?.id, activeFileId])
+  }, [])
   const refreshContextualDraftsRef = useRef<() => Promise<void>>(async () => {})
-  refreshContextualDraftsRef.current = refreshContextualDrafts
+  refreshContextualDraftsRef.current = () => refreshContextualDrafts()
 
-  // Hydrate on file switch, and clear on unmount so a draft from one document
-  // can never render against another's cells.
-  useEffect(() => {
-    if (!project?.id || !activeFileId) return
-    hydrateContextualDrafts(activeFileId, [])
-    void refreshContextualDrafts()
-  }, [project?.id, activeFileId, refreshContextualDrafts])
+  // Attach before paint on every project/file/lane switch. The scope token
+  // race-guards the later snapshot, including the same file id reused across
+  // projects and A → B → A navigation. Non-default lanes deliberately do
+  // not fetch v1's default-lane-only draft endpoint.
+  useLayoutEffect(() => {
+    if (!contextualAutopilotEnabled || !project?.id || !activeFileId) {
+      contextualDraftScopeRef.current = null
+      resetContextualDraftsStore()
+      return
+    }
+    const scope = attachContextualDrafts(project.id, activeFileId, activeLane)
+    contextualDraftScopeRef.current = scope
+    if (activeLane === "") void refreshContextualDrafts(scope)
+  }, [activeFileId, activeLane, contextualAutopilotEnabled, project?.id, refreshContextualDrafts])
 
-  useEffect(() => () => { resetContextualDraftsStore() }, [])
+  useEffect(() => () => {
+    contextualDraftScopeRef.current = null
+    resetContextualDraftsStore()
+  }, [])
 
   // Audio lens: TTS settings (engine, voice library, cast) hydrated from IDB
   // and overlaid onto the project so generation uses the real engine/key/cast.
@@ -1416,15 +1495,14 @@ export function ProjectWorkspace() {
   }, [projectId])
   useEffect(() => {
     if (deepLinkLaneAppliedRef.current || !projectId) return
-    const param = searchParams.get("lane")
-    if (!param) {
+    if (!searchParams.has("lane")) {
       deepLinkLaneAppliedRef.current = true
       return
     }
     // Defer until the project (and thus its lane registry) has loaded, so an
     // unknown tag isn't mistaken for one whose registry hasn't arrived yet.
     if (!project) return
-    const resolved = resolveDeepLinkLane(param, availableLanes)
+    const resolved = resolveDeepLinkLaneFromSearchParams(searchParams, availableLanes)
     deepLinkLaneAppliedRef.current = true
     if (resolved !== null) setActiveLane(resolved)
   }, [projectId, project, searchParams, availableLanes, setActiveLane])
@@ -3219,6 +3297,18 @@ export function ProjectWorkspace() {
               currentFileId: activeFileIdRef.current,
               selection: null,
             })
+            // The project relay is intentionally lossy. A reconnect may have
+            // missed terminal progress or staged-draft frames, so reconcile
+            // both mirrors from their durable sources for the exact scope
+            // mounted now. Generation guards discard a response if the user
+            // switches project/file/lane again while either request is open.
+            void reconcileContextualAfterRealtimeOpen({
+              projectId: pid,
+              currentFileId: activeFileIdRef.current,
+              draftScope: contextualDraftScopeRef.current,
+              attachRun: attachContextualRun,
+              refreshDrafts: refreshContextualDrafts,
+            })
           },
           onClose() {
             if (cancelled) return
@@ -3238,6 +3328,22 @@ export function ProjectWorkspace() {
               )) {
                 invalidateFileProgress(pid, msg.file)
               }
+              // target.cell.commit is also Autopilot's durable review
+              // boundary. Reconcile proposals for the exact mounted scope
+              // even for our own echo; the ordinary cell refetch below skips
+              // own writes, but draft workflow state lives in a separate
+              // projection and may have raced its explicit review request.
+              void reconcileContextualDraftsAfterAppliedEvent({
+                projectId: pid,
+                currentFileId: activeFileIdRef.current,
+                draftScope: contextualDraftScopeRef.current,
+                event: {
+                  kind: msg.kind,
+                  projectId: msg.project,
+                  fileId: msg.file,
+                },
+                refreshDrafts: refreshContextualDrafts,
+              })
               // File-scoped events (file.create / file.rename) carry no cell;
               // they change the project's file inventory or labels. Re-pull the
               // project so renames + new files surface live and the local
@@ -3364,11 +3470,15 @@ export function ProjectWorkspace() {
                 // their cells. A truncated burst means the wave staged more
                 // than one frame carries — refetch rather than show part of a
                 // wave as if it were all of it.
-                const { needsRefetch } = applyContextualDraftsFrame(msg.frame)
+                const { needsRefetch } = applyContextualDraftsFrame(
+                  msg.project,
+                  msg.frame,
+                  getContextualRunState().runId,
+                )
                 if (needsRefetch) void refreshContextualDraftsRef.current()
                 return
               }
-              applyContextualFrame(msg.frame)
+              applyContextualFrame(msg.project, msg.frame)
             } else if (msg.t === "link.upstream-changed") {
               // FRO-479: an upstream live-link project committed lane-relevant
               // changes. Refetch staleness immediately; the handler debounces
@@ -3467,6 +3577,7 @@ export function ProjectWorkspace() {
     clearRemotePresenceState,
     presenceStore,
     sendPresenceUpdate,
+    refreshContextualDrafts,
     refreshAllFilesProgress,
   ])
 
@@ -5796,12 +5907,14 @@ export function ProjectWorkspace() {
             {/* Contextual drafting pill (flag-gated, discourse files only) —
                 absolute inside this relative wrapper so it vanishes on
                 non-editor surfaces; z-30 = floating-chip layer (AppShell). */}
-            {project && activeFile && isFlagEnabled(project, "contextualTranslation") && isDiscourseFile(activeFile) && (
+            {contextualAutopilotEnabled && project && activeFile && isDiscourseFile(activeFile) && (
               <ContextualRunPillMount
                 projectId={project.id}
                 fileId={activeFile.id}
+                activeLane={activeLane}
                 onSetupNeeded={handleAiSetupNeeded}
                 anchorCellId={focusedCellId}
+                canControl={currentRoleLevel >= ROLE.CONTRIBUTOR}
               />
             )}
             {timelineStacked ? (

@@ -41,7 +41,7 @@
 | AI          | Rapid sparkle sequences (regenerate, edit-then-sparkle, lane repeats) never dead-letter as stale siblings | `e2e/specs/ai/completion-races.spec.ts` (spec-local mock LLM) | |
 | AI          | Paragraph pilcrow button drafts all cells of a paragraph as one unit (mock LLM) | `e2e/specs/ai/paragraph-draft.smoke.spec.ts` | ✅ |
 | AI          | Agent drafts open file → workbench accept-all lands in editor → undo restores pre-draft text | `e2e/specs/ai/agent-draft.spec.ts` (mock OpenRouter via e2e-up)     |        |
-| AI          | Contextual run: enable flag, play pill → autonomous run parks with staged drafts + scene briefs; steer via "Direct the run" popover (queued-direction chip) | `e2e/specs/contextual/run-pill.smoke.spec.ts` (server-side mock LLM via [[ctx]] markers) | ✅ |
+| AI          | Contextual run: enable flag, Run Autopilot → run becomes idle with staged drafts + scene briefs; steer via "Direct the run" popover (queued-direction chip) | `e2e/specs/contextual/run-pill.smoke.spec.ts` (server-side mock LLM via [[ctx]] markers) | ✅ |
 | Editor      | Import dialog escalates an unsupported container to the isolated parser, previews normalized source/target units, then commits through ImportService | `e2e/specs/agent-import.spec.ts` (container-gated with `AGENT_SANDBOX_E2E=1`) | |
 | Collab      | File propagates from alice to bob                    | `e2e/specs/collab/file-propagation.smoke.spec.ts` (API project bootstrap)  | ✅ |
 | Collab      | Concurrent cell edit propagates alice → bob          | `e2e/specs/collab/concurrent-edit.smoke.spec.ts` (API project bootstrap)   | ✅ |
@@ -86,6 +86,7 @@
 | Orgs        | Pending invite targeted-email chip vs open-link badge | `e2e/specs/orgs/pending-invite-targeted-chip.smoke.spec.ts`   |   ✅   |
 | Comments    | Stale indicator when translation changes after thread  | `e2e/specs/editor/comment-translation-stale-indicator.smoke.spec.ts` | ✅ |
 | Projects    | Project overview per-file stats row after import      | `e2e/specs/projects/project-overview-file-stats.smoke.spec.ts` |   ✅   |
+| Projects    | Project overview Autopilot: compact start → durable activity; review count selects its evidence-owning run; stopping idle work refreshes to a startable state | `e2e/specs/projects/project-overview-autopilot.smoke.spec.ts` (server-side mock LLM via `[[ctx:*]]` markers) | ✅ |
 | Projects    | Cross-project termbase subscribe and unsubscribe      | `e2e/specs/projects/termbase-subscribe-unsubscribe.smoke.spec.ts` | ⏸ hidden |
 | Editor      | Video attachment Remove attachment clears saved URL   | `e2e/specs/editor/video-attachment-remove.smoke.spec.ts`          |   ✅   |
 | Projects    | Living memory Recent Examples ValidatedCellCard       | `e2e/specs/projects/living-memory-validated-cell-card.smoke.spec.ts` | ✅ |
@@ -285,7 +286,7 @@
 | Terminology | Violations tab shows inbox content                    | `e2e/specs/projects/terminology-violations-tab.smoke.spec.ts` |   ✅   |
 | Terminology | Wildcard source term 'samp*' creates chip for 'sample' | `e2e/specs/terminology/wildcard-term-chip.smoke.spec.ts`     |   ✅   |
 | Terminology | Violations inbox concept group expand/collapse        | `e2e/specs/terminology/violations-inbox-expand-group.smoke.spec.ts` | ✅ |
-| Projects    | Add target language → switch lane → translate per lane (AQU-538) | `e2e/specs/projects/add-target-language.spec.ts` |   |
+| Projects    | Add target language → switch lane → translate per lane; Autopilot stays explicitly default-lane-only (AQU-538/AQU-826) | `e2e/specs/projects/add-target-language.spec.ts` |   |
 | Editor      | Setup checklist AI instructions edit + reset          | `e2e/specs/editor/setup-checklist-ai-instructions-edit.smoke.spec.ts` |   ✅   |
 | Editor      | Workspace actions dropdown lists available actions    | `e2e/specs/editor/workspace-actions-dropdown.smoke.spec.ts`   |   ✅   |
 | Editor      | Workspace actions cell scroll to target cell          | `e2e/specs/editor/workspace-actions-cell-scroll.smoke.spec.ts` |   ✅   |

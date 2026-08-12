@@ -28,6 +28,7 @@ import {
   listAutopilotCandidateFiles,
   getProjectAutopilotSummary,
   parkRun,
+  failRun,
   type StoredSpanSeed,
 } from "../../../db/shared/contextual-runs"
 import {
@@ -88,7 +89,7 @@ async function seedCell(
   cellId: string,
   ref: string,
   source: string,
-  opts?: { fileId?: string; target?: string },
+  opts?: { fileId?: string; target?: string; targetLang?: string },
 ): Promise<void> {
   const fileId = opts?.fileId ?? FILE
   await db
@@ -101,10 +102,19 @@ async function seedCell(
   if (opts?.target !== undefined) {
     await db
       .prepare(
-        `INSERT INTO cells (project_id, file_id, cell_id, side, value, canonical_ref, event_id, source_event_id, last_edit_at, validated)
-         VALUES (?, ?, ?, 'target', ?, ?, ?, ?, 0, 0)`,
+        `INSERT INTO cells (project_id, file_id, cell_id, side, value, canonical_ref, event_id, source_event_id, last_edit_at, validated, target_lang)
+         VALUES (?, ?, ?, 'target', ?, ?, ?, ?, 0, 0, ?)`,
       )
-      .bind(PROJECT, fileId, cellId, opts.target, ref, `ev-tgt-${fileId}-${cellId}`, `ev-src-${fileId}-${cellId}`)
+      .bind(
+        PROJECT,
+        fileId,
+        cellId,
+        opts.target,
+        ref,
+        `ev-tgt-${fileId}-${cellId}-${opts.targetLang ?? "default"}`,
+        `ev-src-${fileId}-${cellId}`,
+        opts.targetLang ?? "",
+      )
       .run()
   }
 }
@@ -278,7 +288,11 @@ describe("runOneTick as a wave", () => {
     // The payload users are actually waiting for: verified text, per span.
     const drafts = frames.filter((f) => f.type === "contextual.drafts")
     expect(drafts).toHaveLength(2)
-    const payload = drafts[0] as { drafts: { cellId: string; text: string; draftId: string }[] }
+    const payload = drafts[0] as {
+      targetLang: string
+      drafts: { cellId: string; text: string; draftId: string }[]
+    }
+    expect(payload.targetLang).toBe("")
     expect(payload.drafts).toHaveLength(1)
     expect(payload.drafts[0].text).toMatch(/^MOCK /)
     expect(payload.drafts[0].draftId).toBeTruthy()
@@ -314,8 +328,9 @@ describe("runOneTick as a wave", () => {
 describe("draft staging under concurrency", () => {
   it("supersedes rather than throwing when two spans stage the same cell", async () => {
     await seedFourSpans()
+    const run = await startRun()
     const base = {
-      runId: "run-a",
+      runId: run.id,
       projectId: PROJECT,
       fileId: FILE,
       drafts: [{ cellId: "w1", text: "first" }],
@@ -324,7 +339,7 @@ describe("draft staging under concurrency", () => {
     // A second span (or a replayed wave) proposing the same cell must not hit
     // the partial UNIQUE — serially this was impossible, concurrently it is not.
     await expect(
-      insertDrafts(db, { ...base, runId: "run-b", drafts: [{ cellId: "w1", text: "second" }] }),
+      insertDrafts(db, { ...base, drafts: [{ cellId: "w1", text: "second" }] }),
     ).resolves.toBeTruthy()
 
     const live = await listDrafts(db, PROJECT, FILE, "proposed")
@@ -343,6 +358,17 @@ describe("draft staging under concurrency", () => {
       cellIds: ["occ1", "occ2", "occ3"],
     })
     expect([...occupied]).toEqual(["occ1"])
+  })
+
+  it("default-lane anti-clobber ignores text in another target lane", async () => {
+    await seedCell("lane1", "LUK 2:1", "source", { target: "français", targetLang: "fr" })
+    const occupied = await findOccupiedCells(db, {
+      projectId: PROJECT,
+      fileId: FILE,
+      cellIds: ["lane1"],
+      targetLang: "",
+    })
+    expect([...occupied]).toEqual([])
   })
 
   it("findOccupiedCells short-circuits on an empty list", async () => {
@@ -418,13 +444,16 @@ async function seedFileRow(fileId: string, kind: string): Promise<void> {
 }
 
 describe("listAutopilotCandidateFiles", () => {
-  it("returns discourse files with work left, most work first, and skips catalogs", async () => {
+  it("returns discourse files with work left and skips catalogs and protected IDML", async () => {
     await seedFileRow("f-usfm", "usfm")
     await seedFileRow("f-json", "json")
+    await seedFileRow("f-idml", "idml")
     await seedFileRow("f-done", "usfm")
-    await seedCell("p1", "JHN 1:1", "one", { fileId: "f-usfm" })
-    await seedCell("p2", "JHN 1:2", "two", { fileId: "f-usfm" })
+    // Non-default translations do not satisfy the default-lane work queue.
+    await seedCell("p1", "JHN 1:1", "one", { fileId: "f-usfm", target: "un", targetLang: "fr" })
+    await seedCell("p2", "JHN 1:2", "two", { fileId: "f-usfm", target: "deux", targetLang: "fr" })
     await seedCell("p3", "ui.title", "Title", { fileId: "f-json" })
+    await seedCell("p-idml", "IDML 1", "Protected layout text", { fileId: "f-idml" })
     await seedCell("p4", "ACT 1:1", "done", { fileId: "f-done", target: "ya traducido" })
 
     const candidates = await listAutopilotCandidateFiles(db, PROJECT)
@@ -432,6 +461,7 @@ describe("listAutopilotCandidateFiles", () => {
     expect(ids).toContain("f-usfm")
     // Key/value catalogs have no discourse to construe.
     expect(ids).not.toContain("f-json")
+    expect(ids).not.toContain("f-idml")
     // Nothing untranslated left → nothing to do.
     expect(ids).not.toContain("f-done")
     expect(candidates.find((c) => c.fileId === "f-usfm")?.untranslatedCells).toBe(2)
@@ -448,6 +478,79 @@ describe("listAutopilotCandidateFiles", () => {
     const candidates = await listAutopilotCandidateFiles(db, PROJECT)
     const ids = candidates.map((c) => c.fileId)
     expect(ids.indexOf("f-big")).toBeLessThan(ids.indexOf("f-small"))
+  })
+
+  it("orders never-started work ahead of a larger failed retry so later batches cannot starve", async () => {
+    await seedFileRow("f-failed-big", "usfm")
+    await seedFileRow("f-never-small", "usfm")
+    for (let i = 0; i < 8; i++) {
+      await seedCell(`failed-${i}`, `ROM 2:${i + 1}`, "retry", { fileId: "f-failed-big" })
+    }
+    await seedCell("never-1", "TIT 2:1", "new", { fileId: "f-never-small" })
+    const prior = await createRun(db, {
+      projectId: PROJECT,
+      fileId: "f-failed-big",
+      targetLang: "",
+    })
+    if (prior.status !== "ok") throw new Error("failed retry fixture was not created")
+    await failRun(db, prior.run.id, "safe categorical failure")
+
+    const candidates = await listAutopilotCandidateFiles(db, PROJECT)
+    const ids = candidates.map((candidate) => candidate.fileId)
+    expect(ids.indexOf("f-never-small")).toBeLessThan(ids.indexOf("f-failed-big"))
+  })
+
+  it("rotates least-recent terminal retries so a repeated 24-file batch reaches the prior tail", async () => {
+    const initialRuns = []
+    for (let index = 1; index <= 26; index++) {
+      const suffix = String(index).padStart(2, "0")
+      const fileId = `retry-${suffix}`
+      await seedFileRow(fileId, "usfm")
+      await seedCell(`retry-cell-${suffix}`, `GEN ${index}:1`, "retry", { fileId })
+      initialRuns.push(
+        db.prepare(
+          `INSERT INTO contextual_runs
+              (id, project_id, file_id, target_lang, status, created_at, updated_at)
+           VALUES (?, ?, ?, '', 'failed', ?::timestamptz, ?::timestamptz)`,
+        ).bind(
+          `initial-retry-${suffix}`,
+          PROJECT,
+          fileId,
+          new Date(Date.UTC(2026, 0, index)).toISOString(),
+          new Date(Date.UTC(2026, 0, index)).toISOString(),
+        ),
+      )
+    }
+    await db.batch(initialRuns)
+
+    const firstBatch = (await listAutopilotCandidateFiles(db, PROJECT))
+      .filter((candidate) => candidate.fileId.startsWith("retry-"))
+      .slice(0, 24)
+    expect(firstBatch).toHaveLength(24)
+    expect(firstBatch.map((candidate) => candidate.fileId)).not.toContain("retry-25")
+
+    // Simulate that bounded retry batch failing again. Its latest-attempt time
+    // moves forward, so the two files deferred last time become oldest-first.
+    await db.batch(firstBatch.map((candidate, index) =>
+      db.prepare(
+        `INSERT INTO contextual_runs
+            (id, project_id, file_id, target_lang, status, created_at, updated_at)
+         VALUES (?, ?, ?, '', 'failed', ?::timestamptz, ?::timestamptz)`,
+      ).bind(
+        `second-retry-${String(index + 1).padStart(2, "0")}`,
+        PROJECT,
+        candidate.fileId,
+        "2027-01-01T00:00:00.000Z",
+        "2027-01-01T00:00:00.000Z",
+      ),
+    ))
+    const nextBatch = (await listAutopilotCandidateFiles(db, PROJECT))
+      .filter((candidate) => candidate.fileId.startsWith("retry-"))
+      .slice(0, 24)
+    expect(nextBatch.slice(0, 2).map((candidate) => candidate.fileId)).toEqual([
+      "retry-25",
+      "retry-26",
+    ])
   })
 })
 
@@ -475,17 +578,32 @@ describe("getProjectAutopilotSummary", () => {
     expect(summary.activeRuns).toBe(0)
     expect(summary.proposedDrafts).toBe(0)
   })
+
+  it("has a project-leading draft index for the polled overview aggregation", async () => {
+    if (!db.transaction) throw new Error("test database must support transactions")
+    const plan = await db.transaction(async (tx) => {
+      await tx.prepare("SET LOCAL enable_seqscan = off").run()
+      return tx.prepare(
+        `EXPLAIN (COSTS OFF)
+         SELECT run_id, COUNT(*) FILTER (WHERE status = 'proposed')
+           FROM contextual_drafts
+          WHERE project_id = ?
+          GROUP BY run_id`,
+      ).bind(PROJECT).all<Record<string, unknown>>()
+    })
+    const rendered = plan.results.flatMap((row) => Object.values(row)).join("\n")
+    expect(rendered).toContain("contextual_drafts_project_status_run_time")
+  })
 })
 
 describe("wave fault containment", () => {
-  it("charges an unexpected lane failure to one span and still advances the cursor", async () => {
+  it("keeps every lane successful when only the decorative progress relay fails", async () => {
     await seedFourSpans()
     const run = await startRun()
 
-    // A progress reporter that throws on the second lane's open. Before the
-    // per-lane catch this rejected Promise.all: the wave's other spans lost
-    // their work, the cursor never advanced, and the run replayed the same
-    // failing wave forever.
+    // A progress reporter that throws on the second lane's open. The durable
+    // snapshot/activity rows are authoritative; live collaboration must not
+    // charge a healthy passage with a model/work failure.
     let starts = 0
     const notify = async (frame: ContextualProgressFrame) => {
       if (frame.type === "contextual.span.start" && ++starts === 2) {
@@ -493,17 +611,23 @@ describe("wave fault containment", () => {
       }
     }
 
-    const result = await runOneTick({ db, runId: run.id, llm: llm(), concurrency: 2, notify })
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    let result
+    try {
+      result = await runOneTick({ db, runId: run.id, llm: llm(), concurrency: 2, notify })
+    } finally {
+      warn.mockRestore()
+    }
 
     const after = await getRun(db, run.id)
     expect(after?.spanCursor?.nextIndex).toBe(2) // advanced past the whole wave
-    expect(after?.doneSpans).toBe(1)
-    expect(after?.failedSpans).toBe(1)
-    expect(after?.lastError).toContain("progress channel exploded")
+    expect(after?.doneSpans).toBe(2)
+    expect(after?.failedSpans).toBe(0)
+    expect(after?.lastError).toBeNull()
     expect(result.continueRun).toBe(true)
 
-    // The healthy lane's work survived.
+    // Both healthy lanes' work survived.
     const drafts = await listDrafts(db, PROJECT, FILE, "proposed")
-    expect(drafts).toHaveLength(1)
+    expect(drafts).toHaveLength(2)
   })
 })

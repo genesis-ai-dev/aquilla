@@ -4,6 +4,7 @@ import { MemoryRouter, Routes, Route } from "react-router-dom"
 import { OrgProvider } from "@/context/OrgContext"
 import { ProjectOverview, deriveProjectStatus } from "./ProjectOverview"
 import type { ProjectRecord } from "@/lib/parsers/types"
+import { ROLE } from "@/lib/frontier/roles"
 
 const navigate = vi.fn()
 vi.mock("react-router-dom", async (importActual) => {
@@ -21,6 +22,11 @@ vi.mock("@/lib/frontier/orgs", () => ({
   listOrgMembers: vi.fn(async () => []),
 }))
 vi.mock("@/components/AccountSwitcher", () => ({ AccountSwitcher: () => null }))
+vi.mock("./ProjectAutopilotPanel", () => ({
+  ProjectAutopilotPanel: ({ canStart }: { canStart: boolean }) => (
+    <div data-testid="project-autopilot-panel-mock" data-can-start={String(canStart)} />
+  ),
+}))
 
 const useProject = vi.fn()
 const refresh = vi.fn()
@@ -317,6 +323,61 @@ describe("ProjectOverview load states", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /^sign in$/i }))
     expect(navigate).toHaveBeenCalledWith("/login?next=%2Fprojects%2Fp1")
+  })
+})
+
+describe("ProjectOverview Autopilot discovery flag", () => {
+  it("hides the overview surface when contextualTranslation is opted out", async () => {
+    fetchSyncToken.mockResolvedValue({ token: "tok" })
+    fetchProjectFiles.mockResolvedValue([])
+    getPortfolio.mockResolvedValue([])
+    useProject.mockReturnValue({
+      project: projectRecord({
+        level: 700,
+        experimentalFlags: { contextualTranslation: false },
+      }),
+      status: "ready",
+      refresh,
+    })
+
+    renderOverview()
+
+    await screen.findByRole("heading", { level: 1, name: "John" })
+    expect(screen.queryByTestId("project-autopilot-panel-mock")).not.toBeInTheDocument()
+  })
+
+  it("shows the overview surface under the default-on discovery flag", async () => {
+    fetchSyncToken.mockResolvedValue({ token: "tok" })
+    fetchProjectFiles.mockResolvedValue([])
+    getPortfolio.mockResolvedValue([])
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 700 }),
+      status: "ready",
+      refresh,
+    })
+
+    renderOverview()
+
+    expect(await screen.findByTestId("project-autopilot-panel-mock")).toBeInTheDocument()
+  })
+
+  it("uses the fresh resolved role for Autopilot controls instead of the stale project cache", async () => {
+    fetchSyncToken.mockResolvedValue({ token: "tok" })
+    fetchProjectFiles.mockResolvedValue([])
+    getPortfolio.mockResolvedValue([])
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 700 }),
+      roleLevel: ROLE.VIEWER,
+      status: "ready",
+      refresh,
+    })
+
+    renderOverview()
+
+    expect(await screen.findByTestId("project-autopilot-panel-mock")).toHaveAttribute(
+      "data-can-start",
+      "false",
+    )
   })
 })
 

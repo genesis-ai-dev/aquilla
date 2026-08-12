@@ -328,6 +328,17 @@ export const rules = defineNamespace({
     "rules.suggestFromEdits.analyzeButton": "Analyze my edits",
     "rules.suggestFromEdits.miningLabel": "Mining edit patterns…",
     "rules.suggestFromEdits.minedPatterns": "Mined patterns: {patterns}",
+
+    // ── completion-service.ts (LLM completion request errors, lib/) ────────
+    "rules.completion.failedToFetchModels": "Failed to fetch models: {status} {statusText}",
+    "rules.completion.frontierLimitReached": "Frontier AI limit reached: {detail}",
+    "rules.completion.outOfCredits": "Out of credits.",
+    "rules.completion.completionFailed": "Completion failed: {status} {text}",
+    "rules.completion.requestTimedOut": "The AI request timed out. Please try again.",
+    "rules.completion.streamError": "Completion stream error",
+    "rules.completion.completionAborted": "Completion aborted",
+    "rules.completion.signInRequired": "Sign in to use Frontier AI.",
+    "rules.completion.noCustomEndpoint": "No custom endpoint configured.",
   },
   context: {
     _context: {
@@ -630,6 +641,25 @@ export const rules = defineNamespace({
       "rules.suggestFromEdits.minedPatterns": {
         description: "Summary line above the review list, showing the mining-stats breakdown.",
         placeholders: { patterns: "Already-localized, comma-joined stats segments (see rules.suggestFromEdits.stats.*)." },
+      },
+      "rules.completion.failedToFetchModels": {
+        description: "Thrown error when the model-list fetch for a custom OpenAI-compatible endpoint fails.",
+        placeholders: {
+          status: "HTTP status code — content, never translated.",
+          statusText: "HTTP status text — content, never translated.",
+        },
+      },
+      "rules.completion.frontierLimitReached": {
+        description:
+          "Thrown error when a Frontier completion request 402s (subscription/credits exhausted).",
+        placeholders: { detail: "Server-provided detail text, or rules.completion.outOfCredits as a fallback." },
+      },
+      "rules.completion.completionFailed": {
+        description: "Generic thrown error when a completion request fails with a non-ok, non-402 status.",
+        placeholders: {
+          status: "HTTP status code — content, never translated.",
+          text: "Raw response body text — content, never translated.",
+        },
       },
       "rules.editor.wouldBeFlagged": {
         description:

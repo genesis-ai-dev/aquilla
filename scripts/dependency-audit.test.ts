@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import {
+  AuditUnavailableError,
   evaluate,
   loadAllowlist,
   parseAuditJson,
@@ -97,13 +98,34 @@ describe("parseAuditJson", () => {
     expect(parseAuditJson(JSON.stringify({ metadata: { vulnerabilities: {} } }))).toEqual([])
   })
 
-  it("throws on an unrecognised payload rather than reporting it clean", () => {
+  it("throws AuditUnavailableError rather than reporting an unreadable payload clean", () => {
     // The gate passing because it could not read the output is the one failure
     // mode that would make it worse than having no gate.
-    expect(() => parseAuditJson(JSON.stringify({}))).toThrow(/unrecognised/)
-    expect(() => parseAuditJson(JSON.stringify({ error: "registry unreachable" }))).toThrow(
-      /unrecognised/,
-    )
+    expect(() => parseAuditJson(JSON.stringify({}))).toThrow(AuditUnavailableError)
+  })
+
+  it("surfaces the registry's own error, so a build log says why", () => {
+    // pnpm reports an unreachable advisory endpoint as an `error` object on
+    // stdout. Without this the failure reads as "unrecognised output" and the
+    // reader goes looking for a parser bug instead of a network problem.
+    const raw = JSON.stringify({
+      error: { code: "ECONNREFUSED", message: "request to https://registry/-/npm/v1/security/audits failed" },
+    })
+    expect(() => parseAuditJson(raw)).toThrow(/ECONNREFUSED/)
+  })
+
+  it("distinguishes an unavailable audit from a found advisory", () => {
+    // These need different reactions: an untriaged advisory is the PR author's
+    // decision, an unreachable endpoint is the builder's problem. Callers
+    // branch on the type, so it has to be the type and not just the message.
+    let caught: unknown
+    try {
+      parseAuditJson(JSON.stringify({}))
+    } catch (err) {
+      caught = err
+    }
+    expect(caught).toBeInstanceOf(AuditUnavailableError)
+    expect((caught as Error).name).toBe("AuditUnavailableError")
   })
 })
 

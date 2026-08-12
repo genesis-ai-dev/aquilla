@@ -72,6 +72,17 @@ export type Verdict =
   | { kind: "expired"; advisory: Advisory; entry: AllowEntry }
 
 /**
+ * The audit could not be *performed* — as distinct from performing it and
+ * finding something. Kept separate because the two need different reactions:
+ * an untriaged advisory is a decision for whoever opened the pull request, and
+ * an unreachable advisory endpoint is a problem with the build environment
+ * that no change to this repository will fix.
+ */
+export class AuditUnavailableError extends Error {
+  override readonly name = "AuditUnavailableError"
+}
+
+/**
  * Compare advisories against the allowlist. `today` is injected rather than
  * read from the clock so the test suite is not a time bomb.
  */
@@ -117,9 +128,17 @@ export function parseAuditJson(raw: string): Advisory[] {
     metadata?: unknown
   }
   if (parsed.advisories === undefined && parsed.metadata === undefined) {
-    throw new Error(
-      "unrecognised `pnpm audit --json` output: no `advisories` and no `metadata` key. " +
-        "Refusing to report a clean result from a payload this script cannot read.",
+    // Name the overwhelmingly likely cause. `pnpm audit` reports a registry or
+    // proxy failure as an `error` object on stdout, and the advisory endpoint
+    // (/-/npm/v1/security/audits) is a different surface from package
+    // tarballs — a mirror can serve installs perfectly and not implement it.
+    const detail =
+      typeof (parsed as { error?: unknown }).error === "object"
+        ? ` Registry reported: ${JSON.stringify((parsed as { error?: unknown }).error).slice(0, 300)}`
+        : ""
+    throw new AuditUnavailableError(
+      "could not obtain an advisory report from `pnpm audit --json` — the payload " +
+        `carried neither \`advisories\` nor \`metadata\`.${detail}`,
     )
   }
   const advisories: Advisory[] = []
@@ -157,9 +176,21 @@ async function runAudit(): Promise<string> {
   } catch (err) {
     const stdout = (err as { stdout?: string }).stdout
     if (stdout && stdout.trim()) return stdout
-    throw err
+    throw new AuditUnavailableError(
+      `\`pnpm audit\` produced no output: ${err instanceof Error ? err.message : String(err)}`,
+    )
   }
 }
+
+/**
+ * Escape hatch for a build environment that cannot reach the advisory
+ * endpoint at all. Deliberately an environment variable rather than a config
+ * file: it should be a visible, deliberate act by whoever administers the
+ * builder, not something that can drift into the repository and be forgotten.
+ * When set, the gate still prints loudly — a skipped check that looks like a
+ * passed check is the failure this whole script exists to avoid.
+ */
+const SKIP_VAR = "AQUILLA_DEP_AUDIT_ALLOW_UNAVAILABLE"
 
 function describe(a: Advisory): string {
   // One representative path is enough to see whether it reaches the bundle;
@@ -169,8 +200,33 @@ function describe(a: Advisory): string {
 }
 
 async function main(): Promise<void> {
-  const raw = await runAudit()
-  const advisories = parseAuditJson(raw)
+  let advisories: Advisory[]
+  try {
+    advisories = parseAuditJson(await runAudit())
+  } catch (err) {
+    if (!(err instanceof AuditUnavailableError)) throw err
+    if (process.env[SKIP_VAR] === "1") {
+      console.warn(
+        `[audit:deps] ⚠ SKIPPED — the advisory endpoint is unreachable and ${SKIP_VAR}=1.\n` +
+          `            ${err.message}\n` +
+          "            Dependency vulnerabilities were NOT checked for this build.",
+      )
+      return
+    }
+    console.error(
+      `[audit:deps] could not run the audit — this is an environment problem, not a finding.\n\n` +
+        `  ${err.message}\n\n` +
+        "The advisory endpoint (/-/npm/v1/security/audits) is separate from package\n" +
+        "downloads, so installs can succeed while this fails — check registry/proxy\n" +
+        "reachability and any npm_config_registry override on the builder.\n\n" +
+        `If this builder genuinely cannot reach it, set ${SKIP_VAR}=1 there. That is a\n` +
+        "deliberate, visible downgrade: the gate then logs a warning and checks nothing.\n" +
+        "It fails by default because a security check that quietly stops running is the\n" +
+        "exact defect docs/OPSEC-REVIEW-2026-08-12.md was written about.",
+    )
+    process.exitCode = 1
+    return
+  }
 
   if (process.argv.includes("--list")) {
     console.log(`[audit:deps] ${advisories.length} advisory(ies) in the production tree:\n`)

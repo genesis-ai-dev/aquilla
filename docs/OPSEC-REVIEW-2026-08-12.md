@@ -199,6 +199,23 @@ then **OPS-10**, then SEC-1. OPS-8, OPS-9 and OPS-11 are closed in code.
    because it could not read its input is the one thing that would make it worse than no
    gate, and that is the failure this whole document is about.
 
+   "Could not run the audit" and "ran it and found something" are separated into distinct
+   types, because they need different reactions: an untriaged advisory is a decision for
+   whoever opened the pull request, while an unreachable advisory endpoint is a builder
+   problem no change to this repository will fix. The advisory endpoint
+   (`/-/npm/v1/security/audits`) is a different surface from package downloads, so a mirror
+   can serve installs perfectly and not implement it — the failure message says exactly
+   that, and quotes the registry's own error, so a build log does not send the reader
+   hunting for a parser bug.
+
+   An environment that genuinely cannot reach the endpoint can set
+   `AQUILLA_DEP_AUDIT_ALLOW_UNAVAILABLE=1` on the builder. It fails **by default**, and the
+   skip prints a warning saying dependency vulnerabilities were not checked. The lever
+   exists because the realistic alternative to a hard block nobody can clear is that
+   somebody deletes the step — and a deliberate, loud, environment-scoped downgrade is
+   better than a quiet deletion. All three paths (clean, unavailable-fails,
+   unavailable-skipped) were exercised against a deliberately unreachable registry.
+
    The last pass recommended a *weekly, non-blocking* `pnpm audit` job for exactly the
    false-positive reason above. This solves the same problem the other way: blocking, but
    only on the part a human has not yet looked at. A non-blocking weekly job produces a

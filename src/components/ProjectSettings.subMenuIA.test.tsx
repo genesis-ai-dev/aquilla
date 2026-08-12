@@ -21,7 +21,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, cleanup } from "@testing-library/react"
-import { MemoryRouter, Route, Routes } from "react-router-dom"
+import { MemoryRouter, Route, Routes, Link } from "react-router-dom"
 import { ProjectSettings } from "./ProjectSettings"
 
 
@@ -29,25 +29,20 @@ vi.mock("@/components/org/OrgSidebar", () => ({
   OrgSidebar: () => <div data-testid="org-sidebar">sidebar</div>,
 }))
 vi.mock("@/components/org/OrgBreadcrumb", () => ({
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  OrgBreadcrumb: ({ section, trail }: any) => {
-    // Lazy require so the mock stays hoist-safe under vitest.
-    const { Link } = require("react-router-dom") as typeof import("react-router-dom")
-    return (
-      <div data-testid="org-breadcrumb">
-        {section}
-        {(trail ?? []).map((t: { label: string; to?: string }) =>
-          t.to ? (
-            <Link key={t.label} to={t.to}>
-              {t.label}
-            </Link>
-          ) : (
-            <span key={t.label}>{` › ${t.label}`}</span>
-          ),
-        )}
-      </div>
-    )
-  },
+  OrgBreadcrumb: ({ section, trail }: { section: string; trail?: { label: string; to?: string }[] }) => (
+    <div data-testid="org-breadcrumb">
+      {section}
+      {(trail ?? []).map((t: { label: string; to?: string }) =>
+        t.to ? (
+          <Link key={t.label} to={t.to}>
+            {t.label}
+          </Link>
+        ) : (
+          <span key={t.label}>{` › ${t.label}`}</span>
+        ),
+      )}
+    </div>
+  ),
 }))
 
 import type { ProjectRecord } from "@/lib/parsers/types"

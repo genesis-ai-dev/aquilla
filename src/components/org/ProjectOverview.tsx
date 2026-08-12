@@ -99,6 +99,7 @@ import {
 } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
 import { LoadingTemplate } from "@/components/ui/loading-overlay"
+import { SegmentTabs } from "@/components/ui/tabs"
 
 /** Max per-file rows shown on the overview; the rest are counted as "+N more". */
 const FILE_ROW_CAP = 12
@@ -221,30 +222,23 @@ function StatTile({ label, pct, colorClass, tooltip, display }: {
   return tooltip ? <AppTooltip content={tooltip}>{tile}</AppTooltip> : tile
 }
 
-// ── Lane filter pill (AQU-538 §3.3) ───────────────────────────────────────────
+// ── Lane filter tabs (AQU-538 §3.3) ───────────────────────────────────────────
+// SegmentTabs needs a non-empty string value; map null/"All" and the default
+// lane ('' on the portfolio) to sentinels so triggers stay unique.
 
-function LanePill({ active, onClick, testId, children }: {
-  active: boolean
-  onClick: () => void
-  testId: string
-  children: React.ReactNode
-}) {
-  return (
-    <button
-      type="button"
-      data-testid={testId}
-      aria-pressed={active}
-      onClick={onClick}
-      className={cn(
-        "rounded-md border px-2.5 py-0.5 text-xs font-medium transition-colors",
-        active
-          ? "border-transparent bg-primary text-primary-foreground"
-          : "bg-background text-muted-foreground hover:bg-muted hover:text-foreground",
-      )}
-    >
-      {children}
-    </button>
-  )
+const LANE_TAB_ALL = "__all__"
+const LANE_TAB_DEFAULT = "__default__"
+
+function laneTagToTab(tag: string | null): string {
+  if (tag === null) return LANE_TAB_ALL
+  if (tag === "") return LANE_TAB_DEFAULT
+  return tag
+}
+
+function tabToLaneTag(tab: string): string | null {
+  if (tab === LANE_TAB_ALL) return null
+  if (tab === LANE_TAB_DEFAULT) return ""
+  return tab
 }
 
 // ── Stat bar ──────────────────────────────────────────────────────────────────
@@ -561,10 +555,10 @@ export function ProjectOverview() {
   const [showAllFiles, setShowAllFiles] = useState(false)
   const [workload, setWorkload] = useState<AssigneeWorkload[]>([])
 
-  // AQU-538 §3.3: the lane filter pill selection. `null` = "All" — today's
+  // AQU-538 §3.3: the lane filter tab selection. `null` = "All" — today's
   // cross-lane behavior, byte-identical (StatTiles read the PortfolioProject
   // scalars, file drill-down reads with no lane param). A non-null value is a
-  // real lane tag ('' = the default lane) selected from the pill row; the tiles
+  // real lane tag ('' = the default lane) selected from the tab row; the tiles
   // recompute from that lane's PortfolioLane and the drill-down re-reads with
   // `?lane=`.
   const [selectedLaneTag, setSelectedLaneTag] = useState<string | null>(null)
@@ -579,7 +573,7 @@ export function ProjectOverview() {
     })
   }, [])
   // The lane passed to the per-file progress reads. "All" (null) and the
-  // default lane pill both map to '' server-side (the default lane == the
+  // default lane tab both map to '' server-side (the default lane == the
   // no-param request), so the drill-down only ever diverges for a selected
   // non-default lane.
   const fileLane = selectedLaneTag ?? ""
@@ -801,13 +795,20 @@ export function ProjectOverview() {
   const showText = hasText
   const showAudio = hasAudio
 
-  // AQU-538 §3.3: lane pills + tile recompute. Pills only surface once a project
+  // AQU-538 §3.3: lane tabs + tile recompute. Tabs only surface once a project
   // has more than one lane (N=1 stays byte-identical). `activeLane` is the
-  // PortfolioLane the pills are filtered to (null = "All"); when set, the
+  // PortfolioLane the tabs are filtered to (null = "All"); when set, the
   // Translated/Validated tiles + bars read that lane, and the cross-language
   // tiles (AI Drafted, audio) grey out — they have no per-lane breakdown.
   const projectLanes: PortfolioLane[] = audio?.lanes ?? []
-  const showLanePills = projectLanes.length > 1
+  const showLaneTabs = projectLanes.length > 1
+  const laneTabOptions = [
+    { label: "All", value: LANE_TAB_ALL },
+    ...projectLanes.map((l) => ({
+      label: l.lane === "" ? (project?.targetLanguage || "Default") : l.lane,
+      value: l.lane === "" ? LANE_TAB_DEFAULT : l.lane,
+    })),
+  ]
   const activeLane: PortfolioLane | null =
     selectedLaneTag != null ? projectLanes.find((l) => l.lane === selectedLaneTag) ?? null : null
   const tileTranslatedPct = activeLane ? laneTranslatedPct(activeLane) : audio ? translatedPct(audio) : 0
@@ -1162,32 +1163,17 @@ export function ProjectOverview() {
                     </div>
                   </div>
 
-                  {/* AQU-538 §3.3: lane filter pills — All + one per lane
+                  {/* AQU-538 §3.3: lane filter tabs — All + one per lane
                       (default lane labeled with the project's targetLanguage).
                       Only rendered when the project has >1 lane. */}
-                  {showLanePills && (
-                    <div className="mb-3 flex flex-wrap items-center gap-1.5" data-testid="lane-filter-pills">
-                      <LanePill
-                        active={selectedLaneTag === null}
-                        onClick={() => setSelectedLaneTag(null)}
-                        testId="lane-pill-all"
-                      >
-                        All
-                      </LanePill>
-                      {projectLanes.map((l) => {
-                        const tagId = l.lane === "" ? "default" : l.lane
-                        const label = l.lane === "" ? (project?.targetLanguage || "Default") : l.lane
-                        return (
-                          <LanePill
-                            key={tagId}
-                            active={selectedLaneTag === l.lane}
-                            onClick={() => setSelectedLaneTag(l.lane)}
-                            testId={`lane-pill-${tagId}`}
-                          >
-                            {label}
-                          </LanePill>
-                        )
-                      })}
+                  {showLaneTabs && (
+                    <div className="mb-3" data-testid="lane-filter-tabs">
+                      <SegmentTabs
+                        value={laneTagToTab(selectedLaneTag)}
+                        onValueChange={(next) => setSelectedLaneTag(tabToLaneTag(next))}
+                        aria-label="Filter progress by language"
+                        options={laneTabOptions}
+                      />
                     </div>
                   )}
 
@@ -1317,7 +1303,7 @@ export function ProjectOverview() {
               {/* ── Languages / lane table (AQU-538 §3.3) ── */}
               {/* Rendered only when the project has more than one target
                   language lane — N=1 projects are byte-identical to before. */}
-              {showLanePills && audio && (
+              {showLaneTabs && audio && (
                 <OverviewLaneTable
                   projectId={id}
                   orgId={portfolioOrgId}

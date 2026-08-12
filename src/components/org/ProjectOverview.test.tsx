@@ -1593,13 +1593,13 @@ describe("ProjectOverview CSV export (AQU-500)", () => {
   })
 })
 
-// ── AQU-538 §3.3: per-project lane table + lane filter pills ─────────────────
+// ── AQU-538 §3.3: per-project lane table + lane filter tabs ──────────────────
 
-describe("ProjectOverview lane table + pills (AQU-538 §3.3)", () => {
+describe("ProjectOverview lane table + tabs (AQU-538 §3.3)", () => {
   // WHY: once a project has more than one target-language lane, a PM must see
   // per-lane progress + people + quick actions directly on the overview, and be
   // able to filter the header StatTiles / per-file drill-down to one lane. N=1
-  // projects must be byte-identical to the pre-lane overview (no table, no pills).
+  // projects must be byte-identical to the pre-lane overview (no table, no tabs).
 
   const NOW = new Date("2026-07-14T12:00:00Z").getTime()
 
@@ -1659,7 +1659,7 @@ describe("ProjectOverview lane table + pills (AQU-538 §3.3)", () => {
     expect(esRow).toHaveTextContent("8%")
   })
 
-  it("does not render the lane table (or pills) for a single-lane project", async () => {
+  it("does not render the lane table (or tabs) for a single-lane project", async () => {
     useLaneProject()
     getPortfolio.mockResolvedValue([laneProject({
       lanes: [{ lane: "", totalCells: 100, filledCells: 80, validatedCells: 50, lastEditAt: NOW }],
@@ -1669,42 +1669,45 @@ describe("ProjectOverview lane table + pills (AQU-538 §3.3)", () => {
     // The progress card still renders (Translated tile present) — just no lane UI.
     await waitFor(() => expect(screen.getAllByText("Translated").length).toBeGreaterThan(0))
     expect(screen.queryByTestId("overview-lane-table")).not.toBeInTheDocument()
-    expect(screen.queryByTestId("lane-filter-pills")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("lane-filter-tabs")).not.toBeInTheDocument()
   })
 
-  it("selecting a lane pill swaps the header StatTile percentages to that lane's numbers", async () => {
+  it("selecting a lane tab swaps the header StatTile percentages to that lane's numbers", async () => {
     useLaneProject()
     getPortfolio.mockResolvedValue([laneProject()])
     renderOverview()
 
-    await screen.findByTestId("lane-filter-pills")
+    await screen.findByTestId("lane-filter-tabs")
 
     // "All" (default) — cross-lane scalars: 100/200 = 50% translated, 58/200 = 29% validated.
     expect(statTile("Translated")).toHaveTextContent("50%")
     expect(statTile("Validated")).toHaveTextContent("29%")
 
     // Filter to es — laneTranslatedPct(es) = 20/100 = 20%, laneValidatedPct = 8/100 = 8%.
-    fireEvent.click(screen.getByTestId("lane-pill-es"))
+    fireEvent.click(screen.getByRole("tab", { name: "es" }))
     await waitFor(() => expect(statTile("Translated")).toHaveTextContent("20%"))
     expect(statTile("Validated")).toHaveTextContent("8%")
 
     // Back to All restores the cross-lane figures.
-    fireEvent.click(screen.getByTestId("lane-pill-all"))
+    fireEvent.click(screen.getByRole("tab", { name: "All" }))
     await waitFor(() => expect(statTile("Translated")).toHaveTextContent("50%"))
   })
 
-  it("each lane row's Open link deep-links the workspace at that lane (?lane=)", async () => {
+  it("each lane row's Open menu item deep-links the workspace at that lane (?lane=)", async () => {
     useLaneProject()
     getPortfolio.mockResolvedValue([laneProject()])
     renderOverview()
 
     await screen.findByTestId("overview-lane-table")
+    fireEvent.click(screen.getByTestId("overview-lane-actions-es"))
     expect(screen.getByTestId("overview-lane-open-es").getAttribute("href")).toBe("/project/p1/editor?lane=es")
-    // The default lane opens the workspace with no lane param (today's behavior).
+
+    // Close and open the default-lane menu — default lane has no lane param.
+    fireEvent.click(screen.getByTestId("overview-lane-actions-default"))
     expect(screen.getByTestId("overview-lane-open-default").getAttribute("href")).toBe("/project/p1/editor")
   })
 
-  it("Assign… on a lane row mounts AssignModal pinned to that lane", async () => {
+  it("Assign… from a lane row ⋯ menu mounts AssignModal pinned to that lane", async () => {
     useLaneProject()
     getPortfolio.mockResolvedValue([laneProject()])
     renderOverview()
@@ -1713,7 +1716,8 @@ describe("ProjectOverview lane table + pills (AQU-538 §3.3)", () => {
     // Closed until launched.
     expect(screen.queryByTestId("assign-modal-mock")).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByTestId("overview-lane-assign-es"))
+    fireEvent.click(screen.getByTestId("overview-lane-actions-es"))
+    fireEvent.click(screen.getByRole("menuitem", { name: /assign/i }))
     const modal = await screen.findByTestId("assign-modal-mock")
     expect(modal.getAttribute("data-lane")).toBe("es")
   })
@@ -1754,8 +1758,8 @@ describe("ProjectOverview lane table + pills (AQU-538 §3.3)", () => {
     })
     renderOverview()
 
-    await screen.findByTestId("lane-filter-pills")
-    fireEvent.click(screen.getByTestId("lane-pill-es"))
+    await screen.findByTestId("lane-filter-tabs")
+    fireEvent.click(screen.getByRole("tab", { name: "es" }))
 
     const row = await screen.findByTestId("file-row")
     fireEvent.click(within(row).getByRole("button", { name: /^expand/i }))

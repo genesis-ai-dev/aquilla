@@ -35,6 +35,7 @@ import { useProjectMembers } from "@/hooks/useProjectMembers"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { addProjectMember } from "@/lib/frontier/members"
 import { fetchMemberScopes, putMemberScopes, type MemberScope } from "@/lib/sync/member-scopes"
+import { cn } from "@/lib/utils"
 
 /** Pinned contract — wave-B agents import this exactly. */
 export interface StaffLanePopoverProps {
@@ -44,6 +45,14 @@ export interface StaffLanePopoverProps {
   orgId: number | null
   trigger?: ReactNode
   onDone?: () => void
+  /** Controlled open — pair with `onOpenChange` when launching from a ⋯ menu. */
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
+  /**
+   * Visually hide the trigger (sr-only). Use when the popover is opened from a
+   * row ⋯ menu and only needs an anchor in the actions cell.
+   */
+  anchorOnly?: boolean
 }
 
 /** The staffing role select is intentionally scoped to reviewer/contributor
@@ -61,13 +70,18 @@ export function StaffLanePopover({
   orgId,
   trigger,
   onDone,
+  open: openProp,
+  onOpenChange,
+  anchorOnly = false,
 }: StaffLanePopoverProps) {
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
   const { members: orgMembers } = useOrgMembers(orgId)
   const { members: projectMembers, refresh: refreshProjectMembers } = useProjectMembers(projectId)
 
-  const [open, setOpen] = useState(false)
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false)
+  const controlled = openProp !== undefined
+  const open = controlled ? openProp : uncontrolledOpen
   const [query, setQuery] = useState("")
   const [selected, setSelected] = useState<{ userId: number; username: string } | null>(null)
   const [role, setRole] = useState<number>(ROLE.REVIEWER)
@@ -91,7 +105,8 @@ export function StaffLanePopover({
   }
 
   function handleOpenChange(next: boolean) {
-    setOpen(next)
+    if (!controlled) setUncontrolledOpen(next)
+    onOpenChange?.(next)
     if (!next) reset()
   }
 
@@ -172,7 +187,11 @@ export function StaffLanePopover({
         render={
           <button
             type="button"
-            className="inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs hover:bg-muted"
+            className={cn(
+              anchorOnly
+                ? "sr-only"
+                : "inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs hover:bg-muted",
+            )}
             aria-label={`Staff ${laneLabel}`}
           />
         }

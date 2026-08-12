@@ -258,7 +258,7 @@ export function NavHistoryProvider({ children }: { children: ReactNode }) {
     setState((prev) => {
       const cur = prev.entries[prev.index]
       let entries = prev.entries
-      let index = prev.index
+      const index = prev.index
       if (cur && cur.title !== next) {
         entries = prev.entries.slice()
         entries[prev.index] = { ...cur, title: next }

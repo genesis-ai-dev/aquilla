@@ -13,11 +13,11 @@
 | Projects    | Open / delete / restore from trash                   | `e2e/specs/projects/project-trash.smoke.spec.ts` + `dashboard-trash-expand-restore.smoke.spec.ts` | ✅ |
 | Orgs        | Create org                                           | `e2e/specs/orgs/org-switcher-create.smoke.spec.ts`            |   ✅   |
 | Orgs        | Add member to org, member sees it                    | `e2e/specs/orgs/members.smoke.spec.ts` (API setup + UI verify) |   ✅   |
-| Orgs        | Invite member → member sees all org projects         | `e2e/specs/orgs/org-access-lifecycle.spec.ts` (test 1)        |   ✅   |
+| Orgs        | Invite Contributor → no org-wide project visibility (AQU-435) | `e2e/specs/orgs/org-access-lifecycle.spec.ts` (test 1) |   ✅   |
 | Orgs        | Create team → attach project/user → group path fires | `e2e/specs/orgs/org-access-lifecycle.spec.ts` (test 2)        |   ✅   |
-| Orgs        | Revoke org membership → project disappears           | `e2e/specs/orgs/org-access-lifecycle.spec.ts` (test 3)        |   ✅   |
+| Orgs        | Revoke Maintainer org membership → project disappears | `e2e/specs/orgs/org-access-lifecycle.spec.ts` (test 3)       |   ✅   |
 | Orgs        | Full revoke (all paths) → 403 on project endpoint    | `e2e/specs/orgs/org-access-lifecycle.spec.ts` (test 4)        |   ✅   |
-| Orgs        | Detach group project → role falls back to org baseline | `e2e/specs/orgs/org-access-lifecycle.spec.ts` (test 5)      |   ✅   |
+| Orgs        | Detach group project → sub-maintainer has no org fallback (AQU-435) | `e2e/specs/orgs/org-access-lifecycle.spec.ts` (test 5) |   ✅   |
 | Orgs        | Remove member, change role                           | `e2e/specs/orgs/remove-member-dialog.smoke.spec.ts` + `projects/share-panel-role-change.smoke.spec.ts` | ✅ |
 | Orgs        | Send & accept invite                                 | `e2e/specs/orgs/invite-to-projects.smoke.spec.ts` + `pending-invite-revoke.smoke.spec.ts` | ✅ |
 | Editor      | Import markdown, edit cell, persists across reload   | `e2e/specs/editor/import-and-edit.smoke.spec.ts`              |   ✅   |

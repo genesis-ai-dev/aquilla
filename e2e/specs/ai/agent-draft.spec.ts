@@ -1,4 +1,5 @@
 import { test, expect } from "../../helpers/multi-user"
+import { AgentPage } from "../../helpers/page-objects/AgentPage"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
 import { Workspace } from "../../helpers/page-objects/Workspace"
 import path from "node:path"
@@ -30,25 +31,21 @@ test("agent drafts the open file; workbench accept-all lands in the editor; undo
   await dash.openProject(name)
 
   const ws = new Workspace(alice)
+  const agent = new AgentPage(alice)
   await ws.importFile(SAMPLE_MD)
   await ws.openFileBySubstring("sample")
   await ws.waitForEditor()
 
   // Open the agent dock tab and send a draft prompt.
-  await alice.getByRole("button", { name: "Agent", exact: true }).click()
-  const composer = alice.getByRole("textbox", { name: "Ask the agent" })
-  await composer.click()
-  await composer.pressSequentially("draft this file")
-  await alice.keyboard.press("Enter")
+  await agent.openAgentTab()
+  await agent.sendPrompt("draft this file")
 
   // The run timeline shows the draft tool chip and then a staged proposal
   // card — nothing is written yet.
   await expect(alice.getByText("target.cell.commit").first()).toBeVisible({ timeout: 30_000 })
 
   // Expand into an editor tab — the SAME session renders there.
-  await alice.getByRole("button", { name: "Open agent in editor tab" }).click()
-  await expect(alice).toHaveURL(/\/agent$/)
-  await expect(alice.getByRole("tablist", { name: "Open files" }).getByRole("tab", { name: "Agent" })).toBeVisible()
+  await agent.openFullScreenWorkbench()
 
   // The working set shows the staged drafts as pending rows; accept them all.
   const acceptAll = alice.getByRole("button", { name: /Accept remaining/ })
@@ -56,24 +53,23 @@ test("agent drafts the open file; workbench accept-all lands in the editor; undo
   await acceptAll.click()
   await expect(acceptAll).toBeHidden({ timeout: 15_000 })
 
-  // Back to the editor: /project/:id/editor restores the last open file (the dock is
-  // still on the Agent tab, so don't reach for the file list). The applied
-  // draft must be in the first cell.
-  await alice.getByRole("button", { name: "Close workbench" }).click()
+  // Close workbench returns to the last open file. The Agent editor tab stays
+  // in the strip; the dock restores to Files (not the compact Agent panel).
+  await agent.closeFullScreenWorkbench()
   await ws.waitForEditor()
   await expect(ws.cellRow(0)).toContainText("[bozza]", { timeout: 15_000 })
 
-  // Regret it: back in the workbench, the receipt offers Undo. Compensating
+  // Regret it: re-open the Agent tab. The receipt offers Undo. Compensating
   // commits restore the pre-draft (empty) targets through the outbox; the
   // receipt flips to "undone" and the editor no longer shows the draft.
-  await alice.getByRole("button", { name: "Open agent in editor tab" }).click()
+  await agent.activateWorkbenchTab()
   const undo = alice.getByRole("button", { name: /Undo applied/ })
   await expect(undo).toBeVisible({ timeout: 10_000 })
   await undo.click()
   await expect(alice.getByText(/\d+ undone/)).toBeVisible({ timeout: 15_000 })
   await expect(undo).toBeHidden()
 
-  await alice.getByRole("button", { name: "Close workbench" }).click()
+  await agent.closeFullScreenWorkbench()
   await ws.waitForEditor()
   await expect(ws.cellRow(0)).not.toContainText("[bozza]", { timeout: 15_000 })
 })

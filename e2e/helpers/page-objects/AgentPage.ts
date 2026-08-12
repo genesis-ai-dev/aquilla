@@ -31,7 +31,10 @@ export class AgentPage {
    *  If an editor Agent tab is already open, focuses that tab; otherwise
    *  opens the compact agent panel inline in the dock. */
   async openAgentTab(): Promise<void> {
-    await this.page.getByRole("button", { name: "Agent", exact: true }).click()
+    await this.page
+      .getByRole("complementary")
+      .getByRole("button", { name: "Agent", exact: true })
+      .click()
   }
 
   /** Expand the docked agent panel into an editor tab at
@@ -42,6 +45,16 @@ export class AgentPage {
     await expect(
       this.page.getByRole("tablist", { name: "Open files" }).getByRole("tab", { name: "Agent" }),
     ).toBeVisible()
+  }
+
+  /** Re-focus the Agent editor tab after Close workbench. The tab stays in
+   *  the strip; the dock restore does not reopen the compact Agent panel. */
+  async activateWorkbenchTab(): Promise<void> {
+    await this.page
+      .getByRole("tablist", { name: "Open files" })
+      .getByRole("button", { name: "Agent", exact: true })
+      .click()
+    await expect(this.page).toHaveURL(/\/agent$/)
   }
 
   async closeFullScreenWorkbench(): Promise<void> {

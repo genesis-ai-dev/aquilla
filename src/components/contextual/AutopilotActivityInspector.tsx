@@ -33,6 +33,8 @@ import {
 } from "@/components/ui/sheet"
 import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
+import { useI18n, useT, type TFunction } from "@/lib/i18n/I18nProvider"
+import type { MessageKey } from "@/lib/i18n/messages/en"
 import { defaultLaneDraftReviewHref } from "@/components/project-workspace-lane-deeplink"
 import {
   commandContextualRun,
@@ -100,42 +102,74 @@ function runFromOverview(row: ContextualOverview["files"][number]): ContextualRu
   }
 }
 
-function statusLabel(run: ContextualRunRecord): string {
-  if (run.status === "failed") return "Needs attention"
-  if (run.status === "running" || run.status === "pausing") return "Working"
-  if (run.status === "paused") return "Paused"
-  if (run.status === "parked") return runHasQueuedWork(run) ? "Queued" : "Idle"
-  if (run.status === "done") return "Complete"
-  if (run.status === "terminated") return "Stopped"
-  return "Not started"
+function statusLabel(run: ContextualRunRecord, t: TFunction): string {
+  if (run.status === "failed") return t("autopilot.status.needsAttention")
+  if (run.status === "running" || run.status === "pausing") return t("autopilot.status.working")
+  if (run.status === "paused") return t("autopilot.status.paused")
+  if (run.status === "parked") {
+    return t(runHasQueuedWork(run) ? "autopilot.status.queued" : "autopilot.status.idle")
+  }
+  if (run.status === "done") return t("autopilot.status.complete")
+  if (run.status === "terminated") return t("autopilot.status.stopped")
+  return t("autopilot.status.notStarted")
 }
 
 function StatusBadge({ run }: { run: ContextualRunRecord }) {
-  const label = statusLabel(run)
-  const variant = label === "Needs attention" ? "destructive" : label === "Working" ? "default" : "outline"
+  const t = useT()
+  const label = statusLabel(run, t)
+  const variant = run.status === "failed"
+    ? "destructive"
+    : run.status === "running" || run.status === "pausing"
+      ? "default"
+      : "outline"
   return (
     <Badge variant={variant}>
-      {label === "Working" && (
+      {(run.status === "running" || run.status === "pausing") && (
         <LoaderCircle data-icon="inline-start" className="animate-spin motion-reduce:animate-none" aria-hidden />
       )}
-      {label === "Needs attention" && <AlertTriangle data-icon="inline-start" aria-hidden />}
+      {run.status === "failed" && <AlertTriangle data-icon="inline-start" aria-hidden />}
       {label}
     </Badge>
   )
 }
 
-function formatTimestamp(value: string | null | undefined): string {
-  if (!value) return "Not recorded"
+function formatTimestamp(
+  value: string | null | undefined,
+  locale: string,
+  t: TFunction,
+): string {
+  if (!value) return t("autopilot.time.notRecorded")
   const date = new Date(value)
-  if (Number.isNaN(date.valueOf())) return "Not recorded"
-  return new Intl.DateTimeFormat(undefined, {
+  if (Number.isNaN(date.valueOf())) return t("autopilot.time.notRecorded")
+  return new Intl.DateTimeFormat(locale, {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(date)
 }
 
-function humanizeKind(kind: string): string {
-  return kind.replace(/[._-]+/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase())
+function phaseLabel(value: string | null | undefined, t: TFunction): string | null {
+  if (!value) return null
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/[….]+$/u, "")
+  if (normalized === "reading" || normalized === "reading context") {
+    return t("autopilot.phase.reading")
+  }
+  if (normalized === "drafting" || normalized === "drafting translations") {
+    return t("autopilot.phase.drafting")
+  }
+  if (normalized === "checking" || normalized === "checking drafts") {
+    return t("autopilot.phase.checking")
+  }
+  if (
+    normalized === "staging" ||
+    normalized === "saving drafts" ||
+    normalized === "staging reviewable drafts"
+  ) {
+    return t("autopilot.phase.staging")
+  }
+  return null
 }
 
 function preferredRun(runs: ContextualRunRecord[], section: AutopilotInspectorSection) {
@@ -203,30 +237,42 @@ function authoritativeDraftCount(
     + activity.draftCounts.superseded
 }
 
-function humanRunError(run: ContextualRunRecord): string | null {
+function humanRunError(run: ContextualRunRecord, t: TFunction): string | null {
   if (!run.lastError) return null
   if (run.lastError.includes("unsupported_target_language_lane")) {
-    return "This run targets a multilingual lane that Autopilot doesn’t support yet. Its history is available, but it can’t be retried."
+    return t("autopilot.inspector.error.unsupportedLane")
   }
   if (/provider_request_aborted\b/i.test(run.lastError)) {
-    return "The model request ended before it completed. Retry when you’re ready."
+    return t("autopilot.inspector.error.requestAborted")
   }
   if (/provider_transport_error\b/i.test(run.lastError)) {
-    return "Autopilot couldn’t reach the model service. Check the connection, then try again."
+    return t("autopilot.inspector.error.transport")
   }
   if (/provider_invalid_response(?:\s+status=\d+)?/i.test(run.lastError)) {
-    return "The model service returned a response Autopilot couldn’t use. Try again, or inspect Technical & evidence for diagnostics."
+    return t("autopilot.inspector.error.invalidResponse")
   }
   if (/provider_http_error(?:\s+status=\d+)?/i.test(run.lastError)) {
-    return "The model service couldn’t complete this run. Try again later, or open Technical & evidence for diagnostic details."
+    return t("autopilot.inspector.error.http")
   }
   if (/span_partial_cells_skipped\b/i.test(run.lastError)) {
-    return "Some cells could not be drafted. Any completed suggestions were preserved for review; inspect the activity evidence before retrying."
+    return t("autopilot.inspector.error.partialCells")
   }
   if (/span_all_cells_skipped\b/i.test(run.lastError)) {
-    return "Autopilot could not produce a reviewable draft for this passage. Inspect the activity evidence before retrying."
+    return t("autopilot.inspector.error.allCells")
   }
-  return run.lastError
+  return t("autopilot.inspector.error.generic")
+}
+
+interface LocalizedNotice {
+  key: MessageKey
+  vars?: Record<string, string | number>
+}
+
+type InspectorNotice = LocalizedNotice
+
+function noticeText(notice: InspectorNotice | null, t: TFunction): string | null {
+  if (!notice) return null
+  return t(notice.key, notice.vars)
 }
 
 function Disclosure({
@@ -331,61 +377,183 @@ function RunControls({
   onCommand: (command: ContextualRunCommand) => void
   onRetry: () => void
 }) {
+  const t = useT()
   if (!canControl) return null
   return (
     <div className="flex flex-wrap gap-2">
       {run.status === "running" && !run.targetLang && (
         <Button type="button" size="sm" variant="outline" disabled={busy !== null} onClick={() => onCommand("pause")}>
           <Pause data-icon="inline-start" aria-hidden />
-          Pause
+          {t("common.pause")}
         </Button>
       )}
       {run.status === "paused" && !run.targetLang && (
         <Button type="button" size="sm" variant="outline" disabled={busy !== null} onClick={() => onCommand("resume")}>
           <Play data-icon="inline-start" aria-hidden />
-          Resume
+          {t("autopilot.action.resume")}
         </Button>
       )}
       {["running", "pausing", "paused", "parked"].includes(run.status) && (
         <Button type="button" size="sm" variant="outline" disabled={busy !== null} onClick={() => onCommand("terminate")}>
           <Square data-icon="inline-start" aria-hidden />
-          Stop
+          {t("common.stop")}
         </Button>
       )}
       {run.status === "failed" && !run.targetLang && (
         <Button type="button" size="sm" disabled={busy !== null} onClick={onRetry}>
           <Play data-icon="inline-start" aria-hidden />
-          Run Autopilot
+          {t("autopilot.action.run")}
         </Button>
       )}
     </div>
   )
 }
 
+const EVENT_KIND_KEYS: Record<string, MessageKey> = {
+  run_created: "autopilot.inspector.event.kind.runCreated",
+  run_state: "autopilot.inspector.event.kind.runState",
+  span_started: "autopilot.inspector.event.kind.spanStarted",
+  phase: "autopilot.inspector.event.kind.phase",
+  scene_ready: "autopilot.inspector.event.kind.sceneReady",
+  drafts_staged: "autopilot.inspector.event.kind.draftsStaged",
+  span_outcome: "autopilot.inspector.event.kind.spanOutcome",
+  steering_queued: "autopilot.inspector.event.kind.steeringQueued",
+  draft_reviewed: "autopilot.inspector.event.kind.draftReviewed",
+}
+
+function detailNumber(event: ContextualActivityEvent, key: string): number | null {
+  const value = event.details[key]
+  return typeof value === "number" && Number.isFinite(value) ? value : null
+}
+
+function eventKindLabel(event: ContextualActivityEvent, t: TFunction): string {
+  const key = EVENT_KIND_KEYS[event.kind]
+  return key ? t(key) : t("autopilot.inspector.event.kind.unknown")
+}
+
+function evidenceStatusLabel(status: string | null | undefined, t: TFunction): string | null {
+  if (!status) return null
+  const keyByStatus: Partial<Record<string, MessageKey>> = {
+    proposed: "autopilot.evidence.status.proposed",
+    applied: "autopilot.evidence.status.applied",
+    rejected: "autopilot.evidence.status.rejected",
+    superseded: "autopilot.evidence.status.superseded",
+    approved: "autopilot.evidence.status.approved",
+    archived: "autopilot.evidence.status.archived",
+  }
+  const key = keyByStatus[status]
+  return key ? t(key) : t("autopilot.evidence.status.unknown")
+}
+
+function eventStatusLabel(event: ContextualActivityEvent, t: TFunction): string | null {
+  const status = event.status
+  if (!status) {
+    return event.phase
+      ? phaseLabel(event.phase, t) ?? t("autopilot.inspector.event.phaseChanged")
+      : null
+  }
+  if (status === "running" || status === "pausing") return t("autopilot.status.working")
+  if (status === "paused") return t("autopilot.status.paused")
+  if (status === "parked") {
+    const done = detailNumber(event, "done") ?? 0
+    const failed = detailNumber(event, "failed") ?? 0
+    const total = detailNumber(event, "total") ?? 0
+    return t(total > done + failed ? "autopilot.status.queued" : "autopilot.status.idle")
+  }
+  if (status === "done" || status === "complete") return t("autopilot.status.complete")
+  if (status === "failed") return t("autopilot.status.needsAttention")
+  if (status === "terminated") return t("autopilot.status.stopped")
+  if (status === "started") return t("autopilot.inspector.event.status.started")
+  if (status === "partial") return t("autopilot.inspector.event.status.partial")
+  if (status === "queued") return t("autopilot.inspector.event.status.queued")
+  return evidenceStatusLabel(status, t) ?? status
+}
+
+function eventSummary(event: ContextualActivityEvent, t: TFunction): string {
+  if (event.kind === "run_created") return t("autopilot.inspector.event.runStarted")
+  if (event.kind === "run_state") {
+    if (event.status === "parked") {
+      const done = detailNumber(event, "done") ?? 0
+      const failed = detailNumber(event, "failed") ?? 0
+      const total = detailNumber(event, "total") ?? 0
+      if (total > done + failed) return t("autopilot.inspector.event.workQueued")
+      return t("autopilot.inspector.event.idle")
+    }
+    if (event.status === "running") return t("autopilot.inspector.event.running")
+    if (event.status === "pausing") return t("autopilot.inspector.event.pauseRequested")
+    if (event.status === "paused") return t("autopilot.inspector.event.paused")
+    if (event.status === "done") return t("autopilot.inspector.event.completed")
+    if (event.status === "failed") return t("autopilot.inspector.event.error")
+    if (event.status === "terminated") return t("autopilot.inspector.event.terminated")
+    return t("autopilot.inspector.event.statusChanged")
+  }
+  if (event.kind === "span_started") {
+    return event.spanLabel
+      ? t("autopilot.inspector.event.spanStarted", { spanLabel: event.spanLabel })
+      : t("autopilot.inspector.event.spanStartedGeneric")
+  }
+  if (event.kind === "phase") {
+    return phaseLabel(event.phase, t) ?? t("autopilot.inspector.event.phaseChanged")
+  }
+  if (event.kind === "scene_ready") return t("autopilot.inspector.event.sceneReady")
+  if (event.kind === "drafts_staged") {
+    const count = detailNumber(event, "count") ?? detailNumber(event, "staged")
+    return count == null
+      ? event.summary
+      : t("autopilot.inspector.event.draftsStaged", { count })
+  }
+  if (event.kind === "span_outcome") {
+    if (event.status === "failed") return t("autopilot.inspector.event.spanFailed")
+    if (event.status === "partial") return t("autopilot.inspector.event.spanPartial")
+    return t("autopilot.inspector.event.spanComplete")
+  }
+  if (event.kind === "steering_queued") {
+    return event.details.steeringKind === "direction"
+      ? t("autopilot.inspector.event.directionQueued")
+      : t("autopilot.inspector.event.kind.steeringQueued")
+  }
+  if (event.kind === "draft_reviewed") {
+    if (event.details.outcome === "applied") return t("autopilot.inspector.event.draftApplied")
+    if (event.details.outcome === "superseded") {
+      return t("autopilot.inspector.event.draftSuperseded")
+    }
+    return t("autopilot.inspector.event.draftRejected")
+  }
+  // Unknown future summaries are durable evidence. Preserve them verbatim
+  // until the client has enough structured data to translate them honestly.
+  return event.summary
+}
+
 function EventTimeline({ events }: { events: ContextualActivityEvent[] }) {
+  const { locale, t } = useI18n()
   if (events.length === 0) {
     return (
       <p className="text-sm text-muted-foreground">
-        Detailed step history wasn&apos;t recorded for this run. Its durable status and totals are still shown above.
+        {t("autopilot.inspector.activity.empty")}
       </p>
     )
   }
   return (
-    <ol role="log" aria-live="off" aria-label="Autopilot step history" className="flex flex-col gap-3">
+    <ol
+      role="log"
+      aria-live="off"
+      aria-label={t("autopilot.inspector.activity.logAria")}
+      className="flex flex-col gap-3"
+    >
       {events.map((event) => (
         <li key={event.id} className="flex gap-3">
           <span className="mt-2 size-2 shrink-0 rounded-full bg-primary" aria-hidden />
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
-              <Badge variant="outline">{humanizeKind(event.kind)}</Badge>
+              <Badge variant="outline">{eventKindLabel(event, t)}</Badge>
               {(event.phase || event.status) && (
-                <Badge variant="secondary">{event.phase ?? event.status}</Badge>
+                <Badge variant="secondary">{eventStatusLabel(event, t)}</Badge>
               )}
               <time className="text-xs text-muted-foreground" dateTime={event.createdAt}>
-                {formatTimestamp(event.createdAt)}
+                {formatTimestamp(event.createdAt, locale, t)}
               </time>
             </div>
-            <p className="mt-1 text-sm">{event.summary}</p>
+            <p className="mt-1 text-sm">{eventSummary(event, t)}</p>
             {event.spanLabel && <p className="text-xs text-muted-foreground">{event.spanLabel}</p>}
           </div>
         </li>
@@ -403,32 +571,44 @@ function ReviewDraft({
   projectId: string
   runTargetLang?: string
 }) {
+  const t = useT()
   const provenance = draft.provenance && Object.keys(draft.provenance).length > 0
     ? JSON.stringify(draft.provenance)
-    : "No provenance metadata recorded"
+    : t("autopilot.inspector.review.noProvenance")
+  const draftStatus = evidenceStatusLabel(draft.status, t)
   return (
     <Card size="sm">
       <CardHeader>
-        <CardTitle>{draft.cellId ? `Cell ${draft.cellId}` : "Draft"}</CardTitle>
+        <CardTitle>{draft.cellId
+          ? t("common.cellLabel", { id: draft.cellId })
+          : t("autopilot.inspector.review.draftTitle")}</CardTitle>
         <CardDescription>{provenance}</CardDescription>
-        <CardAction><Badge variant="outline">{draft.status ?? "unknown"}</Badge></CardAction>
+        <CardAction>
+          <Badge variant="outline">
+            {draftStatus ?? t("autopilot.evidence.status.unknown")}
+          </Badge>
+        </CardAction>
       </CardHeader>
       {draft.text && <CardContent><p className="whitespace-pre-wrap">{draft.text}</p></CardContent>}
       {draft.status === "proposed" && draft.fileId && !runTargetLang && (
         <CardFooter>
           <a
             href={defaultLaneDraftReviewHref(projectId, draft.fileId, draft.cellId)}
-            aria-label={`Review in editor${draft.cellId ? `: cell ${draft.cellId}` : ""}`}
+            aria-label={draft.cellId
+              ? t("autopilot.inspector.review.inEditorCell", { cellId: draft.cellId })
+              : t("autopilot.inspector.review.inEditor")}
             className="text-sm font-medium text-primary underline-offset-4 hover:underline"
           >
-            Review in editor
+            {t("autopilot.inspector.review.inEditor")}
           </a>
         </CardFooter>
       )}
       {draft.status === "proposed" && runTargetLang && (
         <CardFooter>
           <p className="text-xs text-muted-foreground">
-            Evidence only — this draft belongs to the unsupported {runTargetLang} lane and can’t be applied from Autopilot.
+            {t("autopilot.inspector.review.unsupportedLaneEvidence", {
+              language: runTargetLang,
+            })}
           </p>
         </CardFooter>
       )}
@@ -437,32 +617,92 @@ function ReviewDraft({
 }
 
 function SceneBriefEvidence({ brief }: { brief: ContextualActivitySceneBrief }) {
+  const t = useT()
   const ambiguities = Array.isArray(brief.ambiguityRegister) ? brief.ambiguityRegister : []
+  const status = evidenceStatusLabel(brief.status, t)
   return (
     <Card size="sm">
       <CardHeader>
-        <CardTitle>{brief.startCellId && brief.endCellId ? `${brief.startCellId} → ${brief.endCellId}` : "Scene brief"}</CardTitle>
-        <CardDescription>{brief.l1Summary ?? "No condensed scene summary was recorded."}</CardDescription>
-        {brief.status && <CardAction><Badge variant="outline">{brief.status}</Badge></CardAction>}
+        <CardTitle>{brief.startCellId && brief.endCellId
+          ? `${brief.startCellId} → ${brief.endCellId}`
+          : t("autopilot.inspector.context.sceneBrief")}</CardTitle>
+        <CardDescription>
+          {brief.l1Summary ?? t("autopilot.inspector.context.noSceneSummary")}
+        </CardDescription>
+        {status && <CardAction><Badge variant="outline">{status}</Badge></CardAction>}
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
         {brief.construal && (
           <div>
-            <p className="text-xs font-medium">Construal</p>
+            <p className="text-xs font-medium">{t("autopilot.inspector.context.construal")}</p>
             <p className="whitespace-pre-wrap text-sm text-muted-foreground">{brief.construal}</p>
           </div>
         )}
         <div>
-          <p className="text-xs font-medium">Ambiguities ({ambiguities.length})</p>
+          <p className="text-xs font-medium">
+            {t("autopilot.inspector.context.ambiguities", { count: ambiguities.length })}
+          </p>
           {ambiguities.length > 0 ? (
             <ul className="mt-1 flex list-disc flex-col gap-1 pl-4 text-sm text-muted-foreground">
-              {ambiguities.map((item, index) => <li key={item.id ?? index}>{item.question ?? "Unlabelled ambiguity"}</li>)}
+              {ambiguities.map((item, index) => (
+                <li key={item.id ?? index}>
+                  {item.question ?? t("autopilot.inspector.context.unlabelledAmbiguity")}
+                </li>
+              ))}
             </ul>
-          ) : <p className="text-sm text-muted-foreground">None recorded.</p>}
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              {t("autopilot.inspector.context.noneRecorded")}
+            </p>
+          )}
         </div>
       </CardContent>
     </Card>
   )
+}
+
+type ReadinessItem = ContextReadiness["items"][number]
+
+function readinessItemLabel(item: ReadinessItem, t: TFunction): string {
+  const keyById: Partial<Record<string, MessageKey>> = {
+    terminology: "autopilot.readiness.terminology.label",
+    brief: "autopilot.readiness.brief.label",
+    examples: "autopilot.readiness.examples.label",
+    rules: "autopilot.readiness.rules.label",
+    languages: "autopilot.readiness.languages.label",
+  }
+  const key = keyById[item.id]
+  // Unknown future readiness checks remain visible instead of becoming a raw key.
+  return key ? t(key) : item.label
+}
+
+function readinessLevelLabel(item: ReadinessItem, t: TFunction): string {
+  const keyByLevel: Partial<Record<string, MessageKey>> = {
+    ready: "autopilot.readiness.level.ready",
+    partial: "autopilot.readiness.level.partial",
+    missing: "autopilot.readiness.level.missing",
+  }
+  const key = keyByLevel[item.level]
+  return key ? t(key) : item.level
+}
+
+function readinessItemDetail(item: ReadinessItem, t: TFunction): string {
+  if (item.id === "terminology" && item.level === "missing") {
+    return t("autopilot.readiness.terminology.none")
+  }
+  if (item.id === "brief" && item.level === "missing") {
+    return t("autopilot.readiness.brief.none")
+  }
+  if (item.id === "examples" && item.level === "missing") {
+    return t("autopilot.readiness.examples.none")
+  }
+  if (item.id === "languages" && item.level !== "ready") {
+    return t("autopilot.readiness.languages.unset")
+  }
+  // The transport currently embeds counts, summary availability, and language
+  // names inside English prose. Parsing that prose would couple localization to
+  // server wording, so preserve it until the payload exposes structured fields.
+  return item.detail
 }
 
 export function AutopilotActivityInspector({
@@ -479,6 +719,7 @@ export function AutopilotActivityInspector({
   canControl = false,
   onRunChanged,
 }: AutopilotActivityInspectorProps) {
+  const { locale, t } = useI18n()
   const fallbackRuns = useMemo(() => mergeRuns(
     fallbackRun ? [fallbackRun] : [],
     (overview?.files ?? []).map(runFromOverview),
@@ -492,16 +733,16 @@ export function AutopilotActivityInspector({
   const [loadingOlderRuns, setLoadingOlderRuns] = useState(false)
   const [loadingActivity, setLoadingActivity] = useState(false)
   const [loadingOlderDrafts, setLoadingOlderDrafts] = useState(false)
-  const [runsWarning, setRunsWarning] = useState<string | null>(null)
-  const [activityWarning, setActivityWarning] = useState<string | null>(null)
-  const [latestStepAnnouncement, setLatestStepAnnouncement] = useState("")
+  const [runsWarning, setRunsWarning] = useState<MessageKey | null>(null)
+  const [activityWarning, setActivityWarning] = useState<MessageKey | null>(null)
+  const [latestStepEvent, setLatestStepEvent] = useState<ContextualActivityEvent | null>(null)
   const [detailsOpen, setDetailsOpen] = useState(initialSection === "attention")
   const [reviewOpen, setReviewOpen] = useState(initialSection === "review")
   const [historyOpen, setHistoryOpen] = useState(false)
   const [contextOpen, setContextOpen] = useState(initialSection === "context")
   const [technicalOpen, setTechnicalOpen] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
-  const [actionMessage, setActionMessage] = useState<string | null>(null)
+  const [actionMessage, setActionMessage] = useState<InspectorNotice | null>(null)
   const seqRef = useRef(0)
   const activitySeqRef = useRef(0)
   const activityRef = useRef<ContextualRunActivity | null>(null)
@@ -587,7 +828,9 @@ export function AutopilotActivityInspector({
       })
       setRunsWarning(null)
     } catch {
-      if (seq === seqRef.current) setRunsWarning("Could not refresh run history. Showing the last available details.")
+      if (seq === seqRef.current) {
+        setRunsWarning("autopilot.inspector.warning.runsRefresh")
+      }
     } finally {
       if (seq === seqRef.current) setLoadingRuns(false)
     }
@@ -609,7 +852,7 @@ export function AutopilotActivityInspector({
       setRunsTruncated(page.truncated || page.nextCursor !== null)
       setRunsWarning(null)
     } catch {
-      setRunsWarning("Could not load older run history. The runs already shown are still current.")
+      setRunsWarning("autopilot.inspector.warning.olderRuns")
     } finally {
       setLoadingOlderRuns(false)
     }
@@ -632,7 +875,7 @@ export function AutopilotActivityInspector({
           if (!current) return event
           return event.createdAt > current.createdAt ? event : current
         }, null)
-        if (latest) setLatestStepAnnouncement(`Autopilot update: ${latest.summary.slice(0, 240)}`)
+        if (latest) setLatestStepEvent(latest)
       }
       const totalDrafts = authoritativeDraftCount(next, initialSection)
       const canRetainLoadedPages = previous
@@ -660,7 +903,7 @@ export function AutopilotActivityInspector({
       setActivityWarning(null)
     } catch {
       if (seq === activitySeqRef.current) {
-        setActivityWarning("Could not refresh detailed activity. Showing the last available run summary.")
+        setActivityWarning("autopilot.inspector.warning.activityRefresh")
       }
     } finally {
       if (seq === activitySeqRef.current) setLoadingActivity(false)
@@ -689,7 +932,7 @@ export function AutopilotActivityInspector({
     setNextRunCursor(null)
     setRunsWarning(null)
     setActivityWarning(null)
-    setLatestStepAnnouncement("")
+    setLatestStepEvent(null)
     selectionOverrideRef.current = null
     runsRef.current = fallbackRuns
     setRuns(fallbackRuns)
@@ -704,7 +947,7 @@ export function AutopilotActivityInspector({
     activityRef.current = null
     activityRunRef.current = selectedRun.runId
     pagedDraftRunRef.current = null
-    setLatestStepAnnouncement("")
+    setLatestStepEvent(null)
     setActivity(null)
     void loadActivity(selectedRun.runId)
   }, [loadActivity, open, selectedRun?.runId])
@@ -725,7 +968,13 @@ export function AutopilotActivityInspector({
   const handleCommand = async (command: ContextualRunCommand) => {
     if (!selectedRun || busy) return
     setBusy(command)
-    setActionMessage(`${command === "terminate" ? "Stopping" : command === "pause" ? "Pausing" : "Resuming"} Autopilot…`)
+    setActionMessage({
+      key: command === "terminate"
+        ? "autopilot.inspector.action.stopping"
+        : command === "pause"
+          ? "autopilot.inspector.action.pausing"
+          : "autopilot.inspector.action.resuming",
+    })
     try {
       const updated = await commandContextualRun(projectId, selectedRun.runId, command)
       if (updated) {
@@ -735,9 +984,15 @@ export function AutopilotActivityInspector({
       }
       await Promise.all([loadRuns(), loadActivity(selectedRun.runId)])
       await onRunChanged?.()
-      setActionMessage(command === "terminate" ? "Autopilot stopped." : command === "pause" ? "Pause requested." : "Autopilot resumed.")
-    } catch (error) {
-      setActionMessage(error instanceof Error ? error.message : "The run could not be updated.")
+      setActionMessage({
+        key: command === "terminate"
+          ? "autopilot.feedback.stopped"
+          : command === "pause"
+            ? "autopilot.feedback.pauseRequested"
+            : "autopilot.feedback.resumed",
+      })
+    } catch {
+      setActionMessage({ key: "autopilot.inspector.action.updateFailed" })
     } finally {
       setBusy(null)
     }
@@ -746,7 +1001,7 @@ export function AutopilotActivityInspector({
   const handleRetry = async () => {
     if (!selectedRun || busy) return
     setBusy("retry")
-    setActionMessage("Starting Autopilot…")
+    setActionMessage({ key: "autopilot.feedback.starting" })
     try {
       const next = await startFileContextualRun(projectId, selectedRun.fileId)
       const now = new Date().toISOString()
@@ -774,9 +1029,9 @@ export function AutopilotActivityInspector({
       setSelectedRunId(next.runId)
       await loadRuns()
       await onRunChanged?.()
-      setActionMessage("A new Autopilot run started for this file.")
-    } catch (error) {
-      setActionMessage(error instanceof Error ? error.message : "Autopilot could not start.")
+      setActionMessage({ key: "autopilot.feedback.newRunStarted" })
+    } catch {
+      setActionMessage({ key: "autopilot.error.startFailed" })
     } finally {
       setBusy(null)
     }
@@ -817,7 +1072,7 @@ export function AutopilotActivityInspector({
       }
     } catch {
       if (activitySeq === activitySeqRef.current && selectedRunRef.current === selectedRunId) {
-        setActivityWarning("Could not load older draft evidence. The draft records already shown are still current.")
+        setActivityWarning("autopilot.inspector.warning.olderDrafts")
       }
     } finally {
       setLoadingOlderDrafts(false)
@@ -839,7 +1094,10 @@ export function AutopilotActivityInspector({
     ?? proposedDrafts.length
   const proposedDraftCountLabel = proposedDrafts.length === authoritativeProposedDrafts
     ? String(authoritativeProposedDrafts)
-    : `${proposedDrafts.length} of ${authoritativeProposedDrafts}`
+    : t("autopilot.inspector.count.visibleOfTotal", {
+      visible: proposedDrafts.length,
+      total: authoritativeProposedDrafts,
+    })
   const authoritativeDraftHistory = activity?.draftCounts
     ? activity.draftCounts.applied
       + activity.draftCounts.rejected
@@ -847,19 +1105,25 @@ export function AutopilotActivityInspector({
     : draftHistory.length
   const draftHistoryCountLabel = draftHistory.length === authoritativeDraftHistory
     ? String(authoritativeDraftHistory)
-    : `${draftHistory.length} of ${authoritativeDraftHistory}`
-  const selectedRunError = selectedRun ? humanRunError(selectedRun) : null
+    : t("autopilot.inspector.count.visibleOfTotal", {
+      visible: draftHistory.length,
+      total: authoritativeDraftHistory,
+    })
+  const selectedRunError = selectedRun ? humanRunError(selectedRun, t) : null
   const selectedRunHasCategoricalLaneError = Boolean(
     selectedRun?.lastError?.includes("unsupported_target_language_lane"),
   )
+  const runsWarningText = runsWarning ? t(runsWarning) : null
+  const activityWarningText = activityWarning ? t(activityWarning) : null
+  const actionMessageText = noticeText(actionMessage, t)
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent side="right" className="w-full sm:max-w-2xl!" data-testid="autopilot-activity-inspector">
         <SheetHeader className="pr-12">
-          <SheetTitle>Autopilot activity</SheetTitle>
+          <SheetTitle>{t("autopilot.inspector.title")}</SheetTitle>
           <SheetDescription>
-            See what Autopilot did, what it is doing now, and the evidence behind each step.
+            {t("autopilot.inspector.description")}
           </SheetDescription>
         </SheetHeader>
         <ScrollArea className="min-h-0 flex-1">
@@ -871,24 +1135,28 @@ export function AutopilotActivityInspector({
               className="sr-only"
               data-testid="autopilot-latest-step-announcement"
             >
-              {latestStepAnnouncement}
+              {latestStepEvent
+                ? t("autopilot.inspector.activity.updateAnnouncement", {
+                  summary: eventSummary(latestStepEvent, t),
+                })
+                : ""}
             </p>
-            {runsWarning && (
+            {runsWarningText && (
               <p role="status" className="flex items-start gap-2 text-sm text-destructive">
                 <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden />
-                {runsWarning}
+                {runsWarningText}
               </p>
             )}
-            {activityWarning && (
+            {activityWarningText && (
               <p role="status" className="flex items-start gap-2 text-sm text-destructive">
                 <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden />
-                {activityWarning}
+                {activityWarningText}
               </p>
             )}
 
-            <section aria-label="Autopilot runs" className="flex flex-col gap-2">
+            <section aria-label={t("autopilot.inspector.runsRegion")} className="flex flex-col gap-2">
               <div className="flex items-center justify-between gap-2">
-                <h3 className="text-sm font-medium">Runs</h3>
+                <h3 className="text-sm font-medium">{t("autopilot.inspector.runsHeading")}</h3>
                 <Button
                   type="button"
                   size="xs"
@@ -902,18 +1170,22 @@ export function AutopilotActivityInspector({
                   disabled={loadingRuns || loadingActivity}
                 >
                   <RefreshCw data-icon="inline-start" aria-hidden />
-                  Refresh
+                  {t("common.refresh")}
                 </Button>
               </div>
               {initialSection === "review" && (overview?.proposedDrafts ?? 0) > 0 && (
                 <p className="text-sm text-muted-foreground">
-                  {overview!.proposedDrafts} {overview!.proposedDrafts === 1 ? "draft is" : "drafts are"} ready across this project. Runs with review work are marked below; select one to inspect its drafts.
+                  {t("autopilot.inspector.projectReviewCount", {
+                    count: overview!.proposedDrafts,
+                  })}
                 </p>
               )}
               {loadingRuns && scopedRuns.length === 0 ? (
                 <div className="flex flex-col gap-2"><Skeleton className="h-14 w-full" /><Skeleton className="h-14 w-full" /></div>
               ) : scopedRuns.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No Autopilot runs have been recorded yet.</p>
+                <p className="text-sm text-muted-foreground">
+                  {t("autopilot.inspector.noRuns")}
+                </p>
               ) : (
                 <div className="grid gap-2 sm:grid-cols-2">
                   {scopedRuns.map((run) => (
@@ -931,17 +1203,30 @@ export function AutopilotActivityInspector({
                     >
                       <span className="min-w-0 flex-1">
                         <span className="block truncate font-medium">{fileNames?.get(run.fileId) ?? run.fileId}</span>
-                        <span className="block text-xs text-muted-foreground">{run.total > 0 ? `${run.done}/${run.total} passages` : "Scanning passages"}</span>
                         <span className="block text-xs text-muted-foreground">
-                          {run.targetLang ? `Target: ${run.targetLang}` : "Default language lane"}
+                          {run.total > 0
+                            ? t("autopilot.progress.passagesComplete", {
+                              done: run.done,
+                              total: run.total,
+                            })
+                            : t("autopilot.inspector.scanningPassages")}
+                        </span>
+                        <span className="block text-xs text-muted-foreground">
+                          {run.targetLang
+                            ? t("autopilot.inspector.targetLanguage", { language: run.targetLang })
+                            : t("autopilot.inspector.defaultLane")}
                         </span>
                       </span>
                       <span className="flex shrink-0 flex-col items-end gap-1">
                         {(run.proposedDrafts ?? 0) > 0 && (
                           <Badge variant="secondary">
                             {run.targetLang
-                              ? `${run.proposedDrafts} evidence ${run.proposedDrafts === 1 ? "draft" : "drafts"}`
-                              : `${run.proposedDrafts} ready to review`}
+                              ? t("autopilot.inspector.evidenceDrafts", {
+                                count: run.proposedDrafts ?? 0,
+                              })
+                              : t("autopilot.inspector.readyCount", {
+                                count: run.proposedDrafts ?? 0,
+                              })}
                           </Badge>
                         )}
                         <StatusBadge run={run} />
@@ -960,12 +1245,12 @@ export function AutopilotActivityInspector({
                   onClick={() => void loadOlderRuns()}
                 >
                   {loadingOlderRuns && <LoaderCircle data-icon="inline-start" className="animate-spin motion-reduce:animate-none" aria-hidden />}
-                  Load older runs
+                  {t("autopilot.inspector.loadOlderRuns")}
                 </Button>
               )}
               {runsTruncated && !nextRunCursor && (
                 <p className="text-xs text-muted-foreground">
-                  Showing the most recent runs. Older run history is not included in this view.
+                  {t("autopilot.inspector.recentRunsOnly")}
                 </p>
               )}
             </section>
@@ -977,15 +1262,19 @@ export function AutopilotActivityInspector({
                   <CardHeader>
                     <CardTitle>{fileNames?.get(selectedRun.fileId) ?? selectedRun.fileId}</CardTitle>
                     <CardDescription>
-                      {selectedRun.status === "running" && (selectedRun.phase ?? "Autopilot is working through this file.")}
-                      {selectedRun.status === "pausing" && "Finishing the current step before pausing."}
-                      {selectedRun.status === "paused" && "Paused. No new work will start until you resume."}
+                      {selectedRun.status === "running" && (
+                        phaseLabel(selectedRun.phase, t) ?? t("autopilot.inspector.run.working")
+                      )}
+                      {selectedRun.status === "pausing" && t("autopilot.inspector.run.pausing")}
+                      {selectedRun.status === "paused" && t("autopilot.inspector.run.paused")}
                       {selectedRun.status === "parked" && (runHasQueuedWork(selectedRun)
-                        ? `${selectedRun.total - selectedRun.done - selectedRun.failed} passages remain queued. Autopilot will continue in the background.`
-                        : "This run is idle; no more work is queued.")}
-                      {selectedRun.status === "done" && "This run finished."}
-                      {selectedRun.status === "terminated" && "This run was stopped."}
-                      {selectedRun.status === "failed" && "This run stopped before it could finish."}
+                        ? t("autopilot.inspector.run.queued", {
+                          count: selectedRun.total - selectedRun.done - selectedRun.failed,
+                        })
+                        : t("autopilot.inspector.run.idle"))}
+                      {selectedRun.status === "done" && t("autopilot.inspector.run.done")}
+                      {selectedRun.status === "terminated" && t("autopilot.inspector.run.stopped")}
+                      {selectedRun.status === "failed" && t("autopilot.inspector.run.failed")}
                     </CardDescription>
                     <CardAction><StatusBadge run={selectedRun} /></CardAction>
                   </CardHeader>
@@ -993,9 +1282,16 @@ export function AutopilotActivityInspector({
                     {selectedRun.total > 0 && (
                       <div className="flex flex-col gap-1">
                         <div className="flex justify-between gap-2 text-xs text-muted-foreground">
-                          <span>Passages complete</span><span className="tabular-nums">{selectedRun.done}/{selectedRun.total}</span>
+                          <span>{t("autopilot.inspector.run.passagesComplete")}</span>
+                          <span className="tabular-nums">{selectedRun.done}/{selectedRun.total}</span>
                         </div>
-                        <Progress value={(selectedRun.done / selectedRun.total) * 100} aria-label={`${selectedRun.done} of ${selectedRun.total} passages complete`} />
+                        <Progress
+                          value={(selectedRun.done / selectedRun.total) * 100}
+                          aria-label={t("autopilot.progress.passagesComplete", {
+                            done: selectedRun.done,
+                            total: selectedRun.total,
+                          })}
+                        />
                       </div>
                     )}
                     {selectedRunError && !selectedRunHasCategoricalLaneError && (
@@ -1006,54 +1302,93 @@ export function AutopilotActivityInspector({
                     )}
                     {selectedRun.targetLang && (
                       <p className="text-sm text-muted-foreground">
-                        This run targets a multilingual lane that Autopilot doesn’t support yet. Its history is available, but it can’t be retried.
+                        {t("autopilot.inspector.error.unsupportedLane")}
                       </p>
                     )}
                     <RunControls run={selectedRun} busy={busy} canControl={canControl} onCommand={(command) => void handleCommand(command)} onRetry={() => void handleRetry()} />
-                    {actionMessage && <p role="status" aria-live="polite" className="text-sm text-muted-foreground">{actionMessage}</p>}
+                    {actionMessageText && (
+                      <p role="status" aria-live="polite" className="text-sm text-muted-foreground">
+                        {actionMessageText}
+                      </p>
+                    )}
                   </CardContent>
                   <CardFooter className="justify-between gap-3 text-xs text-muted-foreground">
-                    <span>Updated {formatTimestamp(selectedRun.updatedAt)}</span>
-                    <span>{selectedRun.callsSpent} calls · {selectedRun.unitsSpent} units</span>
-                    <span>{selectedRun.failed > 0 ? `${selectedRun.failed} failed` : "No failed passages"}</span>
+                    <span>{t("autopilot.inspector.run.updatedAt", {
+                      time: formatTimestamp(selectedRun.updatedAt, locale, t),
+                    })}</span>
+                    <span className="flex flex-wrap gap-x-2">
+                      <span>
+                        {t("autopilot.inspector.run.calls", { count: selectedRun.callsSpent })}
+                      </span>
+                      <span>
+                        {t("autopilot.inspector.run.units", { count: selectedRun.unitsSpent })}
+                      </span>
+                    </span>
+                    <span>{selectedRun.failed > 0
+                      ? t("autopilot.inspector.run.failedPassages", { count: selectedRun.failed })
+                      : t("autopilot.inspector.run.noFailedPassages")}</span>
                   </CardFooter>
                 </Card>
 
-                <Disclosure title="Run details" open={detailsOpen} onOpenChange={setDetailsOpen}>
+                <Disclosure title={t("autopilot.inspector.details.title")} open={detailsOpen} onOpenChange={setDetailsOpen}>
                   <dl className="grid grid-cols-2 gap-3 text-sm">
-                    <div><dt className="text-xs text-muted-foreground">Started</dt><dd>{formatTimestamp(selectedRun.createdAt)}</dd></div>
-                    <div><dt className="text-xs text-muted-foreground">Last update</dt><dd>{formatTimestamp(selectedRun.updatedAt)}</dd></div>
-                    <div><dt className="text-xs text-muted-foreground">Model calls</dt><dd className="tabular-nums">{selectedRun.callsSpent}</dd></div>
-                    <div><dt className="text-xs text-muted-foreground">Units used</dt><dd className="tabular-nums">{selectedRun.unitsSpent}</dd></div>
-                    <div><dt className="text-xs text-muted-foreground">Started by</dt><dd>{selectedRun.initiatedBy ?? "Not recorded"}</dd></div>
-                    <div><dt className="text-xs text-muted-foreground">Target language</dt><dd>{selectedRun.targetLang || "Project default"}</dd></div>
+                    <div><dt className="text-xs text-muted-foreground">{t("autopilot.inspector.details.started")}</dt><dd>{formatTimestamp(selectedRun.createdAt, locale, t)}</dd></div>
+                    <div><dt className="text-xs text-muted-foreground">{t("autopilot.inspector.details.lastUpdate")}</dt><dd>{formatTimestamp(selectedRun.updatedAt, locale, t)}</dd></div>
+                    <div><dt className="text-xs text-muted-foreground">{t("autopilot.inspector.details.modelCalls")}</dt><dd className="tabular-nums">{selectedRun.callsSpent}</dd></div>
+                    <div><dt className="text-xs text-muted-foreground">{t("autopilot.inspector.details.unitsUsed")}</dt><dd className="tabular-nums">{selectedRun.unitsSpent}</dd></div>
+                    <div><dt className="text-xs text-muted-foreground">{t("autopilot.inspector.details.startedBy")}</dt><dd>{selectedRun.initiatedBy ?? t("autopilot.time.notRecorded")}</dd></div>
+                    <div><dt className="text-xs text-muted-foreground">{t("autopilot.inspector.details.targetLanguage")}</dt><dd>{selectedRun.targetLang || t("autopilot.lane.projectDefault")}</dd></div>
                   </dl>
                   <div className="flex flex-wrap items-center gap-2">
                     <code className="max-w-full truncate rounded bg-muted px-2 py-1 text-xs">{selectedRun.runId}</code>
-                    <Button type="button" size="xs" variant="outline" onClick={() => void copyText(selectedRun.runId).then(() => setActionMessage("Run ID copied."))}>
-                      <Clipboard data-icon="inline-start" aria-hidden />Copy run ID
+                    <Button type="button" size="xs" variant="outline" onClick={() => void copyText(selectedRun.runId).then(() => setActionMessage({ key: "autopilot.inspector.details.runIdCopied" }))}>
+                      <Clipboard data-icon="inline-start" aria-hidden />
+                      {t("autopilot.inspector.details.copyRunId")}
                     </Button>
                   </div>
                 </Disclosure>
 
                 <section aria-labelledby="autopilot-steps-title" className="flex flex-col gap-3">
                   <div className="flex items-center justify-between gap-2">
-                    <h3 id="autopilot-steps-title" className="text-sm font-medium">Activity</h3>
-                    {loadingActivity && events.length === 0 && <span className="text-xs text-muted-foreground">Loading steps…</span>}
+                    <h3 id="autopilot-steps-title" className="text-sm font-medium">
+                      {t("autopilot.inspector.activity.title")}
+                    </h3>
+                    {loadingActivity && events.length === 0 && (
+                      <span className="text-xs text-muted-foreground">
+                        {t("autopilot.inspector.activity.loading")}
+                      </span>
+                    )}
                   </div>
                   <EventTimeline events={events} />
-                  {eventsTruncated && <p className="text-xs text-muted-foreground">Only the most recent activity steps are shown for this run.</p>}
+                  {eventsTruncated && (
+                    <p className="text-xs text-muted-foreground">
+                      {t("autopilot.inspector.activity.recentOnly")}
+                    </p>
+                  )}
                 </section>
 
-                <Disclosure title="Ready to review" open={reviewOpen} onOpenChange={setReviewOpen} badge={<Badge variant="secondary">{proposedDraftCountLabel}</Badge>}>
+                <Disclosure title={t("autopilot.status.readyForReview")} open={reviewOpen} onOpenChange={setReviewOpen} badge={<Badge variant="secondary">{proposedDraftCountLabel}</Badge>}>
                   {proposedDrafts.length > 0
                     ? proposedDrafts.map((draft, index) => <ReviewDraft key={draft.id ?? index} draft={draft} projectId={projectId} runTargetLang={selectedRun.targetLang} />)
                     : authoritativeProposedDrafts > 0
-                      ? <p className="text-sm text-muted-foreground">No ready-to-review drafts are loaded from this bounded page yet. {authoritativeProposedDrafts} remain recorded for this run.</p>
-                      : <p className="text-sm text-muted-foreground">No drafts from this run are waiting for review. Choose a run marked “ready to review” above.</p>}
+                      ? (
+                        <p className="text-sm text-muted-foreground">
+                          {t("autopilot.inspector.review.noneLoaded", {
+                            count: authoritativeProposedDrafts,
+                          })}
+                        </p>
+                      )
+                      : (
+                        <p className="text-sm text-muted-foreground">
+                          {t("autopilot.inspector.review.noneWaiting")}
+                        </p>
+                      )}
                   {draftsTruncated && (
                     <p className="text-xs text-muted-foreground">
-                      Showing {proposedDrafts.length} of {authoritativeProposedDrafts} ready-to-review draft records for this run.
+                      {t("autopilot.inspector.review.showingRecords", {
+                        visible: proposedDrafts.length,
+                        total: authoritativeProposedDrafts,
+                      })}
                     </p>
                   )}
                   {activity?.draftNextCursor && (
@@ -1066,54 +1401,110 @@ export function AutopilotActivityInspector({
                       onClick={() => void loadOlderDrafts()}
                     >
                       {loadingOlderDrafts && <LoaderCircle data-icon="inline-start" className="animate-spin motion-reduce:animate-none" aria-hidden />}
-                      {initialSection === "review" ? "Load more ready-to-review drafts" : "Load more draft records"}
+                      {t(initialSection === "review"
+                        ? "autopilot.inspector.review.loadMore"
+                        : "autopilot.inspector.review.loadMoreRecords")}
                     </Button>
                   )}
                 </Disclosure>
 
                 {initialSection !== "review" && authoritativeDraftHistory > 0 && (
-                  <Disclosure title="Draft history" open={historyOpen} onOpenChange={setHistoryOpen} badge={<Badge variant="secondary">{draftHistoryCountLabel}</Badge>}>
-                    <p className="text-sm text-muted-foreground">Previously applied, rejected, or superseded drafts from this run.</p>
+                  <Disclosure title={t("autopilot.inspector.history.title")} open={historyOpen} onOpenChange={setHistoryOpen} badge={<Badge variant="secondary">{draftHistoryCountLabel}</Badge>}>
+                    <p className="text-sm text-muted-foreground">
+                      {t("autopilot.inspector.history.description")}
+                    </p>
                     {draftHistory.map((draft, index) => <ReviewDraft key={draft.id ?? index} draft={draft} projectId={projectId} runTargetLang={selectedRun.targetLang} />)}
-                    {draftsTruncated && <p className="text-xs text-muted-foreground">Showing {draftHistory.length} of {authoritativeDraftHistory} historical draft records for this run.</p>}
+                    {draftsTruncated && (
+                      <p className="text-xs text-muted-foreground">
+                        {t("autopilot.inspector.history.showingRecords", {
+                          visible: draftHistory.length,
+                          total: authoritativeDraftHistory,
+                        })}
+                      </p>
+                    )}
                   </Disclosure>
                 )}
                 {initialSection === "review" && authoritativeDraftHistory > 0 && (
                   <p className="text-xs text-muted-foreground">
-                    {authoritativeDraftHistory} historical {authoritativeDraftHistory === 1 ? "draft is" : "drafts are"} recorded for this run. Open Activity to inspect non-proposed draft history.
+                    {t("autopilot.inspector.history.recorded", {
+                      count: authoritativeDraftHistory,
+                    })}
                   </p>
                 )}
 
-                <Disclosure title="Context" open={contextOpen} onOpenChange={setContextOpen} badge={<Badge variant="secondary">{suggestedContext.length}</Badge>}>
+                <Disclosure title={t("autopilot.inspector.context.title")} open={contextOpen} onOpenChange={setContextOpen} badge={<Badge variant="secondary">{suggestedContext.length}</Badge>}>
                   {readiness && (
                     <div className="flex flex-col gap-2">
-                      {readiness.blockingGaps > 0 && <p className="text-sm font-medium">{readiness.blockingGaps} missing {readiness.blockingGaps === 1 ? "essential" : "essentials"}</p>}
-                      {readiness.items.map((item) => (
-                        <div key={item.id} className="flex items-start justify-between gap-3 text-sm">
-                          <div><p className="font-medium">{item.label}</p><p className="text-muted-foreground">{item.detail}</p></div>
-                          <div className="flex shrink-0 items-center gap-2">
-                            <Badge variant="outline">{item.level}</Badge>
-                            {item.href && item.level !== "ready" && <a aria-label={`Set up ${item.label}`} href={`/project/${projectId}/${item.href}`} className="text-xs text-primary underline-offset-2 hover:underline">Set up</a>}
+                      {readiness.blockingGaps > 0 && (
+                        <p className="text-sm font-medium">
+                          {t("autopilot.inspector.context.missingEssentials", {
+                            count: readiness.blockingGaps,
+                          })}
+                        </p>
+                      )}
+                      {readiness.items.map((item) => {
+                        const itemLabel = readinessItemLabel(item, t)
+                        return (
+                          <div key={item.id} className="flex items-start justify-between gap-3 text-sm">
+                            <div>
+                              <p className="font-medium">{itemLabel}</p>
+                              <p className="text-muted-foreground">
+                                {readinessItemDetail(item, t)}
+                              </p>
+                            </div>
+                            <div className="flex shrink-0 items-center gap-2">
+                              <Badge variant="outline">{readinessLevelLabel(item, t)}</Badge>
+                              {item.href && item.level !== "ready" && (
+                                <a
+                                  aria-label={t("autopilot.inspector.context.setupNamed", {
+                                    label: itemLabel,
+                                  })}
+                                  href={`/project/${projectId}/${item.href}`}
+                                  className="text-xs text-primary underline-offset-2 hover:underline"
+                                >
+                                  {t("autopilot.inspector.context.setup")}
+                                </a>
+                              )}
+                            </div>
                           </div>
-                        </div>
-                      ))}
+                        )
+                      })}
                     </div>
                   )}
                   {sceneBriefs.map((brief, index) => <SceneBriefEvidence key={brief.id ?? index} brief={brief} />)}
-                  {!readiness && sceneBriefs.length === 0 && <p className="text-sm text-muted-foreground">No context evidence was recorded for this run.</p>}
-                  {sceneBriefsTruncated && <p className="text-xs text-muted-foreground">Only the most recent scene briefs are shown for this run.</p>}
+                  {!readiness && sceneBriefs.length === 0 && (
+                    <p className="text-sm text-muted-foreground">
+                      {t("autopilot.inspector.context.noEvidence")}
+                    </p>
+                  )}
+                  {sceneBriefsTruncated && (
+                    <p className="text-xs text-muted-foreground">
+                      {t("autopilot.inspector.context.recentBriefsOnly")}
+                    </p>
+                  )}
                 </Disclosure>
 
-                <Disclosure title="Technical & evidence" open={technicalOpen} onOpenChange={setTechnicalOpen} badge={<Badge variant="secondary">{eventsTruncated ? `${events.length}+` : events.length}</Badge>}>
-                  <Button type="button" size="sm" variant="outline" className="self-start" onClick={() => void copyText(activityLog(selectedRun, activity)).then(() => setActionMessage("Activity log copied."))}>
-                    <Clipboard data-icon="inline-start" aria-hidden />Copy activity log
+                <Disclosure title={t("autopilot.inspector.technical.title")} open={technicalOpen} onOpenChange={setTechnicalOpen} badge={<Badge variant="secondary">{eventsTruncated ? `${events.length}+` : events.length}</Badge>}>
+                  <Button type="button" size="sm" variant="outline" className="self-start" onClick={() => void copyText(activityLog(selectedRun, activity)).then(() => setActionMessage({ key: "autopilot.inspector.technical.activityLogCopied" }))}>
+                    <Clipboard data-icon="inline-start" aria-hidden />
+                    {t("autopilot.inspector.technical.copyActivityLog")}
                   </Button>
-                  <p className="text-xs text-muted-foreground">The copied JSON contains run metadata and sanitized event evidence. Prompts, credentials, and tokens are redacted.</p>
+                  <p className="text-xs text-muted-foreground">
+                    {t("autopilot.inspector.technical.copyDescription")}
+                  </p>
                   {events.map((event) => {
                     const spanId = event.spanId
                     return (
                       <div key={event.id} className="flex flex-col gap-2 rounded-lg bg-muted p-3">
-                        <div className="flex flex-wrap items-center justify-between gap-2"><span className="text-xs font-medium">{event.summary}</span>{spanId && <Button type="button" size="xs" variant="ghost" onClick={() => void copyText(spanId).then(() => setActionMessage("Span ID copied."))}><Clipboard data-icon="inline-start" aria-hidden />Copy span ID</Button>}</div>
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <span className="text-xs font-medium">{event.summary}</span>
+                          {spanId && (
+                            <Button type="button" size="xs" variant="ghost" onClick={() => void copyText(spanId).then(() => setActionMessage({ key: "autopilot.inspector.technical.spanIdCopied" }))}>
+                              <Clipboard data-icon="inline-start" aria-hidden />
+                              {t("autopilot.inspector.technical.copySpanId")}
+                            </Button>
+                          )}
+                        </div>
                         <pre className="whitespace-pre-wrap break-words text-xs text-muted-foreground">{JSON.stringify(redactedDetails(event.details), null, 2)}</pre>
                       </div>
                     )

@@ -28,6 +28,7 @@ import {
   useContextualDraftsSummary,
 } from "@/lib/contextual/drafts-store"
 import { reviewContextualDraft } from "@/lib/contextual/transport"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 interface ContextualDraftCardProps {
   cellId: string
@@ -53,6 +54,7 @@ export function ContextualDraftCard({
   onAccept,
   dir,
 }: ContextualDraftCardProps) {
+  const t = useT()
   const drafts = useContextualDrafts()
   const summary = useContextualDraftsSummary()
   const draft =
@@ -63,10 +65,7 @@ export function ContextualDraftCard({
       ? drafts.get(cellId)
       : undefined
   const [resolving, setResolving] = useState(false)
-  const [decisionError, setDecisionError] = useState<{
-    draftId: string
-    message: string
-  } | null>(null)
+  const [decisionErrorDraftId, setDecisionErrorDraftId] = useState<string | null>(null)
 
   if (!draft) return null
 
@@ -74,7 +73,7 @@ export function ContextualDraftCard({
     if (resolving) return
     const decidedDraft = draft
     setResolving(true)
-    setDecisionError(null)
+    setDecisionErrorDraftId(null)
     if (action === "accepted") {
       try {
         // This confirms only the durable local enqueue. Do not report
@@ -99,10 +98,7 @@ export function ContextualDraftCard({
         "rejected",
       )
     } catch {
-      setDecisionError({
-        draftId: decidedDraft.draftId,
-        message: "This suggestion couldn’t be dismissed. Retry.",
-      })
+      setDecisionErrorDraftId(decidedDraft.draftId)
       setResolving(false)
       return
     }
@@ -148,20 +144,22 @@ export function ContextualDraftCard({
         {draft.text}
       </p>
       <div className="flex items-center gap-1">
-        <AppTooltip content={draft.spanLabel ? `Drafted from ${draft.spanLabel}` : "Drafted for you"}>
+        <AppTooltip content={draft.spanLabel
+          ? t("autopilot.draft.draftedFrom", { spanLabel: draft.spanLabel })
+          : t("autopilot.draft.draftedForYou")}>
           <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
             <Sparkles className="h-3 w-3" aria-hidden />
-            Suggested
+            {t("autopilot.draft.suggested")}
           </span>
         </AppTooltip>
         <div className="ml-auto flex items-center gap-0.5">
           {editable && (
-            <AppTooltip content="Use this translation">
+            <AppTooltip content={t("autopilot.draft.useTranslation")}>
               <Button
                 type="button"
                 size="icon-sm"
                 variant="ghost"
-                aria-label="Use this translation"
+                aria-label={t("autopilot.draft.useTranslation")}
                 disabled={resolving}
                 onClick={() => void decide("accepted")}
               >
@@ -170,12 +168,12 @@ export function ContextualDraftCard({
             </AppTooltip>
           )}
           {editable && (
-            <AppTooltip content="Dismiss this suggestion">
+            <AppTooltip content={t("autopilot.draft.dismissSuggestion")}>
               <Button
                 type="button"
                 size="icon-sm"
                 variant="ghost"
-                aria-label="Dismiss this suggestion"
+                aria-label={t("autopilot.draft.dismissSuggestion")}
                 disabled={resolving}
                 onClick={() => void decide("rejected")}
               >
@@ -185,9 +183,9 @@ export function ContextualDraftCard({
           )}
         </div>
       </div>
-      {decisionError?.draftId === draft.draftId && (
+      {decisionErrorDraftId === draft.draftId && (
         <p role="alert" className="text-xs text-destructive">
-          {decisionError.message}
+          {t("autopilot.draft.dismissFailed")}
         </p>
       )}
     </div>

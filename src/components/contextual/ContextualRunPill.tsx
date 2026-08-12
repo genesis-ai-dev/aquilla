@@ -26,6 +26,7 @@ import {
 } from "@/lib/contextual/run-store"
 import { useContextualDraftsSummary } from "@/lib/contextual/drafts-store"
 import { installContextualTransport, type ContextualRunRecord } from "@/lib/contextual/transport"
+import { useT } from "@/lib/i18n/I18nProvider"
 import { AutopilotActivityInspector } from "./AutopilotActivityInspector"
 import { ContextualSteering } from "./ContextualSteering"
 
@@ -80,6 +81,7 @@ function ContextualRunPillScoped({
   canControl = false,
   activeLane = "",
 }: PillProps) {
+  const t = useT()
   const state = useContextualRunState()
   const storedProgress = useContextualRunProgress()
   const drafts = useContextualDraftsSummary()
@@ -141,7 +143,7 @@ function ContextualRunPillScoped({
       <div className={PILL_BASE} data-testid="contextual-run-pill" role="status">
         <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
         <span className="text-muted-foreground">
-          Autopilot works in Project default only. Switch to that lane to run it.
+          {t("autopilot.pill.defaultLaneOnly")}
         </span>
       </div>
     )
@@ -151,14 +153,14 @@ function ContextualRunPillScoped({
   // machinery: a translator wants "12 ready for you", not a span count.
   const pendingChip =
     pendingDrafts > 0 ? (
-      <AppTooltip content="Suggestions waiting in your cells">
+      <AppTooltip content={t("autopilot.pill.suggestionsWaiting")}>
         <span
           data-testid="contextual-pending-drafts"
           className="flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-primary"
+          aria-label={t("autopilot.pill.suggestionsReady", { count: pendingDrafts })}
         >
           <Sparkles className="h-3 w-3" aria-hidden />
-          <span className="tabular-nums">{pendingDrafts}</span>
-          <span className="sr-only"> suggestions ready to review</span>
+          <span className="tabular-nums" aria-hidden>{pendingDrafts}</span>
         </span>
       </AppTooltip>
     ) : null
@@ -168,7 +170,7 @@ function ContextualRunPillScoped({
   const laneReadout =
     lanes.length > 1 ? (
       <span data-testid="contextual-lanes" className="text-muted-foreground">
-        {lanes.length} passages
+        {t("autopilot.pill.activePassages", { count: lanes.length })}
       </span>
     ) : spanLabel ? (
       <button
@@ -202,24 +204,33 @@ function ContextualRunPillScoped({
   let trailing: React.ReactNode = null
   let pillClass = PILL_BASE
   let announcement = ""
+  const localizedPhase = phase === "Reading context…" || phase === "reading"
+    ? t("autopilot.phase.reading")
+    : phase === "Drafting…" || phase === "drafting"
+      ? t("autopilot.phase.drafting")
+      : phase === "Checking…" || phase === "checking"
+        ? t("autopilot.phase.checking")
+        : phase === "Saving drafts…" || phase === "staging"
+          ? t("autopilot.phase.staging")
+          : null
 
   if (status === "idle" || status === "terminated") {
-    if (status === "terminated") announcement = "Autopilot stopped."
+    if (status === "terminated") announcement = t("autopilot.feedback.stopped")
     // Idle (no run) and terminated (run is over, can start fresh) share the
     // icon-only Play affordance.
     content = canControl ? (
-      <AppTooltip content="Run Autopilot">
+      <AppTooltip content={t("autopilot.action.run")}>
         <Button
           type="button"
           size="icon-sm"
           variant="ghost"
-          aria-label="Run Autopilot"
+          aria-label={t("autopilot.action.run")}
           onClick={() => {
             setControlError(null)
             if (!available) { onSetupNeeded?.(); return }
             void startContextualRun(projectId, fileId, anchorCellId ?? undefined).then((started) => {
               if (!started) {
-                setControlError("Autopilot couldn’t start. Try again or check AI setup.")
+                setControlError(t("autopilot.pill.startFailed"))
               }
             })
           }}
@@ -227,39 +238,39 @@ function ContextualRunPillScoped({
           <Play className="h-3.5 w-3.5" />
         </Button>
       </AppTooltip>
-    ) : status === "terminated" ? <span className="text-muted-foreground">Stopped</span> : null
+    ) : status === "terminated" ? <span className="text-muted-foreground">{t("autopilot.status.stopped")}</span> : null
   } else if (status === "starting") {
-    announcement = "Autopilot is starting."
+    announcement = t("autopilot.pill.announcement.starting")
     content = (
       <>
         <Spinner className="size-3.5 text-muted-foreground" />
-        <span className="text-muted-foreground">Starting…</span>
+        <span className="text-muted-foreground">{t("autopilot.pill.starting")}</span>
       </>
     )
   } else if (status === "pausing") {
-    announcement = "Autopilot will pause after the current passage."
+    announcement = t("autopilot.pill.announcement.pausing")
     content = (
       <>
         <Spinner className="size-3.5 text-muted-foreground" />
-        <span className="text-muted-foreground">Finishing this passage…</span>
+        <span className="text-muted-foreground">{t("autopilot.pill.finishingPassage")}</span>
       </>
     )
   } else if (status === "paused") {
-    announcement = "Autopilot paused."
+    announcement = t("autopilot.pill.announcement.paused")
     content = (
       <>
-        {canControl && <AppTooltip content="Resume drafting">
+        {canControl && <AppTooltip content={t("autopilot.pill.resumeDrafting")}>
           <Button
             type="button"
             size="icon-sm"
             variant="ghost"
-            aria-label="Resume drafting"
+            aria-label={t("autopilot.pill.resumeDrafting")}
             onClick={() => void resumeContextualRun()}
           >
             <Play className="h-3.5 w-3.5" />
           </Button>
         </AppTooltip>}
-        <span className="text-muted-foreground">Paused</span>
+        <span className="text-muted-foreground">{t("autopilot.status.paused")}</span>
         {pendingChip}
         {progress.total > 0 && (
           <span className="tabular-nums text-muted-foreground">
@@ -269,12 +280,12 @@ function ContextualRunPillScoped({
       </>
     )
     trailing = canControl ? (
-      <AppTooltip content="Stop this run">
+      <AppTooltip content={t("autopilot.pill.stopRun")}>
         <Button
           type="button"
           size="icon-sm"
           variant="ghost"
-          aria-label="Stop this run"
+          aria-label={t("autopilot.pill.stopRun")}
           onClick={() => void terminateContextualRun()}
         >
           <X className="h-3.5 w-3.5" />
@@ -283,26 +294,26 @@ function ContextualRunPillScoped({
     ) : null
   } else if (status === "parked") {
     announcement = parkedRemaining > 0
-      ? `Autopilot has ${parkedRemaining} ${parkedRemaining === 1 ? "passage" : "passages"} queued and will continue in the background.`
-      : "Autopilot is idle. No work is queued."
+      ? t("autopilot.pill.announcement.queued", { count: parkedRemaining })
+      : t("autopilot.pill.announcement.idle")
     content = (
       <>
         <Eye className="h-3.5 w-3.5 text-muted-foreground" />
         <span className="text-muted-foreground">
           {parkedRemaining > 0
-            ? `Queued · ${parkedRemaining} ${parkedRemaining === 1 ? "passage" : "passages"} remaining`
-            : "Idle · no work queued"}
+            ? t("autopilot.pill.queuedRemaining", { count: parkedRemaining })
+            : t("autopilot.pill.idle")}
         </span>
         {pendingChip}
       </>
     )
     trailing = canControl ? (
-      <AppTooltip content="Stop this run">
+      <AppTooltip content={t("autopilot.pill.stopRun")}>
         <Button
           type="button"
           size="icon-sm"
           variant="ghost"
-          aria-label="Stop this run"
+          aria-label={t("autopilot.pill.stopRun")}
           onClick={() => void terminateContextualRun()}
         >
           <X className="h-3.5 w-3.5" />
@@ -310,21 +321,21 @@ function ContextualRunPillScoped({
       </AppTooltip>
     ) : null
   } else if (status === "done") {
-    announcement = "Autopilot completed."
+    announcement = t("autopilot.pill.announcement.complete")
     content = (
       <>
         <CheckCircle2 className="h-3.5 w-3.5 text-muted-foreground" />
-        <span className="text-muted-foreground">Complete</span>
+        <span className="text-muted-foreground">{t("autopilot.status.complete")}</span>
         {pendingChip}
       </>
     )
     trailing = (
-      <AppTooltip content="Dismiss">
+      <AppTooltip content={t("common.dismiss")}>
         <Button
           type="button"
           size="icon-sm"
           variant="ghost"
-          aria-label="Dismiss"
+          aria-label={t("common.dismiss")}
           onClick={dismissContextualRunSummary}
         >
           <X className="h-3.5 w-3.5" />
@@ -333,25 +344,29 @@ function ContextualRunPillScoped({
     )
   } else if (status === "failed") {
     pillClass = cn(PILL_BASE, "border-destructive/40")
-    announcement = "Autopilot stopped after a problem."
+    announcement = t("autopilot.pill.announcement.problem")
     content = (
       <>
         <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-destructive" />
         <span>
           {progress.failed > 0 && progress.total > 0
-            ? `${progress.failed} of ${progress.total} passages had problems`
-            : "Drafting stopped unexpectedly"}
+            ? t("autopilot.pill.failedPassages", {
+                count: progress.total,
+                failed: progress.failed,
+                total: progress.total,
+              })
+            : t("autopilot.pill.unexpectedStop")}
         </span>
         {pendingChip}
       </>
     )
     trailing = (
-      <AppTooltip content="Dismiss">
+      <AppTooltip content={t("common.dismiss")}>
         <Button
           type="button"
           size="icon-sm"
           variant="ghost"
-          aria-label="Dismiss"
+          aria-label={t("common.dismiss")}
           onClick={dismissContextualRunSummary}
         >
           <X className="h-3.5 w-3.5" />
@@ -360,25 +375,24 @@ function ContextualRunPillScoped({
     )
   } else {
     // running
-    announcement = "Autopilot is working."
+    announcement = t("autopilot.pill.announcement.working")
     content = (
       <>
-        {canControl && <AppTooltip content="Pause after this passage">
+        {canControl && <AppTooltip content={t("autopilot.pill.pauseAfterPassage")}>
           <Button
             type="button"
             size="icon-sm"
             variant="ghost"
-            aria-label="Pause after this passage"
+            aria-label={t("autopilot.pill.pauseAfterPassage")}
             onClick={() => void requestPauseContextualRun()}
           >
             <Pause className="h-3.5 w-3.5" />
           </Button>
         </AppTooltip>}
         <ProgressBar done={progress.done} total={progress.total} />
-        {(phase || laneReadout) && (
+        {(localizedPhase || laneReadout) && (
           <span className="flex max-w-56 items-center gap-1 truncate text-muted-foreground">
-            {phase}
-            {phase && laneReadout ? " · " : ""}
+            {localizedPhase && <span>{localizedPhase}</span>}
             {laneReadout}
           </span>
         )}
@@ -391,12 +405,12 @@ function ContextualRunPillScoped({
   }
 
   const activityButton = runId ? (
-    <AppTooltip content="View Autopilot activity">
+    <AppTooltip content={t("autopilot.pill.viewActivity")}>
       <Button
         type="button"
         size="icon-sm"
         variant="ghost"
-        aria-label="View Autopilot activity"
+        aria-label={t("autopilot.pill.viewActivity")}
         onClick={() => setInspectorOpen(true)}
       >
         <ListTree aria-hidden />

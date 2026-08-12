@@ -1,6 +1,10 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { AutopilotActivityInspector } from "./AutopilotActivityInspector"
+import { I18nProvider } from "@/lib/i18n/I18nProvider"
+import { CATALOGS } from "@/lib/i18n/messages"
+import type { Catalog } from "@/lib/i18n/messages/en"
+import { LOCALE_STORAGE_KEY } from "@/lib/i18n/store"
 import type {
   ContextualOverview,
   ContextualRunActivity,
@@ -11,6 +15,7 @@ import type {
 } from "@/lib/contextual/transport"
 
 const RUN_ID = "01920000-0000-7000-8000-000000000001"
+let originalMyanmarCatalog: Catalog
 
 const run: ContextualRunRecord = {
   runId: RUN_ID,
@@ -112,6 +117,8 @@ vi.mock("@/lib/contextual/transport", () => ({
 }))
 
 beforeEach(() => {
+  window.localStorage.clear()
+  originalMyanmarCatalog = CATALOGS.my
   runsMock.mockReset()
   runsMock.mockResolvedValue(runPage([run]))
   activityMock.mockReset()
@@ -125,6 +132,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup()
   vi.useRealTimers()
+  CATALOGS.my = originalMyanmarCatalog
 })
 
 function renderInspector(props: Partial<React.ComponentProps<typeof AutopilotActivityInspector>> = {}) {
@@ -145,7 +153,7 @@ describe("AutopilotActivityInspector", () => {
     renderInspector()
     expect(screen.getByRole("dialog")).toHaveAccessibleName("Autopilot activity")
     expect(screen.getByText(/evidence behind each step/i)).toBeInTheDocument()
-    expect(await screen.findByText("Staged 3 drafts for review.")).toBeInTheDocument()
+    expect(await screen.findByText("3 reviewable drafts staged")).toBeInTheDocument()
     expect(screen.getByRole("log", { name: "Autopilot step history" })).toHaveAttribute("aria-live", "off")
     expect(screen.getByLabelText("3 of 10 passages complete")).toBeInTheDocument()
     expect(screen.getByText(/7 calls/)).toBeInTheDocument()
@@ -154,10 +162,38 @@ describe("AutopilotActivityInspector", () => {
     expect(screen.getByText("Project default")).toBeInTheDocument()
   })
 
+  it("renders inspector chrome and stable run state through the active locale", async () => {
+    window.localStorage.setItem(LOCALE_STORAGE_KEY, "my")
+    CATALOGS.my = {
+      ...originalMyanmarCatalog,
+      "autopilot.inspector.title": "အလိုအလျောက် လုပ်ဆောင်မှု",
+      "autopilot.status.working": "လုပ်ဆောင်နေသည်",
+      "autopilot.phase.checking": "စစ်ဆေးနေသည်…",
+      "autopilot.inspector.activity.title": "လုပ်ဆောင်မှု",
+    }
+
+    render(
+      <I18nProvider>
+        <AutopilotActivityInspector
+          projectId="p1"
+          open
+          onOpenChange={vi.fn()}
+          fileNames={new Map([["file-1", "LUK.usfm"]])}
+        />
+      </I18nProvider>,
+    )
+
+    expect(screen.getByRole("dialog")).toHaveAccessibleName("အလိုအလျောက် လုပ်ဆောင်မှု")
+    expect((await screen.findAllByText("လုပ်ဆောင်နေသည်")).length).toBeGreaterThan(0)
+    expect(screen.getByText("စစ်ဆေးနေသည်…")).toBeInTheDocument()
+    expect(screen.getByRole("heading", { name: "လုပ်ဆောင်မှု" })).toBeInTheDocument()
+  })
+
   it("keeps hydrated history non-live and announces only a newly observed step", async () => {
     const newEvent = {
       ...activity.events[0],
       id: "event-2",
+      kind: "future_check_complete",
       summary: "Finished checking the next passage.",
       createdAt: "2026-08-11T10:03:00.000Z",
     }
@@ -166,7 +202,7 @@ describe("AutopilotActivityInspector", () => {
       .mockResolvedValue({ ...activity, events: [...activity.events, newEvent] })
     renderInspector()
 
-    expect(await screen.findByText("Staged 3 drafts for review.")).toBeInTheDocument()
+    expect(await screen.findByText("3 reviewable drafts staged")).toBeInTheDocument()
     const announcement = screen.getByTestId("autopilot-latest-step-announcement")
     expect(announcement).toBeEmptyDOMElement()
     expect(screen.getByRole("log", { name: "Autopilot step history" })).toHaveAttribute("aria-live", "off")
@@ -182,7 +218,8 @@ describe("AutopilotActivityInspector", () => {
     runsMock.mockResolvedValueOnce(runPage([failed]))
     activityMock.mockResolvedValueOnce({ ...activity, run: failed })
     renderInspector({ initialSection: "attention" })
-    expect(await screen.findByText("Agent credit cap reached.")).toBeInTheDocument()
+    expect(await screen.findByText(/Autopilot reported a problem/)).toBeInTheDocument()
+    expect(screen.queryByText("Agent credit cap reached.")).not.toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Run Autopilot" })).toBeInTheDocument()
     expect(screen.getByText("Model calls")).toBeInTheDocument()
   })
@@ -198,7 +235,8 @@ describe("AutopilotActivityInspector", () => {
     activityMock.mockResolvedValueOnce({ ...activity, run: activeWithError })
     renderInspector({ initialSection: "attention" })
 
-    expect(await screen.findByText("One earlier passage failed checks.")).toBeInTheDocument()
+    expect(await screen.findByText(/Autopilot reported a problem/)).toBeInTheDocument()
+    expect(screen.queryByText("One earlier passage failed checks.")).not.toBeInTheDocument()
     expect(screen.getAllByText("Working").length).toBeGreaterThan(0)
     expect(screen.getByRole("button", { name: "Pause" })).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "Run Autopilot" })).not.toBeInTheDocument()
@@ -216,7 +254,8 @@ describe("AutopilotActivityInspector", () => {
     activityMock.mockResolvedValueOnce({ ...activity, run: parkedWithError })
     renderInspector({ initialSection: "attention" })
 
-    expect(await screen.findByText("The final passage needs attention.")).toBeInTheDocument()
+    expect(await screen.findByText(/Autopilot reported a problem/)).toBeInTheDocument()
+    expect(screen.queryByText("The final passage needs attention.")).not.toBeInTheDocument()
     expect(screen.getAllByText("Idle").length).toBeGreaterThan(0)
     expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "Run Autopilot" })).not.toBeInTheDocument()
@@ -249,14 +288,20 @@ describe("AutopilotActivityInspector", () => {
 
   it("copies sanitized run metadata and events from technical evidence", async () => {
     const writeText = vi.fn<(_value: string) => Promise<void>>(async () => {})
+    const diagnosticRun = { ...run, lastError: "Opaque upstream diagnostic." }
+    runsMock.mockResolvedValue(runPage([diagnosticRun]))
+    activityMock.mockResolvedValue({ ...activity, run: diagnosticRun })
     Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } })
     renderInspector()
-    await screen.findByText("Staged 3 drafts for review.")
+    await screen.findByText("3 reviewable drafts staged")
+    expect(await screen.findByText(/Autopilot reported a problem/)).toBeInTheDocument()
+    expect(screen.queryByText("Opaque upstream diagnostic.")).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: /Technical & evidence/ }))
     fireEvent.click(screen.getByRole("button", { name: "Copy activity log" }))
     await vi.waitFor(() => expect(writeText).toHaveBeenCalled())
     const copied = writeText.mock.calls[0][0]
     expect(copied).toContain("drafts_staged")
+    expect(copied).toContain("Opaque upstream diagnostic.")
     expect(copied).toContain("[redacted]")
     expect(copied).not.toContain("must-not-copy")
   })
@@ -264,7 +309,7 @@ describe("AutopilotActivityInspector", () => {
   it("degrades gracefully when historic events were not recorded", async () => {
     activityMock.mockResolvedValueOnce({ run, events: [], sceneBriefs: [], drafts: [], truncated: false })
     renderInspector()
-    expect(await screen.findByText(/Detailed step history wasn't recorded/)).toBeInTheDocument()
+    expect(await screen.findByText(/Detailed step history wasn’t recorded/)).toBeInTheDocument()
   })
 
   it("selects and marks the run that owns the project review backlog", async () => {
@@ -372,7 +417,7 @@ describe("AutopilotActivityInspector", () => {
     expect(runsMock).toHaveBeenCalledWith("p1", { proposedOnly: true })
     expect(await screen.findByText("Returned proposed draft")).toBeInTheDocument()
     expect(screen.queryByText("Returned applied history")).not.toBeInTheDocument()
-    expect(screen.getByRole("button", { name: /Ready to review.*1 of 700/i })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /Ready for review.*1 of 700/i })).toBeInTheDocument()
     expect(activityMock).toHaveBeenCalledWith(
       "p1",
       reviewOwner.runId,
@@ -384,7 +429,7 @@ describe("AutopilotActivityInspector", () => {
       "Second proposed draft",
       "Returned proposed draft",
     ])
-    expect(screen.getByRole("button", { name: /Ready to review.*2 of 700/i })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /Ready for review.*2 of 700/i })).toBeInTheDocument()
     expect(activityMock).toHaveBeenCalledWith(
       "p1",
       reviewOwner.runId,
@@ -484,7 +529,7 @@ describe("AutopilotActivityInspector", () => {
 
     expect(await screen.findByText("Evidence added by a teammate")).toBeInTheDocument()
     expect(activityMock).toHaveBeenCalledTimes(2)
-    expect(screen.getByRole("button", { name: /Ready to review.*2/i })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /Ready for review.*2/i })).toBeInTheDocument()
   })
 
   it("keeps a retry-selected run selected even when the Sheet opened with an older focus run", async () => {
@@ -537,7 +582,13 @@ describe("AutopilotActivityInspector", () => {
         return {
           ...activity,
           run: secondRun,
-          events: [{ ...activity.events[0], id: "event-b", runId, summary: "Second run activity." }],
+          events: [{
+            ...activity.events[0],
+            id: "event-b",
+            runId,
+            kind: "future_run_activity",
+            summary: "Second run activity.",
+          }],
           drafts: [{ ...activity.drafts[0], id: "draft-b", runId, text: "Second run draft" }],
           draftCounts: { proposed: 1, applied: 0, rejected: 0, superseded: 0 },
           draftNextCursor: null,
@@ -635,7 +686,7 @@ describe("AutopilotActivityInspector", () => {
 
       await act(async () => poll?.())
 
-      expect(await screen.findByRole("button", { name: /LUK\.usfm.*2\/10 passages/i })).toBeInTheDocument()
+      expect(await screen.findByRole("button", { name: /LUK\.usfm.*2 of 10 passages/i })).toBeInTheDocument()
       expect(screen.getByText("OLD.usfm")).toBeInTheDocument()
       expect(screen.queryByRole("button", { name: "Load older runs" })).not.toBeInTheDocument()
     } finally {
@@ -666,7 +717,7 @@ describe("AutopilotActivityInspector", () => {
     renderInspector({ initialSection: "review" })
     expect(await screen.findByText(/Only the most recent activity steps/)).toBeInTheDocument()
     expect(screen.getByRole("button", { name: /Technical & evidence.*1\+/i })).toBeInTheDocument()
-    expect(screen.getByText(/Showing 1 of 1 ready-to-review draft records/)).toBeInTheDocument()
+    expect(screen.getByText(/Showing 1 of 1 ready-to-review draft record/)).toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: /Context/ }))
     expect(screen.getByText(/Only the most recent scene briefs/)).toBeInTheDocument()
   })
@@ -680,7 +731,7 @@ describe("AutopilotActivityInspector", () => {
 
     expect(await screen.findByText(/Could not refresh run history/)).toBeInTheDocument()
     await act(async () => resolveActivity(activity))
-    expect(await screen.findByText("Staged 3 drafts for review.")).toBeInTheDocument()
+    expect(await screen.findByText("3 reviewable drafts staged")).toBeInTheDocument()
     expect(screen.getByText(/Could not refresh run history/)).toBeInTheDocument()
   })
 
@@ -692,7 +743,7 @@ describe("AutopilotActivityInspector", () => {
     fireEvent.click(screen.getByRole("button", { name: "Refresh" }))
     await vi.waitFor(() => expect(runsMock).toHaveBeenCalledTimes(2))
     await vi.waitFor(() => expect(activityMock).toHaveBeenCalledTimes(2))
-    expect(await screen.findByText("Staged 3 drafts for review.")).toBeInTheDocument()
+    expect(await screen.findByText("3 reviewable drafts staged")).toBeInTheDocument()
     expect(screen.queryByText(/Could not refresh detailed activity/)).not.toBeInTheDocument()
   })
 
@@ -735,8 +786,8 @@ describe("AutopilotActivityInspector", () => {
     expect(screen.getAllByText(/multilingual lane that Autopilot doesn’t support yet/)).toHaveLength(1)
     expect(screen.queryByText("unsupported_target_language_lane")).not.toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "Run Autopilot" })).not.toBeInTheDocument()
-    await screen.findByText("Staged 3 drafts for review.")
-    fireEvent.click(screen.getByRole("button", { name: /Ready to review/ }))
+    await screen.findByText("3 reviewable drafts staged")
+    fireEvent.click(screen.getByRole("button", { name: /Ready for review/ }))
     expect(screen.queryByRole("link", { name: /Review in editor/ })).not.toBeInTheDocument()
     expect(await screen.findByText(/Evidence only.*unsupported fr lane/)).toBeInTheDocument()
     expect(retryMock).not.toHaveBeenCalled()
@@ -757,7 +808,7 @@ describe("AutopilotActivityInspector", () => {
     expect(await screen.findByText(/multilingual lane that Autopilot doesn’t support yet/)).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "Resume" })).not.toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument()
-    expect(await screen.findByText("Staged 3 drafts for review.")).toBeInTheDocument()
+    expect(await screen.findByText("3 reviewable drafts staged")).toBeInTheDocument()
   })
 
   it("does not select a historic multilingual proposal as the actionable review owner", async () => {

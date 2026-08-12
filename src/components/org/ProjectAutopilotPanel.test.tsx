@@ -480,7 +480,7 @@ describe("ProjectAutopilotPanel", () => {
       deferred: { count: 0, reason: null },
       truncated: false,
     }))
-    expect(await screen.findByText(/1 file started · 1 skipped/)).toBeInTheDocument()
+    expect(await screen.findByText(/1 file started and 1 file skipped/)).toBeInTheDocument()
     expect(screen.getByText(/1 file is already running/)).toBeInTheDocument()
     expect(screen.getByText(/Draft suggestions stay in review/)).toBeInTheDocument()
   })
@@ -506,7 +506,7 @@ describe("ProjectAutopilotPanel", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Run Autopilot" }))
 
-    const summary = await screen.findByText(/No files started · 5 skipped/)
+    const summary = await screen.findByText(/No files started and 5 files skipped/)
     expect(summary).toHaveTextContent("1 file couldn’t start; open activity for details")
     expect(summary).toHaveTextContent("1 file has an idle run; review its drafts or stop it before rerunning")
     expect(summary).toHaveTextContent("1 file still has queued work")
@@ -531,7 +531,7 @@ describe("ProjectAutopilotPanel", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Run Autopilot" }))
 
-    expect(await screen.findByText(/24 files started · 1 deferred to the next batch/)).toBeInTheDocument()
+    expect(await screen.findByText(/24 files started and 1 file deferred to the next batch/)).toBeInTheDocument()
     expect(screen.getByText(/Run Autopilot again after this batch becomes idle/)).toBeInTheDocument()
   })
 
@@ -596,7 +596,7 @@ describe("ProjectAutopilotPanel", () => {
     renderPanel()
     expect((await screen.findAllByText("Needs attention")).length).toBeGreaterThan(0)
     expect(screen.getByText(/status couldn’t be loaded/)).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "Run Autopilot" })).not.toBeInTheDocument()
   })
 

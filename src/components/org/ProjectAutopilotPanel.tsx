@@ -30,6 +30,7 @@ import {
   type ContextualOverviewFile,
   type ProjectRunStartResult,
 } from "@/lib/contextual/transport"
+import { useI18n, type TFunction } from "@/lib/i18n/I18nProvider"
 
 const POLL_MS = 4_000
 const WORKING_STATUSES = new Set(["running", "pausing"])
@@ -77,10 +78,10 @@ function fileHasQueuedWork(file: ContextualOverviewFile): boolean {
 function resolveState(
   overview: ContextualOverview,
   starting: boolean,
-  startError: string | null,
+  startFailed: boolean,
   initialLoadFailed: boolean,
 ): PanelState {
-  if (initialLoadFailed || startError) return "attention"
+  if (initialLoadFailed || startFailed) return "attention"
   if (starting || overview.files.some((file) => WORKING_STATUSES.has(file.status))) return "working"
   if (overview.files.some((file) => file.status === "failed")) return "attention"
   if (overview.files.some((file) => file.status === "paused")) return "paused"
@@ -92,19 +93,19 @@ function resolveState(
   return "not-started"
 }
 
-function stateLabel(state: PanelState): string {
-  if (state === "attention") return "Needs attention"
-  if (state === "working") return "Working"
-  if (state === "paused") return "Paused"
-  if (state === "queued") return "Queued"
-  if (state === "idle") return "Idle"
-  if (state === "review") return "Ready for review"
-  if (state === "complete") return "Complete"
-  if (state === "stopped") return "Stopped"
-  return "Not started"
+function stateLabel(state: PanelState, t: TFunction): string {
+  if (state === "attention") return t("autopilot.status.needsAttention")
+  if (state === "working") return t("autopilot.status.working")
+  if (state === "paused") return t("autopilot.status.paused")
+  if (state === "queued") return t("autopilot.status.queued")
+  if (state === "idle") return t("autopilot.status.idle")
+  if (state === "review") return t("autopilot.status.readyForReview")
+  if (state === "complete") return t("autopilot.status.complete")
+  if (state === "stopped") return t("autopilot.status.stopped")
+  return t("autopilot.status.notStarted")
 }
 
-function StateBadge({ state }: { state: PanelState }) {
+function StateBadge({ state, t }: { state: PanelState; t: TFunction }) {
   return (
     <Badge variant={state === "attention" ? "destructive" : state === "working" ? "default" : state === "review" ? "secondary" : "outline"}>
       {state === "working" && <LoaderCircle data-icon="inline-start" className="animate-spin motion-reduce:animate-none" aria-hidden />}
@@ -112,7 +113,7 @@ function StateBadge({ state }: { state: PanelState }) {
       {state === "paused" && <CirclePause data-icon="inline-start" aria-hidden />}
       {state === "complete" && <CircleCheck data-icon="inline-start" aria-hidden />}
       {state === "stopped" && <Square data-icon="inline-start" aria-hidden />}
-      {stateLabel(state)}
+      {stateLabel(state, t)}
     </Badge>
   )
 }
@@ -126,24 +127,35 @@ function primaryLine(
   workingTotalsKnown: boolean,
   starting: boolean,
   initialLoadFailed: boolean,
+  t: TFunction,
 ): string {
   if (state === "attention") {
-    if (initialLoadFailed) return "Autopilot status couldn’t be loaded. Try again before starting new work."
+    if (initialLoadFailed) return t("autopilot.overview.loadFailed")
     const count = countAttentionItems(overview.files)
     return count > 0
-      ? `${count} ${count === 1 ? "issue needs" : "issues need"} attention. Open activity to see what happened.`
-      : "Autopilot could not start. Check the message below, then try again."
+      ? t("autopilot.overview.attentionIssues", { count })
+      : t("autopilot.overview.startFailedHelp")
   }
-  if (starting) return "Scanning project files and starting work…"
+  if (starting) return t("autopilot.overview.startingScan")
   if (state === "working") {
     if (!workingTotalsKnown) {
-      return `Working across ${workingFileCount} ${workingFileCount === 1 ? "file" : "files"} — scanning passages and starting the next steps…`
+      return t("autopilot.overview.workingScanningFiles", { fileCount: workingFileCount })
     }
-    if (workingTotal > 0) return `Working across ${workingFileCount} ${workingFileCount === 1 ? "file" : "files"} — ${workingDone} of ${workingTotal} passages complete across the project’s latest runs.`
-    return "Scanning passages and starting the next steps…"
+    if (workingTotal > 0) {
+      return t("autopilot.overview.workingProgress", {
+        fileCount: workingFileCount,
+        progress: t("autopilot.overview.passagesProgress", {
+          done: workingDone,
+          total: workingTotal,
+        }),
+      })
+    }
+    return t("autopilot.overview.scanningPassages")
   }
   if (state === "paused") {
-    return workingTotal > 0 ? `Autopilot is paused at ${workingDone} of ${workingTotal} passages.` : "Autopilot is paused."
+    return workingTotal > 0
+      ? t("autopilot.overview.pausedProgress", { done: workingDone, total: workingTotal })
+      : t("autopilot.overview.paused")
   }
   if (state === "queued") {
     const remaining = overview.files.reduce(
@@ -152,65 +164,78 @@ function primaryLine(
         : 0),
       0,
     )
-    return `${remaining} ${remaining === 1 ? "passage is" : "passages are"} queued. Autopilot will continue in the background.`
+    return t("autopilot.overview.queuedPassages", { count: remaining })
   }
-  if (state === "idle") return "Current runs are idle. No more work is queued."
-  if (state === "review") return `${overview.proposedDrafts} ${overview.proposedDrafts === 1 ? "draft is" : "drafts are"} ready for review.`
-  if (state === "complete") return "Autopilot completed its latest run."
-  if (state === "stopped") return "The latest Autopilot run was stopped."
-  return "Ready to run — Autopilot hasn’t run on this project yet."
+  if (state === "idle") return t("autopilot.overview.idle")
+  if (state === "review") return t("autopilot.overview.reviewDrafts", { count: overview.proposedDrafts })
+  if (state === "complete") return t("autopilot.overview.complete")
+  if (state === "stopped") return t("autopilot.overview.stopped")
+  return t("autopilot.overview.notStarted")
 }
 
-function formatChecked(value: Date | null): string {
-  if (!value) return "Not checked yet"
-  return `Checked ${new Intl.DateTimeFormat(undefined, { timeStyle: "short" }).format(value)}`
+function formatChecked(value: Date | null, locale: string, t: TFunction): string {
+  if (!value) return t("autopilot.time.checkedNever")
+  const time = new Intl.DateTimeFormat(locale, { timeStyle: "short" }).format(value)
+  return t("autopilot.time.checkedAt", { time })
 }
 
-function skippedReasonSummary(skipped: ProjectRunStartResult["skipped"]): string[] {
+function skippedReasonSummary(
+  skipped: ProjectRunStartResult["skipped"],
+  t: TFunction,
+): string[] {
   const counts = new Map<string, number>()
   for (const item of skipped) counts.set(item.reason, (counts.get(item.reason) ?? 0) + 1)
   return [...counts].map(([reason, count]) => {
-    const files = `${count} ${count === 1 ? "file" : "files"}`
-    if (reason === "already running") return `${files} ${count === 1 ? "is" : "are"} already running`
-    if (reason === "work queued") return `${files} still ${count === 1 ? "has" : "have"} queued work`
-    if (reason === "paused") return `${files} ${count === 1 ? "is" : "are"} paused`
-    if (reason === "pause pending") return `${files} ${count === 1 ? "is" : "are"} finishing a pause`
+    if (reason === "already running") return t("autopilot.overview.startResult.alreadyRunning", { count })
+    if (reason === "work queued") return t("autopilot.overview.startResult.queuedWork", { count })
+    if (reason === "paused") return t("autopilot.overview.startResult.paused", { count })
+    if (reason === "pause pending") return t("autopilot.overview.startResult.pausePending", { count })
     if (reason === "idle run owns file; review or stop it before rerunning") {
-      return `${files} ${count === 1 ? "has" : "have"} an idle run; review its drafts or stop it before rerunning`
+      return t("autopilot.overview.startResult.idleOwner", { count })
     }
     if (reason === "start_failed") {
-      return `${files} couldn’t start; open activity for details`
+      return t("autopilot.overview.startResult.startFailed", { count })
     }
     // Reasons are durable technical categories. Unknown future categories
     // must not leak raw identifiers or backend prose into the primary UI.
-    return `${files} couldn’t start right now`
+    return t("autopilot.overview.startResult.unavailable", { count })
   })
 }
 
-function startResultSummary(result: ProjectRunStartResult): string {
+function formatList(items: string[], locale: string): string {
+  return new Intl.ListFormat(locale, { style: "long", type: "conjunction" }).format(items)
+}
+
+function startResultSummary(result: ProjectRunStartResult, locale: string, t: TFunction): string {
   const started = result.started.length
   const skipped = result.skipped.length
   const deferred = result.deferred.count
   const parts = [started > 0
-    ? `${started} ${started === 1 ? "file" : "files"} started`
-    : "No files started"]
-  if (skipped > 0) parts.push(`${skipped} skipped`)
-  if (deferred > 0) parts.push(`${deferred} deferred to the next batch`)
-  const outcome = `${parts.join(" · ")}.`
-  const reasons = skippedReasonSummary(result.skipped)
-  const why = reasons.length > 0 ? ` ${reasons.join("; ")}.` : ""
+    ? t("autopilot.overview.startResult.startedFiles", { count: started })
+    : t("autopilot.overview.startResult.noneStarted")]
+  if (skipped > 0) parts.push(t("autopilot.overview.startResult.skippedFiles", { count: skipped }))
+  if (deferred > 0) parts.push(t("autopilot.overview.startResult.deferredFiles", { count: deferred }))
+  const outcome = t("autopilot.overview.startResult.outcome", { items: formatList(parts, locale) })
+  const reasons = skippedReasonSummary(result.skipped, t)
+  const why = reasons.length > 0
+    ? t("autopilot.overview.startResult.outcome", { items: formatList(reasons, locale) })
+    : null
   const continuation = deferred > 0
-    ? " Run Autopilot again after this batch becomes idle to start the waiting files."
-    : ""
-  return `${outcome}${why}${continuation} Draft suggestions stay in review until a person accepts them.`
+    ? t("autopilot.overview.startResult.deferredHelp")
+    : null
+  return [outcome, why, continuation, t("autopilot.overview.startResult.reviewGuarantee")]
+    .filter((part): part is string => part !== null)
+    .join(" ")
 }
 
 function ActionWidget({
   label,
+  ariaLabel,
   count,
   onClick,
 }: {
   label: string
+  ariaLabel: string
   count: number
   onClick: () => void
 }) {
@@ -219,7 +244,7 @@ function ActionWidget({
       type="button"
       variant="outline"
       className="h-auto min-w-0 justify-between whitespace-normal px-3 py-2 text-left"
-      aria-label={`View ${count} ${label.toLowerCase()}`}
+      aria-label={ariaLabel}
       onClick={onClick}
     >
       <span className="min-w-0"><span className="block text-lg font-semibold tabular-nums">{count}</span><span className="block text-xs text-muted-foreground">{label}</span></span>
@@ -229,11 +254,12 @@ function ActionWidget({
 }
 
 export function ProjectAutopilotPanel({ projectId, fileNames, canStart }: ProjectAutopilotPanelProps) {
+  const { locale, t } = useI18n()
   const [overview, setOverview] = useState<ContextualOverview | null>(null)
   const [loading, setLoading] = useState(true)
   const [starting, setStarting] = useState(false)
-  const [startError, setStartError] = useState<string | null>(null)
-  const [startSummary, setStartSummary] = useState<string | null>(null)
+  const [startFailed, setStartFailed] = useState(false)
+  const [startResult, setStartResult] = useState<ProjectRunStartResult | null>(null)
   const [refreshWarning, setRefreshWarning] = useState(false)
   const [lastGoodAt, setLastGoodAt] = useState<Date | null>(null)
   const [inspectorOpen, setInspectorOpen] = useState(false)
@@ -288,14 +314,14 @@ export function ProjectAutopilotPanel({ projectId, fileNames, canStart }: Projec
   const handleStart = async () => {
     if (starting) return
     setStarting(true)
-    setStartError(null)
-    setStartSummary(null)
+    setStartFailed(false)
+    setStartResult(null)
     try {
       const result = await startProjectContextualRun(projectId)
-      setStartSummary(startResultSummary(result))
+      setStartResult(result)
       await load()
-    } catch (error) {
-      setStartError(error instanceof Error ? error.message : "Autopilot could not start.")
+    } catch {
+      setStartFailed(true)
     } finally {
       setStarting(false)
     }
@@ -312,7 +338,7 @@ export function ProjectAutopilotPanel({ projectId, fileNames, canStart }: Projec
   if (!overview?.available) return null
 
   const initialLoadFailed = refreshWarning && lastGoodAt === null
-  const state = resolveState(overview, starting, startError, initialLoadFailed)
+  const state = resolveState(overview, starting, startFailed, initialLoadFailed)
   const progressFiles = overview.files.filter((file) =>
     state === "working" ? WORKING_STATUSES.has(file.status) : state === "paused" && file.status === "paused",
   )
@@ -341,43 +367,69 @@ export function ProjectAutopilotPanel({ projectId, fileNames, canStart }: Projec
         <CardHeader>
           <CardTitle className="flex flex-wrap items-center gap-2">
             <Sparkles className="size-4 text-primary" aria-hidden />
-            <h3>Autopilot</h3>
-            <StateBadge state={state} />
+            <h3>{t("autopilot.name")}</h3>
+            <StateBadge state={state} t={t} />
           </CardTitle>
-          <CardDescription>{primaryLine(state, overview, workingDone, workingTotal, workingFileCount, workingTotalsKnown, starting, initialLoadFailed)}</CardDescription>
+          <CardDescription>{primaryLine(state, overview, workingDone, workingTotal, workingFileCount, workingTotalsKnown, starting, initialLoadFailed, t)}</CardDescription>
           {showStart && (
             <CardAction>
               <Button type="button" size="sm" variant={state === "not-started" ? "default" : "outline"} disabled={starting} onClick={() => void handleStart()}>
                 {starting ? <LoaderCircle data-icon="inline-start" className="animate-spin motion-reduce:animate-none" aria-hidden /> : <Play data-icon="inline-start" aria-hidden />}
-                Run Autopilot
+                {t("autopilot.action.run")}
               </Button>
             </CardAction>
           )}
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
-          {starting && <p role="status" aria-live="polite" className="text-sm font-medium">Starting Autopilot…</p>}
+          {starting && <p role="status" aria-live="polite" className="text-sm font-medium">{t("autopilot.feedback.starting")}</p>}
           {state === "working" && !starting && workingTotalsKnown && workingTotal > 0 && (
-            <Progress value={(workingDone / workingTotal) * 100} aria-label={`${workingDone} of ${workingTotal} passages complete`} />
+            <Progress
+              value={(workingDone / workingTotal) * 100}
+              aria-label={t("autopilot.progress.passagesComplete", { done: workingDone, total: workingTotal })}
+            />
           )}
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-            <ActionWidget label="Ready to review" count={overview.proposedDrafts} onClick={() => openInspector("review")} />
-            <ActionWidget label="Needs attention" count={attentionItems} onClick={() => openInspector("attention")} />
-            <ActionWidget label="Context suggestions" count={suggestionCount} onClick={() => openInspector("context")} />
+            <ActionWidget
+              label={t("autopilot.overview.widget.reviewLabel")}
+              ariaLabel={t("autopilot.overview.widget.reviewAria", { count: overview.proposedDrafts })}
+              count={overview.proposedDrafts}
+              onClick={() => openInspector("review")}
+            />
+            <ActionWidget
+              label={t("autopilot.status.needsAttention")}
+              ariaLabel={t("autopilot.overview.widget.attentionAria", { count: attentionItems })}
+              count={attentionItems}
+              onClick={() => openInspector("attention")}
+            />
+            <ActionWidget
+              label={t("autopilot.overview.widget.contextLabel")}
+              ariaLabel={t("autopilot.overview.widget.contextAria", { count: suggestionCount })}
+              count={suggestionCount}
+              onClick={() => openInspector("context")}
+            />
           </div>
-          {startSummary && !starting && <p role="status" aria-live="polite" className="text-xs text-muted-foreground">{startSummary}</p>}
-          {startError && <p role="alert" className="flex items-start gap-2 text-sm text-destructive"><AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden />{startError}</p>}
+          {startResult && !starting && (
+            <p role="status" aria-live="polite" className="text-xs text-muted-foreground">
+              {startResultSummary(startResult, locale, t)}
+            </p>
+          )}
+          {startFailed && <p role="alert" className="flex items-start gap-2 text-sm text-destructive"><AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden />{t("autopilot.error.startFailed")}</p>}
           {refreshWarning && (
             <div className="flex flex-wrap items-center gap-2 text-xs text-destructive" role="status">
               <AlertTriangle className="size-4 shrink-0" aria-hidden />
-              <span>{lastGoodAt ? `Refresh failed. Showing the snapshot checked at ${new Intl.DateTimeFormat(undefined, { timeStyle: "short" }).format(lastGoodAt)}.` : "Autopilot status could not be loaded."}</span>
-              <Button type="button" size="xs" variant="ghost" onClick={() => void load()}>Try again</Button>
+              <span>{lastGoodAt
+                ? t("autopilot.overview.refreshFailedAt", {
+                    time: new Intl.DateTimeFormat(locale, { timeStyle: "short" }).format(lastGoodAt),
+                  })
+                : t("autopilot.overview.refreshFailedInitial")}</span>
+              <Button type="button" size="xs" variant="ghost" onClick={() => void load()}>{t("common.retry")}</Button>
             </div>
           )}
         </CardContent>
         <CardFooter className="justify-between gap-3">
-          <span className="text-xs text-muted-foreground">{formatChecked(lastGoodAt)}</span>
+          <span className="text-xs text-muted-foreground">{formatChecked(lastGoodAt, locale, t)}</span>
           <Button type="button" size="sm" variant="ghost" onClick={() => openInspector("activity")}>
-            View activity
+            {t("autopilot.action.viewActivity")}
             <ChevronRight data-icon="inline-end" aria-hidden />
           </Button>
         </CardFooter>

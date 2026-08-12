@@ -77,6 +77,7 @@ Gate:
 | 2 | 2026-08-12 | WS-05 trunk-tables, WS-06 lib-labels, WS-07 error-wiring | **MERGED, gate green** |
 | 2b | 2026-08-12 | translation of the 106 new keys (4 locales) + e2e-note fixup | **MERGED, verified live in Arabic** |
 | 3 | 2026-08-12 | WS-08 roles, WS-09 formatters, WS-10 RTL | **MERGED, gate green** |
+| 4 | 2026-08-12 | WS-11 org, WS-12 onboarding, WS-13 import/export, WS-14 settings, WS-15 rules, WS-16 terminology | in progress |
 
 ## §3 Workstream registry
 
@@ -112,6 +113,12 @@ Gate:
 | 08-12 | orchestrator | — | 0 | green | resolved 3 formatter-vs-direction conflicts by keeping WS-09's formatting AND applying WS-10's logical classes |
 
 **Wave 3 gate: tsc 0 · vitest 7141 tests green · i18n:check 1483 covered · eslint exit 0.**
+
+| 08-12 | WS-16 terminology | 8da402152 | 0 | green | ~150 keys; consolidated a 6-file status vocabulary; split compile.ts's app frame from user terms; **136 suppressions cleared** |
+| 08-12 | WS-12 onboarding | 6f0e51288 | 0 | green | 211 strings, ~300 keys; 8 const-array refactors; found + fixed six hardcoded "← Back" arrows (a real RTL bug) |
+
+**After WS-16 + WS-12: tsc 0 · vitest 7141 green · i18n:check 1931 covered · eslint 0 ·
+lint baseline 2251 → 1903 violations across 168 files (from 199).**
 Residual after wave 3: physical-direction utilities in `components/org` 69+ → **5**;
 locale-blind formatter calls 66 → **6** (all documented exclusions: date-picker/calendar
 locked to en-US, and 4 sandboxed parser modules with no locale across the boundary).

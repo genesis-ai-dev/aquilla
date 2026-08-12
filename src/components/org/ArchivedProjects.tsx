@@ -116,6 +116,7 @@ export function ArchivedProjects() {
             <DataTableRowActionsButton
               label={`More actions for ${p.name}`}
               data-testid={`archived-row-actions-${p.id}`}
+              revealOnHover
               disabled={restoringId != null}
               busy={restoringId === p.id}
             />

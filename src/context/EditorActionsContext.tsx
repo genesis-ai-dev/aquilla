@@ -49,6 +49,14 @@ export interface EditorActionsContextValue {
    * (once on load) and every row reads it the same way.
    */
   myScopes?: MemberScope[]
+  /**
+   * AQU-646: a take just landed on this cell (mic or file upload). The
+   * workspace uses it to give a text-less line a target row, so a recording
+   * counts as translated work rather than an empty cell that happens to make
+   * noise. Context rather than a row prop: rows only forward it, and it is
+   * identity-stable in the workspace.
+   */
+  onTakeSaved?: (cellId: string) => void
 }
 
 const EditorActionsContext = createContext<EditorActionsContextValue>({})

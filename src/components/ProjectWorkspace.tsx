@@ -3809,6 +3809,15 @@ export function ProjectWorkspace() {
   // entangled with the still-drilled audio-lens prop cluster in EditorRow's
   // audio section, so pulling just the callback into context wouldn't shrink
   // that section's prop surface.)
+  // AQU-646: `ensureTargetRowForTake` is declared further down (it needs
+  // `isReadOnly`), and this memo must not churn, so it goes through a ref the
+  // same way the cast-assign handler above does. The context sees one identity
+  // for the life of the workspace.
+  const ensureTargetRowForTakeRef = useRef<(cellId: string) => void>(() => {})
+  const handleTakeSaved = useCallback((cellId: string) => {
+    ensureTargetRowForTakeRef.current(cellId)
+  }, [])
+
   const editorActionsValue = useMemo(() => ({
     onInfractionClick: handleInfractionClick,
     onOpenComments: handleOpenComments,
@@ -3817,8 +3826,9 @@ export function ProjectWorkspace() {
     onOpenRecording: handleOpenRecording,
     onMediaRowActivate: handleMediaRowActivate, // 2026-08-07: row click → timeline (stacked lens only)
     onAssignCastVoice: handleAssignCastVoice, // 2026-08-07: gutter picker (pure assignment)
+    onTakeSaved: handleTakeSaved, // AQU-646: a take gives a text-less line a target row
     myScopes, // AQU-633: per-cell validate scope gate
-  }), [handleInfractionClick, handleOpenComments, handleOpenHistory, handleAiSetupNeeded, handleOpenRecording, handleMediaRowActivate, handleAssignCastVoice, myScopes])
+  }), [handleInfractionClick, handleOpenComments, handleOpenHistory, handleAiSetupNeeded, handleOpenRecording, handleMediaRowActivate, handleAssignCastVoice, handleTakeSaved, myScopes])
 
   const handleAssignVoice = useCallback(async (cellId: string, voiceId: string) => {
     if (!audioProject || !frontierSession) return
@@ -3865,6 +3875,68 @@ export function ProjectWorkspace() {
 
   const perms = useProjectPermissions(project)
   const isReadOnly = !perms.canEditContent
+
+  /**
+   * AQU-646: give a cell a TARGET ROW when it gains a recording, so that a line
+   * carrying only audio is a real translation as far as the rest of the app is
+   * concerned.
+   *
+   * Takes live in `cell_audio`, written by `cell.audio.attach`, which never
+   * creates a `cells` target row. That absence is the actual reason a
+   * recording-only line could not be validated: `emitValidationChange` needs a
+   * `targetEventId` to hang the validation off, and assignment progress counts
+   * target rows with `validated = 1`. Lighting up the validate button without
+   * this would have produced a button that does nothing.
+   *
+   * The commit carries an EMPTY value. That is not a placeholder for text —
+   * the row exists to say "this line has been worked", and the audio is the
+   * work.
+   *
+   * GUARDED, and the guard is the whole safety story: it fires only when the
+   * cell has neither a target row nor a commit already in flight. An unguarded
+   * empty commit on a cell that has text would erase it.
+   */
+  const ensureTargetRowForTake = useCallback(async (cellId: string) => {
+    if (!project?.id || isReadOnly) return
+    if (!canPerform("target.cell.commit", project.syncRole?.level ?? null)) return
+    const cell = getActiveCell(cellId)
+    if (!cell) return
+    if (cell.targetEventId || getPendingTargetEventId(cell.id)) return
+
+    const parentId = resolveTargetCommitParentId(cell)
+    const eventId = await emitTargetCellCommit({
+      projectId: project.id,
+      fileId: cell.fileId,
+      cellId: cell.id,
+      parentId,
+      sourceEventId: cell.sourceEventId ?? null,
+      value: "",
+      valueHtml: "",
+      author: currentUsername,
+      targetLang: activeLane,
+    })
+    rememberPendingTargetCommit(cell.id, eventId, parentId)
+    await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+    await refreshOutboxPending()
+    revalidateCellStats(cell.id)
+    revalidateCell(cell.id)
+  }, [
+    project?.id,
+    project?.syncRole?.level,
+    isReadOnly,
+    getActiveCell,
+    getPendingTargetEventId,
+    activeLane,
+    resolveTargetCommitParentId,
+    rememberPendingTargetCommit,
+    currentUsername,
+    getTokenForProjectFile,
+    refreshOutboxPending,
+    revalidateCellStats,
+    revalidateCell,
+  ])
+
+  ensureTargetRowForTakeRef.current = (cellId: string) => void ensureTargetRowForTake(cellId)
 
   const commitTrayFootnoteText = useCallback(async (cellId: string, updatedText: string) => {
     if (!project?.id || isReadOnly) return
@@ -6505,6 +6577,7 @@ export function ProjectWorkspace() {
             // confirmed — stop deferring a pending timing-mode heads-up.
             timingAck.surfaceNow()
           }}
+          onTakeSaved={(cellId) => void ensureTargetRowForTake(cellId)}
           onClose={() => setRecordingCellId(null)}
         />
       )}

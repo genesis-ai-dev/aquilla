@@ -50,12 +50,16 @@ interface Props {
   projectId: string
   fileId: string
   cellId: string
+  /** AQU-646: an uploaded take just landed. Lets the workspace give a text-less
+   *  line a target row, so a recording counts as translated work. Same contract
+   *  as the recorder modal's `onTakeSaved`. */
+  onTakeSaved?: (cellId: string) => void
   /** Author attribution for the cell.audio.attach event. */
   username: string
   disabled?: boolean
 }
 
-export function CellAudioUploadButton({ projectId, fileId, cellId, username, disabled }: Props) {
+export function CellAudioUploadButton({ projectId, fileId, cellId, username, disabled, onTakeSaved }: Props) {
   const { session } = useFrontierSession()
   const inputRef = useRef<HTMLInputElement | null>(null)
   const [uploading, setUploading] = useState(false)
@@ -129,12 +133,13 @@ export function CellAudioUploadButton({ projectId, fileId, cellId, username, dis
         trimEndMs: null,
       }, attachEventId)
       notifyAudioAttachmentsChanged(fileId)
+      onTakeSaved?.(cellId)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
       setUploading(false)
     }
-  }, [session, projectId, fileId, cellId, username])
+  }, [session, projectId, fileId, cellId, username, onTakeSaved])
 
   const onInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]

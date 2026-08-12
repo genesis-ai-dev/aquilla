@@ -46,6 +46,11 @@ interface Props {
   activeCellId: string | null
   username: string
   onActiveCellChange: (cellId: string) => void
+  /** AQU-646: a take just landed on this cell. The workspace uses it to give a
+   *  text-less line a target row, so a recording counts as translated work —
+   *  see `ensureTargetRowForTake`. Fired after the attach event is safely
+   *  emitted, so a failed upload never claims work that does not exist. */
+  onTakeSaved?: (cellId: string) => void
   onClose: () => void
 }
 
@@ -59,7 +64,7 @@ const OFFLINE_MESSAGE =
 
 export function AudioRecordingModal({
   open, project, cells, activeCellId, username,
-  onActiveCellChange, onClose,
+  onActiveCellChange, onTakeSaved, onClose,
 }: Props) {
   const recorder = useAudioRecorder()
   const countdown = useCountdown()
@@ -399,6 +404,9 @@ export function AudioRecordingModal({
         trimEndMs: null,
       }, attachEventId)
       notifyAudioAttachmentsChanged(activeCell.fileId)
+      // The take is real now. Tell the workspace, so a line that has only ever
+      // held audio gets the target row that makes it countable and validatable.
+      onTakeSaved?.(activeCell.id)
       setPhase("saved")
       // Fire Whisper transcription in the background — user gets karaoke as
       // soon as the model is ready; doesn't block the auto-advance.

@@ -85,7 +85,6 @@ import { RuleDrawer } from "./RuleDrawer"
 import { RulesSurface } from "./RulesSurface"
 import { CommentsDrawer } from "./CommentsDrawer"
 import { HistoryDrawer } from "./HistoryDrawer"
-import { SharePanel } from "./SharePanel"
 import { VideoPlayer, type VideoPlayerHandle } from "./VideoPlayer"
 import { VideoAttachmentDialog } from "./VideoAttachmentDialog"
 import { parseTimestampRange, extractCuesFromCells } from "@/lib/video/vtt-generator"
@@ -129,7 +128,7 @@ import { getVoiceLibrary, newVoiceId, VOICE_PALETTE } from "@/lib/audio/voices"
 import { attachMediaFileToTimeline, attachMediaUrlToTimeline } from "@/lib/timeline/attach-media"
 import { useCellsAuditStatsWithOverlay } from "@/hooks/useCellsAuditStatsWithOverlay"
 import { useComments } from "@/hooks/useComments"
-import { Film, Scale, Bot, MessagesSquare, Share2, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, BookMarked, BookOpen, Users, UserCheck, ArrowRight, PanelLeftClose, Mic, Plus, Pencil, FolderInput, Download } from "lucide-react"
+import { Film, Scale, Bot, MessagesSquare, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, BookMarked, BookOpen, Users, UserCheck, ArrowRight, PanelLeftClose, Mic, Plus, Pencil, FolderInput, Download } from "lucide-react"
 import { toast } from "@/components/ui/toast"
 import { AgentDockPanel } from "./AgentDockPanel"
 import { agentSessionStore } from "@/lib/agent/session-store"
@@ -852,7 +851,6 @@ export function ProjectWorkspace() {
   const [parallelOpen, setParallelOpen] = useState(false)
   const [parallelMode, setParallelMode] = useState<ParallelPanelMode>("search")
   const [parallelScope, setParallelScope] = useState<ParallelPanelScope>("project")
-  const [shareOpen, setShareOpen] = useState(false)
   // FRO-308: left dock active tab (null = collapsed rail only)
   const [dockTab, setDockTab] = useState<DockTab | null>("files")
   // Agent editor tab is in the strip while the workbench is open. Minimize
@@ -4440,10 +4438,8 @@ export function ProjectWorkspace() {
       { id: "living-memory", label: "Memory", icon: BookMarked,
         onClick: () => openOverlay("memory") },
       // Audio/Media lens lives in the header EditorModeToggle — keep it out of
-      // the sidebar More menu so the overflow list stays structural (share,
-      // settings, trash) rather than view-mode toggles.
-      { id: "share", label: "Share", icon: Share2,
-        onClick: () => setShareOpen(true) },
+      // the sidebar More menu so the overflow list stays structural (settings,
+      // trash) rather than view-mode toggles. Sharing lives in Settings → Members.
       { id: "settings", label: "Settings", icon: SettingsIcon,
         onClick: () => {
           if (!projectId) return
@@ -6590,11 +6586,6 @@ export function ProjectWorkspace() {
         isReadOnly={isReadOnly}
         onAfterReplace={rebuildSearchIndex}
         onReplaceAll={handleReplaceAll}
-      />
-      <SharePanel
-        open={shareOpen} onOpenChange={setShareOpen}
-        projectId={projectId!}
-        onSharesChanged={refreshChecklistShares}
       />
       <VideoAttachmentDialog
         open={videoDialogOpen} onOpenChange={setVideoDialogOpen}

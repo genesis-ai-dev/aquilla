@@ -54,7 +54,7 @@
 | Sharing     | Generate invite link / join project via link         | `e2e/specs/projects/share-invite-link.smoke.spec.ts` + `join-page.smoke.spec.ts` | ✅ |
 | Sharing     | Invite accept confirmation + `/shared` visibility (AQU-335 / AQU-417) | `e2e/specs/projects/invite-accept-dashboard-visibility.smoke.spec.ts` | ✅ |
 | Sharing     | Pending-invite inbox + org external-collaborator revoke (AQU-326) | `e2e/specs/orgs/pending-invite-inbox-external-revoke.smoke.spec.ts` | ✅ |
-| Sharing     | Copy invite URL from share panel                     | `e2e/specs/projects/share-invite-copy-url.smoke.spec.ts`      |   ✅   |
+| Sharing     | Copy invite URL from Settings → Members invite tab   | `e2e/specs/projects/share-invite-copy-url.smoke.spec.ts`      |   ✅   |
 | Sharing     | Toggle invite mode between @user and email           | `e2e/specs/projects/share-invite-mode-toggle.smoke.spec.ts`   |   ✅   |
 | Sharing     | Invite landing pages name inviter + workspace (AQU-471) | `e2e/specs/projects/join-page.smoke.spec.ts` (test 2) + `e2e/specs/orgs/join-org-context.smoke.spec.ts` | ✅ |
 | Sharing     | Email invites to multiple projects from the org view (AQU-471) | `e2e/specs/orgs/multi-project-invite-submit.smoke.spec.ts` (test 2) | ✅ |
@@ -153,7 +153,7 @@
 | Projects    | Project settings API key show/hide toggle             | `e2e/specs/projects/project-settings-api-key-toggle.smoke.spec.ts` |   ✅   |
 | Projects    | Project settings termbase sharing section             | `e2e/specs/projects/project-settings-termbase-sharing.smoke.spec.ts` | ⏸ hidden |
 | Projects    | Multi-project invite submit from share panel          | `e2e/specs/projects/multi-project-invite-submit.smoke.spec.ts` |   ✅   |
-| Projects    | Multi-select member add on project surfaces (overview Members card + `/project/:id/settings/members` + Share modal suggestions) | `e2e/specs/projects/project-members-add-multiselect.smoke.spec.ts` + `share-invite-username-verified.smoke.spec.ts` | ✅ |
+| Projects    | Multi-select member add on project surfaces (overview Members card + `/project/:id/settings/members`) | `e2e/specs/projects/project-members-add-multiselect.smoke.spec.ts` + `share-invite-username-verified.smoke.spec.ts` | ✅ |
 | Orgs        | Org rename from Identity (inline blur-to-save)        | `e2e/specs/orgs/org-rename.smoke.spec.ts` | ✅ |
 | Orgs        | Org settings page renders; Identity rename round-trip | `e2e/specs/orgs/org-settings.smoke.spec.ts` + `org-settings-rename.smoke.spec.ts` | ✅ |
 | Orgs        | Member access panel expand shows per-project access   | `e2e/specs/orgs/member-access-panel-expand.smoke.spec.ts`     |   ✅   |
@@ -275,7 +275,7 @@
 | Projects    | Assign work panel in project overview                 | `e2e/specs/projects/assign-work-panel.smoke.spec.ts`          |   ✅   |
 | Projects    | Assign work form submits and collapses after success  | `e2e/specs/orgs/assign-work-submit.smoke.spec.ts`             | ✅ |
 | Projects    | All routes return 200 / don't crash                   | `e2e/specs/projects/route-health.smoke.spec.ts`               |   ✅   |
-| Sharing     | Share dialog opens with correct default state         | `e2e/specs/projects/share-dialog.smoke.spec.ts`               |   ✅   |
+| Sharing     | Add a member dialog opens with members and invite-link tabs | `e2e/specs/projects/share-dialog.smoke.spec.ts`               |   ✅   |
 | Sharing     | Invite email validation (invalid email stays disabled) | `e2e/specs/projects/share-invite-email-validation.smoke.spec.ts` |   ✅   |
 | Sharing     | Invite expiry select changes expiry                   | `e2e/specs/projects/share-invite-expiry-select.smoke.spec.ts` |   ✅   |
 | Sharing     | Invite role select changes role                       | `e2e/specs/projects/share-invite-role-select.smoke.spec.ts`   |   ✅   |

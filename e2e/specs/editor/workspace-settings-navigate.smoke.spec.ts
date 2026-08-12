@@ -27,6 +27,8 @@ test("sidebar More project options Settings item navigates to project settings",
   await moreBtn.click()
 
   // Click the "Settings" row (plain button inside the portaled popover).
+  await expect(alice.getByRole("button", { name: /^Share$/i })).toHaveCount(0)
+
   const settingsItem = alice.getByRole("button", { name: /^Settings$/i })
   await expect(settingsItem).toBeVisible({ timeout: 3_000 })
   await settingsItem.click()

@@ -1,34 +1,19 @@
 import { test, expect } from "../../helpers/multi-user"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
-import { Workspace } from "../../helpers/page-objects/Workspace"
+import { ProjectSettings } from "../../helpers/page-objects/ProjectSettings"
 import { ensureAuthState } from "../../helpers/auth"
 import { addOrgMember, createOrg, ROLE } from "../../helpers/frontier-api"
-import path from "node:path"
-import { fileURLToPath } from "node:url"
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-}
 
 /**
- * SharePanel (Members tab) — change a member's project role.
+ * Settings → Members — change a member's project role.
  *
- * MembersPanel.tsx renders a Base UI Select (trigger aria-label="Change
- * role") next to each non-locked, non-self member. Changing the value
- * calls onChangeRole.
- *
- * This spec: seeds bob into a separate alice-owned org so scoped search can find
- * him, creates a project, opens SharePanel, adds bob, changes his role via the
- * select, then verifies the trigger now shows the new role.
+ * MembersSection renders a row-actions menu ("Actions for <username>") with a
+ * "Change role" submenu. This spec: seeds bob into a separate alice-owned org
+ * so scoped search can find him, creates a project, adds bob, then changes
+ * his role via the row menu.
  */
 test("share panel members tab role select changes member's role", async ({ alice }) => {
   const aliceSession = await ensureAuthState("alice")
-  // Seed bob into a different alice-owned org. That keeps AQU-321 scoped user
-  // search meaningful without making bob an existing member of this project's
-  // Members panel.
   const searchScopeOrg = await createOrg(aliceSession.jwt, `Z Role Change Search Scope ${Date.now()}`)
   await addOrgMember(aliceSession.jwt, searchScopeOrg.id, "bob", ROLE.VIEWER)
 
@@ -36,65 +21,37 @@ test("share panel members tab role select changes member's role", async ({ alice
   await dash.goto()
   const name = `RoleChange ${Date.now()}`
   await dash.createProject({ name, source: "en", target: "fr" })
-  await dash.openProject(name)
+  await expect(alice).toHaveURL(/\/projects\/[^/?#]+/, { timeout: 15_000 })
 
-  const ws = new Workspace(alice)
-  await ws.importFile(SAMPLE_MD)
-  await ws.openFileBySubstring("sample")
-  await ws.waitForEditor()
+  const settings = new ProjectSettings(alice)
+  const dialog = await settings.openAddMemberDialog(settings.projectIdFromCurrentUrl())
 
-  // Open Share panel.
-  // Share lives in the sidebar "More" menu (sidebar cleanup).
-  await alice.getByRole("button", { name: /More project options/i }).click()
-  const shareBtn = alice.getByRole("button", { name: /^Share$/i })
-  await shareBtn.click()
-  const dialog = alice.getByRole("dialog")
-  await expect(dialog).toBeVisible({ timeout: 5_000 })
-
-  // Members tab should be active by default.
-  // Add bob using the multi-select UsernameTypeahead (AQU-734).
   const usernameInput = dialog.locator('input[placeholder*="username"], input[placeholder*="Aquilla"]').first()
   await expect(usernameInput).toBeVisible({ timeout: 5_000 })
   await usernameInput.fill("bob")
 
-  // Check the "bob" suggestion row — stages a chip; dropdown stays open.
   const suggestion = alice.getByRole("checkbox", { name: "bob" })
   await expect(suggestion).toBeVisible({ timeout: 8_000 })
   await suggestion.click()
-  // Chip proves staging; click the dialog title to dismiss the typeahead
-  // portal without closing Share (Escape would dismiss the dialog).
   await expect(dialog.getByRole("button", { name: "Remove bob" })).toBeVisible({ timeout: 5_000 })
-  await dialog.getByRole("heading", { name: /Share/i }).click()
+  await dialog.getByRole("heading", { name: /Add a member/i }).click()
 
   const addBtn = dialog.getByRole("button", { name: /^Add$/i })
   await expect(addBtn).toBeEnabled({ timeout: 5_000 })
   await addBtn.click()
+  await expect(dialog).not.toBeVisible({ timeout: 8_000 })
 
-  // Wait for bob's row to reflect the direct grant (contributor beats his
-  // viewer org role, so the row is unlocked and gets the "Change role" select).
-  await expect(dialog.getByText("bob").first()).toBeVisible({ timeout: 8_000 })
+  const table = alice.getByTestId("settings-members-table")
+  await expect(table.getByText("bob").first()).toBeVisible({ timeout: 8_000 })
 
-  // Change bob's role via the select next to his name.
-  const bobRow = dialog.locator("li").filter({ hasText: "bob" })
-  const roleSelect = bobRow.getByRole("combobox", { name: "Change role" })
-  await expect(roleSelect).toBeVisible({ timeout: 5_000 })
+  const bobRow = table.getByRole("row").filter({ hasText: "bob" })
+  await bobRow.hover()
+  await alice.getByRole("button", { name: /Actions for bob/i }).click()
+  await alice.getByRole("menuitem", { name: /Change role/i }).click()
 
-  // Read the current role label and switch to a different one.
-  const currentRole = (await roleSelect.textContent())?.trim() ?? ""
-  await roleSelect.click()
-  const listbox = alice.getByRole("listbox")
-  await expect(listbox).toBeVisible({ timeout: 3_000 })
-  const otherOption = alice.getByRole("option").filter({ hasNotText: currentRole }).first()
-  await expect(otherOption).toBeVisible({ timeout: 10_000 })
-  // Option rows include the capability blurb; the closed trigger only shows the role name.
-  const newRole =
-    (await otherOption.locator(".font-medium").first().textContent())?.trim() ||
-    ((await otherOption.textContent()) ?? "").trim().split(/\s{2,}|\n/)[0]?.trim() ||
-    ""
-  await otherOption.click()
-  await expect(listbox).toBeHidden({ timeout: 3_000 })
-  await expect(roleSelect).toContainText(new RegExp(escapeRegExp(newRole), "i"), { timeout: 3_000 })
+  const reviewerItem = alice.getByRole("menuitem").filter({ hasText: /^reviewer/i }).first()
+  await expect(reviewerItem).toBeVisible({ timeout: 5_000 })
+  await reviewerItem.click()
 
-  // Dismiss.
-  await alice.keyboard.press("Escape")
+  await expect(bobRow.getByText(/reviewer/i).first()).toBeVisible({ timeout: 8_000 })
 })

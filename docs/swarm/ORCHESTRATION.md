@@ -1,664 +1,99 @@
-# SWARM ORCHESTRATION — codex-web-app → production
+# SWARM ORCHESTRATION — i18n coverage (AQU-511 / AQU-832)
 
----
+**Goal:** close the localization coverage gap. 1,337 keys exist; ~3,465 in-app
+user-visible strings were never keyed. Full audit + plan:
+`docs/swarm/I18N-COVERAGE-PLAN.md` (and the published artifact).
 
-# 🆕🆕🆕🆕🆕🆕🆕 CURRENT GOAL (2026-07-01) — Drain "Prototype Debugging" (Biblica demo bugs)
+## §0 STOP checklist
 
-> **✅ CONVERGED 2026-07-01** — all 4 issues (AQU-455/457/458/460) Fixed + live-verified + promoted to local main `1bb9b6a5d` (ff-only, NOT pushed/deployed). See §M. (Was the ACTIVE goal.) Everything below (incl. the 2026-06-19 block) is reference-only from prior swarms.
-> Driver: user `/swarm`. Project: **Prototype Debugging** (`215cff7b-1a95-443d-9343-1f1528754462`), team FrontierR&D.
-> Scope = 4 Biblica-labelled issues from the 2026-06-30 Kilisusu demo call: AQU-455, AQU-457, AQU-458, AQU-460.
-> Base: main tip `77cd6abb7` (main is LIVE/moving — re-verify tip before every promotion). Integration branch: `swarm/proto-debug-integration` at `.worktrees/proto-debug-integration`.
+Foundation:
+- [ ] `i18n:import` MERGES instead of overwriting; a test proves a partial import
+      preserves previously-translated keys
+- [ ] Source hashes detect English that changed under an existing translation
+- [ ] `i18n/no-unkeyed-string` ESLint rule landed, baselined, wired into `pnpm lint`
+      and CI; a NEW hardcoded string fails the build
+- [ ] `pnpm i18n:check` runs in CI (it never has)
+- [ ] Context standard relaxed to a machine-decidable class test; docs updated
+- [ ] Unreachable pages deleted, not translated
 
-## §0 STOP checklist (the goal)
-- [ ] Every eligible issue at **Fixed** (verified) or honestly blocked with a Linear note.
-- [ ] Integration green: `npx tsc -b --noEmit` + `npx vitest run`; `npm run build` before each promotion.
-- [ ] `cd auth-worker && npx tsc --noEmit && npm test` green (AQU-457 touches it).
-- [ ] Each fix verified on the real dev stack (live UI) before → Fixed; spec reconciled per `/issue` Step 2.5.
-- [ ] Promoted to main only with main clean apart from recorded protected files (never clobbered).
-- [ ] Every remaining gap traced in `docs/swarm/TRACES.md`.
+Shared foundations (block all area work):
+- [ ] `common.role.*` exists; `src/lib/frontier/roles.ts` consumers use it
+- [ ] Colliding vocabulary promoted to `common.*`
+- [ ] Shared locale-aware date/number/list formatters; no `toLocaleX(undefined)` in `src/`
+- [ ] Plural + bidi (FSI/PDI) helpers
+- [ ] RTL logical-property sweep (physical `ml-/pl-/left-` → logical `ms-/ps-/start-`)
 
-## §EXCLUDED
-- Nothing excluded yet. Only the 4 user-named issues are in scope (the rest of Prototype Debugging is out of scope for this run).
-- Protected/forbidden path on main: `public/aquilla-logo.png` was untracked at session start (now committed as `77cd6abb7`); no other actor's dirty files at base.
+Coverage:
+- [ ] Trunk label tables typed as `MessageKey` (compile error on an unkeyed row)
+- [ ] The ~21 already-translated-but-unwired chrome keys are wired
+- [ ] `err.message`-over-keyed-fallback sites fixed (6 keyed-but-dead + auth cluster)
+- [ ] Area sweeps landed in the plan's phase-04 order
+
+Gate:
+- [ ] `npx tsc -b --noEmit` clean
+- [ ] `pnpm test` green
+- [ ] `pnpm build` passes
+- [ ] worker tests pass (sync-worker, auth-worker, agent-worker)
+- [ ] e2e smoke green (run centrally)
+- [ ] Arabic run of the editor shows no English in permanent chrome
+- [ ] every known gap has a SWARM-TODO trace in TRACES.md
 
 ## §1 Operating model
-- Orchestrator (me) is the ONLY merger to main. Subagents never push/deploy/promote/run the shared dev stack.
-- Per-issue agents run the `.claude/commands/issue.md` lifecycle in a manual worktree off the LIVE integration tip.
-- `ProjectWorkspace.tsx` is a shared mega-file → at most ONE wave member may edit it; AQU-455 is forbidden from it (fix in `useRules.ts`), AQU-460 (Wave 2) may.
-- `src/components/ui/**` primitives are shared → reuse, don't modify (AQU-458 uses existing `DialogBody`).
 
-## §3 Workstream registry + wave plan
-| WS | Issue | Pri | Wave | Owned surface | Branch | Agent | Status |
-|----|-------|-----|------|---------------|--------|-------|--------|
-| A | AQU-455 Rules add-all | Med | 1 | `src/hooks/useRules.ts` (latestRulesRef accumulation), `src/hooks/useRules.test.ts` | `swarm/fro-455` | a53b2ee4 | **Fixed+RE-QA PASS** `fbd362c00` (AD-3 root cause; server proof 2→5 rules after reload) |
-| B | AQU-457 username-assign | Med | 1 | `auth-worker/src/services/user-lookup.ts`, `auth-worker/src/routes/users.ts` (+test) — client already trimmed | `swarm/fro-457` | aebd06ec | **Fixed** `4e28d7a47`, merged→int, UI-QA pending |
-| C | AQU-458 export scroll | Low | 1 | `src/components/ExportDialog.tsx` (+test) | `swarm/fro-458` | a78dcf9e | **Fixed** `4a1081d63`, merged→int, UI-QA pending |
-| D | AQU-460 Bible resources default | Low | 2 (REDESIGN) | `parsers/types.ts` (resolveBibleResourcesEnabled), `SearchDock`/`ProjectWorkspace.tsx`, `ProjectSettings.tsx`, `auth-worker/src/lib/aquifer/gate.ts` (files.kind scripture query), `sync/project-settings.ts` | `swarm/fro-460-derive` | aea69ff0 | **DERIVE-ON-READ** `c9e020096` (no write-on-load → race gone by construction); gate ✅ tsc/vitest 3225/auth 492/build; adversarial wf + independent live-QA running |
+- `main` / whatever the user's actor branch is = **sacred**. Never touch its
+  uncommitted work. A concurrent session has been active in this repo all day.
+- `swarm/i18n-integration` = accumulation branch, based on `28618fd32`
+  (`i18n/populate-locale-catalogs`, the four filled catalogs).
+- Each agent → its own worktree off the integration tip. Agents NEVER push.
+- Orchestrator owns: merges into integration, the final gate, promotion, push.
+- Merge protocol: union — if both sides add additive functionality, take both.
 
-Root-cause notes:
-- **AQU-455**: `useRules.ts:69` `addRule` — sequential `handleCommit` loop (`RuleSuggestFromEditsDialog.tsx:137-142`) calls `addRule` per accepted rule, but each call closes over render-time `project`, so appends clobber (only last persists). Fix: batch-append (single `patchProject`) or read fresh state per append. Contain to `useRules.ts` + dialog.
-- **AQU-457**: `auth-worker/src/routes/users.ts:33` passes UNTRIMMED username to `lookupUserByUsername` (validation at :30 only checks trimmed-empty); `user-lookup.ts:22` `WHERE username = ?` is whitespace/case-sensitive (Neon). Trailing space → false 404. Fix: trim (and consider case-insensitive) server-side; add whitespace test.
-- **AQU-458**: `ExportDialog.tsx:501` RadioGroup `max-h-64` inside `DialogContent overflow-hidden` with no `DialogBody` scroll region → lower options clipped. Fix: adopt the existing `DialogBody` (`ui/dialog.tsx:102`, `min-h-0 flex-1 overflow-y-auto`) pattern; do NOT modify the shared primitive.
-- **AQU-460**: default lives at `ProjectSettings.tsx:163/271` (`?? false`) + `useProject.ts:49`; server gate `auth-worker/src/lib/aquifer/gate.ts` (default off). Consumed at `SearchDockPanel.tsx:156`, agent schema-card. Needs design (brainstorming): default-on for scripture projects vs. surface toggle on Bible-file detection.
+### Hard sequencing constraints (violating these loses data or blocks PRs)
 
-## §M Merge log
-- 2026-07-01 · **🎉 PROMOTED AQU-460 (derive-on-read) → local main** `c251b54f3`→`1bb9b6a5d` (ff-only; swarm docs stashed/restored around ff). Gate: root tsc ✅ · vitest 393/3226 ×2 ✅ · auth-worker tsc ✅ + 492 ✅ · build ✅. Adversarial wf = PROMOTE; independent live-QA 4/4 (explicit-OFF respected ×2, no writes); display-race fixed+re-verified. **★ ALL 4 ISSUES CONVERGED ON MAIN.**
-- 2026-07-01 · **🎉 PROMOTED AQU-455+457+458 → local main** `4fb6e6dde`→`c251b54f3` (ff-only). Built fresh on live main tip (user cleaned their branding work first), merged the 3 verified branches, gate: root tsc ✅ · vitest 391/3213 ✅ · auth-worker tsc ✅ + 483 ✅ · build ✅ (8.63s). Main clean before+after. NOT pushed/deployed (no --deploy). AQU-460 EXCLUDED (broken persist-on-load race) → redesigning derive-on-read.
-- 2026-07-01 · WS C · AQU-458 · `swarm/fro-458` → integration `4a1081d63` (ff) · tsc ✅ · vitest deferred to combined gate · UI-QA pending · not yet on main
-- 2026-07-01 · WS B · AQU-457 · `swarm/fro-457` → integration (merge) · root tsc ✅ · auth-worker tsc ✅ + `npm test` 481/481 ✅ (incl 5 new) · service-layer fix also covers projects.ts/orgs.ts callers · UI-QA pending · not yet on main
-- 2026-07-01 · WS A · AQU-455 · `swarm/fro-455` → integration (merge) · root tsc ✅ · fix = await patchShared serializes D1 writes (agent disproved closure-clobber hunch) · UI-QA pending · not yet on main
-- 2026-07-01 · **COMBINED GATE on integration (all 3 wave-1)**: root `tsc -b` ✅ · root `vitest run` 391 files / 3211 tests ✅ · auth-worker tsc ✅ + 481 ✅ · `npm run build` ✅ (✓ built 8.82s).
-- 2026-07-01 · **ADVERSARIAL VERIFY** (wf 7 agents, no REFUTED): AQU-455 fix CONFIRMED correct but one new test VACUOUS (Rule 9) → finisher ab3e7f83 hardening test-only. AQU-457 fix correct but MEDIUM footgun: `LOWER(username) ORDER BY id LIMIT 1` can silently resolve WRONG account on case-collision (auth path) → finisher a52355d4 (exact-match-first, ambiguous→not-found, no migration). AQU-458 CONFIRMED both lenses → UI-QA only. **Fast-follow noted:** functional index `users(LOWER(username))` + optional `UNIQUE(LOWER(username))` (needs migration) — candidate new ticket, NOT this run.
-- 2026-07-01 · Hardening finishers dispatched into existing worktrees (fro-455, fro-457); re-gate + re-merge pending, then AQU-458 short-viewport UI-QA, then promote.
-- 2026-07-01 · WS B hardening · AQU-457 `a94b72281` → int (merge) · exact-first + ambiguous→404 · auth-worker tsc ✅ + 483 ✅ (2 new red-on-old). Spec edit STAGED-not-committed in aquilla-specs (reconcile at convergence).
-- 2026-07-01 · WS A hardening · AQU-455 `71444559c` → int (merge) · TEST-ONLY (useRules.ts byte-identical to fix) · new out-of-order-server outcome test red-on-old/green-on-fix; vacuous test renamed honestly.
-- 2026-07-01 · **FINAL COMBINED GATE on integration**: diff = 7 expected files only · root tsc ✅ · root vitest 391f/**3212** ✅ · auth-worker tsc ✅ + 483 ✅ · SPA build valid (only useRules.ts+ExportDialog.tsx are prod changes, covered by prior ✓ built). Remaining: live-UI QA singleton → rebuild → promote.
-- 2026-07-01 · **LIVE-UI QA (singleton, real dev stack @ isolated ports 5273/8888/8889)**: AQU-458 **PASS** (short/tablet/tall viewports; footer pinned; audio-by-character reachable; single scrollbar). AQU-457 **PASS** (`"bob "` + `"BOB"` resolve & add; nonexistent still rejected). AQU-455 **FAIL** — reproduced on real Postgres: accepted 3, server `settings.rules` kept only 2 after reload (pre-existing + last); 3 serialized PATCH 200s confirmed → payload not cumulative (stale-`project` fallback overwrites). Mock unit test gave FALSE GREEN. → AQU-455 reverted to Dispatched; re-fix agent a53b2ee4 dispatched with MANDATORY live-server proof (GET /settings shows all N after reload).
-- 2026-07-01 · **PROMOTION HELD**: main still @ base `77cd6abb7` but its WORKING TREE is DIRTY with the USER's active branding work (homepage/beta/case-study/index.html, vite-html-branding.ts, src/branding/*, new og/favicon PNGs) — disjoint from swarm changes but I will NOT merge into the user's dirty checkout (field rule: never touch their working changes). AQU-457+458 verified & ready; promote once main is clean (user commits/stashes) or user authorizes disjoint merge. Plan: promote all 3 together after AQU-455 re-fix passes.
-  - LESSON (memory-worthy): unit tests + adversarial code-review BOTH passed AQU-455 while the REAL stack failed — the mock didn't model patchProject/patch server-merge semantics. The "always drive the real UI" gate is what caught it.
-- 2026-07-01 · **AQU-455 RE-FIX + INDEPENDENT RE-QA PASS**: real root cause = AD-3 thin-client never persists project to IDB, so `patchProject`→undefined EVERY call → stale-`project` fallback overwrote. Fix = `latestRulesRef` in useRules.ts (no ProjectWorkspace touch). Merged `fbd362c00` → integration `ba342f6`. Independent re-QA: server `settings.rules` 2→5 after accepting 3 + reload, version 35→38, none dropped. Root tsc ✅ · vitest 391f/3213 ✅. **All 3 wave-1 fixes now independently live-verified (455/457/458).**
-- 2026-07-01 · Wave 2 AQU-460 dispatched EARLY (a6c85327) — now file-disjoint from wave-1 (455 stayed in useRules). Awaiting its landing + a final centralized UI-QA, then promote all 4 together (pending clean main).
+1. **WS-01 (merge-on-import) must land before ANY workstream adds catalog keys.**
+   Today `runImport` emits only the keys in the file handed to it, so a
+   new-keys-only import silently drops the other 1,335 translations and reports
+   them as "safe to ship". Until WS-01 is merged, no agent may run `i18n:import`.
+2. **Foundations (wave 3) must land before area sweeps.** `roles.ts` and the
+   colliding `common.*` vocabulary are claimed by 2+ areas each; fanning out
+   first mints duplicate keys and fails `no-duplicates.test.ts` across unrelated
+   PRs.
+3. **Deletes and megafile splits before keying** those files.
 
----
+### Forbidden paths (all agents)
 
-# 🆕🆕🆕🆕🆕🆕🆕 CURRENT GOAL (2026-06-19) — Paragraph-drafting Phase 1 (segmentation + paragraph unit)
+- `src/lib/i18n/messages/*.ts` — GENERATED catalogs. Never hand-edit. Only
+  `scripts/i18n-catalog.ts import` writes these.
+- Anything under `.worktrees/`, `.claude/worktrees/`
+- `src/pages/Homepage/**`, `src/pages/CaseStudy/**`, `src/pages/PrivacyPolicy.tsx`
+  — marketing, scope decision = SKIP
+- `src/components/admin/**` — scope decision = SKIP (staff-only)
 
-> **[SUPERSEDED 2026-07-01 — reference only; converged & promoted 2026-06-19.]**
-> Spec (read first): `docs/superpowers/specs/2026-06-18-paragraph-drafting-retrieval-context-design.md` (D1/D2/D3/D11). Phase 0 shipped on main.
-> Driver: user `/swarm-orchestration`. **Scope (user 2026-06-19): NEW IMPORTS ONLY** — no retrofit of existing files.
+## §2 Wave history & control plane
 
-## §0 STOP checklist — ✅ CONVERGED (promoted to local main 2026-06-19)
-- [x] F1 contract: paragraph grouping represented on cells (`paragraphStart`) + derivation API (`deriveParagraphs`/`paragraphGroupForCell`) + cell-id output-protocol helpers (encode + `parseParagraphResponse` with loud reconcile) — all unit-tested.
-- [x] D2 import split branches by corpus type: USFM sets `paragraphStart` on verse-cells WITHOUT splitting below the verse; md/docx/plaintext mark paragraphs + recursive sub-split only when over-long.
-- [x] D3 `completeParagraph` drafts a paragraph group as one unit with discourse window; D11 output via cell-id protocol → per-cell `target.cell.commit` fan-out (reuse existing event path).
-- [x] Output parser maps response→cells by id and reconciles LOUDLY (unmapped/missing flagged, never committed empty — incl. present-but-empty tag guard, the fixed blocker).
-- [x] `draftContext` budgets editable in project settings UI (D10 follow-through).
-- [x] Gate: root `tsc -b` 0 · `vitest run` green (swarm areas; 34 pre-existing fails verified on base) · `npm run build` PASS · adversarial panel passed (1 blocker fixed). **UI-driver: DEFERRED by user decision (2026-06-19, "promote now, UI later")** — the draft path has no UI trigger yet (Phase-1 deliverable = hook entry point; button is a later slice) and the live model call needs an OPENROUTER key; covered by 223 unit tests. Live UI verify once a draft trigger is wired.
-
-## §1 Operating model (this goal)
-- Base: `main@ec2eed875` (clean, 14 ahead of origin/unpushed). Integration: `swarm/phase1` (worktree `.worktrees/swarm-phase1`, node_modules symlinked), green-base tsc fix `ece4c6557`.
-- **Foundation-first:** Phase 1 has a coupled core (grouping model + output protocol) shared by several slices. Wave 0 (F1) lands SEQUENTIALLY before any dependent slice is dispatched.
-- Each Wave-1 agent → manual worktree off the live `swarm/phase1` tip (sonnet). Commits its branch; **NEVER** pushes/promotes/changes issue status, and **NEVER** runs `git pull/fetch/merge/rebase/checkout/reset` (bitten twice this session — see [[feedback_subagents_pollute_working_tree]]). Brief includes owned + forbidden files, verify cmds, SWARM-TODO requirement.
-- Orchestrator owns: integration accumulation, final gate, promotion to **local main only**. **NO push to dev/staging** without explicit user say-so.
-- Verify every merge (tsc + vitest) before next promotion. Adversarial panel (races/regressions/contracts) before main.
-
-## §2 Foundation contract (Wave 0 — SEQUENTIAL, must land first)
-- Representation: `paragraphStart?: boolean` on `TranslatableString` (`src/lib/parsers/types.ts`) + `BulkImportCell` (`src/lib/sync/bulk-import.ts`); first cell of a paragraph carries it. Membership DERIVED (scan start→next start), no stored entity.
-- `src/lib/parsers/paragraphs.ts` — `deriveParagraphs(cells): CellRef[][]`, `paragraphGroupForCell(cells, cellId): CellRef[]` (same-file, doc order). Pure + tested.
-- `src/lib/completion/paragraph-protocol.ts` — cell-id-keyed segment encode + `parseParagraphResponse(text, cellIds): { mapped: {cellId,text}[]; missing: cellId[]; extra: string[] }`. Round-trip + reconcile tests.
-
-## §3 Workstream registry (this goal)
-Status: `in-flight | review | merged-integration | merged-main | blocked`
-| ID | Title | Branch | Owns | Wave | Status | Agent |
-|----|-------|--------|------|------|--------|-------|
-| F1 | Grouping model + protocol contract | `swarm/p1-foundation` | `parsers/types.ts`, `bulk-import.ts`, `parsers/paragraphs.ts`, `completion/paragraph-protocol.ts` + tests | 0 | merged-integration | — |
-| S1 | USFM split branch | `swarm/p1-usfm` | `parsers/usfm-lossless.ts` (additive), USFM-path `import.ts`/`usfm.ts` verse→string mapping; NOT `buildBulkCells*` | 1 | merged-integration | a5f5031 |
-| S2 | md/docx/txt split branch | `swarm/p1-text` | `parsers/markdown.ts`, `plaintext.ts`, `docx.ts`, `text-splitter.ts` + the SINGLE `buildBulkCellsWithSpeakers` paragraphStart carry-line in `import.ts` | 1 | merged-integration | acbf720 |
-| S3+S4 | completeParagraph unit + output parse/reconcile | `swarm/p1-draft` | `hooks/useCompletion.ts`, `completion/completion-service.ts` (additive); consume `paragraphs.ts`+`paragraph-protocol.ts`+`draft-context.ts` | 1 | merged-integration | a073dae |
-| S5 | draftContext settings UI | `swarm/p1-settings-ui` | `components/ProjectSettings.tsx` (precedingTargetCells L2 knob) | 1 | merged-integration | a7b0875 |
-| S6 | UI-driver QA | — | read-only real-app drive | 2 | DEFERRED (user 2026-06-19: promote now, UI later; no draft trigger wired + model key needed) | — |
-
-## §4 Forbidden paths (all agents)
-- No event/commit-model changes (`sync-worker/src/events/*`, `events-emit.ts`) — reuse per-cell `target.cell.commit` fan-out.
-- No retrofit of existing files (scope = new imports only).
-- No `docs/swarm/*` edits except via orchestrator.
-
-## §M Merge log (this goal)
-- 2026-06-19 · **FOLLOW-UP LOOP (`/loop 5m`, branch `feat/p1-followups` off main `b1a5ad681`, NOT promoted):** drained the actionable `p1-*` TRACES over 6 iterations — `p1-d4-source-fallback` (opt-in source fallback in gatherPrecedingContext + paragraph render), `p1-following-source` (new gatherFollowingSource + wired right window), `p1-partial-commit-visibility` (committedIds set; catch skips already-committed cells), `p1-draftcontext-idb` (localSettingsFrom extracts draftContext), `p1-usfm-chapter-no-p` (chapter boundary starts a paragraph without `\p`), `p1-paragraph-abort` (optional AbortSignal). Branch tip `1f43282a5`. **Full gate: tsc -b 0 · vitest 3042 pass / 34 pre-existing fails (identical 9-file set, no new) · build PASS.** Loop STOPPED (cron `070fb359` deleted) — only externally-blocked (`p1-paragraph-streaming`, Frontier SSE) + user-deferred (`p1-paragraph-ui-wiring`) remain. Awaiting user decision to promote `feat/p1-followups`→main.
-- 2026-06-19 · integration `swarm/phase1` off `main@ec2eed875`; green-base tsc fix `ece4c6557` (widen `dropPrecedingContextDuplicates` preceding param). Foundation-first plan recorded. NEXT: dispatch Wave 0 (F1) sequentially, then fan out Wave 1.
-- 2026-06-19 · **★★ PROMOTED TO LOCAL MAIN** (fast-forward `swarm/phase1`→main): main `ec2eed875` → **`233288468`**. NOT pushed to dev/staging (user instruction). **Uncommitted-work safety:** main had the user's uncommitted `compress-examples.ts` (a generic-`C` variant of the same `dropPrecedingContextDuplicates` widen that the green-base commit `ece4c6557` did differently → same-line collision). Preserved BYTE-EXACT: backed up + sha-verified (`d685ab4…`), stashed, FF-merged, restored from backup, stash dropped. Post-restore main status = ONLY that one file `M` (unchanged from session start). User's generic version compiles with all swarm callers. **Post-promotion gate on main: tsc -b 0 · 602 paragraph-drafting-suite tests pass.** SWARM CONVERGED. Remaining = traced follow-ups (TRACES.md p1-*) + deferred live UI verify.
-- 2026-06-19 · **ADVERSARIAL PANEL** — all 3 background skeptics died (stream-watchdog stall / process-exit, NOT findings), so the orchestrator ran the 3 lenses DIRECTLY on the diff. **1 BLOCKER found + FIXED (`af9fa769c`):** D11 empty-commit — `parseParagraphResponse` reports a present-but-empty `<c id></c>` tag as `mapped` (tag present), and `completeParagraph`'s fan-out committed every mapped entry → an empty/whitespace tag silently committed an empty cell (the exact trust-killer). Guarded in the draft path (empty content flagged like missing, never committed) + regression test (`vitest` 223, was 222) + `committed_count` telemetry. **Other lenses CLEAN:** import.ts purely additive (no field dropped, sequenceIndex/anchorCellId/order untouched); `buildPrompt`/`buildBatchPrompt` behavior-unchanged (buildParagraphPrompt is new); useCompletion return additive; ProjectSettings reuses `patchShared`. USFM D1 invariant holds (verse textStart/textEnd never altered; `\nb` excluded; bare-vs-intra-verse marker distinction correct). 2 MINOR traced (partial-commit visibility; chapter-boundary-without-`\p` grouping). NEXT: S6 UI-driver → promote to LOCAL main only.
-- 2026-06-19 · **S1 (p1-usfm) MERGED** → integration (branch `1b013d8b0`, clean; import.ts auto-merged with S2 — disjoint hunks: S1=`usfmSectionToStrings`, S2=`buildBulkCellsWithSpeakers`). `PARAGRAPH_START_MARKERS` set + pre-scan in `parseUsfmLossless` sets `paragraphStart` on the verse that begins a paragraph WITHOUT changing verse boundaries/count (D1 verified by test); `usfmSectionToStrings` propagates to TranslatableString → S2's carry-line → BulkImportCell. **Orchestrator adversarial-fix `397cfe90c`: removed `\nb` from the marker set** (no-break = paragraph CONTINUATION, not a start; spec D2 list omits it) + corrected the pipeline test that encoded the wrong grouping.
-- 2026-06-19 · **★ ALL 4 SLICES MERGED. FULL CENTRAL GATE GREEN** on integration `397cfe90c`: root `tsc -b` 0 · `vitest run` = swarm areas all pass (parsers 374 · completion+hooks 222 · ProjectSettings 5); 34 failures in 9 files (Login/Org*/CreditsPanel/ImportDialog/Interlinear/ProjectMembers) are **PRE-EXISTING — verified IDENTICAL (34 fail / same 9 files) on base `3c188800d` in a throwaway worktree**, zero swarm regressions · `npm run build` PASS (✓ 7.07s, dist produced). **Adversarial panel launched** (3 read-only lenses: correctness/D1-D2 ada30ab; regressions/contracts aeb1ea7; races/fan-out af10478). NEXT: triage findings → fix blockers → S6 UI-driver → promote to LOCAL main only.
-- 2026-06-19 · **S5 (p1-settings-ui) MERGED** → integration `e6e48622a` (branch `461de6d31`, clean). "Draft Context" card in ProjectSettings.tsx with `precedingTargetCells` number input (0–10), wired through baseline/isDirty/handleSave→`patchShared` (mirrors `bibleResourcesEnabled`); section nav entry added. L1 NOT exposed (spec D10). 5 tests + build clean. **Central verify: tsc 0 · vitest 5/5.** Follow-up traced: `localSettingsFrom` IDB overlay doesn't extract draftContext (offline shows server default; same as translationBrief — not a regression).
-- 2026-06-19 · **S3+S4 (p1-draft) MERGED** → integration `078fa71a5` (branch `291e8e401`, clean). `buildParagraphPrompt` (additive; buildPrompt/buildBatchPrompt untouched) + `completeParagraph(startCellId): Promise<void>` on useCompletion → `parseParagraphResponse` → per-`mapped`-cell `commitCompletedCell` (reuses single-cell path, ai_suggestion); missing flagged into `errors`, never committed empty; extra/unknown discarded+surfaced. D4/D11/background rationale comments placed. **Central verify: tsc 0 · vitest 222/222 (completion+hooks).** Deferred (traced, NOT §0 blockers): D4 source-fallback for empty-target left-context; followingSource right-window not populated by hook; no AbortSignal on completeParagraph; progressive streaming pending Frontier SSE fix; UI button wiring (later slice). NEXT: S1 (USFM) only remaining.
-- 2026-06-19 · **S2 (p1-text) MERGED** → integration `cd45ef175` (branch `f44bb752b`, clean worktree — isolation held). First TranslatableString of each md/txt/docx paragraph gets `paragraphStart`; over-long sub-splits share one group, only first carries the flag; single `buildBulkCellsWithSpeakers` carry-line (import.ts, only edit). 13 intent tests + rationale comment. **Central verify: tsc 0 · vitest 360/360 (parsers+import).** USFM path untouched (S1's). NEXT: S1/S3+S4/S5 still in-flight.
-- 2026-06-19 · **WAVE 1 DISPATCHED** (4 manual worktrees off live tip `3c188800d`, sonnet, background): S1 p1-usfm (a5f5031), S2 p1-text (acbf720), S3+S4 p1-draft (a073dae), S5 p1-settings-ui (a7b0875). Scope = NEW IMPORTS ONLY. **Cross-slice seam resolved:** `buildBulkCellsWithSpeakers` (import.ts:747) is the single TranslatableString→BulkImportCell chokepoint — S2 owns the lone `paragraphStart` carry-line there; S1 only SETS the field on USFM-path TranslatableString (disjoint hunks → clean 3-way). S3+S4 reuses `commitCompletedCell` fan-out (no event-model change). NEXT: merge as each returns → central verify → adversarial panel → S6 UI-driver → promote to LOCAL main only (no dev/staging push).
-- 2026-06-19 · **F1 FOUNDATION MERGED** (sequential, committed on integration tip): `e7b2ba8ee` (paragraphStart on TranslatableString+BulkImportCell; `paragraphs.ts` deriveParagraphs/paragraphGroupForCell; `paragraph-protocol.ts` encode/parseParagraphResponse) + `ab25f4827` (hardening). Reviewed ✅ spec+quality; 1 Important fixed (duplicate cell-id now surfaced in `extra`, not silently collapsed); 2 Minor noted (TAG_RE assumes text lacks literal `</c>`). **Gate: tsc 0 · 555 parsers+completion tests green.** Contract is FROZEN for Wave 1. NEXT: fan out Wave 1 off tip `ab25f4827` — S1 usfm, S2 text, S3+S4 draft+parse, S5 settings UI.
-
----
-
-# 🆕🆕🆕🆕🆕🆕 CURRENT GOAL (2026-06-13b) — Org credits & unified compute-cost model
-
-> **This block is the active goal.** Everything below is reference-only from prior swarms.
-> Spec (read first): `docs/superpowers/specs/2026-06-13-org-credits-cost-model.md`.
-> Driver: user `/loop 5m until all in place`. Builds on the OmniVoice TTS work (now on main).
-
-## §0 STOP checklist
-- [ ] Migration `0042_org_credit_usage_daily.sql` + `schema.sql`
-- [ ] auth-worker: `credits.ts` lib + record/guard wired into `agent.ts` (priority) + `chat.ts`; `/usage/org/:orgId/credits` (admin OR org-flag); platform-admin config endpoints
-- [ ] sync-worker: `credits.ts` + record TTS raw cost in `tts.ts`
-- [ ] frontend: `src/lib/credits.ts` + client lib; AdminConsole Credits section; org panel behind `showToOrg` flag + maintainer role; **never rendered for end-user translators**
-- [ ] Gate: root tsc 0 · vitest · sync-worker tsc+test · auth-worker tsc+test · build PASS
-- [ ] Adversarial review (contracts/races/correctness incl. cap-math + enforce-off-by-default + role-gating)
-- [ ] Enforcement OFF by default verified; agent sub-cap correct
-- [ ] gaps traced
-
-## §1 Operating model (this goal)
-- main = sacred (tip at dispatch: `250640b16`→spec `3899fe37b`, clean). Never touch other actors' uncommitted work.
-- Integration: `swarm/credits-integration` (worktree `.worktrees/credits-integration`, node_modules ×3 symlinked).
-- Each agent → **manual** worktree off integration tip. sonnet, run_in_background. Commits its branch; NEVER pushes/promotes.
-- ⚠️ **Agents must write to their WORKTREE, not main** (last swarm's bug). Brief tells each to `git -C <worktree> status` self-check that its files are in the worktree before committing. Orchestrator re-verifies gates centrally regardless.
-- Credit formula is spec'd ONCE; triplicated in auth/sync/frontend (no cross-package import) — keep identical.
-- Loop: /loop 5m (CronCreate). Background agents also auto-notify. STOP on convergence.
-
-## §3 Workstream registry (this goal)
-| ID | Title | Branch | Owns | Status | Agent |
-|----|-------|--------|------|--------|-------|
-| ws-cr-schema | Migration + table | `swarm/ws-cr-schema` | `db/postgres/migrations/0042_org_credit_usage_daily.sql`, `db/postgres/schema.sql` | merged-main | a92518e |
-| ws-cr-authcredits | auth-worker credits lib + agent/chat record+guard + endpoints | `swarm/ws-cr-authcredits` | `auth-worker/src/lib/credits.ts`, `auth-worker/src/routes/agent.ts`, `chat.ts`, `usage.ts`, `admin.ts`, `types.ts` (additive), tests | merged-main | a65dc7c |
-| ws-cr-synccredits | sync-worker TTS cost record | `swarm/ws-cr-synccredits` | `sync-worker/src/credits.ts`, `sync-worker/src/tts.ts` (additive), tests | merged-main | a5a7223 |
-| ws-cr-frontadmin | Admin credits UI + org-flag panel | `swarm/ws-cr-frontadmin` | `src/lib/credits.ts`, `src/lib/sync/credits.ts`, AdminConsole credits section, org overview panel (flag+role gated), tests | merged-main | a5e5b1b |
-
-## §M Merge log (this goal)
-- 2026-06-13b · integration `swarm/credits-integration` off main `3899fe37b` (spec). Wave 1 (4 agents) dispatched. Loop cron `cd477f4c` (*/5).
-- 2026-06-13b · **ws-cr-authcredits MERGED** → credits-integration (branch e3d1c285f, clean). credits.ts (resolveCreditConfig/creditsFor/checkCredits/recordCredit/readSpend/creditGuard); agent.ts pre-check+post-record (project→org, 429 before SSE when enforcing); chat.ts (orgId=0 fallback, usage.cost or 1c); /usage/org/:orgId/credits (admin OR maintainer+showToOrg); admin.ts /credits/orgs + PATCH (platform-admin gated). **Central verify: auth-worker tsc 0 · vitest 382/382.**
-- 2026-06-13b · **ADVERSARIAL PANEL DONE** (2 lenses) → docs/swarm/CREDITS-REVIEW-FINDINGS.md. 3 BLOCKERs — all admin client↔server contract drift (URL /v1→/v2; row shape caps→config; {orgs:[]} unwrap) + byRail-defaults + JSDoc + auth-before-config-read. **ALL FIXED.** Security invariants ALL SAFE (translator double-gate, platform-admin gating, enforce/showToOrg default-false, SQL params, no cross-org leak, no run-crash). Deferred: TTS-rail credit-cap enforcement (trace), org-0 chat shared pool (note).
-- 2026-06-13b · **★★ PROMOTED TO MAIN** (real merge credits-integration→main): → `8e04a1fc4`. Clean merge (all additive). Post-merge main root tsc 0. Gate at promote: root tsc 0 · vitest 2875 (7 pre-existing Login) · sync-worker 620/620 · auth-worker 382/382 · build PASS. **SWARM CONVERGED. Loop cron cd477f4c deleted.**
-- 2026-06-13b · REMAINING = config/deploy (human): tune markup(4×/5×)+caps in AdminConsole or env; apply migration `0042` via `npm run neon:apply`; flip `CREDIT_ENFORCE`/per-org `enforce` when ready; deploy workers+SPA (`npm run deploy:aquilla`). Enforcement OFF by default — safe to ship dark.
-- 2026-06-13b · **★ ALL 4 SLICES MERGED. FULL §0 GATE GREEN:** root tsc 0 · vitest 2875 (7 pre-existing Login) · sync-worker tsc 0 + 620/620 · auth-worker tsc 0 + 382/382 · build PASS. Diff 22 files +2791. **Adversarial panel launched** (lens1 aa151d30 contracts+cap-math; lens2 a5eddcb2 security/role-gating). NEXT: fix blockers → promote credits-integration→main (real merge). Watch: client↔server credit shape match; triplicated-formula drift; translator-never-sees-credits; platform-admin gating; cross-org leak; enforce-off default.
-- 2026-06-13b · **ws-cr-frontadmin MERGED** → credits-integration (branch 23ae064b7, clean). credits display lib + admin Compute/Credits tab + CreditsPanel (DOUBLE-gated: role≥maintainer client + showToOrg server 403→null; translator-never-sees-it tested). **Central verify: root tsc 0 · vitest 2875 pass (7 pre-existing Login only).** SWARM-TODO: markup edit fields not yet in admin table (caps only). Awaiting ws-cr-authcredits (backend keystone; UI self-hides until endpoints live).
-- 2026-06-13b · **ws-cr-synccredits MERGED** → credits-integration (branch 62cacecd1, clean worktree). credits.ts + TTS raw-cost record (rail='tts', no-record-on-failure). **Central verify: sync-worker tsc 0 · vitest 620/620.** In-flight: authcredits, frontadmin.
-- 2026-06-13b · **ws-cr-schema MERGED** → credits-integration (branch a1755eef9, committed clean to its worktree — isolation discipline held). Migration 0042 + schema.sql. Note: used `IF NOT EXISTS` on table+index (matches 0041, safer than spec's literal DDL). In-flight: authcredits, synccredits, frontadmin.
-
----
-
-# 🆕🆕🆕🆕🆕 CURRENT GOAL (2026-06-13) — OmniVoice TTS on Modal + org-attributed usage metering
-
-> **This block is the active goal.** Everything below is reference-only from prior swarms.
-> Spec (read first): `docs/superpowers/specs/2026-06-13-omnivoice-tts-design.md`.
-> Driver: user approved the design, then `/loop 5m` + `/swarm-orchestration`.
-> Note: this work plausibly unblocks the parked TTS-demo items (AQU-173 cell_audio empty, AQU-246 TTS demo asset).
-
-## §0 STOP checklist
-- [ ] `infra/modal/omnivoice.py` authored (FastAPI `/synthesize` + `/health`, `X-Auth-Token`, `X-Audio-Duration-Seconds` header; mirrors `seed_vc.py`)
-- [ ] Migration `0041_tts_usage_daily.sql` + `db/postgres/schema.sql` updated
-- [ ] `sync-worker`: `tts-budget.ts` + `tts.ts` (`POST /api/v1/voice/tts`) wired into `index.ts` + tests
-- [ ] `auth-worker`: `GET /api/v1/usage/me` + `GET /api/v1/usage/org/:orgId` (maintainer-gated) + tests
-- [ ] Frontend: client libs + `<UsageSection/>` (Preferences) + `<UsageRollup/>` (OrgHome) + editor "Generate audio" trigger + tests
-- [ ] Gate: root tsc 0 · vitest green · sync-worker tsc+test · auth-worker tsc+test · `npm run build` PASS
-- [ ] Adversarial review panel passed on integration diff (races / regressions / contracts)
-- [ ] UI-QA walkthrough: Preferences Usage + Org overview rollup + cell TTS trigger (post-merge)
-- [ ] every known gap has a SWARM-TODO trace in `docs/swarm/TRACES.md`
-
-## §1 Operating model (this goal)
-- main = sacred (tip at dispatch: `610c4be9e`, clean). Never touch another actor's uncommitted work.
-- Integration: `swarm/integration` (worktree `.worktrees/swarm-integration`, off `610c4be9e`; node_modules ×3 symlinked: root + sync-worker + auth-worker).
-- Each agent → **manual** worktree off integration tip (NOT isolation:worktree — stale-base trap, see 2026-05-31 lesson). sonnet, run_in_background. Commits its branch; **NEVER pushes/promotes/deploys**.
-- Merge: branch → integration → verify (tsc + vitest, + worker tests if touched) → log §M. Keep-both-sides on conflicts.
-- Promote integration → main only when green AND main `git status` clean (D==0, no MERGE_HEAD).
-- Enforcement default LOG-ONLY (`TTS_BUDGET_ENFORCE` off) — mirrors the LLM guard while sizing.
-- Loop: /loop 5m dynamic; background agents auto-notify on completion (primary driver). Drop to watcher / STOP on convergence — do NOT manufacture work.
-- ⚠️ Do NOT run `modal deploy` unattended — author the Python only; deploy is a human step (needs Modal secret creation).
-
-## §3 Workstream registry (this goal)
-Status: `in-flight | review | merged-integration | merged-main | blocked`
-| ID | Title | Branch | Owns (files) | Status | Agent |
-|----|-------|--------|--------------|--------|-------|
-| ws-modal | OmniVoice Modal endpoint | `swarm/ws-modal` | `infra/modal/omnivoice.py` | merged-integration | a3da581 |
-| ws-sync | TTS route + metering | `swarm/ws-sync` | `db/postgres/migrations/0041_tts_usage_daily.sql`, `db/postgres/schema.sql`, `sync-worker/src/tts-budget.ts`, `sync-worker/src/tts.ts`, `sync-worker/src/index.ts`, `sync-worker/src/__tests__/tts*.test.ts` | merged-integration | ae1391d |
-| ws-auth | Usage read endpoints | `swarm/ws-auth` | `auth-worker/src/routes/usage.ts`, `auth-worker/src/index.ts` (mount), `auth-worker/src/__tests__/usage*.test.ts` | merged-integration | a678119 |
-| ws-frontend | Usage UI + cell trigger | `swarm/ws-frontend` | `src/lib/sync/tts.ts`, `src/lib/sync/usage.ts`, `src/components/settings/UsageSection.tsx`, `src/components/org/UsageRollup.tsx`, `src/pages/Preferences.tsx` (insert), `src/components/org/OrgHome.tsx` (insert), `EditorTable.tsx` trigger, tests | merged-integration | af54c3f |
-| ws-qa | UI-QA walkthrough (wave 2) | — | post-merge | DEFERRED (blocked on Modal deploy) | — |
-
-## §M Merge log (this goal)
-- 2026-06-13 · **DEPLOY-BUG HOTFIX (post-promotion, on main):** first `modal deploy` failed at runtime — `ImportError: cannot import name 'OmniVoice' from 'omnivoice' (/root/omnivoice.py)`. Root cause: the Modal script was named `omnivoice.py`, which shadows the pip-installed `omnivoice` package on sys.path, so `from omnivoice import OmniVoice` re-imported the script itself. Package API (`from omnivoice import OmniVoice` / `from_pretrained`) confirmed correct via README. Fix: `git mv infra/modal/omnivoice.py infra/modal/omnivoice_app.py` (app name "omnivoice", secret "omnivoice-auth", OMNIVOICE_URL all UNCHANGED — only the file path). py_compile OK. **New deploy cmd: `modal deploy infra/modal/omnivoice_app.py`.**
-- 2026-06-13 · integration `swarm/integration` created off main `610c4be9e` (spec commit). Wave 1 (4 agents, manual worktrees) dispatched: ws-modal, ws-sync, ws-auth, ws-frontend.
-- 2026-06-13 · ⚠️ **ISOLATION ANOMALY:** ws-sync + ws-auth (and likely ws-frontend) wrote their files to the **MAIN working tree** (`/Users/ryderwishart/prototypes/codex-web-app`), NOT their `.worktrees/swarm-ws-*` worktrees (which are empty/clean). `.worktrees` is gitignored. ws-modal worked correctly in its worktree. main was clean (D==0) before dispatch, so ALL current dirty files are agent output + disjoint by directory (sync-worker/db = ws-sync; auth-worker = ws-auth; src = ws-frontend) — no user work at risk. **Their self-reported tsc/vitest are INVALID** (ran against empty worktrees). **RECOVERY PLAN:** after all 3 finish, harvest main's working-tree feature changes (NOT docs/swarm) into `.worktrees/swarm-integration` (cp by `git add -A` name-list), verify centrally (root tsc+vitest, sync-worker tsc+test, auth-worker tsc+test), commit on integration, then restore main to clean. DO NOT clobber main's dirty files until harvested. DO NOT trust agent self-checks. For wave 2: make the worktree the agent's actual cwd or have it write absolute worktree paths + verify the worktree is non-empty before trusting.
-- 2026-06-13 · **ws-frontend MERGED** → integration (branch `swarm/ws-frontend`@08d8943a0). `usage.ts`/`tts.ts` client libs (mirror assignments.getWorkload + voice-clone.convertToCloneVoice), `<UsageSection/>` in Preferences, `<UsageRollup/>` in OrgHome (mirrors WorkloadRollup self-hide), EditorTable "Generate audio" button → `synthesizeCellTts` + `emitCellAudioAttach`. 1 SWARM-TODO(tts-cell-attach): emit `emitCellAudioSelect` after attach to auto-select the new clip (attach itself works). New tests: UsageSection 5/5, UsageRollup 4/4.
-- 2026-06-13 · **ws-sync MERGED** → integration (branch `swarm/ws-sync`@8d3083376). Migration 0041 + schema; `tts-budget.ts` (checkTtsBudget pre-check SUM, recordTtsUsage user+global-sentinel upserts, runTtsGuard log-only default); `tts.ts` `POST /api/v1/voice/tts` (verifyTokenForFile, project→org via `SELECT org_id FROM projects WHERE id=?` per export-floor.ts, Modal X-Auth-Token, R2 write, record-on-success-only, Modal-fail→502 no-record); index.ts dispatch + 4 env bindings. 31 new tests.
-- 2026-06-13 · **★ FULL §0 AUTOMATED GATE GREEN on integration:** root tsc 0 · root vitest **2843 pass** (7 PRE-EXISTING `Login.test.tsx` fails — untouched by swarm, confirmed via ws-frontend stash) · sync-worker tsc 0 + **604/604** · auth-worker tsc 0 + **345/345** · `npm run build` PASS (✓ 5.86s, dist produced). All 4 slices merged.
-- 2026-06-13 · **ALL 4 AGENTS wrote to MAIN working tree first, then re-copied to their worktrees + committed** (their own explanation). Main's 10 stale duplicates verified byte-identical to integration → discarded; **main restored to clean (D==0).** Work is safe on integration only.
-- 2026-06-13 · **ADVERSARIAL REVIEW PANEL (3 read-only lenses) DONE** → `docs/swarm/TTS-REVIEW-FINDINGS.md`. 2 BLOCKERs (audioId/url missing .wav → unplayable; OrgUsage.total vs server orgTotal) + metering hardening (NaN/absent duration, text cap, ref-id sanitize) + delete-stale-comment. **ALL FIXED** in `ae70fa510` on integration. Architecture confirmed sound (mounts/auth/gate/base-URLs all PASS). Re-verified gate GREEN.
-- 2026-06-13 · NEXT: promote integration→main (real merge, main advanced past base). Live TTS UI-QA DEFERRED to post-Modal-deploy (human step; OMNIVOICE_URL/token + `modal deploy` + apply migration 0041 to live Neon). NOT pushing to dev/staging (can't live-validate without Modal endpoint).
-- 2026-06-13 · **★★ PROMOTED TO MAIN** (real merge, integration→main): main `5b9fa11ce` → **`1a18d76d2`** (+2689, 20 files). Clean merge (feature files all new; docs only on main; no conflicts). Post-merge: main root tsc 0. §0 gate at promotion: root tsc 0 · root vitest 2843 (7 pre-existing Login) · sync-worker tsc 0 + 604/604 · auth-worker tsc 0 + 345/345 · build PASS · adversarial review passed (2 blockers fixed). **SWARM CONVERGED.**
-- 2026-06-13 · **REMAINING = HUMAN/EXTERNAL (legitimate convergence endpoint, §8):** (1) `modal secret create omnivoice-auth OMNIVOICE_TOKEN=<rand> HF_TOKEN=<hf>` + `modal deploy infra/modal/omnivoice_app.py` (renamed from omnivoice.py — see deploy-bug hotfix below); (2) set sync-worker secrets `OMNIVOICE_URL` (the printed Modal /…run URL) + `OMNIVOICE_TOKEN` (same rand) via `wrangler secret put`; (3) apply migration `0041_tts_usage_daily.sql` to live Neon (D1→Neon drift guard); (4) optional: set `TTS_USER_DAILY_SECONDS_LIMIT` + flip `TTS_BUDGET_ENFORCE=true` once sized (default log-only); (5) live UI-QA: cell "Generate audio" → playable clip; Preferences Usage; Org overview rollup (manager). 3 SWARM-TODOs in `omnivoice.py` (release-pin, device_map, language kwarg) to revisit at deploy.
-- 2026-06-13 · **ws-auth MERGED** → integration (branch `swarm/ws-auth`@2c0be2392 was committed correctly + clean worktree, despite also leaking copies to main). `/api/v1/usage/me` + `/usage/org/:orgId` (maintainer gate via `getEffectiveOrgRole` ≥ MAINTAINER, mirrors workload endpoint) + missing-tts-table degrades-to-zeros (42P01 guard). **Central verify: auth-worker tsc 0 · vitest 345/345.** No SWARM-TODOs.
-- 2026-06-13 · **ws-modal MERGED** → integration `37b4b9a82` (FF). `infra/modal/omnivoice.py` (259 lines, mirrors seed_vc). py_compile OK. Uses `OmniVoice.from_pretrained("k2-fsa/OmniVoice")` + `model.generate(...)`, 24kHz output, duration = len/24000. 3 SWARM-TODOs: (1) pin install once upstream tags a release (installs from HEAD), (2) confirm `device_map="cuda:0"` on L40S, (3) `language` accepted at HTTP layer but not forwarded to `generate()` (upstream undocumented kwarg). ws-sync/ws-auth/ws-frontend still in-flight.
-
----
-
-# 🆕🆕🆕🆕 CURRENT GOAL (2026-06-10 PD7) — Drain Prototype Debugging Todo/Backlog dev queue
-
-> **This block is the active goal.** Everything below is reference-only from prior swarms.
-> Driver: `/swarm Prototype Debugging` — Todo/Backlog only; skip Dev Verification Needed / Ready for QA. Sonnet agents.
-
-## §0 STOP checklist (PD7)
-- [ ] Every eligible Todo/Backlog issue at **Fixed**, **Dev Verification Needed**, or honestly **blocked** with a Linear note.
-- [ ] Integration `swarm/pd7-integration` green: `npx tsc -b --noEmit` + `npx vitest run`; `npm run build` before promotion; worker tsc/test if touched.
-- [ ] Live-UI QA (singleton) walked each fix's SWARM-TODO before Fixed.
-- [ ] Promoted to main only with main clean apart from protected untracked (`pd5-settings-text.txt`, `tn-fixture.tsv`) + this file.
-- [ ] Gaps traced in `docs/swarm/TRACES.md`.
-
-## §EXCLUDED (PD7)
-- 14 issues already merged-on-main, reconciled → Dev Verification Needed in Linear: AQU-324/305/300/301/302/306/257/258/304/312/221/218/169/179.
-- AQU-173 — real data gap (cell_audio empty), not a code bug; investigation on main d675e63. Linear-commented, left Todo for human.
-- AQU-246 — needs a new TTS demo asset (content decision). Linear-commented.
-- AQU-227/224 — Dispatched homepage-claims verification owned by a prior dispatch; not reclaimed.
-- AQU-209 — likely fixed by AQU-270 (/reset-password shipped in UX-audit swarm); UI-QA agent verifies, then dup/close.
-
-## §1 Operating model (PD7)
-- Integration `swarm/pd7-integration` (worktree `.worktrees/pd7-integration`, off main `412f800`, node_modules ×3 symlinked).
-- Agents: sonnet, manual worktrees off live integration tip (NEVER isolation:worktree). Commit only; no push/deploy/status-advance beyond Dispatched→Fixed per /issue.
-- Claim = orchestrator flips issue → Dispatched before spawn.
-
-## §3 Workstream registry + wave plan (PD7)
-| WS | FRO | Title | Pri | Branch | Owns | Wave | Status |
-|---|---|---|---|---|---|---|---|
-| A | 323+321+322 | Invite cluster: bulk-add visibility, typeahead privacy, path consolidation | High | swarm/pd7-invites | MembersPage.tsx, invite picker, SharePanel invite tab, auth-worker invite/search endpoints | 1 | in-flight |
-| B | 308+320 | Left sidebar rework + AI chat docked into left bar | Med | swarm/pd7-sidebar | AppShell/sidebar, ChatPanel placement, ProjectWorkspace panel docking | 1 | in-flight |
-| C | 310 | Import flow: client-side parse preview-before-confirm + beta flags | Med | swarm/pd7-import | ImportDialog.tsx, src/lib/import.ts | 1 | in-flight |
-| D | 317 | Footnotes: toggle + inline render + edit | Med | swarm/pd7-footnotes | EditorTable cell rendering, footnote lib | 1 | in-flight |
-| E | 319 | Audio take-switch feedback + spam-safety | Med | swarm/pd7-audio | audio panel/take components | 1 | in-flight |
-| F | 313 | Plain-text export option | Low | swarm/pd7-export | export-service, ExportDialog | 1 | in-flight |
-| G | 303 | AI chat: streaming, history, non-blocking, real cell context | Med | swarm/pd7-chat | ChatPanel internals (after B) | 2 | — |
-| H | 314+315+316 | Importers: spreadsheet col-mapping, cell-labels template, finished-translation import | Med | swarm/pd7-importers | parsers, ImportDialog (after C) | 2 | — |
-| I | 318 | Milestones: event-log model + UI + sidebar nav + sticky anchor | High | swarm/pd7-milestones | sync-worker events (additive), milestones UI (after B) | 2 | — |
-| J | 309 | Search UX: jump-in-context + expand-all (after B's dock) | Med | swarm/pd7-search | search panel/results | 2 | — |
-| K | 311 | AI metrics: post-edit magnitude over time (simplest) | Med | swarm/pd7-metrics | metrics surface | 2 | — |
-| L | 307 | Report-a-problem → PostHog session capture | Med | swarm/pd7-report | new component + posthog lib | 2 | — |
-| M | 259 | /projects refactor | Low | swarm/pd7-projects | ProjectsPage | 3 | — |
-| N | 193 | AD-9 detach-from-source | Low | swarm/pd7-detach | settings + sync-worker event | 3 | — |
-| O | 183 | Terminology spec gaps (scope: decompose first) | Med | — | — | 3 | needs decomposition |
-
-## §M Merge log (PD7)
-- 2026-06-10 · integration `swarm/pd7-integration` created off main `412f800`. Reconciliation DONE: 14 issues → Dev Verification Needed w/ commit-ref comments (AQU-257 comment failed — issue archived; status updated). AQU-173/246 commented, left Todo.
-- 2026-06-10 · Wave 1 CLAIMED (→Dispatched) + dispatched, 6 sonnet agents on manual worktrees off integration tip 412f800: A invites(323+321+322), B sidebar+chat(308+320), C import-preview(310), D footnotes(317), E audio-takes(319), F txt-export(313).
-- 2026-06-10 · **E (AQU-319) MERGED** → integration 5b8efbe (orchestrator fixed 1 unused-var tsc error in test). tsc 0 · full vitest GREEN · AQU-319 Fixed by agent.
-- 2026-06-10 · ⚠️ API-522 outage killed agents A/B/C/D/F mid-flight. F had committed 9d1c0ab — orchestrator verified (tsc 0, export tests 68/68), **F (AQU-313) MERGED** → integration, AQU-313 → Fixed + comment. A/B/C/D respawned as FINISHERS into the same worktrees (A effectively fresh).
-- 2026-06-10 · **C (AQU-310) MERGED** → integration (finisher completed; AQU-310 Fixed by agent). Orchestrator fixed 3 AQU-287 collision tests broken by the new preview step (mock parseFile + walk preview-confirm) @ 5e087d7+amend.
-- 2026-06-10 · **B (AQU-308+320) MERGED** → integration 2eba17a (finisher; AppShell back-compat `sidebar` alias). AQU-308/320 → Fixed by orchestrator (320's comment blocked by permission classifier — status set, no comment).
-- 2026-06-10 · **★ INTEGRATION GREEN post-wave-1-partial: tsc 0 · vitest 2658/2658.** Footnotes finisher died 2× more (API flaky) — finisher #3 dispatched with commit-early discipline. Invites agent still in flight.
-- 2026-06-10 · **Wave 2 dispatched** (5 sonnet agents, worktrees off live integration tip): G chat(303), H importers(316+314+315), J search(309), K metrics(311). L report-problem(307) deferred until a slot frees. In-flight total 6.
-- 2026-06-10 · **G (AQU-303) MERGED** (streaming pre-existed; thread history via localStorage; cell context confirmed) — Fixed by agent. **L (AQU-307) dispatched** into freed slot.
-- 2026-06-10 · **D (AQU-317) MERGED** (finisher #3 16c9d76; orchestrator did the ProjectWorkspace wiring: useFootnotesPreference → ViewSettingsMenu + EditorTable). USFM edit-safe; DOCX read-only.
-- 2026-06-10 · **J (AQU-309) MERGED** 6203563 (click-to-jump + SearchResultsView expand-all) — Fixed by agent.
-- 2026-06-10 · **A (AQU-323+321+322) MERGED** 0f03b8b. 323: server path proven correct w/ round-trip test, real-world cause = role-floor/stale-hook, "park" typo absent; 321: scoped /users/search?scoped=1 + /projects?minRole=600; 322: mode toggle + honest "Add to projects" label (full email-batch unification traced). Spec updated in aquilla-specs. All three Fixed by agent.
-- 2026-06-10 · **★ GATE GREEN: tsc 0 · vitest 2685/2685 · auth-worker tsc 0 + 266/266.**
-- 2026-06-10 · **Wave 3 dispatched:** M /projects-refactor(259), N detach-AD9(193). In flight: H importers, K metrics, L report, M, N (5).
-- 2026-06-10 · **K (AQU-311) MERGED** 0e5e301 (NED post-edit metrics, derive-on-read off target.cell.commit ai_suggestion provenance; Settings → AI Metrics). **L (AQU-307) MERGED** 89fa42f (Report-a-problem → PostHog + replay URL; consent-off honest copy path; "anonymous usage data"→"usage data").
-- 2026-06-10 · **H (AQU-316+314+315) MERGED** 78a610d. ⚠️ ORCHESTRATOR INTERVENTION: AQU-314's apply path wrote cast names into TARGET TEXT via real commits (corruption). Disabled at e073ab7 (template+preview kept); **AQU-314 reopened → Todo** w/ unblocker comment (needs cell.label.set-style event). 316/315 sound (zero-dep XLSX via DecompressionStream; paired import reuses AQU-191 matcher).
-- 2026-06-10 · **M (AQU-259) MERGED** 34396d6 (Linear-style /projects rows + filter/sort; created/updated cols traced — list endpoint lacks fields). TeamDetail "pre-existing fail" claim NOT reproduced on integration (suite green).
-- 2026-06-10 · **AQU-183 DECOMPOSED** → children AQU-327/328/329 (v1 trio, agent dispatched on swarm/pd7-terminology) + AQU-330 (data-model DECISION for Ryder, Todo). Deferred: verdict pipeline, dictionaries, org subscriptions.
-- 2026-06-10 · **N (AQU-193) MERGED** 7b5ba29 (SourceLinkSection + typed-DETACH confirm; project.link-source event added additively to sync-worker; snapshot burst via pre-existing auth-worker snapshotSourceCells; markers clear by pointer-match). Gates: tsc 0 · sync-worker 585/585 · auth-worker 266/266.
-- 2026-06-10 · **★ npm run build PASS** on integration (pre-detach tip).
-- 2026-06-10 · **O (AQU-327/328/329)**: agent found all three ALREADY implemented on the branch base (prior swarm work) — verified green, issues → Fixed. NOTE: review-queue role gate is project_lead(500) vs spec's maintainer(600); AQU-330 = data-model decision for Ryder.
-- 2026-06-10 · **Live-UI QA (singleton, 2 attempts — first killed): ALL 17 CHECKS PASS** → UI-QA-PUNCHLIST.md §PD7. Env-only caveats: local sync-worker CORS/import-500, chat needs OPENROUTER key, footnote render needs a \f-bearing USFM. AQU-209 verified: /reset-password renders (fixed by AQU-270).
-- 2026-06-10 · **★★ PROMOTED TO MAIN (ff-only): 412f800 → 5dea6c6** (+6845/−229, 68 files). Gates at promotion: tsc 0 · vitest 2736/2736 · sync-worker 585/585 · auth-worker 266/266 · build PASS · UI-QA GO. **PD7 SWARM CONVERGED.** Open remainders: AQU-314 (reopened, needs cell-label event), AQU-330 (decision), AQU-183 umbrella, AQU-173/246 (human), AQU-227/224 (prior dispatch).
-
----
-
-# 🆕🆕🆕 CURRENT GOAL (2026-06-11) — QoL sweep (Prototype Debugging simple issues)
-
-> **This block is the active goal.** Everything below is reference-only from prior swarms.
-
-## §0 STOP checklist
-- [ ] Every eligible issue at **Fixed** or honestly **blocked** with a Linear note.
-- [ ] Integration green: `npx tsc -b --noEmit` + `npx vitest run`; `npm run build` passes before promotion.
-- [ ] Promoted to main only with main's working tree clean apart from untracked files.
-- [ ] Each fix verified; spec reconciled per `/issue` Step 2.5.
-- [ ] Remaining gaps traced in `docs/swarm/TRACES.md`.
-
-## §EXCLUDED
-- AQU-257/AQU-258 — wave 2 (file overlap with wave 1; combined into one agent)
-- AQU-304/AQU-312 — wave 2 (file overlap with AQU-305 on ProjectSettings.tsx; combined into one agent)
-
-## §1 Operating model
-- Integration `swarm/qol-integration` (worktree `.worktrees/qol-integration`, off main `89e87e1`, node_modules symlinked).
-- Each agent → manual worktree off integration tip. sonnet model.
-- Agents commit to their branch, NEVER push/deploy/promote.
-- Merge: branch → integration → verify → log §M. Promote integration → main (ff) when green AND main clean.
-- Protected untracked: `pd5-settings-text.txt`, `tn-fixture.tsv`.
+| Wave | Dispatched | Workstreams | Status |
+| --- | --- | --- | --- |
+| 1 | pending | WS-01 import-merge, WS-02 lint-guard, WS-03 dead-code, WS-04 standard-relax | dispatching |
 
 ## §3 Workstream registry
-| FRO | Title | Pri | Branch | Owns | Status |
-|---|---|---|---|---|---|
-| 324 | Drop trailing ellipsis on "Invite to projects" button | Low | swarm/fro-324@3b95ca0 | MembersPage.tsx | merged-main |
-| 305 | Default top_k to 15 | Low | swarm/fro-305 | ProjectSettings.tsx, useCompletion.ts | merged-main |
-| 300 | Outbox indicator position jump on reconnect | Low | swarm/fro-300 | SyncStatusIndicator.tsx | merged-main |
-| 301 | Term mining stopwords + phrase splitting | Med | swarm/fro-301@f973719 | candidates.ts | merged-main |
-| 302 | Setup walkthrough: import files first | Med | swarm/fro-302 | onboarding/, useSetupChecklist.ts, ProjectWorkspace.tsx | merged-main |
-| 306 | Reframe health as staleness + rule violations | Med | swarm/fro-306 | EditorTable.tsx, DecaySettingsSection.tsx | merged-main |
-| 257+258 | Modal/Share scroll overflow (combined) | Med | swarm/fro-257-258 | SharePanel.tsx, MembersPanel.tsx | merged-main |
-| 304+312 | Consolidate AI config in settings (combined) | Med | swarm/fro-304-312 | ProjectSettings.tsx, VoiceLibraryPanel.tsx | merged-main |
 
-## §M Merge log
-- 2026-06-11 · integration `swarm/qol-integration` created off main `89e87e1`. Wave 1 (6 agents) dispatched.
-- 2026-06-11 · **Wave 1 ALL MERGED** → integration. AQU-324 (FF), AQU-305, AQU-300, AQU-301 (orchestrator finished commit after agent timeout), AQU-302 (new ImportFilesStep), AQU-306. **Gate: tsc 0 · vitest 2640/2640 · all green.** Wave 2 dispatched: AQU-257+258 (modal overflow), AQU-304+312 (AI config consolidation).
+| ID | Title | Model | Status | Owns |
+| --- | --- | --- | --- | --- |
+| WS-01 | Merge-on-import + source hashes | sonnet | — | `scripts/i18n-catalog.ts`, `src/lib/i18n/catalog-export.ts` (+tests) |
+| WS-02 | ESLint `no-unkeyed-string` + CI | sonnet | — | `eslint.config.js`, `tools/eslint-rules/**`, suppressions file, `package.json` lint scripts, `.github/workflows/**` |
+| WS-03 | Delete unreachable pages | haiku | — | `TerminologyPage.tsx`, `RulesPage.tsx`, `RuleCreateDialog.tsx`, `RuleSuggestDialog.tsx` + their tests |
+| WS-04 | Relax the context standard | sonnet | — | `src/lib/i18n/context.ts`, `screenshots.ts`, `context.test.ts`, `docs/I18N-CONTEXT-CATALOG.md` |
 
----
+## §4 Merge log
 
-# 🆕🆕 CURRENT GOAL (2026-06-04) — Drain the `Prototype Debugging` Linear Todo queue via parallel `/issue` workflows
+<!-- date · WS · branch · sha · tsc · vitest · notes -->
 
-> **This block is the active goal.** Everything below CONVERGED and is reference-only.
-> Driver: user ran `/swarm-orchestration` to iterate `/issue next`. What-to-do = Linear project **Prototype Debugging** (team FrontierR&D, key FRO), status **Todo**. Per-issue lifecycle = `.claude/commands/issue.md`. Spec source of truth = `~/frontierrnd/aquilla-specs`.
+## §5 Approved scope decisions (from the user)
 
-## §0 STOP checklist
-- [ ] Every eligible `Todo` issue at **Fixed** (verified) or honestly **blocked** with a Linear note.
-- [ ] Integration `swarm/issue-integration` green: root `tsc -b --noEmit` + `vitest run`; `npm run build` before each promotion; sync/auth-worker tsc+test if touched.
-- [ ] Promoted to main ONLY with `ProjectCreateDialog.tsx` working change protected (never staged).
-- [ ] Each fix live-verified on the real dev stack before its issue moves to Fixed; spec reconciled.
-- [ ] Remaining gaps traced in `docs/swarm/TRACES.md`.
-
-## §EXCLUDED — AQU-147 (`ProjectCreateDialog.tsx` DIRTY in main — forbidden path), AQU-146 (staging, user), AQU-145 (archived junk).
-
-## §1 Operating model
-- Integration `swarm/issue-integration` (worktree `.worktrees/issue-integration`, off main `bfacb67`, node_modules + auth-worker/node_modules + sync-worker/node_modules symlinked).
-- Each agent → **manual** worktree off the live integration tip (NOT isolation:worktree — stale-base trap). sonnet. Commits its branch referencing FRO-###, does own Linear (assign me + fix comment), spec reconcile, **NEVER pushes/deploys/changes issue status**. Worker-touching worktrees MUST symlink auth-worker + sync-worker node_modules.
-- **Live-UI verification centralized** (one dev stack :5173): agents leave SWARM-TODO; a single UI-QA agent confirms each batch, then orchestrator moves the issue → Fixed.
-- Merge: branch → integration → verify → log §M. Promote integration → main (ff) only when green AND main clean apart from the protected file.
-- ⚠️ Migrations: 0028 CLAIMED (AQU-142). Next free = **0029**.
-- ⚠️ BASELINE RED (pre-existing, NOT swarm): `src/components/org/AssignedToMe.test.tsx` 2 fails (mock-export). Present at `bfacb67`. Don't attribute/block on it.
-
-## §3 Workstream registry
-Status: `in-flight | review | merged-integration | merged-main | blocked`
-| FRO | Title | Pri | Branch@sha | Status |
-|---|---|---|---|---|
-| 135 | Bible import 0% post-Postgres | High | swarm/fro-135 | in-flight (a30689fbfc2bd3f2d) |
-| 140 | Rename Frontier→Aquilla username | Low | swarm/fro-140@a221e43 | merged-integration |
-| 141 | Org dropdown scroll affordance | Low | swarm/fro-141@2718dad | merged-integration |
-| 136 | Overview file list show-all | Med | swarm/fro-136@84a84f2 | merged-integration |
-| 142 | Group internal/public toggle (+migr 0028) | Low | swarm/fro-142@3eb7f9b | merged-integration |
-| 143 | Version pins nav | Med | swarm/fro-143@be04128 | **review — premise false, see §M** |
-| 134 | Login email→canonical username (TRUE BUG) | High | swarm/fro-134@87c7fa9 | merged-integration |
-| 137 | Roster Matrix perf | High | swarm/fro-137@8c81f91 | merged-integration |
-| 138 | Define+test org/team perm semantics | Urgent | swarm/fro-138@12230b0 | merged-integration (34 tests, 4 OPQs) |
-| 139 | Team view edit perm levels + tooltips | Med | swarm/fro-139 | in-flight (a0b94e6cada5c018a) |
-| 144 | E2E org-level business logic tests | High | swarm/fro-144 | in-flight (a4d5758a0357baa03) |
-
-**Queue status: ENTIRE Todo queue dispatched.** Done/merged: 135,140,141,136,142,134,137,138. In-flight: 139,144. Held: 143. Excluded (done by other actor): 147,146; junk: 145.
-**PENDING ORCHESTRATOR STEPS:** (1) ~~merge 139+144~~ DONE; (2) live-UI QA via Postgres dev stack for the batch SWARM-TODOs; (3) promote integration → `main` branch (clean ff off `bfacb67`; other actor's `ryder/fro-146-staging-subdomain`@883ff20 lands separately, no overlap); (4) move live-verified issues → Fixed; (5) surface AQU-143 decision + AQU-138 OPQs to user.
-
-## §FINAL IN-SESSION STATE (2026-06-04 ~17:25)
-- **ALL 10 swarm issues merged green → `swarm/issue-integration`** (135,140,141,136,142,134,137,138,139,144). AQU-143 held (premise false). Final gate: root tsc 0 · vitest 1514/1516 (2 baseline AssignedToMe reds) · auth-worker tsc 0 + 122/122 · sync-worker 400/400 · build PASS (e2e specs tsc-clean + discovered by `--list`, NOT run).
-- **`swarm/issue-integration` is a real branch — it persists after session close.** All work is recoverable from it; NOT stranded in worktrees.
-- Per user `/loop` instruction: **all 11 dispatched issues moved Todo→`Dispatched` in Linear** (134,135,136,137,138,139,140,141,142,143,144) so the recurring loop only picks fresh Todo work. `Todo` queue now empty (AQU-145 = archived junk).
-- **STILL TODO (human/next-run):** (a) live-UI QA the batch on the Postgres dev stack + run `npm run test:e2e -- e2e/specs/orgs/org-access-lifecycle.spec.ts`; (b) promote `swarm/issue-integration` → `main`; (c) move verified issues Dispatched→Fixed; (d) AQU-143 decision; (e) AQU-138's 4 OPQs (org-viewer-sees-all default, etc.).
-- User switched to a **60-min CLOUD schedule** (must clone BOTH `codex-web-app` + `~/frontierrnd/aquilla-specs`) running: "whenever an issue is finished, revisit Linear, work anything still Todo; mark started-but-unfinished as Dispatched."
-
-## §M Merge log
-- 2026-06-04 · integration `swarm/issue-integration` off main `bfacb67`. AQU-147 protected.
-- 2026-06-04 · **MERGED green → integration:** AQU-141 (OrgSwitcher scroll), AQU-140 (Aquilla rename, 5 files), AQU-136 (ProjectOverview show-all +test), AQU-142 (group toggle: migration `0028_groups_is_internal` + schema + auth-worker org-permissions + TeamsList +4 tests; default Internal-only), AQU-134 (auth.ts JWT-sub → canonical username, TRUE BUG +test), AQU-137 (matrix: stable useCallback deps + React.memo rows, +5 tests). Gate after AQU-137: **root tsc 0 · vitest 1510/1512 · auth-worker tsc 0 + 94/94** (the only reds = 2 baseline AssignedToMe).
-- 2026-06-04 · **AQU-143 HELD (review, NOT merged).** No version-pinning portal exists in codex-web-app OR codex-groups-admin; issue premise ("portal reachable via URL") false. Agent added a build-info "Versions" tab to AdminConsole (green) = version-info *discoverability*, not *pinning*. Branch preserved; awaiting user decision.
-- 2026-06-04 · AQU-146 actor wired staging deploy into `issue.md` Step 3 (`dev.aquilla.app`, `pnpm run deploy:aquilla:staging`). `--deploy` available once AQU-146 lands.
-- 2026-06-04 · **AQU-135 merged** → integration (sync-worker only: defer O(N²) per-cell file-counter recompute to once-per-chunk — the REAL cause of import-stuck-0% over Hyperdrive/PG, SQL dialect was already ported). **root tsc 0 · sync-worker npm test 400/400 · `npm run build` PASS.** ⚠️ sync-worker `tsc --noEmit` shows **60 PRE-EXISTING errors in `__tests__/` files** (CellRow not assignable to Record, node: module resolution) — CONFIRMED identical on `main` branch `bfacb67`, NOT swarm-introduced (from the recent D1→PG migration). Real gate = vitest, green. Traced as separate debt.
-- 2026-06-04 · **★ AUTOMATED GATE GREEN for the 7-issue batch** (135,140,141,136,142,134,137): root tsc 0 · vitest 1510/1512 (2 baseline AssignedToMe reds) · auth-worker tsc 0 + 94/94 · sync-worker test 400/400 · build PASS.
-- 2026-06-04 · **TOPOLOGY CLARIFIED:** `main` BRANCH = `bfacb67` (integration is correctly based on it; clean ff). The main *working dir* is checked out on **`ryder/fro-146-staging-subdomain`** @ `883ff20` (other actor's commits: AQU-146 staging-on-Neon, AQU-147 dialog redesign, dev-stack managed-local-Postgres). **Zero file overlap** with integration (`comm -12` empty) → conflict-free whenever that branch lands on main. ⇒ **AQU-147 + AQU-146 are DONE by the other actor.** dev-stack now boots Postgres for `pnpm dev` (unblocks live-UI QA).
-- 2026-06-04 · **AQU-138 committed** `swarm/fro-138`@`12230b0` ("lock permission semantics with 34 integration tests") — awaiting full agent completion before merge.
-- ⚠️ NOTE: this top block was once stripped by a linter/user edit and restored. If it goes missing again, the merge log here is the recovery source.
-
----
-
-# 🆕 CURRENT GOAL (2026-05-31 PM) — Back-translation + Terminology, built fully
-
-> **This block is the active goal. The historical "production-ready" swarm below CONVERGED and is reference-only.**
-> Design spec (read first): `docs/superpowers/specs/2026-05-31-bt-terminology-design.md`.
-
-**Goal:** Build two aquilla-spec features fully in codex-web-app — (1) back-translation (statistical glosser + `cell.backtranslation.set` persistence + BT-tab edit/Polish/stale/role-gate + termbase seeding); (2) terminology/glossary v1-core (concept model synced + compile-to-rules derived verdicts + settings page CSV/TBX + lookup/apply popover). Localization DEFERRED. **User authorized the sync-worker event layer** (additive only).
-
-## §0 STOP checklist (done = all green; then CronDelete + PushNotify)
-- [ ] `npx tsc -b --noEmit` clean (root) · `npx vitest run` green incl. new tests
-- [ ] `cd sync-worker && npx tsc --noEmit && npm test` green
-- [ ] `npm run build` passes
-- [ ] BT demo-true: auto-generates statistically · persists across reload (event) · Edit→Save persists · Polish toggle · stale→regen · role-gated
-- [ ] Terminology demo-true: add/edit/delete · CSV+TBX import/export · violations on cells · lookup→Apply · termbase seeds BT
-- [ ] every remaining gap traced in `docs/swarm/TRACES.md`
-
-## §1 Operating model (this goal)
-- **Base:** main is CLEAN at `aae39b7` (prior swarm promoted; Paratext actor's sync-worker work landed). No forbidden paths now — sync-worker event layer is fair game, additively.
-- **Integration:** `swarm/integration2` (worktree `.worktrees/swarm-integration2`, off `aae39b7`, node_modules symlinked). The old `swarm/integration`@`9b4529a` is STALE (main 60 ahead) — abandoned.
-- Each agent → isolated worktree (Agent isolation:worktree, model sonnet, run_in_background). Agents commit their branch, NEVER push.
-- Merge protocol: merge branch → integration2 → verify (tsc + vitest, + sync-worker tests for BT-EVENT) → log in §M. Keep-both-sides on conflicts. Promote integration2 → main only when green AND main `git status` clean (D==0, no MERGE_HEAD).
-- **Loop:** 5-min cron (this session). Also re-invoked on each agent completion. Drop to a watcher / STOP on convergence — do NOT manufacture work.
-
-## §3 Workstream registry (this goal)
-Status: `in-flight | review | merged-integration2 | merged-main | blocked`
-| ID | Title | Branch | Owns | Status | Agent |
-|---|---|---|---|---|---|
-| WS-BT-EVENT | sync-worker `cell.backtranslation.set` event + projection + read route | `swarm/ws-bt-event` | sync-worker/src/events/** (additive) | in-flight | ab27b12f8ab8e67e9 |
-| WS-BT-CLIENT | Markov glosser + BT tab edit/Polish/stale/role-gate + emit | `swarm/ws-bt-client` | bt-glosser.ts, EditorTable BT tab, ProjectWorkspace BT wiring | in-flight | ae51dccfab674b40b |
-| WS-TERM-DATA | concept model + sync + compile-to-rules + CSV/TBX lib | `swarm/ws-term-data` | src/lib/terminology/**, types.ts (terminology field), project-settings | in-flight | ac0af825757d23a14 |
-| WS-TERM-UI | terminology page (CRUD+CSV/TBX) + standalone lookup/apply popover | `swarm/ws-term-ui` | TerminologyPage.tsx, TermLookupPopover.tsx, nav/route | in-flight | af692816a137f4701 |
-| WS-GLUE-QA | mount popover in editor + seed glosser from termbase + live UI QA | (wave 2) | (after wave-1 merges) | queued | — |
-
-## §M Merge log (this goal)
-<!-- append: date · WS · branch · sha · tsc · vitest · notes -->
-- 2026-05-31 · integration2 created off main `aae39b7` · wave 1 (4 agents) dispatched.
-- 2026-05-31 · **WS-BT-EVENT merged** → integration2 (FF; `cell.backtranslation.set` event + projection + read route + migration 0021 + 20 tests). root tsc 0, sw tsc 0.
-- 2026-05-31 · **WS-TERM-DATA merged** → integration2 (terminology lib + compile-to-rules @ `useRules.ts:36-45` + CSV/TBX + 29 tests). root tsc 0, **vitest 1291 pass**. sync-worker `npm test` = **6 PRE-EXISTING stale failures** (admin×3 / audio×1 / files-read×2 — per `SYNC-WORKER-FAILURES.md`, NOT introduced here; BT's 20 new tests pass). → fixer `swarm/ws-swtest-fix` dispatched.
-- 2026-05-31 · **WS-BT-CLIENT merged** → integration2 (no conflict; Markov glosser + BT tab edit/Polish/stale/role-gate + outbox emit + 14 glosser tests). root tsc 0, **vitest 1305 pass**. SWARM-TODO: hydrate persisted BT via the read route (glue wave).
-- 2026-05-31 · **WS-TERM-UI merged** → integration2. add/add conflicts on terminology/{types,store,csv,tbx}.ts resolved KEEP-REAL-IMPL (TERM-DATA's); TERM-UI's TEMP stubs dropped. Page + popover + route + RulesPage nav + 16 tests landed. ⚠️ tsc RED (9 errors): TERM-UI's CRUD call-sites assume `addConcept(concept)` but TERM-DATA shipped `addConcept(project, concept) → ProjectRecord` → glue fixes.
-- 2026-05-31 · **★ All 4 wave-1 branches merged.** WAVE 2 GLUE dispatched (`swarm/ws-glue`, off integration2 tip): (1) fix TerminologyPage CRUD call-sites + test to real store API + persist via patchShared; (2) mount TermLookupPopover in EditorTable source-token UI; (3) hydrate persisted BT via cell-backtranslations read route in ProjectWorkspace; (4) seed glosser from termbase (preferred=+,admitted=low,forbidden=−); (5) Terminology sidebar nav item. Target: tsc 0 + vitest green.
-- 2026-05-31 · **WS-SWTEST-FIX merged** → integration2 (clean; 6 stale tests refreshed, zero prod code). **sync-worker now 381/381 pass, tsc 0.** Client tsc still RED pending glue.
-- 2026-05-31 · **WS-GLUE cut off** mid-Task-1 (no commit; left TerminologyPage half-refactored at 20 errors). Discarded the partial. **Decomposed into 3 parallel single-file agents** (brief was too big for one): Glue-A `swarm/ws-glue` (TerminologyPage → real store API, target tsc 0), Glue-B `swarm/ws-glue-pw` (ProjectWorkspace: BT read-route hydration + glosser termbase-seeding + terminology nav), Glue-C `swarm/ws-glue-editor` (EditorTable: mount lookup/apply popover on source-token click). Each owns ONE hot file → conflict-free.
-- 2026-05-31 · **Glue-A + Glue-B merged** → integration2 (clean, disjoint files). **integration2 GREEN: root tsc 0, vitest 1321 pass.** (TerminologyPage CRUD → `useProject().patchSettings`; ProjectWorkspace BT-hydration + glosser termbase-seeding + Terminology nav.) sync-worker still 381/381.
-- 2026-05-31 · **Glue-C merged** → integration2 (clean). **★ FULL GATE GREEN: root tsc 0, vitest 1321, sync-worker tsc 0 + 381 tests, `npm run build` PASS.**
-- 2026-05-31 · **★ PROMOTED TO MAIN (ff-only).** main `aae39b7` → **`e16759a`**. All BT + terminology work is on main; untracked swarm docs preserved; tree clean.
-- 2026-05-31 · **UI-QA done** (`UI-QA-PUNCHLIST.md` §"BT + Terminology QA"). Both PARTIAL. In-session add/save (terminology, PATCH 200 + server-confirmed) and generate/edit/save (BT, event emitted to outbox) all WORK. **1 REAL P1: BUG-TERM-1** — synced settings (terminology) don't load on navigation (StrictMode `aliveRef` race in `useProjectSettings.ts:140` drops the fetched response). **1 glosser defect: BUG-BT-5** — runaway repetition (no termination guard). Rest = ENV (migration 0021 not applied to the running dev D1 → BT D1-persistence unverified live; CSV/TBX/popover/role/Polish untestable via Preview tooling — all cascade, not code bugs).
-- 2026-05-31 · **Fix-wave dispatched**: `swarm/fix-term-load` (BUG-TERM-1: useProjectSettings StrictMode race + regression test) · `swarm/fix-glosser-repeat` (BUG-BT-5: bound length + break repetition cycles + test).
-- **ENV step for the demo** (BUG-BT-1/TERM-2 — NOT a code bug): apply the migration to the demo D1 → `cd auth-worker && npx wrangler d1 migrations apply aquilla-db --local --persist-to ../.wrangler-dev-state` + restart sync-worker. BT persistence logic is unit-proven (sync-worker 381 green incl. BT round-trip); only the dev-stack D1 lacked the table.
-- 2026-05-31 · **Fix-A + Fix-B merged + verified** → integration2 (Fix-B add/add conflict on bt-glosser.ts resolved = take the guarded version; sanity ours=0 / theirs=5 guard markers). **GREEN: root tsc 0, vitest 1324 (1321 + 3 regression tests), build PASS.** sync-worker unchanged 381.
-- 2026-05-31 · **★ PROMOTED TO MAIN (ff-only).** main `e16759a` → **`3ea4932`**. BUG-TERM-1 + BUG-BT-5 fixed on main; all automated gates green.
-- 2026-05-31 · **Re-QA done.** Check 1 (BUG-TERM-1 fix) **✅ FIXED** (loads on nav + hard reload). Check 2 (lookup popover + Apply) **✅ PASS** (note: concept must be status "active"/approved; new = draft). Check 3 (terminology violation) **✗ BUG-TERM-6 (P2)** — `source-requires-target` terminology violations don't fire on cells; persists after hard reload (so NOT in-session staleness); concept active on server, compile unit-tested + `useRules.ts:47` merges them — yet the editor's cell-violation path (likely the health WORKER) doesn't get them.
-- 2026-05-31 · **BUG-TERM-6 fix dispatched** (`swarm/fix-term-violations`): diagnose why compiled terminology rules don't reach the cell-violation path (hypothesis: the health worker's rule input ≠ `useRules` merged rules, or `project.terminology` doesn't reach the editor's rule context) + surgical fix + integration test through the real path. Killed stray re-QA vite :5291.
-- 2026-05-31 · ⚠️ **isolation:worktree STALE-BASE bug discovered.** The BUG-TERM-6 agent's `isolation:worktree` was based off session-start `aae39b7` (NOT live main `3ea4932`) → it recreated the already-on-main terminology module; its branch diff vs main = +350/−3273 (would DELETE all BT + sync-worker event layer + the stale-test/StrictMode fixes). **Branch `swarm/fix-term-violations` DISCARDED — DO NOT MERGE.** Lesson: `isolation:worktree` pins to session-start HEAD; **use MANUAL worktrees off live main for all further agents** (the glue agents did this correctly; Fix-A/Fix-B also got stale bases but their 3-way merges happened to combine cleanly + are re-QA/test-verified). main verified COMPLETE + correct.
-- 2026-05-31 · **Real BUG-TERM-6 fix re-dispatched** on a MANUAL worktree off live main `3ea4932` (`swarm/fix-term-viol2`): diagnose the RUNTIME path (ProjectWorkspace `project`→`useRules`→`useHealth`→`checkRulesForCell`) — prime suspects: `project.terminology` empty in ProjectWorkspace, or `useHealth` filters terminology rules out of `enabledRules`. Surgical fix + real-path test.
-- 2026-05-31 · **BUG-TERM-6 = symptom of BUG-TERM-1 (already fixed).** Real-fix agent (manual worktree, NO recreated modules) traced it: StrictMode race → `settings.terminology` undefined → `useRules` compiled 0 terminology rules; that race is fixed on main (`2e89ccf`). Audited the runtime path (compile sets enabled:true; useHealth keeps them; checkRulesForCell fires) + added a 5-case **integration regression test** (`useRulesHealth.integration.test.tsx`). Merged → main **`00fad37`**. **GREEN: tsc 0, vitest 1329, sw 381, build PASS.**
-- 2026-05-31 · **Final tight re-QA dispatched**: settle the lone contradiction — does a terminology violation RENDER on a FRESH load (active concept + non-compliant cell)? The prior re-QA negative was an in-session-promotion scenario; the integration test proves computation. Non-disruptive, time-boxed, ONE check.
-- 2026-05-31 · **★ Final re-QA: VERDICT = RENDERS.** Terminology violation renders on a genuine FRESH load — source-term dotted-underline decoration + the `source-requires-target` infraction in the cell's Issues tab; control built-in violation also renders. **BUG-TERM-6 was a FALSE NEGATIVE** (prior in-session-promotion timing, exactly as the integration test predicted). UX note (P3, traced): the term violation shows in the Issues tab but has no face-level row indicator.
-- 2026-05-31 · **★★ SWARM CONVERGED — GOAL COMPLETE.** Back-translation + Terminology built fully, on main **`00fad37`**. §0 STOP checklist GREEN: root tsc 0 · vitest **1329** · sync-worker tsc 0 + **381** · `npm run build` PASS · both features demo-true (live-verified) · gaps traced. Bugs found+fixed in QA: BUG-TERM-1 (StrictMode settings-load race), BUG-BT-5 (glosser runaway repetition); BUG-TERM-6 = symptom of TERM-1 (already fixed) + new integration test. ⚠️ `isolation:worktree` stale-base pitfall recorded above — used manual worktrees off live main. **Loop cron `c666a8c2` DELETED.** Demo-env step: apply migration `0021` for BT D1-persistence (unit-proven; sync-worker round-trip green).
-
----
-
-## 📦 ARCHIVE — prior goal "production-ready given homepage claims" (CONVERGED + PROMOTED 2026-05-31)
-
-Everything below this line is the **historical record of the prior swarm**. It converged and **promoted to main** (now `aae39b7` — see the two `merge(swarm→main)` commits). The "Paratext/USFM actor" it repeatedly references has **committed — main's working tree is clean**, and its sync-worker event-layer work (`comment.*`, `target.cell.commit`, etc.) has **landed in main**. ⚠️ Therefore the **"Forbidden paths", "promotion BLOCKED", "promote only when D==0", and "sync-worker = RED" notes below are STALE and no longer apply** — sync-worker is now freely extendable (additively). The dead watcher cron `5d99aca3` was a prior session and is gone. Kept for history; **do not act on its directives** — the live state is the CURRENT GOAL block at the very top.
-
-**Role (historical):** This file is the single source of truth for an autonomous swarm making
-codex-web-app shippable for upcoming demos. The project-lead loop (cron, every 5
-min) and every subagent reads this first. Keep it current.
-
-**Started:** 2026-05-30 · **Mode:** autonomous (user AFK 8–16h) · **Model policy:** sonnet for all implementation subagents.
-
-**GOAL (user-set, /goal):** Production-ready *given the homepage claims*. Every promise on the marketing homepage (`src/pages/Homepage/Homepage.tsx`) must be demonstrably true on the golden path, OR be honestly dialed back (hidden / copy changed) rather than left as a visible broken promise. The homepage is the acceptance contract — see §0 Layer 2 and §6.
-
----
-
-## 0. Definition of "shippable" — STOP checklist
-
-Two layers. BOTH must be green. The loop STOPS (and notifies the user) only when all are true.
-
-### Layer 1 — Green build (the floor)
-- [ ] `npx tsc -b --noEmit` clean (root: src/ + scripts/ + e2e/)
-- [ ] `npx vitest run` green (client/src)
-- [ ] `cd sync-worker && npm test` green · `cd auth-worker && npm test` green
-- [ ] `npm run build` succeeds (aquilla brand)
-- [ ] `npm run test:e2e:smoke` green (run centrally, not in worktrees)
-
-### Layer 2 — Homepage claims demonstrably true (the REAL bar — status tracked in §6)
-- [ ] CTA path: homepage → `/onboarding` → create account (free) → into the workspace
-- [ ] Text translation: open source, draft, edit, validate a cell
-- [ ] Audio translation: record / synthesize / play per-cell audio
-- [ ] Video translation: claimed video modality works — OR claim dialed back with user sign-off
-- [ ] AI first-draft (completion), incl. low-resource framing
-- [ ] Back-translation visible "as you work"
-- [ ] Living Memory = ACTIVE learning loop (a correction becomes guidance in the next draft), not only a read-only view
-- [ ] Confidence score per cell + "biggest drags, ranked, one click away"
-- [ ] Team collaboration / cloud sync (multi-user)
-- [ ] On-device speech + private mode — OR claim dialed back
-- [ ] Import/export robust enough for professional source files
-- [ ] No "unavailable in this build" placeholder on any CLAIMED golden path
-
-### Honesty gate (non-negotiable)
-- [ ] Every gap that can't be closed in time is (a) traced in TRACES.md AND (b) either hidden in the UI or surfaced to the user as a copy change — NEVER a visible broken promise. Under-delivering silently is a FAIL.
-
----
-
-## 1. Operating model (how the swarm works without colliding)
-
-- **main** = sacred. It carries the USER'S uncommitted in-flight work (see Forbidden
-  paths). NEVER `git add`/commit/stash/checkout their changes. Only clean-merge into main.
-- **swarm/integration** (worktree `.worktrees/swarm-integration`, node_modules symlinked)
-  = integration branch based on clean HEAD `8e35c2b`. All agent branches merge here
-  first; kept green; promoted to main in batches.
-- **Each workstream agent** runs via `Agent(model:sonnet, isolation:worktree,
-  run_in_background:true)`. The harness gives it an isolated worktree at HEAD and
-  returns its branch/path on completion. Agents COMMIT their work (no pre-commit hook).
-- **Merge protocol (per completed agent):**
-  1. Review the returned branch diff (scope + forbidden paths).
-  2. Merge branch → `swarm/integration`; run verify commands there.
-  3. Green + on-scope → keep, log in §4. Red/off-scope → revert, write a TRACE, respawn a fixer.
-- **Promotion:** when `swarm/integration` is green, clean-merge it into `main`
-  (`git -C <main> merge --no-ff swarm/integration`). If it conflicts with the user's
-  dirty files, PAUSE and surface — do not force.
-- **Concurrency rule:** never let two IN-FLIGHT agents own the same file. Ownership is
-  tracked in §3. ProjectWorkspace.tsx and import.ts are HOT — single-owner at a time.
-- **Keep ~3–5 agents in flight.** Don't oversubscribe.
-
-### ~~Forbidden paths~~ — ✅ RESOLVED 2026-05-31 (actor landed; sync-worker NO LONGER forbidden)
-**HISTORICAL — do not act on this.** The Paratext/USFM actor committed; main is clean at `aae39b7` and its sync-worker event-layer work is merged. The current goal extends sync-worker freely. The list below records what was *once* in-flight (2026-05-30, now resolved); none of it is off-limits today:
-- `sync-worker/src/events/**`, `sync-worker/src/__tests__/**` (event-layer refactor + comment handlers)
-- `src/lib/import.ts`, `src/components/ImportDialog.tsx`, `src/lib/sync/source-export.ts`, `src/lib/sync/bulk-import.ts` (import/export wiring — they edit these too)
-- `src/lib/import/**` (new dir, theirs)
-- `src/lib/parsers/paratext.ts`, `paratext-project.ts`, `usfm-markers.ts`, `usfm-tokenize.ts` (+ `.test.ts`)
-- `scripts/paratext-import-e2e.ts`, `usfm-conformance.ts`, `usfm-marker-coverage.ts`
-- `src/pages/MembersPage.tsx`
-- Any change needing NEW sync-worker event kinds → leave a TRACE, do not edit the event layer.
-
-NOTE: wave-1 already committed CAT-format edits to `import.ts`/`ImportDialog.tsx` + a `source-export.ts` fix on swarm/integration — these overlap the actor and will be reconciled at promotion (their source-export.ts fix is byte-identical to ours; import.ts/ImportDialog.tsx are additive switch cases). NO NEW swarm work may touch these files.
-
-### Verify commands (ground truth)
-| Scope | Command (from) |
-|---|---|
-| Typecheck (client+scripts+e2e) | `npx tsc -b --noEmit` (root) |
-| Unit tests (client/src) | `npx vitest run` (root) |
-| sync-worker | `cd sync-worker && npx tsc --noEmit && npm test` |
-| auth-worker | `cd auth-worker && npx tsc --noEmit && npm test` |
-| Full build | `npm run build` (root) — central only |
-| E2E smoke (CENTRAL ONLY) | `npm run test:e2e:smoke` — needs wrangler dev ×2 + Chromium |
-Worktree agents: symlink deps first → `ln -s /Users/ryderwishart/prototypes/codex-web-app/node_modules node_modules`.
-
-### Key contracts (so agents build against the right types)
-- Parser output: `TranslatableString` — `src/lib/parsers/types.ts:17`
-- Editor cell: `CellData` (has `id,fileId,original,translated,status,group(=canonicalRef),activeValidators`) — `src/hooks/useCells.ts:42`; hook `useCells()` returns `{cells: CellData[]}` at `:258`
-- Events: `EventKind` union — `sync-worker/src/events/types.ts:22` (already incl. comment.* and target.cell.commit)
-- Import orchestrator: `src/lib/import.ts` (`importFile`→`parseFile` switch→`emitParsedFile`)
-- Export: `src/lib/export/export-service.ts` (`exportFile()` throws today; `downloadBlob()` works); USFM server export at `sync-worker/src/events/export-route.ts`
-- UI: shadcn "base-nova", primitives in `src/components/ui/`, lucide icons, NO toast lib (local state / window.alert), Dialog & Sheet patterns per `ConfirmActionDialog.tsx` / `FixReviewPanel.tsx`
-
----
-
-## 2. Wave history & control plane
-- **Loop cron:** CONVERGED WATCHER `5d99aca3` (`8,38 * * * *` = every 30 min). History: `cd56b87c`(5m build) → watchers `806fc9e0`/`3bc7a649` → ACTIVE `5f4fba13`(10m, user-directed aggressive) → **converged watcher `5d99aca3`** (build done, 30m to save tokens during AFK; auto-promotes when actor's tree clears; if user returns + wants aggressive, follow that). `CronDelete 5d99aca3` on STOP.
-- **USER DIRECTIVE (2026-05-31):** be aggressive with parallel subagents (accept later 3-way merges; don't gate on zero-collision ownership); always keep a UI-walkthrough agent driving the live app. See memory `feedback_aggressive_parallelism`. The earlier "plateau/watcher" throttle was a mistake — keep the pipeline full.
-- **QA server:** integration frontend at `http://127.0.0.1:5273` (vite from `.worktrees/swarm-integration`, env→ running backend :8788 auth / :8789 sync). Relaunch cmd is in the cron prompt. Does NOT disturb the actor's stack on :5173/:8788/:8789.
-- **Wave 6** (2026-05-31, in-flight, aggressive): W6-A UI-QA walkthrough → `ac5e7ebdd5b43e950` (drives :5273 → `docs/swarm/UI-QA-PUNCHLIST.md`); W6-B perf/code-split → `a05898ff789027e5d` (`.worktrees/swarm-w6b-perf`); W6-C UX polish (ExportDialog/LivingMemory/PassagesPanel) → `a44eed5e94c7b02f8` (`.worktrees/swarm-w6c-uxpolish`); W6-D polish traces (lastEditAt sort + complete-all cost) → `af811d4414d7540ce` (`.worktrees/swarm-w6d-traces`). Merge each into swarm/integration on completion.
-- **Promotion logic (IMPORTANT — survives compaction; UPDATED 2026-05-31):** The actor COMMITTED — main moved `8e35c2b` → **`e99b45b`** (landed client Paratext project-import + org-context: Overview dashboard, archive/untrack, audio-progress, org create/rename, Settings/Members in AppShell). Their committed `import.ts`(+182), `ImportDialog.tsx`(+95), `source-export.ts`, `parsers/types.ts` now hold Paratext changes that OVERLAP the swarm's CAT additions → promotion is a REAL 3-way `git merge swarm/integration` (NOT fast-forward), resolving those 4 files by KEEPING BOTH (actor's Paratext cases + swarm's CAT cases; source-export fix is identical). **Still 13 dirty files, ALL sync-worker event-layer** (the actor's ongoing work) + new `paratext-pairing.ts`. The swarm's changes are 100% client `src/` — DISJOINT from the dirty sync-worker, so a merge wouldn't clobber their dirty work — BUT to avoid disrupting the actor mid-work, **promote only when D==0** (their tree clean). Watcher cron handles it. Rollback ref if promotion goes wrong: main was `e99b45b` pre-merge.
-- **Integration worktree:** `.worktrees/swarm-integration` (branch `swarm/integration`, node_modules symlinked, based on clean HEAD `8e35c2b`).
-- **Baseline @ HEAD 8e35c2b:** client `vitest run` = **996 pass / 157 files**. `tsc -b --noEmit` = **1 pre-existing error** (`src/lib/sync/source-export.ts:26`, erasableSyntaxOnly) → assigned to WS-EXPORT to fix.
-- **Wave 1** (2026-05-30, ✅ DONE — verified green on swarm/integration @ 38bea14, promotion to main BLOCKED — see §4):
-  - WS-EXPORT → `a16344d952f81a951` · WS-IMPORT-CAT → `a4c60baf04985eb48` · WS-LIVING-MEMORY (read-only) → `a96afcb61c530cc28` · WS-SEARCH-SURVEY (research) → `aec2ea90f0c7e2c92`
-- **Claims-audit** (research) → `af076577d0a9b4c19`; full report `docs/swarm/CLAIMS-AUDIT.md`; status table in §6.
-- **Wave 2** (2026-05-30, in-flight) — dedicated worktrees off integration tip, claims-driven:
-  - W2-A Living Memory ACTIVE learning loop (C7) → agent `a812e1fea4062dae4`, worktree `.worktrees/swarm-w2a-memory` (branch `swarm/w2-memory`). Owns completion lib.
-  - W2-B workspace wirings: FTS5 search 1-line fix + back-translation (C6) + LM nav → agent `ae7a2741e0c7a207c`, worktree `.worktrees/swarm-w2b-workspace` (branch `swarm/w2-workspace`). Owns ProjectWorkspace.tsx.
-  - Merge-back: when each completes, merge its branch into swarm/integration, verify (tsc+vitest), log in §4.
-- **Wave 3** (2026-05-30, in-flight) off integration tip `d0d4346`: W3-A rule-suggestion-from-corrections → `ac129a2ac74289546` (`.worktrees/swarm-w3a-rulesuggest`); W3-B whole-project multi-format export → `a90e02eab6dfd1290` (`.worktrees/swarm-w3b-projexport`).
-- **Integration tip:** swarm/integration @ `d0d4346` (tsc 0, vitest 1087). Accumulation branch; wave worktrees merge back into it.
-- **Milestone TODO (verification):** the running preview serves MAIN, not integration — so swarm changes aren't browser-verifiable until promotion. Once main unblocks (or via a dev server launched from `.worktrees/swarm-integration`), run a hands-on golden-path QA (onboarding → workspace → import → draft/validate → export → search → Living Memory) + `npm run test:e2e:smoke` centrally. This is the remaining Layer-1/Layer-2 gate not yet exercised.
-
----
-
-## 3. Workstream registry
-
-Status: `queued | in-flight | review | merged-integration | merged-main | blocked`
-
-| ID | Title | Status | Owner branch | Owns (files) | Prio | Notes |
-|---|---|---|---|---|---|---|
-| WS-EXPORT | Multi-format client export + ExportDialog + workspace wiring | in-flight | (wave1) | `src/lib/export/**`, `src/lib/sync/source-export.ts`, new `ExportDialog.tsx`, export wiring in `ProjectWorkspace.tsx` | P0 | User priority. USFM server path stays; add client TSV/CSV/MD/TXT/DOCX/XLIFF/TMX export. |
-| WS-IMPORT-CAT | CAT-industry importers (XLIFF 1.2/2.0, TMX, CSV/TSV bilingual) | in-flight | (wave1) | new `src/lib/parsers/{xliff,tmx,csv-bilingual}.ts`, `src/lib/import.ts`, `ImportDialog.tsx`, `src/lib/parsers/types.ts` | P0 | User priority. Spec-driven (OASIS/LISA), NOT GPL MateCat copy. |
-| WS-LIVING-MEMORY | Living Memory read-only surface (client-side) | in-flight | (wave1) | new `src/components/LivingMemoryPage.tsx`, new `src/hooks/useLivingMemory.ts`, route in `src/App.tsx` | P1 | Quick demo win. Build from `useCells` validated cells. |
-| WS-SEARCH-SURVEY | Survey existing branching-search branches → impl plan | in-flight | (wave1, research) | (read-only) | P1 | Unblocks A2 (large). Report mergeable work from feat/ad-13-branching-search + claude/context-branching-search-*. |
-| WS-COMPLETE-ALL | "Complete all" workspace action + spend display | queued | — | `registry.ts`, ProjectWorkspace actionArgs | P1 | DEFER to wave 2 (collides with WS-EXPORT on ProjectWorkspace.tsx). |
-| WS-SEARCH-IMPL | Parallel passages + project search | queued | — | TBD from survey | P2 | After WS-SEARCH-SURVEY. |
-| WS-LIVING-MEM-SERVER | (only if client-side proves insufficient) | queued | — | — | P3 | — |
-
----
-
-## 4. Merge log & promotion status
-
-- 2026-05-30 · **Wave-1 VERIFIED GREEN** on swarm/integration @ `38bea14` (commits: 9885f78 living-memory, 2b4777e export, 38bea14 import-cat). `tsc -b --noEmit` = 0 errors; `vitest run` = **1070 pass / 162 files** (baseline was 996/157). +2505 lines, 23 files.
-- 2026-05-30 · **PROMOTION TO MAIN: BLOCKED.** Rollback point: main = `8e35c2b`. `git merge --ff-only swarm/integration` from main ABORTED (correctly) — main's working tree dirty (29 files) with the concurrent Paratext/USFM actor editing `import.ts`, `ImportDialog.tsx`, `source-export.ts`. Per user rule do NOT clobber their work.
-  - **Loop action each iteration:** from main run `git merge --ff-only swarm/integration`; if it still aborts, leave main alone and keep accumulating. Promote the instant it succeeds (actor commits → tree clears). The overlaps are small/additive; their source-export.ts fix is identical to ours.
-  - If still blocked when the user returns: surface for a coordinated promotion (they may know the actor / when it commits).
-- 2026-05-30 · **W2-B merged** → swarm/integration @ `c3a7593` (FF). FTS5 search 1-line fix + back-translation display path + Living Memory nav button. `tsc`=0, `vitest`=1070 pass. Main promotion re-attempted — still BLOCKED (Paratext actor tree unchanged, 29 dirty).
-- 2026-05-30 · **W2-A merged + ACTIVATED** → swarm/integration @ `d0d4346`. Learning loop (C7): `collectValidatedPairs` + project rules now feed completion prompts; activated by wiring `rules, allProjectCells` into `useCompletion()` at ProjectWorkspace.tsx:698 (integrator edit). `tsc`=0, `vitest`=**1087 pass**. Main re-attempt still BLOCKED.
-- 2026-05-30 · **W3-A merged** → swarm/integration @ `a01184f` (FF). RulesPage feeds validated cells to RuleSuggestDialog → users can suggest rules from their corrections. `tsc`=0, `vitest`=1087. Main re-attempt still BLOCKED.
-- 2026-05-30 · **W3-B merged** → swarm/integration @ `9f17079`. Whole-project multi-format zip export (`useProjectCells` + `project-zip-export`). `tsc`=0, `vitest`=**1102 pass / 163 files**.
-- 2026-05-30 · **VERIFICATION milestone (partial), integration @ 9f17079:** `npm run build` ✅ PASS (Layer-1 build gate cleared; only non-blocking warnings: chunk size, dashjs CJS-in-ESM). `auth-worker` tests ✅ **65/65**. `sync-worker` tests ❌ **6 FAIL / 350** (`admin.test.ts`×3, `audio.test.ts`×1, `files-read.test.ts`×2).
-  - These 6 FAIL on committed HEAD **and** on the actor's dirty tree → **pre-existing, NOT swarm-caused, NOT fixed by the actor's refactor.** Includes a likely **auth gap** (audio DELETE returns 200, test expects 401 for SYNC_SECRET_KEY). Diagnosis agent `a45ac9e752f47563a` (read-only) → writing `docs/swarm/SYNC-WORKER-FAILURES.md`.
-  - **DO NOT fix unilaterally** — forbidden territory (actor) + the audio one has security semantics needing human judgment. **STOP-checklist Layer-1 sync-worker = RED** until resolved. Surface to user.
-  - **DIAGNOSIS COMPLETE (agent a45ac9e752f47563a → `docs/swarm/SYNC-WORKER-FAILURES.md`):** all 6 are **TEST-STALENESS, not production bugs** — sync-worker production code is correct. The audio "auth bypass" is a **FALSE ALARM** (deliberate feature F8 / commit 1811d31; sync-token DELETE for the file owner is intended, all 4 auth checks present; the test name/expectation is stale). 4 are stale assertions (admin/audio); 2 are `d1-fake.ts` test-helper drift after the v3 schema port (production route is fine). **Owner = the sync-worker actor/user — a ~5-min fix with the diagnosis in hand.** Swarm intentionally NOT editing sync-worker (actor's active package, zero urgency). Reclassify: sync-worker *functionality* is production-OK; only the *test suite* is stale.
-  - e2e smoke deferred: a dev stack is actively running (:8788 sync-worker, :5173 vite); `e2e-up.ts` kills those ports → would disrupt concurrent work. Run only when the stack is free or after coordinating.
-- 2026-05-30 · **W4 merged** → swarm/integration @ `742d27c` (FF). Parallel-passages multi-project mode wired (Search|Passages|Replace toggle). `tsc`=0, `vitest`=1102. Main re-attempt still BLOCKED.
-- 2026-05-30 · **Hands-on/browser verification = BLOCKED (investigated):** the running dev server (vite :5173 + sync-worker :8788) serves MAIN + the actor's DIRTY tree — neither the swarm's work (on integration) nor a clean baseline. Preview MCP needs a managed server (serverId/launch.json). So golden-path + e2e verification stays pending until (a) promotion to main clears, or (b) a dedicated stack off `.worktrees/swarm-integration` (blocked: running stack owns the ports). **Unit (1102) + full build are the current verification ceiling.**
-- 2026-05-30 · **W5 dispatched** (agent `a64fdd568bd3491b2`, worktree `.worktrees/swarm-w5-completeall`): enable "Complete all" (remove the disabled "coming soon" placeholder; draft every untranslated cell with a confirm). This is the LAST identified safe client-side feature/loose-thread. After it, the autonomous build phase is complete.
-- 2026-05-30 · **W5 merged** → swarm/integration @ `fd076a0` (FF). "Complete all" enabled (no more "coming soon" placeholder; confirm + draft every untranslated cell). `tsc`=0, `vitest`=1102.
-- **★ AUTONOMOUS BUILD PHASE COMPLETE (2026-05-30).** Waves 1–5 + learning-loop activation: DONE & verified (tsc 0, vitest **1102**, full `npm run build` PASS @ 9f17079, auth-worker 65/65). Integration tip `fd076a0`. No more safe-buildable work remains — only marginal polish traces (lastEditAt recency sort; complete-all spend display).
-- **LOOP → WATCHER MODE (cadence 5min → ~30min for token efficiency; cron replaced).** Watcher duties each tick: re-attempt `git merge --ff-only swarm/integration` from main; on SUCCESS (actor committed) → verify main (tsc/vitest/build/workers) + run the now-possible e2e/hands-on golden-path + PushNotify user; on ABORT → hold, no busywork. Merge any straggler agent per protocol. STOP only when §0 fully green.
-- **Remaining blockers are NOT the swarm's to fix:** (1) actor's import/export commit → unblocks main promotion + reconciliation; (2) sync-worker test refresh (actor/user — diagnosed in `SYNC-WORKER-FAILURES.md`, ~5 min, all test-staleness); (3) user decisions on homepage overclaims (video/image-oral-story/private-mode).
-- 2026-05-31 · **Wave 6 progress** (active phase resumed per user directive): **W6-D merged** @ `7c99607` (Living Memory recency sort + Complete-all cost hint; vitest 1104). **W6-C merged** @ `bf4efc0` (UX polish: a11y/states/responsive/dark-mode on ExportDialog + LivingMemoryPage + ParallelPassagesPanel; 0 conflicts; vitest 1104). Still in-flight: W6-A UI-QA (`ac5e7ebdd5b43e950` → UI-QA-PUNCHLIST.md), W6-B perf/code-split (`a05898ff789027e5d`), W6-E homepage QA+polish (`a242ae610091449e4`, no-copy-changes). Next wave seeds from the QA punch-list (decompose fix-its per surface — finer slices, scoped per worker).
-- 2026-05-31 · **W6-B merged** @ `ac94d5e` (perf code-split: main entry **772 kB → 46 kB** via route-level React.lazy; heavy dash/hls now lazy workspace-only chunks). 0 conflicts; `tsc`=0, `vitest`=1104, `npm run build`=PASS (8.6s, no >500kB warning). SWARM-TODO: react-player `/lazy` entry to defer codec loading further. Integration @ `ac94d5e` = waves 1–5 + W6-B/C/D, build-verified. In-flight: W6-A UI-QA, W6-E homepage.
-- 2026-05-31 · **W6-A UI-QA delivered** (browser tools WORKED; 34 surfaces walked → `docs/swarm/UI-QA-PUNCHLIST.md`). Found 1 demo-blocker (P1 Voice nav permanently hides file list) + P2 back-translation disabled-no-explanation, P3 "Sync disabled" misleads at root, P4 Geist font 403 console flood (dev-server-only), P5 import label "XLIFF"→"XLIFF/XLF", + Base UI button a11y warning. Most surfaces OK.
-- 2026-05-31 · **W6-E merged** @ `47f227a` (homepage a11y/responsive/correctness polish, NO copy changes; 3 `SWARM-TODO(homepage-copy)` traces for user: open-source badge, stats sourcing, JESUS Film trademark). 0 conflicts; vitest 1104. Integration = full waves 1–6.
-- 2026-05-31 · **Wave 7 dispatched** (per-surface fix-its from punch-list): W7-A workspace UX (P1/P2/P3) → `af0a3eabbba8326c6` (`.worktrees/swarm-w7a-workspaceux`); W7-B console hygiene (P4 font + button a11y + P5 label) → `ac6d26c94438d1e43` (`.worktrees/swarm-w7b-consolehygiene`). NEXT after W7 merges: a SECOND QA pass (verify fixes + deeper voice/audio walkthrough) — run serially (single shared Playwright browser).
-- 2026-05-31 · **W7-A + W7-B merged** @ `cba96a9` (P1 voice-lens escape via toggle, P2 back-translation disabled-hint, P3 "No file open" sync copy; P4 font `fs.allow`, button a11y via `nativeButton={false}` on the Import upload-label, P5 "XLIFF / XLF" label). 0 conflicts; `tsc`=0, `vitest`=1104, `npm run build`=PASS. Integration = **full waves 1–7**. :5273 restarted with fixes.
-- 2026-05-31 · **Pass-2 QA dispatched** (`a0a61edf8617e4020`): verifies the wave-7 fixes on :5273 + deep voice/audio walkthrough → appends `UI-QA-PUNCHLIST.md` Pass 2. Will seed a voice fix-wave if it finds issues.
-- 2026-05-31 · **Pass-2 QA results**: 3 VERIFIED-FIXED (P1 voice toggle, P3 sync copy, P5 XLF label), 3 still-broken → (P2 back-translation hint didn't render; font-403 = **worktree-symlink ARTIFACT, NOT a real app bug** — won't occur in a normal checkout, dismiss; button a11y has a 2nd site `App.tsx:251`). New voice demo-risk **V1**: the Audio LENS (not just nav) hides the file list → can't switch files in audio mode. eBible import 404s (V4 — investigating: real bug vs dev-env).
-- 2026-05-31 · **Wave (post-pass2) dispatched**: W11 Pass-2 re-fixes (V1 audio-lens + P2 BT copy + App.tsx button a11y) → `a0eeed6bd23b44412`; W9 import fidelity (xliff/tmx/csv robustness + eBible 404 diagnosis) → `aecaff4c3095b01d5`; W10 round-trip fidelity verification (+ `docs/swarm/ROUNDTRIP-FIDELITY.md`) → `af17a8c206b3e28ee`.
-- 2026-05-31 · **W10 merged** @ `eeaf351` (round-trip fidelity test ×26 + ROUNDTRIP-FIDELITY.md; `vitest`=1130). Caught a real bug → TRACES `tsv-corruption` (HIGH). **W9 was cut off mid-task** (only partial xliff.ts, uncommitted, 1 stale test) → respawned finisher **W9b** `ad83306c8af70afd5` in the same worktree (resilience: regenerate the slice). In-flight: W11 (`a0eeed6bd23b44412`), W9b.
-- 2026-05-31 · **W9b merged** @ `b14c253` (XLIFF multi-segment + test fix; **TMX source/target bug fixed** (2nd real bug round-trip surfaced); CSV BOM/Excel + 4th-column context; eBible 404 = upstream data gap, NOT a code bug → `SWARM-TODO(ebible-404)`: filter UI to downloadable translations). 0 conflicts; `tsc`=0, `vitest`=**1139** (round-trip test still green vs new parsers). Integration = waves 1–7 + W10 + W9b.
-- 2026-05-31 · **W12 dispatched** (`ab9e21e9557e5992a`): fix TSV `tsv-corruption` (RFC-4180 quoting in exporter + parser; flip round-trip TSV assertions to clean). In-flight: W11, W12.
-- 2026-05-31 · **W12 merged** @ `25f4302` (TSV RFC-4180 quoting → lossless round-trip; trace `tsv-corruption` DONE). FF; `tsc`=0, `vitest`=1139. **Import/export fidelity now comprehensively verified** (CSV/TSV/XLIFF clean; TMX drops untranslated by design; plain/md one-way by design — all documented in ROUNDTRIP-FIDELITY.md). Only W11 (Pass-2 demo re-fixes) still in-flight. Promotion still gated (main `e99b45b`, D=13 sync-worker).
-- 2026-05-31 · **W11 merged** @ `0425a56` (V1 audio-lens keeps file list / VoiceSidebar below; P2 back-translation single correct empty-state message; "second button-a11y site" was a STALE-SERVER artifact, no real bug). 0 conflicts; `tsc`=0, `vitest`=1139. :5273 restarted with all fixes. Integration = waves 1–7 + W10 + W9b + W12 + W11.
-- 2026-05-31 · **Wave dispatched**: W15 QA pass-3 (verify re-fixes + DEEP voice/audio on :5273) → `a472b386b781d1276`; W13 eBible downloadable-filter (resolve `ebible-404`) → `a0ebe515829dc8a46`. Note: swarm is CONVERGING — most build/polish/fidelity done + verified; remaining is browser-serialized QA + blocked-on-user/actor (overclaims, sync-worker tests, promotion).
-- 2026-05-31 · **W13 merged** @ `5e2c736` (eBible picker filters to `downloadable`; `ebible-404` RESOLVED). `tsc`=0, `vitest`=1144.
-- 2026-05-31 · **W15 QA Pass-3 results**: all 3 Pass-2 re-fixes VERIFIED-FIXED (V1 audio-lens, P2 BT copy, P3 sync). DEEP voice found 2 demo-blockers (A1 audio synth fails with only a silent red "Failed" badge; A2 the failure popover's "Open audio setup" CTA is dead) + 6 confusing (A3 narrator synth-vs-play + wrong-cell error; A4 dismiss clears the failed state; A5 Voice-together undiscoverable; A6 "Key needed" vs "Key invalid"; A7 Voice-nav lens-vs-settings; A8 Esc doesn't close More). Char/Recording modals + per-cell layout work well.
-- 2026-05-31 · **W16 dispatched** (`aece6f3a18dc62b3b`): fix voice demo-blockers A1/A2/A3/A4/A6; TRACE A5/A7/A8. Browser free → Pass-4 QA after W16 merges. In-flight: W16.
-- 2026-05-31 · **W16 merged** @ `584cac0` (voice fixes A1–A6; W16 SELF-browser-verified A1/A2/A3/A4 on :5373; A5/A7/A8 traced as `SWARM-TODO(voice-*)`). `tsc`=0, `vitest`=1144. :5273 restarted.
-- 2026-05-31 · **Pass-4 final golden-path QA dispatched** (`aaa816e089a795c8d`): full demo path end-to-end on `584cac0` → DEMO-READY verdict. **Handoff doc written: `docs/swarm/DEMO-READINESS.md`** (user-facing summary: delivered / needs-you / how-to-promote). Swarm is essentially CONVERGED — Pass-4 is the final verification; remaining work is the 3 user/actor blockers in DEMO-READINESS.md.
-- 2026-05-31 · **Pass-4 verdict: READY-WITH-CAVEATS.** All 9 golden-path steps PASS (import engBBE 30,966 cells, edit, validate, export TSV, search+passages, rules+suggest, complete-all, voice A1/A2/A6/V1 all confirmed). ONE new demo-blocker: "Open Voice Studio" button (`ProjectSettings.tsx:722`) → unregistered `/project/:id/voice` route → blank page (no VoiceStudioPage was ever built). → **W17 dispatched** (`a8368f3c90c944846`) to point it at the Audio lens. Caveats (demo-prep, not bugs): dev-project files are empty stubs (import engBBE first); Living Memory needs 2 validators to show entries (single-user demo shows empty).
-- 2026-05-31 · **W17 merged** @ `9b4529a` ("Open Voice Studio" button now lands in the Audio lens via the lens-preference key; W17 browser-verified, no blank page). `tsc`=0, `vitest`=1144. **Golden path is now fully clean.**
-- 2026-05-31 · **★ SWARM CONVERGED ON GOAL.** Every homepage-claim feature is built, polished (a11y/perf/UX), import/export-fidelity-verified, and QA'd across 4 live passes with all findings fixed. 17 waves on `swarm/integration` @ `9b4529a` (`tsc`=0, `vitest`=1144, build PASS, 4 QA passes). **Remaining is ONLY the 3 user/actor blockers** (overclaim copy decisions; sync-worker stale-test refresh; the `main` promotion that auto-fires when the actor's sync-worker tree clears). Handoff: `DEMO-READINESS.md`. Loop → hold/watch per tick (re-attempt promotion; do NOT manufacture work — convergence is the success state, not under-orchestration).
-- 19 swarm wave worktrees remain under `.worktrees/swarm-w*` (branches preserved; dirs are throwaway — safe to `git worktree remove` at leisure). Keep `.worktrees/swarm-integration` (live; serves :5273).
-
----
-
-## 5. Deferred / blocked (see TRACES.md for detail)
-- WS-COMMENTS (A1) — blocked: comment event handlers in flight (forbidden path). Revisit after user's sync-worker work lands.
-- WS-WRITEBACK (B1), WS-AUTOFIX (B2), WS-BULK-AUDIO (B3) — need event-layer work; defer.
-- Tauri desktop release (TODO.md) — only if demo is desktop; confirm with user.
-
----
-
-## 6. Homepage claims → implementation status (the acceptance contract)
-
-Claims source: `src/pages/Homepage/Homepage.tsx` (hero, feature sections, pricing list).
-Status: `DONE | PARTIAL | STUB | MISSING | OVERCLAIM` (OVERCLAIM = needs copy change / sign-off).
-Filled by claims-audit agent → see §2 control plane for its id; update as workstreams land.
-
-| # | Claim (homepage) | Required capability | Status | Evidence / gap |
-|---|---|---|---|---|
-| C1 | "Start translating free" CTA → /onboarding | Onboarding create-account → into workspace works | _audit_ | sole conversion path; must work |
-| C2 | text translation "under one roof" | Cell editor: draft/edit/validate | _audit_ | core |
-| C3 | audio translation | per-cell record / synth / play | _audit_ | voice studio (recent commits) |
-| C4 | **video** translation (pricing list + hero) | video modality | _audit_ | BIG question mark |
-| C5 | "first draft in seconds" low-resource | AI completion | _audit_ | useCompletion exists |
-| C6 | "real-time checks and **back-translation** as you work" | back-translation surface | _audit_ | question mark |
-| C7 | Living Memory "fix it once, the system learns" | corrections → guidance injected into next draft (ACTIVE loop) | _audit_ | WS-LIVING-MEMORY is read-only only → under-scoped |
-| C8 | "Quality you can see" confidence + "biggest drags, ranked, one click away" | per-cell confidence (HealthRing) + ranked drag list w/ jump | _audit_ | AD-14 confidence prototype per memory |
-| C9 | "Many translators, one project" / cloud sync | multi-user collab + sync | _audit_ | sync-worker + teams landed |
-| C10 | "On-device speech & private mode" | local speech + private mode | _audit_ | question mark |
-| C11 | "Free, forever · open source" | onboarding free; repo OSS | _audit_ | policy, not feature |
-| C12 | import/export of professional source files | robust import + multi-format export | in-progress | WS-IMPORT-CAT + WS-EXPORT (wave 1) |
-| C13 | manifesto: image / oral-story modalities | (softer vision copy) | _audit_ | likely OVERCLAIM — confirm vs pricing list |
+- Marketing pages (670 strings): **SKIP**
+- Admin surfaces (~50 strings): **SKIP**
+- Unreachable pages (~150 strings): **DELETE**
+- Per-key context requirement: **RELAX** to a machine-decidable class test
+- Screenshot/"multimedia" context requirement: **RELAX**
+- AI prompt strings: stay English; add an "answer in {language}" directive
+- Email localization: **DEFER** (needs a `users.locale` migration + product call)

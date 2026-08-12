@@ -22,6 +22,13 @@ import { useSyncExternalStore } from "react"
 
 let currentSec: number | null = null
 let playing = false
+// AQU-646 round 5: which line the picture is ON. Derived from the clock by
+// `cellIdAtSec`, but stored rather than recomputed per consumer — the answer
+// was previously local state inside MediaVideoPane, where the caption could see
+// it and nothing else could, which is why the dialogue table never followed the
+// film. Kept as an ID (not the second) so subscribers re-render on a LINE
+// change, not on every one of timeupdate's ~4 ticks a second.
+let soundingCellId: string | null = null
 const listeners = new Set<() => void>()
 
 function notify(): void {
@@ -42,9 +49,19 @@ export function setVideoClockSec(sec: number | null): void {
   // transport back to the queue (or on unmount), and a stale `true` would keep
   // the playhead extrapolating from a position nobody updates any more.
   const nextPlaying = next == null ? false : playing
-  if (currentSec === next && playing === nextPlaying) return
+  // A cleared clock is on no line either.
+  const nextCell = next == null ? null : soundingCellId
+  if (currentSec === next && playing === nextPlaying && soundingCellId === nextCell) return
   currentSec = next
   playing = nextPlaying
+  soundingCellId = nextCell
+  notify()
+}
+
+/** The line the picture is on, from `cellIdAtSec`. Null in a silence. */
+export function setVideoSoundingCellId(next: string | null): void {
+  if (soundingCellId === next) return
+  soundingCellId = next
   notify()
 }
 
@@ -63,6 +80,10 @@ export function getVideoClockPlaying(): boolean {
   return playing
 }
 
+export function getVideoSoundingCellId(): string | null {
+  return soundingCellId
+}
+
 /** TimelineEditor reads this and writes it into its clock ONLY while the queue
  *  is inactive, so the two drivers can never both be writing. */
 export function useVideoClockSec(): number | null {
@@ -73,8 +94,13 @@ export function useVideoClockPlaying(): boolean {
   return useSyncExternalStore(subscribe, () => playing, () => false)
 }
 
+export function useVideoSoundingCellId(): string | null {
+  return useSyncExternalStore(subscribe, () => soundingCellId, () => null)
+}
+
 export function resetVideoClockForTests(): void {
   currentSec = null
   playing = false
+  soundingCellId = null
   notify()
 }

@@ -24,6 +24,7 @@ import { queueClockIsFileTime, useQueueAudibility, useQueueForFile } from "@/lib
 import { effectiveSourceText } from "@/lib/cell-text"
 import type { DirectionMode, TextDirection } from "@/lib/text-direction"
 import { cellIdAtSec } from "@/lib/timeline/source-regions"
+import { setVideoSoundingCellId, useVideoSoundingCellId } from "@/lib/timeline/video-clock"
 import { videoSyncAction } from "./video-sync"
 import { DEFAULT_VIDEO_ASPECT, fitPictureRect, intrinsicAspect } from "./video-frame"
 import { VideoPaneHeader } from "./VideoPaneHeader"
@@ -175,9 +176,14 @@ export function MediaVideoPane({
    * cell ID rather than the second so this re-renders on a line CHANGE, not on
    * every one of `timeupdate`'s ~4 ticks a second.
    */
-  const [standaloneCellId, setStandaloneCellId] = useState<string | null>(null)
+  // Round 5: this used to be local state, which is exactly why the dialogue
+  // table never followed the film — the caption could see which line the
+  // picture was on and nothing else could. It now lives in the video clock
+  // store beside the position it is derived from, so every surface reads one
+  // answer.
+  const standaloneCellId = useVideoSoundingCellId()
   useEffect(() => {
-    if (slaved) setStandaloneCellId(null)
+    if (slaved) setVideoSoundingCellId(null)
   }, [slaved])
   const soundingCell = useMemo(() => {
     // The queue wins whenever it is running, unconditionally — today's exact
@@ -472,7 +478,7 @@ export function MediaVideoPane({
                   onVideoTime?.(sec)
                   // Setting the same id is a no-op re-render in React, so the
                   // caption only repaints when the line actually changes.
-                  setStandaloneCellId(cellIdAtSec(cells, sec))
+                  setVideoSoundingCellId(cellIdAtSec(cells, sec))
                 }
           }
           // Standalone only: the queue is idle here, so it cannot tell the

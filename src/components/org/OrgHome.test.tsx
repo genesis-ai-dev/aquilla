@@ -322,6 +322,79 @@ describe("OrgHome", () => {
     }
   })
 
+  // AQU-882: `/orgs/all` renders OrgHome directly — it's a sibling route of
+  // `/orgs/:orgId`, so OrgRouteGate (the only surface that read the org-load
+  // error) never mounts for it. A failed fetch therefore fell through to the
+  // ordinary dashboard and rendered as "you have no organizations". The error
+  // card lives in the AQU-864 landing guard, so it only renders on the
+  // `/orgs/all` route — these tests mount there, as the app does.
+  describe("organization load failure (AQU-882)", () => {
+    async function renderWithFailedOrgLoad(message = "network down") {
+      const { listMyOrgs } = await import("@/lib/frontier/orgs")
+      vi.mocked(listMyOrgs).mockRejectedValue(new Error(message))
+      render(
+        <MemoryRouter initialEntries={["/orgs/all"]}>
+          <OrgProvider><OrgHome /></OrgProvider>
+        </MemoryRouter>,
+      )
+      return await screen.findByTestId("org-load-error")
+    }
+
+    it("shows an error card with Retry instead of the zero-stat empty dashboard", async () => {
+      const card = await renderWithFailedOrgLoad()
+      expect(within(card).getByText(/couldn’t load your organizations/i)).toBeInTheDocument()
+      expect(within(card).getByRole("button", { name: /retry/i })).toBeInTheDocument()
+      // The repro's misleading surfaces must be gone, not merely accompanied.
+      expect(screen.queryByText("No organizations yet.")).not.toBeInTheDocument()
+      expect(screen.queryByText("No projects yet.")).not.toBeInTheDocument()
+      expect(screen.queryByTestId("organizations-panel")).not.toBeInTheDocument()
+    })
+
+    it("surfaces the failure reason so the error isn't generic", async () => {
+      const card = await renderWithFailedOrgLoad("identity worker unreachable")
+      expect(within(card).getByText("identity worker unreachable")).toBeInTheDocument()
+    })
+
+    it("loads organizations and projects in place when Retry is clicked — no page reload", async () => {
+      const card = await renderWithFailedOrgLoad()
+      const { listMyOrgs } = await import("@/lib/frontier/orgs")
+      // Backend is reachable again.
+      vi.mocked(listMyOrgs).mockResolvedValue([
+        { id: 1, name: "Come and See", role: { level: 700, name: "owner" } },
+      ])
+
+      const { getPortfolio } = await import("@/lib/frontier/portfolio")
+      const portfolioCallsBeforeRetry = vi.mocked(getPortfolio).mock.calls.length
+
+      fireEvent.click(within(card).getByRole("button", { name: /retry/i }))
+
+      // Same mount: the dashboard replaces the error card.
+      await waitFor(() => expect(screen.getAllByText("Come and See").length).toBeGreaterThan(0))
+      expect(screen.queryByTestId("org-load-error")).not.toBeInTheDocument()
+      // Retry re-issues the dependent portfolio fetch too, not just the orgs —
+      // the failure state resolves to real data rather than an empty dashboard.
+      await waitFor(() =>
+        expect(vi.mocked(getPortfolio).mock.calls.length).toBeGreaterThan(portfolioCallsBeforeRetry),
+      )
+    })
+
+    it("does not show the error card when the fetch succeeds with zero organizations", async () => {
+      // Negative case: genuinely belonging to no org is an empty state, not a
+      // failure — it must keep rendering the ordinary dashboard chrome.
+      const { listMyOrgs } = await import("@/lib/frontier/orgs")
+      vi.mocked(listMyOrgs).mockResolvedValue([])
+      render(
+        <MemoryRouter initialEntries={["/orgs/all"]}>
+          <OrgProvider><OrgHome /></OrgProvider>
+        </MemoryRouter>,
+      )
+      await waitFor(() =>
+        expect(screen.queryByTestId("org-home-loading")).not.toBeInTheDocument(),
+      )
+      expect(screen.queryByTestId("org-load-error")).not.toBeInTheDocument()
+    })
+  })
+
   it("renders the org name, nav, and admin links for an owner", async () => {
     render(<MemoryRouter><OrgProvider><OrgHome /></OrgProvider></MemoryRouter>)
     await waitFor(() => expect(screen.getAllByText("Come and See").length).toBeGreaterThan(0))

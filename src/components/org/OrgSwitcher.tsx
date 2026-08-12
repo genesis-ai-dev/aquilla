@@ -99,7 +99,7 @@ function OrgMark({
 export function OrgSwitcher() {
   const {
     orgs, activeOrg, activeOrgId, activeGuestOrg, isAllOrgs, guestOrgs,
-    setActiveOrg, setAllOrgs, refresh,
+    setActiveOrg, setAllOrgs, refresh, error, retryOrgLoad,
     accessibleProjectsError, refreshAccessibleProjects,
   } = useActiveOrg()
   const location = useLocation()
@@ -156,11 +156,37 @@ export function OrgSwitcher() {
     void refreshAccessibleProjects()
   }
 
+  // AQU-882: a failed org load leaves no activeOrg, no all-orgs scope and no
+  // guest orgs, so the check below used to unmount the switcher outright —
+  // removing the only chrome the user could have recovered from and leaving a
+  // full page reload as the sole way to re-issue the fetch. Hold the slot with
+  // a retry affordance instead. Checked before the empty-membership case so a
+  // failure never reads as "you have no organizations" — and before the
+  // directory-failure case below, because retryOrgLoad re-issues both fetches.
+  if (error) {
+    return (
+      <button
+        type="button"
+        data-testid="org-switcher-error"
+        aria-label="Retry loading organizations"
+        onClick={() => { void retryOrgLoad() }}
+        className="flex w-full items-center gap-2 rounded-md px-1.5 py-1.5 text-left text-sm hover:bg-accent"
+      >
+        <AlertTriangle className="size-4 shrink-0 text-destructive" aria-hidden />
+        <span className="min-w-0 flex-1 truncate text-muted-foreground">
+          Couldn’t load organizations
+        </span>
+        <span className="shrink-0 text-xs font-medium underline">Retry</span>
+      </button>
+    )
+  }
+
   // AQU-883: guest orgs are derived entirely from the project directory, so a
   // failed directory fetch presents exactly like "you are a guest nowhere". For
   // a project-only invitee that also trips the unmount below, removing the last
   // affordance that could re-issue the fetch. Hold the slot with a retry
-  // instead — checked first so a failure never reads as "no organizations".
+  // instead — checked before the unmount so a failure never reads as "no
+  // organizations".
   if (accessibleProjectsError && !activeOrg && !isAllOrgs && guestOrgs.length === 0) {
     return (
       <button

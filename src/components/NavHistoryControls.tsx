@@ -29,6 +29,9 @@ import {
 import { AppTooltip } from "@/components/ui/tooltip"
 import { useT } from "@/lib/i18n/I18nProvider"
 
+/** Muted, slightly faded — the default disabled:opacity-50 washes these out. */
+const disabledChrome = "cursor-default text-muted-foreground/70 disabled:opacity-100"
+
 export function NavHistoryControls() {
   const nav = useNavHistory()
   const t = useT()
@@ -58,7 +61,7 @@ function HistoryMenuButton({ nav }: { nav: NavHistoryValue }) {
           size="icon-sm"
           disabled
           aria-label={previouslyViewedLabel}
-          className="cursor-default text-muted-foreground/30"
+          className={disabledChrome}
         >
           <Clock className="size-3.5" />
         </Button>
@@ -180,7 +183,7 @@ function NavArrowButton({ direction, nav }: { direction: "back" | "forward"; nav
           if (isBack) nav.goBack()
           else nav.goForward()
         }}
-        className={enabled ? undefined : "cursor-default text-muted-foreground/30"}
+        className={enabled ? undefined : disabledChrome}
       >
         <Icon className="size-3.5" />
       </Button>

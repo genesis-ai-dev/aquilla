@@ -5,6 +5,8 @@
 // verbatim: SRT payload tags are content, not formatting to strip.
 import type { CellData } from "@/hooks/useCells"
 import { effectiveSourceText } from "@/lib/cell-text"
+import { isUserAddedLine } from "@/lib/timeline/user-lines"
+import { sortedByTime } from "./subtitle-order"
 
 const pad = (n: number, w = 2): string => String(n).padStart(w, "0")
 
@@ -20,10 +22,13 @@ export function formatSrtTime(seconds: number): string {
  *  timecodes are skipped (same contract as exportVtt). */
 export function exportSrt(cells: CellData[]): Blob {
   const cues: string[] = []
-  for (const cell of cells) {
+  for (const cell of sortedByTime(cells)) {
     if (cell.startTime == null || cell.endTime == null) continue
     const text = (cell.translated || effectiveSourceText(cell) || "").trim()
-    if (!text) continue
+    // Same carve-out as the VTT exporter: a line someone added keeps its cue
+    // even while it is still blank, because its timing is real work. Cue
+    // numbers stay sequential because they are taken from cues.length.
+    if (!text && !isUserAddedLine(cell)) continue
     cues.push(`${cues.length + 1}\n${formatSrtTime(cell.startTime)} --> ${formatSrtTime(cell.endTime)}\n${text}`)
   }
   const body = cues.length ? `${cues.join("\n\n")}\n` : ""

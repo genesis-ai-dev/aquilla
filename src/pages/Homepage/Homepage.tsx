@@ -70,7 +70,6 @@ export function Homepage() {
             <a className="aq-nav-link" href="#languages">Languages</a>
             <a className="aq-nav-link" href="#quality">Quality</a>
             <a className="aq-nav-link" href="#pricing">Pricing</a>
-            <a className="aq-nav-link" href={DOCS_URL}>Docs</a>
             <a className="aq-nav-link" href="#book-call">Book a call</a>
           </div>
           <div className="aq-nav-cta">
@@ -465,7 +464,9 @@ export function Homepage() {
                 <li><IconCheck /> Cloud sync &amp; team collaboration</li>
                 <li><IconCheck /> On-device speech</li>
               </ul>
-              <a href="/onboarding" className="aq-btn aq-btn-gold">Sign up free</a>
+              <div className="aq-price-cta">
+                <a href="/onboarding" className="aq-btn aq-btn-gold">Sign up free</a>
+              </div>
             </div>
             <div className="aq-price">
               <span className="aq-chip" style={{ position: "absolute", top: 20, right: 20 }}>Coming soon</span>
@@ -477,7 +478,9 @@ export function Homepage() {
                 <li><IconCheck /> Higher AI usage caps per project</li>
                 <li><IconCheck /> Pay-as-you-go for usage above the cap</li>
               </ul>
-              <a href="mailto:hello@aquilla.app?subject=Pro%20waitlist" className="aq-btn aq-btn-ghost">Join the waitlist</a>
+              <div className="aq-price-cta">
+                <a href="mailto:hello@aquilla.app?subject=Pro%20waitlist" className="aq-btn aq-btn-ghost">Join the waitlist</a>
+              </div>
             </div>
             <div className="aq-price" data-feature="true">
               <h4 className="aq-display">Enterprise support</h4>
@@ -488,7 +491,9 @@ export function Homepage() {
                 <li><IconCheck /> Coordination across large programs</li>
                 <li><IconCheck /> We want to see you succeed</li>
               </ul>
-              <a href="mailto:hello@aquilla.app" className="aq-btn aq-btn-ghost">Talk to us</a>
+              <div className="aq-price-cta">
+                <a href="mailto:hello@aquilla.app" className="aq-btn aq-btn-ghost">Talk to us</a>
+              </div>
             </div>
           </div>
         </section>

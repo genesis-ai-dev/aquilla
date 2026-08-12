@@ -425,7 +425,9 @@ export function BibleTranslationLanding() {
                 <li><IconCheck /> Cloud sync &amp; team collaboration</li>
                 <li><IconCheck /> On-device speech</li>
               </ul>
-              <a href="/onboarding" className="aq-btn aq-btn-gold">Sign up free</a>
+              <div className="aq-price-cta">
+                <a href="/onboarding" className="aq-btn aq-btn-gold">Sign up free</a>
+              </div>
             </div>
             <div className="aq-price" data-feature="true">
               <span className="aq-chip aq-chip-gold" style={{ position: "absolute", top: 20, right: 20 }}><IconSparkS /> Mission, not margin</span>
@@ -437,7 +439,9 @@ export function BibleTranslationLanding() {
                 <li><IconCheck /> Coordination across large programs</li>
                 <li><IconCheck /> We want to see you succeed</li>
               </ul>
-              <a href="mailto:hello@aquilla.app" className="aq-btn aq-btn-ghost">Talk to us</a>
+              <div className="aq-price-cta">
+                <a href="mailto:hello@aquilla.app" className="aq-btn aq-btn-ghost">Talk to us</a>
+              </div>
             </div>
           </div>
         </section>

@@ -228,6 +228,7 @@
 .aq-nav-link {
   font-size: 14px; color: var(--aq-dim);
   transition: color 0.18s ease; position: relative;
+  cursor: pointer;
 }
 .aq-nav-link:hover { color: var(--aq-text); }
 .aq-nav-cta { display: flex; align-items: center; gap: 10px; }
@@ -653,6 +654,13 @@
 .aq-price {
   position: relative; border-radius: 18px; padding: 28px;
   border: 1px solid var(--aq-line); background: var(--aq-fill);
+  display: flex; flex-direction: column;
+}
+.aq-price-cta {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
 }
 .aq-price[data-feature='true'] {
   border-color: oklch(0.74 0.14 245 / 0.45);
@@ -754,7 +762,7 @@
 .aq-footer-brand p { margin-top: 12px; font-size: 13.5px; color: var(--aq-faint); line-height: 1.5; }
 .aq-footer-cols { display: flex; gap: 56px; flex-wrap: wrap; }
 .aq-footer-col h5 { font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--aq-faint); margin-bottom: 14px; }
-.aq-footer-col a { display: block; font-size: 14px; color: var(--aq-dim); margin-bottom: 10px; transition: color 0.16s ease; }
+.aq-footer-col a { display: block; font-size: 14px; color: var(--aq-dim); margin-bottom: 10px; transition: color 0.16s ease; cursor: pointer; }
 .aq-footer-col a:hover { color: var(--aq-text); }
 .aq-footer-base { margin-top: 36px; padding-top: 22px; border-top: 1px solid var(--aq-line); display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; font-size: 13px; color: var(--aq-faint); }
 
@@ -873,7 +881,6 @@
 .aq-root :focus-visible {
   outline: 2px solid var(--aq-gold);
   outline-offset: 3px;
-  border-radius: 4px;
 }
 /* Buttons and links already have their own shape — respect it */
 .aq-root .aq-btn:focus-visible,
@@ -885,6 +892,10 @@
 .aq-root .aq-btn-lg:focus-visible { border-radius: 14px; }
 .aq-root .aq-theme-toggle:focus-visible { border-radius: 10px; }
 .aq-root .aq-mode:focus-visible { border-radius: 10px; }
+.aq-root .aq-input:focus-visible {
+  outline: none;
+  border-radius: 10px;
+}
 
 /* ── Reduced motion ─────────────────────────────────────────────────────── */
 @media (prefers-reduced-motion: reduce) {

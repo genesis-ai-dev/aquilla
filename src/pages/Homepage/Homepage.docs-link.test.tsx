@@ -3,12 +3,9 @@
  *
  * The main marketing site (aquilla.app, served as homepage.html to signed-out
  * visitors) must expose a clearly visible link to the help docs
- * (help.aquilla.app). It must be reachable logged-out and present on the mobile
- * layout — the nav links are hidden below 860px, so a footer link is the
- * mobile-guaranteed affordance. This test guards both:
- *   - at least one docs link exists and points at the docs site
- *   - a docs link lives in the footer (which stays visible on mobile), not only
- *     in the mobile-hidden nav.
+ * (help.aquilla.app). Docs is not a mid-nav item — signed-in visitors get a
+ * Docs button in the nav CTA, and everyone gets a footer link (the
+ * mobile-guaranteed affordance, since `.aq-nav-links` hide below 860px).
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
@@ -60,5 +57,14 @@ describe("Homepage — help documentation link (AQU-702)", () => {
       .getAllByRole("link")
       .filter((a) => a.getAttribute("href") === DOCS_URL)
     expect(footerDocsLinks.length).toBeGreaterThan(0)
+  })
+
+  it("does not duplicate Docs in the mid-nav; signed-in visitors use the CTA button", () => {
+    const { container } = renderHomepage()
+    const midNav = container.querySelector(".aq-nav-links")
+    expect(midNav).not.toBeNull()
+    expect(
+      within(midNav as HTMLElement).queryByRole("link", { name: /^docs$/i }),
+    ).toBeNull()
   })
 })

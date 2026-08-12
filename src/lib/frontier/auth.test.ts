@@ -2,6 +2,11 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import "fake-indexeddb/auto";
 import { login, redeemAccessLink, FrontierAuthError, AUTH_BASE } from "./auth";
 import { clearSession, loadSession } from "./session-store";
+import {
+  clearSessionExpired,
+  isSessionExpired,
+  notifySessionExpired,
+} from "@/lib/errors/session-expired-signal";
 
 describe("login", () => {
   beforeEach(async () => { await clearSession(); vi.restoreAllMocks(); });
@@ -72,6 +77,33 @@ describe("login", () => {
       new Response(JSON.stringify({ detail: "bad creds" }), { status: 401 })
     );
     await expect(login({ username: "x", password: "y" })).rejects.toBeInstanceOf(FrontierAuthError);
+  });
+
+  // AQU-884: the banner no longer clears itself on navigation, so a successful
+  // re-login is what has to lower the flag. finalizeSession() owns that, which
+  // is why every auth entry point (login/register/devLogin/redeemAccessLink)
+  // gets it for free.
+  it("clears the session-expired flag once the new session is persisted", async () => {
+    notifySessionExpired();
+    expect(isSessionExpired()).toBe(true);
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({
+        access_token: "jwt-fresh",
+        token_type: "bearer",
+      }), { status: 200 })
+    );
+    await login({ username: "alice", password: "pw" });
+    expect(isSessionExpired()).toBe(false);
+  });
+
+  it("leaves the session-expired flag set when the re-login fails", async () => {
+    notifySessionExpired();
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ detail: "bad creds" }), { status: 401 })
+    );
+    await expect(login({ username: "x", password: "y" })).rejects.toBeInstanceOf(FrontierAuthError);
+    expect(isSessionExpired()).toBe(true);
+    clearSessionExpired();
   });
 });
 

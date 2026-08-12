@@ -26,6 +26,7 @@ import { comments } from "./comments"
 import { auth } from "./auth"
 import { search } from "./search"
 import { audio } from "./audio"
+import { fileDetails } from "./fileDetails"
 
 export const NAMESPACES = [
   common,
@@ -38,4 +39,5 @@ export const NAMESPACES = [
   auth,
   search,
   audio,
+  fileDetails,
 ] as const

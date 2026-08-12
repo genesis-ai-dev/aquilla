@@ -25,6 +25,8 @@ interface FileRowProps {
   onEditCancel: () => void
   onToggleExpand: () => void
   onSelect: () => void
+  /** Opens the FileDetailsModal for this file. */
+  onShowDetails?: () => void
   onStartRename: () => void
   onMove: () => void
   /** AQU-271: Optional — pass undefined to hide delete for roles below project_lead. */
@@ -49,7 +51,7 @@ function openContextMenuAtPointer(target: EventTarget & Element, clientX: number
 export function FileRow(props: FileRowProps) {
   const {
     file, active, expanded, progress, hasSuggestion, editing,
-    onEditCommit, onEditCancel, onToggleExpand, onSelect, onStartRename,
+    onEditCommit, onEditCancel, onToggleExpand, onSelect, onShowDetails, onStartRename,
     onMove, onDelete, onExportSource, onApplySuggestion,
   } = props
   const t = useT()
@@ -215,6 +217,7 @@ export function FileRow(props: FileRowProps) {
         )}
       </ContextMenuTrigger>
       <FileActionMenu
+        onShowDetails={onShowDetails}
         onRename={onStartRename}
         onMove={onMove}
         onDelete={onDelete}

@@ -178,3 +178,14 @@
 - [OPEN] (ungrouped-sentinel) `group-by-corpus.ts` / `section-index.ts` "Ungrouped" is a
   load-bearing sentinel compared by `AssignModal.tsx:293,608` and `ExpandableFileList.tsx:132`.
   Needs a stable identity key split from the display label before it can be localized.
+
+## Wave 2 verification (live Arabic run, integration branch)
+Confirmed FIXED on screen: Terminology → المصطلحات · Setup: 2/4 → الإعداد: 2/4 ·
+Synced → متزامن · No file open → لا ملف مفتوح · Comments → التعليقات · empty state fully Arabic.
+Still English, each attributable to a LATER scheduled wave (not a wave-2 miss):
+- [OPEN] (import-button) The top-left "Import" button lives in `ImportDialog.tsx` (3,618 lines,
+  ~183 keys) — the import/export area, wave 4. WS-05 keyed `nav.workspaceActions.import`
+  (→ استيراد) for the workspace-action registry, which is a different control.
+- [OPEN] (breadcrumb) "Editor / Dev Project / Dev Org / All organizations" — "All organizations"
+  is `src/components/org/OrgHome.tsx:723`, the org/teams area (wave 3/4). "Dev Project" and
+  "Dev Org" are DATA and correctly stay untranslated.

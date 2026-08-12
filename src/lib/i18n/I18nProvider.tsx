@@ -1,7 +1,8 @@
 /**
  * I18nProvider + hooks (AQU-511).
  *
- * Holds the active locale, persists changes, exposes a type-safe `t(key, vars)`,
+ * Holds the active locale, persists changes, exposes a type-safe `t(key, vars)`
+ * that resolves count-governed keys through the active locale's plural rules,
  * and mirrors the locale onto `<html lang>` / `<html dir>` so RTL locales flip
  * layout direction. Behaviour is neutral for the default English/LTR locale, so
  * mounting the provider at the app root is a no-op until a locale is chosen.
@@ -69,7 +70,9 @@ export function I18nProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const t = useCallback<TFunction>(
-    (key, vars) => translate(CATALOGS[locale] ?? CATALOGS[DEFAULT_LOCALE], key, vars),
+    // The locale is passed as well as the catalog: plural-category selection is
+    // a property of the language, not of which strings happen to be translated.
+    (key, vars) => translate(CATALOGS[locale] ?? CATALOGS[DEFAULT_LOCALE], key, vars, locale),
     [locale],
   )
 
@@ -81,10 +84,41 @@ export function I18nProvider({ children }: { children: ReactNode }) {
   return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>
 }
 
+/**
+ * Provider-less fallback — a frozen, referentially stable English context.
+ *
+ * `t()` is about to be called from ~240 components, and the vast majority of
+ * their existing test files do not mount a provider. Throwing there would force
+ * wrapper churn across the whole suite to buy nothing: English is already the
+ * documented per-key fallback, so resolving against the `en` catalog is the same
+ * answer the provider would give for an unset locale. The prerendered marketing
+ * entries get the same benefit — they render without a provider by design.
+ *
+ * `setLocale` is a no-op because with no provider there is no state to change
+ * and nothing to persist; chrome that needs to know whether switching is even
+ * possible should use `useI18nOptional()` instead of inspecting this.
+ */
+const FALLBACK_CONTEXT: I18nContextValue = Object.freeze<I18nContextValue>({
+  locale: DEFAULT_LOCALE,
+  dir: directionFor(DEFAULT_LOCALE),
+  locales: LOCALES,
+  setLocale: () => {},
+  t: (key, vars) => translate(CATALOGS[DEFAULT_LOCALE], key, vars, DEFAULT_LOCALE),
+})
+
 export function useI18n(): I18nContextValue {
-  const ctx = useContext(I18nContext)
-  if (!ctx) throw new Error("useI18n must be used within I18nProvider")
-  return ctx
+  return useContext(I18nContext) ?? FALLBACK_CONTEXT
+}
+
+/**
+ * Optional read for chrome that may render outside I18nProvider — mirrors the
+ * BrandContext optional-read pattern in AppShell. Returns null instead of
+ * throwing so widely-shared chrome (AppShell) can skip locale-dependent
+ * controls in call sites/tests that don't mount the provider, rather than
+ * requiring every one of them to add it.
+ */
+export function useI18nOptional(): I18nContextValue | null {
+  return useContext(I18nContext)
 }
 
 /** Convenience hook for components that only need the translate function. */

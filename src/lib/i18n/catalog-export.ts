@@ -30,12 +30,66 @@ import {
   CATALOG_CONTEXT,
   CONTEXT_SCHEMA_VERSION,
   MESSAGE_KEYS,
+  englishSourceFor,
+  pluralMessageFor,
   resolveKeyContext,
 } from "./context"
+import { DEFAULT_LOCALE, LOCALES } from "./locales"
+import {
+  PLURAL_CATEGORIES,
+  plural,
+  pluralCategoriesFor,
+  type PluralCategory,
+} from "./plurals"
 import { screenshotPath, screenshotSurface } from "./screenshots"
 
 /** Root object key wrapping the messages in the exported source document. */
 export const CATALOG_SOURCE_ROOT = "messages"
+
+/**
+ * Separator between a message key and a plural category in the exported
+ * document, e.g. `search.resultCount#one`.
+ *
+ * Count-governed keys cannot export as one leaf: a translator working in Aquilla
+ * translates cells, and Arabic needs six cells where English wrote two forms. So
+ * a plural key exports one leaf per category *the target locale needs*, seeded
+ * with the nearest English form. `#` cannot appear in a message key, so a leaf
+ * name is unambiguous in both directions.
+ */
+export const PLURAL_LEAF_SEPARATOR = "#"
+
+/** Leaf name for one plural category of a key. */
+export function pluralLeafKey(key: string, category: PluralCategory): string {
+  return `${key}${PLURAL_LEAF_SEPARATOR}${category}`
+}
+
+/**
+ * Split a leaf name back into its message key and (for a plural leaf) the
+ * category it carries. Unknown categories are treated as part of the key, so a
+ * genuinely odd leaf is reported as an unknown key rather than silently
+ * half-parsed.
+ */
+export function parseLeafKey(leaf: string): { key: string; category?: PluralCategory } {
+  const at = leaf.lastIndexOf(PLURAL_LEAF_SEPARATOR)
+  if (at === -1) return { key: leaf }
+  const category = leaf.slice(at + 1)
+  const known = PLURAL_CATEGORIES.find((c) => c === category)
+  if (!known) return { key: leaf }
+  return { key: leaf.slice(0, at), category: known }
+}
+
+/**
+ * Every leaf the exported document holds for `locale`, in base-catalog order:
+ * one per plain key, and one per plural category the locale needs.
+ */
+export function catalogLeafKeys(locale: string = DEFAULT_LOCALE): string[] {
+  const categories = pluralCategoriesFor(locale)
+  return MESSAGE_KEYS.flatMap((key) => {
+    const forms = pluralMessageFor(key)
+    if (!forms) return [key]
+    return categories.map((category) => pluralLeafKey(key, category))
+  })
+}
 
 /**
  * JSON path of a message key inside the exported source document, in exactly
@@ -65,16 +119,32 @@ export function messageKeyForPath(path: string): string | undefined {
   }
 }
 
-/** The exported source document: every message key with its English value. */
-export function buildCatalogSourceDocument(): Record<string, Record<string, string>> {
+/**
+ * The exported source document for `locale`: every leaf with the English text a
+ * translator starts from.
+ *
+ * The locale matters only for plural keys — it decides how many category leaves
+ * that key contributes. An Arabic translator gets six leaves for `{count}
+ * result`, seeded with English's nearest form; a Thai translator gets one.
+ */
+export function buildCatalogSourceDocument(
+  locale: string = DEFAULT_LOCALE,
+): Record<string, Record<string, string>> {
   const messages: Record<string, string> = {}
-  for (const key of MESSAGE_KEYS) messages[key] = en[key]
+  for (const leaf of catalogLeafKeys(locale)) {
+    const { key, category } = parseLeafKey(leaf)
+    const forms = pluralMessageFor(key as MessageKey)
+    messages[leaf] =
+      forms && category
+        ? (forms.forms[category] ?? forms.forms.other ?? "")
+        : englishSourceFor(key as MessageKey)
+  }
   return { [CATALOG_SOURCE_ROOT]: messages }
 }
 
 /** Serialized source file, ready to import into an Aquilla project. */
-export function buildCatalogSourceJson(): string {
-  return JSON.stringify(buildCatalogSourceDocument(), null, 2) + "\n"
+export function buildCatalogSourceJson(locale: string = DEFAULT_LOCALE): string {
+  return JSON.stringify(buildCatalogSourceDocument(locale), null, 2) + "\n"
 }
 
 /**
@@ -83,9 +153,37 @@ export function buildCatalogSourceJson(): string {
  * the translation agent receives in its prompt — so it must stand alone, with
  * no reference to code.
  */
-export function contextNote(key: MessageKey): string {
+export function contextNote(
+  key: MessageKey,
+  locale: string = DEFAULT_LOCALE,
+  category?: PluralCategory,
+): string {
   const ctx = resolveKeyContext(key)
   const lines = [`Surface: ${ctx.surface}`, `String: ${ctx.description}`]
+
+  if (ctx.plural) {
+    // A translator cannot infer their own plural categories from English, and
+    // getting this wrong is not a quality problem — it is an ungrammatical
+    // sentence no reviewer can repair without re-keying the catalog. So the note
+    // states the governing number and the exact category set to fill.
+    const categories = pluralCategoriesFor(locale)
+    lines.push(
+      `Plural: this message changes with the number in {${ctx.plural.countVar}}. ` +
+        `Your language uses ${categories.length} form(s): ${categories.join(", ")}. ` +
+        `Translate the form named in this cell's key after "` +
+        `${PLURAL_LEAF_SEPARATOR}" — each form is its own cell.`,
+    )
+    if (category) {
+      lines.push(
+        `This cell: the "${category}" form — used for the counts your language puts ` +
+          `in that category. Fill it in even if it reads the same as another form.`,
+      )
+    }
+    const english = Object.entries(ctx.plural.forms)
+      .map(([cat, form]) => `${cat} = "${form}"`)
+      .join("; ")
+    lines.push(`English forms: ${english}`)
+  }
 
   if (ctx.screenshot) {
     const surface = screenshotSurface(ctx.screenshot)
@@ -107,12 +205,47 @@ export function contextNote(key: MessageKey): string {
   return lines.join("\n")
 }
 
+/**
+ * The plural section of the sidecar: for every count-governed key, the
+ * placeholder that governs it, the English forms, and the category set each
+ * shipping locale must fill. Without the per-locale sets a translator has no way
+ * to know that Arabic needs six forms and Thai one.
+ */
+export function buildPluralSidecar(): Record<
+  string,
+  {
+    countVar: string
+    english: Partial<Record<PluralCategory, string>>
+    categoriesByLocale: Record<string, PluralCategory[]>
+  }
+> {
+  const categoriesByLocale: Record<string, PluralCategory[]> = {}
+  for (const locale of LOCALES) {
+    categoriesByLocale[locale.code] = pluralCategoriesFor(locale.code)
+  }
+  const out: Record<
+    string,
+    {
+      countVar: string
+      english: Partial<Record<PluralCategory, string>>
+      categoriesByLocale: Record<string, PluralCategory[]>
+    }
+  > = {}
+  for (const key of MESSAGE_KEYS) {
+    const forms = pluralMessageFor(key)
+    if (!forms) continue
+    out[key] = { countVar: forms.countVar, english: forms.forms, categoriesByLocale }
+  }
+  return out
+}
+
 /** The generated JSON sidecar, in the documented interchange shape. */
 export function buildContextSidecar(): unknown {
   return {
     version: CONTEXT_SCHEMA_VERSION,
     generatedFrom: "src/lib/i18n/context.ts",
     namespaces: CATALOG_CONTEXT,
+    plurals: buildPluralSidecar(),
   }
 }
 
@@ -162,13 +295,39 @@ export function parseTranslatedCatalog(json: string): ParsedCatalog {
 
   const catalog: Catalog = {}
   const unknownKeys: string[] = []
-  for (const [key, value] of Object.entries(root as Record<string, unknown>)) {
+  const pluralForms = new Map<MessageKey, Partial<Record<PluralCategory, string>>>()
+
+  for (const [leaf, value] of Object.entries(root as Record<string, unknown>)) {
     if (typeof value !== "string") continue
+    const { key, category } = parseLeafKey(leaf)
     if (!isMessageKey(key)) {
-      unknownKeys.push(key)
+      unknownKeys.push(leaf)
+      continue
+    }
+    const forms = pluralMessageFor(key)
+    if (forms && category) {
+      // Seeded with the nearest English form, so "still English" means the
+      // translator skipped this category — exactly as for a plain key.
+      const seed = forms.forms[category] ?? forms.forms.other ?? ""
+      if (value.length > 0 && value !== seed) {
+        const collected = pluralForms.get(key) ?? {}
+        collected[category] = value
+        pluralForms.set(key, collected)
+      }
+      continue
+    }
+    if (forms || category) {
+      // A plural key exported as a bare leaf, or a category suffix on a key that
+      // is not count-governed: the shapes drifted, so report rather than guess.
+      unknownKeys.push(leaf)
       continue
     }
     if (value.length > 0 && value !== en[key]) catalog[key] = value
+  }
+
+  for (const [key, forms] of pluralForms) {
+    const base = pluralMessageFor(key)
+    if (base) catalog[key] = plural(forms, base.countVar)
   }
 
   const missingKeys = MESSAGE_KEYS.filter((key) => catalog[key] === undefined)
@@ -183,6 +342,8 @@ export function parseTranslatedCatalog(json: string): ParsedCatalog {
  */
 export function renderCatalogModule(locale: string, catalog: Catalog): string {
   const entries = MESSAGE_KEYS.filter((key) => catalog[key] !== undefined).map(
+    // `JSON.stringify` covers both shapes: a plain string, and the
+    // `{ forms, countVar }` object a count-governed key carries.
     (key) => `  ${JSON.stringify(key)}: ${JSON.stringify(catalog[key])},`,
   )
   const body = entries.length > 0 ? `\n${entries.join("\n")}\n` : ""

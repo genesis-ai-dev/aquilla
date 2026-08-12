@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
+import { useOnline } from "@/hooks/useOnline"
 import { getProject, patchProject } from "@/lib/store/project-index"
 import { ROLE } from "@/lib/frontier/roles"
 import { resolveTermbaseEditFloor } from "@/lib/terminology/glossary-view"
@@ -143,20 +144,8 @@ function mergeProjectWideSettings(local: ProjectWideSettings, server: ProjectWid
   return changed ? { ...local, ...server } : local
 }
 
-function useOnline(): boolean {
-  const [online, setOnline] = useState(() => navigator.onLine)
-  useEffect(() => {
-    const on = () => setOnline(true)
-    const off = () => setOnline(false)
-    window.addEventListener("online", on)
-    window.addEventListener("offline", off)
-    return () => {
-      window.removeEventListener("online", on)
-      window.removeEventListener("offline", off)
-    }
-  }, [])
-  return online
-}
+// useOnline moved to @/hooks/useOnline (2026-08-05) — shared with the
+// recording modal's offline gate.
 
 function localSettingsFrom(
   record: Awaited<ReturnType<typeof getProject>>,

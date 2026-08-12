@@ -24,6 +24,7 @@ import { AssignWork } from "./AssignWork"
 import { MembersTab } from "@/components/ProjectMembersPage"
 import { MemberActivityPanel } from "./MemberActivityPanel"
 import { ProjectAutopilotPanel } from "./ProjectAutopilotPanel"
+import { isFlagEnabled } from "@/lib/features/flags"
 import { getPortfolio, translatedPct, validatedPct, aiDraftedPct, audioPct, recordedMinutes, deadlineStatus, laneTranslatedPct, laneValidatedPct, type PortfolioProject, type PortfolioLane } from "@/lib/frontier/portfolio"
 import { OverviewLaneTable } from "./OverviewLaneTable"
 import { fetchProjectFiles, type FileSummary } from "@/lib/sync/cells-read"
@@ -31,6 +32,7 @@ import { fetchSyncToken } from "@/lib/sync/sync-token"
 import {
   progressToCanonicalRollup,
   sectionProgressToVerseRollup,
+  formatFlatSectionKey,
   type BookRollup,
   type ChapterRollup,
   type VerseRollup,
@@ -329,7 +331,7 @@ function FlatSectionRow({ section }: { section: FlatSectionRollup }) {
       data-testid="section-row"
       className="flex w-full items-center gap-2 py-0.5 text-xs"
     >
-      <span className="w-10 shrink-0 font-medium">{section.key}</span>
+      <span className="w-14 shrink-0 font-medium">{formatFlatSectionKey(section.key)}</span>
       <MiniRollupBar filledPct={section.filledPct} approvedPct={section.approvedPct} />
       <span className="text-[10px] tabular-nums text-muted-foreground">
         {section.filledCount}/{section.approvedCount}/{section.totalCount}
@@ -469,19 +471,19 @@ function FileCanonicalRollup({
   loadVerses: (sectionKey: string) => Promise<VerseRollup[]>
 }) {
   if (loading) {
-    return <p className="ml-7 mt-1 text-xs text-muted-foreground">Loading chapter breakdown…</p>
+    return <p className="ml-7 mt-1 text-xs text-muted-foreground">Loading breakdown…</p>
   }
   if (error) {
     return (
       <button type="button" className="ml-7 mt-1 text-xs text-destructive underline" onClick={onRetry}>
-        Chapter progress unavailable. Retry
+        Progress unavailable. Retry
       </button>
     )
   }
   if (!rollup || (rollup.books === null && rollup.sections.length === 0)) {
     return (
       <p className="ml-7 mt-1 text-xs text-muted-foreground">
-        No chapter structure detected for this file.
+        No section breakdown available for this file.
       </p>
     )
   }
@@ -513,7 +515,7 @@ export function ProjectOverview() {
   // button so it spins + disables instead of sitting idle and re-clickable.
   // `openingOverlay` blocks the rest of the page while the open is in flight.
   const { open: openWorkspace, isPending: openPending, overlay: openingOverlay } = useOpenWorkspace()
-  const { project, status, refresh, pm } = useProject(id)
+  const { project, status, refresh, pm, roleLevel } = useProject(id)
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
   // AQU-507: candidate PMs = the project's effective members. Only fetched for
@@ -1298,11 +1300,14 @@ export function ProjectOverview() {
                   only place that answers "what is drafting, and how much is
                   waiting on my team". Renders nothing when the backend isn't
                   deployed for this environment. */}
-              <ProjectAutopilotPanel
-                projectId={id}
-                fileNames={autopilotFileNames}
-                canStart={(project?.syncRole?.level ?? 0) >= ROLE.CONTRIBUTOR}
-              />
+              {project && isFlagEnabled(project, "contextualTranslation") && (
+                <ProjectAutopilotPanel
+                  key={id}
+                  projectId={id}
+                  fileNames={autopilotFileNames}
+                  canStart={(roleLevel ?? 0) >= ROLE.CONTRIBUTOR}
+                />
+              )}
 
               {/* ── Per-file rows (always fully visible per user decision) ── */}
               {files.length > 0 && (() => {

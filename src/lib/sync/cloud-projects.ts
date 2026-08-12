@@ -24,6 +24,8 @@ export interface CloudFileSummary {
   targetTextDirection?: "ltr" | "rtl" | null
   /** Timeline editor: core video URL for the preview; absent/null ⇒ no video. */
   coreMediaUrl?: string | null
+  /** The file's audio timing mode; absent ⇒ the project default applies. */
+  timingMode?: "dubbing" | "audioFirst" | null
 }
 
 export interface CloudProjectSummary {
@@ -300,6 +302,7 @@ export function minimalProjectRecord(summary: CloudProjectSummary): ProjectRecor
       ...(f.sourceTextDirection === "ltr" || f.sourceTextDirection === "rtl" ? { sourceTextDirection: f.sourceTextDirection } : {}),
       ...(f.targetTextDirection === "ltr" || f.targetTextDirection === "rtl" ? { targetTextDirection: f.targetTextDirection } : {}),
       ...(f.coreMediaUrl ? { coreMediaUrl: f.coreMediaUrl } : {}),
+      ...(f.timingMode === "dubbing" || f.timingMode === "audioFirst" ? { timingMode: f.timingMode } : {}),
     })),
     members: [],
     syncRole: {

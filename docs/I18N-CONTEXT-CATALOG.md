@@ -18,6 +18,7 @@ This builds on the AQU-511 framework (typed `en` catalog, `translate()` fallback
 | Path | What it is |
 | --- | --- |
 | `src/lib/i18n/messages/en.ts` | Base catalog — the source of truth for **keys and English strings** |
+| `src/lib/i18n/plurals.ts` | CLDR plural categories: the `plural()` authoring shape, selection, fallback |
 | `src/lib/i18n/context.ts` | **Context sidecar** — the authored metadata + resolution + lint |
 | `src/lib/i18n/screenshots.ts` | Registry of screenshot **surfaces** (id, route, viewing notes) |
 | `src/lib/i18n/screenshots/<id>.png` | The captured surface images |
@@ -89,6 +90,51 @@ Fields on a `ContextEntry`:
 }
 ```
 
+## Plurals
+
+English has two plural forms. **Arabic has six** (`zero`/`one`/`two`/`few`/`many`/
+`other`); Thai, Burmese and Patani Malay have one. A message keyed as a pair of
+`*One`/`*Many` strings picked with `count === 1` at the call site therefore cannot be
+made grammatical in Arabic by any translator — that is a ceiling in the catalog's
+*shape*, not a quality problem in its content. Arabic ships, so counted messages are
+keyed by CLDR plural category instead.
+
+A count-governed key holds a record of category → string:
+
+```ts
+"search.resultCount": plural({ one: "{count} result", other: "{count} results" }),
+
+// Where the counted noun agrees with something other than {count}, name it:
+"editor.completion.failed": plural(
+  { one: "{failed} of {total} cell failed.", other: "{failed} of {total} cells failed." },
+  "total",
+),
+```
+
+- **English supplies only the categories English uses** (`one`, `other`). `other` is
+  required — it is where every fallback chain ends.
+- **Call sites pass the count, never a branch**: `t("search.resultCount", { count: n })`.
+  `translate()` selects the category with `Intl.PluralRules` for the *active locale*,
+  which is why it takes a locale as well as a catalog.
+- **Fallback**: locale's form for the selected category → locale's `other` → English's
+  form for the category → English's `other`. A locale that filled only `other` renders
+  for every count; a locale missing the category Arabic selected still renders real
+  text. It never yields a raw key.
+- `mfa` is overridden to a single form: `Intl.PluralRules` does not know the tag and
+  would silently ask a Patani Malay translator for an unusable `one`.
+- The lint (`catalogContextIssues()`) requires `other`, rejects an empty form, and
+  requires every form to use the same placeholders — otherwise a rendered sentence
+  silently loses its number in whichever category the count happens to hit.
+
+### How a plural key reaches a translator
+
+A plural key exports **one leaf per category the target locale needs**, named
+`<key>#<category>` — six cells for Arabic, one for Thai. So `pnpm i18n:export` writes a
+catalog and a notes file **per locale**, not one shared `en.catalog.json`, and each
+note states the governing number, the locale's full category set, and which form that
+cell is. The sidecar (`en.context.json`, schema v2) carries the same information in a
+`plurals` section.
+
 ## Screenshots
 
 A **surface** is one screen or dialog a translator can look at to understand a whole group
@@ -123,7 +169,12 @@ a pre-installed one: `I18N_SHOTS_CHROMIUM_PATH=/opt/pw-browsers/chromium pnpm i1
 
 ## Adding a message key — the workflow
 
-1. Add the key + English string to `src/lib/i18n/messages/en.ts`.
+1. Add the key + English string to its namespace module under `src/lib/i18n/namespaces/`
+   (which `messages/en.ts` spreads). If the string counts something, author it as
+   `plural({ … })` — see **Plurals** below.
+   Before adding it, check whether another namespace already renders that exact
+   English: `no-duplicates.test.ts` compares every namespace against every other, and
+   the fix is to reuse the existing key or promote it to `common.*`, not to reword.
 2. Add its context in `src/lib/i18n/context.ts`:
    - if its namespace already has a `_context` that genuinely describes the surface, you're
      done — the key inherits it;
@@ -147,7 +198,8 @@ The lint checks:
 3. no orphan entries — every context key and namespace maps to a real message key, and
    lives under the right namespace;
 4. every referenced screenshot id is declared in `screenshots.ts`;
-5. placeholders agree in both directions between the string and its context;
+5. placeholders agree in both directions between the string and its context — across
+   every plural form of a count-governed key;
 6. every declared screenshot surface is actually referenced by the metadata.
 
 ## Dogfooding: the catalog is an Aquilla project
@@ -158,9 +210,10 @@ translators and the translation agent see what each string does.
 
 ```
                 pnpm i18n:export
-en.ts + context.ts ─────────────▶ en.catalog.json  ──import──▶  Aquilla project
-                                  en.context.json                (one cell per key,
-                                  en.notes.json                   context attached)
+en.ts + context.ts ─────────────▶ <loc>.catalog.json ─import──▶  Aquilla project
+                                  en.context.json                (one cell per key, or
+                                  <loc>.notes.json                per plural category,
+                                                                  context attached)
                                                                         │
                                                                    translate
                                                                 (human or agent,
@@ -177,6 +230,10 @@ pnpm i18n:check                                   # lint the sidecar
 pnpm i18n:export [outDir]                         # default: i18n-export/ (gitignored)
 pnpm i18n:import th i18n-export/th.translated.json # regenerates messages/th.ts
 ```
+
+`i18n:export` writes `en.context.json` plus a `<locale>.catalog.json` and
+`<locale>.notes.json` for every locale in `locales.ts`. The per-locale split exists for
+plurals: the number of cells a counted key needs is a property of the target language.
 
 `en.notes.json` is the piece that does the work: message key → a flattened, standalone
 context note, which is what lands on the imported cell and what the translation agent

@@ -1,6 +1,9 @@
 import { v4 as uuid } from "uuid"
-import type { TranslatableString } from "./types"
-import { extractVoiceLabel } from "@/lib/export/vtt-voice"
+import type { TranslatableString } from "./core-types"
+// Relative on purpose: this module is part of the worker-safe parse core,
+// which the sync-worker imports directly — the `@/` alias only exists in the
+// SPA's tsconfig/vite config.
+import { extractVoiceLabel } from "../export/vtt-voice"
 
 const TIMESTAMP_VTT = /^\d{2}:\d{2}:\d{2}\.\d{3}\s+-->\s+\d{2}:\d{2}:\d{2}\.\d{3}/
 const TIMESTAMP_SRT = /^\d{2}:\d{2}:\d{2},\d{3}\s+-->\s+\d{2}:\d{2}:\d{2},\d{3}/

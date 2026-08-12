@@ -65,6 +65,9 @@ function overlaySettings(record: ProjectRecord, settings: ProjectWideSettings): 
   assign("allowSelfValidation", settings.allowSelfValidation)
   assign("bibleResourcesEnabled", settings.bibleResourcesEnabled)
   assign("draftContext", settings.draftContext)
+  // AQU-646 SUB-53: the Media lens reads this to decide whether to draw the
+  // timeline against the imported file's clock or lay the verses out end to end.
+  assign("audioTimingMode", settings.audioTimingMode)
   // AQU-634: USFM front-matter opt-out must reach the workspace so ImportDialog
   // and the target-import panel drop front matter when it's on.
   assign("importExcludeFrontMatter", settings.importExcludeFrontMatter)
@@ -86,10 +89,11 @@ async function overlayDeviceLocalSettings(record: ProjectRecord): Promise<Projec
     console.warn("[useProject] failed to read device-local project cache", err)
     return record
   }
-  if (!local?.completionSettings) return record
+  if (!local?.completionSettings && !local?.experimentalFlags) return record
   return {
     ...record,
-    completionSettings: local.completionSettings,
+    ...(local.completionSettings ? { completionSettings: local.completionSettings } : {}),
+    ...(local.experimentalFlags ? { experimentalFlags: local.experimentalFlags } : {}),
   }
 }
 
@@ -188,7 +192,7 @@ export function useProject(projectId: string) {
   // AQU-822: the org's termbase-edit floor rides along on the project record,
   // so a terminology-only patch can be permitted below the maintainer settings
   // floor without any extra fetch here.
-  const { settings: syncedSettings, patch: patchSettings } = useProjectSettings(
+  const { settings: syncedSettings, patch: patchSettings, hasFetched: settingsFetched } = useProjectSettings(
     projectId,
     roleLevel,
     { termbaseEditMinRole: project?.termbaseEditMinRole },
@@ -219,5 +223,10 @@ export function useProject(projectId: string) {
     refresh,
     /** Persist project-wide settings (incl. synced voice profiles) to the server. */
     patchSettings,
+    /** True once the settings overlay's GET has confirmed — before this, the
+     *  overlaid shared fields (audioTimingMode, …) may still be defaults.
+     *  Consumers that COMPARE those fields over time (the timing-mode ack)
+     *  must wait for this, or hydration reads as a remote change. */
+    settingsFetched,
   }
 }

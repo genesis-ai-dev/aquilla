@@ -15,9 +15,10 @@
 //     otherwise re-render on every single draft)
 //
 // A draft here is a PROPOSAL. Nothing in this module writes to a cell — accept
-// goes through the caller's own outbox, exactly like a human edit, and only
-// then reports the review to the server. That asymmetry is the whole trust
-// model: the robot may propose anywhere, and commits only where a human said so.
+// goes through the caller's own outbox, exactly like a human edit. The winning
+// target projection resolves accepted drafts atomically; rejection, which has
+// no cell event, uses the review route. That asymmetry is the whole trust model:
+// the robot may propose anywhere, and commits only where a human said so.
 
 import { useSyncExternalStore } from "react"
 
@@ -26,6 +27,11 @@ import { useSyncExternalStore } from "react"
 // ---------------------------------------------------------------------------
 
 export interface ContextualDraftEntry {
+  projectId: string
+  fileId: string
+  /** Empty string is the only lane Autopilot may draft in for v1. */
+  targetLang: string
+  runId: string | null
   draftId: string
   cellId: string
   text: string
@@ -36,7 +42,9 @@ export interface ContextualDraftEntry {
 }
 
 export interface ContextualDraftsSummary {
+  projectId: string | null
   fileId: string | null
+  targetLang: string
   /** Drafts awaiting a human decision. */
   pending: number
   /** Accepted in this session — the "you got 40 verses out of this" number. */
@@ -44,11 +52,25 @@ export interface ContextualDraftsSummary {
   rejectedThisSession: number
 }
 
+/**
+ * Opaque attachment token captured before an authoritative fetch starts.
+ * The generation prevents an A → B → A navigation from letting the
+ * first A response overwrite the newer A session even though its ids match.
+ */
+export interface ContextualDraftsScope {
+  projectId: string
+  fileId: string
+  targetLang: string
+  generation: number
+}
+
 /** Frame shape mirroring auth-worker's ContextualDraftsFrame. */
 export interface ContextualDraftsFrame {
   type: "contextual.drafts"
   runId: string
   fileId: string
+  /** Required wire provenance. v1 accepts only the empty/default lane. */
+  targetLang: string
   spanLabel: string
   drafts: { draftId: string; cellId: string; text: string }[]
   truncated?: boolean
@@ -60,7 +82,9 @@ export interface ContextualDraftsFrame {
 
 const EMPTY_DRAFTS: ReadonlyMap<string, ContextualDraftEntry> = new Map()
 const IDLE_SUMMARY: ContextualDraftsSummary = {
+  projectId: null,
   fileId: null,
+  targetLang: "",
   pending: 0,
   acceptedThisSession: 0,
   rejectedThisSession: 0,
@@ -68,6 +92,7 @@ const IDLE_SUMMARY: ContextualDraftsSummary = {
 
 let _drafts: ReadonlyMap<string, ContextualDraftEntry> = EMPTY_DRAFTS
 let _summary: ContextualDraftsSummary = IDLE_SUMMARY
+let _scopeGeneration = 0
 /** Monotonic arrival counter — `Date.now()` ties at frame granularity, and a
  *  wave delivers several spans in the same millisecond. */
 let _seq = 0
@@ -113,8 +138,18 @@ export function useContextualDraftsSummary(): ContextualDraftsSummary {
   return useSyncExternalStore(subscribeSummary, getContextualDraftsSummary, () => IDLE_SUMMARY)
 }
 
-/** One cell's pending draft, or undefined. Cheap enough to call per row. */
-export function getContextualDraftFor(cellId: string): ContextualDraftEntry | undefined {
+/** One cell's pending draft, scoped to the editor that will consume it. */
+export function getContextualDraftFor(
+  projectId: string,
+  fileId: string,
+  targetLang: string,
+  cellId: string,
+): ContextualDraftEntry | undefined {
+  if (
+    _summary.projectId !== projectId ||
+    _summary.fileId !== fileId ||
+    _summary.targetLang !== targetLang
+  ) return undefined
   return _drafts.get(cellId)
 }
 
@@ -132,13 +167,37 @@ export function getContextualDraftFor(cellId: string): ContextualDraftEntry | un
  * caller refetches the authoritative list rather than showing a partial burst
  * as if it were everything.
  */
-export function applyContextualDraftsFrame(frame: ContextualDraftsFrame): { needsRefetch: boolean } {
-  if (_summary.fileId !== null && frame.fileId !== _summary.fileId) return { needsRefetch: false }
-  if (frame.drafts.length === 0) return { needsRefetch: frame.truncated === true }
+export function applyContextualDraftsFrame(
+  projectId: string,
+  frame: ContextualDraftsFrame,
+  currentRunId: string | null,
+): { needsRefetch: boolean } {
+  // Draft frames carry explicit lane provenance, and v1 only produces the
+  // project-default lane. A project/file/lane must already be attached; never
+  // let an early or project-wide frame choose the editor scope for us.
+  if (
+    _summary.projectId !== projectId ||
+    _summary.fileId !== frame.fileId ||
+    frame.targetLang !== "" ||
+    _summary.targetLang !== frame.targetLang
+  ) return { needsRefetch: false }
+  // Multiple historic runs may legitimately own REST-hydrated proposals, but
+  // a live burst is transient output from exactly one current run. A delayed
+  // burst from superseded run A must never overwrite run B's newer cell text.
+  if (!currentRunId || frame.runId !== currentRunId) return { needsRefetch: true }
+  // A truncated payload may have omitted rows or text that exceeded the live
+  // envelope. Applying any part would expose a draft the user could accept as
+  // though it were complete; leave the mirror untouched and fetch REST truth.
+  if (frame.truncated === true) return { needsRefetch: true }
+  if (frame.drafts.length === 0) return { needsRefetch: false }
 
   const next = new Map(_drafts)
   for (const d of frame.drafts) {
     next.set(d.cellId, {
+      projectId,
+      fileId: frame.fileId,
+      targetLang: frame.targetLang,
+      runId: frame.runId,
       draftId: d.draftId,
       cellId: d.cellId,
       text: d.text,
@@ -147,7 +206,43 @@ export function applyContextualDraftsFrame(frame: ContextualDraftsFrame): { need
     })
   }
   setDrafts(next)
-  return { needsRefetch: frame.truncated === true }
+  return { needsRefetch: false }
+}
+
+/**
+ * Attach the mirror to the editor's exact project/file/lane. Scope changes
+ * clear synchronously, before any snapshot request, so old text cannot flash
+ * or be accepted while the next file is loading.
+ */
+export function attachContextualDrafts(
+  projectId: string,
+  fileId: string,
+  targetLang = "",
+): ContextualDraftsScope {
+  const switching =
+    _summary.projectId !== projectId ||
+    _summary.fileId !== fileId ||
+    _summary.targetLang !== targetLang
+  if (switching) {
+    _scopeGeneration += 1
+    setSummary({
+      projectId,
+      fileId,
+      targetLang,
+      pending: 0,
+      acceptedThisSession: 0,
+      rejectedThisSession: 0,
+    })
+    setDrafts(EMPTY_DRAFTS)
+  }
+  return { projectId, fileId, targetLang, generation: _scopeGeneration }
+}
+
+function isCurrentScope(scope: ContextualDraftsScope): boolean {
+  return scope.generation === _scopeGeneration &&
+    scope.projectId === _summary.projectId &&
+    scope.fileId === _summary.fileId &&
+    scope.targetLang === _summary.targetLang
 }
 
 /**
@@ -156,12 +251,21 @@ export function applyContextualDraftsFrame(frame: ContextualDraftsFrame): { need
  * PERSON did, not what the server currently holds.
  */
 export function hydrateContextualDrafts(
-  fileId: string,
-  drafts: { draftId: string; cellId: string; text: string; spanLabel?: string }[],
-): void {
+  scope: ContextualDraftsScope,
+  drafts: { draftId: string; runId?: string; cellId: string; text: string; spanLabel?: string }[],
+): boolean {
+  // The editor snapshot endpoint is default-lane-only. Even if a future
+  // caller accidentally fetches it while a multilingual lane is open, keep
+  // that evidence out of a lane where accepting it would commit different
+  // translation data.
+  if (!isCurrentScope(scope) || scope.targetLang !== "") return false
   const next = new Map<string, ContextualDraftEntry>()
   for (const d of drafts) {
     next.set(d.cellId, {
+      projectId: scope.projectId,
+      fileId: scope.fileId,
+      targetLang: scope.targetLang,
+      runId: d.runId ?? null,
       draftId: d.draftId,
       cellId: d.cellId,
       text: d.text,
@@ -169,25 +273,43 @@ export function hydrateContextualDrafts(
       receivedAt: ++_seq,
     })
   }
-  const switching = _summary.fileId !== fileId
   setSummary({
-    fileId,
+    ..._summary,
     pending: next.size,
-    acceptedThisSession: switching ? 0 : _summary.acceptedThisSession,
-    rejectedThisSession: switching ? 0 : _summary.rejectedThisSession,
   })
   setDrafts(next)
+  return true
 }
 
 /**
- * Drop a draft the user decided on. Optimistic by design — the server review
- * call is a report, not a gate, so the cell must clear the moment the user
- * clicks. A failed report leaves a stale `proposed` row that the next
- * hydrate reconciles; showing the draft again mid-decision would be worse.
+ * Drop an exact draft identity after its authoritative decision. Rejections
+ * call this only after the server review route succeeds. Accepted drafts are
+ * normally removed by the event.applied-triggered snapshot after the winning
+ * target projection reconciles them; the `accepted` action remains available
+ * for identity-safe consumers and session accounting, but is not an enqueue
+ * acknowledgement.
  */
-export function resolveContextualDraft(cellId: string, action: "accepted" | "rejected"): void {
+export function resolveContextualDraft(
+  projectId: string,
+  fileId: string,
+  targetLang: string,
+  cellId: string,
+  expectedDraftId: string,
+  action: "accepted" | "rejected",
+): boolean {
+  if (
+    _summary.projectId !== projectId ||
+    _summary.fileId !== fileId ||
+    _summary.targetLang !== targetLang
+  ) return false
   const existing = _drafts.get(cellId)
-  if (!existing) return
+  if (
+    !existing ||
+    existing.projectId !== projectId ||
+    existing.fileId !== fileId ||
+    existing.targetLang !== targetLang ||
+    existing.draftId !== expectedDraftId
+  ) return false
   const next = new Map(_drafts)
   next.delete(cellId)
   setSummary({
@@ -199,6 +321,7 @@ export function resolveContextualDraft(cellId: string, action: "accepted" | "rej
       _summary.rejectedThisSession + (action === "rejected" ? 1 : 0),
   })
   setDrafts(next)
+  return true
 }
 
 /** Every pending draft, newest first — the review queue's order. */
@@ -211,4 +334,5 @@ export function resetContextualDraftsStore(): void {
   _drafts = EMPTY_DRAFTS
   _summary = IDLE_SUMMARY
   _seq = 0
+  _scopeGeneration += 1
 }

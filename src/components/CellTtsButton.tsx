@@ -17,6 +17,7 @@ import { generateAndAttachCellVoice } from "@/lib/audio/generate-voice"
 import { AiModelConsentDeniedError } from "@/lib/audio/ai-consent"
 import { useModelStatus } from "@/lib/audio/prefetch"
 import { fetchCellAudio, parseFrontierAudioUrl } from "@/lib/audio/upload"
+import { audioMimeForExt } from "@/lib/audio/mime"
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import type {
@@ -268,7 +269,9 @@ export function CellTtsButton({
     playOnly,
   ])
 
-  if (!trimmed) return null
+  // Round 5: an untranslated cell shows the button DISABLED with the reason
+  // instead of vanishing — a disappearing control read as a bug in QA.
+  const noText = !trimmed
 
   const isLocalModel = provider === "mms" || provider === "kokoro"
   const downloadingModel = !playableAttachId && isLocalModel && modelStatus.kind === "downloading" && status.kind !== "idle"
@@ -288,17 +291,19 @@ export function CellTtsButton({
   // resolution generateAndAttachCellVoice/synthesizeForCell use, so the label
   // can't drift from the real synthesis path.
   const engineName = providerInfo(provider).shortTitle
-  const tooltip = isError
-    ? `TTS failed — ${status.message}`
-    : isLoadingModel
-      ? pct != null ? `Downloading voice model (${pct}%)…` : "Loading voice model…"
-      : isSynthesizing
-        ? "Synthesizing speech…"
-        : isPlaying
-          ? "Pause"
-          : playableAttachId
-            ? `Play generated voice (${voice.name})`
-            : `Generate & play (${voice.name} — ${engineName})`
+  const tooltip = noText
+    ? "Translate this line first to generate voice"
+    : isError
+      ? `TTS failed — ${status.message}`
+      : isLoadingModel
+        ? pct != null ? `Downloading voice model (${pct}%)…` : "Loading voice model…"
+        : isSynthesizing
+          ? "Synthesizing speech…"
+          : isPlaying
+            ? "Pause"
+            : playableAttachId
+              ? `Play generated voice (${voice.name})`
+              : `Generate & play (${voice.name} — ${engineName})`
 
   const button = (
     <Button
@@ -306,7 +311,7 @@ export function CellTtsButton({
       variant="ghost"
       size={isLoadingModel ? "xs" : "icon-xs"}
       onClick={onClick}
-      disabled={disabled || isLoadingModel || isSynthesizing}
+      disabled={disabled || noText || isLoadingModel || isSynthesizing}
       aria-label={tooltip}
       className={cn(
         isError
@@ -315,7 +320,12 @@ export function CellTtsButton({
             ? "text-primary"
             : isLoadingModel
               ? "text-amber-600 dark:text-amber-400"
-              : "text-muted-foreground/50 hover:text-foreground",
+              : noText || disabled
+                // SUB-35: can't-run state stays washed out…
+                ? "text-muted-foreground/40"
+                // …but READY must look ready — the old muted/50 idle tint made a
+                // working button read as disabled.
+                : "text-sky-600 hover:text-sky-500 dark:text-sky-400",
         isSynthesizing && "animate-pulse",
       )}
     >
@@ -351,7 +361,10 @@ async function fetchAttachmentBlob(args: {
       ext: frontier.ext,
       getSyncToken: audioSyncTokenFetcherForSession(args.session),
     })
-    return new Blob([bytes as BlobPart], { type: "audio/wav" })
+    // Fortify pass: type the blob by its REAL container — generations are
+    // webm/opus now; Safari/Firefox reject mislabeled bytes with a bare
+    // onerror (Chromium sniffs, which masked this in Chrome-only testing).
+    return new Blob([bytes as BlobPart], { type: audioMimeForExt(frontier.ext) })
   }
   // Fallback for direct URLs (e.g. blob:, http:). Legacy LFS attachments
   // aren't supported anymore — their bytes are no longer reachable.

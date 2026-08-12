@@ -14,11 +14,13 @@ import { useEffect, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { Spinner } from "@/components/ui/spinner"
 import { marketingLogin } from "@/lib/frontier/auth"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 // Mirrors M_PROJECT_ID in auth-worker/src/routes/marketing-seed.ts.
 const DEMO_PROJECT_ID = "demo-john"
 
 export function MarketingLoginRoute() {
+  const t = useT()
   const navigate = useNavigate()
   const [error, setError] = useState<string | null>(null)
 
@@ -29,7 +31,7 @@ export function MarketingLoginRoute() {
         const session = await marketingLogin()
         if (cancelled) return
         if (!session) {
-          setError("Demo is unavailable in this environment.")
+          setError(t("auth.marketingLogin.unavailable"))
           return
         }
         navigate(`/project/${DEMO_PROJECT_ID}/editor`, { replace: true })
@@ -41,6 +43,7 @@ export function MarketingLoginRoute() {
     return () => {
       cancelled = true
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [navigate])
 
   return (
@@ -48,14 +51,14 @@ export function MarketingLoginRoute() {
       <div className="max-w-md space-y-2 text-center">
         <h1 className="flex items-center justify-center gap-2 text-lg font-semibold">
           <Spinner className="size-5" />
-          Loading the Aquilla demo…
+          {t("auth.marketingLogin.loading")}
         </h1>
         {error ? (
           <p className="text-sm text-red-600" data-testid="marketing-login-error">
             {error}
           </p>
         ) : (
-          <p className="text-sm text-muted-foreground">Setting up a curated project for you.</p>
+          <p className="text-sm text-muted-foreground">{t("auth.marketingLogin.settingUp")}</p>
         )}
       </div>
     </div>

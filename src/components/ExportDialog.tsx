@@ -124,14 +124,14 @@ const BASE_FORMAT_OPTIONS: FormatOption[] = [
     id: "txt",
     label: "Plain text",
     ext: ".txt",
-    description: "Round-trip plain text: paragraph structure preserved; untranslated paragraphs keep source.",
+    description: "Round-trip plain text: paragraph structure preserved; untranslated paragraphs keep source (media lines use their transcription).",
     lossy: true,
   },
   {
     id: "md",
     label: "Markdown",
     ext: ".md",
-    description: "Round-trip markdown: headings, ordered/unordered lists and quotes reconstructed; untranslated blocks keep source.",
+    description: "Round-trip markdown: headings, ordered/unordered lists and quotes reconstructed; untranslated blocks keep source (media lines use their transcription).",
     lossy: true,
   },
   {
@@ -166,7 +166,7 @@ const BASE_FORMAT_OPTIONS: FormatOption[] = [
     id: "srt",
     label: "SRT (subtitles)",
     ext: ".srt",
-    description: "SubRip subtitles: numbered cues with millisecond timecodes; translated text per cue, source kept for untranslated cues.",
+    description: "SubRip subtitles: numbered cues with millisecond timecodes; translated text per cue, source kept for untranslated cues (media lines use their transcription).",
     lossy: true,
   },
   {

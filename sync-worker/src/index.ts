@@ -69,7 +69,7 @@ export { ProjectSync } from "./project-do"
 export { FileSync } from "./file-sync-legacy"
 import { makePostgres } from "../../db/shim/postgres"
 import { shipLog, shipErrorResponse } from "./posthog-logs"
-import { deploymentEnvironmentError } from "./environment-guard"
+import { deploymentEnvironmentError, unauthenticatedBypassError } from "./environment-guard"
 
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace -- Cloudflare namespace augmentation requires this syntax
@@ -216,6 +216,20 @@ const worker = {
       console.error("Refusing request with cross-environment worker bindings", {
         environmentError,
       })
+      return withCors(
+        new Response("Worker deployment configuration does not match this API environment", {
+          status: 503,
+        }),
+        request,
+      )
+    }
+
+    // Separate from the binding check above: that one only fires on the two
+    // first-party API hostnames, while the auth bypass is unsafe on ANY
+    // deployed worker (workers.dev aliases and PR previews included).
+    const bypassError = unauthenticatedBypassError(env)
+    if (bypassError) {
+      console.error("Refusing request with the sync auth bypass enabled", { bypassError })
       return withCors(
         new Response("Worker deployment configuration does not match this API environment", {
           status: 503,

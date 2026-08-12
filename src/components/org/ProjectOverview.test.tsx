@@ -4,6 +4,7 @@ import { MemoryRouter, Routes, Route } from "react-router-dom"
 import { OrgProvider } from "@/context/OrgContext"
 import { ProjectOverview, deriveProjectStatus } from "./ProjectOverview"
 import type { ProjectRecord } from "@/lib/parsers/types"
+import { ROLE } from "@/lib/frontier/roles"
 
 const navigate = vi.fn()
 vi.mock("react-router-dom", async (importActual) => {
@@ -21,6 +22,11 @@ vi.mock("@/lib/frontier/orgs", () => ({
   listOrgMembers: vi.fn(async () => []),
 }))
 vi.mock("@/components/AccountSwitcher", () => ({ AccountSwitcher: () => null }))
+vi.mock("./ProjectAutopilotPanel", () => ({
+  ProjectAutopilotPanel: ({ canStart }: { canStart: boolean }) => (
+    <div data-testid="project-autopilot-panel-mock" data-can-start={String(canStart)} />
+  ),
+}))
 
 const useProject = vi.fn()
 const refresh = vi.fn()
@@ -317,6 +323,61 @@ describe("ProjectOverview load states", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /^sign in$/i }))
     expect(navigate).toHaveBeenCalledWith("/login?next=%2Fprojects%2Fp1")
+  })
+})
+
+describe("ProjectOverview Autopilot discovery flag", () => {
+  it("hides the overview surface when contextualTranslation is opted out", async () => {
+    fetchSyncToken.mockResolvedValue({ token: "tok" })
+    fetchProjectFiles.mockResolvedValue([])
+    getPortfolio.mockResolvedValue([])
+    useProject.mockReturnValue({
+      project: projectRecord({
+        level: 700,
+        experimentalFlags: { contextualTranslation: false },
+      }),
+      status: "ready",
+      refresh,
+    })
+
+    renderOverview()
+
+    await screen.findByRole("heading", { level: 1, name: "John" })
+    expect(screen.queryByTestId("project-autopilot-panel-mock")).not.toBeInTheDocument()
+  })
+
+  it("shows the overview surface under the default-on discovery flag", async () => {
+    fetchSyncToken.mockResolvedValue({ token: "tok" })
+    fetchProjectFiles.mockResolvedValue([])
+    getPortfolio.mockResolvedValue([])
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 700 }),
+      status: "ready",
+      refresh,
+    })
+
+    renderOverview()
+
+    expect(await screen.findByTestId("project-autopilot-panel-mock")).toBeInTheDocument()
+  })
+
+  it("uses the fresh resolved role for Autopilot controls instead of the stale project cache", async () => {
+    fetchSyncToken.mockResolvedValue({ token: "tok" })
+    fetchProjectFiles.mockResolvedValue([])
+    getPortfolio.mockResolvedValue([])
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 700 }),
+      roleLevel: ROLE.VIEWER,
+      status: "ready",
+      refresh,
+    })
+
+    renderOverview()
+
+    expect(await screen.findByTestId("project-autopilot-panel-mock")).toHaveAttribute(
+      "data-can-start",
+      "false",
+    )
   })
 })
 
@@ -1150,7 +1211,7 @@ describe("ProjectOverview chapter/verse rollup (AQU-493)", () => {
     const row = await screen.findByTestId("file-row")
     fireEvent.click(within(row).getByRole("button", { name: /^expand/i }))
 
-    expect(await screen.findByText(/no chapter structure detected/i)).toBeInTheDocument()
+    expect(await screen.findByText(/no section breakdown available/i)).toBeInTheDocument()
     expect(screen.queryByTestId("book-row")).not.toBeInTheDocument()
     expect(screen.queryByTestId("canonical-rollup-books")).not.toBeInTheDocument()
   })
@@ -1176,8 +1237,36 @@ describe("ProjectOverview chapter/verse rollup (AQU-493)", () => {
     expect(sectionRows[0]).toHaveTextContent("GEN")
     expect(sectionRows[0]).toHaveTextContent("1/0/2")
     expect(sectionRows[1]).toHaveTextContent("EXO")
-    expect(screen.queryByText(/no chapter structure detected/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/no section breakdown available/i)).not.toBeInTheDocument()
     expect(screen.queryByTestId("canonical-rollup-books")).not.toBeInTheDocument()
+  })
+
+  // AQU-805: a single-episode media file has no Bible chapters — the server
+  // groups it into ~5-minute time sections, which must render as a "Section
+  // breakdown" with jump-nav minute-range labels, not a flat cell count only.
+  it("expanding a media file renders time sections as a Section breakdown", async () => {
+    fetchProjectFiles.mockResolvedValue([fileSummary(1)])
+    getFileProgress.mockResolvedValue(progress([
+      { key: "t:000000000000", totalCount: 4, filledCount: 2, validatedCount: 1 },
+      { key: "t:000000600000", totalCount: 3, filledCount: 0, validatedCount: 0 },
+    ]))
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 400, files: [{ id: "f1", name: "Episode.mp4", type: "video", createdAt: "x", cellCount: 7 }] }),
+      status: "ready", refresh,
+    })
+
+    renderOverview()
+
+    const row = await screen.findByTestId("file-row")
+    fireEvent.click(within(row).getByRole("button", { name: /^expand/i }))
+
+    expect(await within(row).findByLabelText("Section breakdown")).toBeInTheDocument()
+    const sectionRows = within(row).getAllByTestId("section-row")
+    expect(sectionRows).toHaveLength(2)
+    expect(sectionRows[0]).toHaveTextContent("0–5m")
+    expect(sectionRows[1]).toHaveTextContent("10–15m")
+    expect(screen.queryByTestId("canonical-rollup-books")).not.toBeInTheDocument()
+    expect(screen.queryByText(/no section breakdown available/i)).not.toBeInTheDocument()
   })
 
   it("collapsing and re-expanding a file does not re-fetch its compact progress", async () => {
@@ -1220,8 +1309,8 @@ describe("ProjectOverview chapter/verse rollup (AQU-493)", () => {
     const row = await screen.findByTestId("file-row")
     fireEvent.click(within(row).getByRole("button", { name: /^expand/i }))
 
-    const retry = await within(row).findByRole("button", { name: /chapter progress unavailable/i })
-    expect(within(row).queryByText(/no chapter structure detected/i)).not.toBeInTheDocument()
+    const retry = await within(row).findByRole("button", { name: /progress unavailable/i })
+    expect(within(row).queryByText(/no section breakdown available/i)).not.toBeInTheDocument()
     fireEvent.click(retry)
 
     expect(await within(row).findByTestId("book-row")).toBeInTheDocument()

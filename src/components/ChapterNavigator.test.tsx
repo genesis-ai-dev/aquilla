@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
-import { MilestoneNavigator, type MilestoneNavigationItem } from "./ChapterNavigator"
+import {
+  MilestoneNavigator,
+  VOCABULARIES,
+  type MilestoneNavigationItem,
+} from "./ChapterNavigator"
+import { en } from "@/lib/i18n/messages/en"
+import { isPluralMessage } from "@/lib/i18n/plurals"
 
 afterEach(cleanup)
 
@@ -352,5 +358,74 @@ describe("MilestoneNavigator", () => {
     fireEvent.keyDown(search, { key: "Enter" })
 
     expect(onSelect).toHaveBeenCalledWith("scripture:PSA:31")
+  })
+})
+
+/**
+ * Finding 3 (AQU-511 wave-4 review): every navigator label used to be a frame
+ * with a separately translated noun poured into it — "Previous {singular}" plus
+ * a bare "chapter". English hides the damage because the two just concatenate.
+ * Arabic cannot: the noun has to agree with the frame around it, and Burmese
+ * puts it in a different position in the sentence entirely. The app was also
+ * running toLocaleLowerCase over a translated word, which is meaningless in
+ * three of the four target scripts. So each sentence is now keyed per kind with
+ * the noun written in.
+ */
+describe("MilestoneNavigator label keys (finding 3)", () => {
+  const englishFormsOf = (key: string): string[] => {
+    const value = en[key as keyof typeof en]
+    return isPluralMessage(value) ? Object.values(value.forms) : [value]
+  }
+
+  it("never interpolates a translated noun into a navigator sentence", () => {
+    // The frame placeholders are the tell: {singular} / {plural} could only ever
+    // be filled with another catalog string.
+    const offenders = Object.keys(en)
+      .filter((key) => key.startsWith("editor.milestone."))
+      .flatMap((key) => englishFormsOf(key).map((form) => [key, form] as const))
+      .filter(([, form]) => /\{singular\}|\{plural\}/.test(form))
+    expect(offenders).toEqual([])
+  })
+
+  it("gives every kind of division its own complete sentences", () => {
+    // Each vocabulary's strings must name the division themselves, not lean on a
+    // noun the app supplies at runtime.
+    const nouns: Record<keyof typeof VOCABULARIES, string> = {
+      chapter: "chapter",
+      slide: "slide",
+      story: "stor",
+      section: "section",
+      timeRange: "time range",
+      part: "part",
+      group: "group",
+      milestone: "milestone",
+    }
+    for (const [id, keys] of Object.entries(VOCABULARIES)) {
+      const noun = nouns[id as keyof typeof VOCABULARIES]
+      for (const [role, key] of Object.entries(keys)) {
+        for (const form of englishFormsOf(key)) {
+          expect(form.toLowerCase(), `${id}.${role} (${key})`).toContain(noun)
+        }
+      }
+    }
+  })
+
+  it("labels a story file's controls with story sentences, not a filled-in frame", () => {
+    render(
+      <MilestoneNavigator items={stories} activeKey="story:u363" onSelect={() => {}} />,
+    )
+
+    expect(screen.getByRole("group", { name: "Move between stories" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Previous story" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Next story" })).toBeInTheDocument()
+    openPicker(/Current story: Story u363/)
+    expect(screen.getByRole("combobox", { name: "Find a story" })).toBeInTheDocument()
+    // The picker's group heading is the one place a bare plural noun is still
+    // right: it stands alone, with nothing interpolated around it.
+    expect(screen.getByRole("group", { name: "Stories" })).toBeInTheDocument()
+    fireEvent.change(screen.getByRole("combobox", { name: "Find a story" }), {
+      target: { value: "zzz" },
+    })
+    expect(screen.getByText("No stories found.")).toBeInTheDocument()
   })
 })

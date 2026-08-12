@@ -51,8 +51,9 @@ the warning-not-error change and the `normalize()` fix.
 Measuring, not estimating, the effect on this worktree's 1,337 keys: **1,143 keys (85.5%)
 carried authored per-key prose under the old convention; 653 (48.8%) are classified as
 needing it under the class test below** — a 43% cut in what must be hand-written, with the
-existing per-namespace and per-key content otherwise untouched (every namespace still passes
-unchanged except one pre-existing, tracked gap — see `LEGACY_CONTEXT_GAPS` in `context.ts`).
+existing per-namespace and per-key content otherwise untouched (every namespace passes
+unchanged; the one pre-existing gap this shipped with has since been filled, so
+`LEGACY_CONTEXT_GAPS` in `context.ts` is empty).
 
 ## Where things live
 
@@ -107,13 +108,13 @@ nothing else. This is what makes coverage a **class test** instead of a per-key 
 requirement is decided by what the key *is* (shape of its English value, shape of its name),
 never by whether someone already wrote an entry for it.
 
-**One tracked exception.** `LEGACY_CONTEXT_GAPS` in `context.ts` lists the single key in this
-worktree that predates the class test and still lacks the entry it needs
-(`autopilot.inspector.activity.logAria`, a real `aria-label` with no per-key entry) — fixing
-it means editing a namespace module outside this doc's change, so it's carried as an
-explicit, reviewed admission rather than silently passing. The same lint verifies the
-listing both ways: the key must still genuinely need the exemption, and gains its own issue
-("no longer needs the exemption — drop it") the moment someone adds the missing entry.
+**The tracked-exception hatch.** `LEGACY_CONTEXT_GAPS` in `context.ts` lists keys that predate
+the class test and still lack the entry they need, so a known gap is carried as an explicit,
+reviewed admission rather than silently passing. It is **empty today** — the one key it
+shipped with (`autopilot.inspector.activity.logAria`, a real `aria-label`) has its own entry
+in `autopilot.ts`. The same lint verifies any listing both ways: the key must still genuinely
+need the exemption, and gains its own issue ("no longer needs the exemption — drop it") the
+moment someone adds the missing entry.
 
 ```ts
 export const CATALOG_CONTEXT: Record<string, NamespaceBlock> = {
@@ -350,7 +351,7 @@ The lint checks:
 
 A key can also be carried as a named, reviewed exception via `LEGACY_CONTEXT_GAPS` in
 `context.ts` — see **When a per-key entry is required** above. It's the only escape hatch,
-it's self-verifying, and there's exactly one entry in it today.
+it's self-verifying, and it's empty today.
 
 ## Dogfooding: the catalog is an Aquilla project
 

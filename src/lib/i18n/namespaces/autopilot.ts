@@ -533,6 +533,11 @@ export const autopilot = defineNamespace({
           "Heading and accessible name of the sheet containing Autopilot runs, controls, history, and evidence.",
         screenshot: "editor-table",
       },
+      "autopilot.inspector.activity.logAria": {
+        description:
+          "Accessible name of the live step-history list inside the Autopilot activity inspector.",
+        screenshot: "editor-table",
+      },
       "autopilot.progress.passagesComplete": withPlaceholders(
         "Progressbar accessible name reporting completed passages out of the run total.",
         { done: "Number of completed passages.", total: "Total number of passages in the run." },

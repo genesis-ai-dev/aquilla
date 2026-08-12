@@ -274,36 +274,37 @@ describe("class test enforcement — still fails when a key genuinely needs pros
     expect(requiresOwnContextEntry("autopilot.status.working")).toBe(false)
   })
 
-  it("the tracked legacy gap genuinely fails the class test, independent of its exemption", () => {
-    // `LEGACY_CONTEXT_GAPS` (context.ts) keeps `catalogContextIssues()` green
-    // for this one real pre-existing gap, so it can't be exercised through
-    // the top-level "no issues" assertion — verify the underlying claim
-    // directly instead: the key really is classified as needing its own
-    // entry, and really doesn't have one. `autopilot.inspector.activity.logAria`
-    // is wired to `aria-label` in AutopilotActivityInspector.tsx with no
-    // per-key entry, which is exactly the class of gap this check exists to
-    // catch — it just isn't this change's file to fix (autopilot.ts).
+  it("every carried-over exemption is a real gap, not a classifier false positive", () => {
+    // The carve-out must never hide a phantom: a listed key has to be one the
+    // class test genuinely fails on today (needs its own entry, has none).
+    // Vacuous while the list is empty — the point is that adding an
+    // unjustified exemption starts failing here rather than passing silently.
+    for (const key of LEGACY_CONTEXT_GAPS) {
+      expect(CATALOG_CONTEXT[namespaceOf(key)]?.keys?.[key]).toBeUndefined()
+      expect(requiresOwnContextEntry(key)).toBe(true)
+    }
+  })
+
+  it("the last carried-over gap is fixed: the Autopilot log aria-label has its own entry", () => {
+    // `autopilot.inspector.activity.logAria` is wired to `aria-label` in
+    // AutopilotActivityInspector.tsx. It shipped exempt because WS-04 could
+    // not edit namespace modules; autopilot.ts now carries the entry, so the
+    // exemption is gone and the class test covers it like any other key.
     const key = "autopilot.inspector.activity.logAria"
-    expect(LEGACY_CONTEXT_GAPS).toContain(key)
-    expect(CATALOG_CONTEXT.autopilot.keys?.[key]).toBeUndefined()
+    expect(LEGACY_CONTEXT_GAPS).not.toContain(key)
     expect(requiresOwnContextEntry(key)).toBe(true)
+    expect(CATALOG_CONTEXT.autopilot.keys?.[key]?.description).toBeTruthy()
   })
 
   it("reports when a legacy-listed key no longer needs its exemption", () => {
-    // Proves the carve-out is self-correcting rather than a one-way door: if
-    // autopilot.ts is ever fixed, this same lint starts complaining that the
-    // now-stale LEGACY_CONTEXT_GAPS entry should be deleted.
+    // Proves the carve-out is self-correcting rather than a one-way door:
+    // exempting a key that already has its own entry makes this same lint
+    // complain that the now-stale LEGACY_CONTEXT_GAPS listing should go.
     const key = "autopilot.inspector.activity.logAria"
-    const keys = CATALOG_CONTEXT.autopilot.keys as Record<string, ContextEntry>
-    keys[key] = { description: "Temporary entry added only for this test." }
-    try {
-      const issues = catalogContextIssues()
-      expect(
-        issues.some((i) => i.includes(key) && i.includes("no longer needs the exemption")),
-      ).toBe(true)
-    } finally {
-      delete keys[key]
-    }
+    const issues = catalogContextIssues([key])
+    expect(issues.some((i) => i.includes(key) && i.includes("no longer needs the exemption"))).toBe(
+      true,
+    )
   })
 })
 

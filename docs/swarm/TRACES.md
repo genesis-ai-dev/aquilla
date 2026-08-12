@@ -83,10 +83,10 @@
   only activates for a key once an import touches it, so English that changes under an
   already-translated key is still undetected today. The wave-4 re-translation pass will
   populate it. Latent gap, not live protection.
-- [OPEN] (autopilot-aria) `autopilot.inspector.activity.logAria` is a real aria-label with no
-  per-key context; tracked via `LEGACY_CONTEXT_GAPS` in `context.ts` rather than fixed,
-  because WS-04 was forbidden from editing namespace modules. Owner of `autopilot.ts` should
-  clear it.
+- [DONE] (autopilot-aria) `autopilot.inspector.activity.logAria` now carries its own context
+  entry in `autopilot.ts`, and `LEGACY_CONTEXT_GAPS` is empty. The carve-out's self-correcting
+  check stays exercised: `catalogContextIssues()` takes the gap list as an optional argument,
+  so the stale-exemption path is still covered with the real list empty.
 - [OPEN] (lint-blind-spots) The ESLint rule cannot see template literals with expressions,
   strings in hoisted const arrays, or `.ts` files. Those are exactly the mechanisms behind the
   most visible leaks — typed `MessageKey` props (WS-05/WS-06) are the compensating control.

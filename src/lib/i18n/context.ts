@@ -281,11 +281,10 @@ export function contextRequirementReasons(req: ContextRequirement): string[] {
  * maintenance pass at the end of `catalogContextIssues()`), so this list
  * can't rot the way an unenforced convention could.
  *
- * `autopilot.inspector.activity.logAria` is real, not a classifier false
- * positive: it's wired to `aria-label` in `AutopilotActivityInspector.tsx`
- * with no per-key entry today.
+ * Empty today: the one carry-over (`autopilot.inspector.activity.logAria`) got
+ * its own entry once the owner of `autopilot.ts` cleared it.
  */
-export const LEGACY_CONTEXT_GAPS: readonly MessageKey[] = ["autopilot.inspector.activity.logAria"]
+export const LEGACY_CONTEXT_GAPS: readonly MessageKey[] = []
 
 /**
  * Does `key` need its own context entry, beyond inheriting the namespace
@@ -312,8 +311,13 @@ export function requiresOwnContextEntry(key: MessageKey): boolean {
  *  5. every referenced screenshot id is declared in `screenshots.ts`;
  *  6. placeholders agree in both directions between the string and its context;
  *  7. every declared screenshot surface is actually referenced by the metadata.
+ *
+ * `legacyGaps` defaults to `LEGACY_CONTEXT_GAPS` and exists so the carve-out's
+ * self-correcting behaviour stays testable while that list is empty.
  */
-export function catalogContextIssues(): string[] {
+export function catalogContextIssues(
+  legacyGaps: readonly MessageKey[] = LEGACY_CONTEXT_GAPS,
+): string[] {
   const issues: string[] = []
   const usedNamespaces = new Set<string>()
   const referencedShots = new Set<string>()
@@ -350,7 +354,7 @@ export function catalogContextIssues(): string[] {
     // catch the entry being absent entirely. `LEGACY_CONTEXT_GAPS` is the one
     // deliberate carve-out — see its doc comment — and is verified separately
     // below rather than silently skipped here.
-    if (!entry && !LEGACY_CONTEXT_GAPS.includes(key)) {
+    if (!entry && !legacyGaps.includes(key)) {
       const req = contextRequirementFor(key)
       if (req.placeholder || req.plural || req.maxLength || req.accessibilityName) {
         issues.push(
@@ -453,7 +457,7 @@ export function catalogContextIssues(): string[] {
   // stopped needing one — e.g. the namespace maxLength that required it was
   // removed), must be dropped from the list rather than left to quietly keep
   // exempting a key that no longer needs it.
-  for (const key of LEGACY_CONTEXT_GAPS) {
+  for (const key of legacyGaps) {
     if (!MESSAGE_KEYS.includes(key)) {
       issues.push(`LEGACY_CONTEXT_GAPS lists "${key}", which is not a real message key — drop it`)
       continue

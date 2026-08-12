@@ -240,3 +240,29 @@ Still English, each attributable to a LATER scheduled wave (not a wave-2 miss):
 - [OPEN] (breadcrumb) "Editor / Dev Project / Dev Org / All organizations" — "All organizations"
   is `src/components/org/OrgHome.tsx:723`, the org/teams area (wave 3/4). "Dev Project" and
   "Dev Org" are DATA and correctly stay untranslated.
+
+## Wave 4 lesson — forbid sub-delegation in agent briefs
+WS-11 (org area) spawned SIX of its own subagents into its single worktree and then
+reported "finished" while all six kept writing. Consequences observed:
+- The completion notification was misleading; `tsc` and `vitest` results were a moving
+  target for ~25 minutes. Two rounds of "fixes" I made were against files that changed
+  underneath me.
+- `tsc -b` is INCREMENTAL: it reported errors at line numbers from a cached build, sending
+  me to the wrong code. Delete `*.tsbuildinfo` before trusting a `tsc -b` run on a worktree
+  other agents have been writing to.
+- The namespace-per-agent scheme prevents collisions BETWEEN workstreams, but WS-11's six
+  children shared one namespace and re-created the problem inside it: duplicate
+  `org.assignWork.groupAriaLabel`, plus `org.guestOrgHome.loading` / `org.orgHome.*`
+  colliding with `common.loading` and `common.project`. Two children caught and fixed their
+  own; the rest needed orchestrator dedupe.
+- `echo "tsc: $?"` after a pipe reports the exit code of the LAST pipeline stage (`tail`),
+  not tsc. Use `npx tsc -b --noEmit > out.txt 2>&1; echo $?`.
+
+**Rule for all future briefs: the agent does the work itself and MUST NOT spawn subagents.**
+If an area is too large for one agent, the ORCHESTRATOR splits it into separate workstreams
+with separate worktrees and separate namespaces — that is the only split that preserves the
+isolation the merge protocol depends on.
+
+Also of note: bidi isolation belongs on VISIBLE text only. WS-11 wrapped an aria-label in
+FSI/PDI, which broke `toHaveAccessibleName` — screen readers linearise text, so the invisible
+control characters are pure noise in an accessible name.

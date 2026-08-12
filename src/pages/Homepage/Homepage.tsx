@@ -521,6 +521,7 @@ export function Homepage() {
             <div className="aq-footer-brand">
               <a className="aq-brand" href="#top"><Mark className="aq-brand-mark" /><span className="aq-brand-name">{brand.app.name}</span></a>
               <p>{brand.app.tagline} A multimodal translation workspace for every language still waiting.</p>
+              <p className="aq-footer-copy">© {new Date().getFullYear()} {brand.app.name}</p>
             </div>
             <div className="aq-footer-cols">
               <div className="aq-footer-col">
@@ -545,9 +546,6 @@ export function Homepage() {
                 <a href="mailto:hello@aquilla.app">Contact us</a>
               </div>
             </div>
-          </div>
-          <div className="aq-footer-base">
-            <span>© {new Date().getFullYear()} {brand.app.name} · {brand.deploy?.domain ?? "aquilla.app"}</span>
           </div>
         </div>
       </footer>

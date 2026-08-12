@@ -485,7 +485,7 @@ export function BibleTranslationLanding() {
             </div>
           </div>
           <div className="aq-footer-base">
-            <span>© {new Date().getFullYear()} {brand.app.name} · {brand.deploy?.domain ?? "aquilla.app"}</span>
+            <span>© {new Date().getFullYear()} {brand.app.name}</span>
             <span>Made for the All-Access Goals — Scripture for every language by 2033.</span>
           </div>
         </div>

@@ -757,12 +757,19 @@
 
 /* ── Footer ─────────────────────────────────────────────────────────────── */
 .aq-footer { border-top: 1px solid var(--aq-line); padding-block: 44px; }
-.aq-footer-inner { display: flex; justify-content: space-between; gap: 28px; flex-wrap: wrap; }
-.aq-footer-brand { max-width: 30ch; }
+.aq-footer-inner { display: flex; justify-content: space-between; align-items: stretch; gap: 28px; flex-wrap: wrap; }
+.aq-footer-brand { display: flex; flex-direction: column; max-width: 30ch; }
 .aq-footer-brand p { margin-top: 12px; font-size: 13.5px; color: var(--aq-faint); line-height: 1.5; }
+.aq-footer-brand .aq-footer-copy {
+  margin-top: auto;
+  font-size: 13px;
+  color: var(--aq-faint);
+  line-height: 1.5;
+}
 .aq-footer-cols { display: flex; gap: 56px; flex-wrap: wrap; }
 .aq-footer-col h5 { font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--aq-faint); margin-bottom: 14px; }
 .aq-footer-col a { display: block; font-size: 14px; color: var(--aq-dim); margin-bottom: 10px; transition: color 0.16s ease; cursor: pointer; }
+.aq-footer-col a:last-child { margin-bottom: 0; }
 .aq-footer-col a:hover { color: var(--aq-text); }
 .aq-footer-base { margin-top: 36px; padding-top: 22px; border-top: 1px solid var(--aq-line); display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; font-size: 13px; color: var(--aq-faint); }
 

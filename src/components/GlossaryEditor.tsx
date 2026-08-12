@@ -47,6 +47,7 @@ import { GlossaryRow } from "@/components/GlossaryRow"
 import { TerminologyTermDetail } from "@/components/TerminologyTermDetail"
 import { TerminologyViolationsInbox } from "@/components/TerminologyViolationsInbox"
 import { buildFileScopedTokenFetcher } from "@/lib/sync/cqrs-bridge"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 interface GlossaryEditorProps {
   /** Workspace-authoritative files include optimistic imports before the
@@ -74,6 +75,7 @@ function downloadBlob(content: string, filename: string, mime: string) {
 }
 
 export function GlossaryEditor({ files: workspaceFiles }: GlossaryEditorProps = {}) {
+  const t = useT()
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const { project, loading, patchSettings } = useProject(id!)
@@ -179,19 +181,24 @@ export function GlossaryEditor({ files: workspaceFiles }: GlossaryEditorProps = 
           setOptimisticConcepts(null)
         }
         if (outcome.kind === "error") setError(outcome.message)
-        else if (outcome.kind === "conflict") setError("The glossary changed elsewhere. Review the latest terms and try again.")
-        else setError(outcome.reason === "offline" ? "Glossary changes will sync when you reconnect." : "Your role cannot change the glossary.")
+        else if (outcome.kind === "conflict") setError(t("terminology.editor.errorConflict"))
+        else
+          setError(
+            outcome.reason === "offline"
+              ? t("terminology.editor.errorOffline")
+              : t("terminology.editor.errorBlocked"),
+          )
       }
       return outcome
     },
-    [patchSettings],
+    [patchSettings, t],
   )
 
   // ── Row callbacks (all reuse store.ts helpers over the live project) ────────
   const guard = () => {
     if (!project) return null
     if (!canManage) {
-      setError("Requires Project Lead role or higher to manage the glossary.")
+      setError(t("terminology.editor.errorRequiresProjectLead"))
       return null
     }
     return { ...project, terminology: conceptsRef.current }
@@ -261,7 +268,7 @@ export function GlossaryEditor({ files: workspaceFiles }: GlossaryEditorProps = 
     const source = newSource.trim()
     const rendering = newRendering.trim()
     if (!source || !rendering) {
-      setError("A source term and rendering are required before the term can be active.")
+      setError(t("terminology.editor.errorSourceAndRenderingRequired"))
       return
     }
     const renderings: TermRendering[] = [{ rendering, status: "preferred" }]
@@ -336,7 +343,7 @@ export function GlossaryEditor({ files: workspaceFiles }: GlossaryEditorProps = 
             : importConceptsCsv(text)
           void persist({ terminology: [...(p.terminology ?? []), ...imported] })
         } catch (err) {
-          setError(err instanceof Error ? err.message : "Import failed")
+          setError(err instanceof Error ? err.message : t("terminology.editor.errorImportFailed"))
         }
       }
       reader.readAsText(file)
@@ -345,12 +352,12 @@ export function GlossaryEditor({ files: workspaceFiles }: GlossaryEditorProps = 
   )
 
   if (loading) {
-    return <LoadingPanel label="Loading glossary" />
+    return <LoadingPanel label={t("terminology.editor.loadingGlossary")} />
   }
 
   if (selectedConcept) {
     if (!cellDataReady) {
-      return <LoadingPanel label="Loading term details" />
+      return <LoadingPanel label={t("terminology.editor.loadingTermDetails")} />
     }
     return (
       <TerminologyTermDetail
@@ -375,11 +382,14 @@ export function GlossaryEditor({ files: workspaceFiles }: GlossaryEditorProps = 
       {/* Header / toolbar */}
       <header className="flex items-center gap-2 border-b px-4 py-3">
         <BookOpen className="h-5 w-5 text-muted-foreground" />
-        <h1 className="flex-1 text-base font-semibold">Glossary</h1>
+        <h1 className="flex-1 text-base font-semibold">{t("terminology.editor.title")}</h1>
         {canManage && (
           <>
             <Button variant="outline" size="sm" onClick={handleSuggest} disabled={suggestRequested}>
-              <Sparkles data-icon="inline-start" /> {suggestRequested ? "Finding terms…" : "Suggest terms"}
+              <Sparkles data-icon="inline-start" />{" "}
+              {suggestRequested
+                ? t("terminology.editor.findingTerms")
+                : t("terminology.editor.suggestTerms")}
             </Button>
             <input
               ref={importInputRef}
@@ -393,21 +403,21 @@ export function GlossaryEditor({ files: workspaceFiles }: GlossaryEditorProps = 
               }}
             />
             <Button variant="outline" size="sm" onClick={() => importInputRef.current?.click()}>
-              <Upload data-icon="inline-start" /> Import
+              <Upload data-icon="inline-start" /> {t("nav.workspaceActions.import")}
             </Button>
             <Button
               variant="outline"
               size="sm"
               onClick={() => downloadBlob(exportConceptsCsv(concepts), "glossary.csv", "text/csv")}
             >
-              <Download data-icon="inline-start" /> Export CSV
+              <Download data-icon="inline-start" /> {t("terminology.editor.exportCsv")}
             </Button>
             <Button
               variant="outline"
               size="sm"
               onClick={() => downloadBlob(exportConceptsTbx(concepts), "glossary.tbx", "application/xml")}
             >
-              <Download data-icon="inline-start" /> Export TBX
+              <Download data-icon="inline-start" /> {t("terminology.editor.exportTbx")}
             </Button>
           </>
         )}
@@ -421,12 +431,14 @@ export function GlossaryEditor({ files: workspaceFiles }: GlossaryEditorProps = 
           }}
         >
           <ShieldAlert data-icon="inline-start" />
-          {view === "violations" ? "Back to glossary" : "Violations"}
+          {view === "violations"
+            ? t("terminology.editor.backToGlossary")
+            : t("terminology.violations.title")}
         </Button>
         {canManage && view === "glossary" && (
-          <Button size="sm" onClick={() => setAddOpen(true)} aria-label="Add term">
+          <Button size="sm" onClick={() => setAddOpen(true)} aria-label={t("terminology.editor.addTerm")}>
             <Plus data-icon="inline-start" />
-            Add term
+            {t("terminology.editor.addTerm")}
           </Button>
         )}
       </header>
@@ -434,29 +446,33 @@ export function GlossaryEditor({ files: workspaceFiles }: GlossaryEditorProps = 
       <Dialog open={addOpen} onOpenChange={handleAddOpenChange}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Add term</DialogTitle>
+            <DialogTitle>{t("terminology.editor.addTerm")}</DialogTitle>
             <DialogDescription>
-              Create a source term and its preferred rendering for this project glossary.
+              {t("terminology.editor.addTermDescription")}
             </DialogDescription>
           </DialogHeader>
           <div className="flex flex-col gap-3">
             <Field>
-              <FieldLabel htmlFor="glossary-new-source">Source term</FieldLabel>
+              <FieldLabel htmlFor="glossary-new-source">
+                {t("terminology.editor.sourceTermLabel")}
+              </FieldLabel>
               <Input
                 id="glossary-new-source"
                 value={newSource}
-                placeholder="New source term…"
+                placeholder={t("terminology.editor.sourceTermPlaceholder")}
                 onChange={(e) => setNewSource(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && handleAddTerm()}
                 autoFocus
               />
             </Field>
             <Field>
-              <FieldLabel htmlFor="glossary-new-rendering">Rendering</FieldLabel>
+              <FieldLabel htmlFor="glossary-new-rendering">
+                {t("terminology.editor.renderingLabel")}
+              </FieldLabel>
               <Input
                 id="glossary-new-rendering"
                 value={newRendering}
-                placeholder="rendering"
+                placeholder={t("terminology.editor.renderingLabel")}
                 onChange={(e) => setNewRendering(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && handleAddTerm()}
               />
@@ -464,13 +480,13 @@ export function GlossaryEditor({ files: workspaceFiles }: GlossaryEditorProps = 
           </div>
           <DialogFooter>
             <Button variant="ghost" onClick={() => handleAddOpenChange(false)}>
-              Cancel
+              {t("common.cancel")}
             </Button>
             <Button
               onClick={handleAddTerm}
               disabled={!newSource.trim() || !newRendering.trim()}
             >
-              Add term
+              {t("terminology.editor.addTerm")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -483,7 +499,9 @@ export function GlossaryEditor({ files: workspaceFiles }: GlossaryEditorProps = 
       {view === "violations" ? (
         <main className="flex-1 overflow-y-auto p-4">
           {!cellDataReady ? (
-            <p className="py-10 text-center text-sm text-muted-foreground">Checking terminology…</p>
+            <p className="py-10 text-center text-sm text-muted-foreground">
+              {t("terminology.editor.checkingTerminology")}
+            </p>
           ) : (
             <TerminologyViolationsInbox
               concepts={concepts}
@@ -499,8 +517,8 @@ export function GlossaryEditor({ files: workspaceFiles }: GlossaryEditorProps = 
       {/* Column headers */}
       <div className="flex items-center gap-3 border-b bg-muted/40 px-3 py-1.5 text-xs text-muted-foreground">
         <span className="w-4" />
-        <span className="flex-1">Source</span>
-        <span className="flex-1">Rendering</span>
+        <span className="flex-1">{t("editor.column.source")}</span>
+        <span className="flex-1">{t("terminology.editor.renderingLabel")}</span>
         <span className="w-16" />
       </div>
 
@@ -543,7 +561,7 @@ export function GlossaryEditor({ files: workspaceFiles }: GlossaryEditorProps = 
 
         {active.length === 0 && suggested.length === 0 && (
           <p className="px-4 py-10 text-center text-sm text-muted-foreground">
-            No terms yet. Add one with “Add term”, or use “Suggest terms”.
+            {t("terminology.editor.noTermsYet")}
           </p>
         )}
 
@@ -556,7 +574,9 @@ export function GlossaryEditor({ files: workspaceFiles }: GlossaryEditorProps = 
               onClick={() => setShowArchived((v) => !v)}
             >
               {showArchived ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-              {showArchived ? "Hide archived" : `Show archived (${archived.length})`}
+              {showArchived
+                ? t("terminology.editor.hideArchived")
+                : t("terminology.editor.showArchived", { count: archived.length })}
             </button>
             {showArchived &&
               archived.map((c) => (

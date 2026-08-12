@@ -17,12 +17,15 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { cn } from "@/lib/utils"
 import type { CellData } from "@/hooks/useCells"
 import type { Concept } from "@/lib/terminology/types"
+import { renderingStatusLabelKey } from "@/lib/terminology/types"
 import { compileConceptsToRules } from "@/lib/terminology/compile"
 import { checkRules } from "@/lib/rules/rule-engine"
 import {
   groupTerminologyInfractions,
   type ConceptViolationGroup,
 } from "@/lib/terminology/violations-inbox"
+import { useT } from "@/lib/i18n/I18nProvider"
+import { RichMessage } from "@/lib/i18n/RichMessage"
 
 interface Props {
   concepts: Concept[]
@@ -33,6 +36,7 @@ interface Props {
 }
 
 export function TerminologyViolationsInbox({ concepts, cells, onJumpToCell }: Props) {
+  const t = useT()
   // Compile active concepts → rules and evaluate over the loaded cells. This is
   // the same derive-on-read path the editor uses; it only runs while mounted
   // (the caller mounts this only on the active Violations tab).
@@ -66,31 +70,29 @@ export function TerminologyViolationsInbox({ concepts, cells, onJumpToCell }: Pr
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <ShieldAlert className="h-4 w-4 text-muted-foreground" />
-          Violations
+          {t("terminology.violations.title")}
           {groups.length > 0 && (
             <span className="text-xs font-normal text-muted-foreground">
-              {totalViolations} across {groups.length} concept
-              {groups.length === 1 ? "" : "s"}
+              <RichMessage
+                k="terminology.violations.summary"
+                count={groups.length}
+                values={{ total: totalViolations, count: groups.length }}
+              />
             </span>
           )}
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
-        <p className="text-xs text-muted-foreground">
-          Terminology infractions derived on read over the loaded project cells,
-          grouped by concept. Missing-approved = the source bears the concept but
-          the target has no approved rendering. Forbidden-present = a forbidden
-          rendering appears in the target.
-        </p>
+        <p className="text-xs text-muted-foreground">{t("terminology.violations.description")}</p>
 
         {groups.length === 0 ? (
           <div className="flex flex-col items-center gap-2 py-12 text-center text-muted-foreground">
             <ShieldAlert className="h-8 w-8 opacity-40" />
-            <p className="text-sm">No terminology violations.</p>
+            <p className="text-sm">{t("terminology.violations.emptyTitle")}</p>
             <p className="text-xs">
-              Only <span className="font-medium">approved</span> concepts with
-              renderings are enforced — set a concept's status to approved to
-              start checking.
+              {t("terminology.violations.emptyDescriptionPre")}{" "}
+              <span className="font-medium">{t("terminology.common.statusApproved")}</span>{" "}
+              {t("terminology.violations.emptyDescriptionPost")}
             </p>
           </div>
         ) : (
@@ -119,6 +121,7 @@ function ConceptViolationRow({
   cellById: Map<string, CellData>
   onJumpToCell?: (cell: { cellId: string; fileId: string }) => void
 }) {
+  const t = useT()
   const [open, setOpen] = useState(false)
 
   return (
@@ -143,12 +146,12 @@ function ConceptViolationRow({
         <span className="hidden shrink-0 gap-1.5 text-[10px] sm:flex">
           {group.missingApprovedCount > 0 && (
             <span className="rounded bg-amber-100 px-1.5 py-0.5 font-medium text-amber-700 dark:bg-amber-950 dark:text-amber-400">
-              {group.missingApprovedCount} missing
+              {t("terminology.violations.missingCount", { count: group.missingApprovedCount })}
             </span>
           )}
           {group.forbiddenPresentCount > 0 && (
             <span className="rounded bg-red-100 px-1.5 py-0.5 font-medium text-red-700 dark:bg-red-950 dark:text-red-400">
-              {group.forbiddenPresentCount} forbidden
+              {t("terminology.violations.forbiddenCount", { count: group.forbiddenPresentCount })}
             </span>
           )}
         </span>
@@ -173,7 +176,9 @@ function ConceptViolationRow({
                       : "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-400",
                   )}
                 >
-                  {inf.kind === "forbidden-present" ? "forbidden" : "missing"}
+                  {inf.kind === "forbidden-present"
+                    ? t(renderingStatusLabelKey("forbidden"))
+                    : t("terminology.violations.kindMissing")}
                 </span>
                 {onJumpToCell ? (
                   <button

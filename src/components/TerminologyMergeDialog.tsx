@@ -27,6 +27,8 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import type { Concept, TermRendering } from "@/lib/terminology/types"
+import { renderingStatusLabelKey } from "@/lib/terminology/types"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 // ── Merge preview helpers (pure, mirrors store.mergeConcepts logic) ─────────
 
@@ -66,11 +68,7 @@ function buildMergedPreview(
 // ── Subcomponents ────────────────────────────────────────────────────────────
 
 function RenderingChipPreview({ rendering }: { rendering: TermRendering }) {
-  const statusLabel: Record<string, string> = {
-    preferred: "required",
-    admitted: "alternate",
-    forbidden: "forbidden",
-  }
+  const t = useT()
   return (
     <span
       className={cn(
@@ -83,7 +81,7 @@ function RenderingChipPreview({ rendering }: { rendering: TermRendering }) {
       )}
     >
       {rendering.rendering}
-      <span className="opacity-60">·{statusLabel[rendering.status] ?? rendering.status}</span>
+      <span className="opacity-60">·{t(renderingStatusLabelKey(rendering.status))}</span>
     </span>
   )
 }
@@ -101,6 +99,7 @@ function ConceptSelectRow({
   selectionOrder,
   onToggle,
 }: ConceptSelectRowProps) {
+  const t = useT()
   return (
     <button
       type="button"
@@ -136,7 +135,9 @@ function ConceptSelectRow({
               <RenderingChipPreview key={i} rendering={r} />
             ))
           ) : (
-            <span className="text-xs text-muted-foreground italic">no renderings</span>
+            <span className="text-xs text-muted-foreground italic">
+              {t("terminology.common.noRenderings")}
+            </span>
           )}
         </div>
         {concept.notes && (
@@ -147,7 +148,7 @@ function ConceptSelectRow({
       {/* Survivor label */}
       {selectionOrder === 1 && (
         <Badge variant="outline" className="shrink-0 text-[10px]">
-          survivor
+          {t("terminology.mergeDialog.survivorBadge")}
         </Badge>
       )}
     </button>
@@ -171,6 +172,7 @@ export function TerminologyMergeDialog({
   concepts,
   onMerge,
 }: TerminologyMergeDialogProps) {
+  const t = useT()
   const [step, setStep] = useState<Step>("select")
   const [selectedIds, setSelectedIds] = useState<string[]>([]) // ordered by selection
   const [merging, setMerging] = useState(false)
@@ -214,7 +216,7 @@ export function TerminologyMergeDialog({
       await onMerge(selectedIds, survivorId)
       handleClose()
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Merge failed")
+      setError(err instanceof Error ? err.message : t("terminology.mergeDialog.mergeFailed"))
     } finally {
       setMerging(false)
     }
@@ -226,15 +228,14 @@ export function TerminologyMergeDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Merge className="h-4 w-4" />
-            Merge duplicate concepts
+            {t("terminology.mergeDialog.title")}
           </DialogTitle>
         </DialogHeader>
 
         {step === "select" ? (
           <>
             <p className="text-sm text-muted-foreground">
-              Select 2 or more concepts to merge. The first selected concept
-              becomes the survivor and keeps its id. All renderings are combined.
+              {t("terminology.mergeDialog.selectDescription")}
             </p>
 
             <div className="max-h-[50vh] overflow-y-auto space-y-2 py-1">
@@ -259,15 +260,14 @@ export function TerminologyMergeDialog({
                 onClick={() => setStep("preview")}
                 disabled={selectedIds.length < 2}
               >
-                Preview merge
+                {t("terminology.mergeDialog.previewMergeButton")}
               </Button>
             </DialogFooter>
           </>
         ) : (
           <>
             <p className="text-sm text-muted-foreground">
-              Review the merged concept before confirming. Merged-away concepts
-              will be removed permanently.
+              {t("terminology.mergeDialog.previewDescription")}
             </p>
 
             {/* Preview card */}
@@ -278,14 +278,14 @@ export function TerminologyMergeDialog({
               >
                 <div>
                   <p className="text-xs text-muted-foreground mb-1">
-                    Survivor (keeps id)
+                    {t("terminology.mergeDialog.survivorLabel")}
                   </p>
                   <p className="text-sm font-semibold">{survivor.sourceTerm}</p>
                 </div>
 
                 <div>
                   <p className="text-xs text-muted-foreground mb-1">
-                    Merged renderings
+                    {t("terminology.mergeDialog.mergedRenderingsLabel")}
                   </p>
                   <div className="flex flex-wrap gap-1">
                     {preview.renderings.length > 0 ? (
@@ -294,7 +294,7 @@ export function TerminologyMergeDialog({
                       ))
                     ) : (
                       <span className="text-xs text-muted-foreground italic">
-                        no renderings
+                        {t("terminology.common.noRenderings")}
                       </span>
                     )}
                   </div>
@@ -303,7 +303,7 @@ export function TerminologyMergeDialog({
                 {preview.notes && (
                   <div>
                     <p className="text-xs text-muted-foreground mb-1">
-                      Combined notes
+                      {t("terminology.mergeDialog.combinedNotesLabel")}
                     </p>
                     <p className="text-xs text-muted-foreground">{preview.notes}</p>
                   </div>
@@ -311,7 +311,7 @@ export function TerminologyMergeDialog({
 
                 <div>
                   <p className="text-xs text-muted-foreground mb-1">
-                    Concepts to remove
+                    {t("terminology.mergeDialog.conceptsToRemoveLabel")}
                   </p>
                   <div className="flex flex-wrap gap-1">
                     {others.map((c) => (
@@ -332,15 +332,15 @@ export function TerminologyMergeDialog({
                 onClick={() => setStep("select")}
                 disabled={merging}
               >
-                Back
+                {t("common.back")}
               </Button>
               <Button
                 variant="destructive"
                 onClick={handleConfirmMerge}
                 disabled={merging}
-                aria-label="Confirm merge"
+                aria-label={t("terminology.mergeDialog.confirmMerge")}
               >
-                {merging ? "Merging…" : "Confirm merge"}
+                {merging ? t("terminology.mergeDialog.merging") : t("terminology.mergeDialog.confirmMerge")}
               </Button>
             </DialogFooter>
           </>

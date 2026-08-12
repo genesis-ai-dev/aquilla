@@ -69,11 +69,6 @@
       "count": 3
     }
   },
-  "src/components/CandidateTermsPanel.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 9
-    }
-  },
   "src/components/CellAiStatusPopover.tsx": {
     "i18n/no-unkeyed-string": {
       "count": 2
@@ -107,11 +102,6 @@
   "src/components/EditorTable.tsx": {
     "i18n/no-unkeyed-string": {
       "count": 1
-    }
-  },
-  "src/components/EquivalentsPanel.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 7
     }
   },
   "src/components/ErrorBoundary.tsx": {
@@ -149,16 +139,6 @@
       "count": 3
     }
   },
-  "src/components/GlossaryEditor.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 20
-    }
-  },
-  "src/components/GlossaryRow.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 10
-    }
-  },
   "src/components/ImportDialog.tsx": {
     "i18n/no-unkeyed-string": {
       "count": 146
@@ -177,11 +157,6 @@
   "src/components/JoinOrgPage.tsx": {
     "i18n/no-unkeyed-string": {
       "count": 14
-    }
-  },
-  "src/components/LivingMemoryPage.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 34
     }
   },
   "src/components/MemberAccessDrillDown.tsx": {
@@ -299,11 +274,6 @@
       "count": 17
     }
   },
-  "src/components/ProjectSettings/TermbaseSharingSection.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 17
-    }
-  },
   "src/components/ProjectSettings/ValidationSettingsSection.tsx": {
     "i18n/no-unkeyed-string": {
       "count": 11
@@ -377,31 +347,6 @@
   "src/components/SuggestionBanner.tsx": {
     "i18n/no-unkeyed-string": {
       "count": 4
-    }
-  },
-  "src/components/TermLookupPopover.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 1
-    }
-  },
-  "src/components/TerminologyMergeDialog.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 13
-    }
-  },
-  "src/components/TerminologyReviewQueue.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 4
-    }
-  },
-  "src/components/TerminologyTermDetail.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 11
-    }
-  },
-  "src/components/TerminologyViolationsInbox.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 10
     }
   },
   "src/components/UpdateBanner.tsx": {

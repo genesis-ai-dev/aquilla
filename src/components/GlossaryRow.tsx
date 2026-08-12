@@ -23,14 +23,17 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import type { Concept, TermRendering, RenderingStatus } from "@/lib/terminology/types"
+import { renderingStatusLabelKey } from "@/lib/terminology/types"
 import { primaryRendering } from "@/lib/terminology/glossary-view"
 import { cn } from "@/lib/utils"
+import { useT } from "@/lib/i18n/I18nProvider"
+import type { TFunction } from "@/lib/i18n/I18nProvider"
 
-const RENDERING_STATUS_OPTIONS: { value: RenderingStatus; label: string }[] = [
-  { value: "preferred", label: "required" },
-  { value: "admitted", label: "alternate" },
-  { value: "forbidden", label: "forbidden" },
-]
+const RENDERING_STATUSES: RenderingStatus[] = ["preferred", "admitted", "forbidden"]
+
+function renderingStatusOptions(t: TFunction): { value: RenderingStatus; label: string }[] {
+  return RENDERING_STATUSES.map((value) => ({ value, label: t(renderingStatusLabelKey(value)) }))
+}
 
 export interface GlossaryRowProps {
   concept: Concept
@@ -58,12 +61,13 @@ function ExpanderNotes({
   canManage: boolean
   onCommit: (notes: string) => void
 }) {
+  const t = useT()
   const [draft, setDraft] = useState(concept.notes ?? "")
   return (
     <Textarea
       value={draft}
-      aria-label={`Notes for ${concept.sourceTerm}`}
-      placeholder="Contextual notes for translators"
+      aria-label={t("terminology.row.notesAria", { term: concept.sourceTerm })}
+      placeholder={t("terminology.row.notesPlaceholder")}
       disabled={!canManage}
       className="min-h-16 resize-y text-sm"
       onChange={(event) => setDraft(event.target.value)}
@@ -158,7 +162,9 @@ function ExpanderRenderingRow({
   onChangeStatus: (next: RenderingStatus) => void
   onRemove: () => void
 }) {
+  const t = useT()
   const [draft, setDraft] = useState(rendering.rendering)
+  const statusOptions = renderingStatusOptions(t)
 
   useEffect(() => {
     setDraft(rendering.rendering)
@@ -168,8 +174,8 @@ function ExpanderRenderingRow({
     <div className="flex items-center gap-2">
       <Input
         value={draft}
-        aria-label={`Rendering ${index + 1} text`}
-        placeholder="rendering"
+        aria-label={t("terminology.row.renderingTextAria", { position: index + 1 })}
+        placeholder={t("terminology.editor.renderingLabel")}
         disabled={!canManage}
         className="h-7 flex-1 text-sm"
         onChange={(e) => setDraft(e.target.value)}
@@ -182,16 +188,20 @@ function ExpanderRenderingRow({
         }}
       />
       <Select
-        items={RENDERING_STATUS_OPTIONS}
+        items={statusOptions}
         value={rendering.status}
         onValueChange={(v: string | null) => onChangeStatus((v ?? rendering.status) as RenderingStatus)}
       >
-        <SelectTrigger aria-label={`Rendering ${index + 1} status`} className="h-7 w-32 text-xs" disabled={!canManage}>
+        <SelectTrigger
+          aria-label={t("terminology.row.renderingStatusAria", { position: index + 1 })}
+          className="h-7 w-32 text-xs"
+          disabled={!canManage}
+        >
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
           <SelectGroup>
-            {RENDERING_STATUS_OPTIONS.map((o) => (
+            {statusOptions.map((o) => (
               <SelectItem key={o.value} value={o.value}>
                 {o.label}
               </SelectItem>
@@ -200,7 +210,12 @@ function ExpanderRenderingRow({
         </SelectContent>
       </Select>
       {canManage && (
-        <Button variant="ghost" size="icon-sm" aria-label={`Remove rendering ${index + 1}`} onClick={onRemove}>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label={t("terminology.row.removeRenderingAria", { position: index + 1 })}
+          onClick={onRemove}
+        >
           <X />
         </Button>
       )}
@@ -221,6 +236,7 @@ export function GlossaryRow({
   onAccept,
   onDismiss,
 }: GlossaryRowProps) {
+  const t = useT()
   const [expanded, setExpanded] = useState(false)
   const primary = primaryRendering(concept)
 
@@ -255,7 +271,11 @@ export function GlossaryRow({
         {/* Expander toggle */}
         <button
           type="button"
-          aria-label={expanded ? "Collapse renderings" : "Expand renderings"}
+          aria-label={
+            expanded
+              ? t("terminology.row.collapseRenderingsAria")
+              : t("terminology.row.expandRenderingsAria")
+          }
           className="mt-0.5 text-muted-foreground hover:text-foreground"
           onClick={() => setExpanded((v) => !v)}
         >
@@ -266,7 +286,7 @@ export function GlossaryRow({
         <div className="flex-1 min-w-0">
           <InlineCell
             value={concept.sourceTerm}
-            placeholder="(source term)"
+            placeholder={t("terminology.row.sourceTermPlaceholder")}
             editable={canManage}
             onCommit={(next) => onEditSource(concept.id, next)}
           />
@@ -276,7 +296,7 @@ export function GlossaryRow({
         <div className="flex-1 min-w-0">
           <InlineCell
             value={primary?.rendering ?? ""}
-            placeholder="(add rendering)"
+            placeholder={t("terminology.row.addRenderingPlaceholder")}
             editable={canManage}
             onCommit={(next) => onEditPrimary(concept.id, next)}
           />
@@ -287,28 +307,48 @@ export function GlossaryRow({
           <Button
             variant="ghost"
             size="icon-sm"
-            aria-label={`Open details for ${concept.sourceTerm}`}
+            aria-label={t("terminology.row.openDetailsAria", { term: concept.sourceTerm })}
             onClick={() => onOpenDetails(concept.id)}
           >
             <Info />
           </Button>
           {concept.status === "draft" && canManage && (
             <>
-              <Button variant="ghost" size="icon-sm" aria-label="Accept term" onClick={() => onAccept(concept.id)}>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label={t("terminology.row.acceptTermAria")}
+                onClick={() => onAccept(concept.id)}
+              >
                 <Check className="h-4 w-4 text-emerald-600" />
               </Button>
-              <Button variant="ghost" size="icon-sm" aria-label="Dismiss term" onClick={() => onDismiss(concept.id)}>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label={t("terminology.row.dismissTermAria")}
+                onClick={() => onDismiss(concept.id)}
+              >
                 <X />
               </Button>
             </>
           )}
           {concept.status === "active" && canManage && (
-            <Button variant="ghost" size="icon-sm" aria-label="Archive term" onClick={() => onArchive(concept.id)}>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label={t("terminology.row.archiveTermAria")}
+              onClick={() => onArchive(concept.id)}
+            >
               <Archive className="h-4 w-4" />
             </Button>
           )}
           {concept.status === "deprecated" && canManage && (
-            <Button variant="ghost" size="icon-sm" aria-label="Restore term" onClick={() => onRestore(concept.id)}>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label={t("terminology.row.restoreTermAria")}
+              onClick={() => onRestore(concept.id)}
+            >
               <RotateCcw className="h-4 w-4" />
             </Button>
           )}
@@ -319,7 +359,7 @@ export function GlossaryRow({
       {expanded && (
         <div className="space-y-1.5 border-t bg-muted/30 px-10 py-2">
           {concept.renderings.length === 0 && (
-            <p className="text-xs text-muted-foreground">No renderings yet.</p>
+            <p className="text-xs text-muted-foreground">{t("terminology.row.noRenderingsYet")}</p>
           )}
           {concept.renderings.map((r, i) => (
             <ExpanderRenderingRow
@@ -334,7 +374,7 @@ export function GlossaryRow({
           ))}
           {canManage && (
             <Button variant="ghost" size="sm" className="text-xs" onClick={addRendering}>
-              <Plus data-icon="inline-start" /> Add rendering
+              <Plus data-icon="inline-start" /> {t("terminology.row.addRendering")}
             </Button>
           )}
           <ExpanderNotes

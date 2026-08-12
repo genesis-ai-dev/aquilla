@@ -12,6 +12,7 @@
 import { v4 as uuid } from "uuid"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import type { Concept } from "./types"
+import { t } from "@/lib/i18n/standalone"
 
 // ---------------------------------------------------------------------------
 // addConcept
@@ -109,16 +110,16 @@ export function mergeConcepts(
   survivorId: string,
 ): ProjectRecord {
   if (mergeIds.length < 2) {
-    throw new Error("mergeConcepts requires at least 2 concept ids.")
+    throw new Error(t("terminology.store.mergeMinConcepts"))
   }
   if (!mergeIds.includes(survivorId)) {
-    throw new Error("survivorId must be one of the mergeIds.")
+    throw new Error(t("terminology.store.survivorNotInMergeIds"))
   }
 
   const all = project.terminology ?? []
   const toMerge = mergeIds.map((id) => {
     const c = all.find((x) => x.id === id)
-    if (!c) throw new Error(`Concept ${id} not found.`)
+    if (!c) throw new Error(t("terminology.store.conceptNotFound", { id }))
     return c
   })
 

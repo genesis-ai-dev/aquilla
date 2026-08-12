@@ -15,8 +15,8 @@
 
 import React, { useMemo, useState } from "react"
 import { useParams, useNavigate } from "react-router-dom"
-import { useI18n } from "@/lib/i18n/I18nProvider"
-import { formatDate, formatNumber } from "@/lib/i18n/format"
+import { useI18n, useT } from "@/lib/i18n/I18nProvider"
+import { formatDate, formatCount } from "@/lib/i18n/format"
 import { BookOpen, Users, AlertTriangle, Plus, Pencil, Trash2, Lock, Brain } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -89,9 +89,10 @@ export function deleteEntry(
 // ── Skeleton placeholder while loading ────────────────────────────────────
 
 function LivingMemorySkeleton() {
+  const t = useT()
   return (
     <LoadingTemplate
-      label="Loading validated translations"
+      label={t("terminology.livingMemory.loadingValidatedTranslations")}
       className="min-h-96"
       templateClassName="min-h-96"
     >
@@ -113,16 +114,17 @@ function LivingMemorySkeleton() {
 // ── Empty state for Recent Examples ───────────────────────────────────────
 
 function RecentExamplesEmpty() {
+  const t = useT()
   return (
     <EmptyState
       variant="inline"
       className="py-12"
       role="status"
-      aria-label="No validated translations"
+      aria-label={t("terminology.livingMemory.noValidatedTranslationsAria")}
       icon={BookOpen}
-      title="No validated translations yet"
+      title={t("terminology.livingMemory.noValidatedTranslationsTitle")}
       titleClassName="text-foreground/70"
-      description="When translators and reviewers reach the required validation threshold on a cell, that source → target pair appears here. The AI draws on these pairs in every subsequent draft."
+      description={t("terminology.livingMemory.noValidatedTranslationsDescription")}
       descriptionClassName="max-w-xs text-xs leading-relaxed"
     />
   )
@@ -131,6 +133,7 @@ function RecentExamplesEmpty() {
 // ── Single validated cell card ─────────────────────────────────────────────
 
 function ValidatedCellCard({ cell }: { cell: LivingMemoryCell }) {
+  const t = useT()
   return (
     <Card className="overflow-hidden transition-colors hover:bg-muted/50">
       <CardContent className="p-3 flex flex-col gap-1.5">
@@ -138,7 +141,7 @@ function ValidatedCellCard({ cell }: { cell: LivingMemoryCell }) {
         {cell.group && (
           <span
             className="text-[10px] font-mono text-muted-foreground/80 leading-none tracking-wide"
-            aria-label={`Reference: ${cell.group}`}
+            aria-label={t("terminology.livingMemory.referenceAria", { reference: cell.group })}
           >
             {cell.group}
           </span>
@@ -148,7 +151,7 @@ function ValidatedCellCard({ cell }: { cell: LivingMemoryCell }) {
         <p
           className="text-xs text-muted-foreground leading-relaxed"
           lang="und"
-          aria-label="Source text"
+          aria-label={t("editor.source.textAria")}
         >
           {cell.original || <em className="opacity-50 not-italic">—</em>}
         </p>
@@ -157,7 +160,10 @@ function ValidatedCellCard({ cell }: { cell: LivingMemoryCell }) {
         <div className="h-px bg-border/50 -mx-0.5" role="separator" aria-hidden="true" />
 
         {/* Target text */}
-        <p className="text-sm leading-relaxed font-medium" aria-label="Translation">
+        <p
+          className="text-sm leading-relaxed font-medium"
+          aria-label={t("terminology.livingMemory.translationAria")}
+        >
           {cell.translated || <em className="text-muted-foreground opacity-50 not-italic">—</em>}
         </p>
 
@@ -165,7 +171,9 @@ function ValidatedCellCard({ cell }: { cell: LivingMemoryCell }) {
         {cell.activeValidators.length > 0 && (
           <div
             className="flex flex-wrap items-center gap-1 pt-0.5"
-            aria-label={`Validated by: ${cell.activeValidators.join(", ")}`}
+            aria-label={t("terminology.livingMemory.validatedByAria", {
+              validators: cell.activeValidators.join(", "),
+            })}
           >
             <Users className="h-3 w-3 text-muted-foreground/60 shrink-0" aria-hidden="true" />
             {cell.activeValidators.map((v) => (
@@ -233,26 +241,27 @@ interface EntryFormProps {
 }
 
 function EntryForm({ initialText = "", onSave, onCancel }: EntryFormProps) {
+  const t = useT()
   const [text, setText] = useState(initialText)
   return (
     <div className="flex flex-col gap-2">
       <Textarea
         value={text}
         onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setText(e.target.value)}
-        placeholder="Enter text…"
+        placeholder={t("terminology.livingMemory.enterTextPlaceholder")}
         className="min-h-[72px] resize-none"
         autoFocus
       />
       <div className="flex gap-2 justify-end">
         <Button size="sm" variant="ghost" onClick={onCancel}>
-          Cancel
+          {t("common.cancel")}
         </Button>
         <Button
           size="sm"
           onClick={() => { if (text.trim()) onSave(text) }}
           disabled={!text.trim()}
         >
-          Save
+          {t("common.save")}
         </Button>
       </div>
     </div>
@@ -262,11 +271,12 @@ function EntryForm({ initialText = "", onSave, onCancel }: EntryFormProps) {
 // ── Role-lock icon with tooltip ────────────────────────────────────────────
 
 function RoleLockTooltip({ reason }: { reason: "offline" | "role" | null }) {
+  const t = useT()
   if (reason === null) return null
   const message =
     reason === "offline"
-      ? "You are offline. Reconnect to edit."
-      : "Editing requires Maintainer role (600) or above."
+      ? t("terminology.livingMemory.offlineTooltip")
+      : t("terminology.livingMemory.maintainerRequiredTooltip")
   return (
     <Tooltip>
       <TooltipTrigger
@@ -316,11 +326,16 @@ function AuthoredEntriesSection({
   onDelete,
 }: AuthoredEntriesSectionProps) {
   const { locale } = useI18n()
+  const t = useT()
   const [adding, setAdding] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<LivingMemoryEntry | null>(null)
 
   const filtered = entries.filter((e) => e.kind === kind)
+  // `title` arrives already translated (the two call sites pass
+  // t("terminology.livingMemory.instructionsTitle") / standardsTitle); this
+  // section only ever lower-cases it for the {section} placeholder below.
+  const sectionLower = title.toLowerCase()
 
   return (
     <section aria-label={title}>
@@ -334,10 +349,10 @@ function AuthoredEntriesSection({
             variant="ghost"
             className="h-6 px-2 text-xs gap-1"
             onClick={() => setAdding(true)}
-            aria-label={`Add ${title.toLowerCase()} entry`}
+            aria-label={t("terminology.livingMemory.addEntryAria", { section: sectionLower })}
           >
             <Plus className="h-3 w-3" aria-hidden="true" />
-            Add
+            {t("common.add")}
           </Button>
         )}
         {!canEdit && <RoleLockTooltip reason={reasonCannotEdit} />}
@@ -351,7 +366,9 @@ function AuthoredEntriesSection({
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Add {title.toLowerCase()} entry</DialogTitle>
+            <DialogTitle>
+              {t("terminology.livingMemory.addEntryAria", { section: sectionLower })}
+            </DialogTitle>
             <DialogDescription>{description}</DialogDescription>
           </DialogHeader>
           <EntryForm
@@ -365,7 +382,9 @@ function AuthoredEntriesSection({
         <div className="rounded-lg border border-dashed border-border/60 px-4 py-5 flex flex-col gap-1.5">
           <p className="text-xs text-muted-foreground/60 italic">{placeholder}</p>
           <p className="text-xs text-muted-foreground/50">
-            <span className="font-medium not-italic text-muted-foreground/70">Example: </span>
+            <span className="font-medium not-italic text-muted-foreground/70">
+              {t("terminology.livingMemory.exampleLabel")}{" "}
+            </span>
             {example}
           </p>
         </div>
@@ -390,7 +409,7 @@ function AuthoredEntriesSection({
                           variant="ghost"
                           className="h-6 w-6"
                           onClick={() => setEditingId(entry.id)}
-                          aria-label="Edit entry"
+                          aria-label={t("terminology.livingMemory.editEntryAria")}
                         >
                           <Pencil className="h-3 w-3" aria-hidden="true" />
                         </Button>
@@ -399,7 +418,7 @@ function AuthoredEntriesSection({
                           variant="ghost"
                           className="h-6 w-6 text-destructive hover:text-destructive"
                           onClick={() => setDeleteTarget(entry)}
-                          aria-label="Delete entry"
+                          aria-label={t("terminology.livingMemory.deleteEntryAria")}
                         >
                           <Trash2 className="h-3 w-3" aria-hidden="true" />
                         </Button>
@@ -422,20 +441,22 @@ function AuthoredEntriesSection({
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Delete entry?</DialogTitle>
+            <DialogTitle>{t("terminology.livingMemory.deleteEntryConfirmTitle")}</DialogTitle>
             <DialogDescription>
-              This will permanently remove the entry. This action cannot be undone.
+              {t("terminology.livingMemory.deleteEntryConfirmDescription")}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="ghost" onClick={() => setDeleteTarget(null)}>Cancel</Button>
+            <Button variant="ghost" onClick={() => setDeleteTarget(null)}>
+              {t("common.cancel")}
+            </Button>
             <Button
               variant="destructive"
               onClick={() => {
                 if (deleteTarget) { onDelete(deleteTarget.id); setDeleteTarget(null) }
               }}
             >
-              Delete
+              {t("common.delete")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -451,6 +472,7 @@ function AuthoredEntriesSection({
 
 export function LivingMemoryPage() {
   const { locale } = useI18n()
+  const t = useT()
   const { id: projectId } = useParams<{ id: string }>()
   const navigate = useNavigate()
 
@@ -541,7 +563,7 @@ export function LivingMemoryPage() {
       {/* In-main toolbar — matches Rules/Glossary */}
       <header className="flex shrink-0 items-center gap-2 border-b px-4 py-3">
         <Brain className="h-5 w-5 text-muted-foreground" aria-hidden />
-        <h1 className="text-base font-semibold">Living Memory</h1>
+        <h1 className="text-base font-semibold">{t("terminology.livingMemory.title")}</h1>
         <AppTooltip content={livenessLabel}>
           <span
             aria-label={livenessLabel}
@@ -556,10 +578,15 @@ export function LivingMemoryPage() {
           />
         </AppTooltip>
         {isLoading ? (
-          <Skeleton className="h-4 w-20 rounded-md" aria-label="Loading count" />
+          <Skeleton
+            className="h-4 w-20 rounded-md"
+            aria-label={t("terminology.livingMemory.loadingCountAria")}
+          />
         ) : (
           <Badge variant="secondary" className="text-[10px] tabular-nums">
-            {formatNumber(cells.length, locale)} validated
+            {t("terminology.livingMemory.validatedCount", {
+              count: formatCount(cells.length, locale),
+            })}
           </Badge>
         )}
         <div className="flex-1" />
@@ -567,10 +594,10 @@ export function LivingMemoryPage() {
           variant="outline"
           size="sm"
           onClick={() => navigate(`/project/${projectId}/terminology`)}
-          aria-label="Go to Terminology page"
+          aria-label={t("terminology.livingMemory.goToTerminologyAria")}
         >
           <BookOpen data-icon="inline-start" />
-          Terminology
+          {t("nav.sidebarSection.terminology")}
         </Button>
       </header>
 
@@ -580,16 +607,16 @@ export function LivingMemoryPage() {
           role="alert"
         >
           <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" aria-hidden="true" />
-          <span>Couldn&apos;t load the complete project memory: {cellsError.message}</span>
+          <span>
+            {t("terminology.livingMemory.loadErrorPrefix", { message: cellsError.message })}
+          </span>
         </div>
       )}
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex max-w-2xl flex-col gap-6 p-6">
           <p className="text-xs text-muted-foreground leading-relaxed">
-            Your team&apos;s encoded voice and standards — the project context the AI draws on
-            for every new draft. It grows with each validation, correction, and instruction
-            your team adds.
+            {t("terminology.livingMemory.introText")}
           </p>
 
           <BriefSection
@@ -634,10 +661,10 @@ export function LivingMemoryPage() {
           )}
 
           <AuthoredEntriesSection
-            title="Instructions"
-            description="Tell the AI what this project is about — audience, tone, formality, special handling. These appear in every draft prompt."
-            placeholder="No instructions yet."
-            example={`"Translate into formal Swahili for an adult literacy audience. Avoid theological jargon unless the source uses it."`}
+            title={t("terminology.livingMemory.instructionsTitle")}
+            description={t("terminology.livingMemory.instructionsDescription")}
+            placeholder={t("terminology.livingMemory.instructionsPlaceholder")}
+            example={t("terminology.livingMemory.instructionsExample")}
             kind="instruction"
             entries={entries}
             canEdit={entriesReady && canEdit}
@@ -648,10 +675,10 @@ export function LivingMemoryPage() {
           />
 
           <AuthoredEntriesSection
-            title="Standards"
-            description="Project-wide quality rules the AI checks its drafts against. Capture decisions your team keeps revisiting."
-            placeholder="No standards yet."
-            example={`"Always preserve proper nouns untranslated. Numbers in source must appear as numerals in target."`}
+            title={t("terminology.livingMemory.standardsTitle")}
+            description={t("terminology.livingMemory.standardsDescription")}
+            placeholder={t("terminology.livingMemory.standardsPlaceholder")}
+            example={t("terminology.livingMemory.standardsExample")}
             kind="standard"
             entries={entries}
             canEdit={entriesReady && canEdit}
@@ -661,15 +688,14 @@ export function LivingMemoryPage() {
             onDelete={handleDelete}
           />
 
-          <section aria-label="Recent Examples">
+          <section aria-label={t("terminology.livingMemory.recentExamplesTitle")}>
             <div className="flex items-center gap-2 mb-1">
               <h2 className="text-xs font-semibold text-muted-foreground">
-                Recent Examples
+                {t("terminology.livingMemory.recentExamplesTitle")}
               </h2>
             </div>
             <p className="text-xs text-muted-foreground mb-3 leading-relaxed">
-              Human-validated source&thinsp;&rarr;&thinsp;target pairs the AI uses as in-context
-              examples. These are the translations your team has agreed on.
+              {t("terminology.livingMemory.recentExamplesDescription")}
             </p>
             {isLoading ? (
               <LivingMemorySkeleton />

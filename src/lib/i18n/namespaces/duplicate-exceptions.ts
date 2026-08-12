@@ -97,6 +97,33 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "is the transient state of the unrelated find-and-replace panel's Apply " +
     "button while it rewrites matched cells. Two independent async operations " +
     "that happen to share an English gerund; nothing ties their wording together.",
+  "terminology.editor.showArchived":
+    "Toggle revealing archived (deprecated) GLOSSARY TERMS in the termbase editor. " +
+    "editor.lane.showArchived is a menu item revealing retired LANGUAGE LANES in the " +
+    "lane switcher. Both happen to read 'Show archived (N)' in English, but a term " +
+    "and a language lane are unrelated referents — a translator free to choose a " +
+    "noun for 'archived' would not necessarily pick the same word for both.",
+  "terminology.violations.kindMissing":
+    "Chip tag on one infraction row in the terminology violations inbox: the " +
+    "source bears a concept but the target lacks an approved rendering. " +
+    "autopilot.readiness.level.missing is a checklist item's readiness state " +
+    "('Missing' / 'Partly set up' / 'Ready') in the autopilot setup inspector. A " +
+    "per-infraction tag and a setup-checklist state are different referents that " +
+    "happen to share one English adjective.",
+  "terminology.common.statusApproved":
+    "Lifecycle-status badge on a glossary CONCEPT (draft → active → deprecated) — " +
+    "'active' concepts read 'approved' next to 'suggested'/'old'. " +
+    "autopilot.evidence.status.approved is the review status of a piece of AI-" +
+    "gathered EVIDENCE in the autopilot readiness inspector (vs superseded/archived/" +
+    "unknown). A controlled-vocabulary review state and an evidence-item review " +
+    "state are different referents that happen to share one English adjective.",
+  "terminology.common.statusSuggested":
+    "Lifecycle-status badge on a glossary CONCEPT (draft → active → deprecated), " +
+    "shown next to 'approved'/'old' on the term detail header. " +
+    "autopilot.draft.suggested badges an individual AI-drafted CELL proposal " +
+    "awaiting accept/dismiss. A controlled-vocabulary review state and a per-cell " +
+    "AI-authorship marker are different referents that happen to share one English " +
+    "adjective.",
   "nav.lens.audio":
     "Standalone tab label of the header Text/Audio segmented lens switch — a " +
     "primary navigation control read on its own, alongside its sibling 'Text'. " +

@@ -4,6 +4,7 @@ import type {
   RulePenalties,
   ProjectTtsSettings,
   AlgorithmicCheckOverride,
+  AudioTimingMode,
   BuiltinCheckId,
 } from "@/lib/parsers/types"
 import type { Concept } from "@/lib/terminology/types"
@@ -109,6 +110,16 @@ export interface ProjectWideSettings {
    * cells. In-body section headings and Psalm titles import in both modes.
    */
   importExcludeFrontMatter?: boolean
+  /** AQU-646 SUB-53: dubbing (the default, and the meaning of absent) or
+   *  audio-first. See the AudioTimingMode doc comment in parsers/types.ts. */
+  audioTimingMode?: AudioTimingMode
+}
+
+/** Absent means dubbing — the behaviour every project had before SUB-53. */
+export function resolveAudioTimingMode(
+  settings: Pick<ProjectWideSettings, "audioTimingMode"> | null | undefined,
+): AudioTimingMode {
+  return settings?.audioTimingMode === "audioFirst" ? "audioFirst" : "dubbing"
 }
 
 export interface ProjectSettingsResponse {

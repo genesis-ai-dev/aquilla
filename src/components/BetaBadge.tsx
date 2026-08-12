@@ -10,10 +10,12 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { MessageCircleIcon } from "lucide-react"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 const BETA_ENABLED = import.meta.env.VITE_BETA_FLAG === "1"
 
 export function BetaBadge() {
+  const t = useT()
   if (!BETA_ENABLED) return null
 
   return (
@@ -21,22 +23,19 @@ export function BetaBadge() {
       <DialogTrigger
         render={
           <button type="button">
-            <Badge>Beta</Badge>
+            <Badge>{t("nav.beta.badge")}</Badge>
           </button>
         }
       />
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Heads up — we're in beta</DialogTitle>
-          <DialogDescription>
-            Things might move around, break, or change without warning. That's
-            the deal for now.
-          </DialogDescription>
+          <DialogTitle>{t("nav.beta.title")}</DialogTitle>
+          <DialogDescription>{t("nav.beta.description")}</DialogDescription>
         </DialogHeader>
         <ul className="space-y-1.5 text-sm text-muted-foreground">
-          <li>The UI is actively evolving</li>
-          <li>Features may appear or disappear</li>
-          <li>Your feedback shapes what we build next</li>
+          <li>{t("nav.beta.pointEvolving")}</li>
+          <li>{t("nav.beta.pointFeatures")}</li>
+          <li>{t("nav.beta.pointFeedback")}</li>
         </ul>
         <DialogFooter showCloseButton>
           <Button
@@ -45,7 +44,7 @@ export function BetaBadge() {
             render={<a href="https://discord.gg/T2EndwXe4W" target="_blank" rel="noopener noreferrer" />}
           >
             <MessageCircleIcon className="mr-1.5 h-4 w-4" />
-            Join our Discord
+            {t("nav.beta.joinDiscord")}
           </Button>
         </DialogFooter>
       </DialogContent>

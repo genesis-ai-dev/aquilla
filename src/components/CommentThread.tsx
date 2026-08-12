@@ -7,6 +7,7 @@ import type { CommentThread as ThreadData } from "@/lib/parsers/types"
 import { renderCommentHtml, isThreadStale } from "@/lib/comments/comment-helpers"
 import DOMPurify from "dompurify"
 import { cn } from "@/lib/utils"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 interface CommentThreadProps {
   thread: ThreadData
@@ -25,6 +26,7 @@ function draftKey(projectId: string | undefined, cellId: string | undefined, thr
 }
 
 export function CommentThread({ thread, currentTranslated, canReply = true, canResolve = true, onReply, onResolve, onReopen, projectId, cellId }: CommentThreadProps) {
+  const t = useT()
   const storageKey = draftKey(projectId, cellId, thread.id)
   const [replyText, setReplyText] = useState(() => {
     if (typeof window === "undefined") return ""
@@ -97,12 +99,12 @@ export function CommentThread({ thread, currentTranslated, canReply = true, canR
               : "bg-muted text-muted-foreground"
           )}
         >
-          {thread.status}
+          {thread.status === "open" ? t("comments.status.open") : t("comments.status.resolved")}
         </span>
         {isStale && (
-          <AppTooltip content="Translation changed since this thread was created">
+          <AppTooltip content={t("comments.stale.tooltip")}>
             <span className="flex items-center gap-0.5 text-amber-500">
-              <AlertTriangle className="h-3 w-3" /> stale
+              <AlertTriangle className="h-3 w-3" /> {t("comments.stale.badge")}
             </span>
           </AppTooltip>
         )}
@@ -133,7 +135,7 @@ export function CommentThread({ thread, currentTranslated, canReply = true, canR
                 value={replyText}
                 onChange={(e) => setReplyText(e.target.value)}
                 onKeyDown={handleReplyKeyDown}
-                placeholder="Reply..."
+                placeholder={t("comments.thread.replyPlaceholder")}
                 rows={2}
                 className="resize-none"
               />
@@ -141,17 +143,17 @@ export function CommentThread({ thread, currentTranslated, canReply = true, canR
             <div className="flex flex-wrap gap-1">
               {canReply && (
                 <Button size="sm" variant="outline" onClick={handleReply} disabled={!replyText.trim()}>
-                  <Send className="mr-1 h-3 w-3" /> Reply
+                  <Send className="mr-1 h-3 w-3" /> {t("comments.thread.reply")}
                 </Button>
               )}
               {canReply && canResolve && (
                 <Button size="sm" variant="outline" onClick={handleCloseWithReply} disabled={!replyText.trim()}>
-                  <Check className="mr-1 h-3 w-3" /> Close with reply
+                  <Check className="mr-1 h-3 w-3" /> {t("comments.thread.closeWithReply")}
                 </Button>
               )}
               {canResolve && (
                 <Button size="sm" variant="ghost" onClick={() => onResolve()}>
-                  Resolve
+                  {t("comments.resolve")}
                 </Button>
               )}
             </div>
@@ -161,7 +163,7 @@ export function CommentThread({ thread, currentTranslated, canReply = true, canR
         canResolve && (
           <div className="mt-2">
             <Button size="sm" variant="ghost" onClick={onReopen}>
-              <Undo2 className="mr-1 h-3 w-3" /> Reopen
+              <Undo2 className="mr-1 h-3 w-3" /> {t("comments.reopen")}
             </Button>
           </div>
         )

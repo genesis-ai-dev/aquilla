@@ -8,7 +8,7 @@ import "fake-indexeddb/auto"
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest"
 import { createOpfsFs } from "@/lib/fs/opfs-fs"
 import { MemoryDirectoryHandle } from "@/lib/fs/__test__/mem-fs-handles"
-import { __setRootForTests, audioCachePut, audioCacheGet } from "./bytes-cache"
+import { __setRootForTests, __flushAudioCacheForTests, audioCachePut, audioCacheGet } from "./bytes-cache"
 import { __resetOpfsAvailabilityForTests } from "@/lib/storage/opfs-availability"
 import { transcribeCell, slicePcmToTrim, __setTranscribeAudioForTests } from "./transcribe"
 import { getTranscribeStatus, clearTranscribeStatus } from "./transcribe-status"
@@ -100,7 +100,9 @@ describe("transcribeCell — local-first bytes (FRO-355)", () => {
     expect(n).toBe(1)
     expect(fetchCellAudio).toHaveBeenCalledOnce()
     expect(getTranscribeStatus(FULL_ID).kind).toBe("done")
-    // write-through: the fetched bytes are now cached
+    // write-through: the fetched bytes are now cached (the put is
+    // fire-and-forget behind the index chain — flush it first)
+    await __flushAudioCacheForTests()
     expect(await audioCacheGet(AUDIO_ID, EXT)).not.toBeNull()
   })
 

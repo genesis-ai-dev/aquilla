@@ -78,6 +78,11 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
+      # Credential guard (docs/OPSEC.md §5). Mirrors the lint lane in
+      # scripts/cloudflare-ci-checks.mjs, which is the gate that actually runs
+      # on pull requests (this workflow is workflow_dispatch-only). Keep the
+      # two in step.
+      - run: pnpm run scan:secrets
 
   typecheck:
     runs-on: ubuntu-latest
@@ -102,6 +107,10 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm test
+      # Mirrors the spa lane in scripts/cloudflare-ci-checks.mjs, which is the
+      # gate that actually runs on pull requests (this workflow is
+      # workflow_dispatch-only). Keep the two in step. OPS-4.
+      - run: pnpm test:worker
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm test:idml
 
@@ -130,7 +139,7 @@ jobs:
         run: rm -f dist/_redirects
       - name: Verify deployment artifact exclusion policy
         run: node scripts/verify-deployment-artifacts.mjs dist
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: aquilla-web-${{ needs.target.outputs.live_environment }}-${{ github.sha }}
           path: dist
@@ -232,7 +241,7 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: aquilla-web-${{ needs.target.outputs.live_environment }}-${{ github.sha }}
           path: dist

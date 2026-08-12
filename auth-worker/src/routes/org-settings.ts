@@ -34,6 +34,14 @@
 // is false, preserving the pre-AQU-496 leads-only behavior. Enforced
 // server-side in sync-worker (authorize.ts + assignment-authority.ts); this
 // route only stores/validates the setting.
+//
+// AQU-822: termbaseEditMinRole (who may manage a project's termbase —
+// add/edit/delete/archive concepts) is another role-ladder permission-policy
+// key on the same OWNER-only write gate. Unlike the read floors above it
+// gates a WRITE, and its default is PROJECT_LEAD (500) rather than
+// MAINTAINER — see DEFAULT_TERMBASE_EDIT_MIN_ROLE in
+// services/org-permissions.ts. Enforced by the terminology-scoped carve-out
+// in routes/project-settings.ts; this route only stores/validates it.
 
 import { Hono } from "hono"
 import { zValidator } from "@hono/zod-validator"
@@ -66,6 +74,9 @@ const PERMISSION_POLICY_KEYS: Record<string, string> = {
   rosterViewMinRole: "rosterViewMinRole",
   memberProgressViewMinRole: "memberProgressViewMinRole",
   allowSelfAssignment: "allowSelfAssignment",
+  // AQU-822: who may manage a project's termbase. Role-ladder valued,
+  // OWNER-only on write like the rest of this table.
+  termbaseEditMinRole: "termbaseEditMinRole",
 }
 
 /**

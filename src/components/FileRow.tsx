@@ -9,6 +9,7 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu"
 import { FileActionMenu } from "./FileActionMenu"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 interface FileStats { translated: number; validated: number; total: number }
 
@@ -24,6 +25,8 @@ interface FileRowProps {
   onEditCancel: () => void
   onToggleExpand: () => void
   onSelect: () => void
+  /** Opens the FileDetailsModal for this file. */
+  onShowDetails?: () => void
   onStartRename: () => void
   onMove: () => void
   /** AQU-271: Optional — pass undefined to hide delete for roles below project_lead. */
@@ -48,9 +51,10 @@ function openContextMenuAtPointer(target: EventTarget & Element, clientX: number
 export function FileRow(props: FileRowProps) {
   const {
     file, active, expanded, progress, hasSuggestion, editing,
-    onEditCommit, onEditCancel, onToggleExpand, onSelect, onStartRename,
+    onEditCommit, onEditCancel, onToggleExpand, onSelect, onShowDetails, onStartRename,
     onMove, onDelete, onExportSource, onApplySuggestion,
   } = props
+  const t = useT()
   const inputRef = useRef<HTMLInputElement>(null)
   const [draft, setDraft] = useState(file.name)
 
@@ -72,7 +76,7 @@ export function FileRow(props: FileRowProps) {
   // row says nothing.
   const isTimeOrdered = fileOrderedBy(file) === "time"
   const fileNameTooltip = file.originalName && file.originalName !== file.name
-    ? `${file.name} (imported as ${file.originalName})`
+    ? t("nav.fileRow.importedAsTooltip", { name: file.name, originalName: file.originalName })
     : file.name
 
   return (
@@ -101,11 +105,14 @@ export function FileRow(props: FileRowProps) {
         }
       >
         {canExpand ? (
-          <AppTooltip content={expanded ? "Collapse sections" : "Expand sections"} side="right">
+          <AppTooltip
+            content={expanded ? t("nav.fileRow.collapseSections") : t("nav.fileRow.expandSections")}
+            side="right"
+          >
             <button
               className="p-0.5 rounded-md text-muted-foreground transition-colors hover:text-foreground"
               onClick={(e) => { e.stopPropagation(); onToggleExpand() }}
-              aria-label={expanded ? "Collapse" : "Expand"}
+              aria-label={expanded ? t("nav.fileRow.collapse") : t("nav.fileRow.expand")}
             >
               <ChevronRight className={cn("h-3 w-3 transition-transform", expanded && "rotate-90")} />
             </button>
@@ -114,10 +121,10 @@ export function FileRow(props: FileRowProps) {
           <span className="w-[18px] shrink-0" aria-hidden="true" />
         )}
         {isTimeOrdered && (
-          <AppTooltip content="Timeline-ordered (timecodes are the spine)" side="right">
+          <AppTooltip content={t("nav.fileRow.timelineOrderedTooltip")} side="right">
             <span
               className="shrink-0 text-muted-foreground/70"
-              aria-label="Timeline-ordered file"
+              aria-label={t("nav.fileRow.timelineOrderedFile")}
             >
               <AudioWaveform className="h-3.5 w-3.5" />
             </span>
@@ -167,7 +174,7 @@ export function FileRow(props: FileRowProps) {
             data-testid="file-row-progress-slot"
             aria-label={
               progress && progress.total > 0
-                ? `${translatedPct}% translated, ${validatedPct}% validated`
+                ? t("nav.fileRow.progressAriaLabel", { translated: translatedPct, validated: validatedPct })
                 : undefined
             }
           >
@@ -184,25 +191,25 @@ export function FileRow(props: FileRowProps) {
           </div>
         )}
         {!editing && (
-          <AppTooltip content="File actions" side="right">
+          <AppTooltip content={t("nav.fileRow.fileActions")} side="right">
             <button
               className="p-1 rounded-md text-muted-foreground opacity-0 transition-colors hover:text-foreground group-hover:opacity-100 focus-visible:opacity-100"
               onClick={(e) => {
                 e.stopPropagation()
                 openContextMenuAtPointer(e.currentTarget, e.clientX, e.clientY)
               }}
-              aria-label="File actions"
+              aria-label={t("nav.fileRow.fileActions")}
             >
               <MoreHorizontal className="h-3.5 w-3.5" />
             </button>
           </AppTooltip>
         )}
         {hasSuggestion && !editing && (
-          <AppTooltip content="A cleaner name was detected for this file. Click to apply, or use the Apply button at the top of the sidebar." side="right" className="max-w-xs">
+          <AppTooltip content={t("nav.fileRow.suggestionTooltip")} side="right" className="max-w-xs">
             <button
               className="p-1 rounded-md shrink-0 transition-colors hover:text-foreground"
               onClick={(e) => { e.stopPropagation(); onApplySuggestion?.() }}
-              aria-label="Apply rename suggestion"
+              aria-label={t("nav.fileRow.applyRenameSuggestion")}
             >
               <Sparkles className="h-3 w-3 text-amber-500" />
             </button>
@@ -210,6 +217,7 @@ export function FileRow(props: FileRowProps) {
         )}
       </ContextMenuTrigger>
       <FileActionMenu
+        onShowDetails={onShowDetails}
         onRename={onStartRename}
         onMove={onMove}
         onDelete={onDelete}

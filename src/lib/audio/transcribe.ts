@@ -313,11 +313,16 @@ export async function transcribeCell(args: TranscribeCellArgs): Promise<number> 
         cellId: cell.id,
         audioId,
         url: attachmentUrl,
-        slot: "recording",
+        // SUB-49: a generated-voice clip must not be relocated into the
+        // recording slot by transcribing it (the upsert assigns `slot`
+        // outright, and the sibling-deselect above it would drop the real
+        // take). Follow the clip's own slot.
+        slot: audioId === cell.selectedGeneratedVoiceAudioId ? "generatedVoice" : "recording",
         timings,
         // Preserve attachment fields the projection UPSERT would otherwise
-        // null out (excluded.* overwrite) — the trim window is load-bearing
-        // for imported segments (defines the cell's slice of the shared clip).
+        // null out — belt and braces now that the projection COALESCEs them
+        // too (SUB-49). The trim window is load-bearing for imported segments
+        // (it defines the cell's slice of the shared clip).
         ...(attachment?.trimStartMs != null ? { trimStartMs: attachment.trimStartMs } : {}),
         ...(attachment?.trimEndMs != null ? { trimEndMs: attachment.trimEndMs } : {}),
         ...(attachment?.durationMs != null ? { durationMs: attachment.durationMs } : {}),

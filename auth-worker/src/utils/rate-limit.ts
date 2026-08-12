@@ -48,9 +48,20 @@ export const ADMIN_ELEVATION_VERIFY_MAX_FAILURES = 10
 // office/campus IP signing up several real accounts never trips it.
 export const REGISTER_MAX_PER_IP = 15
 
+// [Pen test] Auth & session mgmt (2026-08-10): POST /password-reset/verify
+// and /password-reset/reset were the only two auth endpoints with no attempt
+// limiting at all (every sibling in this file — login, register, reset
+// *request*, admin elevation verify — already has one). The 122-bit UUIDv4
+// token makes brute force infeasible regardless, but this closes the gap for
+// consistency and as defense-in-depth against a future weaker token format.
+// Scoped per-username, counting failures only, so a legitimate user retrying
+// a stale/mistyped link a few times never gets locked out.
+export const PASSWORD_RESET_ATTEMPT_MAX_FAILURES = 10
+
 export type RateLimitKind =
   | "login"
   | "password_reset_request"
+  | "password_reset_attempt"
   | "contact"
   | "admin_elevation_verify"
   | "register"

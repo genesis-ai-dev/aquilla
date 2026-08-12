@@ -134,4 +134,23 @@ describe("ViewSettingsMenu direction display", () => {
 
     expect(screen.queryByRole("status")).toBeNull()
   })
+
+  it("emphasises the two conflicting directions inside the warning", () => {
+    // The warning exists to contrast what was FORCED with what was DETECTED, and
+    // the emphasis is what lets a reader see the conflict without parsing the
+    // line. Keying the sentence as one catalog string flattened both <strong>s
+    // once already, so assert the ELEMENTS: a text-only assertion passes on the
+    // flattened version and would not have caught it.
+    renderViewSettings({
+      targetDirectionMode: "ltr",
+      targetAutoDirectionSummary: "rtl",
+    })
+
+    const warning = screen.getByRole("status")
+    const emphasised = [...warning.querySelectorAll("strong")].map((el) => el.textContent)
+    expect(emphasised).toEqual(["left-to-right", "right-to-left"])
+    // …and the sentence around them is still one translated string.
+    expect(warning.textContent).toContain("Target is forced left-to-right")
+    expect(warning.textContent).toContain("content looks right-to-left")
+  })
 })

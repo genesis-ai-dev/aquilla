@@ -402,6 +402,9 @@ export interface CellAudioAttachInput {
   voiceId?: string
   referenceAudioId?: string
   durationMs?: number
+  /** AQU-646 round 8: the take's PERMANENT display name ("Take 3"). Omitted
+   *  on re-attaches (trim persists) — the projection keeps the existing one. */
+  label?: string
   /** Non-destructive playback trim window into the clip, in ms. */
   trimStartMs?: number
   trimEndMs?: number
@@ -434,11 +437,68 @@ export async function emitCellAudioAttach(input: CellAudioAttachInput): Promise<
       ...(input.voiceId !== undefined ? { voiceId: input.voiceId } : {}),
       ...(input.referenceAudioId !== undefined ? { referenceAudioId: input.referenceAudioId } : {}),
       ...(input.durationMs !== undefined ? { durationMs: input.durationMs } : {}),
+      ...(input.label !== undefined ? { label: input.label } : {}),
       ...(input.trimStartMs !== undefined ? { trimStartMs: input.trimStartMs } : {}),
       ...(input.trimEndMs !== undefined ? { trimEndMs: input.trimEndMs } : {}),
       ...(input.timings !== undefined ? { timings: input.timings } : {}),
       ...(input.transcription !== undefined ? { transcription: input.transcription } : {}),
     },
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
+export interface CellAudioRenameInput {
+  projectId: string
+  fileId: string
+  cellId: string
+  audioId: string
+  /** The take's new permanent name; null clears back to unnamed. */
+  label: string | null
+  author: string
+  clientTs?: number
+}
+
+/** Emit a `cell.audio.rename` — label only; never touches selection/trims. */
+export async function emitCellAudioRename(input: CellAudioRenameInput): Promise<string> {
+  const { eventId } = await enqueueEvent({
+    kind: "cell.audio.rename",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    cellId: input.cellId,
+    parentId: null,
+    author: input.author,
+    payload: { audioId: input.audioId, label: input.label },
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
+export interface CellAudioMeasureInput {
+  projectId: string
+  fileId: string
+  cellId: string
+  audioId: string
+  /** The clip's decoded length. The server fills only a NULL duration. */
+  durationMs: number
+  author: string
+  clientTs?: number
+}
+
+/**
+ * Emit a `cell.audio.measure` — duration backfill only; never touches
+ * selection/url/slot/trims, so it is safe for non-selected takes (a
+ * re-attach would promote them).
+ */
+export async function emitCellAudioMeasure(input: CellAudioMeasureInput): Promise<string> {
+  const { eventId } = await enqueueEvent({
+    kind: "cell.audio.measure",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    cellId: input.cellId,
+    parentId: null,
+    author: input.author,
+    payload: { audioId: input.audioId, durationMs: input.durationMs },
     clientTs: input.clientTs,
   })
   return eventId
@@ -496,6 +556,48 @@ export async function emitCellRetime(input: CellRetimeInput): Promise<string> {
   return eventId
 }
 
+export interface CellLaneRetimeInput {
+  projectId: string
+  fileId: string
+  cellId: string
+  /** Subtitle span, absolute file ms. null clears (back to the source split). */
+  subtitleStartMs?: number | null
+  subtitleEndMs?: number | null
+  /** Target-audio (dub) start, absolute file ms. null clears (section start). */
+  targetStartMs?: number | null
+  author: string
+  clientTs?: number
+}
+
+/** Emit a `cell.lane.retime` — per-lane presentation timing (AQU-646 round 6).
+ *  The frozen source split (start_ms/end_ms) is never touched; provided keys
+ *  merge into the source-side cell's metadata (null deletes a key). Throws
+ *  when called with no timing key at all. */
+export async function emitCellLaneRetime(input: CellLaneRetimeInput): Promise<string> {
+  if (
+    input.subtitleStartMs === undefined &&
+    input.subtitleEndMs === undefined &&
+    input.targetStartMs === undefined
+  ) {
+    throw new Error("emitCellLaneRetime: at least one timing key is required")
+  }
+  const { eventId } = await enqueueEvent({
+    kind: "cell.lane.retime",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    cellId: input.cellId,
+    parentId: null,
+    author: input.author,
+    payload: {
+      ...(input.subtitleStartMs !== undefined ? { subtitleStartMs: input.subtitleStartMs } : {}),
+      ...(input.subtitleEndMs !== undefined ? { subtitleEndMs: input.subtitleEndMs } : {}),
+      ...(input.targetStartMs !== undefined ? { targetStartMs: input.targetStartMs } : {}),
+    },
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
 export interface FileVideoSetInput {
   projectId: string
   fileId: string
@@ -515,6 +617,31 @@ export async function emitFileVideoSet(input: FileVideoSetInput): Promise<string
     parentId: null,
     author: input.author,
     payload: { coreMediaUrl: input.coreMediaUrl },
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
+export interface FileTimingSetInput {
+  projectId: string
+  fileId: string
+  /** The file's audio timing mode; null clears back to the project default. */
+  timingMode: "dubbing" | "audioFirst" | null
+  author: string
+  clientTs?: number
+}
+
+/** Emit a `file.timing.set` — the file's audio timing mode (Original vs
+ *  Free). Stored in files.meta JSON, like the video link it interacts with.
+ *  Maintainer floor: the server rejects lower roles. */
+export async function emitFileTimingSet(input: FileTimingSetInput): Promise<string> {
+  const { eventId } = await enqueueEvent({
+    kind: "file.timing.set",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    parentId: null,
+    author: input.author,
+    payload: { timingMode: input.timingMode },
     clientTs: input.clientTs,
   })
   return eventId

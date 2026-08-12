@@ -72,8 +72,9 @@ export interface ChangesetSummary {
 export interface PlannedEventIds {
   /** SetTranslation: minted target.cell.commit event id per target cell — one
    *  per resolved precondition. Stored as a list (not a cellKey-keyed object):
-   *  cellKey's NUL separator is not a legal jsonb object key. */
-  setTranslation?: { fileId: string; cellId: string; eventId: string }[]
+   *  cellKey's NUL separator is not a legal jsonb object key. `laneId` is the
+   *  target-language lane (absent = default lane, AQU-538). */
+  setTranslation?: { fileId: string; cellId: string; laneId?: string; eventId: string }[]
   /** PlanImport: the created file id, its file.create event id, and one
    *  source.cell.create {cellId, eventId} per plan cell (cellId minted here
    *  when the plan cell omitted its own id), in plan-cell order. */

@@ -10,6 +10,7 @@ import { canPerform } from "@/lib/sync/role-policy"
 import { denialMessage } from "@/lib/permissions/denial"
 import { ROLE } from "@/lib/frontier/roles"
 import { CommentThread } from "./CommentThread"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 interface CommentsDrawerProps {
   project: ProjectRecord
@@ -53,6 +54,7 @@ function recordsToThreads(records: CommentRecord[]): CommentThreadType[] {
 }
 
 export function CommentsDrawer({ project, cell, liveComments, onClose, onNewThread, onReply, onResolve, onReopen }: CommentsDrawerProps) {
+  const t = useT()
   const [newThreadText, setNewThreadText] = useState("")
   const permissions = useProjectPermissions(project)
   // Use liveComments (from useComments hook) when available; fall back to cell.threads
@@ -92,19 +94,19 @@ export function CommentsDrawer({ project, cell, liveComments, onClose, onNewThre
     <div className="bg-card relative z-10 flex h-full w-96 flex-col border-l" data-testid="comments-drawer">
       <div className="flex items-center justify-between border-b p-2">
         <h3 className="text-sm font-semibold">
-          Comments {cell.context && <span className="text-muted-foreground">· {cell.context}</span>}
+          {t("common.comments")} {cell.context && <span className="text-muted-foreground">· {cell.context}</span>}
         </h3>
-        <Button variant="ghost" size="icon-sm" onClick={onClose} aria-label="Close comments">
+        <Button variant="ghost" size="icon-sm" onClick={onClose} aria-label={t("comments.drawer.closeLabel")}>
           <X />
         </Button>
       </div>
 
       <div className="border-b px-3 py-2 text-xs">
-        <div className="text-muted-foreground">Source</div>
+        <div className="text-muted-foreground">{t("editor.column.source")}</div>
         <div className="mt-0.5">{cell.original}</div>
         {cell.translated && (
           <>
-            <div className="mt-1.5 text-muted-foreground">Target</div>
+            <div className="mt-1.5 text-muted-foreground">{t("editor.column.target")}</div>
             <div className="mt-0.5">{cell.translated}</div>
           </>
         )}
@@ -112,7 +114,7 @@ export function CommentsDrawer({ project, cell, liveComments, onClose, onNewThre
 
       <div className="flex-1 overflow-auto p-3 space-y-2">
         {threads.length === 0 ? (
-          <p className="text-xs text-muted-foreground">No comments yet.</p>
+          <p className="text-xs text-muted-foreground">{t("comments.drawer.noComments")}</p>
         ) : (
           threads.map((thread) => (
             <CommentThread
@@ -131,24 +133,24 @@ export function CommentsDrawer({ project, cell, liveComments, onClose, onNewThre
 
       {canComment ? (
         <div className="border-t p-3 space-y-1.5">
-          <p className="text-xs font-medium">New thread</p>
+          <p className="text-xs font-medium">{t("comments.drawer.newThreadHeading")}</p>
           <Textarea
             value={newThreadText}
             onChange={(e) => setNewThreadText(e.target.value)}
             onKeyDown={handleNewThreadKeyDown}
-            placeholder="Start a new comment thread..."
+            placeholder={t("comments.drawer.newThreadPlaceholder")}
             rows={2}
             className="resize-none"
           />
           <Button size="sm" onClick={handleCreate} disabled={!newThreadText.trim()} className="w-full">
-            Post
+            {t("comments.drawer.post")}
           </Button>
         </div>
       ) : (
         <div className="border-t p-3">
           {/* AQU-427: show a human-readable denial for roles that cannot comment. */}
           <p className="text-xs text-muted-foreground" data-testid="comments-drawer-denial">
-            {commentDenialReason ?? "Read-only (imported from git)"}
+            {commentDenialReason ?? t("common.readOnlyGit")}
           </p>
         </div>
       )}

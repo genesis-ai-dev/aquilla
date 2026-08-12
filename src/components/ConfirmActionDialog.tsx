@@ -4,6 +4,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from "@/components/ui/dialog"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 interface ConfirmActionDialogProps {
   open: boolean
@@ -19,12 +20,14 @@ interface ConfirmActionDialogProps {
 
 export function ConfirmActionDialog({
   open, onOpenChange, title, description, confirmLabel,
-  checkboxLabel = "I understand this action.",
+  checkboxLabel,
   variant = "default",
   onConfirm,
 }: ConfirmActionDialogProps) {
+  const t = useT()
   const [checked, setChecked] = useState(false)
   useEffect(() => { if (!open) setChecked(false) }, [open])
+  const resolvedCheckboxLabel = checkboxLabel ?? t("dialog.confirmCheckboxDefault")
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
@@ -38,10 +41,10 @@ export function ConfirmActionDialog({
             onCheckedChange={(value) => setChecked(value === true)}
             className="mt-0.5"
           />
-          <span>{checkboxLabel}</span>
+          <span>{resolvedCheckboxLabel}</span>
         </label>
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>{t("common.cancel")}</Button>
           <Button
             variant={variant}
             disabled={!checked}

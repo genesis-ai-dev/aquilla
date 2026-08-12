@@ -17,6 +17,7 @@ import {
 import { AppTooltip } from "@/components/ui/tooltip"
 import { prefetchFileProgress } from "@/lib/progress/file-progress-resource"
 import { canExportSourceFile, exportSourceFile } from "@/lib/file-source-export"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 interface FileStats { translated: number; validated: number; total: number }
 
@@ -31,6 +32,8 @@ interface Props {
   /** Storage lane used when exporting translated source files. */
   targetLang?: string
   onSelectFile: (fileId: string, opts?: { sectionLabel?: string }) => void
+  /** Opens the FileDetailsModal for the given file (rendered by the caller). */
+  onShowDetails?: (fileId: string) => void
   onRename: (fileId: string, newName: string) => void
   onMove: (fileId: string) => void
   /** AQU-271: Optional — pass undefined to hide delete for roles below project_lead (500). */
@@ -50,11 +53,12 @@ interface Props {
 
 export function ExpandableFileList({
   projectId, files, activeFileId, fileProgress,
-  suggestionFileIds, validationCount, getTokenForFile, onSelectFile, onRename, onMove, onDelete,
+  suggestionFileIds, validationCount, getTokenForFile, onSelectFile, onShowDetails, onRename, onMove, onDelete,
   targetLang = "",
   onApplySuggestion, onRenameCorpus, canExportByOrgPolicy = true,
   renameSignal,
 }: Props) {
+  const t = useT()
   const { expanded, toggle } = useSidebarExpansion(projectId)
   const { members: collapsed, toggle: toggleCollapsed } = usePersistedToggleSet(
     `codex:sidebar:corpus-collapsed:${projectId}`,
@@ -89,7 +93,7 @@ export function ExpandableFileList({
             type="text"
             role="searchbox"
             name="aquilla-file-filter-query"
-            aria-label="Filter files"
+            aria-label={t("nav.fileList.filterFiles")}
             autoComplete="off"
             autoCapitalize="none"
             spellCheck={false}
@@ -98,7 +102,7 @@ export function ExpandableFileList({
             data-form-type="other"
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
-            placeholder="Filter files..."
+            placeholder={t("nav.fileList.filterPlaceholder")}
             className="text-xs"
           />
           {filter && (
@@ -107,7 +111,7 @@ export function ExpandableFileList({
                 type="button"
                 size="icon-xs"
                 onClick={() => setFilter("")}
-                aria-label="Clear filter"
+                aria-label={t("nav.fileList.clearFilter")}
               >
                 <X />
               </InputGroupButton>
@@ -119,7 +123,9 @@ export function ExpandableFileList({
         <div className="p-2 space-y-2">
           {groups.length === 0 && (
             <p className="px-2 text-sm text-muted-foreground">
-              {filter ? `No files match "${filter}".` : "No files imported yet."}
+              {filter
+                ? t("nav.fileList.noFilesMatch", { filter })
+                : t("nav.fileList.noFilesImported")}
             </p>
           )}
           {groups.map((group) => {
@@ -137,7 +143,11 @@ export function ExpandableFileList({
                       className="flex flex-1 items-center gap-1 rounded-lg px-1 py-0.5 text-left transition-colors hover:text-foreground"
                       onClick={() => toggleCollapsed(group.label)}
                       aria-expanded={!isCollapsed}
-                      aria-label={isCollapsed ? `Expand ${group.label}` : `Collapse ${group.label}`}
+                      aria-label={
+                        isCollapsed
+                          ? t("nav.fileList.expandGroup", { group: group.label })
+                          : t("nav.fileList.collapseGroup", { group: group.label })
+                      }
                     >
                       <ChevronDown
                         className={cn("h-3 w-3 transition-transform", isCollapsed && "-rotate-90")}
@@ -163,11 +173,11 @@ export function ExpandableFileList({
                       )}
                     </button>
                     {canEditCorpus && !isEditingCorpus && (
-                      <AppTooltip content={`Rename ${group.label}`} side="right">
+                      <AppTooltip content={t("nav.fileList.renameGroup", { group: group.label })} side="right">
                         <button
                           className="rounded-md p-0.5 opacity-0 transition-shadow group-hover/corpus:opacity-100"
                           onClick={(e) => { e.stopPropagation(); setEditingCorpus(group.label) }}
-                          aria-label={`Rename ${group.label}`}
+                          aria-label={t("nav.fileList.renameGroup", { group: group.label })}
                         >
                           <Pencil className="h-3 w-3" />
                         </button>
@@ -201,6 +211,7 @@ export function ExpandableFileList({
                             onEditCancel={() => setEditingFileId(null)}
                             onToggleExpand={() => toggle(file.id)}
                             onSelect={() => onSelectFile(file.id)}
+                            onShowDetails={onShowDetails ? () => onShowDetails(file.id) : undefined}
                             onStartRename={() => setEditingFileId(file.id)}
                             onMove={() => onMove(file.id)}
                             onDelete={onDelete ? () => onDelete(file.id) : undefined}

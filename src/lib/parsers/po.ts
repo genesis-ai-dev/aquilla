@@ -19,8 +19,8 @@
  */
 
 import { v4 as uuid } from "uuid"
-import type { TranslatableString } from "./types"
-import type { CellData } from "@/hooks/useCells"
+import type { TranslatableString } from "./core-types"
+import type { ExportCellFields } from "./core-types"
 
 // ─── PO string escaping ──────────────────────────────────────────────────────
 
@@ -258,7 +258,7 @@ export function extractPoStrings(content: string): TranslatableString[] {
  * unchanged. A cell with an empty `translated` keeps the original msgstr
  * (which stays empty if it was empty — msgid is never copied in).
  */
-export function exportPo(originalContent: string, cells: CellData[]): Blob {
+export function exportPo(originalContent: string, cells: ExportCellFields[]): Blob {
   const lines = originalContent.split("\n")
   const entries = parsePoEntries(originalContent)
 
@@ -268,7 +268,7 @@ export function exportPo(originalContent: string, cells: CellData[]): Blob {
   const dropLines = new Set<number>()
   let cellIdx = 0
 
-  const applySlot = (slot: MsgstrSlot, cell: CellData | undefined) => {
+  const applySlot = (slot: MsgstrSlot, cell: ExportCellFields | undefined) => {
     const translated = cell?.translated ?? ""
     if (translated === "") return // fallback: keep the original msgstr lines verbatim
     const keyword = slot.index === null ? "msgstr" : `msgstr[${slot.index}]`

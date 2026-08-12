@@ -213,7 +213,17 @@ export function useCellEditHistory(opts: UseCellEditHistoryOptions): UseCellEdit
         await getOutboxRecordsForCell(pid, fid, cid),
       )
       if (generationRef.current !== gen) return
-      setHistory(localEntries)
+      // Seed from the outbox so locally durable commits appear before the
+      // server read lands — but never *replace* an already-loaded list with
+      // the local-only subset. On a refresh (outbox write, or an
+      // `event.applied` invalidation) the outbox is usually empty because the
+      // commits already flushed, so assigning it blanked the drawer for the
+      // duration of the round trip: "No edits yet." flashed, the entry list
+      // unmounted, and it remounted with fresh local state — collapsing an
+      // expanded intermediate-edits group under the user's cursor.
+      setHistory((prev) => (
+        prev.length === 0 ? localEntries : mergeHistoryEntries(prev, localEntries)
+      ))
 
       const token = await tokenFetcherRef.current(fid)
       if (!token) {

@@ -246,7 +246,11 @@ export function HistoryDrawer({ cell, onClose, projectId, fileId, getTokenForFil
                   isStale && groups.findIndex((g) => g.terminal.isStale ?? false) === i
                 return (
                   <GroupItem
-                    key={`${group.terminal.timestamp}-${group.startIndex}`}
+                    // Keyed on the event id, not the timestamp: a commit's
+                    // timestamp changes when the server-confirmed entry
+                    // replaces the locally pending one, and remounting on that
+                    // swap collapses an expanded group under the reader.
+                    key={group.terminal.eventId ?? `${group.terminal.timestamp}-${group.startIndex}`}
                     group={group}
                     isCurrent={i === currentGroupIndex}
                     formatTimestamp={formatTimestamp}

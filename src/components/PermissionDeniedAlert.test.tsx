@@ -99,6 +99,14 @@ describe("PermissionDeniedAlert", () => {
       { wrapper },
     )
     const alert = await screen.findByRole("alert")
+    // Wait on the ACCOUNT NAME, not the role: the role comes from props and is
+    // painted on the first render, while the account name arrives from the async
+    // session. Gating on the role let a slow session slip through and the
+    // querySelectorAll below then saw only one styled span — the source of this
+    // test's intermittent failures under full-suite parallel load.
+    await waitFor(() =>
+      expect(alert).toHaveTextContent("translator (t@example.com)"),
+    )
     await waitFor(() => expect(alert).toHaveTextContent("your role on this project is Viewer"))
     const styled = Array.from(alert.querySelectorAll(".font-medium"))
     expect(styled).toHaveLength(2)

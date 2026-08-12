@@ -46,6 +46,9 @@ interface Props {
   activeCellId: string | null
   username: string
   onActiveCellChange: (cellId: string) => void
+  /** AQU-646: the cell's LAST take was removed — see `onTakeSaved`'s mirror in
+   *  the workspace, which resets the target row that take created. */
+  onLastTakeRemoved?: (cellId: string) => void
   /** AQU-646: a take just landed on this cell. The workspace uses it to give a
    *  text-less line a target row, so a recording counts as translated work —
    *  see `ensureTargetRowForTake`. Fired after the attach event is safely
@@ -64,7 +67,7 @@ const OFFLINE_MESSAGE =
 
 export function AudioRecordingModal({
   open, project, cells, activeCellId, username,
-  onActiveCellChange, onTakeSaved, onClose,
+  onActiveCellChange, onTakeSaved, onLastTakeRemoved, onClose,
 }: Props) {
   const recorder = useAudioRecorder()
   const countdown = useCountdown()
@@ -768,6 +771,7 @@ export function AudioRecordingModal({
             fileId={activeCell.fileId}
             cellId={activeCell.id}
             takes={recordingTakes}
+            onLastTakeRemoved={onLastTakeRemoved}
             selectedAudioId={audioEntry?.selectedAudioId ?? null}
             selectedGeneratedAudioId={audioEntry?.selectedGeneratedVoiceAudioId ?? null}
             sourceClip={sourceClip}

@@ -402,3 +402,74 @@ describe("TakesStrip — generated (TTS) takes (round 8c)", () => {
     expect(screen.getAllByRole("button", { name: /Remove noise/ }).length).toBe(1) // recorded row only
   })
 })
+
+// AQU-646: a recording is target content, so its removal has to be able to take
+// that content back. The strip is the only thing that knows a delete just
+// happened AND what is left, so it reports the last one; the workspace resets
+// the target row the recording justified, or a line whose work was deleted goes
+// on counting as finished on the server.
+describe("TakesStrip — reporting the last take", () => {
+  // Real ids: buildAudioId embeds its seed, and the imported SOURCE clip is
+  // seeded with the FILE id while takes are seeded with the CELL id. That
+  // distinction is the whole reason this can be counted at all.
+  const own = (n: string): AudioAttachmentOut => ({
+    ...take(`audio-c1-1700000000-${n}`, 1000),
+  })
+  const sourceClipTake = (): AudioAttachmentOut => ({
+    ...take("audio-f1-1690000000-shared", 1000),
+  })
+
+  beforeEach(() => {
+    emitRemove.mockClear()
+    injectOptimisticRemove.mockClear()
+  })
+
+  const deleteFirstTake = () => {
+    fireEvent.click(screen.getAllByRole("button", { name: "Delete take" })[0])
+  }
+
+  it("fires when the only take is deleted", async () => {
+    const onLastTakeRemoved = vi.fn()
+    render(
+      <TakesStrip
+        {...common}
+        takes={[own("a")]}
+        selectedAudioId={`audio-c1-1700000000-a`}
+        onLastTakeRemoved={onLastTakeRemoved}
+      />,
+    )
+    deleteFirstTake()
+    await waitFor(() => expect(onLastTakeRemoved).toHaveBeenCalledWith("c1"))
+  })
+
+  it("does NOT fire while another take survives", async () => {
+    const onLastTakeRemoved = vi.fn()
+    render(
+      <TakesStrip
+        {...common}
+        takes={[own("a"), own("b")]}
+        selectedAudioId={`audio-c1-1700000000-b`}
+        onLastTakeRemoved={onLastTakeRemoved}
+      />,
+    )
+    deleteFirstTake()
+    await waitFor(() => expect(emitRemove).toHaveBeenCalled())
+    expect(onLastTakeRemoved).not.toHaveBeenCalled()
+  })
+
+  it("does not count the shared imported source clip as a surviving take", async () => {
+    // It is seeded with the FILE id and belongs to every cell — treating it as
+    // this cell's recording would leave the target row counting forever.
+    const onLastTakeRemoved = vi.fn()
+    render(
+      <TakesStrip
+        {...common}
+        takes={[own("a"), sourceClipTake()]}
+        selectedAudioId={`audio-c1-1700000000-a`}
+        onLastTakeRemoved={onLastTakeRemoved}
+      />,
+    )
+    deleteFirstTake()
+    await waitFor(() => expect(onLastTakeRemoved).toHaveBeenCalledWith("c1"))
+  })
+})

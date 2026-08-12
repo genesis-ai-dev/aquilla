@@ -3939,6 +3939,61 @@ export function ProjectWorkspace() {
 
   ensureTargetRowForTakeRef.current = (cellId: string) => void ensureTargetRowForTake(cellId)
 
+  /**
+   * AQU-646: the cell's last recording is gone, so the row that recording
+   * justified has to stop counting.
+   *
+   * The client display reverts by itself — the cell leaves `ownTakeCellIds` and
+   * the store's status flip stops applying. The SERVER does not: the target row
+   * created by `ensureTargetRowForTake` keeps `validated = 1` if anyone
+   * validated it, so assignment progress and approved counts would go on
+   * counting a line whose work was deleted. An empty commit advances the chain
+   * head, which resets validated and orphans the stale validator rows — the
+   * same thing any edit does.
+   *
+   * Only for a line with no TEXT: if someone has written the target, the row is
+   * theirs and the recording was never what made it count.
+   */
+  const resetTargetRowAfterLastTake = useCallback(async (cellId: string) => {
+    if (!project?.id || isReadOnly) return
+    if (!canPerform("target.cell.commit", project.syncRole?.level ?? null)) return
+    const cell = getActiveCell(cellId)
+    if (!cell || cell.translated?.trim()) return
+    // Nothing to reset if the row was never validated.
+    if (cell.status !== "validated") return
+
+    const parentId = resolveTargetCommitParentId(cell)
+    const eventId = await emitTargetCellCommit({
+      projectId: project.id,
+      fileId: cell.fileId,
+      cellId: cell.id,
+      parentId,
+      sourceEventId: cell.sourceEventId ?? null,
+      value: "",
+      valueHtml: "",
+      author: currentUsername,
+      targetLang: activeLane,
+    })
+    rememberPendingTargetCommit(cell.id, eventId, parentId)
+    await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+    await refreshOutboxPending()
+    revalidateCellStats(cell.id)
+    revalidateCell(cell.id)
+  }, [
+    project?.id,
+    project?.syncRole?.level,
+    isReadOnly,
+    getActiveCell,
+    activeLane,
+    resolveTargetCommitParentId,
+    rememberPendingTargetCommit,
+    currentUsername,
+    getTokenForProjectFile,
+    refreshOutboxPending,
+    revalidateCellStats,
+    revalidateCell,
+  ])
+
   const commitTrayFootnoteText = useCallback(async (cellId: string, updatedText: string) => {
     if (!project?.id || isReadOnly) return
     if (!canPerform("target.cell.commit", project.syncRole?.level ?? null)) return
@@ -6599,6 +6654,7 @@ export function ProjectWorkspace() {
             timingAck.surfaceNow()
           }}
           onTakeSaved={(cellId) => void ensureTargetRowForTake(cellId)}
+          onLastTakeRemoved={(cellId) => void resetTargetRowAfterLastTake(cellId)}
           onClose={() => setRecordingCellId(null)}
         />
       )}

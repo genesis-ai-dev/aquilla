@@ -47,7 +47,7 @@ export interface AgentWorkbenchProps {
   agent: Omit<AgentDockViewProps, "suggestedActions" | "pendingPrompt" | "onPendingPromptConsumed" | "pendingChip" | "onPendingChipConsumed">
   /** Org agent-credit gauge in the header (maintainer+ only; self-hides). */
   credits?: CreditsDialProps | null
-  /** Leave the workbench (back to the editor). */
+  /** Minimize to the dock and dismiss the editor Agent tab. */
   onClose: () => void
   /** Jump the editor to a cell ("open" on a working-set row). */
   onJumpToCell?: (fileId: string, cellId: string) => void
@@ -257,7 +257,7 @@ export function AgentWorkbench({ agent, credits, onClose, onJumpToCell }: AgentW
               <RotateCcw />
             </Button>
           </AppTooltip>
-          <AppTooltip content="Editor">
+          <AppTooltip content="Minimize to sidebar">
             <Button
               type="button"
               variant="ghost"

@@ -53,23 +53,22 @@ test("agent drafts the open file; workbench accept-all lands in the editor; undo
   await acceptAll.click()
   await expect(acceptAll).toBeHidden({ timeout: 15_000 })
 
-  // Close workbench returns to the last open file. The Agent editor tab stays
-  // in the strip; the dock restores to Files (not the compact Agent panel).
+  // Close workbench returns to the last open file, dismisses the Agent editor
+  // tab, and restores the compact dock panel (same session).
   await agent.closeFullScreenWorkbench()
   await ws.waitForEditor()
+  await agent.expectWorkbenchTabClosed()
   await expect(ws.cellRow(0)).toContainText("[bozza]", { timeout: 15_000 })
 
-  // Regret it: re-open the Agent tab. The receipt offers Undo. Compensating
-  // commits restore the pre-draft (empty) targets through the outbox; the
-  // receipt flips to "undone" and the editor no longer shows the draft.
-  await agent.activateWorkbenchTab()
+  // Regret it from the dock: the receipt offers Undo. Compensating commits
+  // restore the pre-draft (empty) targets through the outbox; the receipt
+  // flips to "undone" and the editor no longer shows the draft.
+  await agent.expectDocked()
   const undo = alice.getByRole("button", { name: /Undo applied/ })
   await expect(undo).toBeVisible({ timeout: 10_000 })
   await undo.click()
   await expect(alice.getByText(/\d+ undone/)).toBeVisible({ timeout: 15_000 })
   await expect(undo).toBeHidden()
 
-  await agent.closeFullScreenWorkbench()
-  await ws.waitForEditor()
   await expect(ws.cellRow(0)).not.toContainText("[bozza]", { timeout: 15_000 })
 })

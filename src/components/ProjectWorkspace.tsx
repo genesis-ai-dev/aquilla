@@ -383,12 +383,14 @@ function writeAgentTabOpen(projectId: string | undefined, open: boolean): void {
   }
 }
 
-/** Sidebar Agent rail click: focus the editor Agent tab when it's open,
- *  otherwise open the compact agent panel inline in the dock. */
+/** Sidebar Agent rail click: focus the workbench only while it is the
+ *  active center surface. A leftover Agent tab in the strip (after
+ *  minimize / switching to a file) must not steal the click — that is
+ *  dock mode again. */
 export function resolveSidebarAgentClick(
-  agentTabOpen: boolean,
+  workbenchActive: boolean,
 ): "activate-editor-tab" | "open-dock" {
-  return agentTabOpen ? "activate-editor-tab" : "open-dock"
+  return workbenchActive ? "activate-editor-tab" : "open-dock"
 }
 
 /**
@@ -853,8 +855,9 @@ export function ProjectWorkspace() {
   const [shareOpen, setShareOpen] = useState(false)
   // FRO-308: left dock active tab (null = collapsed rail only)
   const [dockTab, setDockTab] = useState<DockTab | null>("files")
-  // Agent editor tab stays in the strip until the user closes it — switching
-  // to a file tab only leaves the workbench surface; it does not dismiss Agent.
+  // Agent editor tab is in the strip while the workbench is open. Minimize
+  // and the tab's × dismiss it. Switching to a file tab leaves the surface
+  // but keeps the tab until then.
   const [agentTabOpen, setAgentTabOpen] = useState(
     () => centerSurface === "agent" || readAgentTabOpen(projectId),
   )
@@ -876,19 +879,16 @@ export function ProjectWorkspace() {
       // Entry forces the scope picker ("files"), so treat that forced default
       // (or a collapsed rail) as "no manual choice" and restore the saved tab.
       // Any other tab was picked manually mid-takeover — keep it.
-      // While the Agent editor tab stays open, don't reopen the dock Agent
-      // panel (same session — use the editor tab / sidebar click instead).
-      setDockTab((cur) => {
-        const restored =
-          cur === null || cur === "files" ? dockTabBeforeAgentRef.current : cur
-        if (restored === "agent" && agentTabOpen) return "files"
-        return restored
-      })
+      // Minimize returns to dock mode: if the user expanded from the Agent
+      // panel, restore that panel rather than leaving them on Files.
+      setDockTab((cur) =>
+        cur === null || cur === "files" ? dockTabBeforeAgentRef.current : cur,
+      )
     } else if (centerSurface === "agent" && dockTab === "agent") {
       // Restore/route paths can re-land the agent tab mid-takeover; collapse.
       setDockTab(null)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- dockTab/agentTabOpen read on transition only
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- dockTab read on transition only
   }, [centerSurface])
   // Agent working area (agent-complete follow-up): in the workbench the file
   // explorer doubles as the SCOPE PICKER — clicking a file designates what the
@@ -923,9 +923,6 @@ export function ProjectWorkspace() {
       navigate(editorReturnPath ?? `/project/${projectId}/editor`)
     }
   }, [centerSurface, editorReturnPath, navigate, projectId])
-  const leaveAgentSurface = useCallback(() => {
-    if (projectId) navigate(editorReturnPath ?? `/project/${projectId}/editor`)
-  }, [editorReturnPath, navigate, projectId])
 
   // A source selection the user sent to the agent via "Ask AI". Opens the
   // Agent dock and is inserted into the composer as a context chip.
@@ -5494,10 +5491,11 @@ export function ProjectWorkspace() {
           <LeftDock
             activeTab={dockTab}
             onActiveTabChange={(t) => {
-              // Agent rail: if the editor Agent tab is already open, focus it;
-              // otherwise open the compact agent panel inline in the sidebar.
+              // Agent rail: while the workbench is showing, re-focus it;
+              // otherwise open the compact panel in the dock (even if an
+              // Agent editor tab is still sitting in the strip).
               if (t === "agent") {
-                if (resolveSidebarAgentClick(agentTabOpen) === "activate-editor-tab") {
+                if (resolveSidebarAgentClick(centerSurface === "agent") === "activate-editor-tab") {
                   openAgentTab()
                   return
                 }
@@ -6009,7 +6007,7 @@ export function ProjectWorkspace() {
               onApplied: handleAgentApplied,
             }}
             credits={jwt && projectOrg ? { jwt, orgId: projectOrg.id, orgRoleLevel: projectOrg.role.level } : null}
-            onClose={leaveAgentSurface}
+            onClose={closeAgentTab}
             onJumpToCell={(fileId, cellId) =>
               navigate(`/project/${projectId}/editor/file/${fileId}?cellId=${encodeURIComponent(cellId)}`)
             }

@@ -159,17 +159,17 @@ describe("shouldShowAudioToolbar", () => {
 
 // Keep in sync with `resolveSidebarAgentClick` in ProjectWorkspace.tsx.
 function resolveSidebarAgentClick(
-  agentTabOpen: boolean,
+  workbenchActive: boolean,
 ): "activate-editor-tab" | "open-dock" {
-  return agentTabOpen ? "activate-editor-tab" : "open-dock"
+  return workbenchActive ? "activate-editor-tab" : "open-dock"
 }
 
 describe("resolveSidebarAgentClick", () => {
-  it("activates the editor Agent tab when that tab is already open", () => {
+  it("activates the editor Agent tab only while the workbench is the active surface", () => {
     expect(resolveSidebarAgentClick(true)).toBe("activate-editor-tab")
   })
 
-  it("opens the agent panel inline in the dock when no editor Agent tab is open", () => {
+  it("opens the agent panel inline in the dock when the workbench is minimized", () => {
     expect(resolveSidebarAgentClick(false)).toBe("open-dock")
   })
 })

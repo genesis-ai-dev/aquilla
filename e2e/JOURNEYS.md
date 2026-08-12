@@ -41,6 +41,7 @@
 | AI          | Rapid sparkle sequences (regenerate, edit-then-sparkle, lane repeats) never dead-letter as stale siblings | `e2e/specs/ai/completion-races.spec.ts` (spec-local mock LLM) | |
 | AI          | Paragraph pilcrow button drafts all cells of a paragraph as one unit (mock LLM) | `e2e/specs/ai/paragraph-draft.smoke.spec.ts` | ✅ |
 | AI          | Agent drafts open file → editor-tab workbench accept-all lands in editor → undo restores pre-draft text | `e2e/specs/ai/agent-draft.spec.ts` (mock OpenRouter via e2e-up)     |        |
+| AI          | Sidebar Agent opens the dock; expand → workbench; minimize dismisses the editor tab and restores the dock (collapsed rail also opens dock, not /agent) | `e2e/specs/ai/agent-sidebar-when-minimized.smoke.spec.ts` | ✅ |
 | AI          | Contextual run: enable flag, play pill → autonomous run parks with staged drafts + scene briefs; steer via "Direct the run" popover (queued-direction chip) | `e2e/specs/contextual/run-pill.smoke.spec.ts` (server-side mock LLM via [[ctx]] markers) | ✅ |
 | Editor      | Import dialog escalates an unsupported container to the isolated parser, previews normalized source/target units, then commits through ImportService | `e2e/specs/agent-import.spec.ts` (container-gated with `AGENT_SANDBOX_E2E=1`) | |
 | AI          | External agent stages a SetTranslation changeset (aqk_ credential, Agent API) → commit gated on human approval → approve via `/approve/:id` page AND in-chat ChangesetCard → commit lands in editor | `e2e/specs/agent/changeset-approval.spec.ts` | |

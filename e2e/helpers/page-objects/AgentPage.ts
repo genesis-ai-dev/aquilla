@@ -28,13 +28,23 @@ export class AgentPage {
   // ── Entry ──────────────────────────────────────────────────────────────
 
   /** Open Agent from the sidebar rail.
-   *  If an editor Agent tab is already open, focuses that tab; otherwise
-   *  opens the compact agent panel inline in the dock. */
+   *  While the workbench is the active surface, focuses that tab; otherwise
+   *  opens the compact agent panel inline in the dock. Minimize dismisses
+   *  the editor Agent tab. */
   async openAgentTab(): Promise<void> {
     await this.page
       .getByRole("complementary")
       .getByRole("button", { name: "Agent", exact: true })
       .click()
+  }
+
+  /** Assert the compact dock panel is showing (composer, not /agent). */
+  async expectDocked(): Promise<void> {
+    await expect(this.page).not.toHaveURL(/\/agent(?:\?|$)/)
+    await expect(this.page.getByRole("textbox", { name: "Ask the agent" })).toBeVisible()
+    await expect(
+      this.page.getByRole("button", { name: "Open agent in editor tab" }),
+    ).toBeVisible()
   }
 
   /** Expand the docked agent panel into an editor tab at
@@ -47,14 +57,11 @@ export class AgentPage {
     ).toBeVisible()
   }
 
-  /** Re-focus the Agent editor tab after Close workbench. The tab stays in
-   *  the strip; the dock restore does not reopen the compact Agent panel. */
-  async activateWorkbenchTab(): Promise<void> {
-    await this.page
-      .getByRole("tablist", { name: "Open files" })
-      .getByRole("button", { name: "Agent", exact: true })
-      .click()
-    await expect(this.page).toHaveURL(/\/agent(?:\?|$)/)
+  /** Assert the editor Agent tab is gone (minimize / close). */
+  async expectWorkbenchTabClosed(): Promise<void> {
+    await expect(
+      this.page.getByRole("tablist", { name: "Open files" }).getByRole("tab", { name: "Agent" }),
+    ).toHaveCount(0)
   }
 
   async closeFullScreenWorkbench(): Promise<void> {

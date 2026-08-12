@@ -12,6 +12,7 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { fetchAccessibleProjects, type CloudProjectSummary } from "@/lib/sync/cloud-projects"
 import { partitionSharedProjects } from "@/lib/frontier/shared-projects"
 import { isProjectNew, readProjectOpenedAt } from "@/lib/frontier/opened-shared-store"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 /**
  * AQU-417: the single, dedicated home for "shared with you" projects — every
@@ -30,6 +31,7 @@ import { isProjectNew, readProjectOpenedAt } from "@/lib/frontier/opened-shared-
  * reachable (isAllOrgs requires 2+ member orgs, see OrgContext).
  */
 export function SharedProjectsPage() {
+  const t = useT()
   const { orgs, activeOrgId, isLoading: orgLoading } = useActiveOrg()
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
@@ -78,12 +80,12 @@ export function SharedProjectsPage() {
   const scopedOrgName =
     scopedOrgId == null
       ? null
-      : sharedProjects.find((p) => p.orgName)?.orgName ?? `Org #${scopedOrgId}`
+      : sharedProjects.find((p) => p.orgName)?.orgName ?? t("org.guestOrgHome.orgFallbackWithId", { id: scopedOrgId })
 
   return (
     <AppShell
       sidebar={<OrgSidebar />}
-      header={<OrgBreadcrumb section={scopedOrgName ?? "Shared with you"} />}
+      header={<OrgBreadcrumb section={scopedOrgName ?? t("org.projectsList.sharedWithYouHeading")} />}
       statusBar={null}
       main={
         // See ProjectsList.tsx / AssignedToMe.tsx for why `h-full overflow-y-auto
@@ -93,25 +95,29 @@ export function SharedProjectsPage() {
           data-testid="shared-projects-scroll"
         >
           <div>
-            <h1 className="text-lg font-semibold">{scopedOrgName ?? "Shared with you"}</h1>
+            <h1 className="text-lg font-semibold">{scopedOrgName ?? t("org.projectsList.sharedWithYouHeading")}</h1>
             <p className="text-sm text-muted-foreground">
               {scopedOrgName
-                ? `Projects in ${scopedOrgName} shared with you.`
-                : "Projects shared with you from organizations you’re not a member of, gathered in one place."}
+                ? t("org.sharedProjectsPage.scopedDescription", { org: scopedOrgName })
+                : t("org.sharedProjectsPage.unscopedDescription")}
             </p>
           </div>
           {loading ? (
-            <p className="text-sm text-muted-foreground">Loading&hellip;</p>
+            <p className="text-sm text-muted-foreground">{t("common.loading")}</p>
           ) : sharedProjects.length === 0 ? (
             <EmptyState
               icon={Share2}
-              title={scopedOrgName ? `Nothing shared with you from ${scopedOrgName} yet.` : "Nothing shared with you yet."}
-              description="When someone invites you to a project in another organization, it shows up here."
+              title={
+                scopedOrgName
+                  ? t("org.guestOrgHome.emptyTitle", { orgName: scopedOrgName })
+                  : t("org.sharedProjectsPage.emptyUnscopedTitle")
+              }
+              description={t("org.sharedProjectsPage.emptyDescription")}
             />
           ) : (
             <section data-testid="shared-with-you" className="rounded-2xl border divide-y">
               {sharedProjects.map((p) => {
-                const orgLabel = p.orgName ?? (p.orgId != null ? `Org #${p.orgId}` : null)
+                const orgLabel = p.orgName ?? (p.orgId != null ? t("org.guestOrgHome.orgFallbackWithId", { id: p.orgId }) : null)
                 // AQU-696: new until the user has opened it (recorded on
                 // project landing). Read synchronously — the page remounts on
                 // navigation, so returning here after opening re-reads a fresh
@@ -128,7 +134,7 @@ export function SharedProjectsPage() {
                     <p className="flex-1 min-w-0 truncate font-medium">{p.name}</p>
                     {isNew && (
                       <Badge className="shrink-0" data-testid="new-shared-badge">
-                        New
+                        {t("org.guestOrgHome.newBadge")}
                       </Badge>
                     )}
                     {orgLabel && (

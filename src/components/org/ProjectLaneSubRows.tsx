@@ -21,6 +21,7 @@ import {
 } from "@/lib/frontier/portfolio"
 import { formatRelativeTime } from "@/lib/time/relative"
 import { laneChipLabel, safePct } from "./project-lanes"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 export interface ProjectLaneSubRowsProps {
   projectId: string
@@ -49,6 +50,7 @@ export function ProjectLaneSubRows({
   onAssign,
   onStaffed,
 }: ProjectLaneSubRowsProps) {
+  const t = useT()
   return (
     <TableRow
       data-testid={`project-lanes-subrow-${projectId}`}
@@ -76,17 +78,17 @@ export function ProjectLaneSubRows({
                   <span className="h-1.5 w-full max-w-[8rem] overflow-hidden rounded-full bg-muted" aria-hidden>
                     <span className="block h-full rounded-full bg-primary" style={{ width: `${tpct}%` }} />
                   </span>
-                  <span className="tabular-nums text-muted-foreground" aria-label={`${tpct}% translated`}>
+                  <span className="tabular-nums text-muted-foreground" aria-label={t("org.orgHome.pctTranslated", { pct: tpct })}>
                     {tpct}%
                   </span>
                 </span>
 
-                <span className="tabular-nums text-muted-foreground" aria-label={`${vpct}% validated`}>
-                  {vpct}% validated
+                <span className="tabular-nums text-muted-foreground" aria-label={t("org.orgHome.pctValidated", { pct: vpct })}>
+                  {t("org.orgHome.pctValidated", { pct: vpct })}
                 </span>
 
                 <span className="min-w-[6rem] text-xs text-muted-foreground">
-                  {relative ?? "No activity"}
+                  {relative ?? t("org.projectLaneSubRows.noActivity")}
                 </span>
 
                 <span className="ms-auto flex items-center gap-1.5">
@@ -95,7 +97,7 @@ export function ProjectLaneSubRows({
                     size="xs"
                     variant="outline"
                   >
-                    Open
+                    {t("org.overviewLaneTable.openAction")}
                   </Button>
                   {onAssign && (
                     <Button
@@ -103,7 +105,7 @@ export function ProjectLaneSubRows({
                       variant="outline"
                       onClick={() => onAssign(lane.lane)}
                     >
-                      Assign…
+                      {t("org.assignWork.assignButtonLabel")}
                     </Button>
                   )}
                   <StaffLanePopover
@@ -115,7 +117,7 @@ export function ProjectLaneSubRows({
                     trigger={
                       <>
                         <UserPlus className="size-3.5" aria-hidden />
-                        Staff…
+                        {t("org.overviewLaneTable.staffAction")}
                       </>
                     }
                   />

@@ -33,6 +33,7 @@ import { laneTranslatedPct, laneValidatedPct, type PortfolioLane } from "@/lib/f
 import { formatRelativeTime } from "@/lib/time/relative"
 import type { FileReference } from "@/lib/parsers/types"
 import type { ProjectMember } from "@/lib/frontier/members"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 export interface OverviewLaneTableProps {
   projectId: string
@@ -115,6 +116,7 @@ export function OverviewLaneTable({
   onChanged,
   now,
 }: OverviewLaneTableProps) {
+  const t = useT()
   const { members, refresh: refreshMembers } = useProjectMembers(projectId)
   const [scopesByUser, setScopesByUser] = useState<Record<number, MemberScope[]>>({})
 
@@ -167,19 +169,19 @@ export function OverviewLaneTable({
     <div className="rounded-xl border bg-card p-5" data-testid="overview-lane-table">
       <div className="mb-3 flex items-center gap-2">
         <Languages className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
-        <h2 className="text-xs font-semibold text-muted-foreground">Languages</h2>
+        <h2 className="text-xs font-semibold text-muted-foreground">{t("org.overviewLaneTable.heading")}</h2>
       </div>
 
       <div
         className="mb-1.5 flex items-center gap-3 text-xs font-medium text-muted-foreground"
         data-testid="overview-lane-header"
       >
-        <span className="w-28 shrink-0">Language</span>
-        <span className="w-[104px] shrink-0">Translated</span>
-        <span className="w-[104px] shrink-0">Validated</span>
-        <span className="w-24 shrink-0">People</span>
-        <span className="flex-1">Last activity</span>
-        <span className="shrink-0 text-end">Actions</span>
+        <span className="w-28 shrink-0">{t("org.orgHome.table.languageHeader")}</span>
+        <span className="w-[104px] shrink-0">{t("org.orgHome.table.translatedHeaderLabel")}</span>
+        <span className="w-[104px] shrink-0">{t("org.orgHome.table.validatedHeaderLabel")}</span>
+        <span className="w-24 shrink-0">{t("org.overviewLaneTable.peopleColumn")}</span>
+        <span className="flex-1">{t("org.overviewLaneTable.lastActivityColumn")}</span>
+        <span className="shrink-0 text-end">{t("org.overviewLaneTable.actionsColumn")}</span>
       </div>
 
       <ul className="space-y-2" aria-label="Languages">
@@ -210,7 +212,7 @@ export function OverviewLaneTable({
                 <LanePeople members={people} />
               </span>
               <span className="flex-1 text-xs text-muted-foreground">
-                {rel ?? "No activity yet"}
+                {rel ?? t("org.overviewLaneTable.noActivityYet")}
               </span>
               <span className="flex shrink-0 items-center gap-1.5">
                 <Link
@@ -218,7 +220,7 @@ export function OverviewLaneTable({
                   data-testid={`overview-lane-open-${tagId}`}
                   className={cn(buttonVariants({ size: "sm", variant: "outline" }))}
                 >
-                  Open
+                  {t("org.overviewLaneTable.openAction")}
                 </Link>
                 {canManageLanes && (
                   <Button
@@ -228,7 +230,7 @@ export function OverviewLaneTable({
                     data-testid={`overview-lane-assign-${tagId}`}
                     onClick={() => setAssignLane(lane.lane)}
                   >
-                    Assign…
+                    {t("org.assignWork.assignButtonLabel")}
                   </Button>
                 )}
                 {canManageLanes && (
@@ -237,7 +239,7 @@ export function OverviewLaneTable({
                     lane={lane.lane}
                     laneLabel={label}
                     orgId={orgId}
-                    trigger={<span data-testid={`overview-lane-staff-${tagId}`}>Staff…</span>}
+                    trigger={<span data-testid={`overview-lane-staff-${tagId}`}>{t("org.overviewLaneTable.staffAction")}</span>}
                     onDone={() => { void refreshMembers(); onChanged?.() }}
                   />
                 )}
@@ -258,7 +260,7 @@ export function OverviewLaneTable({
             )}
           >
             <Plus className="h-3.5 w-3.5" />
-            Add language
+            {t("org.overviewLaneTable.addLanguageAction")}
           </Link>
         </div>
       )}

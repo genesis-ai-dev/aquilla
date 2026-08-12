@@ -5,7 +5,7 @@ import { ROLE } from "@/lib/frontier/roles"
 import { Section } from "@/components/ui/page"
 import { SegmentedCapBar, RailLegend } from "@/components/credits/credit-visuals"
 import { pctTextClass } from "@/components/credits/rails"
-import { useI18n } from "@/lib/i18n/I18nProvider"
+import { useI18n, useT } from "@/lib/i18n/I18nProvider"
 
 /**
  * Credit cap usage panel for the org Overview (maintainer+ view).
@@ -36,6 +36,7 @@ export function CreditsPanel({
   orgRoleLevel: number
   action?: ReactNode
 }) {
+  const t = useT()
   const [data, setData] = useState<OrgCredits | null>(null)
 
   useEffect(() => {
@@ -62,15 +63,15 @@ export function CreditsPanel({
 
   return (
     <Section
-      title="Compute credits"
-      description="Usage against daily & weekly caps, broken out by rail"
+      title={t("org.creditsPanel.title")}
+      description={t("org.creditsPanel.description")}
       action={action}
       data-testid="credits-panel"
     >
       <div className="space-y-5">
         {/* Overall caps — total fill = spend/cap, segmented by rail. */}
-        <CapWindow label="Today" total={day.totalCredits} cap={config.dailyCap} byRail={day.byRail} window="day" />
-        <CapWindow label="This week" total={week.totalCredits} cap={config.weeklyCap} byRail={week.byRail} window="week" />
+        <CapWindow label={t("org.creditsPanel.today")} total={day.totalCredits} cap={config.dailyCap} byRail={day.byRail} window="day" />
+        <CapWindow label={t("org.creditsPanel.thisWeek")} total={week.totalCredits} cap={config.weeklyCap} byRail={week.byRail} window="week" />
 
         {/* Agent sub-cap — the totals above already include this; it's broken
             out because agent is the elevated rail (own cap, 5× markup, fastest
@@ -79,12 +80,12 @@ export function CreditsPanel({
           <div className="mb-2 flex items-center gap-1.5">
             <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
             <p className="text-[11px] font-medium text-amber-800 dark:text-amber-300">
-              Agent spend (elevated rail — own cap, 5× markup)
+              {t("org.creditsPanel.agentSpendLabel")}
             </p>
           </div>
           <div className="space-y-1.5">
-            <AgentCapRow label="Today" used={day.agentCredits} cap={config.agentDailyCap} testId="agentcap-day" />
-            <AgentCapRow label="This week" used={week.agentCredits} cap={config.agentWeeklyCap} testId="agentcap-week" />
+            <AgentCapRow label={t("org.creditsPanel.today")} used={day.agentCredits} cap={config.agentDailyCap} testId="agentcap-day" />
+            <AgentCapRow label={t("org.creditsPanel.thisWeek")} used={week.agentCredits} cap={config.agentWeeklyCap} testId="agentcap-week" />
           </div>
         </div>
       </div>

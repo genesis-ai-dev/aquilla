@@ -24,6 +24,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 /**
  * Manager affordance (project_lead+) on the project overview: assign a book or
@@ -78,6 +79,7 @@ export function AssignWork({
   callerUserId = null,
   onAssigned,
 }: AssignWorkProps) {
+  const t = useT()
   const isSelfAssignMode = roleLevel < DEFAULT_ROLE_LEVEL
   const [open, setOpen] = useState(false)
   const [members, setMembers] = useState<ProjectMember[]>([])
@@ -157,22 +159,22 @@ export function AssignWork({
 
   async function submit() {
     if (assigneeId === "") {
-      setError("Choose an assignee.")
+      setError(t("org.assignWork.chooseAssignee"))
       return
     }
     if (!fileId) {
-      setError("Choose a file.")
+      setError(t("org.assignWork.chooseFile"))
       return
     }
     // AQU-676 defense-in-depth: the picker already hides org-baseline-only
     // members, but re-check on submit so a stale/forced selection can't route
     // an assignment to someone outside the project.
     if (!isSelfAssignMode && !eligibleMembers.some((m) => m.userId === Number(assigneeId))) {
-      setError("You can only assign work to a project member.")
+      setError(t("org.assignWork.onlyProjectMember"))
       return
     }
     if (!canSubmitAssignment(roleLevel, allowSelfAssignment, callerUserId, Number(assigneeId))) {
-      setError("You can only assign work to yourself.")
+      setError(t("org.assignWork.onlySelf"))
       return
     }
     // AQU-678: label the assignment with the spelled-out canonical book name.
@@ -214,25 +216,25 @@ export function AssignWork({
   if (!open) {
     return (
       <Button type="button" size="sm" variant="outline" onClick={() => setOpen(true)}>
-        Assign…
+        {t("org.assignWork.assignButtonLabel")}
       </Button>
     )
   }
 
   return (
-    <div role="group" aria-label="Assign work" className="mt-3 w-full rounded-md border p-3">
+    <div role="group" aria-label={t("org.assignWork.groupAriaLabel")} className="mt-3 w-full rounded-md border p-3">
       <FieldGroup className="gap-4">
         <div className="grid gap-4 sm:grid-cols-2">
           <Field>
-            <FieldLabel htmlFor="assign-work-assignee">Assignee</FieldLabel>
+            <FieldLabel htmlFor="assign-work-assignee">{t("org.assignWork.assigneeLabel")}</FieldLabel>
             <Select
               items={
                 isSelfAssignMode
                   ? members
                       .filter((m) => m.userId === callerUserId)
-                      .map((m) => ({ value: String(m.userId), label: `${m.username} (you)` }))
+                      .map((m) => ({ value: String(m.userId), label: t("org.assignWork.youSuffix", { username: m.username }) }))
                   : [
-                      { value: "", label: "Select member…" },
+                      { value: "", label: t("org.assignWork.selectMemberPlaceholder") },
                       // AQU-676: project members only — org-baseline-only people are excluded.
                       ...eligibleMembers.map((m) => ({ value: String(m.userId), label: m.username })),
                     ]
@@ -250,11 +252,11 @@ export function AssignWork({
                     members
                       .filter((m) => m.userId === callerUserId)
                       .map((m) => (
-                        <SelectItem key={m.userId} value={String(m.userId)}>{m.username} (you)</SelectItem>
+                        <SelectItem key={m.userId} value={String(m.userId)}>{t("org.assignWork.youSuffix", { username: m.username })}</SelectItem>
                       ))
                   ) : (
                     <>
-                      <SelectItem value="">Select member…</SelectItem>
+                      <SelectItem value="">{t("org.assignWork.selectMemberPlaceholder")}</SelectItem>
                       {eligibleMembers.map((m) => (
                         <SelectItem key={m.userId} value={String(m.userId)}>{m.username}</SelectItem>
                       ))}
@@ -265,12 +267,12 @@ export function AssignWork({
             </Select>
             {isSelfAssignMode && (
               <FieldDescription>
-                Self-assignment is on — you can claim this work for yourself.
+                {t("org.assignWork.selfAssignNote")}
               </FieldDescription>
             )}
           </Field>
           <Field>
-            <FieldLabel htmlFor="assign-work-book">Book</FieldLabel>
+            <FieldLabel htmlFor="assign-work-book">{t("org.assignWork.bookLabel")}</FieldLabel>
             <Select
               items={sortedFiles.map((f) => ({ value: f.id, label: f.label }))}
               value={fileId}
@@ -290,10 +292,10 @@ export function AssignWork({
             </Select>
           </Field>
           <Field>
-            <FieldLabel htmlFor="assign-work-chapters">Chapters</FieldLabel>
+            <FieldLabel htmlFor="assign-work-chapters">{t("org.assignWork.chaptersLabel")}</FieldLabel>
             {chapters.length === 0 ? (
               <FieldDescription>
-                Whole book — this file has no chapters to narrow to.
+                {t("org.assignWork.wholeBookNoChapters")}
               </FieldDescription>
             ) : (
               <>
@@ -302,8 +304,8 @@ export function AssignWork({
                 >
                   <span>
                     {orderedChosen.length === 0
-                      ? "Whole book (none checked)"
-                      : `${orderedChosen.length} chapter${orderedChosen.length === 1 ? "" : "s"} selected`}
+                      ? t("org.assignWork.wholeBookNoneChecked")
+                      : t("org.assignWork.chaptersSelectedCount", { count: orderedChosen.length })}
                   </span>
                   <Button
                     type="button"
@@ -315,13 +317,13 @@ export function AssignWork({
                       setSelectedChapters(allChaptersChecked ? [] : [...chapters])
                     }
                   >
-                    {allChaptersChecked ? "Clear all" : "Select all"}
+                    {allChaptersChecked ? t("org.assignWork.clearAllChapters") : t("common.selectAll")}
                   </Button>
                 </div>
                 <div
                   id="assign-work-chapters"
                   role="group"
-                  aria-label="Chapters"
+                  aria-label={t("org.assignWork.chaptersLabel")}
                   className="max-h-40 overflow-y-auto rounded-md border p-2"
                 >
                   {chapters.map((ch) => (
@@ -342,7 +344,7 @@ export function AssignWork({
             )}
           </Field>
           <Field>
-            <FieldLabel htmlFor="assign-work-deadline">Deadline (optional)</FieldLabel>
+            <FieldLabel htmlFor="assign-work-deadline">{t("org.assignWork.deadlineLabel")}</FieldLabel>
             <DatePicker
               id="assign-work-deadline"
               value={deadlineDate}
@@ -358,7 +360,7 @@ export function AssignWork({
             onClick={() => void submit()}
             disabled={busy}
           >
-            Assign
+            {t("org.assignWork.assignSubmit")}
           </Button>
           <Button
             type="button"
@@ -367,7 +369,7 @@ export function AssignWork({
             onClick={() => { setOpen(false); setError(null) }}
             disabled={busy}
           >
-            Cancel
+            {t("common.cancel")}
           </Button>
         </div>
         {error && <FieldError>{error}</FieldError>}

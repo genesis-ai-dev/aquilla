@@ -7,6 +7,7 @@ import { ProjectCreateDialog } from "@/components/ProjectCreateDialog"
 import { useOrgMembers } from "@/hooks/useOrg"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import type { CloudProjectSummary } from "@/lib/sync/cloud-projects"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 const dismissKey = (orgId: number) => `org:setup:dismissed:${orgId}`
 
@@ -29,6 +30,7 @@ export function OrgSetupChecklist({
   onProjectCreated: (p: ProjectRecord) => void
   linkableProjects?: CloudProjectSummary[]
 }) {
+  const t = useT()
   const navigate = useNavigate()
   const { members } = useOrgMembers(orgId)
   const [dismissed, setDismissed] = useState(() => {
@@ -59,19 +61,21 @@ export function OrgSetupChecklist({
   return (
     <section data-testid="org-setup-checklist" className="rounded-lg border bg-card p-4">
       <div className="mb-1 flex items-center justify-between">
-        <h2 className="text-sm font-medium">Get your organization started</h2>
+        <h2 className="text-sm font-medium">{t("org.setupChecklist.heading")}</h2>
         <Button
           type="button"
           variant="ghost"
           size="icon-xs"
           onClick={dismiss}
-          aria-label="Dismiss checklist"
+          aria-label={t("org.setupChecklist.dismissAriaLabel")}
           className="text-muted-foreground"
         >
           <X />
         </Button>
       </div>
-      <p className="mb-3 text-xs text-muted-foreground">{doneCount} of 2 complete</p>
+      <p className="mb-3 text-xs text-muted-foreground">
+        {t("org.setupChecklist.progress", { done: doneCount, total: 2 })}
+      </p>
       <ul className="space-y-3">
         <li className="flex items-center gap-3">
           {createdProject ? (
@@ -79,7 +83,7 @@ export function OrgSetupChecklist({
           ) : (
             <Circle className="h-5 w-5 shrink-0 text-muted-foreground" aria-hidden />
           )}
-          <span className="flex-1 text-sm">Create your first project</span>
+          <span className="flex-1 text-sm">{t("org.setupChecklist.createProjectStep")}</span>
           {!createdProject && (
             <ProjectCreateDialog
               orgId={orgId}
@@ -94,10 +98,10 @@ export function OrgSetupChecklist({
           ) : (
             <Circle className="h-5 w-5 shrink-0 text-muted-foreground" aria-hidden />
           )}
-          <span className="flex-1 text-sm">Invite a teammate to your organization</span>
+          <span className="flex-1 text-sm">{t("org.setupChecklist.inviteTeammateStep")}</span>
           {!invitedTeammate && (
             <Button size="sm" variant="outline" onClick={() => navigate(membersPath(orgId))}>
-              <Users className="me-1.5 h-4 w-4" /> Invite
+              <Users className="me-1.5 h-4 w-4" /> {t("org.setupChecklist.inviteButton")}
             </Button>
           )}
         </li>

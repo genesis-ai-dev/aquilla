@@ -26,6 +26,7 @@ import { cn } from "@/lib/utils"
 import { FolderOpen, Search } from "lucide-react"
 import { EmptyState } from "@/components/ui/page"
 import { useT } from "@/lib/i18n/I18nProvider"
+import type { MessageKey } from "@/lib/i18n/messages/en"
 
 // ── Sort options ─────────────────────────────────────────────────────────────
 type SortKey = "name" | "role"
@@ -35,11 +36,11 @@ type ProjectLens = "recent" | "attention" | "overdue" | "least-translated"
 const PROJECT_LENS_STORAGE_KEY = "org:all-projects:view"
 const PROJECT_LENS_VALUES: ProjectLens[] = ["recent", "attention", "overdue", "least-translated"]
 
-const PROJECT_LENSES: { value: ProjectLens; label: string; empty: string }[] = [
-  { value: "recent", label: "Recently updated", empty: "No recently updated projects yet." },
-  { value: "attention", label: "Needs attention", empty: "No projects need attention yet." },
-  { value: "overdue", label: "Overdue", empty: "No overdue projects." },
-  { value: "least-translated", label: "Least translated", empty: "No projects yet." },
+const PROJECT_LENSES: { value: ProjectLens; labelKey: MessageKey; emptyKey: MessageKey }[] = [
+  { value: "recent", labelKey: "org.orgHome.lens.recentLabel", emptyKey: "org.orgHome.lens.recentEmpty" },
+  { value: "attention", labelKey: "org.projectsList.lensAttentionLabel", emptyKey: "org.orgHome.lens.attentionEmpty" },
+  { value: "overdue", labelKey: "org.orgHome.overdue", emptyKey: "org.orgHome.emptyTitle.overdue" },
+  { value: "least-translated", labelKey: "org.orgHome.lens.leastTranslatedLabel", emptyKey: "org.orgHome.noProjectsYet" },
 ]
 
 function readProjectLens(): ProjectLens {
@@ -149,6 +150,7 @@ function ProjectRow({
   /** AQU-696: show the "New" badge (shared-projects list only). */
   isNew?: boolean
 }) {
+  const t = useT()
   return (
     <li>
       <button
@@ -161,7 +163,7 @@ function ProjectRow({
           <span className="truncate text-sm font-medium">{p.name}</span>
           {isNew && (
             <Badge className="shrink-0" data-testid="new-shared-badge">
-              New
+              {t("org.guestOrgHome.newBadge")}
             </Badge>
           )}
           {orgLabel && (
@@ -171,7 +173,7 @@ function ProjectRow({
           )}
           {p.isActive === false && (
             <Badge variant="secondary" className="shrink-0">
-              inactive
+              {t("org.projectsList.inactiveBadge")}
             </Badge>
           )}
         </span>
@@ -319,8 +321,8 @@ export function ProjectsList() {
 
   function projectOrgLabel(project: CloudProjectSummary): string | undefined {
     if (!isAllOrgs) return undefined
-    if (project.orgId == null) return "No org"
-    return orgNameById.get(project.orgId) ?? "External org"
+    if (project.orgId == null) return t("org.projectsList.noOrgLabel")
+    return orgNameById.get(project.orgId) ?? t("org.projectsList.externalOrgLabel")
   }
 
   const filtered = useMemo(() => {
@@ -337,10 +339,12 @@ export function ProjectsList() {
   }, [sharedWithMe, filter, sortKey, sortDir])
   const totalProjectCount = inActiveOrg.length + sharedWithMe.length
   const visibleProjectCount = filtered.length + filteredShared.length
-  const projectLensEmpty = PROJECT_LENSES.find((lens) => lens.value === projectLens)?.empty ?? "No projects yet."
+  const projectLensEmpty = t(
+    PROJECT_LENSES.find((lens) => lens.value === projectLens)?.emptyKey ?? "org.orgHome.noProjectsYet",
+  )
   const projectCountLabel = filter.trim() || (isAllOrgs && projectLens === "overdue")
-    ? `${visibleProjectCount} shown of ${totalProjectCount}`
-    : `${totalProjectCount} ${totalProjectCount === 1 ? "project" : "projects"}`
+    ? t("org.projectsList.shownOfTotal", { visible: visibleProjectCount, total: totalProjectCount })
+    : t("org.orgHome.organizationsPanel.projectCount", { count: totalProjectCount })
 
   // Signed-out or org-less: session finished loading but no JWT.
   if (!sessionLoading && !orgLoading && !jwt) {
@@ -355,15 +359,15 @@ export function ProjectsList() {
         statusBar={null}
         main={
           <div className="flex min-h-screen flex-col items-center justify-center gap-4 p-6 text-center">
-            <p className="text-lg font-medium">Sign in to see your projects</p>
+            <p className="text-lg font-medium">{t("org.projectsList.signedOutTitle")}</p>
             <p className="text-sm text-muted-foreground max-w-xs">
-              Your session has ended or you are not signed in. Sign in to access your projects.
+              {t("org.projectsList.signedOutBody")}
             </p>
             <Link
               to={`/login?next=${encodeURIComponent("/projects")}`}
               className={cn(buttonVariants())}
             >
-              Sign in
+              {t("auth.login.title")}
             </Link>
           </div>
         }
@@ -378,11 +382,11 @@ export function ProjectsList() {
       sidebar={<OrgSidebar />}
       header={
         <div className="flex items-center justify-between pe-4">
-          <OrgBreadcrumb section="Projects" />
+          <OrgBreadcrumb section={t("nav.projects")} />
           {activeOrgId != null ? (
             <ProjectCreateDialog orgId={activeOrgId} onCreated={handleCreated} />
           ) : (
-            <Badge variant="outline">Select an organization to create a project</Badge>
+            <Badge variant="outline">{t("org.orgHome.selectOrgToCreateProject")}</Badge>
           )}
         </div>
       }
@@ -398,18 +402,18 @@ export function ProjectsList() {
         // is exhausted, which otherwise reads as "scrolling does nothing".
         <div className="h-full overflow-y-auto overscroll-contain p-6" data-testid="projects-list-scroll">
           {isPageLoading ? (
-            <LoadingPanel label="Loading projects" className="min-h-[34rem]" />
+            <LoadingPanel label={t("org.projectsList.loadingLabel")} className="min-h-[34rem]" />
           ) : unreachable || orgsUnreachable ? (
             <div className="flex items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm dark:border-amber-800 dark:bg-amber-950">
               <span className="text-amber-800 dark:text-amber-200">
-                Can't reach the server — project list unavailable.
+                {t("org.projectsList.unreachableBanner")}
               </span>
               <button
                 type="button"
                 onClick={retryUnreachable}
                 className="shrink-0 rounded-md bg-amber-800 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-700 dark:bg-amber-700 dark:hover:bg-amber-600"
               >
-                Retry
+                {t("common.retry")}
               </button>
             </div>
           ) : (
@@ -417,7 +421,7 @@ export function ProjectsList() {
               <section className="rounded-lg border bg-card">
                 <div className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
                   <div className="min-w-0">
-                    <h1 className="text-base font-semibold">{isAllOrgs ? "All projects" : "Projects"}</h1>
+                    <h1 className="text-base font-semibold">{isAllOrgs ? t("org.switcher.allProjects") : t("nav.projects")}</h1>
                     <p className="text-xs text-muted-foreground">{projectCountLabel}</p>
                   </div>
                   <InputGroup className="h-9 w-full sm:w-72">
@@ -426,16 +430,16 @@ export function ProjectsList() {
                     </InputGroupAddon>
                     <InputGroupInput
                       type="search"
-                      placeholder="Filter projects…"
+                      placeholder={t("org.orgHome.projectsPanel.filterPlaceholder")}
                       value={filter}
                       onChange={(e) => setFilter(e.target.value)}
-                      aria-label="Filter projects by name"
+                      aria-label={t("org.orgHome.projectsPanel.filterAria")}
                     />
                   </InputGroup>
                 </div>
 
                 {isAllOrgs && (
-                  <div className="flex flex-wrap items-center gap-1 border-b px-4 py-3" aria-label="Project list view">
+                  <div className="flex flex-wrap items-center gap-1 border-b px-4 py-3" aria-label={t("org.projectsList.lensGroupAriaLabel")}>
                     {PROJECT_LENSES.map((lens) => (
                       <Button
                         key={lens.value}
@@ -445,7 +449,7 @@ export function ProjectsList() {
                         onClick={() => selectProjectLens(lens.value)}
                         aria-pressed={projectLens === lens.value}
                       >
-                        {lens.label}
+                        {t(lens.labelKey)}
                       </Button>
                     ))}
                   </div>
@@ -454,20 +458,20 @@ export function ProjectsList() {
                 <div className="grid grid-cols-[minmax(0,1fr)_7rem] gap-x-6 border-b bg-muted/30 px-4 py-2">
                   {isAllOrgs ? (
                     <>
-                      <span className="text-xs font-medium text-muted-foreground">Name</span>
-                      <span className="justify-self-start text-xs font-medium text-muted-foreground">Role</span>
+                      <span className="text-xs font-medium text-muted-foreground">{t("common.name")}</span>
+                      <span className="justify-self-start text-xs font-medium text-muted-foreground">{t("org.membersPage.roleLabel")}</span>
                     </>
                   ) : (
                     <>
                       <SortButton
-                        label="Name"
+                        label={t("common.name")}
                         colKey="name"
                         sortKey={sortKey}
                         sortDir={sortDir}
                         onSort={handleSort}
                       />
                       <SortButton
-                        label="Role"
+                        label={t("org.membersPage.roleLabel")}
                         colKey="role"
                         sortKey={sortKey}
                         sortDir={sortDir}
@@ -484,10 +488,10 @@ export function ProjectsList() {
                     icon={filter ? Search : FolderOpen}
                     title={
                       filter
-                        ? "No projects match your filter."
+                        ? t("org.projectsList.noFilterMatch")
                         : isAllOrgs
                           ? projectLensEmpty
-                          : "No projects in this org yet."
+                          : t("org.projectsList.noOrgProjectsYet")
                     }
                   />
                 ) : (
@@ -510,9 +514,9 @@ export function ProjectsList() {
               {filteredShared.length > 0 && (
                 <section className="rounded-lg border bg-card" data-testid="shared-with-you">
                   <div className="border-b px-4 py-3">
-                    <h2 className="text-sm font-medium">Shared with you</h2>
+                    <h2 className="text-sm font-medium">{t("org.projectsList.sharedWithYouHeading")}</h2>
                     <p className="text-xs text-muted-foreground">
-                      Projects from organizations outside the current scope.
+                      {t("org.projectsList.sharedWithYouDescription")}
                     </p>
                   </div>
                   <ul className="divide-y">

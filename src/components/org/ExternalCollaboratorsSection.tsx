@@ -13,6 +13,7 @@ import {
 } from "@/lib/frontier/external-collaborators"
 import { RoleLabel } from "@/components/RoleLabel"
 import { toUserFacingError } from "@/lib/errors/user-error"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 /**
  * AQU-326: org-level governance view of everyone who reaches this org's
@@ -33,6 +34,7 @@ export function ExternalCollaboratorsSection({
   orgId: number
   orgMemberIds: number[]
 }) {
+  const t = useT()
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
   const [externals, setExternals] = useState<ExternalCollaborator[]>([])
@@ -78,8 +80,8 @@ export function ExternalCollaboratorsSection({
   return (
     <Section
       data-testid="external-collaborators"
-      title="External collaborators"
-      description="People outside this organization with access to specific projects (via invite links, direct adds, or teams). Revoking removes their access to that project only."
+      title={t("org.externalCollaborators.title")}
+      description={t("org.externalCollaborators.description")}
       contentClassName="space-y-2"
     >
       {error && <p className="text-xs text-destructive">{error}</p>}
@@ -89,7 +91,7 @@ export function ExternalCollaboratorsSection({
           <li key={e.userId} className="flex flex-wrap items-center gap-2 px-3 py-2 text-sm">
             <span className="font-medium">{e.username}</span>
             <Badge className="border-transparent bg-amber-500/15 text-[10px] text-amber-700 dark:text-amber-300">
-              external
+              {t("org.externalCollaborators.badge")}
             </Badge>
             <div className="ms-auto flex flex-wrap items-center gap-1.5">
               {e.grants.map((g) => (
@@ -105,7 +107,10 @@ export function ExternalCollaboratorsSection({
                       size="icon"
                       variant="ghost"
                       className="size-4 text-muted-foreground hover:text-destructive"
-                      aria-label={`Revoke ${e.username}'s access to ${g.projectName}`}
+                      aria-label={t("org.externalCollaborators.revokeAriaLabel", {
+                        username: e.username,
+                        project: g.projectName,
+                      })}
                       disabled={busyGrant === `${g.projectId}:${e.userId}`}
                       onClick={() => void revoke(g.projectId, e.userId)}
                     >
@@ -115,13 +120,13 @@ export function ExternalCollaboratorsSection({
                     <AppTooltip
                       content={
                         g.source === "group"
-                          ? "Access via a team: detach the team or remove them from it to revoke"
-                          : "Project creator"
+                          ? t("org.externalCollaborators.viaTeamTooltip")
+                          : t("org.membersPage.lockedHintCreator")
                       }
                       className="max-w-xs"
                     >
                       <span className="text-[10px] text-muted-foreground">
-                        via {g.source}
+                        {t("org.externalCollaborators.viaSourceLabel", { source: g.source })}
                       </span>
                     </AppTooltip>
                   )}

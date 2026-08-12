@@ -107,4 +107,19 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "speech in languages that mark that distinction; the English capitalization " +
     "difference is incidental, not the reason (a case-only split alone would not " +
     "justify this entry).",
+  "org.orgHome.table.languageHeader":
+    "Column heading over the source→target language pair of each project row. " +
+    "language.label is the accessible name of the UI-LANGUAGE switcher — the " +
+    "language the interface itself is drawn in, a different thing entirely from " +
+    "the languages a project translates between. Collapsing them would make a " +
+    "translator render this column with interface-language wording, which is " +
+    "wrong for a content column, and several languages distinguish the two " +
+    "senses lexically rather than by context.",
+  "org.addLanguagePopover.triggerLabel":
+    "Visible text of a small chip BUTTON beside a project row that opens the " +
+    "add-a-language-lane popover; it names an action's object, not a heading. " +
+    "org.orgHome.table.languageHeader is the noun heading of a table column, and " +
+    "language.label names the interface-language switcher. Button object, column " +
+    "heading, and interface-chrome name take different forms in languages that " +
+    "inflect for grammatical role, so one shared string cannot serve all three.",
 }

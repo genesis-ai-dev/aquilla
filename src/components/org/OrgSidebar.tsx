@@ -10,6 +10,7 @@ import { orgHomePath, orgPath, ALL_ORGS_PARAM } from "@/lib/navigation/org-paths
 import { OrgSwitcher } from "./OrgSwitcher"
 import { AccountSwitcher } from "@/components/AccountSwitcher"
 import { HelpMenu } from "@/components/HelpMenu"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 const link = ({ isActive }: { isActive: boolean }) =>
   `block rounded-md px-2 py-1.5 text-sm ${isActive ? "bg-accent font-medium text-foreground" : "text-muted-foreground hover:bg-accent hover:text-foreground"}`
@@ -36,6 +37,7 @@ function OrgNavLink(props: ComponentProps<typeof NavLink>) {
 }
 
 export function OrgSidebar() {
+  const t = useT()
   const { orgs, activeOrg, activeOrgId, activeGuestOrg, isAllOrgs, accessibleProjects } = useActiveOrg()
   const { session } = useFrontierSession()
   const username = session?.username ?? null
@@ -91,31 +93,31 @@ export function OrgSidebar() {
           className={link}
           data-tour="nav-overview"
         >
-          Projects
+          {t("nav.projects")}
         </OrgNavLink>
         {isMemberOrg && activeOrgId != null && <>
-          <OrgNavLink to={orgPath(activeOrgId, "/teams")} className={link}>Teams</OrgNavLink>
-          <OrgNavLink to={orgPath(activeOrgId, "/assigned")} className={link} data-tour="nav-assigned">Assigned to me</OrgNavLink>
+          <OrgNavLink to={orgPath(activeOrgId, "/teams")} className={link}>{t("editor.navTitle.teams")}</OrgNavLink>
+          <OrgNavLink to={orgPath(activeOrgId, "/assigned")} className={link} data-tour="nav-assigned">{t("editor.navTitle.assignedToMe")}</OrgNavLink>
         </>}
         {isAdmin && activeOrgId != null && <>
           <div className="my-1 border-t" />
-          <OrgNavLink to={orgPath(activeOrgId, "/members")} className={link}>Members</OrgNavLink>
-          <OrgNavLink to={orgPath(activeOrgId, "/archived")} className={link}>Archived</OrgNavLink>
-          <OrgNavLink to={orgPath(activeOrgId, "/settings")} className={link} data-tour="nav-settings">Settings</OrgNavLink>
+          <OrgNavLink to={orgPath(activeOrgId, "/members")} className={link}>{t("editor.navTitle.members")}</OrgNavLink>
+          <OrgNavLink to={orgPath(activeOrgId, "/archived")} className={link}>{t("org.orgSidebar.archived")}</OrgNavLink>
+          <OrgNavLink to={orgPath(activeOrgId, "/settings")} className={link} data-tour="nav-settings">{t("nav.settings")}</OrgNavLink>
         </>}
         {isPlatformAdmin && <>
           <div className="my-1 border-t" />
-          <OrgNavLink to="/admin" className={link}>Admin</OrgNavLink>
+          <OrgNavLink to="/admin" className={link}>{t("org.orgSidebar.admin")}</OrgNavLink>
         </>}
         {hasSharedProjects && (
           <>
             <div className="my-1 border-t" />
             <OrgNavLink to="/shared" className={link}>
               <span className="flex items-center justify-between gap-2">
-                Shared with you
+                {t("editor.navTitle.sharedWithYou")}
                 {hasNewSharedProjects && (
                   <Badge className="shrink-0" data-testid="new-shared-nav-badge">
-                    New
+                    {t("org.orgSidebar.newSharedBadge")}
                   </Badge>
                 )}
               </span>

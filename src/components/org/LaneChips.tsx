@@ -40,7 +40,12 @@ function LaneChip({
   const t = useT()
   const { count } = useFormat()
   const pct = safePct(laneTranslatedPct(lane))
-  const pctDisplay = bidiIsolate(`${count(pct)}%`)
+  const pctPlain = `${count(pct)}%`
+  // Isolate only what is SEEN. The bidi isolates keep "40%" from reordering
+  // beside RTL text, but they are invisible control characters: in an
+  // accessible name they are noise a screen reader linearises away anyway, and
+  // they leak into any assertion on that name.
+  const pctDisplay = bidiIsolate(pctPlain)
   const label = laneChipLabel(lane.lane, defaultLaneLabel)
   const tooltip = t("org.laneChips.tooltip", { label, pct: pctDisplay })
   return (
@@ -48,7 +53,7 @@ function LaneChip({
       <span
         data-testid={`lane-chip-${projectId}-${lane.lane}`}
         className="inline-flex min-w-0 max-w-full items-center gap-1 overflow-hidden rounded border bg-card px-1.5 py-0.5 text-xs"
-        aria-label={t("org.laneChips.ariaLabel", { label, pct: pctDisplay })}
+        aria-label={t("org.laneChips.ariaLabel", { label, pct: pctPlain })}
       >
         <span className="min-w-0 flex-1 truncate font-medium">{label}</span>
         <span className="h-1.5 w-8 shrink-0 overflow-hidden rounded-full bg-muted" aria-hidden>

@@ -33,7 +33,11 @@ export function GuestOrgHome() {
   const username = session?.username ?? null
 
   const guestOrgId = activeGuestOrg?.id ?? null
-  const orgName = activeGuestOrg?.name ?? (guestOrgId != null ? `Org #${guestOrgId}` : "Organization")
+  const orgName =
+    activeGuestOrg?.name ??
+    (guestOrgId != null
+      ? t("org.guestOrgHome.orgFallbackWithId", { id: guestOrgId })
+      : t("org.breadcrumb.organizationFallback"))
 
   // The app-wide accessible-project directory is already fetched by OrgProvider;
   // reuse it rather than issuing another request. "Shared with me" scoped to the
@@ -58,17 +62,16 @@ export function GuestOrgHome() {
           <div>
             <h1 className="text-lg font-semibold">{orgName}</h1>
             <p className="text-sm text-muted-foreground">
-              Projects in {orgName} shared with you. You’re a guest here — you have
-              access to these projects, but not to the organization itself.
+              {t("org.guestOrgHome.description", { orgName })}
             </p>
           </div>
           {accessibleProjectsLoading ? (
-            <p className="text-sm text-muted-foreground">Loading&hellip;</p>
+            <p className="text-sm text-muted-foreground">{t("common.loading")}</p>
           ) : sharedProjects.length === 0 ? (
             <EmptyState
               icon={Share2}
-              title={`Nothing shared with you from ${orgName} yet.`}
-              description="When someone invites you to a project in this organization, it shows up here."
+              title={t("org.guestOrgHome.emptyTitle", { orgName })}
+              description={t("org.guestOrgHome.emptyDescription")}
             />
           ) : (
             <section data-testid="guest-org-projects" className="rounded-2xl border divide-y">
@@ -85,7 +88,7 @@ export function GuestOrgHome() {
                     <p className="flex-1 min-w-0 truncate font-medium">{p.name}</p>
                     {isNew && (
                       <Badge className="shrink-0" data-testid="new-shared-badge">
-                        New
+                        {t("org.guestOrgHome.newBadge")}
                       </Badge>
                     )}
                     <RoleLabel name={p.role.name} className="shrink-0 text-xs text-muted-foreground" />

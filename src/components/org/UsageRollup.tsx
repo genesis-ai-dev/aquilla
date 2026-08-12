@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react"
 import { getOrgUsage, type OrgUsage } from "@/lib/sync/usage"
 import { Section } from "@/components/ui/page"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 /**
  * Per-member usage rollup for the org Overview (manager oversight). Fetches
@@ -12,6 +13,7 @@ import { Section } from "@/components/ui/page"
  * Mirrors WorkloadRollup exactly: same effect pattern, same self-hiding logic.
  */
 export function UsageRollup({ jwt, orgId, action }: { jwt: string; orgId: number; action?: ReactNode }) {
+  const t = useT()
   const [data, setData] = useState<OrgUsage | null>(null)
 
   useEffect(() => {
@@ -31,27 +33,27 @@ export function UsageRollup({ jwt, orgId, action }: { jwt: string; orgId: number
   if (!hasUsage) return null
 
   return (
-    <Section title="Team usage" action={action} contentClassName="pt-0">
+    <Section title={t("org.usageRollup.title")} action={action} contentClassName="pt-0">
       <div className="divide-y">
         {data.members.map((m) => {
           const mins = Math.floor(m.audioSeconds / 60)
           const secs = Math.round(m.audioSeconds % 60)
           const audioLabel =
             m.audioSeconds < 60
-              ? `${Math.round(m.audioSeconds)} s audio`
+              ? t("org.usageRollup.audioSecondsOnly", { seconds: Math.round(m.audioSeconds) })
               : secs > 0
-                ? `${mins} min ${secs} s audio`
-                : `${mins} min audio`
+                ? t("org.usageRollup.audioMinutesSeconds", { minutes: mins, seconds: secs })
+                : t("org.usageRollup.audioMinutesOnly", { minutes: mins })
           const requests = m.ttsRequests + m.llmRequests
           return (
             <div key={m.userId} className="flex items-center gap-4 py-2.5 first:pt-0">
               <div className="min-w-0 flex-1">
-                <p className="truncate font-medium">{m.username ?? `User ${m.userId}`}</p>
+                <p className="truncate font-medium">{m.username ?? t("org.workloadRollup.unknownUser", { id: m.userId })}</p>
               </div>
               <div className="shrink-0 text-end">
                 <p className="text-sm font-semibold tabular-nums">{audioLabel}</p>
                 <p className="text-xs text-muted-foreground tabular-nums">
-                  {requests} AI request{requests !== 1 ? "s" : ""}
+                  {t("org.usageRollup.aiRequestCount", { count: requests })}
                 </p>
               </div>
             </div>

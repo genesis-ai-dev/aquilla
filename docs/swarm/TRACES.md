@@ -157,3 +157,24 @@
   most visible leaks — typed `MessageKey` props (WS-05/WS-06) are the compensating control.
 - [DONE] (import-data-loss) i18n:import now merges. Verified: 2-key partial import preserves
   all 1,335 translations; `--replace` retains the destructive path.
+
+## Wave 2 additions
+- [DONE] (permission-alert-flake) Fixed: the test gated on prop-derived text then counted
+  styled spans, while the account name arrived from an async session. Waits on the async
+  value now. Full suite 7121/7121.
+- [OPEN] (orgcontext-flake) `src/context/OrgContext.test.tsx` is the remaining known load
+  flake — same class, not yet diagnosed. Passes 5/5 in isolation.
+- [OPEN] (movetocorpus) `MoveToCorpusDialog` inside ProjectWorkspace.tsx (~line 6600) still
+  hardcodes "Move to corpus" / "Ungrouped" / "Create a corpus" / "Corpus name". Out of WS-05's
+  named scope. Cancel/Save there can reuse common.cancel/common.save.
+- [OPEN] (derivetitle-parallel-source) `editor.navTitle.*` is a parallel English source for
+  words `nav.*` also owns; one collision ("Terminology") already surfaced and was deduped.
+  Several more (`Members`, `Teams`, `Project settings`) will collide once the org/settings
+  sweeps add their keys. Decide ownership before wave 4 rather than minting exceptions.
+- [OPEN] (ws07-remainder) ~9 verbatim `body.error` sites remain, listed in WS-07's handoff
+  section: SourceLinkSection, monday/api, terminology/subscriptions-api, agent/artifact-upload,
+  frontier/admin, frontier/parse-document, sync/archive, diarization/run-diarization,
+  ApproveChangeset.
+- [OPEN] (ungrouped-sentinel) `group-by-corpus.ts` / `section-index.ts` "Ungrouped" is a
+  load-bearing sentinel compared by `AssignModal.tsx:293,608` and `ExpandableFileList.tsx:132`.
+  Needs a stable identity key split from the display label before it can be localized.

@@ -74,7 +74,7 @@ Gate:
 | Wave | Dispatched | Workstreams | Status |
 | --- | --- | --- | --- |
 | 1 | 2026-08-12 | WS-01 import-merge, WS-02 lint-guard, WS-03 dead-code, WS-04 standard-relax | **MERGED, gate green** |
-| 2 | 2026-08-12 | WS-05 trunk-tables, WS-06 lib-labels, WS-07 error-wiring | dispatched |
+| 2 | 2026-08-12 | WS-05 trunk-tables, WS-06 lib-labels, WS-07 error-wiring | **MERGED, gate green** |
 
 ## §3 Workstream registry
 
@@ -95,7 +95,19 @@ Gate:
 | 08-12 | WS-02 lint-guard | merge | 0 | green | `i18n/no-unkeyed-string` + native suppressions ratchet; 199 files / 2251 baseline; CI wired |
 | 08-12 | WS-04 standard-relax | 0e2fdaefc | 0 | green | prose-required keys 1143 (85.5%) → 653 (48.8%); ellipsis normalize defect fixed (20 of 30 exceptions dropped) |
 
+| 08-12 | WS-06 lib-labels | 57ad3b58d | 0 | green | deriveTitle/milestone-nav/sync indicators return MessageKey descriptors; correctly REFUSED to touch two load-bearing display strings |
+| 08-12 | WS-07 error-wiring | 8ba5e0e9c | 0 | green | messageForStatus keyed; 6/6 auth.ts sites; 6/6 keyed-but-dead fixed; closed a latent PIN-oracle |
+| 08-12 | WS-05 trunk-tables | 8ca984025 | 0 | green | trunk label tables → MessageKey; Setup ratio as plural() + FSI/PDI; ~50 new keys, 11 reused |
+| 08-12 | orchestrator | — | 0 | green | union-merged duplicate-exceptions.ts; deduped cross-workstream "Terminology" collision; fixed the PermissionDeniedAlert async race |
+
 **Wave 1 gate: tsc 0 · vitest 768 files / 7109 tests green · i18n:check 1337 covered · eslint exit 0.**
+**Wave 2 gate: tsc 0 · vitest 769 files / 7121 tests green · i18n:check 1441 covered · eslint exit 0.**
+
+### Lesson for wave 3 — isolated worktrees cannot see each other's new keys
+WS-05 and WS-06 each minted a key for the English "Terminology" and neither could
+know. `no-duplicates` caught it only at integration. For wave 3+, either assign one
+agent per namespace, or have each agent declare its intended new keys up front so the
+orchestrator can arbitrate before they author. This will get worse as waves widen.
 
 ## §5 Approved scope decisions (from the user)
 

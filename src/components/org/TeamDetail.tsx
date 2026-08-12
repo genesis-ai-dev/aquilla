@@ -451,7 +451,7 @@ export function TeamDetail() {
       header={<OrgBreadcrumb parent={{ label: "Teams", to: activeOrgId != null ? orgPath(activeOrgId, "/teams") : "/orgs/all" }} section={team?.name ?? "Team"} />}
       statusBar={null}
       main={
-        <Page size="wide" className="pl-14 sm:pl-16">
+        <Page size="wide">
           <div className="space-y-6">
             {loading ? (
               <>
@@ -552,37 +552,34 @@ export function TeamDetail() {
                 </Dialog>
               )}
 
-              {/* Avatar hangs left of the content column so title/description/tabs share one left edge.
-                  With no description, omit the <p> entirely and center the title on the avatar. */}
+              {/* Avatar bleeds left of the max-w-6xl well so title/tabs/tables keep the same
+                  content width as the teams list. Out of flow — do not pad the Page well. */}
               <div className="space-y-3">
               <div
                 className={cn(
-                  "flex justify-between gap-4",
+                  "relative flex justify-between gap-4",
                   teamDescription ? "items-start" : "items-center",
                 )}
               >
-                <div
+                <span
+                  aria-hidden
+                  data-testid="team-detail-avatar"
                   className={cn(
-                    "-ml-11 flex min-w-0 gap-3",
-                    teamDescription ? "items-start" : "items-center",
+                    "absolute right-full mr-3",
+                    teamDescription ? "top-0 mt-0.5" : "top-1/2 -translate-y-1/2",
                   )}
                 >
-                  <span
-                    aria-hidden
-                    className={cn("shrink-0", teamDescription && "mt-0.5")}
-                  >
-                    <InitialsAvatar name={team.name} size="default" />
-                  </span>
-                  <div className={cn("min-w-0", teamDescription && "space-y-1")}>
-                    <h1 className="font-heading text-xl font-semibold tracking-tight text-foreground">
-                      {team.name}
-                    </h1>
-                    {teamDescription ? (
-                      <p className="max-w-prose text-sm text-muted-foreground whitespace-pre-wrap">
-                        {teamDescription}
-                      </p>
-                    ) : null}
-                  </div>
+                  <InitialsAvatar name={team.name} size="default" />
+                </span>
+                <div className={cn("min-w-0", teamDescription && "space-y-1")}>
+                  <h1 className="font-heading text-xl font-semibold tracking-tight text-foreground">
+                    {team.name}
+                  </h1>
+                  {teamDescription ? (
+                    <p className="max-w-prose text-sm text-muted-foreground whitespace-pre-wrap">
+                      {teamDescription}
+                    </p>
+                  ) : null}
                 </div>
                 {isAdmin && activeOrgId != null && groupIdNum != null ? (
                   <Link

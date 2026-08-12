@@ -238,6 +238,18 @@ describe("TeamDetail admin management", () => {
     await waitFor(() => expect(screen.getByRole("heading", { name: "WA" })).toBeInTheDocument())
     expect(screen.getByText("West Africa translation")).toBeInTheDocument()
   })
+
+  it("bleeds the avatar outside the wide well instead of padding max-w-6xl", async () => {
+    renderDetail()
+    await waitFor(() => expect(screen.getByRole("heading", { name: "WA" })).toBeInTheDocument())
+    const well = screen.getByRole("heading", { name: "WA" }).closest(".max-w-6xl")
+    expect(well).toBeTruthy()
+    expect(well).not.toHaveClass("pl-14")
+    expect(well).not.toHaveClass("sm:pl-16")
+    const avatar = screen.getByTestId("team-detail-avatar")
+    expect(avatar).toHaveClass("absolute", "right-full")
+    expect(well?.contains(avatar)).toBe(true)
+  })
 })
 
 describe("TeamDetail non-admin gating", () => {

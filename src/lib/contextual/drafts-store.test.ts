@@ -167,15 +167,20 @@ describe("draft bursts", () => {
     expect(getContextualDraftsSummary()).toMatchObject({ targetLang: "fr", pending: 0 })
   })
 
-  it("drops a frame that declares a non-default producer lane", () => {
-    hydrateContextualDrafts("file-1", [])
+  it("accepts a frame for the attached named lane and drops a sibling language", () => {
+    attachContextualDrafts(PROJECT, "file-1", "fr")
 
     applyContextualDraftsFrame(burst(
-      [{ draftId: "d1", cellId: "c1", text: "legacy lane text" }],
+      [{ draftId: "d1", cellId: "c1", text: "proposition française" }],
       { targetLang: "fr" },
     ))
+    expect(getContextualDraftFor("c1")?.text).toBe("proposition française")
 
-    expect(getContextualDrafts().size).toBe(0)
+    applyContextualDraftsFrame(burst(
+      [{ draftId: "d2", cellId: "c1", text: "propuesta española" }],
+      { targetLang: "es" },
+    ))
+    expect(getContextualDraftFor("c1")?.text).toBe("proposition française")
   })
 
   it("orders the review queue newest first", () => {

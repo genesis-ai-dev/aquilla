@@ -259,7 +259,7 @@ describe("ProjectAutopilotPanel", () => {
     expect(screen.queryByText(/Working across 3 files/)).not.toBeInTheDocument()
   })
 
-  it("aggregates lane progress while counting unique files and keeps an unsupported historic lane visible", async () => {
+  it("aggregates lane progress while counting unique files and keeps a named lane visible", async () => {
     fetchMock.mockResolvedValue(overview({
       activeRuns: 2,
       files: [
@@ -451,6 +451,18 @@ describe("ProjectAutopilotPanel", () => {
     expect(within(panel).getByText("Idle")).toBeInTheDocument()
     expect(within(panel).getByText(/No more work is queued/)).toBeInTheDocument()
     expect(within(panel).getByRole("button", { name: "Run Autopilot" })).toBeInTheDocument()
+  })
+
+  it("marks a parked run that finished with failed passages as needing attention", async () => {
+    fetchMock.mockResolvedValue(overview({
+      files: [fileRow({ status: "parked", doneSpans: 7, failedSpans: 2, totalSpans: 9 })],
+      failedSpans: 2,
+    }))
+    renderPanel()
+    const panel = await screen.findByTestId("project-autopilot-panel")
+
+    expect(within(panel).getByText("Needs attention")).toBeInTheDocument()
+    expect(within(panel).getByRole("button", { name: "View 2 needs attention" })).toBeInTheDocument()
   })
 
   it("explains the never-run state while keeping it ready to act", async () => {

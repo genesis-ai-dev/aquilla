@@ -527,32 +527,44 @@ describe("steering inbox", () => {
 })
 
 describe("staged drafts", () => {
-  it("keeps legacy non-default proposals out of the actionable default-lane queue", async () => {
+  it("keeps sibling-language proposals in independent review queues", async () => {
     const defaultOwner = await newRun()
     await insertDrafts(db, {
       runId: defaultOwner.id,
       projectId: PROJECT,
       fileId: FILE,
-      drafts: [{ cellId: "default-review", text: "default lane proposal" }],
+      drafts: [{ cellId: "shared-cell", text: "default lane proposal" }],
     })
     await terminateRun(db, defaultOwner.id)
 
-    // V1 cannot create these through the route/tick, but rows from an older
-    // lane-aware prototype may still exist and must remain inspectable without
-    // leaking into the editor's default-lane review mirror.
-    const legacyFrenchOwner = await newRun({ targetLang: "fr" })
+    const frenchOwner = await newRun({ targetLang: "fr" })
     await insertDrafts(db, {
-      runId: legacyFrenchOwner.id,
+      runId: frenchOwner.id,
       projectId: PROJECT,
       fileId: FILE,
-      drafts: [{ cellId: "french-review", text: "proposition française" }],
+      drafts: [{ cellId: "shared-cell", text: "proposition française" }],
     })
-    await terminateRun(db, legacyFrenchOwner.id)
+    await terminateRun(db, frenchOwner.id)
+
+    const spanishOwner = await newRun({ targetLang: "es" })
+    await insertDrafts(db, {
+      runId: spanishOwner.id,
+      projectId: PROJECT,
+      fileId: FILE,
+      drafts: [{ cellId: "shared-cell", text: "propuesta española" }],
+    })
+
+    expect((await listDrafts(db, PROJECT, FILE, "proposed")).map((draft) => draft.text))
+      .toEqual(["default lane proposal"])
+    expect((await listDrafts(db, PROJECT, FILE, "proposed", "fr")).map((draft) => draft.text))
+      .toEqual(["proposition française"])
+    expect((await listDrafts(db, PROJECT, FILE, "proposed", "es")).map((draft) => draft.text))
+      .toEqual(["propuesta española"])
+    expect(await countDrafts(db, PROJECT, FILE)).toMatchObject({ proposed: 1 })
+    expect(await countDrafts(db, PROJECT, FILE, "fr")).toMatchObject({ proposed: 1 })
+    expect(await countDrafts(db, PROJECT, FILE, "es")).toMatchObject({ proposed: 1 })
 
     const currentDefault = await newRun()
-    expect((await listDrafts(db, PROJECT, FILE, "proposed")).map((draft) => draft.cellId))
-      .toEqual(["default-review"])
-    expect(await countDrafts(db, PROJECT, FILE)).toMatchObject({ proposed: 1 })
     expect([
       ...(await findProposedCellsFromOtherRuns(db, {
         projectId: PROJECT,
@@ -560,21 +572,27 @@ describe("staged drafts", () => {
         runId: currentDefault.id,
         targetLang: "",
       })),
-    ]).toEqual(["default-review"])
+    ]).toEqual(["shared-cell"])
+    expect([
+      ...(await findProposedCellsFromOtherRuns(db, {
+        projectId: PROJECT,
+        fileId: FILE,
+        runId: currentDefault.id,
+        targetLang: "fr",
+      })),
+    ]).toEqual(["shared-cell"])
 
-    // Historic lane evidence remains available through its owning run.
-    expect((await listDraftsByRun(db, PROJECT, legacyFrenchOwner.id)).map((draft) => draft.cellId))
-      .toEqual(["french-review"])
-    expect((await listRuns(db, PROJECT, { proposedOnly: true })).runs.map((run) => run.id))
-      .toEqual([defaultOwner.id])
-    const allRuns = await listRuns(db, PROJECT)
-    expect(allRuns.runs.find((run) => run.id === legacyFrenchOwner.id)?.proposedDrafts).toBe(1)
+    const proposedOwners = (await listRuns(db, PROJECT, { proposedOnly: true })).runs.map((run) => run.id)
+    expect(proposedOwners).toEqual(expect.arrayContaining([
+      defaultOwner.id,
+      frenchOwner.id,
+      spanishOwner.id,
+    ]))
 
-    // The compact card count and its drill-down owners describe the same
-    // actionable default-lane backlog.
     const overview = await getProjectAutopilotSummary(db, PROJECT)
-    expect(overview.proposedDrafts).toBe(1)
-    expect(overview.files.find((row) => row.runId === legacyFrenchOwner.id)?.proposedDrafts).toBe(0)
+    expect(overview.proposedDrafts).toBe(3)
+    expect(overview.files.find((row) => row.runId === frenchOwner.id)?.proposedDrafts).toBe(1)
+    expect(overview.files.find((row) => row.runId === spanishOwner.id)?.proposedDrafts).toBe(1)
   })
 
   it("a re-propose supersedes the old proposed row in the same batch (partial UNIQUE holds)", async () => {

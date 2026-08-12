@@ -817,6 +817,13 @@ export const editor = defineNamespace({
       "Draft this paragraph? {draftable} of {total} cells will be drafted; " +
       "already-validated cells are kept as-is.",
     "editor.paragraph.confirmAction": "Draft paragraph",
+
+    // — Delete-a-cell confirm dialog (IDML files, AQU-803) ——————————
+    "editor.deleteCell.action": "Delete cell",
+    "editor.deleteCell.confirmTitle": "Delete this cell?",
+    "editor.deleteCell.confirmBody":
+      "This removes the source cell and every translation of it, in all " +
+      "languages. This cannot be undone.",
   },
   context: {
     _context: {
@@ -3856,6 +3863,27 @@ export const editor = defineNamespace({
           "match the wording of editor.ai.draftParagraph's tooltip closely enough " +
           "that the user recognises the same action.",
         maxLength: 22,
+      },
+      "editor.deleteCell.action": {
+        description:
+          "Does double duty as the tooltip/screen-reader name of the trash icon " +
+          "button on a source cell of a file imported from Adobe InDesign (IDML), " +
+          "and as the confirming (destructive) button of the dialog that icon " +
+          "opens. Imperative; one string so the user recognises the same action " +
+          "in both places. Only project leads see it.",
+        maxLength: 20,
+      },
+      "editor.deleteCell.confirmTitle": {
+        description:
+          "Title of the dialog confirming deletion of a source cell and all its " +
+          "translations. A question, so keep the question mark.",
+        maxLength: 30,
+      },
+      "editor.deleteCell.confirmBody": {
+        description:
+          "Body of that dialog. Two parts: the scope (the source cell AND every " +
+          "translation of it, in every language) and the warning that there is no " +
+          "undo. Both must survive translation — the action is destructive.",
       },
     },
   },

@@ -5880,12 +5880,12 @@ function EditorRow({
               // AQU-803: IDML cells suppress the source-edit pencil; the delete
               // affordance is a distinct destructive control in the same region.
               // Project_lead+ only (canEditSource encodes the 500 floor).
-              <AppTooltip content="Delete cell">
+              <AppTooltip content={t("editor.deleteCell.action")}>
                 <Button
                   type="button"
                   variant="ghost"
                   size="icon-xs"
-                  aria-label="Delete cell"
+                  aria-label={t("editor.deleteCell.action")}
                   data-testid="delete-source-cell"
                   onClick={() => setDeleteConfirmOpen(true)}
                   className="absolute right-1 top-1 z-10 shrink-0 text-muted-foreground/50 opacity-0 hover:text-destructive focus-visible:opacity-100 group-hover:opacity-100"
@@ -7424,22 +7424,22 @@ interface DeleteCellConfirmDialogProps {
 }
 
 export function DeleteCellConfirmDialog({ open, onConfirm, onCancel }: DeleteCellConfirmDialogProps) {
+  const t = useT()
   return (
     <Dialog open={open} onOpenChange={(isOpen) => { if (!isOpen) onCancel() }}>
       <DialogContent aria-labelledby="delete-cell-title" aria-describedby="delete-cell-desc">
         <DialogHeader>
-          <DialogTitle id="delete-cell-title">Delete this cell?</DialogTitle>
+          <DialogTitle id="delete-cell-title">{t("editor.deleteCell.confirmTitle")}</DialogTitle>
           <DialogDescription id="delete-cell-desc">
-            This removes the source cell and every translation of it, in all languages.
-            This cannot be undone.
+            {t("editor.deleteCell.confirmBody")}
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>
           <Button variant="outline" onClick={onCancel}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button variant="destructive" onClick={onConfirm}>
-            Delete cell
+            {t("editor.deleteCell.action")}
           </Button>
         </DialogFooter>
       </DialogContent>

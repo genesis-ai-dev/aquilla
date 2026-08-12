@@ -5,7 +5,7 @@
 // role gating that decide WHAT a member sees.
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
 import { MondayIntegrationSection } from "./MondayIntegrationSection"
 import type { MondayBoardLink } from "@/lib/monday/api"
@@ -21,6 +21,7 @@ vi.mock("@/lib/monday/api", () => ({
   deleteMondayLink: vi.fn(),
   analyzeMondayMapping: vi.fn(),
   syncMondayNow: vi.fn(),
+  startMondayConnect: vi.fn(),
 }))
 
 vi.mock("@/hooks/useFrontierSession", () => ({
@@ -64,22 +65,34 @@ beforeEach(() => {
 })
 
 describe("MondayIntegrationSection", () => {
-  it("org not connected: explains and links to org settings", async () => {
+  it("org not connected, below maintainer: points at the ORG-SCOPED settings route", async () => {
     mocked.fetchMondayLink.mockResolvedValue({ linked: false })
     mocked.fetchMondayConnection.mockResolvedValue({ connected: false })
 
-    renderSection()
+    renderSection({ roleLevel: 400 })
 
     await waitFor(() =>
       expect(screen.getByText(/hasn't connected monday\.com yet/i)).toBeTruthy(),
     )
     const orgLink = screen.getByRole("link", { name: /organization settings/i })
-    expect(orgLink.getAttribute("href")).toBe("/settings/monday")
-    // No board picker in this state.
+    // Regression guard: the un-scoped "/settings/monday" has no route and sent
+    // users (including everyone finishing OAuth) to the 404 page.
+    expect(orgLink.getAttribute("href")).toBe("/orgs/7/settings/monday")
     expect(screen.queryByLabelText(/monday board/i)).toBeNull()
   })
 
-  it("unlinked with boards: shows the board picker and AI configure affordance", async () => {
+  it("org not connected, maintainer: offers the AI wizard, which owns the connect step", async () => {
+    mocked.fetchMondayLink.mockResolvedValue({ linked: false })
+    mocked.fetchMondayConnection.mockResolvedValue({ connected: false })
+
+    renderSection()
+
+    // The wizard drives OAuth itself, so a maintainer is never sent away to
+    // org settings and back just to begin.
+    await waitFor(() => expect(screen.getByTestId("monday-setup-with-ai")).toBeTruthy())
+  })
+
+  it("unlinked: AI setup is the primary affordance and costs no board listing", async () => {
     mocked.fetchMondayLink.mockResolvedValue({ linked: false })
     mocked.fetchMondayConnection.mockResolvedValue({
       connected: true,
@@ -90,6 +103,25 @@ describe("MondayIntegrationSection", () => {
     ])
 
     renderSection()
+
+    await waitFor(() => expect(screen.getByTestId("monday-setup-with-ai")).toBeTruthy())
+    // The picker is behind the manual escape hatch now — and because the AI
+    // picks the board server-side, the default path lists no boards at all.
+    expect(screen.queryByLabelText(/monday board/i)).toBeNull()
+    expect(mocked.fetchMondayBoards).not.toHaveBeenCalled()
+  })
+
+  it("unlinked: the manual escape hatch still reveals the board picker", async () => {
+    mocked.fetchMondayLink.mockResolvedValue({ linked: false })
+    mocked.fetchMondayConnection.mockResolvedValue({ connected: true })
+    mocked.fetchMondayBoards.mockResolvedValue([
+      { id: "b1", name: "Translation Tracker", workspace: { id: "w1", name: "Main" } },
+    ])
+
+    renderSection()
+
+    await waitFor(() => expect(screen.getByTestId("monday-setup-with-ai")).toBeTruthy())
+    fireEvent.click(screen.getByRole("button", { name: /set it up manually/i }))
 
     await waitFor(() => expect(screen.getByLabelText(/monday board/i)).toBeTruthy())
     expect(mocked.fetchMondayBoards).toHaveBeenCalledWith("tok", 7)

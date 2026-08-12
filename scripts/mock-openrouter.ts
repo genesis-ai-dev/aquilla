@@ -200,6 +200,25 @@ export function scriptMockResponse(messages: ChatMessage[]) {
     }))
   }
 
+  // Monday.com board SELECTION (auth-worker lib/monday/selectBoardForProject):
+  // runs before the mapping call when the wizard omits a boardId. Echo back a
+  // real id from the prompt — a bogus one would exercise the fallback instead
+  // of the flow under test. Must precede the mapping branch below: this prompt
+  // never contains "column mapping", but keeping the order explicit means a
+  // future edit to either prompt can't silently cross the wires.
+  if (userText.includes("Boards available:")) {
+    const boardsMatch = userText.match(/Boards available:\n(\[.*?\])\n/s)
+    let boardId = "1"
+    try {
+      const boards = JSON.parse(boardsMatch?.[1] ?? "[]") as { id: string }[]
+      if (boards[0]?.id) boardId = boards[0].id
+    } catch { /* fall back to the default above */ }
+    return respond(JSON.stringify({
+      boardId,
+      reason: "[mock] First board in the account.",
+    }))
+  }
+
   // Monday.com board analyze (auth-worker lib/monday/analyze.ts): the prompt
   // asks for a "column mapping" proposal in strict JSON. Return a minimal valid
   // MondayMapping so the AI-configure flow works end-to-end against the mock.

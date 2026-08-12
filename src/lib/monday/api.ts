@@ -250,22 +250,51 @@ export async function deleteMondayLink(jwt: string, projectId: string): Promise<
 
 // ── AI configure + sync ────────────────────────────────────────────────────
 
+export interface MondayAnalysis {
+  proposal: MondayMapping
+  summary: string
+  /** Why a board column the user can see isn't in the proposal (read-only type,
+   *  unknown id). Surfaced per-row in the wizard so a clamp isn't invisible. */
+  warnings: string[]
+  /** Echoed back always — it's the AI's pick when the request omitted one. */
+  boardId: string
+  /** Only set when the AI chose the board; null when the caller supplied it. */
+  boardName: string | null
+  /** One sentence on why this board — empty when chosen without an LLM call. */
+  boardReason: string
+}
+
 /**
  * POST /api/v2/monday/projects/:projectId/analyze (maintainer+). One LLM call
  * server-side; returns a validated/clamped mapping proposal for user review.
+ *
+ * Omit `boardId` and the server picks the board too (one extra cheap LLM call
+ * over the board list) — that's the wizard's zero-decision path.
  */
 export async function analyzeMondayMapping(
   jwt: string,
   projectId: string,
-  body: { boardId: string; message?: string; currentConfig?: MondayMapping },
-): Promise<{ proposal: MondayMapping; summary: string }> {
+  body: { boardId?: string; message?: string; currentConfig?: MondayMapping },
+): Promise<MondayAnalysis> {
   const res = await fetch(`${AUTH_BASE}/api/v2/monday/projects/${projectId}/analyze`, {
     method: "POST",
     headers: authHeaders(jwt),
     body: JSON.stringify(body),
   })
   if (!res.ok) await readError(res, "AI configuration failed")
-  return (await res.json()) as { proposal: MondayMapping; summary: string }
+  const data = (await res.json()) as Partial<MondayAnalysis> & {
+    proposal: MondayMapping
+    summary: string
+  }
+  // Tolerate a server that predates the wizard fields (dev/staging skew).
+  return {
+    proposal: data.proposal,
+    summary: data.summary,
+    warnings: data.warnings ?? [],
+    boardId: data.boardId ?? body.boardId ?? "",
+    boardName: data.boardName ?? null,
+    boardReason: data.boardReason ?? "",
+  }
 }
 
 /** POST /api/v2/monday/projects/:projectId/sync (maintainer+). Push now. */

@@ -113,7 +113,11 @@ export function OrgSettingsMonday() {
     // (No "noopener": we need the handle to set location; Monday is trusted.)
     const popup = window.open("about:blank", "_blank")
     try {
-      const { url } = await startMondayConnect(jwt, activeOrgId, "/settings/monday")
+      const { url } = await startMondayConnect(
+        jwt,
+        activeOrgId,
+        `/orgs/${activeOrgId}/settings/monday`,
+      )
       if (popup && !popup.closed) {
         popup.location.href = url
       } else {

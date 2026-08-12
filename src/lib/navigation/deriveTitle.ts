@@ -101,7 +101,7 @@ export function deriveNavTitleKey(pathname: string): NavTitle {
       case "voice":
         return key("editor.navTitle.voice")
       case "terminology":
-        return key("editor.navTitle.terminology")
+        return key("nav.sidebarSection.terminology")
       case "comments":
         return key("common.comments")
       case "memory":

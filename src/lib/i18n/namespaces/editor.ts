@@ -848,7 +848,6 @@ export const editor = defineNamespace({
     "editor.navTitle.projectSettings": "Project settings",
     "editor.navTitle.checksAndRules": "Checks & rules",
     "editor.navTitle.voice": "Voice",
-    "editor.navTitle.terminology": "Terminology",
     "editor.navTitle.projectMemory": "Project memory",
     "editor.navTitle.projectMembers": "Project members",
 
@@ -4056,11 +4055,6 @@ export const editor = defineNamespace({
         description: "Label for the project's voice/audio production surface.",
         screenshot: "workspace-nav",
         maxLength: 16,
-      },
-      "editor.navTitle.terminology": {
-        description: "Label for a project's shared term-base management surface.",
-        screenshot: "workspace-nav",
-        maxLength: 20,
       },
       "editor.navTitle.projectMemory": {
         description: "Label for the project's AI agent memory surface.",

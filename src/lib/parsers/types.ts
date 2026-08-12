@@ -127,11 +127,35 @@ export interface RuleWaiver {
   waivedBy?: string
 }
 
+/**
+ * Which predicate fired. `rule-engine.ts` is a pure, locale-less sync
+ * function (called from memos and from the hot keystroke path), so it can't
+ * compose a localized sentence itself — it returns a reason CODE instead,
+ * and a render-time helper (`formatInfractionReason` /
+ * `formatInfractionMessage` in `src/lib/rules/format-infraction.ts`) turns
+ * that into text via `t()`. `builtin:${BuiltinCheckId}` covers the ten
+ * algorithmic checks; the other three are the user-authored rule shapes.
+ */
+export type RuleInfractionReason =
+  | "target-forbids"
+  | "source-requires-target"
+  | "source-target-match"
+  | `builtin:${BuiltinCheckId}`
+
 export interface RuleInfraction {
   ruleId: string
   cellId: string
   fileId: string
-  message: string
+  /** Reason code for the predicate that fired — see `RuleInfractionReason`. */
+  reason: RuleInfractionReason
+  /**
+   * Values substituted into the localized reason text. For
+   * `builtin:placeholder-integrity`: `tokens` (the missing placeholder(s),
+   * joined) and `count` (how many) — both are RAW content lifted from the
+   * cell (via `InfractionSpan.matchedText`) and must never be routed through
+   * `t()`, only interpolated as a variable.
+   */
+  reasonParams?: Record<string, string>
   /** Triggering text spans. Empty when the violation has no identifiable
    *  concrete match (e.g. absence rules with no source trigger) — those
    *  fall back to the gutter icon only. */

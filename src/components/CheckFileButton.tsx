@@ -6,7 +6,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { checkScopeSummary } from "@/components/CheckFindingsDrawer"
 import { cn } from "@/lib/utils"
-import { useI18n } from "@/lib/i18n/I18nProvider"
+import { useI18n, useT } from "@/lib/i18n/I18nProvider"
 import { formatTime } from "@/lib/i18n/format"
 import type { CheckRunResult } from "@/lib/check/deterministic-check"
 
@@ -43,6 +43,7 @@ export function CheckFileButton({
   grouped = false,
 }: CheckFileButtonProps) {
   const { locale } = useI18n()
+  const t = useT()
   const mdUp = useIsMdUp()
   const showBadge = Boolean(checkResult && !checkRunning)
   // Below md the label hides; use a true icon button so width matches the ⋯
@@ -58,13 +59,13 @@ export function CheckFileButton({
       onClick={onToggle}
       disabled={checkRunning}
       aria-expanded={checkOpen}
-      aria-label="Check file"
+      aria-label={t("rules.checkFileButton.label")}
       data-testid="check-file-button"
     >
       {checkRunning
         ? <Spinner data-icon={iconOnly ? undefined : "inline-start"} className="size-4" />
         : <ListChecks data-icon={iconOnly ? undefined : "inline-start"} />}
-      {mdUp ? <span>Check file</span> : null}
+      {mdUp ? <span>{t("rules.checkFileButton.label")}</span> : null}
       {showBadge && checkResult && (
         <span className={checkResult.totalFindingCount > 0
           ? "rounded-md bg-amber-100 px-1.5 text-[10px] font-semibold text-amber-800 dark:bg-amber-900/50 dark:text-amber-300"
@@ -83,10 +84,14 @@ export function CheckFileButton({
     <AppTooltip
       content={
         checkOpen
-          ? "Close file check"
+          ? t("rules.checkDrawer.closeAriaLabel")
           : checkResult
-            ? `Last check: ${checkResult.totalFindingCount} issue${checkResult.totalFindingCount === 1 ? "" : "s"} · ${checkScopeSummary(checkResult)} · ${formatTime(checkResult.ranAt, locale, { hour: "numeric", minute: "2-digit" })}`
-            : "Check the open file against the project's rules and term base"
+            ? t("rules.checkFileButton.lastCheckTooltip", {
+                issues: t("rules.checkFileButton.issueCount", { count: checkResult.totalFindingCount }),
+                summary: checkScopeSummary(checkResult, t, locale),
+                time: formatTime(checkResult.ranAt, locale, { hour: "numeric", minute: "2-digit" }),
+              })
+            : t("rules.checkFileButton.idleTooltip")
       }
     >
       {trigger}

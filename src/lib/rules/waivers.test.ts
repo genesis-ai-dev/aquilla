@@ -6,7 +6,7 @@ const waiver = (ruleId: string, extra: Partial<RuleWaiver> = {}): RuleWaiver => 
   ruleId, waivedAt: "2026-04-24T00:00:00Z", ...extra,
 })
 const inf = (ruleId: string): RuleInfraction => ({
-  ruleId, cellId: "c1", fileId: "f1", message: "", spans: [],
+  ruleId, cellId: "c1", fileId: "f1", reason: "target-forbids", spans: [],
 })
 
 describe("isWaived", () => {

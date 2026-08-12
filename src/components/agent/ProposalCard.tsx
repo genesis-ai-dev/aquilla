@@ -31,6 +31,8 @@ import { ValidationQueueCard } from "./cards/ValidationQueueCard"
 import { isValidationProposal } from "./cards/registry"
 import { canApply, isSupportedApplyKind } from "@/lib/agent/role-floors"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { translateRuleName } from "@/lib/lqa/builtin-resolver"
+import { formatInfractionMessage } from "@/lib/rules/format-infraction"
 
 // ── Lint ───────────────────────────────────────────────────────────────────
 
@@ -112,10 +114,15 @@ const KIND_META: Record<string, { label: string; Icon: typeof Pencil }> = {
 function StagedEventRow({
   ev,
   infractions,
+  ruleById,
 }: {
   ev: StagedEvent
   infractions: RuleInfraction[]
+  /** Rule lookup for the lint badges below — needed so a `builtin:` id
+   *  translates its check name instead of showing the raw id. */
+  ruleById: Map<string, TranslationRule>
 }) {
+  const t = useT()
   const meta = KIND_META[ev.kind]
 
   if (!meta) {
@@ -149,11 +156,15 @@ function StagedEventRow({
             {ev.display.canonicalRef}
           </Badge>
         )}
-        {infractions.map((inf) => (
-          <Badge key={inf.ruleId} variant="destructive" className="px-1.5 py-0 text-[10px]">
-            {inf.message}
-          </Badge>
-        ))}
+        {infractions.map((inf) => {
+          const rule = ruleById.get(inf.ruleId)
+          const ruleName = rule ? translateRuleName(rule, t) : inf.ruleId
+          return (
+            <Badge key={inf.ruleId} variant="destructive" className="px-1.5 py-0 text-[10px]">
+              {formatInfractionMessage(inf, ruleName, t)}
+            </Badge>
+          )
+        })}
       </div>
 
       {ev.kind === "target.cell.commit" && (
@@ -244,6 +255,7 @@ function StagedProposalCard({
   const [applyError, setApplyError] = useState<string | null>(null)
 
   const enabledRules = useMemo(() => rules.filter((r) => r.enabled), [rules])
+  const ruleById = useMemo(() => new Map(rules.map((r) => [r.id, r])), [rules])
 
   // Deterministic lint on every commit's AFTER text, before any apply.
   const lintByIndex = useMemo(() => {
@@ -310,6 +322,7 @@ function StagedProposalCard({
             key={`${proposal.proposalId}-${i}`}
             ev={ev}
             infractions={lintByIndex.get(i) ?? []}
+            ruleById={ruleById}
           />
         ))}
       </div>

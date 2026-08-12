@@ -18,7 +18,10 @@ import {
 import type { CellData } from "@/hooks/useCells"
 import {
   BIBLICA_STORY_PATH,
+  SAMPLE_FRONT_MATTER,
+  SAMPLE_FRONT_MATTER_AARON,
   SAMPLE_NOTES,
+  biblicaFrontMatterStory,
   makeBiblicaIdml,
 } from "@/lib/biblica/__fixtures__/biblica-idml"
 import { buildBulkCellsWithSpeakers } from "@/lib/import"
@@ -37,13 +40,16 @@ const directExecutor: IdmlExportExecutor = {
  * paragraphs — and it is the only path that produces the sub-paragraph cells
  * this rejoin contract exists for.
  */
-async function importBiblicaCells(): Promise<{ bytes: ArrayBuffer; cells: CellData[] }> {
-  const bytes = await makeBiblicaIdml()
+async function importBiblicaCells(
+  paragraphs?: readonly string[],
+  splitSentences = true,
+): Promise<{ bytes: ArrayBuffer; cells: CellData[] }> {
+  const bytes = await makeBiblicaIdml(paragraphs)
   const parsed = await parseIdml(bytes.slice(0))
   const { strings } = await extractBiblicaStudyNoteStrings(
     bytes.slice(0),
     async () => parsed,
-    { splitSentences: true },
+    { splitSentences },
   )
   const { cells: bulk } = buildBulkCellsWithSpeakers(strings, {
     fileName: "Genesis-notes.idml",
@@ -187,5 +193,59 @@ describe("IDML export of a note block that was imported as several cells", () =>
 
     await expect(exportIdml(bytes, cells, directExecutor))
       .rejects.toBeInstanceOf(IdmlWebExportError)
+  })
+})
+
+/**
+ * A front/back-matter volume imports far more of its package than a notes
+ * volume does — every text-bearing paragraph, headings included — so the
+ * round trip is checked on the composition rather than on the importer alone.
+ */
+describe("IDML export of a front/back-matter volume", () => {
+  it("returns the publisher's bytes when nothing in it has been translated", async () => {
+    const { bytes, cells } = await importBiblicaCells(biblicaFrontMatterStory, false)
+
+    const result = await exportIdml(bytes.slice(0), cells, directExecutor)
+
+    expect(result.report.translated).toBe(0)
+    expect(new Uint8Array(await result.blob.arrayBuffer())).toEqual(new Uint8Array(bytes))
+  })
+
+  it("re-imports its own export to the same cells and sections", async () => {
+    const { bytes, cells } = await importBiblicaCells(biblicaFrontMatterStory, false)
+    const exported = await (await exportIdml(bytes, cells, directExecutor)).blob.arrayBuffer()
+
+    const parsed = await parseIdml(exported.slice(0))
+    const { strings, contentType } = await extractBiblicaStudyNoteStrings(
+      exported.slice(0),
+      async () => parsed,
+    )
+
+    expect(contentType).toBe("front-matter")
+    expect(strings.map((cell) => [cell.original, cell.section])).toEqual([
+      [SAMPLE_FRONT_MATTER.title, "Opening"],
+      [SAMPLE_FRONT_MATTER.contents[0], "Opening"],
+      [SAMPLE_FRONT_MATTER.contents[1], "Opening"],
+      [SAMPLE_FRONT_MATTER.contents[2], "Opening"],
+      [SAMPLE_FRONT_MATTER.letterA, "A"],
+      [SAMPLE_FRONT_MATTER_AARON, "A"],
+      [SAMPLE_FRONT_MATTER.letterB, "B"],
+      [SAMPLE_FRONT_MATTER.babel, "B"],
+      [SAMPLE_FRONT_MATTER.usageHeading, SAMPLE_FRONT_MATTER.usageHeading],
+      [SAMPLE_FRONT_MATTER.usageBody, SAMPLE_FRONT_MATTER.usageHeading],
+    ])
+  })
+
+  it("keeps the apostrophe run intact when the word around it is translated", async () => {
+    const { bytes, cells } = await importBiblicaCells(biblicaFrontMatterStory, false)
+    translate(cellsFor(cells, [SAMPLE_FRONT_MATTER_AARON])[0]!)
+
+    const story = await storyOf((await exportIdml(bytes, cells, directExecutor)).blob)
+
+    // The apostrophe sits in its own "source serif" run, so it stays a run of
+    // its own on export while the words on either side carry the translation.
+    expect(story).toContain(`<Content>${SAMPLE_FRONT_MATTER.aaronBefore.toUpperCase()}</Content>`)
+    expect(story).toContain("<Content>ʼ</Content>")
+    expect(story).toContain(`<Content>${SAMPLE_FRONT_MATTER.aaronAfter.toUpperCase()}</Content>`)
   })
 })

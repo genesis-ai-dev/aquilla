@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import {
+  SAMPLE_FRONT_MATTER,
+  SAMPLE_FRONT_MATTER_AARON,
   SAMPLE_NOTES,
+  biblicaFrontMatterStory,
+  closedVerse,
   makeBiblicaIdml,
   note,
   paragraph,
@@ -244,6 +248,65 @@ describe("Biblica study-notes import", () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
+  it("commits a front/back-matter volume as all of its text, sectioned by its headings", async () => {
+    const requests = captureRequests()
+
+    const ref = await importBiblicaStudyNotes(
+      await biblicaFile(biblicaFrontMatterStory),
+      { projectId: "p1", author: "alice", getToken: async () => "tok" },
+    )
+
+    const cells = importBodies(requests).flatMap((body) => body.cells ?? [])
+    expect(ref.cellCount).toBe(10)
+    expect(cells.map((cell) => cell.value)).toEqual([
+      SAMPLE_FRONT_MATTER.title,
+      ...SAMPLE_FRONT_MATTER.contents,
+      SAMPLE_FRONT_MATTER.letterA,
+      SAMPLE_FRONT_MATTER_AARON,
+      SAMPLE_FRONT_MATTER.letterB,
+      SAMPLE_FRONT_MATTER.babel,
+      SAMPLE_FRONT_MATTER.usageHeading,
+      SAMPLE_FRONT_MATTER.usageBody,
+    ])
+    // The running head is page furniture InDesign regenerates: no cell anywhere.
+    expect(cells.some((cell) => cell.value.includes(SAMPLE_FRONT_MATTER.runningHead))).toBe(false)
+
+    // Each heading is a section in the editor's navigation, and the heading
+    // itself is an editable cell inside the section it opened.
+    expect(cells.map((cell) => (
+      (cell.metadata?.aquillaImport as { milestone?: { key?: string } })?.milestone?.key
+    ))).toEqual([
+      ...Array(4).fill("biblica:front-matter:Opening"),
+      "biblica:front-matter:A",
+      "biblica:front-matter:A",
+      "biblica:front-matter:B",
+      "biblica:front-matter:B",
+      ...Array(2).fill(`biblica:front-matter:${SAMPLE_FRONT_MATTER.usageHeading}`),
+    ])
+    expect(cells[4]?.metadata?.aquillaImport).toMatchObject({
+      profileId: BIBLICA_NOTES_PROFILE_ID,
+      fidelity: "content-only",
+      sourceLocator: { kind: "idml" },
+      milestone: { kind: "section", label: "A", shortLabel: "A" },
+    })
+  })
+
+  it("explains that an artwork-only front/back-matter volume has nothing to import", async () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal("fetch", fetchMock)
+
+    const artworkOnly = await biblicaFile([
+      paragraph("p-rh", "meta%3arh", run("$ID/[No character style]", "MAPS 3")),
+    ])
+
+    await expect(importBiblicaStudyNotes(artworkOnly, {
+      projectId: "p1",
+      author: "alice",
+      getToken: async () => "tok",
+    })).rejects.toThrow(/contained no translatable text/)
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
   it("explains that a package with no intro paragraphs holds no notes", async () => {
     const fetchMock = vi.fn()
     vi.stubGlobal("fetch", fetchMock)
@@ -251,6 +314,9 @@ describe("Biblica study-notes import", () => {
     const scriptureOnly = await biblicaFile([
       paragraph("p-bk", "meta%3abk", run("$ID/[No character style]", "GEN")),
       paragraph("p-rh", "meta%3arh", run("$ID/[No character style]", "GENESIS 1")),
+      // Marked scripture is what makes this a notes volume rather than a
+      // front/back-matter one, which is read as all of its text instead.
+      closedVerse("p-v1", "1", "In the beginning God created the heavens and the earth.", "1"),
     ])
 
     await expect(importBiblicaStudyNotes(scriptureOnly, {
@@ -263,7 +329,11 @@ describe("Biblica study-notes import", () => {
 
   it("imports notes from a package that never names a book", async () => {
     const requests = captureRequests()
-    const unnamed = await biblicaFile([note("p-n", "A standalone note.")])
+    const unnamed = await biblicaFile([
+      note("p-n", "A standalone note."),
+      // No `meta:bk`, but marked scripture: a notes volume with no book name.
+      closedVerse("p-v1", "1", "In the beginning God created the heavens and the earth.", "1"),
+    ])
 
     const ref = await importBiblicaStudyNotes(unnamed, {
       projectId: "p1",

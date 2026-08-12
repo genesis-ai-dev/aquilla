@@ -132,6 +132,72 @@ export const biblicaSampleStory: readonly string[] = [
   note("p-n5", SAMPLE_NOTES.noteBlock),
 ]
 
+/** A paragraph of ordinary layout text — the styles front and back matter use. */
+export function layoutParagraph(self: string, text: string, style = "text%3am"): string {
+  return paragraph(self, style, run(PLAIN, text))
+}
+
+/**
+ * A dictionary entry whose lead word carries an InDesign "source serif"
+ * apostrophe run. In a note that run is structural glue around the markers; in
+ * prose it is an ordinary possessive and has to survive into the cell.
+ */
+export function apostropheParagraph(
+  self: string,
+  before: string,
+  after: string,
+  style = "text%3am",
+): string {
+  return paragraph(
+    self,
+    style,
+    run(PLAIN, before) + run("source serif", "ʼ") + run(PLAIN, after),
+  )
+}
+
+export const SAMPLE_FRONT_MATTER = {
+  title: "Bible Dictionary",
+  /** A table of contents set as one paragraph with a line break per entry. */
+  contents: [
+    "A — 1",
+    "B — 42",
+    "How to use this dictionary — 88",
+  ],
+  runningHead: "BIBLE DICTIONARY 12",
+  letterA: "A",
+  aaronBefore: "Aaron: Moses",
+  aaronAfter: "s brother, and the first high priest of Israel.",
+  letterB: "B",
+  babel: "Babel: the city whose unfinished tower scattered the nations.",
+  usageHeading: "How to use this dictionary",
+  usageBody: "Entries are listed alphabetically under the letter they begin with.",
+} as const
+
+/** The "Aaron" entry as it reads once its apostrophe run is back inside the word. */
+export const SAMPLE_FRONT_MATTER_AARON =
+  `${SAMPLE_FRONT_MATTER.aaronBefore}ʼ${SAMPLE_FRONT_MATTER.aaronAfter}`
+
+/**
+ * A front/back-matter volume: no chapter or verse is marked anywhere, the text
+ * sits in layout styles rather than `intro:*` note styles, a running head repeats
+ * page furniture, and the volume's own headings divide it into sections.
+ */
+export const biblicaFrontMatterStory: readonly string[] = [
+  layoutParagraph("f-title", SAMPLE_FRONT_MATTER.title, "title%3amt1"),
+  noteList("f-toc", SAMPLE_FRONT_MATTER.contents, "toc%3a1"),
+  paragraph("f-rh", "meta%3arh", run(PLAIN, SAMPLE_FRONT_MATTER.runningHead)),
+  layoutParagraph("f-a", SAMPLE_FRONT_MATTER.letterA, "head%3ams1"),
+  apostropheParagraph(
+    "f-aaron",
+    SAMPLE_FRONT_MATTER.aaronBefore,
+    SAMPLE_FRONT_MATTER.aaronAfter,
+  ),
+  layoutParagraph("f-b", SAMPLE_FRONT_MATTER.letterB, "head%3ams1"),
+  layoutParagraph("f-babel", SAMPLE_FRONT_MATTER.babel),
+  layoutParagraph("f-usage", SAMPLE_FRONT_MATTER.usageHeading, "intro%3aimt2"),
+  layoutParagraph("f-usage-body", SAMPLE_FRONT_MATTER.usageBody),
+]
+
 export function makeBiblicaIdml(
   paragraphs: readonly string[] = biblicaSampleStory,
 ): Promise<ArrayBuffer> {

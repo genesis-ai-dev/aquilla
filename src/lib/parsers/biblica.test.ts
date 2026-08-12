@@ -5,8 +5,11 @@ import {
   type IdmlFormatMetadataV2,
 } from "@aquilla/idml-roundtrip"
 import {
+  SAMPLE_FRONT_MATTER,
+  SAMPLE_FRONT_MATTER_AARON,
   SAMPLE_NOTES,
   BIBLICA_STORY_PATH,
+  biblicaFrontMatterStory,
   makeBiblicaIdml,
 } from "@/lib/biblica/__fixtures__/biblica-idml"
 import { selectBiblicaStudyNotes } from "@/lib/biblica/study-notes"
@@ -152,5 +155,54 @@ describe("Biblica study-notes parser adapter", () => {
 
     expect(strings).toEqual([])
     expect(bookCodes).toEqual([])
+  })
+
+  it("maps a front/back-matter volume's whole text to cells sectioned by its headings", async () => {
+    const buffer = await makeBiblicaIdml(biblicaFrontMatterStory)
+    const parsed = await parseIdml(buffer)
+    const { strings, bookCodes, contentType, skipped } = await extractBiblicaStudyNoteStrings(
+      buffer,
+      async () => parsed,
+    )
+
+    expect(contentType).toBe("front-matter")
+    expect(strings.map((cell) => [cell.original, cell.section])).toEqual([
+      [SAMPLE_FRONT_MATTER.title, "Opening"],
+      [SAMPLE_FRONT_MATTER.contents[0], "Opening"],
+      [SAMPLE_FRONT_MATTER.contents[1], "Opening"],
+      [SAMPLE_FRONT_MATTER.contents[2], "Opening"],
+      [SAMPLE_FRONT_MATTER.letterA, "A"],
+      [SAMPLE_FRONT_MATTER_AARON, "A"],
+      [SAMPLE_FRONT_MATTER.letterB, "B"],
+      [SAMPLE_FRONT_MATTER.babel, "B"],
+      [SAMPLE_FRONT_MATTER.usageHeading, SAMPLE_FRONT_MATTER.usageHeading],
+      [SAMPLE_FRONT_MATTER.usageBody, SAMPLE_FRONT_MATTER.usageHeading],
+    ])
+    // No book is named, and no paragraph is scripture — only the running head is skipped.
+    expect(bookCodes).toEqual([])
+    expect(skipped).toEqual({ verseUnitCount: 0, otherUnitCount: 1 })
+
+    for (const cell of strings) {
+      expect(cell.globalReferences).toBeUndefined()
+      expect(cell.sourceLocator).toMatchObject({ kind: "idml", memberPath: BIBLICA_STORY_PATH })
+      expect(cell.metadata?.idml).toMatchObject({ version: 2 })
+      expect(cell.metadata?.biblica).toMatchObject({ version: 1, contentType: "front-matter" })
+    }
+    expect(strings[4].metadata?.biblica).toMatchObject({
+      sectionLabel: "A",
+      paragraphStyle: "ParagraphStyle/head%3ams1",
+    })
+  })
+
+  it("reads a notes volume as notes even though it also has layout paragraphs", async () => {
+    const buffer = await makeBiblicaIdml()
+    const parsed = await parseIdml(buffer)
+    const { contentType, bookCodes } = await extractBiblicaStudyNoteStrings(
+      buffer,
+      async () => parsed,
+    )
+
+    expect(contentType).toBe("notes")
+    expect(bookCodes).toEqual(["GEN"])
   })
 })

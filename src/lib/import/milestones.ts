@@ -113,6 +113,19 @@ export function planImportMilestones(
 function biblicaMilestone(metadata: Record<string, unknown> | undefined): ImportMilestone | undefined {
   const value = record(metadata?.biblica)
   if (!value) return undefined
+
+  // A front/back-matter volume marks no chapters; its sections are the volume's
+  // own headings ("A", "B", … in the Bible Dictionary).
+  const sectionLabel = string(value.sectionLabel)
+  if (sectionLabel) {
+    return {
+      key: `biblica:front-matter:${sectionLabel}`,
+      kind: "section",
+      label: sectionLabel,
+      shortLabel: sectionLabel.length <= 8 ? sectionLabel : `${sectionLabel.slice(0, 7)}…`,
+    }
+  }
+
   const rawChapter = string(value.chapterLabel)
   if (!rawChapter) return undefined
   const bookCode = string(value.bookCode)?.toUpperCase()

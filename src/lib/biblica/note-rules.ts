@@ -33,6 +33,24 @@ export function isBiblicaChapterHeadingStyle(paragraphStyle: string): boolean {
   return hasStyleToken(paragraphStyle, "head", "cl")
 }
 
+/**
+ * Running heads (`meta:rh`): the folio line InDesign regenerates from the layout
+ * on every reflow. It holds no translatable text and owns no cell.
+ */
+export function isBiblicaRunningHeadStyle(paragraphStyle: string): boolean {
+  return hasStyleToken(paragraphStyle, "meta", "rh")
+}
+
+/**
+ * Headings that open a section in a front/back-matter volume: the volume's own
+ * `intro:imt2` headings and major section heads (`head:ms1` — the Bible
+ * Dictionary sets one per alphabet letter).
+ */
+export function isBiblicaFrontMatterHeadingStyle(paragraphStyle: string): boolean {
+  return hasStyleToken(paragraphStyle, "intro", "imt2")
+    || hasStyleToken(paragraphStyle, "head", "ms1")
+}
+
 /** Verse-number runs (`cv:v`, `cv:v1`). */
 export function isVerseNumberCharacterStyle(characterStyle: string): boolean {
   return hasStyleToken(characterStyle, "cv", "v")
@@ -51,6 +69,19 @@ export function isMetaChapterCharacterStyle(characterStyle: string): boolean {
 /** Verse bookend markers (`meta:v`) that open and close a verse body. */
 export function isMetaVerseCharacterStyle(characterStyle: string): boolean {
   return hasStyleToken(characterStyle, "meta", "v")
+}
+
+/**
+ * Any chapter/verse delimiter run. Their total absence is what identifies a
+ * front/back-matter volume: Biblica ships title pages, tables of contents, the
+ * Bible Dictionary and the like as separate IDML packages with no scripture in
+ * them at all, so no chapter or verse is ever marked.
+ */
+export function isChapterVerseMarkerCharacterStyle(characterStyle: string): boolean {
+  return isVerseNumberCharacterStyle(characterStyle)
+    || isChapterNumberCharacterStyle(characterStyle)
+    || isMetaChapterCharacterStyle(characterStyle)
+    || isMetaVerseCharacterStyle(characterStyle)
 }
 
 /** True for InDesign "source serif" apostrophe glue. */

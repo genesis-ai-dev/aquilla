@@ -1251,7 +1251,7 @@ export async function importBiblicaStudyNotes(
   // is read from the File a second time rather than shared with the parse buffer.
   const parseBuffer = await file.arrayBuffer()
   assertIdmlPackageBytes(parseBuffer, file.name)
-  const { strings, bookCodes, skipped } = await extractBiblicaStudyNoteStrings(
+  const { strings, bookCodes, contentType, skipped } = await extractBiblicaStudyNoteStrings(
     parseBuffer,
     undefined,
     {
@@ -1264,9 +1264,16 @@ export async function importBiblicaStudyNotes(
   )
 
   if (strings.length === 0) {
+    // A front/back-matter volume was already read as all of its text, so an
+    // empty result there means the package genuinely holds none — an artwork
+    // volume (maps, plates) rather than the wrong document.
     throw new Error(
-      `${file.name} parsed successfully but contained no study notes. `
-        + "Biblica notes live in `intro:*` paragraph styles — check that this is the notes document.",
+      contentType === "front-matter"
+        ? `${file.name} parsed successfully but contained no translatable text. `
+          + "It marks no chapter or verse, so it was read as a front/back-matter volume — "
+          + "artwork-only volumes such as maps and plates have nothing to import."
+        : `${file.name} parsed successfully but contained no study notes. `
+          + "Biblica notes live in `intro:*` paragraph styles — check that this is the notes document.",
     )
   }
 

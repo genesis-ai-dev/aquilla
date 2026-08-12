@@ -3409,7 +3409,10 @@ function BiblicaPanel({
         belong to so they stay in step with the passage. Lists that InDesign holds in a
         single paragraph — cross-references, glossaries, outlines — always arrive as one
         cell per line. Optionally, longer note blocks can also be split into one cell per
-        sentence; export puts each block back together as InDesign set it.
+        sentence; export puts each block back together as InDesign set it. Front and back
+        matter — contents, &ldquo;how to use&rdquo;, the Bible Dictionary — ships as its own
+        packages with no verses in them; those import as all of their text, with the
+        volume&rsquo;s own headings as sections.
       </p>
       <div className="flex flex-col gap-2">
         <Button variant="outline" size="sm" nativeButton={false} render={<label className="cursor-pointer" />}>

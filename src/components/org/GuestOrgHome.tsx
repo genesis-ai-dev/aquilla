@@ -7,6 +7,7 @@ import { RoleLabel } from "@/components/RoleLabel"
 import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
 import { useActiveOrg } from "@/context/OrgContext"
+import { useT } from "@/lib/i18n/I18nProvider"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { partitionSharedProjects } from "@/lib/frontier/shared-projects"
 import { isProjectNew, readProjectOpenedAt } from "@/lib/frontier/opened-shared-store"
@@ -27,6 +28,7 @@ import { isProjectNew, readProjectOpenedAt } from "@/lib/frontier/opened-shared-
 export function GuestOrgHome() {
   const { activeGuestOrg, orgs, activeOrgId, accessibleProjects, accessibleProjectsLoading } =
     useActiveOrg()
+  const t = useT()
   const { session } = useFrontierSession()
   const username = session?.username ?? null
 
@@ -46,7 +48,7 @@ export function GuestOrgHome() {
   return (
     <AppShell
       sidebar={<OrgSidebar />}
-      header={<OrgBreadcrumb section="Projects" />}
+      header={<OrgBreadcrumb section={t("nav.projects")} isProjectsLanding />}
       statusBar={null}
       main={
         <div

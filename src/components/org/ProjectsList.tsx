@@ -25,6 +25,7 @@ import {
 import { cn } from "@/lib/utils"
 import { FolderOpen, Search } from "lucide-react"
 import { EmptyState } from "@/components/ui/page"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 // ── Sort options ─────────────────────────────────────────────────────────────
 type SortKey = "name" | "role"
@@ -185,6 +186,7 @@ function ProjectRow({
 // ── Main component ───────────────────────────────────────────────────────────
 export function ProjectsList() {
   const { activeOrgId, isAllOrgs, orgs, isLoading: orgLoading, error: orgError, refresh: refreshOrgs } = useActiveOrg()
+  const t = useT()
   const { session, loading: sessionLoading } = useFrontierSession()
   const jwt = session?.jwt ?? null
   const username = session?.username ?? null
@@ -347,7 +349,7 @@ export function ProjectsList() {
         sidebar={<OrgSidebar />}
         header={
           <div className="flex items-center justify-between pe-4">
-            <OrgBreadcrumb section="Projects" />
+            <OrgBreadcrumb section={t("nav.projects")} isProjectsLanding />
           </div>
         }
         statusBar={null}

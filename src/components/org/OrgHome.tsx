@@ -26,6 +26,7 @@ import {
 import { useOrgSettings, canEditRosterProgressFloor } from "@/hooks/useOrgSettings"
 import { ROLE, resolveRoleName } from "@/lib/frontier/roles"
 import { useT } from "@/lib/i18n/I18nProvider"
+import type { MessageKey } from "@/lib/i18n/messages/en"
 import { RoleLabel } from "@/components/RoleLabel"
 import { UserError } from "@/lib/errors/user-error"
 import { notifySessionExpired } from "@/lib/errors/session-expired-signal"
@@ -224,50 +225,50 @@ type OrgPortfolioSummary = {
   overdueCount: number
 }
 
-const STATUS_FILTERS: { value: StatusFilter; label: string }[] = [
-  { value: "all", label: "All" },
-  { value: "stalled", label: "Stalled" },
-  { value: "overdue", label: "Overdue" },
-  { value: "attention", label: "Needs attention" },
+const STATUS_FILTERS: { value: StatusFilter; labelKey: MessageKey }[] = [
+  { value: "all", labelKey: "org.orgHome.statusFilter.all" },
+  { value: "stalled", labelKey: "org.orgHome.stalled" },
+  { value: "overdue", labelKey: "org.orgHome.overdue" },
+  { value: "attention", labelKey: "autopilot.status.needsAttention" },
 ]
 
-const PROJECT_LENSES: { value: ProjectLens; label: string; description: string; empty: string }[] = [
+const PROJECT_LENSES: { value: ProjectLens; labelKey: MessageKey; descriptionKey: MessageKey; emptyKey: MessageKey }[] = [
   {
     value: "recent",
-    label: "Recently updated",
-    description: "Latest project activity across all organizations",
-    empty: "No recently updated projects yet.",
+    labelKey: "org.orgHome.lens.recentLabel",
+    descriptionKey: "org.orgHome.lens.recentDescription",
+    emptyKey: "org.orgHome.lens.recentEmpty",
   },
   {
     value: "attention",
-    label: "Needs attention",
-    description: "Highest-priority projects by deadline, activity, and progress",
-    empty: "No projects need attention yet.",
+    labelKey: "autopilot.status.needsAttention",
+    descriptionKey: "org.orgHome.lens.attentionDescription",
+    emptyKey: "org.orgHome.lens.attentionEmpty",
   },
   {
     value: "least-translated",
-    label: "Least translated",
-    description: "Projects with the lowest translation progress",
-    empty: "No projects yet.",
+    labelKey: "org.orgHome.lens.leastTranslatedLabel",
+    descriptionKey: "org.orgHome.lens.leastTranslatedDescription",
+    emptyKey: "org.orgHome.noProjectsYet",
   },
   {
     value: "most-progress",
-    label: "Most progress",
-    description: "Projects with the highest translation progress",
-    empty: "No projects yet.",
+    labelKey: "org.orgHome.lens.mostProgressLabel",
+    descriptionKey: "org.orgHome.lens.mostProgressDescription",
+    emptyKey: "org.orgHome.noProjectsYet",
   },
   {
     value: "name",
-    label: "Name",
-    description: "Projects sorted alphabetically",
-    empty: "No projects yet.",
+    labelKey: "common.name",
+    descriptionKey: "org.orgHome.lens.nameDescription",
+    emptyKey: "org.orgHome.noProjectsYet",
   },
   {
     // AQU-507: group projects by their designated Project Manager.
     value: "pm",
-    label: "Project manager",
-    description: "Projects grouped by their designated project manager",
-    empty: "No projects yet.",
+    labelKey: "org.orgHome.lens.pmLabel",
+    descriptionKey: "org.orgHome.lens.pmDescription",
+    emptyKey: "org.orgHome.noProjectsYet",
   },
 ]
 
@@ -315,12 +316,14 @@ function formatDeadlineDate(value: string): string {
   }).format(new Date(parsed))
 }
 
-function deadlineTooltip(project: PortfolioProjectRow, status: "overdue" | "soon") {
+function deadlineTooltip(t: ReturnType<typeof useT>, project: PortfolioProjectRow, status: "overdue" | "soon") {
   return (
     <span className="flex flex-col gap-0.5">
-      <span className="font-medium">{status === "overdue" ? "Overdue" : "Due soon"}</span>
+      <span className="font-medium">{status === "overdue" ? t("org.orgHome.overdue") : t("org.orgHome.dueSoon")}</span>
       {project.deadlineAt && (
-        <span className="text-muted-foreground">Due {formatDeadlineDate(project.deadlineAt)}</span>
+        <span className="text-muted-foreground">
+          {t("org.orgHome.dueDate", { date: formatDeadlineDate(project.deadlineAt) })}
+        </span>
       )}
     </span>
   )
@@ -390,6 +393,7 @@ export function ProjectTable({
   showOrg: boolean
   defaultLaneLabelByProjectId?: Map<string, string>
 }) {
+  const t = useT()
   return (
     <div data-testid="project-table" className="@container/project-table overflow-hidden">
       <div className="w-full">
@@ -402,26 +406,28 @@ export function ProjectTable({
               showOrg && `@md/project-table:grid ${PROJECT_IDENTITY_COLS} @md/project-table:gap-x-2`,
             )}
           >
-            <span>Project</span>
-            {showOrg && <span className="hidden text-start @md/project-table:block">Org</span>}
+            <span>{t("org.orgHome.table.projectHeader")}</span>
+            {showOrg && (
+              <span className="hidden text-start @md/project-table:block">{t("org.orgHome.table.orgHeader")}</span>
+            )}
           </span>
           {/* AQU-538: lane chips column (see the LaneChips cell in each row). */}
-          <span className="hidden @md/project-table:block">Language</span>
+          <span className="hidden @md/project-table:block">{t("org.orgHome.table.languageHeader")}</span>
           <ProjectMetricHeader
-            label="Translated"
-            description="Translated: percentage of cells with target-language content filled in."
+            label={t("org.orgHome.table.translatedHeaderLabel")}
+            description={t("org.orgHome.table.translatedHeaderDescription")}
             icon={Sparkles}
             testId="project-table-translated-header"
           />
           <ProjectMetricHeader
-            label="Validated"
-            description="Validated: percentage of cells marked validated by a reviewer."
+            label={t("org.orgHome.table.validatedHeaderLabel")}
+            description={t("org.orgHome.table.validatedHeaderDescription")}
             icon={CircleCheck}
             testId="project-table-validated-header"
           />
           <ProjectMetricHeader
-            label="Has audio"
-            description="Audio: percentage of cells with at least one recording attached."
+            label={t("org.orgHome.table.audioHeaderLabel")}
+            description={t("org.orgHome.table.audioHeaderDescription")}
             icon={Mic}
             testId="project-table-audio-header"
             className="hidden @md/project-table:inline-flex"
@@ -454,7 +460,7 @@ export function ProjectTable({
                       <ProjectTableName name={p.name} />
                       {(dstatus === "overdue" || dstatus === "soon") && (
                         <AppTooltip
-                          content={deadlineTooltip(p, dstatus)}
+                          content={deadlineTooltip(t, p, dstatus)}
                           side="top"
                           delay={0}
                         >
@@ -480,7 +486,7 @@ export function ProjectTable({
                         data-testid="project-table-metadata"
                         className="flex min-w-0 items-center text-xs leading-4 text-muted-foreground"
                       >
-                        <span className="truncate" aria-label="Source and target language">
+                        <span className="truncate" aria-label={t("org.orgHome.table.sourceTargetLanguageAria")}>
                           {/* AQU-i18n: the lib-generated label uses a literal " → "
                               separator; wrap that glyph so it mirrors under RTL
                               instead of pointing away from the target language. */}
@@ -535,21 +541,21 @@ export function ProjectTable({
                 <span
                   data-testid="project-table-translated-value"
                   className="justify-self-start text-start font-medium tabular-nums text-foreground"
-                  aria-label={`${tpct}% translated`}
+                  aria-label={t("org.orgHome.pctTranslated", { pct: tpct })}
                 >
                   {tpct}%
                 </span>
                 <span
                   data-testid="project-table-validated-value"
                   className="justify-self-start text-start tabular-nums text-muted-foreground"
-                  aria-label={`${pct}% validated`}
+                  aria-label={t("org.orgHome.pctValidated", { pct: pct })}
                 >
                   {pct}%
                 </span>
                 <span
                   data-testid="project-table-audio-value"
                   className="hidden justify-self-start text-start tabular-nums text-muted-foreground @md/project-table:block"
-                  aria-label={`${apct}% audio`}
+                  aria-label={t("org.orgHome.table.audioPctAria", { pct: apct })}
                 >
                   {apct}%
                 </span>
@@ -714,7 +720,7 @@ export function OrgHome() {
     return (
       <AppShell
         sidebar={<OrgSidebar />}
-        header={<OrgBreadcrumb section="Projects" />}
+        header={<OrgBreadcrumb section={t("nav.projects")} isProjectsLanding />}
         statusBar={null}
         main={
           <div className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center">
@@ -885,7 +891,7 @@ export function OrgHome() {
       sidebar={<OrgSidebar />}
       header={
         <div className="flex items-center justify-between pe-4">
-          <OrgBreadcrumb section="Projects" />
+          <OrgBreadcrumb section={t("nav.projects")} isProjectsLanding />
           {activeOrgId != null ? (
             <ProjectCreateDialog
               orgId={activeOrgId}

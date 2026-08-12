@@ -49,6 +49,8 @@ import {
 import { ConfirmActionDialog } from "@/components/ConfirmActionDialog"
 import { RoleLabel } from "@/components/RoleLabel"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { RichMessage } from "@/lib/i18n/RichMessage"
+import type { MessageKey } from "@/lib/i18n/messages/en"
 import type { ProjectMember } from "@/lib/frontier/members"
 import { toUserFacingError } from "@/lib/errors/user-error"
 
@@ -57,11 +59,13 @@ import { toUserFacingError } from "@/lib/errors/user-error"
 // ──────────────────────────────────────────────────────────────────────────
 
 const DEFAULT_INVITE_ROLE = ROLE.CONTRIBUTOR
-const EXPIRY_OPTIONS: { label: string; value: number | null }[] = [
-  { label: "1 day", value: 1 },
-  { label: "7 days (default)", value: 7 },
-  { label: "30 days", value: 30 },
-  { label: "No expiry", value: null },
+// Labels resolve via t() at render time (InviteLinkTab) rather than being
+// hardcoded here, so they stay locale-reactive.
+const EXPIRY_OPTIONS: { labelKey: MessageKey; value: number | null }[] = [
+  { labelKey: "org.membersPage.expiry1Day", value: 1 },
+  { labelKey: "org.membersPage.expiry7DaysDefault", value: 7 },
+  { labelKey: "org.membersPage.expiry30Days", value: 30 },
+  { labelKey: "org.membersPage.expiryNone", value: null },
 ]
 const DEFAULT_EXPIRY_DAYS = 7
 

@@ -31,6 +31,7 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 const ORG_MENU_ITEM_CLASS =
   // hover: only — Base UI highlight-on-hover would steal focus from the search input.
@@ -98,6 +99,7 @@ function OrgMark({
 
 export function OrgSwitcher() {
   const { orgs, activeOrg, activeOrgId, activeGuestOrg, isAllOrgs, guestOrgs, setActiveOrg, setAllOrgs, refresh } = useActiveOrg()
+  const t = useT()
   const location = useLocation()
   const navigate = useNavigate()
 
@@ -130,11 +132,11 @@ export function OrgSwitcher() {
   const title = guestSelected
     ? selectedGuest.name ?? `Org #${selectedGuest.id}`
     : isAllOrgs
-      ? "All organizations"
-      : activeOrg?.name ?? "Workspace"
+      ? t("org.breadcrumb.allOrganizations")
+      : activeOrg?.name ?? t("org.switcher.workspaceFallback")
 
   const filteredOrgs = useMemo(
-    () => sortedOrgs.filter((o) => orgMatchesSearch(o.name ?? "Workspace", search)),
+    () => sortedOrgs.filter((o) => orgMatchesSearch(o.name ?? t("org.switcher.workspaceFallback"), search)),
     [sortedOrgs, search],
   )
   const filteredGuestOrgs = useMemo(
@@ -203,7 +205,7 @@ export function OrgSwitcher() {
           render={
             <button
               type="button"
-              aria-label={`Organization switcher: ${title}`}
+              aria-label={t("org.switcher.triggerAriaLabel", { org: title })}
               className="flex w-full items-center gap-2 rounded-md px-1.5 py-1.5 text-sm hover:bg-accent"
             />
           }
@@ -228,8 +230,8 @@ export function OrgSwitcher() {
             </InputGroupAddon>
             <InputGroupInput
               ref={searchInputRef}
-              placeholder="Find an organization…"
-              aria-label="Find an organization"
+              placeholder={t("org.switcher.searchPlaceholder")}
+              aria-label={t("org.switcher.searchAriaLabel")}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               onKeyDown={(e) => {
@@ -252,7 +254,7 @@ export function OrgSwitcher() {
                   type="button"
                   variant="ghost"
                   size="icon-xs"
-                  aria-label="Clear search"
+                  aria-label={t("org.switcher.clearSearchAriaLabel")}
                   onClick={(e) => {
                     e.stopPropagation()
                     setSearch("")
@@ -280,7 +282,7 @@ export function OrgSwitcher() {
                     <SearchIcon />
                   </EmptyMedia>
                   <EmptyTitle className="text-muted-foreground font-normal">
-                    No organizations found.
+                    {t("org.switcher.noOrganizationsFound")}
                   </EmptyTitle>
                 </EmptyHeader>
               </Empty>
@@ -292,16 +294,16 @@ export function OrgSwitcher() {
                       className={`${ORG_MENU_ITEM_CLASS} focus:[&_[data-slot=avatar]_svg]:text-black! data-highlighted:[&_[data-slot=avatar]_svg]:text-black!`}
                       onClick={handleAllOrgs}
                     >
-                      <OrgMark name="All organizations" allOrgs />
-                      <span className="truncate">All organizations</span>
+                      <OrgMark name={t("org.breadcrumb.allOrganizations")} allOrgs />
+                      <span className="truncate">{t("org.breadcrumb.allOrganizations")}</span>
                       <span className="flex shrink-0 items-center gap-1.5">
-                        <span className={ORG_MENU_META_CLASS}>All projects</span>
+                        <span className={ORG_MENU_META_CLASS}>{t("org.switcher.allProjects")}</span>
                         {!guestSelected && isAllOrgs && <Check className="size-4 opacity-60" />}
                       </span>
                     </DropdownMenuItem>
                   )}
                   {filteredOrgs.map((o) => {
-                    const name = o.name ?? "Workspace"
+                    const name = o.name ?? t("org.switcher.workspaceFallback")
                     const selected = !guestSelected && activeOrgId === o.id
                     return (
                       <DropdownMenuItem
@@ -346,8 +348,8 @@ export function OrgSwitcher() {
           <DropdownMenuSeparator className="mx-0 my-0" />
           <div role="presentation" className="p-1">
             <DropdownMenuItem className={ORG_MENU_ITEM_CLASS} onClick={openCreateDialog}>
-              <OrgMark name="Create" create />
-              <span className="truncate text-muted-foreground!">Create</span>
+              <OrgMark name={t("org.switcher.create")} create />
+              <span className="truncate text-muted-foreground!">{t("org.switcher.create")}</span>
               <span aria-hidden />
             </DropdownMenuItem>
           </div>

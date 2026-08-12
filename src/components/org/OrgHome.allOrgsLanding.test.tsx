@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom"
 import { OrgHome } from "./OrgHome"
 
@@ -27,6 +27,7 @@ const orgContext = vi.hoisted(() => ({
   setActiveOrg: vi.fn(),
   refresh: vi.fn(async () => []),
   refreshAccessibleProjects: vi.fn(async () => []),
+  retryOrgLoad: vi.fn(async () => {}),
 }))
 
 vi.mock("@/context/OrgContext", () => ({
@@ -88,6 +89,7 @@ beforeEach(() => {
   orgContext.accessibleProjectsLoading = false
   orgContext.isLoading = false
   orgContext.error = null
+  orgContext.retryOrgLoad.mockClear()
 })
 
 describe("OrgHome — /orgs/all landing (AQU-864)", () => {
@@ -120,9 +122,14 @@ describe("OrgHome — /orgs/all landing (AQU-864)", () => {
     renderAllOrgs()
 
     expect(screen.getByTestId("location")).toHaveTextContent("/orgs/all")
-    expect(screen.getByText(/couldn't load your organizations/i)).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: /try again/i })).toBeInTheDocument()
+    expect(screen.getByTestId("org-load-error")).toBeInTheDocument()
+    expect(screen.getByText(/couldn’t load your organizations/i)).toBeInTheDocument()
     expect(screen.queryByText(/your organization is ready/i)).not.toBeInTheDocument()
+
+    // AQU-882: retry must re-issue the org fetch AND the dependent
+    // project-directory fetch — the resolver reads `accessibleProjects` too.
+    fireEvent.click(screen.getByRole("button", { name: /retry/i }))
+    expect(orgContext.retryOrgLoad).toHaveBeenCalledTimes(1)
   })
 
   it("keeps the create-your-organization empty state for a caller with no access at all", () => {

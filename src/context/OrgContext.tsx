@@ -43,6 +43,13 @@ interface OrgContextValue {
    *  that need the result immediately don't race against a stale closure. */
   refresh: () => Promise<OrgSummary[]>
   refreshAccessibleProjects: () => Promise<CloudProjectSummary[]>
+  /**
+   * AQU-882: recover from a failed organizations load in place. Re-issues the
+   * org fetch *and* the dependent project-directory fetch, so surfaces showing
+   * the failure (the `/orgs/all` dashboard, the sidebar switcher) can offer a
+   * Retry instead of forcing a full page reload.
+   */
+  retryOrgLoad: () => Promise<void>
 }
 
 const OrgContext = createContext<OrgContextValue | null>(null)
@@ -174,6 +181,13 @@ export function OrgProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => { void refreshAccessibleProjects() }, [refreshAccessibleProjects])
 
+  // AQU-882: `refresh()` clears `error` before re-fetching, so a retry drops
+  // consumers back through their loading state rather than leaving the stale
+  // failure on screen next to a spinner.
+  const retryOrgLoad = useCallback(async (): Promise<void> => {
+    await Promise.all([refresh(), refreshAccessibleProjects()])
+  }, [refresh, refreshAccessibleProjects])
+
   // AQU-473: derive guest orgs from the shared project directory instead of
   // refetching it whenever the member-org list changes.
   const guestOrgs = useMemo(() => {
@@ -262,6 +276,7 @@ export function OrgProvider({ children }: { children: ReactNode }) {
       error,
       refresh,
       refreshAccessibleProjects,
+      retryOrgLoad,
     }}>
       {children}
     </OrgContext.Provider>

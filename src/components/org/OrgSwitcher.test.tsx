@@ -316,4 +316,51 @@ describe("OrgSwitcher", () => {
     // Org scope is path-based for both, so the overview is `/orgs/1`.
     await waitFor(() => expect(screen.getByTestId("loc")).toHaveTextContent("/orgs/1"))
   })
+
+  // AQU-882: a failed org load leaves no activeOrg, no all-orgs scope and no
+  // guest orgs — exactly the shape that unmounted the switcher entirely, so the
+  // user had no in-app affordance to re-issue the fetch.
+  describe("organization load failure (AQU-882)", () => {
+    it("stays mounted with a retry affordance instead of unmounting", async () => {
+      listMyOrgs.mockRejectedValue(new Error("network down"))
+      render(<MemoryRouter><OrgProvider><OrgSwitcher /></OrgProvider></MemoryRouter>)
+
+      const retry = await screen.findByTestId("org-switcher-error")
+      expect(retry).toHaveAccessibleName("Retry loading organizations")
+      expect(screen.getByText(/couldn’t load organizations/i)).toBeInTheDocument()
+    })
+
+    it("reloads organizations in place when the retry affordance is clicked", async () => {
+      listMyOrgs.mockRejectedValueOnce(new Error("network down"))
+      render(<MemoryRouter><OrgProvider><OrgSwitcher /></OrgProvider></MemoryRouter>)
+      const retry = await screen.findByTestId("org-switcher-error")
+
+      // Backend is reachable again.
+      listMyOrgs.mockResolvedValue([
+        { id: 1, name: "Come and See", role: { level: 600, name: "maintainer" } },
+        { id: 2, name: "Side Org", role: { level: 700, name: "owner" } },
+      ])
+      fireEvent.click(retry)
+
+      // Same mount: the real switcher replaces the error affordance.
+      await waitFor(() =>
+        expect(
+          screen.getByRole("button", { name: "Organization switcher: All organizations" }),
+        ).toBeInTheDocument(),
+      )
+      expect(screen.queryByTestId("org-switcher-error")).not.toBeInTheDocument()
+    })
+
+    it("still hides itself for a successful load with no member or guest orgs", async () => {
+      // Negative case: zero orgs is not a failure — the pre-AQU-882 hide
+      // behavior must survive for a genuinely empty (successful) load.
+      listMyOrgs.mockResolvedValue([])
+      const { container } = render(
+        <MemoryRouter><OrgProvider><OrgSwitcher /></OrgProvider></MemoryRouter>,
+      )
+      await waitFor(() => expect(listMyOrgs).toHaveBeenCalled())
+      expect(screen.queryByTestId("org-switcher-error")).not.toBeInTheDocument()
+      expect(container).toBeEmptyDOMElement()
+    })
+  })
 })

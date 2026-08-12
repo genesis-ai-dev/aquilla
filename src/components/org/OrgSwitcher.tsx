@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useLocation, useNavigate } from "react-router-dom"
-import { Building2, Check, ChevronDown, Plus, SearchIcon, X } from "lucide-react"
+import { AlertTriangle, Building2, Check, ChevronDown, Plus, SearchIcon, X } from "lucide-react"
 import { useActiveOrg, type GuestOrg } from "@/context/OrgContext"
 import { isOrgScopedRoute } from "./org-route-scope"
 import { OrgCreateDialog } from "./OrgCreateDialog"
@@ -97,7 +97,7 @@ function OrgMark({
 }
 
 export function OrgSwitcher() {
-  const { orgs, activeOrg, activeOrgId, activeGuestOrg, isAllOrgs, guestOrgs, setActiveOrg, setAllOrgs, refresh } = useActiveOrg()
+  const { orgs, activeOrg, activeOrgId, activeGuestOrg, isAllOrgs, guestOrgs, setActiveOrg, setAllOrgs, refresh, error, retryOrgLoad } = useActiveOrg()
   const location = useLocation()
   const navigate = useNavigate()
 
@@ -144,6 +144,30 @@ export function OrgSwitcher() {
   const showAllOrgsRow = showAllOrgs && search.trim() === ""
   const listEmpty =
     !showAllOrgsRow && filteredOrgs.length === 0 && filteredGuestOrgs.length === 0
+
+  // AQU-882: a failed org load leaves no activeOrg, no all-orgs scope and no
+  // guest orgs, so the check below used to unmount the switcher outright —
+  // removing the only chrome the user could have recovered from and leaving a
+  // full page reload as the sole way to re-issue the fetch. Hold the slot with
+  // a retry affordance instead. Checked before the empty-membership case so a
+  // failure never reads as "you have no organizations".
+  if (error) {
+    return (
+      <button
+        type="button"
+        data-testid="org-switcher-error"
+        aria-label="Retry loading organizations"
+        onClick={() => { void retryOrgLoad() }}
+        className="flex w-full items-center gap-2 rounded-md px-1.5 py-1.5 text-left text-sm hover:bg-accent"
+      >
+        <AlertTriangle className="size-4 shrink-0 text-destructive" aria-hidden />
+        <span className="min-w-0 flex-1 truncate text-muted-foreground">
+          Couldn’t load organizations
+        </span>
+        <span className="shrink-0 text-xs font-medium underline">Retry</span>
+      </button>
+    )
+  }
 
   // AQU-473: a project-only invitee has zero member orgs but may still have
   // guest orgs to switch into — don't hide the whole switcher for them.

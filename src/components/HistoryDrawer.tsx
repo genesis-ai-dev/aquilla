@@ -180,7 +180,7 @@ export function HistoryDrawer({ cell, onClose, projectId, fileId, getTokenForFil
   }
 
   return (
-    <div className="flex h-full w-96 flex-col border-l bg-card">
+    <div className="flex h-full w-96 flex-col border-s bg-card">
       <div className="flex items-center justify-between border-b p-2">
         <h3 className="text-sm font-semibold">
           {t("editor.history.title")} {cell.context && <span className="text-muted-foreground">· {cell.context}</span>}
@@ -230,7 +230,7 @@ export function HistoryDrawer({ cell, onClose, projectId, fileId, getTokenForFil
             <p className="text-[10px] text-muted-foreground">
               {t("editor.history.revisions", { count: groups.length })}
               {hiddenCount > 0 && (
-                <span className="ml-1 normal-case text-muted-foreground/70">
+                <span className="ms-1 normal-case text-muted-foreground/70">
                   {t("editor.history.collapsedNote", {
                     total: history.length,
                     hidden: hiddenCount,
@@ -352,7 +352,7 @@ function GroupItem({
             {t("editor.history.minorEdits", { count: group.entries.length - 1 })}
           </span>
         )}
-        <span className="ml-auto text-muted-foreground">
+        <span className="ms-auto text-muted-foreground">
           {formatTimestamp(terminal.timestamp)}
         </span>
       </div>
@@ -363,9 +363,9 @@ function GroupItem({
           k="editor.history.author"
           values={{ author: <span className="font-medium">{terminal.author}</span> }}
         />
-        {isCurrent && <span className="ml-1.5 text-primary">{t("editor.history.currentMarker")}</span>}
+        {isCurrent && <span className="ms-1.5 text-primary">{t("editor.history.currentMarker")}</span>}
         {isStale && (
-          <span className="ml-1.5 text-amber-700 dark:text-amber-300">
+          <span className="ms-1.5 text-amber-700 dark:text-amber-300">
             {t("editor.history.bumpedMarker")}
           </span>
         )}
@@ -414,7 +414,7 @@ function GroupItem({
             {expanded ? t("editor.history.hideIntermediate") : t("editor.history.showIntermediate")}
           </button>
           {expanded && (
-            <ol className="mt-1 space-y-1 border-l-2 pl-2">
+            <ol className="mt-1 space-y-1 border-s-2 ps-2">
               {group.entries.slice(0, -1).map((entry, j) => (
                 <li
                   key={`${entry.timestamp}-${j}`}

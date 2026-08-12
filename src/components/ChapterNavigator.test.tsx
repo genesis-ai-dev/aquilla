@@ -213,7 +213,7 @@ describe("MilestoneNavigator", () => {
     })
     expect(subsection).toHaveAttribute("data-checked", "true")
     expect(subsection).toHaveAttribute("data-milestone-subsection")
-    expect(subsection).toHaveClass("pl-6")
+    expect(subsection).toHaveClass("ps-6")
     fireEvent.click(screen.getByText("Cells 101–117"))
     expect(onSelect).toHaveBeenCalledWith("story:u363", "story:u363:range:c102")
   })

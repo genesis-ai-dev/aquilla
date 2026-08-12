@@ -308,7 +308,7 @@ export function OrgSettingsMonday() {
               type="button"
               onClick={() => void handleConnect()}
               disabled={busy}
-              className="w-full rounded-lg border p-4 text-left transition-colors hover:border-primary hover:bg-accent disabled:opacity-50"
+              className="w-full rounded-lg border p-4 text-start transition-colors hover:border-primary hover:bg-accent disabled:opacity-50"
             >
               <span className="flex items-center gap-2 font-medium">
                 {busy ? <Spinner className="size-4" /> : <ExternalLink className="size-4" />}

@@ -33,7 +33,7 @@ import {
 const DOCK_MIN_WIDTH = 200
 const DOCK_MAX_WIDTH = 520
 const DOCK_DEFAULT_WIDTH = 256
-/** Collapsed rail (40) + aside `pl-2` inset (8) when railCollapsed. */
+/** Collapsed rail (40) + aside `ps-2` inset (8) when railCollapsed. */
 const DOCK_COLLAPSED_WIDTH = 48
 
 const VIDEO_STORAGE_KEY = "codex:video-height"
@@ -231,7 +231,7 @@ export function AppShell({
         // Collapsed rail: mirror the floating main card's 8px left inset (m-2
         // below) so the centered icon column reads as centered in the visible
         // chrome band instead of being pulled toward the screen edge.
-        railCollapsed && "pl-2",
+        railCollapsed && "ps-2",
       )}
     >
       {(resolvedLogo || logoAccessory) && (

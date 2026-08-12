@@ -33,7 +33,7 @@ const TAB_CLOSE_OVERLAY =
 /** Always-on gradient — softens clipped label at the tab edge. */
 function tabLabelFadeClasses(active: boolean): string {
   return cn(
-    "pointer-events-none absolute inset-y-0 right-0 z-1 w-5 bg-gradient-to-l to-transparent group-hover/tab:opacity-0",
+    "pointer-events-none absolute inset-y-0 end-0 z-1 w-5 bg-gradient-to-l to-transparent rtl:bg-gradient-to-r group-hover/tab:opacity-0",
     active ? "from-card" : "from-card/60 group-hover/tab:from-card",
   )
 }
@@ -42,7 +42,7 @@ function tabLabelFadeClasses(active: boolean): string {
 function tabCloseFadeClasses(active: boolean): string {
   return cn(
     TAB_CLOSE_OVERLAY,
-    "right-5 w-4 bg-gradient-to-l to-transparent",
+    "end-5 w-4 bg-gradient-to-l to-transparent rtl:bg-gradient-to-r",
     active ? "from-card" : "from-card/60 group-hover/tab:from-card",
   )
 }
@@ -51,7 +51,7 @@ function tabCloseFadeClasses(active: boolean): string {
 function tabCloseSolidClasses(active: boolean): string {
   return cn(
     TAB_CLOSE_OVERLAY,
-    "right-0 w-5",
+    "end-0 w-5",
     active ? "bg-card" : "bg-card/60 group-hover/tab:bg-card",
   )
 }
@@ -141,7 +141,7 @@ export function TabStrip({ tabs, activeTabId, files, onActivate, onClose, surfac
               aria-selected={active}
               className={tabClasses(active)}
             >
-              <div className="relative flex min-w-0 flex-1 items-center gap-1 overflow-hidden pr-1">
+              <div className="relative flex min-w-0 flex-1 items-center gap-1 overflow-hidden pe-1">
                 <FileText
                   aria-hidden
                   className={cn(
@@ -153,7 +153,7 @@ export function TabStrip({ tabs, activeTabId, files, onActivate, onClose, surfac
                   <button
                     type="button"
                     onClick={() => onActivate(tab.id)}
-                    className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden p-0 text-left leading-none"
+                    className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden p-0 text-start leading-none"
                   >
                     <span className="whitespace-nowrap font-medium">{label}</span>
                   </button>
@@ -169,7 +169,7 @@ export function TabStrip({ tabs, activeTabId, files, onActivate, onClose, surfac
                   onClose(tab.id)
                 }}
                 aria-label={t("nav.tabStrip.closeTab", { label })}
-                className="absolute right-1 top-1/2 z-10 flex h-4 w-4 -translate-y-1/2 items-center justify-center rounded text-muted-foreground/70 opacity-0 hover:bg-muted hover:text-foreground group-hover/tab:opacity-100 group-focus-within/tab:opacity-100"
+                className="absolute end-1 top-1/2 z-10 flex h-4 w-4 -translate-y-1/2 items-center justify-center rounded text-muted-foreground/70 opacity-0 hover:bg-muted hover:text-foreground group-hover/tab:opacity-100 group-focus-within/tab:opacity-100"
               >
                 <X className="h-3 w-3" />
               </button>
@@ -178,7 +178,7 @@ export function TabStrip({ tabs, activeTabId, files, onActivate, onClose, surfac
         })}
         {surfaceTab && (
           <div role="tab" aria-selected className={tabClasses(true)}>
-            <div className="relative flex min-w-0 flex-1 items-center gap-1 overflow-hidden pr-1">
+            <div className="relative flex min-w-0 flex-1 items-center gap-1 overflow-hidden pe-1">
               <Scale aria-hidden className="block h-3.5 w-3.5 shrink-0 text-primary/80" />
               <span className="min-w-0 flex-1 overflow-hidden whitespace-nowrap font-medium leading-none">
                 {surfaceTab.label}
@@ -191,14 +191,14 @@ export function TabStrip({ tabs, activeTabId, files, onActivate, onClose, surfac
               type="button"
               onClick={surfaceTab.onClose}
               aria-label={t("nav.tabStrip.closeTab", { label: surfaceTab.label })}
-              className="absolute right-1 top-1/2 z-10 flex h-4 w-4 -translate-y-1/2 items-center justify-center rounded text-muted-foreground/70 opacity-0 hover:bg-muted hover:text-foreground group-hover/tab:opacity-100 group-focus-within/tab:opacity-100"
+              className="absolute end-1 top-1/2 z-10 flex h-4 w-4 -translate-y-1/2 items-center justify-center rounded text-muted-foreground/70 opacity-0 hover:bg-muted hover:text-foreground group-hover/tab:opacity-100 group-focus-within/tab:opacity-100"
             >
               <X className="h-3 w-3" />
             </button>
           </div>
         )}
         {trailing && (
-          <div className="ml-auto flex shrink-0 items-center pl-2">{trailing}</div>
+          <div className="ms-auto flex shrink-0 items-center ps-2">{trailing}</div>
         )}
       </div>
       <span

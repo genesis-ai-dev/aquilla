@@ -57,7 +57,7 @@ export function AccessModelLegend({ open, onToggle }: AccessModelLegendProps) {
       <button
         type="button"
         onClick={onToggle}
-        className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-muted-foreground hover:text-foreground"
+        className="flex w-full items-center gap-1.5 px-3 py-1.5 text-start text-muted-foreground hover:text-foreground"
         aria-expanded={open}
       >
         <span

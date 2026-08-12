@@ -121,7 +121,7 @@ function InlineCell({
     <button
       type="button"
       className={cn(
-        "w-full text-left text-sm leading-relaxed rounded px-1 -mx-1",
+        "w-full text-start text-sm leading-relaxed rounded px-1 -mx-1",
         editable && "cursor-text hover:bg-muted/50 transition-colors",
         !value.trim() && "text-muted-foreground italic",
         className,

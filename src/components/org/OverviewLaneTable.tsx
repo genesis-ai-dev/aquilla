@@ -95,7 +95,7 @@ function LaneProgressBar({ pct, fillClass }: { pct: number; fillClass: string })
       <span className="h-1.5 w-16 overflow-hidden rounded-full bg-muted">
         <span className={`block h-full rounded-full ${fillClass}`} style={{ width: `${width}%` }} />
       </span>
-      <span className="w-9 text-right text-xs tabular-nums text-muted-foreground">{width}%</span>
+      <span className="w-9 text-end text-xs tabular-nums text-muted-foreground">{width}%</span>
     </span>
   )
 }
@@ -179,7 +179,7 @@ export function OverviewLaneTable({
         <span className="w-[104px] shrink-0">Validated</span>
         <span className="w-24 shrink-0">People</span>
         <span className="flex-1">Last activity</span>
-        <span className="shrink-0 text-right">Actions</span>
+        <span className="shrink-0 text-end">Actions</span>
       </div>
 
       <ul className="space-y-2" aria-label="Languages">

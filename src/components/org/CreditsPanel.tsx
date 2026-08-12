@@ -115,7 +115,7 @@ function CapWindow({
         <span className="text-xs tabular-nums" data-testid={`cap-${window}-total`}>
           <span className="font-semibold">{formatCredits(total, locale)}</span>
           <span className="text-muted-foreground"> / {formatCredits(cap, locale)}</span>
-          <span className={`ml-1.5 font-medium ${pctTextClass(pct)}`}>{pct}%</span>
+          <span className={`ms-1.5 font-medium ${pctTextClass(pct)}`}>{pct}%</span>
         </span>
       </div>
       <SegmentedCapBar byRail={byRail} cap={cap} />
@@ -148,7 +148,7 @@ function AgentCapRow({
       </div>
       <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground" data-testid={testId}>
         <span className="font-medium text-foreground">{formatCredits(used, locale)}</span> / {formatCredits(cap, locale)}
-        <span className="ml-1">· {pct}%</span>
+        <span className="ms-1">· {pct}%</span>
       </span>
     </div>
   )

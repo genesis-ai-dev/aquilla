@@ -283,7 +283,7 @@ export function SelectionBar({ project, cellStore, username, activeLane, myScope
       <span className="font-medium">
         {t("editor.selection.count", { count: selectedCells.length })}
         {missingCount > 0 && (
-          <span className="ml-1 text-muted-foreground">
+          <span className="ms-1 text-muted-foreground">
             {t("editor.selection.needTranslation", { count: missingCount })}
           </span>
         )}
@@ -303,13 +303,13 @@ export function SelectionBar({ project, cellStore, username, activeLane, myScope
             disabled={isBusy || voiceableCount < 2 || !onVoiceTogether}
           >
             {running.kind === "voice" ? (
-              <Spinner className="mr-1 size-3.5" />
+              <Spinner className="me-1 size-3.5" />
             ) : (
-              <Sparkles className="mr-1 h-3.5 w-3.5" />
+              <Sparkles className="me-1 h-3.5 w-3.5" />
             )}
             {t("editor.selection.voiceTogether")}
             {voiceableCount > 1 && (
-              <span className="ml-1 rounded-md bg-primary-foreground/20 px-1.5 py-0.5 tabular-nums text-primary-foreground">
+              <span className="ms-1 rounded-md bg-primary-foreground/20 px-1.5 py-0.5 tabular-nums text-primary-foreground">
                 {Math.min(voiceableCount, 12)}
               </span>
             )}
@@ -331,13 +331,13 @@ export function SelectionBar({ project, cellStore, username, activeLane, myScope
           disabled={isBusy || missingCount === 0 || !completeBatch}
         >
           {running.kind === "translate" ? (
-            <Spinner className="mr-1 size-3.5" />
+            <Spinner className="me-1 size-3.5" />
           ) : (
-            <Languages className="mr-1 h-3.5 w-3.5" />
+            <Languages className="me-1 h-3.5 w-3.5" />
           )}
           {t("editor.selection.translate")}
           {missingCount > 0 && allHaveTranslation === false && (
-            <span className="ml-1 rounded-md bg-primary-foreground/20 px-1.5 py-0.5 tabular-nums text-primary-foreground">
+            <span className="ms-1 rounded-md bg-primary-foreground/20 px-1.5 py-0.5 tabular-nums text-primary-foreground">
               {missingCount}
             </span>
           )}
@@ -356,11 +356,11 @@ export function SelectionBar({ project, cellStore, username, activeLane, myScope
           disabled={isBusy || validatableCount === 0}
         >
           {running.kind === "validate" ? (
-            <Spinner className="mr-1 size-3.5" />
+            <Spinner className="me-1 size-3.5" />
           ) : null}
           {t("editor.selection.validate")}
           {validatableCount > 0 && (
-            <span className="ml-1 rounded-md bg-muted px-1.5 py-0.5 tabular-nums text-muted-foreground">
+            <span className="ms-1 rounded-md bg-muted px-1.5 py-0.5 tabular-nums text-muted-foreground">
               {validatableCount}
             </span>
           )}
@@ -380,7 +380,7 @@ export function SelectionBar({ project, cellStore, username, activeLane, myScope
         >
           {t("editor.selection.removeMyValidations")}
           {unvalidatableCount > 0 && (
-            <span className="ml-1 rounded-md bg-muted px-1.5 py-0.5 tabular-nums text-muted-foreground">
+            <span className="ms-1 rounded-md bg-muted px-1.5 py-0.5 tabular-nums text-muted-foreground">
               {unvalidatableCount}
             </span>
           )}
@@ -403,9 +403,9 @@ export function SelectionBar({ project, cellStore, username, activeLane, myScope
             disabled={isBusy || !canHarmonize}
             data-testid="selection-harmonize-btn"
           >
-            <Wand2 className="mr-1 h-3.5 w-3.5" />
+            <Wand2 className="me-1 h-3.5 w-3.5" />
             {t("editor.selection.harmonize")}
-            <span className="ml-1 rounded-md bg-muted px-1.5 py-0.5 tabular-nums text-muted-foreground">
+            <span className="ms-1 rounded-md bg-muted px-1.5 py-0.5 tabular-nums text-muted-foreground">
               {harmonizableCount}
             </span>
           </Button>

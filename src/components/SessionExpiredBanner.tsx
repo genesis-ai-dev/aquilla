@@ -39,7 +39,7 @@ export function SessionExpiredBanner() {
     <div
       role="alert"
       aria-live="assertive"
-      className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between gap-2 bg-amber-50 border-b border-amber-200 px-4 py-2 text-sm text-amber-900 dark:bg-amber-950/80 dark:border-amber-800 dark:text-amber-100"
+      className="fixed top-0 start-0 end-0 z-50 flex items-center justify-between gap-2 bg-amber-50 border-b border-amber-200 px-4 py-2 text-sm text-amber-900 dark:bg-amber-950/80 dark:border-amber-800 dark:text-amber-100"
     >
       <span>
         {t("auth.sessionExpired.message")}{" "}

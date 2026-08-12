@@ -107,7 +107,7 @@ function ConceptSelectRow({
       data-testid="merge-concept-row"
       onClick={() => onToggle(concept.id)}
       className={cn(
-        "w-full flex items-start gap-3 rounded-md border p-3 text-left transition-colors",
+        "w-full flex items-start gap-3 rounded-md border p-3 text-start transition-colors",
         selected
           ? "border-primary bg-primary/5"
           : "border-border hover:border-muted-foreground/40",

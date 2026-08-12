@@ -243,7 +243,7 @@ function ActionWidget({
     <Button
       type="button"
       variant="outline"
-      className="h-auto min-w-0 justify-between whitespace-normal px-3 py-2 text-left"
+      className="h-auto min-w-0 justify-between whitespace-normal px-3 py-2 text-start"
       aria-label={ariaLabel}
       onClick={onClick}
     >

@@ -857,7 +857,7 @@ function ExtraTargetLanguages({
             aria-invalid={invalid}
           />
           <Button type="button" variant="secondary" size="sm" data-testid="create-extra-lang-add" onClick={handleAdd}>
-            <Plus className="mr-1 h-3.5 w-3.5" />
+            <Plus className="me-1 h-3.5 w-3.5" />
             Add
           </Button>
         </div>

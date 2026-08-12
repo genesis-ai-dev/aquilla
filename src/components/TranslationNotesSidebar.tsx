@@ -183,7 +183,7 @@ export function TranslationNotesSidebar({
   return (
     <div
       className={cn(
-        "flex h-full w-72 flex-col border-l bg-card text-sm",
+        "flex h-full w-72 flex-col border-s bg-card text-sm",
         className,
       )}
     >

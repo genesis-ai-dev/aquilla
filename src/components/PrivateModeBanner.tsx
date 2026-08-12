@@ -66,14 +66,14 @@ export function PrivateModeBanner() {
   }
 
   return (
-    <div className="fixed top-0 left-0 right-0 z-40 flex items-center justify-center gap-2 border-b border-amber-200 bg-amber-50 px-3 py-1.5 text-xs text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/40 dark:text-amber-200">
+    <div className="fixed top-0 start-0 end-0 z-40 flex items-center justify-center gap-2 border-b border-amber-200 bg-amber-50 px-3 py-1.5 text-xs text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/40 dark:text-amber-200">
       <ShieldAlert className="h-3.5 w-3.5 shrink-0" />
       <span>{t("error.privateMode.message")}</span>
       <button
         type="button"
         onClick={handleDismiss}
         aria-label={t("common.dismiss")}
-        className="ml-1 flex h-5 w-5 items-center justify-center rounded text-amber-700/70 transition-colors hover:bg-amber-100 hover:text-amber-900 dark:text-amber-300/70 dark:hover:bg-amber-900/40 dark:hover:text-amber-100"
+        className="ms-1 flex h-5 w-5 items-center justify-center rounded text-amber-700/70 transition-colors hover:bg-amber-100 hover:text-amber-900 dark:text-amber-300/70 dark:hover:bg-amber-900/40 dark:hover:text-amber-100"
       >
         <X className="h-3 w-3" />
       </button>

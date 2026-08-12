@@ -266,7 +266,7 @@ export function RuleImportDialog({ completionSettings, onAdd, projectId }: Props
               />
             }
           >
-            <Upload className="mr-1 h-3.5 w-3.5" />
+            <Upload className="me-1 h-3.5 w-3.5" />
             Import from doc
           </DialogTrigger>
         </span>

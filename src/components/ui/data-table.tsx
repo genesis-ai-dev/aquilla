@@ -29,7 +29,7 @@ import { cn } from "@/lib/utils"
 import { Search } from "lucide-react"
 
 function columnAlignClass(meta: unknown) {
-  return (meta as { align?: "right" } | undefined)?.align === "right" ? "text-right" : undefined
+  return (meta as { align?: "right" } | undefined)?.align === "right" ? "text-end" : undefined
 }
 
 /**

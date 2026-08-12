@@ -134,8 +134,8 @@ function TabRail({ tabs, activeTab, agentBadge, onTabClick, orientation }: TabRa
                 className={cn(
                   "flex items-center justify-center rounded-md bg-primary text-primary-foreground",
                   isTop
-                    ? "ml-0.5 h-4 min-w-4 px-1 text-[9px]"
-                    : "absolute -right-0.5 -top-0.5 h-3.5 w-3.5 text-[9px]",
+                    ? "ms-0.5 h-4 min-w-4 px-1 text-[9px]"
+                    : "absolute -end-0.5 -top-0.5 h-3.5 w-3.5 text-[9px]",
                 )}
               >
                 {agentBadge > 9 ? "9+" : agentBadge}

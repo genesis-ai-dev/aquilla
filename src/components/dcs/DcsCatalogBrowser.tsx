@@ -252,8 +252,8 @@ export function DcsCatalogBrowser({ onPick, client, defaultLang }: DcsCatalogBro
                     onClick={() => onPick(entry)}
                     className={
                       supported
-                        ? "flex w-full flex-col items-start gap-1 px-3 py-2 text-left hover:bg-accent focus-visible:bg-accent focus-visible:outline-none"
-                        : "flex w-full cursor-not-allowed flex-col items-start gap-1 px-3 py-2 text-left opacity-50"
+                        ? "flex w-full flex-col items-start gap-1 px-3 py-2 text-start hover:bg-accent focus-visible:bg-accent focus-visible:outline-none"
+                        : "flex w-full cursor-not-allowed flex-col items-start gap-1 px-3 py-2 text-start opacity-50"
                     }
                   >
                     <div className="flex w-full items-baseline gap-2">

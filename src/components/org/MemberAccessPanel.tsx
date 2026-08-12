@@ -89,7 +89,7 @@ export function MemberAccessRow({
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center gap-1.5 rounded px-1 py-0.5 text-left text-xs hover:bg-muted"
+        className="flex w-full items-center gap-1.5 rounded px-1 py-0.5 text-start text-xs hover:bg-muted"
       >
         {open ? (
           <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" />
@@ -107,7 +107,7 @@ export function MemberAccessRow({
       </button>
 
       {open && (
-        <div className="ml-4 mt-1 space-y-2">
+        <div className="ms-4 mt-1 space-y-2">
           {loading && (
             <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
               <Spinner className="size-3" />

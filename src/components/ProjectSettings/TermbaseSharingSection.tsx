@@ -338,7 +338,7 @@ export function TermbaseSharingSection({ projectId, orgId, roleLevel }: Props) {
                       disabled={busy}
                       onClick={() => subscribe(t.projectId)}
                     >
-                      <Plus className="mr-1 h-3.5 w-3.5" />
+                      <Plus className="me-1 h-3.5 w-3.5" />
                       Subscribe
                     </Button>
                   </li>

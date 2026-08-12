@@ -5715,7 +5715,7 @@ export function ProjectWorkspace() {
                     ? "1 change was rejected because it conflicted with a newer edit from another session."
                     : `${outboxStaleSiblingCount} changes were rejected because they conflicted with newer edits from another session.`}
                 </span>
-                <div className="ml-2 flex items-center gap-1">
+                <div className="ms-2 flex items-center gap-1">
                   <button
                     type="button"
                     onClick={() => {
@@ -5755,7 +5755,7 @@ export function ProjectWorkspace() {
                 <button
                   type="button"
                   onClick={dismissForbidden}
-                  className="ml-2 rounded bg-rose-200/60 px-2 py-0.5 hover:bg-rose-200 dark:bg-rose-800/50 dark:hover:bg-rose-800"
+                  className="ms-2 rounded bg-rose-200/60 px-2 py-0.5 hover:bg-rose-200 dark:bg-rose-800/50 dark:hover:bg-rose-800"
                 >
                   Dismiss
                 </button>
@@ -5768,7 +5768,7 @@ export function ProjectWorkspace() {
                 <button
                   type="button"
                   onClick={clearOutboxStaleSource}
-                  className="ml-2 rounded bg-blue-200/60 px-2 py-0.5 hover:bg-blue-200 dark:bg-blue-800/50 dark:hover:bg-blue-800"
+                  className="ms-2 rounded bg-blue-200/60 px-2 py-0.5 hover:bg-blue-200 dark:bg-blue-800/50 dark:hover:bg-blue-800"
                 >
                   Dismiss
                 </button>
@@ -5788,7 +5788,7 @@ export function ProjectWorkspace() {
                 <button
                   type="button"
                   onClick={() => setBtWriteError(null)}
-                  className="ml-2 rounded bg-destructive/20 px-2 py-0.5 hover:bg-destructive/30"
+                  className="ms-2 rounded bg-destructive/20 px-2 py-0.5 hover:bg-destructive/30"
                 >
                   Dismiss
                 </button>
@@ -5933,7 +5933,7 @@ export function ProjectWorkspace() {
               />
             )}
             {timelineStacked ? (
-              <div className="relative flex shrink-0 items-center justify-end gap-3 border-b border-border bg-background/90 py-2 pl-2 pr-2 backdrop-blur-xl">
+              <div className="relative flex shrink-0 items-center justify-end gap-3 border-b border-border bg-background/90 py-2 ps-2 pe-2 backdrop-blur-xl">
                 {fileChapterToolbar}
               </div>
             ) : null}
@@ -6759,7 +6759,7 @@ function TrashedProjectScreen({ project, onClose, onRestore }: TrashedProjectScr
           </Button>
           {canRestore && (
             <Button onClick={() => onRestore()}>
-              <Undo2 className="mr-1 h-4 w-4" />
+              <Undo2 className="me-1 h-4 w-4" />
               Restore
             </Button>
           )}

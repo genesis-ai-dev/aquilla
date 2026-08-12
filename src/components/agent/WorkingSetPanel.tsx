@@ -27,12 +27,12 @@ const STATUS_STYLE: Record<string, string> = {
 
 /** Stripe + label per row lifecycle state (the mock's left border). */
 function rowStripe(row: WorkingSetRow, editing: boolean): string {
-  if (editing) return "border-l-sky-400 bg-accent/30"
-  if (row.outcome === "accepted" || row.outcome === "edited") return "border-l-emerald-500"
-  if (row.outcome === "undone") return "border-l-amber-500 opacity-70"
-  if (row.outcome === "rejected") return "border-l-transparent opacity-55"
-  if (row.proposed !== undefined) return "border-l-sky-800"
-  return "border-l-transparent"
+  if (editing) return "border-s-sky-400 bg-accent/30"
+  if (row.outcome === "accepted" || row.outcome === "edited") return "border-s-emerald-500"
+  if (row.outcome === "undone") return "border-s-amber-500 opacity-70"
+  if (row.outcome === "rejected") return "border-s-transparent opacity-55"
+  if (row.proposed !== undefined) return "border-s-sky-800"
+  return "border-s-transparent"
 }
 
 export interface WorkingSetPanelHandle {
@@ -198,7 +198,7 @@ export const WorkingSetPanel = forwardRef<WorkingSetPanelHandle, WorkingSetPanel
               <Button
                 type="button"
                 size="sm"
-                className="ml-auto h-6 text-[11px]"
+                className="ms-auto h-6 text-[11px]"
                 disabled={busy}
                 onClick={() => void onAcceptAll(valueFor)}
               >
@@ -326,7 +326,7 @@ const WorkingSetRowView = memo(function WorkingSetRowView({
       data-row-index={index}
       onClick={onFocus}
       className={cn(
-        "grid grid-cols-[minmax(64px,7rem)_1fr_1fr] gap-x-4 border-b border-l-2 px-3 py-2 text-xs",
+        "grid grid-cols-[minmax(64px,7rem)_1fr_1fr] gap-x-4 border-b border-s-2 px-3 py-2 text-xs",
         focused && !editing && "bg-accent/50",
         rowStripe(row, editing),
       )}
@@ -395,7 +395,7 @@ const WorkingSetRowView = memo(function WorkingSetRowView({
                   type="button"
                   dir="auto"
                   onClick={onStartEdit}
-                  className="whitespace-pre-wrap break-words rounded-sm text-left text-sky-700 hover:bg-sky-500/10 dark:text-sky-300"
+                  className="whitespace-pre-wrap break-words rounded-sm text-start text-sky-700 hover:bg-sky-500/10 dark:text-sky-300"
                 >
                   {editValue}
                 </button>

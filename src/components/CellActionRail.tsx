@@ -74,7 +74,7 @@ export function RailButton({
         <span
           aria-hidden
           className={cn(
-            "pointer-events-none absolute right-0.5 top-0.5 size-1.5 rounded-full ring-2 ring-background",
+            "pointer-events-none absolute end-0.5 top-0.5 size-1.5 rounded-full ring-2 ring-background",
             dotColor,
           )}
         />

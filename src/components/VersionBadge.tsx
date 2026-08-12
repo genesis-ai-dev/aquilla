@@ -134,7 +134,7 @@ export function VersionBadge() {
             size="xs"
             onClick={copy}
             className={cn(
-              "bg-card fixed bottom-3 left-3 z-30 h-auto rounded-md px-3 py-1.5 font-mono text-[11px] leading-none",
+              "bg-card fixed bottom-3 start-3 z-30 h-auto rounded-md px-3 py-1.5 font-mono text-[11px] leading-none",
               copied
                 ? "text-emerald-600 hover:text-emerald-600"
                 : "text-muted-foreground/70 hover:text-muted-foreground",

@@ -317,7 +317,7 @@ export function LanguagesSection({
               onClick={() => void handleAdd()}
               disabled={!canEdit || adding}
             >
-              <Plus className="mr-1 h-3.5 w-3.5" />
+              <Plus className="me-1 h-3.5 w-3.5" />
               {adding ? "Adding…" : "Add lane"}
             </Button>
           </div>

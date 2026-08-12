@@ -191,7 +191,7 @@ function MembersPageContent({ orgId, orgName }: MembersPageContentProps) {
               onClick={() => setMultiInviteOpen(true)}
               disabled={accessibleProjects.length === 0}
             >
-              <UsersRound className="mr-1.5 size-4" />
+              <UsersRound className="me-1.5 size-4" />
               Add to projects
             </Button>
           </AppTooltip>
@@ -222,7 +222,7 @@ function MembersPageContent({ orgId, orgName }: MembersPageContentProps) {
             {membersLoading && members.length === 0 && !rosterHidden ? (
               <Section title="Roster">
                 <div className="flex items-center justify-center py-8 text-muted-foreground">
-                  <Spinner className="mr-2" />
+                  <Spinner className="me-2" />
                   <span className="text-sm">Loading members…</span>
                 </div>
               </Section>

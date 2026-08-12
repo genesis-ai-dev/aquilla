@@ -114,7 +114,7 @@ export function MembersMatrixView() {
   if (isLoading && !matrix) {
     return (
       <div className="flex items-center justify-center py-12 text-muted-foreground">
-        <Spinner className="mr-2" />
+        <Spinner className="me-2" />
         <span className="text-sm">Building portfolio matrix…</span>
       </div>
     )
@@ -154,7 +154,7 @@ export function MembersMatrixView() {
             <TableRow>
               <TableHead
                 scope="col"
-                className="sticky left-0 z-10 border-r bg-background"
+                className="sticky start-0 z-10 border-e bg-background"
               >
                 <div className="flex items-center gap-1">
                   <span>Member</span>
@@ -215,7 +215,7 @@ export function MembersMatrixView() {
 
       {/* Per-member drill-down panel — shown when a member row is selected */}
       {selectedMember && orgId != null && (
-        <div className="w-72 shrink-0 border-l">
+        <div className="w-72 shrink-0 border-s">
           <MemberAccessDrillDown
             orgId={orgId}
             userId={selectedMember.userId}
@@ -239,7 +239,7 @@ function ProjectHeaderCell({
   return (
     <TableHead
       scope="col"
-      className="border-l align-bottom"
+      className="border-s align-bottom"
       style={{ minWidth: "9rem", maxWidth: "14rem" }}
     >
       <div className="flex items-center gap-1">
@@ -302,7 +302,7 @@ const MatrixRow = memo(function MatrixRow({
     <TableRow onMouseEnter={handleRowHover} onFocus={handleRowHover}>
       <TableHead
         scope="row"
-        className="sticky left-0 z-10 border-r bg-background font-normal"
+        className="sticky start-0 z-10 border-e bg-background font-normal"
       >
         <button
           onClick={handleMemberClick}
@@ -315,7 +315,7 @@ const MatrixRow = memo(function MatrixRow({
         </button>
         {member.isOrgInherited && (
           <AppTooltip content="Access on every project comes from org-wide role; no per-project overrides.">
-            <span className="ml-1.5 align-middle rounded bg-muted px-1 py-0.5 text-[9px] text-muted-foreground">
+            <span className="ms-1.5 align-middle rounded bg-muted px-1 py-0.5 text-[9px] text-muted-foreground">
               org-wide
             </span>
           </AppTooltip>

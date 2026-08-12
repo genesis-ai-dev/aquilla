@@ -75,7 +75,7 @@ function ColSelect({
     <div className="flex items-center gap-3">
       <span className="w-40 shrink-0 text-xs font-medium text-foreground/80">
         {label}
-        {required && <span className="ml-0.5 text-destructive">*</span>}
+        {required && <span className="ms-0.5 text-destructive">*</span>}
       </span>
       <Select
         items={items}

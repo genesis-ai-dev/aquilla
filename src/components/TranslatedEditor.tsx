@@ -1563,7 +1563,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
         </div>
       )}
       {pendingFootnoteDelete && (
-        <div className="absolute right-2 top-2 z-20 flex items-center gap-2 rounded-lg border border-destructive/20 bg-background px-2 py-1 text-[11px]">
+        <div className="absolute end-2 top-2 z-20 flex items-center gap-2 rounded-lg border border-destructive/20 bg-background px-2 py-1 text-[11px]">
           <span className="text-muted-foreground">
             {t("editor.footnotes.deletePrompt", { label: pendingFootnoteDelete.label })}
           </span>

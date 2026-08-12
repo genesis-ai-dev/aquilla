@@ -538,7 +538,7 @@ function ValidationHistoryTimeline({
             <li key={`${entry.timestamp}-${i}`} className="rounded text-xs">
               <button
                 type="button"
-                className="flex w-full items-center justify-between gap-2 px-1 py-1 text-left hover:bg-muted/50"
+                className="flex w-full items-center justify-between gap-2 px-1 py-1 text-start hover:bg-muted/50"
                 onClick={() => setExpandedIdx(expanded ? null : i)}
               >
                 <span className="truncate">
@@ -550,7 +550,7 @@ function ValidationHistoryTimeline({
                 <div className="px-1 pb-1 text-[11px] italic text-muted-foreground/80 truncate">"{snippet}"</div>
               )}
               {expanded && (
-                <ul className="border-l border-border/50 pl-2 ml-1 mb-1 space-y-0.5">
+                <ul className="border-s border-border/50 ps-2 ms-1 mb-1 space-y-0.5">
                   {entry.validatorsAll.length === 0 ? (
                     <li className="px-1 py-0.5 text-[11px] text-muted-foreground/60">{t("editor.validation.noValidatorsOnState")}</li>
                   ) : entry.validatorsAll.map(v => (
@@ -562,7 +562,7 @@ function ValidationHistoryTimeline({
                       )}
                     >
                       <span>{v.username}{v.username === currentUsername ? ` ${t("editor.validation.you")}` : ""}</span>
-                      <span className="text-muted-foreground/60 ml-auto">
+                      <span className="text-muted-foreground/60 ms-auto">
                         {formatDate(v.updatedTimestamp, locale, { month: "short", day: "numeric" })}
                       </span>
                     </li>
@@ -1671,7 +1671,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   // holding select + status-badges (flex-col) + verse number in a tight
   // flex row (gap-0.5) — tighter than three gap-2 grid tracks, while the
   // fixed width keeps Source header-aligned. No right gutter; the floating
-  // action rail is absolutely positioned. Target reserves pr-9 for the
+  // action rail is absolutely positioned. Target reserves pe-9 for the
   // expand chevron.
   const gridCols: EditorGridCols = castGutter ? "grid-cols-[132px_1fr_1fr]" : "grid-cols-[84px_1fr_1fr]"
 
@@ -2016,23 +2016,23 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
         aria-label={untimedInTimeLens ? t("editor.row.noTimingAria") : undefined}
         className={cn(
           "relative",
-          untimedInTimeLens && "border-l-2 border-dashed border-amber-400/70",
+          untimedInTimeLens && "border-s-2 border-dashed border-amber-400/70",
           showParagraphBoundary && "mt-3",
         )}
       >
         {untimedInTimeLens && (
-          <span className="pointer-events-none absolute left-1 top-1 z-10 rounded bg-amber-400/15 px-1 text-[9px] font-medium text-amber-600 dark:text-amber-400">
+          <span className="pointer-events-none absolute start-1 top-1 z-10 rounded bg-amber-400/15 px-1 text-[9px] font-medium text-amber-600 dark:text-amber-400">
             {t("editor.row.noTimingBadge")}
           </span>
         )}
         {showParagraphBoundary && (
-          <div className={`grid ${gridCols} border-t border-border/60 pl-2.5 pr-4`}>
+          <div className={`grid ${gridCols} border-t border-border/60 ps-2.5 pe-4`}>
             {/* Pilcrow sits in the number slot of the combined gutter so it
                 stays aligned with line numbers below. */}
             <div className="flex items-center py-1">
-              {castGutter && <div className="mr-2 w-10 shrink-0" aria-hidden="true" />}
+              {castGutter && <div className="me-2 w-10 shrink-0" aria-hidden="true" />}
               <div className="w-5 shrink-0" aria-hidden="true" />
-              <div className="ml-2 flex min-w-0 flex-1 items-center gap-0.5">
+              <div className="ms-2 flex min-w-0 flex-1 items-center gap-0.5">
                 <div className="w-5 shrink-0" aria-hidden="true" />
                 <AppTooltip content={t("editor.row.newParagraph")}>
                   <div
@@ -2291,14 +2291,14 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           // old inset-0 layer painted under Text/Audio + ⋯ when space was tight.
           // min-w-24 floors the picker at prev + chevron + next (three size-8s).
           // gap-2 matches FileChapterToolbar's tabs ↔ ⋯ spacing.
-          <div className="relative flex items-center gap-2 border-b border-border bg-background/90 py-2 pl-2 pr-2 backdrop-blur-xl">
+          <div className="relative flex items-center gap-2 border-b border-border bg-background/90 py-2 ps-2 pe-2 backdrop-blur-xl">
             {showMilestoneNav ? (
               <div className="hidden min-w-0 flex-1 lg:block" aria-hidden="true" />
             ) : null}
             {showMilestoneNav ? (
               <div
                 data-chapter-nav-slot=""
-                className="mr-auto flex min-w-24 max-w-full flex-1 items-center lg:mr-0 lg:flex-none lg:shrink"
+                className="me-auto flex min-w-24 max-w-full flex-1 items-center lg:me-0 lg:flex-none lg:shrink"
               >
                 <div className="min-w-0 w-full max-w-full lg:w-auto">
                   <MilestoneNavigator
@@ -2315,7 +2315,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 className={
                   showMilestoneNav
                     ? "flex shrink-0 items-center lg:flex-1 lg:justify-end"
-                    : "ml-auto flex shrink-0 items-center"
+                    : "ms-auto flex shrink-0 items-center"
                 }
               >
                 {chapterNavTrailing}
@@ -2325,7 +2325,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
             ) : null}
           </div>
         ) : null}
-        <div className={cn("grid gap-2 border-b border-border pl-2.5 pr-4 py-2 text-xs font-medium text-muted-foreground", gridCols)}>
+        <div className={cn("grid gap-2 border-b border-border ps-2.5 pe-4 py-2 text-xs font-medium text-muted-foreground", gridCols)}>
           {/* With the character gutter on, the Source label sits over the
               gutter at the LEFT EDGE (Sam 2026-08-07) instead of floating a
               gutter-width away from the side; otherwise the track is
@@ -2344,7 +2344,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           )}
           {/* In Audio mode the left column carries per-line voice controls, not
               source text, so label it "Controls" (no source-language badge). */}
-          <div className="flex items-center gap-2 pl-2">
+          <div className="flex items-center gap-2 ps-2">
             {castGutter ? null : audioLens ? t("editor.column.controls") : t("editor.column.source")}
             {!castGutter && !audioLens && project.sourceLanguage && (
               <Badge variant="secondary" className="text-[10px] font-normal normal-case tracking-normal">
@@ -2352,7 +2352,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
               </Badge>
             )}
           </div>
-          <div className="flex items-center gap-2 pl-3">
+          <div className="flex items-center gap-2 ps-3">
             Target
             {/* AQU-602 / AQU-583: the target-language tag doubles as the lane
                 switcher AND the entry point to change the target language.
@@ -5603,7 +5603,7 @@ function EditorRow({
           // Flat row in a continuous list: tinted by hover/selection overlays,
           // not shadows. Depth is gone by design — the Linear model reserves
           // elevation for floating layers.
-          "group relative grid gap-2 pl-2.5 pr-4 py-2 transition-colors duration-150 ease-out",
+          "group relative grid gap-2 ps-2.5 pe-4 py-2 transition-colors duration-150 ease-out",
           // The mic-permission help is anchored in the action rail. While it
           // is open, this row must become its own higher stacking layer and
           // allow the popover to escape the row; otherwise neighbouring rows
@@ -5655,11 +5655,11 @@ function EditorRow({
         onKeyDown={handleGridRowKeyDown}
       >
         {/* Combined left gutter — select sits near the left edge (row uses
-            pl-2.5); ml-2 opens space before the badge stack, then a tight
+            ps-2.5); ms-2 opens space before the badge stack, then a tight
             gap to the verse number. Fixed track keeps Source header-aligned. */}
         <div className="flex h-full items-start self-stretch py-1.5">
           {castGutter && (
-            <div className="mr-2 flex w-10 shrink-0 flex-col items-center">
+            <div className="me-2 flex w-10 shrink-0 flex-col items-center">
               <div className="mb-1 h-4 shrink-0" aria-hidden />
               {/* 32px circles centered ON THE VERSE NUMBER (Sam 2026-08-07):
                   same spacer + first-line box as the number column, so the
@@ -5723,8 +5723,8 @@ function EditorRow({
               </button>
             </AppTooltip>
           </div>
-          {/* Badges + verse number — ml-2 opens space after the select. */}
-          <div className="ml-2 flex min-w-0 flex-1 items-start gap-0.5">
+          {/* Badges + verse number — ms-2 opens space after the select. */}
+          <div className="ms-2 flex min-w-0 flex-1 items-start gap-0.5">
             {/* Spacer is a sibling of the badge stack (not inside it) so
                 gap-0.5 only spaces stacked badges — a lone badge stays
                 level with the select control, which has no flex gap. */}
@@ -5805,8 +5805,8 @@ function EditorRow({
             ref={sourceColRef}
             className={cn(
               // The showcase node IS the text surface so it fills the whole
-              // source column. pr-7 clears the floating pencil.
-              "relative flex h-full min-h-[40px] flex-col rounded-lg px-2 py-1.5 pr-7 transition-[colors,opacity]",
+              // source column. pe-7 clears the floating pencil.
+              "relative flex h-full min-h-[40px] flex-col rounded-lg px-2 py-1.5 pe-7 transition-[colors,opacity]",
               // Match the target well — same muted fill + ring (not a darker
               // primary-tinted edit chrome).
               "focus-within:bg-muted focus-within:ring-1 focus-within:ring-ring/40 focus-within:ring-inset",
@@ -5851,7 +5851,7 @@ function EditorRow({
                   aria-pressed={sourceEditing}
                   onClick={() => setSourceEditing((v) => !v)}
                   className={cn(
-                    "absolute right-1 top-1 z-10 shrink-0",
+                    "absolute end-1 top-1 z-10 shrink-0",
                     sourceEditing
                       ? "bg-primary/10 text-primary"
                       : "text-muted-foreground/50 opacity-0 hover:text-foreground focus-visible:opacity-100 [.group:hover:not([data-follow-hover-lock]_*)_&]:opacity-100",
@@ -5867,7 +5867,7 @@ function EditorRow({
               <AppTooltip content={sourceReadOnlyReasonForCell} className="max-w-xs">
                 <span
                   aria-label={t("editor.source.locked")}
-                  className="absolute right-1 top-1 z-10 inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground/50 opacity-0 focus-visible:opacity-100 [.group:hover:not([data-follow-hover-lock]_*)_&]:opacity-100"
+                  className="absolute end-1 top-1 z-10 inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground/50 opacity-0 focus-visible:opacity-100 [.group:hover:not([data-follow-hover-lock]_*)_&]:opacity-100"
                 >
                   <Lock className="size-3" />
                 </span>
@@ -5937,12 +5937,12 @@ function EditorRow({
 
         {/* Target column — TipTap is inline so typing is unchanged. Everything
             else (waveform, transcript preview, backtranslation, infractions
-            detail) lives in the expansion panel. pr-9 reserves space for the
+            detail) lives in the expansion panel. pe-9 reserves space for the
             ever-present chevron at the right edge. */}
         <div
           data-showcase="editor.target"
           className={cn(
-            "relative flex flex-col pl-3 pr-9 transition-opacity",
+            "relative flex flex-col ps-3 pe-9 transition-opacity",
             isSynthBusy && "opacity-70",
           )}
           dir="ltr"
@@ -5964,7 +5964,7 @@ function EditorRow({
             {cell.aiDrafted && (
               <Badge
                 variant="outline"
-                className="ml-auto h-4 shrink-0 gap-1 border-amber-500/40 bg-amber-500/10 px-1.5 text-[9px] font-medium text-amber-700 dark:text-amber-300"
+                className="ms-auto h-4 shrink-0 gap-1 border-amber-500/40 bg-amber-500/10 px-1.5 text-[9px] font-medium text-amber-700 dark:text-amber-300"
                 aria-label={t("editor.ai.draftBadgeAria")}
               >
                 <Sparkles className="size-2.5" />
@@ -6158,7 +6158,7 @@ function EditorRow({
                       {completionPreview}
                       <span
                         aria-hidden
-                        className="ml-0.5 inline-block h-3.5 w-[2px] -mb-0.5 animate-pulse bg-primary/70 align-middle"
+                        className="ms-0.5 inline-block h-3.5 w-[2px] -mb-0.5 animate-pulse bg-primary/70 align-middle"
                       />
                     </p>
                   ) : (
@@ -6284,7 +6284,7 @@ function EditorRow({
             scroll container, the sticky header's stacking context wins (rows
             are position:relative with auto z-index, so the row's local z-10
             doesn't escape the sticky header's z-10 context). */}
-        <div className="pointer-events-none absolute right-2 top-0.5 z-20 flex">
+        <div className="pointer-events-none absolute end-2 top-0.5 z-20 flex">
           <div
             className="pointer-events-auto"
             // AQU-354: track focus landing on / leaving a rail control so the
@@ -6482,7 +6482,7 @@ function EditorRow({
                     {micDenied && showMicDeniedHelp && (
                       <span
                         role="tooltip"
-                        className="absolute bottom-full right-0 z-50 mb-1 w-52 rounded-md border bg-popover px-3 py-2 text-[11px] leading-snug text-popover-foreground shadow-md"
+                        className="absolute bottom-full end-0 z-50 mb-1 w-52 rounded-md border bg-popover px-3 py-2 text-[11px] leading-snug text-popover-foreground shadow-md"
                       >
                         <strong className="block font-semibold">{t("editor.audio.micBlockedTitle")}</strong>
                         <span className="mt-0.5 block text-muted-foreground">
@@ -6617,7 +6617,7 @@ function EditorRow({
           align under the content columns (past the gutter) so it reads as the
           row's child, and only mounted while open so collapsed rows stay flush. */}
       {expanded && (
-      <div className="pl-[3.75rem] pr-4 pb-2">
+      <div className="ps-[3.75rem] pe-4 pb-2">
         <CellExpansion
           open={expanded}
           tab={expansionTab}
@@ -6807,8 +6807,8 @@ function EditorRow({
                         /* The reading — the hero. Foreground, comfortable size
                            and leading, in a soft well with a gentle tone bar
                            (rhymes with the recording's transcript). */
-                        <div className="relative overflow-hidden rounded-xl bg-muted/50 py-3 pr-4 pl-4">
-                          <span aria-hidden className="absolute inset-y-0 left-0 w-[3px] rounded-md bg-primary/35" />
+                        <div className="relative overflow-hidden rounded-xl bg-muted/50 py-3 pe-4 ps-4">
+                          <span aria-hidden className="absolute inset-y-0 start-0 w-[3px] rounded-md bg-primary/35" />
                           <p className="text-[15px] leading-relaxed text-foreground/90">
                             {cell.backtranslation}
                           </p>
@@ -7158,7 +7158,7 @@ function EditorRow({
                             key={inf.ruleId}
                             type="button"
                             onClick={() => setOpenRuleId(inf.ruleId)}
-                            className="bg-card flex w-full items-start gap-2 rounded-lg px-2.5 py-2 text-left text-xs transition-all"
+                            className="bg-card flex w-full items-start gap-2 rounded-lg px-2.5 py-2 text-start text-xs transition-all"
                           >
                             <Icon
                               className={cn(
@@ -7170,7 +7170,7 @@ function EditorRow({
                               <span className="font-medium text-foreground">
                                 {rule?.name ?? inf.ruleId}
                               </span>
-                              <span className="ml-1 text-muted-foreground">
+                              <span className="ms-1 text-muted-foreground">
                                 — {inf.message}
                               </span>
                             </span>
@@ -7190,7 +7190,7 @@ function EditorRow({
                                 key={`waived-${inf.ruleId}`}
                                 type="button"
                                 onClick={() => setOpenRuleId(inf.ruleId)}
-                                className="bg-muted flex w-full items-start gap-2 rounded-xl px-2.5 py-1.5 text-left text-xs text-muted-foreground/70 transition-all"
+                                className="bg-muted flex w-full items-start gap-2 rounded-xl px-2.5 py-1.5 text-start text-xs text-muted-foreground/70 transition-all"
                               >
                                 <Check className="mt-0.5 h-3 w-3 shrink-0" />
                                 <span className="flex-1">

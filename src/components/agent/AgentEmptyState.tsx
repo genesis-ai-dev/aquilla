@@ -85,7 +85,7 @@ export function AgentEmptyState({ onPromptSelect }: AgentEmptyStateProps) {
               key={prompt}
               type="button"
               onClick={() => onPromptSelect(prompt)}
-              className="rounded-md border bg-muted/40 px-2 py-1.5 text-left text-xs hover:bg-muted hover:text-foreground"
+              className="rounded-md border bg-muted/40 px-2 py-1.5 text-start text-xs hover:bg-muted hover:text-foreground"
             >
               {prompt}
             </button>

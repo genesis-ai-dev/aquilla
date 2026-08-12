@@ -93,7 +93,7 @@ function CrumbLink({ crumb }: { crumb: Crumb }) {
 function CrumbSeparator() {
   return (
     <BreadcrumbSeparator className="shrink-0">
-      <span className="text-muted-foreground">›</span>
+      <span className="inline-block text-muted-foreground rtl:-scale-x-100">›</span>
     </BreadcrumbSeparator>
   )
 }

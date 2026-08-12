@@ -185,7 +185,7 @@ export function SearchDockPanel({
         <SegmentTabs
           value={scope}
           aria-label={t("search.scope.label")}
-          className="ml-auto"
+          className="ms-auto"
           listClassName="text-[10px]"
           options={[
             { label: t("common.file"), value: "file", disabled: !activeFileId },
@@ -203,7 +203,7 @@ export function SearchDockPanel({
               size="icon-xs"
               aria-label={t("search.openFullPanel")}
               onClick={onOpenFullPanel}
-              className="ml-0.5"
+              className="ms-0.5"
             >
               <BookOpen className="h-3 w-3" />
             </Button>
@@ -211,7 +211,7 @@ export function SearchDockPanel({
         )}
         </>
         ) : (
-          <span className="ml-auto" />
+          <span className="ms-auto" />
         )}
       </div>
 

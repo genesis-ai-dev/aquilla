@@ -89,7 +89,7 @@ export function ProjectLaneSubRows({
                   {relative ?? "No activity"}
                 </span>
 
-                <span className="ml-auto flex items-center gap-1.5">
+                <span className="ms-auto flex items-center gap-1.5">
                   <Button
                     render={<Link to={laneOpenTo(projectId, lane.lane)} />}
                     size="xs"

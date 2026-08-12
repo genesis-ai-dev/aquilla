@@ -73,7 +73,7 @@ export function RoleGatedStep({
         data-testid="role-gated-step"
         className="pointer-events-none relative opacity-60 select-none"
       >
-        <div className="absolute -top-1 -right-1 z-10 flex h-5 w-5 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+        <div className="absolute -top-1 -end-1 z-10 flex h-5 w-5 items-center justify-center rounded-lg bg-muted text-muted-foreground">
           <Lock className="h-3 w-3" aria-hidden />
         </div>
         {children}

@@ -90,12 +90,12 @@ function TruncatableText({ text, className }: { text: string; className?: string
         <button
           type="button"
           onClick={() => setExpanded((v) => !v)}
-          className="ml-1 inline-flex items-center align-baseline text-[10px] text-muted-foreground underline underline-offset-2 hover:text-foreground"
+          className="ms-1 inline-flex items-center align-baseline text-[10px] text-muted-foreground underline underline-offset-2 hover:text-foreground"
         >
           {expanded ? (
-            <>Show less <ChevronUp className="ml-0.5 h-2.5 w-2.5" /></>
+            <>Show less <ChevronUp className="ms-0.5 h-2.5 w-2.5" /></>
           ) : (
-            <>Show more <ChevronDown className="ml-0.5 h-2.5 w-2.5" /></>
+            <>Show more <ChevronDown className="ms-0.5 h-2.5 w-2.5" /></>
           )}
         </button>
       )}
@@ -352,7 +352,7 @@ function StagedProposalCard({
             </AppTooltip>
           </div>
           {blockedReason && (
-            <div className="text-right text-[10px] text-muted-foreground">{blockedReason}</div>
+            <div className="text-end text-[10px] text-muted-foreground">{blockedReason}</div>
           )}
         </div>
       )}

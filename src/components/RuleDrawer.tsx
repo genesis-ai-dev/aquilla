@@ -41,7 +41,7 @@ export function RuleDrawer({
   }
 
   return (
-    <div className="flex h-full w-80 flex-col border-l bg-card">
+    <div className="flex h-full w-80 flex-col border-s bg-card">
       <div className="flex items-center justify-between border-b p-2">
         <div className="flex items-center gap-2">
           <SeverityIcon className={`h-4 w-4 ${severityColor}`} />
@@ -59,7 +59,7 @@ export function RuleDrawer({
         <AppTooltip content="Autofix is unavailable in this build">
           <span className="inline-flex">
             <Button size="sm" disabled>
-              <Wand2 className="mr-1 h-3.5 w-3.5" />
+              <Wand2 className="me-1 h-3.5 w-3.5" />
               Try to fix all
             </Button>
           </span>
@@ -87,7 +87,7 @@ export function RuleDrawer({
               {infractionCells.slice(0, 20).map(({ infraction, cell }) => (
                 <li key={infraction.cellId} className="flex items-start gap-1">
                   <button
-                    className="flex-1 rounded border-l-2 border-red-400 bg-red-50 p-1.5 text-left text-xs hover:bg-red-100 dark:bg-red-950/20 dark:hover:bg-red-950/40"
+                    className="flex-1 rounded border-s-2 border-red-400 bg-red-50 p-1.5 text-start text-xs hover:bg-red-100 dark:bg-red-950/20 dark:hover:bg-red-950/40"
                     onClick={() => onNavigateToCell(infraction.cellId)}
                   >
                     <div className="truncate text-muted-foreground">{cell!.original.slice(0, 60)}...</div>
@@ -117,7 +117,7 @@ export function RuleDrawer({
               {passingCells.map((cell) => (
                 <li key={cell.id}>
                   <button
-                    className="w-full rounded border-l-2 border-green-400 bg-green-50 p-1.5 text-left text-xs hover:bg-green-100 dark:bg-green-950/20 dark:hover:bg-green-950/40"
+                    className="w-full rounded border-s-2 border-green-400 bg-green-50 p-1.5 text-start text-xs hover:bg-green-100 dark:bg-green-950/20 dark:hover:bg-green-950/40"
                     onClick={() => onNavigateToCell(cell.id)}
                   >
                     <div className="truncate text-muted-foreground">{cell.original.slice(0, 60)}...</div>

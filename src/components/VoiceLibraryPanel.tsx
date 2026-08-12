@@ -290,7 +290,7 @@ function VoiceRow({
         onClick={onSelect}
         onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelect() } }}
         className={cn(
-          "group flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-sm transition-colors",
+          "group flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-start text-sm transition-colors",
           active ? "bg-primary/10" : "hover:bg-accent/50",
         )}
       >

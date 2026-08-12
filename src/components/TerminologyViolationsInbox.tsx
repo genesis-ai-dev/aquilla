@@ -126,7 +126,7 @@ function ConceptViolationRow({
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center gap-2 text-left"
+        className="flex w-full items-center gap-2 text-start"
         aria-expanded={open}
       >
         {open ? (
@@ -155,7 +155,7 @@ function ConceptViolationRow({
       </button>
 
       {open && (
-        <ul className="mt-2 space-y-1 pl-6">
+        <ul className="mt-2 space-y-1 ps-6">
           {group.infractions.map((inf, i) => {
             const cell = cellById.get(inf.cellId)
             const label = cell?.cellLabel ?? inf.cellId

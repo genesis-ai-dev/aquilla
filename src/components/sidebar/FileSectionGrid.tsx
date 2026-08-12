@@ -36,7 +36,7 @@ export function FileSectionGrid({ projectId, fileId, validationCount, getTokenFo
   }
 
   return (
-    <div className="space-y-px pl-6 pr-2 py-1">
+    <div className="space-y-px ps-6 pe-2 py-1">
       {sections.map((section) => {
         const completed = section.textCompleted
         const validated = section.textValidated
@@ -52,7 +52,7 @@ export function FileSectionGrid({ projectId, fileId, validationCount, getTokenFo
             <button
               type="button"
               className={cn(
-                "flex w-full items-center gap-2 rounded-xl bg-card px-2 py-1 text-left text-[11px] transition-shadow",
+                "flex w-full items-center gap-2 rounded-xl bg-card px-2 py-1 text-start text-[11px] transition-shadow",
                 "text-muted-foreground hover:text-foreground",
               )}
               onClick={() => onSectionClick(section.label)}

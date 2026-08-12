@@ -307,7 +307,7 @@ export function RulesSurface({
                   <Button
                     size="sm"
                     variant="outline"
-                    className="ml-auto"
+                    className="ms-auto"
                     onClick={() => setEditingOrgRuleId("new")}
                     disabled={editingOrgRuleId !== null}
                   >
@@ -316,7 +316,7 @@ export function RulesSurface({
                   </Button>
                 )}
                 {!canEditOrgRules && (
-                  <Badge variant="secondary" className="ml-auto">
+                  <Badge variant="secondary" className="ms-auto">
                     <Lock data-icon="inline-start" />
                     Read-only
                   </Badge>

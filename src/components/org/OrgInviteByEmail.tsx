@@ -116,7 +116,7 @@ export function OrgInviteByEmail({ orgId }: { orgId: number }) {
         <div className="flex items-center gap-2">
           <code className="truncate rounded bg-muted px-2 py-1 text-[11px]">{link}</code>
           <Button size="sm" variant="outline" onClick={copyLink}>
-            <Copy className="mr-1 size-3.5" />
+            <Copy className="me-1 size-3.5" />
             {copied ? "Copied" : "Copy"}
           </Button>
         </div>

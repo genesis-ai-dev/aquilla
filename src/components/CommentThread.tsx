@@ -144,12 +144,12 @@ export function CommentThread({ thread, currentTranslated, canReply = true, canR
             <div className="flex flex-wrap gap-1">
               {canReply && (
                 <Button size="sm" variant="outline" onClick={handleReply} disabled={!replyText.trim()}>
-                  <Send className="mr-1 h-3 w-3" /> {t("comments.thread.reply")}
+                  <Send className="me-1 h-3 w-3" /> {t("comments.thread.reply")}
                 </Button>
               )}
               {canReply && canResolve && (
                 <Button size="sm" variant="outline" onClick={handleCloseWithReply} disabled={!replyText.trim()}>
-                  <Check className="mr-1 h-3 w-3" /> {t("comments.thread.closeWithReply")}
+                  <Check className="me-1 h-3 w-3" /> {t("comments.thread.closeWithReply")}
                 </Button>
               )}
               {canResolve && (
@@ -164,7 +164,7 @@ export function CommentThread({ thread, currentTranslated, canReply = true, canR
         canResolve && (
           <div className="mt-2">
             <Button size="sm" variant="ghost" onClick={onReopen}>
-              <Undo2 className="mr-1 h-3 w-3" /> {t("comments.reopen")}
+              <Undo2 className="me-1 h-3 w-3" /> {t("comments.reopen")}
             </Button>
           </div>
         )

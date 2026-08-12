@@ -172,7 +172,7 @@ function HistoryList({
             <button
               type="button"
               onClick={() => onPick(target)}
-              className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm hover:bg-accent/60"
+              className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-start text-sm hover:bg-accent/60"
             >
               <Clock className="size-3.5 shrink-0 text-muted-foreground/70" aria-hidden />
               <span className="truncate">{entry.title}</span>

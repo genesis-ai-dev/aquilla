@@ -94,7 +94,7 @@ export function WorkloadRollup({ jwt, orgId, action }: { jwt: string; orgId: num
                   <div className="h-full rounded-full bg-primary" style={{ width: `${pct}%` }} />
                 </div>
               </div>
-              <div className="shrink-0 text-right">
+              <div className="shrink-0 text-end">
                 <p className="text-sm font-semibold tabular-nums">
                   {a.cellsDone}/{a.cellsTotal}
                 </p>

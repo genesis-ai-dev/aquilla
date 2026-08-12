@@ -187,7 +187,7 @@ function DownloadBar({ loaded, total }: { loaded: number; total: number }) {
           style={{ width: `${pct ?? 8}%` }}
         />
       </div>
-      {pct != null && <span className="w-8 text-right text-[10px] tabular-nums text-muted-foreground">{pct}%</span>}
+      {pct != null && <span className="w-8 text-end text-[10px] tabular-nums text-muted-foreground">{pct}%</span>}
     </div>
   )
 }

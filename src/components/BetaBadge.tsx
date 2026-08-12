@@ -43,7 +43,7 @@ export function BetaBadge() {
             nativeButton={false}
             render={<a href="https://discord.gg/T2EndwXe4W" target="_blank" rel="noopener noreferrer" />}
           >
-            <MessageCircleIcon className="mr-1.5 h-4 w-4" />
+            <MessageCircleIcon className="me-1.5 h-4 w-4" />
             {t("nav.beta.joinDiscord")}
           </Button>
         </DialogFooter>

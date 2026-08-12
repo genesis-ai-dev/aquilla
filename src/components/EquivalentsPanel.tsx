@@ -108,7 +108,7 @@ function PredictedRow({
         <button
           type="button"
           className={cn(
-            "flex items-center gap-1 text-left",
+            "flex items-center gap-1 text-start",
             hasExamples ? "hover:text-foreground" : "cursor-default",
           )}
           onClick={() => hasExamples && setOpen((v) => !v)}
@@ -132,7 +132,7 @@ function PredictedRow({
         <span className="text-[10px] text-muted-foreground">{sourceLabel}</span>
 
         {/* Numeric evidence — kept subtle, signals "this is a guess". */}
-        <span className="ml-auto flex items-center gap-2 font-mono text-[10px] text-muted-foreground">
+        <span className="ms-auto flex items-center gap-2 font-mono text-[10px] text-muted-foreground">
           {prediction.chi2 !== undefined && <span>χ²={prediction.chi2.toFixed(1)}</span>}
           {prediction.emProb !== undefined && <span>p={prediction.emProb.toFixed(2)}</span>}
         </span>
@@ -154,7 +154,7 @@ function PredictedRow({
 
       {/* Few-shot evidence: the nearby pairs this prediction drew from. */}
       {open && hasExamples && (
-        <ul className="ml-4 space-y-1 border-l pl-3">
+        <ul className="ms-4 space-y-1 border-s ps-3">
           {prediction.examples.map((ex, i) => (
             <li key={i} className="text-[11px] leading-relaxed">
               <span className="text-muted-foreground">{ex.source}</span>

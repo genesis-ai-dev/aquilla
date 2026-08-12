@@ -98,9 +98,9 @@ export function AiModelDownloadChip() {
   return (
     <div
       className={cn(
-        // Anchored bottom-left so we don't collide with the workspace's
-        // bottom-right "Synced" pill.
-        "fixed bottom-4 left-4 z-30 w-72 rounded-xl border bg-popover p-3 text-xs text-popover-foreground shadow-lg",
+        // Anchored at the reading-start corner so we don't collide with the
+        // workspace's "Synced" pill, which sits at the opposite (end) corner.
+        "fixed bottom-4 start-4 z-30 w-72 rounded-xl border bg-popover p-3 text-xs text-popover-foreground shadow-lg",
       )}
     >
       <div className="mb-2 flex items-center gap-2">
@@ -122,7 +122,7 @@ export function AiModelDownloadChip() {
           size="icon"
           onClick={() => setDismissed(true)}
           aria-label="Hide"
-          className="ml-auto size-5 text-muted-foreground/60 hover:text-foreground"
+          className="ms-auto size-5 text-muted-foreground/60 hover:text-foreground"
         >
           <X className="h-3 w-3" />
         </Button>

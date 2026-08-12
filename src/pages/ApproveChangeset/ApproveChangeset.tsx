@@ -322,7 +322,7 @@ function ApprovalSummaryView({
       {warnings && warnings.length > 0 && (
         <div className="rounded-md border border-amber-300/50 bg-amber-50 p-3 space-y-1 dark:bg-amber-950/20">
           <p className="text-sm font-medium">Warnings</p>
-          <ul className="list-disc space-y-0.5 pl-4 text-xs text-muted-foreground">
+          <ul className="list-disc space-y-0.5 ps-4 text-xs text-muted-foreground">
             {warnings.map((w, i) => (
               <li key={i}>{w.message}</li>
             ))}

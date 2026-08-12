@@ -119,13 +119,13 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
 
   return (
     // When anchored to the file-options ⋯ button, skip the header-only gap hack.
-    <div className={cn("relative flex items-center", hideTrigger && !anchor && "-ml-1")}>
+    <div className={cn("relative flex items-center", hideTrigger && !anchor && "-ms-1")}>
       {showMismatchWarning && mismatch && (
         <div
           className={cn(
-            "absolute right-full top-1/2 z-30 mr-2 flex -translate-y-1/2 items-center gap-2 whitespace-nowrap",
+            "absolute end-full top-1/2 z-30 me-2 flex -translate-y-1/2 items-center gap-2 whitespace-nowrap",
             "rounded-2xl bg-card px-3 py-2 text-xs",
-            "animate-in fade-in-0 slide-in-from-right-2 duration-200",
+            "animate-in fade-in-0 slide-in-from-right-2 rtl:slide-in-from-left-2 duration-200",
           )}
           role="status"
         >
@@ -172,7 +172,7 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
             </Button>
           </AppTooltip>
           <span
-            className="absolute left-full top-1/2 -translate-y-1/2 border-y-4 border-l-4 border-y-transparent border-l-card"
+            className="absolute start-full top-1/2 -translate-y-1/2 border-y-4 border-s-4 border-y-transparent border-s-card"
             aria-hidden="true"
           />
         </div>

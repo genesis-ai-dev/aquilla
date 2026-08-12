@@ -796,7 +796,7 @@ export function TimelineEditor({
         <div
           data-testid="tl-timing-mode"
           data-mode={timingMode}
-          className="ml-2 inline-flex items-center overflow-hidden rounded-md border border-border text-[11px]"
+          className="ms-2 inline-flex items-center overflow-hidden rounded-md border border-border text-[11px]"
         >
           {(["dubbing", "audioFirst"] as const).map((mode) =>
             onChangeTimingMode ? (
@@ -830,7 +830,7 @@ export function TimelineEditor({
             ) : null,
           )}
         </div>
-        <div className="ml-auto flex items-center gap-1.5">
+        <div className="ms-auto flex items-center gap-1.5">
           {/* Meeting 2026-08-05: generated voices default to compressed
               playback; fast connections can opt into the original WAV. Mic
               recordings have no lossless form — the tooltip says so. */}
@@ -1012,7 +1012,7 @@ export function TimelineEditor({
 
       {/* timeline */}
       <div className="grid min-h-0 grid-cols-[128px_1fr]">
-        <div className="border-r border-border bg-muted/20">
+        <div className="border-e border-border bg-muted/20">
           <div className="h-7 border-b border-border" />
           <LaneLabel
             name={t("editor.timeline.laneSubtitle")}

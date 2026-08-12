@@ -258,11 +258,11 @@ function StatBar({ label, value, total, fillClass, suffix }: {
         <span className="h-2 flex-1 rounded-full bg-muted overflow-hidden">
           <span className={`block h-full rounded-full transition-all ${fillClass}`} style={{ width: `${pct}%` }} />
         </span>
-        <span className="w-20 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
+        <span className="w-20 shrink-0 text-end text-xs tabular-nums text-muted-foreground">
           {pct}%
         </span>
       </div>
-      <span className="w-28 shrink-0 text-right text-[11px] tabular-nums text-muted-foreground/70">
+      <span className="w-28 shrink-0 text-end text-[11px] tabular-nums text-muted-foreground/70">
         {value}/{total}{suffix ?? ""}
       </span>
     </div>
@@ -375,7 +375,7 @@ function ChapterRow({
       <button
         type="button"
         data-testid="chapter-row"
-        className="flex w-full items-center gap-2 rounded-sm py-0.5 text-left text-xs hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="flex w-full items-center gap-2 rounded-sm py-0.5 text-start text-xs hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         onClick={toggle}
         aria-expanded={open}
       >
@@ -386,14 +386,14 @@ function ChapterRow({
           {chapter.filledCount}/{chapter.approvedCount}/{chapter.cellCount}
         </span>
       </button>
-      {open && loading && <p className="ml-5 py-1 text-[10px] text-muted-foreground">Loading verses…</p>}
+      {open && loading && <p className="ms-5 py-1 text-[10px] text-muted-foreground">Loading verses…</p>}
       {open && failed && (
-        <button type="button" className="ml-5 py-1 text-[10px] text-destructive underline" onClick={() => void load()}>
+        <button type="button" className="ms-5 py-1 text-[10px] text-destructive underline" onClick={() => void load()}>
           Verse progress unavailable. Retry
         </button>
       )}
       {open && verses != null && (
-        <ul className="ml-5 mt-0.5 mb-1 grid grid-cols-[repeat(auto-fill,minmax(2.5rem,1fr))] gap-1" aria-label={`${chapter.chapter} verses`}>
+        <ul className="ms-5 mt-0.5 mb-1 grid grid-cols-[repeat(auto-fill,minmax(2.5rem,1fr))] gap-1" aria-label={`${chapter.chapter} verses`}>
           {verses.map((verse, index) => (
             <AppTooltip key={`${verse.ref}:${index}`} content={verse.ref}>
             <li
@@ -428,7 +428,7 @@ function BookRow({
       <button
         type="button"
         data-testid="book-row"
-        className="flex w-full items-center gap-2 py-0.5 text-left text-xs font-medium hover:text-foreground"
+        className="flex w-full items-center gap-2 py-0.5 text-start text-xs font-medium hover:text-foreground"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
       >
@@ -440,7 +440,7 @@ function BookRow({
         </span>
       </button>
       {open && (
-        <ul className="ml-5 mt-0.5" aria-label={`${book.book} chapters`}>
+        <ul className="ms-5 mt-0.5" aria-label={`${book.book} chapters`}>
           {book.chapters.map((c) => (
             <ChapterRow key={c.chapter} chapter={c} loadVerses={loadVerses} />
           ))}
@@ -470,25 +470,25 @@ function FileCanonicalRollup({
   loadVerses: (sectionKey: string) => Promise<VerseRollup[]>
 }) {
   if (loading) {
-    return <p className="ml-7 mt-1 text-xs text-muted-foreground">Loading chapter breakdown…</p>
+    return <p className="ms-7 mt-1 text-xs text-muted-foreground">Loading chapter breakdown…</p>
   }
   if (error) {
     return (
-      <button type="button" className="ml-7 mt-1 text-xs text-destructive underline" onClick={onRetry}>
+      <button type="button" className="ms-7 mt-1 text-xs text-destructive underline" onClick={onRetry}>
         Chapter progress unavailable. Retry
       </button>
     )
   }
   if (!rollup || (rollup.books === null && rollup.sections.length === 0)) {
     return (
-      <p className="ml-7 mt-1 text-xs text-muted-foreground">
+      <p className="ms-7 mt-1 text-xs text-muted-foreground">
         No chapter structure detected for this file.
       </p>
     )
   }
   if (rollup.books === null) {
     return (
-      <ul className="ml-7 mt-1 border-l pl-3" data-testid="flat-section-rollup" aria-label="Section breakdown">
+      <ul className="ms-7 mt-1 border-s ps-3" data-testid="flat-section-rollup" aria-label="Section breakdown">
         {rollup.sections.map((section) => (
           <FlatSectionRow key={section.key} section={section} />
         ))}
@@ -497,7 +497,7 @@ function FileCanonicalRollup({
   }
   if (rollup.books.length === 0) return null
   return (
-    <ul className="ml-7 mt-1 border-l pl-3" data-testid="canonical-rollup-books" aria-label="Chapter breakdown">
+    <ul className="ms-7 mt-1 border-s ps-3" data-testid="canonical-rollup-books" aria-label="Chapter breakdown">
       {rollup.books.map((b) => (
         <BookRow key={b.book} book={b} loadVerses={loadVerses} />
       ))}
@@ -901,11 +901,16 @@ export function ProjectOverview() {
     }
   }
 
-  // Language pair label, e.g. "Greek → Bambara"
+  // Language pair label, e.g. "Greek → Bambara". Arrow is wrapped so it
+  // visually mirrors under RTL instead of pointing away from the target.
   const languagePair =
-    project?.sourceLanguage && project?.targetLanguage
-      ? `${project.sourceLanguage} → ${project.targetLanguage}`
-      : project?.targetLanguage ?? project?.sourceLanguage ?? null
+    project?.sourceLanguage && project?.targetLanguage ? (
+      <>
+        {project.sourceLanguage} <span className="inline-block rtl:-scale-x-100">→</span> {project.targetLanguage}
+      </>
+    ) : (
+      project?.targetLanguage ?? project?.sourceLanguage ?? null
+    )
 
   const nonReadyContent =
     status === "loading" ? (
@@ -1459,10 +1464,10 @@ export function ProjectOverview() {
                         <span className="w-32 shrink-0">File</span>
                         <span className="flex-1">Progress</span>
                         <span className="flex shrink-0 items-center gap-4">
-                          <span className="w-10 text-right">Filled</span>
-                          <span className="w-14 text-right">Approved</span>
-                          <span className="w-10 text-right">Total</span>
-                          <span className="w-12 text-right">Words</span>
+                          <span className="w-10 text-end">Filled</span>
+                          <span className="w-14 text-end">Approved</span>
+                          <span className="w-10 text-end">Total</span>
+                          <span className="w-12 text-end">Words</span>
                         </span>
                       </div>
                       <ul className="space-y-2" aria-label="Files">
@@ -1497,10 +1502,10 @@ export function ProjectOverview() {
                                     className="flex shrink-0 items-center gap-4 text-xs tabular-nums text-muted-foreground"
                                     aria-label={`${f.filledCount} filled, ${f.approvedCount} approved, ${f.cellCount} total cells, ${f.wordCount} words`}
                                   >
-                                    <span className="w-10 text-right">{f.filledCount}</span>
-                                    <span className="w-14 text-right">{f.approvedCount}</span>
-                                    <span className="w-10 text-right">{f.cellCount}</span>
-                                    <span className="w-12 text-right">{f.wordCount}</span>
+                                    <span className="w-10 text-end">{f.filledCount}</span>
+                                    <span className="w-14 text-end">{f.approvedCount}</span>
+                                    <span className="w-10 text-end">{f.cellCount}</span>
+                                    <span className="w-12 text-end">{f.wordCount}</span>
                                   </span>
                                 </AppTooltip>
                               </div>
@@ -1763,7 +1768,7 @@ export function ProjectOverview() {
                             <span className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
                               <span className="block h-full rounded-full bg-primary transition-all" style={{ width: `${donePct}%` }} />
                             </span>
-                            <span className="w-20 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
+                            <span className="w-20 shrink-0 text-end text-xs tabular-nums text-muted-foreground">
                               {w.openAssignments} open · {donePct}%
                             </span>
                             {/* AQU-498: select a teammate to see their recent actions +

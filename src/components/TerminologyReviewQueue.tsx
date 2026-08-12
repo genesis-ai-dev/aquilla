@@ -174,7 +174,7 @@ export function TerminologyReviewQueue({
       <button
         type="button"
         onClick={() => setCollapsed((c) => !c)}
-        className="flex w-full items-center gap-2 pb-3 text-sm font-medium text-left"
+        className="flex w-full items-center gap-2 pb-3 text-sm font-medium text-start"
         aria-expanded={!collapsed}
       >
         <Badge variant="secondary" className="tabular-nums">
@@ -186,9 +186,9 @@ export function TerminologyReviewQueue({
             : "concepts awaiting review"}
         </span>
         {collapsed ? (
-          <ChevronDown className="ml-auto h-4 w-4 text-muted-foreground" />
+          <ChevronDown className="ms-auto h-4 w-4 text-muted-foreground" />
         ) : (
-          <ChevronUp className="ml-auto h-4 w-4 text-muted-foreground" />
+          <ChevronUp className="ms-auto h-4 w-4 text-muted-foreground" />
         )}
       </button>
 

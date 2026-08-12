@@ -138,7 +138,7 @@ export function MembersMatrixCellEditor({
   // otherwise. Click opens the add-role popover.
   if (!cell) {
     return (
-      <TableCell className="border-l p-0">
+      <TableCell className="border-s p-0">
         <Popover open={open} onOpenChange={setOpen}>
           <PopoverTrigger
             render={
@@ -170,13 +170,13 @@ export function MembersMatrixCellEditor({
   // edit popover (always — even for immutable cells, where the popover
   // shows the explanation).
   return (
-    <TableCell className={`border-l p-0 ${cellClassName}`}>
+    <TableCell className={`border-s p-0 ${cellClassName}`}>
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger
           render={
               <button
                 type="button"
-                className="block w-full px-2 py-1.5 text-left text-[11px] hover:bg-muted/30"
+                className="block w-full px-2 py-1.5 text-start text-[11px] hover:bg-muted/30"
                 aria-label={`Edit ${username}'s role on this project`}
               />
           }
@@ -277,14 +277,14 @@ function RolePickerBody({
               type="button"
               onClick={() => onPick(opt.level)}
               disabled={status === "submitting" || isCurrent}
-              className={`flex w-full flex-col items-start gap-0.5 rounded px-2 py-1.5 text-left hover:bg-muted disabled:opacity-60 disabled:cursor-not-allowed ${
+              className={`flex w-full flex-col items-start gap-0.5 rounded px-2 py-1.5 text-start hover:bg-muted disabled:opacity-60 disabled:cursor-not-allowed ${
                 isCurrent ? "bg-muted/60" : ""
               }`}
             >
               <span className="text-xs font-medium capitalize">
                 <RoleLabel name={opt.name} />
                 {isCurrent && (
-                  <span className="ml-1.5 text-[9px] text-muted-foreground">current</span>
+                  <span className="ms-1.5 text-[9px] text-muted-foreground">current</span>
                 )}
               </span>
               <span className="text-[10px] text-muted-foreground">{t(opt.descriptionKey)}</span>
@@ -338,7 +338,7 @@ function EditableBody({
           disabled={status === "submitting"}
           className="w-full justify-start text-destructive hover:text-destructive hover:bg-destructive/10"
         >
-          <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+          <Trash2 className="me-1.5 h-3.5 w-3.5" />
           Remove from project
         </Button>
       </div>
@@ -411,7 +411,7 @@ function ImmutableBody({
               type="button"
               onClick={() => onMakeException(opt.level)}
               disabled={status === "submitting"}
-              className="flex w-full items-center justify-between rounded px-2 py-1 text-left text-xs hover:bg-muted disabled:opacity-60"
+              className="flex w-full items-center justify-between rounded px-2 py-1 text-start text-xs hover:bg-muted disabled:opacity-60"
             >
               <RoleLabel name={opt.name} />
               <RoleLabel name={roleName(opt.level)} className="text-[10px] text-muted-foreground" />

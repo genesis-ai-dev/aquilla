@@ -241,10 +241,10 @@ export function AccountSwitcher({
           <InitialsAvatar name={active.username} size="xs" shape={isHeader ? "circle" : "square"} />
           {!compact && (
             <>
-              <span className={cn("truncate font-medium", !isHeader && "flex-1 text-left")}>
+              <span className={cn("truncate font-medium", !isHeader && "flex-1 text-start")}>
                 {active.username}
               </span>
-              <ChevronDown className={cn("size-4 opacity-50", !isHeader && "ml-auto")} />
+              <ChevronDown className={cn("size-4 opacity-50", !isHeader && "ms-auto")} />
             </>
           )}
         </DropdownMenuTrigger>

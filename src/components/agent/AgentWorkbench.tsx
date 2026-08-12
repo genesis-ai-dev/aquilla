@@ -237,7 +237,7 @@ export function AgentWorkbench({ agent, credits, onClose, onJumpToCell }: AgentW
         {state.queued.length > 0 && (
           <span className="text-[11px] text-muted-foreground">{state.queued.length} queued</span>
         )}
-        <span className="ml-auto flex items-center gap-1">
+        <span className="ms-auto flex items-center gap-1">
           {credits && <CreditsDial {...credits} />}
           {state.isStreaming && (
             <Button type="button" variant="outline" size="sm" className="h-6 text-[11px]" onClick={stop}>
@@ -292,7 +292,7 @@ export function AgentWorkbench({ agent, credits, onClose, onJumpToCell }: AgentW
           <div className="flex min-h-0 flex-1">
             {hasReviewWork ? (
               <>
-                <div className="flex w-[380px] min-w-[320px] flex-none flex-col border-r">
+                <div className="flex w-[380px] min-w-[320px] flex-none flex-col border-e">
                   <AgentDockView
                     {...agent}
                     renderProposalOverride={renderProposalOverride}

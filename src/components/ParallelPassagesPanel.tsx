@@ -201,7 +201,7 @@ function SearchResultContent({ result, t }: { result: WorkspaceSearchResult; t: 
         <Snippet html={result.snippet || (result.original || result.translated)} />
       </div>
       {result.paired != null && result.paired !== "" && (
-        <div className="mt-1.5 w-full pl-2.5 border-l-2 border-muted text-xs text-muted-foreground leading-snug">
+        <div className="mt-1.5 w-full ps-2.5 border-s-2 border-muted text-xs text-muted-foreground leading-snug">
           {result.paired}
         </div>
       )}
@@ -577,9 +577,9 @@ export function ParallelPassagesPanel(props: ParallelPassagesPanelProps) {
         shouldFilter={false}
         className="flex max-h-[85vh] flex-col gap-0 rounded-none bg-transparent p-0"
       >
-        {/* Controls row — pr-10 reserves clearance for the absolute-positioned X close button */}
+        {/* Controls row — pe-10 reserves clearance for the absolute-positioned X close button */}
         <div
-          className="flex shrink-0 flex-wrap items-center gap-3 pb-3 pl-4 pr-10 pt-4"
+          className="flex shrink-0 flex-wrap items-center gap-3 pb-3 ps-4 pe-10 pt-4"
           aria-label={t("search.dialog.controlsAriaLabel")}
         >
           <SegmentTabs<ParallelPanelScope>
@@ -700,7 +700,7 @@ export function ParallelPassagesPanel(props: ParallelPassagesPanelProps) {
             <span className="text-xs tabular-nums text-muted-foreground">
               {t("search.resultCount", { count: formatCount(results.length, locale) })}
             </span>
-            <span className="max-w-[60%] truncate text-right text-xs text-muted-foreground">
+            <span className="max-w-[60%] truncate text-end text-xs text-muted-foreground">
               {mode === "passages" ? t("search.dialog.titlePassages") : scopeLabel}
             </span>
           </div>

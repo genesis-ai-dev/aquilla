@@ -150,7 +150,7 @@ export function InviteStep({ projectId, onSharesChanged }: InviteStepProps) {
                       {form.state.isSubmitting ? (
                         <Spinner data-icon="inline-start" />
                       ) : (
-                        <UserPlus className="mr-1 h-3.5 w-3.5" />
+                        <UserPlus className="me-1 h-3.5 w-3.5" />
                       )}
                       Add
                     </Button>
@@ -196,7 +196,7 @@ export function InviteStep({ projectId, onSharesChanged }: InviteStepProps) {
               disabled={linkBusy || !session?.jwt}
               className="h-7"
             >
-              <Plus className="mr-1 h-3 w-3" />
+              <Plus className="me-1 h-3 w-3" />
               {linkBusy ? "Creating…" : "Create link"}
             </Button>
           )}
@@ -229,7 +229,7 @@ export function InviteStep({ projectId, onSharesChanged }: InviteStepProps) {
               onClick={() => { setIssuedUrl(null); setCopied(false) }}
               className="h-7 w-full text-xs"
             >
-              <Plus className="mr-1 h-3 w-3" />
+              <Plus className="me-1 h-3 w-3" />
               Create another link
             </Button>
           </div>

@@ -212,7 +212,7 @@ export function RuleSuggestFromEditsDialog({
               />
             }
           >
-            <Sparkles className="mr-1 h-3.5 w-3.5" />
+            <Sparkles className="me-1 h-3.5 w-3.5" />
             Suggest from edits
           </DialogTrigger>
         </span>
@@ -240,7 +240,7 @@ export function RuleSuggestFromEditsDialog({
               </p>
             )}
             <Button onClick={handleAnalyze} disabled={!isConfigured} className="w-full">
-              <Sparkles className="mr-1 h-4 w-4" />
+              <Sparkles className="me-1 h-4 w-4" />
               Analyze my edits
             </Button>
           </div>

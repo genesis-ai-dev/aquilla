@@ -141,7 +141,7 @@ export function PreviewPanel({ results, onConfirm, onCancel, uploadPhase, upload
             <div key={ri} className="p-3">
               <p className="mb-2 text-xs font-semibold text-foreground/80">
                 {r.name}
-                <span className="ml-2 font-normal normal-case text-muted-foreground">
+                <span className="ms-2 font-normal normal-case text-muted-foreground">
                   {formatNumber(r.strings.length, locale)} cells
                 </span>
               </p>
@@ -171,7 +171,7 @@ export function PreviewPanel({ results, onConfirm, onCancel, uploadPhase, upload
                     <span className="font-medium">Review before importing</span>
                     <Badge variant="outline">{r.importNotices.length}</Badge>
                   </div>
-                  <ul className="flex list-disc flex-col gap-1 pl-4 text-muted-foreground">
+                  <ul className="flex list-disc flex-col gap-1 ps-4 text-muted-foreground">
                     {r.importNotices.map((notice, index) => (
                       <li key={`${notice.code}-${index}`}>{notice.message}</li>
                     ))}

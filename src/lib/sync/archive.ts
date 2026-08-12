@@ -1,4 +1,4 @@
-// Client helpers for frontier-server's project archive endpoints. The archive
+// Client helpers for auth-worker's (aquilla-identity) project archive endpoints. The archive
 // ("move to Trash") action is server-authoritative for cloud-synced projects
 // so all collaborators see the tombstone. Purely local projects (no server
 // row) get a 404 — callers should fall through to an IDB-only tombstone.

@@ -409,10 +409,10 @@ export interface ProjectRecord {
   /** Soft-delete marker. When present the project is in Trash; the Dashboard
    * hides it from "Your projects" and shows it under the Trash section. Set by
    * owner-triggered archive (local projects) or by a sync signal from
-   * frontier-server (cloud-synced projects). */
+   * auth-worker (cloud-synced projects). */
   deletedAt?: string
-  /** Display name of whoever archived the project. Populated from frontier-
-   * server's response, or from the local session for purely local projects. */
+  /** Display name of whoever archived the project. Populated from
+   * auth-worker's response, or from the local session for purely local projects. */
   deletedBy?: string
   /**
    * Active/inactive lifecycle state (migration 0033, AQU-214).

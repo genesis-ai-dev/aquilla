@@ -216,7 +216,7 @@ export interface TombstoneOutcome {
 
 /**
  * Move a project to Trash (soft-delete). For cloud-synced projects this hits
- * frontier-server so all collaborators see the tombstone on their next sync
+ * auth-worker (aquilla-identity) so all collaborators see the tombstone on their next sync
  * event or dashboard load. For purely local projects (no server row yet)
  * we still set the local tombstone — the user experience is the same either
  * way. If the server returns 403, the local tombstone is NOT applied and

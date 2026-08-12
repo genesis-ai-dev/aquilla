@@ -4,19 +4,15 @@ Bigger opportunities spotted during `/code-health` runs that exceeded that run's
 (one theme, ≤300 lines, ≤8 files). Not done yet — pick one up in a future run. Prune entries
 a later run completes.
 
-## "frontier-server" comment drift (stale doc terminology)
+## Stale "frontier-server" reference in a test comment (not actionable by this routine)
 
-- **Files**: `src/lib/sync/file-projection.ts:1`, `src/lib/sync/archive.ts:1`,
-  `src/lib/store/project-index.ts:218`, `src/lib/parsers/types.ts:418-422`.
-- **Friction**: these file-header/inline comments say requests go to "frontier-server", a
-  decommissioned service. The code now calls `FRONTIER_API_URL`, which resolves to
-  auth-worker (`aquilla-identity`) — see `src/lib/sync/sync-token.ts:19-22`. Misleading for
-  anyone reading the comment to understand where the request actually lands.
-- **Why deferred**: 2026-08-10 run used its budget on the dead-code-deletion theme instead
-  (higher value per the rotation). This is a clean, single-theme, ~4-file candidate for a
-  future run.
-- **Proof needed**: comment-only edits, no exports/behavior touched — trivial to verify with
-  `pnpm build` + unchanged `pnpm test`. No test files should need touching.
+- **File**: `src/lib/frontier/roles.test.ts:22` still says the mirrored source of truth is
+  `frontier-server`'s `ROLE_NAMES`; the live path is `auth-worker/src/services/
+  project-permissions.ts` (fixed in the sibling comment at `src/lib/frontier/roles.ts:4-5`
+  by the 2026-08-12 run). This routine can never touch it — it's inside a `.test.ts` file,
+  which is a frozen zone regardless of theme.
+- **Proof needed**: none from this routine; would need a human or a different, test-editing
+  workflow to update the comment.
 
 ## "D1 is the live datastore" comment drift
 

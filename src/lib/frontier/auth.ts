@@ -24,6 +24,19 @@ import {
   patchSessionEmails,
   saveSession,
 } from "./session-store";
+import { CATALOGS } from "../i18n/messages";
+import type { MessageKey } from "../i18n/messages/en";
+import { DEFAULT_LOCALE, normalizeLocale } from "../i18n/locales";
+import { readStoredLocale } from "../i18n/store";
+import { translate, type TVars } from "../i18n/translate";
+
+// This module runs outside React (plain fetch-helper code, no hooks). `t()`
+// resolves the active locale straight from storage, mirroring the
+// provider-less fallback in I18nProvider.tsx — see AQU-820/AQU-832.
+function t(key: MessageKey, vars?: TVars): string {
+  const locale = normalizeLocale(readStoredLocale());
+  return translate(CATALOGS[locale] ?? CATALOGS[DEFAULT_LOCALE], key, vars, locale);
+}
 
 export class FrontierAuthError extends Error {
   public status: number;
@@ -105,14 +118,22 @@ export async function register(args: RegisterArgs): Promise<FrontierSession> {
     body: JSON.stringify(args),
   });
   if (!res.ok) {
-    // The server returns { detail, error } for validation/conflict errors.
-    let message = `Sign up failed (${res.status})`;
+    // AQU-820: the server's { detail, error } is a validation/conflict reason
+    // (e.g. "username already taken") — genuinely useful for the user to know
+    // which field to fix, so it's kept, but woven into our own translated
+    // sentence frame rather than shown verbatim and unlocalized. Anything
+    // else (network/server error, no body) falls back to a fully translated
+    // generic message with no server text at all.
+    let detail: string | undefined;
     try {
       const body = (await res.json()) as { detail?: string; error?: string };
-      message = body.detail || body.error || message;
+      detail = body.detail || body.error || undefined;
     } catch {
       // keep generic
     }
+    const message = detail
+      ? t("auth.signup.failedWithDetail", { detail })
+      : t("auth.signup.failedGeneric");
     throw new FrontierAuthError(message, res.status);
   }
   const data = (await res.json()) as AuthResponse;
@@ -191,17 +212,20 @@ export async function redeemAccessLink(token: string, pin: string): Promise<Acce
       body: JSON.stringify({ pin }),
     });
   } catch {
-    throw new FrontierAuthError("Couldn't reach the server. Check your connection and try again.", 0);
+    // Reuses auth.join.networkError (same "couldn't reach the server" copy
+    // already used by the invite-accept flow) rather than a new key with
+    // identical English — see no-duplicates.test.ts.
+    throw new FrontierAuthError(t("auth.join.networkError"), 0);
   }
   if (!res.ok) {
-    let message = "This link is invalid or has expired.";
-    try {
-      const body = (await res.json()) as { error?: string };
-      if (body.error) message = body.error;
-    } catch {
-      // keep generic
-    }
-    throw new FrontierAuthError(message, res.status);
+    // AQU-820: never read the response body here. The whole point of this
+    // flow (see file-level doc comment) is that every failure — unknown/
+    // expired/revoked link, or a wrong PIN — is indistinguishable, so a
+    // client guessing PINs against a valid link learns nothing from the
+    // response. Reading body.error and showing it verbatim used to both leak
+    // raw, unlocalized server English AND risk breaking that no-oracle
+    // guarantee the moment the server ever varied its wording per failure.
+    throw new FrontierAuthError(t("auth.accessLink.genericError"), res.status);
   }
   const data = (await res.json()) as AuthResponse & { username: string; project_id: string };
   const session = await finalizeSession(data.username, data);
@@ -215,14 +239,10 @@ export async function requestPasswordReset(email: string): Promise<void> {
     body: JSON.stringify({ email }),
   });
   if (!res.ok) {
-    let message = `Reset request failed (${res.status})`;
-    try {
-      const body = (await res.json()) as { detail?: string; error?: string };
-      message = body.detail || body.error || message;
-    } catch {
-      // keep generic
-    }
-    throw new FrontierAuthError(message, res.status);
+    // AQU-820: dropped body.detail/body.error — showing it here would both
+    // leak raw server English and risk an email-enumeration oracle (a
+    // response that varies by whether the address has an account).
+    throw new FrontierAuthError(t("auth.resetPassword.failedToSend"), res.status);
   }
 }
 
@@ -241,14 +261,11 @@ export async function verifyResetToken(token: string, username: string): Promise
     body: JSON.stringify({ token, username }),
   });
   if (!res.ok) {
-    let message = "Invalid or expired reset link";
-    try {
-      const body = (await res.json()) as { error?: string };
-      if (body.error) message = body.error;
-    } catch {
-      // keep generic
-    }
-    throw new FrontierAuthError(message, res.status);
+    // AQU-820: the caller (ResetPassword.tsx) only ever branches on
+    // success/failure here, never reads .message — but drop the raw
+    // { error: "Invalid token" | "Token expired" } body anyway so this
+    // never becomes a second, inconsistent source of unlocalized text.
+    throw new FrontierAuthError(t("auth.resetPassword.tokenNoLongerValid"), res.status);
   }
 }
 
@@ -265,14 +282,11 @@ export async function verifyEmail(token: string): Promise<void> {
     body: JSON.stringify({ token }),
   });
   if (!res.ok) {
-    let message = "This verification link is invalid or has expired.";
-    try {
-      const body = (await res.json()) as { error?: string };
-      if (body.error) message = body.error;
-    } catch {
-      // keep generic
-    }
-    throw new FrontierAuthError(message, res.status);
+    // AQU-820: this page is purely confirmatory (verification is optional —
+    // see VerifyEmailPage's own doc comment), so the 404-vs-410 distinction
+    // the server's body could carry doesn't change what the user should do
+    // next. Drop it and always use our translated fallback.
+    throw new FrontierAuthError(t("auth.verifyEmail.verificationFailed"), res.status);
   }
 }
 
@@ -294,13 +308,15 @@ export async function resetPassword(
     body: JSON.stringify({ token, username, new_password: newPassword }),
   });
   if (!res.ok) {
-    let message = "Failed to reset password";
-    try {
-      const body = (await res.json()) as { error?: string };
-      if (body.error) message = body.error;
-    } catch {
-      // keep generic
-    }
+    // AQU-820: the server's { error: "Invalid token" | "Token expired" } (400)
+    // vs "Failed to reset password" (500) is dropped in favour of our own
+    // translated messages — a 400 here means the token lapsed between the
+    // initial verify and this submit, which auth.resetPassword.tokenNoLongerValid
+    // tells the user how to recover from; anything else is a generic failure.
+    const message =
+      res.status === 400
+        ? t("auth.resetPassword.tokenNoLongerValid")
+        : t("auth.resetPassword.failedToReset");
     throw new FrontierAuthError(message, res.status);
   }
 }

@@ -5,6 +5,23 @@
 //
 // Pattern mirrors src/lib/audio/ai-error.ts but for the general network layer
 // (sync-worker, frontier, auth-worker). See AQU-281.
+//
+// This module runs outside React (plain fetch-helper code, no hooks), so it
+// can't call useT(). `t()` below resolves the active locale straight from
+// storage (the same source I18nProvider seeds its initial state from) and
+// falls back to English exactly like the provider-less FALLBACK_CONTEXT in
+// I18nProvider.tsx — see AQU-832.
+
+import { CATALOGS } from "../i18n/messages"
+import type { MessageKey } from "../i18n/messages/en"
+import { DEFAULT_LOCALE, normalizeLocale } from "../i18n/locales"
+import { readStoredLocale } from "../i18n/store"
+import { translate, type TVars } from "../i18n/translate"
+
+function t(key: MessageKey, vars?: TVars): string {
+  const locale = normalizeLocale(readStoredLocale())
+  return translate(CATALOGS[locale] ?? CATALOGS[DEFAULT_LOCALE], key, vars, locale)
+}
 
 export type NetworkErrorCategory =
   | "forbidden"
@@ -37,55 +54,55 @@ export function messageForStatus(
   rawBody: string,
   context?: string,
 ): UserFacingError {
-  const ctx = context ? ` for this ${context}` : ""
+  const contextSuffix = context ? t("error.network.contextSuffix", { context }) : ""
   const raw = rawBody.trim()
 
   switch (status) {
     case 400:
       return {
-        message: `The request was invalid${ctx}. Check your input and try again.`,
+        message: t("error.network.badRequest", { contextSuffix }),
         raw,
         category: "unknown",
         status,
       }
     case 401:
       return {
-        message: "Your session expired — sign in again.",
+        message: t("error.network.sessionExpired"),
         raw,
         category: "session-expired",
         status,
       }
     case 403:
       return {
-        message: `You don't have permission to do that${ctx}.`,
+        message: t("error.network.forbidden", { contextSuffix }),
         raw,
         category: "forbidden",
         status,
       }
     case 404:
       return {
-        message: `That item no longer exists${ctx}.`,
+        message: t("error.network.notFound", { contextSuffix }),
         raw,
         category: "not-found",
         status,
       }
     case 409:
       return {
-        message: `A conflict occurred${ctx} — please refresh and try again.`,
+        message: t("error.network.conflict", { contextSuffix }),
         raw,
         category: "conflict",
         status,
       }
     case 410:
       return {
-        message: `That item has been permanently removed${ctx}.`,
+        message: t("error.network.gone", { contextSuffix }),
         raw,
         category: "gone",
         status,
       }
     case 429:
       return {
-        message: "Too many requests — please wait a moment and try again.",
+        message: t("error.network.tooManyRequests"),
         raw,
         category: "server-error",
         status,
@@ -93,14 +110,14 @@ export function messageForStatus(
     default:
       if (status >= 500) {
         return {
-          message: "Something went wrong on the server. Please try again in a moment.",
+          message: t("error.network.serverError"),
           raw,
           category: "server-error",
           status,
         }
       }
       return {
-        message: `The request failed (${status}). Please try again.`,
+        message: t("error.network.unknownStatus", { status }),
         raw,
         category: "unknown",
         status,
@@ -137,7 +154,7 @@ export function toUserFacingError(err: unknown, context?: string): UserFacingErr
   if (isNetworkFailure(err)) {
     const raw = err instanceof Error ? err.message : String(err)
     return {
-      message: "You're offline — changes will sync when you reconnect.",
+      message: t("error.network.offline"),
       raw,
       category: "offline",
     }
@@ -160,7 +177,7 @@ export function toUserFacingError(err: unknown, context?: string): UserFacingErr
   }
 
   const raw = String(err)
-  return { message: "Something went wrong. Please try again.", raw, category: "unknown" }
+  return { message: t("error.network.genericFailure"), raw, category: "unknown" }
 }
 
 /**

@@ -102,8 +102,13 @@ export function VideoAttachmentDialog({ open, onOpenChange, current, onSave }: V
         videoStartOffset: parseOffset(),
       })
       onOpenChange(false)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t("common.uploadFailed"))
+    } catch {
+      // AQU-820: storeVideoBlob() throws raw IndexedDB/browser exceptions
+      // (e.g. QuotaExceededError) — technical diagnostics, not something a
+      // translator can act on, and previously shown verbatim and unlocalized
+      // via err.message, which also meant this key never rendered in any
+      // locale. Always show the translated generic message.
+      setError(t("common.uploadFailed"))
     } finally {
       setUploading(false)
     }

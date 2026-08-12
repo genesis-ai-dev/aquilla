@@ -16,6 +16,7 @@
 
 import { useState, useCallback, useRef, useEffect } from "react"
 import { Search, Replace, BookOpen, Maximize2, Book, ArrowLeft, ExternalLink } from "lucide-react"
+import { useT } from "@/lib/i18n/I18nProvider"
 import {
   Command,
   CommandEmpty,
@@ -87,6 +88,7 @@ export function SearchDockPanel({
   getJwt,
   canonicalRef,
 }: SearchDockPanelProps) {
+  const t = useT()
   const [mode, setMode] = useState<SearchDockMode>("search")
   const [query, setQuery] = useState("")
   const [scope, setScope] = useState<"file" | "project">(activeFileId ? "file" : "project")
@@ -118,7 +120,10 @@ export function SearchDockPanel({
     handleSearch(q)
   }
 
-  const searchPlaceholder = `Search ${scope === "file" && activeFileName ? activeFileName : "project"}…`
+  const searchPlaceholder =
+    scope === "file" && activeFileName
+      ? t("search.placeholderFile", { fileName: activeFileName })
+      : t("search.placeholderProject")
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -130,47 +135,47 @@ export function SearchDockPanel({
           ParallelPassagesPanel already uses. `flex-wrap` keeps the row from
           overflowing at the dock's minimum width. */}
       <div className="flex flex-wrap items-center gap-1 border-b px-2 py-1.5">
-        <AppTooltip content="Search text">
+        <AppTooltip content={t("search.mode.searchTooltip")}>
           <Button
             type="button"
             variant="ghost"
             size="xs"
-            aria-label="Search"
+            aria-label={t("nav.search")}
             aria-pressed={mode === "search"}
             onClick={() => setMode("search")}
             className={mode === "search" ? "bg-accent text-foreground" : undefined}
           >
             <Search className="h-3 w-3" />
-            Search
+            {t("nav.search")}
           </Button>
         </AppTooltip>
-        <AppTooltip content="Find & Replace">
+        <AppTooltip content={t("search.mode.replaceTooltip")}>
           <Button
             type="button"
             variant="ghost"
             size="xs"
-            aria-label="Find & Replace"
+            aria-label={t("search.mode.replaceTooltip")}
             aria-pressed={mode === "replace"}
             onClick={() => setMode("replace")}
             className={mode === "replace" ? "bg-accent text-foreground" : undefined}
           >
             <Replace className="h-3 w-3" />
-            Replace
+            {t("search.mode.replace")}
           </Button>
         </AppTooltip>
         {bibleResourcesEnabled && (
-          <AppTooltip content="Bible resources">
+          <AppTooltip content={t("search.mode.bibleTooltip")}>
             <Button
               type="button"
               variant="ghost"
               size="xs"
-              aria-label="Bible resources"
+              aria-label={t("search.mode.bibleTooltip")}
               aria-pressed={mode === "bible"}
               onClick={() => setMode("bible")}
               className={mode === "bible" ? "bg-accent text-foreground" : undefined}
             >
               <Book className="h-3 w-3" />
-              Bible
+              {t("search.mode.bible")}
             </Button>
           </AppTooltip>
         )}
@@ -180,24 +185,24 @@ export function SearchDockPanel({
         <>
         <SegmentTabs
           value={scope}
-          aria-label="Search scope"
+          aria-label={t("search.scope.label")}
           className="ml-auto"
           listClassName="text-[10px]"
           options={[
-            { label: "File", value: "file", disabled: !activeFileId },
-            { label: "Project", value: "project" },
+            { label: t("common.file"), value: "file", disabled: !activeFileId },
+            { label: t("common.project"), value: "project" },
           ]}
           onValueChange={setScope}
         />
 
         {/* Open full panel */}
         {onOpenFullPanel && (
-          <AppTooltip content="Open full search panel">
+          <AppTooltip content={t("search.openFullPanel")}>
             <Button
               type="button"
               variant="ghost"
               size="icon-xs"
-              aria-label="Open full search panel"
+              aria-label={t("search.openFullPanel")}
               onClick={onOpenFullPanel}
               className="ml-0.5"
             >
@@ -243,11 +248,11 @@ export function SearchDockPanel({
             </CommandEmpty>
           )}
           {!loading && query && results.length === 0 && (
-            <CommandEmpty>No results</CommandEmpty>
+            <CommandEmpty>{t("search.noResults")}</CommandEmpty>
           )}
           {!loading && !query && (
             <CommandEmpty>
-              Type to search {scope === "file" ? "this file" : "the project"}
+              {scope === "file" ? t("search.dock.typeToSearchFile") : t("search.dock.typeToSearchProject")}
             </CommandEmpty>
           )}
           {results.length > 0 && (
@@ -255,17 +260,19 @@ export function SearchDockPanel({
               {onExpandResults && (
                 <div className="flex items-center justify-between pb-0.5 pt-0.5">
                   <span className="px-2 text-[10px] text-muted-foreground">
-                    {results.length} result{results.length !== 1 ? "s" : ""}
+                    {t("search.resultCount", {
+                      count: results.length,
+                    })}
                   </span>
-                  <AppTooltip content="Expand all results in main area">
+                  <AppTooltip content={t("search.dock.expandAllTooltip")}>
                     <button
                       type="button"
-                      aria-label="Expand all results"
+                      aria-label={t("search.dock.expandAllAriaLabel")}
                       onClick={() => onExpandResults(query)}
                       className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
                     >
                       <Maximize2 className="h-2.5 w-2.5" />
-                      Expand all
+                      {t("search.dock.expandAllLabel")}
                     </button>
                   </AppTooltip>
                 </div>
@@ -287,7 +294,7 @@ export function SearchDockPanel({
               ))}
               {results.length > 50 && (
                 <CommandEmpty>
-                  {results.length - 50} more — open full panel for all results
+                  {t("search.dock.moreResults", { count: results.length - 50 })}
                 </CommandEmpty>
               )}
             </CommandGroup>
@@ -297,7 +304,7 @@ export function SearchDockPanel({
         {mode === "replace" && (
           <div className="border-t p-2">
             <p className="mb-1.5 text-[10px] leading-snug text-muted-foreground">
-              Find &amp; Replace with diff preview lives in the full panel.
+              {t("search.dock.replaceHint")}
             </p>
             {onOpenFullPanel && (
               <Button
@@ -306,7 +313,7 @@ export function SearchDockPanel({
                 onClick={onOpenFullPanel}
                 className="h-6 w-full text-[10px]"
               >
-                Open Find &amp; Replace
+                {t("search.dock.openReplace")}
               </Button>
             )}
           </div>
@@ -353,6 +360,7 @@ function BibleResourcesPanel({
   getJwt?: () => string | null
   canonicalRef: string | null
 }) {
+  const t = useT()
   const [query, setQuery] = useState("")
   const [results, setResults] = useState<AquiferSearchResult[]>([])
   const [searching, setSearching] = useState(false)
@@ -423,19 +431,19 @@ function BibleResourcesPanel({
             variant="ghost"
             size="icon-xs"
             onClick={() => setPage(null)}
-            aria-label="Back to results"
+            aria-label={t("search.bible.backToResults")}
           >
             <ArrowLeft className="h-3 w-3" />
           </Button>
           <span className="min-w-0 flex-1 truncate text-xs font-medium">{page.title}</span>
-          <AppTooltip content="Open on bibletranslation.org">
+          <AppTooltip content={t("search.bible.openExternal")}>
             <Button
               variant="ghost"
               size="icon-xs"
               render={
                 <a href={page.url} target="_blank" rel="noreferrer" />
               }
-              aria-label="Open on bibletranslation.org"
+              aria-label={t("search.bible.openExternal")}
             >
               <ExternalLink className="h-3 w-3" />
             </Button>
@@ -451,7 +459,7 @@ function BibleResourcesPanel({
           )}
           {page.truncated && (
             <p className="mt-2 text-[10px] italic text-muted-foreground">
-              Truncated — open the full page on bibletranslation.org.
+              {t("search.bible.truncated")}
             </p>
           )}
         </div>
@@ -472,7 +480,7 @@ function BibleResourcesPanel({
             disabled={pageLoading}
           >
             <Book className="h-3 w-3" />
-            Notes for {canonicalRef}
+            {t("search.bible.notesFor", { ref: canonicalRef ?? "" })}
           </Button>
         </div>
       )}
@@ -489,8 +497,8 @@ function BibleResourcesPanel({
               setQuery(q)
               void runSearch(q)
             }}
-            placeholder="Search Bible resources…"
-            aria-label="Search Bible resources"
+            placeholder={t("search.bible.searchPlaceholder")}
+            aria-label={t("search.bible.searchAriaLabel")}
             className="text-xs"
           />
         </div>
@@ -505,11 +513,11 @@ function BibleResourcesPanel({
             </CommandEmpty>
           )}
           {!searching && !error && query && results.length === 0 && (
-            <CommandEmpty>No resources found</CommandEmpty>
+            <CommandEmpty>{t("search.bible.noResults")}</CommandEmpty>
           )}
           {!searching && !query && results.length === 0 && (
             <CommandEmpty>
-              Search bibletranslation.org for people, places, terms, and translation notes.
+              {t("search.bible.idleHint")}
             </CommandEmpty>
           )}
           {results.length > 0 && (

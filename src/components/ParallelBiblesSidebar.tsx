@@ -24,6 +24,7 @@ import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Spinner } from "@/components/ui/spinner"
 import { RightSidebarPanel } from "./RightSidebarPanel"
+import { useT } from "@/lib/i18n/I18nProvider"
 import {
   InputGroup,
   InputGroupAddon,
@@ -101,6 +102,7 @@ interface VersionVerses {
 }
 
 export function ParallelBiblesSidebar({ trackedRef, open, onToggle, className }: ParallelBiblesSidebarProps) {
+  const t = useT()
   const [pinned, setPinned] = useState<string[]>(() => readPinnedVersions())
   const [pickerOpen, setPickerOpen] = useState(false)
   const [translations, setTranslations] = useState<HelloaoTranslation[] | null>(null)
@@ -228,11 +230,11 @@ export function ParallelBiblesSidebar({ trackedRef, open, onToggle, className }:
   // Closed: slim edge tab so the helps are one click away while reading.
   if (!open) {
     return (
-      <AppTooltip content="Parallel bibles: see this verse in other versions" side="left">
+      <AppTooltip content={t("editor.bibles.openTooltip")} side="left">
         <button
           type="button"
           onClick={onToggle}
-          aria-label="Show parallel bibles"
+          aria-label={t("editor.bibles.show")}
           className={cn(
             "hidden h-full w-9 shrink-0 flex-col items-center gap-1.5 border-l bg-background pt-3 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground sm:flex",
             className,
@@ -240,7 +242,7 @@ export function ParallelBiblesSidebar({ trackedRef, open, onToggle, className }:
         >
           <BookMarked className="h-4 w-4" />
           <span className="text-sm font-semibold tracking-wide [writing-mode:vertical-rl]">
-            Bibles
+            {t("editor.bibles.edgeTab")}
           </span>
         </button>
       </AppTooltip>
@@ -264,7 +266,7 @@ export function ParallelBiblesSidebar({ trackedRef, open, onToggle, className }:
       <div className="flex items-center justify-between border-b p-2">
         <div className="flex items-center gap-1.5 font-medium">
           <BookMarked className="h-4 w-4 text-muted-foreground" />
-          <span>Parallel Bibles</span>
+          <span>{t("editor.bibles.title")}</span>
           {trackedLabel && (
             <span className="rounded bg-muted px-1 py-0.5 text-xs font-mono text-muted-foreground">
               {trackedLabel}
@@ -275,7 +277,7 @@ export function ParallelBiblesSidebar({ trackedRef, open, onToggle, className }:
           type="button"
           variant="ghost"
           size="icon-sm"
-          aria-label="Hide parallel bibles"
+          aria-label={t("editor.bibles.hide")}
           onClick={onToggle}
           className="text-muted-foreground"
         >
@@ -287,11 +289,11 @@ export function ParallelBiblesSidebar({ trackedRef, open, onToggle, className }:
       <div className="flex-1 overflow-y-auto">
         {!tracked ? (
           <p className="p-4 text-xs text-muted-foreground">
-            Scroll the editor to a verse to see it in other bible versions.
+            {t("editor.bibles.scrollHint")}
           </p>
         ) : pinned.length === 0 && !pickerOpen ? (
           <p className="p-4 text-xs text-muted-foreground">
-            No versions added yet. Add a bible version to read alongside your text.
+            {t("editor.bibles.noVersions")}
           </p>
         ) : (
           <div className="divide-y">
@@ -310,7 +312,7 @@ export function ParallelBiblesSidebar({ trackedRef, open, onToggle, className }:
                       type="button"
                       variant="ghost"
                       size="icon-xs"
-                      aria-label={`Remove ${versionId}`}
+                      aria-label={t("editor.bibles.removeVersion", { version: versionId })}
                       onClick={() => unpinVersion(versionId)}
                       className="text-muted-foreground/0 transition-colors hover:text-foreground group-hover:text-muted-foreground"
                     >
@@ -320,18 +322,18 @@ export function ParallelBiblesSidebar({ trackedRef, open, onToggle, className }:
                   {data?.error ? (
                     <p className="mt-1 text-xs text-destructive">{data.error}</p>
                   ) : !data ? (
-                    <div className="mt-1 flex items-center text-muted-foreground">
+                    <div className="mt-1 flex items-center text-muted-foreground" aria-label={t("common.loading")}>
                       <Spinner className="size-3.5" />
                     </div>
                   ) : tracked.verse === null ? (
                     <p className="mt-1 text-xs text-muted-foreground">
-                      Scroll to a verse to see its text.
+                      {t("editor.bibles.scrollToVerse")}
                     </p>
                   ) : verseText ? (
                     <p className="mt-1 text-xs leading-relaxed text-foreground/90">{verseText}</p>
                   ) : (
                     <p className="mt-1 text-xs text-muted-foreground">
-                      No text for {trackedLabel} in this version.
+                      {t("editor.bibles.noTextForRef", { ref: trackedLabel ?? "" })}
                     </p>
                   )}
                 </div>
@@ -349,20 +351,20 @@ export function ParallelBiblesSidebar({ trackedRef, open, onToggle, className }:
               </InputGroupAddon>
               <InputGroupInput
                 autoFocus
-                placeholder="Search versions (e.g. 'eng', 'BSB')"
+                placeholder={t("editor.bibles.searchPlaceholder")}
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                aria-label="Search Bible versions"
+                aria-label={t("editor.bibles.searchLabel")}
               />
             </InputGroup>
             {translationsErr ? (
-              <p className="mt-2 text-xs text-destructive">Failed to load: {translationsErr}</p>
+              <p className="mt-2 text-xs text-destructive">{t("editor.bibles.failedToLoad", { error: translationsErr })}</p>
             ) : !translations ? (
-              <p className="mt-2 text-xs text-muted-foreground">Loading versions…</p>
+              <p className="mt-2 text-xs text-muted-foreground">{t("editor.bibles.loadingVersions")}</p>
             ) : (
               <ul className="mt-2 max-h-48 overflow-y-auto rounded border">
                 {filteredTranslations.length === 0 && (
-                  <li className="p-2 text-xs text-muted-foreground">No matches.</li>
+                  <li className="p-2 text-xs text-muted-foreground">{t("editor.bibles.noMatches")}</li>
                 )}
                 {filteredTranslations.map((t) => (
                   <li key={t.id}>
@@ -392,10 +394,10 @@ export function ParallelBiblesSidebar({ trackedRef, open, onToggle, className }:
           className="flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
         >
           <Plus className="h-3.5 w-3.5" />
-          {pickerOpen ? "Close picker" : "Add version"}
+          {pickerOpen ? t("editor.bibles.closePicker") : t("editor.bibles.addVersion")}
         </button>
         <p className="mt-1 text-[10px] text-muted-foreground/60">
-          Text from the{" "}
+          {t("editor.bibles.attribution")}{" "}
           <a
             href="https://bible.helloao.org/"
             target="_blank"

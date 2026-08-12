@@ -261,7 +261,9 @@ describe("computeContextReadiness", () => {
     expect(r.blockingGaps).toBe(3)
     const byId = new Map(r.items.map((i) => [i.id, i]))
     expect(byId.get("terminology")?.level).toBe("missing")
+    expect(byId.get("terminology")?.href).toBe("terminology")
     expect(byId.get("brief")?.level).toBe("missing")
+    expect(byId.get("brief")?.href).toBe("memory")
     expect(byId.get("examples")?.level).toBe("missing")
   })
 
@@ -322,6 +324,20 @@ describe("computeContextReadiness", () => {
     expect(byId.get("examples")?.level).toBe("partial")
     // Partial is not a blocker — nobody is stopped from pressing play.
     expect(r.blockingGaps).toBe(0)
+  })
+
+  it.each([
+    [1, "1 validated translation to imitate"],
+    [8, "8 validated translations to imitate"],
+  ] as const)("describes validated target cells truthfully (%s)", (validatedExamples, copy) => {
+    const r = computeContextReadiness({
+      context: bareContext,
+      validatedExamples,
+      untranslatedCells: 10,
+    })
+    const detail = r.items.find((item) => item.id === "examples")?.detail ?? ""
+    expect(detail).toContain(copy)
+    expect(detail).not.toMatch(/passages? to imitate/)
   })
 
   it("explains each gap in terms of what it does to the output", () => {

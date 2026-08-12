@@ -13,6 +13,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Pause, Play, X } from "lucide-react"
+import { useT } from "@/lib/i18n/I18nProvider"
 import { CellWaveform } from "@/components/CellWaveform"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
@@ -61,6 +62,7 @@ export interface CombinedBoundaryEditorProps {
 
 export function CombinedBoundaryEditor(props: CombinedBoundaryEditorProps) {
   const { project, fileId, audioId, url, voiceId, referenceAudioId, cells, username, onClose, onSaved } = props
+  const t = useT()
   const n = cells.length
 
   // One controller for the shared clip — a synthetic cell pointing at it.
@@ -180,20 +182,19 @@ export function CombinedBoundaryEditor(props: CombinedBoundaryEditorProps) {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal="true">
       <div className="w-full max-w-2xl rounded-lg border border-border bg-card p-5">
         <div className="mb-1 flex items-center justify-between">
-          <h2 className="text-sm font-semibold">Split the combined clip by line</h2>
+          <h2 className="text-sm font-semibold">{t("audio.boundaryEditor.title")}</h2>
           <Button
             type="button"
             variant="ghost"
             size="icon-sm"
             onClick={onClose}
-            aria-label="Close"
+            aria-label={t("common.close")}
           >
             <X />
           </Button>
         </div>
         <p className="mb-4 text-xs text-muted-foreground">
-          Drag the dividers so each marker sits at the end of a line. Click a segment to hear just that line.
-          Defaults to an even split by text length.
+          {t("audio.boundaryEditor.description")}
         </p>
 
         {/* Waveform + dividers. */}
@@ -211,7 +212,7 @@ export function CombinedBoundaryEditor(props: CombinedBoundaryEditorProps) {
             const leftPct = (start / duration) * 100
             const widthPct = ((end - start) / duration) * 100
             return (
-              <AppTooltip key={i} content={`Preview ${snippet(cells[i], i)}`}>
+              <AppTooltip key={i} content={t("audio.boundaryEditor.previewSegment", { snippet: snippet(cells[i], i) })}>
                 <button
                   type="button"
                   onClick={() => previewSeg(i)}
@@ -227,16 +228,16 @@ export function CombinedBoundaryEditor(props: CombinedBoundaryEditorProps) {
           })}
 
           {/* Draggable dividers. */}
-          {cuts && duration > 0 && cuts.map((t, idx) => {
-            const leftPct = (t / duration) * 100
+          {cuts && duration > 0 && cuts.map((cut, idx) => {
+            const leftPct = (cut / duration) * 100
             return (
               <div
                 key={idx}
                 role="slider"
-                aria-label={`Divider ${idx + 1}`}
+                aria-label={t("audio.boundaryEditor.dividerLabel", { index: idx + 1 })}
                 aria-valuemin={0}
                 aria-valuemax={Math.round(duration)}
-                aria-valuenow={Math.round(t)}
+                aria-valuenow={Math.round(cut)}
                 onPointerDown={(e) => {
                   e.preventDefault(); e.stopPropagation()
                   e.currentTarget.setPointerCapture?.(e.pointerId)
@@ -254,7 +255,7 @@ export function CombinedBoundaryEditor(props: CombinedBoundaryEditorProps) {
 
           {duration <= 0 && (
             <div className="absolute inset-0 flex items-center justify-center gap-2 text-xs text-muted-foreground">
-              <Spinner className="size-3.5" /> Loading clip…
+              <Spinner className="size-3.5" /> {t("audio.boundaryEditor.loadingClip")}
             </div>
           )}
         </div>
@@ -283,10 +284,10 @@ export function CombinedBoundaryEditor(props: CombinedBoundaryEditorProps) {
         </ul>
 
         <div className="mt-4 flex items-center justify-end gap-2">
-          <Button type="button" variant="ghost" onClick={onClose} disabled={saving}>Cancel</Button>
+          <Button type="button" variant="ghost" onClick={onClose} disabled={saving}>{t("common.cancel")}</Button>
           <Button type="button" onClick={() => void onSave()} disabled={saving || !cuts}>
             {saving ? <Spinner className="mr-1 size-3.5" /> : null}
-            Save splits
+            {t("audio.boundaryEditor.saveSplits")}
           </Button>
         </div>
       </div>

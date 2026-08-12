@@ -14,8 +14,8 @@ import { useNavHistory, type NavHistoryValue } from "@/context/NavHistoryContext
 import { NAV_PAGE_ICONS } from "@/lib/navigation/page-icons"
 import {
   MAX_RECENT_VISITS,
-  RECENT_KIND_LABEL,
   type RecentEntity,
+  type RecentKind,
 } from "@/lib/navigation/recent-visits"
 import { Button } from "@/components/ui/button"
 import {
@@ -27,12 +27,14 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 export function NavHistoryControls() {
   const nav = useNavHistory()
+  const t = useT()
   if (!nav) return null
   return (
-    <div className="flex items-center gap-0.5" role="group" aria-label="Page history">
+    <div className="flex items-center gap-0.5" role="group" aria-label={t("nav.historyControls.groupLabel")}>
       <HistoryMenuButton nav={nav} />
       <NavArrowButton direction="back" nav={nav} />
       <NavArrowButton direction="forward" nav={nav} />
@@ -41,19 +43,21 @@ export function NavHistoryControls() {
 }
 
 function HistoryMenuButton({ nav }: { nav: NavHistoryValue }) {
+  const t = useT()
   const [open, setOpen] = useState(false)
   const list = nav.recent.slice(0, MAX_RECENT_VISITS)
   const hasRecent = list.length > 0
+  const previouslyViewedLabel = t("nav.historyControls.previouslyViewed")
 
   if (!hasRecent) {
     return (
-      <AppTooltip content="No previously viewed pages" side="bottom" disabled={open}>
+      <AppTooltip content={t("nav.historyControls.noPreviouslyViewed")} side="bottom" disabled={open}>
         <Button
           type="button"
           variant="ghost"
           size="icon-xs"
           disabled
-          aria-label="Previously viewed"
+          aria-label={previouslyViewedLabel}
           className="cursor-default text-muted-foreground/30"
         >
           <Clock />
@@ -64,14 +68,14 @@ function HistoryMenuButton({ nav }: { nav: NavHistoryValue }) {
 
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
-      <AppTooltip content="Previously viewed" side="bottom" disabled={open}>
+      <AppTooltip content={previouslyViewedLabel} side="bottom" disabled={open}>
         <DropdownMenuTrigger
           render={
             <Button
               type="button"
               variant="ghost"
               size="icon-xs"
-              aria-label="Previously viewed"
+              aria-label={previouslyViewedLabel}
             >
               <Clock />
             </Button>
@@ -81,7 +85,7 @@ function HistoryMenuButton({ nav }: { nav: NavHistoryValue }) {
       <DropdownMenuContent align="end" side="bottom" sideOffset={4} className="min-w-56 w-max max-w-96 text-sm">
         <DropdownMenuGroup>
           <DropdownMenuLabel className="px-2 py-1 text-sm font-normal">
-            Previously viewed
+            {previouslyViewedLabel}
           </DropdownMenuLabel>
           {list.map((entry) => (
             <RecentItem
@@ -99,8 +103,20 @@ function HistoryMenuButton({ nav }: { nav: NavHistoryValue }) {
   )
 }
 
+function recentKindLabel(t: ReturnType<typeof useT>, kind: RecentKind): string {
+  switch (kind) {
+    case "project":
+      return t("nav.historyControls.recentKind.project")
+    case "team":
+      return t("nav.historyControls.recentKind.team")
+    case "file":
+      return t("nav.historyControls.recentKind.file")
+  }
+}
+
 function RecentItem({ entry, onPick }: { entry: RecentEntity; onPick: () => void }) {
-  const kindLabel = RECENT_KIND_LABEL[entry.kind]
+  const t = useT()
+  const kindLabel = recentKindLabel(t, entry.kind)
   const ProjectIcon = NAV_PAGE_ICONS.project
   const FileIcon = NAV_PAGE_ICONS.file
   // Color is hashed from the full team title (same as TeamWithAvatar).
@@ -130,9 +146,10 @@ function RecentItem({ entry, onPick }: { entry: RecentEntity; onPick: () => void
 }
 
 function NavArrowButton({ direction, nav }: { direction: "back" | "forward"; nav: NavHistoryValue }) {
+  const t = useT()
   const isBack = direction === "back"
   const enabled = isBack ? nav.canGoBack : nav.canGoForward
-  const label = isBack ? "Back" : "Forward"
+  const plainLabel = isBack ? t("nav.historyControls.back") : t("nav.historyControls.forward")
   const Icon = isBack ? ChevronLeft : ChevronRight
   const nearest = isBack
     ? nav.entries[nav.index - 1]?.title
@@ -140,7 +157,11 @@ function NavArrowButton({ direction, nav }: { direction: "back" | "forward"; nav
 
   return (
     <AppTooltip
-      content={enabled ? label : `No ${label.toLowerCase()} history`}
+      content={
+        enabled
+          ? plainLabel
+          : t(isBack ? "nav.historyControls.noBackHistory" : "nav.historyControls.noForwardHistory")
+      }
       side="bottom"
     >
       <Button
@@ -148,7 +169,13 @@ function NavArrowButton({ direction, nav }: { direction: "back" | "forward"; nav
         variant="ghost"
         size="icon-xs"
         disabled={!enabled}
-        aria-label={enabled && nearest ? `${label} to ${nearest}` : label}
+        aria-label={
+          enabled && nearest
+            ? isBack
+              ? t("nav.historyControls.backTo", { target: nearest })
+              : t("nav.historyControls.forwardTo", { target: nearest })
+            : plainLabel
+        }
         onClick={() => {
           if (isBack) nav.goBack()
           else nav.goForward()

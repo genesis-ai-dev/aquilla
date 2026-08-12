@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { Navigate, useParams } from "react-router-dom"
-import { Cpu, Gauge, KeyRound, Palette, PanelLeft, ShieldCheck, UserRound } from "lucide-react"
+import { Cpu, Gauge, Globe, KeyRound, Palette, PanelLeft, ShieldCheck, UserRound } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { OrgSidebar } from "@/components/org/OrgSidebar"
 import { OrgBreadcrumb } from "@/components/org/OrgBreadcrumb"
@@ -17,6 +17,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { LanguageSwitcher } from "@/lib/i18n/LanguageSwitcher"
+import { useI18n } from "@/lib/i18n/I18nProvider"
 import { useThemeMode, type ThemeMode } from "@/branding/ThemeMode"
 import { useAnalyticsConsent } from "@/hooks/useAnalyticsConsent"
 import { useDockRailPosition } from "@/hooks/useDockRailPosition"
@@ -168,6 +170,28 @@ function AppearanceSection() {
   )
 }
 
+/**
+ * UI language. Device-scoped like Appearance, and separate from the
+ * translator profile's "Assistant language" (which only steers AI replies).
+ */
+function LanguageSection() {
+  const { t } = useI18n()
+  return (
+    <SettingsGroup label="Language">
+      <SettingsRow
+        label="UI language"
+        description="The language the app's own interface (menus, buttons, messages) is shown in."
+        control={
+          <LanguageSwitcher
+            className="h-9 rounded-md border border-input bg-transparent px-3 text-sm"
+            ariaLabel={t("language.switcher.settingsRow")}
+          />
+        }
+      />
+    </SettingsGroup>
+  )
+}
+
 /** Analytics consent toggle. Self-contained for its detail page. */
 function PrivacySection() {
   const { enabled, setEnabled } = useAnalyticsConsent()
@@ -274,6 +298,14 @@ const PREFERENCE_SECTIONS: PreferenceSection[] = [
     group: "General",
     icon: Palette,
     render: () => <AppearanceSection />,
+  },
+  {
+    slug: "language",
+    title: "Language",
+    description: "The language the app's own interface is shown in.",
+    group: "General",
+    icon: Globe,
+    render: () => <LanguageSection />,
   },
   {
     slug: "privacy",

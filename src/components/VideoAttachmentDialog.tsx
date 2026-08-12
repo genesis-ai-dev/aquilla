@@ -10,7 +10,6 @@ import {
   FieldError,
   FieldGroup,
   FieldLabel,
-  OptionalMark,
 } from "@/components/ui/field"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
@@ -19,6 +18,7 @@ import { storeVideoBlob, deleteVideoBlob } from "@/lib/video/video-store"
 import { v4 as uuid } from "uuid"
 import { cn } from "@/lib/utils"
 import type { VideoAttachment } from "@/lib/parsers/types"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 interface VideoAttachmentDialogProps {
   open: boolean
@@ -30,6 +30,7 @@ interface VideoAttachmentDialogProps {
 type Tab = "url" | "upload"
 
 export function VideoAttachmentDialog({ open, onOpenChange, current, onSave }: VideoAttachmentDialogProps) {
+  const t = useT()
   const [tab, setTab] = useState<Tab>(current.videoUrl ? "url" : "upload")
   const [urlInput, setUrlInput] = useState(current.videoUrl || "")
   const [fileNameInput, setFileNameInput] = useState(current.videoFileName || "")
@@ -70,7 +71,7 @@ export function VideoAttachmentDialog({ open, onOpenChange, current, onSave }: V
   async function handleSaveUrl() {
     const trimmed = urlInput.trim()
     if (!trimmed) {
-      setError("Enter a video URL")
+      setError(t("editor.video.enterUrl"))
       return
     }
     // If they had a local file before, clean it up
@@ -102,7 +103,7 @@ export function VideoAttachmentDialog({ open, onOpenChange, current, onSave }: V
       })
       onOpenChange(false)
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Upload failed")
+      setError(err instanceof Error ? err.message : t("common.uploadFailed"))
     } finally {
       setUploading(false)
     }
@@ -123,7 +124,7 @@ export function VideoAttachmentDialog({ open, onOpenChange, current, onSave }: V
   const currentLabel = current.videoUrl
     ? (current.videoFileName || current.videoUrl)
     : current.videoLocalFileId
-      ? (current.videoFileName || "Uploaded video")
+      ? (current.videoFileName || t("editor.video.uploadedFallbackName"))
       : null
 
   return (
@@ -131,7 +132,7 @@ export function VideoAttachmentDialog({ open, onOpenChange, current, onSave }: V
       <DialogContent className="max-w-lg">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Film className="h-5 w-5" /> Attach Video
+            <Film className="h-5 w-5" /> {t("editor.video.title")}
           </DialogTitle>
         </DialogHeader>
 
@@ -139,18 +140,18 @@ export function VideoAttachmentDialog({ open, onOpenChange, current, onSave }: V
           <div className="space-y-2 rounded border bg-muted/30 p-2">
             <div className="flex items-center gap-2">
               <div className="flex-1 min-w-0">
-                <p className="text-xs text-muted-foreground">Currently attached</p>
+                <p className="text-xs text-muted-foreground">{t("editor.video.currentlyAttached")}</p>
                 <p className="text-sm truncate">{currentLabel}</p>
               </div>
-              <AppTooltip content="Remove attachment">
-                <Button variant="ghost" size="icon-sm" onClick={handleRemove} aria-label="Remove attachment">
+              <AppTooltip content={t("editor.video.removeAttachment")}>
+                <Button variant="ghost" size="icon-sm" onClick={handleRemove} aria-label={t("editor.video.removeAttachment")}>
                   <Trash2 className="text-destructive" />
                 </Button>
               </AppTooltip>
             </div>
             <Field orientation="horizontal" className="items-center gap-2">
               <FieldLabel htmlFor="vstart" className="text-xs whitespace-nowrap">
-                Start offset (s)
+                {t("editor.video.startOffset")}
               </FieldLabel>
               <Input
                 id="vstart"
@@ -174,12 +175,11 @@ export function VideoAttachmentDialog({ open, onOpenChange, current, onSave }: V
                 }}
                 className="h-7 text-xs"
               >
-                Save offset
+                {t("editor.video.saveOffset")}
               </Button>
             </Field>
             <FieldDescription className="text-[11px]">
-              Seconds to wait before cues align. If your video has an intro, set this
-              to the duration of the intro so subtitles line up correctly.
+              {t("editor.video.offsetHint")}
             </FieldDescription>
           </div>
         )}
@@ -193,7 +193,7 @@ export function VideoAttachmentDialog({ open, onOpenChange, current, onSave }: V
               tab === "url" ? "border-foreground text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"
             )}
           >
-            <LinkIcon className="h-3.5 w-3.5" /> From URL
+            <LinkIcon className="h-3.5 w-3.5" /> {t("editor.video.tabUrl")}
           </button>
           <button
             type="button"
@@ -203,14 +203,14 @@ export function VideoAttachmentDialog({ open, onOpenChange, current, onSave }: V
               tab === "upload" ? "border-foreground text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"
             )}
           >
-            <Upload className="h-3.5 w-3.5" /> Upload file
+            <Upload className="h-3.5 w-3.5" /> {t("editor.video.tabUpload")}
           </button>
         </div>
 
         {tab === "url" ? (
           <FieldGroup className="space-y-3">
             <Field>
-              <FieldLabel htmlFor="vurl">Video URL</FieldLabel>
+              <FieldLabel htmlFor="vurl">{t("editor.video.urlLabel")}</FieldLabel>
               <Input
                 id="vurl"
                 value={urlInput}
@@ -218,23 +218,21 @@ export function VideoAttachmentDialog({ open, onOpenChange, current, onSave }: V
                 placeholder="https://example.com/video.mp4"
               />
               <FieldDescription>
-                Direct video URL (MP4, WebM, etc). URL syncs across collaborators.
+                {t("editor.video.urlHint")}
               </FieldDescription>
             </Field>
             <Field>
-              <FieldLabel htmlFor="vname">
-                Display name <OptionalMark />
-              </FieldLabel>
+              <FieldLabel htmlFor="vname">{t("editor.video.displayNameLabel")}</FieldLabel>
               <Input
                 id="vname"
                 value={fileNameInput}
                 onChange={(e) => setFileNameInput(e.target.value)}
-                placeholder="Episode 1"
+                placeholder={t("editor.video.displayNamePlaceholder")}
               />
             </Field>
             {error && <FieldError>{error}</FieldError>}
             <Button onClick={handleSaveUrl} className="w-full">
-              Save URL
+              {t("editor.video.saveUrl")}
             </Button>
           </FieldGroup>
         ) : (
@@ -251,20 +249,20 @@ export function VideoAttachmentDialog({ open, onOpenChange, current, onSave }: V
               {uploading ? (
                 <>
                   <Spinner className="size-6 text-primary" />
-                  <p className="mt-2 text-sm text-muted-foreground">Storing video locally...</p>
+                  <p className="mt-2 text-sm text-muted-foreground">{t("editor.video.storingLocally")}</p>
                 </>
               ) : (
                 <>
                   <Upload className="h-6 w-6 text-muted-foreground" />
                   <p className="mt-2 text-sm text-muted-foreground">
-                    Drag a video file here, or
+                    {t("editor.video.dropHint")}
                   </p>
                   <Button
                     variant="outline"
                     onClick={() => fileInputRef.current?.click()}
                     className="mt-1"
                   >
-                    Choose file
+                    {t("editor.video.chooseFile")}
                   </Button>
                   <input
                     ref={fileInputRef}
@@ -274,7 +272,7 @@ export function VideoAttachmentDialog({ open, onOpenChange, current, onSave }: V
                     onChange={onFileChange}
                   />
                   <p className="mt-2 text-[11px] text-muted-foreground">
-                    Stored locally on this device only (not synced to peers).
+                    {t("editor.video.localOnlyHint")}
                   </p>
                 </>
               )}

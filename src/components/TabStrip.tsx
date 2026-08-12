@@ -4,6 +4,7 @@ import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { looksLikeUuid } from "@/lib/uuid"
 import type { WorkspaceTab } from "@/hooks/useWorkspaceTabs"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 const TAB_WIDTH = "w-[200px]"
 
@@ -74,8 +75,13 @@ interface Props {
   trailing?: ReactNode
 }
 
-/** Tab label for humans — never the internal file id. */
-export function fileNameFor(files: readonly FileMeta[], fileId: string): string | null {
+/** Tab label for humans — never the internal file id. `untitledLabel` is the
+ *  already-translated fallback shown when a file has no usable name. */
+export function fileNameFor(
+  files: readonly FileMeta[],
+  fileId: string,
+  untitledLabel = "Untitled file",
+): string | null {
   const file = files.find((f) => f.id === fileId)
   if (!file) return null
   for (const candidate of [file.name, file.originalName]) {
@@ -83,12 +89,13 @@ export function fileNameFor(files: readonly FileMeta[], fileId: string): string 
     if (!trimmed || trimmed === fileId || looksLikeUuid(trimmed)) continue
     return trimmed
   }
-  return "Untitled file"
+  return untitledLabel
 }
 
 export function TabStrip({ tabs, activeTabId, files, onActivate, onClose, surfaceTabs = [], trailing }: Props) {
+  const t = useT()
   const visibleTabs = tabs.flatMap((tab) => {
-    const name = fileNameFor(files, tab.fileId)
+    const name = fileNameFor(files, tab.fileId, t("nav.tabStrip.untitledFile"))
     return name ? [{ tab, name }] : []
   })
 
@@ -96,7 +103,7 @@ export function TabStrip({ tabs, activeTabId, files, onActivate, onClose, surfac
   return (
     <div
       role="tablist"
-      aria-label="Open files"
+      aria-label={t("nav.tabStrip.openFiles")}
       className="z-10 flex min-w-0 scroll-fade-x scroll-fade-8 items-center gap-1 overflow-x-auto overscroll-x-contain scrollbar-none"
     >
       {visibleTabs.map(({ tab, name }) => {
@@ -140,7 +147,7 @@ export function TabStrip({ tabs, activeTabId, files, onActivate, onClose, surfac
                 e.stopPropagation()
                 onClose(tab.id)
               }}
-              aria-label={`Close ${label}`}
+              aria-label={t("nav.tabStrip.closeTab", { label })}
               className="absolute right-1 top-1/2 z-10 flex h-4 w-4 -translate-y-1/2 items-center justify-center rounded text-muted-foreground/70 opacity-0 hover:bg-muted hover:text-foreground group-hover/tab:opacity-100 group-focus-within/tab:opacity-100"
             >
               <X className="h-3 w-3" />
@@ -183,7 +190,7 @@ export function TabStrip({ tabs, activeTabId, files, onActivate, onClose, surfac
                 e.stopPropagation()
                 surfaceTab.onClose()
               }}
-              aria-label={`Close ${surfaceTab.label}`}
+              aria-label={t("nav.tabStrip.closeTab", { label: surfaceTab.label })}
               className="absolute right-1 top-1/2 z-10 flex h-4 w-4 -translate-y-1/2 items-center justify-center rounded text-muted-foreground/70 opacity-0 hover:bg-muted hover:text-foreground group-hover/tab:opacity-100 group-focus-within/tab:opacity-100"
             >
               <X className="h-3 w-3" />

@@ -2,6 +2,7 @@ import { useSectionProgressState } from "@/hooks/useSectionProgress"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 interface Props {
   projectId: string
@@ -17,11 +18,12 @@ interface Props {
  * the old dot-grid which was hard to interpret.
  */
 export function FileSectionGrid({ projectId, fileId, validationCount, getTokenForFile, onSectionClick }: Props) {
+  const t = useT()
   const { sections, error, retry } = useSectionProgressState(projectId, fileId, validationCount, getTokenForFile)
 
   if (sections === null) {
     return (
-      <div className="flex items-center px-6 py-1 text-muted-foreground">
+      <div className="flex items-center px-6 py-1 text-muted-foreground" aria-label={t("common.loading")}>
         <Spinner className="size-3" />
       </div>
     )
@@ -30,8 +32,8 @@ export function FileSectionGrid({ projectId, fileId, validationCount, getTokenFo
     if (error) {
       return (
         <div className="flex items-center gap-2 px-6 py-1 text-[10px] text-muted-foreground">
-          <span>Progress unavailable.</span>
-          <button type="button" className="font-medium text-foreground hover:underline" onClick={retry}>Retry</button>
+          <span>{t("nav.fileSectionGrid.progressUnavailable")}</span>
+          <button type="button" className="font-medium text-foreground hover:underline" onClick={retry}>{t("common.retry")}</button>
         </div>
       )
     }
@@ -44,7 +46,14 @@ export function FileSectionGrid({ projectId, fileId, validationCount, getTokenFo
         const completed = section.textCompleted
         const validated = section.textValidated
         return (
-          <AppTooltip key={section.label} content={`${section.label}: ${completed}% translated, ${validated}% validated`}>
+          <AppTooltip
+            key={section.label}
+            content={t("nav.fileSectionGrid.sectionProgressTooltip", {
+              section: section.label,
+              completed,
+              validated,
+            })}
+          >
             <button
               type="button"
               className={cn(

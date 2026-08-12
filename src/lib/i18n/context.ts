@@ -24,43 +24,41 @@
  * This module is the authored source of the standard; the JSON interchange
  * sidecar shipped to translators is generated from it verbatim by
  * `catalog-export.ts`. Authoring in TypeScript rather than JSON buys
- * compile-time checking: an entry for a key that doesn't exist, or a screenshot
- * id that isn't declared in `screenshots.ts`, fails `tsc`.
+ * compile-time checking: an entry for a key that doesn't exist, or one filed
+ * under the wrong namespace, fails `tsc`.
+ *
+ * This file is a barrel: each namespace's block is authored in its own module
+ * under `namespaces/`, next to that namespace's keys and its screenshot
+ * surfaces, and collected here. Screenshot ids are checked by this module's lint
+ * and by `context.test.ts` rather than by `tsc` — see `namespaces/types.ts` for
+ * why keeping them a compile-time union would reinstate an import cycle.
  *
  * See `docs/I18N-CONTEXT-CATALOG.md` for the standard and the new-key workflow.
  */
 
 import { en, type MessageKey } from "./messages/en"
-import { isScreenshotId, SCREENSHOTS, type ScreenshotId } from "./screenshots"
+import { NAMESPACES } from "./namespaces"
+import type { ContextEntry } from "./namespaces/types"
+import {
+  isPluralMessage,
+  PLURAL_CATEGORIES,
+  type PluralCategory,
+  type PluralMessage,
+} from "./plurals"
+import { isScreenshotId, SCREENSHOTS } from "./screenshots"
 
-/** Version of the sidecar interchange format emitted by `catalog-export.ts`. */
-export const CONTEXT_SCHEMA_VERSION = 1
+/**
+ * Version of the sidecar interchange format emitted by `catalog-export.ts`.
+ * v2 adds the `plurals` section — which categories each target locale needs for
+ * each count-governed key, and which placeholder governs the selection.
+ */
+export const CONTEXT_SCHEMA_VERSION = 2
 
 /** Minimum useful description length — a one-word note is not context. */
 const MIN_DESCRIPTION_LENGTH = 12
 
-export interface ContextEntry {
-  /**
-   * What the string does: element type (button / label / toast / tooltip /
-   * heading), the action it triggers, and any wording constraint. Written for
-   * someone who cannot see the code.
-   */
-  description: string
-  /** Surface screenshot this string appears in; see `screenshots.ts`. */
-  screenshot?: ScreenshotId
-  /**
-   * Soft ceiling in characters, where the layout genuinely constrains the
-   * translation (narrow nav column, button in a row of buttons). Omit when the
-   * string has room to grow.
-   */
-  maxLength?: number
-  /**
-   * Semantics of each `{placeholder}` in the string, keyed by placeholder name
-   * without braces. Required for every placeholder the English string uses —
-   * `catalogContextIssues()` enforces both directions.
-   */
-  placeholders?: Record<string, string>
-}
+/** Re-exported so consumers keep importing the entry shape from here. */
+export type { ContextEntry } from "./namespaces/types"
 
 export interface NamespaceBlock {
   /** Surface-level context inherited by every key in the namespace. */
@@ -74,258 +72,9 @@ export interface NamespaceBlock {
  * first `.` of a message key. Keys inside `keys` are full message keys so that
  * multi-segment keys (`error.generic.title`) stay unambiguous.
  */
-export const CATALOG_CONTEXT: Record<string, NamespaceBlock> = {
-  common: {
-    _context: {
-      description:
-        "Shared action verbs and status text reused across the whole app — mostly " +
-        "buttons in dialog footers and toolbars, so they sit side by side with other " +
-        "actions and must stay short and imperative.",
-      screenshot: "confirm-dialog",
-      maxLength: 20,
-    },
-    keys: {
-      "common.save": {
-        description:
-          "Primary button that commits the changes in the current dialog or panel. " +
-          "Imperative verb, not a noun ('Save', not 'Saving' or 'Saved').",
-      },
-      "common.cancel": {
-        description:
-          "Secondary button that closes a dialog and discards the changes made in it. " +
-          "Pairs with Save; the two sit next to each other.",
-      },
-      "common.close": {
-        description:
-          "Button that dismisses a panel or dialog that has nothing to commit. Unlike " +
-          "Cancel it does not imply discarding work.",
-      },
-      "common.delete": {
-        description:
-          "Destructive button that permanently removes the selected item. Should read " +
-          "as clearly destructive in the target language.",
-      },
-      "common.dismiss": {
-        description:
-          "Button on a toast or inline notice that hides the message. It only hides the " +
-          "notice; it does not undo or resolve whatever the notice reported.",
-      },
-      "common.retry": {
-        description:
-          "Button offered after a failed operation that attempts the same operation again.",
-      },
-      "common.loading": {
-        description:
-          "Placeholder status text shown while content is being fetched. The trailing " +
-          "character is a single ellipsis glyph (…), not three periods; keep whatever " +
-          "continuation mark is conventional in the target language.",
-        screenshot: "cell-editor",
-      },
-    },
-  },
-
-  nav: {
-    _context: {
-      description:
-        "Top-level workspace navigation — links and controls in the left sidebar and " +
-        "app header that move the user between major areas. Rendered in a narrow " +
-        "fixed-width column, so long translations wrap or clip.",
-      screenshot: "workspace-nav",
-      maxLength: 24,
-    },
-    keys: {
-      "nav.projects": {
-        description:
-          "Sidebar link to the list of translation projects the user belongs to. Plural " +
-          "noun naming a destination, not an action.",
-      },
-      "nav.settings": {
-        description:
-          "Sidebar link to the settings area. Plural noun naming a destination.",
-      },
-      "nav.search": {
-        description:
-          "Control that opens search across the project's cells. Noun or verb depending " +
-          "on what reads naturally as a nav label in the target language.",
-      },
-    },
-  },
-
-  error: {
-    _context: {
-      description:
-        "Failure surfaces — the error boundary and failed-load states. Wording is " +
-        "reassuring and non-technical: it tells the user something broke without " +
-        "blaming them and without exposing internals.",
-      screenshot: "error-state",
-    },
-    keys: {
-      "error.generic.title": {
-        description:
-          "Heading of the generic failure panel shown when an unexpected error is " +
-          "caught. A short sentence, not a button; sentence case, no trailing period.",
-      },
-    },
-  },
-
-  fileDetails: {
-    _context: {
-      description:
-        "The 'File details' modal, opened from a file row's overflow (⋯) menu in the " +
-        "workspace sidebar. Shows a metadata table (label on the left, value on the " +
-        "right) followed by a column of file action buttons; actions the user lacks " +
-        "permission for are disabled with an explanatory sentence underneath.",
-    },
-    keys: {
-      "fileDetails.menuItem": {
-        description:
-          "Menu item in the file row's overflow menu that opens the File details modal. " +
-          "Noun phrase naming what will be shown, not an action verb.",
-        maxLength: 24,
-      },
-      "fileDetails.importedAs": {
-        description:
-          "Subtitle under the modal heading, shown when the file was renamed after " +
-          "import; tells the user the file's original name.",
-        placeholders: {
-          name: "The file's original name at import time, verbatim. Do not translate.",
-        },
-      },
-      "fileDetails.type": {
-        description:
-          "Metadata row label for the file's source format (value is an acronym like " +
-          "USFM or DOCX). Short noun.",
-        maxLength: 20,
-      },
-      "fileDetails.corpus": {
-        description:
-          "Metadata row label for the corpus group the file belongs to (e.g. OT/NT for " +
-          "biblical books). 'Corpus' is a product term for a named group of files.",
-        maxLength: 20,
-      },
-      "fileDetails.bookCode": {
-        description:
-          "Metadata row label for the file's stable scripture book code (e.g. GEN). " +
-          "Only shown for scripture files.",
-        maxLength: 20,
-      },
-      "fileDetails.segments": {
-        description:
-          "Metadata row label for the number of translatable segments (cells) in the " +
-          "file. Plural noun; the value is a bare number.",
-        maxLength: 20,
-      },
-      "fileDetails.ordering": {
-        description:
-          "Metadata row label for how the file's segments are ordered. The value is " +
-          "one of the two ordering names below.",
-        maxLength: 20,
-      },
-      "fileDetails.orderingTimeline": {
-        description:
-          "Ordering value for time-based files (audio/video/subtitles): segments sort " +
-          "by their timecodes. The parenthetical clarifies the mechanism.",
-      },
-      "fileDetails.orderingSequence": {
-        description:
-          "Ordering value for text files: segments sort by their intrinsic sequence " +
-          "(e.g. verse order). Single noun.",
-      },
-      "fileDetails.languages": {
-        description:
-          "Metadata row label for the file's language pair. The value is rendered as " +
-          "'source → target' language codes.",
-        maxLength: 20,
-      },
-      "fileDetails.imported": {
-        description:
-          "Metadata row label for the date the file was imported. Past participle used " +
-          "as a label; the value is a locale-formatted date.",
-        maxLength: 20,
-      },
-      "fileDetails.progress": {
-        description:
-          "Metadata row label for the file's translation progress. The value is the " +
-          "progressValue string below.",
-        maxLength: 20,
-      },
-      "fileDetails.progressValue": {
-        description:
-          "Progress row value combining two percentages, separated by a middle dot. " +
-          "'Translated' counts segments with a draft; 'validated' counts segments " +
-          "approved by a reviewer.",
-        placeholders: {
-          translated: "Whole number 0–100: percentage of segments with a translation.",
-          validated: "Whole number 0–100: percentage of segments validated by a reviewer.",
-        },
-      },
-      "fileDetails.rename": {
-        description:
-          "Action button that closes the modal and starts inline renaming of the file " +
-          "in the sidebar. Imperative verb.",
-        maxLength: 24,
-      },
-      "fileDetails.moveToCorpus": {
-        description:
-          "Action button that opens a dialog to move the file into a different corpus " +
-          "(named file group). Ends with an ellipsis because a dialog follows.",
-        maxLength: 30,
-      },
-      "fileDetails.exportSource": {
-        description:
-          "Action button that downloads the file back in its source format. '.SFM' is " +
-          "a file extension — keep it verbatim.",
-        maxLength: 30,
-      },
-      "fileDetails.exportDisabledType": {
-        description:
-          "Sentence under the disabled export button explaining that only USFM-format " +
-          "files can be exported. 'USFM' is a format name — keep it verbatim.",
-      },
-      "fileDetails.exportDisabledPolicy": {
-        description:
-          "Sentence under the disabled export button explaining that the user's " +
-          "organization has turned off source export for members.",
-      },
-      "fileDetails.deleteRequiresRole": {
-        description:
-          "Sentence under the disabled delete button explaining the required project " +
-          "role. 'Project Lead' is a role name shown elsewhere in the app; translate it " +
-          "consistently with the members page.",
-      },
-    },
-  },
-
-  language: {
-    _context: {
-      description:
-        "UI-language switcher in settings and the app chrome, which changes the " +
-        "language of the interface itself (not the language being translated in the " +
-        "project). These strings are read by someone who may not yet understand the " +
-        "current UI language.",
-      screenshot: "project-settings",
-    },
-    keys: {
-      "language.label": {
-        description:
-          "Accessible label for the language switcher control. Read aloud by screen " +
-          "readers; also the visible form label beside the control.",
-        maxLength: 20,
-      },
-      "language.switchTo": {
-        description:
-          "Accessible description of a single option in the language switcher, naming " +
-          "the language that option selects.",
-        placeholders: {
-          language:
-            "Name of the target UI language, already written in that language's own " +
-            "script (its endonym) — e.g. 'ไทย', 'العربية'. Do not translate the " +
-            "substituted value.",
-        },
-      },
-    },
-  },
-}
+export const CATALOG_CONTEXT: Record<string, NamespaceBlock> = Object.fromEntries(
+  NAMESPACES.map((ns) => [namespaceOf(Object.keys(ns.keys)[0]), ns.context]),
+)
 
 /** Namespace of a message key: everything before the first `.`. */
 export function namespaceOf(key: string): string {
@@ -340,12 +89,53 @@ export function placeholdersIn(template: string): string[] {
   return [...found]
 }
 
+/**
+ * The count-governed forms of a key, or `undefined` for a plain string key.
+ * The one place the rest of the i18n code asks "is this key a plural?".
+ */
+export function pluralMessageFor(key: MessageKey): PluralMessage | undefined {
+  const value = en[key]
+  return isPluralMessage(value) ? value : undefined
+}
+
+/**
+ * Every English string a key contributes — one for a plain key, one per authored
+ * category for a plural key. The duplicate-English guard and the placeholder
+ * lint both work over this, so a plural form cannot smuggle in a duplicate or an
+ * undocumented placeholder.
+ */
+export function englishFormsFor(key: MessageKey): string[] {
+  const value = en[key]
+  if (!isPluralMessage(value)) return [value]
+  return PLURAL_CATEGORIES.flatMap((c) => {
+    const form = value.forms[c]
+    return form === undefined ? [] : [form]
+  })
+}
+
+/**
+ * The single English string that represents a key — the `other` form for a
+ * plural key, since that is the form every locale defines and the one a
+ * translator reads first.
+ */
+export function englishSourceFor(key: MessageKey): string {
+  const value = en[key]
+  if (!isPluralMessage(value)) return value
+  return value.forms.other ?? englishFormsFor(key)[0] ?? ""
+}
+
 /** Fully resolved context for one message key: per-key entry over namespace. */
 export interface ResolvedContext {
   key: MessageKey
   namespace: string
-  /** The English source string, for reference. */
+  /** The English source string, for reference (`other` form when plural). */
   source: string
+  /**
+   * Present when the key is count-governed: the placeholder that selects the
+   * form, and the authored English forms. Translators need both — the category
+   * set they must fill depends on their language, not on English.
+   */
+  plural?: { countVar: string; forms: Partial<Record<PluralCategory, string>> }
   /** Namespace-level description of the surrounding surface. */
   surface: string
   /** Per-key description when present, otherwise the surface description. */
@@ -366,10 +156,12 @@ export function resolveKeyContext(key: MessageKey): ResolvedContext {
   const block = CATALOG_CONTEXT[namespace]
   const nsContext = block?._context
   const entry = block?.keys?.[key]
+  const plural = pluralMessageFor(key)
   return {
     key,
     namespace,
-    source: en[key],
+    source: englishSourceFor(key),
+    ...(plural ? { plural: { countVar: plural.countVar, forms: plural.forms } } : {}),
     surface: nsContext?.description ?? "",
     description: entry?.description ?? nsContext?.description ?? "",
     screenshot: entry?.screenshot ?? nsContext?.screenshot,
@@ -430,7 +222,36 @@ export function catalogContextIssues(): string[] {
       )
     }
 
-    const used = placeholdersIn(en[key])
+    const plural = pluralMessageFor(key)
+    if (plural) {
+      const forms = englishFormsFor(key)
+      if (!plural.forms.other || plural.forms.other.trim().length === 0) {
+        issues.push(
+          `${key}: plural message has no \`other\` form — it is the last form every ` +
+            `locale defines and the end of every fallback chain, so it is required`,
+        )
+      }
+      for (const [category, form] of Object.entries(plural.forms)) {
+        if (form.trim().length === 0) {
+          issues.push(`${key}: plural form "${category}" is empty`)
+        }
+      }
+      // Every form must interpolate the same things, or the rendered sentence
+      // silently loses a number in whichever category the count happens to hit.
+      const signature = (s: string) => placeholdersIn(s).sort().join(",")
+      const first = signature(forms[0] ?? "")
+      for (const form of forms) {
+        if (signature(form) !== first) {
+          issues.push(
+            `${key}: plural forms disagree on placeholders ` +
+              `("${first}" vs "${signature(form)}") — every form must use the same set`,
+          )
+          break
+        }
+      }
+    }
+
+    const used = [...new Set(englishFormsFor(key).flatMap((form) => placeholdersIn(form)))]
     for (const name of used) {
       if (!resolved.placeholders[name]) {
         issues.push(

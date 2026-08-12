@@ -8,15 +8,36 @@
 
 import { env } from "cloudflare:test"
 import { describe, it, expect } from "vitest"
+import { readFileSync } from "node:fs"
+import { fileURLToPath } from "node:url"
+import path from "node:path"
 import app from "../index"
 import { seedUser, jwtFor, authHeader } from "./helpers/db"
+import { pg } from "./helpers/pg-test-env"
+import { PostgresDb, type PgExecutor } from "../../../db/shim/postgres"
 import {
   markStale,
   getSceneBrief,
+  proposeSceneBrief,
+  listSceneBriefsByRun,
   SCENE_BRIEF_MAX_BYTES,
 } from "../../../db/shared/scene-briefs"
 
 const PROJECT = "proj-scene"
+const RLS_MIGRATION = readFileSync(
+  path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    "../../../db/postgres/migrations/0034_rls_backstop.sql",
+  ),
+  "utf8",
+)
+const ACTIVITY_MIGRATION = readFileSync(
+  path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    "../../../db/postgres/migrations/0074_contextual_run_events.sql",
+  ),
+  "utf8",
+)
 
 // The span every test proposes against unless it says otherwise.
 const SPAN = {
@@ -147,6 +168,183 @@ describe("scene-brief propose → review lifecycle", () => {
       action: "approve",
     })
     expect(again.status).toBe(409)
+  })
+})
+
+describe("scene-brief run evidence", () => {
+  it("passes provenance and ambiguity evidence as structured JSON at the Postgres adapter boundary", async () => {
+    let adapterRegister: unknown
+    let adapterProvenance: unknown
+    let executor: PgExecutor
+    executor = {
+      async run(_sql, params) {
+        adapterRegister = params[7]
+        adapterProvenance = params[11]
+        return {
+          rows: [{
+            id: params[0],
+            project_id: params[1],
+            file_id: params[2],
+            start_cell_id: params[3],
+            end_cell_id: params[4],
+            target_lang: params[5],
+            construal: params[6],
+            ambiguity_register: params[7],
+            l1_summary: params[8],
+            l1_generated_at: params[9],
+            l1_model_id: params[10],
+            status: "proposed",
+            human_edited: false,
+            stale_since: null,
+            stale_reason: null,
+            provenance: params[11],
+            created_by: params[12],
+            reviewed_by: null,
+            version: 1,
+            created_at: "2026-08-11T00:00:00.000Z",
+            updated_at: "2026-08-11T00:00:00.000Z",
+          }],
+          rowCount: 1,
+        }
+      },
+      begin: (fn) => fn(executor),
+    }
+
+    const adapterDb = new PostgresDb(executor)
+    const ambiguityRegister = [{ id: "a1", question: "Who is speaking?" }]
+    const provenance = { runId: "run-adapter-boundary", closureRounds: 2 }
+    const result = await proposeSceneBrief(adapterDb, {
+      projectId: PROJECT,
+      ...SPAN,
+      construal: "Scene evidence.",
+      ambiguityRegister,
+      provenance,
+    })
+
+    expect(adapterRegister).toEqual(ambiguityRegister)
+    expect(adapterProvenance).toEqual(provenance)
+    expect(typeof adapterProvenance).toBe("object")
+    expect(result.status).toBe("ok")
+    if (result.status === "ok") expect(result.brief.provenance).toEqual(provenance)
+  })
+
+  it("migration recovers only parseable legacy provenance objects without losing other scalars", async () => {
+    const insertLegacy = async (id: string, payload: string) => {
+      await env.AQUILLA_PG.prepare(
+        `INSERT INTO scene_briefs
+            (id, project_id, file_id, start_cell_id, end_cell_id, construal, provenance)
+         VALUES (?, ?, ?, ?, ?, 'Legacy scene.', to_jsonb(?::text))`,
+      ).bind(id, PROJECT, SPAN.fileId, `${id}-start`, `${id}-end`, payload).run()
+    }
+    await insertLegacy("legacy-object", '{"runId":"legacy-run","closureRounds":2}')
+    await insertLegacy("legacy-invalid", "not encoded json")
+    await insertLegacy("legacy-array", '["legacy-run"]')
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO contextual_runs
+          (id, project_id, file_id, status, role_snapshot, span_cursor)
+       VALUES ('legacy-contextual-json', ?, 'legacy-contextual-file', 'terminated',
+               to_jsonb('{"userId":7,"username":"legacy","level":400}'::text),
+               to_jsonb('{"seeds":[],"nextIndex":0}'::text))`,
+    ).bind(PROJECT).run()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO contextual_drafts
+          (id, run_id, project_id, file_id, cell_id, text, status, verdicts, provenance)
+       VALUES ('legacy-contextual-draft', 'legacy-contextual-json', ?,
+               'legacy-contextual-file', 'legacy-cell', 'legacy draft', 'rejected',
+               to_jsonb('{"ambiguity":"approved"}'::text),
+               to_jsonb('{"spanId":"legacy-span"}'::text))`,
+    ).bind(PROJECT).run()
+
+    // Execute the exact prerequisite and activity migrations so policy/function
+    // dependencies match production rather than being stubbed in the test.
+    await pg.exec(RLS_MIGRATION)
+    await pg.exec(ACTIVITY_MIGRATION)
+
+    const recovered = await listSceneBriefsByRun(env.AQUILLA_PG, PROJECT, "legacy-run")
+    expect(recovered.map((brief) => brief.id)).toEqual(["legacy-object"])
+    const { results } = await env.AQUILLA_PG.prepare(
+      `SELECT id, jsonb_typeof(provenance) AS kind, provenance
+         FROM scene_briefs WHERE id LIKE 'legacy-%' ORDER BY id`,
+    ).all<{ id: string; kind: string; provenance: unknown }>()
+    expect(results).toEqual([
+      { id: "legacy-array", kind: "string", provenance: '["legacy-run"]' },
+      { id: "legacy-invalid", kind: "string", provenance: "not encoded json" },
+      {
+        id: "legacy-object",
+        kind: "object",
+        provenance: { runId: "legacy-run", closureRounds: 2 },
+      },
+    ])
+    const normalizedContextual = await env.AQUILLA_PG.prepare(
+      `SELECT jsonb_typeof(r.role_snapshot) AS role_kind,
+              jsonb_typeof(r.span_cursor) AS cursor_kind,
+              jsonb_typeof(d.verdicts) AS verdict_kind,
+              jsonb_typeof(d.provenance) AS draft_provenance_kind,
+              r.span_cursor ->> 'nextIndex' AS next_index,
+              d.provenance ->> 'spanId' AS span_id
+         FROM contextual_runs r
+         JOIN contextual_drafts d ON d.run_id = r.id
+        WHERE r.id = 'legacy-contextual-json'`,
+    ).first<{
+      role_kind: string
+      cursor_kind: string
+      verdict_kind: string
+      draft_provenance_kind: string
+      next_index: string
+      span_id: string
+    }>()
+    expect(normalizedContextual).toEqual({
+      role_kind: "object",
+      cursor_kind: "object",
+      verdict_kind: "object",
+      draft_provenance_kind: "object",
+      next_index: "0",
+      span_id: "legacy-span",
+    })
+    const indexes = await pg.query<{ indexname: string }>(
+      `SELECT indexname FROM pg_indexes
+        WHERE indexname IN (
+          'contextual_runs_project_time',
+          'contextual_runs_project_lane_time',
+          'scene_briefs_run_provenance_time',
+          'contextual_drafts_project_status_run_time',
+          'contextual_project_leases_project_expiry'
+        )
+        ORDER BY indexname`,
+    )
+    expect(indexes.rows.map((row) => row.indexname)).toEqual([
+      "contextual_drafts_project_status_run_time",
+      "contextual_project_leases_project_expiry",
+      "contextual_runs_project_lane_time",
+      "contextual_runs_project_time",
+      "scene_briefs_run_provenance_time",
+    ])
+  })
+
+  it("lists only the requested run/project and a bounded read keeps the latest rows", async () => {
+    const base = {
+      projectId: PROJECT,
+      fileId: SPAN.fileId,
+      startCellId: SPAN.startCellId,
+      endCellId: SPAN.endCellId,
+      targetLang: SPAN.targetLang,
+      ambiguityRegister: [],
+      provenance: { runId: "run-evidence" },
+    }
+    const first = await proposeSceneBrief(env.AQUILLA_PG, { ...base, construal: "First." })
+    const second = await proposeSceneBrief(env.AQUILLA_PG, { ...base, construal: "Second." })
+    if (first.status !== "ok" || second.status !== "ok") throw new Error("brief not proposed")
+    await env.AQUILLA_PG.prepare("UPDATE scene_briefs SET created_at = '2026-01-01T00:00:00Z' WHERE id = ?")
+      .bind(first.brief.id)
+      .run()
+    await env.AQUILLA_PG.prepare("UPDATE scene_briefs SET created_at = '2026-01-02T00:00:00Z' WHERE id = ?")
+      .bind(second.brief.id)
+      .run()
+
+    expect((await listSceneBriefsByRun(env.AQUILLA_PG, PROJECT, "run-evidence", 1)).map((b) => b.id))
+      .toEqual([second.brief.id])
+    expect(await listSceneBriefsByRun(env.AQUILLA_PG, "other-project", "run-evidence"))
+      .toEqual([])
   })
 })
 

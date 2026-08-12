@@ -4,14 +4,17 @@
 // send so chips track what the server still holds queued.
 
 import { describe, it, expect, beforeEach, vi } from "vitest"
-import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react"
+import { render, screen, fireEvent, cleanup, waitFor, act } from "@testing-library/react"
 import { ContextualSteering } from "./ContextualSteering"
 import {
-  applyRemoteFrame,
+  applyRemoteFrame as applyFrame,
+  attachContextualRun,
+  getContextualRunState,
   resetContextualRunStore,
   setContextualTransport,
   useContextualRunState,
   type ContextualRunSnapshot,
+  type ContextualFrame,
   type ContextualTransport,
 } from "@/lib/contextual/run-store"
 
@@ -42,6 +45,10 @@ vi.mock("@/lib/contextual/transport", () => ({
 }))
 
 const RUN = "01920000-0000-7000-8000-000000000001"
+
+function applyRemoteFrame(frame: ContextualFrame): void {
+  applyFrame("p1", frame)
+}
 
 function runSnapshot(activeDirections: string[]): ContextualRunSnapshot {
   return {
@@ -86,14 +93,17 @@ function openPopover() {
   return screen.getByTestId("contextual-steering-popover")
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   cleanup()
   resetContextualRunStore()
   sendMock.mockReset()
+  setContextualTransport(makeTransport())
+  await attachContextualRun("p1", "file-1")
   applyRemoteFrame({
     type: "contextual.run.state",
     runId: RUN,
     fileId: "file-1",
+    targetLang: "",
     status: "running",
     done: 2,
     total: 10,
@@ -175,12 +185,41 @@ describe("ContextualSteering", () => {
     )
   })
 
+  it("does not reattach or mutate a different run after a delayed send resolves", async () => {
+    let finishSend: (() => void) | undefined
+    sendMock.mockImplementation(() => new Promise<void>((resolve) => { finishSend = resolve }))
+    render(<Harness />)
+    openPopover()
+
+    fireEvent.change(screen.getByLabelText("Direction for the agent"), {
+      target: { value: "Keep the old run formal" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Send" }))
+    await waitFor(() => expect(sendMock).toHaveBeenCalledWith(RUN, "Keep the old run formal"))
+
+    const newScopeFetch = vi.fn(async () => ({ available: true as const, run: null }))
+    setContextualTransport(makeTransport({ fetchSnapshot: newScopeFetch }))
+    await attachContextualRun("p2", "file-2")
+
+    await act(async () => { finishSend?.() })
+    await waitFor(() => expect(screen.getByRole("button", { name: "Send" })).toBeEnabled())
+    expect(getContextualRunState()).toMatchObject({
+      projectId: "p2",
+      fileId: "file-2",
+      runId: null,
+      activeDirections: [],
+    })
+    expect(newScopeFetch).toHaveBeenCalledTimes(1)
+    expect(newScopeFetch).toHaveBeenCalledWith("p2", "file-2")
+  })
+
   it("shows queued directions as chips with a count badge on the trigger", () => {
     setContextualTransport(makeTransport())
     applyRemoteFrame({
       type: "contextual.run.state",
       runId: RUN,
       fileId: "file-1",
+      targetLang: "",
       status: "running",
       done: 2,
       total: 10,

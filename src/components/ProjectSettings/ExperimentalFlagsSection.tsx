@@ -10,6 +10,7 @@ import { useCallback, useEffect, useState } from "react"
 import { Switch } from "@/components/ui/switch"
 import { SettingsGroup, SettingsRow } from "@/components/ui/page"
 import { FLAGS } from "@/lib/features/flags"
+import { useI18n } from "@/lib/i18n/I18nProvider"
 import { getProject, patchProject, updateProject } from "@/lib/store/project-index"
 import type { ProjectRecord } from "@/lib/parsers/types"
 
@@ -24,6 +25,7 @@ export function ExperimentalFlagsSection({
    *  which would make the toggle a no-op on first visit. */
   serverProject?: ProjectRecord
 }) {
+  const { t } = useI18n()
   const [flags, setFlags] = useState<Record<string, boolean> | undefined>(undefined)
 
   // Seed from IDB directly — the parent's `project` comes from the server
@@ -52,26 +54,25 @@ export function ExperimentalFlagsSection({
 
   return (
     <div id="section-experimental">
-      <SettingsGroup label="Experimental">
+      <SettingsGroup label={t("autopilot.settings.experimentalTitle")}>
         {Object.entries(FLAGS).map(([key, def]) => (
           <SettingsRow
             key={key}
-            label={<label htmlFor={`experimental-${key}`}>{def.label}</label>}
-            description={def.description}
+            label={<label htmlFor={`experimental-${key}`}>{t(def.labelKey)}</label>}
+            description={t(def.descriptionKey)}
             control={
               <Switch
                 id={`experimental-${key}`}
                 checked={flags?.[key] ?? def.default}
                 onCheckedChange={(checked) => setFlag(key, checked)}
-                aria-label={def.label}
+                aria-label={t(def.labelKey)}
               />
             }
           />
         ))}
       </SettingsGroup>
       <p className="mt-2 px-4 text-xs text-muted-foreground">
-        Early features still in development. These switches stay on this device — they are not
-        shared with collaborators.
+        {t("autopilot.settings.experimentalDescription")}
       </p>
     </div>
   )

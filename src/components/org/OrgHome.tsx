@@ -30,7 +30,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Button, buttonVariants } from "@/components/ui/button"
+import { buttonVariants } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import {
   InputGroup,

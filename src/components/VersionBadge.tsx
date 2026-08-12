@@ -4,6 +4,7 @@ import { Check } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 declare const __APP_VERSION__: string
 declare const __APP_BRANCH__: string
@@ -74,6 +75,7 @@ function useCopyBuildInfo() {
  * foot of a flex column; it never overlaps content because it occupies layout.
  */
 export function VersionTag() {
+  const t = useT()
   const { copied, copy } = useCopyBuildInfo()
 
   return (
@@ -91,12 +93,12 @@ export function VersionTag() {
                 ? "text-emerald-600 hover:text-emerald-600"
                 : "text-muted-foreground/40 hover:text-muted-foreground/70",
             )}
-            aria-label={copied ? "Build info copied" : "Copy build info"}
+            aria-label={copied ? t("nav.version.copiedAriaLabel") : t("nav.version.copyAriaLabel")}
           >
             {copied ? (
               <>
                 <Check className="size-3 shrink-0" aria-hidden />
-                <span className="truncate">Copied</span>
+                <span className="truncate">{t("nav.version.copiedLabel")}</span>
               </>
             ) : (
               <span className="truncate">{label}</span>
@@ -105,7 +107,7 @@ export function VersionTag() {
         }
       />
       <TooltipContent side="right" className="max-w-xs whitespace-pre-wrap font-mono">
-        {copied ? "Copied to clipboard" : `Click to copy\n${title}`}
+        {copied ? t("nav.version.copiedTooltip") : t("nav.version.copyTooltip", { buildInfo: title })}
       </TooltipContent>
     </Tooltip>
   )
@@ -116,6 +118,7 @@ export function VersionTag() {
  * settings, centred project pages). Click to copy build info.
  */
 export function VersionBadge() {
+  const t = useT()
   const { pathname } = useLocation()
   const { copied, copy } = useCopyBuildInfo()
   if (hasChromeVersionTag(pathname)) return null
@@ -135,12 +138,12 @@ export function VersionBadge() {
                 ? "text-emerald-600 hover:text-emerald-600"
                 : "text-muted-foreground/70 hover:text-muted-foreground",
             )}
-            aria-label={copied ? "Build info copied" : "Copy build info"}
+            aria-label={copied ? t("nav.version.copiedAriaLabel") : t("nav.version.copyAriaLabel")}
           >
             {copied ? (
               <>
                 <Check className="size-3 shrink-0" aria-hidden />
-                <span>Copied</span>
+                <span>{t("nav.version.copiedLabel")}</span>
               </>
             ) : (
               <span className="max-w-[min(70vw,24rem)] truncate">{label}</span>
@@ -149,7 +152,7 @@ export function VersionBadge() {
         }
       />
       <TooltipContent side="top" className="max-w-xs whitespace-pre-wrap font-mono">
-        {copied ? "Copied to clipboard" : `Click to copy\n${title}`}
+        {copied ? t("nav.version.copiedTooltip") : t("nav.version.copyTooltip", { buildInfo: title })}
       </TooltipContent>
     </Tooltip>
   )

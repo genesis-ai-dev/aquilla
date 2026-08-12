@@ -40,7 +40,9 @@ vi.mock("@/components/HealthRing", () => ({
 vi.mock("./homepage.css", () => ({}))
 
 const mockHasAuthHintCookie = vi.fn(() => false)
-const mockLoadActiveSession = vi.fn(() => Promise.resolve(null))
+const mockLoadActiveSession = vi.fn<() => Promise<{ username: string } | null>>(() =>
+  Promise.resolve(null),
+)
 vi.mock("@/lib/frontier/session-store", () => ({
   hasAuthHintCookie: () => mockHasAuthHintCookie(),
   loadActiveSession: () => mockLoadActiveSession(),

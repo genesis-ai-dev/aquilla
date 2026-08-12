@@ -29,6 +29,7 @@ import { AssignWork } from "./AssignWork"
 import { MembersTab } from "@/components/ProjectMembersPage"
 import { MemberActivityPanel } from "./MemberActivityPanel"
 import { ProjectAutopilotPanel } from "./ProjectAutopilotPanel"
+import { isFlagEnabled } from "@/lib/features/flags"
 import { getPortfolio, translatedPct, validatedPct, aiDraftedPct, audioPct, recordedMinutes, deadlineStatus, laneTranslatedPct, laneValidatedPct, type PortfolioProject, type PortfolioLane } from "@/lib/frontier/portfolio"
 import { OverviewLaneTable } from "./OverviewLaneTable"
 import { fetchProjectFiles, type FileSummary } from "@/lib/sync/cells-read"
@@ -518,7 +519,7 @@ export function ProjectOverview() {
   // button so it spins + disables instead of sitting idle and re-clickable.
   // `openingOverlay` blocks the rest of the page while the open is in flight.
   const { open: openWorkspace, isPending: openPending, overlay: openingOverlay } = useOpenWorkspace()
-  const { project, status, refresh, pm } = useProject(id)
+  const { project, status, refresh, pm, roleLevel } = useProject(id)
   useNavHistoryTitle(project?.name)
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
@@ -1338,11 +1339,14 @@ export function ProjectOverview() {
                   only place that answers "what is drafting, and how much is
                   waiting on my team". Renders nothing when the backend isn't
                   deployed for this environment. */}
-              <ProjectAutopilotPanel
-                projectId={id}
-                fileNames={autopilotFileNames}
-                canStart={(project?.syncRole?.level ?? 0) >= ROLE.CONTRIBUTOR}
-              />
+              {project && isFlagEnabled(project, "contextualTranslation") && (
+                <ProjectAutopilotPanel
+                  key={id}
+                  projectId={id}
+                  fileNames={autopilotFileNames}
+                  canStart={(roleLevel ?? 0) >= ROLE.CONTRIBUTOR}
+                />
+              )}
 
               {/* ── Per-file rows (always fully visible per user decision) ── */}
               {files.length > 0 && (() => {

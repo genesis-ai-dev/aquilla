@@ -11,6 +11,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 // Configured at build time with sane defaults so help links always work.
 const DOCS_URL =
@@ -38,6 +39,7 @@ interface HelpMenuProps {
  * (AQU-307) live here so the left rail stays uncluttered.
  */
 export function HelpMenu({ compact = false, showTour = true }: HelpMenuProps) {
+  const t = useT()
   const [open, setOpen] = useState(false)
   const [reportOpen, setReportOpen] = useState(false)
   const { openTour } = useProductTourContext()
@@ -59,7 +61,7 @@ export function HelpMenu({ compact = false, showTour = true }: HelpMenuProps) {
           render={
             <button
               type="button"
-              aria-label="Help & community"
+              aria-label={t("nav.help.menuLabel")}
               className={cn(
                 // Match OrgSidebar nav links: text-sm + px-2 py-1.5 + size-4 icon.
                 "flex items-center gap-2 rounded-md text-sm font-normal text-muted-foreground transition-colors hover:bg-accent hover:text-foreground data-popup-open:bg-accent data-popup-open:text-foreground",
@@ -71,7 +73,7 @@ export function HelpMenu({ compact = false, showTour = true }: HelpMenuProps) {
           <HelpCircle className="size-4 shrink-0" aria-hidden />
           {!compact && (
             <>
-              Help &amp; community
+              {t("nav.help.menuLabel")}
               {/* AQU-699: advertise that the trigger expands, so the Tour housed
                   inside it stays discoverable. Omitted when collapsed to an icon. */}
               <ChevronDown
@@ -91,7 +93,7 @@ export function HelpMenu({ compact = false, showTour = true }: HelpMenuProps) {
             {showTour ? (
               <DropdownMenuItem onClick={handleTour} className={HELP_ITEM_CLASS}>
                 <Map />
-                Take the tour
+                {t("nav.help.tour")}
               </DropdownMenuItem>
             ) : null}
             <DropdownMenuItem
@@ -122,7 +124,7 @@ export function HelpMenu({ compact = false, showTour = true }: HelpMenuProps) {
               }
             >
               <BookOpen />
-              Help
+              {t("nav.help.docs")}
               <ExternalLink className="ml-auto opacity-60" />
             </DropdownMenuItem>
             <DropdownMenuItem
@@ -137,7 +139,7 @@ export function HelpMenu({ compact = false, showTour = true }: HelpMenuProps) {
               }
             >
               <Discord className="size-4 shrink-0" />
-              Discord server
+              {t("nav.help.discord")}
               <ExternalLink className="ml-auto opacity-60" />
             </DropdownMenuItem>
             <DropdownMenuItem
@@ -147,12 +149,12 @@ export function HelpMenu({ compact = false, showTour = true }: HelpMenuProps) {
               }
             >
               <Mail />
-              Contact support
+              {t("nav.help.contactSupport")}
               <ExternalLink className="ml-auto opacity-60" />
             </DropdownMenuItem>
             <DropdownMenuItem onClick={handleReport} className={HELP_ITEM_CLASS}>
               <Flag />
-              Report
+              {t("nav.help.report")}
             </DropdownMenuItem>
           </DropdownMenuGroup>
         </DropdownMenuContent>

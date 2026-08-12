@@ -56,16 +56,21 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { useT } from "@/lib/i18n/I18nProvider"
+import type { TFunction } from "@/lib/i18n/I18nProvider"
+import { translate } from "@/lib/i18n/translate"
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
 export type SortOrder = "recent-activity" | "creation" | "unresolved-first"
 
-const SORT_ITEMS: { value: SortOrder; label: string }[] = [
-  { value: "unresolved-first", label: "Unresolved first" },
-  { value: "recent-activity", label: "Most recent activity" },
-  { value: "creation", label: "Newest first" },
-]
+function sortItems(t: TFunction): { value: SortOrder; label: string }[] {
+  return [
+    { value: "unresolved-first", label: t("comments.sort.unresolvedFirst") },
+    { value: "recent-activity", label: t("comments.sort.recentActivity") },
+    { value: "creation", label: t("comments.sort.newest") },
+  ]
+}
 
 export interface FilterState {
   fileId: string    // "" = all
@@ -185,32 +190,38 @@ function formatTs(ms: number): string {
   }
 }
 
-/** Resolve a fileId to a display name, or return a tombstone if not found. */
+/**
+ * Resolve a fileId to a display name, or return a tombstone if not found.
+ * `t` is optional so this pure helper stays callable from tests without a
+ * provider; callers that render UI always pass the real translator.
+ */
 export function resolveFileName(
   fileId: string | null | undefined,
   fileMap: Map<string, string>,
+  t: TFunction = (key, vars) => translate(undefined, key, vars),
 ): { name: string; exists: boolean } {
-  if (!fileId) return { name: "Unknown file", exists: false }
+  if (!fileId) return { name: t("comments.file.unknown"), exists: false }
   const name = fileMap.get(fileId)
   if (name !== undefined) return { name, exists: true }
-  return { name: "Deleted file", exists: false }
+  return { name: t("comments.file.deleted"), exists: false }
 }
 
-function scopeLabel(comment: CommentRecord, fileMap: Map<string, string>): string {
+function scopeLabel(comment: CommentRecord, fileMap: Map<string, string>, t: TFunction): string {
   if (comment.scopeKind === "cell") {
-    const { name } = resolveFileName(comment.fileId, fileMap)
+    const { name } = resolveFileName(comment.fileId, fileMap, t)
     // AQU-599: prefer the human-readable cell reference (e.g. "GEN 1:1") the
     // server resolves from the source cell, so the panel shows the cell number
     // instead of the opaque cellId. Fall back to the raw id only when no
     // canonical ref is available (non-scripture / deleted cell / older worker).
-    const cellLabel = comment.cellRef?.trim() || `Cell ${comment.cellId ?? "?"}`
-    return `${cellLabel} in ${name}`
+    const cellLabel =
+      comment.cellRef?.trim() || t("common.cellLabel", { id: comment.cellId ?? "?" })
+    return t("comments.scope.cell", { cell: cellLabel, file: name })
   }
   if (comment.scopeKind === "file") {
-    const { name } = resolveFileName(comment.fileId, fileMap)
-    return `File ${name}`
+    const { name } = resolveFileName(comment.fileId, fileMap, t)
+    return t("comments.scope.file", { file: name })
   }
-  return "Project"
+  return t("common.project")
 }
 
 // ── @mention typeahead in comment composer ────────────────────────────────
@@ -232,6 +243,7 @@ function MentionTextarea({
   className,
   onKeyDown,
 }: MentionTypeaheadProps) {
+  const t = useT()
   const [mentionQuery, setMentionQuery] = useState("")
   const [mentionOpen, setMentionOpen] = useState(false)
   const [mentionStart, setMentionStart] = useState(0)
@@ -299,15 +311,15 @@ function MentionTextarea({
       {mentionOpen && (
         <div className="absolute left-0 right-0 top-full mt-0.5 z-50 max-h-48 overflow-y-auto rounded-md border bg-popover shadow-md">
           {needsMorePrefix && (
-            <p className="px-3 py-2 text-[11px] text-muted-foreground">Type more to search…</p>
+            <p className="px-3 py-2 text-[11px] text-muted-foreground">{t("comments.mention.typeMore")}</p>
           )}
           {!needsMorePrefix && isLoading && (
             <p className="flex items-center gap-1.5 px-3 py-2 text-[11px] text-muted-foreground">
-              <Spinner className="size-3" /> Searching…
+              <Spinner className="size-3" /> {t("common.searching")}
             </p>
           )}
           {!needsMorePrefix && !isLoading && results.length === 0 && mentionQuery.length >= 2 && (
-            <p className="px-3 py-2 text-[11px] text-muted-foreground">No users found.</p>
+            <p className="px-3 py-2 text-[11px] text-muted-foreground">{t("comments.mention.noResults")}</p>
           )}
           {results.length > 0 && (
             <ul className="py-0.5">
@@ -340,6 +352,7 @@ interface CommentBubbleProps {
 }
 
 function CommentBubble({ comment, currentUsername, onEdit, onDelete }: CommentBubbleProps) {
+  const t = useT()
   const isDeleted = comment.deletedAt !== null
   const isOwn = !!currentUsername && comment.authorId === currentUsername
   const canMutate = isOwn && !isDeleted
@@ -354,7 +367,7 @@ function CommentBubble({ comment, currentUsername, onEdit, onDelete }: CommentBu
         />
         <span>{formatTs(comment.createdAt)}</span>
         {comment.updatedAt !== comment.createdAt && (
-          <span className="italic">(edited)</span>
+          <span className="italic">{t("comments.bubble.edited")}</span>
         )}
         {canMutate && onEdit && onDelete && (
           <Popover>
@@ -365,7 +378,7 @@ function CommentBubble({ comment, currentUsername, onEdit, onDelete }: CommentBu
                   variant="ghost"
                   size="icon-xs"
                   className="ml-auto size-5"
-                  aria-label="Comment actions"
+                  aria-label={t("comments.bubble.actionsLabel")}
                 >
                   <MoreHorizontal className="h-3 w-3" />
                 </Button>
@@ -378,7 +391,7 @@ function CommentBubble({ comment, currentUsername, onEdit, onDelete }: CommentBu
                 className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-xs hover:bg-muted"
               >
                 <Pencil className="h-3 w-3" />
-                Edit
+                {t("common.edit")}
               </button>
               <button
                 type="button"
@@ -386,14 +399,14 @@ function CommentBubble({ comment, currentUsername, onEdit, onDelete }: CommentBu
                 className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-xs text-destructive hover:bg-muted"
               >
                 <Trash2 className="h-3 w-3" />
-                Delete
+                {t("common.delete")}
               </button>
             </PopoverContent>
           </Popover>
         )}
       </div>
       {isDeleted ? (
-        <p className="italic text-xs text-muted-foreground">[deleted]</p>
+        <p className="italic text-xs text-muted-foreground">{t("comments.bubble.deletedBody")}</p>
       ) : (
         // eslint-disable-next-line react/no-danger
         <div
@@ -426,6 +439,7 @@ interface ThreadProps {
 function CommentThreadCard({
   root, replies, currentUsername, fileMap, onResolve, onEdit, onDelete, onNavigate,
 }: ThreadProps) {
+  const t = useT()
   const [open, setOpen] = useState(!root.resolved)
   const [replyText, setReplyText] = useState("")
 
@@ -492,18 +506,18 @@ function CommentThreadCard({
       <Dialog open={isDeletingConfirm} onOpenChange={(v) => { if (!v) cancelDelete() }}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Delete comment?</DialogTitle>
+            <DialogTitle>{t("comments.deleteDialog.title")}</DialogTitle>
             <DialogDescription>
-              This comment will be permanently removed. This action cannot be undone.
+              {t("comments.deleteDialog.description")}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="ghost" onClick={cancelDelete}>Cancel</Button>
+            <Button variant="ghost" onClick={cancelDelete}>{t("common.cancel")}</Button>
             <Button
               variant="destructive"
               onClick={confirmDelete}
             >
-              Delete
+              {t("common.delete")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -514,43 +528,43 @@ function CommentThreadCard({
           <CardHeader className="flex flex-row items-start gap-2 space-y-0 py-2 px-3">
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-0.5">
-                <span className="truncate">{scopeLabel(root, fileMap)}</span>
-                {root.fileId && !resolveFileName(root.fileId, fileMap).exists && (
+                <span className="truncate">{scopeLabel(root, fileMap, t)}</span>
+                {root.fileId && !resolveFileName(root.fileId, fileMap, t).exists && (
                   <Badge variant="outline" className="h-4 px-1 text-[10px] text-muted-foreground">
-                    deleted
+                    {t("comments.file.deletedBadge")}
                   </Badge>
                 )}
                 {root.resolved && (
                   <Badge variant="secondary" className="h-4 px-1 text-[10px]">
                     <CheckCircle className="mr-0.5 h-2.5 w-2.5" />
-                    resolved
+                    {t("comments.status.resolved")}
                   </Badge>
                 )}
               </div>
             </div>
             <div className="flex items-center gap-1 shrink-0">
               {onNavigate && root.scopeKind === "cell" && root.fileId && root.cellId && (() => {
-                const { exists } = resolveFileName(root.fileId, fileMap)
+                const { exists } = resolveFileName(root.fileId, fileMap, t)
                 return exists ? (
-                  <AppTooltip content="Go to cell in editor">
+                  <AppTooltip content={t("comments.goToCell")}>
                     <Button
                       variant="ghost"
                       className="h-6 px-2 text-xs"
                       onClick={() => onNavigate(root)}
                     >
                       <ArrowUpRight className="mr-0.5 h-3 w-3" />
-                      Open file
+                      {t("comments.openFile")}
                     </Button>
                   </AppTooltip>
                 ) : (
-                  <AppTooltip content="File has been deleted">
+                  <AppTooltip content={t("comments.fileDeletedTooltip")}>
                     <Button
                       variant="ghost"
                       className="h-6 px-2 text-xs cursor-not-allowed opacity-50"
                       disabled
                     >
                       <ArrowUpRight className="mr-0.5 h-3 w-3" />
-                      Open file
+                      {t("comments.openFile")}
                     </Button>
                   </AppTooltip>
                 )
@@ -560,7 +574,7 @@ function CommentThreadCard({
                 className="h-6 px-2 text-xs"
                 onClick={() => onResolve(root.commentId, !root.resolved)}
               >
-                {root.resolved ? "Reopen" : "Resolve"}
+                {root.resolved ? t("comments.reopen") : t("comments.resolve")}
               </Button>
               <CollapsibleTrigger asChild>
                 <Button size="icon" variant="ghost" className="h-6 w-6">
@@ -582,7 +596,7 @@ function CommentThreadCard({
                       <MentionTextarea
                         value={editBody}
                         onChange={setEditBody}
-                        placeholder="Edit comment…"
+                        placeholder={t("comments.composer.editPlaceholder")}
                         rows={3}
                         onKeyDown={(e) => {
                           if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
@@ -600,7 +614,7 @@ function CommentThreadCard({
                           onClick={saveEdit}
                           disabled={isSavingEdit || !editBody.trim()}
                         >
-                          {isSavingEdit ? <Spinner className="size-3" /> : "Save"}
+                          {isSavingEdit ? <Spinner className="size-3" /> : t("common.save")}
                         </Button>
                         <Button
                           variant="ghost"
@@ -608,7 +622,7 @@ function CommentThreadCard({
                           onClick={cancelEdit}
                           disabled={isSavingEdit}
                         >
-                          Cancel
+                          {t("common.cancel")}
                         </Button>
                       </div>
                     </div>
@@ -627,12 +641,12 @@ function CommentThreadCard({
                 <MentionTextarea
                   value={replyText}
                   onChange={setReplyText}
-                  placeholder="Reply… (type @ to mention)"
+                  placeholder={t("comments.composer.replyPlaceholder")}
                   rows={2}
                   onKeyDown={handleReplyKeyDown}
                 />
                 <p className="text-[10px] text-muted-foreground">
-                  Replies from this view are not yet wired — open the cell in the editor to reply.
+                  {t("comments.reply.notWired")}
                   {/* SWARM-TODO: wire reply submission from CommentsPage when a cell-reply endpoint is available */}
                 </p>
               </div>
@@ -654,7 +668,11 @@ interface FilterControlsProps {
 }
 
 function FilterControls({ filter, onChange, fileOptions, authorOptions }: FilterControlsProps) {
+  const t = useT()
   const [expanded, setExpanded] = useState(false)
+  const sortItemsList = sortItems(t)
+  const allFilesLabel = t("comments.filter.allFiles")
+  const anyoneLabel = t("comments.filter.anyone")
 
   return (
     <div className="space-y-2">
@@ -666,7 +684,7 @@ function FilterControls({ filter, onChange, fileOptions, authorOptions }: Filter
           </InputGroupAddon>
           <InputGroupInput
             className="text-sm"
-            placeholder="Search comments…"
+            placeholder={t("comments.filter.searchPlaceholder")}
             value={filter.search}
             onChange={(e) => onChange({ ...filter, search: e.target.value })}
           />
@@ -677,7 +695,7 @@ function FilterControls({ filter, onChange, fileOptions, authorOptions }: Filter
           onClick={() => setExpanded((v) => !v)}
         >
           <SlidersHorizontal className="h-3.5 w-3.5" />
-          Filters
+          {t("comments.filter.filtersButton")}
         </Button>
       </div>
 
@@ -685,9 +703,9 @@ function FilterControls({ filter, onChange, fileOptions, authorOptions }: Filter
         <div className="flex flex-wrap items-center gap-3 rounded-md border px-3 py-2 text-xs bg-muted/20">
           {/* Sort picker */}
           <label className="flex items-center gap-1.5">
-            <span className="text-muted-foreground whitespace-nowrap">Sort</span>
+            <span className="text-muted-foreground whitespace-nowrap">{t("comments.filter.sortLabel")}</span>
             <Select
-              items={SORT_ITEMS}
+              items={sortItemsList}
               value={filter.sort}
               onValueChange={(v) => onChange({ ...filter, sort: v as SortOrder })}
             >
@@ -696,7 +714,7 @@ function FilterControls({ filter, onChange, fileOptions, authorOptions }: Filter
               </SelectTrigger>
               <SelectContent>
                 <SelectGroup>
-                  {SORT_ITEMS.map((it) => (
+                  {sortItemsList.map((it) => (
                     <SelectItem key={it.value} value={it.value}>{it.label}</SelectItem>
                   ))}
                 </SelectGroup>
@@ -711,16 +729,16 @@ function FilterControls({ filter, onChange, fileOptions, authorOptions }: Filter
               onCheckedChange={(checked) => onChange({ ...filter, showResolved: checked })}
               className="size-3.5"
             />
-            <span>Show resolved</span>
+            <span>{t("comments.filter.showResolved")}</span>
           </label>
 
           {/* File filter */}
           {fileOptions.length > 0 && (
             <label className="flex items-center gap-1.5">
-              <span className="text-muted-foreground whitespace-nowrap">File</span>
+              <span className="text-muted-foreground whitespace-nowrap">{t("common.file")}</span>
               <Select
                 items={[
-                  { value: "", label: "All files" },
+                  { value: "", label: allFilesLabel },
                   ...fileOptions.map((f) => ({ value: f.id, label: f.name })),
                 ]}
                 value={filter.fileId}
@@ -731,7 +749,7 @@ function FilterControls({ filter, onChange, fileOptions, authorOptions }: Filter
                 </SelectTrigger>
                 <SelectContent>
                   <SelectGroup>
-                    <SelectItem value="">All files</SelectItem>
+                    <SelectItem value="">{allFilesLabel}</SelectItem>
                     {fileOptions.map((f) => (
                       <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>
                     ))}
@@ -744,10 +762,10 @@ function FilterControls({ filter, onChange, fileOptions, authorOptions }: Filter
           {/* Author filter */}
           {authorOptions.length > 0 && (
             <label className="flex items-center gap-1.5">
-              <span className="text-muted-foreground whitespace-nowrap">Author</span>
+              <span className="text-muted-foreground whitespace-nowrap">{t("comments.filter.authorLabel")}</span>
               <Select
                 items={[
-                  { value: "", label: "Anyone" },
+                  { value: "", label: anyoneLabel },
                   ...authorOptions.map((a) => ({ value: a.id, label: a.label })),
                 ]}
                 value={filter.authorId}
@@ -758,7 +776,7 @@ function FilterControls({ filter, onChange, fileOptions, authorOptions }: Filter
                 </SelectTrigger>
                 <SelectContent>
                   <SelectGroup>
-                    <SelectItem value="">Anyone</SelectItem>
+                    <SelectItem value="">{anyoneLabel}</SelectItem>
                     {authorOptions.map((a) => (
                       <SelectItem key={a.id} value={a.id}>{a.label}</SelectItem>
                     ))}
@@ -771,10 +789,10 @@ function FilterControls({ filter, onChange, fileOptions, authorOptions }: Filter
           {/* Participant filter */}
           {authorOptions.length > 0 && (
             <label className="flex items-center gap-1.5">
-              <span className="text-muted-foreground whitespace-nowrap">Participant</span>
+              <span className="text-muted-foreground whitespace-nowrap">{t("comments.filter.participantLabel")}</span>
               <Select
                 items={[
-                  { value: "", label: "Anyone" },
+                  { value: "", label: anyoneLabel },
                   ...authorOptions.map((a) => ({ value: a.id, label: a.label })),
                 ]}
                 value={filter.participant}
@@ -785,7 +803,7 @@ function FilterControls({ filter, onChange, fileOptions, authorOptions }: Filter
                 </SelectTrigger>
                 <SelectContent>
                   <SelectGroup>
-                    <SelectItem value="">Anyone</SelectItem>
+                    <SelectItem value="">{anyoneLabel}</SelectItem>
                     {authorOptions.map((a) => (
                       <SelectItem key={a.id} value={a.id}>{a.label}</SelectItem>
                     ))}
@@ -801,7 +819,7 @@ function FilterControls({ filter, onChange, fileOptions, authorOptions }: Filter
             className="h-6 px-2 text-xs text-muted-foreground"
             onClick={() => onChange(DEFAULT_FILTER)}
           >
-            Reset
+            {t("common.reset")}
           </Button>
         </div>
       )}
@@ -812,6 +830,7 @@ function FilterControls({ filter, onChange, fileOptions, authorOptions }: Filter
 // ── Page ──────────────────────────────────────────────────────────────────
 
 export function CommentsPage() {
+  const t = useT()
   const { id: projectId } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const { session } = useFrontierSession()
@@ -876,7 +895,7 @@ export function CommentsPage() {
     // Resolve each fileId to its display name; tombstone deleted files
     const fileOptions = Array.from(fileIds)
       .map((id) => {
-        const { name } = resolveFileName(id, fileMap)
+        const { name } = resolveFileName(id, fileMap, t)
         return { id, name }
       })
       .sort((a, b) => a.name.localeCompare(b.name))
@@ -886,7 +905,7 @@ export function CommentsPage() {
         .map(([id, label]) => ({ id, label }))
         .sort((a, b) => a.label.localeCompare(b.label)),
     }
-  }, [comments, fileMap])
+  }, [comments, fileMap, t])
 
   // Apply filter + sort
   const displayedRoots = useMemo(() => {
@@ -897,7 +916,7 @@ export function CommentsPage() {
   function handleNavigate(root: CommentRecord) {
     if (!projectId || !root.fileId) return
     // Only navigate to live files (tombstoned files have no route to open)
-    const { exists } = resolveFileName(root.fileId, fileMap)
+    const { exists } = resolveFileName(root.fileId, fileMap, t)
     if (!exists) return
     // Append ?cellId= so ProjectWorkspace can scroll to the right cell on load.
     const params = root.cellId
@@ -912,17 +931,19 @@ export function CommentsPage() {
     <div className="mx-auto max-w-3xl space-y-6 p-8">
       <div className="flex items-center justify-between">
         <Button variant="ghost" onClick={() => navigate(`/project/${projectId}/editor`)}>
-          <ArrowLeft className="mr-2 h-4 w-4" /> Back to project
+          <ArrowLeft className="mr-2 h-4 w-4" /> {t("comments.backToProject")}
         </Button>
         <Button variant="outline" onClick={refresh} disabled={isLoading}>
-          {isLoading ? <Spinner className="size-3.5" /> : "Refresh"}
+          {isLoading ? <Spinner className="size-3.5" /> : t("common.refresh")}
         </Button>
       </div>
 
       <div className="flex items-center gap-2">
         <MessageCircle className="h-5 w-5 text-muted-foreground" />
         <h1 className="text-xl font-semibold">
-          {project?.name ? `${project.name} — ` : ""}Comments
+          {project?.name
+            ? t("comments.page.titleWithProject", { projectName: project.name })
+            : t("common.comments")}
         </h1>
         {comments.length > 0 && (
           <Badge variant="secondary" data-testid="comments-count-badge">
@@ -931,7 +952,9 @@ export function CommentsPage() {
         )}
         {activeFilterCount > 0 && (
           <Badge variant="outline" className="text-[10px]">
-            {activeFilterCount} filter{activeFilterCount > 1 ? "s" : ""}
+            {activeFilterCount > 1
+              ? t("comments.filterCount.other", { count: activeFilterCount })
+              : t("comments.filterCount.one", { count: activeFilterCount })}
           </Badge>
         )}
       </div>
@@ -947,7 +970,7 @@ export function CommentsPage() {
         <Card className="border-destructive">
           <CardContent className="flex items-center gap-2 py-3 text-sm text-destructive">
             <AlertCircle className="h-4 w-4 shrink-0" />
-            Failed to load comments. Check your connection and try refreshing.
+            {t("comments.loadError")}
           </CardContent>
         </Card>
       )}
@@ -962,9 +985,9 @@ export function CommentsPage() {
         <Card>
           <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
             <MessageCircle className="h-10 w-10 text-muted-foreground" />
-            <div className="text-lg font-medium">No comments yet</div>
+            <div className="text-lg font-medium">{t("comments.empty.title")}</div>
             <p className="max-w-md text-sm text-muted-foreground">
-              Comments can be added from the cell menu in the editor.
+              {t("comments.empty.body")}
             </p>
           </CardContent>
         </Card>
@@ -974,9 +997,9 @@ export function CommentsPage() {
         <Card>
           <CardContent className="flex flex-col items-center gap-3 py-8 text-center">
             <Search className="h-8 w-8 text-muted-foreground" />
-            <div className="text-base font-medium">No threads match your filters</div>
+            <div className="text-base font-medium">{t("comments.noMatch.title")}</div>
             <Button variant="outline" onClick={() => setFilter(DEFAULT_FILTER)}>
-              Clear filters
+              {t("comments.noMatch.clear")}
             </Button>
           </CardContent>
         </Card>

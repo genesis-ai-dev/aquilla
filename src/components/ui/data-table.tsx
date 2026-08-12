@@ -47,7 +47,7 @@ function columnMetaClass(meta: unknown) {
 
 function columnId<TData, TValue>(col: ColumnDef<TData, TValue>): string | undefined {
   if (col.id != null) return col.id
-  if (typeof col.accessorKey === "string" || typeof col.accessorKey === "number") {
+  if ("accessorKey" in col && (typeof col.accessorKey === "string" || typeof col.accessorKey === "number")) {
     return String(col.accessorKey)
   }
   return undefined

@@ -10,22 +10,24 @@
 import { Link } from "react-router-dom"
 import { FileQuestion } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 export function NotFound() {
+  const t = useT()
   return (
     <div className="min-h-screen flex items-center justify-center p-8">
       <div className="flex max-w-sm flex-col items-center gap-2 text-center">
         <div className="text-muted-foreground">
           <FileQuestion className="h-10 w-10" aria-hidden />
         </div>
-        <h1 className="text-base font-medium">Page not found</h1>
+        <h1 className="text-base font-medium">{t("error.notFound.title")}</h1>
         <p className="text-sm text-muted-foreground">
-          The link you followed doesn't exist or may have moved.
+          {t("error.notFound.description")}
         </p>
         <div className="mt-2">
           <Link to="/">
-            <Button variant="outline">
-              Go home
+            <Button size="sm" variant="outline">
+              {t("error.notFound.goHome")}
             </Button>
           </Link>
         </div>

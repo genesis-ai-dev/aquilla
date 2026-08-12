@@ -59,7 +59,7 @@ import { FootnotesTray } from "./footnotes/FootnoteInline"
 import { AudioRecordingModal } from "./AudioRecorder/AudioRecordingModal"
 import { VoiceSidebar } from "./voice/VoiceSidebar"
 import { VoicePlaybackBar } from "./voice/VoicePlaybackBar"
-import { startQueue, getQueueState, seekQueueToTime, setQueueTimingMode, startQueueAtTime, pauseQueue, pauseAllPlayback, resumeQueue, queueClockIsFileTime } from "@/lib/audio/play-queue"
+import { startQueue, getQueueState, seekQueueToTime, setQueueTimingMode, startQueueAtTime, pauseQueue, pauseAllPlayback, resumeQueue, queueClockIsFileTime, startExternalDubs, stopExternalDubs, updateExternalDubCells, tickExternalDubs, setExternalDubsPlaying } from "@/lib/audio/play-queue"
 import { generateCombinedVoice, type CombinedVoiceResult } from "@/lib/audio/combined-voice"
 import { generateCellVoice } from "@/lib/audio/voice-generate-helpers"
 import { CombinedBoundaryEditor } from "./voice/CombinedBoundaryEditor"
@@ -160,7 +160,12 @@ import {
   VIDEO_PANE_MAX_SHARE,
   VIDEO_PANE_TABLE_MIN_WIDTH,
 } from "./timeline/video-pane-layout"
-import { setVideoClockSec, setVideoClockPlaying } from "@/lib/timeline/video-clock"
+import {
+  setVideoClockSec,
+  setVideoClockPlaying,
+  useVideoClockPlaying,
+  useVideoClockSec,
+} from "@/lib/timeline/video-clock"
 import { setVideoDurationSec, useVideoDurationSec } from "@/lib/timeline/video-duration"
 import { uiSlotRef } from "@/lib/ui-slots"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
@@ -4909,6 +4914,41 @@ export function ProjectWorkspace() {
     coreMediaUrl: activeFile?.coreMediaUrl,
     timingMode,
   })
+
+  // AQU-646 round 5: DUBS OVER THE PICTURE.
+  //
+  // A take recorded against the film could not be heard against it — the queue
+  // is the only thing that fires dub overlays, and its clock means nothing on
+  // this arrangement. The engine already takes the master's second as a plain
+  // parameter, so the picture's clock drives the same overlays, with the same
+  // trims, the same pool and the same Target speaker button.
+  //
+  // Driving is gated on the pane being on screen: in Free timing there is no
+  // picture to be in sync with, and the queue owns playback there.
+  const videoDrivesDubs = showVideoPane && !audioMergedCells.some((c) => queueClockIsFileTime(c))
+  useEffect(() => {
+    if (!videoDrivesDubs || !project?.id || !frontierSession) {
+      stopExternalDubs()
+      return
+    }
+    startExternalDubs({ cells: audioMergedCells, projectId: project.id, session: frontierSession })
+    return () => stopExternalDubs()
+    // Cells are refreshed by the effect below rather than here — restarting the
+    // driver on every take would cut a dub off mid-word.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [videoDrivesDubs, project?.id, frontierSession])
+  useEffect(() => {
+    updateExternalDubCells(audioMergedCells)
+  }, [audioMergedCells])
+  const videoDubSec = useVideoClockSec()
+  const videoDubPlaying = useVideoClockPlaying()
+  useEffect(() => {
+    if (videoDubSec != null) tickExternalDubs(videoDubSec)
+  }, [videoDubSec])
+  useEffect(() => {
+    setExternalDubsPlaying(videoDubPlaying)
+  }, [videoDubPlaying])
+
   // A REMOTE mode change gets an acknowledged heads-up — deferred while the
   // user is in the text view or has the recorder open (a cell transition
   // inside the recorder ends the wait; the take is confirmed by then).

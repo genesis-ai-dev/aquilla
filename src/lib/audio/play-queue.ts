@@ -7,7 +7,7 @@
 import { useMemo, useSyncExternalStore } from "react"
 import type { CellData } from "@/hooks/useCells"
 import { fetchCellAudio, getCellAudioStreamUrl, parseFrontierAudioUrl, audioIdSeededWith, probeCellAudioPresent } from "./upload"
-import { activeTargetForCell, sourceClipAudioForCell } from "./track-audio"
+import { activeTargetForCell, resolveTargetAudio, sourceClipAudioForCell } from "./track-audio"
 import { effectiveAttachmentDurationMs, targetChipGeom, targetDueSec } from "@/lib/timeline/lane-timing"
 import { hasTiming, sortByLens } from "@/lib/timeline/derive"
 import { buildProgramme, slotAtProgrammeSec, type Programme, type ProgrammeSlot } from "@/lib/timeline/programme"
@@ -1593,16 +1593,36 @@ export type TargetOverlayPlan =
  * `sounding` membership guard covers both the in-flight and playing states;
  * take-only sections never fire (the MASTER plays the take itself).
  */
+export interface TargetOverlayOptions {
+  /**
+   * AQU-646 round 5: the master is something OUTSIDE the queue — the linked
+   * picture.
+   *
+   * Two gates below exist because, in the dubbing arrangement, a cell with no
+   * source clip is not a section of the master timeline at all, so firing a dub
+   * for it would be nonsense (pinned by "a take-only cell never fires"). When
+   * the PICTURE is the master that reasoning inverts: every cue is a section of
+   * the film whether or not it has its own recording, and a text cell carrying
+   * only a take is exactly the thing that must sound.
+   */
+  masterIsExternal?: boolean
+}
+
 export function planTargetOverlay(
   cells: CellData[],
   index: number,
   sounding: ReadonlySet<string>,
   reason: "advance" | "seek",
   masterSec: number,
+  opts?: TargetOverlayOptions,
 ): TargetOverlayPlan {
   const cell = cells[index]
-  const target = cell ? activeTargetForCell(cell) : null
-  if (!cell || !target || !sourceClipAudioForCell(cell)) {
+  // `activeTargetForCell` gates on medium:"media"; `resolveTargetAudio` is the
+  // same resolution without that gate, and is already what the video-first
+  // timeline draws its dub chips from.
+  const target = cell ? (opts?.masterIsExternal ? resolveTargetAudio(cell) : activeTargetForCell(cell)) : null
+  const needsSourceClip = !opts?.masterIsExternal
+  if (!cell || !target || (needsSourceClip && !sourceClipAudioForCell(cell))) {
     return reason === "seek" ? { kind: "silence" } : { kind: "keep" }
   }
   if (reason === "advance" && sounding.has(cell.id)) return { kind: "keep" }
@@ -1859,7 +1879,8 @@ function wireOverlayElement(
   if (opts.autostart) {
     // SUB-53: in audio-first a verse can be dub-only, so the source element
     // may legitimately be paused (or absent) while the programme plays.
-    if (progRunning() || (currentAudio && !currentAudio.paused)) {
+    // ...or a linked PICTURE is the master and running (AQU-646 round 5).
+    if (progRunning() || (currentAudio && !currentAudio.paused) || externalDubsRunning()) {
       void audio.play().catch(() => { /* user-driven, ignore */ })
     }
   }
@@ -2836,4 +2857,117 @@ export function updateQueueCells(cells: CellData[]): void {
  *  Play button enablement. */
 export function hasAnyPlayableAudio(cells: CellData[]): boolean {
   return cells.some((c) => pickPlayableAudio(c) !== undefined)
+}
+
+// ── Dubs over a linked picture (AQU-646 round 5) ────────────────────────────
+//
+// A subtitle file timed against footage has no imported source recording, so
+// the queue's master element has nothing to play and its clock means nothing.
+// The PICTURE is the master there — and until now that meant a recorded take
+// could not be heard against the film it was recorded for, which is the whole
+// point of the workflow.
+//
+// This is not a second engine. Everything below the plan — the overlay pool and
+// its eviction, `executeFire`, `wireOverlayElement`, the byte-resolution
+// ladder, trims, the audibility sweep — is already clock-agnostic, and
+// `planTargetOverlay` already takes the master's second as a plain parameter.
+// Only the thing that TICKS changes.
+//
+// WHY A SWEEP RATHER THAN THE QUEUE'S ARM/FIRE MACHINE. The queue plays a
+// programme forward and arms one dub at a time, with a lookahead slot for a
+// chip dragged backwards. A film is randomly seekable: the user scrubs, jumps
+// between cues, and drags takes off their line by design. So this asks the
+// simpler, stateless question every tick — "which dubs should be audible at
+// this second, and which of those are not already sounding?" — which is
+// idempotent, needs no arm to keep in sync with a scrub, and gets negative
+// offsets and overlapping takes for free. The per-cell decision is still
+// `planTargetOverlay`, so the timing maths has exactly one home.
+
+/** Set while a linked picture is driving. Null = the queue owns playback. */
+let externalDubs: { playing: boolean; lastSec: number } | null = null
+
+/** Beyond this, a clock move is a SCRUB rather than playback — the dubs that
+ *  were ringing belong to a part of the film we have left. Generous next to
+ *  timeupdate's ~250ms so ordinary play never trips it. */
+const EXTERNAL_SEEK_SLOP_SEC = 1.5
+
+/** Begin driving dubs from a picture. Idempotent; refreshes the cell list. */
+export function startExternalDubs(ctx: PlayContext): void {
+  activeContext = ctx
+  if (!externalDubs) externalDubs = { playing: false, lastSec: 0 }
+}
+
+/** Hand playback back (file switch, the picture going away, unmount). */
+export function stopExternalDubs(): void {
+  if (!externalDubs) return
+  externalDubs = null
+  pendingDub = null
+  disposeAllOverlays()
+}
+
+/** The picture's cells changed under us — a take recorded, deleted or retimed. */
+export function updateExternalDubCells(cells: CellData[]): void {
+  if (!externalDubs || !activeContext) return
+  activeContext = { ...activeContext, cells }
+}
+
+/**
+ * The picture started or stopped. Overlays follow it exactly, the same way the
+ * queue's overlays follow its master element's play/pause.
+ */
+export function setExternalDubsPlaying(playing: boolean): void {
+  if (!externalDubs || externalDubs.playing === playing) return
+  externalDubs.playing = playing
+  for (const entry of overlayPool) {
+    if (!entry.element) continue
+    if (playing) void entry.element.play().catch(() => { /* user-driven, ignore */ })
+    else entry.element.pause()
+  }
+}
+
+/** True while a picture is driving and running — the overlay autostart test. */
+function externalDubsRunning(): boolean {
+  return externalDubs?.playing === true
+}
+
+/**
+ * One tick of the picture's clock. Fires every dub that should be sounding at
+ * `sec` and is not already.
+ */
+export function tickExternalDubs(sec: number): void {
+  const ctx = activeContext
+  if (!externalDubs || !ctx || !Number.isFinite(sec)) return
+  const drift = sec - externalDubs.lastSec
+  // Backwards, or further forward than playing could carry us: a scrub. Only
+  // then is a wholesale re-cue right — doing it every tick would restart a
+  // ringing dub four times a second.
+  const seeked = drift < 0 || drift > EXTERNAL_SEEK_SLOP_SEC
+  externalDubs.lastSec = sec
+  if (seeked) disposeAllOverlays()
+
+  const sounding = soundingCellIds()
+  for (let i = 0; i < ctx.cells.length; i++) {
+    // `advance` even on a scrub: `seek` means "silence everything else", which
+    // the dispose above has already done, and asking for it per cell would
+    // make each cell cancel the one before it.
+    const plan = planTargetOverlay(ctx.cells, i, sounding, "advance", sec, { masterIsExternal: true })
+    if (plan.kind === "fire") executeFire(plan)
+  }
+}
+
+/** DEV seam for the browser passes, beside `__aqDubDebugSnapshot`. */
+export function getExternalDubsSnapshot(): {
+  driving: boolean
+  playing: boolean
+  pool: { cellId: string; audioId: string; paused: boolean | null }[]
+} {
+  return {
+    driving: externalDubs != null,
+    playing: externalDubs?.playing === true,
+    pool: overlayPool.map((e) => ({
+      cellId: e.cellId,
+      audioId: e.audioId,
+      paused: e.element ? e.element.paused : null,
+    })),
+  }
 }

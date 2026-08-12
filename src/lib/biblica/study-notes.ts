@@ -28,10 +28,13 @@ import {
 } from "@aquilla/idml-roundtrip"
 import { biblicaSentenceCutPoints } from "./sentence-cuts"
 import {
+  biblicaDivisionLabel,
   bookCodeFromParagraphText,
   computeChapterRangeLabel,
   isBiblicaBookMarkerStyle,
+  isBiblicaBookTitleStyle,
   isBiblicaChapterHeadingStyle,
+  isBiblicaDivisionHeadingStyle,
   isBiblicaNoteSectionStyle,
   isChapterNumberCharacterStyle,
   isMetaChapterCharacterStyle,
@@ -55,8 +58,17 @@ export interface BiblicaStudyNote {
   readonly rejoin?: BiblicaNoteRejoin
   /** Book the note belongs to, when the document has named one yet. */
   readonly bookCode?: string
-  /** Chapter-range label for the note's section: "Preface", "3", or "1-2". */
+  /**
+   * Label for the note's section: a chapter range ("Preface", "3", "1-2"), or
+   * the heading text when `isDivision` says this is a division section.
+   */
   readonly chapterLabel: string
+  /**
+   * True for notes under a division heading — a heading that introduces a group
+   * of books ("Stories about Jesus"). Those sections stand on their own: they
+   * carry no book, so their label is the heading text alone.
+   */
+  readonly isDivision?: boolean
 }
 
 export interface BiblicaNoteRejoin {
@@ -195,6 +207,11 @@ export function selectBiblicaStudyNotes(
   let currentLabel: string | null = null
   // Verse number still open across paragraph boundaries, if any.
   let openSpanningVerse: string | null = null
+  // Label of the division heading in effect, while one is. Kept beside
+  // `currentLabel` rather than in it so a book marker arriving mid-division —
+  // InDesign puts the heading in the next book's front matter — resets the
+  // book's own chapter bookkeeping without cutting the division short.
+  let divisionLabel: string | null = null
 
   const updateChapterRange = (chapter: string): void => {
     if (!firstChapterInRange) firstChapterInRange = chapter
@@ -235,6 +252,7 @@ export function selectBiblicaStudyNotes(
     // Scripture paragraph: record which chapters it covered, then skip it.
     if (scan.verses.length > 0) {
       currentLabel = null
+      divisionLabel = null
       for (const verse of scan.verses) updateChapterRange(verse.chapter)
       openSpanningVerse = opensSpanningVerse(scan) ?? null
       verseUnitCount += 1
@@ -244,6 +262,7 @@ export function selectBiblicaStudyNotes(
     // Continuation of a verse that began in an earlier paragraph.
     if (openSpanningVerse) {
       currentLabel = null
+      divisionLabel = null
       updateChapterRange(currentChapter)
       if (scan.closesEarlierVerse && scan.metaVerseCounts.has(openSpanningVerse)) {
         openSpanningVerse = null
@@ -261,6 +280,27 @@ export function selectBiblicaStudyNotes(
     if (isStructuralOnlyContent(unit.slots.map((slot) => slot.text)) || !noteHasVisibleText(unit)) {
       otherUnitCount += 1
       continue
+    }
+
+    // The paragraph's lines, needed both to read a heading's full text and to
+    // emit one cell per line below.
+    const lines = partitionIdmlUnitAtLineBreaks(unit)
+
+    // A book title ("The Gospel of Matthew") hands labelling back to the book,
+    // so a division heading above it covered only the paragraphs in between.
+    // The book's own front matter starts a fresh section from here.
+    if (divisionLabel && isBiblicaBookTitleStyle(paragraphStyle)) {
+      divisionLabel = null
+      currentLabel = null
+    }
+
+    // A division heading ("Stories about Jesus") introduces a group of books.
+    // InDesign sets it inside the following book's front matter, but it belongs
+    // to neither book: it opens its own section, titled by the heading itself
+    // and carrying no book reference.
+    if (isBiblicaDivisionHeadingStyle(paragraphStyle)) {
+      const heading = biblicaDivisionLabel(lines.map((line) => line.sourceText))
+      if (heading) divisionLabel = heading
     }
 
     // A chapter-label heading ("Psalm 2") opens a new chapter, so it and the
@@ -286,10 +326,16 @@ export function selectBiblicaStudyNotes(
       lastChapterInRange = null
     }
 
+    // Inside a division the section is the heading's, and it names no book —
+    // "Stories about Jesus", never "MAT Stories about Jesus".
+    const sectionLabel = divisionLabel ?? currentLabel
+    const sectionBook = divisionLabel ? "" : currentBook
+    const divisionFields = divisionLabel ? { isDivision: true as const } : {}
+
     // One cell per line: a list set as a single paragraph would otherwise arrive
     // as one cell holding every item. Lines that are only structural glue own no
     // cell, and their slots keep their source text on export.
-    for (const line of partitionIdmlUnitAtLineBreaks(unit)) {
+    for (const line of lines) {
       if (
         isStructuralOnlyContent(line.slots.map((slot) => slot.text))
         || !noteHasVisibleText(line)
@@ -299,8 +345,9 @@ export function selectBiblicaStudyNotes(
       if (!splitSentences) {
         notes.push({
           unit: line,
-          ...(currentBook ? { bookCode: currentBook } : {}),
-          chapterLabel: currentLabel,
+          ...(sectionBook ? { bookCode: sectionBook } : {}),
+          chapterLabel: sectionLabel,
+          ...divisionFields,
         })
         continue
       }
@@ -315,8 +362,9 @@ export function selectBiblicaStudyNotes(
           ...(slices.length > 1
             ? { rejoin: { index, count: slices.length, ranges: slice.ranges } }
             : {}),
-          ...(currentBook ? { bookCode: currentBook } : {}),
-          chapterLabel: currentLabel,
+          ...(sectionBook ? { bookCode: sectionBook } : {}),
+          chapterLabel: sectionLabel,
+          ...divisionFields,
         })
       }
     }

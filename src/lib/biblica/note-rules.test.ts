@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest"
 import {
+  biblicaDivisionLabel,
   bookCodeFromParagraphText,
   computeChapterRangeLabel,
   isBiblicaBookMarkerStyle,
+  isBiblicaBookTitleStyle,
   isBiblicaChapterHeadingStyle,
+  isBiblicaDivisionHeadingStyle,
   isBiblicaNoteSectionStyle,
   isChapterNumberCharacterStyle,
   isMetaChapterCharacterStyle,
@@ -29,6 +32,32 @@ describe("Biblica IDML style rules", () => {
 
     expect(isBiblicaChapterHeadingStyle("ParagraphStyle/intro%3ahead%3acl")).toBe(true)
     expect(isBiblicaChapterHeadingStyle("ParagraphStyle/intro%3ad_h")).toBe(false)
+  })
+
+  it("tells a book title apart from the division heading above it", () => {
+    for (const style of ["ParagraphStyle/intro%3aimt1", "ParagraphStyle/intro:imt1"]) {
+      expect(isBiblicaBookTitleStyle(style)).toBe(true)
+      expect(isBiblicaDivisionHeadingStyle(style)).toBe(false)
+    }
+    for (const style of ["ParagraphStyle/intro%3aimt2", "ParagraphStyle/intro:imt2"]) {
+      expect(isBiblicaDivisionHeadingStyle(style)).toBe(true)
+      expect(isBiblicaBookTitleStyle(style)).toBe(false)
+    }
+    // Both are still note styles: they become editable cells like any intro/*.
+    expect(isBiblicaNoteSectionStyle("ParagraphStyle/intro%3aimt2")).toBe(true)
+    expect(isBiblicaDivisionHeadingStyle("ParagraphStyle/intro%3aip")).toBe(false)
+    expect(isBiblicaBookTitleStyle("ParagraphStyle/intro%3aip")).toBe(false)
+  })
+
+  it("cleans a division heading's own text into its section label", () => {
+    // Discretionary hyphens are invisible on the page and must not reach the label.
+    expect(biblicaDivisionLabel(["Sto\u00ADries about Jesus"])).toBe("Stories about Jesus")
+    // A heading set over two lines has no space at the break.
+    expect(biblicaDivisionLabel(["Stories", "about Jesus"])).toBe("Stories about Jesus")
+    expect(biblicaDivisionLabel(["Letters and", "mes\u00ADsages"])).toBe("Letters and messages")
+    // Empty lines contribute no doubled space, and stray whitespace collapses.
+    expect(biblicaDivisionLabel(["Stories ", "", "  about   Jesus\n"])).toBe("Stories about Jesus")
+    expect(biblicaDivisionLabel(["", "  "])).toBe("")
   })
 
   it("keeps verse, chapter, and bookend character styles distinct", () => {

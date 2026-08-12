@@ -14,6 +14,9 @@ const ACE_MARKER_PATTERN = /<\?ACE\s+\d+\?>/gi
 /** Apostrophe characters used as structural glue in English Biblica IDML (source serif). */
 const STRUCTURAL_APOSTROPHE_PATTERN = /^['\u02BC\u2019\u2032\u00B4]+$/
 
+/** Discretionary hyphens InDesign sets inside a justified heading ("Sto\u00ADries"). */
+const SOFT_HYPHEN_PATTERN = /\u00AD/g
+
 function hasStyleToken(styleName: string, prefix: string, suffix = ""): boolean {
   return styleName.includes(`${prefix}%3a${suffix}`) || styleName.includes(`${prefix}:${suffix}`)
 }
@@ -31,6 +34,19 @@ export function isBiblicaBookMarkerStyle(paragraphStyle: string): boolean {
 /** Chapter-label headings such as "Psalm 2", which open a new chapter grouping. */
 export function isBiblicaChapterHeadingStyle(paragraphStyle: string): boolean {
   return hasStyleToken(paragraphStyle, "head", "cl")
+}
+
+/** Book-title headings (`intro:imt1`) such as "The Gospel of Matthew". */
+export function isBiblicaBookTitleStyle(paragraphStyle: string): boolean {
+  return hasStyleToken(paragraphStyle, "intro", "imt1")
+}
+
+/**
+ * Division headings (`intro:imt2`) such as "Stories about Jesus", which
+ * introduce a *group* of books rather than the one book they sit in.
+ */
+export function isBiblicaDivisionHeadingStyle(paragraphStyle: string): boolean {
+  return hasStyleToken(paragraphStyle, "intro", "imt2")
 }
 
 /** Verse-number runs (`cv:v`, `cv:v1`). */
@@ -100,6 +116,25 @@ export const BIBLICA_BOOK_CODES: ReadonlySet<string> = new Set([
 export function bookCodeFromParagraphText(text: string): string | undefined {
   const match = text.trim().match(/^([A-Z0-9]{3})\s*[-–—\n]/)
   return match && BIBLICA_BOOK_CODES.has(match[1]) ? match[1] : undefined
+}
+
+/**
+ * The section label a division heading carries: the heading's own text.
+ *
+ * Two InDesign artifacts have to come out first. A justified heading is
+ * hyphenated with discretionary hyphens, which are invisible on the page but
+ * would otherwise sit inside the label ("Sto­ries about Jesus"). And a
+ * heading set over several lines has no space at the break, so the lines are
+ * joined with one rather than run together ("aboutJesus").
+ *
+ * Takes the heading's lines — the text of each `<Br/>`-separated part — because
+ * a paragraph's joined source text has already lost where those breaks were.
+ */
+export function biblicaDivisionLabel(lineTexts: readonly string[]): string {
+  return lineTexts
+    .map((line) => line.replace(SOFT_HYPHEN_PATTERN, "").replace(/\s+/g, " ").trim())
+    .filter((line) => line.length > 0)
+    .join(" ")
 }
 
 /**

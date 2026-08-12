@@ -132,6 +132,35 @@ export const biblicaSampleStory: readonly string[] = [
   note("p-n5", SAMPLE_NOTES.noteBlock),
 ]
 
+/**
+ * A division heading and its book, the shape Biblica sets before Matthew.
+ *
+ * The heading is `intro:imt2`, carrying the discretionary hyphen InDesign
+ * justifies it with, and sits *inside* the following book's front matter —
+ * after the `meta:bk` marker and before the `intro:imt1` book title.
+ */
+export const DIVISION_NOTES = {
+  /** As typed: justified by InDesign, so hyphenated with a discretionary hyphen. */
+  heading: "Sto\u00ADries about Jesus",
+  /** The section label the heading has to produce. */
+  headingLabel: "Stories about Jesus",
+  /** The same heading set over two lines, which IDML separates with a `<Br/>`. */
+  headingLines: ["Stories", "about Jesus"],
+  body: "The books from Matthew to Acts are stories about Jesus.",
+  bookTitle: "The Gospel of Matthew",
+  bookIntro: "Matthew wrote for readers who knew the Scriptures.",
+} as const
+
+export const biblicaDivisionStory: readonly string[] = [
+  paragraph("p-bk", "meta%3abk", run(PLAIN, "MAT")),
+  note("p-div", DIVISION_NOTES.heading, "intro%3aimt2"),
+  note("p-div-body", DIVISION_NOTES.body),
+  note("p-title", DIVISION_NOTES.bookTitle, "intro%3aimt1"),
+  note("p-intro", DIVISION_NOTES.bookIntro, "intro%3aip"),
+  closedVerse("p-v1", "1", "This is the genealogy of Jesus the Messiah.", "1"),
+  note("p-n1", "1:1 Matthew opens with a genealogy.", "intro%3aipi"),
+]
+
 export function makeBiblicaIdml(
   paragraphs: readonly string[] = biblicaSampleStory,
 ): Promise<ArrayBuffer> {

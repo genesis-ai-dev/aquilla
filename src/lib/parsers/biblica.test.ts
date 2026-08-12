@@ -5,8 +5,10 @@ import {
   type IdmlFormatMetadataV2,
 } from "@aquilla/idml-roundtrip"
 import {
+  DIVISION_NOTES,
   SAMPLE_NOTES,
   BIBLICA_STORY_PATH,
+  biblicaDivisionStory,
   makeBiblicaIdml,
 } from "@/lib/biblica/__fixtures__/biblica-idml"
 import { selectBiblicaStudyNotes } from "@/lib/biblica/study-notes"
@@ -47,6 +49,38 @@ describe("Biblica study-notes parser adapter", () => {
     expect(strings[1].metadata?.biblica).toMatchObject({
       paragraphStyle: "ParagraphStyle/intro%3aipi",
     })
+  })
+
+  it("sections a division heading by its own text, with no book prefix or reference", async () => {
+    const buffer = await makeBiblicaIdml(biblicaDivisionStory)
+    const parsed = await parseIdml(buffer)
+    const { strings, bookCodes } = await extractBiblicaStudyNoteStrings(
+      buffer,
+      async () => parsed,
+    )
+
+    expect(strings.map((cell) => [cell.original, cell.section])).toEqual([
+      [DIVISION_NOTES.heading, DIVISION_NOTES.headingLabel],
+      [DIVISION_NOTES.body, DIVISION_NOTES.headingLabel],
+      [DIVISION_NOTES.bookTitle, "MAT Preface"],
+      [DIVISION_NOTES.bookIntro, "MAT Preface"],
+      ["1:1 Matthew opens with a genealogy.", "MAT 1"],
+    ])
+
+    // The division's cells belong to no book: nothing attributes them to Matthew.
+    const [heading, body, title] = strings
+    expect(heading.globalReferences).toBeUndefined()
+    expect(body.globalReferences).toBeUndefined()
+    expect(title.globalReferences).toEqual(["MAT"])
+    expect(heading.metadata?.biblica).toMatchObject({
+      sectionKind: "division",
+      chapterLabel: DIVISION_NOTES.headingLabel,
+      paragraphStyle: "ParagraphStyle/intro%3aimt2",
+    })
+    expect(heading.metadata?.biblica).not.toHaveProperty("bookCode")
+    expect(title.metadata?.biblica).not.toHaveProperty("sectionKind")
+    // Matthew is still the one book the file reports, division notwithstanding.
+    expect(bookCodes).toEqual(["MAT"])
   })
 
   it("carries the rejoin ranges only on cells that are part of a sliced note block", async () => {

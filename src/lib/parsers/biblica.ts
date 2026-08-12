@@ -74,6 +74,7 @@ export async function extractBiblicaStudyNoteStrings(
           version: 1,
           contentType: "notes",
           chapterLabel: note.chapterLabel,
+          ...(note.isDivision ? { sectionKind: "division" } : {}),
           ...(note.bookCode ? { bookCode: note.bookCode } : {}),
           ...(note.unit.paragraphStyleId
             ? { paragraphStyle: note.unit.paragraphStyleId }

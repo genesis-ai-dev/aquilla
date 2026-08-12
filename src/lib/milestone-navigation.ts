@@ -194,6 +194,11 @@ function milestoneFromBiblica(
   const biblica = record(metadata?.biblica)
   const chapter = string(biblica?.chapterLabel)
   if (!chapter) return undefined
+  // A division heading ("Stories about Jesus") introduces a group of books, so
+  // its section is titled by the heading alone and belongs to no book.
+  if (string(biblica?.sectionKind) === "division") {
+    return { key: `biblica:division:${chapter}`, kind: "section", label: chapter, shortLabel: "§" }
+  }
   const book = string(biblica?.bookCode)?.toUpperCase()
   const bookName = book ? getBookName(book) ?? book : undefined
   const displayChapter = chapter === "Preface" ? chapter : chapter.replace("-", "–")

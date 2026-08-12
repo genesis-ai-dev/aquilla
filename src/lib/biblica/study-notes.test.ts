@@ -6,8 +6,11 @@ import {
 } from "@aquilla/idml-roundtrip"
 import { selectBiblicaStudyNotes } from "./study-notes"
 import {
+  DIVISION_NOTES,
   SAMPLE_NOTES,
+  biblicaDivisionStory,
   biblicaSampleStory,
+  closedVerse,
   makeBiblicaIdml,
   note,
   noteList,
@@ -327,6 +330,85 @@ describe("Biblica study-note selection", () => {
     const selection = selectBiblicaStudyNotes(units)
 
     expect(selection.notes[0].chapterLabel).toBe("23")
+  })
+
+  it("gives a division heading its own section, ahead of the book it is set inside", async () => {
+    const parsed = await parseIdml(await makeBiblicaIdml(biblicaDivisionStory))
+    const selection = selectBiblicaStudyNotes(parsed.units)
+
+    expect(selection.notes.map((entry) => [
+      entry.unit.sourceText,
+      entry.chapterLabel,
+      entry.bookCode,
+    ])).toEqual([
+      // The heading and the paragraph under it are the division's, and carry no
+      // book: the label is the heading alone, never "MAT Stories about Jesus".
+      [DIVISION_NOTES.heading, DIVISION_NOTES.headingLabel, undefined],
+      [DIVISION_NOTES.body, DIVISION_NOTES.headingLabel, undefined],
+      // The book title ends the division and hands labelling back to Matthew.
+      [DIVISION_NOTES.bookTitle, "Preface", "MAT"],
+      [DIVISION_NOTES.bookIntro, "Preface", "MAT"],
+      ["1:1 Matthew opens with a genealogy.", "1", "MAT"],
+    ])
+    expect(selection.notes.map((entry) => entry.isDivision))
+      .toEqual([true, true, undefined, undefined, undefined])
+  })
+
+  it("joins a division heading set over two lines with a space", async () => {
+    const parsed = await parseIdml(await makeBiblicaIdml([
+      paragraph("p-bk", "meta%3abk", run("$ID/[No character style]", "MAT")),
+      noteList("p-div", DIVISION_NOTES.headingLines, "intro%3aimt2"),
+      note("p-div-body", DIVISION_NOTES.body),
+      note("p-title", DIVISION_NOTES.bookTitle, "intro%3aimt1"),
+    ]))
+    const selection = selectBiblicaStudyNotes(parsed.units)
+
+    // Each line of the paragraph is still its own cell, but they share the one
+    // section label, joined with the space the line break stands in for.
+    expect(selection.notes.map((entry) => [entry.unit.sourceText, entry.chapterLabel])).toEqual([
+      [DIVISION_NOTES.headingLines[0], DIVISION_NOTES.headingLabel],
+      [DIVISION_NOTES.headingLines[1], DIVISION_NOTES.headingLabel],
+      [DIVISION_NOTES.body, DIVISION_NOTES.headingLabel],
+      [DIVISION_NOTES.bookTitle, "Preface"],
+    ])
+  })
+
+  it("opens a division section mid-file, between the previous book and the next", async () => {
+    // The ACT-REV volume: "Letters and messages" falls between the last Acts
+    // note section and Romans' own front matter.
+    const parsed = await parseIdml(await makeBiblicaIdml([
+      paragraph("p-bk-act", "meta%3abk", run("$ID/[No character style]", "ACT")),
+      closedVerse("p-v1", "1", "In my former book, Theophilus,", "1"),
+      note("p-n-act", "1:1 Luke addresses Theophilus again.", "intro%3aipi"),
+      note("p-div", "Letters and mes\u00ADsages", "intro%3aimt2"),
+      note("p-div-body", "The books from Romans to Jude are letters."),
+      paragraph("p-bk-rom", "meta%3abk", run("$ID/[No character style]", "ROM")),
+      note("p-title", "Paul's letter to the Romans", "intro%3aimt1"),
+      note("p-intro", "Paul wrote to a church he had not yet visited.", "intro%3aip"),
+    ]))
+    const selection = selectBiblicaStudyNotes(parsed.units)
+
+    expect(selection.notes.map((entry) => [
+      entry.chapterLabel,
+      entry.bookCode,
+    ])).toEqual([
+      ["1", "ACT"],
+      // A book marker inside the division does not cut it short.
+      ["Letters and messages", undefined],
+      ["Letters and messages", undefined],
+      ["Preface", "ROM"],
+      ["Preface", "ROM"],
+    ])
+  })
+
+  it("leaves a book with no division heading labelled exactly as before", async () => {
+    const parsed = await parseIdml(await makeBiblicaIdml())
+    const selection = selectBiblicaStudyNotes(parsed.units)
+
+    expect(selection.notes.map((entry) => entry.chapterLabel))
+      .toEqual(["Preface", "1", "2-3", "2", "2", "2", "2", "2", "2"])
+    expect(selection.notes.every((entry) => entry.bookCode === "GEN")).toBe(true)
+    expect(selection.notes.some((entry) => entry.isDivision)).toBe(false)
   })
 
   it("returns nothing for a package with no note paragraphs", async () => {

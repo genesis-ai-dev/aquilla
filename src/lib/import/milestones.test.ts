@@ -92,6 +92,47 @@ describe("import milestone planning", () => {
     ])
   })
 
+  it("gives a Biblica division heading its own section milestone, titled by the heading", () => {
+    const manifest = normalizeTranslatableStrings([
+      text("division", "Stories about Jesus", {
+        metadata: {
+          biblica: {
+            version: 1,
+            contentType: "notes",
+            chapterLabel: "Stories about Jesus",
+            sectionKind: "division",
+          },
+        },
+      }),
+      text("preface", "The Gospel of Matthew", {
+        metadata: {
+          biblica: { version: 1, contentType: "notes", bookCode: "MAT", chapterLabel: "Preface" },
+        },
+      }),
+    ], {
+      fileName: "Matthew",
+      fileType: "idml",
+      profileId: "builtin:biblica-study-notes",
+    })
+
+    // A division introduces a group of books, so it is a section rather than a
+    // preface or a chapter, and no book name is prefixed to its label.
+    expect(manifest.units.map((unit) => unit.milestone)).toEqual([
+      {
+        key: "biblica:division:Stories about Jesus",
+        kind: "section",
+        label: "Stories about Jesus",
+        shortLabel: "§",
+      },
+      {
+        key: "biblica:MAT:Preface",
+        kind: "preface",
+        label: "Matthew Preface",
+        shortLabel: "P",
+      },
+    ])
+  })
+
   it("starts document sections at headings and keeps duplicate labels addressable", () => {
     const manifest = normalizeTranslatableStrings([
       text("preamble", "Before"),

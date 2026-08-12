@@ -115,6 +115,16 @@ function biblicaMilestone(metadata: Record<string, unknown> | undefined): Import
   if (!value) return undefined
   const rawChapter = string(value.chapterLabel)
   if (!rawChapter) return undefined
+  // A division heading ("Stories about Jesus") introduces a group of books, so
+  // its section is titled by the heading alone and belongs to no book.
+  if (string(value.sectionKind) === "division") {
+    return {
+      key: `biblica:division:${rawChapter}`,
+      kind: "section",
+      label: rawChapter,
+      shortLabel: "§",
+    }
+  }
   const bookCode = string(value.bookCode)?.toUpperCase()
   const bookName = bookCode ? getBookName(bookCode) ?? bookCode : undefined
   const shortLabel = rawChapter === "Preface" ? "P" : rawChapter.replace("-", "–")

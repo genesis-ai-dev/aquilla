@@ -240,7 +240,7 @@ describe("TeamDetail member role editing (AQU-139)", () => {
     getTeam.mockResolvedValue({ id: 10, name: "WA", members: [{ userId: 2, username: "anna", roleLevel: 100 }], projects: [] })
     renderDetail()
     await waitFor(() => expect(screen.getByText("anna")).toBeInTheDocument())
-    await pickSelectOption(/role for anna/i, /^contributor$/)
+    await pickSelectOption(/role for anna/i, /^contributor$/i)
     await waitFor(() => expect(addOrgMember).toHaveBeenCalledWith("jwt", 1, "anna", 400))
   })
 

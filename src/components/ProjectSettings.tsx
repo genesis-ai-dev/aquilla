@@ -85,7 +85,8 @@ import { setUserApiKey, useUserApiKey } from "@/lib/store/user-api-keys"
 import type { ProjectWideSettings } from "@/lib/sync/project-settings"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { PermissionDeniedAlert } from "@/components/PermissionDeniedAlert"
-import { humanRoleName, ROLE } from "@/lib/frontier/roles"
+import { resolveRoleName, ROLE } from "@/lib/frontier/roles"
+import { useT } from "@/lib/i18n/I18nProvider"
 import { renameProject } from "@/lib/sync/cloud-projects"
 import { UserError } from "@/lib/errors/user-error"
 import { usePostEditMetrics } from "@/lib/metrics/use-post-edit-metrics"
@@ -226,6 +227,7 @@ function decayEqual(a: DecaySettings | undefined, b: DecaySettings | undefined):
 
 export function ProjectSettings() {
   const { locale } = useI18n()
+  const t = useT()
   const { id, section: sectionParam } = useParams<{ id: string; section?: string }>()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
@@ -1194,7 +1196,7 @@ export function ProjectSettings() {
             action="change shared settings"
             requiredRole="Maintainer or higher"
             currentRole={
-              project?.syncRole ? humanRoleName(project.syncRole.level) : undefined
+              project?.syncRole ? resolveRoleName(t, project.syncRole.level) : undefined
             }
           />
         )}

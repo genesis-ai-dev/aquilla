@@ -24,7 +24,8 @@ import {
   sectionTintClass,
 } from "./SectionVisibilityBadge"
 import { useOrgSettings, canEditRosterProgressFloor } from "@/hooks/useOrgSettings"
-import { ROLE, roleDisplayText } from "@/lib/frontier/roles"
+import { ROLE, resolveRoleName } from "@/lib/frontier/roles"
+import { useT } from "@/lib/i18n/I18nProvider"
 import { RoleLabel } from "@/components/RoleLabel"
 import { UserError } from "@/lib/errors/user-error"
 import { notifySessionExpired } from "@/lib/errors/session-expired-signal"
@@ -299,8 +300,8 @@ function orgDisplayName(org: OrgSummary): string {
   return org.name ?? "Workspace"
 }
 
-function roleLabel(org: OrgSummary): string {
-  return roleDisplayText(org.role.name)
+function roleLabel(t: ReturnType<typeof useT>, org: OrgSummary): string {
+  return resolveRoleName(t, org.role.name)
 }
 
 function formatDeadlineDate(value: string): string {
@@ -550,6 +551,7 @@ export function ProjectTable({
 
 export function OrgHome() {
   const { locale } = useI18n()
+  const t = useT()
   const {
     activeOrg,
     activeOrgId,
@@ -1006,7 +1008,7 @@ export function OrgHome() {
                                   <div className="flex flex-wrap items-center gap-2">
                                     <p className="truncate font-medium">{orgDisplayName(summary.org)}</p>
                                     <Badge variant="secondary" className="shrink-0">
-                                      {roleLabel(summary.org)}
+                                      {roleLabel(t, summary.org)}
                                     </Badge>
                                   </div>
                                   <div className="mt-2 grid grid-cols-3 gap-2 text-xs text-muted-foreground">

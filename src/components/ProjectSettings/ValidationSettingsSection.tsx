@@ -11,7 +11,8 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { DisabledFieldTooltip } from "./DisabledFieldTooltip"
-import { VALIDATION_FLOOR_ROLE_OPTIONS, roleDisplayText } from "@/lib/frontier/roles"
+import { VALIDATION_FLOOR_ROLE_OPTIONS, resolveRoleName } from "@/lib/frontier/roles"
+import { useT } from "@/lib/i18n/I18nProvider"
 import type { ProjectRecord } from "@/lib/parsers/types"
 
 type ValidationRoleFloor = NonNullable<ProjectRecord["validationRoleFloor"]>
@@ -22,11 +23,15 @@ type ValidationRoleFloor = NonNullable<ProjectRecord["validationRoleFloor"]>
 // intentional subset (reviewer and up); subsetting is fine, renaming is not.
 // `roleName` (the option's `name`) is exactly the ProjectRecord
 // `validationRoleFloor` literal, so it doubles as the stored value.
-const ROLE_OPTIONS: { value: ValidationRoleFloor; label: string }[] =
-  VALIDATION_FLOOR_ROLE_OPTIONS.map((o) => ({
+//
+// Built inside the component (not at module scope) because the label needs
+// `useT()` — this small (3-item) list is cheap to recompute per render.
+function roleOptionsFor(t: ReturnType<typeof useT>): { value: ValidationRoleFloor; label: string }[] {
+  return VALIDATION_FLOOR_ROLE_OPTIONS.map((o) => ({
     value: o.name as ValidationRoleFloor,
-    label: roleDisplayText(o.name),
+    label: resolveRoleName(t, o.name),
   }))
+}
 
 interface Props {
   validationCount: number
@@ -77,6 +82,9 @@ export function ValidationSettingsSection({
   disabledTooltip,
   onChange,
 }: Props) {
+  const t = useT()
+  const ROLE_OPTIONS = roleOptionsFor(t)
+
   function clamp(raw: string): number {
     const n = Math.floor(Number(raw))
     if (!Number.isFinite(n)) return 1

@@ -21,7 +21,8 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { AppTooltip } from "@/components/ui/tooltip"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
-import { humanRoleName } from "@/lib/frontier/roles"
+import { resolveRoleName } from "@/lib/frontier/roles"
+import { useT } from "@/lib/i18n/I18nProvider"
 import { orgPath } from "@/lib/navigation/org-paths"
 import {
   getTeam,
@@ -47,7 +48,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { roleDisplayText } from "@/lib/frontier/roles"
 import { RoleLabel } from "@/components/RoleLabel"
 
 const ROLE_OPTIONS = [
@@ -79,11 +79,10 @@ const ROLE_DESCRIPTIONS: Record<number, string> = {
   700: "Owner (700) — full control: add/remove org members, archive/restore projects, and all maintainer actions.",
 }
 
-function roleLabel(roleLevel: number | null | undefined): string {
+function roleLabel(t: ReturnType<typeof useT>, roleLevel: number | null | undefined): string {
   if (roleLevel == null) return "Unknown"
-  // Fall back to the canonical humanized name — never a raw numeric (FRO-368).
-  const name = ROLE_OPTIONS.find((role) => role.level === roleLevel)?.name
-  return name ? roleDisplayText(name) : humanRoleName(roleLevel)
+  // Falls back to the canonical humanized name — never a raw numeric (FRO-368).
+  return resolveRoleName(t, roleLevel)
 }
 
 // AQU-789: removing a team member is a maintainer+ (600) action. Non-maintainers
@@ -98,6 +97,7 @@ function lockedOrgRoleTooltip(roleLevel: number | null | undefined): string {
 }
 
 export function TeamDetail() {
+  const t = useT()
   const { groupId } = useParams<{ groupId: string }>()
   const groupIdNum = groupId != null ? Number(groupId) : null
   const { activeOrgId, activeOrg } = useActiveOrg()
@@ -540,7 +540,7 @@ export function TeamDetail() {
                             {isOwner ? (
                               /* Owners can change the member's org-level role via the upsert endpoint */
                               <Select
-                                items={ROLE_OPTIONS.map((r) => ({ value: String(r.level), label: roleDisplayText(r.name) }))}
+                                items={ROLE_OPTIONS.map((r) => ({ value: String(r.level), label: resolveRoleName(t, r.name) }))}
                                 value={m.roleLevel != null ? String(m.roleLevel) : ""}
                                 onValueChange={(v) => { if (v) void handleChangeMemberRole(m.username, Number(v)) }}
                               >
@@ -567,9 +567,9 @@ export function TeamDetail() {
                                 <span
                                   tabIndex={0}
                                   className="inline-flex cursor-help items-center gap-1 rounded-md border border-border bg-muted/40 px-2 py-1 text-xs text-muted-foreground"
-                                  aria-label={`Org-level role: ${roleLabel(m.roleLevel)}`}
+                                  aria-label={`Org-level role: ${roleLabel(t, m.roleLevel)}`}
                                 >
-                                  {roleLabel(m.roleLevel)}
+                                  {roleLabel(t, m.roleLevel)}
                                   <span className="inline-flex h-3.5 w-3.5 items-center justify-center rounded-lg border text-[10px] leading-none text-muted-foreground" aria-hidden="true">?</span>
                                 </span>
                               </AppTooltip>
@@ -657,7 +657,7 @@ export function TeamDetail() {
                           </SelectContent>
                         </Select>
                         <Select
-                          items={ROLE_OPTIONS.map((r) => ({ value: String(r.level), label: roleDisplayText(r.name) }))}
+                          items={ROLE_OPTIONS.map((r) => ({ value: String(r.level), label: resolveRoleName(t, r.name) }))}
                           value={selectedRole}
                           onValueChange={(v) => setSelectedRole(v ?? "")}
                         >
@@ -706,7 +706,7 @@ export function TeamDetail() {
                               {isAdmin ? (
                                 <>
                                   <Select
-                                    items={ROLE_OPTIONS.map((r) => ({ value: String(r.level), label: roleDisplayText(r.name) }))}
+                                    items={ROLE_OPTIONS.map((r) => ({ value: String(r.level), label: resolveRoleName(t, r.name) }))}
                                     value={String(p.grantedRoleLevel)}
                                     onValueChange={(v) => { if (v) void handleChangeProjectRole(p.id, Number(v)) }}
                                   >
@@ -731,7 +731,7 @@ export function TeamDetail() {
                                   </button>
                                 </>
                               ) : (
-                                <span className="text-xs capitalize text-muted-foreground">{roleLabel(p.grantedRoleLevel)}</span>
+                                <span className="text-xs capitalize text-muted-foreground">{roleLabel(t, p.grantedRoleLevel)}</span>
                               )}
                             </div>
                           </li>

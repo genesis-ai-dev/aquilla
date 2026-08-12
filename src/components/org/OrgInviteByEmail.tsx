@@ -9,7 +9,8 @@ import {
 } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { createOrgInvite } from "@/lib/frontier/orgs"
-import { ROLE, ORG_ROLE_PICKER, roleName, roleDisplayText } from "@/lib/frontier/roles"
+import { ROLE, ORG_ROLE_PICKER, resolveRoleName } from "@/lib/frontier/roles"
+import { useT } from "@/lib/i18n/I18nProvider"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import posthog from "@/lib/posthog"
 import { INVITE_SENT } from "@/lib/event-names"
@@ -21,6 +22,7 @@ import { INVITE_SENT } from "@/lib/event-names"
  * Server enforces owner-only — this UI is gated by the caller as a courtesy.
  */
 export function OrgInviteByEmail({ orgId }: { orgId: number }) {
+  const t = useT()
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
   const [email, setEmail] = useState("")
@@ -99,7 +101,7 @@ export function OrgInviteByEmail({ orgId }: { orgId: number }) {
           >
             {ORG_ROLE_PICKER.map((level) => (
               <option key={level} value={level}>
-                {roleDisplayText(roleName(level))}
+                {resolveRoleName(t, level)}
               </option>
             ))}
           </select>

@@ -5,12 +5,13 @@ import { PageHeader } from "@/components/ui/page"
 import { NavList, NavRow } from "@/components/ui/nav-list"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useOrgSettings } from "@/hooks/useOrgSettings"
-import { ROLE } from "@/lib/frontier/roles"
+import { ROLE, resolveRoleName } from "@/lib/frontier/roles"
+import { useT } from "@/lib/i18n/I18nProvider"
 import { membersPath, orgPath, orgSettingsPath } from "@/lib/navigation/org-paths"
-import { FLOOR_LABEL } from "./constants"
 import { OrgSettingsShell } from "./OrgSettingsShell"
 
 export function OrgSettingsIndex() {
+  const t = useT()
   const { activeOrg, activeOrgId } = useActiveOrg()
   const { exportMinRole, rosterViewMinRole, allowSelfAssignment, termbaseEditMinRole } = useOrgSettings(
     activeOrgId,
@@ -36,8 +37,8 @@ export function OrgSettingsIndex() {
       <div className="space-y-6">
         <NavList label="Organization">
           <NavRow to={orgSettingsPath(activeOrgId, "identity")} icon={Building2} title="Identity" hint={activeOrg?.name ?? "Untitled"} />
-          <NavRow to={orgSettingsPath(activeOrgId, "export")} icon={Download} title="Export permissions" hint={FLOOR_LABEL[displayedExportMinRole] ?? "Maintainer"} />
-          <NavRow to={orgSettingsPath(activeOrgId, "roster")} icon={EyeOff} title="Roster & progress visibility" hint={FLOOR_LABEL[rosterViewMinRole] ?? "Maintainer"} />
+          <NavRow to={orgSettingsPath(activeOrgId, "export")} icon={Download} title="Export permissions" hint={resolveRoleName(t, displayedExportMinRole)} />
+          <NavRow to={orgSettingsPath(activeOrgId, "roster")} icon={EyeOff} title="Roster & progress visibility" hint={resolveRoleName(t, rosterViewMinRole)} />
           <NavRow
             to={orgSettingsPath(activeOrgId, "assignment")}
             icon={UserCheck}
@@ -48,7 +49,7 @@ export function OrgSettingsIndex() {
             to={orgSettingsPath(activeOrgId, "terminology")}
             icon={BookMarked}
             title="Terminology permissions"
-            hint={FLOOR_LABEL[termbaseEditMinRole] ?? "Project lead"}
+            hint={resolveRoleName(t, termbaseEditMinRole)}
           />
           <NavRow to={orgSettingsPath(activeOrgId, "providers")} icon={KeyRound} title="AI provider keys" hint="Org keys" />
           <NavRow to={orgSettingsPath(activeOrgId, "monday")} icon={Workflow} title="Monday.com" hint="Board sync" />

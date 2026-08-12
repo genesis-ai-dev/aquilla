@@ -88,7 +88,7 @@ export function VoiceLibraryPanel({
   // local projects that never resolve a syncRole — same convention as
   // resolveEditorCapabilities / canPerform.
   const canEditVoices = roleLevel == null || roleLevel >= ROLE.MAINTAINER
-  const voiceDenialReason = !canEditVoices ? denialMessage(ROLE.MAINTAINER, roleLevel) : null
+  const voiceDenialReason = !canEditVoices ? denialMessage(t, ROLE.MAINTAINER, roleLevel) : null
 
   // Seed the local library once per project.
   useEffect(() => {

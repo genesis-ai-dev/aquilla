@@ -16,7 +16,7 @@
  */
 
 import { requiredRoleFor, ROLE } from "@/lib/sync/role-policy"
-import { roleDisplayLabel } from "@/lib/frontier/roles"
+import { resolveRoleName, type RoleT } from "@/lib/frontier/roles"
 
 export { ROLE }
 
@@ -50,7 +50,7 @@ export interface CanApplyResult {
  * everything else. Unsupported kinds are handled separately by the card
  * (Apply disabled with a "not supported yet" note), not here.
  */
-export function canApply(kind: string, roleLevel: number | null | undefined): CanApplyResult {
+export function canApply(t: RoleT, kind: string, roleLevel: number | null | undefined): CanApplyResult {
   if (roleLevel == null) return { allowed: true }
   const required = requiredRoleFor(kind)
   if (required == null) return { allowed: true }
@@ -58,6 +58,6 @@ export function canApply(kind: string, roleLevel: number | null | undefined): Ca
   return {
     allowed: false,
     requiredLevel: required,
-    reason: `Requires ${roleDisplayLabel(required)} role or higher`,
+    reason: `Requires ${resolveRoleName(t, required)} role or higher`,
   }
 }

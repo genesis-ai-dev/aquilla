@@ -1,13 +1,7 @@
-import { ROLE } from "@/lib/frontier/roles"
-
-/** Short role labels for the export-floor hint on the index row. */
-export const FLOOR_LABEL: Record<number, string> = {
-  [ROLE.VIEWER]: "Viewer",
-  [ROLE.CONTRIBUTOR]: "Contributor",
-  [ROLE.PROJECT_LEAD]: "Project lead",
-  [ROLE.MAINTAINER]: "Maintainer",
-  [ROLE.OWNER]: "Owner",
-}
+// AQU-832 wave 3 (WS-08): FLOOR_LABEL used to duplicate the exact role
+// vocabulary now owned by `common.role.*` (src/lib/i18n/namespaces/common.ts)
+// as a second, hardcoded, English-only copy. Removed — OrgSettingsIndex.tsx
+// resolves the same labels via `resolveRoleName(t, level)` instead.
 
 export const ORG_SETTINGS_SECTIONS = [
   "identity",

@@ -1,4 +1,4 @@
-import { defineNamespace } from "./types"
+import { defineNamespace, plural } from "./types"
 
 export const common = defineNamespace({
   keys: {
@@ -53,6 +53,41 @@ export const common = defineNamespace({
     "common.refresh": "Refresh",
     "common.searching": "Searching…",
     "common.stop": "Stop",
+
+    // — Role vocabulary (AQU-832 wave 3, WS-08): the seven-level role ladder
+    //   (src/lib/frontier/roles.ts) generated every display label by string
+    //   manipulation (snake_case → spaces → capitalize) and pluralised by
+    //   appending a literal "s". Each role's singular/plural display form is
+    //   authored as one `plural()` key — CLDR `one` is the singular label
+    //   ("Viewer"), `other` is the plural noun ("Viewers"), so a caller who
+    //   needs the plural form (e.g. "Viewers cannot perform this action")
+    //   asks the catalog for it instead of concatenating "s" onto the
+    //   singular. The canonical machine-readable name ("viewer",
+    //   "project_lead", …) is NOT translated here — it stays in roles.ts as
+    //   a plain string, used for comparisons, sorting, and the wire format
+    //   shared with the server.
+    "common.role.viewer": plural({ one: "Viewer", other: "Viewers" }),
+    "common.role.commenter": plural({ one: "Commenter", other: "Commenters" }),
+    "common.role.reviewer": plural({ one: "Reviewer", other: "Reviewers" }),
+    "common.role.contributor": plural({ one: "Contributor", other: "Contributors" }),
+    "common.role.projectLead": plural({ one: "Project lead", other: "Project leads" }),
+    "common.role.maintainer": plural({ one: "Maintainer", other: "Maintainers" }),
+    "common.role.owner": plural({ one: "Owner", other: "Owners" }),
+
+    "common.role.viewerDescription": "Read-only access to cells + comments",
+    "common.role.commenterDescription": "Read + add comments on cells",
+    "common.role.reviewerDescription": "Read + comment + validate cells (no content edits)",
+    "common.role.contributorDescription": "Read + comment + edit cell content",
+    "common.role.projectLeadDescription": "Contributor + manage members",
+    "common.role.maintainerDescription": "Lead + manage roles",
+    "common.role.ownerDescription": "Full control",
+
+    // Permission-denial sentence (src/lib/permissions/denial.ts), split so
+    // the two embedded role names are translated through the keys above
+    // rather than baked into this template as English words.
+    "common.role.denialUnknown": "You need at least {minRole} access to do this.",
+    "common.role.denialKnown":
+      "{currentRole} cannot perform this action — you need at least {minRole} access.",
   },
   context: {
     _context: {
@@ -389,6 +424,104 @@ export const common = defineNamespace({
           "or playback of a take. Distinct from Pause in English only by convention — use " +
           "whichever verb your language uses for 'stop', not 'pause'.",
         screenshot: "audio-studio",
+      },
+      "common.role.viewer": {
+        description:
+          "The lowest role on the seven-level access ladder: read-only, no comments or " +
+          "edits. Shown as a role-picker option label (share links, project/org member " +
+          "lists) and, in its plural form, as the subject of a permission-denial sentence " +
+          "('Viewers cannot perform this action'). The 'one' form is the singular label " +
+          "used everywhere a single role name is shown; 'other' is the plural noun.",
+        screenshot: "project-settings",
+      },
+      "common.role.commenter": {
+        description:
+          "Role one step above viewer: read + add comments, no validation or content " +
+          "edits. Same singular/plural label usage as common.role.viewer.",
+        screenshot: "project-settings",
+      },
+      "common.role.reviewer": {
+        description:
+          "Role that can read, comment, and validate cells but not edit content — " +
+          "translation consultants approving work without changing it. Same " +
+          "singular/plural label usage as common.role.viewer.",
+        screenshot: "project-settings",
+      },
+      "common.role.contributor": {
+        description:
+          "Role that can read, comment, and edit cell content. Same singular/plural " +
+          "label usage as common.role.viewer.",
+        screenshot: "project-settings",
+      },
+      "common.role.projectLead": {
+        description:
+          "Operational-PM role: contributor privileges plus managing project members, " +
+          "but not managing roles. Two words in English ('Project lead'); keep the " +
+          "second word lowercase unless the target language's title-casing rules call " +
+          "for otherwise. Same singular/plural label usage as common.role.viewer.",
+        screenshot: "project-settings",
+      },
+      "common.role.maintainer": {
+        description:
+          "Role that can manage members and roles on a project. Same singular/plural " +
+          "label usage as common.role.viewer.",
+        screenshot: "project-settings",
+      },
+      "common.role.owner": {
+        description:
+          "The highest role: full control. Same singular/plural label usage as " +
+          "common.role.viewer.",
+        screenshot: "project-settings",
+      },
+      "common.role.viewerDescription": {
+        description:
+          "One-line summary of what the viewer role can do, shown beside its name in " +
+          "every role picker (share link, project member, org member).",
+        screenshot: "project-settings",
+      },
+      "common.role.commenterDescription": {
+        description: "One-line summary of what the commenter role can do, shown in role pickers.",
+        screenshot: "project-settings",
+      },
+      "common.role.reviewerDescription": {
+        description: "One-line summary of what the reviewer role can do, shown in role pickers.",
+        screenshot: "project-settings",
+      },
+      "common.role.contributorDescription": {
+        description: "One-line summary of what the contributor role can do, shown in role pickers.",
+        screenshot: "project-settings",
+      },
+      "common.role.projectLeadDescription": {
+        description: "One-line summary of what the project-lead role can do, shown in role pickers.",
+        screenshot: "project-settings",
+      },
+      "common.role.maintainerDescription": {
+        description: "One-line summary of what the maintainer role can do, shown in role pickers.",
+        screenshot: "project-settings",
+      },
+      "common.role.ownerDescription": {
+        description: "One-line summary of what the owner role can do, shown in role pickers.",
+        screenshot: "project-settings",
+      },
+      "common.role.denialUnknown": {
+        description:
+          "Explains why a gated action is disabled when the caller's current role isn't " +
+          "known (e.g. a local, unsynced project) — only the remedy is stated. Shown as a " +
+          "tooltip or inline message on a disabled control.",
+        placeholders: {
+          minRole: "The minimum role name required, already localized (e.g. 'Contributor').",
+        },
+      },
+      "common.role.denialKnown": {
+        description:
+          "Explains why a gated action is disabled, naming both the caller's current role " +
+          "(as the plural role noun, addressing the whole class of users with that role) " +
+          "and the minimum role required. Shown as a tooltip or inline message on a " +
+          "disabled control.",
+        placeholders: {
+          currentRole: "The caller's current role name, already localized and pluralized (e.g. 'Viewers').",
+          minRole: "The minimum role name required, already localized (e.g. 'Contributor').",
+        },
       },
     },
   },

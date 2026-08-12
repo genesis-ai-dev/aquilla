@@ -40,9 +40,10 @@ import {
   ROLE,
   LINK_ROLE_OPTIONS,
   PROJECT_ROLE_OPTIONS,
-  roleDisplayText,
+  resolveRoleName,
 } from "@/lib/frontier/roles"
 import { RoleLabel } from "@/components/RoleLabel"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 interface SharePanelProps {
   open: boolean
@@ -305,6 +306,7 @@ const EXPIRY_OPTIONS: { label: string; value: number | null }[] = [
 const DEFAULT_EXPIRY_DAYS = 30
 
 function InviteLinkTab({ projectId, onSharesChanged }: InviteLinkTabProps) {
+  const t = useT()
   const { session } = useFrontierSession()
   const [inviteRole, setInviteRole] = useState<number>(DEFAULT_INVITE_ROLE)
   const [inviteEmail, setInviteEmail] = useState<string>("")
@@ -388,7 +390,10 @@ function InviteLinkTab({ projectId, onSharesChanged }: InviteLinkTabProps) {
           {copied && <p className="text-xs text-green-600">Copied!</p>}
           <p className="text-[10px] text-muted-foreground">
             The recipient signs in (or signs up) and is added as{" "}
-            {LINK_ROLE_OPTIONS.find((o) => o.level === inviteRole)?.name ?? "a member"}.
+            {(() => {
+              const opt = LINK_ROLE_OPTIONS.find((o) => o.level === inviteRole)
+              return opt ? resolveRoleName(t, opt.name) : "a member"
+            })()}.
             This link is single-use — once redeemed, click{" "}
             <strong className="font-medium">Create another link</strong> to generate
             a fresh one for the next person.
@@ -405,7 +410,7 @@ function InviteLinkTab({ projectId, onSharesChanged }: InviteLinkTabProps) {
             <Select
               items={LINK_ROLE_OPTIONS.map((opt) => ({
                 value: String(opt.level),
-                label: roleDisplayText(opt.name),
+                label: resolveRoleName(t, opt.name),
               }))}
               value={String(inviteRole)}
               onValueChange={(v) => setInviteRole(Number(v ?? ""))}
@@ -426,7 +431,10 @@ function InviteLinkTab({ projectId, onSharesChanged }: InviteLinkTabProps) {
             </Select>
             <p className="text-[10px] text-muted-foreground">
               {session?.jwt
-                ? LINK_ROLE_OPTIONS.find((o) => o.level === inviteRole)?.description
+                ? (() => {
+                    const opt = LINK_ROLE_OPTIONS.find((o) => o.level === inviteRole)
+                    return opt ? t(opt.descriptionKey) : ""
+                  })()
                 : "Sign in to create an invite link"}
             </p>
           </div>

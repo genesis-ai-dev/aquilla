@@ -26,12 +26,17 @@ export function DataTableColumnHeader<TData, TValue>({
   column,
   title,
   className,
+  ...props
 }: DataTableColumnHeaderProps<TData, TValue>) {
   const alignEnd = className?.includes("justify-end")
   const rootClass = cn("flex items-center gap-1", alignEnd && "w-full justify-end", className)
 
   if (!column.getCanSort()) {
-    return <div className={rootClass}>{title}</div>
+    return (
+      <div className={rootClass} {...props}>
+        {title}
+      </div>
+    )
   }
 
   const sorted = column.getIsSorted()
@@ -51,7 +56,7 @@ export function DataTableColumnHeader<TData, TValue>({
   )
 
   return (
-    <div className={rootClass}>
+    <div className={rootClass} {...props}>
       <button
         type="button"
         className={cn(

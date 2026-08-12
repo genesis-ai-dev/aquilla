@@ -106,6 +106,10 @@ interface DataTableProps<TData, TValue> {
   rowClassName?: string | ((row: TData) => string | undefined)
   /** When set, clicking a body row invokes this handler (e.g. navigate on row). */
   onRowClick?: (row: TData) => void
+  /** Extra attributes on each body row (e.g. `data-project-id` for tests). */
+  getRowAttributes?: (
+    row: TData,
+  ) => Record<string, string | number | undefined | null> | undefined
   /**
    * Items for a body row's menu, reachable two ways: right-click anywhere on the
    * row, or the ⋯ button (`DataTableRowActionsButton`) in an actions column.
@@ -125,6 +129,11 @@ interface DataTableProps<TData, TValue> {
   dense?: boolean
   /** Class on the bordered table wrapper (e.g. `border-0` when nested in a card). */
   className?: string
+  /**
+   * Fill a flex parent and scroll only the table body — keeps search/toolbar
+   * pinned above while rows scroll (in-card portfolio panels).
+   */
+  fillHeight?: boolean
 }
 
 function DataTable<TData, TValue>({
@@ -138,11 +147,13 @@ function DataTable<TData, TValue>({
   testId,
   rowClassName,
   onRowClick,
+  getRowAttributes,
   renderRowMenuItems,
   renderSubRow,
   emptyState,
   dense = false,
   className,
+  fillHeight = false,
 }: DataTableProps<TData, TValue>) {
   const [sorting, setSorting] = React.useState<SortingState>(
     () => (initialSorting?.length ? initialSorting : defaultSorting(columns)),
@@ -177,9 +188,15 @@ function DataTable<TData, TValue>({
   const hasRows = table.getRowModel().rows.length > 0
 
   return (
-    <div className={cn("flex w-full flex-col", dense ? "gap-2.5" : "gap-3")}>
+    <div
+      className={cn(
+        "flex w-full flex-col",
+        fillHeight && "min-h-0 flex-1",
+        dense ? "gap-2.5" : "gap-3",
+      )}
+    >
       {(searchPlaceholder || toolbarNode) && (
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="flex shrink-0 flex-wrap items-center gap-3">
           {searchPlaceholder ? (
             <InputGroup className="max-w-xs bg-card">
               <InputGroupAddon>
@@ -201,7 +218,15 @@ function DataTable<TData, TValue>({
         </div>
       )}
       <div
-        className={cn("overflow-hidden rounded-md border", className)}
+        className={cn(
+          "rounded-md border",
+          className,
+          // After `className` so fillHeight scroll wins over admin
+          // `overflow-visible` chrome.
+          fillHeight
+            ? "min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain [&_thead]:sticky [&_thead]:top-0 [&_thead]:z-10 [&_thead]:bg-card"
+            : "overflow-hidden",
+        )}
         data-testid={testId}
       >
         {!hasRows && emptyStateNode ? (
@@ -220,6 +245,7 @@ function DataTable<TData, TValue>({
                         dense ? "h-9 py-1.5" : "h-11",
                         header.column.id === "expand" ? "w-8" : undefined,
                         columnMetaClass(header.column.columnDef.meta),
+                        fillHeight && "bg-card",
                       )}
                     >
                       {header.isPlaceholder
@@ -249,6 +275,7 @@ function DataTable<TData, TValue>({
                   ))
                   const rowProps = {
                     "data-state": row.getIsSelected() && "selected",
+                    ...getRowAttributes?.(row.original),
                     className: cn(
                       menuItems && "group",
                       typeof rowClassName === "function"

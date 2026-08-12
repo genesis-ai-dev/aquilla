@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import { Link, useNavigate } from "react-router-dom"
+import { type ColumnDef } from "@tanstack/react-table"
 import { AppShell } from "@/components/AppShell"
 import { LoadingOverlay } from "@/components/ui/loading-overlay"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -21,31 +22,28 @@ import { LaneChips } from "./LaneChips"
 import { ProjectMetricHeader } from "./ProjectMetricHeader"
 import { displayLanes } from "./project-lanes"
 import { ProjectStatusFilter } from "./ProjectStatusFilter"
+import { OrgProjectsDataTable } from "./OrgProjectsDataTable"
 import type { StatusFilter } from "@/hooks/useOrgPortfolio"
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import { buttonVariants } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { Page, PageHeader, Section, StatTile, EmptyState } from "@/components/ui/page"
+import { DataTable, DataTableColumnHeader } from "@/components/ui/data-table"
+import { OrgWithAvatar } from "@/components/OrgWithAvatar"
 import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupButton,
-  InputGroupInput,
-} from "@/components/ui/input-group"
-import { Page, PageHeader, StatTile, EmptyState } from "@/components/ui/page"
+  ADMIN_TABLE_CLASS,
+  ADMIN_TABLE_SECTION_CONTENT,
+  ADMIN_TABLE_SECTION_HEADER,
+} from "@/components/admin/shared"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
-import { FolderPlus, Search, X, Building2, Sparkles, CircleCheck, Mic } from "lucide-react"
+import { FolderPlus, Search, Building2, Sparkles, CircleCheck, Mic } from "lucide-react"
+
+const PANEL_MAX_H =
+  "max-h-[clamp(14rem,calc(100dvh-22rem),28rem)]"
 
 function DashboardRowTemplate() {
   return (
-    <div className="flex items-center gap-4 p-4">
+    <div className="flex items-center gap-4 px-2 py-2">
       <div className="flex min-w-0 flex-1 flex-col gap-2">
         <Skeleton className="h-4 w-2/5" />
         <Skeleton className="h-3 w-3/5" />
@@ -58,14 +56,14 @@ function DashboardRowTemplate() {
 function DashboardPanelTemplate({ rows }: { rows: number }) {
   return (
     <section className="overflow-hidden rounded-lg border bg-card">
-      <div className="flex items-center justify-between gap-4 border-b px-4 py-3">
+      <div className="flex items-start justify-between gap-4 px-5 pt-5 pb-0">
         <div className="flex flex-col gap-2">
           <Skeleton className="h-5 w-28" />
-          <Skeleton className="h-3 w-16" />
+          <Skeleton className="h-3 w-40" />
         </div>
         <Skeleton className="h-8 w-40" />
       </div>
-      <div className="divide-y">
+      <div className="space-y-1 px-5 pt-2 pb-3">
         {Array.from({ length: rows }).map((_, index) => (
           <DashboardRowTemplate key={index} />
         ))}
@@ -119,9 +117,9 @@ function OrgHomeLoadingTemplate() {
                   </div>
                 ))}
               </div>
-              <div className="grid items-start gap-6 lg:grid-cols-[minmax(14rem,1fr)_minmax(30rem,2fr)]">
-                <DashboardPanelTemplate rows={3} />
+              <div className="flex flex-col gap-6">
                 <DashboardPanelTemplate rows={4} />
+                <DashboardPanelTemplate rows={3} />
               </div>
             </div>
           </Page>
@@ -207,46 +205,6 @@ type OrgPortfolioSummary = {
   overdueCount: number
 }
 
-const PROJECT_LENSES: { value: ProjectLens; label: string; description: string; empty: string }[] = [
-  {
-    value: "recent",
-    label: "Recently updated",
-    description: "Latest project activity across all organizations",
-    empty: "No recently updated projects yet.",
-  },
-  {
-    value: "attention",
-    label: "Needs attention",
-    description: "Highest-priority projects by deadline, activity, and progress",
-    empty: "No projects need attention yet.",
-  },
-  {
-    value: "least-translated",
-    label: "Least translated",
-    description: "Projects with the lowest translation progress",
-    empty: "No projects yet.",
-  },
-  {
-    value: "most-progress",
-    label: "Most progress",
-    description: "Projects with the highest translation progress",
-    empty: "No projects yet.",
-  },
-  {
-    value: "name",
-    label: "Name",
-    description: "Projects sorted alphabetically",
-    empty: "No projects yet.",
-  },
-  {
-    // AQU-507: group projects by their designated Project Manager.
-    value: "pm",
-    label: "Project manager",
-    description: "Projects grouped by their designated project manager",
-    empty: "No projects yet.",
-  },
-]
-
 export function readProjectLens(): ProjectLens {
   try {
     const stored = localStorage.getItem(PROJECT_LENS_STORAGE_KEY)
@@ -254,18 +212,6 @@ export function readProjectLens(): ProjectLens {
   } catch {
     return "recent"
   }
-}
-
-function writeProjectLens(lens: ProjectLens) {
-  try {
-    localStorage.setItem(PROJECT_LENS_STORAGE_KEY, lens)
-  } catch {
-    // Ignore local storage restrictions; the in-memory state still updates.
-  }
-}
-
-function isProjectLens(value: string | null | undefined): value is ProjectLens {
-  return PROJECT_LENS_VALUES.includes(value as ProjectLens)
 }
 
 function averagePct(projects: PortfolioProjectRow[], readPct: (project: PortfolioProjectRow) => number): number {
@@ -279,6 +225,38 @@ function orgDisplayName(org: OrgSummary): string {
 function roleLabel(org: OrgSummary): string {
   return roleDisplayText(org.role.name)
 }
+
+const ORG_SUMMARY_COLUMNS: ColumnDef<OrgPortfolioSummary>[] = [
+  {
+    id: "organization",
+    accessorFn: (s) => orgDisplayName(s.org).toLowerCase(),
+    header: ({ column }) => <DataTableColumnHeader column={column} title="Organization" />,
+    meta: { className: "min-w-0" },
+    cell: ({ row }) => (
+      <OrgWithAvatar name={orgDisplayName(row.original.org)} size="xs" className="max-w-full" />
+    ),
+  },
+  {
+    id: "role",
+    accessorFn: (s) => roleLabel(s.org).toLowerCase(),
+    header: ({ column }) => <DataTableColumnHeader column={column} title="Role" />,
+    meta: { className: "w-[8.5rem] whitespace-nowrap" },
+    cell: ({ row }) => (
+      <span className="text-sm text-foreground">{roleLabel(row.original.org)}</span>
+    ),
+  },
+  {
+    id: "projects",
+    accessorFn: (s) => s.projectCount,
+    header: ({ column }) => (
+      <DataTableColumnHeader column={column} title="Projects" className="justify-end" />
+    ),
+    meta: { align: "right", className: "w-[5.5rem]" },
+    cell: ({ row }) => (
+      <div className="text-right tabular-nums">{row.original.projectCount}</div>
+    ),
+  },
+]
 
 function deadlineTooltip(project: PortfolioProjectRow, status: "overdue" | "soon") {
   return deadlineStatusTooltip(status, project.deadlineAt)
@@ -349,10 +327,10 @@ export function ProjectTable({
   defaultLaneLabelByProjectId?: Map<string, string>
 }) {
   return (
-    <div data-testid="project-table" className="@container/project-table overflow-hidden">
+    <div data-testid="project-table" className="@container/project-table -mx-2 overflow-hidden">
       <div className="w-full">
         <div
-          className={`sticky top-0 z-20 grid ${PROJECT_TABLE_COLS} items-center gap-x-2 border-b bg-muted/95 py-2 pr-2 pl-4 text-xs font-medium text-muted-foreground backdrop-blur-sm`}
+          className={`sticky top-0 z-20 grid ${PROJECT_TABLE_COLS} items-center gap-x-2 border-b bg-muted/95 py-2 pr-2 pl-2 text-xs font-medium text-muted-foreground backdrop-blur-sm`}
         >
           <span
             className={cn(
@@ -396,7 +374,7 @@ export function ProjectTable({
                 key={p.id}
                 to={`/projects/${p.id}`}
                 data-project-id={p.id}
-                className={`grid ${PROJECT_TABLE_COLS} items-center gap-x-2 overflow-hidden py-2 pr-2 pl-4 text-sm transition-colors hover:bg-muted/50`}
+                className={`grid ${PROJECT_TABLE_COLS} items-center gap-x-2 overflow-hidden rounded-lg py-2 pr-2 pl-2 text-sm transition-colors hover:bg-muted/50`}
               >
                 <span
                   data-testid="project-table-identity"
@@ -529,10 +507,8 @@ export function OrgHome() {
   // empty portfolio as real data before its request has even started.
   const [resolvedPortfolioScopeKey, setResolvedPortfolioScopeKey] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [projectQuery, setProjectQuery] = useState("")
-  const [orgQuery, setOrgQuery] = useState("")
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all")
-  const [projectLens, setProjectLens] = useState<ProjectLens>(readProjectLens)
+  const projectLens = readProjectLens()
 
   useEffect(() => {
     if (!jwt) {
@@ -641,6 +617,7 @@ export function OrgHome() {
       : 0
   const stalledCount = projects.filter((p) => activityStatus(p, now) === "stalled").length
   const overdueCount = projects.filter((p) => deadlineStatus(p, now) === "overdue").length
+  const attentionCount = projects.filter((p) => portfolioAttentionReasons(p, now).length > 0).length
 
   // AQU-507: the portfolio feed (which backs these rows) has no PM dimension;
   // merge it in from the accessible-projects feed when available — here we rely
@@ -666,39 +643,14 @@ export function OrgHome() {
     })
     .sort((a, b) => orgDisplayName(a.org).localeCompare(orgDisplayName(b.org)))
 
-  const visibleOrgSummaries = orgSummaries.filter((summary) => {
-    if (!orgQuery) return true
-    return orgDisplayName(summary.org).toLowerCase().includes(orgQuery.toLowerCase())
-  })
-
   function openOrg(orgId: number) {
     setActiveOrg(orgId)
     navigate(orgHomePath(orgId))
   }
 
-  function selectProjectLens(lens: ProjectLens) {
-    setProjectLens(lens)
-    writeProjectLens(lens)
-  }
-
-  function handleProjectLensChange(value: string | null) {
-    if (!isProjectLens(value)) return
-    selectProjectLens(value)
-  }
-
-  // Project lists
-  const currentProjectLens = PROJECT_LENSES.find((lens) => lens.value === projectLens) ?? PROJECT_LENSES[0]
-
   // Filter bar — narrows the listed projects only; the rollup strip above
-  // continues to reflect the full portfolio.
+  // continues to reflect the full portfolio. Search/sort live in the DataTable.
   const filteredProjects = projectsWithPm.filter((p) => {
-    if (projectQuery) {
-      // AQU-507: the search box also matches PM username, satisfying the
-      // "filter by PM" half of the AC for the all-orgs list.
-      const q = projectQuery.toLowerCase()
-      const haystack = `${p.name} ${p.pm?.username ?? ""}`.toLowerCase()
-      if (!haystack.includes(q)) return false
-    }
     switch (statusFilter) {
       case "stalled":
         return activityStatus(p, now) === "stalled"
@@ -710,11 +662,6 @@ export function OrgHome() {
         return true
     }
   })
-  const visible = sortProjectsByLens(
-    filteredProjects,
-    statusFilter === "attention" ? "attention" : projectLens,
-    now,
-  )
 
   return (
     <AppShell
@@ -732,12 +679,17 @@ export function OrgHome() {
                   hasn't accepted yet. Without this, an invite whose email/link
                   never arrived is undiscoverable in-app. */}
               {pendingInvites.length > 0 && (
-                <section data-testid="pending-invitations" className="space-y-2">
-                  <h2 className="text-sm font-medium text-muted-foreground">Pending invitations</h2>
-                  <div className="rounded-lg border divide-y">
+                <Section
+                  data-testid="pending-invitations"
+                  title="Pending invitations"
+                  description="Invites sent to your email that you have not accepted yet."
+                  headerClassName={ADMIN_TABLE_SECTION_HEADER}
+                  contentClassName={ADMIN_TABLE_SECTION_CONTENT}
+                >
+                  <div className="divide-y">
                     {pendingInvites.map((inv) => (
-                      <div key={inv.token} className="flex flex-wrap items-center gap-3 p-4">
-                        <div className="flex-1 min-w-0">
+                      <div key={inv.token} className="flex flex-wrap items-center gap-3 py-3 first:pt-0 last:pb-0">
+                        <div className="min-w-0 flex-1">
                           <p className="truncate text-sm font-medium">
                             {inv.projects.map((p) => p.projectName).join(", ")}
                           </p>
@@ -755,7 +707,7 @@ export function OrgHome() {
                       </div>
                     ))}
                   </div>
-                </section>
+                </Section>
               )}
 
               <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-6">
@@ -771,181 +723,118 @@ export function OrgHome() {
                       {overdueCount}
                     </span>
                   }
+                  className={attentionCount > 0 ? "border-amber-500/40" : undefined}
                 />
               </div>
 
-              <div className="grid items-start gap-6 lg:grid-cols-[minmax(14rem,1fr)_minmax(30rem,2fr)]">
-                <section
-                  data-testid="organizations-panel"
-                  className="self-start overflow-hidden rounded-lg border bg-card lg:flex lg:max-h-[clamp(16rem,calc(100dvh-24rem),42rem)] lg:flex-col xl:max-h-[clamp(20rem,calc(100dvh-18rem),42rem)]"
+              <div className="flex flex-col gap-6">
+                <Section
+                  data-testid="projects-panel"
+                  title="Projects"
+                  description="Projects across every organization you belong to."
+                  headerClassName={cn(ADMIN_TABLE_SECTION_HEADER, "shrink-0")}
+                  contentClassName={cn(
+                    ADMIN_TABLE_SECTION_CONTENT,
+                    "@container/projects-panel flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden",
+                  )}
+                  className={cn("flex min-w-0 flex-col overflow-hidden", PANEL_MAX_H)}
                 >
-                  <div className="shrink-0 flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
-                    <div>
-                      <h2 className="text-base font-semibold">Organizations</h2>
-                      <p className="text-xs text-muted-foreground">
-                        {visibleOrgSummaries.length} of {orgSummaries.length}
-                      </p>
+                  {projects.length === 0 ? (
+                    <EmptyState
+                      variant="inline"
+                      className="py-6"
+                      icon={FolderPlus}
+                      title="No projects yet"
+                    />
+                  ) : (
+                    <div
+                      data-testid="projects-scroll"
+                      className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
+                    >
+                      <OrgProjectsDataTable
+                        projects={filteredProjects}
+                        now={now}
+                        showOrg
+                        layout="embedded"
+                        testId="project-table"
+                        defaultLaneLabelByProjectId={defaultLaneLabelByProjectId}
+                        initialLens={statusFilter === "attention" ? "attention" : projectLens}
+                        toolbarLeading={
+                          <ProjectStatusFilter
+                            value={statusFilter}
+                            onValueChange={setStatusFilter}
+                            className="bg-background"
+                          />
+                        }
+                        emptyTitle={
+                          statusFilter === "stalled"
+                            ? "No stalled projects."
+                            : statusFilter === "attention"
+                              ? "No projects need attention."
+                              : statusFilter === "overdue"
+                                ? "No overdue projects."
+                                : "No projects yet."
+                        }
+                      />
                     </div>
-                    {orgSummaries.length > 0 && (
-                      <InputGroup className="h-9 w-full sm:w-56">
-                        <InputGroupAddon>
-                          <Search />
-                        </InputGroupAddon>
-                        <InputGroupInput
-                          type="search"
-                          value={orgQuery}
-                          onChange={(e) => setOrgQuery(e.target.value)}
-                          placeholder="Filter organizations…"
-                          aria-label="Filter organizations by name"
-                        />
-                      </InputGroup>
-                    )}
-                  </div>
+                  )}
+                </Section>
 
+                <Section
+                  data-testid="organizations-panel"
+                  title="Organizations"
+                  description="Workspaces you belong to across Aquilla."
+                  headerClassName={cn(ADMIN_TABLE_SECTION_HEADER, "shrink-0")}
+                  contentClassName={cn(
+                    ADMIN_TABLE_SECTION_CONTENT,
+                    "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden",
+                  )}
+                  className={cn("flex min-w-0 flex-col overflow-hidden", PANEL_MAX_H)}
+                >
                   <div
                     data-testid="organizations-scroll"
-                    className="min-h-0 overscroll-contain lg:overflow-y-auto"
+                    className="min-h-0 min-w-0 overflow-x-hidden overflow-y-auto overscroll-contain"
                   >
                     {orgSummaries.length === 0 ? (
                       <EmptyState
                         variant="inline"
-                        className="py-10"
+                        className="py-6"
                         icon={Building2}
-                        title="No organizations yet."
-                      />
-                    ) : visibleOrgSummaries.length === 0 ? (
-                      <EmptyState
-                        variant="inline"
-                        className="py-10"
-                        icon={Search}
-                        title="No matching organizations."
+                        title="No organizations yet"
                       />
                     ) : (
-                      <div className="divide-y">
-                        {visibleOrgSummaries.map((summary) => (
-                          <button
-                            key={summary.org.id}
-                            type="button"
-                            onClick={() => openOrg(summary.org.id)}
-                            className="flex w-full items-center gap-4 p-4 text-left transition-colors hover:bg-muted/50"
-                          >
-                            <div className="min-w-0 flex-1">
-                              <div className="flex flex-wrap items-center gap-2">
-                                <p className="truncate font-medium">{orgDisplayName(summary.org)}</p>
-                                <Badge variant="secondary" className="shrink-0">
-                                  {roleLabel(summary.org)}
-                                </Badge>
-                              </div>
-                              <div className="mt-2 grid grid-cols-3 gap-2 text-xs text-muted-foreground">
-                                <span>{summary.projectCount} project{summary.projectCount === 1 ? "" : "s"}</span>
-                                <span>{Math.round(summary.avgTranslatedPct * 100)}% translated</span>
-                                <span>{Math.round(summary.avgValidatedPct * 100)}% validated</span>
-                              </div>
-                            </div>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </section>
-
-                <section
-                  data-testid="projects-panel"
-                  className="@container/projects-panel min-w-0 overflow-hidden rounded-lg border bg-card lg:flex lg:max-h-[clamp(16rem,calc(100dvh-24rem),42rem)] lg:flex-col xl:max-h-[clamp(20rem,calc(100dvh-18rem),42rem)]"
-                >
-                  <div className="shrink-0 flex flex-col gap-2 border-b px-4 py-2.5">
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div>
-                        <h2 className="text-base font-semibold">Projects</h2>
-                        <p className="text-xs text-muted-foreground">{currentProjectLens.description}</p>
-                      </div>
-                    </div>
-                    <div className="flex w-full flex-wrap items-center gap-2">
-                      <InputGroup className="h-8 w-40 max-w-full shrink-0 transition-[width] duration-150 focus-within:w-52">
-                        <InputGroupAddon>
-                          <Search />
-                        </InputGroupAddon>
-                        <InputGroupInput
-                          type="text"
-                          value={projectQuery}
-                          onChange={(e) => setProjectQuery(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === "Escape") e.currentTarget.blur()
-                          }}
-                          placeholder="Filter projects…"
-                          aria-label="Filter projects by name"
-                          autoComplete="off"
-                          autoCorrect="off"
-                          autoCapitalize="none"
-                          spellCheck={false}
-                        />
-                        {projectQuery && (
-                          <InputGroupAddon align="inline-end">
-                            <InputGroupButton
-                              type="button"
-                              size="icon-xs"
-                              aria-label="Clear project filter"
-                              onMouseDown={(e) => e.preventDefault()}
-                              onClick={() => setProjectQuery("")}
-                            >
-                              <X />
-                            </InputGroupButton>
-                          </InputGroupAddon>
+                      <DataTable
+                        columns={ORG_SUMMARY_COLUMNS}
+                        data={orgSummaries}
+                        getRowId={(s) => String(s.org.id)}
+                        onRowClick={(s) => openOrg(s.org.id)}
+                        initialSorting={[{ id: "organization", desc: false }]}
+                        searchPlaceholder="Filter organizations…"
+                        globalFilterFn={(row, _columnId, filterValue) => {
+                          const q = String(filterValue).trim().toLowerCase()
+                          if (!q) return true
+                          return orgDisplayName(row.original.org).toLowerCase().includes(q)
+                        }}
+                        testId="all-orgs-organizations-table"
+                        className={cn(
+                          ADMIN_TABLE_CLASS,
+                          // No -mx-2 bleed here: it widens past the card and
+                          // creates a horizontal scrollbar on the scrollport.
+                          "mx-0 overflow-x-hidden [&_[data-slot=table-container]]:overflow-x-hidden",
                         )}
-                      </InputGroup>
-                      <ProjectStatusFilter value={statusFilter} onValueChange={setStatusFilter} />
-                      <div className="ml-auto flex shrink-0 items-center gap-2" aria-label="Project sort">
-                        <span className="text-xs font-medium text-muted-foreground">Sort by</span>
-                        <Select
-                          items={PROJECT_LENSES.map((lens) => ({ value: lens.value, label: lens.label }))}
-                          value={projectLens}
-                          onValueChange={handleProjectLensChange}
-                        >
-                          <SelectTrigger aria-label="Sort projects" size="sm" className="bg-background">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectGroup>
-                              {PROJECT_LENSES.map((lens) => (
-                                <SelectItem key={lens.value} value={lens.value}>
-                                  {lens.label}
-                                </SelectItem>
-                              ))}
-                            </SelectGroup>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div
-                    data-testid="projects-scroll"
-                    className="min-h-0 overscroll-contain lg:overflow-y-auto"
-                  >
-                    {projects.length === 0 ? (
-                      <EmptyState
-                        variant="inline"
-                        className="py-10"
-                        icon={FolderPlus}
-                        title="No projects yet."
-                      />
-                    ) : visible.length === 0 ? (
-                      <EmptyState
-                        variant="inline"
-                        className="py-10"
-                        icon={Search}
-                        title={projectQuery ? "No matching projects." : currentProjectLens.empty}
-                      />
-                    ) : (
-                      <ProjectTable
-                        projects={visible}
-                        now={now}
-                        showOrg
-                        defaultLaneLabelByProjectId={defaultLaneLabelByProjectId}
+                        dense
+                        emptyState={
+                          <EmptyState
+                            variant="inline"
+                            className="py-6"
+                            icon={Search}
+                            title="No matching organizations"
+                          />
+                        }
                       />
                     )}
                   </div>
-                </section>
+                </Section>
               </div>
             </div>
           )}

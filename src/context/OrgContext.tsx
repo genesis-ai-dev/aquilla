@@ -70,6 +70,12 @@ export function OrgProvider({ children }: { children: ReactNode }) {
   const [resolvedProjectsJwt, setResolvedProjectsJwt] = useState<string | null>(null)
   const orgRequestRef = useRef(0)
   const projectsRequestRef = useRef(0)
+  // Route changes update org scope in the dedicated effect below; they must
+  // not recreate `refresh` and refetch the membership directory. Keep the
+  // latest path in a ref so an explicit/account-driven refresh can still
+  // respect whichever URL is authoritative when its request resolves.
+  const pathnameRef = useRef(location.pathname)
+  pathnameRef.current = location.pathname
   const projectsInFlightRef = useRef<{
     jwt: string
     requestId: number
@@ -96,7 +102,7 @@ export function OrgProvider({ children }: { children: ReactNode }) {
       // When the URL already names an org, don't clamp away from it here —
       // OrgRouteGate owns unauthorized/missing UX. Only auto-pick when the
       // path isn't driving org context (project routes, etc.).
-      const fromPath = parseOrgPath(location.pathname)
+      const fromPath = parseOrgPath(pathnameRef.current)
       if (fromPath) return list
       setActiveOrgId((cur) =>
         list.length === 0 ? null
@@ -120,7 +126,7 @@ export function OrgProvider({ children }: { children: ReactNode }) {
         setLoading(false)
       }
     }
-  }, [jwt, location.pathname, sessionLoading])
+  }, [jwt, sessionLoading])
 
   useEffect(() => { void refresh() }, [refresh])
 

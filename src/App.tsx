@@ -28,10 +28,7 @@ import { OrgProvider } from "@/context/OrgContext"
 import { OutboxProvider } from "@/context/OutboxContext"
 import { NavHistoryProvider } from "@/context/NavHistoryContext"
 import { TooltipProvider } from "@/components/ui/tooltip"
-import { LoadingOverlay, LoadingPanel } from "@/components/ui/loading-overlay"
-import { AppShell } from "@/components/AppShell"
-import { OrgSidebar } from "@/components/org/OrgSidebar"
-import { OrgBreadcrumb } from "@/components/org/OrgBreadcrumb"
+import { LoadingOverlay } from "@/components/ui/loading-overlay"
 import { Toaster } from "@/components/ui/sonner"
 import { AiModelConsentDialog } from "@/components/AiModelConsentDialog"
 import { AiModelDownloadChip } from "@/components/AiModelDownloadChip"
@@ -153,19 +150,13 @@ function LazyRoute({ children, fallback = <RouteLoadingFallback /> }: { children
   return <Suspense fallback={fallback}>{children}</Suspense>
 }
 
-function OrgRouteLoadingFallback() {
-  return (
-    <AppShell
-      sidebar={<OrgSidebar />}
-      header={<OrgBreadcrumb section="Loading" />}
-      statusBar={null}
-      main={<LoadingPanel label="Loading page" className="h-full" />}
-    />
-  )
-}
-
 function OrgLazyRoute({ children }: { children: ReactNode }) {
-  return <LazyRoute fallback={<OrgRouteLoadingFallback />}>{children}</LazyRoute>
+  // Do not catch suspension here. OrgSidebar navigates in a transition, so
+  // bubbling to the existing outer boundary lets React retain the useful
+  // source screen while a chunk resolves. On a direct cold URL there is no
+  // source screen, and the outer boundary correctly shows its full loader.
+  // Destination pages still own explicit loaders for authoritative data waits.
+  return children
 }
 
 export default function App() {

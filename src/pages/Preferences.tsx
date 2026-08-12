@@ -404,7 +404,7 @@ function PreferencesIndex({ modal = false, backgroundLocation }: { modal?: boole
 }
 
 /** A single section, rendered on its own page with a back breadcrumb. */
-function PreferencesDetail({ slug, modal = false, backgroundLocation }: { slug: string; modal?: boolean; backgroundLocation?: Location }) {
+function PreferencesDetail({ slug, modal = false }: { slug: string; modal?: boolean }) {
   const navigate = useNavigate()
   const section = PREFERENCE_SECTIONS.find((s) => s.slug === slug)
   if (!section) return <Navigate to="/preferences" replace />
@@ -462,7 +462,7 @@ export function PreferencesDialog() {
         </DialogHeader>
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
           {section
-            ? <PreferencesDetail slug={section} modal backgroundLocation={backgroundLocation} />
+            ? <PreferencesDetail slug={section} modal />
             : <PreferencesIndex modal backgroundLocation={backgroundLocation} />}
         </div>
       </DialogContent>

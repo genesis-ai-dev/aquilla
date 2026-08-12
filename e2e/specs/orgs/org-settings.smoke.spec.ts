@@ -21,10 +21,27 @@ test("org settings page renders Identity section and stats", async ({ alice }) =
 
   await alice.goto(orgRoute(alice))
   await expect(alice.getByRole("link", { name: "Settings", exact: true })).toBeVisible()
+  const overviewHeading = alice.locator("h1").first()
+  await expect(overviewHeading).toBeVisible()
+
+  // Delay the first lazy destination chunk. Ordinary org navigation should
+  // retain the useful overview instead of replacing it with loading chrome.
+  let releaseChunks!: () => void
+  const chunkGate = new Promise<void>((resolve) => { releaseChunks = resolve })
+  await alice.route("**/assets/app-chunk-*.js", async (route) => {
+    await chunkGate
+    await route.continue()
+  })
   // Count only requests caused by the client-side transition; initial account
   // hydration legitimately loads the directory once.
   orgDirectoryRequests = 0
-  await alice.getByRole("link", { name: "Settings", exact: true }).click()
+  try {
+    await alice.getByRole("link", { name: "Settings", exact: true }).click()
+    await expect(overviewHeading).toBeVisible()
+    await expect(alice.getByText("Loading page", { exact: true })).toHaveCount(0)
+  } finally {
+    releaseChunks()
+  }
   await expect(alice).toHaveURL(orgRoute(alice, "/settings"))
   // Main heading.
   await expect(alice.locator("h1").filter({ hasText: /Organization settings/i })).toBeVisible({

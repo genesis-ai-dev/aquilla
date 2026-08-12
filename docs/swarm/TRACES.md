@@ -71,3 +71,24 @@
   found during the audit.
 
 ## [DONE] resolved traces
+
+## Wave 1 additions
+- [OPEN] (load-flakes) `src/components/PermissionDeniedAlert.test.tsx` and
+  `src/context/OrgContext.test.tsx` pass in isolation but fail intermittently under
+  full-suite parallel load. THREE separate swarm agents reported these as "pre-existing
+  failures" when they are load flakes. Every agent brief now warns about them. Real fix:
+  isolate the shared localStorage/DOM state these tests race on. Until then they can mask a
+  genuine regression.
+- [OPEN] (stale-hashes) `source-hashes.json` does not exist yet. WS-01's staleness detection
+  only activates for a key once an import touches it, so English that changes under an
+  already-translated key is still undetected today. The wave-4 re-translation pass will
+  populate it. Latent gap, not live protection.
+- [OPEN] (autopilot-aria) `autopilot.inspector.activity.logAria` is a real aria-label with no
+  per-key context; tracked via `LEGACY_CONTEXT_GAPS` in `context.ts` rather than fixed,
+  because WS-04 was forbidden from editing namespace modules. Owner of `autopilot.ts` should
+  clear it.
+- [OPEN] (lint-blind-spots) The ESLint rule cannot see template literals with expressions,
+  strings in hoisted const arrays, or `.ts` files. Those are exactly the mechanisms behind the
+  most visible leaks — typed `MessageKey` props (WS-05/WS-06) are the compensating control.
+- [DONE] (import-data-loss) i18n:import now merges. Verified: 2-key partial import preserves
+  all 1,335 translations; `--replace` retains the destructive path.

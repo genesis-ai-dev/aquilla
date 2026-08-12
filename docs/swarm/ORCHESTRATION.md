@@ -73,7 +73,8 @@ Gate:
 
 | Wave | Dispatched | Workstreams | Status |
 | --- | --- | --- | --- |
-| 1 | pending | WS-01 import-merge, WS-02 lint-guard, WS-03 dead-code, WS-04 standard-relax | dispatching |
+| 1 | 2026-08-12 | WS-01 import-merge, WS-02 lint-guard, WS-03 dead-code, WS-04 standard-relax | **MERGED, gate green** |
+| 2 | 2026-08-12 | WS-05 trunk-tables, WS-06 lib-labels, WS-07 error-wiring | dispatched |
 
 ## §3 Workstream registry
 
@@ -86,7 +87,15 @@ Gate:
 
 ## §4 Merge log
 
-<!-- date · WS · branch · sha · tsc · vitest · notes -->
+| date | WS | sha | tsc | vitest | notes |
+| --- | --- | --- | --- | --- | --- |
+| 08-12 | WS-03 dead-code | 89c9b1dd1 | 0 | green | 4 files deleted; verified unreachable independently (routes go to ProjectWorkspace) |
+| 08-12 | WS-01 import-merge | merge | 0 | green | **data-loss fix.** Verified by hand: 2-key import → 1335 before / 1335 after. `--replace` still destructive on request |
+| 08-12 | prune | — | — | — | dropped 4 stale suppressions for WS-03's deleted files; baseline 2431 → 2251 |
+| 08-12 | WS-02 lint-guard | merge | 0 | green | `i18n/no-unkeyed-string` + native suppressions ratchet; 199 files / 2251 baseline; CI wired |
+| 08-12 | WS-04 standard-relax | 0e2fdaefc | 0 | green | prose-required keys 1143 (85.5%) → 653 (48.8%); ellipsis normalize defect fixed (20 of 30 exceptions dropped) |
+
+**Wave 1 gate: tsc 0 · vitest 768 files / 7109 tests green · i18n:check 1337 covered · eslint exit 0.**
 
 ## §5 Approved scope decisions (from the user)
 

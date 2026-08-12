@@ -7,84 +7,43 @@
  * keys, which is what makes context metadata cheap enough to keep complete.
  *
  * This registry is the single source of truth for the screenshot set:
- *   - `context.ts` may only reference a `ScreenshotId` declared here (enforced
- *     by `catalogContextIssues()`), so metadata can never point at a shot that
+ *   - `context.ts` may only reference a surface declared here (enforced by
+ *     `catalogContextIssues()`), so metadata can never point at a shot that
  *     nothing produces;
- *   - `e2e/specs/i18n/catalog-shots.spec.ts` iterates this list to regenerate
- *     the PNGs deterministically, so adding a surface here is the only step
- *     needed to get it captured.
+ *   - `scripts/i18n-shots.ts` drives each declared surface and writes its PNG,
+ *     and a test asserts every surface has a driver, so adding a surface here
+ *     plus a driver there is the only step needed to get it captured.
+ *
+ * Like `messages/en.ts` and `context.ts`, this file is a barrel: each surface is
+ * declared by the namespace module whose strings appear in it, under
+ * `namespaces/`.
  *
  * Files land at `<SCREENSHOT_DIR>/<id>.png` and are referenced by the stable
  * `id`, never by path, so the storage location can move (repo → R2) without
  * rewriting the metadata.
  */
 
+import { NAMESPACES } from "./namespaces"
+import type { ScreenshotSurface } from "./namespaces/types"
+
 /** Repo-relative directory holding the captured surface screenshots. */
 export const SCREENSHOT_DIR = "src/lib/i18n/screenshots"
 
-export interface ScreenshotSurface {
-  /** Stable id; also the PNG basename. Kebab-case, no locale suffix. */
-  id: string
-  /** Human title shown to translators alongside the image. */
-  title: string
-  /**
-   * Route the capture spec navigates to, in the seeded E2E project. `:projectId`
-   * is substituted with the seeded project's id at capture time.
-   */
-  route: string
-  /** What a translator should look for in this shot. */
-  notes: string
-}
-
-export const SCREENSHOTS = [
-  {
-    id: "workspace-nav",
-    title: "Workspace navigation",
-    route: "/project/:projectId",
-    notes:
-      "Left sidebar and top chrome of a project. Navigation labels sit in a narrow " +
-      "column, so translations that are much longer than the English will wrap or clip.",
-  },
-  {
-    id: "cell-editor",
-    title: "Cell editor",
-    route: "/project/:projectId",
-    notes:
-      "The source/target editing table. Strings here appear as inline controls and " +
-      "status text next to translation content, competing for horizontal space.",
-  },
-  {
-    id: "confirm-dialog",
-    title: "Confirmation dialog",
-    route: "/project/:projectId",
-    notes:
-      "Modal confirm/cancel pattern. The action verbs are buttons sitting side by " +
-      "side; keep them short and imperative.",
-  },
-  {
-    id: "project-settings",
-    title: "Project settings",
-    route: "/project/:projectId/settings",
-    notes:
-      "Settings surface, including the language switcher. Labels are form labels " +
-      "above or beside their control and have more room than nav or button text.",
-  },
-  {
-    id: "error-state",
-    title: "Error state",
-    route: "/project/:projectId",
-    notes:
-      "Generic failure surface (error boundary / failed load). Wording should be " +
-      "reassuring and non-technical; the title is a heading, not a button.",
-  },
-] as const satisfies readonly ScreenshotSurface[]
+export type { ScreenshotSurface } from "./namespaces/types"
 
 /**
- * Literal union of the declared surface ids. Because `context.ts` types its
- * `screenshot` fields as `ScreenshotId`, a reference to an undeclared surface is
- * a compile error, not just a lint failure.
+ * Every surface any namespace declares, in namespace order.
+ *
+ * `ScreenshotId` is `string` rather than a literal union: `flatMap` over the
+ * namespace list cannot produce one, and deriving the union here is what would
+ * force namespace modules to import from this barrel. The invariants that union
+ * used to buy are enforced at test time instead — `catalogContextIssues()`
+ * rejects an undeclared id, and `context.test.ts` asserts every declared surface
+ * has a capture driver in `scripts/i18n-shots/`.
  */
-export type ScreenshotId = (typeof SCREENSHOTS)[number]["id"]
+export const SCREENSHOTS: readonly ScreenshotSurface[] = NAMESPACES.flatMap((ns) => ns.surfaces)
+
+export type ScreenshotId = string
 
 const SCREENSHOT_IDS: ReadonlySet<string> = new Set(SCREENSHOTS.map((s) => s.id))
 

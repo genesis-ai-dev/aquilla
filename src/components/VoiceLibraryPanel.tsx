@@ -8,6 +8,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Check, MoreHorizontal, Pencil, Plus, Search, Star, Trash2 } from "lucide-react"
+import { useT } from "@/lib/i18n/I18nProvider"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -74,6 +75,7 @@ export function VoiceLibraryPanel({
   selectedVoiceId, onSelectVoice, castStats, cells, seedCellId, seedSignal,
   roleLevel,
 }: Props) {
+  const t = useT()
   const [voices, setVoices] = useState<Voice[]>([])
   const [defaultVoiceId, setDefaultVoiceId] = useState<string | undefined>(undefined)
   const [localSelectedId, setLocalSelectedId] = useState<string>("")
@@ -160,7 +162,7 @@ export function VoiceLibraryPanel({
     <div className="flex h-full min-h-0 flex-col">
       {/* Header */}
       <div className="flex items-center justify-between px-4 pb-2 pt-3">
-        <h2 className="text-sm font-semibold">Voices</h2>
+        <h2 className="text-sm font-semibold">{t("common.voices")}</h2>
         <span className="text-xs text-muted-foreground">{voices.length}</span>
       </div>
 
@@ -174,7 +176,7 @@ export function VoiceLibraryPanel({
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search voices…"
+            placeholder={t("audio.library.searchPlaceholder")}
           />
         </InputGroup>
       </div>
@@ -183,7 +185,7 @@ export function VoiceLibraryPanel({
       <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-3 pb-3">
         {filtered.length === 0 ? (
           <p className="px-2 py-3 text-center text-xs italic text-muted-foreground">
-            {query ? "No matches" : "No voices yet"}
+            {query ? t("common.noMatches") : t("audio.library.noVoicesYet")}
           </p>
         ) : (
           filtered.map((voice) => (
@@ -217,7 +219,7 @@ export function VoiceLibraryPanel({
             onClick={() => setEditing({ kind: "create" })}
           >
             <Plus data-icon="inline-start" />
-            New voice
+            {t("audio.newVoice.createLabel")}
           </Button>
         </AppTooltip>
       </div>
@@ -267,15 +269,16 @@ function VoiceRow({
   onMakeDefault: () => void
   onDelete: () => void
 }) {
+  const t = useT()
   // Same resolution the synth path uses (CellTtsButton, generateAndAttachCellVoice):
   // a voice's own provider wins; an absent one falls back to the project's
   // configured engine — never a hardcoded "Gemini".
   const engineLabel = voice.referenceAudioId
-    ? "Clone"
+    ? t("audio.library.cloneEngineLabel")
     : providerInfo(voice.provider ?? projectProvider).shortTitle
   const [menuOpen, setMenuOpen] = useState(false)
   return (
-    <AppTooltip content="Click to select · drag onto a line to assign">
+    <AppTooltip content={t("audio.library.rowHint")}>
       <div
         role="button"
         tabIndex={0}
@@ -300,17 +303,17 @@ function VoiceRow({
           </span>
           {" · "}
           {stats && stats.assigned > 0
-            ? `${stats.voiced}/${stats.assigned} voiced`
-            : isDefault ? "narrator" : "no lines yet"}
+            ? t("audio.library.voicedStats", { voiced: stats.voiced, assigned: stats.assigned })
+            : isDefault ? t("audio.narrator") : t("audio.library.noLinesYet")}
         </span>
       </span>
       {isDefault && (
-        <AppTooltip content="Narrator — lines without an explicit speaker use this voice.">
+        <AppTooltip content={t("audio.library.narratorHint")}>
           <Badge
             variant="secondary"
             className="shrink-0 gap-1 text-[9px]"
           >
-            <Star data-icon="inline-start" /> Narrator
+            <Star data-icon="inline-start" /> {t("audio.narrator")}
           </Badge>
         </AppTooltip>
       )}
@@ -320,7 +323,7 @@ function VoiceRow({
           concern this ticket doesn't touch). */}
       {canEdit && (
         <Popover open={menuOpen} onOpenChange={setMenuOpen}>
-          <AppTooltip content="More">
+          <AppTooltip content={t("audio.library.moreTooltip")}>
             <PopoverTrigger
               render={
                 <Button
@@ -328,7 +331,7 @@ function VoiceRow({
                   variant="ghost"
                   size="icon-xs"
                   onClick={(e) => e.stopPropagation()}
-                  aria-label="More voice actions"
+                  aria-label={t("audio.library.moreActionsLabel")}
                   className="shrink-0 opacity-0 transition-opacity focus:opacity-100 group-hover:opacity-100 data-[popup-open]:opacity-100"
                 >
                   <MoreHorizontal />
@@ -337,14 +340,14 @@ function VoiceRow({
             />
           </AppTooltip>
           <PopoverContent align="end" side="bottom" className="w-44 p-1" onClick={(e) => e.stopPropagation()}>
-            <MenuItem icon={Pencil} label="Edit" onClick={() => { setMenuOpen(false); onEdit() }} />
+            <MenuItem icon={Pencil} label={t("common.edit")} onClick={() => { setMenuOpen(false); onEdit() }} />
             {!isDefault && (
-              <MenuItem icon={Star} label="Set as narrator" onClick={() => { setMenuOpen(false); onMakeDefault() }} />
+              <MenuItem icon={Star} label={t("audio.library.setNarrator")} onClick={() => { setMenuOpen(false); onMakeDefault() }} />
             )}
             {!voice.builtIn && (
               <MenuItem
                 icon={Trash2}
-                label="Delete"
+                label={t("common.delete")}
                 destructive
                 onClick={() => { setMenuOpen(false); onDelete() }}
               />

@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest"
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import type { CellData } from "@/hooks/useCells"
 import { extractJsonStrings, exportJson } from "@/lib/parsers/json-i18n"
 import { I18nProvider, useT } from "./I18nProvider"
@@ -7,6 +8,14 @@ import { LanguageSwitcher } from "./LanguageSwitcher"
 import { buildCatalogSourceJson, parseTranslatedCatalog } from "./catalog-export"
 import { CATALOGS } from "./messages"
 import type { Catalog } from "./messages/en"
+
+/** Open the globe menu and choose a locale by its endonym, as a user would. */
+async function pickLanguage(endonym: string) {
+  await userEvent.click(screen.getByRole("button", { name: "Language" }))
+  await userEvent.click(
+    await screen.findByRole("menuitemradio", { name: new RegExp(endonym) }),
+  )
+}
 
 /**
  * AQU-832 — the loop, end to end and on screen.
@@ -100,7 +109,7 @@ describe("round-tripped catalog renders through the language switcher", () => {
     render(<Harness />)
     expect(screen.getByTestId("nav")).toHaveTextContent("Projects")
 
-    fireEvent.change(screen.getByRole("combobox"), { target: { value: "th" } })
+    await pickLanguage("ไทย")
 
     expect(screen.getByTestId("nav")).toHaveTextContent("⟦Prójécts⟧")
     expect(document.documentElement.lang).toBe("th")
@@ -110,7 +119,7 @@ describe("round-tripped catalog renders through the language switcher", () => {
     CATALOGS.th = await translateCatalogInAquilla()
 
     render(<Harness />)
-    fireEvent.change(screen.getByRole("combobox"), { target: { value: "th" } })
+    await pickLanguage("ไทย")
 
     // The `{language}` placeholder came back intact and was filled at render.
     expect(screen.getByTestId("switch")).toHaveTextContent("⟦Swítch lángúágé tó ไทย⟧")
@@ -122,7 +131,7 @@ describe("round-tripped catalog renders through the language switcher", () => {
     CATALOGS.th = partial
 
     render(<Harness />)
-    fireEvent.change(screen.getByRole("combobox"), { target: { value: "th" } })
+    await pickLanguage("ไทย")
 
     expect(screen.getByTestId("nav")).toHaveTextContent("Projects")
     expect(screen.getByTestId("switch")).toHaveTextContent("⟦Swítch lángúágé tó ไทย⟧")

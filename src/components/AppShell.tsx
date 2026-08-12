@@ -3,6 +3,8 @@ import { useLocation } from "react-router-dom"
 import { usePanelRef } from "react-resizable-panels"
 import { cn } from "@/lib/utils"
 import { BrandContext } from "@/branding/use-brand"
+import { useI18nOptional } from "@/lib/i18n/I18nProvider"
+import { LanguageSwitcher } from "@/lib/i18n/LanguageSwitcher"
 import { VersionTag } from "./VersionBadge"
 import { BetaBadge } from "./BetaBadge"
 import { NavHistoryControls } from "./NavHistoryControls"
@@ -143,6 +145,10 @@ export function AppShell({
   // Optional read (not useBrand) — the shell is rendered by page tests that
   // don't mount BrandProvider; the logo link is chrome, not a hard dependency.
   const brand = useContext(BrandContext)
+  // Same optional-read reasoning as `brand` above: AppShell is mounted by
+  // ~20 page-level tests that don't wrap I18nProvider, so this reads null
+  // there instead of throwing — the switcher just doesn't render.
+  const i18n = useI18nOptional()
   const resolvedLogo = logoSlot ?? (brand ? (
     <a
       href="/homepage"
@@ -252,13 +258,23 @@ export function AppShell({
         </div>
       )}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">{dockContent}</div>
-      {!leftDock && (
-        <div className="flex shrink-0 items-center">
+      {/* Sidebar footer. The version tag is org-chrome only, but the language
+          switcher rides in both layouts: ProjectWorkspace (the `leftDock` case)
+          is the screen a translator spends the whole day on, so making them
+          leave it to change UI language would defeat the point. */}
+      <div className={cn("flex shrink-0 items-center gap-2", leftDock && "justify-end px-2 pb-2")}>
+        {!leftDock && (
           <div className="min-w-0 flex-1">
             <VersionTag />
           </div>
-        </div>
-      )}
+        )}
+        {i18n && (
+          <LanguageSwitcher
+            className="h-6 shrink-0 rounded-md border border-border/50 bg-transparent px-1 text-xs"
+            ariaLabel={i18n.t("language.switcher.chrome")}
+          />
+        )}
+      </div>
     </aside>
   )
 

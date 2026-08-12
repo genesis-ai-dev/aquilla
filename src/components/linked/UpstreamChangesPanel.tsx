@@ -46,6 +46,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Spinner } from "@/components/ui/spinner"
 import { DiffText } from "./DiffText"
+import { useI18n } from "@/lib/i18n/I18nProvider"
+import { formatDateTime } from "@/lib/i18n/format"
 import {
   useUpstreamChangesReview,
   type ReviewItem,
@@ -78,6 +80,7 @@ export function UpstreamChangesPanel({
   roleLevel,
   username,
 }: UpstreamChangesPanelProps) {
+  const { locale } = useI18n()
   const navigate = useNavigate()
   const { groups, totalFlagged, isLoading, isError, revalidate } = useUpstreamChangesReview({
     projectId,
@@ -277,7 +280,7 @@ export function UpstreamChangesPanel({
             >
               <CollapsibleTrigger className="flex w-full items-center justify-between rounded border px-3 py-2 text-left text-sm font-medium hover:bg-muted/40">
                 <span>
-                  Sync batch — {new Date(group.serverTs).toLocaleString()}
+                  Sync batch — {formatDateTime(group.serverTs, locale)}
                 </span>
                 <Badge variant="outline">{group.cellCount} cell{group.cellCount === 1 ? "" : "s"}</Badge>
               </CollapsibleTrigger>

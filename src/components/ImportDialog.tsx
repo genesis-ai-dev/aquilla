@@ -61,6 +61,8 @@ import { importSdbh, type SdbhImportProgress } from "@/lib/import-sdbh"
 import { assertSourceUploadByteLength } from "@/lib/sync/source-upload"
 import { PreviewPanel, type ImportUploadProgress } from "@/components/import/PreviewPanel"
 import { formatBytesProgress } from "@/lib/format-bytes"
+import { useI18n } from "@/lib/i18n/I18nProvider"
+import { formatNumber } from "@/lib/i18n/format"
 import type { FileReference, ProjectTtsSettings } from "@/lib/parsers/types"
 import { detectFileType, isMediaFileType } from "@/lib/parsers/types"
 import { buildCastAdditions } from "@/lib/import/cast-from-speakers"
@@ -1064,6 +1066,7 @@ function idmlParsePhase(
 }
 
 function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targetLang, identityToken, getToken, onImported, ttsSettings, onCastUpdated, existingFiles, onCollision, onPreview, onCommitPhase, onCommitProgress, onCommitError, onSpreadsheetFile, excludeFrontMatter }: UploadPanelProps) {
+  const { locale } = useI18n()
   const [importing, setImporting] = useState(false)
   const [dragOver, setDragOver] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -1439,12 +1442,12 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
                 />
               </div>
               <p className="mt-1.5 text-xs text-muted-foreground">
-                {progress.count.toLocaleString()} / {progress.total.toLocaleString()} cells
+                {formatNumber(progress.count, locale)} / {formatNumber(progress.total, locale)} cells
                 {progress.bytesTotal ? (
                   <>
                     {" · "}
                     <span data-testid="upload-bytes">
-                      {formatBytesProgress(progress.bytesReceived, progress.bytesTotal)}
+                      {formatBytesProgress(progress.bytesReceived, progress.bytesTotal, locale)}
                     </span>
                   </>
                 ) : null}
@@ -1529,6 +1532,7 @@ function ParatextChoice({
   entries, bookCount, projectId, username, sourceLanguage, targetLanguage, targetLang, getToken, onImported, onCancel,
   existingFiles, onCollision, excludeFrontMatter,
 }: ParatextChoiceProps) {
+  const { locale } = useI18n()
   const [mode, setMode] = useState<"choose" | "pickSource" | "importing">("choose")
   const [plan, setPlan] = useState<ParatextPlan | null>(null)
   const [phase, setPhase] = useState("")
@@ -1698,7 +1702,7 @@ function ParatextChoice({
               <div className="h-full bg-primary transition-all" style={{ width: `${Math.round((progress.count / progress.total) * 100)}%` }} />
             </div>
             <p className="mt-1.5 text-xs text-muted-foreground">
-              {progress.count.toLocaleString()} / {progress.total.toLocaleString()} cells · {progress.bookLabel}
+              {formatNumber(progress.count, locale)} / {formatNumber(progress.total, locale)} cells · {progress.bookLabel}
             </p>
           </>
         )}
@@ -1774,7 +1778,7 @@ function ParatextChoice({
         </p>
         <p className="text-xs text-muted-foreground">
           {plan
-            ? <>{language && <>Language: {language} · </>}{includedCells.toLocaleString()} cells parsed in your browser — review, then choose how to bring it in.</>
+            ? <>{language && <>Language: {language} · </>}{formatNumber(includedCells, locale)} cells parsed in your browser — review, then choose how to bring it in.</>
             : "Reading project…"}
         </p>
       </div>
@@ -1803,7 +1807,7 @@ function ParatextChoice({
                     >
                       <span className={`truncate text-sm ${included ? "" : "text-muted-foreground line-through"}`}>{b.book.displayName}</span>
                       <span className="shrink-0 text-xs text-muted-foreground">
-                        {b.book.bookId} · {b.cellCount.toLocaleString()} cells
+                        {b.book.bookId} · {formatNumber(b.cellCount, locale)} cells
                         {b.duplicateRefs.length > 0 && <span className="text-amber-600"> · {b.duplicateRefs.length} duplicate ref{b.duplicateRefs.length === 1 ? "" : "s"}</span>}
                       </span>
                     </button>
@@ -1821,7 +1825,7 @@ function ParatextChoice({
                         </li>
                       ))}
                       {b.strings.length > 4 && (
-                        <li className="text-xs text-muted-foreground/70">… {(b.strings.length - 4).toLocaleString()} more</li>
+                        <li className="text-xs text-muted-foreground/70">… {formatNumber(b.strings.length - 4, locale)} more</li>
                       )}
                     </ul>
                   )}
@@ -1868,6 +1872,7 @@ type EBiblePanelMode = "source" | "target"
 type EBibleTargetStep = "pick" | "review" | "applying" | "done"
 
 function EBiblePanel({ projectId, username, sourceLanguage, targetLanguage, targetLang, getToken, sourceCells, onImported, onTargetImported }: EBiblePanelProps) {
+  const { locale } = useI18n()
   const [mode, setMode] = useState<EBiblePanelMode>("source")
   const [targetStep, setTargetStep] = useState<EBibleTargetStep>("pick")
   const [matchResult, setMatchResult] = useState<EBibleMatchResult | null>(null)
@@ -2000,7 +2005,7 @@ function EBiblePanel({ projectId, username, sourceLanguage, targetLanguage, targ
       <div className="mx-auto w-full max-w-sm py-8 text-center">
         <p className="text-sm font-medium">
           {targetProgress?.phase === "save" && targetProgress.cellsTotal
-            ? `Committing ${(targetProgress.cellsEnqueued ?? 0).toLocaleString()} / ${targetProgress.cellsTotal.toLocaleString()} verses…`
+            ? `Committing ${formatNumber(targetProgress.cellsEnqueued ?? 0, locale)} / ${formatNumber(targetProgress.cellsTotal, locale)} verses…`
             : "Committing verses…"}
         </p>
         {targetProgress?.phase === "save" && targetProgress.cellsTotal ? (
@@ -2147,11 +2152,11 @@ function EBiblePanel({ projectId, username, sourceLanguage, targetLanguage, targ
         <div className="text-xs text-muted-foreground">
           <p>
             {progress.phase === "download"
-              ? `Downloading ${selected?.id ?? ""}… ${formatProgress(progress.received, progress.total)}`
+              ? `Downloading ${selected?.id ?? ""}… ${formatProgress(progress.received, progress.total, locale)}`
               : progress.phase === "parse"
                 ? "Parsing verses…"
                 : progress.cellsTotal
-                  ? `Uploading verses: ${(progress.cellsEnqueued ?? 0).toLocaleString()} / ${progress.cellsTotal.toLocaleString()}`
+                  ? `Uploading verses: ${formatNumber(progress.cellsEnqueued ?? 0, locale)} / ${formatNumber(progress.cellsTotal, locale)}`
                   : "Uploading to project…"}
           </p>
           {progress.phase === "save" && progress.cellsTotal ? (
@@ -2172,7 +2177,7 @@ function EBiblePanel({ projectId, username, sourceLanguage, targetLanguage, targ
         <div className="text-xs text-muted-foreground">
           <p>
             {targetProgress.phase === "download"
-              ? `Downloading ${selected?.id ?? ""}… ${formatProgress(targetProgress.received, targetProgress.total)}`
+              ? `Downloading ${selected?.id ?? ""}… ${formatProgress(targetProgress.received, targetProgress.total, locale)}`
               : targetProgress.phase === "parse"
                 ? "Parsing verses…"
                 : "Matching verses to source cells…"}
@@ -2214,6 +2219,7 @@ interface HelloaoPanelProps {
 }
 
 function HelloaoPanel({ projectId, username, sourceLanguage, targetLanguage, getToken, onImported }: HelloaoPanelProps) {
+  const { locale } = useI18n()
   const [translations, setTranslations] = useState<HelloaoTranslation[] | null>(null)
   const [loadErr, setLoadErr] = useState<string | null>(null)
   const [query, setQuery] = useState("")
@@ -2407,11 +2413,11 @@ function HelloaoPanel({ projectId, username, sourceLanguage, targetLanguage, get
           <div className="text-xs text-muted-foreground">
             <p>
               {progress.phase === "download"
-                ? `Downloading ${selected.id}… ${formatProgress(progress.received, progress.total)}`
+                ? `Downloading ${selected.id}… ${formatProgress(progress.received, progress.total, locale)}`
                 : progress.phase === "parse"
                   ? "Parsing verses…"
                   : progress.cellsTotal
-                    ? `Uploading verses: ${(progress.cellsEnqueued ?? 0).toLocaleString()} / ${progress.cellsTotal.toLocaleString()}`
+                    ? `Uploading verses: ${formatNumber(progress.cellsEnqueued ?? 0, locale)} / ${formatNumber(progress.cellsTotal, locale)}`
                     : "Uploading to project…"}
             </p>
             {progress.phase === "save" && progress.cellsTotal ? (
@@ -2432,7 +2438,7 @@ function HelloaoPanel({ projectId, username, sourceLanguage, targetLanguage, get
         <div className="flex items-center justify-end gap-3">
           {books && checkedBooks.size > 0 && (
             <span className="text-xs text-muted-foreground">
-              ~{selectedVerseCount.toLocaleString()} verses
+              ~{formatNumber(selectedVerseCount, locale)} verses
             </span>
           )}
           <Button onClick={handleImport} disabled={!books || checkedBooks.size === 0 || importing}>
@@ -2882,6 +2888,7 @@ interface ObsPanelProps {
 }
 
 function ObsPanel({ projectId, username, sourceLanguage, targetLanguage, getToken, onImported }: ObsPanelProps) {
+  const { locale } = useI18n()
   const [progress, setProgress] = useState<EBibleProgress | null>(null)
   const [importing, setImporting] = useState(false)
   const [importErr, setImportErr] = useState<string | null>(null)
@@ -2938,11 +2945,11 @@ function ObsPanel({ projectId, username, sourceLanguage, targetLanguage, getToke
         <div className="text-xs text-muted-foreground">
           <p>
             {progress.phase === "download"
-              ? `Downloading stories… ${formatProgress(progress.received, progress.total)}`
+              ? `Downloading stories… ${formatProgress(progress.received, progress.total, locale)}`
               : progress.phase === "parse"
                 ? "Parsing frames…"
                 : progress.cellsTotal
-                  ? `Uploading frames: ${(progress.cellsEnqueued ?? 0).toLocaleString()} / ${progress.cellsTotal.toLocaleString()}`
+                  ? `Uploading frames: ${formatNumber(progress.cellsEnqueued ?? 0, locale)} / ${formatNumber(progress.cellsTotal, locale)}`
                   : "Uploading to project…"}
           </p>
           {progress.phase === "save" && progress.cellsTotal ? (
@@ -3000,6 +3007,7 @@ interface DcsPanelProps {
 type DcsPanelStage = "browse" | "importing" | "done"
 
 function DcsPanel({ projectId, getToken, defaultLang, patchDcsCursor, onImported, excludeFrontMatter }: DcsPanelProps) {
+  const { locale } = useI18n()
   const [stage, setStage] = useState<DcsPanelStage>("browse")
   const [selected, setSelected] = useState<DcsCatalogEntry | null>(null)
   const [progress, setProgress] = useState<{ uploaded: number; total: number } | null>(null)
@@ -3079,7 +3087,7 @@ function DcsPanel({ projectId, getToken, defaultLang, patchDcsCursor, onImported
               <div className="h-full bg-primary transition-all" style={{ width: `${pct}%` }} />
             </div>
             <p className="mt-1.5 text-xs text-muted-foreground">
-              {progress.uploaded.toLocaleString()} / {progress.total.toLocaleString()} files
+              {formatNumber(progress.uploaded, locale)} / {formatNumber(progress.total, locale)} files
             </p>
           </>
         ) : (
@@ -3097,8 +3105,8 @@ function DcsPanel({ projectId, getToken, defaultLang, patchDcsCursor, onImported
         <div className="mt-2 space-y-1 text-xs text-muted-foreground">
           <p>{selected?.fullName}</p>
           <p>
-            {summary.files.toLocaleString()} file{summary.files === 1 ? "" : "s"} ·{" "}
-            {summary.cells.toLocaleString()} cell{summary.cells === 1 ? "" : "s"}
+            {formatNumber(summary.files, locale)} file{summary.files === 1 ? "" : "s"} ·{" "}
+            {formatNumber(summary.cells, locale)} cell{summary.cells === 1 ? "" : "s"}
           </p>
           <p>
             {summary.pinned
@@ -3132,6 +3140,7 @@ interface SdbhPanelProps {
 }
 
 function SdbhPanel({ projectId, username, getToken, onImported }: SdbhPanelProps) {
+  const { locale } = useI18n()
   const [masterFile, setMasterFile] = useState<File | null>(null)
   const [localizedFile, setLocalizedFile] = useState<File | null>(null)
   const [importing, setImporting] = useState(false)
@@ -3231,7 +3240,7 @@ function SdbhPanel({ projectId, username, getToken, onImported }: SdbhPanelProps
                 {progress.phase === "source" ? "Uploading source" : "Pre-filling translations"}
                 {progress.fileIndex ? ` — file ${progress.fileIndex} / ${progress.fileCount}` : ""}
                 {progress.cellsTotal
-                  ? `: ${(progress.cellsEnqueued ?? 0).toLocaleString()} / ${progress.cellsTotal.toLocaleString()} cells`
+                  ? `: ${formatNumber(progress.cellsEnqueued ?? 0, locale)} / ${formatNumber(progress.cellsTotal, locale)} cells`
                   : ""}
               </p>
               <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-muted">
@@ -3263,6 +3272,7 @@ interface MaculaPanelProps {
 }
 
 function MaculaPanel({ projectId, username, getToken, onImported }: MaculaPanelProps) {
+  const { locale } = useI18n()
   const [importing, setImporting] = useState(false)
   const [progress, setProgress] = useState<MaculaProgress | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -3323,7 +3333,7 @@ function MaculaPanel({ projectId, username, getToken, onImported }: MaculaPanelP
           {progress.phase === "parse" && "Parsing verse data…"}
           {progress.phase === "save" && progress.cellsTotal && (
             <>
-              <p>Uploading: {(progress.cellsEnqueued ?? 0).toLocaleString()} / {progress.cellsTotal.toLocaleString()} cells</p>
+              <p>Uploading: {formatNumber(progress.cellsEnqueued ?? 0, locale)} / {formatNumber(progress.cellsTotal, locale)} cells</p>
               <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-muted">
                 <div
                   className="h-full bg-primary transition-all"
@@ -3365,6 +3375,7 @@ function BiblicaPanel({
   getToken,
   onImported,
 }: BiblicaPanelProps) {
+  const { locale } = useI18n()
   const [importing, setImporting] = useState(false)
   const [progress, setProgress] = useState<BiblicaProgress | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -3461,7 +3472,7 @@ function BiblicaPanel({
           {progress.phase === "save" && progress.cellsTotal && (
             <>
               <p>
-                Uploading: {(progress.cellsEnqueued ?? 0).toLocaleString()} / {progress.cellsTotal.toLocaleString()} notes
+                Uploading: {formatNumber(progress.cellsEnqueued ?? 0, locale)} / {formatNumber(progress.cellsTotal, locale)} notes
               </p>
               <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-muted">
                 <div
@@ -3471,7 +3482,7 @@ function BiblicaPanel({
               </div>
               {progress.verseUnitCount ? (
                 <p className="mt-1.5">
-                  {progress.verseUnitCount.toLocaleString()} scripture paragraphs skipped.
+                  {formatNumber(progress.verseUnitCount, locale)} scripture paragraphs skipped.
                 </p>
               ) : null}
             </>
@@ -3500,6 +3511,7 @@ interface TnPanelProps {
 }
 
 function TnPanel({ projectId, username, getToken, onImported }: TnPanelProps) {
+  const { locale } = useI18n()
   const [importing, setImporting] = useState(false)
   const [progress, setProgress] = useState<TnProgress | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -3564,7 +3576,7 @@ function TnPanel({ projectId, username, getToken, onImported }: TnPanelProps) {
           {progress.phase === "parse" && "Parsing translation notes…"}
           {progress.phase === "save" && progress.cellsTotal && (
             <>
-              <p>Uploading: {(progress.cellsEnqueued ?? 0).toLocaleString()} / {progress.cellsTotal.toLocaleString()} notes</p>
+              <p>Uploading: {formatNumber(progress.cellsEnqueued ?? 0, locale)} / {formatNumber(progress.cellsTotal, locale)} notes</p>
               <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-muted">
                 <div
                   className="h-full bg-primary transition-all"

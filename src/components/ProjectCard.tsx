@@ -13,6 +13,8 @@ import { useProjectHealth } from "@/hooks/useProjectHealth"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { roleName } from "@/lib/frontier/roles"
 import { RoleLabel } from "@/components/RoleLabel"
+import { useI18n } from "@/lib/i18n/I18nProvider"
+import { formatDate as formatLocaleDate } from "@/lib/i18n/format"
 
 /**
  * Has this project ever lived server-side? Two signals:
@@ -62,6 +64,7 @@ export function ProjectCard({
   canToggleLifecycle,
   onToggleLifecycle,
 }: ProjectCardProps) {
+  const { locale } = useI18n()
   const isGit = project.origin?.kind === "git"
   const isTrashed = variant === "trashed"
   // isActive absent or true → active; explicit false → inactive (frozen)
@@ -240,7 +243,7 @@ export function ProjectCard({
             <span className="text-xs text-muted-foreground">
               Deleted
               {project.deletedBy ? ` by ${project.deletedBy}` : ""}
-              {project.deletedAt ? ` · ${formatDate(project.deletedAt)}` : ""}
+              {project.deletedAt ? ` · ${formatDate(project.deletedAt, locale)}` : ""}
             </span>
             {onRestore && (
               <Button size="sm" variant="outline" onClick={onRestore}>
@@ -255,13 +258,9 @@ export function ProjectCard({
   )
 }
 
-function formatDate(iso: string): string {
+function formatDate(iso: string, locale: string): string {
   try {
-    return new Date(iso).toLocaleDateString(undefined, {
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-    })
+    return formatLocaleDate(iso, locale, { month: "short", day: "numeric", year: "numeric" })
   } catch {
     return iso
   }

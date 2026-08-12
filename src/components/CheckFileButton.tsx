@@ -6,6 +6,8 @@ import { Spinner } from "@/components/ui/spinner"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { checkScopeSummary } from "@/components/CheckFindingsDrawer"
 import { cn } from "@/lib/utils"
+import { useI18n } from "@/lib/i18n/I18nProvider"
+import { formatTime } from "@/lib/i18n/format"
 import type { CheckRunResult } from "@/lib/check/deterministic-check"
 
 /** Tailwind `md` — at/above this, the "Check file" label is visible. */
@@ -40,6 +42,7 @@ export function CheckFileButton({
   onToggle,
   grouped = false,
 }: CheckFileButtonProps) {
+  const { locale } = useI18n()
   const mdUp = useIsMdUp()
   const showBadge = Boolean(checkResult && !checkRunning)
   // Below md the label hides; use a true icon button so width matches the ⋯
@@ -82,7 +85,7 @@ export function CheckFileButton({
         checkOpen
           ? "Close file check"
           : checkResult
-            ? `Last check: ${checkResult.totalFindingCount} issue${checkResult.totalFindingCount === 1 ? "" : "s"} · ${checkScopeSummary(checkResult)} · ${new Date(checkResult.ranAt).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}`
+            ? `Last check: ${checkResult.totalFindingCount} issue${checkResult.totalFindingCount === 1 ? "" : "s"} · ${checkScopeSummary(checkResult)} · ${formatTime(checkResult.ranAt, locale, { hour: "numeric", minute: "2-digit" })}`
             : "Check the open file against the project's rules and term base"
       }
     >

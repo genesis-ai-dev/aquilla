@@ -3,7 +3,8 @@ import type { FileReference } from "@/lib/parsers/types"
 import { fileOrderedBy } from "@/lib/parsers/types"
 import { ROLE } from "@/lib/frontier/roles"
 import { canExportSourceFile, EXPORTABLE_SOURCE_FILE_TYPES } from "@/lib/file-source-export"
-import { useT } from "@/lib/i18n/I18nProvider"
+import { useI18n } from "@/lib/i18n/I18nProvider"
+import { bidiIsolate, formatDate, formatNumber } from "@/lib/i18n/format"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -82,7 +83,7 @@ export function FileDetailsModal({
   file, open, onOpenChange, progress, roleLevel, canExportByOrgPolicy,
   onRename, onMove, onExportSource, onDelete,
 }: FileDetailsModalProps) {
-  const t = useT()
+  const { t, locale } = useI18n()
   if (!file) return null
 
   const translatedPct = progress && progress.total > 0
@@ -127,13 +128,14 @@ export function FileDetailsModal({
             </DetailRow>
             {languages && <DetailRow label={t("fileDetails.languages")}>{languages}</DetailRow>}
             <DetailRow label={t("fileDetails.imported")}>
-              {new Date(file.createdAt).toLocaleDateString(undefined, {
-                year: "numeric", month: "short", day: "numeric",
-              })}
+              {formatDate(file.createdAt, locale, { year: "numeric", month: "short", day: "numeric" })}
             </DetailRow>
             {translatedPct !== null && validatedPct !== null && (
               <DetailRow label={t("fileDetails.progress")}>
-                {t("fileDetails.progressValue", { translated: translatedPct, validated: validatedPct })}
+                {t("fileDetails.progressValue", {
+                  translated: bidiIsolate(formatNumber(translatedPct, locale)),
+                  validated: bidiIsolate(formatNumber(validatedPct, locale)),
+                })}
               </DetailRow>
             )}
           </dl>

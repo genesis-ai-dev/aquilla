@@ -11,6 +11,8 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react"
 import { Copy } from "lucide-react"
 import { buildAgentInstructions } from "@/lib/sync/agent-instructions"
+import { useI18n } from "@/lib/i18n/I18nProvider"
+import { formatDate } from "@/lib/i18n/format"
 import { syncWorkerHttpOrigin } from "@/lib/sync/sync-worker-url"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -62,12 +64,8 @@ function expiryToIso(preset: ExpiryPresetId): string | undefined {
   return new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString()
 }
 
-function fmtDate(iso: string): string {
-  return new Date(iso).toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  })
+function fmtDate(iso: string, locale: string): string {
+  return formatDate(iso, locale, { month: "short", day: "numeric", year: "numeric" })
 }
 
 /** Resolve a credential's org/project scope into a friendly label. Falls back
@@ -255,6 +253,7 @@ function CredentialRow({
   onRevoke: () => void
   onShowInstructions: () => void
 }) {
+  const { locale } = useI18n()
   const revoked = Boolean(credential.revokedAt)
   const expired =
     !revoked && Boolean(credential.expiresAt) && new Date(credential.expiresAt!).getTime() < Date.now()
@@ -274,8 +273,8 @@ function CredentialRow({
           {credential.name} · {scopeLabel(credential, orgs, projects)}
         </p>
         <p className="text-[11px] text-muted-foreground">
-          {credential.expiresAt ? `Expires ${fmtDate(credential.expiresAt)}` : "No expiry"}
-          {credential.lastUsedAt ? ` · Last used ${fmtDate(credential.lastUsedAt)}` : ""}
+          {credential.expiresAt ? `Expires ${fmtDate(credential.expiresAt, locale)}` : "No expiry"}
+          {credential.lastUsedAt ? ` · Last used ${fmtDate(credential.lastUsedAt, locale)}` : ""}
         </p>
       </div>
       {!revoked && (

@@ -55,7 +55,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { useT } from "@/lib/i18n/I18nProvider"
+import { useT, useI18n } from "@/lib/i18n/I18nProvider"
+import { formatDateTime } from "@/lib/i18n/format"
 import type { TFunction } from "@/lib/i18n/I18nProvider"
 import { translate } from "@/lib/i18n/translate"
 
@@ -176,9 +177,9 @@ export function headerBadgeCount(
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
-function formatTs(ms: number): string {
+function formatTs(ms: number, locale: string): string {
   try {
-    return new Date(ms).toLocaleString(undefined, {
+    return formatDateTime(ms, locale, {
       month: "short",
       day: "numeric",
       hour: "numeric",
@@ -351,7 +352,7 @@ interface CommentBubbleProps {
 }
 
 function CommentBubble({ comment, currentUsername, onEdit, onDelete }: CommentBubbleProps) {
-  const t = useT()
+  const { t, locale } = useI18n()
   const isDeleted = comment.deletedAt !== null
   const isOwn = !!currentUsername && comment.authorId === currentUsername
   const canMutate = isOwn && !isDeleted
@@ -360,7 +361,7 @@ function CommentBubble({ comment, currentUsername, onEdit, onDelete }: CommentBu
     <div className={cn("flex flex-col gap-0.5", comment.parentCommentId ? "pl-6" : "")}>
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
         <span className="font-medium text-foreground">{comment.authorLabel ?? comment.authorId}</span>
-        <span>{formatTs(comment.createdAt)}</span>
+        <span>{formatTs(comment.createdAt, locale)}</span>
         {comment.updatedAt !== comment.createdAt && (
           <span className="italic">{t("comments.bubble.edited")}</span>
         )}

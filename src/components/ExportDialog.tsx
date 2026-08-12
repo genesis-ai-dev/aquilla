@@ -22,6 +22,8 @@
 
 import { useState, useEffect, useMemo, useRef } from "react"
 import { Download, AlertTriangle, CheckCircle2 } from "lucide-react"
+import { useI18n } from "@/lib/i18n/I18nProvider"
+import { formatNumber } from "@/lib/i18n/format"
 import {
   Dialog,
   DialogContent,
@@ -292,6 +294,7 @@ export function ExportDialog({
   onReimport,
   outstandingInfractionCount = 0,
 }: ExportDialogProps) {
+  const { locale } = useI18n()
   // The file's own format is the default export — "give me my file back".
   // Types without a 1:1 native exporter (ebible, obs, audio, video, sdbh, …)
   // have no primary download; the format list opens instead.
@@ -635,7 +638,7 @@ export function ExportDialog({
         const stem = buildExportStem(true)
         downloadBlob(new Blob([xml], { type: "application/xml" }), `${stem}.XML`)
         const warnNote = warnings.length ? ` — ${warnings.length} gloss warning(s), check semicolons` : ""
-        setStatus({ kind: "ok", msg: `Reinjected ${byCellId.size.toLocaleString()} translations into ${sensesInjected.toLocaleString()} senses${warnNote}` })
+        setStatus({ kind: "ok", msg: `Reinjected ${formatNumber(byCellId.size, locale)} translations into ${formatNumber(sensesInjected, locale)} senses${warnNote}` })
       } else if (runScope === "project") {
         // Client-side project-scope zip: use already-loaded per-file cells.
         if (projectCellsLoading) {

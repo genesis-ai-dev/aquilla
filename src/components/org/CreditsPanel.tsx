@@ -5,6 +5,7 @@ import { ROLE } from "@/lib/frontier/roles"
 import { Section } from "@/components/ui/page"
 import { SegmentedCapBar, RailLegend } from "@/components/credits/credit-visuals"
 import { pctTextClass } from "@/components/credits/rails"
+import { useI18n } from "@/lib/i18n/I18nProvider"
 
 /**
  * Credit cap usage panel for the org Overview (maintainer+ view).
@@ -105,14 +106,15 @@ function CapWindow({
   byRail: Record<string, number>
   window: "day" | "week"
 }) {
+  const { locale } = useI18n()
   const pct = capUsagePct(total, cap)
   return (
     <div>
       <div className="mb-1.5 flex items-baseline justify-between gap-2">
         <span className="text-xs font-medium">{label}</span>
         <span className="text-xs tabular-nums" data-testid={`cap-${window}-total`}>
-          <span className="font-semibold">{formatCredits(total)}</span>
-          <span className="text-muted-foreground"> / {formatCredits(cap)}</span>
+          <span className="font-semibold">{formatCredits(total, locale)}</span>
+          <span className="text-muted-foreground"> / {formatCredits(cap, locale)}</span>
           <span className={`ml-1.5 font-medium ${pctTextClass(pct)}`}>{pct}%</span>
         </span>
       </div>
@@ -136,6 +138,7 @@ function AgentCapRow({
   cap: number
   testId: string
 }) {
+  const { locale } = useI18n()
   const pct = capUsagePct(used, cap)
   return (
     <div className="flex items-center gap-2.5">
@@ -144,7 +147,7 @@ function AgentCapRow({
         <div className="h-full rounded-full bg-amber-500" style={{ width: `${pct}%` }} aria-hidden />
       </div>
       <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground" data-testid={testId}>
-        <span className="font-medium text-foreground">{formatCredits(used)}</span> / {formatCredits(cap)}
+        <span className="font-medium text-foreground">{formatCredits(used, locale)}</span> / {formatCredits(cap, locale)}
         <span className="ml-1">· {pct}%</span>
       </span>
     </div>

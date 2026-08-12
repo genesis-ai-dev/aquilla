@@ -14,6 +14,8 @@
 
 import { X } from "lucide-react"
 import { useMemberActivity } from "@/hooks/useMemberActivity"
+import { useI18n } from "@/lib/i18n/I18nProvider"
+import { formatDateTime } from "@/lib/i18n/format"
 import type { MemberActivityEvent } from "@/lib/sync/member-activity-read-types"
 import { Button } from "@/components/ui/button"
 
@@ -40,9 +42,9 @@ function kindLabel(kind: string): string {
   return KIND_LABELS[kind] ?? kind
 }
 
-function formatTimestamp(ms: number | null): string {
+function formatTimestamp(ms: number | null, locale: string): string {
   if (ms == null) return "—"
-  return new Date(ms).toLocaleString()
+  return formatDateTime(ms, locale)
 }
 
 export interface MemberActivityPanelProps {
@@ -59,6 +61,7 @@ export interface MemberActivityPanelProps {
  * sync-token minter via `getToken`.
  */
 export function MemberActivityPanel({ projectId, username, getToken, onClose }: MemberActivityPanelProps) {
+  const { locale } = useI18n()
   const { events, fileRollup, isLoading, isError } = useMemberActivity({
     projectId,
     author: username,
@@ -101,7 +104,7 @@ export function MemberActivityPanel({ projectId, username, getToken, onClose }: 
                   <li key={f.fileId} className="flex items-center justify-between gap-2 text-xs">
                     <span className="truncate font-medium">{f.fileName}</span>
                     <span className="shrink-0 tabular-nums text-muted-foreground">
-                      {f.cellsTouched} cells · {f.wordCount} words · {formatTimestamp(f.lastActivityAt)}
+                      {f.cellsTouched} cells · {f.wordCount} words · {formatTimestamp(f.lastActivityAt, locale)}
                     </span>
                   </li>
                 ))}
@@ -121,7 +124,7 @@ export function MemberActivityPanel({ projectId, username, getToken, onClose }: 
                   <li key={e.id} className="flex items-center justify-between gap-2 text-xs">
                     <span className="truncate">{kindLabel(e.kind)}</span>
                     <span className="shrink-0 tabular-nums text-muted-foreground">
-                      {formatTimestamp(e.serverTs)}
+                      {formatTimestamp(e.serverTs, locale)}
                     </span>
                   </li>
                 ))}

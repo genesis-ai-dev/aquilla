@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react"
 import { Copy, AlertCircle, Trash2 } from "lucide-react"
+import { useI18n } from "@/lib/i18n/I18nProvider"
+import { formatDate } from "@/lib/i18n/format"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -522,6 +524,7 @@ interface ActiveInvitesListProps {
 }
 
 function ActiveInvitesList({ projectId, jwt, version, onRevoked }: ActiveInvitesListProps) {
+  const { locale } = useI18n()
   const [invites, setInvites] = useState<ActiveProjectInvite[] | null>(null)
   const [loading, setLoading] = useState(false)
   const [revokeTarget, setRevokeTarget] = useState<string | null>(null)
@@ -556,8 +559,7 @@ function ActiveInvitesList({ projectId, jwt, version, onRevoked }: ActiveInvites
 
   function formatExpiry(expiresAt: string | null): string {
     if (!expiresAt) return "No expiry"
-    const d = new Date(expiresAt)
-    return `Expires ${d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}`
+    return `Expires ${formatDate(expiresAt, locale, { month: "short", day: "numeric", year: "numeric" })}`
   }
 
   if (loading && !invites) {

@@ -137,7 +137,8 @@ import { VOICE_ASSIGN_MIME } from "./VoiceLibraryPanel"
 import type { RangeHighlight } from "./HighlightedText"
 import { TermLookupPopover } from "./TermLookupPopover"
 import type { Concept } from "@/lib/terminology/types"
-import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
+import { useT, useI18n, type TFunction } from "@/lib/i18n/I18nProvider"
+import { formatDate } from "@/lib/i18n/format"
 import { RichMessage } from "@/lib/i18n/RichMessage"
 import { useFileFontSizes } from "@/lib/store/file-view-prefs"
 import { getSkipReplaceConfirm, setSkipReplaceConfirm } from "@/lib/store/replace-confirm-pref"
@@ -514,7 +515,7 @@ function ValidationHistoryTimeline({
   entries: import("@/hooks/useCells").EditValidationSummary[]
   currentUsername: string
 }) {
-  const t = useT()
+  const { t, locale } = useI18n()
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null)
   // entries are value-editMap only, oldest-first. The last entry IS the current
   // state (already shown above the divider), so skip it. Show remaining newest-first.
@@ -530,7 +531,7 @@ function ValidationHistoryTimeline({
           const snippet = typeof entry.value === "string"
             ? (entry.value.length > 40 ? entry.value.slice(0, 40) + "…" : entry.value)
             : ""
-          const date = new Date(entry.timestamp).toLocaleDateString(undefined, { month: "short", day: "numeric" })
+          const date = formatDate(entry.timestamp, locale, { month: "short", day: "numeric" })
           const authors = entry.authors.join(", ")
           const expanded = expandedIdx === i
           return (
@@ -562,7 +563,7 @@ function ValidationHistoryTimeline({
                     >
                       <span>{v.username}{v.username === currentUsername ? ` ${t("editor.validation.you")}` : ""}</span>
                       <span className="text-muted-foreground/60 ml-auto">
-                        {new Date(v.updatedTimestamp).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+                        {formatDate(v.updatedTimestamp, locale, { month: "short", day: "numeric" })}
                       </span>
                     </li>
                   ))}

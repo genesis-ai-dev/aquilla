@@ -15,6 +15,8 @@ import { AppTooltip } from "@/components/ui/tooltip"
 import { Spinner } from "@/components/ui/spinner"
 import { cellTextForDisplay, truncateCellText } from "@/lib/cell-text"
 import { parseTimestampRange } from "@/lib/video/vtt-generator"
+import { useI18n } from "@/lib/i18n/I18nProvider"
+import { formatTime } from "@/lib/i18n/format"
 import type { CellData } from "@/hooks/useCells"
 import type {
   CheckRunResult,
@@ -58,9 +60,8 @@ export function termFindingHeadline(f: TermConsistencyFinding): string {
     : usePart
 }
 
-function formatRunTime(iso: string): string {
-  const d = new Date(iso)
-  return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })
+function formatRunTime(iso: string, locale: string): string {
+  return formatTime(iso, locale, { hour: "numeric", minute: "2-digit" })
 }
 
 /** SUB-5: human title for a finding card. Prefer the cell's label (verse ref);
@@ -217,6 +218,7 @@ export function CheckFindingsDrawer({
   onNavigateToCell,
   onOpenComments,
 }: CheckFindingsDrawerProps) {
+  const { locale } = useI18n()
   const cellMap = new Map(cells.map((c) => [c.id, c]))
 
   const flaggedTermFindings = result?.termFindings.filter((f) => f.flaggedCells.length > 0) ?? []
@@ -253,7 +255,7 @@ export function CheckFindingsDrawer({
       ) : (
         <>
           <div className="shrink-0 truncate border-b px-3 py-2 text-xs text-muted-foreground">
-            Checked {checkScopeSummary(result)} · {formatRunTime(result.ranAt)}
+            Checked {checkScopeSummary(result)} · {formatRunTime(result.ranAt, locale)}
           </div>
 
           {result.totalFindingCount === 0 ? (

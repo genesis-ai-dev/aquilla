@@ -2,24 +2,33 @@
 // Subscribes to the batch-audio progress store; renders nothing when idle.
 
 import { X } from "lucide-react"
+import { useT } from "@/lib/i18n/I18nProvider"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
 import {
   useBatchProgress,
   cancelBatchTranscribe,
   cancelBatchSynth,
+  cancelBatchMeasure,
 } from "@/lib/audio/batch-audio"
 
 export function AudioBulkProgressBanner() {
+  const t = useT()
   const progress = useBatchProgress()
   if (!progress) return null
 
   const { kind, total, done, cancelled } = progress
   const pct = total > 0 ? Math.round((done / total) * 100) : 0
-  const label = kind === "transcribe" ? "Transcribing" : "Synthesizing"
+  const label =
+    kind === "transcribe"
+      ? t("common.transcribing")
+      : kind === "synth"
+        ? t("common.synthesizing")
+        : t("common.measuringLengths")
   const handleCancel = () => {
     if (kind === "transcribe") cancelBatchTranscribe()
-    else cancelBatchSynth()
+    else if (kind === "synth") cancelBatchSynth()
+    else cancelBatchMeasure()
   }
 
   return (
@@ -35,13 +44,13 @@ export function AudioBulkProgressBanner() {
         {done}/{total}
       </span>
       {!cancelled && (
-        <AppTooltip content="Cancel batch">
+        <AppTooltip content={t("audio.bulkProgress.cancelTooltip")}>
           <Button
             type="button"
             variant="ghost"
             size="icon-xs"
             onClick={handleCancel}
-            aria-label="Cancel batch"
+            aria-label={t("audio.bulkProgress.cancelTooltip")}
             className="ml-1 text-muted-foreground"
           >
             <X />
@@ -49,7 +58,7 @@ export function AudioBulkProgressBanner() {
         </AppTooltip>
       )}
       {cancelled && (
-        <span className="text-muted-foreground">cancelling…</span>
+        <span className="text-muted-foreground">{t("common.cancelling")}</span>
       )}
     </div>
   )

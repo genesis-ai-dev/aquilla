@@ -132,6 +132,74 @@ describe("ApproveChangeset", () => {
     expect(screen.queryByText(/No changes summarized/i)).not.toBeInTheDocument()
   })
 
+  it("renders per-cell before/after changes and a back-to-project link", async () => {
+    const data = {
+      ...APPROVAL_DATA,
+      changes: {
+        total: 202,
+        truncated: true,
+        items: [
+          {
+            fileId: "file-1",
+            fileName: "Genesis",
+            cellId: "c-a",
+            canonicalRef: "GEN 1:1",
+            source: "In the beginning",
+            before: "Old draft",
+            after: "New draft",
+          },
+          {
+            fileId: "file-1",
+            fileName: "Genesis",
+            cellId: "c-b",
+            canonicalRef: "GEN 1:2",
+            source: "And the earth",
+            before: null,
+            after: "Fresh translation",
+          },
+        ],
+      },
+    }
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(data), { status: 200 }))
+    vi.stubGlobal("fetch", fetchMock)
+
+    renderPage()
+
+    expect(await screen.findByText(/Changes \(202\)/)).toBeInTheDocument()
+    expect(screen.getByText(/GEN 1:1/)).toBeInTheDocument()
+    expect(screen.getByText("Old draft")).toBeInTheDocument()
+    expect(screen.getByText("New draft")).toBeInTheDocument()
+    expect(screen.getByText("Fresh translation")).toBeInTheDocument()
+    // 202 total, 2 shown — the truncation notice keeps the reviewer honest.
+    expect(screen.getByText(/and 200 more changes/i)).toBeInTheDocument()
+    const back = screen.getByRole("link", { name: /back to Blackfoot/i })
+    expect(back).toHaveAttribute("href", "/project/proj-1")
+  })
+
+  it("renders an import preview for a PlanImport changeset", async () => {
+    const data = {
+      ...APPROVAL_DATA,
+      importPreview: {
+        fileName: "genesis.usfm",
+        fileType: "usfm",
+        totalCells: 25,
+        sampleCells: [
+          { canonicalRef: "GEN 1:1", content: "In the beginning" },
+          { canonicalRef: "GEN 1:2", content: "And the earth" },
+        ],
+      },
+    }
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(data), { status: 200 }))
+    vi.stubGlobal("fetch", fetchMock)
+
+    renderPage()
+
+    expect(await screen.findByText(/Import preview/i)).toBeInTheDocument()
+    expect(screen.getByText(/genesis\.usfm/)).toBeInTheDocument()
+    expect(screen.getByText("In the beginning")).toBeInTheDocument()
+    expect(screen.getByText(/and 23 more cells/i)).toBeInTheDocument()
+  })
+
   it("shows a not-authorized message on 403", async () => {
     const fetchMock = vi.fn(async () => {
       return new Response(

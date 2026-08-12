@@ -35,7 +35,17 @@ try {
       }`,
     )
   }
-  browser = await chromium.launch({ headless: true })
+  const launchOptions = process.env.WORKERS_CI === "1"
+    ? await (async () => {
+        const { default: serverlessChromium } = await import("@sparticuz/chromium")
+        return {
+          args: serverlessChromium.args,
+          executablePath: await serverlessChromium.executablePath(),
+          headless: true as const,
+        }
+      })()
+    : { headless: true as const }
+  browser = await chromium.launch(launchOptions)
   const page = await browser.newPage()
   await page.goto(`${baseUrl}/fixtures/browser.html`)
   const report = await page.evaluate(async () => {

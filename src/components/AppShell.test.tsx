@@ -9,7 +9,9 @@
 import { describe, it, expect } from "vitest"
 import { MemoryRouter, useLocation, useNavigate } from "react-router-dom"
 import { render, screen, fireEvent } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { AppShell } from "./AppShell"
+import { I18nProvider } from "@/lib/i18n/I18nProvider"
 
 function AlwaysThrows(): never {
   throw new Error("main content crash")
@@ -109,5 +111,50 @@ describe("AppShell main-content error containment", () => {
     )
 
     expect(container.querySelector('[data-slot="app-shell-header"]')).toHaveClass("h-[52px]", "min-h-[52px]", "justify-center")
+  })
+
+  it("offers a UI-language control in the chrome when an I18nProvider is present", async () => {
+    render(
+      <MemoryRouter>
+        <I18nProvider>
+          <AppShell
+            header={<div data-testid="header">header</div>}
+            statusBar={<div data-testid="status-bar">status</div>}
+            sidebar={<div data-testid="sidebar">sidebar</div>}
+            main={<div data-testid="content">content</div>}
+          />
+        </I18nProvider>
+      </MemoryRouter>,
+    )
+    // Distinct from the Preferences page's own switcher (finding 8) so a
+    // screen reader never announces the same name twice with nothing to tell
+    // the two apart.
+    const trigger = await screen.findByRole("button", { name: "Quick language switch" })
+    expect(trigger).toBeInTheDocument()
+    // The picker must list endonyms, not English names — a Burmese speaker
+    // looking for their language will not scan for the word "Burmese".
+    await userEvent.click(trigger)
+    expect(await screen.findByRole("menuitemradio", { name: /မြန်မာ/ })).toBeInTheDocument()
+  })
+
+  it("keeps the language control reachable in the leftDock (project workspace) layout", async () => {
+    render(
+      <MemoryRouter>
+        <I18nProvider>
+          <AppShell
+            header={<div data-testid="header">header</div>}
+            statusBar={<div data-testid="status-bar">status</div>}
+            leftDock={<div data-testid="left-dock">dock</div>}
+            main={<div data-testid="content">content</div>}
+          />
+        </I18nProvider>
+      </MemoryRouter>,
+    )
+    // ProjectWorkspace is the only caller that passes leftDock, and it is the
+    // screen a translator works in all day. If the switcher only rendered in the
+    // org-chrome layout, changing UI language would mean leaving your work.
+    expect(
+      await screen.findByRole("button", { name: "Quick language switch" }),
+    ).toBeInTheDocument()
   })
 })

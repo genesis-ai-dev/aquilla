@@ -97,11 +97,13 @@ describe("DenoiseButton", () => {
     expect(emitSelect).toHaveBeenCalledWith(
       expect.objectContaining({ audioId: "audio-a.webm", slot: "recording", cellId: "c1" }),
     )
-    // Optimistic re-inject of the original flips selection instantly.
+    // Optimistic re-inject of the original flips selection instantly, bound to
+    // the select event so it lives exactly as long as that event is queued.
     expect(inject).toHaveBeenCalledWith(
       "f1",
       "c1",
       expect.objectContaining({ audioId: "audio-a.webm", slot: "recording" }),
+      expect.anything(),
     )
     expect(notify).toHaveBeenCalledWith("f1")
   })

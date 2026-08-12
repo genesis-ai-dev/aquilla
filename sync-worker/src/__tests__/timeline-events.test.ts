@@ -90,3 +90,37 @@ describe("file.video.set projection", () => {
     expect(recorded[0].args).toEqual(["evt-1", "f1", "p1"])
   })
 })
+
+describe("file.timing.set projection (pre-merge round: file-level timing mode)", () => {
+  it("is maintainer-gated and non-chain-mutating", async () => {
+    const { REQUIRED_ROLE } = await import("../events/role-policy")
+    const { isChainMutatingKind } = await import("../events/event-projection")
+    expect(REQUIRED_ROLE["file.timing.set"]).toBe(600)
+    expect(isChainMutatingKind("file.timing.set")).toBe(false)
+  })
+
+  it("merges timingMode into files.meta and advances event_id", () => {
+    const { db, recorded } = makeRecordingDb()
+    const touches = buildEventProjectionStmts(
+      db,
+      makeEvent("file.timing.set", { timingMode: "audioFirst" }, { cellId: null }),
+      [],
+    )
+    expect(touches).toEqual(["files"])
+    expect(recorded).toHaveLength(1)
+    expect(recorded[0].sql).toContain("UPDATE files")
+    expect(recorded[0].sql).toContain("jsonb_build_object('timingMode'")
+    expect(recorded[0].args).toEqual(["audioFirst", "evt-1", "f1", "p1"])
+  })
+
+  it("removes the timingMode key when null — the file falls back to the project default", () => {
+    const { db, recorded } = makeRecordingDb()
+    buildEventProjectionStmts(
+      db,
+      makeEvent("file.timing.set", { timingMode: null }, { cellId: null }),
+      [],
+    )
+    expect(recorded[0].sql).toContain("- 'timingMode'")
+    expect(recorded[0].args).toEqual(["evt-1", "f1", "p1"])
+  })
+})

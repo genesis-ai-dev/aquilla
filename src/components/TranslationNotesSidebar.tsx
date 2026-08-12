@@ -23,6 +23,8 @@ import { fetchProjectFiles, fetchFileCells } from "@/lib/sync/cells-read"
 import { cn } from "@/lib/utils"
 import { BookOpen, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { useT } from "@/lib/i18n/I18nProvider"
+import { RichMessage } from "@/lib/i18n/RichMessage"
 
 // Sentinel fileId for project-scoped token mints (no specific file).
 // Must match the "__project__" sentinel used by useComments,
@@ -84,6 +86,7 @@ export function TranslationNotesSidebar({
   onToggle,
   className,
 }: TranslationNotesSidebarProps) {
+  const t = useT()
   const [notes, setNotes] = useState<TnNote[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -188,7 +191,7 @@ export function TranslationNotesSidebar({
       <div className="flex items-center justify-between border-b p-2">
         <div className="flex items-center gap-1.5 font-medium">
           <BookOpen className="h-4 w-4 text-muted-foreground" />
-          <span>Translation Notes</span>
+          <span>{t("editor.tn.title")}</span>
           {canonicalRef && (
             <span className="rounded bg-muted px-1 py-0.5 text-xs font-mono text-muted-foreground">
               {canonicalRef}
@@ -199,7 +202,7 @@ export function TranslationNotesSidebar({
           type="button"
           variant="ghost"
           size="icon-sm"
-          aria-label="Hide translation notes"
+          aria-label={t("editor.tn.hide")}
           onClick={onToggle}
           className="text-muted-foreground"
         >
@@ -211,15 +214,20 @@ export function TranslationNotesSidebar({
       <div className="flex-1 overflow-y-auto">
         {!canonicalRef ? (
           <p className="p-4 text-xs text-muted-foreground">
-            Focus a translation cell to see notes for that verse.
+            {t("editor.tn.focusHint")}
           </p>
         ) : loading ? (
-          <p className="p-4 text-xs text-muted-foreground">Loading…</p>
+          <p className="p-4 text-xs text-muted-foreground">{t("common.loading")}</p>
         ) : error ? (
           <p className="p-4 text-xs text-destructive">{error}</p>
         ) : notes.length === 0 ? (
           <p className="p-4 text-xs text-muted-foreground">
-            No translation notes for <span className="font-mono">{canonicalRef}</span>.
+            {/* Same ref, same monospacing as the badge in the header above — a
+                reference reads as data wherever this panel shows one. */}
+            <RichMessage
+              k="editor.tn.noneForRef"
+              values={{ ref: <span className="font-mono">{canonicalRef}</span> }}
+            />
           </p>
         ) : (
           <div className="divide-y">

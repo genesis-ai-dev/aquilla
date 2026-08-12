@@ -8,9 +8,12 @@ import { LoadingTemplate } from "@/components/ui/loading-overlay"
 import { EmptyState } from "@/components/ui/page"
 import { Skeleton } from "@/components/ui/skeleton"
 import type { CellAreaState } from "@/lib/editor/cell-area-state"
+import { useT } from "@/lib/i18n/I18nProvider"
 
-/** Matches EditorTable's gridCols — keep in sync if the table's columns change. */
-const GRID_COLS = "grid-cols-[56px_1fr_1fr_56px]"
+/** Matches EditorTable's default gridCols (the Text lens shape — the stacked
+ *  media lens widens the gutter, but this skeleton always precedes text
+ *  mode). Keep in sync if the table's columns change. */
+const GRID_COLS = "grid-cols-[84px_1fr_1fr]"
 
 interface CellAreaPlaceholderProps {
   state: CellAreaState
@@ -59,18 +62,23 @@ function LoadError({
   fileName?: string
   onRetryClick?: () => void
 }) {
+  const t = useT()
   return (
     <EmptyState
       variant="inline"
       className="h-full p-8"
       icon={CloudOff}
-      title={fileName ? `Couldn't load ${fileName}` : "Couldn't load this file"}
-      description="The file is still safe. Check your connection and try loading it again."
+      title={
+        fileName
+          ? t("editor.file.loadErrorTitleNamed", { fileName })
+          : t("editor.file.loadErrorTitle")
+      }
+      description={t("editor.file.loadErrorBody")}
       action={
         onRetryClick ? (
           <Button size="sm" variant="outline" onClick={onRetryClick}>
             <RefreshCw data-icon="inline-start" />
-            Retry loading file
+            {t("editor.file.retryLoad")}
           </Button>
         ) : undefined
       }
@@ -79,9 +87,14 @@ function LoadError({
 }
 
 function SkeletonRows() {
+  const t = useT()
+  // AQU-819: this state is a plain read — the cells projection is being
+  // fetched, or the socket hasn't finished connecting yet. Nothing is being
+  // pushed or pulled on the user's behalf, so it must not say "Syncing";
+  // that word is reserved for the outbox/edit-flush indicators.
   return (
     <LoadingTemplate
-      label="Syncing file from the cloud"
+      label={t("editor.file.loadingFromCloud")}
       className="h-full min-h-64"
       templateClassName="min-h-64"
       data-testid="cell-area-loading"
@@ -111,6 +124,7 @@ function NoFileEmpty({
   filesLoaded?: boolean
   onImportClick?: () => void
 }) {
+  const t = useT()
   // AQU-149: while the file list hasn't loaded yet, show the neutral "No file
   // selected" copy. We must NOT show "No files yet — Import a file" here because
   // projectFiles is transiently empty (server fetch still in flight) even on
@@ -123,8 +137,8 @@ function NoFileEmpty({
         variant="inline"
         className="h-full p-8"
         icon={FolderOpen}
-        title="No file selected"
-        description="Pick a file from the sidebar to start translating."
+        title={t("editor.file.noneSelectedTitle")}
+        description={t("editor.file.noneSelectedBody")}
       />
     )
   }
@@ -137,13 +151,13 @@ function NoFileEmpty({
         variant="inline"
         className="h-full p-8"
         icon={Upload}
-        title="No files yet"
-        description="Import a file to get started."
+        title={t("editor.file.noFilesTitle")}
+        description={t("editor.file.noFilesBody")}
         action={
           onImportClick ? (
             <Button size="sm" onClick={onImportClick}>
               <Upload data-icon="inline-start" />
-              Import a file
+              {t("editor.file.importFile")}
             </Button>
           ) : undefined
         }
@@ -155,8 +169,8 @@ function NoFileEmpty({
       variant="inline"
       className="h-full p-8"
       icon={FolderOpen}
-      title="No file selected"
-      description="Pick a file from the sidebar to start translating."
+      title={t("editor.file.noneSelectedTitle")}
+      description={t("editor.file.noneSelectedBody")}
     />
   )
 }
@@ -168,18 +182,23 @@ function ReadyEmpty({
   fileName?: string
   onImportClick?: () => void
 }) {
+  const t = useT()
   return (
     <EmptyState
       variant="inline"
       className="h-full p-8"
       icon={FileText}
-      title={fileName ? `${fileName} is empty` : "This file has no cells yet"}
-      description="Import content, or start typing in the first cell."
+      title={
+        fileName
+          ? t("editor.file.emptyNamedTitle", { fileName })
+          : t("editor.file.emptyTitle")
+      }
+      description={t("editor.file.emptyBody")}
       action={
         onImportClick ? (
           <Button size="sm" onClick={onImportClick}>
             <Sparkles data-icon="inline-start" />
-            Import content
+            {t("editor.file.importContent")}
           </Button>
         ) : undefined
       }

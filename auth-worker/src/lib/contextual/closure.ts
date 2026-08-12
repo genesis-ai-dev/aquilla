@@ -276,6 +276,7 @@ export async function construeScene(deps: ConstrueSceneDeps): Promise<ClosureRes
       tier: "mid",
       maxTokens: 1024,
       temperature: 0,
+      label: "construe",
     })
     const construal = parseConstrualReply(reply, seed.id)
     if (!construal) {

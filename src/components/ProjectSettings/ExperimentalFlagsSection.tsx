@@ -11,6 +11,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { FieldLabel } from "@/components/ui/field"
 import { Switch } from "@/components/ui/switch"
 import { FLAGS } from "@/lib/features/flags"
+import { useI18n } from "@/lib/i18n/I18nProvider"
 import { getProject, patchProject, updateProject } from "@/lib/store/project-index"
 import type { ProjectRecord } from "@/lib/parsers/types"
 
@@ -25,6 +26,7 @@ export function ExperimentalFlagsSection({
    *  which would make the toggle a no-op on first visit. */
   serverProject?: ProjectRecord
 }) {
+  const { t } = useI18n()
   const [flags, setFlags] = useState<Record<string, boolean> | undefined>(undefined)
 
   // Seed from IDB directly — the parent's `project` comes from the server
@@ -54,20 +56,19 @@ export function ExperimentalFlagsSection({
   return (
     <Card id="section-experimental">
       <CardHeader>
-        <CardTitle>Experimental</CardTitle>
+        <CardTitle>{t("autopilot.settings.experimentalTitle")}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
         <p className="text-xs text-muted-foreground">
-          Early features still in development. These switches stay on this device — they are not
-          shared with collaborators.
+          {t("autopilot.settings.experimentalDescription")}
         </p>
         {Object.entries(FLAGS).map(([key, def]) => (
           <div key={key} className="flex items-start justify-between gap-4">
             <div className="space-y-0.5">
               <FieldLabel htmlFor={`experimental-${key}`} className="text-sm">
-                {def.label}
+                {t(def.labelKey)}
               </FieldLabel>
-              <p className="text-xs text-muted-foreground">{def.description}</p>
+              <p className="text-xs text-muted-foreground">{t(def.descriptionKey)}</p>
             </div>
             <Switch
               id={`experimental-${key}`}

@@ -112,6 +112,22 @@ describe("SearchResultsView", () => {
     expect(screen.getByText(/2 results in 1 file/)).toBeInTheDocument()
   })
 
+  it("shows the query in the header, whole-sentence rather than glued fragments", () => {
+    render(
+      <SearchResultsView
+        query="God"
+        results={[makeResult()]}
+        onJumpToResult={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    )
+    // AQU-511 wave-3 finding 3: "for" and the quoted query used to be two
+    // separately translated fragments glued together in fixed JSX order.
+    // They are now one catalog key ("search.expanded.forQuery") — see the
+    // sibling reorder-proof test in SearchResultsView.i18n.test.tsx.
+    expect(screen.getByText(/for\s+.God./)).toBeInTheDocument()
+  })
+
   it("WHY: onJumpToResult must be called — if not, click-to-jump from expanded view is broken", () => {
     // This test encodes the core invariant: every result row must fire onJumpToResult
     // so that ProjectWorkspace can scroll the editor to the clicked cell.

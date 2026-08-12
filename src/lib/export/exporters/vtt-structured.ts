@@ -8,6 +8,7 @@
 //      <v Name> cues exports with the same voices without any project setup.
 // exportVtt is untouched (C7: existing behavior stays byte-identical).
 import type { CellData } from "@/hooks/useCells"
+import { effectiveSourceText } from "@/lib/cell-text"
 import { escapeVoiceName } from "@/lib/export/vtt-voice"
 
 const pad = (n: number, w = 2): string => String(n).padStart(w, "0")
@@ -30,7 +31,7 @@ export function exportVttStructured(cells: CellData[]): Blob {
   const cues: string[] = []
   for (const cell of cells as SpeakerCell[]) {
     if (cell.startTime == null || cell.endTime == null) continue
-    const text = (cell.translated || cell.original || "").trim()
+    const text = (cell.translated || effectiveSourceText(cell) || "").trim()
     if (!text) continue
     const payload = cell.speaker ? `<v ${escapeVoiceName(cell.speaker)}>${text}</v>` : text
     cues.push(`${formatVttTimeFull(cell.startTime)} --> ${formatVttTimeFull(cell.endTime)}\n${payload}`)

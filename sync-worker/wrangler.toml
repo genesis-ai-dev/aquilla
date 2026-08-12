@@ -19,6 +19,9 @@ ENVIRONMENT = "local"
 # Identity worker base URL for the Monday-integration push nudge
 # (src/monday-notify.ts). Local dev stack runs identity on 8788.
 AUTH_WORKER_URL = "http://127.0.0.1:8788"
+# SPA host for the ask-mode approval deep link (external/prepare.ts
+# approvalUrlFor). Local dev stack serves the SPA via Vite on 5173.
+BASE_URL = "http://localhost:5173"
 
 # =============================================================================
 # ROUTE / ENV CONVENTION — same pattern as auth-worker
@@ -120,13 +123,19 @@ command = "bash ../scripts/verify-deploy-branch.sh main"
 [env.production.observability]
 enabled = true
 
+[env.production.version_metadata]
+binding = "CF_VERSION_METADATA"
+
 [env.production.vars]
 ENVIRONMENT = "production"
+DEPLOYMENT_WORKER_NAME = "aquilla-sync-worker"
 # PostHog *project* token (public — same one shipped in the SPA bundle).
 # Enables 4xx/5xx log shipping to PostHog Logs (src/posthog-logs.ts).
 POSTHOG_KEY = "phc_oTksJRNEdLEaLD4wmdd2XcR4xaR4n52eA5VGDytW55Ln"
 # Identity worker base for the Monday-integration push nudge (monday-notify.ts).
 AUTH_WORKER_URL = "https://api.aquilla.app/identity"
+# SPA host for the ask-mode approval deep link (external/prepare.ts).
+BASE_URL = "https://aquilla.app"
 
 [[env.production.durable_objects.bindings]]
 name = "ProjectSync"
@@ -175,10 +184,16 @@ name = "aquilla-sync-worker-dev"
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 routes = ["api.dev.aquilla.app/sync/*"]
 
+[env.development.version_metadata]
+binding = "CF_VERSION_METADATA"
+
 [env.development.vars]
 ENVIRONMENT = "development"
+DEPLOYMENT_WORKER_NAME = "aquilla-sync-worker-dev"
 # Identity worker base for the Monday-integration push nudge (monday-notify.ts).
 AUTH_WORKER_URL = "https://api.dev.aquilla.app/identity"
+# SPA host for the ask-mode approval deep link (external/prepare.ts).
+BASE_URL = "https://dev.aquilla.app"
 
 [[env.development.durable_objects.bindings]]
 name = "ProjectSync"

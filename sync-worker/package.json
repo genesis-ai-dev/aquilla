@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
+    "build:workers-build": "node ../scripts/assert-workers-build-env.mjs && pnpm run type-check && pnpm test",
+    "deploy:workers-build": "node ../scripts/cloudflare-build-deploy.mjs sync",
     "deploy": "pnpm --dir .. run deploy:aquilla:sync",
     "type-check": "tsc --noEmit",
     "test": "vitest run"

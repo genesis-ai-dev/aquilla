@@ -445,6 +445,19 @@ describe("lane select (AQU-538)", () => {
     expect(laneTrigger.textContent).toMatch(/fr/i)
   })
 
+  // AQU-511 wave-3 finding 4: the italic on "can" is what distinguishes assigning
+  // work (this field) from gating who may EDIT a lane (a separate staffing
+  // setting) — flattened to plain text the sentence reads as a truism. Assert
+  // the element, not just the text, so this can't regress back to a plain
+  // string interpolation that merely contains the word "can".
+  it("keeps 'can' emphasised (not flattened to plain text) in the lane helper text", () => {
+    render(<AssignModal {...BASE_PROPS} targetLanes={["es", "fr"]} defaultLane="fr" />)
+    const emphasised = screen.getByText("can", { selector: "em" })
+    expect(emphasised.tagName).toBe("EM")
+    expect(screen.getByText(/Restricting who/)).toBeInTheDocument()
+    expect(screen.getByText(/edit a lane is separate/)).toBeInTheDocument()
+  })
+
   it("threads the pre-filled lane into createAssignment as targetLang", async () => {
     render(<AssignModal {...BASE_PROPS} targetLanes={["es", "fr"]} defaultLane="es" />)
     await pickSelectOption(/assign to/i, /anna/)

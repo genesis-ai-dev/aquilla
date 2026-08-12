@@ -52,6 +52,7 @@ vi.mock("@/hooks/useProject", () => ({
     isUnreachable: false,
     refresh: vi.fn(),
     patchSettings: mockPatch,
+    settingsFetched: true,
   })),
 }))
 
@@ -114,6 +115,7 @@ describe("LivingMemoryPage — purpose copy", () => {
       roleLevel: null,
       pm: null,      refresh: vi.fn(),
       patchSettings: mockPatch,
+      settingsFetched: true,
     })
     vi.mocked(useProjectSettings).mockReturnValue({ ...mockProjectSettingsReturn })
   })
@@ -143,6 +145,7 @@ describe("LivingMemoryPage — empty states", () => {
       roleLevel: null,
       pm: null,      refresh: vi.fn(),
       patchSettings: mockPatch,
+      settingsFetched: true,
     })
     vi.mocked(useProjectSettings).mockReturnValue({
       ...mockProjectSettingsReturn,
@@ -187,6 +190,7 @@ describe("LivingMemoryPage — role-gated edit affordances", () => {
       roleLevel: null,
       pm: null,      refresh: vi.fn(),
       patchSettings: mockPatch,
+      settingsFetched: true,
     })
     vi.mocked(useProjectSettings).mockReturnValue({
       ...mockProjectSettingsReturn,
@@ -213,6 +217,7 @@ describe("LivingMemoryPage — role-gated edit affordances", () => {
       roleLevel: null,
       pm: null,      refresh: vi.fn(),
       patchSettings: mockPatch,
+      settingsFetched: true,
     })
     vi.mocked(useProjectSettings).mockReturnValue({
       ...mockProjectSettingsReturn,
@@ -235,6 +240,7 @@ describe("LivingMemoryPage — role-gated edit affordances", () => {
       roleLevel: null,
       pm: null,      refresh: vi.fn(),
       patchSettings: mockPatch,
+      settingsFetched: true,
     })
     vi.mocked(useProjectSettings).mockReturnValue({
       ...mockProjectSettingsReturn,
@@ -262,6 +268,7 @@ describe("LivingMemoryPage — role-gated edit affordances", () => {
       roleLevel: null,
       pm: null,      refresh: vi.fn(),
       patchSettings: mockPatch,
+      settingsFetched: true,
     })
     vi.mocked(useProjectSettings).mockReturnValue({
       ...mockProjectSettingsReturn,
@@ -284,6 +291,7 @@ describe("LivingMemoryPage — role-gated edit affordances", () => {
       roleLevel: null,
       pm: null,      refresh: vi.fn(),
       patchSettings: mockPatch,
+      settingsFetched: true,
     })
     vi.mocked(useProjectSettings).mockReturnValue({
       ...mockProjectSettingsReturn,

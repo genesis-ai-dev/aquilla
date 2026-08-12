@@ -316,6 +316,11 @@ async function main(): Promise<void> {
     // strips the `/chat` prefix the same way production `api.*.aquilla.app/chat` does.
     VITE_CHAT_BASE: `http://127.0.0.1:${IDENTITY_PORT}/chat`,
     VITE_SYNC_WORKER_HOST: `127.0.0.1:${SYNC_WORKER_PORT}`,
+    // Pin Google Drive import to unconfigured regardless of the developer's
+    // .env.local — import-dialog.smoke.spec asserts the not-configured notice,
+    // and real creds leaking into the e2e build would flip that panel state.
+    VITE_GOOGLE_CLIENT_ID: "",
+    VITE_GOOGLE_API_KEY: "",
   }
 
   // 0. Free our managed ports — survives stale processes from a prior aborted run.

@@ -43,6 +43,7 @@
 | AI          | Agent drafts open file → editor-tab workbench accept-all lands in editor → undo restores pre-draft text | `e2e/specs/ai/agent-draft.spec.ts` (mock OpenRouter via e2e-up)     |        |
 | AI          | Contextual run: enable flag, play pill → autonomous run parks with staged drafts + scene briefs; steer via "Direct the run" popover (queued-direction chip) | `e2e/specs/contextual/run-pill.smoke.spec.ts` (server-side mock LLM via [[ctx]] markers) | ✅ |
 | Editor      | Import dialog escalates an unsupported container to the isolated parser, previews normalized source/target units, then commits through ImportService | `e2e/specs/agent-import.spec.ts` (container-gated with `AGENT_SANDBOX_E2E=1`) | |
+| AI          | External agent stages a SetTranslation changeset (aqk_ credential, Agent API) → commit gated on human approval → approve via `/approve/:id` page AND in-chat ChangesetCard → commit lands in editor | `e2e/specs/agent/changeset-approval.spec.ts` | |
 | Collab      | File propagates from alice to bob                    | `e2e/specs/collab/file-propagation.smoke.spec.ts` (API project bootstrap)  | ✅ |
 | Collab      | Concurrent cell edit propagates alice → bob          | `e2e/specs/collab/concurrent-edit.smoke.spec.ts` (API project bootstrap)   | ✅ |
 | Collab      | Conflict resolution on same cell                     | _gap — Plan 2_                                                |        |
@@ -191,6 +192,7 @@
 | Editor      | No-file placeholder renders when no file open         | `e2e/specs/editor/editor-no-file-placeholder.smoke.spec.ts`   |   ✅   |
 | Editor      | Sidebar corpus collapse toggle                        | `e2e/specs/editor/sidebar-corpus-collapse.smoke.spec.ts`      |   ✅   |
 | Editor      | Import dialog opens and shows upload/eBible options   | `e2e/specs/editor/import-dialog.smoke.spec.ts`                |   ✅   |
+| Editor      | Import dialog offers Google Drive; picker/OAuth flow itself is manual-QA only (external Google dependency, AQU-823) | `e2e/specs/editor/import-dialog.smoke.spec.ts`                |   ✅   |
 | Editor      | eBible import search/select and imported file persists across reload | `e2e/specs/editor/import-dialog-ebible.smoke.spec.ts` + `import-dialog-ebible-search.smoke.spec.ts` + `import-ebible-persists-reload.smoke.spec.ts` | ✅ |
 | Editor      | Export scope toggle (file vs project)                 | `e2e/specs/editor/export-scope-toggle.smoke.spec.ts`          |   ✅   |
 | Editor      | Export lossy format warning badge                     | `e2e/specs/editor/export-lossy-warning.smoke.spec.ts`         |   ✅   |

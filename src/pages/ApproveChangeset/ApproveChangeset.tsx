@@ -8,13 +8,19 @@
 // is provably what the server staged.
 
 import { useCallback, useEffect, useState } from "react"
-import { useParams } from "react-router-dom"
-import { AlertCircle, CheckCircle2, XCircle } from "lucide-react"
+import { Link, useParams } from "react-router-dom"
+import { AlertCircle, ArrowLeft, CheckCircle2, XCircle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { AUTH_BASE } from "@/lib/frontier/auth"
+import {
+  ChangeList,
+  ImportPreviewView,
+  type ChangesetChanges,
+  type ChangesetImportPreview,
+} from "@/components/changesets/ChangeList"
 
 interface ApprovalSummary {
   warnings?: { message: string }[]
@@ -32,6 +38,10 @@ interface ApprovalData {
   status: string
   autonomyMode: string
   summary: ApprovalSummary
+  /** Per-cell before/after detail (SetTranslation commands), capped server-side. */
+  changes?: ChangesetChanges
+  /** Sample cells for a PlanImport command. */
+  importPreview?: ChangesetImportPreview
   digest: string
   createdAt: string
   expiresAt: string
@@ -144,7 +154,7 @@ export function ApproveChangeset() {
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background p-4">
-      <Card className="w-full max-w-lg">
+      <Card className="w-full max-w-2xl">
         <CardHeader>
           <CardTitle className="text-lg">Approve agent changes</CardTitle>
         </CardHeader>
@@ -168,6 +178,7 @@ export function ApproveChangeset() {
               <p className="text-sm font-medium">
                 Approved — return to your agent, it can now commit.
               </p>
+              <BackToProjectLink data={load.phase === "loaded" ? load.data : null} />
             </div>
           ) : action.phase === "rejected" ? (
             <div className="flex flex-col items-center gap-2 py-4 text-center">
@@ -175,6 +186,7 @@ export function ApproveChangeset() {
               <p className="text-sm font-medium">
                 Rejected — the changeset was discarded.
               </p>
+              <BackToProjectLink data={load.phase === "loaded" ? load.data : null} />
             </div>
           ) : load.phase === "loading" ? (
             <div className="flex items-center gap-2 py-1">
@@ -200,6 +212,22 @@ export function ApproveChangeset() {
         </CardContent>
       </Card>
     </div>
+  )
+}
+
+/** Post-action escape hatch: approving used to strand the reviewer on this
+ *  full-screen page with only the browser back button (Joel's feedback) —
+ *  always offer the way back into the project. */
+function BackToProjectLink({ data }: { data: ApprovalData | null }) {
+  if (!data) return null
+  return (
+    <Link
+      to={`/project/${data.projectId}`}
+      className="mt-1 inline-flex items-center gap-1 text-xs text-muted-foreground underline-offset-2 hover:underline"
+    >
+      <ArrowLeft className="h-3 w-3" />
+      Back to {data.projectName ?? "project"}
+    </Link>
   )
 }
 
@@ -266,6 +294,26 @@ function ApprovalSummaryView({
         )}
       </div>
 
+      {data.changes && data.changes.items.length > 0 && (
+        <div className="space-y-1.5">
+          <p className="text-sm font-medium">
+            Changes ({data.changes.total})
+          </p>
+          <div className="max-h-96 space-y-1.5 overflow-y-auto rounded-md border bg-muted/30 p-2">
+            <ChangeList changes={data.changes} />
+          </div>
+        </div>
+      )}
+
+      {data.importPreview && (
+        <div className="space-y-1.5">
+          <p className="text-sm font-medium">Import preview</p>
+          <div className="max-h-96 space-y-1.5 overflow-y-auto rounded-md border bg-muted/30 p-2">
+            <ImportPreviewView preview={data.importPreview} />
+          </div>
+        </div>
+      )}
+
       {warnings && warnings.length > 0 && (
         <div className="rounded-md border border-amber-300/50 bg-amber-50 p-3 space-y-1 dark:bg-amber-950/20">
           <p className="text-sm font-medium">Warnings</p>
@@ -302,6 +350,10 @@ function ApprovalSummaryView({
         >
           Reject
         </Button>
+      </div>
+
+      <div className="text-center">
+        <BackToProjectLink data={data} />
       </div>
     </div>
   )

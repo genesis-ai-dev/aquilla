@@ -19,6 +19,7 @@
 
 import { DurableObject } from "cloudflare:workers"
 import { shouldBeReadOnly, verifyTokenForProject } from "./auth"
+import { isDeployedEnvironment } from "./environment-guard"
 import {
   applyDisconnect,
   applyFocusClaim,
@@ -72,6 +73,12 @@ interface ConnectionState {
 interface DOEnv {
   SYNC_SECRET_KEY?: string
   ALLOW_UNAUTHENTICATED?: string
+  /**
+   * Deployment label ("production" | "development" | "local" | unset). Read
+   * here only so the ALLOW_UNAUTHENTICATED bypass can be refused on deployed
+   * workers — see isDeployedEnvironment.
+   */
+  ENVIRONMENT?: string
   /**
    * Optional binding back to the worker so we can POST to /events via an
    * internal fetch. When absent (tests), outbox.event frames are queued
@@ -271,10 +278,17 @@ export class ProjectSync extends DurableObject<DOEnv> {
     // Frontier username (claims.username), which matches the `currentUsername`
     // the client uses for presence/lock filtering. ALLOW_UNAUTHENTICATED dev
     // has no token, so fall back to the optional `user` param or "anon".
+    //
+    // The bypass is honoured only off a deployed worker. index.ts already
+    // 503s the whole worker when the flag is set in a deployed environment,
+    // but the authorization decision lives here, so it re-checks rather than
+    // inheriting the entry point's answer.
+    const bypassAuth =
+      this.env.ALLOW_UNAUTHENTICATED === "true" && !isDeployedEnvironment(this.env)
     let userId: string
     let numericUserId: number | null = null
     let role: number | null = null
-    if (this.env.ALLOW_UNAUTHENTICATED !== "true") {
+    if (!bypassAuth) {
       const token = url.searchParams.get("token")
       const auth = await verifyTokenForProject(token, projectId, this.env.SYNC_SECRET_KEY)
       if (!auth.ok) {

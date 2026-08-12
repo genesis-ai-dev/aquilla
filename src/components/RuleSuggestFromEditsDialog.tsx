@@ -49,7 +49,7 @@ interface Props {
    * detect repeated edits. This prop accepts both — repeated-edit detection will
    * just only see validated if that's all we get.
    */
-  cells?: { id?: string; original: string; translated: string; status: "empty" | "unvalidated" | "validated"; hasPendingEdit?: boolean }[]
+  cells?: { id?: string; original: string; translated: string; status: "empty" | "unvalidated" | "validated"; hasPendingEdit?: boolean; aiDrafted?: boolean }[]
   onAdd: (rule: Omit<TranslationRule, "id" | "createdAt">) => void | Promise<void>
   projectId?: string
 }
@@ -71,7 +71,7 @@ export function RuleSuggestFromEditsDialog({
   const [suggestions, setSuggestions] = useState<RuleSuggestion[]>([])
   const [evidence, setEvidence] = useState<string[]>([])
   const [committing, setCommitting] = useState(false)
-  const [miningStats, setMiningStats] = useState<{ repeated: number; recent: number; pairs: number } | null>(null)
+  const [miningStats, setMiningStats] = useState<{ repeated: number; recent: number; pairs: number; human: number } | null>(null)
 
   const provider = completionSettings ? resolveProvider(completionSettings) : "frontier"
   const isConfigured =
@@ -96,11 +96,13 @@ export function RuleSuggestFromEditsDialog({
       const repeated = candidates.filter((c) => c.kind === "repeated").length
       const recent = candidates.filter((c) => c.kind === "recent").length
       const pairs = candidates.filter((c) => c.kind === "validated-pair").length
-      setMiningStats({ repeated, recent, pairs })
+      // AQU-820: human-authored targets count too, even with no AI draft first.
+      const human = candidates.filter((c) => c.kind === "human-authored").length
+      setMiningStats({ repeated, recent, pairs, human })
 
       if (candidates.length === 0) {
         setError(
-          "No edit patterns found. Translate some cells (validated pairs preferred) to generate suggestions.",
+          "No edit patterns found. Translate some cells in this file to generate suggestions.",
         )
         setStage("idle")
         return
@@ -185,6 +187,7 @@ export function RuleSuggestFromEditsDialog({
           miningStats.repeated > 0 && `${miningStats.repeated} repeated`,
           miningStats.recent > 0 && `${miningStats.recent} recent`,
           miningStats.pairs > 0 && `${miningStats.pairs} from pairs`,
+          miningStats.human > 0 && `${miningStats.human} human-authored`,
         ]
           .filter(Boolean)
           .join(", ")
@@ -226,8 +229,8 @@ export function RuleSuggestFromEditsDialog({
         {stage === "idle" && (
           <div className="space-y-3">
             <p className="text-sm text-muted-foreground">
-              Analyzes your repeated corrections, recent edits, and validated translations to
-              propose testable rules. You'll review each suggestion before anything is saved.
+              Analyzes your repeated corrections, recent edits, and human-authored translations
+              to propose testable rules. You'll review each suggestion before anything is saved.
             </p>
             {error && <p className="text-sm text-destructive">{error}</p>}
             {!isConfigured && (

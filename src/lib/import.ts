@@ -476,6 +476,11 @@ export interface ImportContext {
   /** Advanced orchestrators can keep fresh files hidden while persisting
    * package-level or format-specific secondary data. */
   deferPublication?: boolean
+  /** Per-file import provenance, keyed by normalized file name
+   *  (`name.trim().toLowerCase()` — the skipKeys vocabulary). A matching
+   *  entry is stamped as `importManifest.origin` and projected verbatim to
+   *  `files.meta.aquillaImport.origin` (linked-sync hook, e.g. Google Drive). */
+  origins?: ReadonlyMap<string, Record<string, unknown>>
 }
 
 type PrepareImportContext = Pick<
@@ -546,6 +551,16 @@ export interface ImportFileResult {
  * deterministic parser id remains `tmx`. */
 export function importedFileKind(fileType: FileType): string {
   return fileType === "tmx" ? "translation-memory" : fileType
+}
+
+/** Merge caller-supplied provenance into the versioned import summary. */
+function manifestWithOrigin(
+  manifest: object,
+  origins: ReadonlyMap<string, Record<string, unknown>> | undefined,
+  fileName: string,
+): object {
+  const origin = origins?.get(fileName.trim().toLowerCase())
+  return origin ? { ...manifest, origin } : manifest
 }
 
 /**
@@ -1506,7 +1521,7 @@ export async function emitParsedFile(
       kind: importedFileKind(fileType),
       importFormat: fileType,
       parserVersion: `${normalized.profileId}@${normalized.profileVersion}`,
-      importManifest: summarizeNormalizedImport(normalized),
+      importManifest: manifestWithOrigin(summarizeNormalizedImport(normalized), ctx.origins, result.name),
       sourceLanguage: ctx.sourceLanguage,
       targetLanguage: ctx.targetLanguage,
       sourceTextDirection: ctx.sourceTextDirection,
@@ -2181,7 +2196,7 @@ export async function importParatextAsTarget(
           kind: "usfm",
           importFormat: "usfm",
           parserVersion: `${normalized.profileId}@${normalized.profileVersion}`,
-          importManifest: summarizeNormalizedImport(normalized),
+          importManifest: manifestWithOrigin(summarizeNormalizedImport(normalized), ctx.origins, bookPlan.displayName),
           sourceLanguage: ctx.sourceLanguage,
           targetLanguage: ctx.targetLanguage,
           targetTextDirection: plan.project.settings.rightToLeft ? "rtl" : ctx.targetTextDirection,

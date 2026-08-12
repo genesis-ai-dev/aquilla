@@ -104,6 +104,10 @@ describe("live deployment environment verification", () => {
           "https://api.aquilla.app/chat",
         ].join(" "))
       }
+      // This case verifies the PRODUCTION spa surface, so the verifier crawls
+      // https://aquilla.app — a leftover staging origin here (the staging
+      // profile was retired in AQU-799) meant the mock never matched and the
+      // case threw `unexpected URL` instead of asserting anything.
       const caseStudy = serveCaseStudies("https://aquilla.app", url)
       if (caseStudy) return caseStudy
       throw new Error(`unexpected URL ${url}`)

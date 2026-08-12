@@ -78,6 +78,11 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
+      # Credential guard (docs/OPSEC.md §5). Mirrors the lint lane in
+      # scripts/cloudflare-ci-checks.mjs, which is the gate that actually runs
+      # on pull requests (this workflow is workflow_dispatch-only). Keep the
+      # two in step.
+      - run: pnpm run scan:secrets
 
   typecheck:
     runs-on: ubuntu-latest

@@ -30,6 +30,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:worker": "vitest run --config worker/vitest.config.ts --dir worker",
+    "scan:secrets": "tsx scripts/secret-scan.ts",
     "test:idml": "pnpm --filter @aquilla/idml-roundtrip test",
     "build:idml": "pnpm --filter @aquilla/idml-roundtrip build",
     "idml:gate": "tsx scripts/assert-idml-release-gate.ts",

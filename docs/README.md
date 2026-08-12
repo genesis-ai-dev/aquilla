@@ -15,6 +15,9 @@ design and audit material.
   build integrations, explicit deployment ownership, previews, and verification.
 - [E2E](../e2e/README.md) — local integration and smoke-test environment.
 - [RLS rollout](RLS-ROLLOUT.md) — Postgres row-level-security operations.
+- [Operational security](OPSEC.md) — sensitive data inventory, threat model,
+  open risks, and which security controls are actually enforced. Re-run its
+  mechanical checks with `pnpm run scan:secrets` and `pnpm audit --prod`.
 
 Runtime configuration in `wrangler.toml`, `auth-worker/wrangler.toml`,
 `sync-worker/wrangler.toml`, the deploy workflows, and `package.json` is enforced

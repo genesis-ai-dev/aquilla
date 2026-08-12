@@ -295,6 +295,9 @@ describe("durable sanitized activity", () => {
     executor = {
       async run(sql, params) {
         if (sql.includes("SELECT id FROM contextual_runs")) return { rows: [], rowCount: 0 }
+        if (sql.includes("FROM contextual_runs WHERE id")) {
+          return { rows: runRow ? [runRow] : [], rowCount: runRow ? 1 : 0 }
+        }
         if (sql.includes("INSERT INTO contextual_runs")) {
           roleParam = params[5]
           runRow = {
@@ -314,15 +317,16 @@ describe("durable sanitized activity", () => {
         if (sql.includes("UPDATE contextual_drafts")) return { rows: [], rowCount: 0 }
         if (sql.includes("INSERT INTO contextual_drafts")) {
           draftId = String(params[0])
-          verdictParam = params[7]
-          provenanceParam = params[8]
+          verdictParam = params[8]
+          provenanceParam = params[9]
           return { rows: [], rowCount: 1 }
         }
         if (sql.includes("SELECT id, run_id") && sql.includes("FROM contextual_drafts")) {
           return {
             rows: [{
               id: draftId, run_id: (runRow as Record<string, unknown>).id,
-              project_id: PROJECT, file_id: FILE, cell_id: "c-json", scene_brief_id: null,
+              project_id: PROJECT, file_id: FILE, cell_id: "c-json",
+              target_lang: "", scene_brief_id: null,
               text: "structured", verdicts: verdictParam, provenance: provenanceParam,
               status: "proposed", created_at: "2026-08-11T00:00:00.000Z",
               reviewed_at: null, reviewed_by: null,

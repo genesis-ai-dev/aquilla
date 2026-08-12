@@ -320,7 +320,7 @@ describe("POST /contextual/runs", () => {
 })
 
 describe("GET /contextual/runs snapshot", () => {
-  it("keeps legacy non-default proposals as evidence without exposing them to the editor queue", async () => {
+  it("counts named-lane proposals in overview and hydrates them on that lane", async () => {
     const { viewer } = await seedWorld()
     const defaultOwner = await createRun(env.AQUILLA_PG, {
       projectId: PROJECT,
@@ -335,24 +335,30 @@ describe("GET /contextual/runs snapshot", () => {
     })
     await terminateRun(env.AQUILLA_PG, defaultOwner.run.id)
 
-    const legacyFrenchOwner = await createRun(env.AQUILLA_PG, {
+    const frenchOwner = await createRun(env.AQUILLA_PG, {
       projectId: PROJECT,
       fileId: FILE,
       targetLang: "fr",
     })
-    if (legacyFrenchOwner.status !== "ok") throw new Error("French run not created")
+    if (frenchOwner.status !== "ok") throw new Error("French run not created")
     await insertDrafts(env.AQUILLA_PG, {
-      runId: legacyFrenchOwner.run.id,
+      runId: frenchOwner.run.id,
       projectId: PROJECT,
       fileId: FILE,
-      drafts: [{ cellId: "french-evidence-only", text: "proposition française" }],
+      drafts: [{ cellId: "french-review", text: "proposition française" }],
     })
-    await terminateRun(env.AQUILLA_PG, legacyFrenchOwner.run.id)
+    await terminateRun(env.AQUILLA_PG, frenchOwner.run.id)
 
     const editor = await req("GET", `/drafts?fileId=${FILE}&status=proposed`, viewer)
     expect(editor.status).toBe(200)
     const editorBody = await editor.json() as { drafts: { cellId: string }[] }
     expect(editorBody.drafts.map((draft) => draft.cellId)).toEqual(["default-editor-review"])
+
+    const frenchEditor = await req("GET", `/drafts?fileId=${FILE}&status=proposed&targetLang=fr`, viewer)
+    const frenchEditorBody = await frenchEditor.json() as { drafts: { cellId: string; targetLang: string }[] }
+    expect(frenchEditorBody.drafts).toEqual([
+      expect.objectContaining({ cellId: "french-review", targetLang: "fr" }),
+    ])
 
     const snapshot = await req("GET", `/runs?fileId=${FILE}`, viewer)
     const snapshotBody = await snapshot.json() as {
@@ -362,21 +368,24 @@ describe("GET /contextual/runs snapshot", () => {
     expect(snapshotBody.run).toMatchObject({ runId: defaultOwner.run.id, proposedDrafts: 1 })
     expect(snapshotBody.draftCounts.proposed).toBe(1)
 
+    const frenchSnapshot = await req("GET", `/runs?fileId=${FILE}&targetLang=fr`, viewer)
+    const frenchSnapshotBody = await frenchSnapshot.json() as {
+      run: { runId: string; proposedDrafts: number } | null
+      draftCounts: Record<string, number>
+    }
+    expect(frenchSnapshotBody.run).toMatchObject({ runId: frenchOwner.run.id, proposedDrafts: 1 })
+    expect(frenchSnapshotBody.draftCounts.proposed).toBe(1)
+
     const overview = await req("GET", "/overview", viewer)
     const overviewBody = await overview.json() as { proposedDrafts: number }
-    expect(overviewBody.proposedDrafts).toBe(1)
+    expect(overviewBody.proposedDrafts).toBe(2)
 
     const reviewOwners = await req("GET", "/runs?proposedOnly=true", viewer)
-    const reviewOwnerBody = await reviewOwners.json() as { runs: { runId: string }[] }
-    expect(reviewOwnerBody.runs.map((run) => run.runId)).toEqual([defaultOwner.run.id])
-
-    const evidence = await req(
-      "GET",
-      `/runs/${legacyFrenchOwner.run.id}/activity?draftStatus=proposed`,
-      viewer,
-    )
-    const evidenceBody = await evidence.json() as { drafts: { cellId: string }[] }
-    expect(evidenceBody.drafts.map((draft) => draft.cellId)).toEqual(["french-evidence-only"])
+    const reviewOwnerBody = await reviewOwners.json() as { runs: { runId: string; targetLang: string }[] }
+    expect(reviewOwnerBody.runs).toEqual(expect.arrayContaining([
+      expect.objectContaining({ runId: defaultOwner.run.id, targetLang: "" }),
+      expect.objectContaining({ runId: frenchOwner.run.id, targetLang: "fr" }),
+    ]))
   })
 
   it("viewer can hydrate: run snapshot + active directions + draft counts", async () => {

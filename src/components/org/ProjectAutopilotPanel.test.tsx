@@ -461,8 +461,8 @@ describe("ProjectAutopilotPanel", () => {
     renderPanel()
     const panel = await screen.findByTestId("project-autopilot-panel")
 
-    expect(within(panel).getByText("Needs attention")).toBeInTheDocument()
     expect(within(panel).getByRole("button", { name: "View 2 needs attention" })).toBeInTheDocument()
+    expect(within(panel).getByText(/2 issues need attention/)).toBeInTheDocument()
   })
 
   it("explains the never-run state while keeping it ready to act", async () => {

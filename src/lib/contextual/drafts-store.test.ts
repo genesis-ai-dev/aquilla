@@ -174,13 +174,13 @@ describe("draft bursts", () => {
       [{ draftId: "d1", cellId: "c1", text: "proposition française" }],
       { targetLang: "fr" },
     ))
-    expect(getContextualDraftFor("c1")?.text).toBe("proposition française")
+    expect(getContextualDraftFor("c1", PROJECT, "file-1", "fr")?.text).toBe("proposition française")
 
     applyContextualDraftsFrame(burst(
       [{ draftId: "d2", cellId: "c1", text: "propuesta española" }],
       { targetLang: "es" },
     ))
-    expect(getContextualDraftFor("c1")?.text).toBe("proposition française")
+    expect(getContextualDraftFor("c1", PROJECT, "file-1", "fr")?.text).toBe("proposition française")
   })
 
   it("orders the review queue newest first", () => {

@@ -4,37 +4,29 @@ import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/se
 /**
  * Comments — shell-owned navigation back to the editor.
  *
- * AQU-254 moved Comments inside the ProjectWorkspace shell
- * (/project/:id/comments renders ProjectWorkspace with the comments surface
- * in the center). The page's own "Back to project" button was removed —
- * breadcrumb, history arrows, and the persistent sidebar own navigation.
- * Clicking a file row calls setActiveFileId → navigate(`/project/:id/editor/file/:fileId`).
+ * Opening Comments from the editor (sidebar) stamps `?return=` so the
+ * breadcrumb includes a clickable Editor crumb. Direct /comments URLs do not.
  *
- * This spec: import a file → open comments → verify the page rendered inside
- * the shell → click the file in the sidebar → verify the URL returns to the
- * editor and the comments heading is gone.
+ * This spec: import a file → open comments from the sidebar → verify Editor
+ * and Comments in the breadcrumb → click Editor → return to the file editor.
  */
-test("comments surface returns to editor via sidebar file selection", async ({ alice }) => {
+test("comments opened from editor shows Editor in the breadcrumb", async ({ alice }) => {
   const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `CommentsBack ${Date.now()}` })
   const ws = await openSeededProject(alice, seeded)
 
-  await alice.goto(`/project/${seeded.projectId}/comments`)
+  await alice.locator("aside").getByRole("button", { name: /^Comments$/ }).click()
+  await alice.waitForURL(/\/project\/[^/]+\/comments/, { timeout: 10_000 })
   await expect(
     alice.locator("h1").filter({ hasText: /Comments/i }),
   ).toBeVisible({ timeout: 10_000 })
-  await expect(alice.getByRole("button", { name: /Back to project/i })).toHaveCount(0)
 
-  // The shell sidebar is still mounted — click the imported file to return
-  // to the editor. Target the FileRow ROOT precisely (div[tabindex="0"])
-  // rather than a broad aside text click, matching the rules-surface spec.
-  await alice
-    .locator('aside div[tabindex="0"]')
-    .filter({ has: alice.locator('button[aria-label="File actions"]') })
-    .filter({ hasText: /sample/i })
-    .first()
-    .click()
+  const breadcrumb = alice.getByRole("navigation", { name: /breadcrumb/i })
+  const editorCrumb = breadcrumb.getByRole("link", { name: /^Editor$/i })
+  await expect(editorCrumb).toBeVisible()
+  await expect(breadcrumb.getByText("Comments", { exact: true })).toHaveAttribute("aria-current", "page")
 
-  await alice.waitForURL(/\/project\/[^/]+\/editor\/file\/[^/]+/, { timeout: 10_000 })
+  await editorCrumb.click()
+  await alice.waitForURL(/\/project\/[^/]+\/editor(?:\/file\/[^/]+)?/, { timeout: 10_000 })
   await ws.waitForEditor()
   await expect(alice.locator("h1").filter({ hasText: /Comments/i })).not.toBeVisible()
 })

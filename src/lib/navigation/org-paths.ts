@@ -115,10 +115,29 @@ export function isProjectEditorPath(path: string, projectId: string): boolean {
   return path === base || path.startsWith(`${base}/`)
 }
 
+/** Keep the editor handoff (`?return=`) on a path so the Editor crumb survives hops. Merges into any existing query. */
+export function withEditorReturn(path: string, returnTo: string | null | undefined): string {
+  if (!returnTo) return path
+  const qIndex = path.indexOf("?")
+  const pathname = qIndex === -1 ? path : path.slice(0, qIndex)
+  const params = new URLSearchParams(qIndex === -1 ? "" : path.slice(qIndex + 1))
+  params.set("return", returnTo)
+  return `${pathname}?${params.toString()}`
+}
+
 /** Keep the editor handoff (`?return=`) on in-settings links so the Editor crumb survives pane hops. */
 export function withSettingsReturn(path: string, returnTo: string | null | undefined): string {
-  if (!returnTo) return path
-  const params = new URLSearchParams()
-  params.set("return", returnTo)
-  return `${path}?${params.toString()}`
+  return withEditorReturn(path, returnTo)
+}
+
+/** Current editor URL, or `?return=` when it points at this project's editor. */
+export function editorReturnFromLocation(
+  pathname: string,
+  search: string,
+  projectId: string,
+): string | null {
+  if (isProjectEditorPath(pathname, projectId)) return pathname
+  const raw = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search).get("return")
+  const returnTo = safeReturnPath(raw)
+  return returnTo && isProjectEditorPath(returnTo, projectId) ? returnTo : null
 }

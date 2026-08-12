@@ -41,7 +41,7 @@ export class AgentPage {
    * `/project/:id/agent`. Mirrors `agent-draft.spec.ts`'s existing pattern. */
   async openFullScreenWorkbench(): Promise<void> {
     await this.page.getByRole("button", { name: "Open agent in editor tab" }).click()
-    await expect(this.page).toHaveURL(/\/agent$/)
+    await expect(this.page).toHaveURL(/\/agent(?:\?|$)/)
     await expect(
       this.page.getByRole("tablist", { name: "Open files" }).getByRole("tab", { name: "Agent" }),
     ).toBeVisible()
@@ -54,7 +54,7 @@ export class AgentPage {
       .getByRole("tablist", { name: "Open files" })
       .getByRole("button", { name: "Agent", exact: true })
       .click()
-    await expect(this.page).toHaveURL(/\/agent$/)
+    await expect(this.page).toHaveURL(/\/agent(?:\?|$)/)
   }
 
   async closeFullScreenWorkbench(): Promise<void> {

@@ -19,6 +19,11 @@ interface Props {
   overviewHref?: string
   /** Workspace surface (e.g. "Editor") — shown after the project name. */
   surfaceLabel?: string
+  /**
+   * When an overlay (Comments, Rules, …) was opened from the editor, link
+   * back to that editor URL as a crumb before `surfaceLabel`.
+   */
+  editorHref?: string
   /** Current book/chapter (e.g. "GEN 1") — trailing segment when known. */
   bookLabel?: string | null
 }
@@ -30,10 +35,12 @@ export function WorkspaceHeader({
   onImport,
   overviewHref,
   surfaceLabel,
+  editorHref,
   bookLabel,
 }: Props) {
   const items = extraMenuItems ?? []
   const trail: OrgBreadcrumbTrailSegment[] = []
+  if (editorHref) trail.push({ label: "Editor", to: editorHref })
   if (surfaceLabel) trail.push({ label: surfaceLabel })
   if (bookLabel) trail.push({ label: bookLabel })
   return (

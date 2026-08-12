@@ -23,7 +23,7 @@ test("living memory shell nav returns to the project editor", async ({ alice }) 
   // Open Living Memory via the sidebar "More" menu (shell-owned nav).
   await alice.getByRole("button", { name: /More project options/i }).click()
   await alice.getByRole("button", { name: /^Memory$/ }).click()
-  await alice.waitForURL(/\/project\/[^/]+\/memory$/, { timeout: 5_000 })
+  await alice.waitForURL(/\/project\/[^/]+\/memory(?:\?|$)/, { timeout: 5_000 })
 
   // The memory surface renders inside the workspace shell.
   await expect(alice.getByRole("heading", { name: /Living Memory/i }).first()).toBeVisible({

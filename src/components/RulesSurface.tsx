@@ -6,7 +6,7 @@
  * only this component swaps in place of the EditorTable.
  */
 import { useState, useMemo, useEffect } from "react"
-import { useNavigate, useSearchParams } from "react-router-dom"
+import { useNavigate, useSearchParams, useLocation } from "react-router-dom"
 import { AlertTriangle, AlertCircle, Trash2, Wand2, ChevronDown, ChevronUp, Pencil, ArrowUpCircle, Building2, Lock, Clock, ScrollText, Plus, BookOpen } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { EmptyState } from "@/components/ui/page"
@@ -24,6 +24,7 @@ import { RuleEditor } from "./RuleEditor"
 import { RuleImportDialog } from "./RuleImportDialog"
 import { RuleSuggestFromEditsDialog } from "./RuleSuggestFromEditsDialog"
 import { cn } from "@/lib/utils"
+import { editorReturnFromLocation, withEditorReturn } from "@/lib/navigation/org-paths"
 import type { CompletionSettings, ProjectRecord, RuleAutofix, TranslationRule, PromotionRequest } from "@/lib/parsers/types"
 import type { useRules } from "@/hooks/useRules"
 import type { CellData } from "@/hooks/useCells"
@@ -95,6 +96,7 @@ export function RulesSurface({
   setEditingRuleId,
 }: Props) {
   const navigate = useNavigate()
+  const location = useLocation()
   const [searchParams, setSearchParams] = useSearchParams()
   const [expandedRuleId, setExpandedRuleId] = useState<string | null>(null)
   const [promoteRule, setPromoteRule] = useState<TranslationRule | null>(null)
@@ -207,7 +209,13 @@ export function RulesSurface({
       <header className="flex shrink-0 items-center gap-2 border-b px-4 py-3">
         <ScrollText className="h-5 w-5 text-muted-foreground" aria-hidden />
         <h1 className="flex-1 text-base font-semibold">Rules</h1>
-        <Button variant="outline" onClick={() => navigate(`/project/${projectId}/terminology`)}>
+        <Button
+          variant="outline"
+          onClick={() => navigate(withEditorReturn(
+            `/project/${projectId}/terminology`,
+            editorReturnFromLocation(location.pathname, location.search, projectId),
+          ))}
+        >
           <BookOpen data-icon="inline-start" />
           Terminology
         </Button>

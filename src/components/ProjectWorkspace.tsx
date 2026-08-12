@@ -29,7 +29,12 @@ import { useCellConfidence } from "@/hooks/useCellConfidence"
 import { useRules } from "@/hooks/useRules"
 import { useOrgSettings } from "@/hooks/useOrgSettings"
 import { useActiveOrg } from "@/context/OrgContext"
-import { ALL_ORGS_PARAM, orgHomePath } from "@/lib/navigation/org-paths"
+import {
+  ALL_ORGS_PARAM,
+  editorReturnFromLocation,
+  orgHomePath,
+  withEditorReturn,
+} from "@/lib/navigation/org-paths"
 import { updateProject, patchProject, getProject, mergeServerProjectWithLocalCache } from "@/lib/store/project-index"
 import { completionBatchSizeFor, workspaceActions, getVisibleActions } from "@/lib/workspace-actions/registry"
 import type { WorkspaceAction } from "@/lib/workspace-actions/types"
@@ -809,6 +814,19 @@ export function ProjectWorkspace() {
     location.pathname.endsWith("/agent") ? "agent" :
     "editor"
 
+  const editorReturnPath = useMemo(() => {
+    if (!projectId) return null
+    if (centerSurface === "editor") return workspaceReturnPath(projectId, activeFileId)
+    return editorReturnFromLocation(location.pathname, location.search, projectId)
+  }, [projectId, centerSurface, activeFileId, location.pathname, location.search])
+
+  const openOverlay = useCallback((
+    surface: "rules" | "comments" | "terminology" | "memory" | "agent",
+  ) => {
+    if (!projectId) return
+    navigate(withEditorReturn(`/project/${projectId}/${surface}`, editorReturnPath))
+  }, [projectId, navigate, editorReturnPath])
+
   const [editingRuleId, setEditingRuleId] = useState<string | "new" | null>(null)
 
   useEffect(() => {
@@ -897,17 +915,17 @@ export function ProjectWorkspace() {
   }, [projectId, agentTabOpen])
   const openAgentTab = useCallback(() => {
     setAgentTabOpen(true)
-    if (projectId) navigate(`/project/${projectId}/agent`)
-  }, [navigate, projectId])
+    openOverlay("agent")
+  }, [openOverlay])
   const closeAgentTab = useCallback(() => {
     setAgentTabOpen(false)
     if (centerSurface === "agent" && projectId) {
-      navigate(`/project/${projectId}/editor`)
+      navigate(editorReturnPath ?? `/project/${projectId}/editor`)
     }
-  }, [centerSurface, navigate, projectId])
+  }, [centerSurface, editorReturnPath, navigate, projectId])
   const leaveAgentSurface = useCallback(() => {
-    if (projectId) navigate(`/project/${projectId}/editor`)
-  }, [navigate, projectId])
+    if (projectId) navigate(editorReturnPath ?? `/project/${projectId}/editor`)
+  }, [editorReturnPath, navigate, projectId])
 
   // A source selection the user sent to the agent via "Ask AI". Opens the
   // Agent dock and is inserted into the composer as a context chip.
@@ -1602,7 +1620,8 @@ export function ProjectWorkspace() {
   const workspaceBreadcrumb = useMemo(() => ({
     surfaceLabel:
       centerSurface === "editor" ? "Editor" : deriveNavTitle(location.pathname),
-  }), [centerSurface, location.pathname])
+    editorHref: centerSurface === "editor" ? undefined : editorReturnPath ?? undefined,
+  }), [centerSurface, location.pathname, editorReturnPath])
 
   const handleVisibleFootnotesChange = useCallback((entries: VisibleFootnoteEntry[]) => {
     const key = entries
@@ -4410,16 +4429,16 @@ export function ProjectWorkspace() {
   const projectNavItems = useMemo(() => {
     const items = [
       { id: "rules", label: "Rules", icon: Scale,
-        onClick: () => navigate(`/project/${projectId}/rules`) },
+        onClick: () => openOverlay("rules") },
       // Pinned below Comments: Terminology is a frequent destination, so it
       // stays visible; everything else unpinned collapses into "More".
       { id: "comments", label: "Comments", icon: MessagesSquare, pinned: true,
         badge: Array.from(openCommentCount.values()).reduce((a, b) => a + b, 0),
-        onClick: () => navigate(`/project/${projectId}/comments`) },
+        onClick: () => openOverlay("comments") },
       { id: "terminology", label: "Terminology", icon: BookOpen, pinned: true,
-        onClick: () => navigate(`/project/${projectId}/terminology`) },
+        onClick: () => openOverlay("terminology") },
       { id: "living-memory", label: "Memory", icon: BookMarked,
-        onClick: () => navigate(`/project/${projectId}/memory`) },
+        onClick: () => openOverlay("memory") },
       // Audio/Media lens lives in the header EditorModeToggle — keep it out of
       // the sidebar More menu so the overflow list stays structural (share,
       // settings, trash) rather than view-mode toggles.
@@ -4441,7 +4460,7 @@ export function ProjectWorkspace() {
         : []),
     ]
     return items
-  }, [projectId, activeFileId, navigate, openCommentCount, currentRoleLevel])
+  }, [projectId, activeFileId, navigate, openCommentCount, currentRoleLevel, openOverlay])
 
   // AQU-646 P0: cells from the store never carry audio attachments — only
   // mergeCellsWithAudio adds them (EditorTable and VoicePlaybackBar each merge
@@ -5661,6 +5680,7 @@ export function ProjectWorkspace() {
             onImport={project ? handleHeaderImport : undefined}
             overviewHref={projectId ? `/projects/${projectId}` : undefined}
             surfaceLabel={workspaceBreadcrumb.surfaceLabel}
+            editorHref={workspaceBreadcrumb.editorHref}
           >
             {/* AQU-615: Door43 upstream-sync badge — visible hint that source
                 cells are managed by a DCS link. Self-gated: renders nothing
@@ -5696,8 +5716,8 @@ export function ProjectWorkspace() {
                     active: true as const,
                     // Navigating to the bare project route lets the
                     // restore-location effect re-open the last active file.
-                    onActivate: () => navigate(`/project/${projectId}/rules`),
-                    onClose: () => navigate(`/project/${projectId}/editor`),
+                    onActivate: () => openOverlay("rules"),
+                    onClose: () => navigate(editorReturnPath ?? `/project/${projectId}/editor`),
                   }]
                 : []),
               ...(agentTabOpen && projectId
@@ -5706,7 +5726,7 @@ export function ProjectWorkspace() {
                     label: "Agent",
                     icon: Bot,
                     active: centerSurface === "agent",
-                    onActivate: () => navigate(`/project/${projectId}/agent`),
+                    onActivate: () => openOverlay("agent"),
                     onClose: closeAgentTab,
                   }]
                 : []),

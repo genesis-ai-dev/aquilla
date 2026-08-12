@@ -1,10 +1,11 @@
-import { useNavigate } from "react-router-dom"
+import { useNavigate, useLocation } from "react-router-dom"
 import { X, AlertTriangle, AlertCircle, Sparkles, Wand2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
 import type { TranslationRule, RuleInfraction, ProjectRecord } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
 import { RightSidebarPanel } from "./RightSidebarPanel"
+import { editorReturnFromLocation, withEditorReturn } from "@/lib/navigation/org-paths"
 
 interface RuleDrawerProps {
   rule: TranslationRule | null
@@ -23,6 +24,7 @@ export function RuleDrawer({
   project,
 }: RuleDrawerProps) {
   const navigate = useNavigate()
+  const location = useLocation()
   // Phase 2c-gamma: autofix applied via Y.Doc edits; the writeback path is
   // gone. The "Try to fix" buttons render disabled until the event-grammar
   // equivalent lands.
@@ -38,7 +40,10 @@ export function RuleDrawer({
   const severityColor = rule.severity === "major" ? "text-red-500" : "text-amber-500"
 
   function onAmendRule() {
-    navigate(`/project/${project!.id}/rules?ruleId=${rule!.id}&focus=autofix`)
+    navigate(withEditorReturn(
+      `/project/${project!.id}/rules?ruleId=${rule!.id}&focus=autofix`,
+      editorReturnFromLocation(location.pathname, location.search, project!.id),
+    ))
   }
 
   return (

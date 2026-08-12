@@ -14,7 +14,7 @@
  */
 
 import React, { useMemo, useState } from "react"
-import { useParams, useNavigate } from "react-router-dom"
+import { useParams, useNavigate, useLocation } from "react-router-dom"
 import { BookOpen, Users, AlertTriangle, Plus, Pencil, Trash2, Lock, Brain } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -50,6 +50,7 @@ import { emptyBrief, isL1Stale } from "@/lib/brief/brief"
 import { useTranslationBrief } from "@/hooks/useTranslationBrief"
 import { generateL1Summary, extractBriefFromDocument, draftField } from "@/lib/brief/brief-generator"
 import { checkInputSize } from "@/lib/rules/rule-extractor"
+import { editorReturnFromLocation, withEditorReturn } from "@/lib/navigation/org-paths"
 
 // ── Pure helpers (add/update/delete for living memory entries) ─────────────
 
@@ -447,6 +448,7 @@ function AuthoredEntriesSection({
 export function LivingMemoryPage() {
   const { id: projectId } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const location = useLocation()
 
   const { cells, isLoading, isEmpty, error: cellsError } = useLivingMemory({
     projectId: projectId ?? "",
@@ -559,7 +561,13 @@ export function LivingMemoryPage() {
         <div className="flex-1" />
         <Button
           variant="outline"
-          onClick={() => navigate(`/project/${projectId}/terminology`)}
+          onClick={() => {
+            if (!projectId) return
+            navigate(withEditorReturn(
+              `/project/${projectId}/terminology`,
+              editorReturnFromLocation(location.pathname, location.search, projectId),
+            ))
+          }}
           aria-label="Go to Terminology page"
         >
           <BookOpen data-icon="inline-start" />

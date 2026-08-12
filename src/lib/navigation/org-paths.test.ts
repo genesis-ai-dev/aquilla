@@ -1,6 +1,7 @@
 import { describe, expect, it, beforeEach, afterEach } from "vitest"
 import {
   ALL_ORGS_PARAM,
+  editorReturnFromLocation,
   isProjectEditorPath,
   membersPath,
   orgHomePath,
@@ -13,6 +14,7 @@ import {
   resumeOrgPath,
   safeReturnPath,
   swapOrgInPath,
+  withEditorReturn,
   withSettingsReturn,
   ORG_STORAGE_KEY,
 } from "./org-paths"
@@ -92,6 +94,21 @@ describe("editor settings handoff", () => {
     expect(withSettingsReturn("/project/p1/settings/ai", "/project/p1/editor"))
       .toBe("/project/p1/settings/ai?return=%2Fproject%2Fp1%2Feditor")
     expect(withSettingsReturn("/project/p1/settings", null)).toBe("/project/p1/settings")
+  })
+
+  it("merges ?return= into an overlay path that already has a query", () => {
+    expect(withEditorReturn("/project/p1/rules?ruleId=r1", "/project/p1/editor/file/f1"))
+      .toBe("/project/p1/rules?ruleId=r1&return=%2Fproject%2Fp1%2Feditor%2Ffile%2Ff1")
+  })
+
+  it("reads the editor handoff from the current editor URL or ?return=", () => {
+    expect(editorReturnFromLocation("/project/p1/editor/file/f1", "", "p1"))
+      .toBe("/project/p1/editor/file/f1")
+    expect(editorReturnFromLocation("/project/p1/comments", "?return=%2Fproject%2Fp1%2Feditor", "p1"))
+      .toBe("/project/p1/editor")
+    expect(editorReturnFromLocation("/project/p1/comments", "", "p1")).toBeNull()
+    expect(editorReturnFromLocation("/project/p1/comments", "?return=%2Fproject%2Fp2%2Feditor", "p1"))
+      .toBeNull()
   })
 })
 

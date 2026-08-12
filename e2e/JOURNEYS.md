@@ -119,7 +119,7 @@
 | Terminology | Violations inbox: expand concept row → see cell violations | `e2e/specs/projects/terminology-violations-expand.smoke.spec.ts` | ✅ |
 | Comments    | CommentsPage route renders empty state                | `e2e/specs/editor/comments-page.smoke.spec.ts`                |   ✅   |
 | Comments    | CommentsPage Refresh button reloads data              | `e2e/specs/editor/comments-page-refresh.smoke.spec.ts`        |   ✅   |
-| Comments    | Comments page returns to editor via sidebar file selection | `e2e/specs/editor/comments-page-back-nav.smoke.spec.ts`       |   ✅   |
+| Comments    | Comments opened from editor shows Editor in breadcrumb; Editor crumb returns to workspace | `e2e/specs/editor/comments-page-back-nav.smoke.spec.ts`       |   ✅   |
 | Auth        | Account switcher renders signed-in accounts           | `e2e/specs/orgs/account-switcher.smoke.spec.ts`               |   ✅   |
 | Auth        | Signup form show/hide password + checklist            | `e2e/specs/orgs/account-signup-form.smoke.spec.ts` + `account-signup-password-checklist.smoke.spec.ts` | ✅ |
 | Auth        | Login form show/hide password toggle                  | `e2e/specs/orgs/login-form-show-hide-password.smoke.spec.ts`  |   ✅   |

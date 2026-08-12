@@ -247,6 +247,25 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
     expect(screen.queryByLabelText(/project title/i)).toBeNull()
   })
 
+  it("omits Editor from the breadcrumb unless settings was opened from the editor", () => {
+    renderAt(`/project/${PROJECT_ID}/settings`)
+    expect(screen.getByTestId("org-breadcrumb")).not.toHaveTextContent("Editor")
+
+    renderAt(`/project/${PROJECT_ID}/settings?return=/project/${PROJECT_ID}/editor`)
+    expect(screen.getByTestId("org-breadcrumb")).toHaveTextContent("Editor")
+  })
+
+  it("keeps the Editor crumb when opening a pane from an editor handoff", () => {
+    renderAt(`/project/${PROJECT_ID}/settings?return=/project/${PROJECT_ID}/editor`)
+    fireEvent.click(screen.getByText("General"))
+
+    expect(screen.getByTestId("org-breadcrumb")).toHaveTextContent("Editor")
+    expect(screen.getByRole("link", { name: /^Settings$/i })).toHaveAttribute(
+      "href",
+      `/project/${PROJECT_ID}/settings?return=${encodeURIComponent(`/project/${PROJECT_ID}/editor`)}`,
+    )
+  })
+
   it("search results are grouped under main section headers", () => {
     renderAt(`/project/${PROJECT_ID}/settings`)
 

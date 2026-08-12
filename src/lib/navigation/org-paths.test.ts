@@ -1,6 +1,7 @@
 import { describe, expect, it, beforeEach, afterEach } from "vitest"
 import {
   ALL_ORGS_PARAM,
+  isProjectEditorPath,
   membersPath,
   orgHomePath,
   orgKeyFromParam,
@@ -10,7 +11,9 @@ import {
   projectEditorPath,
   projectSettingsPath,
   resumeOrgPath,
+  safeReturnPath,
   swapOrgInPath,
+  withSettingsReturn,
   ORG_STORAGE_KEY,
 } from "./org-paths"
 
@@ -66,6 +69,29 @@ describe("convenience paths", () => {
     expect(membersPath(3, "matrix")).toBe("/orgs/3/members/matrix")
     expect(orgSettingsPath(3, "identity")).toBe("/orgs/3/settings/identity")
     expect(projectSettingsPath("p1", "ai")).toBe("/project/p1/settings/ai")
+  })
+})
+
+describe("editor settings handoff", () => {
+  it("accepts same-origin relative return paths and rejects protocol-relative", () => {
+    expect(safeReturnPath("/project/p1/editor")).toBe("/project/p1/editor")
+    expect(safeReturnPath("/project/p1/editor/file/f1")).toBe("/project/p1/editor/file/f1")
+    expect(safeReturnPath("//evil.example/phish")).toBeNull()
+    expect(safeReturnPath("https://evil.example")).toBeNull()
+    expect(safeReturnPath(null)).toBeNull()
+  })
+
+  it("recognizes this project's editor, including a file under it", () => {
+    expect(isProjectEditorPath("/project/p1/editor", "p1")).toBe(true)
+    expect(isProjectEditorPath("/project/p1/editor/file/f1", "p1")).toBe(true)
+    expect(isProjectEditorPath("/project/p1/settings", "p1")).toBe(false)
+    expect(isProjectEditorPath("/project/p2/editor", "p1")).toBe(false)
+  })
+
+  it("keeps ?return= on in-settings links and leaves other paths alone", () => {
+    expect(withSettingsReturn("/project/p1/settings/ai", "/project/p1/editor"))
+      .toBe("/project/p1/settings/ai?return=%2Fproject%2Fp1%2Feditor")
+    expect(withSettingsReturn("/project/p1/settings", null)).toBe("/project/p1/settings")
   })
 })
 

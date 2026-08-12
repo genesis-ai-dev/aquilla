@@ -34,4 +34,10 @@ test("sidebar More project options Settings item navigates to project settings",
   // Should navigate to /project/:id/settings.
   await alice.waitForURL(/\/project\/[^/]+\/settings/, { timeout: 5_000 })
   expect(alice.url()).toContain("/settings")
+  expect(alice.url()).toMatch(/[?&]return=/)
+
+  // Editor handoff: the breadcrumb includes Editor so the user can return.
+  const breadcrumb = alice.getByRole("navigation", { name: /breadcrumb/i })
+  await expect(breadcrumb.getByText("Editor", { exact: true })).toBeVisible()
+  await expect(breadcrumb.getByText("Settings", { exact: true })).toBeVisible()
 })

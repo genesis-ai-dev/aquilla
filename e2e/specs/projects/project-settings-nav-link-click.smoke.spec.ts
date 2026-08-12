@@ -21,6 +21,11 @@ test("settings sub-menu link navigates to its pane and back", async ({ alice }) 
   const validationLink = alice.getByRole("link", { name: /Validation & health/i })
   await expect(validationLink).toBeVisible({ timeout: 10_000 })
 
+  // Direct settings URL (not the editor handoff) must not insert an Editor crumb.
+  const breadcrumb = alice.getByRole("navigation", { name: /breadcrumb/i })
+  await expect(breadcrumb.getByText("Settings", { exact: true })).toBeVisible()
+  await expect(breadcrumb.getByText("Editor", { exact: true })).toHaveCount(0)
+
   await validationLink.click()
 
   // The URL now carries the section param and the Validation section's own

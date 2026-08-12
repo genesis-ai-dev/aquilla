@@ -102,3 +102,23 @@ export function projectEditorPath(projectId: string, fileId?: string | null): st
   const base = `/project/${projectId}/editor`
   return fileId ? `${base}/file/${fileId}` : base
 }
+
+/** Same-origin relative path from `?return=` — rejects protocol-relative URLs. */
+export function safeReturnPath(raw: string | null | undefined): string | null {
+  if (!raw || !raw.startsWith("/") || raw.startsWith("//")) return null
+  return raw
+}
+
+/** True when `path` is this project's editor (`/project/:id/editor` or a file under it). */
+export function isProjectEditorPath(path: string, projectId: string): boolean {
+  const base = projectEditorPath(projectId)
+  return path === base || path.startsWith(`${base}/`)
+}
+
+/** Keep the editor handoff (`?return=`) on in-settings links so the Editor crumb survives pane hops. */
+export function withSettingsReturn(path: string, returnTo: string | null | undefined): string {
+  if (!returnTo) return path
+  const params = new URLSearchParams()
+  params.set("return", returnTo)
+  return `${path}?${params.toString()}`
+}

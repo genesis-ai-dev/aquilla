@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType } from "react"
 import { useParams, useNavigate, useSearchParams } from "react-router-dom"
-import { projectSettingsPath } from "@/lib/navigation/org-paths"
+import {
+  isProjectEditorPath,
+  projectSettingsPath,
+  safeReturnPath,
+  withSettingsReturn,
+} from "@/lib/navigation/org-paths"
 import {
   Check, CheckCircle, XCircle, ChevronDown, Save, Sparkles,
   SlidersHorizontal, Link2, BarChart3, ShieldCheck, AudioLines, Plug, FlaskConical,
@@ -229,11 +234,12 @@ export function ProjectSettings() {
   const { project, loading, refresh } = useProject(id!)
 
   // Workspace handoff (`?return=…`) — only accept same-origin relative paths.
-  const returnParam = searchParams.get("return")
-  const editorPath =
-    returnParam && returnParam.startsWith("/") && !returnParam.startsWith("//")
-      ? returnParam
-      : `/project/${id}/editor`
+  // The Editor breadcrumb is only for this handoff (settings opened from /editor).
+  const returnTo = safeReturnPath(searchParams.get("return"))
+  const fromEditor = Boolean(id && returnTo && isProjectEditorPath(returnTo, id))
+  const editorPath = fromEditor && returnTo ? returnTo : `/project/${id}/editor`
+  const settingsHref = (section?: string) =>
+    withSettingsReturn(projectSettingsPath(id!, section), fromEditor ? returnTo : null)
 
   const {
     canEdit: canEditShared,
@@ -1197,12 +1203,14 @@ export function ProjectSettings() {
       sectionTo={id ? `/projects/${id}` : undefined}
       orgId={project?.orgId}
       trail={[
-        { label: "Editor", onClick: () => requestNavigate(editorPath) },
+        ...(fromEditor
+          ? [{ label: "Editor", onClick: () => requestNavigate(editorPath) }]
+          : []),
         onSettingsPane
-          ? { label: "Settings", to: projectSettingsPath(id!) }
+          ? { label: "Settings", to: settingsHref() }
           : { label: "Settings" },
         ...(breadcrumbParent
-          ? [{ label: breadcrumbParent.label, to: projectSettingsPath(id!, breadcrumbParent.id) }]
+          ? [{ label: breadcrumbParent.label, to: settingsHref(breadcrumbParent.id) }]
           : []),
         ...(onSettingsPane && activeGroup ? [{ label: activeGroup.label }] : []),
       ]}
@@ -1255,7 +1263,7 @@ export function ProjectSettings() {
                       {rows.map((g) => (
                         <NavRow
                           key={g.id}
-                          to={projectSettingsPath(id!, g.id)}
+                          to={settingsHref(g.id)}
                           icon={g.icon}
                           title={g.label}
                           hint={groupHints[g.id] ?? g.description}
@@ -1534,7 +1542,7 @@ export function ProjectSettings() {
             {!lowerQuery && id ? (
               <NavList>
                 <NavRow
-                  to={projectSettingsPath(id, "system-prompt")}
+                  to={settingsHref("system-prompt")}
                   title="System prompt"
                   description="What this project is producing and how translations should read"
                   hint={

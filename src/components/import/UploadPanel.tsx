@@ -6,7 +6,8 @@ import type { PreparedImportFile } from "@/lib/import/import-service"
 import type { ImportUploadProgress } from "@/components/import/PreviewPanel"
 import { ParatextChoice } from "./ParatextChoice"
 import { formatBytesProgress } from "@/lib/format-bytes"
-import { useI18n } from "@/lib/i18n/I18nProvider"
+import { useI18n, useT } from "@/lib/i18n/I18nProvider"
+import { t as tStandalone } from "@/lib/i18n/standalone"
 import { formatNumber } from "@/lib/i18n/format"
 import type { FileReference, ProjectTtsSettings } from "@/lib/parsers/types"
 import { detectFileType, isMediaFileType } from "@/lib/parsers/types"
@@ -67,23 +68,36 @@ function fileExts(list: File[]): string {
   return [...new Set(list.map((f) => f.name.split(".").pop()?.toLowerCase() ?? ""))].sort().join(",")
 }
 
+// Outside React render (called from a progress callback passed into a plain
+// lib helper), so this uses the standalone t() rather than useT() — see
+// src/lib/i18n/standalone.ts.
 function idmlParsePhase(
   fileName: string,
   progress: { phase: string; completed: number; total: number },
 ): string {
-  const action = progress.phase === "inspect"
-    ? "Checking"
-    : progress.phase === "unpack"
-      ? "Opening"
-      : "Reading"
-  const count = progress.total > 1
-    ? ` (${Math.min(progress.completed, progress.total)}/${progress.total})`
-    : ""
-  return `${action} ${fileName}${count}…`
+  const actionKey =
+    progress.phase === "inspect"
+      ? "importExport.upload.idmlChecking"
+      : progress.phase === "unpack"
+        ? "importExport.upload.idmlOpening"
+        : "importExport.upload.idmlReading"
+  const count =
+    progress.total > 1
+      ? tStandalone("importExport.upload.idmlCountSuffix", {
+          completed: Math.min(progress.completed, progress.total),
+          total: progress.total,
+        })
+      : ""
+  return tStandalone("importExport.upload.idmlPhase", {
+    action: tStandalone(actionKey),
+    fileName,
+    count,
+  })
 }
 
 export function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targetLang, identityToken, getToken, onImported, ttsSettings, onCastUpdated, existingFiles, onCollision, onPreview, onCommitPhase, onCommitProgress, onCommitError, onSpreadsheetFile, excludeFrontMatter }: UploadPanelProps) {
   const { locale } = useI18n()
+  const t = useT()
   const [importing, setImporting] = useState(false)
   const [dragOver, setDragOver] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -133,7 +147,7 @@ export function UploadPanel({ projectId, username, sourceLanguage, targetLanguag
       await doImportFiles(list)
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [projectId, username, sourceLanguage, targetLanguage, targetLang, identityToken, getToken, onImported, ttsSettings, onCastUpdated, existingFiles, onCollision]
+    [projectId, username, sourceLanguage, targetLanguage, targetLang, identityToken, getToken, onImported, ttsSettings, onCastUpdated, existingFiles, onCollision, t]
   )
 
   /** Inner helper: import a resolved list of files (after collision resolution).
@@ -148,7 +162,7 @@ export function UploadPanel({ projectId, username, sourceLanguage, targetLanguag
       const spreadsheets = list.filter((file) => /\.(?:csv|tsv|xlsx)$/i.test(file.name))
       if (spreadsheets.length > 0) {
         if (list.length !== 1) {
-          setError("Import one spreadsheet at a time so its columns can be mapped safely.")
+          setError(t("importExport.upload.oneSpreadsheetAtATime"))
           return
         }
         onSpreadsheetFile(spreadsheets[0])
@@ -182,7 +196,11 @@ export function UploadPanel({ projectId, username, sourceLanguage, targetLanguag
         try {
           for (const file of textFiles) {
             const knownType = detectFileType(file.name)
-            setPhase(knownType ? `Reading ${file.name}…` : `Analyzing ${file.name}…`)
+            setPhase(
+              knownType
+                ? t("importExport.upload.readingFile", { fileName: file.name })
+                : t("importExport.upload.analyzingFile", { fileName: file.name }),
+            )
             const prepared = await prepareImportFile(file, {
               projectId,
               identityToken,
@@ -206,7 +224,7 @@ export function UploadPanel({ projectId, username, sourceLanguage, targetLanguag
             file_exts: fileExts(list),
             error_message: err instanceof Error ? err.message : String(err),
           })
-          setError(err instanceof Error ? err.message : "Parse failed")
+          setError(err instanceof Error ? err.message : t("importExport.upload.parseFailed"))
           setImporting(false)
           setPhase("")
           return
@@ -228,7 +246,7 @@ export function UploadPanel({ projectId, username, sourceLanguage, targetLanguag
       await doCommit(list, undefined, reimportFileIds)
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [projectId, username, sourceLanguage, targetLanguage, identityToken, getToken, onImported, ttsSettings, onCastUpdated, onPreview, onSpreadsheetFile]
+    [projectId, username, sourceLanguage, targetLanguage, identityToken, getToken, onImported, ttsSettings, onCastUpdated, onPreview, onSpreadsheetFile, t]
   )
 
   /** Upload all files (called after preview confirmation, or directly for media). */
@@ -245,14 +263,14 @@ export function UploadPanel({ projectId, username, sourceLanguage, targetLanguag
       onCommitError?.(null)
       const checkpoint = finalizationCheckpointRef.current
       if (checkpoint?.files === list) {
-        const finishPhase = "Finishing up…"
+        const finishPhase = t("importExport.upload.finishingUp")
         setPhase(finishPhase)
         onCommitPhase?.(finishPhase)
         try {
           await onImported(checkpoint.refs, undefined, checkpoint.skipped)
           finalizationCheckpointRef.current = null
         } catch (err) {
-          const message = err instanceof Error ? err.message : "Import finalization failed"
+          const message = err instanceof Error ? err.message : t("importExport.upload.finalizationFailed")
           setError(message)
           onCommitError?.(message)
         } finally {
@@ -293,7 +311,7 @@ export function UploadPanel({ projectId, username, sourceLanguage, targetLanguag
       try {
         for (; currentFileIndex < list.length; currentFileIndex++) {
           const file = list[currentFileIndex]
-          const filePhase = `Uploading ${file.name}…`
+          const filePhase = t("importExport.upload.uploadingFile", { fileName: file.name })
           setPhase(filePhase)
           // AQU-430: surface phase to parent so PreviewPanel can show progress.
           onCommitPhase?.(filePhase)
@@ -311,7 +329,7 @@ export function UploadPanel({ projectId, username, sourceLanguage, targetLanguag
             reimportFileIds,
             getToken,
             onCellEnqueued: (count, total) => {
-              const p = `Uploading ${file.name}`
+              const p = t("importExport.upload.uploadingFile", { fileName: file.name })
               setPhase(p)
               onCommitPhase?.(p)
               const frac = total > 0 ? Math.min(count / total, 1) : 0
@@ -328,7 +346,7 @@ export function UploadPanel({ projectId, username, sourceLanguage, targetLanguag
         }
         // Apply cast additions if any subtitle speakers were found.
         await persistCastAdditions()
-        const finishPhase = "Finishing up…"
+        const finishPhase = t("importExport.upload.finishingUp")
         setPhase(finishPhase)
         onCommitPhase?.(finishPhase)
         handoffAttempted = true
@@ -337,7 +355,7 @@ export function UploadPanel({ projectId, username, sourceLanguage, targetLanguag
         await onImported(allRefs, undefined, skipped)
         finalizationCheckpointRef.current = null
       } catch (err) {
-        const message = err instanceof Error ? err.message : "Import failed"
+        const message = err instanceof Error ? err.message : t("importExport.errors.importFailed")
         posthog.captureException(err, { import_stage: "upload", project_id: projectId, file_exts: fileExts(list) })
         posthog.capture(IMPORT_FAILED, {
           import_stage: "upload",
@@ -350,7 +368,7 @@ export function UploadPanel({ projectId, username, sourceLanguage, targetLanguag
             ...allSkipped,
             ...list.slice(currentFileIndex).map((file, index) => ({
               book: file.name,
-              reason: index === 0 ? message : "not attempted after an earlier file failed",
+              reason: index === 0 ? message : t("importExport.upload.notAttempted"),
             })),
           ]
           // Speakers from files that did succeed must not disappear merely
@@ -361,13 +379,13 @@ export function UploadPanel({ projectId, username, sourceLanguage, targetLanguag
               await persistCastAdditions()
             } catch (castError) {
               failedAndUnattempted.push({
-                book: "Cast assignments",
+                book: t("importExport.upload.castAssignmentsLabel"),
                 reason: castError instanceof Error ? castError.message : String(castError),
               })
             }
           }
           if (failedAndUnattempted.length === 0) {
-            failedAndUnattempted.push({ book: "Import finalization", reason: message })
+            failedAndUnattempted.push({ book: t("importExport.upload.importFinalizationLabel"), reason: message })
           }
           handoffAttempted = true
           finalizationCheckpointRef.current = {
@@ -379,7 +397,7 @@ export function UploadPanel({ projectId, username, sourceLanguage, targetLanguag
             await onImported(allRefs, undefined, failedAndUnattempted)
             finalizationCheckpointRef.current = null
           } catch (handoffError) {
-            const handoffMessage = handoffError instanceof Error ? handoffError.message : "Import finalization failed"
+            const handoffMessage = handoffError instanceof Error ? handoffError.message : t("importExport.upload.finalizationFailed")
             setError(handoffMessage)
             onCommitError?.(handoffMessage)
           }
@@ -397,7 +415,7 @@ export function UploadPanel({ projectId, username, sourceLanguage, targetLanguag
         onCommitPhase?.("")
       }
     },
-    [projectId, username, sourceLanguage, targetLanguage, targetLang, identityToken, getToken, onImported, ttsSettings, onCastUpdated, onCommitPhase, onCommitProgress, onCommitError]
+    [projectId, username, sourceLanguage, targetLanguage, targetLang, identityToken, getToken, onImported, ttsSettings, onCastUpdated, onCommitPhase, onCommitProgress, onCommitError, t]
   )
 
   function handleDrop(e: React.DragEvent) {
@@ -449,7 +467,7 @@ export function UploadPanel({ projectId, username, sourceLanguage, targetLanguag
     >
       {importing ? (
         <div className="w-full max-w-sm text-center">
-          <p className="text-sm font-medium">{phase || "Importing…"}</p>
+          <p className="text-sm font-medium">{phase || t("importExport.action.importing")}</p>
           {progress && progress.total > 0 ? (
             <>
               <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-muted">
@@ -459,7 +477,10 @@ export function UploadPanel({ projectId, username, sourceLanguage, targetLanguag
                 />
               </div>
               <p className="mt-1.5 text-xs text-muted-foreground">
-                {formatNumber(progress.count, locale)} / {formatNumber(progress.total, locale)} cells
+                {t("importExport.upload.cellsProgress", {
+                  count: formatNumber(progress.count, locale),
+                  total: formatNumber(progress.total, locale),
+                })}
                 {progress.bytesTotal ? (
                   <>
                     {" · "}
@@ -471,17 +492,17 @@ export function UploadPanel({ projectId, username, sourceLanguage, targetLanguag
               </p>
             </>
           ) : (
-            <p className="mt-2 text-xs text-muted-foreground">Working…</p>
+            <p className="mt-2 text-xs text-muted-foreground">{t("importExport.action.working")}</p>
           )}
         </div>
       ) : (
         <>
           <p className="mb-2 text-sm text-muted-foreground">
-            Drag & drop files here, or
+            {t("importExport.upload.dragDropHint")}
           </p>
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" nativeButton={false} render={<label />}>
-              Choose Files
+              {t("importExport.upload.chooseFiles")}
               <input
                 type="file"
                 multiple
@@ -490,7 +511,7 @@ export function UploadPanel({ projectId, username, sourceLanguage, targetLanguag
               />
             </Button>
             <Button variant="outline" size="sm" nativeButton={false} render={<label />}>
-              Choose Folder
+              {t("importExport.upload.chooseFolder")}
               {/* Folder picker for an unzipped Paratext project. */}
               <input
                 type="file"
@@ -503,13 +524,13 @@ export function UploadPanel({ projectId, username, sourceLanguage, targetLanguag
             </Button>
           </div>
           <div className="mt-3 space-y-1 text-xs text-muted-foreground">
-            <p><span className="font-medium text-foreground/70">Scripture</span> — USFM, USX, SFM</p>
-            <p><span className="font-medium text-foreground/70">Translation</span> — XLIFF/XLF, TMX, CSV/TSV</p>
-            <p><span className="font-medium text-foreground/70">Documents</span> — DOCX, TXT, MD, HTML, JSON/ARB, PPTX, IDML (InDesign)</p>
-            <p><span className="font-medium text-foreground/70">Localization</span> — PO/POT, Java properties</p>
-            <p><span className="font-medium text-foreground/70">Subtitles</span> — VTT, SRT, SBV</p>
-            <p><span className="font-medium text-foreground/70">Paratext project</span> — .zip or folder</p>
-            <p><span className="font-medium text-foreground/70">Other formats</span> — AI-assisted when configured, always reviewed before import</p>
+            <p><span className="font-medium text-foreground/70">{t("importExport.upload.categoryScripture")}</span> — USFM, USX, SFM</p>
+            <p><span className="font-medium text-foreground/70">{t("importExport.upload.categoryTranslation")}</span> — XLIFF/XLF, TMX, CSV/TSV</p>
+            <p><span className="font-medium text-foreground/70">{t("importExport.upload.categoryDocuments")}</span> — DOCX, TXT, MD, HTML, JSON/ARB, PPTX, IDML (InDesign)</p>
+            <p><span className="font-medium text-foreground/70">{t("importExport.upload.categoryLocalization")}</span> — PO/POT, Java properties</p>
+            <p><span className="font-medium text-foreground/70">{t("importExport.upload.categorySubtitles")}</span> — VTT, SRT, SBV</p>
+            <p><span className="font-medium text-foreground/70">{t("importExport.upload.categoryParatextProject")}</span> — {t("importExport.upload.zipOrFolder")}</p>
+            <p><span className="font-medium text-foreground/70">{t("importExport.upload.categoryOtherFormats")}</span> — {t("importExport.upload.otherFormatsHint")}</p>
           </div>
         </>
       )}

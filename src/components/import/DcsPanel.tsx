@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
-import { useI18n } from "@/lib/i18n/I18nProvider"
+import { useI18n, useT } from "@/lib/i18n/I18nProvider"
 import { formatNumber } from "@/lib/i18n/format"
+import { RichMessage } from "@/lib/i18n/RichMessage"
 import type { FileReference } from "@/lib/parsers/types"
 import { DcsCatalogBrowser } from "@/components/dcs/DcsCatalogBrowser"
 import { importDcsResource } from "@/lib/dcs/import-dcs"
@@ -28,6 +29,7 @@ type DcsPanelStage = "browse" | "importing" | "done"
 
 export function DcsPanel({ projectId, getToken, defaultLang, patchDcsCursor, onImported, excludeFrontMatter }: DcsPanelProps) {
   const { locale } = useI18n()
+  const t = useT()
   const [stage, setStage] = useState<DcsPanelStage>("browse")
   const [selected, setSelected] = useState<DcsCatalogEntry | null>(null)
   const [progress, setProgress] = useState<{ uploaded: number; total: number } | null>(null)
@@ -72,12 +74,12 @@ export function DcsPanel({ projectId, getToken, defaultLang, patchDcsCursor, onI
         result.skipped,
       )
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Import failed")
+      setError(err instanceof Error ? err.message : t("importExport.errors.importFailed"))
       setStage("browse")
     } finally {
       abortRef.current = null
     }
-  }, [projectId, getToken, patchDcsCursor, onImported, excludeFrontMatter])
+  }, [projectId, getToken, patchDcsCursor, onImported, excludeFrontMatter, t])
 
   if (stage === "browse") {
     return (
@@ -98,8 +100,10 @@ export function DcsPanel({ projectId, getToken, defaultLang, patchDcsCursor, onI
     return (
       <div className="mx-auto w-full max-w-sm py-8 text-center">
         <p className="text-sm font-medium">
-          Importing {selected?.fullName ?? "resource"}
-          {selected?.ref ? ` @ ${selected.ref}` : ""}…
+          {t("importExport.dcs.importingResource", {
+            resource: selected?.fullName ?? t("importExport.dcs.genericResource"),
+            ref: selected?.ref ? ` @ ${selected.ref}` : "",
+          })}
         </p>
         {progress && progress.total > 0 ? (
           <>
@@ -107,11 +111,14 @@ export function DcsPanel({ projectId, getToken, defaultLang, patchDcsCursor, onI
               <div className="h-full bg-primary transition-all" style={{ width: `${pct}%` }} />
             </div>
             <p className="mt-1.5 text-xs text-muted-foreground">
-              {formatNumber(progress.uploaded, locale)} / {formatNumber(progress.total, locale)} files
+              {t("importExport.dcs.filesProgress", {
+                uploaded: formatNumber(progress.uploaded, locale),
+                total: formatNumber(progress.total, locale),
+              })}
             </p>
           </>
         ) : (
-          <p className="mt-2 text-xs text-muted-foreground">Fetching &amp; parsing from Door43…</p>
+          <p className="mt-2 text-xs text-muted-foreground">{t("importExport.dcs.fetchingAndParsing")}</p>
         )}
       </div>
     )
@@ -120,20 +127,26 @@ export function DcsPanel({ projectId, getToken, defaultLang, patchDcsCursor, onI
   // stage === "done"
   return (
     <div className="mx-auto w-full max-w-sm py-8 text-center">
-      <p className="text-sm font-medium">Import complete</p>
+      <p className="text-sm font-medium">{t("importExport.dcs.importComplete")}</p>
       {summary && (
         <div className="mt-2 space-y-1 text-xs text-muted-foreground">
           <p>{selected?.fullName}</p>
           <p>
-            {formatNumber(summary.files, locale)} file{summary.files === 1 ? "" : "s"} ·{" "}
-            {formatNumber(summary.cells, locale)} cell{summary.cells === 1 ? "" : "s"}
+            {/* Two independent counts (files, cells) — each pluralized on its own and
+             *  joined, rather than one template agreeing with two numbers at once. */}
+            {t("importExport.dcs.filesCount", { count: formatNumber(summary.files, locale) })}
+            {" · "}
+            {t("importExport.dcs.cellsCount", { count: formatNumber(summary.cells, locale) })}
           </p>
           <p>
             {summary.pinned
-              ? <>Pinned to release <span className="font-medium text-foreground/80">{summary.ref}</span></>
-              : <span className="text-amber-600 dark:text-amber-400">
-                  Imported, but couldn&apos;t pin the release — you may lack maintainer rights on this project.
-                </span>}
+              ? (
+                <RichMessage
+                  k="importExport.dcs.pinnedToRelease"
+                  values={{ ref: <span className="font-medium text-foreground/80">{summary.ref}</span> }}
+                />
+              )
+              : <span className="text-amber-600 dark:text-amber-400">{t("importExport.dcs.couldNotPin")}</span>}
           </p>
         </div>
       )}

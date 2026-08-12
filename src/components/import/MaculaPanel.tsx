@@ -1,8 +1,9 @@
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { importMacula, type MaculaProgress } from "@/lib/import"
-import { useI18n } from "@/lib/i18n/I18nProvider"
+import { useI18n, useT } from "@/lib/i18n/I18nProvider"
 import { formatNumber } from "@/lib/i18n/format"
+import { RichMessage } from "@/lib/i18n/RichMessage"
 import type { FileReference } from "@/lib/parsers/types"
 
 interface MaculaPanelProps {
@@ -14,6 +15,7 @@ interface MaculaPanelProps {
 
 export function MaculaPanel({ projectId, username, getToken, onImported }: MaculaPanelProps) {
   const { locale } = useI18n()
+  const t = useT()
   const [importing, setImporting] = useState(false)
   const [progress, setProgress] = useState<MaculaProgress | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -28,7 +30,7 @@ export function MaculaPanel({ projectId, username, getToken, onImported }: Macul
       const refs = await importMacula(file, { projectId, author: username, getToken }, setProgress)
       await onImported(refs)
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Import failed")
+      setError(err instanceof Error ? err.message : t("importExport.errors.importFailed"))
     } finally {
       setImporting(false)
       setProgress(null)
@@ -38,21 +40,25 @@ export function MaculaPanel({ projectId, username, getToken, onImported }: Macul
   return (
     <div className="flex flex-col gap-4 py-2">
       <p className="text-xs text-muted-foreground">
-        Upload a Macula TSV file obtained from{" "}
-        <a
-          href="https://github.com/Clear-Bible/macula-hebrew"
-          target="_blank"
-          rel="noreferrer"
-          className="underline"
-        >
-          Clear Bible's Macula project
-        </a>
-        . Each TSV file represents one biblical book. The Hebrew and Greek word-level
-        morphology (lemma, morph code, Strong's) will be preserved alongside the verse text.
+        <RichMessage
+          k="importExport.macula.description"
+          values={{
+            link: (
+              <a
+                href="https://github.com/Clear-Bible/macula-hebrew"
+                target="_blank"
+                rel="noreferrer"
+                className="underline"
+              >
+                Clear Bible's Macula project
+              </a>
+            ),
+          }}
+        />
       </p>
       <div className="flex flex-col gap-2">
         <Button variant="outline" size="sm" nativeButton={false} render={<label />}>
-          {file ? file.name : "Choose Macula TSV file"}
+          {file ? file.name : t("importExport.macula.chooseFile")}
           <input
             type="file"
             className="hidden"
@@ -71,10 +77,15 @@ export function MaculaPanel({ projectId, username, getToken, onImported }: Macul
       </div>
       {progress && (
         <div className="text-xs text-muted-foreground">
-          {progress.phase === "parse" && "Parsing verse data…"}
+          {progress.phase === "parse" && t("importExport.macula.parsing")}
           {progress.phase === "save" && progress.cellsTotal && (
             <>
-              <p>Uploading: {formatNumber(progress.cellsEnqueued ?? 0, locale)} / {formatNumber(progress.cellsTotal, locale)} cells</p>
+              <p>
+                {t("importExport.macula.uploadingCells", {
+                  enqueued: formatNumber(progress.cellsEnqueued ?? 0, locale),
+                  total: formatNumber(progress.cellsTotal, locale),
+                })}
+              </p>
               <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-muted">
                 <div
                   className="h-full bg-primary transition-all"
@@ -88,7 +99,7 @@ export function MaculaPanel({ projectId, username, getToken, onImported }: Macul
       {error && <p className="text-sm text-destructive">{error}</p>}
       <div className="flex justify-end">
         <Button onClick={handleImport} disabled={!file || importing}>
-          {importing ? "Importing…" : "Import"}
+          {importing ? t("importExport.action.importing") : t("importExport.action.import")}
         </Button>
       </div>
     </div>

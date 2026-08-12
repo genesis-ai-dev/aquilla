@@ -7,8 +7,9 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { cn } from "@/lib/utils"
 import { importEBible, prepareEBibleTargetImport, applyEBibleTargetImport, type EBibleProgress, type EBibleTargetProgress, type EBibleMatchResult, type SourceCellRef } from "@/lib/import"
 import { formatBytesProgress as formatProgress } from "@/lib/format-bytes"
-import { useI18n } from "@/lib/i18n/I18nProvider"
+import { useI18n, useT } from "@/lib/i18n/I18nProvider"
 import { formatNumber } from "@/lib/i18n/format"
+import { RichMessage } from "@/lib/i18n/RichMessage"
 import type { FileReference } from "@/lib/parsers/types"
 import { fetchTranslationsList, type EBibleTranslation } from "@/lib/parsers/ebible"
 import { EBibleTargetReviewPanel } from "@/components/EBibleTargetReviewPanel"
@@ -32,6 +33,7 @@ type EBibleTargetStep = "pick" | "review" | "applying" | "done"
 
 export function EBiblePanel({ projectId, username, sourceLanguage, targetLanguage, targetLang, getToken, sourceCells, onImported, onTargetImported }: EBiblePanelProps) {
   const { locale } = useI18n()
+  const t = useT()
   const [mode, setMode] = useState<EBiblePanelMode>("source")
   const [targetStep, setTargetStep] = useState<EBibleTargetStep>("pick")
   const [matchResult, setMatchResult] = useState<EBibleMatchResult | null>(null)
@@ -68,11 +70,11 @@ export function EBiblePanel({ projectId, username, sourceLanguage, targetLanguag
     if (!q) return translations.slice(0, 200)
     return translations
       .filter(
-        (t) =>
-          t.id.toLowerCase().includes(q) ||
-          t.title.toLowerCase().includes(q) ||
-          t.languageNameInEnglish.toLowerCase().includes(q) ||
-          t.languageName.toLowerCase().includes(q)
+        (tr) =>
+          tr.id.toLowerCase().includes(q) ||
+          tr.title.toLowerCase().includes(q) ||
+          tr.languageNameInEnglish.toLowerCase().includes(q) ||
+          tr.languageName.toLowerCase().includes(q)
       )
       .slice(0, 200)
   }, [translations, query])
@@ -101,7 +103,7 @@ export function EBiblePanel({ projectId, username, sourceLanguage, targetLanguag
       // sourceLanguage so the project can seed it when unset (AQU-249).
       await onImported(ref, { sourceLanguage: selected.languageCode || selected.id })
     } catch (err) {
-      setImportErr(err instanceof Error ? err.message : "Import failed")
+      setImportErr(err instanceof Error ? err.message : t("importExport.errors.importFailed"))
     } finally {
       setImporting(false)
       abortRef.current = null
@@ -133,7 +135,7 @@ export function EBiblePanel({ projectId, username, sourceLanguage, targetLanguag
       setMatchResult(result)
       setTargetStep("review")
     } catch (err) {
-      setTargetErr(err instanceof Error ? err.message : "Preparation failed")
+      setTargetErr(err instanceof Error ? err.message : t("importExport.ebible.preparationFailed"))
     } finally {
       setImporting(false)
       abortRef.current = null
@@ -153,7 +155,7 @@ export function EBiblePanel({ projectId, username, sourceLanguage, targetLanguag
       )
       setTargetStep("done")
     } catch (err) {
-      setTargetErr(err instanceof Error ? err.message : "Apply failed")
+      setTargetErr(err instanceof Error ? err.message : t("importExport.ebible.applyFailed"))
       setTargetStep("review")
     }
   }
@@ -164,8 +166,11 @@ export function EBiblePanel({ projectId, username, sourceLanguage, targetLanguag
       <div className="mx-auto w-full max-w-sm py-8 text-center">
         <p className="text-sm font-medium">
           {targetProgress?.phase === "save" && targetProgress.cellsTotal
-            ? `Committing ${formatNumber(targetProgress.cellsEnqueued ?? 0, locale)} / ${formatNumber(targetProgress.cellsTotal, locale)} verses…`
-            : "Committing verses…"}
+            ? t("importExport.ebible.committingVerses", {
+                enqueued: formatNumber(targetProgress.cellsEnqueued ?? 0, locale),
+                total: formatNumber(targetProgress.cellsTotal, locale),
+              })
+            : t("importExport.ebible.committingVersesIndeterminate")}
         </p>
         {targetProgress?.phase === "save" && targetProgress.cellsTotal ? (
           <div className="mx-auto mt-3 h-2 w-full max-w-xs overflow-hidden rounded-full bg-muted">
@@ -175,7 +180,7 @@ export function EBiblePanel({ projectId, username, sourceLanguage, targetLanguag
             />
           </div>
         ) : (
-          <p className="mt-2 text-xs text-muted-foreground">Working…</p>
+          <p className="mt-2 text-xs text-muted-foreground">{t("importExport.action.working")}</p>
         )}
       </div>
     )
@@ -185,11 +190,11 @@ export function EBiblePanel({ projectId, username, sourceLanguage, targetLanguag
   if (mode === "target" && targetStep === "done") {
     return (
       <div className="flex flex-col items-center gap-4 py-8 text-center">
-        <p className="text-sm font-medium">Target verses committed.</p>
+        <p className="text-sm font-medium">{t("importExport.ebible.targetCommitted")}</p>
         <p className="text-xs text-muted-foreground">
-          The target column will update as the server projection lands.
+          {t("importExport.ebible.targetCommittedHint")}
         </p>
-        <Button size="sm" onClick={() => onTargetImported?.()}>Close</Button>
+        <Button size="sm" onClick={() => onTargetImported?.()}>{t("common.close")}</Button>
       </div>
     )
   }
@@ -219,27 +224,27 @@ export function EBiblePanel({ projectId, username, sourceLanguage, targetLanguag
           onValueChange={(value) => setMode(value as EBiblePanelMode)}
           className="gap-0"
         >
-          <TabsList size="lg" className="w-full" aria-label="eBible import mode">
-            <TabsTrigger value="source">New source file</TabsTrigger>
-            <TabsTrigger value="target">Into target column</TabsTrigger>
+          <TabsList size="lg" className="w-full" aria-label={t("importExport.ebible.modeTabsAriaLabel")}>
+            <TabsTrigger value="source">{t("importExport.ebible.modeSource")}</TabsTrigger>
+            <TabsTrigger value="target">{t("importExport.ebible.modeTarget")}</TabsTrigger>
           </TabsList>
         </Tabs>
       )}
 
       <p className="text-xs text-muted-foreground">
         {mode === "source" ? (
-          <>
-            Import a Bible translation directly from the{" "}
-            <a href="https://github.com/BibleNLP/ebible" target="_blank" rel="noreferrer" className="underline">
-              BibleNLP/ebible corpus
-            </a>
-            . Only redistributable translations are included.
-          </>
+          <RichMessage
+            k="importExport.ebible.sourceDescription"
+            values={{
+              link: (
+                <a href="https://github.com/BibleNLP/ebible" target="_blank" rel="noreferrer" className="underline">
+                  {t("importExport.ebible.corpusLinkText")}
+                </a>
+              ),
+            }}
+          />
         ) : (
-          <>
-            Match eBible verses to existing source cells by canonical reference (e.g. GEN 1:1) and
-            fill the target column. A review step lets you keep or replace any existing target content.
-          </>
+          t("importExport.ebible.targetDescription")
         )}
       </p>
 
@@ -248,47 +253,47 @@ export function EBiblePanel({ projectId, username, sourceLanguage, targetLanguag
           <Search />
         </InputGroupAddon>
         <InputGroupInput
-          placeholder="Search by language, title, or id (e.g. 'eng', 'KJV')"
+          placeholder={t("importExport.ebible.searchPlaceholder")}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           disabled={!translations || importing}
-          aria-label="Search eBible translations"
+          aria-label={t("importExport.ebible.searchAriaLabel")}
         />
       </InputGroup>
 
       {loadErr ? (
-        <p className="text-sm text-destructive">Failed to load list: {loadErr}</p>
+        <p className="text-sm text-destructive">{t("importExport.helloao.failedToLoadList", { error: loadErr })}</p>
       ) : !translations ? (
-        <p className="text-sm text-muted-foreground">Loading translations...</p>
+        <p className="text-sm text-muted-foreground">{t("importExport.helloao.loadingTranslations")}</p>
       ) : (
         <ScrollArea className="h-72 rounded-md border">
           <ul className="divide-y">
             {filtered.length === 0 && (
-              <li className="p-3 text-sm text-muted-foreground">No matches.</li>
+              <li className="p-3 text-sm text-muted-foreground">{t("common.noMatches")}</li>
             )}
-            {filtered.map((t) => {
-              const isSelected = selected?.id === t.id
+            {filtered.map((tr) => {
+              const isSelected = selected?.id === tr.id
               return (
-                <li key={t.id}>
+                <li key={tr.id}>
                   <button
                     type="button"
                     disabled={importing}
-                    onClick={() => setSelected(t)}
+                    onClick={() => setSelected(tr)}
                     className={cn(
                       "flex w-full flex-col items-start gap-0.5 px-3 py-2 text-start text-sm transition-colors hover:bg-accent",
                       isSelected && "bg-accent"
                     )}
                   >
                     <div className="flex w-full items-center justify-between gap-2">
-                      <span className="font-medium">{t.title}</span>
+                      <span className="font-medium">{tr.title}</span>
                       <span className="shrink-0 font-mono text-xs text-muted-foreground">
-                        {t.id}
+                        {tr.id}
                       </span>
                     </div>
                     <span className="text-xs text-muted-foreground">
-                      {t.languageNameInEnglish || t.languageName}
-                      {t.otBooks + t.ntBooks > 0 && (
-                        <> · {t.otBooks} OT · {t.ntBooks} NT</>
+                      {tr.languageNameInEnglish || tr.languageName}
+                      {tr.otBooks + tr.ntBooks > 0 && (
+                        <> · {t("importExport.ebible.otBooks", { count: tr.otBooks })} · {t("importExport.ebible.ntBooks", { count: tr.ntBooks })}</>
                       )}
                     </span>
                   </button>
@@ -302,7 +307,7 @@ export function EBiblePanel({ projectId, username, sourceLanguage, targetLanguag
       {selected && (
         <div className="rounded-md border bg-muted/30 p-3 text-xs">
           <div className="font-medium text-sm">{selected.title}</div>
-          <div className="text-muted-foreground">{selected.copyright || "No copyright info."}</div>
+          <div className="text-muted-foreground">{selected.copyright || t("importExport.ebible.noCopyrightInfo")}</div>
         </div>
       )}
 
@@ -311,12 +316,18 @@ export function EBiblePanel({ projectId, username, sourceLanguage, targetLanguag
         <div className="text-xs text-muted-foreground">
           <p>
             {progress.phase === "download"
-              ? `Downloading ${selected?.id ?? ""}… ${formatProgress(progress.received, progress.total, locale)}`
+              ? t("importExport.ebible.downloading", {
+                  id: selected?.id ?? "",
+                  progress: formatProgress(progress.received, progress.total, locale),
+                })
               : progress.phase === "parse"
-                ? "Parsing verses…"
+                ? t("importExport.helloao.parsingVerses")
                 : progress.cellsTotal
-                  ? `Uploading verses: ${formatNumber(progress.cellsEnqueued ?? 0, locale)} / ${formatNumber(progress.cellsTotal, locale)}`
-                  : "Uploading to project…"}
+                  ? t("importExport.helloao.uploadingVerses", {
+                      enqueued: formatNumber(progress.cellsEnqueued ?? 0, locale),
+                      total: formatNumber(progress.cellsTotal, locale),
+                    })
+                  : t("importExport.obs.uploadingToProject")}
           </p>
           {progress.phase === "save" && progress.cellsTotal ? (
             <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-muted">
@@ -336,10 +347,13 @@ export function EBiblePanel({ projectId, username, sourceLanguage, targetLanguag
         <div className="text-xs text-muted-foreground">
           <p>
             {targetProgress.phase === "download"
-              ? `Downloading ${selected?.id ?? ""}… ${formatProgress(targetProgress.received, targetProgress.total, locale)}`
+              ? t("importExport.ebible.downloading", {
+                  id: selected?.id ?? "",
+                  progress: formatProgress(targetProgress.received, targetProgress.total, locale),
+                })
               : targetProgress.phase === "parse"
-                ? "Parsing verses…"
-                : "Matching verses to source cells…"}
+                ? t("importExport.helloao.parsingVerses")
+                : t("importExport.ebible.matchingVerses")}
           </p>
         </div>
       )}
@@ -350,11 +364,11 @@ export function EBiblePanel({ projectId, username, sourceLanguage, targetLanguag
       <div className="flex justify-end">
         {mode === "source" ? (
           <Button onClick={handleImport} disabled={!selected || importing}>
-            {importing ? "Importing..." : "Import"}
+            {importing ? t("importExport.action.importing") : t("importExport.action.import")}
           </Button>
         ) : (
           <Button onClick={handlePrepareTarget} disabled={!selected || importing || !sourceCells?.length}>
-            {importing ? "Preparing…" : "Next: Review matches"}
+            {importing ? t("importExport.ebible.preparing") : t("importExport.ebible.nextReviewMatches")}
           </Button>
         )}
       </div>

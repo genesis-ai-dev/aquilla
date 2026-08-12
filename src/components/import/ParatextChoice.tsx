@@ -5,7 +5,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { prepareParatextProject, commitParatextProject, importParatextAsTarget, type ParatextPlan, type ParatextImportProgress } from "@/lib/import"
-import { useI18n } from "@/lib/i18n/I18nProvider"
+import { useI18n, useT } from "@/lib/i18n/I18nProvider"
 import { formatNumber } from "@/lib/i18n/format"
 import type { FileReference } from "@/lib/parsers/types"
 import { type ProjectEntry } from "@/lib/parsers/paratext-project"
@@ -49,6 +49,7 @@ export function ParatextChoice({
   existingFiles, onCollision, excludeFrontMatter,
 }: ParatextChoiceProps) {
   const { locale } = useI18n()
+  const t = useT()
   const [mode, setMode] = useState<"choose" | "pickSource" | "importing">("choose")
   const [plan, setPlan] = useState<ParatextPlan | null>(null)
   const [phase, setPhase] = useState("")
@@ -76,16 +77,20 @@ export function ParatextChoice({
           project_id: projectId,
           error_message: err instanceof Error ? err.message : String(err),
         })
-        setError(err instanceof Error ? err.message : "Couldn't read the project")
+        setError(err instanceof Error ? err.message : t("importExport.paratext.couldNotReadProject"))
       })
     return () => { cancelled = true }
-  }, [entries, projectId, excludeFrontMatter])
+  }, [entries, projectId, excludeFrontMatter, t])
 
   function onProgress(p: ParatextImportProgress) {
     const bookLabel = p.book
-      ? `${p.book} · book ${Math.min(p.booksDone + 1, p.booksTotal)} of ${p.booksTotal}`
-      : `${p.booksDone} / ${p.booksTotal} books`
-    setPhase(p.book ? `Uploading ${p.book}…` : "Uploading…")
+      ? t("importExport.paratext.bookProgressLabel", {
+          book: p.book,
+          done: Math.min(p.booksDone + 1, p.booksTotal),
+          total: p.booksTotal,
+        })
+      : t("importExport.paratext.booksProgressLabel", { done: p.booksDone, total: p.booksTotal })
+    setPhase(p.book ? t("importExport.paratext.uploadingBook", { book: p.book }) : t("importExport.paratext.uploading"))
     // Prefer the per-chunk cell counts (smooth bar); fall back to books.
     if (p.cellsTotal != null && p.cellsTotal > 0) {
       setProgress({ count: p.cellsDone ?? 0, total: p.cellsTotal, bookLabel })
@@ -110,7 +115,7 @@ export function ParatextChoice({
 
   async function runSourceWithResolution(resolution: CollisionResolution) {
     if (!plan) return
-    setMode("importing"); setError(null); setPhase("Uploading…"); setProgress(null)
+    setMode("importing"); setError(null); setPhase(t("importExport.paratext.uploading")); setProgress(null)
     try {
       const { refs, settings, skipped } = await commitParatextProject(plan, {
         ...ctx,
@@ -126,7 +131,7 @@ export function ParatextChoice({
         project_id: projectId,
         error_message: err instanceof Error ? err.message : String(err),
       })
-      setError(err instanceof Error ? err.message : "Import failed"); setMode("choose")
+      setError(err instanceof Error ? err.message : t("importExport.errors.importFailed")); setMode("choose")
     }
   }
 
@@ -149,14 +154,14 @@ export function ParatextChoice({
       try {
         setTranslations(await fetchTranslationsList())
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Couldn't load the source list")
+        setError(err instanceof Error ? err.message : t("importExport.paratext.couldNotLoadSourceList"))
       }
     }
   }
 
   async function runTargetWithResolution(sel: EBibleTranslation, resolution: CollisionResolution) {
     if (!plan) return
-    setMode("importing"); setError(null); setPhase(`Fetching source: ${sel.title}…`); setProgress(null)
+    setMode("importing"); setError(null); setPhase(t("importExport.paratext.fetchingSource", { title: sel.title })); setProgress(null)
     try {
       const corpus = await fetchTranslationText(sel.id, () => {})
       const sourceVerses: SourceVerse[] = parseEBibleCorpus(corpus).map((s) => ({
@@ -177,7 +182,7 @@ export function ParatextChoice({
         skipped.length ? skipped : undefined,
       )
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Import failed"); setMode("pickSource")
+      setError(err instanceof Error ? err.message : t("importExport.errors.importFailed")); setMode("pickSource")
     }
   }
 
@@ -199,10 +204,10 @@ export function ParatextChoice({
     const q = query.trim().toLowerCase()
     const base = q
       ? translations.filter(
-          (t) =>
-            t.id.toLowerCase().includes(q) ||
-            t.title.toLowerCase().includes(q) ||
-            t.languageNameInEnglish.toLowerCase().includes(q),
+          (tr) =>
+            tr.id.toLowerCase().includes(q) ||
+            tr.title.toLowerCase().includes(q) ||
+            tr.languageNameInEnglish.toLowerCase().includes(q),
         )
       : translations
     return base.slice(0, 200)
@@ -211,14 +216,18 @@ export function ParatextChoice({
   if (mode === "importing") {
     return (
       <div className="mx-auto w-full max-w-sm py-8 text-center">
-        <p className="text-sm font-medium">{phase || "Importing…"}</p>
+        <p className="text-sm font-medium">{phase || t("importExport.action.importing")}</p>
         {progress && progress.total > 0 && (
           <>
             <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-muted">
               <div className="h-full bg-primary transition-all" style={{ width: `${Math.round((progress.count / progress.total) * 100)}%` }} />
             </div>
             <p className="mt-1.5 text-xs text-muted-foreground">
-              {formatNumber(progress.count, locale)} / {formatNumber(progress.total, locale)} cells · {progress.bookLabel}
+              {t("importExport.paratext.cellsProgress", {
+                count: formatNumber(progress.count, locale),
+                total: formatNumber(progress.total, locale),
+                bookLabel: progress.bookLabel,
+              })}
             </p>
           </>
         )}
@@ -231,35 +240,35 @@ export function ParatextChoice({
     return (
       <div className="flex flex-col gap-3 py-2">
         <div className="flex items-center justify-between">
-          <p className="text-sm font-medium">Pick a source Bible to align against</p>
-          <Button variant="ghost" size="sm" onClick={() => setMode("choose")}>Back</Button>
+          <p className="text-sm font-medium">{t("importExport.paratext.pickSourceTitle")}</p>
+          <Button variant="ghost" size="sm" onClick={() => setMode("choose")}>{t("common.back")}</Button>
         </div>
         <p className="text-xs text-muted-foreground">
-          It just needs to be close — verses align by reference (e.g. MAT 1:1). Verses missing on either side stay blank.
+          {t("importExport.paratext.pickSourceHint")}
         </p>
         <InputGroup>
           <InputGroupAddon>
             <Search />
           </InputGroupAddon>
           <InputGroupInput
-            placeholder="Search translations (language, name, code)…"
+            placeholder={t("importExport.paratext.searchTranslationsPlaceholder")}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            aria-label="Search translations"
+            aria-label={t("importExport.paratext.searchTranslationsAriaLabel")}
           />
         </InputGroup>
         <ScrollArea className="h-64 rounded border">
           {!translations ? (
-            <p className="p-3 text-sm text-muted-foreground">Loading source list…</p>
+            <p className="p-3 text-sm text-muted-foreground">{t("importExport.paratext.loadingSourceList")}</p>
           ) : filtered.length === 0 ? (
-            <p className="p-3 text-sm text-muted-foreground">No matches.</p>
+            <p className="p-3 text-sm text-muted-foreground">{t("common.noMatches")}</p>
           ) : (
             <ul className="divide-y">
-              {filtered.map((t) => (
-                <li key={t.id}>
-                  <button type="button" onClick={() => runTarget(t)} className="flex w-full flex-col items-start px-3 py-2 text-start hover:bg-accent">
-                    <span className="text-sm">{t.title}</span>
-                    <span className="text-xs text-muted-foreground">{t.languageNameInEnglish} · {t.id}</span>
+              {filtered.map((tr) => (
+                <li key={tr.id}>
+                  <button type="button" onClick={() => runTarget(tr)} className="flex w-full flex-col items-start px-3 py-2 text-start hover:bg-accent">
+                    <span className="text-sm">{tr.title}</span>
+                    <span className="text-xs text-muted-foreground">{tr.languageNameInEnglish} · {tr.id}</span>
                   </button>
                 </li>
               ))}
@@ -290,12 +299,17 @@ export function ParatextChoice({
     <div className="flex flex-col gap-3 py-2">
       <div>
         <p className="text-sm font-medium">
-          Paratext project detected — {plan ? plan.books.length : bookCount} book{(plan ? plan.books.length : bookCount) === 1 ? "" : "s"}
+          {t("importExport.paratext.projectDetected", { count: plan ? plan.books.length : bookCount })}
         </p>
         <p className="text-xs text-muted-foreground">
           {plan
-            ? <>{language && <>Language: {language} · </>}{formatNumber(includedCells, locale)} cells parsed in your browser — review, then choose how to bring it in.</>
-            : "Reading project…"}
+            ? (
+              <>
+                {language && <>{t("importExport.paratext.languageLabel", { language })} · </>}
+                {t("importExport.paratext.cellsParsedHint", { count: formatNumber(includedCells, locale) })}
+              </>
+            )
+            : t("importExport.paratext.readingProject")}
         </p>
       </div>
       {plan && (
@@ -313,18 +327,23 @@ export function ParatextChoice({
                     <Checkbox
                       checked={included}
                       onCheckedChange={() => toggleBook(b.book.bookId)}
-                      aria-label={`Include ${b.book.displayName}`}
+                      aria-label={t("importExport.paratext.includeBookAriaLabel", { book: b.book.displayName })}
                     />
                     <button
                       type="button"
                       onClick={() => setExpandedBook(expanded ? null : key)}
                       className="flex min-w-0 flex-1 items-baseline gap-2 text-start"
-                      aria-label="Show the first parsed cells"
+                      aria-label={t("importExport.paratext.showParsedCellsAriaLabel")}
                     >
                       <span className={`truncate text-sm ${included ? "" : "text-muted-foreground line-through"}`}>{b.book.displayName}</span>
                       <span className="shrink-0 text-xs text-muted-foreground">
-                        {b.book.bookId} · {formatNumber(b.cellCount, locale)} cells
-                        {b.duplicateRefs.length > 0 && <span className="text-amber-600"> · {b.duplicateRefs.length} duplicate ref{b.duplicateRefs.length === 1 ? "" : "s"}</span>}
+                        {t("importExport.paratext.bookCellsCount", { bookId: b.book.bookId, count: formatNumber(b.cellCount, locale) })}
+                        {b.duplicateRefs.length > 0 && (
+                          <span className="text-amber-600">
+                            {" · "}
+                            {t("importExport.paratext.duplicateRefsCount", { count: b.duplicateRefs.length })}
+                          </span>
+                        )}
                       </span>
                     </button>
                   </div>
@@ -341,7 +360,9 @@ export function ParatextChoice({
                         </li>
                       ))}
                       {b.strings.length > 4 && (
-                        <li className="text-xs text-muted-foreground/70">… {formatNumber(b.strings.length - 4, locale)} more</li>
+                        <li className="text-xs text-muted-foreground/70">
+                          {t("importExport.paratext.moreCells", { count: formatNumber(b.strings.length - 4, locale) })}
+                        </li>
                       )}
                     </ul>
                   )}
@@ -351,19 +372,19 @@ export function ParatextChoice({
           </ul>
         </div>
       )}
-      <p className="text-xs text-muted-foreground">How should we bring it in?</p>
+      <p className="text-xs text-muted-foreground">{t("importExport.paratext.howToBringIn")}</p>
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         <button type="button" onClick={runSource} disabled={!plan || includedBooks.length === 0} className="rounded-lg border p-3 text-start transition-colors hover:border-primary hover:bg-primary/5 disabled:cursor-not-allowed disabled:opacity-50">
-          <p className="text-sm font-medium">Source text</p>
-          <p className="mt-1 text-xs text-muted-foreground">A reference Bible to translate from. Books import as source cells.</p>
+          <p className="text-sm font-medium">{t("importExport.paratext.sourceTextTitle")}</p>
+          <p className="mt-1 text-xs text-muted-foreground">{t("importExport.paratext.sourceTextDescription")}</p>
         </button>
         <button type="button" onClick={startTarget} disabled={!plan || includedBooks.length === 0} className="rounded-lg border p-3 text-start transition-colors hover:border-primary hover:bg-primary/5 disabled:cursor-not-allowed disabled:opacity-50">
-          <p className="text-sm font-medium">Translation in progress</p>
-          <p className="mt-1 text-xs text-muted-foreground">Your team's target text. We'll pair it with a source Bible by verse.</p>
+          <p className="text-sm font-medium">{t("importExport.paratext.translationInProgressTitle")}</p>
+          <p className="mt-1 text-xs text-muted-foreground">{t("importExport.paratext.translationInProgressDescription")}</p>
         </button>
       </div>
       <div>
-        <Button variant="ghost" size="sm" onClick={onCancel}>Cancel</Button>
+        <Button variant="ghost" size="sm" onClick={onCancel}>{t("common.cancel")}</Button>
       </div>
       {error && <p className="text-sm text-destructive">{error}</p>}
     </div>

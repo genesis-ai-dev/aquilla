@@ -2,8 +2,9 @@ import { useEffect, useRef, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { importObs, type EBibleProgress } from "@/lib/import"
 import { formatBytesProgress as formatProgress } from "@/lib/format-bytes"
-import { useI18n } from "@/lib/i18n/I18nProvider"
+import { useI18n, useT } from "@/lib/i18n/I18nProvider"
 import { formatNumber } from "@/lib/i18n/format"
+import { RichMessage } from "@/lib/i18n/RichMessage"
 import type { FileReference } from "@/lib/parsers/types"
 
 interface ObsPanelProps {
@@ -17,6 +18,7 @@ interface ObsPanelProps {
 
 export function ObsPanel({ projectId, username, sourceLanguage, targetLanguage, getToken, onImported }: ObsPanelProps) {
   const { locale } = useI18n()
+  const t = useT()
   const [progress, setProgress] = useState<EBibleProgress | null>(null)
   const [importing, setImporting] = useState(false)
   const [importErr, setImportErr] = useState<string | null>(null)
@@ -51,7 +53,7 @@ export function ObsPanel({ projectId, username, sourceLanguage, targetLanguage, 
       // English OBS — seed the project source language when unset.
       await onImported(ref, { sourceLanguage: "en" })
     } catch (err) {
-      setImportErr(err instanceof Error ? err.message : "Import failed")
+      setImportErr(err instanceof Error ? err.message : t("importExport.errors.importFailed"))
     } finally {
       setImporting(false)
       abortRef.current = null
@@ -61,24 +63,33 @@ export function ObsPanel({ projectId, username, sourceLanguage, targetLanguage, 
   return (
     <div className="flex flex-col gap-3">
       <p className="text-xs text-muted-foreground">
-        Narrative stories with reference images, from{" "}
-        <a href="https://git.door43.org/unfoldingWord/en_obs" target="_blank" rel="noreferrer" className="underline">
-          unfoldingWord/door43
-        </a>
-        . 50 stories are imported as one source file; each frame becomes a cell
-        carrying its reference image.
+        <RichMessage
+          k="importExport.obs.description"
+          values={{
+            link: (
+              <a href="https://git.door43.org/unfoldingWord/en_obs" target="_blank" rel="noreferrer" className="underline">
+                unfoldingWord/door43
+              </a>
+            ),
+          }}
+        />
       </p>
 
       {progress && (
         <div className="text-xs text-muted-foreground">
           <p>
             {progress.phase === "download"
-              ? `Downloading stories… ${formatProgress(progress.received, progress.total, locale)}`
+              ? t("importExport.obs.downloading", {
+                  progress: formatProgress(progress.received, progress.total, locale),
+                })
               : progress.phase === "parse"
-                ? "Parsing frames…"
+                ? t("importExport.obs.parsingFrames")
                 : progress.cellsTotal
-                  ? `Uploading frames: ${formatNumber(progress.cellsEnqueued ?? 0, locale)} / ${formatNumber(progress.cellsTotal, locale)}`
-                  : "Uploading to project…"}
+                  ? t("importExport.obs.uploadingFrames", {
+                      enqueued: formatNumber(progress.cellsEnqueued ?? 0, locale),
+                      total: formatNumber(progress.cellsTotal, locale),
+                    })
+                  : t("importExport.obs.uploadingToProject")}
           </p>
           {progress.phase === "save" && progress.cellsTotal ? (
             <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-muted">
@@ -97,7 +108,7 @@ export function ObsPanel({ projectId, username, sourceLanguage, targetLanguage, 
 
       <div className="flex justify-end">
         <Button onClick={handleImport} disabled={importing}>
-          {importing ? "Importing…" : "Download & Import"}
+          {importing ? t("importExport.action.importing") : t("importExport.obs.downloadAndImport")}
         </Button>
       </div>
     </div>

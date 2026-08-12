@@ -2,6 +2,7 @@ import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { type CollisionResult } from "@/lib/import-collision"
+import { useT } from "@/lib/i18n/I18nProvider"
 import type { CollisionResolution } from "./import-dialog-types"
 
 type CollisionChoice = "update" | "skip" | "duplicate"
@@ -14,6 +15,7 @@ interface CollisionPanelProps {
 
 /** Per-collision prompt with apply-to-all toggle. */
 export function CollisionPanel({ collisions, onResolve, onCancel }: CollisionPanelProps) {
+  const t = useT()
   // Updating preserves logical cell ids and is the safe default when the
   // existing project listing supplied an id. Legacy name-only callers fall
   // back to Skip because they cannot address an existing file safely.
@@ -74,21 +76,20 @@ export function CollisionPanel({ collisions, onResolve, onCancel }: CollisionPan
   return (
     <div className="flex flex-col gap-4 py-2">
       <p className="text-sm text-muted-foreground">
-        The following {collisions.length === 1 ? "file already exists" : `${collisions.length} files already exist`} in this
-        project. Choose what to do with each one.
+        {t("importExport.collision.intro", { count: collisions.length })}
       </p>
       <p className="text-xs text-muted-foreground">
-        Updating matches stable units and keeps translations, language lanes, comments, audio, and units missing from the new file.
+        {t("importExport.collision.updateHint")}
       </p>
       {collisions.some((collision) => collision.ambiguous) && (
         <p role="alert" className="text-xs text-amber-700 dark:text-amber-300">
-          Some files have multiple matches. Choose Skip or Import as duplicate for those files.
+          {t("importExport.collision.ambiguousWarning")}
         </p>
       )}
 
       {/* Apply-to-all row */}
       <div className="flex items-center gap-2 text-xs">
-        <span className="text-muted-foreground">Apply to all:</span>
+        <span className="text-muted-foreground">{t("importExport.collision.applyToAll")}</span>
         <button
           type="button"
           onClick={() => setAll("update")}
@@ -98,7 +99,7 @@ export function CollisionPanel({ collisions, onResolve, onCancel }: CollisionPan
             allUpdate ? "border-primary bg-primary/10 text-primary" : "border-muted text-muted-foreground hover:border-foreground/40",
           )}
         >
-          Update all
+          {t("importExport.collision.updateAll")}
         </button>
         <button
           type="button"
@@ -108,7 +109,7 @@ export function CollisionPanel({ collisions, onResolve, onCancel }: CollisionPan
             allSkip ? "border-primary bg-primary/10 text-primary" : "border-muted text-muted-foreground hover:border-foreground/40",
           )}
         >
-          Skip all
+          {t("importExport.collision.skipAll")}
         </button>
         <button
           type="button"
@@ -118,7 +119,7 @@ export function CollisionPanel({ collisions, onResolve, onCancel }: CollisionPan
             allDup ? "border-primary bg-primary/10 text-primary" : "border-muted text-muted-foreground hover:border-foreground/40",
           )}
         >
-          Import all as duplicates
+          {t("importExport.collision.duplicateAll")}
         </button>
       </div>
 
@@ -133,7 +134,7 @@ export function CollisionPanel({ collisions, onResolve, onCancel }: CollisionPan
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-medium">{c.name}</p>
                   <p className="truncate text-xs text-muted-foreground">
-                    Existing: {c.existingName}
+                    {t("importExport.collision.existing", { name: c.existingName })}
                     {c.bookCode ? ` (${c.bookCode})` : ""}
                   </p>
                 </div>
@@ -150,7 +151,7 @@ export function CollisionPanel({ collisions, onResolve, onCancel }: CollisionPan
                         : "border-muted text-muted-foreground hover:border-foreground/40",
                     )}
                   >
-                    Update existing
+                    {t("importExport.collision.updateExisting")}
                   </button>
                   <button
                     type="button"
@@ -162,7 +163,7 @@ export function CollisionPanel({ collisions, onResolve, onCancel }: CollisionPan
                         : "border-muted text-muted-foreground hover:border-foreground/40",
                     )}
                   >
-                    Skip
+                    {t("importExport.collision.skip")}
                   </button>
                   <button
                     type="button"
@@ -174,7 +175,7 @@ export function CollisionPanel({ collisions, onResolve, onCancel }: CollisionPan
                         : "border-muted text-muted-foreground hover:border-foreground/40",
                     )}
                   >
-                    Import as duplicate
+                    {t("importExport.collision.duplicate")}
                   </button>
                 </div>
               </li>
@@ -185,10 +186,10 @@ export function CollisionPanel({ collisions, onResolve, onCancel }: CollisionPan
 
       <div className="flex justify-end gap-2">
         <Button variant="ghost" size="sm" onClick={onCancel} disabled={resolving}>
-          Cancel
+          {t("common.cancel")}
         </Button>
         <Button size="sm" onClick={handleConfirm} disabled={resolving}>
-          {resolving ? "Continuing…" : "Continue"}
+          {resolving ? t("importExport.collision.continuing") : t("importExport.collision.continue")}
         </Button>
       </div>
     </div>

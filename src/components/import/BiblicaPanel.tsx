@@ -2,7 +2,7 @@ import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { importBiblicaStudyNotes, type BiblicaProgress } from "@/lib/import"
-import { useI18n } from "@/lib/i18n/I18nProvider"
+import { useI18n, useT } from "@/lib/i18n/I18nProvider"
 import { formatNumber } from "@/lib/i18n/format"
 import type { FileReference } from "@/lib/parsers/types"
 
@@ -24,6 +24,7 @@ export function BiblicaPanel({
   onImported,
 }: BiblicaPanelProps) {
   const { locale } = useI18n()
+  const t = useT()
   const [importing, setImporting] = useState(false)
   const [progress, setProgress] = useState<BiblicaProgress | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -51,7 +52,7 @@ export function BiblicaPanel({
       )
       await onImported(ref)
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Import failed")
+      setError(err instanceof Error ? err.message : t("importExport.errors.importFailed"))
     } finally {
       setImporting(false)
       setProgress(null)
@@ -60,19 +61,10 @@ export function BiblicaPanel({
 
   return (
     <div className="flex flex-col gap-4 py-2">
-      <p className="text-xs text-muted-foreground">
-        Upload the InDesign (.idml) package for a Biblica study Bible. Only the study
-        notes are imported — the Bible text is skipped, because it comes from the
-        published scripture files rather than being retyped here. Each note keeps its
-        InDesign formatting locked, and the notes carry the book and chapter range they
-        belong to so they stay in step with the passage. Lists that InDesign holds in a
-        single paragraph — cross-references, glossaries, outlines — always arrive as one
-        cell per line. Optionally, longer note blocks can also be split into one cell per
-        sentence; export puts each block back together as InDesign set it.
-      </p>
+      <p className="text-xs text-muted-foreground">{t("importExport.biblica.description")}</p>
       <div className="flex flex-col gap-2">
         <Button variant="outline" size="sm" nativeButton={false} render={<label className="cursor-pointer" />}>
-          {file ? file.name : "Choose study Bible IDML file"}
+          {file ? file.name : t("importExport.biblica.chooseFile")}
           <input
             type="file"
             className="hidden"
@@ -96,13 +88,12 @@ export function BiblicaPanel({
             checked={splitSentences}
             disabled={importing}
             onCheckedChange={(checked) => setSplitSentences(checked === true)}
-            aria-label="Split long notes into one cell per sentence"
+            aria-label={t("importExport.biblica.splitSentencesAriaLabel")}
           />
           <span className="flex flex-col gap-0.5">
-            <span>Split long notes into one cell per sentence</span>
+            <span>{t("importExport.biblica.splitSentencesLabel")}</span>
             <span className="text-xs text-muted-foreground">
-              Leave unchecked to import each note line as one larger cell. Lists still
-              split per line either way.
+              {t("importExport.biblica.splitSentencesHint")}
             </span>
           </span>
         </label>
@@ -111,16 +102,21 @@ export function BiblicaPanel({
         <div className="text-xs text-muted-foreground">
           {progress.phase === "parse" && (
             <p>
-              Reading the InDesign package…
               {progress.idml?.total
-                ? ` (${progress.idml.completed} / ${progress.idml.total})`
-                : ""}
+                ? t("importExport.biblica.readingPackageWithProgress", {
+                    completed: progress.idml.completed,
+                    total: progress.idml.total,
+                  })
+                : t("importExport.biblica.readingPackage")}
             </p>
           )}
           {progress.phase === "save" && progress.cellsTotal && (
             <>
               <p>
-                Uploading: {formatNumber(progress.cellsEnqueued ?? 0, locale)} / {formatNumber(progress.cellsTotal, locale)} notes
+                {t("importExport.biblica.uploadingNotes", {
+                  enqueued: formatNumber(progress.cellsEnqueued ?? 0, locale),
+                  total: formatNumber(progress.cellsTotal, locale),
+                })}
               </p>
               <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-muted">
                 <div
@@ -130,7 +126,9 @@ export function BiblicaPanel({
               </div>
               {progress.verseUnitCount ? (
                 <p className="mt-1.5">
-                  {formatNumber(progress.verseUnitCount, locale)} scripture paragraphs skipped.
+                  {t("importExport.biblica.paragraphsSkipped", {
+                    count: formatNumber(progress.verseUnitCount, locale),
+                  })}
                 </p>
               ) : null}
             </>
@@ -140,7 +138,7 @@ export function BiblicaPanel({
       {error && <p className="text-sm text-destructive">{error}</p>}
       <div className="flex justify-end">
         <Button onClick={handleImport} disabled={!file || importing}>
-          {importing ? "Importing…" : "Import"}
+          {importing ? t("importExport.action.importing") : t("importExport.action.import")}
         </Button>
       </div>
     </div>

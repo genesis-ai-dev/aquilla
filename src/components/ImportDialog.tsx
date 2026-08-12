@@ -11,6 +11,7 @@ import { SpreadsheetImportPanel } from "@/components/import/SpreadsheetImportPan
 import { LabelImportPanel, type LabelImportResult } from "@/components/import/LabelImportPanel"
 import { PairedImportPanel } from "@/components/import/PairedImportPanel"
 import type { DcsCursor } from "@/lib/dcs/types"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 import type { Screen, CollisionResolution } from "@/components/import/import-dialog-types"
 import { ImportDialogBackButton } from "@/components/import/ImportDialogBackButton"
@@ -121,6 +122,7 @@ export function ImportDialog({
   onLabelsImported,
   excludeFrontMatter,
 }: ImportDialogProps) {
+  const t = useT()
   const [screen, setScreen] = useState<Screen>("landing")
   // Holds refs + inferred languages while waiting for the user to set direction.
   const [pendingImport, setPendingImport] = useState<{
@@ -212,12 +214,12 @@ export function ImportDialog({
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err)
       setPendingImport(captured)
-      setConfirmError(`Couldn't finish saving your import — please try again. (${message})`)
+      setConfirmError(t("importExport.dialog.finishSaveFailed", { message }))
     } finally {
       flushingRef.current = false
       setConfirming(false)
     }
-  }, [onImported, onOpenChange, projectId])
+  }, [onImported, onOpenChange, projectId, t])
 
   // Intercept dialog close while an imported file still needs its final project
   // handoff. Keep the dialog visible until that async write succeeds; on failure
@@ -318,9 +320,9 @@ export function ImportDialog({
       setImportResult(null)
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
-      setImportResultError(`Couldn't finish saving your import — please try again. (${message})`)
+      setImportResultError(t("importExport.dialog.finishSaveFailed", { message }))
     }
-  }, [importResult, handleChildImported])
+  }, [importResult, handleChildImported, t])
 
   // BLOCKER 1 fix: values confirmed via DirectionPanel are EXPLICIT — they
   // replace current values, not merely fill empty slots.
@@ -349,7 +351,7 @@ export function ImportDialog({
       // retry or skip. The rejection MUST NOT escape as an unhandled rejection.
       setPendingImport(captured)
       const message = err instanceof Error ? err.message : String(err)
-      setConfirmError(`Couldn't save your import — please try again. (${message})`)
+      setConfirmError(t("importExport.dialog.saveFailed", { message }))
     } finally {
       flushingRef.current = false
       setConfirming(false)
@@ -367,13 +369,13 @@ export function ImportDialog({
         <DialogHeader>
           <DialogTitle>
             {screen === "landing" ? (
-              "Import"
+              t("importExport.dialog.titleImport")
             ) : screen === "direction" ? (
-              "Set translation direction"
+              t("importExport.dialog.titleDirection")
             ) : screen === "result" ? (
-              "Import complete — some items skipped"
+              t("importExport.dialog.titleResult")
             ) : screen === "collision" ? (
-              "Re-import detected"
+              t("importExport.dialog.titleCollision")
             ) : screen === "preview" ? (
               <div className="flex items-center gap-2">
                 <ImportDialogBackButton
@@ -383,28 +385,28 @@ export function ImportDialog({
                     setPreviewCommitError(null)
                     setScreen(returnScreen)
                   }}
-                  label="Back to file selection"
+                  label={t("importExport.dialog.backToFileSelection")}
                 />
-                Preview
+                {t("importExport.dialog.titlePreview")}
               </div>
             ) : (
               <div className="flex items-center gap-2">
                 <ImportDialogBackButton
                   onClick={() => setScreen("landing")}
-                  label="Back to import types"
+                  label={t("importExport.dialog.backToImportTypes")}
                 />
-                {screen === "upload" ? "Upload Files"
-                  : screen === "helloao" ? "Bible API (helloao.org)"
-                  : screen === "obs" ? "Open Bible Stories"
-                  : screen === "dcs" ? "Door43 (DCS)"
-                  : screen === "macula" ? "Macula Hebrew + Greek"
-                  : screen === "tn" ? "Translation Notes (TSV)"
-                  : screen === "biblica" ? "Biblica Study Bible Notes"
-                  : screen === "spreadsheet" ? "Spreadsheet (CSV / XLSX)"
-                  : screen === "labels" ? "Cell Labels / Cast"
-                  : screen === "paired" ? "Paired Translation Import"
-                  : screen === "sdbh" ? "SDBH Hebrew Lexicon"
-                  : "eBible Corpus"}
+                {screen === "upload" ? t("importExport.dialog.titleUpload")
+                  : screen === "helloao" ? t("importExport.dialog.titleHelloao")
+                  : screen === "obs" ? t("importExport.dialog.titleObs")
+                  : screen === "dcs" ? t("importExport.dialog.titleDcs")
+                  : screen === "macula" ? t("importExport.dialog.titleMacula")
+                  : screen === "tn" ? t("importExport.dialog.titleTn")
+                  : screen === "biblica" ? t("importExport.dialog.titleBiblica")
+                  : screen === "spreadsheet" ? t("importExport.dialog.titleSpreadsheet")
+                  : screen === "labels" ? t("importExport.dialog.titleLabels")
+                  : screen === "paired" ? t("importExport.dialog.titlePaired")
+                  : screen === "sdbh" ? t("importExport.dialog.titleSdbh")
+                  : t("importExport.dialog.titleEbible")}
               </div>
             )}
           </DialogTitle>
@@ -619,7 +621,7 @@ export function ImportDialog({
         )}
         {screen === "labels" && (!projectFiles || projectFiles.length === 0) && (
           <div className="py-4 text-center text-sm text-muted-foreground">
-            Cell labels require an existing source file in this project. Import source files first, then return here.
+            {t("importExport.dialog.labelsNeedSourceFile")}
           </div>
         )}
 
@@ -640,7 +642,7 @@ export function ImportDialog({
         )}
         {screen === "paired" && (!sourceCells || sourceCells.length === 0) && (
           <div className="py-4 text-center text-sm text-muted-foreground">
-            Paired translation import requires existing source cells in this project. Import source files first.
+            {t("importExport.dialog.pairedNeedsSourceCells")}
           </div>
         )}
 

@@ -1,8 +1,9 @@
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { importTranslationNotes, type TnProgress } from "@/lib/import"
-import { useI18n } from "@/lib/i18n/I18nProvider"
+import { useI18n, useT } from "@/lib/i18n/I18nProvider"
 import { formatNumber } from "@/lib/i18n/format"
+import { RichMessage } from "@/lib/i18n/RichMessage"
 import type { FileReference } from "@/lib/parsers/types"
 
 interface TnPanelProps {
@@ -14,6 +15,7 @@ interface TnPanelProps {
 
 export function TnPanel({ projectId, username, getToken, onImported }: TnPanelProps) {
   const { locale } = useI18n()
+  const t = useT()
   const [importing, setImporting] = useState(false)
   const [progress, setProgress] = useState<TnProgress | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -32,7 +34,7 @@ export function TnPanel({ projectId, username, getToken, onImported }: TnPanelPr
       )
       await onImported(ref)
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Import failed")
+      setError(err instanceof Error ? err.message : t("importExport.errors.importFailed"))
     } finally {
       setImporting(false)
       setProgress(null)
@@ -42,21 +44,25 @@ export function TnPanel({ projectId, username, getToken, onImported }: TnPanelPr
   return (
     <div className="flex flex-col gap-4 py-2">
       <p className="text-xs text-muted-foreground">
-        Upload an{" "}
-        <a
-          href="https://door43.org/u/Door43-Catalog/en_tn/"
-          target="_blank"
-          rel="noreferrer"
-          className="underline"
-        >
-          unfoldingWord-style Translation Notes
-        </a>{" "}
-        TSV file. Each row becomes a note cell; notes appear in a sidebar when you focus a
-        translation cell at the matching verse reference.
+        <RichMessage
+          k="importExport.tn.description"
+          values={{
+            link: (
+              <a
+                href="https://door43.org/u/Door43-Catalog/en_tn/"
+                target="_blank"
+                rel="noreferrer"
+                className="underline"
+              >
+                unfoldingWord-style Translation Notes
+              </a>
+            ),
+          }}
+        />
       </p>
       <div className="flex flex-col gap-2">
         <Button variant="outline" size="sm" nativeButton={false} render={<label />}>
-          {file ? file.name : "Choose Translation Notes TSV"}
+          {file ? file.name : t("importExport.tn.chooseFile")}
           <input
             type="file"
             className="hidden"
@@ -75,10 +81,15 @@ export function TnPanel({ projectId, username, getToken, onImported }: TnPanelPr
       </div>
       {progress && (
         <div className="text-xs text-muted-foreground">
-          {progress.phase === "parse" && "Parsing translation notes…"}
+          {progress.phase === "parse" && t("importExport.tn.parsing")}
           {progress.phase === "save" && progress.cellsTotal && (
             <>
-              <p>Uploading: {formatNumber(progress.cellsEnqueued ?? 0, locale)} / {formatNumber(progress.cellsTotal, locale)} notes</p>
+              <p>
+                {t("importExport.tn.uploadingNotes", {
+                  enqueued: formatNumber(progress.cellsEnqueued ?? 0, locale),
+                  total: formatNumber(progress.cellsTotal, locale),
+                })}
+              </p>
               <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-muted">
                 <div
                   className="h-full bg-primary transition-all"
@@ -86,7 +97,9 @@ export function TnPanel({ projectId, username, getToken, onImported }: TnPanelPr
                 />
               </div>
               {progress.skippedCount ? (
-                <p className="mt-1 text-yellow-600">{progress.skippedCount} rows skipped (missing canonical reference)</p>
+                <p className="mt-1 text-yellow-600">
+                  {t("importExport.tn.rowsSkipped", { count: progress.skippedCount })}
+                </p>
               ) : null}
             </>
           )}
@@ -95,7 +108,7 @@ export function TnPanel({ projectId, username, getToken, onImported }: TnPanelPr
       {error && <p className="text-sm text-destructive">{error}</p>}
       <div className="flex justify-end">
         <Button onClick={handleImport} disabled={!file || importing}>
-          {importing ? "Importing…" : "Import"}
+          {importing ? t("importExport.action.importing") : t("importExport.action.import")}
         </Button>
       </div>
     </div>

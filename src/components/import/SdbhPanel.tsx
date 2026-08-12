@@ -2,8 +2,9 @@ import { useEffect, useRef, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { importSdbh, type SdbhImportProgress } from "@/lib/import-sdbh"
 import { assertSourceUploadByteLength } from "@/lib/sync/source-upload"
-import { useI18n } from "@/lib/i18n/I18nProvider"
+import { useI18n, useT } from "@/lib/i18n/I18nProvider"
 import { formatNumber } from "@/lib/i18n/format"
+import { RichMessage } from "@/lib/i18n/RichMessage"
 import type { FileReference } from "@/lib/parsers/types"
 
 interface SdbhPanelProps {
@@ -19,6 +20,7 @@ interface SdbhPanelProps {
 
 export function SdbhPanel({ projectId, username, getToken, onImported }: SdbhPanelProps) {
   const { locale } = useI18n()
+  const t = useT()
   const [masterFile, setMasterFile] = useState<File | null>(null)
   const [localizedFile, setLocalizedFile] = useState<File | null>(null)
   const [importing, setImporting] = useState(false)
@@ -58,7 +60,7 @@ export function SdbhPanel({ projectId, username, getToken, onImported }: SdbhPan
         ...(summary.targetLanguageCode ? { targetLanguage: summary.targetLanguageCode } : {}),
       }, summary.skipped)
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Import failed")
+      setError(err instanceof Error ? err.message : t("importExport.errors.importFailed"))
     } finally {
       setImporting(false)
       setProgress(null)
@@ -74,15 +76,18 @@ export function SdbhPanel({ projectId, username, getToken, onImported }: SdbhPan
   return (
     <div className="flex flex-col gap-4 py-2">
       <p className="text-xs text-muted-foreground">
-        Import the UBS MARBLE <span className="font-medium">Semantic Dictionary of Biblical Hebrew</span>.
-        Choose the master edition (usually <code>SDBH-en.JSON</code>) as the source; optionally add a
-        localized edition (e.g. <code>SDBH-es.JSON</code>) to pre-fill the target column with the
-        translation so far. Entries import one file per Hebrew letter plus a semantic-domain label
-        file; each sense groups as one paragraph with a cell per definition, gloss list, and comment.
+        <RichMessage
+          k="importExport.sdbh.description"
+          values={{
+            dictName: <span className="font-medium">Semantic Dictionary of Biblical Hebrew</span>,
+            masterFile: <code>SDBH-en.JSON</code>,
+            localizedFile: <code>SDBH-es.JSON</code>,
+          }}
+        />
       </p>
       <div className="flex flex-col gap-2">
         <Button variant="outline" size="sm" nativeButton={false} render={<label />}>
-          {masterFile ? masterFile.name : "Choose master edition (SDBH-en.JSON)"}
+          {masterFile ? masterFile.name : t("importExport.sdbh.chooseMaster")}
           <input
             type="file"
             className="hidden"
@@ -95,7 +100,7 @@ export function SdbhPanel({ projectId, username, getToken, onImported }: SdbhPan
           />
         </Button>
         <Button variant="outline" size="sm" nativeButton={false} render={<label />}>
-          {localizedFile ? localizedFile.name : "Choose localized edition (optional)"}
+          {localizedFile ? localizedFile.name : t("importExport.sdbh.chooseLocalized")}
           <input
             type="file"
             className="hidden"
@@ -111,14 +116,21 @@ export function SdbhPanel({ projectId, username, getToken, onImported }: SdbhPan
       {progress && (
         <div className="text-xs text-muted-foreground">
           {progress.phase === "parse" ? (
-            <p>Parsing lexicon…</p>
+            <p>{t("importExport.sdbh.parsingLexicon")}</p>
           ) : (
             <>
               <p>
-                {progress.phase === "source" ? "Uploading source" : "Pre-filling translations"}
-                {progress.fileIndex ? ` — file ${progress.fileIndex} / ${progress.fileCount}` : ""}
+                {progress.phase === "source"
+                  ? t("importExport.sdbh.uploadingSource")
+                  : t("importExport.sdbh.prefillingTranslations")}
+                {progress.fileIndex
+                  ? ` — ${t("importExport.sdbh.fileProgress", { index: progress.fileIndex, count: progress.fileCount ?? 0 })}`
+                  : ""}
                 {progress.cellsTotal
-                  ? `: ${formatNumber(progress.cellsEnqueued ?? 0, locale)} / ${formatNumber(progress.cellsTotal, locale)} cells`
+                  ? `: ${t("importExport.sdbh.cellsProgress", {
+                      enqueued: formatNumber(progress.cellsEnqueued ?? 0, locale),
+                      total: formatNumber(progress.cellsTotal, locale),
+                    })}`
                   : ""}
               </p>
               <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-muted">
@@ -131,7 +143,7 @@ export function SdbhPanel({ projectId, username, getToken, onImported }: SdbhPan
       {error && <p className="text-sm text-destructive">{error}</p>}
       <div className="flex justify-end">
         <Button onClick={handleImport} disabled={!masterFile || importing}>
-          {importing ? "Importing…" : "Import"}
+          {importing ? t("importExport.action.importing") : t("importExport.action.import")}
         </Button>
       </div>
     </div>

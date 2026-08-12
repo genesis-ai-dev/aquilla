@@ -93,7 +93,7 @@
 | Editor      | Video attachment Remove attachment clears saved URL   | `e2e/specs/editor/video-attachment-remove.smoke.spec.ts`          |   ✅   |
 | Projects    | Living memory Recent Examples ValidatedCellCard       | `e2e/specs/projects/living-memory-validated-cell-card.smoke.spec.ts` | ✅ |
 | Editor      | Delete file confirm dialog requires checkbox          | `e2e/specs/editor/delete-file-confirm-dialog.smoke.spec.ts`       |   ✅   |
-| Editor      | RTL detection hint shows and can be dismissed         | `e2e/specs/editor/rtl-hint-dismiss.smoke.spec.ts`                 |   ✅   |
+| Editor      | RTL detection toast shows and can be dismissed        | `e2e/specs/editor/rtl-hint-dismiss.smoke.spec.ts`                 |   ✅   |
 | Projects    | Project settings discard-changes dialog (Keep editing / Discard) | `e2e/specs/projects/project-settings-discard-unsaved.smoke.spec.ts` | ✅ |
 | Rules       | Amend rule button navigates to rules?focus=autofix    | `e2e/specs/rules/rule-drawer.smoke.spec.ts` (extended)             |   ✅   |
 | Editor      | Import dialog back-to-types button returns to landing | `e2e/specs/editor/import-back-to-types.smoke.spec.ts`              |   ✅   |

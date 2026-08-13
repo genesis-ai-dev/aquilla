@@ -209,6 +209,50 @@ describe('buildEventProjectionStmts — source.cell.commit', () => {
     expect(sql).toContain('UPDATE cells SET')
     expect(sql).not.toContain('source_event_id =')
   })
+
+  // AQU-847: an imported media section's `value` is the import FILENAME, so a
+  // source edit on one corrects its TRANSCRIPT instead. Before this, the
+  // payload had nowhere to put that and the correction was silently dropped.
+  it('lands a media section correction on `transcription`, scoped to the source row', () => {
+    const { db, recorded } = makeD1Stub()
+    const stmts: AquillaStatement[] = []
+    buildEventProjectionStmts(
+      db,
+      makeEvent('source.cell.commit', { value: 'episode.mp3', transcription: 'corrected transcript' }),
+      stmts,
+    )
+    const cellsStmts = recorded.filter(r => !r.sql.includes('cells_fts') && !r.sql.includes('WHERE false'))
+    const transcriptStmt = cellsStmts.find(r => r.sql.includes('transcription = ?'))
+    expect(transcriptStmt).toBeDefined()
+    expect(transcriptStmt!.sql).toContain("side = 'source'")
+    expect(transcriptStmt!.args[0]).toBe('corrected transcript')
+    // The filename `value` is resent unchanged — provenance survives the edit.
+    expect(cellsStmts[0].args[0]).toBe('episode.mp3')
+  })
+
+  it('an empty-string correction clears the transcript (it is not treated as absent)', () => {
+    const { db, recorded } = makeD1Stub()
+    const stmts: AquillaStatement[] = []
+    buildEventProjectionStmts(
+      db,
+      makeEvent('source.cell.commit', { value: 'episode.mp3', transcription: '' }),
+      stmts,
+    )
+    const transcriptStmt = recorded.find(r => r.sql.includes('transcription = ?'))
+    expect(transcriptStmt).toBeDefined()
+    expect(transcriptStmt!.args[0]).toBe('')
+  })
+
+  it('an ordinary text-cell commit writes NO transcription statement', () => {
+    const { db, recorded } = makeD1Stub()
+    const stmts: AquillaStatement[] = []
+    buildEventProjectionStmts(
+      db,
+      makeEvent('source.cell.commit', { value: 'updated source' }),
+      stmts,
+    )
+    expect(recorded.some(r => r.sql.includes('transcription = ?'))).toBe(false)
+  })
 })
 
 describe('buildEventProjectionStmts — source.cell.metadata.patch', () => {

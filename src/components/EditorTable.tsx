@@ -167,7 +167,7 @@ import {
 import { extractUsfmFootnotes, type ExtractedFootnote } from "@/lib/footnotes/extract"
 import { createUsfmFootnoteMarker } from "@/lib/footnotes/insert"
 import { defaultFootnoteRef } from "@/lib/footnotes/refs"
-import { effectiveSourceText } from "@/lib/cell-text"
+import { displayedSourceText, effectiveSourceText, projectedSourceValue, sourceCommitFields, sourceEditorSeed } from "@/lib/cell-text"
 import { deleteFootnote, spliceFootnoteText } from "@/lib/footnotes/splice"
 import type { FootnoteViewMode, VisibleFootnoteEntry } from "@/lib/footnotes/types"
 import {
@@ -4123,6 +4123,14 @@ function EditorRow({
     [cell.metadata, cell.originalHtml],
   )
   const canEditSourceForCell = canEditSource && !idmlConfiguration
+  // AQU-847: an imported MEDIA section's `value` (→ `cell.original`) is the
+  // import FILENAME; its real source text is the transcript. The read surface
+  // already knew that (filename only as a placeholder before transcription) —
+  // the EDIT surface didn't, so opening the pencil loaded the filename and
+  // committing it overwrote the transcript with the file's title. The four
+  // `cell-text` helpers below carry that rule across seed/commit/display/
+  // reconcile so the two surfaces can't drift apart again.
+  const sourceSeed = sourceEditorSeed(cell)
   const sourceReadOnlyReasonForCell = idmlConfiguration
     ? t("editor.source.idmlProtected")
     : sourceReadOnlyReason
@@ -4494,8 +4502,9 @@ function EditorRow({
       fileId: cell.fileId,
       cellId: cell.id,
       parentId,
-      value,
-      valueHtml,
+      // AQU-847: on a media section this routes the typed text to
+      // `transcription` and resends the filename `value` unchanged.
+      ...sourceCommitFields(cell, { value, valueHtml }),
       author: username,
     }).then((eventId) => {
       pendingSourceCommitRef.current = { eventId, parentId }
@@ -4506,7 +4515,7 @@ function EditorRow({
       setWriteError(msg)
       setSourceDraft(null)
     })
-  }, [canEditSourceForCell, project.id, project.syncRole?.level, cell.fileId, cell.id, cell.sourceEventId, username, onCellCommitted, t])
+  }, [canEditSourceForCell, project.id, project.syncRole?.level, cell, username, onCellCommitted, t])
 
   // Reconcile the pending source head against the projection — the mirror of
   // ProjectWorkspace's target-side pendingTargetCommitHeadsRef reconciliation.
@@ -4526,9 +4535,12 @@ function EditorRow({
   }, [cell.sourceEventId])
 
   // Clear the optimistic source draft once the server projection carries it.
+  // AQU-847: a media section's edit lands on `transcription`, not `original`,
+  // so reconcile against whichever field this cell's edit actually writes —
+  // otherwise the draft never clears and the row stays on optimistic text.
   useEffect(() => {
-    if (sourceDraft && (cell.original ?? "") === sourceDraft.value) setSourceDraft(null)
-  }, [cell.original, sourceDraft])
+    if (sourceDraft && projectedSourceValue(cell) === sourceDraft.value) setSourceDraft(null)
+  }, [cell, sourceDraft])
 
   // Force-close an OPEN source editor when canEditSource flips false mid-edit
   // (e.g. a settings revalidate delivers a DCS cursor). Without this the editor
@@ -5939,8 +5951,8 @@ function EditorRow({
             {sourceEditing ? (
               <TranslatedEditor
                 cellId={`${cell.id}::source`}
-                initialPlain={sourceDraft?.value ?? cell.original}
-                initialHtml={sourceDraft?.valueHtml ?? cell.originalHtml}
+                initialPlain={sourceDraft?.value ?? sourceSeed.text}
+                initialHtml={sourceDraft?.valueHtml ?? sourceSeed.html}
                 onCommit={handleSourceCommit}
                 onBlur={() => setSourceEditing(false)}
                 editable
@@ -5951,18 +5963,18 @@ function EditorRow({
                 placeholder={t("editor.source.placeholder")}
                 className="w-full !px-0"
               />
-            ) : (sourceDraft?.valueHtml || cell.originalHtml) ? (
+            ) : (cell.medium !== "media" && (sourceDraft?.valueHtml || cell.originalHtml)) ? (
               <SanitizedRichHtml html={sourceDraft?.valueHtml || cell.originalHtml || ""} />
             ) : (
               <UsfmSourceText
                 // AQU-646: an imported media segment's stored `value` is the
                 // filename; once transcribed, the ASR transcript IS the source
                 // text users translate. Non-media cells are unaffected.
-                text={
-                  cell.medium === "media" && cell.transcription?.trim()
-                    ? cell.transcription
-                    : (sourceDraft?.value ?? cell.original)
-                }
+                // AQU-847: media rows skip the HTML branch above entirely — a
+                // transcript is plain text, and letting `originalHtml` win
+                // there is what pinned the file title over the transcript once
+                // any source commit had landed.
+                text={displayedSourceText(cell, sourceDraft?.value)}
                 highlights={highlights}
                 ranges={sourceRanges}
                 showEvidence={examplesExpanded}

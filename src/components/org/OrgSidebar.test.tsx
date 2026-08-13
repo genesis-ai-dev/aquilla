@@ -146,6 +146,28 @@ describe("OrgSidebar all-organizations scope", () => {
     expect(overview).toHaveAttribute("data-tour", "nav-overview")
     expect(screen.queryByRole("link", { name: "Projects" })).not.toBeInTheDocument()
     expect(screen.queryByRole("link", { name: "Teams" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("link", { name: "Data egress" })).not.toBeInTheDocument()
+  })
+})
+
+describe("OrgSidebar Data egress entry", () => {
+  it("shows the org-scoped link for maintainers and owners", async () => {
+    listMyOrgs.mockResolvedValue([{ id: 1, name: "Acme", role: { level: 600, name: "maintainer" } }])
+    fetchAccessibleProjects.mockResolvedValue([])
+
+    renderSidebar("/orgs/1")
+
+    expect(await screen.findByRole("link", { name: "Data egress" })).toHaveAttribute("href", "/orgs/1/egress")
+  })
+
+  it("hides the entry below maintainer", async () => {
+    listMyOrgs.mockResolvedValue([{ id: 1, name: "Acme", role: { level: 500, name: "project_lead" } }])
+    fetchAccessibleProjects.mockResolvedValue([])
+
+    renderSidebar("/orgs/1")
+
+    await screen.findByRole("link", { name: "Teams" })
+    expect(screen.queryByRole("link", { name: "Data egress" })).not.toBeInTheDocument()
   })
 })
 

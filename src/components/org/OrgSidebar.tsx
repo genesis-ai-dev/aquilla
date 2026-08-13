@@ -146,6 +146,10 @@ export function OrgSidebar() {
             <NavIcon icon={NAV_PAGE_ICONS.archived} />
             {t("org.orgSidebar.archived")}
           </OrgNavLink>
+          <OrgNavLink to={orgPath(activeOrgId, "/egress")} className={link}>
+            <NavIcon icon={NAV_PAGE_ICONS.egress} />
+            {t("org.egress.title")}
+          </OrgNavLink>
           <OrgNavLink to={orgPath(activeOrgId, "/settings")} className={link} data-tour="nav-settings">
             <NavIcon icon={NAV_PAGE_ICONS.settings} />
             {t("nav.settings")}

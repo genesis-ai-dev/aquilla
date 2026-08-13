@@ -81,8 +81,15 @@ export async function downloadSourceFile(args: DownloadSourceArgs): Promise<Down
  * AQU-233: Fetch the raw source side-car bytes for a non-USFM file (e.g. DOCX).
  * The server returns the raw binary bytes with X-Export-Mode: raw-sidecar.
  * Returns an ArrayBuffer so the caller can do client-side XML injection.
+ *
+ * NOTE: for USFM files the route has no raw mode — its response re-serializes
+ * the stored source with current default-lane translations injected. Callers
+ * that present the result as "the original upload" must say so (the egress
+ * manifest records a note; a server-side raw mode is tracked as follow-up).
  */
-export async function fetchSourceSidecar(args: Omit<DownloadSourceArgs, "downloadName">): Promise<ArrayBuffer> {
+export async function fetchSourceSidecar(
+  args: Omit<DownloadSourceArgs, "downloadName">,
+): Promise<ArrayBuffer> {
   const token = await args.getToken(args.fileId)
   if (!token) throw new SourceExportError("Couldn't get an export token — sign in and try again.")
   const url = sourceExportUrl(args.projectId, args.fileId, args.targetLang)
@@ -99,6 +106,33 @@ export async function fetchSourceSidecar(args: Omit<DownloadSourceArgs, "downloa
     )
   }
   return res.arrayBuffer()
+}
+
+/**
+ * Fetch the translation-injected source TEXT for a file (USFM today — the
+ * /source route substitutes current translations back into the original
+ * markup server-side). Same endpoint as `fetchSourceSidecar`; text-returning
+ * formats decode the body instead of keeping raw bytes.
+ */
+export async function fetchInjectedSourceText(
+  args: Omit<DownloadSourceArgs, "downloadName">,
+): Promise<string> {
+  const token = await args.getToken(args.fileId)
+  if (!token) throw new SourceExportError("Couldn't get an export token — sign in and try again.")
+  const url = sourceExportUrl(args.projectId, args.fileId, args.targetLang)
+
+  const res = await fetch(url, {
+    method: "GET",
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "")
+    throw new SourceExportError(
+      detail || `Export failed (HTTP ${res.status})`,
+      res.status,
+    )
+  }
+  return res.text()
 }
 
 function triggerDownload(blob: Blob, filename: string): void {
@@ -155,22 +189,22 @@ export async function downloadProjectZip(
   for (const file of candidates) {
     const downloadName = /\.(sfm|usfm)$/i.test(file.name) ? file.name : `${file.name}.SFM`
     try {
-      const token = await args.getToken(file.id)
-      if (!token) throw new SourceExportError("Couldn't get an export token.")
-      const res = await fetch(
-        sourceExportUrl(args.projectId, file.id, args.targetLang),
-        { headers: { Authorization: `Bearer ${token}` } },
-      )
-      if (!res.ok) {
-        const detail = res.status === 404
-          ? "no side-car raw bytes (file imported before round-trip support)"
-          : `HTTP ${res.status}`
-        skipped.push({ name: downloadName, reason: detail })
-      } else {
-        zip.file(downloadName, await res.text())
-      }
+      const text = await fetchInjectedSourceText({
+        projectId: args.projectId,
+        fileId: file.id,
+        getToken: args.getToken,
+        targetLang: args.targetLang,
+      })
+      zip.file(downloadName, text)
     } catch (e) {
-      skipped.push({ name: downloadName, reason: (e as Error).message })
+      // Same skip copy as before the fetchInjectedSourceText refactor: 404 is
+      // the "re-import to enable" nudge, other HTTP failures stay terse.
+      const reason = e instanceof SourceExportError && e.status === 404
+        ? "no side-car raw bytes (file imported before round-trip support)"
+        : e instanceof SourceExportError && e.status !== undefined
+          ? `HTTP ${e.status}`
+          : (e as Error).message
+      skipped.push({ name: downloadName, reason })
     }
     done++
     args.onProgress?.(done, candidates.length)

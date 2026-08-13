@@ -1,0 +1,427 @@
+/**
+ * Per-project egress builder — turns one project's selected files into
+ * PROJECT-RELATIVE zip entries plus the transparency report. The orchestrator
+ * (org-egress) prefixes the project slug, so the entry set can be cached and
+ * replayed into a later org zip regardless of sibling-project slug dedupe.
+ *
+ * `deps` members default to the real implementations (same pattern as
+ * loadProjectCellFiles' loadRows param) so tests inject fakes — no network,
+ * no Web Audio.
+ */
+
+import type { CellData } from "@/hooks/useCells"
+import { loadProjectCellFiles } from "@/hooks/useProjectCells"
+import { mergeCellsWithAudio } from "@/hooks/useFileAudioAttachments"
+import { fetchFileAudioAttachments } from "@/lib/sync/cell-audio-read"
+import type { FileAudioAttachmentsResponse } from "@/lib/sync/cell-audio-read-types"
+import type { ProjectTtsSettings } from "@/lib/parsers/types"
+import {
+  fetchInjectedSourceText,
+  fetchSourceSidecar,
+  SourceExportError,
+} from "@/lib/sync/source-export"
+import { exportFileCells, type TextExportFormat } from "@/lib/export/project-zip-export"
+import { exportVttStructured } from "@/lib/export/exporters/vtt-structured"
+import {
+  assembleAudioEntries,
+  type AudioAssemblyArgs,
+  type AudioAssemblyMode,
+} from "@/lib/export/audio-assembly"
+import { audioCacheGet, audioCachePut } from "@/lib/audio/bytes-cache"
+import { fetchCellAudio } from "@/lib/audio/upload"
+import type {
+  EgressFileRef,
+  EgressFileReport,
+  EgressOptions,
+  EgressProjectReport,
+  EgressProjectSelection,
+} from "./types"
+
+export interface EgressZipEntry {
+  /** Project-relative zip path — org-egress prefixes `<project-slug>/`. */
+  path: string
+  data: Blob | ArrayBuffer | Uint8Array | string
+}
+
+export interface BuildProjectExportResult {
+  entries: EgressZipEntry[]
+  report: EgressProjectReport
+  /** True when at least one skip came from a possibly-retryable failure
+   *  (network, 5xx, decode) rather than a stable project state (404 no
+   *  sidecar, 403 policy, no audio). The orchestrator must not cache a zip
+   *  built with transient holes — a retry could fill them. */
+  hadTransientFailures: boolean
+}
+
+/** Injected exporters use the structural minimum of the real result shapes. */
+type SidecarInjector = (rawBytes: ArrayBuffer, cells: CellData[]) => Promise<{ blob: Blob }>
+
+export interface BuildProjectExportDeps {
+  jwt: string
+  /** Per-file sync token mint — the sync-worker's /audio and cells reads
+   *  verify the token's fileId claim, so tokens can't be shared across files. */
+  getToken: (fileId: string) => Promise<string | null>
+  /** Freshness digest the orchestrator computed (files + settings + audio). */
+  freshnessKey: string
+  /** TTS cast settings the orchestrator fetched (voice names for audio entry
+   *  naming). Undefined degrades to preset voices — never fatal. */
+  ttsSettings?: ProjectTtsSettings
+  /** Audio-attachments listings the orchestrator pre-fetched for its
+   *  freshness digest, keyed by fileId — files absent here are fetched via
+   *  fetchAudioAttachments so standalone callers still work. */
+  audioListings?: ReadonlyMap<string, FileAudioAttachmentsResponse>
+  onProgress?: (phase: "text" | "audio", done: number, total: number) => void
+  signal?: AbortSignal
+  loadCellFiles?: typeof loadProjectCellFiles
+  fetchAudioAttachments?: typeof fetchFileAudioAttachments
+  fetchSidecar?: typeof fetchSourceSidecar
+  fetchInjectedText?: typeof fetchInjectedSourceText
+  assembleAudio?: typeof assembleAudioEntries
+  fetchAudioBytes?: AudioAssemblyArgs["fetchBytes"]
+  decodeAudio?: AudioAssemblyArgs["decode"]
+  exportDocxFn?: SidecarInjector
+  exportPptxFn?: SidecarInjector
+  exportIdmlFn?: SidecarInjector
+}
+
+/** FileType → native round-trip plan (mirrors ExportDialog's
+ *  NATIVE_EXPORT_BY_FILE_TYPE). Types absent here (ebible, helloao, obs,
+ *  sdbh, audio, video, …) fall back to options.convertFormat with a note. */
+type NativeTextPlan =
+  | { kind: "usfm"; ext: "usfm" }
+  | { kind: "sidecar"; format: "docx" | "pptx" | "idml"; ext: string }
+  | { kind: "structured"; format: TextExportFormat; ext: string }
+  | { kind: "vtt"; ext: "vtt" }
+
+const NATIVE_TEXT_BY_FILE_TYPE: Partial<Record<string, NativeTextPlan>> = {
+  usfm: { kind: "usfm", ext: "usfm" },
+  docx: { kind: "sidecar", format: "docx", ext: "docx" },
+  pptx: { kind: "sidecar", format: "pptx", ext: "pptx" },
+  idml: { kind: "sidecar", format: "idml", ext: "idml" },
+  md: { kind: "structured", format: "md", ext: "md" },
+  txt: { kind: "structured", format: "txt", ext: "txt" },
+  vtt: { kind: "vtt", ext: "vtt" },
+  srt: { kind: "structured", format: "srt", ext: "srt" },
+  xliff: { kind: "structured", format: "xlf", ext: "xlf" },
+  tmx: { kind: "structured", format: "tmx", ext: "tmx" },
+  csv: { kind: "structured", format: "csv", ext: "csv" },
+  tsv: { kind: "structured", format: "tsv", ext: "tsv" },
+}
+
+/** Shared slug convention: path-hostile runs → "-", trimmed. Dots survive the
+ *  charset filter, so all-dot results ("."/"..") — which would escape their
+ *  zip folder as path segments — take the fallback too. */
+export function egressSlug(raw: string, fallback: string): string {
+  const slug = raw.replace(/[^\w.-]+/g, "-").replace(/^-+|-+$/g, "")
+  return !slug || /^\.+$/.test(slug) ? fallback : slug
+}
+
+const fileBaseSlug = (name: string): string =>
+  egressSlug(name.replace(/\.[^.]+$/, ""), "file")
+
+/** Human reason for a failed /source fetch — the two policy-relevant statuses
+ *  get the design's fixed copy, everything else surfaces the error verbatim. */
+function sourceFetchReason(err: unknown): string {
+  if (err instanceof SourceExportError) {
+    if (err.status === 404) {
+      return "no sidecar stored (imported before round-trip support); re-import to enable"
+    }
+    if (err.status === 403) return "export blocked by org policy (HTTP 403)"
+  }
+  return err instanceof Error ? err.message : String(err)
+}
+
+const defaultFetchAudioBytes = (
+  getToken: (fileId: string) => Promise<string | null>,
+): AudioAssemblyArgs["fetchBytes"] =>
+  async ({ projectId, fileId, audioId, ext }) => {
+    // Cache-first like batch-audio: a take's bytes may live in the OPFS cache.
+    const cached = await audioCacheGet(audioId, ext)
+    if (cached) return cached
+    const bytes = await fetchCellAudio({
+      projectId,
+      fileId,
+      audioId,
+      ext,
+      getSyncToken: (_pid, fid) => getToken(fid),
+    })
+    void audioCachePut(audioId, ext, bytes)
+    return bytes
+  }
+
+const defaultDecodeAudio: AudioAssemblyArgs["decode"] = async (bytes) =>
+  (await import("@/lib/audio/decode-mono")).decodeToMono48k(bytes)
+
+export async function buildProjectExport(
+  selection: EgressProjectSelection,
+  options: EgressOptions,
+  deps: BuildProjectExportDeps,
+): Promise<BuildProjectExportResult> {
+  const loadCellFiles = deps.loadCellFiles ?? loadProjectCellFiles
+  const fetchAudioAttachments = deps.fetchAudioAttachments ?? fetchFileAudioAttachments
+  const fetchSidecar = deps.fetchSidecar ?? fetchSourceSidecar
+  const fetchInjectedText = deps.fetchInjectedText ?? fetchInjectedSourceText
+  const assembleAudio = deps.assembleAudio ?? assembleAudioEntries
+  const fetchAudioBytes = deps.fetchAudioBytes ?? defaultFetchAudioBytes(deps.getToken)
+  const decodeAudio = deps.decodeAudio ?? defaultDecodeAudio
+  // Sidecar injectors dynamic-import by default, like ExportDialog — the
+  // docx/pptx/idml engines are heavy and most egress runs never need them.
+  const exportDocxFn: SidecarInjector =
+    deps.exportDocxFn ??
+    (async (raw, cells) => (await import("@/lib/export/exporters/docx")).exportDocx(raw, cells))
+  const exportPptxFn: SidecarInjector =
+    deps.exportPptxFn ??
+    (async (raw, cells) => (await import("@/lib/export/exporters/pptx")).exportPptx(raw, cells))
+  const exportIdmlFn: SidecarInjector =
+    deps.exportIdmlFn ??
+    (async (raw, cells) => (await import("@/lib/export/exporters/idml")).exportIdml(raw, cells))
+
+  const throwIfAborted = (): void => {
+    if (deps.signal?.aborted) {
+      const reason: unknown = deps.signal.reason
+      throw reason ?? new DOMException("Aborted", "AbortError")
+    }
+  }
+  /** Aborts must propagate (cancel the run), everything else becomes a skip. */
+  const rethrowIfAborted = (err: unknown): void => {
+    if (deps.signal?.aborted) throw err
+    if (err instanceof DOMException && err.name === "AbortError") throw err
+  }
+
+  const entries: EgressZipEntry[] = []
+  const errors: string[] = []
+  /** Fix-9 classifier: 404/403 skips are stable project states (no sidecar,
+   *  org policy); anything else could succeed on retry, so a zip containing
+   *  it must not be cached (see BuildProjectExportResult). */
+  let hadTransientFailures = false
+  const isTransientFailure = (err: unknown): boolean =>
+    !(err instanceof SourceExportError && (err.status === 404 || err.status === 403))
+  const fileReports = new Map<string, EgressFileReport>()
+  for (const file of selection.files) {
+    fileReports.set(file.id, { fileId: file.id, fileName: file.name, entries: [], skipped: [] })
+  }
+  const reportFor = (file: EgressFileRef): EgressFileReport => fileReports.get(file.id)!
+
+  // Path dedupe within the project — same _2/_3 convention as audio-assembly.
+  const usedPaths = new Map<string, number>()
+  const claimPath = (path: string): string => {
+    const seen = usedPaths.get(path) ?? 0
+    usedPaths.set(path, seen + 1)
+    if (seen === 0) return path
+    const dot = path.lastIndexOf(".")
+    const slash = path.lastIndexOf("/")
+    return dot > slash
+      ? `${path.slice(0, dot)}_${seen + 1}${path.slice(dot)}`
+      : `${path}_${seen + 1}`
+  }
+  const pushEntry = (report: EgressFileReport, path: string, data: EgressZipEntry["data"]): void => {
+    const claimed = claimPath(path)
+    entries.push({ path: claimed, data })
+    report.entries.push(claimed)
+  }
+
+  const audioMode: AudioAssemblyMode | null =
+    options.audioMode === "none" ? null : options.audioMode
+  const wantText = options.textMode !== "none"
+
+  // Cells from loadProjectCellFiles NEVER carry attachments/selected slots
+  // (buildCellData doesn't populate them — the workspace merges the per-file
+  // audio read separately), so audio modes must fetch the listings and fold
+  // them in with mergeCellsWithAudio or every cell reads as "no audio".
+  // Listings are lane-independent → memoized per file, pre-fetched ones from
+  // the orchestrator (its freshness digest) are reused, not fetched twice.
+  const listingByFile = new Map<string, Promise<FileAudioAttachmentsResponse>>()
+  const getAudioListing = (file: EgressFileRef): Promise<FileAudioAttachmentsResponse> => {
+    let promise = listingByFile.get(file.id)
+    if (!promise) {
+      const prefetched = deps.audioListings?.get(file.id)
+      promise = prefetched
+        ? Promise.resolve(prefetched)
+        : (async () => {
+            const token = await deps.getToken(file.id)
+            if (!token) throw new Error(`Couldn't get a read token for ${file.name}.`)
+            return fetchAudioAttachments(selection.projectId, file.id, token)
+          })()
+      listingByFile.set(file.id, promise)
+    }
+    return promise
+  }
+
+  const lanes = wantText || audioMode !== null ? options.lanes : []
+  const unitTotal = lanes.length * selection.files.length
+  let textDone = 0
+  let audioDone = 0
+
+  for (const lane of lanes) {
+    const laneSlug = egressSlug(lane || selection.targetLanguage, "target")
+    const laneLang = lane || selection.targetLanguage || "und"
+    for (const file of selection.files) {
+      throwIfAborted()
+      const report = reportFor(file)
+      const fileBase = fileBaseSlug(file.name)
+
+      // Cells load lazily and once per (lane, file): usfm-only text runs never
+      // pay for them; text + audio share one load.
+      let cellsPromise: Promise<CellData[]> | null = null
+      const getCells = (): Promise<CellData[]> => {
+        cellsPromise ??= loadCellFiles({
+          projectId: selection.projectId,
+          projectFiles: [file],
+          getToken: deps.getToken,
+          lane,
+        }).then(([loaded]) => loaded.cells)
+        return cellsPromise
+      }
+
+      if (wantText) {
+        let plan: NativeTextPlan | undefined =
+          options.textMode === "original" ? NATIVE_TEXT_BY_FILE_TYPE[file.type] : undefined
+        if (!plan) {
+          if (options.textMode === "original") {
+            ;(report.notes ??= []).push(
+              `no native round-trip exporter for type "${file.type}" — converted to ${options.convertFormat}`,
+            )
+          }
+          plan = { kind: "structured", format: options.convertFormat, ext: options.convertFormat }
+        }
+        const path = `${laneSlug}/${fileBase}.${plan.ext}`
+        try {
+          if (plan.kind === "usfm") {
+            const text = await fetchInjectedText({
+              projectId: selection.projectId,
+              fileId: file.id,
+              getToken: deps.getToken,
+              targetLang: lane || undefined,
+            })
+            pushEntry(report, path, text)
+          } else if (plan.kind === "sidecar") {
+            const raw = await fetchSidecar({
+              projectId: selection.projectId,
+              fileId: file.id,
+              getToken: deps.getToken,
+              targetLang: lane || undefined,
+            })
+            const cells = await getCells()
+            const inject =
+              plan.format === "docx" ? exportDocxFn : plan.format === "pptx" ? exportPptxFn : exportIdmlFn
+            const result = await inject(raw, cells)
+            pushEntry(report, path, result.blob)
+          } else if (plan.kind === "vtt") {
+            pushEntry(report, path, exportVttStructured(await getCells()))
+          } else {
+            const blob = exportFileCells(
+              await getCells(),
+              plan.format,
+              selection.sourceLanguage || "und",
+              laneLang,
+            )
+            pushEntry(report, path, blob)
+          }
+        } catch (err) {
+          rethrowIfAborted(err)
+          if (isTransientFailure(err)) hadTransientFailures = true
+          report.skipped.push({
+            scope: `${file.name} (${laneSlug})`,
+            reason: sourceFetchReason(err),
+          })
+        }
+        textDone++
+        deps.onProgress?.("text", textDone, unitTotal)
+      }
+
+      if (audioMode !== null) {
+        try {
+          const [bareCells, listing] = await Promise.all([getCells(), getAudioListing(file)])
+          const cells = mergeCellsWithAudio(bareCells, new Map(Object.entries(listing.cells)))
+          const result = await assembleAudio({
+            cells,
+            settings: deps.ttsSettings,
+            projectId: selection.projectId,
+            fileSlug: fileBase,
+            langCode: laneLang,
+            mode: audioMode,
+            fetchBytes: fetchAudioBytes,
+            decode: decodeAudio,
+            signal: deps.signal,
+          })
+          for (const e of result.entries) {
+            pushEntry(report, `audio/${laneSlug}/${fileBase}/${e.name}`, e.data)
+          }
+          const allSilent =
+            result.entries.length === 0 &&
+            result.skipped.length > 0 &&
+            result.skipped.every((s) => s.reason === "no audio")
+          if (allSilent) {
+            // Collapse the per-cell "no audio" noise for audio-less files.
+            report.skipped.push({
+              scope: `${file.name} (audio, ${laneSlug})`,
+              reason: "no audio on this file",
+            })
+          } else {
+            for (const s of result.skipped) {
+              report.skipped.push({ scope: `cell ${s.cellId} (audio, ${laneSlug})`, reason: s.reason })
+            }
+          }
+          // Per-clip fetch/decode failures inside the assembler surface as
+          // "audio failed: …" skips (its failReason) — retryable, so they
+          // must poison the cache like any other transient failure.
+          if (result.skipped.some((s) => s.reason.startsWith("audio failed:"))) {
+            hadTransientFailures = true
+          }
+        } catch (err) {
+          rethrowIfAborted(err)
+          // Listing fetch / cell load / assembly crashes are all retryable.
+          hadTransientFailures = true
+          report.skipped.push({
+            scope: `${file.name} (audio, ${laneSlug})`,
+            reason: err instanceof Error ? err.message : String(err),
+          })
+        }
+        audioDone++
+        deps.onProgress?.("audio", audioDone, unitTotal)
+      }
+    }
+  }
+
+  // Source documents once per file, not per lane — the raw upload bytes are
+  // lane-independent.
+  if (options.includeSourceDocs) {
+    for (const file of selection.files) {
+      throwIfAborted()
+      const report = reportFor(file)
+      try {
+        const raw = await fetchSidecar({
+          projectId: selection.projectId,
+          fileId: file.id,
+          getToken: deps.getToken,
+        })
+        pushEntry(report, `source-documents/${egressSlug(file.name, "file")}`, raw)
+        if (file.type === "usfm") {
+          // The /source route has no raw mode for USFM — it re-serializes the
+          // stored source with current default-lane translations injected.
+          // Say so rather than presenting the entry as the byte-exact upload.
+          ;(report.notes ??= []).push(
+            "source document is the original USFM re-serialized with current default-lane translations injected — a byte-exact raw copy needs a server raw mode (tracked as follow-up)",
+          )
+        }
+      } catch (err) {
+        rethrowIfAborted(err)
+        if (isTransientFailure(err)) hadTransientFailures = true
+        report.skipped.push({
+          scope: `${file.name} (source document)`,
+          reason: sourceFetchReason(err),
+        })
+      }
+    }
+  }
+
+  const report: EgressProjectReport = {
+    projectId: selection.projectId,
+    projectName: selection.projectName,
+    freshnessKey: deps.freshnessKey,
+    fromCache: false,
+    files: selection.files.map((f) => fileReports.get(f.id)!),
+    errors,
+  }
+  return { entries, report, hadTransientFailures }
+}

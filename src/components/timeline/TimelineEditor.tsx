@@ -1675,7 +1675,7 @@ export function TimelineEditor({
           <AppTooltip
             content={
               audioQuality === "original"
-                ? "Original quality (WAV) for generated voices — larger downloads. Recordings are always compressed."
+                ? "Original quality (WAV) for generated voices — larger downloads. Recorded takes always play in the format they were captured."
                 : "Compressed playback (smaller, faster). Toggle for original-quality generated voices."
             }
           >

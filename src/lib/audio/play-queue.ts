@@ -1838,6 +1838,12 @@ function wireOverlayElement(
     //
     // So: no seek until the clip's length is known. Starting a fraction of a
     // second early is a far smaller error than a dub that never sounds.
+    //
+    // Takes recorded since the WAV round satisfy this guard trivially (a RIFF
+    // header states its own length), but the guard is LOAD-BEARING FOREVER:
+    // every take already recorded in every project is a webm, and so is every
+    // take from anyone who opts out. Do not delete these checks after watching
+    // WAV takes work.
     if (!Number.isFinite(d)) return
     audio.currentTime = Math.max(0, Math.min(startAtClipSec, d))
   }

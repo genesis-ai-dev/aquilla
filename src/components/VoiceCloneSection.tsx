@@ -41,7 +41,13 @@ type Status =
 const MAX_REFERENCE_BYTES = 8 * 1024 * 1024 // 8 MB — Seed-VC only needs a few seconds.
 
 export function VoiceCloneSection({ voice, projectId, fileId, session, onChange, focusSignal }: Props) {
-  const recorder = useAudioRecorder()
+  // Hand the 8 MB budget to the recorder so it becomes an early hard stop
+  // (~78s of WAV, ~4min of webm/opus) instead of a rejection delivered after
+  // the person has finished speaking. The reference follows the device's WAV
+  // preference like any other take: reference-extract.ts already uploads WAV
+  // through uploadVoiceReference, so that server path is proven, and Seed-VC
+  // reads only the first few seconds either way.
+  const recorder = useAudioRecorder({ maxBytes: MAX_REFERENCE_BYTES })
   const [status, setStatus] = useState<Status>({ kind: "idle" })
   const consumedBlobRef = useRef<Blob | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
@@ -67,6 +73,10 @@ export function VoiceCloneSection({ voice, projectId, fileId, session, onChange,
         setStatus({ kind: "error", message: "No project context for upload." })
         return
       }
+      // Backstop only, and unreachable for a recorded clip now that the
+      // recorder stops itself at this budget. It still guards the file-picker
+      // path below, and it fails loudly rather than silently if the capture
+      // format's byte rate is ever wrong.
       if (blob.size > MAX_REFERENCE_BYTES) {
         setStatus({ kind: "error", message: "Reference clip too large (max 8 MB). Use a few seconds." })
         return

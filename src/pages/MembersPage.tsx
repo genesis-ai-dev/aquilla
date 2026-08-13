@@ -30,6 +30,7 @@ import { ExternalCollaboratorsSection } from "@/components/org/ExternalCollabora
 import { ROLE, ORG_ROLE_PICKER, roleName } from "@/lib/frontier/roles"
 import { RoleLabel } from "@/components/RoleLabel"
 import { formatRelativeTime } from "@/lib/time/relative"
+import { toUserFacingError } from "@/lib/errors/user-error"
 import type { OrgMemberProject, PendingOrgInvite } from "@/lib/frontier/orgs"
 import type { MemberGrantResult } from "@/lib/frontier/members"
 import { useActiveOrg } from "@/context/OrgContext"
@@ -356,6 +357,9 @@ function RosterWithProjectChips({
   callerOrgRoleLevel,
   onRequestRemove,
 }: RosterProps) {
+  // AQU-780: surface the real reason a role change failed (a Maintainer hitting
+  // the owner-only gate used to fail silently — `add()` swallowed the 403).
+  const [roleError, setRoleError] = useState<string | null>(null)
   return (
     <>
       <Section
@@ -377,15 +381,36 @@ function RosterWithProjectChips({
               error: r.error?.message,
             }))
           }}
+          onAddBatchError={(e) => {
+            // AQU-780: a whole-batch throw means nothing landed — a 403
+            // owner-gate, a 429, or a 5xx. Report the actual cause instead of
+            // "may not exist" (a genuinely unknown username comes back as a
+            // per-person `user_not_found` result, not a thrown batch error).
+            const uf = toUserFacingError(e, "org")
+            return uf.category === "forbidden"
+              ? "Only org owners can add members."
+              : uf.message
+          }}
           onRemove={(userId) => {
             const target = panelMembers.find((m) => m.userId === userId)
             if (target) onRequestRemove(target.userId, target.username)
             return Promise.resolve()
           }}
           onChangeRole={async (username, role) => {
-            await add(username, role)
+            setRoleError(null)
+            try {
+              await add(username, role)
+            } catch (e) {
+              const uf = toUserFacingError(e, "org")
+              setRoleError(
+                uf.category === "forbidden"
+                  ? "Only org owners can change member roles."
+                  : uf.message,
+              )
+            }
           }}
         />
+        {roleError && <p className="text-xs text-destructive">{roleError}</p>}
       </Section>
 
       <Section

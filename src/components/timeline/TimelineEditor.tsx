@@ -1146,10 +1146,13 @@ export function TimelineEditor({
         : trackDrag.bounds[trackDrag.bounds.length - 1].bottom
       : null
 
-  // SUB-12: cursor-centered wheel/pinch zoom (⌘/ctrl + wheel — trackpad pinch
+  // SUB-12: cursor-centered wheel/pinch zoom (ctrl + wheel — a trackpad pinch
   // arrives as a ctrlKey wheel). Native listener with passive:false because
   // React's synthetic onWheel can't reliably preventDefault (the browser would
   // page-zoom). Plain wheel (no modifier) keeps scrolling untouched.
+  //
+  // Stage 3 hangs the VERTICAL zoom off the same listener under ⌘ — see the
+  // metaKey branch in onWheel for why that modifier and not ctrl.
   //
   // Smoothness (Sam's "spazzy" feedback on v1):
   //  - the factor scales with gesture velocity (exp of deltaY) instead of a
@@ -1162,6 +1165,10 @@ export function TimelineEditor({
   //    detach/re-attach gaps.
   const pxPerSecRef = useRef(pxPerSec)
   pxPerSecRef.current = pxPerSec
+  // Same trick for the row height: the wheel listener attaches once, so it
+  // cannot close over the state.
+  const rowHRef = useRef(rowH)
+  rowHRef.current = rowH
   const zoomAnchorRef = useRef<{ timeSec: number; offsetX: number } | null>(null)
   // Eased zoom: wheel/pinch moves a TARGET; the committed zoom glides toward it
   // (~35%/frame exponential approach) for a light accel/decel feel. The first
@@ -1209,6 +1216,32 @@ export function TimelineEditor({
     const onWheel = (e: WheelEvent) => {
       if (!e.ctrlKey && !e.metaKey) return
       e.preventDefault()
+      // ⌘ + pinch zooms the ROWS instead of the seconds (Sam, 2026-08-13).
+      //
+      // metaKey is the only modifier that can carry this, and the reason is
+      // worth writing down: a trackpad pinch ALREADY arrives as a ctrlKey
+      // wheel — that is how the horizontal zoom below is triggered — so ctrl
+      // cannot distinguish "pinch" from "ctrl+pinch". They are the same event.
+      // ⌘ is untouched by the gesture, so ⌘+pinch reads as ctrlKey AND metaKey
+      // and is unambiguous, while a plain pinch keeps meaning what it always
+      // has. (On Windows/Linux that leaves the Win key as the vertical
+      // modifier and Ctrl+pinch still horizontal — same reason, no way round
+      // it without inventing a modifier the gesture does not report.)
+      if (e.metaKey) {
+        const rowMag = Math.abs(e.deltaY)
+        const rowSpeed = rowMag >= 90 ? rowMag * 0.0022 : Math.min(rowMag * 0.019, 0.55)
+        const from = rowHRef.current
+        const raw = from * Math.exp(e.deltaY < 0 ? rowSpeed : -rowSpeed)
+        // A ROW HEIGHT IS AN INTEGER (see clampRowHeight — half pixels blur
+        // every border-b), so a proportional step has a floor the horizontal
+        // zoom does not: at 66px a gentle tick works out to a third of a pixel,
+        // which rounds straight back to 66 and the gesture does nothing at all
+        // no matter how long it is held. Below one pixel the step becomes one
+        // pixel, which is also the finest move this control HAS.
+        const delta = raw - from
+        applyRowHeight(from + (Math.abs(delta) < 1 ? Math.sign(delta) : delta))
+        return
+      }
       // Two very different inputs share this event: trackpad PINCH ticks are
       // floats whose magnitude tracks gesture speed (~1 slow … ~60+ hard),
       // wheel NOTCHES are ~±100+. Wheel keeps its dialed-in gain; pinch speed
@@ -1729,7 +1762,7 @@ export function TimelineEditor({
             <button
               type="button"
               aria-label="Shorter rows"
-              title="Shorter rows — fit more tracks on screen"
+              title="Shorter rows — fit more tracks on screen (⌘ + pinch)"
               onClick={() => applyRowHeight(rowH / 1.3)}
               className="px-1.5 py-1 text-foreground/70 hover:bg-muted"
             >
@@ -1741,7 +1774,7 @@ export function TimelineEditor({
             <button
               type="button"
               aria-label="Taller rows"
-              title="Taller rows"
+              title="Taller rows (⌘ + pinch)"
               onClick={() => applyRowHeight(rowH * 1.3)}
               className="px-1.5 py-1 text-foreground/70 hover:bg-muted"
             >

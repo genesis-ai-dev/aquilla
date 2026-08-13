@@ -172,13 +172,45 @@ describe("TimelineEditor", () => {
     const zoomedIn = width()
     expect(zoomedIn).toBeGreaterThan(before)
 
-    // meta+wheel down = zoom out (applied by the glide loop).
-    sendWheel({ deltaY: 100, metaKey: true })
+    // ctrl+wheel down = zoom out (applied by the glide loop).
+    sendWheel({ deltaY: 100, ctrlKey: true })
     await waitFor(() => expect(width()).toBeLessThan(zoomedIn))
 
     // Clamp: hammering zoom-out bottoms out at ZOOM_MIN instead of vanishing.
     for (let i = 0; i < 40; i++) sendWheel({ deltaY: 100, ctrlKey: true })
     await waitFor(() => expect(width()).toBeGreaterThan(0))
+  })
+
+  it("⌘ + pinch zooms the rows, and leaves the seconds alone", async () => {
+    // 2026-08-13. A trackpad pinch ALREADY arrives as a ctrlKey wheel — that is
+    // how the horizontal zoom above is driven — so ⌘ is the only modifier that
+    // can distinguish "pinch" from "pinch for the other axis". Its own render:
+    // the horizontal zoom eases over rAF frames, so a width read taken while
+    // the test above is still gliding is a race, not a regression.
+    localStorage.removeItem("codex:timelineRowHeight:metafile")
+    render(
+      <TimelineEditor
+        fileId="metafile"
+        coreMediaUrl={null}
+        editable
+        cells={[cell({ id: "d1", original: "x", medium: "media", startTime: 0, endTime: 2 })]}
+        onRetimeSubtitle={() => {}}
+      />,
+    )
+    const scroll = screen.getByTestId("tl-scroll")
+    const rowH = () => screen.getByTestId("tl-editor").style.getPropertyValue("--tl-row-h")
+    const width = () => parseFloat(screen.getByTestId("tl-card-d1").style.width)
+    const sendWheel = (init: { deltaY: number; ctrlKey?: boolean; metaKey?: boolean }) => {
+      const ev = new Event("wheel", { bubbles: true, cancelable: true })
+      Object.assign(ev, { clientX: 0, ...init })
+      fireEvent(scroll, ev)
+    }
+
+    const rowsBefore = rowH()
+    const widthBefore = width()
+    sendWheel({ deltaY: 100, ctrlKey: true, metaKey: true })
+    await waitFor(() => expect(rowH()).not.toBe(rowsBefore))
+    expect(width()).toBe(widthBefore)
   })
 
   it("no longer renders the video itself — the pane beside the table owns it", () => {

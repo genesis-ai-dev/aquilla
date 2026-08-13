@@ -5,6 +5,7 @@ import { useOrg } from "@/hooks/useOrg"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { ROLE } from "@/lib/frontier/roles"
 import { RoleLabel } from "@/components/RoleLabel"
+import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { MembersMatrixCellEditor } from "./MembersMatrixCellEditor"
 import { MemberAccessDrillDown } from "./MemberAccessDrillDown"
 import { AccessModelLegend } from "./AccessModelLegend"
@@ -311,7 +312,10 @@ const MatrixRow = memo(function MatrixRow({
             isSelected ? "font-semibold text-primary" : "",
           ].join(" ")}
         >
-          {member.username}
+          <UsernameWithAvatar
+            username={member.username}
+            nameClassName={isSelected ? "font-semibold text-primary" : undefined}
+          />
         </button>
         {member.isOrgInherited && (
           <AppTooltip content="Access on every project comes from org-wide role; no per-project overrides.">

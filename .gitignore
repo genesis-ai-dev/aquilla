@@ -105,3 +105,6 @@ ds-bundle/
 
 # AQU-832 — generated i18n translator hand-off bundle (pnpm i18n:export)
 i18n-export/
+
+# Google OAuth credential downloads — never commit
+client_secret*.json

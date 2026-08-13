@@ -19,8 +19,9 @@ test("OrgSwitcher Create org creates and switches to new org", async ({ alice })
   // "first chevron" selector can hit the account menu when layout/order shifts.
   await dash.openOrganizationSwitcher()
 
-  // Click "Create".
-  const createOrgItem = alice.getByRole("menuitem", { name: /^create$/i })
+  // Click "Create" in the switcher footer (plain button, not a menuitem).
+  const createOrgItem = alice.getByRole("button", { name: /^create$/i })
+  await expect(createOrgItem).toBeVisible({ timeout: 5_000 })
   await createOrgItem.click()
 
   // The create dialog appears.

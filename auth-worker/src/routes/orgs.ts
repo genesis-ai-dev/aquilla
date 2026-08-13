@@ -22,6 +22,7 @@ import {
   getMemberEffectiveAccess,
   getOrCreateUserOrg,
   getOrgGroupDetail,
+  getOrgDeletedFiles,
   getOrgPortfolio,
   getOrgPortfolios,
   getRosterViewMinRole,
@@ -282,6 +283,21 @@ orgs.get("/:orgId/portfolio", async (c) => {
   const isAdmin = isPlatformAdminEmail(c.env, user.email)
   const projects = await getOrgPortfolio(c.env, orgId, { userId: user.id, isAdmin })
   return c.json({ projects })
+})
+
+/**
+ * GET /api/v2/orgs/:orgId/deleted-files — soft-deleted files across projects
+ * the caller can see. Powers the Archived page's Recently deleted tab.
+ */
+orgs.get("/:orgId/deleted-files", async (c) => {
+  const user = c.get("user")
+  const orgId = parseInt(c.req.param("orgId"), 10)
+  if (!Number.isFinite(orgId)) return c.json({ error: "invalid orgId" }, 400)
+  const role = await getEffectiveOrgRole(c.env, orgId, user)
+  if (role == null) return c.json({ error: "not an org member" }, 403)
+  const isAdmin = isPlatformAdminEmail(c.env, user.email)
+  const files = await getOrgDeletedFiles(c.env, orgId, { userId: user.id, isAdmin })
+  return c.json({ files })
 })
 
 /**

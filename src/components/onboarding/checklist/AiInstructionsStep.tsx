@@ -65,7 +65,6 @@ export function AiInstructionsStep({ project, onUpdated }: AiInstructionsStepPro
         <span>{prompt.length} characters</span>
       </div>
       <Button
-        size="sm"
         onClick={handleSave}
         disabled={busy || prompt.trim().length === 0}
         className="w-full"

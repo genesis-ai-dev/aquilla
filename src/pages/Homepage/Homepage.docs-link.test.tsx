@@ -3,12 +3,9 @@
  *
  * The main marketing site (aquilla.app, served as homepage.html to signed-out
  * visitors) must expose a clearly visible link to the help docs
- * (help.aquilla.app). It must be reachable logged-out and present on the mobile
- * layout — the nav links are hidden below 860px, so a footer link is the
- * mobile-guaranteed affordance. This test guards both:
- *   - at least one docs link exists and points at the docs site
- *   - a docs link lives in the footer (which stays visible on mobile), not only
- *     in the mobile-hidden nav.
+ * (help.aquilla.app). Docs is not a mid-nav item — signed-in visitors get a
+ * Docs button in the nav CTA, and everyone gets a footer link (the
+ * mobile-guaranteed affordance, since `.aq-nav-links` hide below 860px).
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
@@ -28,15 +25,6 @@ vi.mock("./MultimodalWorkspace", () => ({ MultimodalWorkspace: () => null }))
 vi.mock("./LanguageBlitz", () => ({ LanguageBlitz: () => null, LanguageMarquee: () => null }))
 vi.mock("@/components/HealthRing", () => ({ HealthRing: () => null }))
 vi.mock("./homepage.css", () => ({}))
-
-vi.mock("@/lib/frontier/session-store", () => ({
-  // The homepage itself no longer reads identity while rendering — it's
-  // prerendered and edge-cached, so its markup can't depend on the visitor.
-  // AppEntryBanner resolves the session after mount instead, which is why this
-  // mock has to provide loadActiveSession. Returning null keeps the banner off
-  // so these assertions see the signed-out page.
-  loadActiveSession: () => Promise.resolve(null),
-}))
 
 function renderHomepage() {
   return render(
@@ -69,5 +57,14 @@ describe("Homepage — help documentation link (AQU-702)", () => {
       .getAllByRole("link")
       .filter((a) => a.getAttribute("href") === DOCS_URL)
     expect(footerDocsLinks.length).toBeGreaterThan(0)
+  })
+
+  it("does not duplicate Docs in the mid-nav; signed-in visitors use the CTA button", () => {
+    const { container } = renderHomepage()
+    const midNav = container.querySelector(".aq-nav-links")
+    expect(midNav).not.toBeNull()
+    expect(
+      within(midNav as HTMLElement).queryByRole("link", { name: /^docs$/i }),
+    ).toBeNull()
   })
 })

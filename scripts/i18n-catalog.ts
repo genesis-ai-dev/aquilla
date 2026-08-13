@@ -7,11 +7,16 @@
  *     wired into a pre-commit hook or a docs example without booting vitest.
  *
  *   pnpm i18n:export [outDir]              (default: i18n-export/)
- *     Write the three files a translator or the translation agent needs:
- *       en.catalog.json  — the source file to import into an Aquilla project
- *       en.context.json  — the context sidecar, in the AQU-832 interchange shape
- *       en.notes.json    — message key → flattened context note, which is what
- *                          lands on each imported cell / in the agent prompt
+ *     Write the files a translator or the translation agent needs:
+ *       en.context.json      — the context sidecar, in the AQU-832 interchange shape
+ *       <locale>.catalog.json — the source file to import into an Aquilla project
+ *       <locale>.notes.json   — leaf key → flattened context note, which is what
+ *                               lands on each imported cell / in the agent prompt
+ *
+ *     One catalog per target locale, not one shared `en.catalog.json`, because
+ *     count-governed keys export one cell per plural category and the category
+ *     set is a property of the *target* language: Arabic needs six cells where
+ *     Thai needs one. `en.*` is still emitted, as the base/reference pair.
  *
  *   pnpm i18n:import <locale> <translated.json>
  *     Take the JSON exported back out of the project and regenerate
@@ -27,12 +32,15 @@ import { fileURLToPath } from "node:url"
 import {
   buildCatalogSourceJson,
   buildContextSidecarJson,
+  catalogLeafKeys,
   contextNote,
+  parseLeafKey,
   parseTranslatedCatalog,
   renderCatalogModule,
 } from "../src/lib/i18n/catalog-export"
 import { MESSAGE_KEYS, catalogContextIssues } from "../src/lib/i18n/context"
-import { DEFAULT_LOCALE, isSupportedLocale } from "../src/lib/i18n/locales"
+import { DEFAULT_LOCALE, LOCALES, isSupportedLocale } from "../src/lib/i18n/locales"
+import type { MessageKey } from "../src/lib/i18n/messages/en"
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..")
 const DEFAULT_OUT_DIR = "i18n-export"
@@ -62,21 +70,25 @@ function runExport(outDirArg?: string): void {
   const outDir = resolve(REPO_ROOT, outDirArg ?? DEFAULT_OUT_DIR)
   mkdirSync(outDir, { recursive: true })
 
-  const notes: Record<string, string> = {}
-  for (const key of MESSAGE_KEYS) notes[key] = contextNote(key)
-
   const files: Array<[string, string]> = [
-    ["en.catalog.json", buildCatalogSourceJson()],
     ["en.context.json", buildContextSidecarJson()],
-    ["en.notes.json", JSON.stringify(notes, null, 2) + "\n"],
   ]
+  for (const { code } of LOCALES) {
+    const notes: Record<string, string> = {}
+    for (const leaf of catalogLeafKeys(code)) {
+      const { key, category } = parseLeafKey(leaf)
+      notes[leaf] = contextNote(key as MessageKey, code, category)
+    }
+    files.push([`${code}.catalog.json`, buildCatalogSourceJson(code)])
+    files.push([`${code}.notes.json`, JSON.stringify(notes, null, 2) + "\n"])
+  }
   for (const [name, contents] of files) {
     writeFileSync(join(outDir, name), contents, "utf8")
     console.log(`i18n-catalog: wrote ${join(outDirArg ?? DEFAULT_OUT_DIR, name)}`)
   }
   console.log(
-    `\nNext: import en.catalog.json into an Aquilla project as a JSON i18n source, ` +
-      `attaching each cell's note from en.notes.json.`,
+    `\nNext: import <locale>.catalog.json into an Aquilla project as a JSON i18n ` +
+      `source, attaching each cell's note from <locale>.notes.json.`,
   )
 }
 

@@ -5,6 +5,7 @@
 
 import { useState, type FormEvent } from "react"
 import { AUTH_BASE } from "@/lib/frontier/auth"
+import { OptionalMark } from "@/components/ui/field"
 
 export const BOOKING_URL = "https://calendar.app.google/umM8GMgm6d78mZWS9"
 
@@ -101,11 +102,11 @@ export function BookCallSection() {
                 </label>
               </div>
               <label className="aq-field">
-                <span>Organization <em>(optional)</em></span>
+                <span>Organization <OptionalMark /></span>
                 <input className="aq-input" name="organization" type="text" autoComplete="organization" placeholder="Team or organization" />
               </label>
               <label className="aq-field">
-                <span>What are you hoping to translate? <em>(optional)</em></span>
+                <span>What are you hoping to translate? <OptionalMark /></span>
                 <textarea className="aq-input aq-textarea" name="message" rows={4} placeholder="Languages, media, timeline — anything helpful." />
               </label>
               {/* Honeypot: off-screen, skipped by humans, filled by naive bots. */}

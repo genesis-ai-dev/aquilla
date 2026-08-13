@@ -157,6 +157,23 @@ function runOnce(
   })
 }
 
+/** If wrangler/workerd exits mid-suite, Playwright would otherwise keep
+ * going and every remaining spec would fail in 0s with ECONNREFUSED.
+ * Abort the shard immediately and dump worker logs. */
+function abortIfWorkerDies(worker: SpawnedWorker, label: string): void {
+  worker.child.on("exit", (code, signal) => {
+    if (shuttingDown) return
+    const reason = code != null ? `exit ${code}` : `signal ${signal ?? "unknown"}`
+    console.error(
+      `\n${TAG}[fail] ${label} worker on :${worker.port} died (${reason}).\n` +
+        `${TAG}[fail] Remaining tests would fail with ECONNREFUSED ${worker.port} — aborting now.\n` +
+        `${TAG}[hint] Tail ${logFiles[label] ?? `${LOG_DIR}/`}. Common causes: another e2e-up / pnpm dev fighting the port, workerd OOM, or Postgres gone.`,
+    )
+    dumpLogs()
+    void shutdown(1)
+  })
+}
+
 /** Print the last N lines of each known log file to stderr. Used when a
  * subcommand fails so the developer can see what went wrong without
  * needing to know the log paths. */
@@ -311,7 +328,16 @@ async function main(): Promise<void> {
   const browserEnv: Record<string, string> = {
     VITE_AUTH_BASE: `http://127.0.0.1:${IDENTITY_PORT}`,
     VITE_FRONTIER_BASE: `http://127.0.0.1:${IDENTITY_PORT}`,
+    // Must override .env.local's VITE_CHAT_BASE (often the old chat-worker
+    // port, now sync-worker). Chat + agent/run live on identity; the worker
+    // strips the `/chat` prefix the same way production `api.*.aquilla.app/chat` does.
+    VITE_CHAT_BASE: `http://127.0.0.1:${IDENTITY_PORT}/chat`,
     VITE_SYNC_WORKER_HOST: `127.0.0.1:${SYNC_WORKER_PORT}`,
+    // Pin Google Drive import to unconfigured regardless of the developer's
+    // .env.local — import-dialog.smoke.spec asserts the not-configured notice,
+    // and real creds leaking into the e2e build would flip that panel state.
+    VITE_GOOGLE_CLIENT_ID: "",
+    VITE_GOOGLE_API_KEY: "",
   }
 
   // 0. Free our managed ports — survives stale processes from a prior aborted run.
@@ -362,6 +388,7 @@ async function main(): Promise<void> {
   )
   attachOutput(openrouterMock, "mock-openrouter", openLogFile(path.join(LOG_DIR, "mock-openrouter.log")), VERBOSE)
   cleanup.push(() => killChildTree(openrouterMock))
+  await waitForUrl(`http://127.0.0.1:${OPENROUTER_MOCK_PORT}/healthz`, 30_000)
 
   const legacyMigrationMock = spawn(
     "npx",
@@ -412,6 +439,7 @@ async function main(): Promise<void> {
     streamToParent: VERBOSE,
   })
   cleanup.push(() => identity.kill())
+  abortIfWorkerDies(identity, "identity")
 
   // 4. Boot sync-worker. Same Hyperdrive override so sync SQL also hits Postgres.
   console.log(`${TAG}[boot 4/8] starting sync-worker on :${SYNC_WORKER_PORT}…`)
@@ -425,6 +453,7 @@ async function main(): Promise<void> {
     streamToParent: VERBOSE,
   })
   cleanup.push(() => sync.kill())
+  abortIfWorkerDies(sync, "sync")
 
   // 5. Boot mock LLM (binds to an OS-assigned free port, so shards never clash).
   console.log(`${TAG}[boot 5/8] starting mock LLM…`)
@@ -447,6 +476,7 @@ async function main(): Promise<void> {
       [
         `VITE_AUTH_BASE=${browserEnv.VITE_AUTH_BASE}`,
         `VITE_FRONTIER_BASE=${browserEnv.VITE_FRONTIER_BASE}`,
+        `VITE_CHAT_BASE=${browserEnv.VITE_CHAT_BASE}`,
         `VITE_SYNC_WORKER_HOST=${browserEnv.VITE_SYNC_WORKER_HOST}`,
         `VITE_LLM_BASE_URL=${browserEnv.VITE_LLM_BASE_URL}`,
         "",

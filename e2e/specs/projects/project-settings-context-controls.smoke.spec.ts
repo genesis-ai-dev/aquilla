@@ -6,10 +6,10 @@ import { jwtFor, seedProjectWithFile } from "../../helpers/seed-project"
  * ProjectSettings — AI context controls in the AI Instructions section.
  *
  * The AI Instructions card has three controls not tested elsewhere
- * (Base UI select triggers + checkbox):
+ * (Base UI select triggers + switch):
  *   - #context-size select: Small | Medium (default) | Large
  *   - #few-shot-example-format select: "Source + target (default)" | "Target only"
- *   - "Approved examples only" trust boundary (always checked and locked)
+ *   - "Approved examples only" trust boundary (always on and locked)
  *
  * Each change marks the form dirty ("Save changes" button appears).
  *
@@ -39,10 +39,10 @@ test("project settings AI context controls mark form dirty", async ({ alice }) =
   await pickSelectOption(alice, fewShotSelect, "Target only")
   await expectSelectValue(fewShotSelect, "Target only")
 
-  const approvedOnlyChk = alice.getByRole("checkbox", { name: "Approved examples only" })
-  await expect(approvedOnlyChk).toBeVisible({ timeout: 3_000 })
-  await expect(approvedOnlyChk).toBeChecked()
-  await expect(approvedOnlyChk).toBeDisabled()
+  const approvedOnlySwitch = alice.getByRole("switch", { name: "Approved examples only" })
+  await expect(approvedOnlySwitch).toBeVisible({ timeout: 3_000 })
+  await expect(approvedOnlySwitch).toBeChecked()
+  await expect(approvedOnlySwitch).toBeDisabled()
 
   // "Save changes" is still visible.
   await expect(saveBtn).toBeVisible()

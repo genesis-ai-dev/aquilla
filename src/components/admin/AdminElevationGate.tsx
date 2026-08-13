@@ -1,6 +1,12 @@
-import { useCallback, useRef, useState } from "react"
+import { useCallback, useState } from "react"
+import { REGEXP_ONLY_DIGITS } from "input-otp"
 import { ShieldCheck } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import {
+  InputOTP,
+  InputOTPGroup,
+  InputOTPSlot,
+} from "@/components/ui/input-otp"
 import { requestAdminElevation, verifyAdminElevation } from "@/lib/frontier/admin"
 
 const CODE_LENGTH = 6
@@ -25,11 +31,13 @@ export function AdminElevationGate({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  const [code, setCode] = useState("")
 
   const sendCode = useCallback(async () => {
     setBusy(true)
     setError(null)
     setNotice(null)
+    setCode("")
     try {
       const { sent, devCode } = await requestAdminElevation(jwt)
       setPhase("verify")
@@ -50,14 +58,15 @@ export function AdminElevationGate({
   }, [jwt, email])
 
   const verify = useCallback(
-    async (code: string) => {
+    async (nextCode: string) => {
       setBusy(true)
       setError(null)
       try {
-        await verifyAdminElevation(jwt, code)
+        await verifyAdminElevation(jwt, nextCode)
         onElevated()
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err))
+        setCode("")
       } finally {
         setBusy(false)
       }
@@ -66,7 +75,7 @@ export function AdminElevationGate({
   )
 
   return (
-    <div className="mx-auto mt-10 max-w-md rounded-2xl border bg-card p-6 text-center">
+    <div className="mx-auto mt-10 max-w-md rounded-lg border bg-card p-6 text-center">
       <div className="mx-auto mb-3 flex size-11 items-center justify-center rounded-lg bg-primary/10 text-primary">
         <ShieldCheck className="size-6" />
       </div>
@@ -86,7 +95,33 @@ export function AdminElevationGate({
       ) : (
         <div className="mt-6 space-y-4">
           {notice && <p className="text-xs text-muted-foreground">{notice}</p>}
-          <CodeInput onComplete={verify} disabled={busy} />
+          <div className="flex justify-center">
+            <InputOTP
+              maxLength={CODE_LENGTH}
+              pattern={REGEXP_ONLY_DIGITS}
+              value={code}
+              onChange={setCode}
+              onComplete={verify}
+              disabled={busy}
+              autoComplete="one-time-code"
+              inputMode="numeric"
+              aria-label="Verification code"
+              containerClassName="gap-0"
+              // OTP fields don't get password-manager badges; probing them
+              // polls `window` on an interval that survives happy-dom teardown.
+              pushPasswordManagerStrategy="none"
+            >
+              <InputOTPGroup>
+                {Array.from({ length: CODE_LENGTH }, (_, i) => (
+                  <InputOTPSlot
+                    key={i}
+                    index={i}
+                    className="size-11 font-mono text-lg"
+                  />
+                ))}
+              </InputOTPGroup>
+            </InputOTP>
+          </div>
           {error && <p className="text-xs text-destructive">{error}</p>}
           <div className="flex items-center justify-center gap-2 text-xs">
             <button
@@ -100,88 +135,6 @@ export function AdminElevationGate({
           </div>
         </div>
       )}
-    </div>
-  )
-}
-
-/**
- * Six single-character boxes with auto-advance + paste support. Calls
- * `onComplete` once all six digits are present (Enter also submits).
- */
-function CodeInput({
-  onComplete,
-  disabled,
-}: {
-  onComplete: (code: string) => void
-  disabled: boolean
-}) {
-  const [digits, setDigits] = useState<string[]>(Array(CODE_LENGTH).fill(""))
-  const refs = useRef<Array<HTMLInputElement | null>>([])
-
-  const setAt = (i: number, v: string) => {
-    setDigits((prev) => {
-      const next = [...prev]
-      next[i] = v
-      return next
-    })
-  }
-
-  const submitIfComplete = (next: string[]) => {
-    const code = next.join("")
-    if (code.length === CODE_LENGTH && next.every((d) => d !== "")) onComplete(code)
-  }
-
-  const handleChange = (i: number, raw: string) => {
-    const v = raw.replace(/\D/g, "")
-    if (!v) {
-      setAt(i, "")
-      return
-    }
-    // Support pasting/typing multiple digits at once.
-    const chars = v.split("")
-    setDigits((prev) => {
-      const next = [...prev]
-      let idx = i
-      for (const ch of chars) {
-        if (idx >= CODE_LENGTH) break
-        next[idx] = ch
-        idx++
-      }
-      const focusIdx = Math.min(idx, CODE_LENGTH - 1)
-      refs.current[focusIdx]?.focus()
-      submitIfComplete(next)
-      return next
-    })
-  }
-
-  const handleKeyDown = (i: number, e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Backspace" && !digits[i] && i > 0) {
-      refs.current[i - 1]?.focus()
-    } else if (e.key === "Enter") {
-      submitIfComplete(digits)
-    }
-  }
-
-  return (
-    <div className="flex justify-center gap-2" role="group" aria-label="Verification code">
-      {digits.map((d, i) => (
-        <input
-          key={i}
-          ref={(el) => {
-            refs.current[i] = el
-          }}
-          type="text"
-          inputMode="numeric"
-          autoComplete="one-time-code"
-          maxLength={CODE_LENGTH}
-          value={d}
-          disabled={disabled}
-          aria-label={`Digit ${i + 1}`}
-          onChange={(e) => handleChange(i, e.target.value)}
-          onKeyDown={(e) => handleKeyDown(i, e)}
-          className="size-11 rounded-lg border bg-background text-center font-mono text-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
-        />
-      ))}
     </div>
   )
 }

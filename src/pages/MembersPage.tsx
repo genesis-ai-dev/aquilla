@@ -4,7 +4,7 @@ import {
   Clock,
   Lock,
   Mail,
-  UsersRound,
+  UserPlus,
   X,
 } from "lucide-react"
 import { useLocation, useNavigate } from "react-router-dom"
@@ -30,6 +30,7 @@ import { ExternalCollaboratorsSection } from "@/components/org/ExternalCollabora
 import { ROLE, ORG_ROLE_PICKER, roleName } from "@/lib/frontier/roles"
 import { RoleLabel } from "@/components/RoleLabel"
 import { formatRelativeTime } from "@/lib/time/relative"
+import { toUserFacingError } from "@/lib/errors/user-error"
 import type { OrgMemberProject, PendingOrgInvite } from "@/lib/frontier/orgs"
 import type { MemberGrantResult } from "@/lib/frontier/members"
 import { useActiveOrg } from "@/context/OrgContext"
@@ -63,10 +64,14 @@ export function MembersPage() {
     return (
       <MembersShell>
         <Page size="wide">
-          <PageHeader title="Members" description="People in this organization and their access." />
+          <PageHeader
+            title="Members"
+            description="People in this organization and their access."
+            inset={false}
+          />
           <div className="space-y-4">
-            <div className="h-24 animate-pulse rounded-2xl border bg-card" />
-            <div className="h-40 animate-pulse rounded-2xl border bg-card" />
+            <div className="h-24 animate-pulse rounded-lg border bg-card" />
+            <div className="h-40 animate-pulse rounded-lg border bg-card" />
           </div>
         </Page>
       </MembersShell>
@@ -77,8 +82,12 @@ export function MembersPage() {
     return (
       <MembersShell>
         <Page size="wide">
-          <PageHeader title="Members" description="People in this organization and their access." />
-          <div className="rounded-2xl border border-destructive/30 bg-destructive/5 p-4">
+          <PageHeader
+            title="Members"
+            description="People in this organization and their access."
+            inset={false}
+          />
+          <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-4">
             <p className="text-sm font-medium text-destructive">Couldn't load your organization</p>
             <p className="mt-1 text-xs text-muted-foreground">{error}</p>
             <p className="mt-2 text-xs text-muted-foreground">
@@ -95,7 +104,11 @@ export function MembersPage() {
     return (
       <MembersShell>
         <Page size="wide">
-          <PageHeader title="Members" description="People in this organization and their access." />
+          <PageHeader
+            title="Members"
+            description="People in this organization and their access."
+            inset={false}
+          />
           <EmptyState
             icon={AlertTriangle}
             title={isAllOrgs ? "Select an organization" : "Sign in to manage members"}
@@ -183,15 +196,15 @@ function MembersPageContent({ orgId, orgName }: MembersPageContentProps) {
             granted separately via the Add-to-projects flow.
           </>
         }
+        inset={false}
         actions={
           <AppTooltip content="Add someone to specific projects without granting org-wide access.">
             <Button
               variant="default"
-              size="sm"
               onClick={() => setMultiInviteOpen(true)}
               disabled={accessibleProjects.length === 0}
             >
-              <UsersRound className="mr-1.5 size-4" />
+              <UserPlus className="mr-1.5 size-4" />
               Add to projects
             </Button>
           </AppTooltip>
@@ -344,6 +357,9 @@ function RosterWithProjectChips({
   callerOrgRoleLevel,
   onRequestRemove,
 }: RosterProps) {
+  // AQU-780: surface the real reason a role change failed (a Maintainer hitting
+  // the owner-only gate used to fail silently — `add()` swallowed the 403).
+  const [roleError, setRoleError] = useState<string | null>(null)
   return (
     <>
       <Section
@@ -365,15 +381,36 @@ function RosterWithProjectChips({
               error: r.error?.message,
             }))
           }}
+          onAddBatchError={(e) => {
+            // AQU-780: a whole-batch throw means nothing landed — a 403
+            // owner-gate, a 429, or a 5xx. Report the actual cause instead of
+            // "may not exist" (a genuinely unknown username comes back as a
+            // per-person `user_not_found` result, not a thrown batch error).
+            const uf = toUserFacingError(e, "org")
+            return uf.category === "forbidden"
+              ? "Only org owners can add members."
+              : uf.message
+          }}
           onRemove={(userId) => {
             const target = panelMembers.find((m) => m.userId === userId)
             if (target) onRequestRemove(target.userId, target.username)
             return Promise.resolve()
           }}
           onChangeRole={async (username, role) => {
-            await add(username, role)
+            setRoleError(null)
+            try {
+              await add(username, role)
+            } catch (e) {
+              const uf = toUserFacingError(e, "org")
+              setRoleError(
+                uf.category === "forbidden"
+                  ? "Only org owners can change member roles."
+                  : uf.message,
+              )
+            }
           }}
         />
+        {roleError && <p className="text-xs text-destructive">{roleError}</p>}
       </Section>
 
       <Section

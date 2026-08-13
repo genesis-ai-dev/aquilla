@@ -95,15 +95,19 @@ Then: `get_capabilities` (returns a numbered quickstart) → `get_identity_and_s
 `confirm_changeset`. The MCP tools and REST endpoints are the same command layer — same
 permissions, same error codes, same changesets.
 
-Two things are REST-only (MCP is JSON text and can't carry binaries): **artifact upload**
-(`POST .../artifacts`, raw bytes, max 25 MB) and **`PlanImport`** staging.
+One thing is REST-only (MCP is JSON text and can't carry binaries): **artifact upload**
+(`POST .../artifacts`, raw bytes, max 25 MB). File imports then stage over MCP with
+`preview_import` / `prepare_import` (server-side parsing of the uploaded artifact:
+txt, md, json, po, properties, obs, vtt, srt, sbv, csv, tsv, usfm), or over REST —
+either `POST .../artifacts/:artifactId/parse` with `{ "stage": true }`, or a raw
+`PlanImport` command when you parsed the file yourself.
 
 ## Command kinds (the writes you can stage)
 
 | Kind | What it does | Min role | Notes |
 | --- | --- | --- | --- |
 | `SetTranslation` | Set a cell's target text | CONTRIBUTOR | Batch freely in one changeset. |
-| `PlanImport` | Create a file + source cells | PROJECT_LEAD | REST-only; sole command; ≤5,000 cells. |
+| `PlanImport` | Create a file + source cells | PROJECT_LEAD | Stage via `preview_import`/`prepare_import` (or REST); sole command; ≤5,000 cells. |
 | `CreateProject` | Create a project | org MAINTAINER | Sole command; **always ask-mode** — human approval required by design. |
 | `UpdateProjectSettings` | Write settings blob | MAINTAINER | Sole command; needs `ifMatchVersion`. |
 | `LinkMedia` | Attach uploaded audio to a cell | CONTRIBUTOR | Upload artifact first with `x-artifact-kind: audio`. |

@@ -7,9 +7,9 @@ import react, { reactCompilerPreset } from "@vitejs/plugin-react"
 import babel from "@rolldown/plugin-babel"
 import tailwindcss from "@tailwindcss/vite"
 import { nodePolyfills } from "vite-plugin-node-polyfills"
-import { brandingHtmlPlugin } from "./scripts/vite-html-branding"
-import { BRAND_DATA, BRAND_DATA_IDS } from "./src/branding/brands/data"
-import type { BrandId } from "./src/branding/types"
+import { brandingHtmlPlugin } from "./scripts/vite-html-branding.ts"
+import { BRAND_DATA, BRAND_DATA_IDS } from "./src/branding/brands/data.ts"
+import type { BrandId } from "./src/branding/types.ts"
 
 // Cloudflare Pages exposes CF_PAGES_BRANCH / CF_PAGES_COMMIT_SHA in CI builds.
 // Locally we fall back to git so dev shells still show something useful.
@@ -104,13 +104,13 @@ export default defineConfig(({ mode }) => ({
       // checkout therefore never needs gitignored package output before tests.
       {
         find: /^@aquilla\/idml-roundtrip\/worker$/,
-        replacement: path.resolve(__dirname, "./packages/idml-roundtrip/src/worker.ts"),
+        replacement: path.resolve(import.meta.dirname, "./packages/idml-roundtrip/src/worker.ts"),
       },
       {
         find: /^@aquilla\/idml-roundtrip$/,
-        replacement: path.resolve(__dirname, "./packages/idml-roundtrip/src/index.ts"),
+        replacement: path.resolve(import.meta.dirname, "./packages/idml-roundtrip/src/index.ts"),
       },
-      { find: "@", replacement: path.resolve(__dirname, "./src") },
+      { find: "@", replacement: path.resolve(import.meta.dirname, "./src") },
     ],
   },
   optimizeDeps: {
@@ -153,12 +153,12 @@ export default defineConfig(({ mode }) => ({
       // statically-served marketing homepage (homepage.html). The aquilla-web
       // Worker picks between them at the edge via the aq_hint cookie.
       input: {
-        index: path.resolve(__dirname, "index.html"),
-        homepage: path.resolve(__dirname, "homepage.html"),
-        "bible-translation": path.resolve(__dirname, "bible-translation.html"),
-        beta: path.resolve(__dirname, "beta.html"),
-        "case-study": path.resolve(__dirname, "case-study.html"),
-        "case-study-biblica": path.resolve(__dirname, "case-study-biblica.html"),
+        index: path.resolve(import.meta.dirname, "index.html"),
+        homepage: path.resolve(import.meta.dirname, "homepage.html"),
+        "bible-translation": path.resolve(import.meta.dirname, "bible-translation.html"),
+        beta: path.resolve(import.meta.dirname, "beta.html"),
+        "case-study": path.resolve(import.meta.dirname, "case-study.html"),
+        "case-study-biblica": path.resolve(import.meta.dirname, "case-study-biblica.html"),
       },
       output: {
         // Keep source module names out of emitted chunk URLs. Brave/EasyList can

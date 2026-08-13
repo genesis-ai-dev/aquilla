@@ -324,7 +324,6 @@ function StagedProposalCard({
           <div className="flex items-center justify-end gap-1.5">
             <Button
               variant="ghost"
-              size="sm"
               className="h-6 text-[11px]"
               onClick={() => setState("discarded")}
               disabled={state === "applying"}
@@ -333,7 +332,6 @@ function StagedProposalCard({
             </Button>
             <AppTooltip content={blockedReason ?? undefined} disabled={!blockedReason}>
               <Button
-                size="sm"
                 className="h-6 text-[11px]"
                 onClick={() => void handleApply()}
                 disabled={Boolean(blockedReason) || state === "applying"}

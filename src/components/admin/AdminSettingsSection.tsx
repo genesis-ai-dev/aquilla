@@ -2,7 +2,17 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { Check } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { FieldLabel } from "@/components/ui/field"
+import { Input } from "@/components/ui/input"
 import { Section } from "@/components/ui/page"
+import { Switch } from "@/components/ui/switch"
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { ModelListEditor, type ModelListValue } from "./ModelListEditor"
 import { AbResultsPanel } from "./AbResultsPanel"
 import {
@@ -123,8 +133,8 @@ export function AdminSettingsSection({ jwt }: { jwt: string }) {
   if (loading) {
     return (
       <div className="space-y-6">
-        <div className="h-56 animate-pulse rounded-2xl border bg-card" />
-        <div className="h-40 animate-pulse rounded-2xl border bg-card" />
+        <div className="h-56 animate-pulse rounded-lg border bg-card" />
+        <div className="h-40 animate-pulse rounded-lg border bg-card" />
       </div>
     )
   }
@@ -147,30 +157,45 @@ export function AdminSettingsSection({ jwt }: { jwt: string }) {
         description="Route a share of default-model chat traffic to a challenger and compare how often each model's drafts are accepted."
       >
         <div className="space-y-4">
-          <label className="flex items-center gap-2 text-sm">
-            <Toggle checked={abEnabled} onChange={setAbEnabled} label="enable A/B experiment" />
+          <div className="flex items-center gap-2 text-sm">
+            <Switch
+              checked={abEnabled}
+              onCheckedChange={setAbEnabled}
+              aria-label="enable A/B experiment"
+            />
             <span>Run the experiment</span>
-          </label>
+          </div>
 
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1.5">
               <FieldLabel htmlFor="admin-ab-challenger">Challenger model</FieldLabel>
-              <select
-                id="admin-ab-challenger"
+              <Select
+                items={[
+                  { value: "", label: "— choose a model —" },
+                  ...modelList.models
+                    .filter((m) => m !== modelList.chatModel)
+                    .map((m) => ({ value: m, label: m })),
+                ]}
                 value={abChallenger}
-                onChange={(e) => setAbChallenger(e.target.value)}
+                onValueChange={(v) => setAbChallenger(v ?? "")}
                 disabled={!abEnabled}
-                className="w-full rounded-lg border bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
               >
-                <option value="">— choose a model —</option>
-                {modelList.models
-                  .filter((m) => m !== modelList.chatModel)
-                  .map((m) => (
-                    <option key={m} value={m}>
-                      {m}
-                    </option>
-                  ))}
-              </select>
+                <SelectTrigger id="admin-ab-challenger" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    <SelectItem value="">— choose a model —</SelectItem>
+                    {modelList.models
+                      .filter((m) => m !== modelList.chatModel)
+                      .map((m) => (
+                        <SelectItem key={m} value={m}>
+                          {m}
+                        </SelectItem>
+                      ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
               <p className="text-xs text-muted-foreground">
                 Competes against the default chat model ({modelList.chatModel || "unset"}).
               </p>
@@ -214,10 +239,14 @@ export function AdminSettingsSection({ jwt }: { jwt: string }) {
             </div>
           </div>
 
-          <label className="flex items-center gap-2 text-sm">
-            <Toggle checked={enforce} onChange={setEnforce} label="enforce AI budget" />
+          <div className="flex items-center gap-2 text-sm">
+            <Switch
+              checked={enforce}
+              onCheckedChange={setEnforce}
+              aria-label="enforce AI budget"
+            />
             <span>Enforce budget (block with 429 instead of log-only)</span>
-          </label>
+          </div>
         </div>
       </Section>
 
@@ -248,43 +277,14 @@ function NumberInput({
   placeholder?: string
 }) {
   return (
-    <input
+    <Input
       id={id}
       type="number"
       min={0}
       value={value}
       placeholder={placeholder}
       onChange={(e) => onChange(e.target.value)}
-      className="w-full rounded-lg border bg-background px-3 py-2 text-sm tabular-nums focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      className="tabular-nums"
     />
-  )
-}
-
-function Toggle({
-  checked,
-  onChange,
-  label,
-}: {
-  checked: boolean
-  onChange: (v: boolean) => void
-  label: string
-}) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      aria-label={label}
-      onClick={() => onChange(!checked)}
-      className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-lg transition-colors ${
-        checked ? "bg-primary" : "bg-muted"
-      }`}
-    >
-      <span
-        className={`inline-block h-3.5 w-3.5 transform rounded-lg bg-white shadow transition-transform ${
-          checked ? "translate-x-4" : "translate-x-0.5"
-        }`}
-      />
-    </button>
   )
 }

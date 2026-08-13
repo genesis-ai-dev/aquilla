@@ -4,124 +4,97 @@
  *
  * Iterates the `SCREENSHOTS` registry (`src/lib/i18n/screenshots.ts`) and
  * captures each surface from the live app into `<SCREENSHOT_DIR>/<id>.png`.
- * Every declared surface must have a driver below — a registry entry without
- * one fails the run, so the registry and the capture set cannot drift.
+ * Every declared surface must have a driver in `scripts/i18n-shots/<namespace>.ts`
+ * — a registry entry without one fails the run, and `context.test.ts` fails CI
+ * first, so the registry and the capture set cannot drift.
  *
  * Usage: with the dev stack running (`pnpm dev`), run `pnpm i18n:shots` and
  * commit the changed PNGs. Signs in via the `/__dev/login` bypass (see
- * AGENTS.md "Local dev — auth bypass"); override the app origin with
- * I18N_SHOTS_BASE_URL when Vite is not on :5173.
+ * AGENTS.md "Local dev — auth bypass").
+ *
+ * Env overrides, all needed together when the stack is not on its default
+ * ports (e.g. a second worktree running a parallel stack):
+ *   I18N_SHOTS_BASE_URL        Vite origin              (default :5173)
+ *   I18N_SHOTS_IDENTITY_BASE   auth-worker origin       (default :8788)
+ *   I18N_SHOTS_SYNC_BASE       sync-worker origin       (default :8789)
+ *   I18N_SHOTS_CHROMIUM_PATH   explicit Chromium binary
+ *
+ * Two things this script owns beyond the loop:
+ *
+ *   1. CONTENT. `/__dev__/seed` creates the dev user/org/project but no files
+ *      and no cells, so most surfaces would render empty-state placeholders.
+ *      `seedShotsFile()` puts a small bilingual sample file in `dev-project`
+ *      first (idempotent) — see `i18n-shots/seed.ts`.
+ *   2. ISOLATION. Each surface gets a fresh browser context. Surfaces leave
+ *      state behind (an open dock, a confirm row mid-flow, a selected cell),
+ *      and a single shared page made every shot depend on the order of the one
+ *      before it. It also lets the `auth` surface run genuinely signed out
+ *      instead of being bounced to the workspace by an existing session.
  */
 
-import { mkdirSync, writeFileSync } from "node:fs"
-import { tmpdir } from "node:os"
+import { mkdirSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
-import { chromium, type Page } from "@playwright/test"
-import { SCREENSHOT_DIR, SCREENSHOTS, type ScreenshotId } from "../src/lib/i18n/screenshots"
+import { chromium, type Browser } from "@playwright/test"
+import { SCREENSHOT_DIR, SCREENSHOTS } from "../src/lib/i18n/screenshots"
+import { DRIVERS, SIGNED_OUT_SURFACE_IDS } from "./i18n-shots/index"
+import { devSession, seedShotsFile } from "./i18n-shots/seed"
+import { BASE_URL, setDevOrgId } from "./i18n-shots/shared"
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..")
 const OUT_DIR = join(REPO_ROOT, SCREENSHOT_DIR)
-const BASE_URL = process.env.I18N_SHOTS_BASE_URL || "http://127.0.0.1:5173"
 const VIEWPORT = { width: 1440, height: 900 }
-/** The dev-bypass seed project + org (auth-worker `/__dev__/seed`). */
-const DEV_PROJECT = "dev-project"
-const DEV_ORG_ID = 1
 
-/**
- * One driver per declared surface: navigate to the state the surface describes,
- * settle on an observable element, and leave the page ready for a screenshot.
- */
-const DRIVERS: Record<ScreenshotId, (page: Page) => Promise<void>> = {
-  "workspace-nav": async (page) => {
-    // The seeded org's project list: sidebar + top chrome + project cards.
-    await page.goto(`${BASE_URL}/orgs/${DEV_ORG_ID}`)
-    await page.getByRole("button", { name: /new project/i }).first().waitFor({ timeout: 30_000 })
-  },
-  "cell-editor": async (page) => {
-    await page.goto(`${BASE_URL}/project/${DEV_PROJECT}/editor`)
-    // The seed project ships empty; import a tiny text file through the real
-    // upload flow so the shot shows the editing table, not the empty state.
-    const emptyCta = page.getByRole("button", { name: /import a file/i })
-    const cell = page.getByText("In the beginning God created", { exact: false }).first()
-    await emptyCta.or(cell).first().waitFor({ timeout: 30_000 })
-    if (await emptyCta.isVisible().catch(() => false)) {
-      const samplePath = join(tmpdir(), "i18n-shots-sample.txt")
-      writeFileSync(
-        samplePath,
-        "In the beginning God created the heavens and the earth.\n" +
-          "And God said, Let there be light: and there was light.\n",
-      )
-      await emptyCta.click()
-      await page.getByRole("dialog").waitFor({ timeout: 10_000 })
-      await page.getByText("Upload files", { exact: true }).click()
-      const fileInput = page.locator('input[type="file"]').first()
-      await fileInput.waitFor({ state: "attached", timeout: 10_000 })
-      await fileInput.setInputFiles(samplePath)
-      await page.getByRole("button", { name: /confirm import/i }).click()
-      await cell.waitFor({ timeout: 60_000 })
-      // First import prompts for translation direction — not this surface.
-      const skipDirection = page.getByRole("button", { name: /skip for now/i })
-      if (await skipDirection.isVisible().catch(() => false)) {
-        await skipDirection.click()
-        await skipDirection.waitFor({ state: "hidden", timeout: 10_000 })
-      }
+async function captureSurface(
+  browser: Browser,
+  id: string,
+  title: string,
+): Promise<void> {
+  const drive = DRIVERS[id]
+  if (!drive) {
+    throw new Error(
+      `surface "${id}" is declared in SCREENSHOTS but has no driver in scripts/i18n-shots/`,
+    )
+  }
+  const context = await browser.newContext({ viewport: VIEWPORT })
+  const page = await context.newPage()
+  try {
+    if (!SIGNED_OUT_SURFACE_IDS.includes(id)) {
+      await page.goto(`${BASE_URL}/__dev/login`)
+      await page.waitForURL(/\/project\//, { timeout: 60_000 })
     }
-  },
-  "confirm-dialog": async (page) => {
-    // The project-card delete flow is the canonical confirm/cancel pattern.
-    // Cancelled after capture — nothing is deleted.
-    // Remove-target-lane is the canonical destructive confirm ("Confirm
-    // remove" / cancel). A throwaway lane is added if none exists; the dialog
-    // is dismissed after capture, so project state is unchanged.
-    await page.goto(`${BASE_URL}/project/${DEV_PROJECT}/settings/general`)
-    const removeLane = page
-      .locator('[data-testid^="remove-lane-"], [data-testid^="archive-lane-"]')
-      .first()
-    const addLaneInput = page.getByTestId("add-target-lang-input")
-    await removeLane.or(addLaneInput).first().waitFor({ timeout: 30_000 })
-    if (!(await removeLane.isVisible().catch(() => false))) {
-      await addLaneInput.fill("fr")
-      await page.getByTestId("add-target-lang-btn").click()
-      await removeLane.waitFor({ timeout: 10_000 })
-    }
-    await removeLane.click()
-    await page.getByRole("button", { name: /^Confirm/i }).waitFor({ timeout: 10_000 })
-  },
-  "project-settings": async (page) => {
-    await page.goto(`${BASE_URL}/project/${DEV_PROJECT}/settings`)
-    await page.getByRole("heading").first().waitFor({ timeout: 30_000 })
-  },
-  "error-state": async (page) => {
-    // A project id that cannot exist renders the workspace failure surface.
-    await page.goto(`${BASE_URL}/project/i18n-shots-no-such-project/editor`)
-    await page
-      .getByText(/went wrong|not found|no longer have access|couldn.t|failed|error/i)
-      .first()
-      .waitFor({ timeout: 30_000 })
-  },
+    await drive(page)
+    await page.screenshot({ path: join(OUT_DIR, `${id}.png`) })
+    console.log(`captured ${id}.png — ${title}`)
+  } catch (err) {
+    // Say which surface broke and where it got to — a bare Playwright timeout
+    // does not identify the driver, and the run stops here.
+    throw new Error(
+      `surface "${id}" failed at ${page.url()}: ${err instanceof Error ? err.message : String(err)}`,
+      { cause: err },
+    )
+  } finally {
+    await context.close()
+  }
 }
 
 async function main(): Promise<void> {
   mkdirSync(OUT_DIR, { recursive: true })
+
+  // Seed before the browser starts: the org id is only knowable from the login
+  // response, and drivers read it through requireDevOrgId().
+  const session = await devSession()
+  setDevOrgId(session.orgId)
+  const seeded = await seedShotsFile(session.jwt)
+  console.log(`seeded ${seeded.fileName} (${seeded.cellIds.length} cells) in dev-project`)
+
   // Sandboxed agent environments pre-install a Chromium that may not match the
   // pinned @playwright/test build — point at it explicitly when needed.
   const executablePath = process.env.I18N_SHOTS_CHROMIUM_PATH
   const browser = await chromium.launch(executablePath ? { executablePath } : {})
-  const page = await browser.newPage({ viewport: VIEWPORT })
   try {
-    // Sign in once: the bypass route seeds user `dev` + `dev-project` and
-    // redirects into the workspace.
-    await page.goto(`${BASE_URL}/__dev/login`)
-    await page.waitForURL(/\/project\//, { timeout: 60_000 })
-
     for (const surface of SCREENSHOTS) {
-      const drive = DRIVERS[surface.id]
-      await drive(page)
-      await page.screenshot({ path: join(OUT_DIR, `${surface.id}.png`) })
-      console.log(`captured ${surface.id}.png — ${surface.title}`)
-      // Leave any open dialog behind before the next surface.
-      await page.keyboard.press("Escape")
+      await captureSurface(browser, surface.id, surface.title)
     }
   } finally {
     await browser.close()

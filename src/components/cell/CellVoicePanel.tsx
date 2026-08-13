@@ -38,6 +38,7 @@ import type { CellData } from "@/hooks/useCells"
 import type { CodexCell } from "@/lib/codex-editor/types"
 import type { FrontierSession } from "@/lib/frontier/types"
 import type { ProjectRecord as Project, ProjectTtsSettings, Voice } from "@/lib/parsers/types"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 interface CellVoicePanelProps {
   cell: CellData
@@ -88,6 +89,7 @@ function buildBars(seed: string, n: number): number[] {
 /** A waveform-styled seek surface: decorative bars that fill as the clip plays
  *  and seek on click/drag. Keeps slider semantics for a11y. */
 function WaveScrubber({ fraction, onSeek, seed }: { fraction: number; onSeek: (f: number) => void; seed: string }) {
+  const t = useT()
   const ref = useRef<HTMLDivElement | null>(null)
   const bars = useMemo(() => buildBars(seed, 56), [seed])
   const fracFromClientX = (clientX: number): number => {
@@ -110,7 +112,7 @@ function WaveScrubber({ fraction, onSeek, seed }: { fraction: number; onSeek: (f
     <div
       ref={ref}
       role="slider"
-      aria-label="Seek"
+      aria-label={t("common.seek")}
       aria-valuemin={0}
       aria-valuemax={100}
       aria-valuenow={Math.round(active * 100)}
@@ -134,6 +136,7 @@ function WaveScrubber({ fraction, onSeek, seed }: { fraction: number; onSeek: (f
 }
 
 function VolumeButton({ volume, onChange }: { volume: number; onChange: (v: number) => void }) {
+  const t = useT()
   return (
     <Popover>
       <PopoverTrigger
@@ -142,7 +145,7 @@ function VolumeButton({ volume, onChange }: { volume: number; onChange: (v: numb
             type="button"
             variant="ghost"
             size="icon-sm"
-            aria-label="Volume"
+            aria-label={t("common.volume")}
             className="shrink-0"
           >
             {volume === 0 ? <VolumeX className="h-3.5 w-3.5" /> : <Volume2 className="h-3.5 w-3.5" />}
@@ -158,7 +161,7 @@ function VolumeButton({ volume, onChange }: { volume: number; onChange: (v: numb
             step={0.01}
             value={[volume]}
             onValueChange={(next) => onChange(Array.isArray(next) ? next[0] : next)}
-            aria-label="Volume level"
+            aria-label={t("editor.voice.volumeLevel")}
             className="flex-1"
           />
           <Volume2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
@@ -209,6 +212,7 @@ export function CellVoicePanel({
   onAfterGenerate,
   onMakeCharacter,
 }: CellVoicePanelProps) {
+  const t = useT()
   const sess = session as FrontierSession | null
 
   // AQU-768: resolve THIS line's active voice from the saved cast assignment
@@ -398,7 +402,7 @@ export function CellVoicePanel({
   // Nothing to voice yet (untranslated) — a quiet hint, no player chrome.
   if (!hasTake && !canGenerate) {
     return (
-      <div className="px-1 py-2 text-[11px] italic text-muted-foreground">Translate to voice this line</div>
+      <div className="px-1 py-2 text-[11px] italic text-muted-foreground">{t("editor.voice.translateFirst")}</div>
     )
   }
 
@@ -409,11 +413,11 @@ export function CellVoicePanel({
   const effDur = Math.max(0, effEnd - effStart)
   const effCurrent = Math.max(0, Math.min(currentTime - effStart, effDur))
   const fraction = effDur > 0 ? effCurrent / effDur : 0
-  const primaryTitle = isPlaying ? "Pause" : "Play this line"
+  const primaryTitle = isPlaying ? t("common.pause") : t("editor.voice.play")
 
   return (
     <div
-      className="group/voice relative rounded-xl border bg-card/50 p-2.5 transition-colors hover:border-primary/30"
+      className="group/voice relative rounded-lg border bg-card/50 p-2.5 transition-colors hover:border-primary/30"
       dir="ltr"
     >
       {/* Voiced: waveform with a centered play/pause + running time. Hover the
@@ -427,7 +431,7 @@ export function CellVoicePanel({
               <CropButton controller={audio} trim={{ start: trimStart, end: trimEnd }} onChange={changeTrim} />
             )}
             <VolumeButton volume={volume} onChange={changeVolume} />
-            <HeaderIconButton title="Clone a voice from this take" onClick={onMakeCharacter}>
+            <HeaderIconButton title={t("editor.voice.clone")} onClick={onMakeCharacter}>
               <UserPlus className="h-3.5 w-3.5" />
             </HeaderIconButton>
           </div>
@@ -446,7 +450,7 @@ export function CellVoicePanel({
               </Button>
             </AppTooltip>
             <span className="pointer-events-none absolute bottom-0 left-0 rounded bg-background/70 px-1 text-[10px] tabular-nums text-muted-foreground">
-              {isVoicing ? "Voicing…" : `${fmtTime(effCurrent)} / ${effDur > 0 ? fmtTime(effDur) : "–:––"}`}
+              {isVoicing ? t("editor.voice.voicing") : `${fmtTime(effCurrent)} / ${effDur > 0 ? fmtTime(effDur) : "–:––"}`}
             </span>
           </div>
         </>
@@ -457,10 +461,10 @@ export function CellVoicePanel({
         <div className="mb-1.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
           {isVoicing ? (
             <>
-              <Spinner className="h-3 w-3" /> Voicing…
+              <Spinner className="h-3 w-3" /> {t("editor.voice.voicing")}
             </>
           ) : (
-            "Click a voice to generate"
+            t("editor.voice.clickVoiceToGenerate")
           )}
         </div>
       )}

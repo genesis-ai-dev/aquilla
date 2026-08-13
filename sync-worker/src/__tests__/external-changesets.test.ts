@@ -222,6 +222,45 @@ describe('changesets — prepare → commit (act mode)', () => {
     expect(missing).toHaveLength(1)
     expect(missing[0].cellId).toBe('cell-99')
   })
+
+  it("DO fan-out marks agent commits `via: 'external'` with `by` = the credential owner", async () => {
+    // The commit routes through /events with a token-bridge token, so the
+    // event.applied broadcast carries by = the OWNER's username. If that owner
+    // has the project open in the editor, isOwnWriteEcho (ws-reconciler.ts)
+    // would suppress the refetch as an own-write echo — but no outbox write
+    // happened, so the editor would never show the agent's translation until a
+    // manual reload. The `via: 'external'` marker is what defeats that
+    // suppression; this test pins it through the FULL agent path
+    // (token-bridge → /events perimeter → ProjectSync fan-out).
+    const bodies: Array<Record<string, unknown>> = []
+    const stubFetch = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body)))
+      return new Response(JSON.stringify({ ok: true }), { status: 200 })
+    })
+    const env = {
+      ...makeEnv(tdb.db),
+      ProjectSync: {
+        idFromName: vi.fn().mockReturnValue({ id: 'do-id' }),
+        get: vi.fn().mockReturnValue({ fetch: stubFetch }),
+      } as unknown as DurableObjectNamespace,
+    }
+    const token = await credToken(tdb, contributorCred())
+
+    const { body: prep } = await prepare(env, token, [
+      { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'hola', valueHtml: '<p>hola</p>' },
+    ])
+    const res = (await handleExternalChangesetsRequest(commitReq(token, prep.changeset.id), env))!
+    expect(res.status).toBe(200)
+
+    const applied = bodies
+      .flatMap((b) => (b.t === 'broadcast.batch' ? (b.messages as Array<Record<string, unknown>>) : [b]))
+      .filter((m) => m.t === 'event.applied')
+    expect(applied.length).toBeGreaterThan(0)
+    for (const m of applied) {
+      expect(m.by).toBe('alice')
+      expect(m.via).toBe('external')
+    }
+  })
 })
 
 // ── ask-mode confirmation ────────────────────────────────────────────────────

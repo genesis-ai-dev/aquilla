@@ -59,10 +59,17 @@ test("project overview renders name, overview cards, and Open project button", a
   await expect(workspaceBreadcrumb.getByText("Editor", { exact: true })).toHaveAttribute("aria-current", "page")
 
   await allOrganizations.click()
-  await alice.waitForURL(/\/orgs\/all$/, { timeout: 10_000 })
-  await expect(
-    alice.getByRole("navigation", { name: "breadcrumb" }).getByText("All organizations", { exact: true }),
-  ).toHaveAttribute("aria-current", "page")
+  // AQU-864: /orgs/all only renders the aggregate portfolio at 2+ org
+  // memberships. Alice has exactly one org on a fresh backend, so the landing
+  // guard immediately replaces the URL with her org's home — which the
+  // AQU-790 index route then resolves to /overview for a member org. Accept
+  // both shapes: the intermediate /orgs/:id replace can win the race.
+  await alice.waitForURL(new RegExp(`/orgs/${alice.orgId}(/overview)?$`), { timeout: 10_000 })
+  const orgBreadcrumb = alice.getByRole("navigation", { name: "breadcrumb" })
+  await expect(orgBreadcrumb.getByText("Acme", { exact: true })).toHaveAttribute("aria-current", "page")
+  // The root crumb stays a link — "All organizations" is never the resting
+  // place for a single-org caller.
+  await expect(orgBreadcrumb.getByRole("link", { name: "All organizations", exact: true })).toBeVisible()
 })
 
 test("project overview keeps its template visible with explicit progress while details load", async ({ alice }) => {

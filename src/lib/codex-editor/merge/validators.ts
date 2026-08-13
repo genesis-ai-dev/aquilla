@@ -1,7 +1,7 @@
 // src/lib/codex-editor/merge/validators.ts
 // Vendored from codex-editor/src/projectManager/utils/merge/resolvers.ts:55-121,714-781
 // Pure JS, no Node or VS Code deps.
-import type { ValidationEntry, EditHistory } from "@/lib/codex-editor/types"
+import type { ValidationEntry } from "@/lib/codex-editor/types"
 
 export function isValidValidationEntry(value: unknown): value is ValidationEntry {
   if (!value || typeof value !== "object") return false
@@ -33,13 +33,4 @@ export function mergeValidatedByLists(
     })
   }
   return [...byUser.values()].sort((a, b) => a.username.localeCompare(b.username))
-}
-
-export function mergeValidatedByArrays(
-  existing: EditHistory, incoming: EditHistory
-): EditHistory {
-  return {
-    ...existing,
-    validatedBy: mergeValidatedByLists(existing.validatedBy, incoming.validatedBy),
-  }
 }

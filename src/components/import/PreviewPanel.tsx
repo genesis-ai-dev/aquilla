@@ -219,10 +219,10 @@ export function PreviewPanel({ results, onConfirm, onCancel, uploadPhase, upload
       )}
 
       <div className="flex justify-end gap-2">
-        <Button variant="ghost" size="sm" onClick={onCancel} disabled={confirming}>
+        <Button variant="ghost" onClick={onCancel} disabled={confirming}>
           Cancel
         </Button>
-        <Button size="sm" onClick={handleConfirm} disabled={confirming}>
+        <Button onClick={handleConfirm} disabled={confirming}>
           Confirm import
         </Button>
       </div>

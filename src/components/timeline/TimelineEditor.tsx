@@ -33,10 +33,12 @@ import { TimelineChipStrip } from "./TimelineChipStrip"
 import { useTimelineClock } from "./useTimelineClock"
 import { resolveEntryAudio, useClipAudioMissing } from "./useClipAudioMissing"
 import type { CellData } from "@/hooks/useCells"
-import { AUDIO_TIMING_MODE_LABELS, type AudioTimingMode, type ProjectRecord } from "@/lib/parsers/types"
+import { type AudioTimingMode, type ProjectRecord } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
 import type { CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { useT } from "@/lib/i18n/I18nProvider"
+import type { MessageKey } from "@/lib/i18n/messages/en"
 
 export interface TimelineEditorProps {
   cells: CellData[]
@@ -111,6 +113,49 @@ export interface TimelineEditorProps {
   }
 }
 
+/** The timing modes' user-facing copy, per mode.
+ *
+ *  `AUDIO_TIMING_MODE_LABELS` (lib/parsers/types) still carries the English for
+ *  the Project Settings card; the toolbar reads its copy from the catalog
+ *  instead, because a `{mode}` frame filled with a translated noun cannot be
+ *  made grammatical in every locale. `lockedDescription` is the same sentence
+ *  plus the below-maintainer note, kept whole rather than concatenated. */
+const TIMING_MODE_KEYS: Record<
+  AudioTimingMode,
+  { name: MessageKey; description: MessageKey; lockedDescription: MessageKey }
+> = {
+  dubbing: {
+    name: "editor.timeline.timingModeDubbing",
+    description: "editor.timeline.timingModeDubbingHint",
+    lockedDescription: "editor.timeline.timingModeDubbingHintLocked",
+  },
+  audioFirst: {
+    name: "editor.timeline.timingModeFree",
+    description: "editor.timeline.timingModeFreeHint",
+    lockedDescription: "editor.timeline.timingModeFreeHintLocked",
+  },
+}
+
+/** Each audio track's speaker-button copy. Whole sentences per track, not one
+ *  frame per state with the track's name poured in — the name inflects. */
+const SPEAKER_TOGGLE_KEYS: Record<
+  keyof TrackAudibility,
+  { mute: MessageKey; unmute: MessageKey; audibleTitle: MessageKey; mutedTitle: MessageKey }
+> = {
+  source: {
+    mute: "editor.timeline.muteSourceAudio",
+    unmute: "editor.timeline.unmuteSourceAudio",
+    audibleTitle: "editor.timeline.sourceAudioAudible",
+    mutedTitle: "editor.timeline.sourceAudioMuted",
+  },
+  target: {
+    mute: "editor.timeline.muteTargetAudio",
+    unmute: "editor.timeline.unmuteTargetAudio",
+    audibleTitle: "editor.timeline.targetAudioAudible",
+    mutedTitle: "editor.timeline.targetAudioMuted",
+  },
+}
+
 const zoomKey = (fileId: string) => `codex:timelineZoom:${fileId}`
 
 function loadZoom(fileId: string): number {
@@ -178,6 +223,7 @@ export function TimelineEditor({
   audioByCellId,
   legacyMeasure,
 }: TimelineEditorProps) {
+  const t = useT()
   const audioFirst = timingMode === "audioFirst"
   const [pxPerSec, setPxPerSec] = useState(() => loadZoom(fileId))
   // Dismissal is per-visit on purpose: while unmeasured takes remain, the
@@ -320,15 +366,16 @@ export function TimelineEditor({
     })
   }
 
-  function speakerToggle(track: keyof TrackAudibility, name: string) {
+  function speakerToggle(track: keyof TrackAudibility) {
     const audible = audibility[track]
+    const keys = SPEAKER_TOGGLE_KEYS[track]
     return (
       <button
         type="button"
         data-testid={`tl-speaker-${track}`}
-        aria-label={audible ? `Mute ${name}` : `Unmute ${name}`}
+        aria-label={t(audible ? keys.mute : keys.unmute)}
         aria-pressed={audible}
-        title={audible ? `${name} is audible — click to mute` : `${name} is muted — click to unmute`}
+        title={t(audible ? keys.audibleTitle : keys.mutedTitle)}
         onClick={() => toggleTrackAudible(track)}
         className={cn(
           "inline-flex shrink-0 items-center rounded-md border border-border p-1",
@@ -739,7 +786,7 @@ export function TimelineEditor({
     <div data-testid="tl-editor" className="flex min-h-0 flex-col">
       {/* toolbar */}
       <div className="flex items-center gap-2 border-b border-border bg-muted/30 px-3 py-1.5">
-        <span className="text-xs font-medium text-muted-foreground">Timeline</span>
+        <span className="text-xs font-medium text-muted-foreground">{t("editor.timeline.title")}</span>
         {/* Pre-merge round: the mode is FILE-level again (the video link it
             interacts with is per-file), so the control returns to the
             toolbar. Same clearance as before: `onChangeTimingMode` absent =
@@ -758,7 +805,7 @@ export function TimelineEditor({
                 type="button"
                 data-testid={`tl-timing-mode-${mode}`}
                 aria-pressed={timingMode === mode}
-                title={AUDIO_TIMING_MODE_LABELS[mode].description}
+                title={t(TIMING_MODE_KEYS[mode].description)}
                 onClick={() => {
                   if (timingMode !== mode) onChangeTimingMode(mode)
                 }}
@@ -769,16 +816,16 @@ export function TimelineEditor({
                     : "bg-background text-foreground/60 hover:bg-muted",
                 )}
               >
-                {AUDIO_TIMING_MODE_LABELS[mode].name}
+                {t(TIMING_MODE_KEYS[mode].name)}
               </button>
             ) : timingMode === mode ? (
               <span
                 key={mode}
                 data-testid={`tl-timing-mode-${mode}`}
-                title={`${AUDIO_TIMING_MODE_LABELS[mode].description} Only a maintainer can change this.`}
+                title={t(TIMING_MODE_KEYS[mode].lockedDescription)}
                 className="px-2 py-1 text-foreground/70"
               >
-                {AUDIO_TIMING_MODE_LABELS[mode].name}
+                {t(TIMING_MODE_KEYS[mode].name)}
               </span>
             ) : null,
           )}
@@ -790,13 +837,13 @@ export function TimelineEditor({
           <AppTooltip
             content={
               audioQuality === "original"
-                ? "Original quality (WAV) for generated voices — larger downloads. Recordings are always compressed."
-                : "Compressed playback (smaller, faster). Toggle for original-quality generated voices."
+                ? t("editor.timeline.qualityOriginalTooltip")
+                : t("editor.timeline.qualityCompressedTooltip")
             }
           >
             <button
               type="button"
-              aria-label="Play generated voices at original quality"
+              aria-label={t("editor.timeline.qualityToggleAria")}
               aria-pressed={audioQuality === "original"}
               data-testid="tl-quality-toggle"
               onClick={() => setAudioQualityPref(audioQuality === "original" ? "compressed" : "original")}
@@ -812,10 +859,10 @@ export function TimelineEditor({
           </AppTooltip>
           {/* SUB-53: nothing to snap to when positions are computed. */}
           {!audioFirst && (
-          <AppTooltip content={snapOn ? "Snapping on — edges magnet to neighbors" : "Snapping off"}>
+          <AppTooltip content={snapOn ? t("editor.timeline.snapOnTooltip") : t("editor.timeline.snapOffTooltip")}>
             <button
               type="button"
-              aria-label="Snap to neighboring edges"
+              aria-label={t("editor.timeline.snapToggleAria")}
               aria-pressed={snapOn}
               data-testid="tl-snap-toggle"
               onClick={() => {
@@ -832,10 +879,10 @@ export function TimelineEditor({
             </button>
           </AppTooltip>
           )}
-          <AppTooltip content="Follow playhead">
+          <AppTooltip content={t("editor.timeline.followPlayhead")}>
             <button
               type="button"
-              aria-label="Follow playhead"
+              aria-label={t("editor.timeline.followPlayhead")}
               aria-pressed={follow}
               onClick={() => {
                 const next = !follow
@@ -862,19 +909,19 @@ export function TimelineEditor({
             <button
               type="button"
               onClick={() => {
-                const u = window.prompt("Core video URL (leave blank to clear)", coreMediaUrl ?? "")
+                const u = window.prompt(t("editor.timeline.coreVideoPrompt"), coreMediaUrl ?? "")
                 if (u !== null) onLinkVideo(u.trim() || null)
               }}
               className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground/80 hover:bg-muted"
             >
               <Film className="h-3.5 w-3.5 text-muted-foreground" />
-              {coreMediaUrl ? "Change video" : "Link video"}
+              {coreMediaUrl ? t("editor.timeline.changeVideo") : t("editor.timeline.linkVideo")}
             </button>
           )}
           <div className="inline-flex items-center rounded-md border border-border">
             <button
               type="button"
-              aria-label="Zoom out"
+              aria-label={t("editor.timeline.zoomOut")}
               onClick={() => applyZoom(pxPerSec / 1.3)}
               className="px-1.5 py-1 text-foreground/70 hover:bg-muted"
             >
@@ -885,7 +932,7 @@ export function TimelineEditor({
             </span>
             <button
               type="button"
-              aria-label="Zoom in"
+              aria-label={t("editor.timeline.zoomIn")}
               onClick={() => applyZoom(pxPerSec * 1.3)}
               className="px-1.5 py-1 text-foreground/70 hover:bg-muted"
             >
@@ -915,7 +962,7 @@ export function TimelineEditor({
           data-testid="tl-video-hidden-note"
           className="border-b border-border bg-muted/30 px-3 py-1.5 text-[11px] text-muted-foreground"
         >
-          The linked video is hidden here — it plays on the original recording's timing, which this view no longer follows.
+          {t("editor.timeline.videoHiddenNote")}
         </div>
       )}
 
@@ -930,17 +977,15 @@ export function TimelineEditor({
           className="flex items-center gap-2 border-b border-border bg-amber-500/10 px-3 py-1.5 text-[11px] text-muted-foreground"
         >
           <span className="min-w-0 flex-1">
-            {legacyMeasure.count === 1
-              ? "1 recording has no measured length — its chip is drawn at a guessed width."
-              : `${legacyMeasure.count} recordings have no measured length — their chips are drawn at guessed widths.`}
+            {t("editor.timeline.measureNote", { count: legacyMeasure.count })}
           </span>
           <AppTooltip
             content={
               !online
-                ? "Measuring downloads each recording — connect to the internet first."
+                ? t("editor.timeline.measureOfflineTooltip")
                 : batchProgress != null
-                  ? "Another batch is running — wait for it to finish."
-                  : "Download each recording, measure its real length, and fix the chips. Nothing else about the takes changes."
+                  ? t("editor.timeline.measureBusyTooltip")
+                  : t("editor.timeline.measureTooltip")
             }
           >
             <button
@@ -950,12 +995,12 @@ export function TimelineEditor({
               onClick={legacyMeasure.onMeasure}
               className="rounded border border-border bg-background px-2 py-0.5 font-medium text-foreground/80 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
             >
-              Measure now
+              {t("editor.timeline.measureNow")}
             </button>
           </AppTooltip>
           <button
             type="button"
-            aria-label="Dismiss for now"
+            aria-label={t("editor.timeline.measureDismiss")}
             data-testid="tl-measure-dismiss"
             onClick={() => setMeasureDismissedFor(fileId)}
             className="rounded p-0.5 text-muted-foreground hover:bg-muted"
@@ -969,15 +1014,29 @@ export function TimelineEditor({
       <div className="grid min-h-0 grid-cols-[128px_1fr]">
         <div className="border-r border-border bg-muted/20">
           <div className="h-7 border-b border-border" />
-          <LaneLabel name="Subtitles" sub="text · reading" dot="bg-zinc-400 dark:bg-zinc-600" />
-          <LaneLabel name="Source audio" sub="original speech" dot="bg-sky-600" trailing={speakerToggle("source", "source audio")} />
-          <LaneLabel name="Target audio" sub="takes · generated" dot="bg-emerald-600" trailing={speakerToggle("target", "target audio")} />
+          <LaneLabel
+            name={t("editor.timeline.laneSubtitle")}
+            sub={t("editor.timeline.laneSubtitleSub")}
+            dot="bg-zinc-400 dark:bg-zinc-600"
+          />
+          <LaneLabel
+            name={t("editor.timeline.laneSourceAudio")}
+            sub={t("editor.timeline.laneSourceAudioSub")}
+            dot="bg-sky-600"
+            trailing={speakerToggle("source")}
+          />
+          <LaneLabel
+            name={t("editor.timeline.laneTargetAudio")}
+            sub={t("editor.timeline.laneTargetAudioSub")}
+            dot="bg-emerald-600"
+            trailing={speakerToggle("target")}
+          />
           {/* SUB-37: the untimed parking strip only exists when something is
               actually untimed — an always-on empty row read as a mystery. */}
           {untimed.length > 0 && (
             <div className="flex h-12 flex-col justify-center px-3">
-              <span className="text-xs font-semibold text-foreground">Untimed</span>
-              <span className="text-[10px] text-muted-foreground">no timecode yet</span>
+              <span className="text-xs font-semibold text-foreground">{t("editor.timeline.laneUntimed")}</span>
+              <span className="text-[10px] text-muted-foreground">{t("editor.timeline.laneUntimedSub")}</span>
             </div>
           )}
         </div>

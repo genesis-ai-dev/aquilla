@@ -30,12 +30,6 @@ export function setPerfLog(on: boolean): void {
   console.log(`[perf] logging ${on ? "ON" : "OFF"}`)
 }
 
-export function perfLog(label: string, ...args: unknown[]): void {
-  if (!enabled) return
-  // eslint-disable-next-line no-console
-  console.log(`[perf] ${label}`, ...args)
-}
-
 /**
  * Returns a function that, when called, logs the elapsed ms since the mark
  * was created. Returns the elapsed time so callers can also chain math.

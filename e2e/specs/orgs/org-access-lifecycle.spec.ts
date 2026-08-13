@@ -1,19 +1,23 @@
 /**
- * AQU-144 — Org-level business logic E2E
+ * AQU-144 + AQU-435 — Org-level access-control E2E
  *
- * Covers the full access-control journey documented in
- * aquilla-specs/05-user-stories/access-control-permission-semantics.md:
+ * Covers the access-control journey in
+ * aquilla-specs/05-user-stories/access-control-permission-semantics.md,
+ * updated for AQU-435: the org path is *oversight* and fires only at
+ * Maintainer+ (role_level >= 600). A Contributor/Viewer reaches a project
+ * through a direct membership or a team (group) grant — never through
+ * org membership alone.
  *
- *   1. Alice creates a project and invites Bob to the org.
- *   2. Bob (as a new org member) can see the project (org path fires).
- *   3. Alice creates a team (group), adds Carol to the org, adds Carol to
- *      the team, and grants the team access to the project.
- *   4. Carol (via group path) can see the project.
- *   5. Alice revokes Bob's org membership → Bob can no longer access the project.
- *   6. Alice detaches the project from the team → Carol loses the group path
- *      (she keeps org-member visibility since she's still in the org).
- *   7. Alice fully removes Carol from the org → Carol can no longer list org
- *      projects (all paths gone).
+ *   1. Alice creates a project and invites Bob as Contributor.
+ *      Bob does NOT see the project (no org-wide visibility below Maintainer).
+ *   2. Alice creates a team, adds Carol (org Viewer) to the team, and grants
+ *      the team access to the project. Carol sees the project via the group
+ *      path (not via org-viewer).
+ *   3. Alice invites Bob as Maintainer (org path fires) then revokes his org
+ *      membership → Bob can no longer access the project.
+ *   4. Alice fully removes Bob's org + direct paths → project returns 403.
+ *   5. Alice detaches the project from the team → Carol loses the group path
+ *      and has no org-viewer fallback (AQU-435) → 403.
  *
  * Architecture:
  *   - ALL setup uses API calls (stable contract, same as production data path).
@@ -42,11 +46,41 @@ import {
   detachGroupProject,
   removeOrgMember,
 } from "../../helpers/frontier-api-groups"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
+import type { Page } from "@playwright/test"
+
+async function expectOrgProjectsPage(page: Page, orgId: number): Promise<void> {
+  await page.goto(`/orgs/${orgId}/projects`)
+  await expect(page.getByRole("heading", { name: "Projects" })).toBeVisible({ timeout: 15_000 })
+}
 
 // ---------------------------------------------------------------------------
-// Shared types for API response shapes
+// Test 1: org membership below Maintainer does NOT grant project visibility
 // ---------------------------------------------------------------------------
+
+test("invite contributor to org → bob does not see org projects (AQU-435)", async ({ alice: _alice, bob }) => {
+  const aliceSession = await ensureAuthState("alice")
+  const acme = await getMyOrg(aliceSession.jwt)
+
+  // Create a project under Alice's org.
+  const projectId = `fro144-proj-${Date.now()}`
+  await createProjectServerSide(aliceSession.jwt, { id: projectId, name: "Acme Bible" })
+
+  // Bob is NOT a member yet — should NOT see the project.
+  const bobSession = await ensureAuthState("bob")
+  const bobProjectsBefore = await listProjectsApi(bobSession.jwt, acme.id)
+  expect(bobProjectsBefore.some((p) => p.id === projectId)).toBe(false)
+
+  // Alice invites Bob to the org as Contributor. AQU-435: that is not enough
+  // for the org path — Bob still has no direct/team grant.
+  await addOrgMember(aliceSession.jwt, acme.id, "bob", ROLE.CONTRIBUTOR)
+
+  const bobProjectsAfter = await listProjectsApi(bobSession.jwt, acme.id)
+  expect(bobProjectsAfter.some((p) => p.id === projectId)).toBe(false)
+
+  // UI: bob can open Acme (he's a member) but the project is absent.
+  await expectOrgProjectsPage(bob, acme.id)
+  await expect(bob.getByText("Acme Bible")).toHaveCount(0)
+})
 
 interface ProjectRow {
   id: string
@@ -85,37 +119,6 @@ interface UserRow {
 }
 
 // ---------------------------------------------------------------------------
-// Test 1: org membership grants project visibility
-// ---------------------------------------------------------------------------
-
-test("invite to org → bob sees all org projects on dashboard", async ({ alice: _alice, bob }) => {
-  const aliceSession = await ensureAuthState("alice")
-  const acme = await getMyOrg(aliceSession.jwt)
-
-  // Create a project under Alice's org.
-  const projectId = `fro144-proj-${Date.now()}`
-  await createProjectServerSide(aliceSession.jwt, { id: projectId, name: "Acme Bible" })
-
-  // Bob is NOT a member yet — should NOT see the project.
-  const bobSession = await ensureAuthState("bob")
-  const bobProjectsBefore = await listProjectsApi(bobSession.jwt, acme.id)
-  expect(bobProjectsBefore.some((p) => p.id === projectId)).toBe(false)
-
-  // Alice invites Bob to the org.
-  await addOrgMember(aliceSession.jwt, acme.id, "bob", ROLE.CONTRIBUTOR)
-
-  // Bob can now see the project via the org path.
-  const bobProjectsAfter = await listProjectsApi(bobSession.jwt, acme.id)
-  expect(bobProjectsAfter.some((p) => p.id === projectId)).toBe(true)
-
-  // UI: bob's dashboard shows the shared project.
-  const bobDash = new Dashboard(bob)
-  await bobDash.goto()
-  await bob.reload()
-  await expect(bob.getByText("Acme Bible").first()).toBeVisible({ timeout: 10_000 })
-})
-
-// ---------------------------------------------------------------------------
 // Test 2: team (group) path grants project visibility at group role
 // ---------------------------------------------------------------------------
 
@@ -129,11 +132,11 @@ test("create team → add carol → attach project → carol sees project", asyn
   // Carol must be an org member before she can be added to a group.
   await addOrgMember(aliceSession.jwt, acme.id, "carol", ROLE.VIEWER)
 
-  // Verify Carol sees the project via org-viewer path BEFORE team creation.
+  // AQU-435: org-viewer does NOT reveal org projects. Carol sees nothing
+  // until the team grant lands.
   const carolSession = await ensureAuthState("carol")
-  const carolProjects = await listProjectsApi(carolSession.jwt, acme.id)
-  // Org viewer sees all org projects (AD-12 org path).
-  expect(carolProjects.some((p) => p.id === projectId)).toBe(true)
+  const carolProjectsBefore = await listProjectsApi(carolSession.jwt, acme.id)
+  expect(carolProjectsBefore.some((p) => p.id === projectId)).toBe(false)
 
   // Create team and add carol.
   const group = await createGroup(aliceSession.jwt, acme.id, "Translators")
@@ -142,19 +145,20 @@ test("create team → add carol → attach project → carol sees project", asyn
   // Attach project to group with contributor role.
   await attachGroupProject(aliceSession.jwt, acme.id, group.id, projectId, ROLE.CONTRIBUTOR)
 
-  // Carol's effective role on the project should be max(viewer_org, contributor_group)
-  // = contributor. Verify via the effective-access API (requires maintainer+ to call —
-  // alice is the owner so she can call it).
+  // Carol's effective role on the project should be the group contributor
+  // grant (org-viewer does not contribute). Verify via the effective-access
+  // API (requires maintainer+ to call — alice is the owner so she can).
   const effectiveAccess = await getEffectiveAccess(aliceSession.jwt, acme.id, carolSession.username)
   const entry = effectiveAccess.find((e) => e.projectId === projectId)
   expect(entry).toBeDefined()
   // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
   expect(entry!.effectiveLevel).toBeGreaterThanOrEqual(ROLE.CONTRIBUTOR)
 
-  // UI: carol's dashboard renders the project.
-  const carolDash = new Dashboard(carol)
-  await carolDash.goto()
-  await carol.reload()
+  const carolProjectsAfter = await listProjectsApi(carolSession.jwt, acme.id)
+  expect(carolProjectsAfter.some((p) => p.id === projectId)).toBe(true)
+
+  // UI: carol's Acme projects page renders the project.
+  await expectOrgProjectsPage(carol, acme.id)
   await expect(carol.getByText("Team Project").first()).toBeVisible({ timeout: 10_000 })
 })
 
@@ -169,8 +173,8 @@ test("revoke org membership → bob can no longer list org projects", async ({ a
   const projectId = `fro144-revoke-${Date.now()}`
   await createProjectServerSide(aliceSession.jwt, { id: projectId, name: "Secret Project" })
 
-  // Add bob so he has access.
-  await addOrgMember(aliceSession.jwt, acme.id, "bob", ROLE.CONTRIBUTOR)
+  // Add bob as Maintainer so the org path fires (AQU-435 floor).
+  await addOrgMember(aliceSession.jwt, acme.id, "bob", ROLE.MAINTAINER)
 
   const bobSession = await ensureAuthState("bob")
   const bobProjectsBefore = await listProjectsApi(bobSession.jwt, acme.id)
@@ -183,11 +187,9 @@ test("revoke org membership → bob can no longer list org projects", async ({ a
   const bobProjectsAfter = await listProjectsApi(bobSession.jwt, acme.id)
   expect(bobProjectsAfter.some((p) => p.id === projectId)).toBe(false)
 
-  // UI: bob's dashboard no longer shows the project.
-  const bobDash = new Dashboard(bob)
-  await bobDash.goto()
-  await bob.reload()
-  await expect(bob.getByText("Secret Project")).not.toBeVisible({ timeout: 10_000 })
+  // UI: bob's own dashboard no longer shows the project.
+  await expectOrgProjectsPage(bob, bob.orgId)
+  await expect(bob.getByText("Secret Project")).toHaveCount(0)
 })
 
 // ---------------------------------------------------------------------------
@@ -243,18 +245,17 @@ test("detach group project → carol loses group bonus but keeps org baseline", 
   await addGroupMember(aliceSession.jwt, acme.id, group.id, "carol")
   await attachGroupProject(aliceSession.jwt, acme.id, group.id, projectId, ROLE.CONTRIBUTOR)
 
-  // Effective = contributor (group beats org-viewer).
+  // Effective = contributor (group beats a non-contributing org-viewer).
   const beforeDetach = await resolveProjectRole(carolSession.jwt, projectId)
   expect(beforeDetach.level).toBe(ROLE.CONTRIBUTOR)
+  expect(beforeDetach.path).toBe("group")
 
   // Detach project from group.
   await detachGroupProject(aliceSession.jwt, acme.id, group.id, projectId)
 
-  // After detach: effective = viewer (org-viewer path still active).
-  const afterDetach = await resolveProjectRole(carolSession.jwt, projectId)
-  expect(afterDetach.level).toBe(ROLE.VIEWER)
-  // source="org" confirms the org-member path is active, not a group path.
-  expect(afterDetach.path).toBe("org")
+  // After detach: org-viewer is below the AQU-435 floor, so no path remains.
+  const afterDetach = await fetchProjectApi(carolSession.jwt, projectId)
+  expect(afterDetach.status).toBe(403)
 })
 
 // ---------------------------------------------------------------------------

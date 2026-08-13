@@ -16,6 +16,8 @@ export interface CharacterClip {
   audioId: string
   /** frontier-audio:// URL on the chosen attachment. */
   url: string
+  /** Cell timecode in seconds; null for untimed (non-timeline) files. */
+  startSec: number | null
 }
 
 export interface CharacterGroup {
@@ -57,7 +59,12 @@ export function groupAudioByCharacter(
       byVoice.set(voice.id, group)
       order.push(voice.id)
     }
-    group.clips.push({ cellId: cell.id, audioId, url: attachment.url })
+    group.clips.push({
+      cellId: cell.id,
+      audioId,
+      url: attachment.url,
+      startSec: typeof cell.startTime === "number" ? cell.startTime : null,
+    })
   }
   return order.map((id) => byVoice.get(id)!)
 }
@@ -101,6 +108,77 @@ export function concatPcm(clips: Float32Array[]): Float32Array {
   return out
 }
 
+// ─── Timeline layout (AQU-905) ───────────────────────────────────────────────
+
+/**
+ * How a character's clips are laid out in their exported track.
+ *
+ * - `concat` — back-to-back in document order, no silence (the original
+ *   behavior; correct for untimed files like scripture).
+ * - `timeline` — each clip at its own timecode inside a full-length track,
+ *   silence in the gaps. Every character's track is the same length (the
+ *   episode), so the set can be aligned/mixed in an external DAW.
+ */
+export type AudioTrackLayout = "concat" | "timeline"
+
+export interface TimelinePcmClip {
+  pcm: Float32Array
+  /** Timeline offset in seconds; null when the cell carries no timecode. */
+  startSec: number | null
+}
+
+/**
+ * Lay mono PCM clips out on one full-length timeline track: each clip starts at
+ * its own timecode, the gaps are silence, and the track runs for at least
+ * `episodeSec` so every character's track comes out the same length.
+ *
+ * Untimed clips are appended after the furthest-written sample rather than
+ * dropped, so a partially-timed file still exports all of its audio. Overlaps
+ * are summed and clamped to [-1, 1].
+ */
+export function placePcmOnTimeline(
+  clips: TimelinePcmClip[],
+  sampleRate: number,
+  episodeSec = 0,
+): Float32Array {
+  const placed: { pcm: Float32Array; offset: number }[] = []
+  let end = 0
+  for (const clip of clips) {
+    const offset =
+      clip.startSec != null && Number.isFinite(clip.startSec)
+        ? Math.max(0, Math.round(clip.startSec * sampleRate))
+        : end
+    placed.push({ pcm: clip.pcm, offset })
+    end = Math.max(end, offset + clip.pcm.length)
+  }
+  const total = Math.max(end, Math.round(Math.max(0, episodeSec) * sampleRate))
+  const out = new Float32Array(total)
+  for (const { pcm, offset } of placed) {
+    for (let i = 0; i < pcm.length; i++) {
+      const sum = out[offset + i] + pcm[i]
+      out[offset + i] = sum > 1 ? 1 : sum < -1 ? -1 : sum
+    }
+  }
+  return out
+}
+
+/** True when any cell carries a timecode — i.e. the file is timeline-ordered
+ *  (media/subtitle) and per-voice tracks should be timeline-placed. */
+export function hasTimecodes(cells: CellData[]): boolean {
+  return cells.some((c) => typeof c.startTime === "number" || typeof c.endTime === "number")
+}
+
+/** Full episode length in seconds: the furthest timecode across ALL cells (not
+ *  just one character's), so every exported track is the same length. */
+export function episodeDurationSec(cells: CellData[]): number {
+  let max = 0
+  for (const cell of cells) {
+    if (typeof cell.endTime === "number" && cell.endTime > max) max = cell.endTime
+    if (typeof cell.startTime === "number" && cell.startTime > max) max = cell.startTime
+  }
+  return max
+}
+
 // ─── Orchestrator ────────────────────────────────────────────────────────────
 
 /** Filesystem-safe character key (mirrors codex-editor's sanitization). */
@@ -120,10 +198,20 @@ export interface ExportAudioArgs {
    *  tests pass a fake. */
   decode: (bytes: Uint8Array) => Promise<Float32Array>
   onProgress?: (done: number, total: number) => void
+  /** AQU-905: `timeline` lays each character's clips out at their own timecodes
+   *  inside a full-length track (silence in the gaps) so the set can be aligned
+   *  in an external tool. Defaults to `timeline` when the cells carry timecodes
+   *  and `concat` when they don't. */
+  layout?: AudioTrackLayout
+  /** Explicit episode length in seconds (e.g. the linked video's duration).
+   *  Defaults to the furthest timecode across `cells`. `timeline` layout only. */
+  episodeSec?: number
 }
 
 export async function exportAudioByCharacter(args: ExportAudioArgs): Promise<{ blob: Blob; skipped: number }> {
   const groups = groupAudioByCharacter(args.cells, args.settings)
+  const layout: AudioTrackLayout = args.layout ?? (hasTimecodes(args.cells) ? "timeline" : "concat")
+  const episodeSec = args.episodeSec ?? episodeDurationSec(args.cells)
   const zip = new JSZip()
   const usedNames = new Map<string, number>()
   const totalClips = groups.reduce((n, g) => n + g.clips.length, 0)
@@ -137,7 +225,7 @@ export async function exportAudioByCharacter(args: ExportAudioArgs): Promise<{ b
   const pcmByClip = new Map<string, Promise<Float32Array | null>>()
 
   for (const group of groups) {
-    const pcmClips: Float32Array[] = []
+    const pcmClips: TimelinePcmClip[] = []
     for (const clip of group.clips) {
       const cell = args.cells.find((c) => c.id === clip.cellId)!
       const parsed = parseFrontierAudioUrl(clip.url)
@@ -169,7 +257,7 @@ export async function exportAudioByCharacter(args: ExportAudioArgs): Promise<{ b
       }
       try {
         const pcm = await pcmPromise
-        if (pcm) pcmClips.push(pcm)
+        if (pcm) pcmClips.push({ pcm, startSec: clip.startSec })
       } catch (err) {
         console.warn(`[audio-by-character] skipping clip ${clip.audioId} (${clip.cellId}):`, err)
         skipped++
@@ -177,8 +265,16 @@ export async function exportAudioByCharacter(args: ExportAudioArgs): Promise<{ b
       done++
       args.onProgress?.(done, totalClips)
     }
-    const pcm = concatPcm(pcmClips)
-    if (pcm.length === 0) continue // character ended up with no decodable audio
+    // A character with no decodable audio is dropped entirely — even in
+    // timeline layout, where an all-silence full-length track would just be
+    // dead weight in the zip.
+    const usable = pcmClips.filter((c) => c.pcm.length > 0)
+    if (usable.length === 0) continue
+    const pcm =
+      layout === "timeline"
+        ? placePcmOnTimeline(usable, TARGET_RATE, episodeSec)
+        : concatPcm(usable.map((c) => c.pcm))
+    if (pcm.length === 0) continue
     const wav = encodeWavPcm16(pcm, TARGET_RATE)
     // Disambiguate same-named cast members.
     const base = `${characterKey(group.voice.name)}_${args.langCode}`

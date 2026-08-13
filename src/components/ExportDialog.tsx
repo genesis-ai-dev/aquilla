@@ -188,7 +188,7 @@ const BASE_FORMAT_OPTIONS: FormatOption[] = [
     id: "audio-by-character",
     label: "Audio by character",
     ext: ".zip",
-    description: "One WAV per cast member — each character's clips concatenated, best-available audio (recording → generated). Concatenated order = document order. Trim-honoring deferred; clips export full-length.",
+    description: "One WAV per cast member, best-available audio (recording → generated). Timed files (media/subtitle) export full-length tracks with each clip at its own timecode and silence in the gaps, so the tracks line up in an external editor; untimed files concatenate in document order. Trim-honoring deferred; clips export full-length.",
     lossy: false,
   },
   // Advanced-only option — not shown in the main format list.

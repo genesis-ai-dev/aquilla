@@ -8,7 +8,7 @@ a later run completes.
 
 - **Files**: systemic — 500+ hits across dozens of files (sampled instances:
   `src/hooks/useCells.ts:1`, `src/components/HistoryDrawer.tsx:20`,
-  `src/components/EditorTable.tsx:697,4816`, `src/components/CellActionsMenu.tsx:29,43`).
+  `src/components/EditorTable.tsx:697,4816`).
 - **Friction**: comments describe D1 as the live datastore/audit source; the D1→Postgres
   (Neon/Hyperdrive) cutover is complete per CLAUDE.md. Misleads readers about where reads
   actually go.
@@ -45,22 +45,11 @@ a later run completes.
 
 ## Prior candidates retained from the 2026-08-10/11 runs
 
-- **`src/components/Dashboard.tsx`** (466 lines) — a pre-org-model project dashboard,
-  apparently superseded by `src/components/org/OrgHome.tsx`; no import found anywhere
-  (route table in `App.tsx` doesn't reference it). At 466 lines this alone would consume
-  most of a single run's budget — worth a dedicated pass rather than bundling with
-  smaller deletions. Proof needed: zero importers/JSX usage (component + string route
-  matches), and confirm `OrgHome.tsx` covers the same surface before deleting.
-  (Entry was dropped in a prior stacked-ledger conflict resolution while the file still
-  exists with zero importers — restored 2026-08-12.)
-- **`src/components/CellActionsMenu.tsx`**, `ProgressDot.tsx`, and
-  `useSubscribedConcepts.ts` — re-check zero importers before deletion.
-- **`src/lib/sync/settings-read.ts`** / `settings-read-types.ts` and
-  **`src/lib/timeline/diarization-loader.ts`** — deferred from the 2026-08-11 survey;
-  confirm no newer feature path introduced a caller.
-- **`src/lib/sync/sync-debug.ts`**, the deprecated `EditorScrollContext` compatibility
-  fields, and the deprecated `ExamplePanel` prop pass-through were recorded as candidates
-  in the earlier run; verify the current source before taking further action.
+- `src/components/Dashboard.tsx`, `CellActionsMenu.tsx`, `sidebar/ProgressDot.tsx`,
+  `src/lib/sync/sync-debug.ts`, `settings-read.ts`/`settings-read-types.ts`,
+  `src/lib/timeline/diarization-loader.ts`, and the deprecated `EditorScrollContext` /
+  `ExamplePanel` compat fields were all confirmed deleted/resolved as of the 2026-08-13
+  run — pruned from this ledger.
 
 The 2026-08-10 run also recorded an E2E limitation in the Claude Code web sandbox: its
 Docker/Wrangler setup was not reliable enough to complete the smoke suite. This is an

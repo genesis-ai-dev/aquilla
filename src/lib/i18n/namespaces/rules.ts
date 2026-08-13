@@ -120,10 +120,6 @@ export const rules = defineNamespace({
     "rules.checkDrawer.goToCell": "Go to cell",
     "rules.checkDrawer.commentOnCell": "Comment on this cell",
     "rules.checkDrawer.commentOnCellAriaLabel": "Comment on {label}",
-    "rules.checkDrawer.cellCount": plural({
-      one: "{count} cell",
-      other: "{count} cells",
-    }),
     "rules.checkDrawer.matchedDetail": 'matched "{text}"',
     "rules.checkDrawer.scopeRules": plural({ one: "{count} rule", other: "{count} rules" }),
     "rules.checkDrawer.scopeTerms": plural({ one: "{count} term", other: "{count} terms" }),
@@ -457,10 +453,6 @@ export const rules = defineNamespace({
       "rules.checkDrawer.commentOnCellAriaLabel": {
         description: "Accessible label for the per-finding 'comment on this cell' button.",
         placeholders: { label: "The cell's human-facing reference (verse ref or id)." },
-      },
-      "rules.checkDrawer.cellCount": {
-        description: "Count badge on a finding card (rule or term), stating how many cells it flags.",
-        placeholders: { count: "Number of cells the finding flags." },
       },
       "rules.checkDrawer.matchedDetail": {
         description:

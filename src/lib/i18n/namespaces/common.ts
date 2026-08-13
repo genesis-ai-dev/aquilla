@@ -35,6 +35,7 @@ export const common = defineNamespace({
     "common.project": "Project",
     "common.file": "File",
     "common.comments": "Comments",
+    "common.cellCount": plural({ one: "{count} cell", other: "{count} cells" }),
     "common.cellLabel": "Cell {id}",
     "common.selectAll": "Select all",
     "common.cancelling": "cancelling…",
@@ -315,6 +316,17 @@ export const common = defineNamespace({
           "narrow per-cell drawer, so it must fit a narrow column. Comments are team " +
           "discussion about a translation, not footnotes in the text.",
         screenshot: "comments",
+      },
+      "common.cellCount": {
+        description:
+          "A plain count of cells, reused wherever the app reports how many cells " +
+          "something touched: the DCS import summary, the file-check drawer's " +
+          "checked-cell total, a finding's group size, and a rule's flagged-cell " +
+          "count. 'Cell' is Aquilla's unit of translation — one verse, line, or " +
+          "segment.",
+        placeholders: {
+          count: "How many cells; also selects the plural form.",
+        },
       },
       "common.cellLabel": {
         description:

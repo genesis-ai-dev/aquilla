@@ -37,7 +37,7 @@ interface CheckFindingsDrawerProps {
 /** "32 cells · 12 rules · 8 terms" — the spec's what-was-checked summary. */
 export function checkScopeSummary(result: CheckRunResult, t: TFunction, locale: string): string {
   return [
-    t("rules.checkDrawer.cellCount", { count: formatCount(result.checkedCellCount, locale) }),
+    t("common.cellCount", { count: formatCount(result.checkedCellCount, locale) }),
     t("rules.checkDrawer.scopeRules", { count: formatCount(result.checkedRuleCount, locale) }),
     t("rules.checkDrawer.scopeTerms", { count: formatCount(result.checkedTermCount, locale) }),
   ].join(" · ")
@@ -163,7 +163,7 @@ function RuleFindingCard({
             content, never keyed here. */}
         <span className="min-w-0 truncate text-xs font-semibold">{group.rule.name}</span>
         <span className="ms-auto shrink-0 text-[10px] text-muted-foreground">
-          {t("rules.checkDrawer.cellCount", { count: group.infractions.length })}
+          {t("common.cellCount", { count: group.infractions.length })}
         </span>
       </div>
       <ul className="min-w-0 space-y-1">
@@ -210,7 +210,7 @@ function TermFindingCard({
         {/* finding.sourceTerm is content (the term itself) — never keyed. */}
         <span className="min-w-0 truncate text-xs font-semibold">{finding.sourceTerm}</span>
         <span className="ms-auto shrink-0 text-[10px] text-muted-foreground">
-          {t("rules.checkDrawer.cellCount", { count: finding.flaggedCells.length })}
+          {t("common.cellCount", { count: finding.flaggedCells.length })}
         </span>
       </div>
       <p className="mb-1.5 break-words text-xs text-muted-foreground">

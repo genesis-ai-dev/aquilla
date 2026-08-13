@@ -189,7 +189,7 @@ export function CollisionPanel({ collisions, onResolve, onCancel }: CollisionPan
           {t("common.cancel")}
         </Button>
         <Button size="sm" onClick={handleConfirm} disabled={resolving}>
-          {resolving ? t("importExport.collision.continuing") : t("importExport.collision.continue")}
+          {resolving ? t("importExport.collision.continuing") : t("onboarding.common.continue")}
         </Button>
       </div>
     </div>

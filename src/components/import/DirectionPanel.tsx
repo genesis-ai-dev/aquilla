@@ -47,7 +47,7 @@ export function DirectionPanel({
       <p className="text-sm text-muted-foreground">{t("importExport.direction.intro")}</p>
       <FieldGroup className="grid grid-cols-2 gap-4">
         <Field>
-          <FieldLabel htmlFor="dl-source">{t("importExport.direction.sourceLabel")}</FieldLabel>
+          <FieldLabel htmlFor="dl-source">{t("projectSettings.info.sourceLanguageLabel")}</FieldLabel>
           <Input
             id="dl-source"
             value={sourceLanguage}
@@ -78,7 +78,7 @@ export function DirectionPanel({
       {error && <FieldError role="alert">{error}</FieldError>}
       <div className="flex justify-end gap-2">
         <Button variant="ghost" size="sm" onClick={onSkip} disabled={confirming}>
-          {t("importExport.direction.skip")}
+          {t("onboarding.common.skipForNow")}
         </Button>
         <Button
           size="sm"

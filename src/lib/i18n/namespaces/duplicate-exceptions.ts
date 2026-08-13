@@ -482,4 +482,17 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "link and snapshots its data. A casual toggle and a one-way destructive " +
     "operation carry very different weight, and many languages would render " +
     "'detach' with a stronger verb for the latter.",
+  "terminology.editor.errorImportFailed":
+    "Failure notice for importing TERMS into the project termbase — a glossary " +
+    "operation. importExport.errors.importFailed reports a failed SOURCE-DOCUMENT " +
+    "import, the parse-and-ingest pipeline. common.test.ts already documents " +
+    "'Import' as a verb whose translation depends on its domain, and these are two " +
+    "different domains; one shared sentence would misname one of them.",
+  "terminology.livingMemory.translationAria":
+    "Accessible name of the field holding a single stored translation in the " +
+    "living-memory list — a countable noun, 'this translation'. " +
+    "importExport.upload.categoryTranslation names a FILE CATEGORY in the upload " +
+    "picker, sitting beside 'Source' and 'Audio' as a kind-of-thing label. A " +
+    "specific instance and a category name take different forms wherever nouns " +
+    "inflect for definiteness.",
 }

@@ -1313,7 +1313,7 @@ export function ExportDialog({
                 onClick={() => handleOpenChange(false)}
                 disabled={isBusy}
               >
-                {isDone ? t("importExport.dialog.done") : t("common.cancel")}
+                {isDone ? t("common.done") : t("common.cancel")}
               </Button>
               <Button
                 onClick={() => handleExport()}

@@ -136,7 +136,7 @@ export function DcsPanel({ projectId, getToken, defaultLang, patchDcsCursor, onI
              *  joined, rather than one template agreeing with two numbers at once. */}
             {t("search.expanded.fileCount", { count: formatNumber(summary.files, locale) })}
             {" · "}
-            {t("importExport.dcs.cellsCount", { count: formatNumber(summary.cells, locale) })}
+            {t("common.cellCount", { count: formatNumber(summary.cells, locale) })}
           </p>
           <p>
             {summary.pinned

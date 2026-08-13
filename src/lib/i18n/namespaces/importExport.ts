@@ -33,13 +33,11 @@ export const importExport = defineNamespace({
     "importExport.direction.intro":
       "We detected the source language from the imported project. Please confirm the " +
       "source and set the target language so back-translation and QA rules work correctly.",
-    "importExport.direction.sourceLabel": "Source language",
     "importExport.direction.sourcePlaceholder": "e.g. English, arb, hbo",
     "importExport.direction.targetLabel": "Target language",
     "importExport.direction.targetPlaceholder": "e.g. Spanish, fra, swh",
     "importExport.direction.changeLaterHint": "You can change these later in {path}.",
     "importExport.direction.settingsBreadcrumb": "Project Settings → Project Info",
-    "importExport.direction.skip": "Skip for now",
     "importExport.direction.setting": "Setting…",
     "importExport.direction.setDirection": "Set direction",
 
@@ -129,7 +127,6 @@ export const importExport = defineNamespace({
     "importExport.dcs.filesProgress": "{uploaded} / {total} files",
     "importExport.dcs.fetchingAndParsing": "Fetching & parsing from Door43…",
     "importExport.dcs.importComplete": "Import complete",
-    "importExport.dcs.cellsCount": plural({ one: "{count} cell", other: "{count} cells" }),
     "importExport.dcs.pinnedToRelease": "Pinned to release {ref}",
     "importExport.dcs.couldNotPin":
       "Imported, but couldn't pin the release — you may lack maintainer rights on this project.",
@@ -205,7 +202,6 @@ export const importExport = defineNamespace({
     "importExport.collision.skip": "Skip",
     "importExport.collision.duplicate": "Import as duplicate",
     "importExport.collision.continuing": "Continuing…",
-    "importExport.collision.continue": "Continue",
 
     // — Bible API (helloao.org) panel —
     "importExport.helloao.description":
@@ -495,7 +491,6 @@ export const importExport = defineNamespace({
       other: "{count} segments lost inline formatting in this export",
     }),
     "importExport.dialog.andMore": "…and {count} more",
-    "importExport.dialog.done": "Done",
     "importExport.dialog.exportAgain": "Export again",
 
     // — Export dialog: handleExport status messages —
@@ -723,10 +718,6 @@ export const importExport = defineNamespace({
           uploaded: "Number of files uploaded so far, already locale-formatted.",
           total: "Total file count, already locale-formatted.",
         },
-      },
-      "importExport.dcs.cellsCount": {
-        description: "Second half of the Door43 (DCS) import-complete summary — how many cells landed. Joined with search.expanded.fileCount by ' · '.",
-        placeholders: { count: "Number of cells imported, already locale-formatted." },
       },
       "importExport.dcs.pinnedToRelease": {
         description:

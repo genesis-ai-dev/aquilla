@@ -90,6 +90,14 @@ id = "69bcc10e67464f2eaf4fe91a9141e7cd"
 # id = "<prod-namespace-id>"
 
 # Auth:
+#   ADMIN_SECRET (optional) is the operator credential for /admin/* and
+#   /migrate/*. Provision with `wrangler secret put ADMIN_SECRET --env <env>`
+#   and call those routes with `pnpm admin:request`, which reads it from the
+#   environment instead of an argv the shell records. SYNC_SECRET_KEY keeps
+#   working on those routes — auth-worker calls /admin/files/* and
+#   /admin/projects/* with it — so provisioning ADMIN_SECRET cannot lock
+#   anyone out. See src/lib/admin-auth.ts and docs/OPSEC-REVIEW-2026-08-13.md
+#   (OPS-2) for what closing the fallback requires.
 #   SYNC_SECRET_KEY (shared with auth-worker for sync-token verification and
 #   distinct from the identity access-token SECRET_KEY) and ALLOW_UNAUTHENTICATED live in
 #   .dev.vars for local dev (see .dev.vars.example) and are provisioned via

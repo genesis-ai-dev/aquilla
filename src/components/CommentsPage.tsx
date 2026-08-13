@@ -411,6 +411,8 @@ function CommentBubble({ comment, currentUsername, onEdit, onDelete }: CommentBu
         // eslint-disable-next-line react/no-danger
         <div
           className="text-sm"
+          // OPS-3: comment bodies quote draft text — keep them out of replays.
+          data-ph-mask
           dangerouslySetInnerHTML={{
             __html: DOMPurify.sanitize(renderCommentHtml(comment.body), {
               ALLOWED_TAGS: ["b", "i", "code", "br", "span"],

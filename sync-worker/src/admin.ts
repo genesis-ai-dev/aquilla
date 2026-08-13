@@ -3,10 +3,11 @@
 // the partyserver import graph (which references cloudflare:* URLs Node
 // doesn't resolve).
 
-import { secureCompare as constantTimeEqual } from "./lib/secure-compare"
+import { hasAdminSecretConfigured, isAuthorizedAdminBearer } from "./lib/admin-auth"
 
 export interface AdminEnv {
   SNAPSHOTS: R2Bucket
+  ADMIN_SECRET?: string
   SYNC_SECRET_KEY?: string
   R2_KEY_PREFIX?: string
 }
@@ -20,9 +21,10 @@ function r2KeyPrefix(env: Pick<AdminEnv, "R2_KEY_PREFIX">): string {
  * Handles DELETE /admin/files/:projectId/:fileId. Returns null when the path
  * isn't an admin route so the caller can fall through to partyserver.
  *
- * Auth: Authorization: Bearer ${SYNC_SECRET_KEY}. Reuses the JWT-signing
- * secret as a shared admin key — only frontier-server (which already holds
- * SYNC_SECRET_KEY for token signing) can call this.
+ * Auth: Authorization: Bearer ${ADMIN_SECRET}, the dedicated operator
+ * credential. SYNC_SECRET_KEY is still accepted because auth-worker calls this
+ * route with it during project/file deletion — see lib/admin-auth.ts for why
+ * that fallback is deliberate and what closing it requires (OPS-2).
  */
 export async function handleAdminRequest(
   request: Request,
@@ -39,8 +41,7 @@ export async function handleAdminRequest(
 
   // Auth gate applies to every recognized admin route.
   const auth = request.headers.get("Authorization") ?? ""
-  const expected = env.SYNC_SECRET_KEY ? `Bearer ${env.SYNC_SECRET_KEY}` : null
-  if (!expected || !constantTimeEqual(auth, expected)) {
+  if (!hasAdminSecretConfigured(env) || !isAuthorizedAdminBearer(auth, env)) {
     return new Response("unauthorized", { status: 401 })
   }
 

@@ -12,10 +12,11 @@
 // to the live audio path (audioObjectKey), so the cell.audio.attach url
 // (frontier-audio://<audioId>) resolves + streams from R2 exactly as usual.
 //
-// Gated on SYNC_SECRET_KEY — same trust tier as /migrate/ingest + /migrate/audio.
+// Gated on ADMIN_SECRET (SYNC_SECRET_KEY still accepted — see lib/admin-auth.ts);
+// same trust tier as /migrate/ingest + /migrate/audio.
 
 import { audioObjectKey } from "../audio"
-import { secureCompare } from "../lib/secure-compare"
+import { isAuthorizedAdminBearer } from "../lib/admin-auth"
 
 const RE = /^\/migrate\/audio-copy\/?$/
 
@@ -24,6 +25,7 @@ export interface MigrateAudioCopyEnv {
   SNAPSHOTS: R2Bucket
   /** Source: GitLab's LFS object-storage bucket, bound read-only. */
   LFS_SRC?: R2Bucket
+  ADMIN_SECRET?: string
   SYNC_SECRET_KEY?: string
   R2_KEY_PREFIX?: string
 }
@@ -54,7 +56,7 @@ export async function handleMigrateAudioCopyRequest(
   if (!RE.test(url.pathname)) return null
   if (request.method !== "POST") return new Response("method not allowed", { status: 405 })
   if (!env.SYNC_SECRET_KEY) return new Response("SYNC_SECRET_KEY not configured", { status: 500 })
-  if (!secureCompare(request.headers.get("Authorization") ?? "", `Bearer ${env.SYNC_SECRET_KEY}`)) {
+  if (!isAuthorizedAdminBearer(request.headers.get("Authorization") ?? "", env)) {
     return new Response("unauthorized", { status: 401 })
   }
   if (!env.SNAPSHOTS) return new Response("SNAPSHOTS bucket not bound", { status: 500 })

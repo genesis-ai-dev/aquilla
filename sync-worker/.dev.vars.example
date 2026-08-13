@@ -6,6 +6,14 @@
 # sync-worker compromise cannot forge Frontier access tokens.
 SYNC_SECRET_KEY="test-sync-secret-key"
 
+# Optional dedicated operator credential for /admin/* and /migrate/*. When set,
+# it authorizes those routes instead of you having to hand them the signing key
+# above (docs/OPSEC-REVIEW-2026-08-13.md, OPS-2). SYNC_SECRET_KEY keeps working
+# on them either way, so setting or omitting this locks nobody out. Call the
+# routes with `pnpm admin:request`, which reads the value from the environment
+# rather than an argv your shell records.
+# ADMIN_SECRET="test-admin-secret"
+
 # Dev bypass. Lets clients connect without a valid sync-token JWT. Safe for
 # local dev while the client isn't yet fetching /sync-token. DO NOT set this
 # in production — prod default (unset) enforces strict auth.

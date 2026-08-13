@@ -15,11 +15,24 @@ if (typeof window !== "undefined" && KEY) {
     capture_exceptions: true,
     disable_session_recording: !isAnalyticsEnabled(),
     session_recording: {
-      // Translators' draft text is user content but not credentials; keep the
-      // page visible so replays are actually diagnosable. Inputs are masked —
-      // passwords, emails, invite tokens all enter through inputs.
+      // Keep the page visible so replays are actually diagnosable. Inputs are
+      // masked — passwords, emails and invite tokens all enter through inputs.
       maskAllInputs: true,
-      maskTextSelector: "[data-ph-mask]",
+      // OPS-3 (docs/OPSEC-REVIEW-2026-08-13.md): `maskAllInputs` never covered
+      // the thing most worth covering. The cell editor is a contenteditable,
+      // not an <input>, so unpublished draft translations — and the source
+      // text beside them, which names the passage and therefore the project —
+      // were replayed verbatim into a third-party US processor. For a team
+      // translating in a jurisdiction where the work is dangerous, a replay
+      // that shows *which* text is being worked on is a bigger disclosure than
+      // anything in the analytics events.
+      //
+      // `[data-cell-type]` is the source and target column wrappers in
+      // EditorTable, so this masks every render variant of cell text — rich
+      // HTML, plain, USFM, IDML, and the live editor — in one selector rather
+      // than one component at a time. `[data-ph-mask]` stays for everything
+      // else that opts in (comment bodies, the source rich-text surface).
+      maskTextSelector: "[data-ph-mask], [data-cell-type]",
     },
     opt_out_capturing_by_default: !isAnalyticsEnabled(),
   })

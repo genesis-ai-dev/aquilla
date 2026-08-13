@@ -28,6 +28,40 @@ export function sanitizeEditorHtml(html: string): string {
 }
 
 /**
+ * Sanitizer for the read-only SOURCE cell surface.
+ *
+ * OPS-8 (docs/OPSEC-REVIEW-2026-08-13.md): this surface used to render
+ * `cell.originalHtml` through `DOMPurify.sanitize()` with DEFAULT options.
+ * Defaults stop scripts and event handlers — so this was never an XSS — but
+ * they happily keep `<img src>`, `<a href>`, `<video>`, `<source>` and friends.
+ * `extractHtmlStrings` stores an imported block's `innerHTML` verbatim
+ * (src/lib/parsers/html.ts), so an HTML document handed to a team for import
+ * could make every translator's browser fetch an attacker-controlled URL the
+ * moment the cell scrolled into view: IP, user agent, and the exact minute a
+ * named person was working on a named passage. That linkage is the single
+ * highest-consequence datum this product holds, and the report-only CSP's
+ * `img-src … https:` would not have stopped it.
+ *
+ * The fix is to render source text under the same allowlist the target side
+ * has always used — which is also what the parsers actually produce, per the
+ * SECURITY note in EditorTable. Round-trip export is unaffected: `exportHtml`
+ * re-parses the original uploaded document, not this field.
+ *
+ * Separate from `sanitizeEditorHtml` only because that one also runs
+ * `injectFootnoteSpans`, which would change how raw `\f…\f*` markers in source
+ * text render. Same allowlist, no rewriting.
+ */
+export function sanitizeSourceDisplayHtml(html: string): string {
+  if (!html) return ""
+  return DOMPurify.sanitize(html, {
+    ALLOWED_TAGS,
+    ALLOWED_ATTR,
+    ALLOW_ARIA_ATTR: false,
+    ALLOW_DATA_ATTR: false,
+  })
+}
+
+/**
  * The IDML editor accepts only the canonical protected-anchor vocabulary.
  * Keep this separate from the general rich-text sanitizer: allowing IDML data
  * attributes globally would turn ordinary spans into misleading pseudo

@@ -1,5 +1,10 @@
 # Operational Security Review — 2026-08-06
 
+> **This is the first pass in the series, not the current state.** Later reviews
+> supersede it where they overlap: `docs/OPSEC-REVIEW-2026-08-10.md` (OPS-1…OPS-7)
+> and **`docs/OPSEC-REVIEW-2026-08-13.md` (OPS-8…OPS-10, current)**. Start with
+> the most recent — its §6 re-verifies everything below rather than assuming it.
+
 _Standing OPSEC review of Aquilla's handling of sensitive data. Complements
 `docs/SECURITY-NOTES-2026-06-10.md` (application-security findings, June audit)
 and the 2026-08-03 pen-test remediation work._

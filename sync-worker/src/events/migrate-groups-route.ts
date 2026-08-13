@@ -10,12 +10,13 @@
 // DO NOTHING on their composite PKs. Returns legacy_uuid→id maps so the caller
 // can place projects without a second round-trip.
 
-import { secureCompare } from '../lib/secure-compare'
+import { isAuthorizedAdminBearer } from '../lib/admin-auth'
 
 const PATH = '/migrate/groups'
 
 export interface MigrateGroupsEnv {
   AQUILLA_PG?: AquillaDb
+  ADMIN_SECRET?: string
   SYNC_SECRET_KEY?: string
 }
 
@@ -82,7 +83,7 @@ export async function handleMigrateGroupsRequest(
   if (new URL(request.url).pathname !== PATH) return null
   if (request.method !== 'POST') return new Response('method not allowed', { status: 405 })
   if (!env.SYNC_SECRET_KEY) return new Response('SYNC_SECRET_KEY not configured', { status: 500 })
-  if (!secureCompare(request.headers.get('Authorization') ?? '', `Bearer ${env.SYNC_SECRET_KEY}`)) {
+  if (!isAuthorizedAdminBearer(request.headers.get('Authorization') ?? '', env)) {
     return new Response('unauthorized', { status: 401 })
   }
   if (!env.AQUILLA_PG) return new Response('AQUILLA_PG binding not configured', { status: 500 })

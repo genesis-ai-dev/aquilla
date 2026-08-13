@@ -98,6 +98,10 @@ declare global {
       HYPERDRIVE?: Hyperdrive
       /** Shared HMAC key with identity that mints /sync-token JWTs. */
       SYNC_SECRET_KEY?: string
+      /** Optional dedicated operator credential for /admin/* and /migrate/*, so
+       *  those routes stop being exercised with the signing key above. Absent
+       *  until provisioned; see lib/admin-auth.ts (OPS-2). */
+      ADMIN_SECRET?: string
       /** Deployment profile used to reject cross-environment custom-domain traffic. */
       ENVIRONMENT?: string
       /** Base URL of the identity worker in the same deployment environment. */

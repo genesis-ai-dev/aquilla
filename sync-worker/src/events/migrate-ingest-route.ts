@@ -25,7 +25,7 @@
 import { buildEventProjectionStmts, type PersistedEvent } from './event-projection'
 import { buildEventInsertStmt } from './event-insert'
 import type { EventKind } from './types'
-import { secureCompare } from '../lib/secure-compare'
+import { isAuthorizedAdminBearer } from '../lib/admin-auth'
 
 // Keep each ingest transaction short so it commits and releases its locks
 // quickly — large batches hold a write transaction open longer and serialise
@@ -35,6 +35,7 @@ const BATCH_LIMIT = 100
 
 export interface MigrateIngestEnv {
   AQUILLA_PG?: AquillaDb
+  ADMIN_SECRET?: string
   SYNC_SECRET_KEY?: string
 }
 
@@ -96,7 +97,7 @@ export async function handleMigrateIngestRequest(
     return new Response('SYNC_SECRET_KEY not configured', { status: 500 })
   }
   const authHeader = request.headers.get('Authorization') ?? ''
-  if (!secureCompare(authHeader, `Bearer ${env.SYNC_SECRET_KEY}`)) {
+  if (!isAuthorizedAdminBearer(authHeader, env)) {
     return new Response('unauthorized', { status: 401 })
   }
   if (!env.AQUILLA_PG) {

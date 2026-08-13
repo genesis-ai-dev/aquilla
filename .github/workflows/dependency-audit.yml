@@ -1,0 +1,96 @@
+name: Dependency audit
+
+# OPS-6 (docs/OPSEC-REVIEW-2026-08-13.md): until this existed, dependency
+# advisories were found by a human running `pnpm audit` during a security
+# review. Between reviews nothing looked. Two of the three items June's SEC-7
+# raised were closed by ordinary version drift rather than by anyone noticing.
+#
+# Weekly and scheduled, deliberately NOT a pull-request gate: a per-PR audit
+# goes red on an advisory in unrelated tooling that the PR author cannot fix,
+# and a check people learn to override is worse than no check. The PR gate lives
+# in Cloudflare Workers Builds (scripts/cloudflare-ci-checks.mjs); this is a
+# detector, and its output is an issue for someone to pick up.
+#
+# `pnpm audit:deps` covers all four lockfiles — the root SPA plus the three
+# Workers, which a root-level audit never saw — and fails when an audit reports
+# an implausibly small dependency count, so "did not run" cannot pass as
+# "clean". See scripts/audit-deps.ts.
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Mondays 08:07 UTC. Off the hour on purpose: GitHub delays runs scheduled
+    # at popular round times, sometimes by tens of minutes.
+    - cron: "7 8 * * 1"
+
+concurrency:
+  group: dependency-audit
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - id: audit
+        name: Audit every lockfile
+        run: |
+          set +e
+          pnpm audit:deps 2>&1 | tee audit.log
+          status=${PIPESTATUS[0]}
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          {
+            echo 'report<<AUDIT_EOF'
+            cat audit.log
+            echo 'AUDIT_EOF'
+          } >> "$GITHUB_OUTPUT"
+          exit "$status"
+
+      # A failing scheduled workflow notifies nobody who is not already
+      # watching Actions. File the finding where it will be seen instead, and
+      # keep one open issue rather than fifty-two a year.
+      - name: Open or update the tracking issue
+        if: failure() && steps.audit.outputs.status != ''
+        uses: actions/github-script@v8
+        env:
+          REPORT: ${{ steps.audit.outputs.report }}
+        with:
+          script: |
+            const title = "Dependency advisories in a production lockfile"
+            const body = [
+              "`pnpm audit:deps` failed on the weekly schedule.",
+              "",
+              "```",
+              (process.env.REPORT || "(no output captured)").slice(0, 55000),
+              "```",
+              "",
+              "Fix by raising the declared range in the owning `package.json`, or —",
+              "for a transitive dependency — adding a `pnpm.overrides` entry in the",
+              "root `package.json`. Close this issue once `pnpm audit:deps` is clean;",
+              "the next scheduled run reopens it if anything regresses.",
+              "",
+              `Run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+            ].join("\n")
+
+            const existing = await github.rest.issues.listForRepo({
+              ...context.repo,
+              state: "open",
+              labels: "dependencies",
+              per_page: 100,
+            })
+            const match = existing.data.find((issue) => issue.title === title)
+            if (match) {
+              await github.rest.issues.createComment({ ...context.repo, issue_number: match.number, body })
+            } else {
+              await github.rest.issues.create({ ...context.repo, title, body, labels: ["dependencies"] })
+            }

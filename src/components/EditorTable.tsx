@@ -6,7 +6,6 @@ import {
   type LegendListRenderItemProps,
   type OnViewableItemsChangedInfo,
 } from "@legendapp/list/react"
-import DOMPurify from "dompurify"
 import {
   Check, CheckCheck, Circle, Trash2, AlertTriangle, AlertCircle, RefreshCw,
   MessageCircle, Play, Pause, Mic, MicOff, Sparkles, FileText, History as HistoryIcon,
@@ -174,6 +173,7 @@ import {
   hasMeaningfulRichText,
   prepareReadOnlyRichTextHtml,
   sanitizeIdmlEditorHtml,
+  sanitizeSourceDisplayHtml,
 } from "@/lib/richtext/editor-content"
 import {
   resolveIdmlEditorConfiguration,
@@ -3460,11 +3460,17 @@ function UsfmSourceText(props: SourceWithTermLookupProps) {
 }
 
 function SanitizedRichHtml({ html }: { html: string }) {
-  const safeHtml = useMemo(() => DOMPurify.sanitize(html), [html])
+  // OPS-8: allowlisted, NOT DOMPurify's defaults. Defaults permit <img>/<a>/
+  // <video>, and imported HTML reaches this field verbatim — so a crafted
+  // source document could beacon every translator's IP and read-time to a
+  // third party. See sanitizeSourceDisplayHtml.
+  const safeHtml = useMemo(() => sanitizeSourceDisplayHtml(html), [html])
   const innerHtml = useMemo(() => ({ __html: safeHtml }), [safeHtml])
 
   return (
     <div
+      // Cell text is unpublished draft content; keep it out of session replays.
+      data-ph-mask
       // eslint-disable-next-line react/no-danger
       dangerouslySetInnerHTML={innerHtml}
     />
@@ -5097,9 +5103,11 @@ function EditorRow({
   const infractionCount = cellInfractions.length
 
 
-  // SECURITY: originalHtml below is sanitized through DOMPurify.sanitize() at
-  // the render boundary. Parsers only produce safe inline tags (<b>, <i>, <u>,
-  // <s>, <code>). DOMPurify provides defense-in-depth against XSS.
+  // SECURITY: originalHtml below is sanitized at the render boundary by
+  // sanitizeSourceDisplayHtml, which allowlists exactly the inline tags the
+  // parsers produce (<b>, <i>, <u>, <s>, <code>). Anything else in an imported
+  // document — notably <img>/<a>, which DOMPurify's defaults let through —
+  // is dropped rather than rendered. See OPS-8.
   // Prefer the explicitly-assigned cast member's name; fall back to the cell's
   // own label (e.g. a chapter/verse marker from USFM), then nothing.
   const castVoiceId = cellLabelsEnabled ? assignedCastVoiceId(project.ttsSettings, cell.id) : undefined

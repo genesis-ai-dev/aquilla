@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { importBiblicaStudyNotes, type BiblicaProgress } from "@/lib/import"
 import { useI18n, useT } from "@/lib/i18n/I18nProvider"
-import { formatNumber } from "@/lib/i18n/format"
+import { formatCount, formatNumber } from "@/lib/i18n/format"
 import type { FileReference } from "@/lib/parsers/types"
 
 interface BiblicaPanelProps {
@@ -127,7 +127,7 @@ export function BiblicaPanel({
               {progress.verseUnitCount ? (
                 <p className="mt-1.5">
                   {t("importExport.biblica.paragraphsSkipped", {
-                    count: formatNumber(progress.verseUnitCount, locale),
+                    count: formatCount(progress.verseUnitCount, locale),
                   })}
                 </p>
               ) : null}

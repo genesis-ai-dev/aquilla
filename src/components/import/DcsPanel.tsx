@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useI18n, useT } from "@/lib/i18n/I18nProvider"
-import { formatNumber } from "@/lib/i18n/format"
+import { formatCount, formatNumber } from "@/lib/i18n/format"
 import { RichMessage } from "@/lib/i18n/RichMessage"
 import type { FileReference } from "@/lib/parsers/types"
 import { DcsCatalogBrowser } from "@/components/dcs/DcsCatalogBrowser"
@@ -134,9 +134,9 @@ export function DcsPanel({ projectId, getToken, defaultLang, patchDcsCursor, onI
           <p>
             {/* Two independent counts (files, cells) — each pluralized on its own and
              *  joined, rather than one template agreeing with two numbers at once. */}
-            {t("search.expanded.fileCount", { count: formatNumber(summary.files, locale) })}
+            {t("search.expanded.fileCount", { count: formatCount(summary.files, locale) })}
             {" · "}
-            {t("common.cellCount", { count: formatNumber(summary.cells, locale) })}
+            {t("common.cellCount", { count: formatCount(summary.cells, locale) })}
           </p>
           <p>
             {summary.pinned

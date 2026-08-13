@@ -8,7 +8,7 @@ import { SegmentTabs } from "@/components/ui/tabs"
 import { importHelloao, type EBibleProgress } from "@/lib/import"
 import { formatBytesProgress as formatProgress } from "@/lib/format-bytes"
 import { useI18n, useT } from "@/lib/i18n/I18nProvider"
-import { formatNumber } from "@/lib/i18n/format"
+import { formatCount, formatNumber } from "@/lib/i18n/format"
 import { RichMessage } from "@/lib/i18n/RichMessage"
 import type { FileReference } from "@/lib/parsers/types"
 import { fetchHelloaoTranslations, fetchHelloaoBooks, type HelloaoTranslation, type HelloaoBook } from "@/lib/parsers/helloao"
@@ -251,7 +251,7 @@ export function HelloaoPanel({ projectId, username, sourceLanguage, targetLangua
         <div className="flex items-center justify-end gap-3">
           {books && checkedBooks.size > 0 && (
             <span className="text-xs text-muted-foreground">
-              {t("importExport.helloao.approxVerseCount", { count: formatNumber(selectedVerseCount, locale) })}
+              {t("importExport.helloao.approxVerseCount", { count: formatCount(selectedVerseCount, locale) })}
             </span>
           )}
           <Button onClick={handleImport} disabled={!books || checkedBooks.size === 0 || importing}>

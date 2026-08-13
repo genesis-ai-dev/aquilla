@@ -4,7 +4,7 @@ import { useT } from "@/lib/i18n/I18nProvider"
 import { useProject } from "@/hooks/useProject"
 import { describePatchFailure, SETTINGS_EDIT_ROLE_FLOOR } from "@/hooks/useProjectSettings"
 import { useNavHistoryTitle } from "@/context/NavHistoryContext"
-import { deriveNavTitle } from "@/lib/navigation/deriveTitle"
+import { deriveNavTitleKey } from "@/lib/navigation/deriveTitle"
 import { deriveCellAreaState } from "@/lib/editor/cell-area-state"
 import { CellAreaPlaceholder } from "./CellAreaPlaceholder"
 import { WorkspaceSkeleton } from "./WorkspaceSkeleton"
@@ -665,9 +665,13 @@ export function ProjectWorkspace() {
       ? projectFiles.find((f) => f.id === routeFileId)?.name
       : undefined
     if (fileName) return `${project.name} · ${fileName}`
-    const section = deriveNavTitle(location.pathname)
-    return section === "Editor" ? project.name : `${project.name} · ${section}`
-  }, [project, routeFileId, projectFiles, location.pathname])
+    const info = deriveNavTitleKey(location.pathname)
+    // Compare the KEY, never the rendered label: the old `=== "Editor"` check
+    // silently stopped matching the moment this surface was translated.
+    if (info.kind === "key" && info.key === "editor.navTitle.editor") return project.name
+    const section = info.kind === "key" ? t(info.key) : info.text
+    return `${project.name} · ${section}`
+  }, [project, routeFileId, projectFiles, location.pathname, t])
   useNavHistoryTitle(navHistoryTitle)
 
   // `navigate(replace)` calls `history.replaceState` synchronously, but the
@@ -1540,10 +1544,11 @@ export function ProjectWorkspace() {
 
   const isSubtitleFile = activeFile?.type === "vtt" || activeFile?.type === "srt"
 
-  const workspaceBreadcrumb = useMemo(() => ({
-    surfaceLabel:
-      centerSurface === "editor" ? "Editor" : deriveNavTitle(location.pathname),
-  }), [centerSurface, location.pathname])
+  const workspaceBreadcrumb = useMemo(() => {
+    if (centerSurface === "editor") return { surfaceLabel: t("editor.navTitle.editor") }
+    const info = deriveNavTitleKey(location.pathname)
+    return { surfaceLabel: info.kind === "key" ? t(info.key) : info.text }
+  }, [centerSurface, location.pathname, t])
 
   const handleVisibleFootnotesChange = useCallback((entries: VisibleFootnoteEntry[]) => {
     const key = entries

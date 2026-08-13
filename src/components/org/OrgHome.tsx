@@ -800,14 +800,14 @@ export function OrgHome() {
           statusBar={null}
           main={
             <Page size="wide">
-              <PageHeader title="All organizations" />
+              <PageHeader title={t("org.breadcrumb.allOrganizations")} />
               <EmptyState
                 data-testid="org-load-error"
                 icon={AlertTriangle}
-                title="Couldn’t load your organizations"
+                title={t("org.orgHome.allOrgsError.title")}
                 description={orgsError ?? accessibleProjectsError ?? "Something went wrong loading your workspace."}
                 action={
-                  <Button onClick={() => { void retryOrgLoad() }}>Retry</Button>
+                  <Button onClick={() => { void retryOrgLoad() }}>{t("common.retry")}</Button>
                 }
               />
             </Page>
@@ -1227,7 +1227,7 @@ export function OrgHome() {
                               variant="inline"
                               className="py-10"
                               icon={FolderPlus}
-                              title="No projects yet."
+                              title={t("org.orgHome.noProjectsYet")}
                             />
                           )
                         ) : visible.length === 0 ? (
@@ -1277,11 +1277,11 @@ export function OrgHome() {
                     <EmptyState
                       data-testid="no-organizations-empty"
                       icon={Building2}
-                      title="You're not part of an organization yet"
-                      description="Create one to start a translation project, or ask a teammate to invite you to theirs."
+                      title={t("org.orgHome.noOrgYet.title")}
+                      description={t("org.orgHome.noOrgYet.description")}
                       action={
                         <Button onClick={() => setOrgCreateOpen(true)}>
-                          Create organization
+                          {t("org.createDialog.title")}
                         </Button>
                       }
                     />

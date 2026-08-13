@@ -22,6 +22,12 @@ export const org = defineNamespace({
     "org.switcher.noOrganizationsFound": "No organizations found.",
     "org.switcher.allProjects": "All projects",
     "org.switcher.create": "Create",
+    // AQU-882/AQU-883: retry affordances for the two independent load failures
+    // the switcher can show — the member-org list, and the project directory
+    // that backs guest orgs.
+    "org.switcher.retryOrganizationsAriaLabel": "Retry loading organizations",
+    "org.switcher.retrySharedOrganizationsAriaLabel": "Retry loading shared organizations",
+    "org.switcher.couldNotLoadSharedOrganizations": "Couldn’t load shared organizations",
 
     // -- LaneChips: per-lane progress chips on an OrgHome project row --
     "org.laneChips.tooltip": "{label} — {pct} translated",
@@ -55,6 +61,16 @@ export const org = defineNamespace({
     "org.orgHome.projectDirectoryError.description":
       "Projects shared with you and guest organizations may be missing from this view.",
     "org.orgHome.noProjectsYet": "No projects yet.",
+    // AQU-882: the all-organizations route's own org-list load failure —
+    // distinct from projectDirectoryError above, which is the accessible-
+    // projects/guest-org feed.
+    "org.orgHome.allOrgsError.title": "Couldn’t load your organizations",
+    // AQU-864: no org in scope at all — offer the only thing that moves the
+    // caller forward, creating one. "Create organization" button reuses
+    // `org.createDialog.title` (identical text).
+    "org.orgHome.noOrgYet.title": "You're not part of an organization yet",
+    "org.orgHome.noOrgYet.description":
+      "Create one to start a translation project, or ask a teammate to invite you to theirs.",
 
     "org.orgHome.organizationsPanel.countFraction": "{shown} of {total}",
     "org.orgHome.organizationsPanel.filterPlaceholder": "Filter organizations…",
@@ -683,6 +699,14 @@ export const org = defineNamespace({
       },
       "org.switcher.clearSearchAriaLabel": {
         description: "Accessible name for the small × button that clears the org-switcher search field.",
+      },
+      "org.switcher.retryOrganizationsAriaLabel": {
+        description:
+          "Accessible name for the button shown in place of the org switcher when loading the caller's member organizations failed.",
+      },
+      "org.switcher.retrySharedOrganizationsAriaLabel": {
+        description:
+          "Accessible name for the retry control shown when loading the project directory that backs shared/guest organizations failed. Used both when it replaces the whole switcher (no member orgs) and on the inline retry row inside the open dropdown (member orgs still shown).",
       },
       "org.laneChips.tooltip": {
         description:

@@ -170,15 +170,15 @@ export function OrgSwitcher() {
       <button
         type="button"
         data-testid="org-switcher-error"
-        aria-label="Retry loading organizations"
+        aria-label={t("org.switcher.retryOrganizationsAriaLabel")}
         onClick={() => { void retryOrgLoad() }}
         className="flex w-full items-center gap-2 rounded-md px-1.5 py-1.5 text-left text-sm hover:bg-accent"
       >
         <AlertTriangle className="size-4 shrink-0 text-destructive" aria-hidden />
         <span className="min-w-0 flex-1 truncate text-muted-foreground">
-          Couldn’t load organizations
+          {t("org.routeGate.errorTitle")}
         </span>
-        <span className="shrink-0 text-xs font-medium underline">Retry</span>
+        <span className="shrink-0 text-xs font-medium underline">{t("common.retry")}</span>
       </button>
     )
   }
@@ -194,15 +194,15 @@ export function OrgSwitcher() {
       <button
         type="button"
         data-testid="org-switcher-projects-error"
-        aria-label="Retry loading shared organizations"
+        aria-label={t("org.switcher.retrySharedOrganizationsAriaLabel")}
         onClick={retryProjectDirectory}
         className="flex w-full items-center gap-2 rounded-md px-1.5 py-1.5 text-left text-sm hover:bg-accent"
       >
         <AlertTriangle className="size-4 shrink-0 text-destructive" aria-hidden />
         <span className="min-w-0 flex-1 truncate text-muted-foreground">
-          Couldn’t load shared organizations
+          {t("org.switcher.couldNotLoadSharedOrganizations")}
         </span>
-        <span className="shrink-0 text-xs font-medium underline">Retry</span>
+        <span className="shrink-0 text-xs font-medium underline">{t("common.retry")}</span>
       </button>
     )
   }
@@ -398,18 +398,18 @@ export function OrgSwitcher() {
                       <div className="flex items-center gap-2 text-sm">
                         <AlertTriangle className="size-4 shrink-0 text-destructive" aria-hidden />
                         <span className="min-w-0 flex-1 truncate text-muted-foreground">
-                          Couldn’t load shared organizations
+                          {t("org.switcher.couldNotLoadSharedOrganizations")}
                         </span>
                         <button
                           type="button"
-                          aria-label="Retry loading shared organizations"
+                          aria-label={t("org.switcher.retrySharedOrganizationsAriaLabel")}
                           className="shrink-0 text-xs font-medium underline"
                           onClick={(e) => {
                             e.stopPropagation()
                             retryProjectDirectory()
                           }}
                         >
-                          Retry
+                          {t("common.retry")}
                         </button>
                       </div>
                     </div>

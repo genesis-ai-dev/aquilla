@@ -7,6 +7,7 @@
 import { useCallback, useState } from "react"
 import { AlertTriangle, CloudDownload, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { useT } from "@/lib/i18n/I18nProvider"
 import {
   planDriveImport,
   expandDriveFolders,
@@ -34,6 +35,7 @@ export function GoogleDrivePanel({
    *  standard import path. Origin keys are normalized file names. */
   onFiles: (files: File[], origins: Map<string, Record<string, unknown>>) => void | Promise<void>
 }) {
+  const t = useT()
   const config = googleDriveConfig()
   const [stage, setStage] = useState<Stage>({ kind: "idle" })
   const [error, setError] = useState<string | null>(null)
@@ -85,8 +87,7 @@ export function GoogleDrivePanel({
   if (!config) {
     return (
       <div className="rounded-md border border-dashed p-6 text-sm text-muted-foreground">
-        Google Drive import isn&apos;t configured for this deployment
-        (missing VITE_GOOGLE_CLIENT_ID / VITE_GOOGLE_API_KEY).
+        {t("importExport.googleDrive.notConfigured")}
       </div>
     )
   }
@@ -105,17 +106,16 @@ export function GoogleDrivePanel({
       {(stage.kind === "idle" || stage.kind === "picking") && (
         <div className="flex flex-col items-start gap-2">
           <p className="text-sm text-muted-foreground">
-            Pick files or a whole folder from your Google Drive. Only the items
-            you pick are shared with Aquilla. Google Docs import as DOCX.
+            {t("importExport.googleDrive.description")}
           </p>
           <Button onClick={pick} disabled={stage.kind === "picking"}>
             {stage.kind === "picking" ? (
               <>
-                <Loader2 className="mr-2 size-4 animate-spin" /> Waiting for Google…
+                <Loader2 className="mr-2 size-4 animate-spin" /> {t("importExport.googleDrive.waiting")}
               </>
             ) : (
               <>
-                <CloudDownload className="mr-2 size-4" /> Choose from Google Drive
+                <CloudDownload className="mr-2 size-4" /> {t("importExport.googleDrive.chooseButton")}
               </>
             )}
           </Button>
@@ -125,17 +125,20 @@ export function GoogleDrivePanel({
       {stage.kind === "summary" && (
         <div className="space-y-3">
           <div>
-            <h4 className="text-sm font-medium">Will import ({stage.plan.accepted.length})</h4>
+            <h4 className="text-sm font-medium">
+              {t("importExport.googleDrive.willImportCount", { count: stage.plan.accepted.length })}
+            </h4>
             <ul className="mt-1 max-h-40 overflow-y-auto text-sm text-muted-foreground">
-              {stage.plan.accepted.map((t) => (
-                <li key={t.id}>{t.name}</li>
+              {stage.plan.accepted.map((task) => (
+                <li key={task.id}>{task.name}</li>
               ))}
             </ul>
           </div>
           {stage.plan.skipped.length > 0 && (
             <div role="alert">
               <h4 className="flex items-center gap-1.5 text-sm font-medium text-amber-600 dark:text-amber-400">
-                <AlertTriangle className="size-4" /> Skipped ({stage.plan.skipped.length})
+                <AlertTriangle className="size-4" />{" "}
+                {t("importExport.googleDrive.skippedCount", { count: stage.plan.skipped.length })}
               </h4>
               <ul className="mt-1 max-h-40 overflow-y-auto text-sm text-muted-foreground">
                 {stage.plan.skipped.map((s) => (
@@ -148,10 +151,10 @@ export function GoogleDrivePanel({
           )}
           <div className="flex gap-2">
             <Button onClick={confirm} disabled={stage.plan.accepted.length === 0}>
-              Import {stage.plan.accepted.length} file{stage.plan.accepted.length === 1 ? "" : "s"}
+              {t("importExport.googleDrive.importButton", { count: stage.plan.accepted.length })}
             </Button>
             <Button variant="outline" onClick={() => setStage({ kind: "idle" })}>
-              Back
+              {t("common.back")}
             </Button>
           </div>
         </div>
@@ -160,7 +163,7 @@ export function GoogleDrivePanel({
       {stage.kind === "downloading" && (
         <p className="flex items-center gap-2 text-sm text-muted-foreground">
           <Loader2 className="size-4 animate-spin" />
-          Downloading {stage.done}/{stage.total} from Google Drive…
+          {t("importExport.googleDrive.downloadingProgress", { done: stage.done, total: stage.total })}
         </p>
       )}
     </div>

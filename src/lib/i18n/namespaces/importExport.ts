@@ -45,6 +45,21 @@ export const importExport = defineNamespace({
     "importExport.action.importing": "Importing…",
     "importExport.errors.importFailed": "Import failed",
 
+    // — Google Drive import panel (AQU-823) —
+    "importExport.googleDrive.notConfigured":
+      "Google Drive import isn't configured for this deployment (missing VITE_GOOGLE_CLIENT_ID / VITE_GOOGLE_API_KEY).",
+    "importExport.googleDrive.description":
+      "Pick files or a whole folder from your Google Drive. Only the items you pick are shared with Aquilla. Google Docs import as DOCX.",
+    "importExport.googleDrive.waiting": "Waiting for Google…",
+    "importExport.googleDrive.chooseButton": "Choose from Google Drive",
+    "importExport.googleDrive.willImportCount": "Will import ({count})",
+    "importExport.googleDrive.skippedCount": "Skipped ({count})",
+    "importExport.googleDrive.importButton": plural({
+      one: "Import {count} file",
+      other: "Import {count} files",
+    }),
+    "importExport.googleDrive.downloadingProgress": "Downloading {done}/{total} from Google Drive…",
+
     // — Macula Hebrew/Greek panel —
     "importExport.macula.description":
       "Upload a Macula TSV file obtained from {link}. Each TSV file represents one " +
@@ -1127,6 +1142,26 @@ export const importExport = defineNamespace({
       "importExport.dialog.saveFailed": {
         description: "Inline retryable error shown when confirming the post-import direction prompt fails to save.",
         placeholders: { message: "Raw underlying error message." },
+      },
+      "importExport.googleDrive.willImportCount": {
+        description: "Heading above the accepted-files list on the Google Drive picker's pre-import summary screen.",
+        placeholders: { count: "Number of files that will be imported." },
+      },
+      "importExport.googleDrive.skippedCount": {
+        description:
+          "Heading above the skipped-files list on the Google Drive picker's pre-import summary screen, shown only when at least one item was skipped.",
+        placeholders: { count: "Number of files that were skipped." },
+      },
+      "importExport.googleDrive.importButton": {
+        description: "Primary button on the Google Drive picker's pre-import summary screen that starts the download.",
+        placeholders: { count: "Number of files that will be downloaded and imported." },
+      },
+      "importExport.googleDrive.downloadingProgress": {
+        description: "Progress line shown while files picked from Google Drive are being downloaded into the browser.",
+        placeholders: {
+          done: "Number of files downloaded so far.",
+          total: "Total number of files being downloaded.",
+        },
       },
     },
   },

@@ -273,11 +273,14 @@ export class Workspace {
     throw new Error("Import dialog did not open")
   }
 
-  /** Click a file row in the sidebar, identified by a substring of its name. */
+  /** Click a file row in the sidebar, identified by a substring of its name.
+   * Anchored to the file rows themselves: sidebar chrome (e.g. the history
+   * arrows) embeds the current file's name in its accessible labels, so a
+   * bare role+name match inside <aside> can grab the wrong button. */
   async openFileBySubstring(nameSubstring: string): Promise<void> {
     await this.page
-      .locator("aside")
-      .getByRole("button", { name: new RegExp(nameSubstring, "i") })
+      .locator('aside [data-showcase="sidebar.file"]')
+      .filter({ hasText: new RegExp(nameSubstring, "i") })
       .first()
       .click()
   }

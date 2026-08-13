@@ -40,7 +40,9 @@ export interface StagedEvent {
   cellId?: string
   parentId?: string
   payload: Record<string, unknown>
-  display: { canonicalRef?: string; before?: string; after?: string }
+  /** AQU-846: fileName is what the approval UI names, so the user can see
+   *  WHICH file a proposed cell lands in before they click Apply. */
+  display: { canonicalRef?: string; fileName?: string; before?: string; after?: string }
 }
 
 // ── Inputs ──────────────────────────────────────────────────────────────────
@@ -284,6 +286,27 @@ async function stageOne(
   return { kind: "staged", event, sourceValue }
 }
 
+/**
+ * AQU-846: resolve display names for every file the batch touches, so both the
+ * proposal card and the summary line can say where the changes land. Names are
+ * cosmetic — a lookup failure must never fail the staging.
+ */
+async function resolveFileNames(
+  db: AquillaDb,
+  projectId: string,
+  fileIds: string[],
+): Promise<Map<string, string>> {
+  const names = new Map<string, string>()
+  if (fileIds.length === 0) return names
+  const placeholders = fileIds.map(() => "?").join(", ")
+  const { results } = await db
+    .prepare(`SELECT id, name FROM files WHERE project_id = ? AND id IN (${placeholders})`)
+    .bind(projectId, ...fileIds)
+    .all<{ id: string; name: string }>()
+  for (const row of results ?? []) names.set(row.id, row.name)
+  return names
+}
+
 function summarize(events: StagedEvent[]): string {
   const byKind = new Map<string, StagedEvent[]>()
   for (const e of events) {
@@ -296,7 +319,13 @@ function summarize(events: StagedEvent[]): string {
     const refs = list.map((e) => e.display.canonicalRef).filter(Boolean) as string[]
     const span =
       refs.length === 0 ? "" : refs.length === 1 ? ` (${refs[0]})` : ` (${refs[0]} – ${refs[refs.length - 1]})`
-    parts.push(`${list.length}× ${kind}${span}`)
+    // AQU-846: name the destination file(s) — the summary is the headline the
+    // user reads before approving, and "12× target.cell.commit (GEN 1:1 – 1:12)"
+    // never said which file those refs live in.
+    const files = [...new Set(list.map((e) => e.display.fileName).filter(Boolean) as string[])]
+    const where =
+      files.length === 0 ? "" : files.length === 1 ? ` in ${files[0]}` : ` in ${files.join(", ")}`
+    parts.push(`${list.length}× ${kind}${span}${where}`)
   }
   return `Stage ${events.length} event${events.length === 1 ? "" : "s"}: ${parts.join(", ")}`
 }
@@ -355,6 +384,21 @@ export async function stageEvents(
       ...lintLines,
       "Fix the NEEDS REVIEW drafts and re-emit them (same cellIds) — the corrected versions replace these in the proposal.",
     )
+  }
+
+  // AQU-846: stamp each staged event with its file's display name before the
+  // proposal leaves the server — the approval UI has only what `display` carries.
+  if (staged.length > 0) {
+    try {
+      const fileIds = [...new Set(staged.map((e) => e.fileId).filter(Boolean) as string[])]
+      const names = await resolveFileNames(db, ctx.projectId, fileIds)
+      for (const event of staged) {
+        const name = event.fileId ? names.get(event.fileId) : undefined
+        if (name) event.display.fileName = name
+      }
+    } catch {
+      /* naming is cosmetic — never fail a staged batch over it */
+    }
   }
 
   lines.push(

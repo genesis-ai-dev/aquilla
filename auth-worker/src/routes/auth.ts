@@ -308,14 +308,22 @@ auth.post("/register", zValidator("json", registerSchema), async (c) => {
         409,
       )
     }
+    // SEC-11: this branch used to echo `msg` verbatim, in every environment.
+    // Any internal failure whose message merely CONTAINED "409" — a Postgres
+    // error string, an upstream URL, a constraint name — was reflected to an
+    // unauthenticated caller. The status code is the useful part; the text is
+    // already in the log line above.
     if (msg.includes("409")) {
-      return c.json({ detail: msg, error: msg }, 409)
+      return c.json(
+        { detail: "User already exists", error: "User already exists" },
+        409,
+      )
     }
 
-    const envName = String(c.env.ENVIRONMENT || "").toLowerCase()
-    const isProd = envName === "production" || envName === "prod"
-    const detail = isProd ? "Registration failed" : msg || "Registration failed"
-    return c.json({ detail, error: "Registration failed" }, 500)
+    return c.json(
+      { detail: "Registration failed", error: "Registration failed" },
+      500,
+    )
   }
 })
 

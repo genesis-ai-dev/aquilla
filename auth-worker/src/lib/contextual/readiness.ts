@@ -85,8 +85,8 @@ export function computeContextReadiness(input: ReadinessInput): ContextReadiness
       answered === 0 && !hasL1
         ? "No brief. Autopilot has to guess your audience, register, and how literal to be — the decisions that shape every sentence."
         : `${answered} of the brief's questions answered${hasL1 ? ", summarised for every passage" : ""}. Audience, register, and literalness ride in each draft prompt.`,
-    // The brief builder lives on Living Memory, not in a settings sub-route.
-    href: "memory",
+        // The brief builder lives on Living Memory in project settings.
+        href: "settings/memory",
   })
 
   // ── Examples of your team's own work ──
@@ -111,7 +111,7 @@ export function computeContextReadiness(input: ReadinessInput): ContextReadiness
       authored === 0
         ? "No hand-written checks. Key-term checks still run; add rules for punctuation, spelling, or formatting conventions you care about."
         : `${authored} ${authored === 1 ? "check runs" : "checks run"} on every draft before it reaches you.`,
-    href: "rules",
+    href: "settings/rules",
   })
 
   // ── Languages ──

@@ -176,3 +176,41 @@ describe("apply / discard", () => {
     expect(screen.queryByRole("button", { name: "Apply" })).not.toBeInTheDocument()
   })
 })
+
+// AQU-846 — the drafts landed in a file the user wasn't looking at, and the
+// card gave them no way to notice before clicking Apply.
+describe("destination file (AQU-846)", () => {
+  it("names the file each proposed cell belongs to", () => {
+    render(
+      <ProposalCard
+        {...BASE_PROPS}
+        proposal={makeProposal({
+          events: [
+            {
+              kind: "target.cell.commit",
+              fileId: "f-gen",
+              cellId: "c-1",
+              payload: { value: "En el principio" },
+              display: { canonicalRef: "GEN 1:1", fileName: "Genesis.usfm", after: "En el principio" },
+            },
+            {
+              kind: "target.cell.commit",
+              fileId: "f-mrk",
+              cellId: "c-2",
+              payload: { value: "Y comenzó" },
+              display: { canonicalRef: "MRK 4:1", fileName: "Mark.usfm", after: "Y comenzó" },
+            },
+          ],
+        })}
+      />,
+    )
+    expect(screen.getByText("Genesis.usfm")).toBeInTheDocument()
+    expect(screen.getByText("Mark.usfm")).toBeInTheDocument()
+  })
+
+  it("omits the file badge rather than guessing when the server sent no name", () => {
+    render(<ProposalCard {...BASE_PROPS} proposal={makeProposal()} />)
+    expect(screen.getByText("MRK 4:1")).toBeInTheDocument()
+    expect(screen.queryByText(/\.usfm$/)).not.toBeInTheDocument()
+  })
+})

@@ -330,6 +330,7 @@ export interface ContextualSpanStartFrame {
   type: "contextual.span.start"
   runId: string
   fileId: string
+  targetLang: string
   spanId: string
   spanLabel: string
 }
@@ -351,8 +352,8 @@ export interface ContextualDraftsFrame {
   type: "contextual.drafts"
   runId: string
   fileId: string
-  /** Required even though v1 only emits the default lane. Consumers fail
-   * closed on missing/non-default values during rolling or legacy traffic. */
+  /** Empty string is Project default. Consumers fail closed when this does
+   *  not match the editor's attached language lane. */
   targetLang: string
   spanId?: string
   spanLabel: string
@@ -745,6 +746,7 @@ async function processSpan(
     type: "contextual.span.start",
     runId: run.id,
     fileId: run.fileId,
+    targetLang: run.targetLang,
     spanId: seed.id,
     spanLabel: label,
   })
@@ -780,7 +782,9 @@ async function processSpan(
       ...(steeringDirections.length > 0 ? { steeringDirections } : {}),
       rules: shared.rules,
       ...(shared.ctx.sourceLanguage ? { sourceLanguage: shared.ctx.sourceLanguage } : {}),
-      ...(shared.ctx.targetLanguage ? { targetLanguage: shared.ctx.targetLanguage } : {}),
+      ...(run.targetLang || shared.ctx.targetLanguage
+        ? { targetLanguage: run.targetLang || shared.ctx.targetLanguage }
+        : {}),
       // Tag every call this span makes, for cost attribution. A wave runs
       // several spans concurrently, so the span id must ride the request
       // rather than live in shared mutable state.
@@ -844,7 +848,7 @@ async function processSpan(
           projectId: run.projectId,
           fileId: run.fileId,
           cellIds: draft.cells.map((c) => c.cellId),
-          targetLang: "",
+          targetLang: run.targetLang,
         })
         occupiedAtStage += occupied.size
         const fresh = draft.cells.filter((c) => !occupied.has(c.cellId))
@@ -1008,23 +1012,10 @@ export async function runOneTick(deps: TickDeps): Promise<TickResult> {
     return { continueRun: false, status: run.status }
   }
 
-  // AQU-826 filters cell reads by lane, but contextual_drafts remain lane-less.
-  // Fail legacy non-default runs before reading any cells rather than persist
-  // evidence whose lane identity the review queue cannot represent.
-  if (run.targetLang !== "") {
-    const failed = await failRun(
-      db,
-      runId,
-      "unsupported_target_language_lane",
-    )
-    if (failed.status === "ok") await notify(runStateFrame(failed.run))
-    return { continueRun: false, status: failed.status === "ok" ? "failed" : run.status }
-  }
-
   // Scope + cursor. Pairs are re-read every wave (cells move under the run);
   // seeds are pinned in the cursor so segmentation never shifts mid-run.
   const [pairs, excludedCellIds] = await Promise.all([
-    selectCellPairs(db, run.projectId, { fileId: run.fileId, targetLang: "" }),
+    selectCellPairs(db, run.projectId, { fileId: run.fileId, targetLang: run.targetLang }),
     findProposedCellsFromOtherRuns(db, {
       projectId: run.projectId,
       fileId: run.fileId,
@@ -1050,10 +1041,9 @@ export async function runOneTick(deps: TickDeps): Promise<TickResult> {
   }
 
   if (cursor.nextIndex >= cursor.seeds.length) {
-    // A paused final failure resumes into this edge. Preserve its actionable
-    // terminal state instead of relabelling it as idle; only clean exhaustion
-    // parks for future steering/new cells.
-    const t = run.failedSpans > 0
+    // Exhausted work parks so successful drafts stay reviewable on a live run.
+    // A run that produced nothing at all still fails, so Play can start fresh.
+    const t = run.failedSpans > 0 && run.doneSpans === 0
       ? await failRun(db, runId, run.lastError ?? "One or more passages need attention.")
       : await parkRun(db, runId)
     if (t.status === "ok") await notify(runStateFrame(t.run))
@@ -1158,9 +1148,9 @@ export async function runOneTick(deps: TickDeps): Promise<TickResult> {
   }
   if (after) await notify(runStateFrame(after))
   if (fresh?.status === "running" && advanced.nextIndex >= advanced.seeds.length) {
-    // Exhausted work with any failed passage is terminal/actionable, not
-    // "idle". Successful siblings and their proposals remain reviewable.
-    const t = fresh.failedSpans > 0
+    // Mixed success parks with failedSpans as the attention signal. A run
+    // that staged nothing still fails so retry can start a new run.
+    const t = fresh.failedSpans > 0 && fresh.doneSpans === 0
       ? await failRun(db, runId, fresh.lastError ?? "One or more passages need attention.")
       : await parkRun(db, runId)
     if (t.status === "ok") await notify(runStateFrame(t.run))

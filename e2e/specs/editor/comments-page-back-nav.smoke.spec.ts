@@ -1,32 +1,32 @@
 import { test, expect } from "../../helpers/multi-user"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
+import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
- * CommentsPage — "Back to project" button navigates to the workspace.
+ * Comments — shell-owned navigation back to the editor.
  *
- * CommentsPage.tsx has a "Back to project" button (ghost, sm, ArrowLeft icon)
- * in the page header. Clicking it calls navigate(`/project/${projectId}/editor`).
+ * Opening Comments from the editor (sidebar) stamps `?return=` so the
+ * breadcrumb includes a clickable Editor crumb. Direct /comments URLs do not.
  *
- * This spec: navigate to /project/:id/comments → click "Back to project" →
- * verify URL returns to /project/:id/editor
+ * This spec: import a file → open comments from the sidebar → verify Editor
+ * and Comments in the breadcrumb → click Editor → return to the file editor.
  */
-test("CommentsPage Back to project navigates to workspace", async ({ alice }) => {
-  const dash = new Dashboard(alice)
-  await dash.goto()
-  const name = `CommentsBack ${Date.now()}`
-  await dash.createProject({ name, source: "en", target: "fr" })
+test("comments opened from editor shows Editor in the breadcrumb", async ({ alice }) => {
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `CommentsBack ${Date.now()}` })
+  const ws = await openSeededProject(alice, seeded)
 
-  await alice.waitForURL(/\/projects\/[^/]+$/, { timeout: 5_000 })
-  const projectId = alice.url().match(/\/projects\/([^/]+)$/)?.[1]
-  expect(projectId).toBeTruthy()
+  await alice.locator("aside").getByRole("button", { name: /^Comments$/ }).click()
+  await alice.waitForURL(/\/project\/[^/]+\/comments/, { timeout: 10_000 })
+  await expect(
+    alice.locator("h1").filter({ hasText: /Comments/i }),
+  ).toBeVisible({ timeout: 10_000 })
 
-  await alice.goto(`/project/${projectId}/comments`)
-  // "Back to project" button is visible.
-  const backBtn = alice.getByRole("button", { name: /Back to project/i })
-  await expect(backBtn).toBeVisible({ timeout: 10_000 })
+  const breadcrumb = alice.getByRole("navigation", { name: /breadcrumb/i })
+  const editorCrumb = breadcrumb.getByRole("link", { name: /^Editor$/i })
+  await expect(editorCrumb).toBeVisible()
+  await expect(breadcrumb.getByText("Comments", { exact: true })).toHaveAttribute("aria-current", "page")
 
-  // Click it — navigates to /project/:id/editor
-  await backBtn.click()
-  await alice.waitForURL(new RegExp(`/project/${projectId}/editor`), { timeout: 5_000 })
-  expect(alice.url()).toMatch(/\/project\/[^/]+\/editor(?:\/file\/[^/]+)?(?:\?|$)/)
+  await editorCrumb.click()
+  await alice.waitForURL(/\/project\/[^/]+\/editor(?:\/file\/[^/]+)?/, { timeout: 10_000 })
+  await ws.waitForEditor()
+  await expect(alice.locator("h1").filter({ hasText: /Comments/i })).not.toBeVisible()
 })

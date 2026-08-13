@@ -151,7 +151,7 @@ export function toUserFacingError(err: unknown, context?: string): UserFacingErr
     // Parse "... failed: HTTP 403 — <body>" patterns emitted by our fetch helpers.
     const match = err.message.match(/HTTP (\d{3})(?:\s*[—-]\s*(.*))?$/s)
     if (match) {
-      const status = parseInt(match[1]!, 10)
+      const status = parseInt(match[1], 10)
       const body = (match[2] ?? "").trim()
       return messageForStatus(status, body || err.message, context)
     }

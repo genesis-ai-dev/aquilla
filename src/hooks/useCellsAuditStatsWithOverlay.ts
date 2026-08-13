@@ -10,7 +10,7 @@ interface UseCellsAuditStatsWithOverlayOptions {
 }
 
 /**
- * Combines D1 audit stats with the client outbox so users see their own
+ * Combines server (Postgres) audit stats with the client outbox so users see their own
  * pending commits/validations immediately, before the next 30s refetch.
  *
  * Pending events are filtered to the active fileId — the outbox can hold

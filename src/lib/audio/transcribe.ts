@@ -307,7 +307,13 @@ export async function transcribeCell(args: TranscribeCellArgs): Promise<number> 
       // to the local outbox and can throw a role-gate error, so swallow it:
       // transcription itself succeeded, and the timings re-emit on a manual
       // re-transcribe. author falls back to "local".
-      void emitCellAudioAttach({
+      //
+      // AQU-783: AWAIT the attach so the event is durably in the outbox before
+      // transcribeCell resolves. The per-cell / timeline / batch completion
+      // handlers flush the outbox and revalidate the cell the moment this
+      // promise settles; a fire-and-forget emit let that flush race ahead of
+      // the IDB write, so the transcript only surfaced after a manual refresh.
+      await emitCellAudioAttach({
         projectId,
         fileId: cell.fileId,
         cellId: cell.id,

@@ -759,7 +759,6 @@ export function AudioRecordingModal({
           <AppTooltip content={t("audio.recordingModal.prevCellTooltip")}>
             <Button
               variant="ghost"
-              size="sm"
               disabled={!canNav || activeIndex <= 0}
               onClick={() => gotoIndex(activeIndex - 1)}
             >
@@ -769,7 +768,6 @@ export function AudioRecordingModal({
           <AppTooltip content={t("audio.recordingModal.nextCellTooltip")}>
             <Button
               variant="ghost"
-              size="sm"
               disabled={!canNav || activeIndex >= cells.length - 1}
               onClick={() => gotoIndex(activeIndex + 1)}
             >
@@ -782,13 +780,13 @@ export function AudioRecordingModal({
           {displayPhase === "preview" && (
             <>
               <AppTooltip content={t("audio.recordingModal.retakeTooltip")}>
-                <Button variant="outline" size="sm" onClick={retake}>
+                <Button variant="outline" onClick={retake}>
                   <RefreshCw className="mr-1 h-4 w-4" /> {t("audio.recordingModal.retakeButton")}
                 </Button>
               </AppTooltip>
               <AppTooltip content={online ? t("audio.recordingModal.saveTooltip") : offlineMessage}>
                 <span className="inline-flex">
-                  <Button size="sm" data-testid="rec-save" disabled={!online} onClick={save}>
+                  <Button data-testid="rec-save" disabled={!online} onClick={save}>
                     <Check className="mr-1 h-4 w-4" /> {t("common.save")}
                   </Button>
                 </span>
@@ -798,7 +796,7 @@ export function AudioRecordingModal({
 
           {displayPhase === "recording" && (
             <AppTooltip content={t("audio.recordingModal.stopTooltip")}>
-              <Button variant="destructive" size="sm" onClick={stopRecording}>
+              <Button variant="destructive" onClick={stopRecording}>
                 <Square className="mr-1 h-4 w-4" /> {t("common.stop")}
               </Button>
             </AppTooltip>
@@ -824,7 +822,6 @@ export function AudioRecordingModal({
                 <span className="inline-flex">
                   <Button
                     variant="outline"
-                    size="sm"
                     data-testid="rec-generate-tts"
                     disabled={!online || !activeCell?.translated?.trim() || ttsBusy}
                     onClick={() => void generateTts()}
@@ -842,7 +839,7 @@ export function AudioRecordingModal({
               </AppTooltip>
               <AppTooltip content={online ? t("audio.recordingModal.startTooltip") : offlineMessage}>
                 <span className="inline-flex">
-                  <Button size="sm" data-testid="rec-start" disabled={!online} onClick={startFlow}>
+                  <Button data-testid="rec-start" disabled={!online} onClick={startFlow}>
                     <Play className="mr-1 h-4 w-4" /> {t("audio.recordingModal.startButton")}
                   </Button>
                 </span>
@@ -851,7 +848,7 @@ export function AudioRecordingModal({
           )}
 
           {displayPhase === "counting" && (
-            <Button variant="outline" size="sm" onClick={() => { countdown.cancel(); setPhase("idle") }}>
+            <Button variant="outline" onClick={() => { countdown.cancel(); setPhase("idle") }}>
               {t("audio.recordingModal.cancelCountdown")}
             </Button>
           )}

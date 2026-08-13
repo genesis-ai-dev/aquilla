@@ -261,7 +261,6 @@ export function RuleImportDialog({ completionSettings, onAdd, projectId }: Props
             render={
               <Button
                 variant="outline"
-                size="sm"
                 disabled={!isConfigured}
               />
             }
@@ -306,7 +305,6 @@ export function RuleImportDialog({ completionSettings, onAdd, projectId }: Props
               </p>
               <Button
                 variant="outline"
-                size="sm"
                 onClick={() => fileInputRef.current?.click()}
               >
                 Browse file
@@ -329,7 +327,7 @@ export function RuleImportDialog({ completionSettings, onAdd, projectId }: Props
             <div className="space-y-1">
               <p className="text-xs text-muted-foreground">Or paste document text:</p>
               <Textarea
-                className="min-h-[80px] font-mono resize-y"
+                className="font-mono"
                 placeholder="Paste text here and it will be processed automatically…"
                 onPaste={handlePaste}
                 readOnly={false}

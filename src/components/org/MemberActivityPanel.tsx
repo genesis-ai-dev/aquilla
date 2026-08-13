@@ -16,6 +16,7 @@ import { X } from "lucide-react"
 import { useMemberActivity } from "@/hooks/useMemberActivity"
 import type { MemberActivityEvent } from "@/lib/sync/member-activity-read-types"
 import { Button } from "@/components/ui/button"
+import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 
 const KIND_LABELS: Record<string, string> = {
   "target.cell.create": "Created a translation",
@@ -71,7 +72,10 @@ export function MemberActivityPanel({ projectId, username, getToken, onClose }: 
       data-testid="member-activity-panel"
     >
       <div className="mb-3 flex items-center justify-between gap-2">
-        <h3 className="text-sm font-medium">Activity — {username}</h3>
+        <h3 className="flex min-w-0 items-center gap-2 text-sm font-medium">
+          <span className="shrink-0 text-muted-foreground">Activity —</span>
+          <UsernameWithAvatar username={username} nameClassName="text-sm font-medium" />
+        </h3>
         <Button
           variant="ghost"
           size="icon-sm"

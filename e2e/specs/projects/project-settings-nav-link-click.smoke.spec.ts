@@ -6,12 +6,12 @@ import { jwtFor, seedProjectWithFile } from "../../helpers/seed-project"
  *
  * AQU-501 replaced the old single-scroll + scroll-spy TOC with an index of
  * labeled sub-menus (NavList/NavRow, matching org Settings): picking a
- * sub-menu navigates to `?section=<group>` and renders only that group's
- * pane, with a "‹ Settings" BackLink back to the index.
+ * sub-menu navigates to `/settings/:section` and renders only that group's
+ * pane. Return to the index via the Settings breadcrumb.
  *
  * This spec: navigate to settings (index) → click the "Validation & health"
  * sub-menu → verify the Validation card becomes visible and the index list
- * is gone → click "‹ Settings" → verify the index returns.
+ * is gone → click Settings in the breadcrumb → verify the index returns.
  */
 test("settings sub-menu link navigates to its pane and back", async ({ alice }) => {
   const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `SettingsNavClick ${Date.now()}` })
@@ -20,6 +20,11 @@ test("settings sub-menu link navigates to its pane and back", async ({ alice }) 
   // The index shows the sub-menu list, not any section's controls.
   const validationLink = alice.getByRole("link", { name: /Validation & health/i })
   await expect(validationLink).toBeVisible({ timeout: 10_000 })
+
+  // Direct settings URL (not the editor handoff) must not insert an Editor crumb.
+  const breadcrumb = alice.getByRole("navigation", { name: /breadcrumb/i })
+  await expect(breadcrumb.getByText("Settings", { exact: true })).toBeVisible()
+  await expect(breadcrumb.getByText("Editor", { exact: true })).toHaveCount(0)
 
   await validationLink.click()
 
@@ -32,8 +37,8 @@ test("settings sub-menu link navigates to its pane and back", async ({ alice }) 
   // The sub-menu index is no longer shown (only the active pane).
   await expect(alice.getByRole("link", { name: /Validation & health/i })).not.toBeVisible()
 
-  // "‹ Settings" returns to the index.
-  await alice.getByRole("main").getByRole("link", { name: /^Settings$/i }).click()
+  // Settings breadcrumb returns to the index.
+  await alice.getByRole("navigation", { name: /breadcrumb/i }).getByRole("link", { name: /^Settings$/i }).click()
   await expect(validationSection).not.toBeVisible({ timeout: 5_000 })
   await expect(alice.getByRole("link", { name: /Validation & health/i })).toBeVisible({ timeout: 5_000 })
 })

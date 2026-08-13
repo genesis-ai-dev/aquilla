@@ -157,15 +157,16 @@ export function useOrgMembers(orgId: number | null): UseOrgMembers {
 
   useEffect(() => { void refresh(); }, [refresh]);
 
+  // AQU-780: propagate the error instead of collapsing every failure to
+  // `null`. A bare `catch { return null }` here discarded the HTTP status and
+  // message, so a 403 (non-owner), a 429, and a 500 all looked identical to
+  // the caller — which then guessed "username may not exist." The caller now
+  // branches on the thrown UserError (status/category) to show the real cause.
   const add = useCallback(async (username: string, role: number) => {
     if (!jwt || orgId == null) return null;
-    try {
-      const next = await addOrgMember(jwt, orgId, username, role);
-      await refresh();
-      return next;
-    } catch {
-      return null;
-    }
+    const next = await addOrgMember(jwt, orgId, username, role);
+    await refresh();
+    return next;
   }, [jwt, orgId, refresh]);
 
   const addMany = useCallback(async (

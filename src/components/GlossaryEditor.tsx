@@ -378,7 +378,7 @@ export function GlossaryEditor({ files: workspaceFiles }: GlossaryEditorProps = 
         <h1 className="flex-1 text-base font-semibold">Glossary</h1>
         {canManage && (
           <>
-            <Button variant="outline" size="sm" onClick={handleSuggest} disabled={suggestRequested}>
+            <Button variant="outline" onClick={handleSuggest} disabled={suggestRequested}>
               <Sparkles data-icon="inline-start" /> {suggestRequested ? "Finding terms…" : "Suggest terms"}
             </Button>
             <input
@@ -392,19 +392,17 @@ export function GlossaryEditor({ files: workspaceFiles }: GlossaryEditorProps = 
                 e.target.value = ""
               }}
             />
-            <Button variant="outline" size="sm" onClick={() => importInputRef.current?.click()}>
+            <Button variant="outline" onClick={() => importInputRef.current?.click()}>
               <Upload data-icon="inline-start" /> Import
             </Button>
             <Button
               variant="outline"
-              size="sm"
               onClick={() => downloadBlob(exportConceptsCsv(concepts), "glossary.csv", "text/csv")}
             >
               <Download data-icon="inline-start" /> Export CSV
             </Button>
             <Button
               variant="outline"
-              size="sm"
               onClick={() => downloadBlob(exportConceptsTbx(concepts), "glossary.tbx", "application/xml")}
             >
               <Download data-icon="inline-start" /> Export TBX
@@ -413,7 +411,6 @@ export function GlossaryEditor({ files: workspaceFiles }: GlossaryEditorProps = 
         )}
         <Button
           variant={view === "violations" ? "secondary" : "outline"}
-          size="sm"
           aria-pressed={view === "violations"}
           onClick={() => {
             setCellDataRequested(true)
@@ -424,7 +421,7 @@ export function GlossaryEditor({ files: workspaceFiles }: GlossaryEditorProps = 
           {view === "violations" ? "Back to glossary" : "Violations"}
         </Button>
         {canManage && view === "glossary" && (
-          <Button size="sm" onClick={() => setAddOpen(true)} aria-label="Add term">
+          <Button onClick={() => setAddOpen(true)} aria-label="Add term">
             <Plus data-icon="inline-start" />
             Add term
           </Button>

@@ -22,6 +22,7 @@ const orgContext = vi.hoisted(() => ({
   orgs: [] as { id: number; name: string }[],
   accessibleProjects: [] as { id: string }[],
   accessibleProjectsLoading: false,
+  accessibleProjectsError: null as string | null,
   isLoading: false,
   error: null as string | null,
   setActiveOrg: vi.fn(),
@@ -87,6 +88,7 @@ beforeEach(() => {
   orgContext.orgs = []
   orgContext.accessibleProjects = []
   orgContext.accessibleProjectsLoading = false
+  orgContext.accessibleProjectsError = null
   orgContext.isLoading = false
   orgContext.error = null
   orgContext.retryOrgLoad.mockClear()
@@ -128,6 +130,22 @@ describe("OrgHome — /orgs/all landing (AQU-864)", () => {
 
     // AQU-882: retry must re-issue the org fetch AND the dependent
     // project-directory fetch — the resolver reads `accessibleProjects` too.
+    fireEvent.click(screen.getByRole("button", { name: /retry/i }))
+    expect(orgContext.retryOrgLoad).toHaveBeenCalledTimes(1)
+  })
+
+  it("shows the error rather than the empty state when the project directory failed at zero memberships", () => {
+    // AQU-883: guest orgs and shared projects come only from the directory, so
+    // its failure makes "no access at all" unknown — never the create-your-org
+    // dead end. The retry re-issues both fetches.
+    orgContext.accessibleProjectsError = "Failed to fetch"
+
+    renderAllOrgs()
+
+    expect(screen.getByTestId("location")).toHaveTextContent("/orgs/all")
+    expect(screen.getByTestId("org-load-error")).toBeInTheDocument()
+    expect(screen.queryByTestId("no-organizations-empty")).not.toBeInTheDocument()
+
     fireEvent.click(screen.getByRole("button", { name: /retry/i }))
     expect(orgContext.retryOrgLoad).toHaveBeenCalledTimes(1)
   })

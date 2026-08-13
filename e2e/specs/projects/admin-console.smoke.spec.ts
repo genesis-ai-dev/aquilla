@@ -3,7 +3,7 @@ import { test, expect } from "../../helpers/multi-user"
 /**
  * Admin console (/admin) — tabs and overview stats.
  *
- * AdminConsole.tsx renders tabs: Overview, Tenants, People, Projects, Activity, Platform.
+ * AdminConsole.tsx renders tabs: Overview, Tenants, Teams, People, Projects, Activity, Platform.
  * The Overview tab shows stat cards for organizations, teams, users, active projects, etc.
  * Switching to the Tenants tab renders a table with Organization/Owner/Members/Projects/Teams.
  *

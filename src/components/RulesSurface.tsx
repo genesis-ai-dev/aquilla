@@ -6,7 +6,7 @@
  * only this component swaps in place of the EditorTable.
  */
 import { useState, useMemo, useEffect } from "react"
-import { useNavigate, useSearchParams } from "react-router-dom"
+import { useNavigate, useSearchParams, useLocation } from "react-router-dom"
 import { AlertTriangle, AlertCircle, Trash2, Wand2, ChevronDown, ChevronUp, Pencil, ArrowUpCircle, Building2, Lock, Clock, ScrollText, Plus, BookOpen } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { EmptyState } from "@/components/ui/page"
@@ -24,6 +24,7 @@ import { RuleEditor } from "./RuleEditor"
 import { RuleImportDialog } from "./RuleImportDialog"
 import { RuleSuggestFromEditsDialog } from "./RuleSuggestFromEditsDialog"
 import { cn } from "@/lib/utils"
+import { editorReturnFromLocation, withEditorReturn } from "@/lib/navigation/org-paths"
 import type { CompletionSettings, ProjectRecord, RuleAutofix, TranslationRule, PromotionRequest } from "@/lib/parsers/types"
 import type { useRules } from "@/hooks/useRules"
 import type { CellData } from "@/hooks/useCells"
@@ -53,6 +54,8 @@ interface Props {
   requestPromotion?: (rule: TranslationRule, sourceProjectId: string) => Promise<PromotionRequestResult | { kind: "blocked" }>
   editingRuleId: string | "new" | null
   setEditingRuleId: (id: string | "new" | null) => void
+  /** Settings pane: skip the in-main title toolbar; PageHeader owns the title. */
+  embedded?: boolean
 }
 
 function SeverityBadge({ severity }: { severity: string }) {
@@ -93,8 +96,10 @@ export function RulesSurface({
   requestPromotion,
   editingRuleId,
   setEditingRuleId,
+  embedded = false,
 }: Props) {
   const navigate = useNavigate()
+  const location = useLocation()
   const [searchParams, setSearchParams] = useSearchParams()
   const [expandedRuleId, setExpandedRuleId] = useState<string | null>(null)
   const [promoteRule, setPromoteRule] = useState<TranslationRule | null>(null)
@@ -200,37 +205,52 @@ export function RulesSurface({
     setSearchParams(next, { replace: true })
   }
 
+  const toolbarActions = (
+    <>
+      <Button
+        variant="outline"
+        onClick={() => navigate(withEditorReturn(
+          `/project/${projectId}/terminology`,
+          editorReturnFromLocation(location.pathname, location.search, projectId),
+        ))}
+      >
+        <BookOpen data-icon="inline-start" />
+        Terminology
+      </Button>
+      <RuleImportDialog
+        completionSettings={completionSettings}
+        onAdd={addRule}
+        projectId={projectId}
+      />
+      <RuleSuggestFromEditsDialog
+        completionSettings={completionSettings}
+        onAdd={addRule}
+        projectId={projectId}
+        cells={cells}
+      />
+      <Button
+        onClick={() => setEditingRuleId("new")}
+        disabled={editingRuleId !== null}
+      >
+        <Plus className="size-4" aria-hidden />
+        Add Rule
+      </Button>
+    </>
+  )
+
   return (
-    <div className="flex h-full flex-col bg-background">
-      {/* In-main toolbar — matches Glossary/Terminology: actions live in the
-          surface, not the workspace header. */}
-      <header className="flex shrink-0 items-center gap-2 border-b px-4 py-3">
-        <ScrollText className="h-5 w-5 text-muted-foreground" aria-hidden />
-        <h1 className="flex-1 text-base font-semibold">Rules</h1>
-        <Button variant="outline" size="sm" onClick={() => navigate(`/project/${projectId}/terminology`)}>
-          <BookOpen data-icon="inline-start" />
-          Terminology
-        </Button>
-        <RuleImportDialog
-          completionSettings={completionSettings}
-          onAdd={addRule}
-          projectId={projectId}
-        />
-        <RuleSuggestFromEditsDialog
-          completionSettings={completionSettings}
-          onAdd={addRule}
-          projectId={projectId}
-          cells={cells}
-        />
-        <Button
-          size="sm"
-          onClick={() => setEditingRuleId("new")}
-          disabled={editingRuleId !== null}
-        >
-          <Plus className="size-4" aria-hidden />
-          Add Rule
-        </Button>
-      </header>
+    <div className={embedded ? "flex flex-col gap-6" : "flex h-full flex-col bg-background"}>
+      {embedded ? (
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {toolbarActions}
+        </div>
+      ) : (
+        <header className="flex shrink-0 items-center gap-2 border-b px-4 py-3">
+          <ScrollText className="h-5 w-5 text-muted-foreground" aria-hidden />
+          <h1 className="flex-1 text-base font-semibold">Rules</h1>
+          {toolbarActions}
+        </header>
+      )}
 
       {/* Create project rule — dialog, not inline */}
       <Dialog
@@ -282,8 +302,8 @@ export function RulesSurface({
         </DialogContent>
       </Dialog>
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto flex max-w-2xl flex-col gap-6 p-6">
+      <div className={embedded ? "flex flex-col gap-6" : "min-h-0 flex-1 overflow-y-auto"}>
+        <div className={embedded ? "flex flex-col gap-6" : "mx-auto flex max-w-2xl flex-col gap-6 p-6"}>
         {usageSummary && (
           <AppTooltip content="LLM usage on this project">
             <p className="text-xs text-muted-foreground">{usageSummary}</p>
@@ -305,7 +325,6 @@ export function RulesSurface({
                 <CardTitle>Org Rules ({orgRules.length})</CardTitle>
                 {canEditOrgRules && (
                   <Button
-                    size="sm"
                     variant="outline"
                     className="ml-auto"
                     onClick={() => setEditingOrgRuleId("new")}
@@ -351,7 +370,6 @@ export function RulesSurface({
                             <AppTooltip content="Edit org rule">
                               <Button
                                 variant="ghost"
-                                size="sm"
                                 onClick={() => setEditingOrgRuleId(editingOrgRuleId === rule.id ? null : rule.id)}
                                 disabled={editingOrgRuleId !== null && editingOrgRuleId !== rule.id}
                                 aria-label="Edit org rule"
@@ -368,7 +386,7 @@ export function RulesSurface({
                               />
                               Enabled
                             </label>
-                            <Button variant="ghost" size="sm" onClick={() => deleteOrgRule(rule.id)}>
+                            <Button variant="ghost" onClick={() => deleteOrgRule(rule.id)}>
                               <Trash2 />
                             </Button>
                           </>
@@ -415,12 +433,12 @@ export function RulesSurface({
                           </div>
                           <div className="flex items-center gap-2 shrink-0">
                             <AppTooltip content="Promote this rule to org scope">
-                              <Button size="sm" onClick={() => handleApproveRequest(req)}>
+                              <Button onClick={() => handleApproveRequest(req)}>
                                 Approve
                               </Button>
                             </AppTooltip>
                             <AppTooltip content="Dismiss this request">
-                              <Button size="sm" variant="ghost" onClick={() => handleDismissRequest(req.id)}>
+                              <Button variant="ghost" onClick={() => handleDismissRequest(req.id)}>
                                 Dismiss
                               </Button>
                             </AppTooltip>
@@ -490,7 +508,6 @@ export function RulesSurface({
                         </div>
                         <AppTooltip content="Opens the editor with this rule's drawer">
                           <Button
-                            size="sm"
                             variant="outline"
                             onClick={() => navigate(`/project/${projectId}/editor?openRule=${rule.id}`)}
                           >
@@ -501,7 +518,6 @@ export function RulesSurface({
                         {canEditOrgRules && patchOrgSettings && (
                           <AppTooltip content="Copy this rule to the org's rule library">
                           <Button
-                            size="sm"
                             variant="outline"
                             onClick={() => setPromoteRule(rule)}
                           >
@@ -524,7 +540,6 @@ export function RulesSurface({
                             ) : (
                               <AppTooltip content="Ask an org maintainer to promote this rule to org scope">
                                 <Button
-                                  size="sm"
                                   variant="outline"
                                   onClick={() => handleRequestPromotion(rule)}
                                   disabled={isRequesting}
@@ -539,7 +554,6 @@ export function RulesSurface({
                         <AppTooltip content="Edit rule">
                           <Button
                             variant="ghost"
-                            size="sm"
                             onClick={() => setEditingRuleId(editingRuleId === rule.id ? null : rule.id)}
                             disabled={editingRuleId !== null && editingRuleId !== rule.id}
                             aria-label="Edit rule"
@@ -547,7 +561,7 @@ export function RulesSurface({
                             <Pencil />
                           </Button>
                         </AppTooltip>
-                        <Button variant="ghost" size="sm" onClick={() => toggleExpanded(rule.id)}>
+                        <Button variant="ghost" onClick={() => toggleExpanded(rule.id)}>
                           {expanded ? <ChevronUp /> : <ChevronDown />}
                         </Button>
                         <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -559,7 +573,7 @@ export function RulesSurface({
                           />
                           Enabled
                         </label>
-                        <Button variant="ghost" size="sm" onClick={() => deleteRule(rule.id)}>
+                        <Button variant="ghost" onClick={() => deleteRule(rule.id)}>
                           <Trash2 />
                         </Button>
                       </div>
@@ -610,10 +624,10 @@ function AutofixEditor({ rule, onUpdate }: { rule: TranslationRule; onUpdate: (a
           <Input placeholder="Flags (e.g. gi)" value={flags} onChange={(e) => setFlags(e.target.value)} />
         </div>
         <div className="flex gap-2">
-          <Button size="sm" onClick={() => onUpdate(pattern ? { kind: "regex-replace", pattern, replacement, flags } : undefined)}>
+          <Button onClick={() => onUpdate(pattern ? { kind: "regex-replace", pattern, replacement, flags } : undefined)}>
             Save autofix
           </Button>
-          <Button size="sm" variant="ghost" onClick={() => onUpdate(undefined)}>Clear</Button>
+          <Button variant="ghost" onClick={() => onUpdate(undefined)}>Clear</Button>
         </div>
       </div>
     </>

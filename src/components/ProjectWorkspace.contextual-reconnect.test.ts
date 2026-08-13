@@ -86,7 +86,7 @@ describe("Autopilot realtime reconnect reconciliation", () => {
     })
   })
 
-  it("does not hydrate an unsupported lane on reconnect", async () => {
+  it("hydrates a named target-language lane on reconnect", async () => {
     const scope = attachContextualDrafts(PROJECT, FILE, "fr")
     const attachRun = vi.fn(async () => {})
     const refreshDrafts = vi.fn(async () => {})
@@ -99,8 +99,8 @@ describe("Autopilot realtime reconnect reconciliation", () => {
       refreshDrafts,
     })
 
-    expect(attachRun).not.toHaveBeenCalled()
-    expect(refreshDrafts).not.toHaveBeenCalled()
+    expect(attachRun).toHaveBeenCalledWith(PROJECT, FILE, "fr")
+    expect(refreshDrafts).toHaveBeenCalledWith(scope)
   })
 
   it("refreshes the mounted default-lane drafts after the target commit projection lands", async () => {
@@ -127,7 +127,6 @@ describe("Autopilot realtime reconnect reconciliation", () => {
     ["source commit", "source.cell.commit", PROJECT, FILE, ""],
     ["another project", "target.cell.commit", "project-other", FILE, ""],
     ["another file", "target.cell.commit", PROJECT, "file-other", ""],
-    ["unsupported lane", "target.cell.commit", PROJECT, FILE, "fr"],
   ])("does not refresh for %s", async (_label, kind, eventProjectId, eventFileId, lane) => {
     const scope = attachContextualDrafts(PROJECT, FILE, lane)
     const refreshDrafts = vi.fn(async () => {})
@@ -141,5 +140,25 @@ describe("Autopilot realtime reconnect reconciliation", () => {
     })
 
     expect(refreshDrafts).not.toHaveBeenCalled()
+  })
+
+  it("refreshes named-lane drafts after a target commit on the open file", async () => {
+    const scope = attachContextualDrafts(PROJECT, FILE, "fr")
+    const refreshDrafts = vi.fn(async () => {})
+
+    await reconcileContextualDraftsAfterAppliedEvent({
+      projectId: PROJECT,
+      currentFileId: FILE,
+      draftScope: scope,
+      event: {
+        kind: "target.cell.commit",
+        projectId: PROJECT,
+        fileId: FILE,
+      },
+      refreshDrafts,
+    })
+
+    expect(refreshDrafts).toHaveBeenCalledOnce()
+    expect(refreshDrafts).toHaveBeenCalledWith(scope)
   })
 })

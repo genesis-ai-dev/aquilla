@@ -1,5 +1,6 @@
 import { test, expect, orgRoute } from "../../helpers/multi-user"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
+import { ProjectSettings } from "../../helpers/page-objects/ProjectSettings"
 
 /**
  * AQU-326 — both halves of membership visibility:
@@ -23,14 +24,11 @@ test("targeted invite surfaces in bob's inbox; after accept, alice sees and revo
   await dash.goto()
   const name = `ExtInvite ${Date.now()}`
   await dash.createProject({ name, source: "en", target: "fr" })
-  await dash.openProject(name)
+  await expect(alice).toHaveURL(/\/projects\/[^/?#]+/, { timeout: 15_000 })
 
-  await alice.getByRole("button", { name: /More project options/i }).click()
-  await alice.getByRole("button", { name: /^Share$/i }).click()
-  const dialog = alice.getByRole("dialog")
-  await expect(dialog).toBeVisible({ timeout: 5_000 })
-  await dialog.getByRole("button", { name: /^Invite link$/i }).click()
-  await dialog.locator("#invite-email").fill("bob@example.test")
+  const settings = new ProjectSettings(alice)
+  const dialog = await settings.openInviteLinkTab(settings.projectIdFromCurrentUrl())
+  await dialog.locator("#pm-invite-email").fill("bob@example.test")
   await dialog.getByRole("button", { name: /Create invite link/i }).click()
   await expect(dialog.locator("input[readonly]")).toBeVisible({ timeout: 10_000 })
   await alice.keyboard.press("Escape")

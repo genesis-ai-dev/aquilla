@@ -13,9 +13,9 @@ test("assigned-to-me page renders heading and empty state", async ({ alice }) =>
   await alice.goto(orgRoute(alice, "/assigned"))
   await expect(alice.getByRole("heading", { name: /Assigned to me/i })).toBeVisible({ timeout: 10_000 })
 
-  // Empty state message (alice has no assignments).
-  await expect(
-    alice.getByText(/You have no open assignments/i)
-      .or(alice.getByText(/Loading/i))
-  ).toBeVisible({ timeout: 8_000 })
+  // Empty state message (alice has no assignments). The loading state is a
+  // textless skeleton, so wait directly for the resolved empty state — an
+  // unanchored /Loading/i fallback also matches the build-info footer when
+  // the git branch name contains "loading".
+  await expect(alice.getByText(/You have no open assignments/i)).toBeVisible({ timeout: 8_000 })
 })

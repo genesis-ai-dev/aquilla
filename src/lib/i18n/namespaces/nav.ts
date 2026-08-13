@@ -17,6 +17,9 @@ export const nav = defineNamespace({
     "nav.historyControls.noBackHistory": "No back history",
     "nav.historyControls.noForwardHistory": "No forward history",
     "nav.historyControls.emptyList": "No history",
+    "nav.historyControls.previouslyViewed": "Previously viewed",
+    "nav.historyControls.noPreviouslyViewed": "No previously viewed pages",
+    "nav.historyControls.recentKind.team": "Team",
 
     // -- AccountSwitcher: account menu + auth dialogs --
     "nav.account.addTitle": "Add Frontier account",
@@ -108,6 +111,8 @@ export const nav = defineNamespace({
     "nav.fileRow.importedAsTooltip": "{name} (imported as {originalName})",
     "nav.fileRow.progressAriaLabel": "{translated}% translated, {validated}% validated",
     "nav.fileRow.fileActions": "File actions",
+    "nav.fileRow.export": "Export",
+    // Assign-work menu item reuses dialog.assign.title (same phrase, same act).
     "nav.fileRow.suggestionTooltip":
       "A cleaner name was detected for this file. Click to apply, or use the Apply button at the top of the sidebar.",
     "nav.fileRow.applyRenameSuggestion": "Apply rename suggestion",
@@ -287,6 +292,19 @@ export const nav = defineNamespace({
           "Placeholder text inside the history popover when press-and-hold opens it but " +
           "there are no entries in that direction (edge case; the button is normally " +
           "disabled first).",
+      },
+      "nav.historyControls.previouslyViewed": {
+        description:
+          "Tooltip, aria-label, and menu heading for the clock button that opens the " +
+          "recently viewed projects/teams/files menu.",
+      },
+      "nav.historyControls.noPreviouslyViewed": {
+        description:
+          "Tooltip on the disabled clock button when the recently viewed list is empty.",
+      },
+      "nav.historyControls.recentKind.team": {
+        description: "Kind column label for a team row in the recently viewed menu.",
+        maxLength: 12,
       },
 
       // -- AccountSwitcher --
@@ -628,7 +646,13 @@ export const nav = defineNamespace({
       "nav.fileRow.fileActions": {
         description:
           "Tooltip and accessible name for the ⋯ button that opens the file's context " +
-          "menu (rename, move, delete, export).",
+          "menu (rename, move, export, assign work, delete).",
+      },
+      "nav.fileRow.export": {
+        description:
+          "Menu item that opens the Export dialog for this file. Imperative verb. " +
+          "Distinct from 'Export source (.SFM)', which downloads USFM immediately.",
+        maxLength: 20,
       },
       "nav.fileRow.suggestionTooltip": {
         description:

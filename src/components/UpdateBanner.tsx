@@ -9,7 +9,6 @@ export function UpdateBanner() {
   return (
     <Button
       variant="outline"
-      size="sm"
       onClick={() => window.location.reload()}
       className="fixed bottom-3 left-3 z-30 animate-in slide-in-from-bottom-2 fade-in gap-2 rounded-md border-violet-300 bg-background/90 shadow-md backdrop-blur-sm duration-300 hover:border-violet-400 dark:border-violet-500/50"
     >

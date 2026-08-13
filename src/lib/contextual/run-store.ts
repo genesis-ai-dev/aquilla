@@ -90,6 +90,8 @@ export interface ContextualSpanStartFrame {
   type: "contextual.span.start"
   runId: string
   fileId: string
+  /** Empty string is the project-default lane. */
+  targetLang?: string
   spanId: string
   spanLabel: string
 }
@@ -129,9 +131,9 @@ export interface ContextualTransportSnapshot {
 }
 
 export interface ContextualTransport {
-  fetchSnapshot(projectId: string, fileId: string): Promise<ContextualTransportSnapshot>
+  fetchSnapshot(projectId: string, fileId: string, targetLang?: string): Promise<ContextualTransportSnapshot>
   /** `anchorCellId` is where the user is looking — the first wave starts there. */
-  start(projectId: string, fileId: string, anchorCellId?: string): Promise<{ runId: string }>
+  start(projectId: string, fileId: string, anchorCellId?: string, targetLang?: string): Promise<{ runId: string }>
   pause(runId: string): Promise<void>
   resume(runId: string): Promise<void>
   terminate(runId: string): Promise<void>
@@ -162,6 +164,8 @@ export interface ContextualRunState {
   projectId: string | null
   runId: string | null
   fileId: string | null
+  /** Empty string is Project default. The editor's open language lane. */
+  targetLang: string
   status: ContextualRunStatus
   phase: string | null
   spanLabel: string | null
@@ -181,6 +185,7 @@ const IDLE_STATE: ContextualRunState = {
   projectId: null,
   runId: null,
   fileId: null,
+  targetLang: "",
   status: "idle",
   phase: null,
   spanLabel: null,
@@ -196,6 +201,7 @@ let _progress: ContextualRunProgress = IDLE_PROGRESS
  * snapshot request is asynchronous, while WebSocket fan-out starts at once. */
 let _attachedFileId: string | null = null
 let _attachedProjectId: string | null = null
+let _attachedTargetLang = ""
 
 const _stateListeners = new Set<() => void>()
 const _progressListeners = new Set<() => void>()
@@ -288,13 +294,13 @@ export function applyRemoteFrame(projectId: string, frame: ContextualFrame): voi
   if (projectId !== _attachedProjectId) return
   if (frame.type === "contextual.run.state" || frame.type === "contextual.span.start") {
     if (frame.fileId !== _attachedFileId || isStaleRunId(frame.runId)) return
-    if (
-      frame.type === "contextual.run.state" &&
-      (typeof frame.targetLang !== "string" || frame.targetLang !== "")
-    ) return
+    const frameLane = frame.type === "contextual.run.state"
+      ? frame.targetLang
+      : (frame.targetLang ?? "")
+    if (typeof frameLane !== "string" || frameLane !== _attachedTargetLang) return
   } else if (!_state.runId || frame.runId !== _state.runId) {
     // Scene/phase/span frames intentionally omit fileId on the wire. They are
-    // safe only after a project/file-scoped frame or snapshot established this run.
+    // safe only after a project/file/lane-scoped frame or snapshot established this run.
     return
   }
 
@@ -312,6 +318,7 @@ export function applyRemoteFrame(projectId: string, frame: ContextualFrame): voi
       projectId: _attachedProjectId,
       runId: frame.runId,
       fileId: frame.fileId,
+      targetLang: _attachedTargetLang,
       status: sameRun ? _state.status : "running",
       activeDirections: sameRun ? _state.activeDirections : [],
       lanes,
@@ -354,6 +361,7 @@ export function applyRemoteFrame(projectId: string, frame: ContextualFrame): voi
       projectId: _attachedProjectId,
       runId: frame.runId,
       fileId: frame.fileId,
+      targetLang: _attachedTargetLang,
       status,
       // First running frame of a span/run with no phase yet: the analyzer is
       // reading. Terminal/idle-ish states drop the phase readout.
@@ -415,34 +423,48 @@ let _fetchSeq = 0
  * snapshot never rolls the store back to an older runId than a frame already
  * delivered.
  */
-export async function attachContextualRun(projectId: string, fileId: string): Promise<void> {
+export async function attachContextualRun(
+  projectId: string,
+  fileId: string,
+  targetLang = "",
+): Promise<void> {
   const seq = ++_fetchSeq
-  if (_attachedProjectId !== projectId || _attachedFileId !== fileId) {
+  if (
+    _attachedProjectId !== projectId ||
+    _attachedFileId !== fileId ||
+    _attachedTargetLang !== targetLang
+  ) {
     _attachedProjectId = projectId
     _attachedFileId = fileId
+    _attachedTargetLang = targetLang
     // Scope changes synchronously, before the fetch, so a project-wide frame
     // cannot flash another file's run or expose commands for it meanwhile.
-    setState({ ...IDLE_STATE, available: _state.available, projectId, fileId })
+    setState({ ...IDLE_STATE, available: _state.available, projectId, fileId, targetLang })
     setProgress(IDLE_PROGRESS)
   }
   let snap: ContextualTransportSnapshot
   try {
-    snap = await _transport.fetchSnapshot(projectId, fileId)
+    snap = await _transport.fetchSnapshot(projectId, fileId, targetLang)
   } catch {
     snap = { available: false }
   }
-  if (seq !== _fetchSeq || _attachedProjectId !== projectId || _attachedFileId !== fileId) return
+  if (
+    seq !== _fetchSeq ||
+    _attachedProjectId !== projectId ||
+    _attachedFileId !== fileId ||
+    _attachedTargetLang !== targetLang
+  ) return
   if (!snap.available) {
-    setState({ ...IDLE_STATE, projectId, fileId })
+    setState({ ...IDLE_STATE, projectId, fileId, targetLang })
     setProgress(IDLE_PROGRESS)
     return
   }
   const run = snap.run
   if (!run) {
     // A live frame may have raced ahead of an older empty snapshot. It is
-    // already scoped to this project/file, so retain it instead of rolling back.
-    if (_state.fileId === fileId && _state.runId) return
-    setState({ ...IDLE_STATE, available: true, projectId, fileId })
+    // already scoped to this project/file/lane, so retain it instead of rolling back.
+    if (_state.fileId === fileId && _state.targetLang === targetLang && _state.runId) return
+    setState({ ...IDLE_STATE, available: true, projectId, fileId, targetLang })
     setProgress(IDLE_PROGRESS)
     return
   }
@@ -456,6 +478,7 @@ export async function attachContextualRun(projectId: string, fileId: string): Pr
     projectId,
     runId: run.runId,
     fileId: run.fileId,
+    targetLang,
     status: run.status,
     phase: run.phase,
     spanLabel: run.spanLabel,
@@ -480,19 +503,44 @@ export async function startContextualRun(
   projectId: string,
   fileId: string,
   anchorCellId?: string,
+  targetLang?: string,
 ): Promise<boolean> {
+  if (targetLang !== undefined) _attachedTargetLang = targetLang
   if (_attachedProjectId !== projectId || _attachedFileId !== fileId) {
     _attachedProjectId = projectId
     _attachedFileId = fileId
     ++_fetchSeq
-    setState({ ...IDLE_STATE, available: _state.available, projectId, fileId })
+    setState({
+      ...IDLE_STATE,
+      available: _state.available,
+      projectId,
+      fileId,
+      targetLang: _attachedTargetLang,
+    })
   }
-  setState({ ..._state, fileId, status: "starting", lanes: [] })
+  setState({ ..._state, fileId, targetLang: _attachedTargetLang, status: "starting", lanes: [] })
   setProgress(IDLE_PROGRESS)
   try {
-    const { runId } = await _transport.start(projectId, fileId, anchorCellId)
-    if (_attachedProjectId === projectId && _attachedFileId === fileId && !isStaleRunId(runId)) {
-      setState({ ..._state, projectId, runId, fileId, status: "running", phase: _state.phase ?? PHASE_READING })
+    const { runId } = await _transport.start(
+      projectId,
+      fileId,
+      anchorCellId,
+      _attachedTargetLang,
+    )
+    if (
+      _attachedProjectId === projectId &&
+      _attachedFileId === fileId &&
+      !isStaleRunId(runId)
+    ) {
+      setState({
+        ..._state,
+        projectId,
+        runId,
+        fileId,
+        targetLang: _attachedTargetLang,
+        status: "running",
+        phase: _state.phase ?? PHASE_READING,
+      })
     }
     return true
   } catch {
@@ -556,6 +604,7 @@ export function dismissContextualRunSummary(): void {
     available: _state.available,
     projectId: _state.projectId,
     fileId: _state.fileId,
+    targetLang: _state.targetLang,
   })
   setProgress(IDLE_PROGRESS)
 }
@@ -566,6 +615,7 @@ export function resetContextualRunStore(): void {
   _fetchSeq = 0
   _attachedFileId = null
   _attachedProjectId = null
+  _attachedTargetLang = ""
   _state = IDLE_STATE
   _progress = IDLE_PROGRESS
 }

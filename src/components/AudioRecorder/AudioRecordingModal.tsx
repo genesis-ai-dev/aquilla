@@ -7,14 +7,15 @@
 // "capture-and-save" hook is not reused here because the modal adds a
 // preview/retake step between stop and upload.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { ChevronLeft, ChevronRight, ChevronsRight, Mic, Pin, Play, Sparkles, Square, X, Volume2, VolumeX, RefreshCw, Check } from "lucide-react"
+import { type ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { ChevronLeft, ChevronRight, ChevronsRight, Mic, Pin, Play, Sparkles, Square, Upload, X, Volume2, VolumeX, RefreshCw, Check } from "lucide-react"
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { MIN_USEFUL_REGION_SEC } from "@/lib/timeline/lane-timing"
+import { isLinkableVideoUrl } from "@/components/timeline/LinkVideoUrlDialog"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { useAudioRecorder } from "@/hooks/useAudioRecorder"
@@ -26,10 +27,14 @@ import { generateCellVoice } from "@/lib/audio/voice-generate-helpers"
 import { useCountdown } from "./useCountdown"
 import { AudioWaveform } from "./AudioWaveform"
 import { DurationBar } from "./DurationBar"
+import { RecordingVideoSurface } from "./RecordingVideoSurface"
 import { TakesStrip, nextTakeLabel } from "./TakesStrip"
 import { useRecordingAutoAdvance, setRecordingAutoAdvance } from "@/lib/store/recording-auto-advance-pref"
+import { setRecordingFormatPref, useRecordingFormatPref } from "@/lib/store/recording-format-pref"
 import { useFileAudioAttachments } from "@/hooks/useFileAudioAttachments"
-import { audioIdSeededWith, buildAudioId, uploadCellAudio, deleteCellAudio, fetchCellAudio, parseFrontierAudioUrl } from "@/lib/audio/upload"
+import { ACCEPT, OFFLINE_MESSAGE, attachAudioFileToCell, validateAudioFile } from "@/lib/audio/attach-file"
+import { recordingLimitsFor } from "@/lib/audio/recording-limits"
+import { MAX_AUDIO_UPLOAD_BYTES, audioIdSeededWith, buildAudioId, uploadCellAudio, deleteCellAudio, fetchCellAudio, parseFrontierAudioUrl } from "@/lib/audio/upload"
 import { audioCachePutBlob } from "@/lib/audio/bytes-cache"
 import { emitCellAudioAttach, emitCellAudioSelect } from "@/lib/sync/events-emit"
 import { notifyAudioAttachmentsChanged, injectOptimisticAudioAttachment } from "@/lib/audio/audio-attachments-bus"
@@ -59,12 +64,6 @@ interface Props {
 
 type Phase = "idle" | "counting" | "recording" | "preview" | "uploading" | "saved" | "error"
 
-/** Decision 2026-08-05: recording is blocked UP FRONT while offline (a take
- *  can't be saved without a connection), instead of failing mid-flow with a
- *  raw fetch error. One copy of the message, used by every gate. */
-const OFFLINE_MESSAGE =
-  "You're offline — recordings can't be saved without a connection. Reconnect and try again."
-
 export function AudioRecordingModal({
   open, project, cells, activeCellId, username,
   onActiveCellChange, onTakeSaved, onLastTakeRemoved, onClose,
@@ -88,6 +87,19 @@ export function AudioRecordingModal({
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const previewAudioRef = useRef<HTMLAudioElement | null>(null)
   const consumedBlobRef = useRef<Blob | null>(null)
+  // AQU-646 stage 5: takes are captured at WAV quality by default, with the
+  // historic webm/opus as the opt-out. Read REACTIVELY here — for the header
+  // pill's label and the near-limit copy only. The recorder hook reads the same
+  // pref PLAINLY at start(), which pins the format for that take; the pill goes
+  // disabled from the countdown onwards, and that is what keeps the two reads
+  // describing the same take rather than disagreeing mid-flow.
+  const recordingFormat = useRecordingFormatPref()
+  const formatLimits = useMemo(() => recordingLimitsFor(recordingFormat), [recordingFormat])
+  // Nonce-keyed "put the picture on this line" for RecordingVideoSurface,
+  // following the `seekSec: {sec, nonce}` idiom the timeline already uses. A
+  // nonce and not a boolean because re-arming the SAME cell — a retake, or
+  // coming back to a line already recorded — has to re-fire.
+  const [armNonce, setArmNonce] = useState(0)
 
   const activeIndex = useMemo(
     () => (activeCellId ? cells.findIndex((c) => c.id === activeCellId) : -1),
@@ -103,6 +115,22 @@ export function AudioRecordingModal({
   const targetSec = activeCell && activeCell.startTime != null && activeCell.endTime != null
     ? Math.max(0, activeCell.endTime - activeCell.startTime)
     : null
+
+  // AQU-646 stage 5: the film for the line being recorded, shown beside the
+  // stage so an overrun is visible as it happens rather than only measurable
+  // afterwards. The `?.` on `project.files` is LOAD-BEARING: this modal's own
+  // test fixtures cast a ProjectRecord with no files array at all, and
+  // `project.files.find` throws there.
+  //
+  // Validated with the link dialog's own checker because the field is free text
+  // that predates that dialog — a QA project has a paragraph of English prose
+  // stored as its video URL, and nothing downstream can tell that apart from a
+  // real address; a <video> pointed at it renders a black rectangle, which is
+  // worse than no picture at all.
+  const filmUrl = useMemo(() => {
+    const raw = project.files?.find((f) => f.id === activeCell?.fileId)?.coreMediaUrl
+    return raw && isLinkableVideoUrl(raw) ? raw : null
+  }, [project.files, activeCell?.fileId])
 
   // Recording-slot takes for the active cell — drives the takes strip. The bus
   // refetch (poked on save below) keeps this fresh as new takes land.
@@ -189,8 +217,25 @@ export function AudioRecordingModal({
     setErrorMessage(null)
     if (previewUrl) { URL.revokeObjectURL(previewUrl); setPreviewUrl(null) }
     consumedBlobRef.current = null
+    // …and put the picture on the new line's first frame.
+    setArmNonce((n) => n + 1)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeCellId])
+
+  // Re-arm the picture at the top of the countdown, so the frame is already on
+  // the line's start by the time capture begins, and again when a take lands in
+  // PREVIEW — where `running` is false, so the surface rewinds and stays paused.
+  //
+  // Running the film under the preview player is a NON-GOAL, not an oversight:
+  // unmuted it talks over the take, and muted it drifts the moment the user
+  // scrubs the audio, because scrubbing an <audio> publishes nothing for a
+  // picture to follow. Mirroring one element's clock onto another is a real sync
+  // engine, and this codebase has deliberately centralised that behind the two
+  // video singletons the surface is forbidden to touch. Review-against-picture
+  // is a legitimate want and a separate piece of work.
+  useEffect(() => {
+    if (phase === "counting" || phase === "preview") setArmNonce((n) => n + 1)
+  }, [phase])
 
   // Close cleanup.
   useEffect(() => {
@@ -318,6 +363,28 @@ export function AudioRecordingModal({
     }
   }, [online, activeCell, session, ttsBusy, project, username, recordingTakes, audioEntry?.selectedAudioId, sourceClip])
 
+  // Settle on the next line after a brief success indication. Shared by the
+  // recorded and the uploaded path so "saved" means exactly the same thing
+  // either way — the upload control below exists to inherit this, among the
+  // rest of the phase machine.
+  //
+  // SUB-50: opt-out for repeat takes on one line, and the handle is tracked so
+  // closing or navigating inside the 450ms window can't fire a stray jump after
+  // the fact.
+  const scheduleAutoAdvance = useCallback(() => {
+    if (!autoAdvance) return
+    if (advanceTimerRef.current) clearTimeout(advanceTimerRef.current)
+    advanceTimerRef.current = setTimeout(() => {
+      advanceTimerRef.current = null
+      const nextIdx = activeIndex + 1
+      if (nextIdx < cells.length) {
+        onActiveCellChange(cells[nextIdx].id)
+      } else {
+        onClose()
+      }
+    }, 450)
+  }, [autoAdvance, activeIndex, cells, onActiveCellChange, onClose])
+
   const save = useCallback(async () => {
     if (recorder.state.kind !== "stopped") return
     // Silent backstop for the Space/Enter path — deliberately NOT the error
@@ -332,10 +399,27 @@ export function AudioRecordingModal({
     try {
       const blob = recorder.state.blob
       const ext = recorder.state.ext
+      // Belt and braces. The hard stop that ends a take is DERIVED from this
+      // same cap (recording-limits.ts), so this should be unreachable — it is
+      // here so that a future change to the capture rate or bitrate fails
+      // loudly, and recoverably, instead of turning into a rejected PUT after
+      // the operator has already given the performance. Thrown, so it lands in
+      // the catch below and bounces back to the PREVIEW with the take intact.
+      if (blob.size > MAX_AUDIO_UPLOAD_BYTES) {
+        throw new Error(
+          `This take is ${Math.round(blob.size / (1024 * 1024))} MB, over the ` +
+          `${Math.round(MAX_AUDIO_UPLOAD_BYTES / (1024 * 1024))} MB upload limit. ` +
+          "Record a shorter take, or switch the format to compressed.",
+        )
+      }
       // SUB-48: the recorder already TIMED this take — use that, never a probe.
       // Chrome writes no duration header into MediaRecorder webm, so probing
       // the blob raced a timeout and long takes silently attached with no
-      // length at all, leaving their chips stuck at section width.
+      // length at all, leaving their chips stuck at section width. The WAV path
+      // makes this stronger rather than weaker: its duration is sample-exact
+      // (frames ÷ the context's real rate), so a probe there would be strictly
+      // worse than the number already in hand. Do not re-add one for either
+      // branch.
       const takeDurationMs = Math.round(recorder.state.durationSec * 1000)
       const audioId = buildAudioId(activeCell.id)
       // Warm the OPFS byte cache BEFORE upload (FRO-355), keyed exactly as
@@ -433,22 +517,7 @@ export function AudioRecordingModal({
         projectId: project.id,
         language: project.targetLanguage,
       })
-      // Auto-advance: settle on the new cell after a brief success indication.
-      // SUB-50: opt-out for repeat takes on one line, and the handle is now
-      // tracked so closing/navigating inside the window can't fire a stray
-      // jump after the fact.
-      if (autoAdvance) {
-        if (advanceTimerRef.current) clearTimeout(advanceTimerRef.current)
-        advanceTimerRef.current = setTimeout(() => {
-          advanceTimerRef.current = null
-          const nextIdx = activeIndex + 1
-          if (nextIdx < cells.length) {
-            onActiveCellChange(cells[nextIdx].id)
-          } else {
-            onClose()
-          }
-        }, 450)
-      }
+      scheduleAutoAdvance()
     } catch (e) {
       // A network failure that raced the online flag reads as the same
       // offline story, not a raw fetch error.
@@ -461,7 +530,57 @@ export function AudioRecordingModal({
       // that struck mid-upload retries with the SAME take after reconnect.
       setPhase(recorder.state.kind === "stopped" ? "preview" : "error")
     }
-  }, [recorder.state, online, session, activeCell, project.id, username, activeIndex, cells, onActiveCellChange, onClose, autoAdvance, recordingTakes])
+  }, [recorder.state, online, session, activeCell, project.id, username, recordingTakes, scheduleAutoAdvance])
+
+  // Attach an existing FILE as a take, through this dialog's phase machine.
+  //
+  // That inheritance is the whole argument for a modal-owned control rather
+  // than reusing the cell rail's upload button: the same "Uploading…" stage,
+  // the same saved state, the same auto-advance, the same error surface — and a
+  // take LABEL, which the rail cannot supply because it has no takes list.
+  const attachPickedFile = useCallback(async (file: File) => {
+    if (!activeCell) return
+    // A courtesy check, not the guarantee: `attachAudioFileToCell` validates
+    // again and IS the gate. Doing it here as well keeps an obviously-wrong
+    // pick from flashing "Uploading…" on its way to being refused.
+    const invalid = validateAudioFile(file)
+    if (invalid) {
+      setErrorMessage(invalid)
+      setPhase("error")
+      return
+    }
+    setPhase("uploading")
+    setErrorMessage(null)
+    try {
+      await attachAudioFileToCell({
+        session: session ?? null,
+        projectId: project.id,
+        fileId: activeCell.fileId,
+        cellId: activeCell.id,
+        file,
+        username,
+        // Round 8: takes are BORN with their permanent name. The strip sits
+        // ~100px below this button, so an unlabelled "Take" next to "Take 1"
+        // reads as a defect. (Not auto-transcribed, deliberately — an uploaded
+        // file routinely is not this line; see attach-file.ts.)
+        label: nextTakeLabel(recordingTakes),
+      })
+      onTakeSaved?.(activeCell.id)
+      setPhase("saved")
+      scheduleAutoAdvance()
+    } catch (e) {
+      setErrorMessage(e instanceof Error ? e.message : String(e))
+      setPhase("error")
+    }
+  }, [activeCell, session, project.id, username, recordingTakes, onTakeSaved, scheduleAutoAdvance])
+
+  const uploadInputRef = useRef<HTMLInputElement | null>(null)
+  const onUploadInputChange = useCallback((e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    // Reset so picking the SAME file again still fires onChange.
+    e.target.value = ""
+    if (file) void attachPickedFile(file)
+  }, [attachPickedFile])
 
   // A pending advance must never outlive the modal (or a manual jump): the
   // 450ms window was previously untracked, so closing inside it still fired.
@@ -513,7 +632,12 @@ export function AudioRecordingModal({
       // Alt+Space belong to the OS or other shortcuts, not to recording.
       // FORTIFY: Space on a FOCUSED BUTTON activates that button — a keyboard
       // user who tabbed to "Retake" and pressed Space was having the bad take
-      // SAVED instead of discarded.
+      // SAVED instead of discarded. The stage-5 controls (the format pill, the
+      // upload button, the film's mute toggle) are all <Button>s and so are all
+      // covered by it: once the mute toggle has focus, Space unmutes the film
+      // instead of starting a take. That is the guard working as designed, not
+      // a bug — the focused control is the one that acts. (The hidden file
+      // input is caught by the INPUT check at the top of this handler.)
       if (e.key === " " && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) {
         if (target?.tagName === "BUTTON" || target?.getAttribute?.("role") === "button") return
         e.preventDefault()
@@ -535,6 +659,9 @@ export function AudioRecordingModal({
   const elapsedMs = recorder.elapsedMs
   const targetOverrun = targetSec != null && elapsedMs / 1000 > targetSec
   const isNearLimit = recorder.isNearLimit
+  // From the countdown onwards there is a take being made or already made, and
+  // the capture format can no longer change anything about its bytes.
+  const takeInHand = phase === "counting" || phase === "recording" || phase === "preview" || phase === "uploading"
 
   return (
     <Dialog open={open} onOpenChange={(next) => { if (!next) onClose() }}>
@@ -606,6 +733,40 @@ export function AudioRecordingModal({
             </div>
           </div>
           <div className="flex items-center gap-1">
+            {/* TEXT, not an icon: there is no glyph that reads as "WAV", and
+                the choice is between two words the operator already knows.
+                Disabled once a take is in hand — the bytes exist, so flipping
+                this then would only mislead. Base UI tooltips do not fire on a
+                disabled button, hence the span wrapper (same as rec-start). */}
+            <AppTooltip
+              content={
+                takeInHand
+                  ? "This take is already captured — the format applies to the next one."
+                  : recordingFormat === "wav"
+                    ? "Recording at full WAV quality — about three times the file size. Click to record compressed instead."
+                    : "Recording compressed — much smaller files, slightly less detail. Click to record at full WAV quality."
+              }
+            >
+              <span className="inline-flex">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  data-testid="rec-format"
+                  aria-pressed={recordingFormat === "wav"}
+                  aria-label={
+                    recordingFormat === "wav"
+                      ? "Recording format: WAV — click to record compressed"
+                      : "Recording format: compressed — click to record in WAV"
+                  }
+                  disabled={takeInHand}
+                  onClick={() => setRecordingFormatPref(recordingFormat === "wav" ? "webm" : "wav")}
+                  className="h-7 rounded-full px-2.5 text-[11px] font-semibold tracking-wide text-muted-foreground/70"
+                >
+                  {recordingFormat === "wav" ? "WAV" : "Compressed"}
+                </Button>
+              </span>
+            </AppTooltip>
             <AppTooltip
               content={
                 autoAdvance
@@ -657,8 +818,24 @@ export function AudioRecordingModal({
             and footer stay anchored at 100% zoom on compact viewports. */}
         <div className="min-h-0 flex-1 overflow-y-auto">
 
-        {/* Stage — changes with phase */}
-        <div className="relative flex min-h-[200px] flex-col items-center justify-center gap-4 p-6">
+        {/* Stage — changes with phase. With a film linked it splits into two
+            columns on anything wider than a phone: side by side costs ZERO
+            extra height in the common case (a 280px 16:9 picture is 157px,
+            inside the stage's existing 200px minimum) and vertical space is the
+            scarce resource in this dialog. With no film the second column is
+            ABSENT — not hidden, not a placeholder — so an audio-import file
+            gets exactly the markup it had before any of this existed. */}
+        <div
+          className={cn(
+            "relative flex min-h-[200px] flex-col items-center justify-center gap-4 p-6",
+            filmUrl && "sm:flex-row sm:items-center",
+          )}
+        >
+          {/* The per-phase blocks, in a wrapper that carries the stage's own
+              centring: `flex-1` alone would grow to the full height of the
+              200px box and strand its content at the top, which is a visible
+              change for every file that has no film. */}
+          <div className="flex min-w-0 flex-1 flex-col items-center justify-center">
           {displayPhase === "counting" && countdown.count !== null && (
             <div className="flex flex-col items-center gap-3">
               <div
@@ -689,7 +866,13 @@ export function AudioRecordingModal({
               )}
               {isNearLimit && (
                 <p className="text-center text-xs font-medium text-amber-500">
-                  Recording is 25 minutes — it will stop automatically at 30 minutes.
+                  {/* Derived, never restated: WAV is ~3× the bytes of a
+                      compressed take, so its window is much shorter, and both
+                      windows are computed from the upload cap. A hardcoded
+                      "25 … 30" here was already wrong the moment WAV became the
+                      default. */}
+                  Recording is {minutesOf(formatLimits.warnMs)} minutes — it will stop
+                  automatically at {minutesOf(formatLimits.hardStopMs)} minutes.
                 </p>
               )}
             </div>
@@ -758,8 +941,29 @@ export function AudioRecordingModal({
 
           {displayPhase === "error" && (
             <div className="space-y-2 text-center">
-              <p className="text-sm font-medium text-destructive">{errorMessage ?? "Something went wrong."}</p>
+              <p data-testid="rec-error-message" className="text-sm font-medium text-destructive">
+                {errorMessage ?? "Something went wrong."}
+              </p>
               <p className="text-xs text-muted-foreground">Press Space or Start to try again.</p>
+            </div>
+          )}
+          </div>{/* end per-phase column */}
+
+          {filmUrl && (
+            <div className="w-full shrink-0 sm:w-[280px]">
+              <RecordingVideoSurface
+                src={filmUrl}
+                startSec={activeCell.startTime ?? null}
+                // The PHASE, not the end of the countdown: recorder.start() is
+                // async, so binding the picture to the phase is what makes
+                // picture-start equal capture-start — and that equality is what
+                // makes an overrun readable.
+                running={displayPhase === "recording"}
+                armNonce={armNonce}
+                // One overrun signal in the dialog, drawn twice, rather than two
+                // that can disagree.
+                overrun={targetOverrun}
+              />
             </div>
           )}
         </div>
@@ -868,6 +1072,38 @@ export function AudioRecordingModal({
                   </Button>
                 </span>
               </AppTooltip>
+              {/* Upload a file instead of recording one. Offered in `idle` and
+                  `error` only — and `error` is the one that matters, because a
+                  blocked microphone lands there and "I can't record, let me
+                  upload" is the single best moment for this button to exist.
+                  Never in preview: a take is already in hand there, and a second
+                  source beside it is a save-the-wrong-thing hazard. */}
+              <input
+                ref={uploadInputRef}
+                type="file"
+                accept={ACCEPT}
+                className="sr-only"
+                onChange={onUploadInputChange}
+                aria-label="Upload audio file"
+                // Diverges from the cell rail's copy of this input ON PURPOSE:
+                // inside a focus trap an invisible tab stop is a real
+                // annoyance, and the visible button below already carries the
+                // accessible name and the click.
+                tabIndex={-1}
+              />
+              <AppTooltip content={online ? "Attach an audio file as a take" : OFFLINE_MESSAGE}>
+                <span className="inline-flex">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    data-testid="rec-upload"
+                    disabled={!online}
+                    onClick={() => uploadInputRef.current?.click()}
+                  >
+                    <Upload className="mr-1 h-4 w-4" /> Upload audio
+                  </Button>
+                </span>
+              </AppTooltip>
               <AppTooltip content={online ? "Start recording (Space)" : OFFLINE_MESSAGE}>
                 <span className="inline-flex">
                   <Button size="sm" data-testid="rec-start" disabled={!online} onClick={startFlow}>
@@ -895,6 +1131,13 @@ export function AudioRecordingModal({
       </DialogContent>
     </Dialog>
   )
+}
+
+/** Whole minutes, for the near-limit copy. The limits themselves are computed
+ *  from the upload cap (recording-limits.ts) and differ per format, so the
+ *  sentence that quotes them has to be computed too. */
+function minutesOf(ms: number): number {
+  return Math.round(ms / 60_000)
 }
 
 function formatClock(ms: number): string {

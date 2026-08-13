@@ -4,10 +4,12 @@
 // works out of the box on mobile browsers (opens the file picker / camera
 // roll / files app), no MediaRecorder support needed.
 //
-// Reuses the SAME upload+attach path as the mic recorder
-// (AudioRecordingModal.save, ~:178-242): R2 PUT via uploadCellAudio, then
-// cell.audio.attach via emitCellAudioAttach into slot "recording", then the
-// optimistic-injection bus so `hasAudio` flips before the server round-trip.
+// Presentation only. The upload+attach flow lives in
+// `@/lib/audio/attach-file` (AQU-646 stage 5), shared verbatim with the
+// recording modal's own upload control so the R2 PUT → cell.audio.attach →
+// orphan-cleanup → optimistic-inject sequence cannot drift between the two.
+// This file owns the rail button, the hidden input, and the error popover;
+// everything else it does is `await attachAudioFileToCell(...)`.
 //
 // SWARM-TODO (live-UI QA): in the editor, on a cell action rail (a cell with
 // no audio yet), click the new Upload-audio button next to the mic icon,
@@ -20,31 +22,7 @@ import { useCallback, useRef, useState } from "react"
 import { Upload } from "lucide-react"
 import { RailButton } from "./CellActionRail"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
-import { buildAudioId, deleteCellAudio, uploadCellAudio } from "@/lib/audio/upload"
-import { emitCellAudioAttach } from "@/lib/sync/events-emit"
-import { injectOptimisticAudioAttachment, notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
-import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
-import { markProjectHasAudioDataSoon } from "@/lib/audio/project-audio-state"
-import { probeDurationMsSafe } from "@/lib/import"
-
-const ACCEPT = "audio/*,.wav,.mp3,.m4a,.ogg"
-
-/** Extension for the R2 object name. Prefer the filename's own extension
- *  (wav/mp3/m4a survive that way); fall back to a mimeType guess, then a
- *  generic default so an upload never fails just because the ext is unclear. */
-function extFromFile(file: File): string {
-  const dot = file.name.lastIndexOf(".")
-  if (dot > 0 && dot < file.name.length - 1) {
-    const fromName = file.name.slice(dot + 1).toLowerCase().replace(/[^a-z0-9]/g, "")
-    if (fromName) return fromName
-  }
-  const mime = file.type.toLowerCase()
-  if (mime.includes("wav")) return "wav"
-  if (mime.includes("mpeg") || mime.includes("mp3")) return "mp3"
-  if (mime.includes("mp4") || mime.includes("m4a") || mime.includes("aac")) return "m4a"
-  if (mime.includes("ogg")) return "ogg"
-  return "bin"
-}
+import { ACCEPT, attachAudioFileToCell } from "@/lib/audio/attach-file"
 
 interface Props {
   projectId: string
@@ -72,67 +50,12 @@ export function CellAudioUploadButton({ projectId, fileId, cellId, username, dis
   }, [disabled, uploading])
 
   const handleFileSelected = useCallback(async (file: File) => {
-    if (!session?.jwt) {
-      setError("Sign in to upload recordings")
-      return
-    }
     setUploading(true)
     setError(null)
-    const ext = extFromFile(file)
-    const audioId = buildAudioId(cellId)
     try {
-      const result = await uploadCellAudio({
-        projectId,
-        fileId,
-        audioId,
-        ext,
-        blob: file,
-        getSyncToken: audioSyncTokenFetcherForSession(session),
-      })
-      markProjectHasAudioDataSoon(projectId)
-      const fullAudioId = `${result.audioId}.${result.ext}`
-      // Round 6: carry the upload's duration so its Target-track chip renders
-      // at the recording's real length. Best-effort.
-      const uploadDurationMs = await probeDurationMsSafe(file)
-      let attachEventId: string
-      try {
-        attachEventId = await emitCellAudioAttach({
-          projectId,
-          fileId,
-          cellId,
-          audioId: fullAudioId,
-          url: result.url,
-          slot: "recording",
-          mimeType: file.type || undefined,
-          durationMs: uploadDurationMs,
-          author: username,
-        })
-      } catch (emitErr) {
-        // Same orphan-cleanup as the mic recorder: the R2 object uploaded
-        // fine but the attach event failed — delete it rather than leaking
-        // storage, then re-throw so the user sees the real error.
-        void deleteCellAudio({
-          projectId,
-          fileId,
-          audioId: result.audioId,
-          ext: result.ext,
-          getSyncToken: audioSyncTokenFetcherForSession(session),
-        })
-        throw emitErr
-      }
-      // Flip `hasAudio` immediately — don't wait on the server round-trip.
-      injectOptimisticAudioAttachment(fileId, cellId, {
-        audioId: fullAudioId,
-        url: result.url,
-        slot: "recording",
-        mimeType: file.type || null,
-        voiceId: null,
-        referenceAudioId: null,
-        durationMs: uploadDurationMs ?? null,
-        trimStartMs: null,
-        trimEndMs: null,
-      }, attachEventId)
-      notifyAudioAttachmentsChanged(fileId)
+      // No `label`: this rail has no takes list to number against, and
+      // fetching one to name a single icon click isn't worth the request.
+      await attachAudioFileToCell({ session, projectId, fileId, cellId, file, username })
       onTakeSaved?.(cellId)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))

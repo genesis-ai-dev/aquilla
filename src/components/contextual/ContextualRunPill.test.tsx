@@ -102,7 +102,7 @@ describe("ContextualRunPill", () => {
       await Promise.resolve()
     })
     expect(onSetupNeeded).not.toHaveBeenCalled()
-    expect(transport.start).toHaveBeenCalledWith("p1", "file-1", undefined)
+    expect(transport.start).toHaveBeenCalledWith("p1", "file-1", undefined, "")
   })
 
   it("announces a visible recovery message when starting fails", async () => {

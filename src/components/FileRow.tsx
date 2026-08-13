@@ -24,6 +24,7 @@ interface FileRowProps {
   file: FileReference
   active: boolean
   expanded: boolean
+  expandable?: boolean
   progress?: FileStats
   openCommentCount?: number
   hasSuggestion?: boolean
@@ -68,7 +69,7 @@ export function FileRow(props: FileRowProps) {
     ? Math.round((progress.translated / progress.total) * 100) : 0
   const validatedPct = progress && progress.total > 0
     ? Math.round((progress.validated / progress.total) * 100) : 0
-  const canExpand = fileHasSections(file)
+  const canExpand = props.expandable ?? fileHasSections(file)
   // Timeline-segment-model: a file is either time-true (timeline spine) or
   // sequence-true (intrinsic order). Sequence is the default, so only the
   // exceptional timeline files carry a marker — repeating an icon on every

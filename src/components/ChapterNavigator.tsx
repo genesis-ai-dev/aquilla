@@ -402,11 +402,13 @@ export function MilestoneNavigator({
   activeKey,
   activeSubsectionKey,
   onSelect,
+  compact = false,
 }: {
   items: MilestoneNavigationItem[]
   activeKey: string
   activeSubsectionKey?: string
   onSelect: (key: string, subsectionKey?: string) => void
+  compact?: boolean
 }) {
   const t = useT()
   const [open, setOpen] = useState(false)
@@ -585,7 +587,10 @@ export function MilestoneNavigator({
                 // Default: padded label + chevron. data-icon-only: true icon
                 // button (w-8, p-0, label hidden, chevron centered). xl+: fixed
                 // width with start-aligned label regardless of squeeze.
-                className="flex h-8 min-w-8 w-auto max-w-full shrink items-center justify-center gap-2 overflow-hidden px-2.5 data-[icon-only]:w-8 data-[icon-only]:shrink-0 data-[icon-only]:gap-0 data-[icon-only]:p-0 xl:w-56 xl:min-w-56 xl:shrink-0 xl:justify-start xl:px-2.5 xl:data-[icon-only]:w-56 xl:data-[icon-only]:gap-2 xl:data-[icon-only]:p-2.5 xl:[&>svg:last-child]:ml-auto [&>svg:last-child]:shrink-0"
+                className={cn(
+                  "flex h-8 min-w-8 w-auto max-w-full shrink items-center justify-center gap-2 overflow-hidden px-2.5 data-[icon-only]:w-8 data-[icon-only]:shrink-0 data-[icon-only]:gap-0 data-[icon-only]:p-0 [&>svg:last-child]:shrink-0",
+                  !compact && "xl:w-56 xl:min-w-56 xl:shrink-0 xl:justify-start xl:px-2.5 xl:data-[icon-only]:w-56 xl:data-[icon-only]:gap-2 xl:data-[icon-only]:p-2.5 xl:[&>svg:last-child]:ml-auto",
+                )}
                 aria-label={
                   activeSubsection
                     ? t(vocabulary.currentWithCells, {
@@ -600,7 +605,7 @@ export function MilestoneNavigator({
             <span
               className={
                 iconOnlyTrigger
-                  ? "hidden min-w-0 items-center gap-2 text-left xl:flex"
+                  ? cn("hidden min-w-0 items-center gap-2 text-left", !compact && "xl:flex")
                   : "flex min-w-0 items-center gap-2 text-left"
               }
             >
@@ -608,7 +613,10 @@ export function MilestoneNavigator({
                 {active.label}
               </span>
               {/* Below xl: chapter label only — drop the verse/cell summary. */}
-              <span className="hidden min-w-0 truncate text-xs font-normal leading-none text-muted-foreground xl:inline">
+              <span className={cn(
+                "hidden min-w-0 truncate text-xs font-normal leading-none text-muted-foreground",
+                !compact && "xl:inline",
+              )}>
                 {activeSummary}
               </span>
             </span>

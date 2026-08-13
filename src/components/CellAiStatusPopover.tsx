@@ -55,7 +55,9 @@ export function CellAiStatusPopover({ trigger, error, actions, onDismiss }: Prop
       >
         <div className="flex items-start gap-2">
           <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
-          <div className="space-y-1">
+          {/* min-w-0 keeps the flex child from sizing to the widest line of the
+              raw provider error; break-words inherits into the body + <pre>. */}
+          <div className="min-w-0 flex-1 space-y-1 break-words">
             <div className="text-sm font-medium leading-tight">{error.title}</div>
             <p className="text-muted-foreground leading-snug">{error.body}</p>
             {error.body !== error.raw && (

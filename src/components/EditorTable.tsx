@@ -299,7 +299,7 @@ function clampIndex(index: number, length: number): number {
   return Math.max(0, Math.min(length - 1, index))
 }
 
-function applyRowOverlays(
+export function applyRowOverlays(
   cell: CellData,
   options: {
     audioEntry?: CellAudioEntry
@@ -318,6 +318,12 @@ function applyRowOverlays(
         ...(attachment.voiceId ? { voiceId: attachment.voiceId } : {}),
         ...(attachment.referenceAudioId ? { referenceAudioId: attachment.referenceAudioId } : {}),
         ...(attachment.durationMs != null ? { durationMs: attachment.durationMs } : {}),
+        // AQU-782: forward the trim window so the text-section Transcribe
+        // control windows an imported clip to just this section (mirrors
+        // mergeCellsWithAudio). Without it, transcribeCell saw no trim and
+        // fell through to whole-clip transcription for every section.
+        ...(attachment.trimStartMs != null ? { trimStartMs: attachment.trimStartMs } : {}),
+        ...(attachment.trimEndMs != null ? { trimEndMs: attachment.trimEndMs } : {}),
       }
     }
     next = {

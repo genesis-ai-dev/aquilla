@@ -5,7 +5,8 @@ import { test, expect, orgRoute } from "../../helpers/multi-user"
  *
  * The page renders:
  *   - h1 "Organization settings"
- *   - Navigation rows to identity, export, roster, providers, members, teams, archived
+ *   - Navigation rows: Organization (identity, security, providers, monday),
+ *     People & Projects (members, teams, archived)
  *
  * This spec verifies the route loads and the key structural elements render.
  * It does NOT mutate org settings.
@@ -53,9 +54,19 @@ test("org settings page renders Identity section and stats", async ({ alice }) =
     timeout: 5_000,
   })
 
-  // AQU-485: roster & progress visibility is a first-class settings sub-page.
-  await expect(alice.getByRole("link", { name: /Roster & progress visibility/i })).toBeVisible({
+  // AQU-485+: visibility and permission floors live on /settings/security.
+  const securityLink = alice.getByRole("link", { name: /^Security/i })
+  await expect(securityLink).toBeVisible({
     timeout: 5_000,
   })
+  await securityLink.click()
+  await expect(alice).toHaveURL(orgRoute(alice, "/settings/security"))
+  await expect(alice.locator("h1").filter({ hasText: /^Security$/ })).toBeVisible({
+    timeout: 10_000,
+  })
+  await expect(alice.getByText("Visibility", { exact: true })).toBeVisible()
+  await expect(alice.getByText("Permissions", { exact: true })).toBeVisible()
+  await expect(alice.getByLabelText(/who can view the roster/i)).toBeVisible()
+  await expect(alice.getByLabelText(/who can export/i)).toBeVisible()
   expect(orgDirectoryRequests).toBe(0)
 })

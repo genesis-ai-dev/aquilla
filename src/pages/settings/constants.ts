@@ -1,6 +1,6 @@
 import { ROLE } from "@/lib/frontier/roles"
 
-/** Short role labels for the export-floor hint on the index row. */
+/** Short role labels for floor hints and compact Security-page selects. */
 export const FLOOR_LABEL: Record<number, string> = {
   [ROLE.VIEWER]: "Viewer",
   [ROLE.CONTRIBUTOR]: "Contributor",
@@ -11,35 +11,31 @@ export const FLOOR_LABEL: Record<number, string> = {
 
 export const ORG_SETTINGS_SECTIONS = [
   "identity",
-  "export",
-  "roster",
-  "assignment",
-  "terminology",
+  "security",
   "providers",
   "monday",
 ] as const
 export type OrgSettingsSection = (typeof ORG_SETTINGS_SECTIONS)[number]
 
+/** Retired per-floor pages that now live on /settings/security. */
+export const ORG_SETTINGS_SECTION_ALIASES: Record<string, OrgSettingsSection> = {
+  export: "security",
+  roster: "security",
+  assignment: "security",
+  terminology: "security",
+}
+
 export const ORG_SETTINGS_SECTION_TITLES: Record<OrgSettingsSection, string> = {
   identity: "Identity",
-  export: "Export permissions",
-  roster: "Roster & progress visibility",
-  assignment: "Assignment authority",
-  terminology: "Terminology permissions",
+  security: "Security",
   providers: "AI provider keys",
   monday: "Monday.com",
 }
 
 export const ORG_SETTINGS_SECTION_DESCRIPTIONS: Record<OrgSettingsSection, string> = {
   identity: "The organization's display name, shown across the workspace.",
-  export:
-    "Minimum role required to download project deliverables — USFM export and project zip. Defaults to Maintainer.",
-  roster:
-    "Who can see the member roster and per-member progress. Both default to Maintainer.",
-  assignment:
-    "Whether members below project lead may claim work for themselves. Leads and maintainers can always assign.",
-  terminology:
-    "Minimum role required to manage a project's term base — add, edit, delete, and archive terms. Defaults to Project lead.",
+  security:
+    "Who can see members and who can export, assign, and manage terms.",
   providers:
     "Org-level keys act as a baseline for everyone in this organization. Projects or individuals can override with their own.",
   monday:

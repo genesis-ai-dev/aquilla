@@ -215,19 +215,28 @@ function StatTile({
  */
 function SettingsGroup({
   label,
+  description,
   className,
   children,
 }: {
   label?: React.ReactNode
+  description?: React.ReactNode
   className?: string
   children: React.ReactNode
 }) {
   return (
     <div className={cn("space-y-2", className)}>
-      {label ? (
-        <p className="pl-4 font-heading text-base font-medium tracking-tight text-foreground">
-          {label}
-        </p>
+      {label || description ? (
+        <div className="space-y-1 pl-4">
+          {label ? (
+            <p className="font-heading text-base font-medium tracking-tight text-foreground">
+              {label}
+            </p>
+          ) : null}
+          {description ? (
+            <p className="text-sm text-muted-foreground">{description}</p>
+          ) : null}
+        </div>
       ) : null}
       <div className="divide-y overflow-hidden rounded-lg border bg-card">
         {children}

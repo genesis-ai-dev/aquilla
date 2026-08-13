@@ -4,9 +4,6 @@
  */
 export { OrgSettingsIndex as Settings } from "./settings/OrgSettingsIndex"
 export { OrgSettingsIdentity } from "./settings/OrgSettingsIdentity"
-export { OrgSettingsExport } from "./settings/OrgSettingsExport"
-export { OrgSettingsRoster } from "./settings/OrgSettingsRoster"
-export { OrgSettingsAssignment } from "./settings/OrgSettingsAssignment"
-export { OrgSettingsTerminology } from "./settings/OrgSettingsTerminology"
+export { OrgSettingsSecurity } from "./settings/OrgSettingsSecurity"
 export { OrgSettingsProviders } from "./settings/OrgSettingsProviders"
 export { OrgSettingsMonday } from "./settings/OrgSettingsMonday"

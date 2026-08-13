@@ -7,7 +7,7 @@
  * richer name (e.g. the project + file name) upgrade their entry's title via
  * `useNavHistoryTitle` once that data has loaded.
  */
-import { ORG_SETTINGS_SECTION_TITLES, type OrgSettingsSection } from "@/pages/settings/constants"
+import { ORG_SETTINGS_SECTION_ALIASES, ORG_SETTINGS_SECTION_TITLES, type OrgSettingsSection } from "@/pages/settings/constants"
 import { parseOrgPath, ALL_ORGS_PARAM } from "@/lib/navigation/org-paths"
 
 export function deriveNavTitle(pathname: string): string {
@@ -45,7 +45,10 @@ export function deriveNavTitle(pathname: string): string {
         return "Assigned to me"
       case "settings":
         if (parts.length === 1) return "Organization settings"
-        return ORG_SETTINGS_SECTION_TITLES[parts[1] as OrgSettingsSection] ?? "Settings"
+        {
+          const slug = ORG_SETTINGS_SECTION_ALIASES[parts[1]] ?? parts[1]
+          return ORG_SETTINGS_SECTION_TITLES[slug as OrgSettingsSection] ?? "Settings"
+        }
       case "members":
         return parts[1] === "matrix" ? "Members matrix" : "Members"
       case "teams":

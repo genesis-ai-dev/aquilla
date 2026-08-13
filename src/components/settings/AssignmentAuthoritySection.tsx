@@ -14,8 +14,8 @@
 // affordance only.
 
 import { useState } from "react"
-import { FieldDescription, FieldError } from "@/components/ui/field"
-import { SettingsGroup, SettingsRow } from "@/components/ui/page"
+import { FieldError } from "@/components/ui/field"
+import { SettingsRow } from "@/components/ui/page"
 import { Switch } from "@/components/ui/switch"
 import type { UseOrgSettings } from "@/hooks/useOrgSettings"
 
@@ -44,29 +44,21 @@ export function AssignmentAuthoritySection({ orgSettings, canEdit }: AssignmentA
   }
 
   return (
-    <SettingsGroup label="Assignments">
-      <SettingsRow
-        label="Allow self-assignment"
-        description="When on, a member (contributor and above) can claim a book/chapter/take for THEMSELVES from the assign-work picker — they still can't assign work to anyone else. Leads and maintainers can always assign, to anyone, regardless of this setting."
-        block
-      >
-        <div className="flex items-start justify-between gap-4">
-          <div className="min-w-0 space-y-1">
-            {!canEdit && (
-              <FieldDescription>Only org owners can change the assignment authority policy.</FieldDescription>
-            )}
-            {error && <FieldError className="text-xs">{error}</FieldError>}
-          </div>
+    <SettingsRow
+      label="Allow self-assignment"
+      description="When on, a member (contributor and above) can claim a book/chapter/take for themselves from the assign-work picker — they still can't assign work to anyone else. Leads and maintainers can always assign, to anyone, regardless of this setting."
+      control={
+        <div className="flex min-w-44 flex-col items-end gap-1">
           <Switch
             id="allow-self-assignment"
             checked={allowSelfAssignment}
             onCheckedChange={(checked) => void handleChange(checked)}
             disabled={!canEdit || busy}
             aria-label="Allow self-assignment"
-            className="shrink-0"
           />
+          {error && <FieldError className="text-xs">{error}</FieldError>}
         </div>
-      </SettingsRow>
-    </SettingsGroup>
+      }
+    />
   )
 }

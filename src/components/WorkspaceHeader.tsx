@@ -10,7 +10,7 @@ interface Props {
   extraMenuItems?: OverflowMenuItem[]
   /** When set, renders Import in a button group beside the ⋯ overflow menu. */
   onImport?: () => void
-  /** When set, renders a Settings cog beside Import. */
+  /** When set, renders a Settings cog beside the Import group. */
   onSettings?: () => void
   /**
    * AQU-428: When provided, the project name in the breadcrumb becomes a

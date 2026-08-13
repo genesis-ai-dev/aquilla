@@ -197,3 +197,53 @@ makes the work impossible to review or revert cleanly.
 ## Useful slash commands
 
 - `/e2e-add` — scaffold a new E2E spec from template (see `.claude/commands/e2e-add.md`).
+
+## Cursor Cloud specific instructions
+
+The Cloud Agent VM is provisioned by the startup update script (three `pnpm install`
+runs: root, `auth-worker/`, `sync-worker/`) plus a preinstalled Playwright Chromium.
+Node 22 + pnpm 10.19.0 are already present. Standard commands are unchanged — see
+`CLAUDE.md` (Commands) and `README.md` for lint/test/build/dev. Non-obvious caveats
+specific to this environment:
+
+- **Postgres is native, not Docker.** This VM has **no Docker**, so the dev-stack's
+  default `postgres:16` container path (and the optional agent sandbox worker on
+  :8790) are unavailable. Instead, PostgreSQL 16 is installed locally with a role/db
+  matching the dev-stack default (`aquilla`/`aquilla` → `aquilla_dev` on
+  `127.0.0.1:5432`). The Postgres **server is not auto-started on boot** — start it
+  once per session before `pnpm dev` / `pnpm test:e2e`:
+
+  ```bash
+  sudo pg_ctlcluster 16 main start   # idempotent; check with: sudo pg_lsclusters
+  ```
+
+- **`LOCAL_PG_URL` makes the dev-stack use the native Postgres instead of Docker.**
+  It is exported in `~/.bashrc` as
+  `postgresql://aquilla:aquilla@127.0.0.1:5432/aquilla_dev`. Interactive login shells
+  pick it up automatically; if you launch `pnpm dev` from a non-login shell that did
+  not source `~/.bashrc`, export it first, otherwise dev-stack tries (and fails) to
+  manage a Docker container. `scripts/dev-stack.ts` loads/reconciles
+  `db/postgres/schema.sql` into this DB on boot.
+
+- **What `pnpm dev` brings up:** Vite (`5173`), auth-worker/identity (`8788`),
+  sync-worker (`8789`), and a scripted mock OpenRouter LLM (`9456`, since no real
+  `OPENROUTER_API_KEY`). The agent sandbox is skipped (no Docker) — agent code-exec
+  tools report "sandbox unavailable"; this is expected and non-blocking. Log in for
+  manual/browser testing via `http://127.0.0.1:5173/__dev/login` (seeds the `dev`
+  user + `dev-project`).
+
+- **E2E:** `pnpm test:e2e` / `pnpm test:e2e:smoke` also require the native Postgres
+  running (above). Because there is no Docker, the harness resets its `aquilla_e2e*`
+  databases via local `psql`, and its admin connection defaults to
+  `postgresql:///postgres` (a Unix-socket login as the OS user, which doesn't exist
+  here). `E2E_PG_ADMIN_URL` is therefore exported in `~/.bashrc` as
+  `postgresql://aquilla:aquilla@localhost:5432/postgres` (the `aquilla` role was granted
+  `CREATEDB`); without it, `[e2e-up] … drop/recreate failed` / `role "ubuntu" does not
+  exist`. Run e2e from a login shell (or export it first). The harness force-kills ports
+  `5173`/`8787`/`8788`, so stop `pnpm dev` first. If a boot fails with
+  `Address already in use (127.0.0.1:187xx)`, an orphaned `wrangler`/`workerd` from a
+  previous run is still holding an inspector port — kill those specific PIDs (find them
+  with `lsof -ti :18787 :18788`) before retrying. Chromium is already installed; no
+  `playwright install` needed. Target one spec with
+  `npx tsx scripts/e2e-up.ts -- <spec>`; the full smoke suite runs serially and is slow
+  (~40-60 min) — see `e2e/README.md`.

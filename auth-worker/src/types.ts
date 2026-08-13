@@ -128,7 +128,7 @@ export interface Env {
   OPENROUTER_API_KEY?: string
   DEFAULT_LLM_MODEL?: string
   /** Fallback model for the translation agent (routes/agent.ts) when
-   *  platform_settings.agentModel is unset. Default: anthropic/claude-haiku-4-5. */
+   *  platform_settings.agentModel is unset. Default: openai/gpt-5.6-luna. */
   AGENT_MODEL_DEFAULT?: string
   /** Fallback model for the agent's server-side `draft` tool when
    *  platform_settings.agentDraftModel is unset. Default: the agent model. */
@@ -137,7 +137,7 @@ export interface Env {
    *  in scripts/mock-openrouter.ts). Never set in prod. */
   OPENROUTER_BASE_URL?: string
   /** Contextual pipeline (routes/contextual.ts) fast-tier model override.
-   *  Default: anthropic/claude-haiku-4-5. */
+   *  Default: openai/gpt-5.6-luna. */
   CONTEXTUAL_FAST_MODEL?: string
   /** Contextual pipeline deep-tier (verifier) model override. Default: the
    *  resolved draft (mid) model. */

@@ -46,4 +46,14 @@ describe("buildAugmentSystemPrompt — memory index", () => {
     expect(prompt).toContain("and 13 more")
     expect(prompt).toContain("read_memory")
   })
+
+  it("keeps conversation language separate from the translation target", () => {
+    const inferred = buildAugmentSystemPrompt({ memory: ctx([]) })
+    expect(inferred).toContain("language of the user's latest message")
+    expect(inferred).toContain("target language applies only to translated content")
+    expect(inferred).not.toContain("project's working language")
+
+    const configured = buildAugmentSystemPrompt({ memory: ctx([]), responseLanguage: "Spanish" })
+    expect(configured).toContain("Reply to the user in Spanish")
+  })
 })

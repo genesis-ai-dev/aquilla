@@ -15,16 +15,16 @@ const SAMPLE_USFM = path.resolve(__dirname, "../../fixtures/sample.usfm")
  * The chevron only renders for section-bearing file types: fileTypeHasSections
  * (src/lib/parsers/types.ts) is scripture-only (usfm/ebible), so markdown
  * files no longer expand — this spec imports sample.usfm instead, which has
- * two chapters that become sections "GEN 1" and "GEN 2" (section labels come
- * from the canonical reference, e.g. "GEN 1:1" → "GEN 1").
+ * two chapters that become sections "Genesis 1" and "Genesis 2".
  *
  * This spec:
  *   1. Imports sample.usfm.
  *   2. Waits for the file to appear in the sidebar.
  *   3. Clicks the "Expand" button on the file row.
- *   4. Verifies the section rows (GEN 1, GEN 2) become visible.
+ *   4. Verifies the section rows (Genesis 1, Genesis 2) become visible.
  *   5. Proves expansion does not request full cell pages.
- *   6. Edits and validates a cell, then verifies both progress bars update.
+ *   6. Edits and validates a cell, then verifies the file validation bar and
+ *      chapter health matrix update.
  *   7. Clicks "Collapse" — section rows disappear.
  */
 test("expanding a file row reveals section rows in the sidebar", async ({ alice }) => {
@@ -46,6 +46,10 @@ test("expanding a file row reveals section rows in the sidebar", async ({ alice 
   // cell load is expected. Start measuring only after that independent work
   // has settled; requests observed below are attributable to expansion.
   await ws.waitForEditor()
+  const fileRow = sidebar.locator('[data-showcase="sidebar.file"][data-showcase-name="sample.usfm"]')
+  const validationBar = fileRow.getByRole("progressbar", { name: /Validation progress for sample\.usfm/i })
+  await expect(validationBar).toHaveAttribute("aria-valuenow", "0")
+  const initialValidationPct = Number(await validationBar.getAttribute("aria-valuenow") ?? "0")
   const cellPageReads: string[] = []
   const trackCellReads = (request: Request) => {
     const url = new URL(request.url())
@@ -61,20 +65,18 @@ test("expanding a file row reveals section rows in the sidebar", async ({ alice 
   await expandBtn.click()
 
   // FileSectionGrid loads section progress from the sync-worker.
-  // sample.usfm has chapters 1 and 2 → sections "GEN 1" and "GEN 2".
+  // sample.usfm has chapters 1 and 2 → sections "Genesis 1" and "Genesis 2".
   await expect(
-    sidebar.getByText(/^GEN 1$/).first()
+    sidebar.getByText(/^Genesis 1$/).first()
   ).toBeVisible({ timeout: 10_000 })
   await expect(
-    sidebar.getByText(/^GEN 2$/).first()
+    sidebar.getByText(/^Genesis 2$/).first()
   ).toBeVisible({ timeout: 3_000 })
   expect(cellPageReads).toEqual([])
   alice.off("request", trackCellReads)
 
-  // Open chapter 1 and verify optimistic progress is reflected immediately.
-  const gen1 = sidebar.getByRole("button", { name: /GEN 1/i }).first()
-  const translatedBar = gen1.locator("span.bg-amber-500")
-  const validatedBar = gen1.locator("span.bg-emerald-500")
+  // Open chapter 1 and verify optimistic validation progress is reflected immediately.
+  const gen1 = sidebar.getByRole("button", { name: "Genesis 1" }).first()
   await gen1.click()
   await ws.waitForEditor()
   // AQU-634 imports book-name/title front matter by default, so cell index 0
@@ -87,20 +89,21 @@ test("expanding a file row reveals section rows in the sidebar", async ({ alice 
   }, "In the beginning")
   expect(verseIndex).toBeGreaterThanOrEqual(0)
   await ws.editCell(verseIndex, "Bonjour")
-  await expect.poll(async () => Number.parseFloat((await translatedBar.getAttribute("style"))?.match(/[\d.]+/)?.[0] ?? "0"), {
-    timeout: 10_000,
-  }).toBeGreaterThan(0)
 
+  // Human-authored translations are currently validated on commit. The
+  // explicit helper is still safe when that has already happened and keeps
+  // this journey valid if the validation policy later becomes two-step.
   await ws.validateCell(verseIndex)
-  await expect.poll(async () => Number.parseFloat((await validatedBar.getAttribute("style"))?.match(/[\d.]+/)?.[0] ?? "0"), {
+  await expect.poll(async () => Number(await validationBar.getAttribute("aria-valuenow") ?? "0"), {
     timeout: 10_000,
-  }).toBeGreaterThan(0)
+  }).toBeGreaterThan(initialValidationPct)
+  await expect(gen1.getByRole("img", { name: /human validated/i }).first()).toBeVisible({ timeout: 10_000 })
 
   // Collapse the file row — sections disappear.
   const collapseBtn = sidebar.locator('[aria-label="Collapse"]').first()
   await expect(collapseBtn).toBeVisible({ timeout: 3_000 })
   await collapseBtn.click()
   await expect(
-    sidebar.getByText(/^GEN 1$/).first()
+    sidebar.getByText(/^Genesis 1$/).first()
   ).not.toBeVisible({ timeout: 3_000 })
 })

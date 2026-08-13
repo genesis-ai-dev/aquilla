@@ -14,7 +14,7 @@ export interface DraftContextSettings {
 }
 
 export const DEFAULT_DRAFT_CONTEXT: DraftContextSettings = {
-  precedingTargetCells: 3,
+  precedingTargetCells: 5,
 }
 
 type MinimalCell = {

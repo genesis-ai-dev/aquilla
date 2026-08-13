@@ -1,9 +1,11 @@
 import { useMemo, useSyncExternalStore, type RefObject, type ReactNode } from "react"
-import { ListChecks } from "lucide-react"
+import { ListChecks, LoaderCircle, WandSparkles } from "lucide-react"
 import { CheckFileButton } from "@/components/CheckFileButton"
 import { EditorModeToggle, type EditorLens } from "@/components/EditorModeToggle"
 import { OverflowMenu, type OverflowMenuItem } from "@/components/OverflowMenu"
 import type { CheckRunResult } from "@/lib/check/deterministic-check"
+import { Switch } from "@/components/ui/switch"
+import { AppTooltip } from "@/components/ui/tooltip"
 
 /** Tailwind `sm` — below this, Check file folds into the ⋯ menu. */
 const SM_MIN_WIDTH_QUERY = "(min-width: 640px)"
@@ -31,6 +33,10 @@ interface FileChapterToolbarProps {
   menuItems: OverflowMenuItem[]
   fileOptionsAnchorRef?: RefObject<HTMLButtonElement | null>
   viewSettingsMenu?: ReactNode
+  translateAsReadEnabled?: boolean
+  translateAsReadDisabled?: boolean
+  translateAsReadActive?: boolean
+  onTranslateAsReadChange?: (enabled: boolean) => void
 }
 
 /** Chapter-row right-side controls: lens switch, file check, and overflow menu. */
@@ -45,6 +51,10 @@ export function FileChapterToolbar({
   menuItems,
   fileOptionsAnchorRef,
   viewSettingsMenu,
+  translateAsReadEnabled = false,
+  translateAsReadDisabled = false,
+  translateAsReadActive = false,
+  onTranslateAsReadChange,
 }: FileChapterToolbarProps) {
   const smUp = useIsSmUp()
 
@@ -87,6 +97,30 @@ export function FileChapterToolbar({
           onChange={onLensChange}
           timeOrdered={timeOrdered}
         />
+        {onTranslateAsReadChange ? (
+          <AppTooltip
+            content={translateAsReadDisabled
+              ? "AI translation is unavailable or this file is read-only"
+              : "Draft visible empty cells. Refresh untouched AI drafts only when better evidence is available."}
+          >
+            <div className={translateAsReadDisabled
+              ? "flex cursor-not-allowed items-center gap-2 rounded-md border bg-card px-2.5 py-1.5 text-xs text-muted-foreground opacity-60"
+              : "flex items-center gap-2 rounded-md border bg-card px-2.5 py-1.5 text-xs font-medium text-foreground shadow-xs transition-colors hover:bg-accent"}
+            >
+              {translateAsReadActive
+                ? <LoaderCircle className="h-3.5 w-3.5 animate-spin text-primary" />
+                : <WandSparkles className="h-3.5 w-3.5 text-primary" />}
+              <span className="hidden whitespace-nowrap lg:inline">Translate as read</span>
+              <Switch
+                size="sm"
+                aria-label="Translate as read"
+                checked={translateAsReadEnabled}
+                disabled={translateAsReadDisabled}
+                onCheckedChange={onTranslateAsReadChange}
+              />
+            </div>
+          </AppTooltip>
+        ) : null}
         {/* Really small: Check file lives in the ⋯ menu instead. */}
         <div className="hidden sm:contents">
           <CheckFileButton

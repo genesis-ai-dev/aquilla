@@ -48,7 +48,10 @@ ENVIRONMENT="development"
 # the former aquilla-chat-worker on 2026-05-26). Without this, chat
 # requests return 500. Grab a key at https://openrouter.ai/keys.
 OPENROUTER_API_KEY=""
-DEFAULT_LLM_MODEL="anthropic/claude-sonnet-4.5"
+DEFAULT_LLM_MODEL="openai/gpt-5.6-luna"
+AGENT_MODEL_DEFAULT="openai/gpt-5.6-luna"
+AGENT_DRAFT_MODEL_DEFAULT="openai/gpt-5.6-luna"
+CONTEXTUAL_FAST_MODEL="openai/gpt-5.6-luna"
 
 # Optional Docker-free agent code execution. Point these at an already deployed
 # development sandbox. Leave both empty to let scripts/dev-stack.ts try the

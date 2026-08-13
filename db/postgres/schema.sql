@@ -461,6 +461,9 @@ CREATE TABLE cells (
     -- by any subsequent human target.cell.commit or cell.validate. Forward-only:
     -- historical commits without the ai_suggestion field default to 0.
     ai_drafted        INTEGER NOT NULL DEFAULT 0,
+    -- Durable provenance for the current untouched AI head. Cleared together
+    -- with ai_drafted on human edit or validation.
+    ai_draft          JSONB,
     start_ms          BIGINT,
     end_ms            BIGINT,
     medium            TEXT,

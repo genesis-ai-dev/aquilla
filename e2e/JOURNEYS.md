@@ -40,6 +40,8 @@
 | AI          | Sparkle in a secondary target lane commits into that lane only — survives reload, default lane untouched | `e2e/specs/ai/completion-lane.spec.ts` (spec-local mock LLM) | |
 | AI          | Rapid sparkle sequences (regenerate, edit-then-sparkle, lane repeats) never dead-letter as stale siblings | `e2e/specs/ai/completion-races.spec.ts` (spec-local mock LLM) | |
 | AI          | Paragraph pilcrow button drafts all cells of a paragraph as one unit (mock LLM) | `e2e/specs/ai/paragraph-draft.smoke.spec.ts` | ✅ |
+| AI          | Translate as read drafts visible empty cells while preserving human-owned/validated text | `e2e/specs/ai/translate-as-read.spec.ts` + `src/lib/completion/translate-as-read.test.ts` | |
+| AI          | Translate as read refreshes an untouched AI draft only after newly validated evidence; extra AI drafts alone do not rewrite it | `e2e/specs/ai/translate-as-read.spec.ts` | |
 | AI          | Agent drafts open file → editor-tab workbench accept-all lands in editor → undo restores pre-draft text | `e2e/specs/ai/agent-draft.spec.ts` (mock OpenRouter via e2e-up)     |        |
 | AI          | Sidebar Agent opens the dock; expand → workbench; minimize dismisses the editor tab and restores the dock (collapsed rail also opens dock, not /agent) | `e2e/specs/ai/agent-sidebar-when-minimized.smoke.spec.ts` | ✅ |
 | AI          | Contextual run: enable flag, play pill → autonomous run parks with staged drafts + scene briefs; steer via "Direct the run" popover (queued-direction chip) | `e2e/specs/contextual/run-pill.smoke.spec.ts` (server-side mock LLM via [[ctx]] markers) | ✅ |
@@ -101,8 +103,8 @@
 | Editor      | File rename suggestion banner (numbered family) appears and can be dismissed | `e2e/specs/editor/suggestion-banner-dismiss.smoke.spec.ts` | ✅ |
 | Editor      | Suggestion banner Apply all renames files and shows undo toast; Undo reverts | `e2e/specs/editor/suggestion-banner-apply-undo.smoke.spec.ts` | ✅ |
 | Editor      | Suggestion banner Review dialog shows per-file checkboxes; Cancel closes     | `e2e/specs/editor/suggestion-banner-review-dialog.smoke.spec.ts` | ✅ |
-| Editor      | Expand file row from compact progress (no cell-page fetch); edit/validation updates bars; section click navigates | `e2e/specs/editor/sidebar-file-expand-sections.smoke.spec.ts` | ✅ |
-| Editor      | Sidebar section progress dot click opens editor at section | `e2e/specs/editor/sidebar-progress-dot-navigate.smoke.spec.ts` | ✅ |
+| Editor      | Expand file row from validation progress (no cell-page fetch); validation updates the bar and chapter health matrix; section click navigates | `e2e/specs/editor/sidebar-file-expand-sections.smoke.spec.ts` | ✅ |
+| Editor      | Sidebar chapter health row click opens editor at section | `e2e/specs/editor/sidebar-progress-dot-navigate.smoke.spec.ts` | ✅ |
 | Editor      | Per-file "Apply rename suggestion" sparkle applies one rename and shows undo toast | `e2e/specs/editor/suggestion-banner-per-file-apply.smoke.spec.ts` | ✅ |
 | Rules       | Delete a custom rule removes it from the list          | `e2e/specs/rules/rule-delete.smoke.spec.ts`             |   ✅   |
 | Terminology | Archive hides an active term while preserving it for restore | `e2e/specs/projects/terminology-delete-concept.smoke.spec.ts` | ✅ |

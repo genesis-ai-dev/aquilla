@@ -234,15 +234,39 @@ export function scriptMockResponse(messages: ChatMessage[]) {
     return respond(`[mock] ${copilotMatch[1].trim()}`)
   }
 
-  // The draft tool's INTERNAL model call: numbered source segments in, strict
-  // [{i,t}] JSON out. Detected by the user-turn shape the tool builds.
-  const translateMatch = userText.match(/^Translate these \d+ segments:/)
-  if (translateMatch) {
-    const drafts: { i: number; t: string }[] = []
-    for (const line of userText.split("\n")) {
-      const m = line.match(/^(\d+)\.\s*(?:\[[^\]]*\]\s*)?(.+)$/)
-      if (m) drafts.push({ i: Number(m[1]), t: `[bozza] ${m[2].trim()}` })
-    }
+  // The draft tool's INTERNAL two-pass model workflow. Route on the
+  // server-owned system contract, not source/user wording: the generation
+  // user message now starts with the completed evidence record, so matching
+  // only `^Translate these …` silently routed it back into the orchestrator's
+  // draft-tool flow and produced no parseable [{i,t}] result.
+  const isDraftResearch = messages.some((message) =>
+    message.role === "system"
+      && typeof message.content === "string"
+      && message.content.includes("You are the RESEARCH pass, separate from final generation."),
+  )
+  if (isDraftResearch) {
+    const count = extractNumberedLines(userText).length
+    return respond(
+      `Mock evidence record for ${count} source segments: preserve every proposition and follow the project evidence.`,
+    )
+  }
+
+  const isDraftGeneration = messages.some((message) =>
+    message.role === "system"
+      && typeof message.content === "string"
+      && message.content.includes("You are the GENERATION pass."),
+  )
+  // Keep the direct prompt shape as a compatibility fallback for older draft
+  // callers while treating the current generation system prompt as canonical.
+  const translateMatch = userText.match(/(?:^|\n)Translate these \d+ segments:[^\n]*(?:\n|$)/)
+  if (isDraftGeneration || translateMatch) {
+    const numberedInput = translateMatch
+      ? userText.slice((translateMatch.index ?? 0) + translateMatch[0].length)
+      : userText
+    const drafts = extractNumberedLines(numberedInput).map(({ i, body }) => ({
+      i,
+      t: `[bozza] ${body}`,
+    }))
     return respond(JSON.stringify(drafts))
   }
   // Match action words, not status adjectives: "translated" and "validated"

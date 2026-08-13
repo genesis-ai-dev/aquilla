@@ -115,6 +115,36 @@ describe("GET /api/v1/projects/:projectId/files/:fileId/cells", () => {
     expect(targetBody.cells[0].side).toBe("target")
   })
 
+  it("returns provenance only for an untouched AI draft", async () => {
+    const aiDraft = {
+      model: "gpt-5.6-luna",
+      provider: "frontier",
+      promptVersion: "translation-draft-v2",
+      exampleIds: ["example-1"],
+      generatedAt: 123,
+      mode: "read",
+      projectState: {
+        sourceLanguage: "en", targetLanguage: "es", approvedExampleCount: 1,
+        evidenceCoverage: 0.5, evidenceWeight: 0.2,
+      },
+    }
+    const { db } = await makeTestDb({
+      cells: [
+        makeCell({ cell_id: "ai", event_id: "ev-ai", anchor_cell_id: null, ai_drafted: 1, ai_draft: aiDraft }),
+        makeCell({ cell_id: "human", event_id: "ev-human", anchor_cell_id: "ai", ai_drafted: 0, ai_draft: aiDraft }),
+      ],
+    })
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-x" })
+    const req = new Request(
+      "https://w/api/v1/projects/proj-a/files/file-x/cells?side=target",
+      { headers: { Authorization: `Bearer ${token}` } },
+    )
+    const res = (await handleCellsReadRequest(req, envWith(db)))!
+    const body = (await res.json()) as { cells: Array<{ cellId: string; aiDraft: unknown }> }
+    expect(body.cells.find((cell) => cell.cellId === "ai")?.aiDraft).toEqual(aiDraft)
+    expect(body.cells.find((cell) => cell.cellId === "human")?.aiDraft).toBeNull()
+  })
+
   it("AQU-538: lane filters target rows to the requested lane; source rows are always included", async () => {
     const { db } = await makeTestDb({
       cells: [

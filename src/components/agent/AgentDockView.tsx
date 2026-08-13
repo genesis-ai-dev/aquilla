@@ -5,16 +5,14 @@
  * (src/lib/agent/session-store.ts): the store owns runs/streaming/queueing
  * and the server-session id, so the full-screen workbench renders the SAME
  * conversation and an in-flight run survives dock unmounts. This component
- * owns only presentation wiring: composer, context pin, proposal Apply.
+ * owns only presentation wiring: composer, attachments, proposal Apply.
  */
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { Bot, Paperclip, X } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { ChatComposer, type ChatComposerHandle, type SuggestedAction } from "@/components/chat/ChatComposer"
-import { ChatContextPin } from "@/components/chat/ChatContextPin"
 import { InputGroupButton } from "@/components/ui/input-group"
-import type { CellContext } from "@/lib/cell-context"
 import { serializeWithChips, type ContextChip } from "@/lib/agent/context-chip"
 import { uploadAgentArtifact, ArtifactUploadError } from "@/lib/agent/artifact-upload"
 import { expandSlashCommand } from "@/lib/agent/slash-commands"
@@ -33,6 +31,7 @@ import {
   MessageScrollerViewport,
 } from "@/components/ui/message-scroller"
 import { AgentEmptyState } from "./AgentEmptyState"
+import { AGENT_PROMPT_HINTS } from "./prompt-hints"
 import { AgentRunView } from "./AgentRunView"
 import { PassageCard } from "./cards/PassageCard"
 import { passageRowsFor } from "./cards/registry"
@@ -47,12 +46,8 @@ export interface AgentDockViewProps {
   author: string
   /** Current user's project role level (project.syncRole.level). */
   roleLevel: number | null
-  /** Focused file/cell ids — sent as run context when the pin is on. */
+  /** Current file/cell location — automatically sent as run context. */
   context: { fileId?: string; cellId?: string }
-  /** Open file's name — keeps the pin pill honest when only file context is sent. */
-  fileName?: string
-  /** Focused cell display info for the context pin strip. */
-  currentCell: CellContext | null
   /** Project's active rules for proposal lint. */
   rules: TranslationRule[]
   /** Live cell lookup from useCells. */
@@ -86,8 +81,6 @@ export function AgentDockView({
   author,
   roleLevel,
   context,
-  fileName,
-  currentCell,
   rules,
   resolveCell,
   onApplied,
@@ -100,8 +93,18 @@ export function AgentDockView({
   onReviewMemory,
 }: AgentDockViewProps) {
   const { state, send, stop, noteActivity } = useAgentSession(projectId)
-  const [includeContext, setIncludeContext] = useState(true)
+  const [promptHintIndex, setPromptHintIndex] = useState(0)
   const composerRef = useRef<ChatComposerHandle>(null)
+
+  // Teach by example in the one place the examples are useful: the empty
+  // composer. Once a conversation exists, return to a quiet generic hint.
+  useEffect(() => {
+    if (state.runs.length > 0) return
+    const timer = window.setInterval(() => {
+      setPromptHintIndex((index) => (index + 1) % AGENT_PROMPT_HINTS.length)
+    }, 4500)
+    return () => window.clearInterval(timer)
+  }, [state.runs.length])
 
   // Composer attach-file affordance (AQU-AGENT Wave-2). Chosen files are
   // uploaded as project artifacts immediately; the returned {artifactId,
@@ -158,9 +161,7 @@ export function AgentDockView({
         jwt,
         request: {
           projectId,
-          ...(includeContext && (context.fileId || context.cellId)
-            ? { context: { ...context } }
-            : {}),
+          ...(context.fileId || context.cellId ? { context: { ...context } } : {}),
           ...(translatorProfile ? { translatorProfile } : {}),
           ...(attachments.length > 0 ? { artifacts: attachments } : {}),
         },
@@ -168,7 +169,7 @@ export function AgentDockView({
       // Attachments belong to the message that carried them — clear after send.
       if (attachments.length > 0) setAttachments([])
     },
-    [jwt, send, projectId, includeContext, context, attachments],
+    [jwt, send, projectId, context, attachments],
   )
 
   // Run a prompt handed in from a suggested action (tapped in chat mode, which
@@ -202,17 +203,9 @@ export function AgentDockView({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <ChatContextPin
-        includeCellContext={includeContext}
-        onToggle={setIncludeContext}
-        currentCell={currentCell}
-        fileName={fileName}
-        compact
-      />
-
       {state.runs.length === 0 ? (
         jwt ? (
-          <AgentEmptyState onPromptSelect={(text) => composerRef.current?.insertText(text)} />
+          <AgentEmptyState />
         ) : (
           <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-1.5 px-3 text-center text-muted-foreground">
             <Bot className="h-5 w-5" />
@@ -223,9 +216,14 @@ export function AgentDockView({
         <MessageScrollerProvider>
           <MessageScroller className="flex-1">
             <MessageScrollerViewport>
-              <MessageScrollerContent className="px-3 py-2">
+              <MessageScrollerContent className="mx-auto w-full max-w-2xl gap-5 px-4 pb-3 pt-4">
                 {state.runs.map((run) => (
-                  <MessageScrollerItem key={run.localId} messageId={run.localId} scrollAnchor>
+                  <MessageScrollerItem
+                    key={run.localId}
+                    messageId={run.localId}
+                    scrollAnchor
+                    className="border-b border-border/40 pb-4 last:border-b-0"
+                  >
                     <AgentRunView
                       run={run}
                       renderProposal={(proposal) =>
@@ -274,7 +272,7 @@ export function AgentDockView({
                 )}
               </MessageScrollerContent>
             </MessageScrollerViewport>
-            <MessageScrollerButton />
+            <MessageScrollerButton className="shadow-sm" />
           </MessageScroller>
         </MessageScrollerProvider>
       )}
@@ -288,7 +286,11 @@ export function AgentDockView({
         compact
         suggestedActions={suggestedActions}
         queueWhileStreaming
-        placeholder="Ask the agent… (/draft, /check, /find, /status)"
+        placeholder={
+          state.runs.length === 0
+            ? `Try asking: ${AGENT_PROMPT_HINTS[promptHintIndex]}`
+            : "Ask Aquilla…"
+        }
         attachmentBar={
           attachments.length > 0 || attachError ? (
             <div className="flex flex-col gap-1">
@@ -340,6 +342,7 @@ export function AgentDockView({
               type="button"
               variant="ghost"
               size="icon-sm"
+              className="rounded-full"
               disabled={!jwt || uploading}
               aria-label="Attach file"
               title="Attach a file for the agent"

@@ -3,8 +3,7 @@
 // Enforces two controls on the OpenRouter chat-completion proxy:
 //
 //   1. Model allowlist — reject any model not in the configured set.
-//      Default: the models the client actually offers ("anthropic/claude-sonnet-4-5",
-//      "anthropic/claude-haiku-4-5", "anthropic/claude-sonnet-4", "anthropic/claude-3.5-sonnet").
+//      Default: GPT-5.6 Luna plus explicitly retained fallback models.
 //      Override via env var AI_ALLOWED_MODELS (comma-separated).
 //
 //   2. Per-user daily budget + global daily ceiling.
@@ -26,12 +25,13 @@
 // AquillaDb is a global type (declared in ../aquilla-db.d.ts).
 import type { Env } from "../types"
 import { getPlatformSettingsCached, type PlatformSettings } from "./platform-settings"
+import { DEFAULT_LLM_MODEL_ID } from "./model-defaults"
 
 // ── Allowlist ──────────────────────────────────────────────────────────────────
 
 /**
  * The models the Codex app actually offers to users. Sourced from:
- *   - DEFAULT_LLM_MODEL in wrangler.toml: anthropic/claude-sonnet-4.5
+ *   - Product default: openai/gpt-5.6-luna
  *   - completion-service.ts: model="" / "default" → DEFAULT_LLM_MODEL
  *   - ProjectSettings.tsx placeholder: anthropic/claude-3.5-sonnet
  *   - Historical / fallback: claude-3.5-sonnet, claude-haiku variants
@@ -40,6 +40,7 @@ import { getPlatformSettingsCached, type PlatformSettings } from "./platform-set
  * has no UI to select them; a request for one signals abuse or misconfiguration.
  */
 const DEFAULT_ALLOWED_MODELS = [
+  DEFAULT_LLM_MODEL_ID,
   "anthropic/claude-sonnet-4.5",
   "anthropic/claude-sonnet-4-5",
   "anthropic/claude-haiku-4-5",

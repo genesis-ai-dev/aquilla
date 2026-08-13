@@ -222,3 +222,55 @@ describe("completeBatch — empty <vN> is never committed", () => {
     expect(finalProgress?.finished).toBe(true)
   })
 })
+
+describe("completeBatch — Luna context recipe", () => {
+  beforeEach(() => {
+    vi.unstubAllGlobals()
+    clearBatchCompletionProgress()
+  })
+
+  it("passes the five immediately preceding approved pairs through to the model prompt", async () => {
+    const preceding = Array.from({ length: 6 }, (_, i) => ({
+      ...makeCell(`previous-${i + 1}`, FILE_A, `Previous source ${i + 1}`),
+      translated: `Previous target ${i + 1}`,
+      status: "validated",
+    }))
+    const live = makeCell("live", FILE_A, "Live source")
+    const cells = [...preceding, live]
+    let userPrompt = ""
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation((_url: string, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body)) as { messages: { role: string; content: string }[] }
+        userPrompt = body.messages.find((message) => message.role === "user")?.content ?? ""
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ choices: [{ message: { content: "<v1>Translated live</v1>" } }] }),
+          body: null,
+        })
+      }),
+    )
+
+    const commitMock = vi.fn().mockResolvedValue(undefined)
+    const { result } = renderHook(() =>
+      useCompletion(
+        SETTINGS, "English", "French",
+        searchMock, vi.fn().mockResolvedValue([]),
+        SESSION, commitMock, [],
+        cells as never, undefined, DEFAULT_DRAFT_CONTEXT,
+      ),
+    )
+
+    await act(async () => {
+      await result.current.completeBatch([live] as never)
+    })
+
+    expect(userPrompt).not.toContain("Source: Previous source 1\nTranslation: Previous target 1")
+    for (let i = 2; i <= 6; i++) {
+      expect(userPrompt).toContain(`Source: Previous source ${i}\nTranslation: Previous target ${i}`)
+    }
+    expect(userPrompt.indexOf("Previous target 6")).toBeLessThan(userPrompt.indexOf("<v1>Live source</v1>"))
+    expect(commitMock).toHaveBeenCalledTimes(1)
+  })
+})

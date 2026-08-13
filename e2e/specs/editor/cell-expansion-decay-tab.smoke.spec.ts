@@ -2,18 +2,17 @@ import { test, expect } from "../../helpers/multi-user"
 import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
- * CellExpansion — "Retrieval support" tab shows endorsement count and support %.
+ * CellExpansion — "Retrieval support" tab explains the available evidence.
  *
  * EditorTable.tsx's cell expansion panel has a "Retrieval support" tab (value="health").
  * Switching to it reveals:
- *   - "<N> endorsements · support <N>%"
- *   - an explicit reminder that the signal prioritizes, but does not replace, review
+ *   - source evidence when it is available, or an explicit unavailable state
+ *   - an explicit reminder that this is support evidence, not predicted quality
  *
- * For a fresh unvalidated cell, endorsementCount is 0 and health is low.
+ * A fresh untranslated cell may not have enough source evidence yet.
  *
- * This spec: import a file → expand first cell → click the "Decay" tab →
- * verify endorsement count text appears → verify one of the attention messages
- * is visible.
+ * This spec: import a file → expand first cell → click "Retrieval support" →
+ * verify the evidence state appears → verify it does not certify translation quality.
  */
 test("cell expansion support tab shows evidence without certifying quality", async ({ alice }) => {
   const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `CellDecay ${Date.now()}` })
@@ -37,9 +36,11 @@ test("cell expansion support tab shows evidence without certifying quality", asy
   await expect(decayTab).toBeVisible({ timeout: 3_000 })
   await decayTab.click()
 
-  await expect(alice.getByText(/endorsement.*support/i)).toBeVisible({ timeout: 3_000 })
+  const sourceEvidence = alice.getByText(/Source evidence \d+%/i)
+  const evidenceUnavailable = alice.getByText(/Pre-translation source evidence is not available yet/i)
+  expect(await sourceEvidence.isVisible() || await evidenceUnavailable.isVisible()).toBe(true)
 
-  const lowerSupport = alice.getByText(/Lower retrieval support/i)
-  const reviewRequired = alice.getByText(/human review is still required/i)
-  expect(await lowerSupport.isVisible() || await reviewRequired.isVisible()).toBe(true)
+  if (await sourceEvidence.isVisible()) {
+    await expect(alice.getByText(/available support, not the quality/i)).toBeVisible()
+  }
 })

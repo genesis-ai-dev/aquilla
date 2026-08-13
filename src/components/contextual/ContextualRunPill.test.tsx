@@ -65,13 +65,44 @@ describe("ContextualRunPill", () => {
     expect(screen.queryByRole("button", { name: "Run Autopilot" })).not.toBeInTheDocument()
   })
 
-  it("idle + backend unavailable: Play is clickable and opens setup (never disabled)", () => {
+  it("idle + backend unavailable: Play is clickable and opens setup (never disabled)", async () => {
     const onSetupNeeded = vi.fn()
     render(<ContextualRunPill projectId="p1" fileId="file-1" onSetupNeeded={onSetupNeeded} canControl />)
     const play = screen.getByRole("button", { name: "Run Autopilot" })
     expect(play).not.toBeDisabled()
-    fireEvent.click(play)
+    await act(async () => { fireEvent.click(play) })
     expect(onSetupNeeded).toHaveBeenCalledTimes(1)
+  })
+
+  it("Play during snapshot hydration starts the run instead of opening setup", async () => {
+    resetContextualRunStore()
+    let resolveSnap!: (value: { available: boolean; run: null }) => void
+    const snap = new Promise<{ available: boolean; run: null }>((resolve) => {
+      resolveSnap = resolve
+    })
+    const transport = makeTransport({
+      fetchSnapshot: vi.fn(() => snap),
+      start: vi.fn(async () => ({ runId: RUN })),
+    })
+    setContextualTransport(transport)
+    const attaching = attachContextualRun("p1", "file-1")
+    const onSetupNeeded = vi.fn()
+    render(<ContextualRunPill projectId="p1" fileId="file-1" onSetupNeeded={onSetupNeeded} canControl />)
+
+    fireEvent.click(screen.getByRole("button", { name: "Run Autopilot" }))
+    expect(onSetupNeeded).not.toHaveBeenCalled()
+    expect(transport.start).not.toHaveBeenCalled()
+
+    await act(async () => {
+      resolveSnap({ available: true, run: null })
+      await attaching
+    })
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(onSetupNeeded).not.toHaveBeenCalled()
+    expect(transport.start).toHaveBeenCalledWith("p1", "file-1", undefined)
   })
 
   it("announces a visible recovery message when starting fails", async () => {

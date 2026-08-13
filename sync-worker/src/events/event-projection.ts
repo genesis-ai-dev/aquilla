@@ -561,8 +561,8 @@ export function buildEventProjectionStmts(
                 project_id, file_id, cell_id, side, target_lang, value, value_html, type,
                 canonical_ref, anchor_cell_id, event_id, source_event_id,
                 last_editor, last_edit_at, validated, word_count, content_hash,
-                ai_drafted
-              ) SELECT ?, ?, ?, 'target', ?, ?, ?, NULL, NULL, NULL, ?, ?, ?, ?, 0, ?, ?, ?${gateWhere}
+                ai_drafted, ai_draft
+              ) SELECT ?, ?, ?, 'target', ?, ?, ?, NULL, NULL, NULL, ?, ?, ?, ?, 0, ?, ?, ?, ?${gateWhere}
               ON CONFLICT(project_id, file_id, cell_id, side, target_lang) DO UPDATE SET
                 value             = excluded.value,
                 value_html        = excluded.value_html,
@@ -574,7 +574,8 @@ export function buildEventProjectionStmts(
                 content_hash      = excluded.content_hash,
                 validated         = 0,
                 endorsement_count = 0,
-                ai_drafted        = excluded.ai_drafted`,
+                ai_drafted        = excluded.ai_drafted,
+                ai_draft          = excluded.ai_draft`,
             )
             .bind(
               event.projectId,
@@ -590,6 +591,7 @@ export function buildEventProjectionStmts(
               wordCount,
               hash,
               aiDrafted,
+              aiDrafted ? JSON.stringify(tp.ai_draft ?? null) : null,
               ...gateBinds,
             ),
         )
@@ -869,7 +871,7 @@ export function buildEventProjectionStmts(
         stmts.push(
           db
             .prepare(
-              `UPDATE cells SET ai_drafted = 0
+              `UPDATE cells SET ai_drafted = 0, ai_draft = NULL
                WHERE project_id = ? AND file_id = ? AND cell_id = ?
                  AND side = 'target' AND target_lang = ?`,
             )

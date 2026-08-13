@@ -83,6 +83,7 @@ function parseSettings(raw: string): PlatformSettings {
   const out: PlatformSettings = {}
   if (typeof obj.defaultLlmModel === "string") out.defaultLlmModel = obj.defaultLlmModel
   if (typeof obj.agentModel === "string") out.agentModel = obj.agentModel
+  if (typeof obj.agentDraftModel === "string") out.agentDraftModel = obj.agentDraftModel
   if (Array.isArray(obj.allowedModels)) {
     out.allowedModels = obj.allowedModels.filter((m): m is string => typeof m === "string")
   }

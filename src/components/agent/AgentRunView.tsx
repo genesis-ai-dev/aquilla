@@ -13,6 +13,7 @@ import {
   AlertTriangle,
   Book,
   BookOpen,
+  Bot,
   Check,
   ChevronRight,
   Database,
@@ -30,6 +31,7 @@ import { Bubble, BubbleContent } from "@/components/ui/bubble"
 import { Marker, MarkerContent, MarkerIcon } from "@/components/ui/marker"
 import { Message, MessageContent } from "@/components/ui/message"
 import { Spinner } from "@/components/ui/spinner"
+import { AppTooltip } from "@/components/ui/tooltip"
 import type { AgentProposal, AquiferPublishProposal } from "@/lib/agent/protocol"
 import type { AgentRunUi, ToolItem, ToolKind } from "@/lib/agent/run-state"
 import { BudgetMeter } from "./BudgetMeter"
@@ -116,100 +118,109 @@ export function AgentRunView({
   onReviewMemory,
 }: AgentRunViewProps) {
   return (
-    <div className="flex flex-col gap-2">
-      {/* User prompt — right-aligned primary bubble. */}
-      <Message align="end">
+    <div className="flex flex-col gap-4 pb-2">
+      <Message align="end" className="px-1">
         <MessageContent>
-          <Bubble>
-            <BubbleContent>{run.prompt}</BubbleContent>
+          <Bubble variant="tinted" className="max-w-[92%]">
+            <BubbleContent className="rounded-2xl rounded-br-md px-3.5 py-2.5 text-[13px]">
+              {run.prompt}
+            </BubbleContent>
           </Bubble>
         </MessageContent>
       </Message>
 
-      {run.items.map((item) => {
-        switch (item.kind) {
-          case "text":
-            // Ghost bubble keeps long-form markdown aligned with the column
-            // at full width instead of a cramped framed bubble.
-            return item.text.trim() ? (
-              <Message key={item.id} align="start">
-                <MessageContent>
-                  <Bubble variant="ghost">
-                    <BubbleContent>
-                      <ChatMarkdown content={item.text} />
-                    </BubbleContent>
-                  </Bubble>
-                </MessageContent>
-              </Message>
-            ) : null
-          case "tool": {
-            const card = renderToolCard?.(item)
-            return (
-              <div key={item.id} className="flex flex-col gap-1">
-                <ToolChip item={item} />
-                {card}
-              </div>
-            )
-          }
-          case "proposal":
-            return renderProposal ? (
-              <div key={item.id}>{renderProposal(item.proposal)}</div>
-            ) : null
-          case "aquifer":
-            return renderAquiferProposal ? (
-              <div key={item.id}>{renderAquiferProposal(item.proposal)}</div>
-            ) : null
-          case "code":
-            return <CodeActivityBlock key={item.id} item={item} />
-          case "changeset":
-            return <ChangesetCard key={item.id} item={item} />
-          case "memory-proposed":
-            return <MemoryProposalNotice key={item.id} item={item} onReviewMemory={onReviewMemory} />
-          case "brief-proposed":
-            return <BriefProposalNotice key={item.id} item={item} onReviewMemory={onReviewMemory} />
-        }
-      })}
-
-      {run.status === "running" && (
-        <Marker role="status">
-          <MarkerIcon>
-            <Spinner />
-          </MarkerIcon>
-          <MarkerContent>
-            {run.progress
-              ? `${run.progress.label} — ${run.progress.done}/${run.progress.total}`
-              : "Agent working…"}
-          </MarkerContent>
-        </Marker>
-      )}
-
-      {run.status === "error" && (
-        <Marker role="alert" className="text-destructive">
-          <MarkerIcon>
-            <AlertTriangle />
-          </MarkerIcon>
-          <MarkerContent>{run.errorMessage || "Agent run failed."}</MarkerContent>
-        </Marker>
-      )}
-
-      {run.status === "capped" && (
-        <Marker role="status" className="text-amber-700 dark:text-amber-400">
-          <MarkerIcon>
-            <AlertTriangle />
-          </MarkerIcon>
-          <MarkerContent>Run hit its step/token cap — results may be partial.</MarkerContent>
-        </Marker>
-      )}
-
-      {run.usage && (
-        <div className="text-[10px] text-muted-foreground">
-          {run.usage.promptTokens.toLocaleString()} prompt + {run.usage.completionTokens.toLocaleString()} completion tokens
-          {" · "}
-          {formatCredits(run.usage.costCredits)}
+      <div className="relative flex min-w-0 flex-col gap-2.5 pl-4">
+        <span aria-hidden className="absolute bottom-1 left-0 top-1 w-px bg-border/80" />
+        <div className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
+          <Bot className="h-3.5 w-3.5 text-primary" />
+          <span>Aquilla</span>
         </div>
-      )}
 
-      {run.budget && <BudgetMeter budget={run.budget} />}
+        {run.items.map((item) => {
+          switch (item.kind) {
+            case "text":
+              return item.text.trim() ? (
+                <Message key={item.id} align="start">
+                  <MessageContent>
+                    <Bubble variant="ghost">
+                      <BubbleContent className="text-[13px] leading-6">
+                        <ChatMarkdown content={item.text} />
+                      </BubbleContent>
+                    </Bubble>
+                  </MessageContent>
+                </Message>
+              ) : null
+            case "tool": {
+              const card = renderToolCard?.(item)
+              return (
+                <div key={item.id} className="flex flex-col gap-1">
+                  <ToolChip item={item} />
+                  {card}
+                </div>
+              )
+            }
+            case "proposal":
+              return renderProposal ? (
+                <div key={item.id}>{renderProposal(item.proposal)}</div>
+              ) : null
+            case "aquifer":
+              return renderAquiferProposal ? (
+                <div key={item.id}>{renderAquiferProposal(item.proposal)}</div>
+              ) : null
+            case "code":
+              return <CodeActivityBlock key={item.id} item={item} />
+            case "changeset":
+              return <ChangesetCard key={item.id} item={item} />
+            case "memory-proposed":
+              return <MemoryProposalNotice key={item.id} item={item} onReviewMemory={onReviewMemory} />
+            case "brief-proposed":
+              return <BriefProposalNotice key={item.id} item={item} onReviewMemory={onReviewMemory} />
+          }
+        })}
+
+        {run.status === "running" && (
+          <Marker role="status">
+            <MarkerIcon>
+              <Spinner />
+            </MarkerIcon>
+            <MarkerContent>
+              {run.progress
+                ? `${run.progress.label} — ${run.progress.done}/${run.progress.total}`
+                : "Agent working…"}
+            </MarkerContent>
+          </Marker>
+        )}
+
+        {run.status === "error" && (
+          <Marker role="alert" className="text-destructive">
+            <MarkerIcon>
+              <AlertTriangle />
+            </MarkerIcon>
+            <MarkerContent>{run.errorMessage || "Agent run failed."}</MarkerContent>
+          </Marker>
+        )}
+
+        {run.status === "capped" && (
+          <Marker role="status" className="text-amber-700 dark:text-amber-400">
+            <MarkerIcon>
+              <AlertTriangle />
+            </MarkerIcon>
+            <MarkerContent>Run hit its step/token cap — results may be partial.</MarkerContent>
+          </Marker>
+        )}
+
+        {run.usage && (
+          <AppTooltip
+            content={`${run.usage.promptTokens.toLocaleString()} prompt + ${run.usage.completionTokens.toLocaleString()} completion tokens`}
+          >
+            <div className="w-fit text-[10px] text-muted-foreground/70">
+              {formatCredits(run.usage.costCredits)} · {(run.usage.promptTokens + run.usage.completionTokens).toLocaleString()} tokens
+            </div>
+          </AppTooltip>
+        )}
+
+        {run.budget && <BudgetMeter budget={run.budget} />}
+      </div>
     </div>
   )
 }

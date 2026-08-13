@@ -56,7 +56,7 @@ describe("gatherPrecedingContext", () => {
   })
 
   it("ships a sane default budget", () => {
-    expect(DEFAULT_DRAFT_CONTEXT.precedingTargetCells).toBe(3)
+    expect(DEFAULT_DRAFT_CONTEXT.precedingTargetCells).toBe(5)
   })
 
   // D4 source-fallback (opt-in): before anything is committed, fall back to

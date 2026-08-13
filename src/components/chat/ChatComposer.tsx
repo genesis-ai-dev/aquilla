@@ -6,7 +6,7 @@
  * via "Ask AI"). On send it serializes the doc to `{ text, chips }` — text with
  * `⟦chip:<id>⟧` placeholders — which AgentDockView turns into the wire message.
  *
- *  - Enter sends; Shift+Enter inserts a newline.
+ *  - Enter inserts a newline; Command/Ctrl+Enter sends.
  *  - While streaming, typing stays enabled and Send is replaced by Stop —
  *    unless `queueWhileStreaming`, where Send stays live (the session store
  *    queues the prompt behind the in-flight run) next to Stop.
@@ -25,7 +25,7 @@ import StarterKit from "@tiptap/starter-kit"
 import { ArrowUp, Sparkles, Square } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
-  InputGroup, InputGroupAddon, InputGroupButton, InputGroupText,
+  InputGroup, InputGroupButton,
 } from "@/components/ui/input-group"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
@@ -102,12 +102,12 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
         "aria-label": "Ask the agent",
         "data-slot": "input-group-control",
         class: cn(
-          "w-full max-h-32 min-h-9 overflow-y-auto px-3 py-2 focus:outline-none",
-          compact ? "text-xs" : "text-sm",
+          "w-full max-h-32 min-h-10 overflow-y-auto px-2 py-2.5 focus:outline-none",
+          compact ? "text-xs/5" : "text-sm/5",
         ),
       },
       handleKeyDown(view, event) {
-        if (event.key === "Enter" && !event.shiftKey) {
+        if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
           event.preventDefault()
           sendFromView(view)
           return true
@@ -163,7 +163,12 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
   }
 
   return (
-    <div className={cn("border-t", compact ? "p-2" : "p-3")}>
+    <div
+      className={cn(
+        "shrink-0 bg-gradient-to-t from-background via-background to-transparent px-3 pb-3 pt-2",
+        compact ? "" : "sm:px-4 sm:pb-4",
+      )}
+    >
       <div className={cn("flex flex-col", compact ? "gap-1.5" : "gap-2")}>
         {suggestedActions && suggestedActions.length > 0 && (
           <div className="flex flex-wrap items-center gap-1.5">
@@ -185,14 +190,19 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
           </div>
         )}
         {attachmentBar}
-        <InputGroup>
+        <InputGroup className="h-auto min-h-10 items-end rounded-2xl border-border/80 bg-card/95 shadow-[0_8px_30px_rgb(0_0_0/0.12)] backdrop-blur-sm focus-within:border-primary/50 focus-within:ring-2 focus-within:ring-primary/15">
+          {attachAction ? (
+            <div className="flex h-10 shrink-0 items-center pl-1.5">
+              {attachAction}
+            </div>
+          ) : null}
           <div className="relative w-full min-w-0 flex-1">
             <EditorContent editor={editor} />
             {isEmpty && (
               <span
                 className={cn(
-                  "pointer-events-none absolute left-3 top-2 text-muted-foreground",
-                  compact ? "text-xs" : "text-sm",
+                  "pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground/70",
+                  compact ? "text-xs/5" : "text-sm/5",
                 )}
                 aria-hidden
               >
@@ -200,18 +210,14 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
               </span>
             )}
           </div>
-          <InputGroupAddon align="block-end">
-            {attachAction}
-            <InputGroupText className={cn(compact ? "text-[9px]" : "text-[10px]")}>
-              Enter to send · Shift+Enter for newline
-            </InputGroupText>
+          <div className="flex h-10 shrink-0 items-center gap-1 pr-1.5">
             {isStreaming ? (
-              <span className="ml-auto flex items-center gap-1">
+              <span className="flex items-center gap-1">
                 {queueWhileStreaming && (
-                  <AppTooltip content="Queue — sends when the current run finishes">
+                  <AppTooltip content="Queue message (⌘↵)">
                     <InputGroupButton
                       type="button" variant="default" size="icon-sm" onClick={handleSendClick}
-                      disabled={isEmpty} aria-label="Queue message"
+                      disabled={isEmpty} aria-label="Queue message" className="rounded-full"
                     >
                       <ArrowUp />
                     </InputGroupButton>
@@ -220,23 +226,23 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
                 <AppTooltip content="Stop">
                   <InputGroupButton
                     type="button" variant="outline" size="icon-sm" onClick={onStop}
-                    aria-label="Stop"
+                    aria-label="Stop" className="rounded-full"
                   >
                     <Square />
                   </InputGroupButton>
                 </AppTooltip>
               </span>
             ) : (
-              <AppTooltip content="Send">
+              <AppTooltip content="Send (⌘↵)">
                 <InputGroupButton
                   type="button" variant="default" size="icon-sm" onClick={handleSendClick}
-                  disabled={isEmpty || !isConfigured} className="ml-auto" aria-label="Send"
+                  disabled={isEmpty || !isConfigured} className="rounded-full" aria-label="Send"
                 >
                   <ArrowUp />
                 </InputGroupButton>
               </AppTooltip>
             )}
-          </InputGroupAddon>
+          </div>
         </InputGroup>
       </div>
     </div>

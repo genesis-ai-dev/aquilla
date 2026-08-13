@@ -89,6 +89,12 @@ describe("FileRow — AQU-341 truncation consistency", () => {
     )
   })
 
+  it("exposes both translated and validated percents on the reserved progress slot", () => {
+    const { container } = renderRow({ progress: { translated: 8, validated: 5, total: 10 } })
+    const slot = container.querySelector('[data-testid="file-row-progress-slot"]')
+    expect(slot).toHaveAttribute("aria-label", "80% translated, 50% validated")
+  })
+
   it("exposes the full (untruncated) name so the user can recover it", () => {
     const { container } = renderRow()
     // The accessible name is the full string even though it renders truncated.

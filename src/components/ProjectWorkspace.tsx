@@ -18,12 +18,21 @@ import { useStaleSourceCells } from "@/hooks/useStaleSourceCells"
 import { triggerLinkSync } from "@/lib/sync/archive"
 import { useDebouncedValue } from "@/hooks/useDebouncedValue"
 import { useCompletion, FALLBACK_COMPLETION_SETTINGS } from "@/hooks/useCompletion"
+import { useTranslateAsReadPreference } from "@/hooks/useTranslateAsReadPreference"
 import { DEFAULT_DRAFT_CONTEXT } from "@/lib/completion/draft-context"
+import {
+  hasMateriallyBetterEvidence,
+  translateAsReadAction,
+  translateAsReadAttemptKey,
+  withTranslateAsReadClaim,
+} from "@/lib/completion/translate-as-read"
 import { fetchBranchingSearch } from "@/lib/sync/branching-search-read"
 import { fetchBranchingSearchPassages } from "@/lib/sync/branching-search-passages-read"
 import type { ScoredPair } from "@/lib/search/dual-index"
 import type { PassageHit } from "@/hooks/useSearchIndex"
 import { useHealth } from "@/hooks/useHealth"
+import { needsAttentionFromConfidence, resolveDecayConfig } from "@/lib/health/decay-engine"
+import { buildHealthRibbon, preTranslationEvidence } from "@/lib/health/health-ribbon"
 import { partitionInfractions } from "@/lib/rules/waivers"
 import { useCellConfidence } from "@/hooks/useCellConfidence"
 import { useRules } from "@/hooks/useRules"
@@ -102,7 +111,7 @@ import {
   buildFileScopedTokenFetcher,
   buildProjectAwareMinter,
 } from "@/lib/sync/cqrs-bridge"
-import { emitTargetCellCommit, emitCellBacktranslationSet, emitFileRename, emitFileDelete, emitFileRestore, emitCellValidate, emitCellRetime, emitCellLaneRetime, emitCellAudioAttach, emitFileVideoSet, emitFileTimingSet } from "@/lib/sync/events-emit"
+import { emitTargetCellCommit, emitCellBacktranslationSet, emitFileRename, emitFileDelete, emitFileRestore, emitCellValidate, emitCellUnvalidate, emitCellRetime, emitCellLaneRetime, emitCellAudioAttach, emitFileVideoSet, emitFileTimingSet } from "@/lib/sync/events-emit"
 import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
 import { isBulkValidationEligible } from "@/lib/review/review-eligibility"
 import { TimelineEditor } from "@/components/timeline/TimelineEditor"
@@ -153,6 +162,7 @@ import type { EditorLens } from "@/components/EditorModeToggle"
 import { SelectionBar } from "./SelectionBar"
 import { WorkspaceStatusBar } from "./WorkspaceStatusBar"
 import { ExpandableFileList } from "./ExpandableFileList"
+import type { BookHealthChapter } from "./sidebar/BookHealthSpine"
 import { FileDetailsModal } from "./FileDetailsModal"
 import { SidebarProjectSection } from "./SidebarProjectSection"
 import { SuggestionBanner } from "./SuggestionBanner"
@@ -189,7 +199,7 @@ import {
 } from "@/components/ui/select"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { readValidationCount } from "@/lib/progress/read-validation-count"
-import { summarizeTextDirections } from "@/lib/text-direction"
+import { resolveTextDirection, summarizeTextDirections } from "@/lib/text-direction"
 import { useSetupChecklist } from "@/hooks/useSetupChecklist"
 import { SetupChecklistDrawer } from "./onboarding/SetupChecklistDrawer"
 import { SystemPromptNudge } from "./onboarding/SystemPromptNudge"
@@ -204,7 +214,12 @@ import {
 import { generateBacktranslation } from "@/lib/completion/backtranslation-service"
 import { normalizeProtectedCompletion } from "@/lib/idml/completion"
 import { hasIdmlMetadata, replaceProtectedIdmlText } from "@/lib/idml/protected-html"
-import { hasIdmlCellMetadata } from "@/lib/richtext/idml-editor"
+import {
+  hasIdmlCellMetadata,
+  resolveIdmlEditorConfiguration,
+  validateIdmlEditorCommit,
+} from "@/lib/richtext/idml-editor"
+import { shouldAutoValidateHumanEdit } from "@/lib/review/auto-validation"
 import { addConcept } from "@/lib/terminology/store"
 import type { Concept } from "@/lib/terminology/types"
 import { buildGlosser, type BtSeed, type Glosser } from "@/lib/completion/bt-glosser"
@@ -217,6 +232,7 @@ import { ProjectAssignedToMe } from "./ProjectAssignedToMe"
 import { getMyAssignments, getProjectAssignments, type MyAssignment, type AssigneeWorkload } from "@/lib/sync/assignments"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
 import { useMyScopes } from "@/hooks/useMyScopes"
+import { isInMemberScope } from "@/lib/sync/member-scopes"
 import { getSelectedIds } from "@/lib/audio/selection"
 
 // Import runs inline in the workspace (upload + eBible corpus tabs). The
@@ -805,6 +821,22 @@ export function ProjectWorkspace() {
     location.pathname.endsWith("/terminology") ? "terminology" :
     location.pathname.endsWith("/agent") ? "agent" :
     "editor"
+  const agentOpen = centerSurface === "agent"
+  const [translateAsReadEnabled, setTranslateAsReadEnabled] = useTranslateAsReadPreference(projectId)
+  const [translateAsReadActiveCellId, setTranslateAsReadActiveCellId] = useState<string | null>(null)
+  const [visibleCellIds, setVisibleCellIds] = useState<string[]>([])
+  const translateAsReadEnabledRef = useRef(false)
+  translateAsReadEnabledRef.current = translateAsReadEnabled
+  const translateAsReadAttemptsRef = useRef(new Map<string, string>())
+  const translateAsReadRunRef = useRef(0)
+  const handleVisibleCellIdsChange = useCallback((next: string[]) => {
+    setVisibleCellIds((current) => (
+      current.length === next.length && current.every((id, index) => id === next[index])
+        ? current
+        : next
+    ))
+  }, [])
+  const [editorHeaderNavTarget, setEditorHeaderNavTarget] = useState<HTMLDivElement | null>(null)
 
   const editorReturnPath = useMemo(() => {
     if (!projectId) return null
@@ -912,12 +944,12 @@ export function ProjectWorkspace() {
   }, [centerSurface, editorReturnPath, navigate, projectId])
 
   // A source selection the user sent to the agent via "Ask AI". Opens the
-  // Agent dock and is inserted into the composer as a context chip.
+  // integrated Agent pane and is inserted into the composer as a context chip.
   const [pendingChip, setPendingChip] = useState<ContextChip | null>(null)
   const handleAskAiFromSelection = useCallback((chip: ContextChip) => {
     setPendingChip(chip)
-    setDockTab("agent")
-  }, [])
+    openAgentTab()
+  }, [openAgentTab])
   // FRO-309: expanded search results overlay in the main area
   const [searchExpandedQuery, setSearchExpandedQuery] = useState<string | null>(null)
   const [aiSetupOpen, setAiSetupOpen] = useState(false)
@@ -2235,6 +2267,7 @@ export function ProjectWorkspace() {
       value: completed.value,
       ...(completed.valueHtml ? { valueHtml: completed.valueHtml } : {}),
       aiDrafted: true,
+      aiDraft: provenance,
     })
     // RACE-3/QW-2: use the pending event id for this cell (last AI-completion
     // commit we enqueued) as parentId, falling back to the projection value.
@@ -2409,7 +2442,7 @@ export function ProjectWorkspace() {
     revalidateCell(cell.id)
   }, [project?.id, historyCellId, getActiveCell, applyOptimisticTargetEdit, activeLane, resolveTargetCommitParentId, rememberPendingTargetCommit, getTokenForProjectFile, currentUsername, refreshOutboxPending, revalidateCellStats, revalidateCell])
 
-  const { completeSingle, completeBatch, completeParagraph, isConfigured, isAvailable: isCompletionAvailable, completing, examples, errors, previews } = useCompletion(
+  const { completeSingle, prepareSingleEvidence, completeBatch, completeParagraph, isConfigured, isAvailable: isCompletionAvailable, completing, examples, errors, previews } = useCompletion(
     // AQU-538/AQU-602: when a non-default lane is active, its tag IS the target
     // language for few-shot/completion; default lane falls back to the file's
     // (then project's) targetLanguage exactly as before. Shares the same
@@ -2427,6 +2460,14 @@ export function ProjectWorkspace() {
   const handleCompleteSingle = useCallback(
     (cell: CellData, opts?: { regenerate?: boolean }) => completeSingle(cell, undefined, opts),
     [completeSingle],
+  )
+
+  const handleAgentTargetDraft = useCallback(
+    (cellId: string, opts?: { regenerate?: boolean }) => {
+      const cell = getActiveCell(cellId)
+      return cell ? handleCompleteSingle(cell, opts) : false
+    },
+    [getActiveCell, handleCompleteSingle],
   )
 
   // p1-paragraph-ui-wiring (Task 3): draft an entire paragraph group as one
@@ -2933,14 +2974,14 @@ export function ProjectWorkspace() {
   )
   // SWARM-TODO(AQU-516) live-verify: open a project with multiple files,
   // don't open any file — every file in the sidebar should show a progress
-  // indicator (amber/emerald bars in FileRow), and the numbers should match
+  // indicator (the validation bar in FileRow), and the numbers should match
   // the PM dashboard's file table (org/ProjectOverview.tsx, same
   // fetchProjectFiles source). Then open one file and confirm its bars stay
-  // live-accurate (move on edit) rather than freezing at the snapshot value.
+  // live-accurate (move on validation) rather than freezing at the snapshot value.
 
   // AD-14 health-as-confidence (AQU-641): derive per-cell health on read from
-  // FTS similarity to validated cells, and overlay it onto the endorsement
-  // healthMap for the editor rings/tooltip. Without the overlay the
+  // FTS similarity to validated cells, and supply it to the editor's automatic
+  // health stage. Without the overlay the
   // endorsement path is binary (0% until Validate, then 100%) because the
   // neighborhood-endorsement loop was never built — the graded score IS this
   // overlay, so it is ON by default. Kill switch (revert to binary baseline):
@@ -2952,20 +2993,52 @@ export function ProjectWorkspace() {
       return true
     }
   }, [])
+  const confidenceOverlayActive = confidenceOverlayEnabled
+    && Boolean(project?.id && activeFileId && frontierSession?.jwt)
   const confidence = useCellConfidence({
     projectId: project?.id,
     fileId: activeFileId ?? undefined,
     getToken: activeFileId ? () => getTokenForFile(activeFileId) : undefined,
     cells: cellSummaries,
-    enabled: confidenceOverlayEnabled && Boolean(project?.id && activeFileId && frontierSession?.jwt),
+    enabled: confidenceOverlayActive,
     perHopDecay: project?.decaySettings?.perHopDecay,
   })
   const effectiveHealthMap = useMemo(() => {
-    if (!confidenceOverlayEnabled || confidence.healthMap.size === 0) return healthMap
-    const merged = new Map(healthMap)
-    for (const [cellId, h] of confidence.healthMap) merged.set(cellId, h)
-    return merged
-  }, [confidenceOverlayEnabled, healthMap, confidence.healthMap])
+    if (!confidenceOverlayActive) return healthMap
+    // For synced projects, absence of automatic evidence is unknown — not the
+    // endorsement fallback's false zero. Validated cells and fetched estimates
+    // are seeded by useCellConfidence; the ribbon handles validation as 100 too.
+    return confidence.healthMap
+  }, [confidenceOverlayActive, healthMap, confidence.healthMap])
+
+  const activeChapterHealth = useMemo<BookHealthChapter[]>(() => {
+    if (!activeFileId) return []
+    return readAtVersion(cellStoreVersion, () => {
+      const summaries = new Map(cellSummaries.map((cell) => [cell.id, cell]))
+      return cellStore.getNavigationIndex().map((chapter) => ({
+        key: chapter.key,
+        label: chapter.label,
+        translated: chapter.translated,
+        validated: chapter.validated,
+        total: chapter.total,
+        cells: chapter.cellIds.flatMap((cellId) => {
+          const cell = summaries.get(cellId)
+          if (!cell) return []
+          const stage = cell.status === "validated"
+            ? "validated" as const
+            : cell.status === "empty" || !cell.translated.trim()
+              ? "untranslated" as const
+              : "automatic" as const
+          return [{
+            id: cellId,
+            stage,
+            health: stage === "validated" ? 100 : effectiveHealthMap.get(cellId),
+            hasIssue: (infractions.get(cellId)?.length ?? 0) > 0,
+          }]
+        }),
+      }))
+    })
+  }, [activeFileId, cellStore, cellStoreVersion, cellSummaries, effectiveHealthMap, infractions])
 
   // AD-14: the four-sub-score breakdown popover is retired. The project ring
   // shows decay-derived health; the "biggest drags" popover redesign (cells
@@ -3230,6 +3303,129 @@ export function ProjectWorkspace() {
   // Reactive version of focusedCellIdRef for the agent panel's context wiring.
   const [focusedCellId, setFocusedCellId] = useState<string | null>(null)
 
+  const agentWorkbenchWorkspace = useMemo(() => {
+    const scopeAvailable = Boolean(activeFileId && activeFile)
+    const sourceLanguage = activeFile?.sourceLanguage || project?.sourceLanguage
+    const targetLanguage = activeLaneTargetLanguage || activeFile?.targetLanguage || project?.targetLanguage
+
+    if (!scopeAvailable) {
+      return {
+        cells: [],
+        fileName: activeFile?.name,
+        sourceLanguage,
+        targetLanguage,
+        focusedCellId: null,
+        totalCells: 0,
+        scopeAvailable: false,
+        loading: cellsLoading,
+      }
+    }
+
+    // Keep rendering bounded around the focused cell for very large files.
+    const allCells = readAtVersion(cellStoreVersion, getActiveCells).filter(
+      (cell) => cell.fileId === activeFileId,
+    )
+    const healthRibbonByCellId = buildHealthRibbon(allCells.map((cell) => {
+      const stage = cell.status === "validated"
+        ? "validated" as const
+        : cell.status === "empty" || !cell.translated.trim()
+          ? "untranslated" as const
+          : "automatic" as const
+      const preTranslation = stage === "untranslated"
+        ? preTranslationEvidence(effectiveSourceText(cell), examples.get(cell.id) ?? [])
+        : null
+      return {
+        id: cell.id,
+        scope: `${cell.fileId}:${cell.group || cell.section || "document"}`,
+        stage,
+        rawScore: stage === "validated"
+          ? 100
+          : stage === "automatic"
+            ? effectiveHealthMap.get(cell.id)
+            : preTranslation?.score,
+        evidenceWeight: preTranslation?.evidenceWeight ?? 1,
+      }
+    }))
+    const ruleById = new Map(rules.map((rule) => [rule.id, rule]))
+    const validationRequirement = project ? readValidationCount(project) : 1
+    const decayConfig = resolveDecayConfig(project?.decaySettings, validationRequirement)
+    const roleCanValidate = canPerform("cell.validate", project?.syncRole?.level ?? null)
+    const focusIndex = focusedCellId
+      ? Math.max(0, allCells.findIndex((cell) => cell.id === focusedCellId))
+      : 0
+    const windowSize = 80
+    const start = Math.max(0, Math.min(focusIndex - Math.floor(windowSize / 2), allCells.length - windowSize))
+    const cells = allCells.slice(start, start + windowSize).map((cell, index) => {
+      const healthRibbonPoint = healthRibbonByCellId.get(cell.id)
+      const activeInfractions = partitionInfractions(infractions.get(cell.id) ?? [], cell.waivers).active
+      const hasMajorHealthIssue = activeInfractions.some(
+        (infraction) => ruleById.get(infraction.ruleId)?.severity === "major",
+      )
+      const needsHealthAttention = Boolean(
+        cell.translated.trim()
+        && healthRibbonPoint?.stage === "automatic"
+        && healthRibbonPoint.smoothedScore !== undefined
+        && needsAttentionFromConfidence(healthRibbonPoint.smoothedScore, decayConfig.decayWarnThreshold),
+      )
+      return {
+        cellId: cell.id,
+        fileId: cell.fileId,
+        ref: cell.cellLabel || cell.globalReferences?.[0] || cell.context || `Cell ${start + index + 1}`,
+        source: effectiveSourceText(cell),
+        sourceHtml: cell.medium === "media" && cell.transcription?.trim()
+          ? undefined
+          : cell.originalHtml,
+        target: cell.translated,
+        targetHtml: cell.translatedHtml,
+        status: cell.status,
+        idmlConfiguration: resolveIdmlEditorConfiguration(cell.metadata, cell.originalHtml),
+        targetTextDirection: resolveTextDirection(
+          fileMeta.targetDirectionMode,
+          cell.translatedHtml ?? cell.translated,
+          fileMeta.targetTextDirection,
+        ),
+        targetDirectionMode: fileMeta.targetDirectionMode,
+        healthRibbonPoint,
+        hasMajorHealthIssue,
+        hasHealthIssue: activeInfractions.length > 0 || needsHealthAttention,
+        validationStatus: cell.validationStatus,
+        activeValidators: cell.activeValidators,
+        validationHistory: cell.validationHistory,
+        canValidate: roleCanValidate && isInMemberScope(myScopes, cell.fileId, activeLane),
+      }
+    })
+
+    return {
+      cells,
+      fileName: activeFile?.name,
+      sourceLanguage,
+      targetLanguage,
+      focusedCellId,
+      totalCells: allCells.length,
+      scopeAvailable: true,
+      loading: cellsLoading,
+    }
+  }, [
+    activeFileId,
+    activeFile,
+    activeLane,
+    activeLaneTargetLanguage,
+    cellStoreVersion,
+    cellsLoading,
+    effectiveHealthMap,
+    examples,
+    fileMeta.targetDirectionMode,
+    fileMeta.targetTextDirection,
+    focusedCellId,
+    getActiveCells,
+    infractions,
+    myScopes,
+    project,
+    project?.sourceLanguage,
+    project?.targetLanguage,
+    rules,
+  ])
+
   // FRO-179: TN sidebar visibility + canonicalRef of the focused cell.
   // Hidden by default; toggled via the View settings menu.
   const [tnSidebarVisible, setTnSidebarVisible] = useState<boolean>(() =>
@@ -3237,22 +3433,6 @@ export function ProjectWorkspace() {
   )
   const [focusedCellCanonicalRef, setFocusedCellCanonicalRef] = useState<string | null>(null)
 
-  // Scripture context for the chat dock's Summarize book/chapter buttons. A
-  // "Bible file" is one whose format is scripture (usfm/ebible/helloao), carries
-  // a corpus marker, or whose focused cell has a canonical ref. The chapter is
-  // the ref minus the verse, e.g. "GEN 1:1" → "GEN 1".
-  const bibleSummary = useMemo(() => {
-    if (!activeFile) return null
-    const isScripture =
-      ["usfm", "ebible", "helloao"].includes(activeFile.type) ||
-      Boolean(activeFile.corpusMarker) ||
-      Boolean(focusedCellCanonicalRef)
-    if (!isScripture) return null
-    const chapterRef = focusedCellCanonicalRef
-      ? focusedCellCanonicalRef.split(":")[0].trim()
-      : null
-    return { bookName: activeFile.name, chapterRef }
-  }, [activeFile, focusedCellCanonicalRef])
   // Parallel-bibles sidebar (helloao): open state persisted per project, plus
   // the canonical ref the panel follows. Fed by two signals, most recent
   // wins: the first visible editor row (scroll) and the focused cell
@@ -3822,6 +4002,164 @@ export function ProjectWorkspace() {
 
   const perms = useProjectPermissions(project)
   const isReadOnly = !perms.canEditContent
+
+  const validatedEvidenceVersion = useMemo(() => (
+    readAtVersion(cellStoreVersion, getActiveCells)
+      .filter((cell) => cell.status === "validated" && cell.translated.trim())
+      .map((cell) => `${cell.id}:${cell.targetEventId ?? cell.lastEditAt ?? ""}`)
+      .join("|")
+  ), [cellStoreVersion, getActiveCells])
+
+  // Completion and store callbacks can legitimately receive new identities as
+  // their hooks update UI state. Translate-as-read must not treat those normal
+  // renders as a reason to abort an in-flight model request, so the queue reads
+  // their latest implementations through refs while its lifecycle remains
+  // keyed only to actual queue inputs below.
+  const translateAsReadGetCellRef = useRef(getActiveCell)
+  const translateAsReadCheckLockRef = useRef(checkLockHolder)
+  const translateAsReadCompleteRef = useRef(completeSingle)
+  const translateAsReadPrepareEvidenceRef = useRef(prepareSingleEvidence)
+  translateAsReadGetCellRef.current = getActiveCell
+  translateAsReadCheckLockRef.current = checkLockHolder
+  translateAsReadCompleteRef.current = completeSingle
+  translateAsReadPrepareEvidenceRef.current = prepareSingleEvidence
+
+  useEffect(() => {
+    translateAsReadAttemptsRef.current.clear()
+  }, [activeFileId, activeLane])
+
+  const translateAsReadViewportCellIds = useMemo(() => (
+    visibleCellIds.length > 0
+      ? visibleCellIds
+      : agentOpen && focusedCellId
+        ? [focusedCellId]
+        : []
+  ), [agentOpen, focusedCellId, visibleCellIds])
+  const translateAsReadViewportStateKey = useMemo(() => (
+    readAtVersion(cellStoreVersion, () => translateAsReadViewportCellIds
+      .map((cellId) => {
+        const cell = getActiveCell(cellId)
+        return cell ? `${cellId}\u0000${translateAsReadAttemptKey(cell)}` : `${cellId}\u0000missing`
+      })
+      .join("\u0001"))
+  ), [cellStoreVersion, getActiveCell, translateAsReadViewportCellIds])
+
+  useEffect(() => {
+    // The standard editor and the integrated Source | Agent | Target workbench
+    // both feed this same viewport queue.
+    const runId = ++translateAsReadRunRef.current
+    const viewportCellIds = translateAsReadViewportCellIds
+    const available = translateAsReadEnabled
+      && lens === "text"
+      && !isReadOnly
+      && isConfigured
+      && isCompletionAvailable
+      && Boolean(activeFileId)
+    if (!available || viewportCellIds.length === 0) {
+      setTranslateAsReadActiveCellId(null)
+      return
+    }
+
+    let stopped = false
+    const controller = new AbortController()
+    const run = async () => {
+      for (const cellId of viewportCellIds) {
+        if (stopped || controller.signal.aborted) break
+        const initial = translateAsReadGetCellRef.current(cellId)
+        if (!initial || translateAsReadCheckLockRef.current(cellId)) continue
+        const action = translateAsReadAction(initial)
+        if (!action) continue
+        // A selected empty row is still eligible. If the user types while the
+        // model is running, the state-key guard below cancels the write. Only
+        // refreshes of existing AI text need to wait for focus to leave.
+        if (action === "refresh" && focusedCellIdRef.current === cellId) continue
+
+        const stateKey = translateAsReadAttemptKey(initial)
+        const attemptKey = action === "refresh"
+          ? `${stateKey}\u0000${validatedEvidenceVersion}`
+          : stateKey
+        if (translateAsReadAttemptsRef.current.get(cellId) === attemptKey) continue
+        translateAsReadAttemptsRef.current.set(cellId, attemptKey)
+        if (translateAsReadRunRef.current === runId) setTranslateAsReadActiveCellId(cellId)
+
+        const claimScope = `${project?.id ?? ""}\u0000${activeFileId ?? ""}\u0000${activeLane}\u0000${cellId}`
+        const claim = await withTranslateAsReadClaim(claimScope, attemptKey, async () => {
+          if (stopped || controller.signal.aborted) {
+            return { remember: false, committed: false }
+          }
+          const claimedInitial = translateAsReadGetCellRef.current(cellId)
+          if (
+            !claimedInitial
+            || translateAsReadAttemptKey(claimedInitial) !== stateKey
+            || translateAsReadAction(claimedInitial) !== action
+            || translateAsReadCheckLockRef.current(cellId)
+          ) {
+            return { remember: true, committed: false }
+          }
+
+          let preparedEvidence
+          if (action === "refresh") {
+            preparedEvidence = await translateAsReadPrepareEvidenceRef.current(claimedInitial)
+            if (stopped || controller.signal.aborted) {
+              return { remember: false, committed: false }
+            }
+            const current = translateAsReadGetCellRef.current(cellId)
+            if (
+              !current
+              || translateAsReadAttemptKey(current) !== stateKey
+              || translateAsReadAction(current) !== "refresh"
+              || focusedCellIdRef.current === cellId
+              || translateAsReadCheckLockRef.current(cellId)
+              || !hasMateriallyBetterEvidence(current.aiDraft, preparedEvidence.snapshot)
+            ) {
+              return { remember: true, committed: false }
+            }
+          }
+
+          const committed = await translateAsReadCompleteRef.current(claimedInitial, controller.signal, {
+            mode: "read",
+            preparedEvidence,
+            commitGuard: () => {
+              const current = translateAsReadGetCellRef.current(cellId)
+              return !stopped
+                && translateAsReadEnabledRef.current
+                && (action === "draft" || focusedCellIdRef.current !== cellId)
+                && !translateAsReadCheckLockRef.current(cellId)
+                && current !== null
+                && translateAsReadAction(current) === action
+                && translateAsReadAttemptKey(current) === stateKey
+            },
+          })
+          return { remember: committed, committed }
+        })
+        if (claim.ran && claim.outcome?.remember === false && !stopped) {
+          // A transient provider/enqueue failure may be retried after the row
+          // leaves and re-enters the viewport; do not create a tight loop.
+          translateAsReadAttemptsRef.current.delete(cellId)
+        }
+        if (translateAsReadRunRef.current === runId) setTranslateAsReadActiveCellId(null)
+      }
+    }
+    void run().finally(() => {
+      if (translateAsReadRunRef.current === runId) setTranslateAsReadActiveCellId(null)
+    })
+    return () => {
+      stopped = true
+      controller.abort()
+    }
+  }, [
+    activeFileId,
+    activeLane,
+    isCompletionAvailable,
+    isConfigured,
+    isReadOnly,
+    lens,
+    project?.id,
+    translateAsReadEnabled,
+    translateAsReadViewportCellIds,
+    translateAsReadViewportStateKey,
+    validatedEvidenceVersion,
+  ])
 
   const commitTrayFootnoteText = useCallback(async (cellId: string, updatedText: string) => {
     if (!project?.id || isReadOnly) return
@@ -4904,6 +5242,106 @@ export function ProjectWorkspace() {
     }
   }, [getTokenForProjectFile, rememberPendingTargetCommit, refreshOutboxPending, revalidateAuditStats, revalidateCellStats, revalidateCell, revalidateCells])
 
+  // Target edits made beside the agent use the editor's normal commit chain;
+  // the workbench is another view of the document, not a separate draft store.
+  const handleAgentTargetCommit = useCallback(async (
+    cellId: string,
+    snapshot: { value: string; valueHtml: string },
+  ) => {
+    if (!project?.id || isReadOnly) throw new Error("This project is read-only.")
+    if (!canPerform("target.cell.commit", project.syncRole?.level ?? null)) {
+      throw new Error("Your project role cannot edit translations.")
+    }
+    const cell = getActiveCell(cellId)
+    if (!cell) throw new Error("This cell is no longer available in the open file.")
+    const lockHolder = checkLockHolder(cellId)
+    if (lockHolder) throw new Error(`${lockHolder} is editing this cell.`)
+
+    const idmlConfiguration = resolveIdmlEditorConfiguration(cell.metadata, cell.originalHtml)
+    const idmlCommitError = validateIdmlEditorCommit(idmlConfiguration, snapshot.valueHtml)
+    if (idmlCommitError) throw new Error(idmlCommitError)
+
+    applyOptimisticTargetEditWithCapture(cell.id, snapshot)
+    const parentId = resolveTargetCommitParentId(cell)
+    let eventId: string
+    try {
+      eventId = await emitTargetCellCommit({
+        projectId: project.id,
+        fileId: cell.fileId,
+        cellId: cell.id,
+        parentId,
+        sourceEventId: cell.sourceEventId ?? null,
+        value: snapshot.value,
+        valueHtml: snapshot.valueHtml,
+        author: currentUsername,
+        targetLang: activeLane,
+      })
+    } catch (error) {
+      applyOptimisticTargetEditWithCapture(cell.id, {
+        value: cell.translated ?? "",
+        valueHtml: cell.translatedHtml ?? "",
+      })
+      throw error
+    }
+
+    rememberPendingTargetCommit(cell.id, eventId, parentId)
+    if (shouldAutoValidateHumanEdit({
+      value: snapshot.value,
+      canValidate: canPerform("cell.validate", project.syncRole?.level ?? null),
+      allowSelfValidation: project.allowSelfValidation,
+      roleLevel: project.syncRole?.level ?? null,
+    })) {
+      try {
+        await emitCellValidate({
+          projectId: project.id,
+          fileId: cell.fileId,
+          cellId: cell.id,
+          editEventId: eventId,
+          author: currentUsername,
+          targetLang: activeLane,
+        })
+      } catch (error) {
+        console.warn("[agent-target-auto-validate] emit failed:", error)
+      }
+    }
+    await handleCellCommitted(cell.id, eventId, parentId)
+  }, [
+    activeLane,
+    applyOptimisticTargetEditWithCapture,
+    checkLockHolder,
+    currentUsername,
+    getActiveCell,
+    handleCellCommitted,
+    isReadOnly,
+    project,
+    rememberPendingTargetCommit,
+    resolveTargetCommitParentId,
+  ])
+
+  const handleAgentValidationChange = useCallback(async (cellId: string, validated: boolean) => {
+    const action = validated ? "cell.validate" : "cell.unvalidate"
+    if (!project?.id || !canPerform(action, project.syncRole?.level ?? null)) return false
+    const cell = getActiveCell(cellId)
+    if (!cell?.targetEventId || !isInMemberScope(myScopes, cell.fileId, activeLane)) return false
+    const emit = validated ? emitCellValidate : emitCellUnvalidate
+    try {
+      await emit({
+        projectId: project.id,
+        fileId: cell.fileId,
+        cellId: cell.id,
+        editEventId: cell.targetEventId,
+        author: currentUsername,
+        targetLang: activeLane,
+      })
+      await handleCellCommitted(cell.id)
+      return true
+    } catch (error) {
+      console.warn(`[agent-target-${validated ? "validate" : "unvalidate"}] emit failed:`, error)
+      toast.error("Couldn't save this validation change.")
+      return false
+    }
+  }, [activeLane, currentUsername, getActiveCell, handleCellCommitted, myScopes, project])
+
   // AQU-616: bulk validate/unvalidate from the SelectionBar enqueues N events
   // but has no per-cell commit callback, so without this the events would wait
   // for the ~5s periodic flusher before syncing — the confirmed state lags for
@@ -5442,6 +5880,12 @@ export function ProjectWorkspace() {
           }}
         />
       )}
+      translateAsReadEnabled={translateAsReadEnabled}
+      translateAsReadDisabled={!translateAsReadEnabled && (
+        lens !== "text" || isReadOnly || !isConfigured || !isCompletionAvailable
+      )}
+      translateAsReadActive={translateAsReadActiveCellId !== null}
+      onTranslateAsReadChange={setTranslateAsReadEnabled}
     />
   ) : null
 
@@ -5449,7 +5893,7 @@ export function ProjectWorkspace() {
     <EditorScrollProvider>
       {/* ScrollToGroupHandler must live inside EditorScrollProvider so it can call useEditorScroll */}
       <ScrollToGroupHandler cellStore={cellStore} storeVersion={cellStoreVersion} editorRef={editorRef} />
-      {/* FRO-308: currentCell for chat panel — derived from focusedCellId */}
+      {/* The agent inherits the workspace's live file/cell location below. */}
       <AppShell
         railCollapsed={dockTab === null}
         dockStorageKey={projectId}
@@ -5520,29 +5964,14 @@ export function ProjectWorkspace() {
                 <ExpandableFileList
                   projectId={projectId!}
                   files={project.files}
-                  activeFileId={centerSurface === "agent" ? (agentScopeFile?.id ?? activeFileId) : activeFileId}
+                  activeFileId={activeFileId}
                   fileProgress={fileProgress}
+                  activeChapterHealth={activeChapterHealth}
                   suggestionFileIds={suggestionFileIds}
                   validationCount={validationCount}
                   getTokenForFile={getTokenForFile}
                   targetLang={activeLane}
-                  onSelectFile={(fileId, opts) => {
-                    // Workbench: the explorer designates the agent's working
-                    // area — stay in the takeover, retarget the session, and
-                    // let the model hear about it on the next turn.
-                    if (centerSurface === "agent") {
-                      setAgentScopeFileId(fileId)
-                      const name = projectFiles.find((f) => f.id === fileId)?.name ?? fileId
-                      if (project?.id) {
-                        agentSessionStore(project.id).noteActivity(
-                          "scope",
-                          `The user set the working area to the file "${name}" (:file now resolves to it).`,
-                        )
-                      }
-                      return
-                    }
-                    workspaceTabs.openFile(fileId, opts)
-                  }}
+                  onSelectFile={workspaceTabs.openFile}
                   onShowDetails={setDetailsFileId}
                   onRename={handleRename}
                   onMove={(fileId) => {
@@ -5609,16 +6038,6 @@ export function ProjectWorkspace() {
             }
             agentPanel={
               <AgentDockPanel
-                currentCell={(() => {
-                  if (!focusedCellId) return null
-                  const cell = getActiveCell(focusedCellId)
-                  if (!cell) return null
-                  return {
-                    sourceText: effectiveSourceText(cell),
-                    translatedText: cell.translated,
-                    context: cell.context ?? undefined,
-                  }
-                })()}
                 agent={{
                   projectId: project.id,
                   jwt,
@@ -5628,7 +6047,6 @@ export function ProjectWorkspace() {
                     fileId: activeFileId ?? undefined,
                     cellId: focusedCellId ?? undefined,
                   },
-                  fileName: activeFile?.name,
                   rules,
                   resolveCell: resolveCellById,
                   onApplied: handleAgentApplied,
@@ -5682,6 +6100,13 @@ export function ProjectWorkspace() {
             surfaceLabel={workspaceBreadcrumb.surfaceLabel}
             editorHref={workspaceBreadcrumb.editorHref}
           >
+            {centerSurface === "editor" && activeFileId ? (
+              <div
+                ref={setEditorHeaderNavTarget}
+                className="flex min-w-0 max-w-[min(58vw,52rem)] items-center"
+                data-editor-header-navigation=""
+              />
+            ) : null}
             {/* AQU-615: Door43 upstream-sync badge — visible hint that source
                 cells are managed by a DCS link. Self-gated: renders nothing
                 when project_settings has no dcsUpstream cursor. */}
@@ -5723,10 +6148,7 @@ export function ProjectWorkspace() {
         }
         beforeMain={
           <>
-{/* Agent workbench is a takeover surface: the selection bar belongs
-                to the editor and only adds competing chrome above the workbench.
-                Banners below still render. */}
-            {project && activeFileId && centerSurface !== "agent" && (
+            {project && activeFileId && centerSurface === "editor" && (
               <>
                 <SelectionBar
                   project={project}
@@ -5902,7 +6324,7 @@ export function ProjectWorkspace() {
           </>
         }
         resizableTop={
-          isSubtitleFile && videoSrc && centerSurface !== "agent" ? (
+          isSubtitleFile && videoSrc && !agentOpen ? (
             <VideoPlayer
               ref={videoPlayerRef}
               src={videoSrc}
@@ -5929,7 +6351,8 @@ export function ProjectWorkspace() {
           </div>
         ) : centerSurface === "agent" ? (
           // Agent workbench (agent-mode-v2 §4): full-screen agent surface —
-          // same shared session as the dock tab, plus the working-set panel.
+          // same shared session as the dock tab, plus the three-pane
+          // Source | Agent | Target working set from the agent-workspace branch.
           <AgentWorkbench
             agent={{
               projectId: project.id,
@@ -5937,20 +6360,44 @@ export function ProjectWorkspace() {
               author: currentUsername,
               roleLevel: currentRoleLevel,
               context: {
-                fileId: agentScopeFile?.id ?? undefined,
+                fileId: agentScopeFile?.id ?? activeFileId ?? undefined,
                 cellId: agentScopeFile?.id === activeFileId ? focusedCellId ?? undefined : undefined,
               },
-              fileName: agentScopeFile?.name,
-              currentCell: null,
               rules,
               resolveCell: resolveCellById,
               onApplied: handleAgentApplied,
+              pendingChip,
+              onPendingChipConsumed: () => setPendingChip(null),
             }}
             credits={jwt && projectOrg ? { jwt, orgId: projectOrg.id, orgRoleLevel: projectOrg.role.level } : null}
             onClose={closeAgentTab}
+            onChooseFile={() => setDockTab("files")}
             onJumpToCell={(fileId, cellId) =>
               navigate(`/project/${projectId}/editor/file/${fileId}?cellId=${encodeURIComponent(cellId)}`)
             }
+            workspace={{
+              ...agentWorkbenchWorkspace,
+              editable: !isReadOnly,
+              onCommitTarget: handleAgentTargetCommit,
+              isAnonymous: !frontierSession,
+              isCompletionConfigured: isConfigured,
+              isCompletionAvailable,
+              completing,
+              onDraftTarget: handleAgentTargetDraft,
+              onAiSetupNeeded: handleAiSetupNeeded,
+              openCommentCounts: liveCellOpenCommentCount,
+              onOpenComments: handleOpenComments,
+              onOpenHistory: handleOpenHistory,
+              currentUsername,
+              validationRequirement: readValidationCount(project),
+              canValidate: canPerform("cell.validate", project.syncRole?.level ?? null),
+              onValidationChange: handleAgentValidationChange,
+              cellLockHolders,
+              onClaimCell: handleClaimCell,
+              onReleaseCell: handleReleaseCell,
+              onTargetPresenceSelection: handleTargetPresenceSelection,
+              onVisibleCellIdsChange: handleVisibleCellIdsChange,
+            }}
           />
         ) : cellAreaState.kind === "ready" ? (
           // FRO-309: relative wrapper so the search-expanded overlay can cover the editor
@@ -6103,9 +6550,12 @@ export function ProjectWorkspace() {
             upstreamStaleCellIds={upstreamStaleCellIds}
             assignmentsByCellId={assignmentsByCellId}
             onVisibleRefChange={setTrackedCellRef}
+            onVisibleCellIdsChange={handleVisibleCellIdsChange}
             // Stacked mode already shows the toolbar in the media header row
             // above the timeline — don't render it twice.
             chapterNavTrailing={timelineStacked ? undefined : fileChapterToolbar ?? undefined}
+            chapterNavPortalTarget={editorHeaderNavTarget}
+            onAgentToggle={openAgentTab}
           />
               </div>
               </div>
@@ -6121,6 +6571,7 @@ export function ProjectWorkspace() {
               />
             )}
           </div>
+          )
         ) : (
           <CellAreaPlaceholder
             state={cellAreaState}
@@ -6272,11 +6723,8 @@ export function ProjectWorkspace() {
                 }
               />
             )
-            // File translation stats belong to the editor; the workbench has
-            // its own working-set summary. Sync/outbox status above stays —
-            // agent Apply flushes through the same outbox.
             const fileStats =
-              centerSurface !== "agent" &&
+              centerSurface === "editor" &&
               (cellAreaState.kind === "ready" || cellAreaState.kind === "ready-empty") ? (
               <StatusBar
                 className={showAudioToolbar ? "px-0 py-0.5" : undefined}

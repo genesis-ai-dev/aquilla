@@ -17,6 +17,7 @@ import {
 import { AppTooltip } from "@/components/ui/tooltip"
 import { prefetchFileProgress } from "@/lib/progress/file-progress-resource"
 import { canExportSourceFile, exportSourceFile } from "@/lib/file-source-export"
+import type { BookHealthChapter } from "./sidebar/BookHealthSpine"
 import { useT } from "@/lib/i18n/I18nProvider"
 
 interface FileStats { translated: number; validated: number; total: number }
@@ -53,6 +54,7 @@ interface Props {
   canExportByOrgPolicy?: boolean
   /** When set, opens inline rename for the given file (sidebar + file-options menu). */
   renameSignal?: { fileId: string; nonce: number } | null
+  activeChapterHealth?: BookHealthChapter[]
 }
 
 export function ExpandableFileList({
@@ -60,7 +62,7 @@ export function ExpandableFileList({
   suggestionFileIds, validationCount, getTokenForFile, onSelectFile, onShowDetails, onRename, onMove, onExport, onAssignWork, onDelete,
   targetLang = "",
   onApplySuggestion, onRenameCorpus, canExportByOrgPolicy = true,
-  renameSignal,
+  renameSignal, activeChapterHealth,
 }: Props) {
   const t = useT()
   const { expanded, toggle } = useSidebarExpansion(projectId)
@@ -194,6 +196,7 @@ export function ExpandableFileList({
                   <div className="space-y-0.5">
                     {group.files.map((file) => {
                       const canExpand = fileHasSections(file)
+                        || (file.id === activeFileId && Boolean(activeChapterHealth?.length))
                       const isExpanded = canExpand && expanded.has(file.id)
                       const isEditing = editingFileId === file.id
                       return (
@@ -206,6 +209,7 @@ export function ExpandableFileList({
                             file={file}
                             active={file.id === activeFileId}
                             expanded={isExpanded}
+                            expandable={canExpand}
                             progress={fileProgress.get(file.id)}
                             hasSuggestion={suggestionFileIds.has(file.id)}
                             editing={isEditing}
@@ -237,6 +241,7 @@ export function ExpandableFileList({
                               fileId={file.id}
                               validationCount={validationCount}
                               getTokenForFile={getTokenForFile}
+                              chapters={file.id === activeFileId ? activeChapterHealth : undefined}
                               onSectionClick={(label) => {
                                 if (file.id !== activeFileId) {
                                   onSelectFile(file.id, { sectionLabel: label })

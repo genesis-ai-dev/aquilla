@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { Navigate, useParams } from "react-router-dom"
+import { Navigate, useLocation, useNavigate, useParams, type Location } from "react-router-dom"
 import { Cpu, Gauge, Globe, KeyRound, Palette, PanelLeft, ShieldCheck, UserRound } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { OrgSidebar } from "@/components/org/OrgSidebar"
@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Page, PageHeader, SettingsGroup, SettingsRow } from "@/components/ui/page"
 import { NavList, NavRow, BackLink } from "@/components/ui/nav-list"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { LanguageSwitcher } from "@/lib/i18n/LanguageSwitcher"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { useThemeMode, type ThemeMode } from "@/branding/ThemeMode"
@@ -348,7 +349,7 @@ const PREFERENCE_SECTIONS: PreferenceSection[] = [
 const PREFERENCE_GROUPS = ["General", "AI & personalization", "Account"] as const
 
 /** The index: grouped navigation rows, each hinting its current value. */
-function PreferencesIndex() {
+function PreferencesIndex({ modal = false, backgroundLocation }: { modal?: boolean; backgroundLocation?: Location }) {
   const { enabled } = useAnalyticsConsent()
   const { position } = useDockRailPosition()
   const { mode } = useThemeMode()
@@ -366,56 +367,67 @@ function PreferencesIndex() {
     usage: "This week",
   }
 
+  const content = (
+    <Page>
+      <PageHeader
+        title="Preferences"
+        description="Personal preferences that apply to you across all projects on this device."
+      />
+      <div className="space-y-6">
+        {PREFERENCE_GROUPS.map((group) => (
+          <NavList key={group} label={group}>
+            {PREFERENCE_SECTIONS.filter((s) => s.group === group).map((s) => (
+              <NavRow
+                key={s.slug}
+                to={`/preferences/${s.slug}`}
+                state={backgroundLocation ? { backgroundLocation, preferencesModalDepth: 2 } : undefined}
+                icon={s.icon}
+                title={s.title}
+                hint={hints[s.slug]}
+              />
+            ))}
+          </NavList>
+        ))}
+      </div>
+    </Page>
+  )
+
+  if (modal) return content
   return (
     <AppShell
       sidebar={<OrgSidebar />}
       header={<OrgBreadcrumb section="Preferences" />}
       statusBar={null}
-      main={
-        <Page>
-          <PageHeader
-            title="Preferences"
-            description="Personal preferences that apply to you across all projects on this device."
-          />
-          <div className="space-y-6">
-            {PREFERENCE_GROUPS.map((group) => (
-              <NavList key={group} label={group}>
-                {PREFERENCE_SECTIONS.filter((s) => s.group === group).map((s) => (
-                  <NavRow
-                    key={s.slug}
-                    to={`/preferences/${s.slug}`}
-                    icon={s.icon}
-                    title={s.title}
-                    hint={hints[s.slug]}
-                  />
-                ))}
-              </NavList>
-            ))}
-          </div>
-        </Page>
-      }
+      main={content}
     />
   )
 }
 
 /** A single section, rendered on its own page with a back breadcrumb. */
-function PreferencesDetail({ slug }: { slug: string }) {
+function PreferencesDetail({ slug, modal = false }: { slug: string; modal?: boolean }) {
+  const navigate = useNavigate()
   const section = PREFERENCE_SECTIONS.find((s) => s.slug === slug)
   if (!section) return <Navigate to="/preferences" replace />
+  const content = (
+    <Page>
+      <div className="space-y-6">
+        <BackLink
+          to="/preferences"
+          onClick={modal ? () => navigate(-1) : undefined}
+          label="Preferences"
+        />
+        <PageHeader title={section.title} description={section.description} />
+        {section.render()}
+      </div>
+    </Page>
+  )
+  if (modal) return content
   return (
     <AppShell
       sidebar={<OrgSidebar />}
       header={<OrgBreadcrumb parent={{ label: "Preferences", to: "/preferences" }} section={section.title} />}
       statusBar={null}
-      main={
-        <Page>
-          <div className="space-y-6">
-            <BackLink to="/preferences" label="Preferences" />
-            <PageHeader title={section.title} description={section.description} />
-            {section.render()}
-          </div>
-        </Page>
-      }
+      main={content}
     />
   )
 }
@@ -423,4 +435,37 @@ function PreferencesDetail({ slug }: { slug: string }) {
 export function Preferences() {
   const { section } = useParams<{ section?: string }>()
   return section ? <PreferencesDetail slug={section} /> : <PreferencesIndex />
+}
+
+/** Route-modal presentation used by in-app entry points. Direct URLs continue
+ * to render the full-page Preferences surface above. */
+export function PreferencesDialog() {
+  const { section } = useParams<{ section?: string }>()
+  const location = useLocation()
+  const navigate = useNavigate()
+  const modalState = location.state as {
+    backgroundLocation?: Location
+    preferencesModalDepth?: number
+  } | null
+  const backgroundLocation = modalState?.backgroundLocation
+  const modalDepth = modalState?.preferencesModalDepth ?? 1
+
+  return (
+    <Dialog open onOpenChange={(open) => { if (!open) navigate(-modalDepth) }}>
+      <DialogContent
+        className="h-[min(90dvh,56rem)] max-w-[min(72rem,calc(100%-2rem))] gap-0 p-0 sm:max-w-[min(72rem,calc(100%-2rem))]"
+        data-testid="preferences-dialog"
+      >
+        <DialogHeader className="sr-only">
+          <DialogTitle>Preferences</DialogTitle>
+          <DialogDescription>Personal preferences that apply across projects.</DialogDescription>
+        </DialogHeader>
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+          {section
+            ? <PreferencesDetail slug={section} modal />
+            : <PreferencesIndex modal backgroundLocation={backgroundLocation} />}
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
 }

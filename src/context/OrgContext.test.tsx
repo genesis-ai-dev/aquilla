@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest"
 import { render, screen, waitFor, act } from "@testing-library/react"
-import { MemoryRouter } from "react-router-dom"
+import { MemoryRouter, useNavigate } from "react-router-dom"
 import { OrgProvider, useActiveOrg } from "./OrgContext"
 import { UserError } from "@/lib/errors/user-error"
 import { onSessionExpired } from "@/lib/errors/session-expired-signal"
@@ -66,6 +66,17 @@ function Probe() {
   )
 }
 
+function RouteProbe() {
+  const navigate = useNavigate()
+  const { isLoading } = useActiveOrg()
+  return (
+    <div>
+      <span data-testid="loading">{isLoading ? "yes" : "no"}</span>
+      <button onClick={() => navigate("/orgs/1/settings")}>settings</button>
+    </div>
+  )
+}
+
 beforeEach(() => {
   localStorage.clear()
   sessionState.loading = false
@@ -76,6 +87,26 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks())
 
 describe("OrgProvider", () => {
+  it("keeps resolved organization state across client-side route changes", async () => {
+    listMyOrgs.mockResolvedValue([
+      { id: 1, name: "A", role: { level: 700, name: "owner" } },
+    ])
+
+    render(
+      <MemoryRouter initialEntries={["/orgs/1"]}>
+        <OrgProvider><RouteProbe /></OrgProvider>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByTestId("loading").textContent).toBe("no"))
+    expect(listMyOrgs).toHaveBeenCalledTimes(1)
+
+    await act(async () => { screen.getByText("settings").click() })
+
+    expect(screen.getByTestId("loading").textContent).toBe("no")
+    expect(listMyOrgs).toHaveBeenCalledTimes(1)
+  })
+
   it("loads the shared project directory once while organization state resolves", async () => {
     listMyOrgs.mockResolvedValue([
       { id: 1, name: "A", role: { level: 700, name: "owner" } },

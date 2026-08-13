@@ -1,4 +1,5 @@
-import { NavLink } from "react-router-dom"
+import { startTransition, type ComponentProps, type MouseEvent } from "react"
+import { NavLink, useNavigate } from "react-router-dom"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { usePlatformAdmin } from "@/hooks/usePlatformAdmin"
@@ -12,6 +13,27 @@ import { HelpMenu } from "@/components/HelpMenu"
 
 const link = ({ isActive }: { isActive: boolean }) =>
   `block rounded-md px-2 py-1.5 text-sm ${isActive ? "bg-accent font-medium text-foreground" : "text-muted-foreground hover:bg-accent hover:text-foreground"}`
+
+/** Preserve the current org surface while a lazy destination chunk resolves.
+ * Modified/new-tab clicks retain normal anchor behavior. */
+function OrgNavLink(props: ComponentProps<typeof NavLink>) {
+  const navigate = useNavigate()
+  const handleClick = (event: MouseEvent<HTMLAnchorElement>) => {
+    props.onClick?.(event)
+    if (
+      event.defaultPrevented ||
+      event.button !== 0 ||
+      event.metaKey ||
+      event.ctrlKey ||
+      event.shiftKey ||
+      event.altKey ||
+      props.reloadDocument
+    ) return
+    event.preventDefault()
+    startTransition(() => navigate(props.to, { replace: props.replace, state: props.state }))
+  }
+  return <NavLink {...props} onClick={handleClick} />
+}
 
 export function OrgSidebar() {
   const { orgs, activeOrg, activeOrgId, activeGuestOrg, isAllOrgs, accessibleProjects } = useActiveOrg()
@@ -63,32 +85,32 @@ export function OrgSidebar() {
       </div>
       <nav className="mt-2 flex flex-1 flex-col gap-0.5">
         {/* FRO-243: data-tour anchors for product tour steps */}
-        <NavLink
+        <OrgNavLink
           to={homeTo}
           end
           className={link}
           data-tour="nav-overview"
         >
           Projects
-        </NavLink>
+        </OrgNavLink>
         {isMemberOrg && activeOrgId != null && <>
-          <NavLink to={orgPath(activeOrgId, "/teams")} className={link}>Teams</NavLink>
-          <NavLink to={orgPath(activeOrgId, "/assigned")} className={link} data-tour="nav-assigned">Assigned to me</NavLink>
+          <OrgNavLink to={orgPath(activeOrgId, "/teams")} className={link}>Teams</OrgNavLink>
+          <OrgNavLink to={orgPath(activeOrgId, "/assigned")} className={link} data-tour="nav-assigned">Assigned to me</OrgNavLink>
         </>}
         {isAdmin && activeOrgId != null && <>
           <div className="my-1 border-t" />
-          <NavLink to={orgPath(activeOrgId, "/members")} className={link}>Members</NavLink>
-          <NavLink to={orgPath(activeOrgId, "/archived")} className={link}>Archived</NavLink>
-          <NavLink to={orgPath(activeOrgId, "/settings")} className={link} data-tour="nav-settings">Settings</NavLink>
+          <OrgNavLink to={orgPath(activeOrgId, "/members")} className={link}>Members</OrgNavLink>
+          <OrgNavLink to={orgPath(activeOrgId, "/archived")} className={link}>Archived</OrgNavLink>
+          <OrgNavLink to={orgPath(activeOrgId, "/settings")} className={link} data-tour="nav-settings">Settings</OrgNavLink>
         </>}
         {isPlatformAdmin && <>
           <div className="my-1 border-t" />
-          <NavLink to="/admin" className={link}>Admin</NavLink>
+          <OrgNavLink to="/admin" className={link}>Admin</OrgNavLink>
         </>}
         {hasSharedProjects && (
           <>
             <div className="my-1 border-t" />
-            <NavLink to="/shared" className={link}>
+            <OrgNavLink to="/shared" className={link}>
               <span className="flex items-center justify-between gap-2">
                 Shared with you
                 {hasNewSharedProjects && (
@@ -97,7 +119,7 @@ export function OrgSidebar() {
                   </Badge>
                 )}
               </span>
-            </NavLink>
+            </OrgNavLink>
           </>
         )}
       </nav>

@@ -81,9 +81,18 @@ function buildTerminologyGuidance(hints: TerminologyHint[]): string {
   ].join("\n")
 }
 
+/**
+ * AQU-848: what to say when the project carries no source language. Callers
+ * must pass the *configured* source language through verbatim; when there is
+ * none, the prompt stays language-neutral rather than naming a language the
+ * project never chose (it used to default to English, which produced English
+ * back-translations for low-resource projects).
+ */
+const UNSET_SOURCE_LANGUAGE = "the source language"
+
 export function buildBacktranslationPrompt(options: BuildOptions): ChatMessage[] {
   let systemContent = BACKTRANSLATION_SYSTEM_PROMPT
-    .replace(/\{sourceLanguage\}/g, options.sourceLanguage)
+    .replace(/\{sourceLanguage\}/g, options.sourceLanguage.trim() || UNSET_SOURCE_LANGUAGE)
     .replace(/\{targetLanguage\}/g, options.targetLanguage)
 
   if (options.terminologyHints && options.terminologyHints.length > 0) {

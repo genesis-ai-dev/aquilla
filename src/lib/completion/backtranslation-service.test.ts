@@ -247,3 +247,61 @@ describe("generateBacktranslation terminology seeding", () => {
     expect(system).not.toContain("grâce")
   })
 })
+
+describe("AQU-848 — the configured source language reaches the request payload", () => {
+  beforeEach(() => {
+    completeMock.mockClear()
+  })
+
+  it("carries a low-resource source language through verbatim", () => {
+    // The reported bug: a Gom-source project got English back-translations
+    // because the call site defaulted to "English". The configured language
+    // must reach the system message exactly as configured.
+    const messages = buildBacktranslationPrompt({
+      sourceLanguage: "Gom",
+      targetLanguage: "Gom",
+      targetText: "…",
+      examples: [],
+    })
+    expect(messages[0].content).toContain("BACK into Gom")
+    expect(messages[0].content).not.toContain("English")
+  })
+
+  it("does not name English when the project has no source language", () => {
+    // Unset must stay language-neutral rather than silently claiming English.
+    for (const unset of ["", "   "]) {
+      const messages = buildBacktranslationPrompt({
+        sourceLanguage: unset,
+        targetLanguage: "Gom",
+        targetText: "…",
+        examples: [],
+      })
+      expect(messages[0].content).toContain("BACK into the source language")
+      expect(messages[0].content).not.toContain("English")
+    }
+  })
+
+  it("still names English for a genuinely English-source project", () => {
+    const messages = buildBacktranslationPrompt({
+      sourceLanguage: "English",
+      targetLanguage: "Gom",
+      targetText: "…",
+      examples: [],
+    })
+    expect(messages[0].content).toContain("BACK into English")
+  })
+
+  it("sends the configured source language on the generated request", async () => {
+    await generateBacktranslation({
+      settings: { model: "m", temperature: 0.3 } as never,
+      session: null,
+      sourceLanguage: "Konkani (Goan)",
+      targetLanguage: "Konkani (Goan)",
+      targetText: "…",
+      examples: [],
+    })
+    const system = lastCompleteArg().messages.find((m) => m.role === "system")
+    expect(system?.content).toContain("Konkani (Goan)")
+    expect(system?.content).not.toContain("English")
+  })
+})

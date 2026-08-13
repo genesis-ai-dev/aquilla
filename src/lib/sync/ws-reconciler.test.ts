@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import {
   buildProjectWsUrl,
   createLinkUpstreamChangedHandler,
+  createReconnectResyncHandler,
   createWsReconciler,
   fileInventoryChanged,
   isOwnWriteEcho,
@@ -750,5 +751,48 @@ describe("fileInventoryChanged (AQU-744 staged-import reveal)", () => {
 
   it("stays progress-only for a known file without the signal", () => {
     expect(fileInventoryChanged(frame("f1", false), new Set(["f1", "f2"]))).toBe(false)
+  })
+})
+
+// AQU-845: the project DO broadcasts `event.applied` live and never replays it,
+// so every frame that lands while a client's socket is down is lost to that
+// client. Without a resync on reopen, a peer's committed cell renders blank
+// until the user happens to blur+refocus the window — the reported "cells are
+// empty for the other member, then fill in on their own".
+describe("createReconnectResyncHandler (AQU-845 missed-broadcast recovery)", () => {
+  it("does not resync on the first open — the initial read is already in flight", () => {
+    const onResync = vi.fn()
+    const onOpen = createReconnectResyncHandler(onResync)
+
+    onOpen()
+
+    expect(onResync).not.toHaveBeenCalled()
+  })
+
+  it("resyncs on every reopen after the first", () => {
+    const onResync = vi.fn()
+    const onOpen = createReconnectResyncHandler(onResync)
+
+    onOpen() // initial connect
+    onOpen() // reconnect after a sync-worker redeploy
+    expect(onResync).toHaveBeenCalledTimes(1)
+
+    onOpen() // and again after the next drop
+    onOpen()
+    expect(onResync).toHaveBeenCalledTimes(3)
+  })
+
+  it("keeps each project's reconciler on its own first-open ledger", () => {
+    const a = vi.fn()
+    const b = vi.fn()
+    const onOpenA = createReconnectResyncHandler(a)
+    const onOpenB = createReconnectResyncHandler(b)
+
+    onOpenA()
+    onOpenA()
+    onOpenB()
+
+    expect(a).toHaveBeenCalledTimes(1)
+    expect(b).not.toHaveBeenCalled()
   })
 })

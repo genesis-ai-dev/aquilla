@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach, beforeEach, vi } from "vitest"
 import { act, render, screen, waitFor, fireEvent, within } from "@testing-library/react"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { OrgProvider } from "@/context/OrgContext"
-import { ProjectTable, activityStatus } from "./OrgHome"
+import { ProjectTable, activityStatus, OrgHome } from "./OrgHome"
 import { OrgOverview } from "./OrgOverview"
 import { OrgProjectsPage } from "./OrgProjectsPage"
 import { renderWithTooltips, expectTooltip } from "@/test-utils/tooltip"
@@ -85,6 +85,9 @@ vi.mock("@/lib/frontier/portfolio", async (importActual) => {
   return {
     ...actual,
     getPortfolio: vi.fn(async () => projects),
+    // AQU-883: the all-orgs dashboard fans out through getPortfolios; tests
+    // that exercise that scope override this (default matches the member
+    // overview fixture so overview assertions stay hermetic).
     getPortfolios: vi.fn(async () => [{ orgId: 1, projects }]),
   }
 })
@@ -394,6 +397,80 @@ describe("OrgOverview / OrgProjects", () => {
       view.unmount()
       container.remove()
     }
+  })
+
+  // AQU-882: `/orgs/all` renders OrgHome directly — it's a sibling route of
+  // `/orgs/:orgId`, so OrgRouteGate (the only surface that read the org-load
+  // error) never mounts for it. A failed fetch therefore fell through to the
+  // ordinary dashboard and rendered as "you have no organizations". The error
+  // card lives in the AQU-864 landing guard, so it only renders on the
+  // `/orgs/all` route — these tests mount there, as the app does.
+  describe("organization load failure (AQU-882)", () => {
+    async function renderWithFailedOrgLoad(message = "network down") {
+      const { listMyOrgs } = await import("@/lib/frontier/orgs")
+      vi.mocked(listMyOrgs).mockRejectedValue(new Error(message))
+      render(
+        <MemoryRouter initialEntries={["/orgs/all"]}>
+          <OrgProvider><OrgHome /></OrgProvider>
+        </MemoryRouter>,
+      )
+      return await screen.findByTestId("org-load-error")
+    }
+
+    it("shows an error card with Retry instead of the zero-stat empty dashboard", async () => {
+      const card = await renderWithFailedOrgLoad()
+      expect(within(card).getByText(/couldn’t load your organizations/i)).toBeInTheDocument()
+      expect(within(card).getByRole("button", { name: /retry/i })).toBeInTheDocument()
+      // The repro's misleading surfaces must be gone, not merely accompanied.
+      expect(screen.queryByText("No organizations yet.")).not.toBeInTheDocument()
+      expect(screen.queryByText("No projects yet.")).not.toBeInTheDocument()
+      expect(screen.queryByTestId("organizations-panel")).not.toBeInTheDocument()
+    })
+
+    it("surfaces the failure reason so the error isn't generic", async () => {
+      const card = await renderWithFailedOrgLoad("identity worker unreachable")
+      expect(within(card).getByText("identity worker unreachable")).toBeInTheDocument()
+    })
+
+    it("loads organizations and projects in place when Retry is clicked — no page reload", async () => {
+      const card = await renderWithFailedOrgLoad()
+      const { listMyOrgs } = await import("@/lib/frontier/orgs")
+      // Backend is reachable again.
+      vi.mocked(listMyOrgs).mockResolvedValue([
+        { id: 1, name: "Come and See", role: { level: 700, name: "owner" } },
+        { id: 2, name: "Side Org", role: { level: 700, name: "owner" } },
+      ])
+
+      const { getPortfolios } = await import("@/lib/frontier/portfolio")
+      const portfolioCallsBeforeRetry = vi.mocked(getPortfolios).mock.calls.length
+
+      fireEvent.click(within(card).getByRole("button", { name: /retry/i }))
+
+      // Same mount: the dashboard replaces the error card.
+      await waitFor(() => expect(screen.getAllByText("Come and See").length).toBeGreaterThan(0))
+      expect(screen.queryByTestId("org-load-error")).not.toBeInTheDocument()
+      // Retry re-issues the dependent portfolio fetch too, not just the orgs —
+      // the failure state resolves to real data rather than an empty dashboard.
+      await waitFor(() =>
+        expect(vi.mocked(getPortfolios).mock.calls.length).toBeGreaterThan(portfolioCallsBeforeRetry),
+      )
+    })
+
+    it("does not show the error card when the fetch succeeds with zero organizations", async () => {
+      // Negative case: genuinely belonging to no org is an empty state, not a
+      // failure — it must keep rendering the ordinary dashboard chrome.
+      const { listMyOrgs } = await import("@/lib/frontier/orgs")
+      vi.mocked(listMyOrgs).mockResolvedValue([])
+      render(
+        <MemoryRouter initialEntries={["/orgs/all"]}>
+          <OrgProvider><OrgHome /></OrgProvider>
+        </MemoryRouter>,
+      )
+      await waitFor(() =>
+        expect(screen.queryByTestId("org-home-loading")).not.toBeInTheDocument(),
+      )
+      expect(screen.queryByTestId("org-load-error")).not.toBeInTheDocument()
+    })
   })
 
   it("renders the org name, nav, and admin links for an owner", async () => {
@@ -717,5 +794,66 @@ describe("activityStatus", () => {
 
   it("treats a recently edited project as active", () => {
     expect(activityStatus({ ...base, lastEditAt: now, filledCells: 5 }, now)).toBe("active")
+  })
+})
+
+// AQU-883: the project directory (accessible-projects) is the only source of
+// shared/guest projects and the guest orgs derived from them. Its fetch used to
+// collapse every failure into an empty list with no error recorded anywhere, so
+// the all-orgs overview was indistinguishable from "nothing is shared with you".
+describe("OrgHome — project-directory load failure (AQU-883)", () => {
+  const twoOrgs = [
+    { id: 1, name: "Come and See", role: { level: 700, name: "owner" } },
+    { id: 2, name: "Side Org", role: { level: 700, name: "owner" } },
+  ]
+
+  async function renderAllOrgs() {
+    const { listMyOrgs } = await import("@/lib/frontier/orgs")
+    vi.mocked(listMyOrgs).mockResolvedValue(twoOrgs)
+    const { getPortfolios } = await import("@/lib/frontier/portfolio")
+    vi.mocked(getPortfolios).mockResolvedValue([])
+    return render(
+      <MemoryRouter initialEntries={["/orgs/all"]}>
+        <OrgProvider><OrgHome /></OrgProvider>
+      </MemoryRouter>,
+    )
+  }
+
+  it("surfaces the failure in the projects panel instead of a plain empty state", async () => {
+    fetchAccessibleProjectsMock.mockRejectedValue(new Error("Failed to fetch"))
+    await renderAllOrgs()
+
+    const errorCard = await screen.findByTestId("project-directory-error")
+    expect(errorCard).toBeInTheDocument()
+    // Member orgs loaded fine, so the org panel must NOT claim a failure...
+    expect(screen.getByText("Come and See")).toBeInTheDocument()
+    // ...and the misleading "No projects yet." must not stand in for the error.
+    expect(screen.queryByText("No projects yet.")).not.toBeInTheDocument()
+    expect(within(errorCard).getByRole("button", { name: /retry/i })).toBeInTheDocument()
+  })
+
+  it("Retry re-fetches the directory in place and clears the error", async () => {
+    fetchAccessibleProjectsMock.mockRejectedValueOnce(new Error("Failed to fetch"))
+    await renderAllOrgs()
+
+    const errorCard = await screen.findByTestId("project-directory-error")
+    fetchAccessibleProjectsMock.mockResolvedValue([])
+    await act(async () => {
+      fireEvent.click(within(errorCard).getByRole("button", { name: /retry/i }))
+    })
+
+    await waitFor(() =>
+      expect(screen.queryByTestId("project-directory-error")).not.toBeInTheDocument(),
+    )
+    expect(fetchAccessibleProjectsMock.mock.calls.length).toBeGreaterThan(1)
+  })
+
+  it("negative case: a genuinely empty directory keeps the normal empty presentation", async () => {
+    fetchAccessibleProjectsMock.mockResolvedValue([])
+    await renderAllOrgs()
+
+    await waitFor(() => expect(screen.getByText("Come and See")).toBeInTheDocument())
+    expect(screen.queryByTestId("project-directory-error")).not.toBeInTheDocument()
+    expect(screen.getByText("No projects yet")).toBeInTheDocument()
   })
 })

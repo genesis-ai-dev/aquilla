@@ -10,6 +10,12 @@ function LocationProbe() {
   return <div data-testid="loc">{loc.pathname + loc.search}</div>
 }
 
+async function openOrgSwitcher(name: string | RegExp) {
+  const trigger = screen.getByRole("combobox", { name })
+  await act(async () => { trigger.click() })
+  await screen.findByRole("combobox", { name: /find an organization/i })
+}
+
 vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({ session: { jwt: "jwt", username: "anna", createdAt: "x" }, loading: false }),
 }))
@@ -321,5 +327,133 @@ describe("OrgSwitcher", () => {
 
     // Org scope is path-based for both, so the overview is `/orgs/1`.
     await waitFor(() => expect(screen.getByTestId("loc")).toHaveTextContent("/orgs/1"))
+  })
+
+  // AQU-883: guest orgs are derived ENTIRELY from the project-directory fetch.
+  // When that fetch failed the section simply vanished, reading as "you are a
+  // guest nowhere" — and for a project-only invitee the whole switcher
+  // unmounted, removing the last affordance that could re-issue the fetch.
+  describe("project-directory load failure (AQU-883)", () => {
+    it("shows a retry row in place of the guest section instead of silently dropping it", async () => {
+      listMyOrgs.mockResolvedValue([
+        { id: 1, name: "Alpha Org", role: { level: 700, name: "owner" } },
+        { id: 2, name: "Bravo Org", role: { level: 700, name: "owner" } },
+      ])
+      fetchAccessibleProjects.mockRejectedValue(new Error("Failed to fetch"))
+
+      render(<MemoryRouter><OrgProvider><OrgSwitcher /></OrgProvider></MemoryRouter>)
+      await screen.findByRole("combobox", { name: /organization switcher/i })
+      await openOrgSwitcher(/organization switcher/i)
+
+      // Member orgs still list — the two fetches fail independently.
+      expect(screen.getByText("Alpha Org")).toBeInTheDocument()
+      expect(await screen.findByTestId("guest-orgs-error")).toBeInTheDocument()
+      expect(screen.queryByTestId("guest-orgs")).not.toBeInTheDocument()
+    })
+
+    it("Retry re-fetches in place and the recovered guest orgs appear without a reload", async () => {
+      listMyOrgs.mockResolvedValue([
+        { id: 1, name: "Alpha Org", role: { level: 700, name: "owner" } },
+        { id: 2, name: "Bravo Org", role: { level: 700, name: "owner" } },
+      ])
+      fetchAccessibleProjects.mockRejectedValueOnce(new Error("Failed to fetch"))
+
+      render(<MemoryRouter><OrgProvider><OrgSwitcher /></OrgProvider></MemoryRouter>)
+      await screen.findByRole("combobox", { name: /organization switcher/i })
+      await openOrgSwitcher(/organization switcher/i)
+      await screen.findByTestId("guest-orgs-error")
+
+      fetchAccessibleProjects.mockResolvedValue([
+        { id: "pg", name: "P", orgId: 9, orgName: "Golf Guest", role: { level: 100, name: "viewer", source: "override" } },
+      ])
+      fireEvent.click(screen.getByRole("button", { name: /retry loading shared organizations/i }))
+
+      // Menu stays open, so the recovered guest org lands in place.
+      await waitFor(() => expect(screen.getByText("Golf Guest")).toBeInTheDocument())
+      expect(screen.queryByTestId("guest-orgs-error")).not.toBeInTheDocument()
+    })
+
+    it("keeps a retry affordance for a project-only invitee whose switcher would otherwise unmount", async () => {
+      // Zero member orgs: guest orgs were the ONLY reason the switcher rendered.
+      listMyOrgs.mockResolvedValue([])
+      fetchAccessibleProjects.mockRejectedValueOnce(new Error("Failed to fetch"))
+
+      render(<MemoryRouter><OrgProvider><OrgSwitcher /></OrgProvider></MemoryRouter>)
+      const retry = await screen.findByTestId("org-switcher-projects-error")
+      expect(retry).toBeInTheDocument()
+
+      fetchAccessibleProjects.mockResolvedValue([
+        { id: "pg", name: "P", orgId: 9, orgName: "Golf Guest", role: { level: 100, name: "viewer", source: "override" } },
+      ])
+      fireEvent.click(retry)
+
+      // Recovered: the real switcher returns, scoped to the guest org.
+      await waitFor(() =>
+        expect(screen.getByRole("combobox", { name: /organization switcher/i })).toBeInTheDocument(),
+      )
+    })
+
+    it("negative case: a successful empty directory still renders no guest section and no error", async () => {
+      listMyOrgs.mockResolvedValue([
+        { id: 1, name: "Alpha Org", role: { level: 700, name: "owner" } },
+        { id: 2, name: "Bravo Org", role: { level: 700, name: "owner" } },
+      ])
+      fetchAccessibleProjects.mockResolvedValue([])
+
+      render(<MemoryRouter><OrgProvider><OrgSwitcher /></OrgProvider></MemoryRouter>)
+      await screen.findByRole("combobox", { name: /organization switcher/i })
+      await openOrgSwitcher(/organization switcher/i)
+
+      expect(screen.getByText("Alpha Org")).toBeInTheDocument()
+      expect(screen.queryByTestId("guest-orgs-error")).not.toBeInTheDocument()
+      expect(screen.queryByTestId("guest-orgs")).not.toBeInTheDocument()
+    })
+  })
+
+  // AQU-882: a failed org load leaves no activeOrg, no all-orgs scope and no
+  // guest orgs — exactly the shape that unmounted the switcher entirely, so the
+  // user had no in-app affordance to re-issue the fetch.
+  describe("organization load failure (AQU-882)", () => {
+    it("stays mounted with a retry affordance instead of unmounting", async () => {
+      listMyOrgs.mockRejectedValue(new Error("network down"))
+      render(<MemoryRouter><OrgProvider><OrgSwitcher /></OrgProvider></MemoryRouter>)
+
+      const retry = await screen.findByTestId("org-switcher-error")
+      expect(retry).toHaveAccessibleName("Retry loading organizations")
+      expect(screen.getByText(/couldn’t load organizations/i)).toBeInTheDocument()
+    })
+
+    it("reloads organizations in place when the retry affordance is clicked", async () => {
+      listMyOrgs.mockRejectedValueOnce(new Error("network down"))
+      render(<MemoryRouter><OrgProvider><OrgSwitcher /></OrgProvider></MemoryRouter>)
+      const retry = await screen.findByTestId("org-switcher-error")
+
+      // Backend is reachable again.
+      listMyOrgs.mockResolvedValue([
+        { id: 1, name: "Come and See", role: { level: 600, name: "maintainer" } },
+        { id: 2, name: "Side Org", role: { level: 700, name: "owner" } },
+      ])
+      fireEvent.click(retry)
+
+      // Same mount: the real switcher replaces the error affordance.
+      await waitFor(() =>
+        expect(
+          screen.getByRole("combobox", { name: "Organization switcher: All organizations" }),
+        ).toBeInTheDocument(),
+      )
+      expect(screen.queryByTestId("org-switcher-error")).not.toBeInTheDocument()
+    })
+
+    it("still hides itself for a successful load with no member or guest orgs", async () => {
+      // Negative case: zero orgs is not a failure — the pre-AQU-882 hide
+      // behavior must survive for a genuinely empty (successful) load.
+      listMyOrgs.mockResolvedValue([])
+      const { container } = render(
+        <MemoryRouter><OrgProvider><OrgSwitcher /></OrgProvider></MemoryRouter>,
+      )
+      await waitFor(() => expect(listMyOrgs).toHaveBeenCalled())
+      expect(screen.queryByTestId("org-switcher-error")).not.toBeInTheDocument()
+      expect(container).toBeEmptyDOMElement()
+    })
   })
 })

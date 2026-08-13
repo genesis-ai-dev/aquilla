@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react"
 import { useLocation, useNavigate } from "react-router-dom"
 import { Combobox as ComboboxPrimitive } from "@base-ui/react/combobox"
-import { Building2, Check, Plus, SearchIcon } from "lucide-react"
+import { AlertTriangle, Building2, Check, Plus, SearchIcon } from "lucide-react"
 import { useActiveOrg, type GuestOrg } from "@/context/OrgContext"
 import { isOrgScopedRoute } from "./org-route-scope"
 import { OrgCreateDialog } from "./OrgCreateDialog"
@@ -140,11 +140,15 @@ function OrgSwitcherList({
   isAllOrgs,
   activeOrgId,
   selectedGuestOrgId,
+  directoryError,
+  onRetryDirectory,
 }: {
   guestSelected: boolean
   isAllOrgs: boolean
   activeOrgId: number | null
   selectedGuestOrgId: number | null
+  directoryError: string | null
+  onRetryDirectory: () => void
 }) {
   const filtered = ComboboxPrimitive.useFilteredItems<OrgSwitcherItem>()
   const members = filtered.filter((item) => item.kind !== "guest")
@@ -167,9 +171,46 @@ function OrgSwitcherList({
           ))}
         </ComboboxGroup>
       )}
-      {guests.length > 0 && (
+      {/* AQU-883: the guest section is populated from the project
+          directory. When that fetch failed we don't know whether the
+          caller has guest orgs, so say so and offer a retry rather
+          than rendering the section as legitimately empty. A plain
+          button (not a ComboboxItem) keeps the menu open so the
+          recovered orgs appear in place. */}
+      {directoryError ? (
         <>
           {members.length > 0 && (
+            <ComboboxSeparator className="mx-0 my-1" />
+          )}
+          <div
+            role="presentation"
+            data-testid="guest-orgs-error"
+            className="px-2 py-2"
+          >
+            <div className="flex items-center gap-2 text-sm">
+              <AlertTriangle className="size-4 shrink-0 text-destructive" aria-hidden />
+              <span className="min-w-0 flex-1 truncate text-muted-foreground">
+                Couldn’t load shared organizations
+              </span>
+              <button
+                type="button"
+                aria-label="Retry loading shared organizations"
+                className="shrink-0 text-xs font-medium underline"
+                onPointerDown={(e) => e.preventDefault()}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onRetryDirectory()
+                }}
+              >
+                Retry
+              </button>
+            </div>
+          </div>
+        </>
+      ) : null}
+      {guests.length > 0 && (
+        <>
+          {(members.length > 0 || directoryError) && (
             <ComboboxSeparator
               className="mx-0 my-1"
               data-testid="guest-orgs-separator"
@@ -239,6 +280,10 @@ export function OrgSwitcher() {
     setActiveOrg,
     setAllOrgs,
     refresh,
+    error,
+    retryOrgLoad,
+    accessibleProjectsError,
+    refreshAccessibleProjects,
   } = useActiveOrg()
   const location = useLocation()
   const navigate = useNavigate()
@@ -288,6 +333,59 @@ export function OrgSwitcher() {
     }
     return null
   }, [items, guestSelected, selectedGuestOrgId, isAllOrgs, showAllOrgs, activeOrgId])
+
+  function retryProjectDirectory() {
+    void refreshAccessibleProjects()
+  }
+
+  // AQU-882: a failed org load leaves no activeOrg, no all-orgs scope and no
+  // guest orgs, so the check below used to unmount the switcher outright —
+  // removing the only chrome the user could have recovered from and leaving a
+  // full page reload as the sole way to re-issue the fetch. Hold the slot with
+  // a retry affordance instead. Checked before the empty-membership case so a
+  // failure never reads as "you have no organizations" — and before the
+  // directory-failure case below, because retryOrgLoad re-issues both fetches.
+  if (error) {
+    return (
+      <button
+        type="button"
+        data-testid="org-switcher-error"
+        aria-label="Retry loading organizations"
+        onClick={() => { void retryOrgLoad() }}
+        className="flex w-full items-center gap-2 rounded-md px-1.5 py-1.5 text-left text-sm hover:bg-accent"
+      >
+        <AlertTriangle className="size-4 shrink-0 text-destructive" aria-hidden />
+        <span className="min-w-0 flex-1 truncate text-muted-foreground">
+          Couldn’t load organizations
+        </span>
+        <span className="shrink-0 text-xs font-medium underline">Retry</span>
+      </button>
+    )
+  }
+
+  // AQU-883: guest orgs are derived entirely from the project directory, so a
+  // failed directory fetch presents exactly like "you are a guest nowhere". For
+  // a project-only invitee that also trips the unmount below, removing the last
+  // affordance that could re-issue the fetch. Hold the slot with a retry
+  // instead — checked before the unmount so a failure never reads as "no
+  // organizations".
+  if (accessibleProjectsError && !activeOrg && !isAllOrgs && guestOrgs.length === 0) {
+    return (
+      <button
+        type="button"
+        data-testid="org-switcher-projects-error"
+        aria-label="Retry loading shared organizations"
+        onClick={retryProjectDirectory}
+        className="flex w-full items-center gap-2 rounded-md px-1.5 py-1.5 text-left text-sm hover:bg-accent"
+      >
+        <AlertTriangle className="size-4 shrink-0 text-destructive" aria-hidden />
+        <span className="min-w-0 flex-1 truncate text-muted-foreground">
+          Couldn’t load shared organizations
+        </span>
+        <span className="shrink-0 text-xs font-medium underline">Retry</span>
+      </button>
+    )
+  }
 
   // AQU-473: a project-only invitee has zero member orgs but may still have
   // guest orgs to switch into — don't hide the whole switcher for them.
@@ -410,6 +508,8 @@ export function OrgSwitcher() {
               isAllOrgs={isAllOrgs}
               activeOrgId={activeOrgId}
               selectedGuestOrgId={selectedGuestOrgId}
+              directoryError={accessibleProjectsError}
+              onRetryDirectory={retryProjectDirectory}
             />
           </ComboboxList>
           <ComboboxSeparator className="mx-0 my-0" />

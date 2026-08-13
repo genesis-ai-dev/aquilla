@@ -46,7 +46,7 @@ async function requireMaintainer(c: Context<AuthHonoEnv>, orgId: number) {
 }
 
 billing.get("/orgs/:orgId/billing", authMiddleware, async (c) => {
-  const orgId = parseInt(c.req.param("orgId"), 10)
+  const orgId = parseInt(c.req.param("orgId") ?? "", 10)
   if (!Number.isFinite(orgId)) return c.json({ error: "invalid orgId" }, 400)
   if (!(await requireMaintainer(c, orgId))) return c.json({ error: "forbidden" }, 403)
 
@@ -86,7 +86,7 @@ const checkoutSchema = z.object({
 })
 
 billing.post("/orgs/:orgId/billing/checkout", authMiddleware, async (c) => {
-  const orgId = parseInt(c.req.param("orgId"), 10)
+  const orgId = parseInt(c.req.param("orgId") ?? "", 10)
   if (!Number.isFinite(orgId)) return c.json({ error: "invalid orgId" }, 400)
   if (!(await requireMaintainer(c, orgId))) return c.json({ error: "forbidden" }, 403)
 
@@ -139,7 +139,7 @@ billing.post("/orgs/:orgId/billing/checkout", authMiddleware, async (c) => {
 })
 
 billing.post("/orgs/:orgId/billing/portal", authMiddleware, async (c) => {
-  const orgId = parseInt(c.req.param("orgId"), 10)
+  const orgId = parseInt(c.req.param("orgId") ?? "", 10)
   if (!Number.isFinite(orgId)) return c.json({ error: "invalid orgId" }, 400)
   if (!(await requireMaintainer(c, orgId))) return c.json({ error: "forbidden" }, 403)
 

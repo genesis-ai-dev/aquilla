@@ -9,6 +9,10 @@ import { hmac } from "@noble/hashes/hmac"
 import { sha256 } from "@noble/hashes/sha256"
 import { bytesToHex, utf8ToBytes } from "@noble/hashes/utils"
 
+function request(path: string, init?: RequestInit): Promise<Response> {
+  return Promise.resolve(app.request(path, init, env))
+}
+
 async function seedOrg() {
   await seedUser(1, "wendi")
   await seedUser(2, "anna")
@@ -23,13 +27,13 @@ async function seedOrg() {
 describe("GET /api/v2/orgs/:orgId/billing", () => {
   it("403s a contributor and 200s a maintainer with the unpaid snapshot", async () => {
     await seedOrg()
-    const member = await app.request(
+    const member = await request(
       "http://local/api/v2/orgs/1/billing",
       { headers: authHeader(await jwtFor("anna")) },
     )
     expect(member.status).toBe(403)
 
-    const owner = await app.request(
+    const owner = await request(
       "http://local/api/v2/orgs/1/billing",
       { headers: authHeader(await jwtFor("wendi")) },
     )
@@ -44,7 +48,7 @@ describe("GET /api/v2/orgs/:orgId/billing", () => {
 describe("POST /api/v2/orgs/:orgId/billing/checkout", () => {
   it("503s Field Plan checkout when Stripe is unconfigured", async () => {
     await seedOrg()
-    const res = await app.request("http://local/api/v2/orgs/1/billing/checkout", {
+    const res = await request("http://local/api/v2/orgs/1/billing/checkout", {
       method: "POST",
       headers: { ...authHeader(await jwtFor("wendi")), "Content-Type": "application/json" },
       body: JSON.stringify({ kind: "field" }),
@@ -113,7 +117,7 @@ describe("POST /api/v2/billing/webhook", () => {
         },
       },
     })
-    const res = await app.request("http://local/api/v2/billing/webhook", {
+    const res = await request("http://local/api/v2/billing/webhook", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: payload,
@@ -144,7 +148,7 @@ describe("POST /api/v2/billing/webhook", () => {
         },
       },
     })
-    const res = await app.request("http://local/api/v2/billing/webhook", {
+    const res = await request("http://local/api/v2/billing/webhook", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: payload,
@@ -176,7 +180,7 @@ describe("POST /api/v2/billing/webhook", () => {
         },
       },
     })
-    const res = await app.request("http://local/api/v2/billing/webhook", {
+    const res = await request("http://local/api/v2/billing/webhook", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: payload,
@@ -190,7 +194,7 @@ describe("POST /api/v2/billing/webhook", () => {
 
   it("rejects a bad Stripe signature when a webhook secret is set", async () => {
     env.STRIPE_WEBHOOK_SECRET = "whsec_test"
-    const res = await app.request("http://local/api/v2/billing/webhook", {
+    const res = await request("http://local/api/v2/billing/webhook", {
       method: "POST",
       headers: { "stripe-signature": "t=1,v1=nope" },
       body: "{}",

@@ -6,6 +6,7 @@ import { OrgSettingsBilling } from "./OrgSettingsBilling"
 import { getOrgBilling } from "@/lib/sync/billing"
 import type { OrgBilling } from "@/lib/sync/billing"
 
+vi.mock("@/components/AccountSwitcher", () => ({ AccountSwitcher: () => null }))
 vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({ session: { jwt: "jwt", username: "wendi", createdAt: "x" }, loading: false }),
 }))

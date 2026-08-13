@@ -7,6 +7,7 @@ import {
   FieldError,
   FieldGroup,
   FieldLabel,
+  OptionalMark,
 } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
@@ -96,6 +97,7 @@ export function OrgStep({
       </div>
       <form
         id="org-step-form"
+        autoComplete="off"
         onSubmit={(e) => {
           e.preventDefault()
           void form.handleSubmit()
@@ -112,7 +114,12 @@ export function OrgStep({
                   <FieldLabel htmlFor="org-name">{t("org.createDialog.nameLabel")}</FieldLabel>
                   <Input
                     id="org-name"
-                    name={field.name}
+                    // Avoid DOM name="name" — Chrome contact autofill heuristic.
+                    name="aquilla-org-name"
+                    autoComplete="off"
+                    autoCorrect="off"
+                    autoCapitalize="none"
+                    spellCheck={false}
                     value={field.state.value}
                     onBlur={field.handleBlur}
                     onChange={(e) => field.handleChange(e.target.value)}
@@ -129,10 +136,18 @@ export function OrgStep({
             name="emails"
             children={(field) => (
               <Field>
-                <FieldLabel htmlFor="org-emails">{t("onboarding.step.org.inviteLabel")}</FieldLabel>
+                <FieldLabel htmlFor="org-emails">
+                  {t("onboarding.step.org.inviteLabel")} <OptionalMark />
+                </FieldLabel>
                 <Input
                   id="org-emails"
-                  name={field.name}
+                  name="aquilla-org-invite-emails"
+                  type="text"
+                  inputMode="email"
+                  autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="none"
+                  spellCheck={false}
                   value={field.state.value}
                   onBlur={field.handleBlur}
                   onChange={(e) => field.handleChange(e.target.value)}

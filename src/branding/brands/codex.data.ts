@@ -1,4 +1,4 @@
-import type { BrandData } from "../types"
+import type { BrandData } from "../types.ts"
 
 export const codexData: BrandData = {
   id: "codex",

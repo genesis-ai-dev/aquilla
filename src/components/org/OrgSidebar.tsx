@@ -1,19 +1,31 @@
 import { startTransition, type ComponentProps, type MouseEvent } from "react"
 import { NavLink, useNavigate } from "react-router-dom"
+import type { LucideIcon } from "lucide-react"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { usePlatformAdmin } from "@/hooks/usePlatformAdmin"
 import { partitionSharedProjects } from "@/lib/frontier/shared-projects"
 import { isProjectNew, readProjectOpenedAt } from "@/lib/frontier/opened-shared-store"
 import { Badge } from "@/components/ui/badge"
-import { orgHomePath, orgPath, ALL_ORGS_PARAM } from "@/lib/navigation/org-paths"
+import {
+  orgHomePath,
+  orgPath,
+  orgOverviewPath,
+  orgProjectsPath,
+  ALL_ORGS_PARAM,
+} from "@/lib/navigation/org-paths"
+import { NAV_PAGE_ICONS } from "@/lib/navigation/page-icons"
 import { OrgSwitcher } from "./OrgSwitcher"
 import { AccountSwitcher } from "@/components/AccountSwitcher"
 import { HelpMenu } from "@/components/HelpMenu"
 import { useT } from "@/lib/i18n/I18nProvider"
 
 const link = ({ isActive }: { isActive: boolean }) =>
-  `block rounded-md px-2 py-1.5 text-sm ${isActive ? "bg-accent font-medium text-foreground" : "text-muted-foreground hover:bg-accent hover:text-foreground"}`
+  `flex items-center gap-2 rounded-md px-2 py-1.5 text-sm font-normal ${isActive ? "bg-accent text-foreground" : "text-muted-foreground hover:bg-accent hover:text-foreground"}`
+
+function NavIcon({ icon: Icon }: { icon: LucideIcon }) {
+  return <Icon className="size-4 shrink-0" aria-hidden />
+}
 
 /** Preserve the current org surface while a lazy destination chunk resolves.
  * Modified/new-tab clicks retain normal anchor behavior. */
@@ -74,7 +86,7 @@ export function OrgSidebar() {
       isProjectNew(p.grantedAt, readProjectOpenedAt(username, p.id)),
     )
 
-  const homeTo = isAllOrgs
+  const portfolioHomeTo = isAllOrgs
     ? orgHomePath(ALL_ORGS_PARAM)
     : activeOrgId != null
       ? orgHomePath(activeOrgId)
@@ -86,34 +98,89 @@ export function OrgSidebar() {
         <OrgSwitcher />
       </div>
       <nav className="mt-2 flex flex-1 flex-col gap-0.5">
-        {/* FRO-243: data-tour anchors for product tour steps */}
-        <OrgNavLink
-          to={homeTo}
-          end
-          className={link}
-          data-tour="nav-overview"
-        >
-          {t("nav.projects")}
-        </OrgNavLink>
+        {/* Guest org: single project list at org index. Member: Overview + Projects. */}
+        {isGuestOrg && activeOrgId != null ? (
+          <OrgNavLink
+            to={orgHomePath(activeOrgId)}
+            end
+            className={link}
+            data-tour="nav-overview"
+          >
+            <NavIcon icon={NAV_PAGE_ICONS.projects} />
+            {t("nav.projects")}
+          </OrgNavLink>
+        ) : isMemberOrg && activeOrgId != null ? (
+          <>
+            <OrgNavLink
+              to={orgOverviewPath(activeOrgId)}
+              end
+              className={link}
+              data-tour="nav-overview"
+            >
+              <NavIcon icon={NAV_PAGE_ICONS.overview} />
+              {t("editor.navTitle.overview")}
+            </OrgNavLink>
+            <OrgNavLink
+              to={orgProjectsPath(activeOrgId)}
+              className={link}
+              data-tour="nav-projects"
+            >
+              <NavIcon icon={NAV_PAGE_ICONS.projects} />
+              {t("nav.projects")}
+            </OrgNavLink>
+          </>
+        ) : (
+          // All organizations: single portfolio home (OrgHome). There is no
+          // separate /projects tool under `/orgs/all`, so label it Overview —
+          // matching member-org Overview, not the Teams-style Projects table.
+          <OrgNavLink
+            to={portfolioHomeTo}
+            end
+            className={link}
+            data-tour="nav-overview"
+          >
+            <NavIcon icon={NAV_PAGE_ICONS.overview} />
+            {t("editor.navTitle.overview")}
+          </OrgNavLink>
+        )}
         {isMemberOrg && activeOrgId != null && <>
-          <OrgNavLink to={orgPath(activeOrgId, "/teams")} className={link}>{t("editor.navTitle.teams")}</OrgNavLink>
-          <OrgNavLink to={orgPath(activeOrgId, "/assigned")} className={link} data-tour="nav-assigned">{t("editor.navTitle.assignedToMe")}</OrgNavLink>
+          <OrgNavLink to={orgPath(activeOrgId, "/teams")} className={link}>
+            <NavIcon icon={NAV_PAGE_ICONS.teams} />
+            {t("editor.navTitle.teams")}
+          </OrgNavLink>
+          <OrgNavLink to={orgPath(activeOrgId, "/assigned")} className={link} data-tour="nav-assigned">
+            <NavIcon icon={NAV_PAGE_ICONS.assigned} />
+            {t("editor.navTitle.assignedToMe")}
+          </OrgNavLink>
         </>}
         {isAdmin && activeOrgId != null && <>
           <div className="my-1 border-t" />
-          <OrgNavLink to={orgPath(activeOrgId, "/members")} className={link}>{t("editor.navTitle.members")}</OrgNavLink>
-          <OrgNavLink to={orgPath(activeOrgId, "/archived")} className={link}>{t("org.orgSidebar.archived")}</OrgNavLink>
-          <OrgNavLink to={orgPath(activeOrgId, "/settings")} className={link} data-tour="nav-settings">{t("nav.settings")}</OrgNavLink>
+          <OrgNavLink to={orgPath(activeOrgId, "/members")} className={link}>
+            <NavIcon icon={NAV_PAGE_ICONS.members} />
+            {t("editor.navTitle.members")}
+          </OrgNavLink>
+          <OrgNavLink to={orgPath(activeOrgId, "/archived")} className={link}>
+            <NavIcon icon={NAV_PAGE_ICONS.archived} />
+            {t("org.orgSidebar.archived")}
+          </OrgNavLink>
+          <OrgNavLink to={orgPath(activeOrgId, "/settings")} className={link} data-tour="nav-settings">
+            <NavIcon icon={NAV_PAGE_ICONS.settings} />
+            {t("nav.settings")}
+          </OrgNavLink>
         </>}
         {isPlatformAdmin && <>
           <div className="my-1 border-t" />
-          <OrgNavLink to="/admin" className={link}>{t("org.orgSidebar.admin")}</OrgNavLink>
+          <OrgNavLink to="/admin" className={link}>
+            <NavIcon icon={NAV_PAGE_ICONS.admin} />
+            {t("org.orgSidebar.admin")}
+          </OrgNavLink>
         </>}
         {hasSharedProjects && (
           <>
             <div className="my-1 border-t" />
             <OrgNavLink to="/shared" className={link}>
-              <span className="flex items-center justify-between gap-2">
+              <NavIcon icon={NAV_PAGE_ICONS.shared} />
+              <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
                 {t("editor.navTitle.sharedWithYou")}
                 {hasNewSharedProjects && (
                   <Badge className="shrink-0" data-testid="new-shared-nav-badge">
@@ -125,11 +192,11 @@ export function OrgSidebar() {
           </>
         )}
       </nav>
-      <div className="mt-auto pt-2 flex flex-col gap-1">
-        <HelpMenu />
-        <div data-tour="account-switcher">
+      <div className="mt-auto flex items-center gap-1 pt-2">
+        <div className="min-w-0 flex-1" data-tour="account-switcher">
           <AccountSwitcher variant="sidebar" />
         </div>
+        <HelpMenu compact />
       </div>
     </div>
   )

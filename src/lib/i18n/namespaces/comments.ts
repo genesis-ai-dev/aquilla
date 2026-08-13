@@ -2,6 +2,8 @@ import { defineNamespace } from "./types"
 
 export const comments = defineNamespace({
   keys: {
+    "comments.backToProject": "Back to project",
+
     // Sort picker
     "comments.sort.unresolvedFirst": "Unresolved first",
     "comments.sort.recentActivity": "Most recent activity",
@@ -61,7 +63,6 @@ export const comments = defineNamespace({
     "comments.filter.anyone": "Anyone",
 
     // Page chrome
-    "comments.backToProject": "Back to project",
     "comments.page.titleWithProject": "{projectName} — Comments",
     "comments.filterCount.one": "{count} filter",
     "comments.filterCount.other": "{count} filters",
@@ -89,6 +90,11 @@ export const comments = defineNamespace({
       screenshot: "comments",
     },
     keys: {
+      "comments.backToProject": {
+        description:
+          "Button at the top of the full-page thread list that navigates back to the " +
+          "project's editor.",
+      },
       "comments.sort.unresolvedFirst": {
         description: "Option in the thread-list sort picker: unresolved threads first.",
       },
@@ -288,11 +294,6 @@ export const comments = defineNamespace({
         description:
           "Option shared by both the author and participant pickers meaning no " +
           "person filter is applied.",
-      },
-      "comments.backToProject": {
-        description:
-          "Button at the top of the full-page thread list that navigates back to the " +
-          "project's editor.",
       },
       "comments.page.titleWithProject": {
         description:

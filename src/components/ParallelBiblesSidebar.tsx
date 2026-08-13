@@ -22,6 +22,8 @@ import { cn } from "@/lib/utils"
 import { BookMarked, Plus, Search, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { Spinner } from "@/components/ui/spinner"
+import { RightSidebarPanel } from "./RightSidebarPanel"
 import { useT } from "@/lib/i18n/I18nProvider"
 import {
   InputGroup,
@@ -234,7 +236,7 @@ export function ParallelBiblesSidebar({ trackedRef, open, onToggle, className }:
           onClick={onToggle}
           aria-label={t("editor.bibles.show")}
           className={cn(
-            "hidden h-full w-9 shrink-0 flex-col items-center gap-1.5 border-s bg-background pt-3 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground sm:flex",
+            "hidden h-full w-9 shrink-0 flex-col items-center gap-1.5 border-l bg-background pt-3 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground sm:flex",
             className,
           )}
         >
@@ -252,7 +254,14 @@ export function ParallelBiblesSidebar({ trackedRef, open, onToggle, className }:
     : null
 
   return (
-    <div className={cn("hidden h-full w-80 shrink-0 flex-col border-s bg-card text-sm sm:flex", className)}>
+    <RightSidebarPanel
+      storageKey="parallel-bibles"
+      defaultWidth={320}
+      minWidth={300}
+      className={cn("hidden sm:flex", className)}
+      resizeLabel="Resize parallel bibles panel"
+    >
+    <div className="flex h-full w-full flex-col border-l bg-card text-sm">
       {/* Header — p-2 matches the other side panels' header strip. */}
       <div className="flex items-center justify-between border-b p-2">
         <div className="flex items-center gap-1.5 font-medium">
@@ -313,7 +322,9 @@ export function ParallelBiblesSidebar({ trackedRef, open, onToggle, className }:
                   {data?.error ? (
                     <p className="mt-1 text-xs text-destructive">{data.error}</p>
                   ) : !data ? (
-                    <p className="mt-1 text-xs text-muted-foreground">{t("common.loading")}</p>
+                    <div className="mt-1 flex items-center text-muted-foreground" aria-label={t("common.loading")}>
+                      <Spinner className="size-3.5" />
+                    </div>
                   ) : tracked.verse === null ? (
                     <p className="mt-1 text-xs text-muted-foreground">
                       {t("editor.bibles.scrollToVerse")}
@@ -360,7 +371,7 @@ export function ParallelBiblesSidebar({ trackedRef, open, onToggle, className }:
                     <button
                       type="button"
                       onClick={() => pinVersion(t.id)}
-                      className="flex w-full items-center justify-between gap-2 px-2 py-1.5 text-start text-xs transition-colors hover:bg-accent"
+                      className="flex w-full items-center justify-between gap-2 px-2 py-1.5 text-left text-xs transition-colors hover:bg-accent"
                     >
                       <span className="truncate">{t.englishName || t.name}</span>
                       <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
@@ -398,5 +409,6 @@ export function ParallelBiblesSidebar({ trackedRef, open, onToggle, className }:
         </p>
       </div>
     </div>
+    </RightSidebarPanel>
   )
 }

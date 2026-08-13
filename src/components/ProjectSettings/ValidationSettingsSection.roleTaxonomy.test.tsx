@@ -20,6 +20,20 @@ import type { DenialT } from "@/lib/permissions/denial"
 // same source the component actually resolves.
 const t: DenialT = (key, vars) => translate(undefined, key, vars)
 
+vi.mock("@/hooks/useProjectMembers", () => ({
+  useProjectMembers: () => ({
+    members: [],
+    isLoading: false,
+    error: null,
+    rosterHidden: false,
+    refresh: async () => {},
+    add: async () => null,
+    addMany: async () => [],
+    remove: async () => {},
+    changeRole: async () => null,
+  }),
+}))
+
 function renderFloor(validationRoleFloor: "reviewer" | "project_lead" | "maintainer") {
   return render(
     <ValidationSettingsSection

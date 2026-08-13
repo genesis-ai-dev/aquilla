@@ -37,6 +37,14 @@ import {
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { SegmentTabs } from "@/components/ui/tabs"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Spinner } from "@/components/ui/spinner"
@@ -1004,17 +1012,26 @@ export function ExportDialog({
             <legend className="text-xs font-medium text-muted-foreground mb-1.5">
               {t("importExport.dialog.voiceLegend")}
             </legend>
-            <select
+            <Select
               value={voiceFilter}
-              onChange={(e) => setVoiceFilter(e.target.value)}
-              aria-label={t("importExport.dialog.voiceFilterAriaLabel")}
-              className="h-7 w-full rounded-md border bg-background px-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+              onValueChange={(v) => setVoiceFilter(v ?? "")}
             >
-              <option value="">{t("importExport.dialog.allVoices")}</option>
-              {distinctVoices.map((v) => (
-                <option key={v} value={v}>{v}</option>
-              ))}
-            </select>
+              <SelectTrigger
+                size="sm"
+                className="w-full"
+                aria-label={t("importExport.dialog.voiceFilterAriaLabel")}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  <SelectItem value="">{t("importExport.dialog.allVoices")}</SelectItem>
+                  {distinctVoices.map((v) => (
+                    <SelectItem key={v} value={v}>{v}</SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
             {voiceFilter && (
               <p className="text-[10px] text-muted-foreground">
                 <RichMessage
@@ -1240,7 +1257,6 @@ export function ExportDialog({
                 <span className="flex flex-wrap items-center gap-2 pt-1">
                   <Button
                     type="button"
-                    size="sm"
                     variant="outline"
                     onClick={() => {
                       downloadBlob(
@@ -1255,7 +1271,6 @@ export function ExportDialog({
                   </Button>
                   <Button
                     type="button"
-                    size="sm"
                     variant="outline"
                     onClick={() => {
                       handleOpenChange(false)

@@ -80,9 +80,8 @@ export function ProjectAssignedToMe({
       {expanded && (
         <div className="mt-1 space-y-0.5">
           {loading ? (
-            <div className="flex items-center gap-1 px-2 py-1 text-xs text-muted-foreground">
+            <div className="flex items-center px-2 py-1 text-muted-foreground">
               <Spinner className="size-3" />
-              Loading…
             </div>
           ) : error ? (
             <p className="px-2 py-1 text-xs text-destructive">{error}</p>

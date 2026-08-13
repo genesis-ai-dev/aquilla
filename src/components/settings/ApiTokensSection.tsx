@@ -171,7 +171,7 @@ export function ApiTokensSection() {
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center justify-between gap-4 px-1">
+      <div className="flex items-center justify-between gap-4 pl-4">
         <p className="font-heading text-base font-medium tracking-tight text-foreground">
           {t("onboarding.apiTokens.heading")}
         </p>
@@ -188,7 +188,9 @@ export function ApiTokensSection() {
       <SettingsGroup>
         <SettingsRow label={t("onboarding.apiTokens.yourTokensLabel")} block>
           {loading && !credentials ? (
-            <p className="text-xs text-muted-foreground">{t("common.loading")}</p>
+            <div className="flex items-center text-muted-foreground">
+              <Spinner className="size-3.5" />
+            </div>
           ) : error ? (
             <p className="text-xs text-destructive" role="alert">
               {error}
@@ -681,7 +683,7 @@ function MintTokenDialog({
                 value={expiry}
                 onValueChange={(value) => setExpiry((value ?? "90d") as ExpiryPresetId)}
               >
-                <SelectTrigger id="token-expiry" className="w-full">
+                <SelectTrigger id="token-expiry">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>

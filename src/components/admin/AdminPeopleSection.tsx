@@ -1,16 +1,36 @@
 import { useMemo } from "react"
 import { type ColumnDef } from "@tanstack/react-table"
-import { AlertTriangle, ShieldCheck, Users } from "lucide-react"
-import { Badge } from "@/components/ui/badge"
+import { AlertTriangle, Users } from "lucide-react"
+import { toast } from "@/components/ui/toast"
 import { DataTable, DataTableColumnHeader } from "@/components/ui/data-table"
+import { missingLast, SORT_MISSING_LAST } from "@/components/ui/data-table-missing"
 import { DateTooltip } from "@/components/ui/date-tooltip"
 import { EmptyState } from "@/components/ui/empty"
+import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
+import { ADMIN_TABLE_PANEL_CLASS } from "@/components/admin/shared"
 import type { AdminUser, AdminAdmin } from "@/lib/frontier/admin"
+
+function CopyEmailButton({ email }: { email: string }) {
+  return (
+    <button
+      type="button"
+      className="max-w-full truncate text-left text-muted-foreground hover:text-foreground"
+      aria-label={`Copy ${email}`}
+      onClick={(e) => {
+        e.stopPropagation()
+        void navigator.clipboard.writeText(email).then(() => {
+          toast.add({ type: "success", title: "Email copied to clipboard" })
+        })
+      }}
+    >
+      {email}
+    </button>
+  )
+}
 
 /**
  * People — the merge of the old Users and Admins tabs. Every registered user is
- * a row; the ones whose email is on the ADMIN_EMAILS allowlist wear a "Platform
- * admin" badge (the Admins tab was just this filtered view). Allowlisted emails
+ * a row; allowlisted emails show as Role = Platform admin. Allowlisted emails
  * with no matching account are surfaced as a callout so the list stays auditable.
  */
 export function AdminPeopleSection({ users, admins }: { users: AdminUser[]; admins: AdminAdmin[] }) {
@@ -29,23 +49,28 @@ export function AdminPeopleSection({ users, admins }: { users: AdminUser[]; admi
         cell: ({ row }) => {
           const u = row.original
           return (
-            <div className="flex items-center gap-2">
-              <span className="font-medium text-foreground">
-                {u.displayName ? `${u.displayName} (${u.username})` : u.username}
-              </span>
-              {adminEmails.has(u.email.trim().toLowerCase()) && (
-                <Badge variant="secondary">
-                  <ShieldCheck data-icon="inline-start" />
-                  Platform admin
-                </Badge>
-              )}
-            </div>
+            <UsernameWithAvatar
+              username={u.username}
+              label={u.displayName ? `${u.displayName} (${u.username})` : u.username}
+              size="xs"
+              nameClassName="font-normal"
+            />
           )
         },
       },
       {
         accessorKey: "email",
         header: ({ column }) => <DataTableColumnHeader column={column} title="Email" />,
+        cell: ({ row }) => <CopyEmailButton email={row.original.email} />,
+      },
+      {
+        id: "role",
+        accessorFn: (u) => (adminEmails.has(u.email.trim().toLowerCase()) ? 1 : 0),
+        header: ({ column }) => <DataTableColumnHeader column={column} title="Role" />,
+        cell: ({ row }) =>
+          adminEmails.has(row.original.email.trim().toLowerCase()) ? (
+            <span>Platform admin</span>
+          ) : null,
       },
       {
         accessorKey: "orgCount",
@@ -58,16 +83,9 @@ export function AdminPeopleSection({ users, admins }: { users: AdminUser[]; admi
       },
       {
         id: "lastActive",
-        accessorFn: (u) => (u.lastActiveAt ? Date.parse(u.lastActiveAt) : null),
+        accessorFn: (u) => missingLast(u.lastActiveAt ? Date.parse(u.lastActiveAt) : undefined),
+        sortUndefined: SORT_MISSING_LAST,
         header: ({ column }) => <DataTableColumnHeader column={column} title="Last active" />,
-        sortingFn: (a, b) => {
-          const av = a.original.lastActiveAt ? Date.parse(a.original.lastActiveAt) : null
-          const bv = b.original.lastActiveAt ? Date.parse(b.original.lastActiveAt) : null
-          if (av == null && bv == null) return 0
-          if (av == null) return 1
-          if (bv == null) return -1
-          return av - bv
-        },
         cell: ({ row }) => (
           <DateTooltip value={row.original.lastActiveAt} label="Last active" />
         ),
@@ -98,7 +116,7 @@ export function AdminPeopleSection({ users, admins }: { users: AdminUser[]; admi
   return (
     <div className="flex flex-col gap-3">
       {orphanAdmins.length > 0 && (
-        <div className="flex items-start gap-2 rounded-2xl border border-amber-500/30 bg-amber-50/60 px-4 py-3 text-sm dark:bg-amber-950/20">
+        <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-50/60 px-4 py-3 text-sm dark:bg-amber-950/20">
           <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-400" />
           <p className="text-muted-foreground">
             <span className="font-medium text-foreground">
@@ -114,13 +132,14 @@ export function AdminPeopleSection({ users, admins }: { users: AdminUser[]; admi
         columns={columns}
         data={users}
         getRowId={(u) => String(u.id)}
-        initialSorting={[{ id: "lastActive", desc: true }]}
+        initialSorting={[{ id: "user", desc: false }]}
         searchPlaceholder="Search people…"
         globalFilterFn={(row, _columnId, filterValue) => {
           const q = String(filterValue).trim().toLowerCase()
           if (!q) return true
           const u = row.original
-          return `${u.username} ${u.displayName ?? ""} ${u.email}`.toLowerCase().includes(q)
+          const role = adminEmails.has(u.email.trim().toLowerCase()) ? "platform admin" : ""
+          return `${u.username} ${u.displayName ?? ""} ${u.email} ${role}`.toLowerCase().includes(q)
         }}
         toolbar={(table) => (
           <span className="ml-auto text-xs tabular-nums text-muted-foreground">
@@ -130,6 +149,8 @@ export function AdminPeopleSection({ users, admins }: { users: AdminUser[]; admi
           </span>
         )}
         testId="admin-people-table"
+        className={ADMIN_TABLE_PANEL_CLASS}
+        dense
       />
     </div>
   )

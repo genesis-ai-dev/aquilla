@@ -1,12 +1,7 @@
 import { useState } from "react";
 import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import {
-  Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue,
-} from "@/components/ui/select";
-import { RoleLabel } from "@/components/RoleLabel";
-import { resolveRoleName } from "@/lib/frontier/roles";
-import { useT } from "@/lib/i18n/I18nProvider";
+import { RoleSelect } from "@/components/RoleSelect";
 import { UsernameTypeahead, type RecipientValue } from "@/components/UsernameTypeahead";
 import type { UserSearchResult } from "@/hooks/useUserSearch";
 
@@ -183,7 +178,6 @@ export function MemberMultiAddRow({
     }
   }
 
-  const t = useT();
   const stagedUsernames = new Set(staged.map((s) => s.username.toLowerCase()));
   const canAdd = staged.length > 0 || recipient.raw.trim().length > 0;
 
@@ -228,25 +222,13 @@ export function MemberMultiAddRow({
             }}
           />
         </div>
-        <Select
-          items={roleOptions.map((r) => ({ value: String(r.level), label: resolveRoleName(t, r.name) }))}
-          value={String(role)}
-          onValueChange={(v) => setRole(parseInt(v ?? "", 10))}
+        <RoleSelect
+          options={roleOptions}
+          value={role}
+          onValueChange={setRole}
           disabled={adding || disabled}
-        >
-          <SelectTrigger aria-label="Role">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectGroup>
-              {roleOptions.map((r) => (
-                <SelectItem key={r.level} value={String(r.level)}>
-                  <RoleLabel name={r.name} />
-                </SelectItem>
-              ))}
-            </SelectGroup>
-          </SelectContent>
-        </Select>
+          aria-label="Role"
+        />
         <Button
           size={buttonSize}
           className="sm:whitespace-nowrap"

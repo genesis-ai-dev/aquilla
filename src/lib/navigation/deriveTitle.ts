@@ -54,12 +54,17 @@ export function deriveNavTitleKey(pathname: string): NavTitle {
 
   const org = parseOrgPath(p)
   if (org) {
-    if (org.orgKey === ALL_ORGS_PARAM || org.rest === "") return key("nav.projects")
+    if (org.orgKey === ALL_ORGS_PARAM) return key("editor.navTitle.overview")
+    if (org.rest === "") return key("nav.projects")
     const rest = org.rest.replace(/^\//, "")
     const parts = rest.split("/").filter(Boolean)
     switch (parts[0]) {
+      case "overview":
+        return key("editor.navTitle.overview")
+      case "projects":
+        return key("nav.projects")
       case "archived":
-        return key("editor.navTitle.archivedProjects")
+        return parts[1] === "files" ? key("nav.sidebarSection.trash") : key("editor.navTitle.archivedProjects")
       case "assigned":
         return key("editor.navTitle.assignedToMe")
       case "settings": {
@@ -93,6 +98,8 @@ export function deriveNavTitleKey(pathname: string): NavTitle {
       case "editor":
         return seg[3] === "file" ? key("common.file") : key("editor.navTitle.editor")
       case "settings":
+        if (seg[3] === "rules") return key("editor.navTitle.checksAndRules")
+        if (seg[3] === "memory") return key("editor.navTitle.projectMemory")
         return key("editor.navTitle.projectSettings")
       case "rules":
         return key("editor.navTitle.checksAndRules")

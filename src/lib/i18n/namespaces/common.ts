@@ -5,6 +5,7 @@ export const common = defineNamespace({
     "common.save": "Save",
     "common.cancel": "Cancel",
     "common.close": "Close",
+    "common.closeToastAriaLabel": "Close toast",
     "common.delete": "Delete",
     "common.dismiss": "Dismiss",
     "common.retry": "Retry",
@@ -143,6 +144,9 @@ export const common = defineNamespace({
         description:
           "Button that dismisses a panel or dialog that has nothing to commit. Unlike " +
           "Cancel it does not imply discarding work.",
+      },
+      "common.closeToastAriaLabel": {
+        description: "Accessible name for the X button that dismisses a toast notification.",
       },
       "common.delete": {
         description:

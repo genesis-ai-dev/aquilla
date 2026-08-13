@@ -41,7 +41,7 @@ export function AudioMediaStrategySection({ value, onChange }: Props) {
                   "flex flex-col items-start gap-1 rounded-md border p-3 text-start text-sm transition-colors",
                   selected
                     ? "border-primary bg-primary/5"
-                    : "border-border hover:bg-muted/40",
+                    : "border-border bg-background hover:bg-muted/40",
                 )}
                 aria-pressed={selected}
               >

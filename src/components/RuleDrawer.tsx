@@ -1,4 +1,4 @@
-import { useNavigate } from "react-router-dom"
+import { useNavigate, useLocation } from "react-router-dom"
 import { X, AlertTriangle, AlertCircle, Sparkles, Wand2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -6,6 +6,8 @@ import type { TranslationRule, RuleInfraction, ProjectRecord } from "@/lib/parse
 import type { CellData } from "@/hooks/useCells"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { translateRuleName, translateRuleDescription } from "@/lib/lqa/builtin-resolver"
+import { RightSidebarPanel } from "./RightSidebarPanel"
+import { editorReturnFromLocation, withEditorReturn } from "@/lib/navigation/org-paths"
 
 interface RuleDrawerProps {
   rule: TranslationRule | null
@@ -25,6 +27,7 @@ export function RuleDrawer({
 }: RuleDrawerProps) {
   const t = useT()
   const navigate = useNavigate()
+  const location = useLocation()
   // Phase 2c-gamma: autofix applied via Y.Doc edits; the writeback path is
   // gone. The "Try to fix" buttons render disabled until the event-grammar
   // equivalent lands.
@@ -40,11 +43,15 @@ export function RuleDrawer({
   const severityColor = rule.severity === "major" ? "text-red-500" : "text-amber-500"
 
   function onAmendRule() {
-    navigate(`/project/${project!.id}/rules?ruleId=${rule!.id}&focus=autofix`)
+    navigate(withEditorReturn(
+      `/project/${project!.id}/settings/rules?ruleId=${rule!.id}&focus=autofix`,
+      editorReturnFromLocation(location.pathname, location.search, project!.id),
+    ))
   }
 
   return (
-    <div className="flex h-full w-80 flex-col border-s bg-card">
+    <RightSidebarPanel storageKey="rule" defaultWidth={320} resizeLabel="Resize rule panel">
+      <div className="flex h-full w-full flex-col border-l bg-card">
       <div className="flex items-center justify-between border-b p-2">
         <div className="flex items-center gap-2">
           <SeverityIcon className={`h-4 w-4 ${severityColor}`} />
@@ -142,5 +149,6 @@ export function RuleDrawer({
       </div>
 
     </div>
+    </RightSidebarPanel>
   )
 }

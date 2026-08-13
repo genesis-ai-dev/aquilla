@@ -245,7 +245,7 @@ export function SpreadsheetImportPanel({
         </div>
         {error && <p className="text-xs text-destructive">{error}</p>}
         <div className="flex justify-end">
-          <Button variant="ghost" size="sm" onClick={onCancel}>Cancel</Button>
+          <Button variant="ghost" onClick={onCancel}>Cancel</Button>
         </div>
       </div>
     )
@@ -279,7 +279,7 @@ export function SpreadsheetImportPanel({
         </div>
         {error && <p className="text-xs text-destructive">{error}</p>}
         <div className="flex justify-end">
-          <Button variant="ghost" size="sm" onClick={onCancel}>Cancel</Button>
+          <Button variant="ghost" onClick={onCancel}>Cancel</Button>
         </div>
       </div>
     )

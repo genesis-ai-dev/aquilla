@@ -11,6 +11,7 @@
 //   PATCH  /projects/:projectId/link          project maintainer+ — enabled/config
 //   DELETE /projects/:projectId/link          project maintainer+
 //   POST   /projects/:projectId/analyze       project maintainer+ — AI mapping proposal
+//                                             (boardId optional — omit it and the AI picks the board too)
 //   POST   /projects/:projectId/sync          project maintainer+ — push now
 //   POST   /webhook                           NO auth (Monday JWT via MONDAY_SIGNING_SECRET)
 //   POST   /internal/push                     Bearer SYNC_SECRET_KEY (sync-worker fire-and-forget)
@@ -58,7 +59,12 @@ import {
   type MondayMapping,
 } from "../lib/monday/types"
 import { computeProjectMetrics } from "../lib/monday/metrics"
-import { analyzeBoardMapping, AnalyzeUpstreamError } from "../lib/monday/analyze"
+import {
+  analyzeBoardMapping,
+  selectBoardForProject,
+  AnalyzeUpstreamError,
+  NoBoardsError,
+} from "../lib/monday/analyze"
 import { pushBoardLink, schedulePush } from "../lib/monday/push"
 import { secureCompare } from "../utils/secure-compare"
 
@@ -576,8 +582,12 @@ async function loadLinkToken(env: Env, link: IntegrationLinkRow): Promise<string
 
 // ── AI analyze + manual sync ───────────────────────────────────────────────
 
+// boardId is OPTIONAL: the "Set up with AI" wizard omits it so the board itself
+// is part of the proposal (selectBoardForProject), which is the single most
+// ambiguous setup decision. The existing per-board reconfigure path still sends
+// one and behaves exactly as before.
 const analyzeSchema = z.object({
-  boardId: z.string().min(1),
+  boardId: z.string().min(1).optional(),
   message: z.string().optional(),
   currentConfig: z.record(z.string(), z.unknown()).optional(),
 })
@@ -599,11 +609,29 @@ monday.post(
     const summary = await computeProjectMetrics(c.env.AQUILLA_PG, guard.projectId)
     if (!summary) return c.json({ error: "project not found" }, 404)
 
+    let boardId = body.boardId
+    let boardName: string | null = null
+    let boardReason = ""
     let structure, sampleItems
     try {
-      structure = await fetchBoardStructure(token, body.boardId)
-      sampleItems = await fetchBoardItemsSample(token, body.boardId, 25)
+      if (!boardId) {
+        const choice = await selectBoardForProject(c.env, {
+          boards: await listBoards(token),
+          summary,
+        })
+        boardId = choice.boardId
+        boardName = choice.boardName
+        boardReason = choice.reason
+      }
+      structure = await fetchBoardStructure(token, boardId)
+      sampleItems = await fetchBoardItemsSample(token, boardId, 25)
     } catch (err) {
+      // An empty account is the user's to fix, not an upstream failure — same
+      // family as "org is not connected", so it must not read as a retryable
+      // 502 blaming Monday.
+      if (err instanceof NoBoardsError) {
+        return c.json({ error: err.message, noBoards: true }, 409)
+      }
       const message = err instanceof Error ? err.message : String(err)
       console.error("[monday] analyze board fetch failed:", err)
       return c.json({ error: `Monday API error: ${message}` }, 502)
@@ -621,7 +649,17 @@ monday.post(
         currentConfig,
         message: body.message,
       })
-      return c.json({ proposal: result.proposal, summary: result.summary })
+      // warnings tell the user WHY a column they can see on the board isn't in
+      // the proposal (read-only type, unknown id). They were computed and
+      // dropped here before — without them a clamped mapping looks arbitrary.
+      return c.json({
+        proposal: result.proposal,
+        summary: result.summary,
+        warnings: result.warnings,
+        boardId,
+        boardName,
+        boardReason,
+      })
     } catch (err) {
       console.error("[monday] analyze failed:", err)
       // Upstream outage gets a clear, distinct shape (the body snippet is

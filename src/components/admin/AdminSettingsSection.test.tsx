@@ -32,6 +32,14 @@ const RESPONSE: PlatformSettingsResponse = {
 beforeEach(() => vi.clearAllMocks())
 afterEach(() => vi.restoreAllMocks())
 
+async function pickSelectOption(triggerLabel: string, optionName: RegExp) {
+  fireEvent.click(screen.getByLabelText(triggerLabel))
+  const option = await screen.findByRole("option", { name: optionName })
+  fireEvent.pointerMove(option)
+  fireEvent.mouseMove(option)
+  fireEvent.keyDown(option, { key: "Enter" })
+}
+
 describe("AdminSettingsSection", () => {
   it("loads settings and lists the allowed models", async () => {
     mockGet.mockResolvedValue(RESPONSE)
@@ -91,9 +99,7 @@ describe("AdminSettingsSection", () => {
     await screen.findByText("anthropic/claude-sonnet-4.5")
 
     fireEvent.click(screen.getByRole("switch", { name: /enable a\/b experiment/i }))
-    fireEvent.change(screen.getByLabelText("Challenger model"), {
-      target: { value: "anthropic/claude-haiku-4-5" },
-    })
+    await pickSelectOption("Challenger model", /anthropic\/claude-haiku-4-5/)
     fireEvent.change(screen.getByLabelText("Challenger traffic %"), { target: { value: "25" } })
     fireEvent.click(screen.getByRole("button", { name: /save settings/i }))
 

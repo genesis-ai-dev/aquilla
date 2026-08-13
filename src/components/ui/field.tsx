@@ -6,6 +6,7 @@ import { cva, type VariantProps } from "class-variance-authority"
 import { cn } from "@/lib/utils"
 import { Label } from "@/components/ui/label"
 import { Separator } from "@/components/ui/separator"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 function FieldSet({ className, ...props }: React.ComponentProps<"fieldset">) {
   return (
@@ -226,6 +227,16 @@ function FieldError({
   )
 }
 
+/** Grayed “(optional)” suffix for field labels — matches AI provider keys. */
+function OptionalMark({ className }: { className?: string }) {
+  const t = useT()
+  return (
+    <span className={cn("font-normal text-muted-foreground/70", className)}>
+      {t("common.optionalFieldNote")}
+    </span>
+  )
+}
+
 export {
   Field,
   FieldLabel,
@@ -237,4 +248,5 @@ export {
   FieldSet,
   FieldContent,
   FieldTitle,
+  OptionalMark,
 }

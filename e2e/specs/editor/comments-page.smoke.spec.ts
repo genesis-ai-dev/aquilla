@@ -32,4 +32,9 @@ test("comments page renders empty state for a new project", async ({ alice }) =>
   await expect(
     alice.getByText(/No comments yet/i)
   ).toBeVisible({ timeout: 5_000 })
+
+  // Direct /comments URL (not the editor handoff) must not insert an Editor crumb.
+  const breadcrumb = alice.getByRole("navigation", { name: /breadcrumb/i })
+  await expect(breadcrumb.getByText("Comments", { exact: true })).toBeVisible()
+  await expect(breadcrumb.getByText("Editor", { exact: true })).toHaveCount(0)
 })

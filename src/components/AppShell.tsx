@@ -1,5 +1,5 @@
 import { useContext, useEffect, useState, type ReactNode } from "react"
-import { useLocation } from "react-router-dom"
+import { Link, useLocation } from "react-router-dom"
 import { usePanelRef } from "react-resizable-panels"
 import { cn } from "@/lib/utils"
 import { BrandContext } from "@/branding/use-brand"
@@ -106,12 +106,21 @@ interface Props {
    */
   resizableTop?: ReactNode
   main: ReactNode
+  /**
+   * Right-side editor drawers/sidebars. Each panel owns its own width via
+   * `RightSidebarPanel` — AppShell only lays them out in a row.
+   */
   aside?: ReactNode
+  /**
+   * Non-resizable right-edge chrome (e.g. collapsed Parallel Bibles tab).
+   */
+  asideEdge?: ReactNode
   /** Brand logo mark rendered at the top of the dock rail — passed here so
    * AppShell can stay the single source for the logo placement. */
   logoSlot?: ReactNode
-  /** Rendered to the right of the logo (e.g. the workspace's collapse-sidebar
-   * toggle) so rail controls live in the logo row, not the dock footer. */
+  /** Rendered after history on the far-right chrome cluster (e.g. the
+   * workspace's collapse-sidebar toggle) so rail controls live in the logo
+   * row, not the dock footer. */
   logoAccessory?: ReactNode
   /** When the left dock is collapsed to its icon rail, stack the top chrome
    * (logo, nav history, beta badge) vertically so the rail can stay narrow
@@ -132,6 +141,7 @@ export function AppShell({
   resizableTop,
   main,
   aside,
+  asideEdge,
   railCollapsed,
 }: Props) {
   const dockContent = leftDock ?? sidebar
@@ -150,13 +160,13 @@ export function AppShell({
   // there instead of throwing — the switcher just doesn't render.
   const i18n = useI18nOptional()
   const resolvedLogo = logoSlot ?? (brand ? (
-    <a
-      href="/homepage"
-      aria-label={`${brand.app.name} — homepage`}
+    <Link
+      to="/"
+      aria-label={`${brand.app.name} — home`}
       className="flex w-fit cursor-default items-center rounded-md p-1.5 hover:bg-accent/60"
     >
       <brand.logo.Mark className="h-6 w-6 shrink-0" aria-hidden />
-    </a>
+    </Link>
   ) : null)
 
   const dockPanelRef = usePanelRef()
@@ -178,17 +188,22 @@ export function AppShell({
   // Status / playback sit at the bottom of the MAIN column (not under `aside`)
   // so the transport/volume share the editor's right edge when drawers/sidebars
   // are open — instead of stretching under them and looking "escaped."
+  const mainColumn = (
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+      <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
+        <ErrorBoundary key={pathname} compact>
+          {main}
+        </ErrorBoundary>
+      </div>
+      {statusBar ? <div className="shrink-0">{statusBar}</div> : null}
+    </div>
+  )
+
   const mainStack = (
     <main className="flex min-h-0 flex-1 overflow-hidden">
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-        <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
-          <ErrorBoundary key={pathname} compact>
-            {main}
-          </ErrorBoundary>
-        </div>
-        {statusBar ? <div className="shrink-0">{statusBar}</div> : null}
-      </div>
+      {mainColumn}
       {aside}
+      {asideEdge}
     </main>
   )
 
@@ -237,23 +252,29 @@ export function AppShell({
       {(resolvedLogo || logoAccessory) && (
         <div
           className={cn(
-            // Vertical/horizontal spacing is owned here so every child aligns by
-            // box-center under items-center — no per-child mt-2 to drift the row.
-            "flex shrink-0 pt-2",
-            railCollapsed ? "flex-col items-center gap-1" : "items-center justify-between px-2",
+            // Align every chrome child on the same vertical midline — no fixed
+            // height; natural content size with items-center.
+            "flex shrink-0 items-center pt-2",
+            railCollapsed
+              ? "flex-col items-center justify-center gap-1 px-2"
+              : "justify-between px-2",
           )}
         >
-          <div className={cn("flex gap-0.5", railCollapsed ? "flex-col items-center" : "items-center")}>
+          <div className="flex items-center">
             {resolvedLogo}
-            {/* Browser-style back/forward + history popover, top-left chrome. */}
-            <NavHistoryControls />
           </div>
-          {/* BETA + collapse toggle ride together as a right-aligned cluster so the
-              badge hugs the toggle instead of floating in the justify-between middle
-              slot. On org pages / collapsed rail there's no toggle, so it's just the badge. */}
-          <div className="flex items-center gap-2">
+          {/* History cluster, then sidebar collapse on the far right. */}
+          <div
+            className={cn(
+              "flex items-center gap-1.5",
+              railCollapsed && "flex-col",
+            )}
+          >
             <BetaBadge />
-            {logoAccessory && <div className="shrink-0">{logoAccessory}</div>}
+            <NavHistoryControls />
+            {logoAccessory ? (
+              <div className="flex shrink-0 items-center">{logoAccessory}</div>
+            ) : null}
           </div>
         </div>
       )}
@@ -293,7 +314,9 @@ export function AppShell({
           </div>
         </div>
       ) : (
-        <div className="m-2 flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border bg-background">
+        // No top margin: the card's top edge should sit on the same baseline as
+        // the org switcher (sidebar content starts right under the logo row).
+        <div className="mx-2 mb-2 flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border bg-background">
           {cardBody}
         </div>
       )}
@@ -306,7 +329,7 @@ export function AppShell({
   // card's main column (alongside any right aside) so they stay aligned with
   // the editor shell on both edges.
   return (
-    <div className="flex h-screen min-w-0 bg-sidebar">
+    <div className="flex h-screen min-w-0 overflow-hidden bg-sidebar">
       {useDockResize ? (
         <ResizablePanelGroup orientation="horizontal" className="h-full w-full">
           <ResizablePanel

@@ -103,7 +103,6 @@ export function SignInStep({
       {import.meta.env.DEV && (
         <Button
           variant="outline"
-          size="sm"
           onClick={async () => {
             const session = await devLogin()
             if (session) onNext()

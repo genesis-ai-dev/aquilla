@@ -165,6 +165,16 @@ screenshots, video, and service logs are retained.
   `.env.test.local` contents during a run; it should be regenerated each time
   `e2e-up.ts` boots.
 - **Port already in use** → `e2e-up.ts` force-kills 5173/8787/8788 at startup. If it
-  still fails, kill processes manually before retrying.
+  still fails, kill processes manually before retrying. **Do not `git push` while
+  `pnpm dev` or a recording `e2e-up` is running** — shard 1 reuses those ports
+  (and `pnpm dev`'s identity worker is on **8788**, the same port smoke uses for
+  sync-worker). The live stack and the pre-push stack will kill each other.
+- **Many specs fail in 0.0s with `ECONNREFUSED 127.0.0.1:8787`** → this is not
+  a product bug in those specs. Identity (auth-worker) died mid-suite, so
+  `resetBackend()` cannot reach `POST /__test__/reset`. `e2e-up` now aborts the
+  shard as soon as wrangler exits instead of cascading. Check
+  `.e2e-logs-s0/identity.log` (shard 1). On a Mac the Docker runtime is Colima
+  (`colima start` before push); if Postgres/workerd is gone, every remaining
+  test fails the same way.
 - **Cold-start latency** → first run is ~4–5 min on a cold machine (wrangler downloads
   workerd, browser caches build, etc.). Subsequent runs are faster.

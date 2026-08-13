@@ -123,7 +123,7 @@ describe("TOUR_STEPS — AQU-262 copy and anchor correctness", () => {
     expect(orgSwitcherIdx).toBeLessThan(navOverviewIdx)
   })
 
-  it("AQU-262: projects step describes the consolidated project hub", () => {
+  it("AQU-262: overview step describes the portfolio / org home", () => {
     const step = TOUR_STEPS.find((s) => s.anchor === "nav-overview")
     expect(step).toBeDefined()
     expect(englishOf(step!.titleKey)).toBe("Projects")

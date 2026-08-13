@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 
 /**
  * Team-workload rollup for the org Overview (manager oversight). One row per
@@ -84,7 +85,10 @@ export function WorkloadRollup({ jwt, orgId, action }: { jwt: string; orgId: num
             <div key={a.assignmentId} className="flex items-center gap-4 py-2.5 first:pt-0">
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
-                  <p className="truncate font-medium">{a.username ?? t("org.workloadRollup.unknownUser", { id: a.assigneeUserId })}</p>
+                  <UsernameWithAvatar
+                    username={a.username ?? t("org.workloadRollup.unknownUser", { id: a.assigneeUserId })}
+                    className="min-w-0"
+                  />
                   <span className="shrink-0 truncate text-xs text-muted-foreground">{a.projectName}</span>
                   {/* AQU-538 (§3.5): lane chip when the assignment is pinned to a lane. */}
                   {a.targetLang && (

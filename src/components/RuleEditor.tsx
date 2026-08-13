@@ -15,7 +15,7 @@
 import { useState, useMemo, useEffect, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Field, FieldError, FieldLabel } from "@/components/ui/field"
+import { Field, FieldError, FieldLabel, OptionalMark } from "@/components/ui/field"
 import { Switch } from "@/components/ui/switch"
 import { X } from "lucide-react"
 import type { TranslationRule, RuleCheck, RuleAutofix } from "@/lib/parsers/types"
@@ -248,7 +248,7 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel, className }: 
   const sentence = humanSentence(side, mode, t)
 
   return (
-    <div className={cn("rounded-lg border bg-card p-4 space-y-4", className)}>
+    <div className={cn("overflow-hidden rounded-lg border bg-card p-4 space-y-4", className)}>
       {/* Header */}
       <div className="flex items-center justify-between">
         <p className="text-sm font-semibold text-foreground">
@@ -277,7 +277,9 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel, className }: 
           {attempted && nameError && <FieldError>{nameError}</FieldError>}
         </Field>
         <Field>
-          <FieldLabel htmlFor="re-desc" className="text-xs">{t("common.descriptionOptional")}</FieldLabel>
+          <FieldLabel htmlFor="re-desc" className="text-xs">
+            {t("common.descriptionOptional")} <OptionalMark />
+          </FieldLabel>
           <Input
             id="re-desc"
             value={description}
@@ -461,7 +463,7 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel, className }: 
           onClick={() => setShowAutofix((v) => !v)}
           className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
         >
-          {showAutofix ? t("rules.editor.hideAutofix") : t("rules.editor.addAutofix")}
+          {showAutofix ? t("rules.editor.hideAutofix") : <>{t("rules.editor.addAutofix")} <OptionalMark /></>}
         </button>
         {showAutofix && (
           <div className="mt-2 space-y-2 rounded border p-3">
@@ -521,21 +523,19 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel, className }: 
         )}
       </div>
 
-      {/* Actions */}
-      <div className="flex flex-col gap-2 pt-1">
-        {attempted && (checkError || patternError || sourcePatternError) && (
-          <FieldError>
-            {checkError ?? patternError ?? sourcePatternError}
-          </FieldError>
-        )}
-        <div className="flex gap-2">
-          <Button size="sm" onClick={handleSave}>
-            {initialRule ? t("common.saveChanges") : t("rules.editor.createRuleButton")}
-          </Button>
-          <Button size="sm" variant="ghost" onClick={onCancel}>
-            {t("common.cancel")}
-          </Button>
-        </div>
+      {/* Actions — match Terminology Add dialog DialogFooter */}
+      {attempted && (checkError || patternError || sourcePatternError) && (
+        <FieldError>
+          {checkError ?? patternError ?? sourcePatternError}
+        </FieldError>
+      )}
+      <div className="-mx-4 -mb-4 mt-1 flex flex-col-reverse gap-2 rounded-b-3xl bg-muted/40 p-4 sm:flex-row sm:justify-end">
+        <Button type="button" variant="outline" onClick={onCancel}>
+          {t("common.cancel")}
+        </Button>
+        <Button type="button" onClick={handleSave}>
+          {initialRule ? t("common.saveChanges") : t("rules.editor.createRuleButton")}
+        </Button>
       </div>
     </div>
   )

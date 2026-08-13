@@ -251,7 +251,6 @@ export function AiModelsStep({ project, onUpdated }: AiModelsStepProps) {
                     </span>
                     <Button
                       variant="ghost"
-                      size="sm"
                       className="h-6 px-2 text-xs"
                       onClick={() => { setGeminiError(null); setEditingKey(true) }}
                     >
@@ -320,7 +319,6 @@ export function AiModelsStep({ project, onUpdated }: AiModelsStepProps) {
 
       <div className="flex items-center gap-2">
         <Button
-          size="sm"
           onClick={handleStart}
           disabled={!expanded || nothingSelected || allReady || anyDownloading}
         >
@@ -358,7 +356,6 @@ export function AiModelsStep({ project, onUpdated }: AiModelsStepProps) {
           </span>
           <Button
             variant="ghost"
-            size="sm"
             className="h-6 px-2 text-xs"
             onClick={() => void setSkipped(false)}
           >

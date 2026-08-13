@@ -1,4 +1,14 @@
-import { useState, forwardRef, useImperativeHandle, type ReactNode, type RefObject } from "react"
+import {
+  useState,
+  useEffect,
+  useMemo,
+  useCallback,
+  useRef,
+  forwardRef,
+  useImperativeHandle,
+  type ReactNode,
+  type RefObject,
+} from "react"
 import { AlertTriangle, Settings, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
@@ -14,6 +24,7 @@ import { Separator } from "@/components/ui/separator"
 import { Switch } from "@/components/ui/switch"
 import { SegmentTabs } from "@/components/ui/tabs"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { toast } from "@/components/ui/toast"
 import { cn } from "@/lib/utils"
 import { MIN_FONT_SIZE, MAX_FONT_SIZE, FONT_SIZE_STEP } from "@/lib/store/file-view-prefs"
 import type { FootnoteViewMode } from "@/lib/footnotes/types"
@@ -21,6 +32,9 @@ import type { DirectionMode, TextDirection, TextDirectionSummary } from "@/lib/t
 import { useT } from "@/lib/i18n/I18nProvider"
 import { RichMessage } from "@/lib/i18n/RichMessage"
 import type { MessageKey } from "@/lib/i18n/messages/en"
+
+/** Stable id so a lingering mismatch upserts instead of stacking. */
+export const DIRECTION_MISMATCH_TOAST_ID = "editor.view.directionMismatch"
 
 export interface ViewSettingsMenuHandle {
   open: () => void
@@ -88,12 +102,21 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
 }, ref) {
   const t = useT()
   const [menuOpen, setMenuOpen] = useState(false)
-  const mismatch = getManualDirectionMismatch({
-    sourceMode: sourceDirectionMode,
-    targetMode: targetDirectionMode,
-    sourceSummary: sourceAutoDirectionSummary,
-    targetSummary: targetAutoDirectionSummary,
-  })
+  const mismatch = useMemo(
+    () =>
+      getManualDirectionMismatch({
+        sourceMode: sourceDirectionMode,
+        targetMode: targetDirectionMode,
+        sourceSummary: sourceAutoDirectionSummary,
+        targetSummary: targetAutoDirectionSummary,
+      }),
+    [
+      sourceDirectionMode,
+      targetDirectionMode,
+      sourceAutoDirectionSummary,
+      targetAutoDirectionSummary,
+    ],
+  )
   const mismatchSignature = mismatch
     ? `${directionWarningScope ?? ""}:${mismatch.side}:${mismatch.forced}:${mismatch.detected}`
     : null
@@ -102,20 +125,63 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
     fileOpen &&
     mismatch &&
     mismatchSignature &&
-    dismissedMismatchSignature !== mismatchSignature &&
-    !menuOpen,
+    dismissedMismatchSignature !== mismatchSignature,
   )
-  const detectedManualDirection = mismatch?.detected === "mixed" ? null : (mismatch?.detected ?? null)
+  // "mixed" detected text has no single forceable direction — only a definite
+  // ltr/rtl detection offers a one-click "use the detected direction" button.
+  const detectedManualDirection =
+    mismatch && mismatch.detected !== "mixed" ? mismatch.detected : null
 
   useImperativeHandle(ref, () => ({
     open: () => setMenuOpen(true),
   }))
 
-  function applyDirectionMismatchFix(mode: DirectionMode) {
+  const applyDirectionMismatchFix = useCallback((mode: DirectionMode) => {
     if (!mismatch) return
     if (mismatch.side === "source") onSourceDirectionModeChange(mode)
     else onTargetDirectionModeChange(mode)
-  }
+  }, [mismatch, onSourceDirectionModeChange, onTargetDirectionModeChange])
+  const applyDirectionMismatchFixRef = useRef(applyDirectionMismatchFix)
+  applyDirectionMismatchFixRef.current = applyDirectionMismatchFix
+
+  useEffect(() => {
+    if (!showMismatchWarning || !mismatch || !mismatchSignature) {
+      toast.close(DIRECTION_MISMATCH_TOAST_ID)
+      return
+    }
+
+    toast.add({
+      id: DIRECTION_MISMATCH_TOAST_ID,
+      type: "warning",
+      timeout: 0,
+      title: (
+        <RichMessage
+          k="editor.view.directionMismatch"
+          values={{
+            side: t(sideLabelKey(mismatch.side)),
+            forced: <strong>{t(directionNameKey(mismatch.forced))}</strong>,
+            detected: <strong>{t(detectedDirectionNameKey(mismatch.detected))}</strong>,
+          }}
+        />
+      ),
+      actionProps: {
+        children: t("editor.view.directionAuto"),
+        onClick: () => {
+          applyDirectionMismatchFixRef.current("auto")
+          toast.close(DIRECTION_MISMATCH_TOAST_ID)
+        },
+      },
+      onClose: () => {
+        setDismissedMismatchSignature(mismatchSignature)
+      },
+    })
+  }, [showMismatchWarning, mismatch, mismatchSignature, t])
+
+  useEffect(() => {
+    return () => {
+      toast.close(DIRECTION_MISMATCH_TOAST_ID)
+    }
+  }, [])
 
   return (
     // When anchored to the file-options ⋯ button, skip the header-only gap hack.

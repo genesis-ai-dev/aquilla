@@ -1,8 +1,8 @@
 /**
  * Codex's CF-native numeric role ladder. Single source of truth for the
- * 7-level scheme used across InviteStep, SharePanel, MembersPage, and the
- * frontier-server (mirrored in
- * `frontier-server/cloudflare/src/services/project-permissions.ts` —
+ * 7-level scheme used across InviteStep, SharePanel, MembersPage, and
+ * auth-worker (mirrored in
+ * `auth-worker/src/services/project-permissions.ts` —
  * see migration 0013).
  *
  * The ladder is intentionally richer than GitLab's 5 rungs (10/20/30/40/50)
@@ -127,6 +127,29 @@ export function roleName(level: number): string {
   }
 }
 
+/** Underscore-free role string for display with CSS `capitalize`. */
+export function formatRoleDisplay(name: string): string {
+  return name.replace(/_/g, " ")
+}
+
+/** Title-cased role label for plain-text contexts (tooltips, aria labels) —
+ *  for call sites outside `useT()`'s reach (pure non-React modules). Prefer
+ *  `roleNameKey()` + `t()` in components. */
+export function roleDisplayText(name: string): string {
+  return formatRoleDisplay(name).replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
+/** Display label from a numeric role level — see `roleDisplayText()`. */
+export function roleDisplayLabel(level: number): string {
+  return roleDisplayText(roleName(level))
+}
+
+/** Human display form of a role level: 500 → "Project lead". */
+export function humanRoleName(level: number): string {
+  const name = roleName(level).replace(/_/g, " ")
+  return name.charAt(0).toUpperCase() + name.slice(1)
+}
+
 /**
  * Catalog key → display label lookup, keyed by the canonical role name.
  * `common.role.*` (`src/lib/i18n/namespaces/common.ts`) authors each as a
@@ -153,6 +176,31 @@ const ROLE_DESCRIPTION_KEY: Partial<Record<number, MessageKey>> = {
   500: "common.role.projectLeadDescription",
   600: "common.role.maintainerDescription",
   700: "common.role.ownerDescription",
+}
+
+/**
+ * Capability blurb shown under each role in RoleSelect (AD-6 / AQU-138).
+ * Name + level stay on the label line — this is the "what it does" copy only.
+ */
+export function roleDescription(level: number): string {
+  switch (level) {
+    case 100: return "Can read all org projects. No edit or management actions."
+    case 200: return "Can read and leave comments. Cannot edit content."
+    case 300: return "Can read, comment, and review. Cannot make direct edits."
+    case 400: return "Can edit project content. Maximum level grantable via share link."
+    case 500: return "Can add members to projects, mint share-link invites, and lead project work."
+    case 600: return "Can create/manage teams, rename the org, set project deadlines, and remove project members."
+    case 700: return "Full control: add/remove org members, archive/restore projects, and all maintainer actions."
+    default: return ""
+  }
+}
+
+/** Full "Viewer (100) — …" string for tooltips and help affordances. */
+export function roleHelpText(level: number): string {
+  const description = roleDescription(level)
+  if (!description) return ""
+  const blurb = description.charAt(0).toLowerCase() + description.slice(1)
+  return `${roleDisplayLabel(level)} (${level}) — ${blurb}`
 }
 
 /**
@@ -242,6 +290,10 @@ function toOption(level: RoleLevel): RoleOption {
   }
   return { level, name: roleName(level), nameKey, descriptionKey }
 }
+
+/** Full seven-rung ladder — team attach / org-owner role change. */
+export const ALL_ROLE_OPTIONS: readonly RoleOption[] =
+  ALL_ROLE_LEVELS.map(toOption)
 
 export const PROJECT_ROLE_OPTIONS: readonly RoleOption[] =
   PROJECT_ROLE_PICKER.map(toOption)

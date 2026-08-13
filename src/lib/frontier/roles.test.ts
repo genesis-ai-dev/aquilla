@@ -7,13 +7,14 @@ import {
   ORG_ROLE_PICKER,
   roleName,
   roleNameKey,
-  roleDescriptionKey,
   unknownRoleLabel,
   resolveRoleName,
-  resolveRoleDescription,
+  roleDescription,
+  roleHelpText,
   PROJECT_ROLE_OPTIONS,
   ORG_ROLE_OPTIONS,
   LINK_ROLE_OPTIONS,
+  ALL_ROLE_OPTIONS,
   VALIDATION_FLOOR_ROLES,
   VALIDATION_FLOOR_ROLE_OPTIONS,
 } from "./roles"
@@ -53,10 +54,16 @@ describe("ROLE constants", () => {
 
   it("provides a description key for every canonical level, resolving to non-empty text", () => {
     for (const level of ALL_ROLE_LEVELS) {
-      const key = roleDescriptionKey(level)
-      expect(key).toBeDefined()
-      expect(resolveRoleDescription(t, level)).not.toBe("")
+      expect(roleDescription(level)).not.toBe("")
+      expect(roleHelpText(level)).toContain(String(level))
     }
+  })
+
+  it("keeps the AD-6 viewer help text", () => {
+    expect(roleDescription(100)).toMatch(/read all org projects/i)
+    expect(roleHelpText(100)).toBe(
+      "Viewer (100) — can read all org projects. No edit or management actions.",
+    )
   })
 })
 
@@ -95,8 +102,16 @@ describe("ROLE_OPTIONS shapes", () => {
   it("link options match the link-allowed list", () => {
     expect(LINK_ROLE_OPTIONS.map((o) => o.level)).toEqual([...LINK_ROLE_ALLOWED])
   })
-  it("every option has a non-empty canonical name and resolves to non-empty display text", () => {
-    for (const opt of [...PROJECT_ROLE_OPTIONS, ...ORG_ROLE_OPTIONS, ...LINK_ROLE_OPTIONS]) {
+  it("all-role options cover the full ladder", () => {
+    expect(ALL_ROLE_OPTIONS.map((o) => o.level)).toEqual([...ALL_ROLE_LEVELS])
+  })
+  it("every option has a non-empty name and description", () => {
+    for (const opt of [
+      ...ALL_ROLE_OPTIONS,
+      ...PROJECT_ROLE_OPTIONS,
+      ...ORG_ROLE_OPTIONS,
+      ...LINK_ROLE_OPTIONS,
+    ]) {
       expect(opt.name).not.toBe("")
       expect(t(opt.nameKey, { count: 1 })).not.toBe("")
       expect(t(opt.descriptionKey)).not.toBe("")

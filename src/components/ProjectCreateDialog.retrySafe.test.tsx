@@ -99,7 +99,7 @@ describe("ProjectCreateDialog — retry-safe project creation (AQU-712)", () => 
       .mockResolvedValue(undefined)
 
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
-    fireEvent.click(screen.getByRole("button", { name: "New Project" }))
+    fireEvent.click(screen.getByRole("button", { name: "New project" }))
     fillBasics()
 
     clickCreate()
@@ -129,7 +129,7 @@ describe("ProjectCreateDialog — retry-safe project creation (AQU-712)", () => 
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
 
     // Session 1: create "Russian BSB" successfully → dialog closes.
-    fireEvent.click(screen.getByRole("button", { name: "New Project" }))
+    fireEvent.click(screen.getByRole("button", { name: "New project" }))
     fillBasics("Russian BSB")
     clickCreate()
     await waitFor(() => {
@@ -140,7 +140,7 @@ describe("ProjectCreateDialog — retry-safe project creation (AQU-712)", () => 
     })
 
     // Session 2: reopen and create a project with the SAME name.
-    fireEvent.click(screen.getByRole("button", { name: "New Project" }))
+    fireEvent.click(screen.getByRole("button", { name: "New project" }))
     fillBasics("Russian BSB")
     clickCreate()
     await waitFor(() => {

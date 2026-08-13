@@ -345,7 +345,6 @@ export function UpstreamChangesPanel({
                         {item.target && (
                           <Button
                             variant="secondary"
-                            size="sm"
                             disabled={!canRepin || busy}
                             onClick={() => void handleRepinSingle(item)}
                           >

@@ -407,14 +407,12 @@ export function GlossaryEditor({ files: workspaceFiles }: GlossaryEditorProps = 
             </Button>
             <Button
               variant="outline"
-              size="sm"
               onClick={() => downloadBlob(exportConceptsCsv(concepts), "glossary.csv", "text/csv")}
             >
               <Download data-icon="inline-start" /> {t("terminology.editor.exportCsv")}
             </Button>
             <Button
               variant="outline"
-              size="sm"
               onClick={() => downloadBlob(exportConceptsTbx(concepts), "glossary.tbx", "application/xml")}
             >
               <Download data-icon="inline-start" /> {t("terminology.editor.exportTbx")}
@@ -423,7 +421,6 @@ export function GlossaryEditor({ files: workspaceFiles }: GlossaryEditorProps = 
         )}
         <Button
           variant={view === "violations" ? "secondary" : "outline"}
-          size="sm"
           aria-pressed={view === "violations"}
           onClick={() => {
             setCellDataRequested(true)

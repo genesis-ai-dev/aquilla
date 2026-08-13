@@ -155,7 +155,6 @@ export function VoiceCloneSection({ voice, projectId, fileId, session, onChange,
           />
           <Button
             type="button"
-            size="sm"
             variant="ghost"
             onClick={removeReference}
             className="text-destructive hover:bg-destructive/10 hover:text-destructive"
@@ -164,7 +163,6 @@ export function VoiceCloneSection({ voice, projectId, fileId, session, onChange,
           </Button>
           <Button
             type="button"
-            size="sm"
             variant="outline"
             onClick={() => fileInputRef.current?.click()}
             disabled={status.kind === "uploading"}
@@ -181,7 +179,6 @@ export function VoiceCloneSection({ voice, projectId, fileId, session, onChange,
           ) : (
             <Button
               type="button"
-              size="sm"
               onClick={() => void recorder.start()}
               disabled={status.kind === "uploading"}
             >
@@ -190,7 +187,6 @@ export function VoiceCloneSection({ voice, projectId, fileId, session, onChange,
           )}
           <Button
             type="button"
-            size="sm"
             variant="outline"
             onClick={() => fileInputRef.current?.click()}
             disabled={status.kind === "uploading" || isRecording}
@@ -277,7 +273,6 @@ export function ReferencePreview({ projectId, fileId, referenceAudioId, session 
     <AppTooltip content={t("audio.clone.previewTooltip")}>
       <Button
         type="button"
-        size="sm"
         variant="outline"
         onClick={toggle}
         className={cn(state === "error" && "text-destructive")}

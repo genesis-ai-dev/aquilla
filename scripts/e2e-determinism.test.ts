@@ -9,6 +9,11 @@ import {
   readPersistedSession,
   writePersistedSession,
 } from "../e2e/helpers/auth-state"
+import { resetBackend } from "../e2e/helpers/seed"
+import {
+  isRetryableTransportError,
+  withTransportRetry,
+} from "../e2e/helpers/transport-retry"
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 
@@ -111,5 +116,54 @@ describe("E2E auth-state isolation", () => {
     } finally {
       await rm(root, { recursive: true, force: true })
     }
+  })
+})
+
+describe("E2E backend-reset transport retry", () => {
+  it("treats ECONNREFUSED / fetch failed as retryable and HTTP errors as not", () => {
+    expect(isRetryableTransportError(
+      Object.assign(new TypeError("fetch failed"), {
+        cause: new Error("connect ECONNREFUSED 127.0.0.1:8787"),
+      }),
+    )).toBe(true)
+    expect(isRetryableTransportError(new Error("backend reset failed: HTTP 500 — boom"))).toBe(false)
+  })
+
+  it("retries a transient transport error then returns", async () => {
+    let calls = 0
+    const result = await withTransportRetry(async () => {
+      calls += 1
+      if (calls < 2) throw new TypeError("fetch failed")
+      return "ok"
+    })
+    expect(result).toBe("ok")
+    expect(calls).toBe(2)
+  })
+
+  it("retries POST /__test__/reset when identity flaps, then succeeds", async () => {
+    const originalFetch = globalThis.fetch
+    let calls = 0
+    globalThis.fetch = (async () => {
+      calls += 1
+      if (calls < 2) {
+        throw Object.assign(new TypeError("fetch failed"), {
+          cause: new Error("connect ECONNREFUSED 127.0.0.1:8787"),
+        })
+      }
+      return new Response(JSON.stringify({ ok: true }), { status: 200 })
+    }) as typeof fetch
+    try {
+      await resetBackend()
+      expect(calls).toBe(2)
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  it("aborts the e2e shard when identity or sync wrangler exits", () => {
+    const source = readFileSync(path.join(REPO_ROOT, "scripts/e2e-up.ts"), "utf8")
+    expect(source).toContain("function abortIfWorkerDies")
+    expect(source).toMatch(/abortIfWorkerDies\(identity,\s*"identity"\)/)
+    expect(source).toMatch(/abortIfWorkerDies\(sync,\s*"sync"\)/)
   })
 })

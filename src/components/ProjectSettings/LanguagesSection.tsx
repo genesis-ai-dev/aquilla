@@ -18,7 +18,7 @@
 // shared-settings field on this page; `sharedConflict` in the parent already
 // renders the "Settings changed elsewhere" banner when the hook detects one.
 import { useState } from "react"
-import { Globe, Archive, ArchiveRestore, Plus } from "lucide-react"
+import { Archive, ArchiveRestore, Plus, Globe } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
@@ -202,7 +202,7 @@ export function LanguagesSection({
               {active.map((lane) => (
                 <li
                   key={lane}
-                  className="flex items-center gap-2 rounded border bg-card px-2 py-1.5 text-sm"
+                  className="flex items-center gap-2 rounded border bg-background px-2 py-1.5 text-sm"
                 >
                   <Badge variant="outline" className="shrink-0">
                     {lane}
@@ -215,7 +215,6 @@ export function LanguagesSection({
                       </span>
                       <Button
                         variant="destructive"
-                        size="sm"
                         disabled={busyLane === lane}
                         onClick={() => void handleConfirmArchive(lane)}
                       >
@@ -223,7 +222,6 @@ export function LanguagesSection({
                       </Button>
                       <Button
                         variant="ghost"
-                        size="sm"
                         disabled={busyLane === lane}
                         onClick={() => setPendingArchive(null)}
                       >
@@ -254,6 +252,8 @@ export function LanguagesSection({
           )}
         </div>
 
+        {laneActionError && <p className="text-xs text-destructive">{laneActionError}</p>}
+
         {archived.length > 0 && (
           <div>
             <FieldLabel>{t("projectSettings.languages.archivedLanesLabel")}</FieldLabel>
@@ -273,7 +273,6 @@ export function LanguagesSection({
                   <DisabledFieldTooltip disabled={!canEdit} tooltip={disabledTooltip}>
                     <Button
                       variant="ghost"
-                      size="sm"
                       className="h-7 shrink-0 gap-1"
                       disabled={!canEdit || busyLane === lane}
                       data-testid={`restore-lane-${lane}`}
@@ -289,7 +288,6 @@ export function LanguagesSection({
             </ul>
           </div>
         )}
-        {laneActionError && <p className="text-xs text-destructive">{laneActionError}</p>}
 
         <DisabledFieldTooltip disabled={!canEdit} tooltip={disabledTooltip}>
           <div className="flex items-end gap-2">

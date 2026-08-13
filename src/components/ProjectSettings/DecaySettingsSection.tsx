@@ -1,6 +1,6 @@
-import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field"
 import type { DecaySettings } from "@/lib/parsers/types"
 import { DECAY_DEFAULTS } from "@/lib/health/decay-engine"
 import { useT } from "@/lib/i18n/I18nProvider"

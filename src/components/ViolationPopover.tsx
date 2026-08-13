@@ -82,6 +82,7 @@ export function ViolationPopover({
               placeholder={t("rules.violationPopover.reasonPlaceholder")}
               value={reason}
               onChange={(e) => setReason(e.target.value)}
+              autoComplete="off"
               autoFocus
             />
             <div className="flex gap-2">

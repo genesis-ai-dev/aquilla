@@ -7,7 +7,8 @@ import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
-import { FieldLabel } from "@/components/ui/field"
+import { FieldLabel, OptionalMark } from "@/components/ui/field"
+import { Spinner } from "@/components/ui/spinner"
 import {
   Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select"
@@ -41,9 +42,10 @@ import {
   ROLE,
   LINK_ROLE_OPTIONS,
   PROJECT_ROLE_OPTIONS,
-  resolveRoleName,
+  roleDisplayLabel,
 } from "@/lib/frontier/roles"
 import { RoleLabel } from "@/components/RoleLabel"
+import { RoleSelect } from "@/components/RoleSelect"
 import { useT } from "@/lib/i18n/I18nProvider"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 
@@ -81,7 +83,7 @@ export function SharePanel({ open, onOpenChange, projectId, onSharesChanged }: S
             onClick={() => setTab("members")}
             className={`px-3 py-1.5 text-sm ${
               tab === "members"
-                ? "border-b-2 border-primary font-medium"
+                ? "border-b-2 border-foreground font-medium"
                 : "text-muted-foreground"
             }`}
           >
@@ -92,7 +94,7 @@ export function SharePanel({ open, onOpenChange, projectId, onSharesChanged }: S
             onClick={() => setTab("link")}
             className={`px-3 py-1.5 text-sm ${
               tab === "link"
-                ? "border-b-2 border-primary font-medium"
+                ? "border-b-2 border-foreground font-medium"
                 : "text-muted-foreground"
             }`}
           >
@@ -264,7 +266,9 @@ function MembersTab({ projectId }: { projectId: string }) {
     <div>
       {error && <p className="mb-2 text-xs text-destructive">{error}</p>}
       {isLoading && members.length === 0 ? (
-        <p className="text-xs text-muted-foreground">{t("common.loading")}</p>
+        <div className="flex items-center text-muted-foreground">
+          <Spinner className="size-3.5" />
+        </div>
       ) : (
         <MembersPanel
           members={panelMembers}
@@ -396,7 +400,7 @@ function InviteLinkTab({ projectId, onSharesChanged }: InviteLinkTabProps) {
             {t("projectSettings.share.recipientJoinsAs", {
               role: (() => {
                 const opt = LINK_ROLE_OPTIONS.find((o) => o.level === inviteRole)
-                return opt ? resolveRoleName(t, opt.name) : t("projectSettings.share.recipientJoinsAsFallbackRole")
+                return opt ? roleDisplayLabel(opt.level) : t("projectSettings.share.recipientJoinsAsFallbackRole")
               })(),
             })}{" "}
             <RichMessage
@@ -417,28 +421,13 @@ function InviteLinkTab({ projectId, onSharesChanged }: InviteLinkTabProps) {
         <div className="space-y-3">
           <div className="space-y-1">
             <FieldLabel className="text-xs">{t("common.roleLabel")}</FieldLabel>
-            <Select
-              items={LINK_ROLE_OPTIONS.map((opt) => ({
-                value: String(opt.level),
-                label: resolveRoleName(t, opt.name),
-              }))}
-              value={String(inviteRole)}
-              onValueChange={(v) => setInviteRole(Number(v ?? ""))}
+            <RoleSelect
+              options={LINK_ROLE_OPTIONS}
+              value={inviteRole}
+              onValueChange={setInviteRole}
               disabled={!session?.jwt}
-            >
-              <SelectTrigger className="w-full" aria-label={t("common.roleLabel")}>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectGroup>
-                  {LINK_ROLE_OPTIONS.map((opt) => (
-                    <SelectItem key={opt.level} value={String(opt.level)}>
-                      <RoleLabel name={opt.name} />
-                    </SelectItem>
-                  ))}
-                </SelectGroup>
-              </SelectContent>
-            </Select>
+              aria-label={t("common.roleLabel")}
+            />
             <p className="text-[10px] text-muted-foreground">
               {session?.jwt
                 ? (() => {
@@ -450,8 +439,7 @@ function InviteLinkTab({ projectId, onSharesChanged }: InviteLinkTabProps) {
           </div>
           <div className="space-y-1">
             <FieldLabel htmlFor="invite-email" className="text-xs">
-              {t("projectSettings.share.recipientEmailLabel")}{" "}
-              <span className="text-muted-foreground font-normal">{t("common.optionalFieldNote")}</span>
+              {t("projectSettings.share.recipientEmailLabel")} <OptionalMark />
             </FieldLabel>
             <Input
               id="invite-email"
@@ -510,7 +498,6 @@ function InviteLinkTab({ projectId, onSharesChanged }: InviteLinkTabProps) {
             </p>
           )}
           <Button
-            size="sm"
             onClick={handleCreate}
             disabled={busy || !session?.jwt}
             className="w-full"
@@ -619,7 +606,6 @@ function ActiveInvitesList({ projectId, jwt, version, onRevoked }: ActiveInvites
                   {t("common.confirm")}
                 </label>
                 <Button
-                  size="sm"
                   variant="destructive"
                   className="h-6 px-2 text-[10px]"
                   disabled={!revokeConfirm || revoking}
@@ -628,7 +614,6 @@ function ActiveInvitesList({ projectId, jwt, version, onRevoked }: ActiveInvites
                   {revoking ? "…" : t("common.revoke")}
                 </Button>
                 <Button
-                  size="sm"
                   variant="ghost"
                   className="h-6 px-1 text-[10px]"
                   onClick={() => { setRevokeTarget(null); setRevokeConfirm(false) }}
@@ -639,7 +624,6 @@ function ActiveInvitesList({ projectId, jwt, version, onRevoked }: ActiveInvites
             ) : (
               <AppTooltip content={t("projectSettings.share.revokeLinkAriaLabel")}>
                 <Button
-                  size="sm"
                   variant="ghost"
                   className="h-6 shrink-0 px-1 text-muted-foreground hover:text-destructive"
                   onClick={() => { setRevokeTarget(inv.token); setRevokeConfirm(false) }}

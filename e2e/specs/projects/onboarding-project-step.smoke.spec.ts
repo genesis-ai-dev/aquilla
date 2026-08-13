@@ -2,12 +2,12 @@ import { test, expect } from "../../helpers/multi-user"
 import { advanceOnboardingTo } from "../../helpers/onboarding"
 
 /**
- * Onboarding wizard — ProjectStep (step 5) fields: proj-name, src-lang, tgt-lang.
+ * Onboarding wizard — ProjectStep (step 5) fields: proj-title, src-lang, tgt-lang.
  *
  * OnboardingWizard.tsx steps (alice is already signed in so steps 2+3 skip):
  *   1. WelcomeStep     → "Get started"
  *   4. NameStep        → id="display-name"
- *   5. ProjectStep     → id="proj-name", id="src-lang", id="tgt-lang"
+ *   5. ProjectStep     → id="proj-title", id="src-lang", id="tgt-lang"
  *
  * ProjectStep only renders the form when a server session is present (alice
  * is always signed in). Submitting creates a project via the server, so
@@ -23,7 +23,7 @@ test("onboarding ProjectStep inputs enable Create Project button", async ({ alic
   await alice.goto("/onboarding")
   await advanceOnboardingTo(alice, 7)
 
-  const projName = alice.locator("#proj-name")
+  const projName = alice.locator("#proj-title")
   await expect(projName).toBeVisible({ timeout: 10_000 })
 
   const srcLang = alice.locator("#src-lang")

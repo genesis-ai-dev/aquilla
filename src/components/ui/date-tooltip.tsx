@@ -13,12 +13,12 @@ export function DateTooltip({
   className?: string
 }) {
   const { locale } = useI18n()
-  if (value == null) return <span className={className}>—</span>
+  if (value == null) return null
   const t = typeof value === "number" ? value : Date.parse(value)
-  if (Number.isNaN(t)) return <span className={className}>—</span>
+  if (Number.isNaN(t)) return null
 
   return (
-    <AppTooltip content={fmtLabeledDateTime(t, label, undefined, locale)}>
+    <AppTooltip content={fmtLabeledDateTime(t, label, undefined, locale)} side="bottom">
       <span className={cn("cursor-default", className)}>{fmtShortCalendarDate(t, undefined, locale)}</span>
     </AppTooltip>
   )

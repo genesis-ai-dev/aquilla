@@ -176,9 +176,6 @@ describe("buildSystemPrompt — role filtering", () => {
   })
 
   it("grounds the situation when a file is focused — name, kind, and relative-reference rule", () => {
-    const unfocused = buildSystemPrompt({ ...baseCtx, roleLevel: 400 })
-    expect(unfocused).not.toContain("## Current situation")
-
     const focused = buildSystemPrompt({
       ...baseCtx,
       roleLevel: 400,
@@ -190,6 +187,23 @@ describe("buildSystemPrompt — role filtering", () => {
     expect(focused).toContain('"Ruth"')
     expect(focused).toContain("kind: sequence")
     expect(focused).toContain("refer to THIS file")
+    // AQU-846: relative work stays in the open file unless the user names another.
+    expect(focused).toContain("never move the work to another file")
+  })
+
+  // AQU-846 — with no file focused the agent used to be left to its own
+  // devices and drafted into whichever file it found. The prompt must now
+  // tell it to ask instead of pick.
+  it("tells the agent to ask which file when none is focused", () => {
+    const unfocused = buildSystemPrompt({ ...baseCtx, roleLevel: 400 })
+    expect(unfocused).toContain("## Current situation")
+    expect(unfocused).toContain("No file is open")
+    expect(unfocused).toContain("Do not pick one")
+  })
+
+  it("makes 'which file' an explicit exception to prefer-acting-over-asking", () => {
+    const prompt = buildSystemPrompt({ ...baseCtx, roleLevel: 400, fileId: "f1" })
+    expect(prompt).toContain("WHICH FILE is the one exception")
   })
 })
 

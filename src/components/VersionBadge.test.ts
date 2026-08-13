@@ -32,6 +32,10 @@ describe("hasChromeVersionTag", () => {
       "/project/p1/comments",
       "/project/p1/agent",
       "/project/p1/voice",
+      // Settings uses AppShell + OrgSidebar VersionTag (not a centred badge page).
+      "/project/p1/settings",
+      "/project/p1/settings/ai",
+      "/project/p1/settings/validation",
     ]) {
       expect(hasChromeVersionTag(path), path).toBe(true)
     }
@@ -42,8 +46,6 @@ describe("hasChromeVersionTag", () => {
       "/login",
       "/onboarding",
       "/join/tok",
-      "/project/p1/settings",
-      "/project/p1/settings/ai",
       "/project/p1/debug",
       "/privacy-policy",
     ]) {

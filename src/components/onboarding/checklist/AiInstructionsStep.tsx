@@ -65,7 +65,6 @@ export function AiInstructionsStep({ project, onUpdated }: AiInstructionsStepPro
         <span>{t("onboarding.checklist.aiInstructions.charCount", { count: prompt.length })}</span>
       </div>
       <Button
-        size="sm"
         onClick={handleSave}
         disabled={busy || prompt.trim().length === 0}
         className="w-full"

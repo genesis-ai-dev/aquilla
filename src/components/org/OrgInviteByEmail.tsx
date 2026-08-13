@@ -8,8 +8,9 @@ import {
   FieldLabel,
 } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import { RoleSelect } from "@/components/RoleSelect"
 import { createOrgInvite } from "@/lib/frontier/orgs"
-import { ROLE, ORG_ROLE_PICKER, resolveRoleName } from "@/lib/frontier/roles"
+import { ROLE, ORG_ROLE_OPTIONS } from "@/lib/frontier/roles"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import posthog from "@/lib/posthog"
@@ -87,6 +88,8 @@ export function OrgInviteByEmail({ orgId }: { orgId: number }) {
           <Input
             id="org-invite-email"
             type="email"
+            inputMode="email"
+            autoComplete="off"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             placeholder={t("org.inviteByEmail.emailPlaceholder")}
@@ -95,18 +98,13 @@ export function OrgInviteByEmail({ orgId }: { orgId: number }) {
         </Field>
         <Field>
           <FieldLabel htmlFor="org-invite-role">{t("org.inviteByEmail.roleLabel")}</FieldLabel>
-          <select
+          <RoleSelect
             id="org-invite-role"
+            options={ORG_ROLE_OPTIONS}
             value={role}
-            onChange={(e) => setRole(Number(e.target.value))}
-            className="h-9 rounded-md border border-border bg-background px-2 text-sm"
-          >
-            {ORG_ROLE_PICKER.map((level) => (
-              <option key={level} value={level}>
-                {resolveRoleName(t, level)}
-              </option>
-            ))}
-          </select>
+            onValueChange={setRole}
+            aria-label={t("org.inviteByEmail.roleLabel")}
+          />
         </Field>
         <Button size="sm" onClick={submit} disabled={busy}>
           {busy ? t("auth.resetPassword.sending") : t("org.inviteByEmail.submit")}

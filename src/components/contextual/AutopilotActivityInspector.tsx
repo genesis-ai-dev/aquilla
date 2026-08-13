@@ -801,6 +801,15 @@ export function AutopilotActivityInspector({
       setSelectedRunId((current) => {
         const explicit = selectionOverrideRef.current
         if (explicit && scoped.some((run) => run.runId === explicit)) return explicit
+        if (initialSection === "review") {
+          // The opening pre-seed points at the newest overview run, which may
+          // own none of the proposed drafts this sheet was opened to review —
+          // steer to the run that actually owns them (it may only be present
+          // via the indexed proposed-only fetch above).
+          const currentRun = scoped.find((run) => run.runId === current)
+          const withReview = preferredRun(scoped, "review")
+          if (withReview && (currentRun?.proposedDrafts ?? 0) === 0) return withReview.runId
+        }
         if (current && scoped.some((run) => run.runId === current)) return current
         return preferredRun(scoped, initialSection)?.runId ?? null
       })

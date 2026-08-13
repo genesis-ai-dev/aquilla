@@ -69,7 +69,7 @@ function ExpanderNotes({
       aria-label={t("terminology.row.notesAria", { term: concept.sourceTerm })}
       placeholder={t("terminology.row.notesPlaceholder")}
       disabled={!canManage}
-      className="min-h-16 resize-y text-sm"
+      className="text-sm"
       onChange={(event) => setDraft(event.target.value)}
       onBlur={() => {
         if (draft !== (concept.notes ?? "")) onCommit(draft)

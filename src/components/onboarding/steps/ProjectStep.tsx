@@ -21,7 +21,7 @@ import { ChevronLeft } from "lucide-react"
 import { useT } from "@/lib/i18n/I18nProvider"
 
 const formSchema = z.object({
-  name: requiredString("Project name"),
+  name: requiredString("Project title"),
   sourceLanguage: requiredString("Source language"),
   targetLanguage: requiredString("Target language"),
 })
@@ -115,6 +115,7 @@ export function ProjectStep({
       </div>
       <form
         id="project-step-form"
+        autoComplete="off"
         onSubmit={(e) => {
           e.preventDefault()
           void form.handleSubmit()
@@ -128,10 +129,15 @@ export function ProjectStep({
               const invalid = isFieldInvalid(field)
               return (
                 <Field data-invalid={invalid}>
-                  <FieldLabel htmlFor="proj-name">{t("projectSettings.info.nameLabel")}</FieldLabel>
+                  <FieldLabel htmlFor="proj-title">{t("projectSettings.info.nameLabel")}</FieldLabel>
                   <Input
-                    id="proj-name"
-                    name={field.name}
+                    id="proj-title"
+                    // Avoid DOM name="name" — Chrome contact autofill heuristic.
+                    name="aquilla-project-title"
+                    autoComplete="off"
+                    autoCorrect="off"
+                    autoCapitalize="none"
+                    spellCheck={false}
                     value={field.state.value}
                     onBlur={field.handleBlur}
                     onChange={(e) => field.handleChange(e.target.value)}
@@ -153,7 +159,11 @@ export function ProjectStep({
                   <FieldLabel htmlFor="src-lang">{t("projectSettings.info.sourceLanguageLabel")}</FieldLabel>
                   <Input
                     id="src-lang"
-                    name={field.name}
+                    name="aquilla-project-source-language"
+                    autoComplete="off"
+                    autoCorrect="off"
+                    autoCapitalize="none"
+                    spellCheck={false}
                     value={field.state.value}
                     onBlur={field.handleBlur}
                     onChange={(e) => field.handleChange(e.target.value)}
@@ -174,7 +184,11 @@ export function ProjectStep({
                   <FieldLabel htmlFor="tgt-lang">{t("autopilot.inspector.details.targetLanguage")}</FieldLabel>
                   <Input
                     id="tgt-lang"
-                    name={field.name}
+                    name="aquilla-project-target-language"
+                    autoComplete="off"
+                    autoCorrect="off"
+                    autoCapitalize="none"
+                    spellCheck={false}
                     value={field.state.value}
                     onBlur={field.handleBlur}
                     onChange={(e) => field.handleChange(e.target.value)}

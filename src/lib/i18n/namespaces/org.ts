@@ -594,6 +594,7 @@ export const org = defineNamespace({
     "org.projectsList.sharedWithYouDescription": "Projects from organizations outside the current scope.",
     "org.projectsList.shownOfTotal": "{visible} shown of {total}",
     "org.projectsList.lensGroupAriaLabel": "Project list view",
+    "org.projectsList.viewLabel": "View",
     "org.projectsList.loadingLabel": "Loading projects",
 
     // -- OrgProjectsDataTable: org projects data table --
@@ -1168,6 +1169,10 @@ export const org = defineNamespace({
       "org.projectsList.lensGroupAriaLabel": {
         description:
           "Accessible name for the row of lens buttons (Recently updated / Needs attention / Overdue / Least translated) above the all-orgs projects list.",
+      },
+      "org.projectsList.viewLabel": {
+        description:
+          "Label preceding the lens picker (Recently updated / Needs attention / Overdue / Least translated) above the all-orgs projects list.",
       },
       "org.orgProjectsDataTable.actionsColumnSrOnly": {
         description:

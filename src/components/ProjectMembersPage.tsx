@@ -1,26 +1,21 @@
-// AQU-180: Per-project members page (/project/:id/members).
+// Shared project-members building blocks.
 //
-// Renders inside the ProjectWorkspace shell (AQU-254 surface-swap pattern).
-// Shell stays mounted; only the center content area swaps.
+// Canonical UI: `/project/:id/settings/members` (MembersSection).
 //
-// Features:
-//   - Effective member list (GET /projects/:id/members) incl. secondarySources
-//   - Direct-grant add / change-role / remove (reuses useProjectMembers hook)
-//   - Invite-link generation with expiry selector (reuses InviteLinkTab logic)
-//   - "Revoke all access" with grant-path enumeration + typed confirmation
+// This module keeps the pieces still embedded elsewhere:
+//   - MembersTab — org-side ProjectOverview Members card
+//   - InviteLinkTab / RevokeAllDialog — settings MembersSection + MembersTab
 
 import { useState, useCallback, useEffect, useMemo } from "react"
-import { useParams } from "react-router-dom"
 import {
-  ArrowLeft, UserPlus, LinkIcon, ShieldOff, RefreshCcw,
-  AlertTriangle, Copy, Lock, Users,
+  UserPlus, LinkIcon, ShieldOff, RefreshCcw,
+  AlertTriangle, Copy, Lock,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Spinner } from "@/components/ui/spinner"
 import { LoadingPanel } from "@/components/ui/loading-overlay"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Input } from "@/components/ui/input"
-import { FieldLabel } from "@/components/ui/field"
+import { FieldLabel, OptionalMark } from "@/components/ui/field"
 import {
   Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select"
@@ -28,7 +23,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog"
 import { cn } from "@/lib/utils"
-import { useOpenWorkspace } from "@/hooks/useOpenWorkspace"
+import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
 import { useProjectOrgId } from "@/hooks/useProjectOrgId"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
@@ -44,10 +39,12 @@ import {
   ROLE,
   LINK_ROLE_OPTIONS,
   PROJECT_ROLE_OPTIONS,
-  resolveRoleName,
+  humanRoleName,
+  roleDisplayText,
 } from "@/lib/frontier/roles"
 import { ConfirmActionDialog } from "@/components/ConfirmActionDialog"
 import { RoleLabel } from "@/components/RoleLabel"
+import { RoleSelect } from "@/components/RoleSelect"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { RichMessage } from "@/lib/i18n/RichMessage"
 import type { MessageKey } from "@/lib/i18n/messages/en"
@@ -70,90 +67,11 @@ const EXPIRY_OPTIONS: { labelKey: MessageKey; value: number | null }[] = [
 const DEFAULT_EXPIRY_DAYS = 7
 
 // ──────────────────────────────────────────────────────────────────────────
-// Main surface
-// ──────────────────────────────────────────────────────────────────────────
-
-type ActiveTab = "members" | "invite"
-
-export function ProjectMembersPage() {
-  const { id: projectId } = useParams<{ id: string }>()
-  // AQU-737: the workspace route is lazy; surface the load on Back to project so
-  // it spins + disables instead of sitting idle and re-clickable.
-  // `openingOverlay` blocks the rest of the page while the open is in flight.
-  const { open: openWorkspace, isPending: backPending, overlay: openingOverlay } = useOpenWorkspace()
-  const [tab, setTab] = useState<ActiveTab>("members")
-  const t = useT()
-
-  if (!projectId) return null
-
-  return (
-    <div className="flex h-full flex-col overflow-y-auto">
-      {openingOverlay}
-      {/* Back header */}
-      <div className="flex items-center gap-3 border-b bg-background px-6 py-3">
-        <Button
-          variant="ghost"
-          size="sm"
-          className="gap-1.5 text-muted-foreground"
-          onClick={() => openWorkspace(`/project/${projectId}/editor`)}
-          disabled={backPending}
-          aria-busy={backPending || undefined}
-        >
-          {backPending ? <Spinner className="h-4 w-4" /> : <ArrowLeft className="h-4 w-4" />}
-          {t("comments.backToProject")}
-        </Button>
-        <div className="flex items-center gap-2 text-sm font-medium">
-          <Users className="h-4 w-4 text-muted-foreground" />
-          {t("editor.navTitle.members")}
-        </div>
-      </div>
-
-      {/* Tab bar */}
-      <div className="flex gap-2 border-b px-6">
-        <button
-          type="button"
-          onClick={() => setTab("members")}
-          className={cn(
-            "px-3 py-2 text-sm",
-            tab === "members"
-              ? "border-b-2 border-primary font-medium"
-              : "text-muted-foreground hover:text-foreground",
-          )}
-        >
-          {t("editor.navTitle.members")}
-        </button>
-        <button
-          type="button"
-          onClick={() => setTab("invite")}
-          className={cn(
-            "px-3 py-2 text-sm",
-            tab === "invite"
-              ? "border-b-2 border-primary font-medium"
-              : "text-muted-foreground hover:text-foreground",
-          )}
-        >
-          {t("projectSettings.share.tabInviteLink")}
-        </button>
-      </div>
-
-      {/* Content */}
-      <div className="flex-1 overflow-y-auto px-6 py-6">
-        {tab === "members" ? (
-          <MembersTab projectId={projectId} />
-        ) : (
-          <InviteLinkTab projectId={projectId} />
-        )}
-      </div>
-    </div>
-  )
-}
-
-// ──────────────────────────────────────────────────────────────────────────
 // Members tab
 //
 // Exported (AQU-335) so the org-side ProjectOverview (/projects/:id) can
-// embed the same members add/change-role/revoke surface the in-project
-// members page offers — one implementation, two surfaces.
+// embed the same members add/change-role/revoke surface — one implementation,
+// two surfaces (overview card + settings MembersSection helpers).
 // ──────────────────────────────────────────────────────────────────────────
 
 export function MembersTab({
@@ -262,7 +180,7 @@ export function MembersTab({
         key={m.userId}
         className="flex flex-wrap items-center gap-2 px-4 py-3 text-sm"
       >
-        <span className="font-medium">{m.username}</span>
+        <UsernameWithAvatar username={m.username} />
         <SourceBadge source={m.role.source} />
         <RoleLabel name={m.role.name} className="text-xs text-muted-foreground" />
 
@@ -276,44 +194,26 @@ export function MembersTab({
         <div className="ms-auto flex items-center gap-2">
           {/* Role change dropdown — only for direct grants, not self */}
           {!isLocked && !isSelf && (
-            <Select
-              items={[
-                // Current role may sit above the caller's grantable
-                // cap; include it so the closed trigger renders the
-                // role name instead of the raw level.
-                ...(grantableRoles.some((r) => r.level === m.role.level)
-                  ? []
-                  : [{ value: String(m.role.level), label: resolveRoleName(t, m.role.name) }]),
-                ...grantableRoles.map((r) => ({
-                  value: String(r.level),
-                  label: resolveRoleName(t, r.name),
-                })),
-              ]}
-              value={String(m.role.level)}
-              onValueChange={(v) => {
-                void add(m.username, parseInt(v ?? "", 10))
+            <RoleSelect
+              options={grantableRoles}
+              currentOption={
+                grantableRoles.some((r) => r.level === m.role.level)
+                  ? null
+                  : { level: m.role.level, name: m.role.name }
+              }
+              value={m.role.level}
+              onValueChange={(level) => {
+                void add(m.username, level)
               }}
-            >
-              <SelectTrigger size="sm" aria-label={t("org.membersPage.changeRoleAria")}>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectGroup>
-                  {grantableRoles.map((r) => (
-                    <SelectItem key={r.level} value={String(r.level)}>
-                      <RoleLabel name={r.name} />
-                    </SelectItem>
-                  ))}
-                </SelectGroup>
-              </SelectContent>
-            </Select>
+              size="sm"
+              aria-label={t("org.membersPage.changeRoleAria")}
+            />
           )}
 
           {/* Remove button for direct grants */}
           {!isLocked && !isSelf && m.role.source === "override" ? (
             <AppTooltip content={t("org.membersPage.removeDirectAccessTooltip", { username: m.username })}>
               <Button
-                size="sm"
                 variant="ghost"
                 className="text-muted-foreground"
                 onClick={() => setRemoveTarget(m)}
@@ -333,7 +233,6 @@ export function MembersTab({
           {session?.jwt && !isSelf && (
             <AppTooltip content={t("org.membersPage.revokeAllTooltip")}>
               <Button
-                size="sm"
                 variant="ghost"
                 className="gap-1 text-destructive/70 hover:text-destructive"
                 onClick={() => setRevokeTarget(m)}
@@ -398,7 +297,6 @@ export function MembersTab({
           </h2>
           <Button
             variant="ghost"
-            size="sm"
             className="gap-1 text-muted-foreground"
             onClick={() => void refresh()}
           >
@@ -423,7 +321,7 @@ export function MembersTab({
                 {t("org.membersPage.noDirectMembers")}
               </p>
             ) : (
-              <ul className="divide-y rounded border">
+              <ul className="divide-y rounded border bg-background">
                 {projectMembers.map(renderMemberRow)}
               </ul>
             )}
@@ -439,7 +337,7 @@ export function MembersTab({
                 <p className="mb-2 text-xs text-muted-foreground">
                   {t("org.membersPage.orgAccessSummary", { count: orgAccessMembers.length })}
                 </p>
-                <ul className="divide-y rounded border">
+                <ul className="divide-y rounded border bg-background">
                   {orgAccessMembers.map(renderMemberRow)}
                 </ul>
               </div>
@@ -450,7 +348,7 @@ export function MembersTab({
 
       {/* Add member — AQU-734 parity: multi-select staging + one batch Add.
           Eligible org colleagues show as checkbox rows on focus (AQU-672). */}
-      <div className="rounded border p-4 space-y-3">
+      <div className="space-y-3 rounded border bg-background p-4">
         <h2 className="text-sm font-medium flex items-center gap-2">
           <UserPlus className="h-4 w-4 text-muted-foreground" />
           {t("org.membersPage.addMemberHeading")}
@@ -494,7 +392,7 @@ export function MembersTab({
           removeTarget
             ? t("org.membersPage.removeMemberDescription", {
                 username: removeTarget.username,
-                role: resolveRoleName(t, removeTarget.role.level),
+                role: roleDisplayText(removeTarget.role.name),
               })
             : ""
         }
@@ -533,7 +431,7 @@ interface RevokeAllDialogProps {
   onRevoked: () => void
 }
 
-function RevokeAllDialog({
+export function RevokeAllDialog({
   member, projectId, onClose, onRevoked,
 }: RevokeAllDialogProps) {
   const t = useT()
@@ -691,7 +589,14 @@ function RevokeAllDialog({
 // Invite-link tab (reuses SharePanel's InviteLinkTab logic)
 // ──────────────────────────────────────────────────────────────────────────
 
-function InviteLinkTab({ projectId }: { projectId: string }) {
+export function InviteLinkTab({
+  projectId,
+  embedded = false,
+}: {
+  projectId: string
+  /** When true (settings Card), drop the page-style max-width + duplicate title. */
+  embedded?: boolean
+}) {
   const t = useT()
   const { session } = useFrontierSession()
   const [inviteRole, setInviteRole] = useState<number>(DEFAULT_INVITE_ROLE)
@@ -702,6 +607,7 @@ function InviteLinkTab({ projectId }: { projectId: string }) {
   const [issuedUrl, setIssuedUrl] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   const [serverError, setServerError] = useState<string | null>(null)
+  const wrapClass = embedded ? "space-y-4" : "mx-auto max-w-lg space-y-4"
 
   async function handleCreate() {
     setEmailError(null)
@@ -753,11 +659,13 @@ function InviteLinkTab({ projectId }: { projectId: string }) {
 
   if (issuedUrl) {
     return (
-      <div className="mx-auto max-w-lg space-y-4">
-        <h2 className="text-sm font-medium flex items-center gap-2">
-          <LinkIcon className="h-4 w-4 text-muted-foreground" />
-          {t("org.membersPage.inviteLinkReadyHeading")}
-        </h2>
+      <div className={wrapClass}>
+        {!embedded && (
+          <h2 className="text-sm font-medium flex items-center gap-2">
+            <LinkIcon className="h-4 w-4 text-muted-foreground" />
+            {t("org.membersPage.inviteLinkReadyHeading")}
+          </h2>
+        )}
         <p className="text-sm text-muted-foreground">
           {t("org.membersPage.inviteLinkReadyBody")}
         </p>
@@ -765,7 +673,6 @@ function InviteLinkTab({ projectId }: { projectId: string }) {
           <Input value={issuedUrl} readOnly className="text-xs font-mono" />
           <AppTooltip content={t("projectSettings.share.copyUrlLabel")}>
             <Button
-              size="sm"
               variant="ghost"
               onClick={() => copyUrl(issuedUrl)}
               aria-label={t("projectSettings.share.copyUrlLabel")}
@@ -779,11 +686,11 @@ function InviteLinkTab({ projectId }: { projectId: string }) {
           {t("org.membersPage.inviteRecipientNote", {
             role: (() => {
               const opt = LINK_ROLE_OPTIONS.find((o) => o.level === inviteRole)
-              return opt ? resolveRoleName(t, opt.name) : t("projectSettings.share.recipientJoinsAsFallbackRole")
+              return opt ? humanRoleName(opt.level) : t("projectSettings.share.recipientJoinsAsFallbackRole")
             })(),
           })}
         </p>
-        <Button size="sm" variant="outline" onClick={reset} className="w-full">
+        <Button variant="outline" onClick={reset} className="w-full">
           {t("projectSettings.share.createAnotherLinkButton")}
         </Button>
       </div>
@@ -791,38 +698,25 @@ function InviteLinkTab({ projectId }: { projectId: string }) {
   }
 
   return (
-    <div className="mx-auto max-w-lg space-y-4">
-      <h2 className="text-sm font-medium flex items-center gap-2">
-        <LinkIcon className="h-4 w-4 text-muted-foreground" />
-        {t("projectSettings.share.createInviteLinkButton")}
-      </h2>
+    <div className={wrapClass}>
+      {!embedded && (
+        <h2 className="text-sm font-medium flex items-center gap-2">
+          <LinkIcon className="h-4 w-4 text-muted-foreground" />
+          {t("projectSettings.share.createInviteLinkButton")}
+        </h2>
+      )}
 
-      <div className="rounded border p-4 space-y-4">
+      <div className={cn("space-y-4", !embedded && "rounded border p-4")}>
         {/* Role */}
         <div className="space-y-1">
           <FieldLabel className="text-xs">{t("common.roleLabel")}</FieldLabel>
-          <Select
-            items={LINK_ROLE_OPTIONS.map((opt) => ({
-              value: String(opt.level),
-              label: resolveRoleName(t, opt.name),
-            }))}
-            value={String(inviteRole)}
-            onValueChange={(v) => setInviteRole(Number(v ?? ""))}
+          <RoleSelect
+            options={LINK_ROLE_OPTIONS}
+            value={inviteRole}
+            onValueChange={setInviteRole}
             disabled={!session?.jwt}
-          >
-            <SelectTrigger className="w-full" aria-label={t("common.roleLabel")}>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectGroup>
-                {LINK_ROLE_OPTIONS.map((opt) => (
-                  <SelectItem key={opt.level} value={String(opt.level)}>
-                    <RoleLabel name={opt.name} />
-                  </SelectItem>
-                ))}
-              </SelectGroup>
-            </SelectContent>
-          </Select>
+            aria-label={t("common.roleLabel")}
+          />
           <p className="text-[10px] text-muted-foreground">
             {session?.jwt
               ? (() => {
@@ -836,7 +730,7 @@ function InviteLinkTab({ projectId }: { projectId: string }) {
         {/* Optional email */}
         <div className="space-y-1">
           <FieldLabel htmlFor="pm-invite-email" className="text-xs">
-            {t("org.membersPage.recipientEmailLabel")}
+            {t("org.membersPage.recipientEmailLabel")} <OptionalMark />
           </FieldLabel>
           <Input
             id="pm-invite-email"
@@ -898,7 +792,6 @@ function InviteLinkTab({ projectId }: { projectId: string }) {
         )}
 
         <Button
-          size="sm"
           onClick={() => void handleCreate()}
           disabled={busy || !session?.jwt}
           className="w-full"
@@ -950,7 +843,7 @@ function GrantPathRow({
         {source}
       </span>
       {/* Role LABEL only — numeric levels are internal (FRO-368). */}
-      <span className="text-muted-foreground">→ {resolveRoleName(t, level)}</span>
+      <span className="text-muted-foreground">→ {humanRoleName(level)}</span>
       {removable ? (
         <span className="text-xs text-destructive/70">{t("org.membersPage.willBeRemoved")}</span>
       ) : (

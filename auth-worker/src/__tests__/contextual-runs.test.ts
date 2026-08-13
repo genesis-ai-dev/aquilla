@@ -291,8 +291,7 @@ describe("durable sanitized activity", () => {
     let provenanceParam: unknown
     let runRow: Record<string, unknown> | null = null
     let draftId = ""
-    let executor: PgExecutor
-    executor = {
+    const executor: PgExecutor = {
       async run(sql, params) {
         if (sql.includes("SELECT id FROM contextual_runs")) return { rows: [], rowCount: 0 }
         if (sql.includes("FROM contextual_runs WHERE id")) {
@@ -371,8 +370,7 @@ describe("durable sanitized activity", () => {
 
   it("passes details as structured JSON at the production Postgres adapter boundary", async () => {
     let adapterDetails: unknown
-    let executor: PgExecutor
-    executor = {
+    const executor: PgExecutor = {
       async run(_sql, params) {
         adapterDetails = params[10]
         return {

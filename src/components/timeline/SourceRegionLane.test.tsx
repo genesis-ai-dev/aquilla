@@ -1,9 +1,8 @@
 // WHY these tests exist: the row must look like an mp3 import's source row —
-// the SAME TimelineCard chips, broken at the VTT timestamps — plus a dashed
-// empty chip over each silence, because the silences are the point of the
-// feature. The sub-0.2s gap rule is pinned because a real VTT carries 1–100ms
-// rounding gaps between most consecutive cues, and a sliver chip at every one
-// reads as dirt.
+// the SAME TimelineCard chips, one per audio-VTT cue — plus a dashed empty chip
+// over each silence, because the silences are the point of the feature. The
+// sub-0.2s gap rule is pinned because a real VTT carries 1–100ms rounding gaps
+// between most consecutive cues, and a sliver chip at every one reads as dirt.
 
 import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
@@ -72,9 +71,17 @@ describe("SourceRegionLane", () => {
     expect(gaps[0].className).toContain("border-dashed")
   })
 
+  // Stage 2: "no speech", not "no subtitle". These gaps come from a transcript
+  // of the soundtrack, so they say nobody was talking — a subtitle may well sit
+  // over one, and on a real episode plenty do.
   it("says a silence is empty, in words, on hover", () => {
     renderLane()
-    expect(screen.getAllByTestId("tl-source-gap")[0]).toHaveAttribute("title", "No subtitle here · 10.0s")
+    expect(screen.getAllByTestId("tl-source-gap")[0]).toHaveAttribute("title", "No speech here · 10.0s")
+  })
+
+  it("marks itself as the audio-cue row in the DOM", () => {
+    renderLane()
+    expect(screen.getByTestId("tl-source-regions")).toHaveAttribute("data-variant", "source-audio-cues")
   })
 
   it("skips a chip for the millisecond rounding gaps between consecutive cues", () => {

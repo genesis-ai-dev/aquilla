@@ -23,19 +23,32 @@ import { buildFileTrackSetStmt } from '../event-projection'
 import type { DispatchResult } from './types'
 
 /**
- * Track ids and group ids. Wide enough for the three well-known literals and
+ * Track ids and group ids. Wide enough for the four well-known literals and
  * for generated uuids, capped at 64 because the id becomes a JSON key inside
  * files.meta.trackOverrides — an unbounded id is an unbounded meta blob.
  */
 const TRACK_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/
 
 /**
- * The three TrackKind values. They double as the three DEFAULT track ids —
+ * The four TrackKind values. They double as the four RESERVED track ids —
  * a default track's id IS its kind string — hence the second name below:
  * the two are the same set today but gate different fields, and only the
- * alias reads correctly at its call site.
+ * alias reads correctly at its call site. Reserved rather than "default"
+ * because which of them a given file actually draws depends on the file:
+ * a dubbing file has no target-subtitles row, but the id stays spoken for.
+ *
+ * Renamed in stage 2 ('subtitles' -> 'source-subtitles', 'target-subtitles'
+ * added) while the kind was still DORMANT: no event has ever carried the old
+ * spellings, so there is no stored payload to migrate. That window is now
+ * spent.
+ *
+ * HAND-MIRRORED with DEFAULT_TRACK_IDS in src/lib/timeline/tracks.ts. The
+ * client and this worker share no code, so the two lists are kept in step by
+ * hand and must be edited together. Drift is not cosmetic: a kind the client
+ * will happily persist but this allow-list rejects makes every retry of that
+ * event fail identically, which wedges the client's outbox behind it.
  */
-const TRACK_KINDS = new Set(['subtitles', 'source-audio', 'target-audio'])
+const TRACK_KINDS = new Set(['source-subtitles', 'source-audio', 'target-subtitles', 'target-audio'])
 const DEFAULT_TRACK_IDS = TRACK_KINDS
 
 const PATCH_KEYS = new Set(['kind', 'name', 'order', 'groupId'])

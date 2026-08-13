@@ -35,7 +35,7 @@ import { completionBatchSizeFor, workspaceActions, getVisibleActions } from "@/l
 import type { WorkspaceAction } from "@/lib/workspace-actions/types"
 import type { FileReference } from "@/lib/parsers/types"
 import { fileHasSections, fileOrderedBy, isMediaFileType, projectHasScriptureFiles, resolveBibleResourcesEnabled } from "@/lib/parsers/types"
-import { isSubtitleImportFile, resolveFileTimingMode, type AudioTimingMode } from "@/lib/parsers/types"
+import { isAudioCueFile, isSubtitleImportFile, resolveFileTimingMode, type AudioTimingMode } from "@/lib/parsers/types"
 import { isFlagEnabled } from "@/lib/features/flags"
 import { isDiscourseFile } from "@/lib/contextual/discourse-file"
 import { applyRemoteFrame as applyContextualFrame } from "@/lib/contextual/run-store"
@@ -47,6 +47,8 @@ import { warmFileDubs } from "@/lib/audio/warm-dubs"
 import { effectiveSourceText } from "@/lib/cell-text"
 import { resolveDeepLinkLane } from "./project-workspace-lane-deeplink"
 import { resolveActiveTargetLanguage } from "./project-workspace-lane-target"
+import { useAudioCueCells } from "@/hooks/useAudioCueCells"
+import { uploadAudioCueFile, type ParsedAudioVtt } from "@/lib/import/audio-vtt"
 import { useWorkspaceSearch } from "@/hooks/useWorkspaceSearch"
 import { ParallelPassagesPanel, type ParallelPanelMode, type ParallelPanelScope, type ReplaceAllPayload } from "./ParallelPassagesPanel"
 import type { EditorTableHandle } from "./EditorTable"
@@ -153,6 +155,7 @@ import { ConfirmActionDialog } from "./ConfirmActionDialog"
 import { LinkVideoTimingDialog } from "./timeline/LinkVideoTimingDialog"
 import { TimingVideoWarningDialog } from "./timeline/TimingVideoWarningDialog"
 import { LinkVideoUrlDialog } from "./timeline/LinkVideoUrlDialog"
+import { ImportAudioVttDialog } from "./timeline/ImportAudioVttDialog"
 import { MediaVideoPane } from "./timeline/MediaVideoPane"
 import {
   shouldShowVideoPane,
@@ -466,7 +469,30 @@ export function ProjectWorkspace() {
   }, [projectId])
 
   const projectFiles = useMemo(() => {
-    const serverFiles = hydratedProject?.files ?? []
+    // AQU-646 stage 2 — THE CENTRAL SEAM for hiding the audio-cue siblings.
+    //
+    // A sibling is a real file row (role "audio-cues", anchored to the text
+    // file it times), but it is cue DATA for one timeline track, not a
+    // document: nobody can open it, rename it, export it or translate it.
+    // Dropping it here — before `project` is rebuilt from this list — is what
+    // keeps it out of the file list, both export paths, the label picker,
+    // move/corpus, the dialogue table and everything else downstream that
+    // reads `project.files`. Do NOT add a second filter further down: if a
+    // surface is showing a sibling it is reading around this memo, and that
+    // is the bug.
+    //
+    // The surfaces that DON'T go through `project.files` need their own filter
+    // and have one: trash (below), project search, terminology, glossary and
+    // the project card.
+    //
+    // Filtered only when there is something to filter, like the optimistic
+    // deletes below: an untouched array keeps `projectFiles ===
+    // hydratedProject.files`, which is what lets the `project` memo hand the
+    // hydrated record straight back instead of respreading it.
+    const rawFiles = hydratedProject?.files ?? []
+    const serverFiles = rawFiles.some((f) => isAudioCueFile(f))
+      ? rawFiles.filter((f) => !isAudioCueFile(f))
+      : rawFiles
     // Overlay optimistic renames so the new label shows instantly and
     // detectSuggestions drops the applied file from the banner. Reconciled away
     // by the effect below once the server read reflects the new name.
@@ -1830,6 +1856,96 @@ export function ProjectWorkspace() {
     [activeFile, project, applyLinkVideo],
   )
 
+  // ── AQU-646 stage 2: the audio VTT's cues ────────────────────────────────
+  // Every sibling anchored to the open file, read off the UNFILTERED server
+  // list: `project.files` has already dropped them (see the projectFiles
+  // memo), which is the point of them. Detection is one of only two things
+  // that deliberately reads around that filter — the other is the search
+  // hook's `files`, which needs to recognise a sibling to drop its hits.
+  const audioCueSiblings = useMemo(
+    () =>
+      (hydratedProject?.files ?? []).filter(
+        (f) => isAudioCueFile(f) && f.anchorFileId === activeFileId,
+      ),
+    [hydratedProject?.files, activeFileId],
+  )
+  // Normally there is at most one. If a replace uploaded the new sibling and
+  // then failed to delete the old, there are two, and the greatest id is the
+  // right answer: file ids are UUIDv7, which sorts lexicographically by mint
+  // time, so "greatest" is deterministically "newest". Detection never has to
+  // guess — which is why a failed delete below is a warning and not a failure.
+  const audioCueSibling = useMemo(
+    () =>
+      audioCueSiblings.reduce<FileReference | null>(
+        (newest, f) => (newest && newest.id >= f.id ? newest : f),
+        null,
+      ),
+    [audioCueSiblings],
+  )
+  const { audioCues } = useAudioCueCells({
+    projectId: project?.id ?? null,
+    siblingFileId: audioCueSibling?.id ?? null,
+    getToken: getTokenForFile,
+  })
+  const [importAudioVttOpen, setImportAudioVttOpen] = useState(false)
+  /**
+   * Write the picked cues as this file's audio-cue sibling.
+   *
+   * IMPORT FIRST, DELETE SECOND. The upload is atomic (bulkUploadSource stages
+   * the file and only publishes it once every cell has landed), so on failure
+   * the file simply never appears and the sibling already on screen is
+   * untouched — there is no window in which the track is gone. Deleting first
+   * would open exactly that window, and a failed upload after it would leave
+   * the file with no cues at all.
+   *
+   * The delete then sweeps EVERY sibling for this anchor, not just the one
+   * that was showing: that self-heals an orphan left behind by a previous
+   * replace whose delete leg failed.
+   */
+  const handleImportAudioVtt = useCallback(
+    async (parsed: ParsedAudioVtt, sourceFileName: string) => {
+      if (!project?.id || !activeFile) return
+      // The upload is a direct HTTP write, not an outbox event, so offline it
+      // fails at the network rather than queueing — say so up front instead of
+      // showing a spinner that can only end in a request error.
+      if (!navigator.onLine) {
+        toast.error("Audio cues can't be imported while offline.")
+        return
+      }
+      const stale = audioCueSiblings.map((f) => f.id)
+      let uploaded
+      try {
+        uploaded = await uploadAudioCueFile({
+          projectId: project.id,
+          anchorFileId: activeFile.id,
+          anchorFileName: activeFile.name,
+          sourceFileName,
+          cues: parsed.cues,
+          getToken: getTokenForFile,
+        })
+      } catch (e) {
+        toast.error(
+          e instanceof Error ? `Couldn't import the audio cues: ${e.message}` : "Couldn't import the audio cues.",
+        )
+        return
+      }
+      try {
+        for (const fileId of stale) {
+          await emitFileDelete({ projectId: project.id, fileId, author: currentUsername })
+        }
+        if (stale.length > 0) await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+      } catch (e) {
+        // Not an error the user has to act on: the new cues are in, and the
+        // newest-id rule above means the stale sibling is invisible either way.
+        console.warn("[audio-cues] replacing sibling: delete failed", e)
+        toast.warning("The new audio cues are in, but the ones they replaced couldn't be tidied away.")
+      }
+      refresh()
+      toast.success(`Imported ${uploaded.cellCount} audio cues.`)
+    },
+    [project?.id, activeFile, audioCueSiblings, currentUsername, getTokenForFile, getTokenForProjectFile, refresh],
+  )
+
   const [videoDialogOpen, setVideoDialogOpen] = useState(false)
   // Nothing reads this any more (round 8 removed the dead cue clock below), but
   // the player it belongs to comes back with the event grammar in v1.x, so the
@@ -1886,7 +2002,12 @@ export function ProjectWorkspace() {
     results: searchResults,
     loading: searchLoading,
     ready: searchReady,
-  } = useWorkspaceSearch({ projectId: project?.id ?? null, getToken: getTokenForFile, files: project?.files || [] })
+    // AQU-646 stage 2: the UNFILTERED list, unlike everything else fed from
+    // `project.files`. The server's FTS index has the audio-cue siblings'
+    // transcripts in it whether or not this client lists the files, so the
+    // hook has to be able to RECOGNISE a sibling to drop its hits — hand it
+    // the already-hidden list and it would only see an unknown file id.
+  } = useWorkspaceSearch({ projectId: project?.id ?? null, getToken: getTokenForFile, files: hydratedProject?.files || [] })
 
   // Merge: AD-14 (this branch) retired the composite-health `penalties` path.
   // Comments handlers take main's Phase 2c-gamma rip — threads/messages lived
@@ -2922,27 +3043,13 @@ export function ProjectWorkspace() {
   const jumpToCellIdFollowing = useCallback((cellId: string) => {
     editorRef.current?.scrollToCellId(cellId, { flash: true, follow: "engage" })
   }, [])
-  // AQU-646 round 8: someone clicked a silence on the source band. The timeline
-  // has already put the playhead on its start; this is the table's half.
-  //
-  // Scroll to the line BEFORE the gap and pulse the lines on BOTH sides of it.
-  // Scrolling alone drops you into a long list with several silences in view and
-  // nothing saying which one you clicked (Sam, 2026-08-11) — the two pulses
-  // bracket the gap, so the eye lands on the space between them.
-  //
-  // Deliberately NOT selectFromChip: that sets selectedId and draws a selection
-  // ring, and nothing was selected. A silence is not a thing you can select.
-  const revealGap = useCallback(
-    (_startSec: number, beforeCellId: string | null, afterCellId: string | null) => {
-      // The leading silence has no line before it, so there is nowhere to
-      // scroll — the playhead is already at 0, which says it well enough.
-      if (beforeCellId) {
-        editorRef.current?.scrollToCellId(beforeCellId, { flash: false })
-      }
-      editorRef.current?.pulseCells([beforeCellId, afterCellId].filter((id): id is string => Boolean(id)))
-    },
-    [],
-  )
+  // AQU-646 stage 2: a gap click used to scroll the table to the silence and
+  // pulse the lines bracketing it. The band it belonged to is gone, and the
+  // gaps on the row that replaced it are gaps in SPEECH, whose boundaries do
+  // not line up with the text cues — pulsing two subtitle rows around one
+  // would claim a correspondence that isn't there. A gap click is a seek now,
+  // and nothing else. EditorTable.pulseCells stays: it is the table's own API
+  // and other callers may yet want it.
 
   // The bottom bar's per-advance jump: startQueue captures this ONCE, but the
   // lens can change mid-run — so the "driver owns follow while stacked" gate
@@ -4227,9 +4334,18 @@ export function ProjectWorkspace() {
 
   const trashFiles = useMemo(() => {
     const byId = new Map<string, FileSummary>()
-    for (const f of deletedFiles) byId.set(f.fileId, f)
+    // AQU-646 stage 2: replacing a file's audio cues soft-deletes the sibling
+    // it replaced, so without this every replace would leave a "recently
+    // deleted" row for a file the user never knew existed and cannot use —
+    // restoring one would only add a second set of cues behind the timeline's
+    // newest-wins rule. Filtered here rather than in refreshDeletedFiles: that
+    // function's server ids are what reconcile the optimistic rows away, and
+    // thinning them there would strand any row it dropped. (`role` arrives
+    // nullable off the server read, hence the coalesce.)
+    const isDocument = (f: FileSummary) => !isAudioCueFile({ role: f.role ?? undefined })
+    for (const f of deletedFiles) if (isDocument(f)) byId.set(f.fileId, f)
     for (const f of optimisticTrash) {
-      if (!byId.has(f.fileId)) byId.set(f.fileId, f)
+      if (isDocument(f) && !byId.has(f.fileId)) byId.set(f.fileId, f)
     }
     return Array.from(byId.values())
   }, [deletedFiles, optimisticTrash])
@@ -4859,15 +4975,18 @@ export function ProjectWorkspace() {
   )
 
   // AQU-646 round 8: the text table's add/remove controls. Live only in the
-  // VTT-plus-footage arrangement — the same test the timeline's band uses, plus
-  // the permission that actually creates the row — and undefined everywhere
-  // else, so no other workflow renders anything new.
+  // VTT-plus-footage arrangement — the same test the timeline asks about the
+  // file's nature, plus the permission that actually creates the row — and
+  // undefined everywhere else, so no other workflow renders anything new.
+  //
+  // Named for the source band until stage 2, which deleted the band; these
+  // cells only ever fed the table's insert strip, so the name now says that.
   //
   // Gated on `legacyCellsNeeded` through audioMergedCells: outside the media
   // lens that array is empty by design, and forcing it would cost a full
   // thousand-object rebuild on every store bump for a surface nobody is looking
   // at. This is why the controls are a media-lens affordance.
-  const sourceBandCells = activeFile?.coreMediaUrl && legacyCellsNeeded
+  const addLineCells = activeFile?.coreMediaUrl && legacyCellsNeeded
     && !audioMergedCells.some((c) => (c.medium ?? "text") === "media")
     && canPerform("source.cell.create", project?.syncRole?.level ?? null)
     ? audioMergedCells
@@ -4875,17 +4994,17 @@ export function ProjectWorkspace() {
   const videoDurationForTable = useVideoDurationSec(activeFile?.coreMediaUrl ?? null)
   const insertSlots = useMemo(
     () =>
-      sourceBandCells
+      addLineCells
         ? insertSlotsByCell(
-            deriveSourceRegions(sourceBandCells, videoDurationForTable),
+            deriveSourceRegions(addLineCells, videoDurationForTable),
             MIN_ADDABLE_SPAN_SEC,
           )
         : EMPTY_INSERT_SLOTS,
-    [sourceBandCells, videoDurationForTable],
+    [addLineCells, videoDurationForTable],
   )
   const sourceLineEditing = useMemo(
     () =>
-      sourceBandCells
+      addLineCells
         ? {
             head: insertSlots.head,
             afterCell: insertSlots.afterCell,
@@ -4896,7 +5015,7 @@ export function ProjectWorkspace() {
             onRemoveLine: (cellId: string) => void handleRemoveLine(cellId),
           }
         : undefined,
-    [sourceBandCells, insertSlots, handleAddLine, handleRemoveLine],
+    [addLineCells, insertSlots, handleAddLine, handleRemoveLine],
   )
 
   // AQU-646 SUB-53 / pre-merge round: which job THIS FILE is for. The mode is
@@ -4904,12 +5023,34 @@ export function ProjectWorkspace() {
   // own inherits the legacy project-level value (so projects that chose Free
   // timing in Project Settings keep it), else Original timing.
   const timingMode = resolveFileTimingMode(activeFile, project ?? undefined)
-  // AQU-646 stage 1: the timeline's rows. Every file's overrides are empty
-  // today — nothing writes `file.track.set` yet — so this always merges out to
-  // the three defaults. Wiring the REAL merge now anyway is the point: when
-  // renames and extra tracks arrive, they arrive as data on the file, with no
-  // plumbing left to lay.
-  const timelineTracks = useMemo(() => deriveTracksForFile(activeFile), [activeFile])
+  // AQU-646 stage 2: which rows a file derives is a question about the file,
+  // and this is the only place that can answer it — tracks.ts is deliberately
+  // import-free, so what it knows about a file arrives as this flat context
+  // rather than as a FileReference it would have to reach into the parsers for.
+  //
+  // `hasMediaCells` is asked of the merged cells rather than of the file type,
+  // because that is the same array every other media-arrangement test in this
+  // file reads; outside the media lens it is empty by design, which is exactly
+  // when the timeline is not drawn either.
+  const trackContext = useMemo(
+    () => ({
+      isSubtitleImport: isSubtitleFile,
+      hasMediaCells: audioMergedCells.some((c) => (c.medium ?? "text") === "media"),
+      // null = no sibling file at all, so no cues and no row. An EMPTY array is
+      // a sibling still loading: the row exists, drawn empty, rather than
+      // appearing a moment after the timeline settles.
+      hasAudioCues: audioCues !== null,
+    }),
+    [isSubtitleFile, audioMergedCells, audioCues],
+  )
+  // Stage 1: every file's overrides are empty today — nothing writes
+  // `file.track.set` yet — so this merges out to the derived defaults. Wiring
+  // the REAL merge now anyway is the point: when renames and extra tracks
+  // arrive, they arrive as data on the file, with no plumbing left to lay.
+  const timelineTracks = useMemo(
+    () => deriveTracksForFile(activeFile, trackContext),
+    [activeFile, trackContext],
+  )
   // Pre-merge round: the control returned to the timeline toolbar, gated by
   // the same clearance the setting had in Project Settings (maintainer). The
   // gate is "don't pass the callback": below the floor the toolbar renders
@@ -6365,8 +6506,14 @@ export function ProjectWorkspace() {
                     // server. Offering the button below that bar would mint a
                     // guaranteed 403 and wedge the outbox.
                     canAddLine={canPerform("source.cell.create", project?.syncRole?.level ?? null)}
-                    onRevealGap={revealGap}
                     canLinkVideo={canPerform("file.video.set", project?.syncRole?.level ?? null)}
+                    // AQU-646 stage 2: the audio VTT. The import writes cells,
+                    // so it sits behind the SAME source.* floor as the add-line
+                    // button above and for the same reason.
+                    onRequestImportAudioVtt={() => setImportAudioVttOpen(true)}
+                    canImportAudioVtt={canPerform("source.cell.create", project?.syncRole?.level ?? null)}
+                    hasAudioCueTrack={audioCueSibling !== null}
+                    audioCues={audioCues}
                     onSeekToTime={handleTimelineSeekToTime}
                     tracks={timelineTracks}
                     timingMode={timingMode}
@@ -6417,6 +6564,9 @@ export function ProjectWorkspace() {
                     <MediaVideoPane
                       key={activeFile.id}
                       src={activeFile.coreMediaUrl}
+                      // AQU-646 stage 2: the pane's header now carries the
+                      // film's mute button, and audibility is stored per file.
+                      fileId={activeFile.id}
                       cells={audioMergedCells}
                       seekSec={videoSeek}
                       togglePlay={videoToggle}
@@ -6952,6 +7102,21 @@ export function ProjectWorkspace() {
           // dialog, which would otherwise mount over this one's focus trap.
           setLinkVideoOpen(false)
           handleLinkVideo(url)
+        }}
+      />
+      {/* AQU-646 stage 2: the audio VTT lands as this file's hidden cue
+          sibling. The dialog lives up here, beside the link-video one, because
+          the workspace is what owns the upload and the refresh that follows. */}
+      <ImportAudioVttDialog
+        open={importAudioVttOpen}
+        replacing={audioCueSibling !== null}
+        textFileName={activeFile?.name ?? ""}
+        onCancel={() => setImportAudioVttOpen(false)}
+        onConfirm={(parsed, sourceFileName) => {
+          // Close FIRST, like the link dialog above: the import runs for
+          // several seconds and reports with toasts, which a modal covers.
+          setImportAudioVttOpen(false)
+          void handleImportAudioVtt(parsed, sourceFileName)
         }}
       />
       <LinkVideoTimingDialog

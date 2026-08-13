@@ -8,7 +8,7 @@ import { selectQueueForFile } from "@/lib/audio/queue-scope"
 import { sourceClipAudioForCell } from "@/lib/audio/track-audio"
 import { resetVideoDurationsForTests, setVideoDurationSec } from "@/lib/timeline/video-duration"
 import { deriveTracksForFile } from "@/lib/timeline/tracks"
-import { ZOOM_MAX } from "@/lib/timeline/scale"
+import { ZOOM_DEFAULT, ZOOM_MAX } from "@/lib/timeline/scale"
 
 // AQU-646: the editor subscribes to the play-queue (read-only) for playhead
 // tracking. Mock the two hooks with mutable stubs so tests can simulate
@@ -17,27 +17,56 @@ let mockQueueState: QueueState = { kind: "idle" }
 let mockProgress: QueueProgress = { currentTime: 0, duration: 0, rate: 1, volume: 1 }
 // Round 5: the speaker buttons push audibility straight into the queue.
 let lastAudibility: { source: boolean; target: boolean } | null = null
+// Stage 2: audibility is a STORE now — lib/audio/audibility merges every toggle
+// against `getQueueAudibility()` rather than against component state, precisely
+// so the editor's button and the video pane's cannot clobber each other. So the
+// stub has to BE a store (value + getter + subscription), not just a recorder;
+// a stub that only remembered the last write would let the editor's button read
+// a stale value and the clobbering bug back in through the test suite.
+const audibilityStore = vi.hoisted(() => {
+  let value = { source: true, target: true }
+  const listeners = new Set<() => void>()
+  return {
+    get: () => value,
+    set: (next: { source: boolean; target: boolean }) => {
+      value = { source: next.source, target: next.target }
+      for (const l of listeners) l()
+    },
+    subscribe: (l: () => void) => {
+      listeners.add(l)
+      return () => void listeners.delete(l)
+    },
+  }
+})
 // Decision 2026-08-05: chips badge definitively-missing dubs.
 const mockMissingCells: ReadonlySet<string> = new Set()
-vi.mock("@/lib/audio/play-queue", () => ({
-  useQueueState: () => mockQueueState,
-  useQueueProgress: () => mockProgress,
-  // Uses the REAL scoping rule (a side-effect-free module) so this stub cannot
-  // drift from the guard that keeps one file's queue out of another's timeline.
-  useQueueForFile: (cellIds: ReadonlySet<string>) =>
-    selectQueueForFile(mockQueueState, mockProgress, cellIds),
-  useMissingClipCells: () => mockMissingCells,
-  MISSING_AUDIO_MESSAGE: "This clip's audio is missing.",
-  // 2026-08-11: the editor gates its clock write on this. Built over the REAL
-  // sourceClipAudioForCell (side-effect-free) for the same reason as
-  // selectQueueForFile above — the part that decides whether a position is a
-  // file position cannot be allowed to drift from the real rule.
-  queueClockIsFileTime: (cell: CellData | undefined | null) =>
-    cell?.medium === "media" && sourceClipAudioForCell(cell) != null,
-  setQueueAudibility: (a: { source: boolean; target: boolean }) => {
-    lastAudibility = a
-  },
-}))
+vi.mock("@/lib/audio/play-queue", async () => {
+  // Subscribed with React's own hook, exactly as the real one is.
+  const { useSyncExternalStore } = await import("react")
+  return {
+    useQueueState: () => mockQueueState,
+    useQueueProgress: () => mockProgress,
+    // Uses the REAL scoping rule (a side-effect-free module) so this stub cannot
+    // drift from the guard that keeps one file's queue out of another's timeline.
+    useQueueForFile: (cellIds: ReadonlySet<string>) =>
+      selectQueueForFile(mockQueueState, mockProgress, cellIds),
+    useMissingClipCells: () => mockMissingCells,
+    MISSING_AUDIO_MESSAGE: "This clip's audio is missing.",
+    // 2026-08-11: the editor gates its clock write on this. Built over the REAL
+    // sourceClipAudioForCell (side-effect-free) for the same reason as
+    // selectQueueForFile above — the part that decides whether a position is a
+    // file position cannot be allowed to drift from the real rule.
+    queueClockIsFileTime: (cell: CellData | undefined | null) =>
+      cell?.medium === "media" && sourceClipAudioForCell(cell) != null,
+    setQueueAudibility: (a: { source: boolean; target: boolean }) => {
+      lastAudibility = a
+      audibilityStore.set(a)
+    },
+    getQueueAudibility: () => audibilityStore.get(),
+    useQueueAudibility: () =>
+      useSyncExternalStore(audibilityStore.subscribe, audibilityStore.get, audibilityStore.get),
+  }
+})
 // Round 7: the editor claims the app-wide audio shortcut while mounted.
 const pushOverride = vi.fn()
 const releaseOverride = vi.fn()
@@ -899,16 +928,24 @@ describe("TimelineEditor — audio-first mode", () => {
   })
 })
 
-// AQU-646: the Source row has two possible tenants. For an imported recording
-// it is the dialogue lane, as before. For a subtitle file timed against footage
-// — which produces no media cells at all, which is why that row is simply blank
-// today — it is the band: the video's own audio, divided at the subtitle
-// timestamps, silences included.
-describe("TimelineEditor — the source-audio band", () => {
+// AQU-646 stage 2: the Source-audio row has two possible tenants, and the CELLS
+// decide which. An imported recording gets its dialogue lane, as always. A
+// subtitle file — no media cells at all — gets the AUDIO VTT's cues: a hidden
+// sibling file transcribing the film's own speech, drawn as chips with a dashed
+// empty chip over each stretch where nobody talks. The stage-1 "band" (the
+// film's audio, notionally split at the SUBTITLE timestamps) is gone; the film's
+// soundtrack gets no row, ever.
+describe("TimelineEditor — the Source-audio row (the audio VTT's cues)", () => {
   const VIDEO = "https://cdn/episode.m3u8"
   const subtitleCells = [
     cell({ id: "s1", original: "One", medium: "text", startTime: 41.792, endTime: 43.043 }),
     cell({ id: "s2", original: "Two", medium: "text", startTime: 50, endTime: 52 }),
+  ]
+  // The sibling's cells: transcript in `original`, seconds, and NO medium —
+  // they are neither this file's text nor anybody's media.
+  const audioCues = [
+    cell({ id: "c1", original: "Whoa there", startTime: 10, endTime: 20 }),
+    cell({ id: "c2", original: "Easy now", startTime: 30, endTime: 40 }),
   ]
   // An imported recording: media cells backed by the shared file-seeded clip.
   const importedMedia = [
@@ -918,26 +955,34 @@ describe("TimelineEditor — the source-audio band", () => {
     } as Partial<CellData>),
   ]
 
+  // The rows a subtitle file derives, with and without an audio VTT imported.
+  const subtitleTracks = (hasAudioCues: boolean) =>
+    deriveTracksForFile(null, { isSubtitleImport: true, hasMediaCells: false, hasAudioCues })
+
   beforeEach(() => resetVideoDurationsForTests())
 
-  it("draws the band for a subtitle file with footage linked, in place of the dialogue lane", () => {
+  it("draws each audio cue as the SAME card an mp3 import's source row uses", () => {
     setVideoDurationSec(VIDEO, 120)
     render(
-      <TimelineEditor fileId="f1" coreMediaUrl={VIDEO} editable cells={subtitleCells} onRetimeSubtitle={() => {}} />,
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={VIDEO} editable cells={subtitleCells}
+        tracks={subtitleTracks(true)} audioCues={audioCues} onRetimeSubtitle={() => {}}
+      />,
     )
     const lane = screen.getByTestId("tl-source-regions")
-    // The cues render as the SAME cards an mp3 import's source row draws.
     expect(within(lane).getAllByTestId(/^tl-card-/)).toHaveLength(2)
-    // The subtitle lane is still there; the DIALOGUE lane is what the band replaced.
-    expect(screen.queryAllByTestId("tl-lane")).toHaveLength(1)
+    expect(within(lane).getByText("Whoa there")).toBeInTheDocument()
   })
 
-  it("reaches past the last subtitle to the end of the footage", () => {
+  it("the row's trailing silence runs to the end of the footage", () => {
     setVideoDurationSec(VIDEO, 120)
     render(
-      <TimelineEditor fileId="f1" coreMediaUrl={VIDEO} editable cells={subtitleCells} onRetimeSubtitle={() => {}} />,
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={VIDEO} editable cells={subtitleCells}
+        tracks={subtitleTracks(true)} audioCues={audioCues} onRetimeSubtitle={() => {}}
+      />,
     )
-    // The trailing silence — 52s to 120s — is a real, reachable chip.
+    // The last cue ends at 40s; 40→120 is a real, reachable chip.
     const gaps = screen.getAllByTestId("tl-source-gap")
     const last = gaps[gaps.length - 1]
     expect(Number(last.getAttribute("data-region-end"))).toBe(120)
@@ -945,61 +990,88 @@ describe("TimelineEditor — the source-audio band", () => {
 
   it("still draws the row before the footage's length is known", () => {
     render(
-      <TimelineEditor fileId="f1" coreMediaUrl={VIDEO} editable cells={subtitleCells} onRetimeSubtitle={() => {}} />,
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={VIDEO} editable cells={subtitleCells}
+        tracks={subtitleTracks(true)} audioCues={audioCues} onRetimeSubtitle={() => {}}
+      />,
     )
     // Spans the cues, exactly as the row did before — no crash, no empty row.
     const lane = screen.getByTestId("tl-source-regions")
     expect(within(lane).getAllByTestId(/^tl-card-/)).toHaveLength(2)
   })
 
-  // 2026-08-11: this button used to be hidden here, because setQueueAudibility
-  // only reaches the queue's own elements and there are none in this
-  // arrangement. It is back, and the video pane honours the same flag — muting
-  // the original while listening back to a take is the point of having it.
-  it("keeps the source speaker button, which now mutes the linked video", () => {
+  // THE LAYOUT-FLOOR GUARD, and the reason this test does not go anywhere near a
+  // row. `subtitleFileWithFootage` also feeds the layout's duration floor, which
+  // is the only thing that makes the track longer than its last cue. Couple that
+  // floor to "has audio cues" by accident and the final minutes of a 70-minute
+  // episode become unreachable on EVERY row at once, with nothing on screen to
+  // suggest they exist. The band that used to demonstrate this is gone, and the
+  // floor was never about the band.
+  it("reaches the end of the footage with no audio VTT imported at all", () => {
+    localStorage.removeItem("codex:timelineZoom:floorfile")
     setVideoDurationSec(VIDEO, 120)
     render(
-      <TimelineEditor fileId="f1" coreMediaUrl={VIDEO} editable cells={subtitleCells} onRetimeSubtitle={() => {}} />,
+      <TimelineEditor
+        fileId="floorfile" coreMediaUrl={VIDEO} editable cells={subtitleCells}
+        tracks={subtitleTracks(false)} onRetimeSubtitle={() => {}}
+      />,
     )
-    const speaker = screen.getByTestId("tl-speaker-source")
-    expect(speaker).toHaveAttribute("aria-pressed", "true")
-    fireEvent.click(speaker)
-    expect(screen.getByTestId("tl-speaker-source")).toHaveAttribute("aria-pressed", "false")
-    // The published flag is what the pane reads.
-    expect(lastAudibility).toEqual({ source: false, target: true })
+    // The last cue ends at 52s; the scrolling track runs to the footage's 120.
+    const track = screen.getByTestId("tl-scroll").firstElementChild as HTMLElement
+    expect(parseFloat(track.style.width) / ZOOM_DEFAULT).toBeGreaterThanOrEqual(120)
+    // …and there is no Source-audio row to have done it for us.
+    expect(screen.queryByTestId("tl-source-regions")).not.toBeInTheDocument()
+  })
+
+  // Stage 2: the film's mute moved onto the film (the video pane's header). This
+  // button publishes into the play queue, which can only reach the queue's own
+  // elements — and a subtitle file has none — so leaving it here would have left
+  // two source-mute controls on screen, one of them silencing nothing.
+  it("hands the source mute to the video pane — no gutter speaker on a subtitle file", () => {
+    setVideoDurationSec(VIDEO, 120)
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={VIDEO} editable cells={subtitleCells}
+        tracks={subtitleTracks(true)} audioCues={audioCues} onRetimeSubtitle={() => {}}
+      />,
+    )
+    expect(screen.queryByTestId("tl-speaker-source")).not.toBeInTheDocument()
   })
 
   it("leaves the target row's speaker button alone", () => {
     setVideoDurationSec(VIDEO, 120)
     render(
-      <TimelineEditor fileId="f1" coreMediaUrl={VIDEO} editable cells={subtitleCells} onRetimeSubtitle={() => {}} />,
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={VIDEO} editable cells={subtitleCells}
+        tracks={subtitleTracks(true)} audioCues={audioCues} onRetimeSubtitle={() => {}}
+      />,
     )
     expect(screen.getByTestId("tl-speaker-target")).toHaveAttribute("aria-pressed", "true")
   })
 
-  it("leaves an imported recording alone even when it also has a video linked", () => {
+  it("an imported recording keeps its gutter source speaker, and it still publishes", () => {
+    localStorage.removeItem("codex:timelineAudibility:spk2")
     setVideoDurationSec(VIDEO, 120)
     render(
-      <TimelineEditor fileId="f1" coreMediaUrl={VIDEO} editable cells={importedMedia} onRetimeSubtitle={() => {}} />,
+      <TimelineEditor fileId="spk2" coreMediaUrl={VIDEO} editable cells={importedMedia} onRetimeSubtitle={() => {}} />,
     )
+    // The dialogue lane, not the cue row — media cells own this track.
     expect(screen.queryByTestId("tl-source-regions")).not.toBeInTheDocument()
     expect(screen.getAllByTestId("tl-lane")).toHaveLength(2)
-    expect(screen.getByTestId("tl-speaker-source")).toBeInTheDocument()
-  })
-
-  it("does not draw the band with no video linked", () => {
-    render(
-      <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={subtitleCells} onRetimeSubtitle={() => {}} />,
-    )
-    expect(screen.queryByTestId("tl-source-regions")).not.toBeInTheDocument()
+    const speaker = screen.getByTestId("tl-speaker-source")
+    expect(speaker).toHaveAttribute("aria-pressed", "true")
+    fireEvent.click(speaker)
+    expect(screen.getByTestId("tl-speaker-source")).toHaveAttribute("aria-pressed", "false")
+    expect(lastAudibility).toEqual({ source: false, target: true })
   })
 
   // Round 8: the VTT's own timing is not ours to nudge, but a line added into
   // a silence still moves. Both cards live in the SAME lane, so this is the
   // test that would catch a lane-wide freeze pretending to be a per-cell one.
   describe("imported cues are frozen, added lines are not", () => {
-    // Scoped to the Subtitles track on purpose: the band draws the SAME cell as
-    // a chip too, so an unscoped testid query matches twice.
+    // Scoped to the Subtitles track on purpose: it is the only row that may
+    // retime anything, and other rows draw these same cells, so an unscoped
+    // query could quietly start asserting against the wrong one.
     const gripsInSubtitleLane = (cardId: string) =>
       within(screen.getByTestId("tl-lane")).getByTestId(`tl-card-${cardId}`)
         .querySelectorAll(".cursor-ew-resize")
@@ -1024,10 +1096,10 @@ describe("TimelineEditor — the source-audio band", () => {
     })
 
     it("SUB-36's subtitle mirror keeps its grips", () => {
-      // The mirror cannot collide with the band — it exists only when there ARE
-      // dialogue cells, and the band needs there to be none — but the predicate
-      // is scoped rather than trusted, so assert the other side of that.
-      // deriveLanes only mirrors a media cell that has transcript/translation.
+      // The mirror cannot collide with the freeze — it exists only when there
+      // ARE dialogue cells, and the freeze predicate needs there to be none —
+      // but the predicate is scoped rather than trusted, so assert the other
+      // side of it. deriveLanes only mirrors a media cell with a transcript.
       setVideoDurationSec(VIDEO, 120)
       render(
         <TimelineEditor
@@ -1050,19 +1122,22 @@ describe("TimelineEditor — the source-audio band", () => {
     })
   })
 
-  it("clicking a silence seeks its start and names the lines on both sides", () => {
+  // Round 8 sent a gap click to the table as well, to scroll to the lines either
+  // side and pulse them. Stage 2 drops that half deliberately: these gaps are
+  // silences in the AUDIO cues, and the reveal matched their start second
+  // against the TEXT region map, whose boundaries do not coincide — so it would
+  // usually find nothing, and when it did find something it would be flashing
+  // subtitle rows around a stretch where nobody SPOKE.
+  it("clicking a silence in the audio row seeks its start, and does nothing else", () => {
     setVideoDurationSec(VIDEO, 120)
     const onSeekToTime = vi.fn()
-    const onRevealGap = vi.fn()
+    const onChipActivated = vi.fn()
     render(
       <TimelineEditor
-        fileId="f1" coreMediaUrl={VIDEO} editable
-        cells={[
-          cell({ id: "a", original: "One", medium: "text", startTime: 10, endTime: 20 }),
-          cell({ id: "b", original: "Two", medium: "text", startTime: 30, endTime: 40 }),
-        ]}
+        fileId="f1" coreMediaUrl={VIDEO} editable cells={subtitleCells}
+        tracks={subtitleTracks(true)} audioCues={audioCues}
         onSeekToTime={onSeekToTime}
-        onRevealGap={onRevealGap}
+        onChipActivated={onChipActivated}
         onRetimeSubtitle={() => {}}
       />,
     )
@@ -1070,7 +1145,33 @@ describe("TimelineEditor — the source-audio band", () => {
     const middle = gaps.find((g) => g.getAttribute("data-region-start") === "20")!
     fireEvent.click(middle, { clientX: 400 })
     expect(onSeekToTime).toHaveBeenCalledWith(20)
-    expect(onRevealGap).toHaveBeenCalledWith(20, "a", "b")
+    expect(onChipActivated).not.toHaveBeenCalled()
+    expect(screen.getByTestId("tl-detail-empty")).toBeInTheDocument()
+  })
+
+  // The one deliberate UX choice of this round. Selection means "this is the
+  // current chip", and everything it drives — the detail readout, the media
+  // cursor, the row the text table scrolls to — is a TEXT-cell surface. An audio
+  // cue has no row in any of them.
+  it("an audio chip seeks the film but never selects", () => {
+    setVideoDurationSec(VIDEO, 120)
+    const onSeekToTime = vi.fn()
+    const onChipActivated = vi.fn()
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={VIDEO} editable cells={subtitleCells}
+        tracks={subtitleTracks(true)} audioCues={audioCues}
+        onSeekToTime={onSeekToTime}
+        onChipActivated={onChipActivated}
+        onRetimeSubtitle={() => {}}
+      />,
+    )
+    // Resolved against the CUES: laneProps.onSeek looks ids up in the file's
+    // own cells, where "c2" does not exist, and the chip would be a dead click.
+    fireEvent.click(within(screen.getByTestId("tl-source-regions")).getByTestId("tl-card-c2"))
+    expect(onSeekToTime).toHaveBeenCalledWith(30)
+    expect(onChipActivated).not.toHaveBeenCalled()
+    expect(screen.getByTestId("tl-detail-empty")).toBeInTheDocument()
   })
 
   // Round 8, "no room, no add". These run ZOOMED IN ON PURPOSE: the buttons
@@ -1098,12 +1199,10 @@ describe("TimelineEditor — the source-audio band", () => {
       ])
       expect(screen.queryByTestId("tl-add-line-20")).not.toBeInTheDocument()
       expect(screen.queryByTestId(/^tl-target-add-20/)).not.toBeInTheDocument()
-      // ...and the band does not draw a chip there either. Same threshold: the
-      // row can never stay silent about a stretch the pencil offers to fill.
-      const gapStarts = screen
-        .getAllByTestId("tl-source-gap")
-        .map((el) => Number(el.getAttribute("data-region-start")))
-      expect(gapStarts).not.toContain(20)
+      // Stage 2 dropped this test's third assertion — that the Source row also
+      // declined to draw a chip over the same 0.15s. That row draws the AUDIO
+      // cues now, a different set of boundaries entirely, so the two answers are
+      // no longer about the same stretch. Both surfaces still share the number.
     })
 
     it("offers both ways in over a silence with room", () => {
@@ -1113,10 +1212,6 @@ describe("TimelineEditor — the source-audio band", () => {
         cell({ id: "b", original: "B", medium: "text", startTime: 20.3, endTime: 30 }),
       ])
       expect(screen.getByTestId("tl-add-line-20")).toBeInTheDocument()
-      const gapStarts = screen
-        .getAllByTestId("tl-source-gap")
-        .map((el) => Number(el.getAttribute("data-region-start")))
-      expect(gapStarts).toContain(20)
     })
   })
 })
@@ -1143,9 +1238,12 @@ describe("TimelineEditor — rows come from the track model", () => {
     Array.from(
       screen
         .getByTestId("tl-scroll")
-        .querySelectorAll('[data-testid="tl-lane"],[data-testid="tl-target-lane"]'),
+        .querySelectorAll('[data-testid="tl-lane"],[data-testid="tl-target-lane"],[data-testid="tl-source-regions"]'),
     ).map((el) => el.getAttribute("data-variant") ?? el.getAttribute("data-testid"))
 
+  // THE DUBBING GUARD. Stage 2 renamed every track kind and made derivation
+  // file-aware; a project that imports mp3s must see none of it. This case is
+  // deliberately unchanged from stage 1, down to the strings.
   it("draws the gutter and the lanes from the same list, in its order", () => {
     render(
       <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={rowCells} onRetimeSubtitle={() => {}} />,
@@ -1167,6 +1265,51 @@ describe("TimelineEditor — rows come from the track model", () => {
     )
     expect(gutterNames()).toEqual(["Armenian dub", "Subtitles", "Source audio"])
     expect(laneRows()).toEqual(["tl-target-lane", "subtitle", "dialogue"])
+  })
+
+  // ── Stage 2: the same one list, drawing a subtitle file's rows ──
+
+  const cueCells = [cell({ id: "s1", original: "One", translated: "Uno", medium: "text", startTime: 0, endTime: 4 })]
+  const subtitleTracks = (hasAudioCues: boolean) =>
+    deriveTracksForFile(null, { isSubtitleImport: true, hasMediaCells: false, hasAudioCues })
+
+  it("a subtitle file with no audio VTT has no Source-audio row at all", () => {
+    // Not an empty row: an empty "Source audio" reads as "this episode has no
+    // speech", which is the opposite of true until someone imports the cues.
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={cueCells}
+        tracks={subtitleTracks(false)} onRetimeSubtitle={() => {}}
+      />,
+    )
+    expect(gutterNames()).toEqual(["Source subtitles", "Target subtitles", "Target audio"])
+    expect(laneRows()).toEqual(["subtitle", "target-subtitle", "tl-target-lane"])
+  })
+
+  it("importing an audio VTT drops the Source-audio row into its own seat", () => {
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={cueCells}
+        tracks={subtitleTracks(true)}
+        audioCues={[cell({ id: "c1", original: "Whoa there", startTime: 1, endTime: 2 })]}
+        onRetimeSubtitle={() => {}}
+      />,
+    )
+    expect(gutterNames()).toEqual(["Source subtitles", "Source audio", "Target subtitles", "Target audio"])
+    expect(laneRows()).toEqual(["subtitle", "source-audio-cues", "target-subtitle", "tl-target-lane"])
+  })
+
+  it("the Target-subtitles row shows the translation, not the source text", () => {
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={cueCells}
+        tracks={subtitleTracks(false)} onRetimeSubtitle={() => {}}
+      />,
+    )
+    const rows = screen.getAllByTestId("tl-lane")
+    const target = rows.find((l) => l.getAttribute("data-variant") === "target-subtitle")!
+    expect(within(target).getByTestId("tl-card-s1")).toHaveTextContent("Uno")
+    expect(within(target).queryByText("One")).toBeNull()
   })
 })
 

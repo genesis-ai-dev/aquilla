@@ -430,7 +430,7 @@ export interface OutboxEventPayloads {
   "file.track.set": {
     trackId: string
     patch: {
-      kind?: "subtitles" | "source-audio" | "target-audio"
+      kind?: "source-subtitles" | "source-audio" | "target-subtitles" | "target-audio"
       name?: string | null
       order?: number | null
       groupId?: string | null

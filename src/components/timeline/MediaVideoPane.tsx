@@ -20,7 +20,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import { cn } from "@/lib/utils"
 import type { CellData } from "@/hooks/useCells"
-import { queueClockIsFileTime, useQueueAudibility, useQueueForFile } from "@/lib/audio/play-queue"
+import { seedAudibility, toggleAudibility, useQueueAudibility } from "@/lib/audio/audibility"
+import { queueClockIsFileTime, useQueueForFile } from "@/lib/audio/play-queue"
 import { effectiveSourceText } from "@/lib/cell-text"
 import type { DirectionMode, TextDirection } from "@/lib/text-direction"
 import { cellIdAtSec } from "@/lib/timeline/source-regions"
@@ -66,6 +67,11 @@ const VIDEO_READY_TIMEOUT_MS = 4000
 
 export interface MediaVideoPaneProps {
   src: string
+  /** The file the picture belongs to — the key the mute preference is stored
+   *  under. Required rather than optional on purpose: an absent id would seed
+   *  nothing and mute nothing, silently, and the compiler catching a caller
+   *  that forgot is cheaper than finding that out on screen. */
+  fileId: string
   cells: CellData[]
   /** A nonce-keyed seek from the timeline. Applied unconditionally, because the
    *  queue drops seeks in several ordinary cases (no session, scrubbing into
@@ -105,6 +111,7 @@ export interface MediaVideoPaneProps {
 
 export function MediaVideoPane({
   src,
+  fileId,
   cells,
   seekSec,
   togglePlay,
@@ -152,9 +159,17 @@ export function MediaVideoPane({
    * the user gets a frozen first frame, no controls, and no way to start it.
    */
   const slaved = useMemo(() => cells.some((c) => queueClockIsFileTime(c)), [cells])
-  /** The timeline's Source-track speaker button. Only bites in the standalone
+  /** Whether the film's soundtrack is on. Only bites in the standalone
    *  arrangement — a slaved picture is already silent. */
   const sourceAudible = useQueueAudibility().source
+  // Put this file's stored preference into the play-queue store, which is where
+  // every surface reads it from. Keyed on the file ALONE: re-seeding on
+  // anything else would re-read the value on disk and undo a mute made this
+  // session. TimelineEditor seeds too — first mount wins, the other is a no-op
+  // re-publish of the identical value.
+  useEffect(() => {
+    seedAudibility(fileId)
+  }, [fileId])
 
   const setMode = useCallback((next: SubtitleMode) => {
     setModeState(next)
@@ -603,6 +618,10 @@ export function MediaVideoPane({
   }
 
   if (failed) {
+    // The error card renders the same header WITHOUT a mute control, and that
+    // absence is deliberately the only gate: a source that will not load has no
+    // soundtrack to silence, so the button must not appear beside the reason it
+    // failed.
     return (
       <VideoPaneErrorCard
         src={src}
@@ -618,7 +637,17 @@ export function MediaVideoPane({
       data-video-state={slaved ? "slaved" : "standalone"}
       className="flex h-full min-h-0 flex-col overflow-hidden border-r border-border"
     >
-      <VideoPaneHeader src={src} />
+      <VideoPaneHeader
+        src={src}
+        // Only the standalone arrangement gets the button. A slaved picture is
+        // force-muted below whatever the preference says, so offering it there
+        // would be a control that visibly does nothing.
+        muteControl={
+          slaved
+            ? undefined
+            : { audible: sourceAudible, onToggle: () => toggleAudibility(fileId, "source") }
+        }
+      />
       {/* The black field fills everything under the header, and the picture is
           centred in it at the video's own proportions — leftover space becomes
           cinema bars instead of blank page. */}
@@ -646,10 +675,12 @@ export function MediaVideoPane({
           preload="metadata"
           // Slaved: silent picture, no competing controls. Standalone: this IS
           // the player, so it keeps both — and it is also the SOURCE AUDIO, so
-          // the timeline's Source-track speaker button mutes it. That button
-          // publishes through setQueueAudibility, which reaches the queue's own
-          // elements; there are none in this arrangement, so the pane honours
-          // the same flag directly. (AQU-646, 2026-08-11)
+          // the mute button in this pane's own HEADER silences it. (It lived on
+          // the timeline's Source-audio track until stage 2 made that track cue
+          // data, which mutes nothing.) The button publishes through the
+          // audibility module into the queue store, which reaches the queue's
+          // own elements; there are none in this arrangement, so the pane
+          // honours the same flag directly. (AQU-646, 2026-08-11 / 2026-08-13)
           muted={slaved || !sourceAudible}
           controls={!slaved}
           onError={() => {

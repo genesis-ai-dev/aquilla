@@ -72,12 +72,12 @@ function dispatch(authed: AuthorizedEvent<'file.track.set'>) {
 
 describe('file.track.set — role floor', () => {
   it('accepts a maintainer (600)', async () => {
-    const result = await authorizeTrackSetRaw({ trackId: 'subtitles', patch: VALID_PATCH }, 600)
+    const result = await authorizeTrackSetRaw({ trackId: 'source-subtitles', patch: VALID_PATCH }, 600)
     expect(result.ok).toBe(true)
   })
 
   it('rejects a contributor (400) — track structure is file structure', async () => {
-    const result = await authorizeTrackSetRaw({ trackId: 'subtitles', patch: VALID_PATCH }, 400)
+    const result = await authorizeTrackSetRaw({ trackId: 'source-subtitles', patch: VALID_PATCH }, 400)
     expect(result.ok).toBe(false)
     if (result.ok) throw new Error('unreachable')
     expect(result.status).toBe(403)
@@ -108,7 +108,7 @@ describe('file.track.set — accepted writes', () => {
 
   it('accepts a field-clearing patch', async () => {
     const authed = await authorizeTrackSet({
-      trackId: 'subtitles',
+      trackId: 'source-subtitles',
       patch: { name: null, order: null, groupId: null },
     })
     expect(dispatch(authed).ok).toBe(true)
@@ -118,17 +118,17 @@ describe('file.track.set — accepted writes', () => {
   // existing ones (0.5) or ahead of the first (-1) without rewriting anything
   // else. Both shapes must stay accepted forever.
   it('accepts a negative order', async () => {
-    const authed = await authorizeTrackSet({ trackId: 'subtitles', patch: { order: -1 } })
+    const authed = await authorizeTrackSet({ trackId: 'source-subtitles', patch: { order: -1 } })
     expect(dispatch(authed).ok).toBe(true)
   })
 
   it('accepts a fractional order', async () => {
-    const authed = await authorizeTrackSet({ trackId: 'subtitles', patch: { order: 0.5 } })
+    const authed = await authorizeTrackSet({ trackId: 'source-subtitles', patch: { order: 0.5 } })
     expect(dispatch(authed).ok).toBe(true)
   })
 
   it('accepts a 120-character name (the cap itself is legal)', async () => {
-    const authed = await authorizeTrackSet({ trackId: 'subtitles', patch: { name: 'x'.repeat(120) } })
+    const authed = await authorizeTrackSet({ trackId: 'source-subtitles', patch: { name: 'x'.repeat(120) } })
     expect(dispatch(authed).ok).toBe(true)
   })
 })
@@ -139,7 +139,7 @@ describe('file.track.set — rejected writes', () => {
     // ever sees one, so clear the field on the already-authorized envelope to
     // reach the handler's own guard — the last line of defence for in-process
     // callers that skip the route.
-    const authed = await authorizeTrackSet({ trackId: 'subtitles', patch: VALID_PATCH })
+    const authed = await authorizeTrackSet({ trackId: 'source-subtitles', patch: VALID_PATCH })
     delete (authed.event as { fileId?: string }).fileId
     expect(() => dispatch(authed)).toThrow(/missing fileId/)
   })
@@ -149,18 +149,29 @@ describe('file.track.set — rejected writes', () => {
     ['an empty trackId', { trackId: '', patch: VALID_PATCH }, /unusable trackId/],
     ['a trackId with punctuation', { trackId: 'sub titles!', patch: VALID_PATCH }, /unusable trackId/],
     ['a trackId over 64 chars', { trackId: 'a'.repeat(65), patch: VALID_PATCH }, /unusable trackId/],
-    ['an undefined patch', { trackId: 'subtitles' }, /non-object patch/],
-    ['a string patch', { trackId: 'subtitles', patch: 'name' }, /non-object patch/],
-    ['an array patch', { trackId: 'subtitles', patch: [] }, /non-object patch/],
-    ['an empty patch', { trackId: 'subtitles', patch: {} }, /empty patch/],
+    ['an undefined patch', { trackId: 'source-subtitles' }, /non-object patch/],
+    ['a string patch', { trackId: 'source-subtitles', patch: 'name' }, /non-object patch/],
+    ['an array patch', { trackId: 'source-subtitles', patch: [] }, /non-object patch/],
+    ['an empty patch', { trackId: 'source-subtitles', patch: {} }, /empty patch/],
     [
       'an unknown patch key',
-      { trackId: 'subtitles', patch: { name: 'Captions', colour: 'sky' } },
+      { trackId: 'source-subtitles', patch: { name: 'Captions', colour: 'sky' } },
       /unknown patch key: colour/,
     ],
     [
       'an unknown kind',
       { trackId: 'custom-1', patch: { kind: 'video' } },
+      /unknown track kind/,
+    ],
+    // The stage-2 rename ('subtitles' -> 'source-subtitles') was free only
+    // because the kind was dormant and nothing had ever persisted the old
+    // word. This case is what keeps it that way: if the retired spelling
+    // could still get in, files.meta would start carrying a kind the client's
+    // merge drops on sight, and the row would be invisible with no way to
+    // tell it from a bug.
+    [
+      'the retired "subtitles" kind',
+      { trackId: 'custom-1', patch: { kind: 'subtitles' } },
       /unknown track kind/,
     ],
     // kind is identity — there is nothing to fall back to, so null is not a
@@ -170,39 +181,39 @@ describe('file.track.set — rejected writes', () => {
     // ever contradict it.
     [
       'a kind on a default track',
-      { trackId: 'subtitles', patch: { kind: 'subtitles' } },
-      /sets kind on default track subtitles/,
+      { trackId: 'source-subtitles', patch: { kind: 'source-subtitles' } },
+      /sets kind on default track source-subtitles/,
     ],
-    ['a non-string name', { trackId: 'subtitles', patch: { name: 7 } }, /unusable track name/],
+    ['a non-string name', { trackId: 'source-subtitles', patch: { name: 7 } }, /unusable track name/],
     // Clearing a rename is name: null, never "".
-    ['an empty name', { trackId: 'subtitles', patch: { name: '' } }, /unusable track name/],
-    ['a whitespace-only name', { trackId: 'subtitles', patch: { name: '   ' } }, /unusable track name/],
+    ['an empty name', { trackId: 'source-subtitles', patch: { name: '' } }, /unusable track name/],
+    ['a whitespace-only name', { trackId: 'source-subtitles', patch: { name: '   ' } }, /unusable track name/],
     [
       'a name over 120 chars',
-      { trackId: 'subtitles', patch: { name: 'x'.repeat(121) } },
+      { trackId: 'source-subtitles', patch: { name: 'x'.repeat(121) } },
       /unusable track name/,
     ],
-    ['a non-number order', { trackId: 'subtitles', patch: { order: '2' } }, /non-finite track order/],
-    ['a NaN order', { trackId: 'subtitles', patch: { order: Number.NaN } }, /non-finite track order/],
+    ['a non-number order', { trackId: 'source-subtitles', patch: { order: '2' } }, /non-finite track order/],
+    ['a NaN order', { trackId: 'source-subtitles', patch: { order: Number.NaN } }, /non-finite track order/],
     [
       'an infinite order',
-      { trackId: 'subtitles', patch: { order: Number.POSITIVE_INFINITY } },
+      { trackId: 'source-subtitles', patch: { order: Number.POSITIVE_INFINITY } },
       /non-finite track order/,
     ],
     [
       'a negatively infinite order',
-      { trackId: 'subtitles', patch: { order: Number.NEGATIVE_INFINITY } },
+      { trackId: 'source-subtitles', patch: { order: Number.NEGATIVE_INFINITY } },
       /non-finite track order/,
     ],
-    ['a non-string groupId', { trackId: 'subtitles', patch: { groupId: 3 } }, /unusable groupId/],
+    ['a non-string groupId', { trackId: 'source-subtitles', patch: { groupId: 3 } }, /unusable groupId/],
     [
       'a groupId with punctuation',
-      { trackId: 'subtitles', patch: { groupId: 'dubs/es' } },
+      { trackId: 'source-subtitles', patch: { groupId: 'dubs/es' } },
       /unusable groupId/,
     ],
     [
       'a groupId over 64 chars',
-      { trackId: 'subtitles', patch: { groupId: 'g'.repeat(65) } },
+      { trackId: 'source-subtitles', patch: { groupId: 'g'.repeat(65) } },
       /unusable groupId/,
     ],
   ]

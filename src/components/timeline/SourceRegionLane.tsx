@@ -1,11 +1,18 @@
-// The Source-audio row for a subtitle file timed against footage. (AQU-646)
+// The Source-audio row: the AUDIO VTT's cues. (AQU-646, stage 2)
+//
+// Single-purpose now. Stage 1 pointed this component at the subtitle cells and
+// called the result a band — the film's own audio, notionally divided at the
+// text timestamps. Stage 2 killed that: the film's soundtrack gets no timeline
+// row, ever (it is heard from the video pane whatever the timeline shows), and
+// what this row draws instead is real DATA — a near-verbatim transcript of the
+// film's speech, imported as a hidden sibling file and frozen. Where there is
+// no cue, nobody spoke.
 //
 // Same chips as an imported recording's source row — literally the same
-// component, TimelineCard in its dialogue variant — with the breaks falling at
-// the VTT timestamps instead of at silence-detected splits. The stretches
-// BETWEEN cues get a chip too: same shape, dashed, empty. That is the point of
-// the row — the video has sound there, nobody has said anything about it yet,
-// and a later round makes those chips fillable.
+// component, TimelineCard in its dialogue variant, which reads
+// `transcription || original` and so shows a cue's transcript with no change of
+// its own. The stretches BETWEEN cues get a chip too: same shape, dashed,
+// empty.
 //
 // 2026-08-11: this replaced a first draft that drew one continuous tinted band
 // with hairline divisions. Sam: the app already has a chip language for "a
@@ -23,12 +30,17 @@ import type { SourceRegionMap } from "@/lib/timeline/source-regions"
 // Silences shorter than MIN_ADDABLE_SPAN_SEC draw no chip. A real VTT carries
 // 1–100ms rounding gaps between most consecutive cues, and a dashed sliver at
 // every one reads as dirt — the space still shows, as the break between cards.
-// Round 8: this is the same threshold that decides whether a line may be added
-// there, so the row can never draw nothing over a stretch the pencil offers.
+// Round 8 shared this number with the "may a line be added here" rule so the
+// row could never stay silent about a stretch the pencil offered. Stage 2 keeps
+// the number and drops that guarantee, deliberately: the pencil is offered over
+// the TEXT cues' gaps and this row draws the AUDIO cues' gaps, which are a
+// different set of boundaries. One threshold for "too narrow to say anything
+// about", applied to two different questions.
 
 export interface SourceRegionLaneProps {
   map: SourceRegionMap
-  /** Timed cells, lane-filtered + time-sorted (the subtitle derivation). */
+  /** The audio-cue sibling's cells, in cue order. Empty is legal (no import
+   *  yet) and draws an empty row rather than crashing. */
   cells: CellData[]
   pxPerSec: number
   viewStartSec: number
@@ -76,7 +88,7 @@ function SourceRegionLaneImpl({
   )
 
   return (
-    <div data-testid="tl-source-regions" data-variant="source-band" className="relative h-[66px] border-b border-border">
+    <div data-testid="tl-source-regions" data-variant="source-audio-cues" className="relative h-[66px] border-b border-border">
       {visibleGaps.map((g) => {
         const widthPx = secToPx(g.endSec - g.startSec, pxPerSec)
         return (
@@ -85,7 +97,10 @@ function SourceRegionLaneImpl({
           data-testid="tl-source-gap"
           data-region-start={g.startSec}
           data-region-end={g.endSec}
-          title={`No subtitle here · ${(g.endSec - g.startSec).toFixed(1)}s`}
+          // "No speech", not "no subtitle": these gaps come from a transcript of
+          // the soundtrack, so a gap says nobody was talking — a subtitle may
+          // well exist over it, and often does.
+          title={`No speech here · ${(g.endSec - g.startSec).toFixed(1)}s`}
           onClick={() => onSeekSec(g.startSec)}
           // TimelineCard's geometry and radius, dashed and unfilled — the
           // established "slot with nothing in it yet" treatment (the untimed

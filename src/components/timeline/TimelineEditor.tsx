@@ -4,12 +4,12 @@
 // own — the play queue is the master clock, and the linked video lives beside
 // the text table as MediaVideoPane (AQU-646).
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { createPortal } from "react-dom"
 import { AudioLines, Film, LocateFixed, Magnet, Minus, Plus, Volume2, VolumeX, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { deriveLanes } from "@/lib/timeline/lanes"
-import { cuesAroundGap, deriveSourceRegions, EMPTY_SOURCE_REGIONS } from "@/lib/timeline/source-regions"
+import { deriveSourceRegions, EMPTY_SOURCE_REGIONS } from "@/lib/timeline/source-regions"
 import { isLineEmpty, isUserAddedLine } from "@/lib/timeline/user-lines"
 import { SourceRegionLane } from "./SourceRegionLane"
 import { chipOverlaps, MIN_ADDABLE_SPAN_SEC } from "@/lib/timeline/lane-timing"
@@ -19,9 +19,13 @@ import { computeFollowScroll } from "@/lib/timeline/follow"
 import { secToPx, pxToSec, ZOOM_MIN, ZOOM_MAX, ZOOM_DEFAULT } from "@/lib/timeline/scale"
 // Read-only queue subscriptions only — playback COMMANDS stay in the
 // workspace (onSeekToTime), keeping this component testable with a spy prop.
-// Round 5 exception: the per-track speaker buttons drive setQueueAudibility
-// directly — muting is a pure element-level concern with no workspace state.
-import { useQueueForFile, useMissingClipCells, setQueueAudibility, queueClockIsFileTime, type TrackAudibility } from "@/lib/audio/play-queue"
+// Round 5 exception: the per-track speaker buttons write muting themselves —
+// a pure element-level concern with no workspace state. Stage 2 moved that
+// write behind lib/audio/audibility, because the video pane's header carries a
+// mute button too now and two components each merging a toggle into their OWN
+// copy of the preference clobber one another.
+import { useQueueForFile, useMissingClipCells, queueClockIsFileTime } from "@/lib/audio/play-queue"
+import { seedAudibility, toggleAudibility, useQueueAudibility, type TrackAudibility } from "@/lib/audio/audibility"
 import { isInEditableContext, isTopAudioShortcutOwner, pushAudioShortcutOverride } from "@/lib/audio/audio-coordinator"
 import { spacebarShouldToggle } from "@/lib/audio/playback-keys"
 import { activeTargetForCell, resolveTargetAudio } from "@/lib/audio/track-audio"
@@ -80,17 +84,32 @@ export interface TimelineEditorProps {
   canAddLine?: boolean
   /** Take back a line someone added, while it is still empty. */
   onRemoveLine?(cellId: string): void
-  /**
-   * AQU-646 round 8: someone clicked a silence on the source band. The playhead
-   * has already been moved to its start; this is the table's half — scroll to
-   * the line before the gap and draw the eye to the gap itself. Either id may
-   * be null (the leading silence has no line before it, the trailing one none
-   * after). Nothing here selects anything: nothing was selected.
-   */
-  onRevealGap?(startSec: number, beforeCellId: string | null, afterCellId: string | null): void
   /** False disables the control — `file.video.set` needs contributor access,
    *  and the emit throws rather than failing quietly. */
   canLinkVideo?: boolean
+  /** AQU-646 stage 2: open the audio-VTT import dialog. It lives up in the
+   *  workspace for the same reason the link-video one does — it owns the upload
+   *  and the refresh. Presence renders the control. */
+  onRequestImportAudioVtt?(): void
+  /** False disables it. The import creates cells, so the server enforces
+   *  `source.cell.create` (PROJECT_LEAD): offering a button that can only mint
+   *  a 403 is worse than offering none. */
+  canImportAudioVtt?: boolean
+  /** Whether an audio-cue sibling already exists for this file — the control
+   *  then REPLACES rather than adds, and says so. */
+  hasAudioCueTrack?: boolean
+  /**
+   * AQU-646 stage 2: the audio VTT's cues — the cells of the hidden sibling
+   * file, transcript in `original`, times in seconds, and no `medium` (they are
+   * not media, and they are not this file's text either).
+   *
+   * They arrive as their own prop rather than inside `cells` deliberately:
+   * `medium` is the app's only cell→surface discriminator, so a cue mixed into
+   * `cells` would land in the dialogue table, the counters, the exports, the
+   * search index and the play queue. Timeline-only means timeline-only. null =
+   * no sibling has been imported, and there is no Source-audio row at all.
+   */
+  audioCues?: CellData[] | null
   /** AQU-646: navigate audio playback to a file-timeline second — ruler
    *  clicks and clean card clicks route through this (the workspace decides
    *  whether to jump the live queue or cue a paused one). */
@@ -170,23 +189,6 @@ function loadZoom(fileId: string): number {
   }
 }
 
-// Round 5: which tracks are AUDIBLE, persisted per file like zoom. Both-on is
-// the default; the queue itself only ever sees element.muted flags.
-const audibilityKey = (fileId: string) => `codex:timelineAudibility:${fileId}`
-
-function loadAudibility(fileId: string): TrackAudibility {
-  try {
-    const parsed: unknown = JSON.parse(localStorage.getItem(audibilityKey(fileId)) ?? "")
-    if (parsed && typeof parsed === "object") {
-      const p = parsed as Partial<TrackAudibility>
-      return { source: p.source !== false, target: p.target !== false }
-    }
-  } catch {
-    /* unset / private mode */
-  }
-  return { source: true, target: true }
-}
-
 function LaneLabel({ name, sub, dot, trailing }: { name: string; sub: string; dot: string; trailing?: ReactNode }) {
   return (
     <div className="flex h-[66px] items-center justify-between gap-1 border-b border-border px-3">
@@ -217,13 +219,17 @@ const TRACK_RENDER: Record<
   { sub: string; dot: string; audibilityKey: keyof TrackAudibility | null; speakerName: string }
 > = {
   // No speaker button: the Subtitles row makes no sound to mute.
-  subtitles: { sub: "text · reading", dot: "bg-zinc-400 dark:bg-zinc-600", audibilityKey: null, speakerName: "" },
-  // The speaker button publishes through setQueueAudibility, which reaches the
-  // queue's own elements. While the source chips come from a linked video there
-  // are none — so MediaVideoPane reads the same flag and mutes the picture
-  // itself. Muting the original while you listen back to a take is the whole
-  // reason to want this button on this row. (2026-08-11)
+  "source-subtitles": { sub: "text · reading", dot: "bg-zinc-400 dark:bg-zinc-600", audibilityKey: null, speakerName: "" },
+  // The speaker button publishes into the play queue, which can only reach the
+  // queue's OWN elements — so it belongs to this row only while the row is an
+  // imported recording's dialogue. Stage 2: on a subtitle file this row draws
+  // the audio VTT's cues, which are text and make no sound at all, and the
+  // film's soundtrack is silenced from the video pane's own header instead
+  // (see the gutter below, which withholds the button in that arrangement).
   "source-audio": { sub: "original speech", dot: "bg-sky-600", audibilityKey: "source", speakerName: "source audio" },
+  // Emerald like the dub row beneath it — same side of the file — but pale, so
+  // the two subtitle-shaped rows are never mistaken for each other at a glance.
+  "target-subtitles": { sub: "text · translated", dot: "bg-emerald-300 dark:bg-emerald-800", audibilityKey: null, speakerName: "" },
   "target-audio": { sub: "takes · generated", dot: "bg-emerald-600", audibilityKey: "target", speakerName: "target audio" },
 }
 
@@ -239,9 +245,12 @@ export function TimelineEditor({
   onRequestLinkVideo,
   onAddLine,
   canAddLine,
-  onRevealGap,
   onRemoveLine,
   canLinkVideo = true,
+  onRequestImportAudioVtt,
+  canImportAudioVtt = true,
+  hasAudioCueTrack = false,
+  audioCues,
   onSeekToTime,
   onOpenRecording,
   initialSelectedCellId,
@@ -269,7 +278,10 @@ export function TimelineEditor({
   const measureNoteDismissed = measureDismissedFor === fileId
   const online = useOnline()
   const batchProgress = useBatchProgress()
-  const [audibility, setAudibility] = useState<TrackAudibility>(() => loadAudibility(fileId))
+  // Stage 2: the queue's store is the single source of truth for muting, shared
+  // with the video pane's header button. This is a read; every write goes
+  // through toggleAudibility, which merges against the store.
+  const audibility = useQueueAudibility()
   const [snapOn, setSnapOn] = useState(loadSnapEnabled)
   const audioQuality = useAudioQualityPref()
   // Seeded by the text→media trace (AQU-646 round 3): the seed alone opens
@@ -364,11 +376,13 @@ export function TimelineEditor({
     return () => ro.disconnect()
   }, [])
 
-  // Round 5: keep the queue's element muting in lockstep with the speaker
-  // buttons (mount + every toggle).
+  // Publish THIS FILE's persisted mute preference into the store. Keyed on the
+  // file and on nothing else, deliberately: seeding on any other dependency
+  // would read the disk copy back over a toggle made this session, and the
+  // video pane seeds the same value on its own mount — see seedAudibility.
   useEffect(() => {
-    setQueueAudibility(audibility)
-  }, [audibility])
+    seedAudibility(fileId)
+  }, [fileId])
 
   // Round 7 (SUB-44): transport keys while the timeline is on screen.
   // Space = play/pause the QUEUE; Cmd/Ctrl+Enter = back to the very start.
@@ -415,18 +429,6 @@ export function TimelineEditor({
     }
   }, [])
 
-  function toggleTrackAudible(track: keyof TrackAudibility) {
-    setAudibility((prev) => {
-      const next = { ...prev, [track]: !prev[track] }
-      try {
-        localStorage.setItem(audibilityKey(fileId), JSON.stringify(next))
-      } catch {
-        /* private mode — just won't persist */
-      }
-      return next
-    })
-  }
-
   function speakerToggle(track: keyof TrackAudibility, name: string) {
     const audible = audibility[track]
     return (
@@ -436,7 +438,7 @@ export function TimelineEditor({
         aria-label={audible ? `Mute ${name}` : `Unmute ${name}`}
         aria-pressed={audible}
         title={audible ? `${name} is audible — click to mute` : `${name} is muted — click to unmute`}
-        onClick={() => toggleTrackAudible(track)}
+        onClick={() => toggleAudibility(fileId, track)}
         className={cn(
           "inline-flex shrink-0 items-center rounded-md border border-border p-1",
           audible
@@ -450,45 +452,59 @@ export function TimelineEditor({
   }
 
   const { subtitle, dialogue, untimed } = useMemo(() => deriveLanes(cells), [cells])
-  // AQU-646: the source-audio BAND draws for a file that has footage linked and
-  // no media cells of its own — a VTT timed against a video, where the Source
-  // row is empty today because deriveLanes only ever fills it from media cells.
-  // That is also exactly the case where the track has to reach the end of the
-  // footage rather than stopping after the last cue.
+  // WHAT KIND OF FILE THIS IS — not what any row draws. Stage 2 killed the band
+  // this flag was born for (it was `drawsSourceBand`) and kept every other
+  // reader untouched, because not one of them was ever about the band: a VTT
+  // timed against footage whose cells are ALL text, because deriveLanes fills
+  // the dialogue lane from `medium: "media"` cells and a subtitle import makes
+  // none.
+  //
+  // The first reader is the one that hurts. The layout's duration floor is the
+  // only thing that makes the track reach the end of the FOOTAGE rather than
+  // stopping after the last cue — on a 70-minute episode whose final subtitle
+  // lands at 68:12, losing it makes the last four minutes unreachable on every
+  // row at once, with nothing on screen to suggest they exist. It must never
+  // become conditional on whether an audio VTT has been imported.
   const videoDurationSec = useVideoDurationSec(coreMediaUrl)
-  const drawsSourceBand = Boolean(coreMediaUrl) && dialogue.length === 0
+  const subtitleFileWithFootage = Boolean(coreMediaUrl) && dialogue.length === 0
   // SUB-53: the single answer to "where does this go on the track?". Dubbing
   // returns the pre-SUB-53 geometry verbatim; audio-first returns the laid-out
   // programme. Everything below reads positions through this.
   const layout = useMemo<TimelineLayout>(
-    () => buildTimelineLayout(timingMode, cells, dialogue, drawsSourceBand ? videoDurationSec : null),
-    [timingMode, cells, dialogue, drawsSourceBand, videoDurationSec],
+    () => buildTimelineLayout(timingMode, cells, dialogue, subtitleFileWithFootage ? videoDurationSec : null),
+    [timingMode, cells, dialogue, subtitleFileWithFootage, videoDurationSec],
   )
-  // Derived, never stored — recomputed from the cells and the footage's length
-  // exactly like the lanes above it.
+  // The TEXT cues' regions. NOTHING RENDERS THESE ANY MORE — the band they fed
+  // is gone. They survive for `addableSpans` below, i.e. for the two places that
+  // ask "is there a stretch of film here with no line on it": the pencil in the
+  // Subtitles row and the mic in the Target audio row. Both are questions about
+  // the TEXT, which is why this still sweeps `cells` and not the audio cues.
   const sourceRegions = useMemo(
-    () => (drawsSourceBand ? deriveSourceRegions(cells, videoDurationSec) : EMPTY_SOURCE_REGIONS),
-    [drawsSourceBand, cells, videoDurationSec],
+    () => (subtitleFileWithFootage ? deriveSourceRegions(cells, videoDurationSec) : EMPTY_SOURCE_REGIONS),
+    [subtitleFileWithFootage, cells, videoDurationSec],
   )
-  // AQU-646 round 8: a click on a silence lands the playhead at its START —
-  // being dropped at an arbitrary point inside a stretch that means "nothing is
-  // said here" told you nothing — and hands the table the two lines around it
-  // so it can scroll there and draw the eye to the gap.
-  const handleGapClick = useCallback(
-    (startSec: number) => {
-      seekTo(startSec)
-      if (!onRevealGap) return
-      const { beforeCellId, afterCellId } = cuesAroundGap(sourceRegions, startSec)
-      onRevealGap(startSec, beforeCellId, afterCellId)
-    },
-    [seekTo, onRevealGap, sourceRegions],
+  // The Source-audio row's own map, from the hidden sibling's cues. Same sweep,
+  // a different set of boundaries: the audio VTT transcribes the film's
+  // soundtrack, so its cues are misaligned with the subtitle cues by nature (on
+  // episode 101, 71 of them have no text partner at all).
+  const audioRegions = useMemo(
+    () => deriveSourceRegions(audioCues ?? [], videoDurationSec),
+    [audioCues, videoDurationSec],
   )
+  // A click on a silence in that row is SEEK-ONLY now. Round 8's other half —
+  // `onRevealGap`, which scrolled the text table to the lines either side and
+  // pulsed them — is gone with the band, and deliberately not reconnected: it
+  // found those lines by matching the gap's exact start second against the TEXT
+  // region map, and these gaps come from the AUDIO map, whose boundaries do not
+  // coincide with it. It would usually match nothing, and when it did match it
+  // would be flashing subtitle rows around a stretch where nobody SPOKE. Two
+  // tracks, conflated. (EditorTable keeps its pulseCells API for other callers.)
 
   // AQU-646 round 8: in this workflow every cell is a text cell, so the header
   // read "Subtitle" and changed as you clicked around. Sam asked for it to stay
   // "Dialogue" for now — pinned, so it reads the same with a chip selected and
   // with none.
-  const textHeadingLabel = drawsSourceBand ? "Dialogue" : undefined
+  const textHeadingLabel = subtitleFileWithFootage ? "Dialogue" : undefined
 
   // Stretches of film that no cell covers — where a line can still be added.
   // Derived from the same sweep the Source track draws, so the two can never
@@ -510,8 +526,8 @@ export function TimelineEditor({
   // AQU-646: in the VTT-plus-footage arrangement the takes hang off TEXT cells
   // — there are no media cells to hang them on — so the Target track resolves
   // them without the medium gate. Everywhere else it is exactly as before.
-  const targetSource = drawsSourceBand ? subtitle : dialogue
-  const resolveTarget = drawsSourceBand ? resolveTargetAudio : activeTargetForCell
+  const targetSource = subtitleFileWithFootage ? subtitle : dialogue
+  const resolveTarget = subtitleFileWithFootage ? resolveTargetAudio : activeTargetForCell
   const targetItems = useMemo<TargetAudioItem[]>(
     () =>
       targetSource.flatMap((c) => {
@@ -893,6 +909,16 @@ export function TimelineEditor({
     },
   }
 
+  // The Source-audio row needs its OWN resolver: `laneProps.onSeek` looks the id
+  // up in THIS FILE's cells, and an audio cue is not one of them — it belongs to
+  // the hidden sibling — so every chip on that row would be a dead click. The
+  // layout is not consulted either: a cue's second is a second of the film, and
+  // the only mode this row appears in draws the film's clock verbatim.
+  const seekAudioCue = (cellId: string) => {
+    const cue = audioCues?.find((c) => c.id === cellId)
+    if (cue && typeof cue.startTime === "number" && Number.isFinite(cue.startTime)) seekTo(cue.startTime)
+  }
+
   // One row of the track column. Declared HERE, in the component body, because
   // it reads the lanes, the layout, the zoom window, the snap flag and every
   // handler above — hoisting it to module scope would mean threading twenty
@@ -900,7 +926,7 @@ export function TimelineEditor({
   // forgot to pass would be a lane that quietly stopped updating.
   function laneForTrack(track: TimelineTrack): ReactNode {
     switch (track.kind) {
-      case "subtitles":
+      case "source-subtitles":
         // SUB-53: a subtitle span is expressed against the original's clock,
         // so it can't be dragged on a re-flowed track.
         return (
@@ -916,12 +942,13 @@ export function TimelineEditor({
             // its neighbours. Only this arrangement passes the predicate, so
             // SUB-36's deliberately draggable subtitle mirror is untouched —
             // and cannot collide with it anyway, since that mirror exists
-            // only when there ARE dialogue cells and the band needs none.
-            canRetimeCell={drawsSourceBand ? isUserAddedLine : undefined}
+            // only when there ARE dialogue cells and this predicate needs
+            // there to be none.
+            canRetimeCell={subtitleFileWithFootage ? isUserAddedLine : undefined}
             // ...and the line it may move within is the space its neighbours
             // leave it. Only here: SUB-36's media-subtitle card is meant to
             // sit wherever it likes, so this must never be on by default.
-            boundNeighbours={drawsSourceBand}
+            boundNeighbours={subtitleFileWithFootage}
             snapEnabled={snapOn}
             {...laneProps}
             // AQU-646: the stretches of film with no line of their own. Only
@@ -932,32 +959,48 @@ export function TimelineEditor({
             // Only a line someone added here, and only while it is still
             // empty — deleting a cell with takes or comments on it would
             // leave every one of them behind.
-            canRemove={drawsSourceBand && canAddLine ? (c) => isUserAddedLine(c) && isLineEmpty(c) : undefined}
+            canRemove={subtitleFileWithFootage && canAddLine ? (c) => isUserAddedLine(c) && isLineEmpty(c) : undefined}
             onRemove={onRemoveLine}
           />
         )
       case "source-audio":
-        // AQU-646: a file with footage and no media cells of its own gets the
-        // video's audio as source chips — the same cards an mp3 import's
-        // source row draws, broken at the VTT timestamps, with a dashed empty
-        // chip over each silence. Otherwise the original dialogue lane, whose
-        // source split is FROZEN at import and never retimable (Round 6).
-        return drawsSourceBand ? (
+        // Two tenants, and which one shows up is decided by the CELLS, never by
+        // whether a video is linked. An imported recording's dialogue lane,
+        // whose source split is FROZEN at import and never retimable (round 6);
+        // or, when there are no media cells at all, the audio VTT's cues —
+        // transcript chips over the film's own speech, with a dashed empty chip
+        // across each stretch where nobody talks.
+        return dialogue.length > 0 ? (
+          <TimelineLane key={track.id} cells={dialogue} variant="dialogue" retimable={false} {...laneProps} />
+        ) : (
           <SourceRegionLane
             key={track.id}
-            map={sourceRegions}
-            cells={subtitle}
+            map={audioRegions}
+            cells={audioCues ?? []}
             pxPerSec={pxPerSec}
             viewStartSec={viewStartSec}
             viewEndSec={viewEndSec}
             selectedId={selectedId}
             editable={editable}
-            onSelect={selectFromChip}
-            onSeek={laneProps.onSeek}
-            onSeekSec={handleGapClick}
+            // AUDIO CHIPS SEEK, BUT THEY DO NOT SELECT. Selection means "this is
+            // the current chip", and all three things it drives — the detail
+            // readout, the media cursor, and `onChipActivated`, which scrolls
+            // the text table to the matching row — are TEXT-cell surfaces. An
+            // audio cue has no row in any of them, so selecting one would blank
+            // the readout and scroll the table to nothing. The chip's job is to
+            // take you to that second of the film, and it still does.
+            onSelect={() => {}}
+            onSeek={seekAudioCue}
+            onSeekSec={seekTo}
           />
-        ) : (
-          <TimelineLane key={track.id} cells={dialogue} variant="dialogue" retimable={false} {...laneProps} />
+        )
+      case "target-subtitles":
+        // The translation of each cue, at the cue's own timings — the same
+        // cells as the Subtitles row above, showing their other side (see
+        // TimelineCard's labelText). Frozen: moving a translation would mean
+        // moving the cue, which is the source row's timing and not ours.
+        return (
+          <TimelineLane key={track.id} cells={subtitle} variant="target-subtitle" retimable={false} {...laneProps} />
         )
       case "target-audio":
         return (
@@ -1136,6 +1179,24 @@ export function TimelineEditor({
               </button>
             </AppTooltip>
           )}
+          {/* AQU-646 stage 2: the audio VTT — a near-verbatim transcript of the
+              film's own speech, ~550 cues, which becomes the Source audio row.
+              It lands in a hidden sibling file, so this never adds anything to
+              the file list, the dialogue table or the counters. */}
+          {onRequestImportAudioVtt && (
+            <AppTooltip content="Requires project lead access" disabled={canImportAudioVtt}>
+              <button
+                type="button"
+                data-testid="tl-import-audio-vtt"
+                disabled={!canImportAudioVtt}
+                onClick={onRequestImportAudioVtt}
+                className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground/80 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <AudioLines className="h-3.5 w-3.5 text-muted-foreground" />
+                {hasAudioCueTrack ? "Replace audio VTT" : "Import audio VTT"}
+              </button>
+            </AppTooltip>
+          )}
           <div className="inline-flex items-center rounded-md border border-border">
             <button
               type="button"
@@ -1230,15 +1291,22 @@ export function TimelineEditor({
               is the whole seam a rename arrives through. */}
           {tracks.map((track) => {
             const render = TRACK_RENDER[track.kind]
+            // Stage 2: EXACTLY ONE source-mute control on screen, whatever the
+            // arrangement. The film's mute now lives on the film itself (the
+            // video pane's header), and this button can only reach the play
+            // queue's own elements — which exist only for a file with media
+            // cells. So a dubbing file keeps its gutter speaker and this one
+            // loses it, rather than showing two buttons for the same sound or
+            // (worse) one that silences nothing.
+            const speaker =
+              render.audibilityKey === "source" && subtitleFileWithFootage ? null : render.audibilityKey
             return (
               <LaneLabel
                 key={track.id}
                 name={track.name}
                 sub={render.sub}
                 dot={render.dot}
-                trailing={
-                  render.audibilityKey ? speakerToggle(render.audibilityKey, render.speakerName) : undefined
-                }
+                trailing={speaker ? speakerToggle(speaker, render.speakerName) : undefined}
               />
             )
           })}

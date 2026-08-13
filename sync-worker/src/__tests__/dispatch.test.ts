@@ -52,7 +52,7 @@ async function makeAuthorized<K extends EventKind>(kind: K, role = 500) {
     'cell.lane.retime': { subtitleStartMs: 0, subtitleEndMs: 1000 },
     'file.video.set': { coreMediaUrl: 'https://cdn/v.mp4' },
     'file.timing.set': { timingMode: 'audioFirst' },
-    'file.track.set': { trackId: 'subtitles', patch: { name: 'Captions' } },
+    'file.track.set': { trackId: 'source-subtitles', patch: { name: 'Captions' } },
     'source.cell.mirror': {
       value: 'x',
       upstream: { projectId: 'proj-up', cellId: 'cell-1', eventId: 'evt-up-1', seq: 1, side: 'source', contentHash: 'abc' },

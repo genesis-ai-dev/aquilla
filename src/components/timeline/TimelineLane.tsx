@@ -18,7 +18,10 @@ import type { CellData } from "@/hooks/useCells"
 export interface TimelineLaneProps {
   /** Already lane-filtered + time-sorted (from deriveLanes). */
   cells: CellData[]
-  variant: "subtitle" | "dialogue"
+  /** AQU-646 stage 2: "target-subtitle" draws the same cells as "subtitle" with
+   *  their translation on the chip — a third variant so the row is
+   *  distinguishable in the DOM, and so TimelineCard keeps the text policy. */
+  variant: "subtitle" | "dialogue" | "target-subtitle"
   /** SUB-53: resolves where each card sits — the frozen file clock in dubbing
    *  mode, the laid-out programme in audio-first. Absent = dubbing. */
   layout?: TimelineLayout
@@ -80,7 +83,10 @@ export function TimelineLane({
 
   const spanOf = (c: CellData): { start: number; end: number } => {
     if (layout) {
-      const s = layout.spanFor(c, variant === "subtitle" ? "subtitle" : "source")
+      // Only the dialogue row asks for the SOURCE span (a media cell's frozen
+      // section). Both subtitle-shaped rows sit on the subtitle span, because a
+      // translation is drawn at the timing of the cue it translates.
+      const s = layout.spanFor(c, variant === "dialogue" ? "source" : "subtitle")
       if (s) return s
     }
     if (variant === "subtitle") {

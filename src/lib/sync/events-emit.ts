@@ -659,8 +659,9 @@ export interface FileTrackSetInput {
   projectId: string
   fileId: string
   /** The track this delta is about. Default tracks use their kind as the id
-   *  ("subtitles" / "source-audio" / "target-audio"); user-added tracks carry
-   *  a generated one. An id is forever once written — it is the meta key. */
+   *  ("source-subtitles" / "source-audio" / "target-subtitles" /
+   *  "target-audio"); user-added tracks carry a generated one. An id is
+   *  forever once written — it is the meta key. */
   trackId: string
   /**
    * The delta to merge, or null to DELETE the whole entry (drop a user-added

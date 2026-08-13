@@ -85,7 +85,12 @@ export interface TimelineCardProps {
   pxPerSec: number
   /** Time (s) at the left edge of the track; usually 0. */
   laneStartSec: number
-  variant: "subtitle" | "dialogue"
+  /** AQU-646 stage 2: "target-subtitle" is a third VARIANT rather than a text
+   *  resolver the lane passes in, because it is the DOM's `data-variant` that
+   *  tells the two subtitle-shaped rows apart, and because this component stays
+   *  the single home of per-variant text policy (see `labelText`). It borrows
+   *  the subtitle look wholesale — only the words differ. */
+  variant: "subtitle" | "dialogue" | "target-subtitle"
   selected: boolean
   editable: boolean
   /** Round 6: whether this LANE allows retiming at all (the source row never
@@ -242,17 +247,25 @@ export function TimelineCard({
   // an audio block — it shows the translation once translated, else the
   // transcript (never the filename-ish `original`).
   const labelText =
-    isDialogue
-      ? cell.transcription || cell.original
-      : (cell.medium ?? "text") === "media"
-        ? subtitleMirrorText(cell)
-        : cell.original
+    variant === "target-subtitle"
+      ? cell.translated
+      : isDialogue
+        ? cell.transcription || cell.original
+        : (cell.medium ?? "text") === "media"
+          ? subtitleMirrorText(cell)
+          : cell.original
   // AQU-646: a cell that exists but has nothing written in it yet. Dotted means
   // a different thing in each track — on the SUBTITLE track it is exactly this:
   // the cell is real, the words are not here yet. (Source audio uses dotted for
   // the opposite, audio with no cell; the target track only ever uses it to say
   // something is wrong.) A blank chip carries no placeholder text either — an
   // em dash would read as content.
+  //
+  // Stage 2 adds a fourth reading and no code: on Target subtitles blank means
+  // NOT YET TRANSLATED. The test already consults `translated`, which is that
+  // row's own text, so an untranslated cue draws the established dashed chip
+  // for free — and a cue with a translation but no source (it happens; a
+  // translator can get ahead of a missing line) correctly does not.
   const blank = !labelText?.trim() && !cell.translated?.trim()
   // The em-dash placeholder reads as content. A line nobody has written yet
   // shows its timecode and nothing else, in either track.

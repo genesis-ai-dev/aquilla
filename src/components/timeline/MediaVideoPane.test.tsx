@@ -23,9 +23,16 @@ vi.mock("@/lib/audio/play-queue", () => ({
   // backed by the shared source clip.
   queueClockIsFileTime: (c: CellData | undefined | null) =>
     c?.medium === "media" && Boolean(c?.attachments),
-  // The timeline's Source-track speaker button, which the pane honours when it
-  // is the thing making the sound.
+  // Whether the film's soundtrack is on — the pane honours it when it is the
+  // thing making the sound.
   useQueueAudibility: () => mockAudibility,
+  // Stage 2: the pane seeds this file's persisted preference into the store on
+  // mount and writes it back from the header's mute button, both through
+  // @/lib/audio/audibility, which reaches for these two. The setter is inert on
+  // purpose — `mockAudibility` stays the ONE thing deciding what the pane sees,
+  // so a test can still put the flag wherever it likes before rendering.
+  getQueueAudibility: () => mockAudibility,
+  setQueueAudibility: () => {},
 }))
 
 import { MediaVideoPane, readCaptionPlacement, readSubtitleMode } from "./MediaVideoPane"
@@ -64,7 +71,7 @@ function sounding(cellId: string, over: Partial<QueueForFile> = {}) {
 }
 
 function renderPane(props: Partial<React.ComponentProps<typeof MediaVideoPane>> = {}) {
-  return render(<MediaVideoPane src="https://cdn/episode.webm" cells={CELLS} {...props} />)
+  return render(<MediaVideoPane src="https://cdn/episode.webm" fileId="f1" cells={CELLS} {...props} />)
 }
 
 describe("MediaVideoPane", () => {
@@ -92,7 +99,7 @@ describe("MediaVideoPane", () => {
       cell({ id: "s2", medium: "text", original: "Line two", translated: "Ligne deux", startTime: 10, endTime: 15 }),
     ]
     const renderStandalone = (props = {}) =>
-      render(<MediaVideoPane src="https://cdn/episode.webm" cells={subs} {...props} />)
+      render(<MediaVideoPane src="https://cdn/episode.webm" fileId="f1" cells={subs} {...props} />)
 
     /** happy-dom has no media pipeline, so currentTime has to be planted. */
     const tickTo = (video: HTMLVideoElement, sec: number) => {
@@ -138,11 +145,11 @@ describe("MediaVideoPane", () => {
         // happy-dom reports readyState 0 for everything. This test is about the
         // toggle, so give it a picture that is genuinely ready.
         Object.defineProperty(video, "readyState", { value: 4, configurable: true })
-        rerender(<MediaVideoPane src="https://cdn/episode.webm" cells={subs} togglePlay={{ nonce: 1 }} />)
+        rerender(<MediaVideoPane src="https://cdn/episode.webm" fileId="f1" cells={subs} togglePlay={{ nonce: 1 }} />)
         expect(play).toHaveBeenCalled()
 
         Object.defineProperty(video, "paused", { value: false, configurable: true })
-        rerender(<MediaVideoPane src="https://cdn/episode.webm" cells={subs} togglePlay={{ nonce: 2 }} />)
+        rerender(<MediaVideoPane src="https://cdn/episode.webm" fileId="f1" cells={subs} togglePlay={{ nonce: 2 }} />)
         expect(pause).toHaveBeenCalled()
       } finally {
         play.mockRestore()
@@ -154,9 +161,9 @@ describe("MediaVideoPane", () => {
       const play = vi.spyOn(window.HTMLMediaElement.prototype, "play").mockResolvedValue(undefined)
       try {
         // renderPane()'s CELLS are media cells with the shared clip → slaved.
-        const { rerender } = render(<MediaVideoPane src="https://cdn/episode.webm" cells={CELLS} togglePlay={{ nonce: 0 }} />)
+        const { rerender } = render(<MediaVideoPane src="https://cdn/episode.webm" fileId="f1" cells={CELLS} togglePlay={{ nonce: 0 }} />)
         play.mockClear()
-        rerender(<MediaVideoPane src="https://cdn/episode.webm" cells={CELLS} togglePlay={{ nonce: 1 }} />)
+        rerender(<MediaVideoPane src="https://cdn/episode.webm" fileId="f1" cells={CELLS} togglePlay={{ nonce: 1 }} />)
         expect(play).not.toHaveBeenCalled()
       } finally {
         play.mockRestore()
@@ -171,7 +178,7 @@ describe("MediaVideoPane", () => {
   describe("the Source-track speaker button", () => {
     const subtitleCells = [cell({ id: "s1", medium: "text", original: "Line one" })]
     const renderStandalone = () =>
-      render(<MediaVideoPane src="https://cdn/episode.webm" cells={subtitleCells} />)
+      render(<MediaVideoPane src="https://cdn/episode.webm" fileId="f1" cells={subtitleCells} />)
 
     it("mutes the picture when the source track is muted", () => {
       mockAudibility = { source: false, target: true }
@@ -216,13 +223,13 @@ describe("MediaVideoPane", () => {
     expect(screen.queryByTestId("video-pane-caption")).toBeNull()
 
     sounding("c1")
-    rerender(<MediaVideoPane src="https://cdn/episode.webm" cells={CELLS} />)
+    rerender(<MediaVideoPane src="https://cdn/episode.webm" fileId="f1" cells={CELLS} />)
     expect(screen.getByTestId("video-pane-caption-target")).toHaveTextContent(
       "Que la paz de Cristo reine en sus corazones.",
     )
 
     sounding("c2")
-    rerender(<MediaVideoPane src="https://cdn/episode.webm" cells={CELLS} />)
+    rerender(<MediaVideoPane src="https://cdn/episode.webm" fileId="f1" cells={CELLS} />)
     expect(screen.getByTestId("video-pane-caption-target")).toHaveTextContent("Y sean agradecidos.")
   })
 
@@ -289,7 +296,7 @@ describe("MediaVideoPane", () => {
       cell({ id: "u1", medium: "media", attachments: {}, transcription: "In the beginning was the Word.", translated: "" }),
     ]
     sounding("u1")
-    render(<MediaVideoPane src="https://cdn/episode.webm" cells={untranslated} />)
+    render(<MediaVideoPane src="https://cdn/episode.webm" fileId="f1" cells={untranslated} />)
     expect(screen.getByTestId("video-pane-caption-source")).toHaveTextContent("In the beginning was the Word.")
     expect(screen.queryByTestId("video-pane-caption-target")).toBeNull()
   })
@@ -307,7 +314,7 @@ describe("MediaVideoPane", () => {
       cell({ id: "s1", medium: "text", original: "Line one", translated: "Ligne un", attachments: { a1: { url: "blob:x", type: "audio" } } }),
     ]
     const onVideoTime = vi.fn()
-    render(<MediaVideoPane src="https://cdn/episode.webm" cells={subtitleCells} onVideoTime={onVideoTime} />)
+    render(<MediaVideoPane src="https://cdn/episode.webm" fileId="f1" cells={subtitleCells} onVideoTime={onVideoTime} />)
     const video = screen.getByTestId("video-pane-media") as HTMLVideoElement
     expect(video.controls).toBe(true)
     expect(video.muted).toBe(false)
@@ -335,7 +342,7 @@ describe("MediaVideoPane", () => {
     expect(controls.className).toContain("pointer-events-none")
 
     sounding("c1")
-    rerender(<MediaVideoPane src="https://cdn/episode.webm" cells={CELLS} />)
+    rerender(<MediaVideoPane src="https://cdn/episode.webm" fileId="f1" cells={CELLS} />)
     expect(screen.getByTestId("video-pane-controls").className).toContain("opacity-100")
   })
 
@@ -425,7 +432,7 @@ describe("MediaVideoPane", () => {
     /** Mount standalone, then arm the element, then press. */
     const pressPlay = (o: { readyState?: number; seeking?: boolean } = {}) => {
       const view = render(
-        <MediaVideoPane src="https://cdn/episode.webm" cells={subs} onVideoTime={vi.fn()} />,
+        <MediaVideoPane src="https://cdn/episode.webm" fileId="f1" cells={subs} onVideoTime={vi.fn()} />,
       )
       const video = screen.getByTestId("video-pane-media") as HTMLVideoElement
       const play = plant(video, o)
@@ -433,6 +440,7 @@ describe("MediaVideoPane", () => {
         view.rerender(
           <MediaVideoPane
             src="https://cdn/episode.webm"
+            fileId="f1"
             cells={subs}
             onVideoTime={vi.fn()}
             togglePlay={{ nonce }}
@@ -525,16 +533,16 @@ describe("MediaVideoPane", () => {
       // The transport can change its mind while we wait, and the take must not
       // pick up the film starting behind it.
       const view = render(
-        <MediaVideoPane src="https://cdn/episode.webm" cells={subs} onVideoTime={vi.fn()} />,
+        <MediaVideoPane src="https://cdn/episode.webm" fileId="f1" cells={subs} onVideoTime={vi.fn()} />,
       )
       const video = screen.getByTestId("video-pane-media") as HTMLVideoElement
       const play = plant(video, { readyState: 0 })
       view.rerender(
-        <MediaVideoPane src="https://cdn/episode.webm" cells={subs} onVideoTime={vi.fn()} togglePlay={{ nonce: 1 }} />,
+        <MediaVideoPane src="https://cdn/episode.webm" fileId="f1" cells={subs} onVideoTime={vi.fn()} togglePlay={{ nonce: 1 }} />,
       )
       expect(getVideoBuffering()).toBe(true)
       view.rerender(
-        <MediaVideoPane src="https://cdn/episode.webm" cells={subs} onVideoTime={vi.fn()} togglePlay={{ nonce: 1 }} suspended />,
+        <MediaVideoPane src="https://cdn/episode.webm" fileId="f1" cells={subs} onVideoTime={vi.fn()} togglePlay={{ nonce: 1 }} suspended />,
       )
       fireEvent.seeked(video)
       expect(play).not.toHaveBeenCalled()
@@ -560,12 +568,13 @@ describe("MediaVideoPane", () => {
       // the marked row from sitting on the position the film used to be at.
       const onVideoTime = vi.fn()
       const view = render(
-        <MediaVideoPane src="https://cdn/episode.webm" cells={subs} onVideoTime={onVideoTime} />,
+        <MediaVideoPane src="https://cdn/episode.webm" fileId="f1" cells={subs} onVideoTime={onVideoTime} />,
       )
       onVideoTime.mockClear()
       view.rerender(
         <MediaVideoPane
           src="https://cdn/episode.webm"
+          fileId="f1"
           cells={subs}
           onVideoTime={onVideoTime}
           seekSec={{ sec: 12, nonce: 1 }}
@@ -579,7 +588,7 @@ describe("MediaVideoPane", () => {
 
     it("confirms where it actually landed", () => {
       const onVideoTime = vi.fn()
-      render(<MediaVideoPane src="https://cdn/episode.webm" cells={subs} onVideoTime={onVideoTime} />)
+      render(<MediaVideoPane src="https://cdn/episode.webm" fileId="f1" cells={subs} onVideoTime={onVideoTime} />)
       const video = screen.getByTestId("video-pane-media") as HTMLVideoElement
       Object.defineProperty(video, "currentTime", { value: 11.5, configurable: true })
       onVideoTime.mockClear()
@@ -591,12 +600,13 @@ describe("MediaVideoPane", () => {
       // A slaved picture is the queue's to report; two writers would fight.
       const onVideoTime = vi.fn()
       const view = render(
-        <MediaVideoPane src="https://cdn/episode.webm" cells={CELLS} onVideoTime={onVideoTime} />,
+        <MediaVideoPane src="https://cdn/episode.webm" fileId="f1" cells={CELLS} onVideoTime={onVideoTime} />,
       )
       onVideoTime.mockClear()
       view.rerender(
         <MediaVideoPane
           src="https://cdn/episode.webm"
+          fileId="f1"
           cells={CELLS}
           onVideoTime={onVideoTime}
           seekSec={{ sec: 12, nonce: 1 }}

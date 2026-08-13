@@ -143,7 +143,7 @@ describe("file.track.set projection (stage 1: per-track overrides)", () => {
       db,
       makeEvent(
         "file.track.set",
-        { trackId: "subtitles", patch: { name: "Captions", order: 2 } },
+        { trackId: "source-subtitles", patch: { name: "Captions", order: 2 } },
         { cellId: null },
       ),
       [],
@@ -158,8 +158,8 @@ describe("file.track.set projection (stage 1: per-track overrides)", () => {
     // trackId binds twice — once as the key written, once to read the entry
     // being merged onto — then the patch JSON, then the chain/row keys.
     expect(recorded[0].args).toEqual([
-      "subtitles",
-      "subtitles",
+      "source-subtitles",
+      "source-subtitles",
       '{"name":"Captions","order":2}',
       "evt-1",
       "f1",
@@ -211,7 +211,7 @@ describe("file.track.set projection (stage 1: per-track overrides)", () => {
         db,
         makeEvent(
           "file.track.set",
-          { trackId: "subtitles", patch: { name: "Captions" } },
+          { trackId: "source-subtitles", patch: { name: "Captions" } },
           { cellId: null, fileId: null },
         ),
         [],

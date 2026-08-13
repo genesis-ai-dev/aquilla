@@ -1,11 +1,21 @@
-// The timeline track contract. (AQU-646 stage 1)
+// The timeline track contract. (AQU-646 stage 1; renamed and made file-aware
+// in stage 2)
 //
 // Until now a "track" was three hardcoded rows of JSX in TimelineEditor plus a
 // hand-mirrored label gutter — there was no entity to rename, reorder or group,
 // which is exactly what The Chosen's per-episode text/audio/character files
-// need. This module is the single owner of that entity: the three defaults
-// every file starts with, the deltas persisted against them, and the merge that
-// turns the two into the list the editor draws.
+// need. This module is the single owner of that entity: WHICH ROWS A GIVEN
+// FILE DERIVES, the deltas persisted against them, and the merge that turns the
+// two into the list the editor draws.
+//
+// TRACKS ARE CUE DATA, AND THE FILM'S SOUNDTRACK GETS NO ROW, EVER. The picture
+// is heard from the video pane whatever the timeline shows, so there is nothing
+// for a "the film's own audio" row to hold. "Source audio" is the row for the
+// AUDIO VTT's cues — a near-verbatim transcript of that soundtrack, imported as
+// a hidden sibling file — and until such an import exists there is nothing to
+// draw and the row is simply absent. That is why derivation takes a
+// TrackDerivationContext instead of being a constant: which rows exist is a
+// property of the FILE, not of the app.
 //
 // It imports NOTHING, deliberately. `FileReference` type-imports
 // PersistedTrackOverrides from here, so a type-only import back the other way
@@ -26,7 +36,12 @@
 // from a merge. Break that rule and an old client silently deletes a new
 // client's tracks the first time anyone touches the file.
 
-export type TrackKind = "subtitles" | "source-audio" | "target-audio"
+// RENAMED IN STAGE 2, AND THAT WAS ONLY FREE BECAUSE OF A WINDOW THAT IS NOW
+// SPENT: the branch is unpushed and `file.track.set` is dormant, so no event,
+// no `files.meta.trackOverrides` entry and no exported project anywhere has
+// ever carried the old "subtitles" spelling. Once a single one does, a rename
+// here stops being a rename and becomes a migration of stored deltas.
+export type TrackKind = "source-subtitles" | "source-audio" | "target-subtitles" | "target-audio"
 
 export interface TimelineTrack {
   /** Defaults use their kind as the id; user-added tracks carry a generated
@@ -63,16 +78,68 @@ export interface PersistedTrackPatch {
 export type PersistedTrackOverrides = Record<string, PersistedTrackPatch>
 
 export const TRACK_KIND_LABELS: Record<TrackKind, string> = {
-  subtitles: "Subtitles",
+  "source-subtitles": "Source subtitles",
   "source-audio": "Source audio",
+  "target-subtitles": "Target subtitles",
   "target-audio": "Target audio",
 }
 
-/** The three rows the editor has drawn since it shipped, in the order it has
- *  always drawn them. */
-const DEFAULT_TRACK_KINDS: readonly TrackKind[] = ["subtitles", "source-audio", "target-audio"]
+/**
+ * THE RESERVED IDS — every kind, not "the rows this file starts with".
+ *
+ * The distinction is load-bearing and easy to misread now that derivation is
+ * file-aware. A media file derives three rows and never a `target-subtitles`
+ * one; if this set only listed the rows it DID derive, the reserved-id rule in
+ * mergeTrackOverrides would happily build `target-subtitles` as a "user-added"
+ * track out of a stray delta — a second, half-real row wearing a default's id,
+ * which the next reorder or rename would then write against. Reserving all four
+ * kinds means a delta naming one this file does not derive is simply ignored.
+ *
+ * HAND-MIRRORED with `TRACK_KINDS`/`DEFAULT_TRACK_IDS` in
+ * sync-worker/src/events/handlers/file-track-set.ts: the packages share no
+ * code, so both sides must be edited together. Drift the other way — a kind the
+ * client will happily persist that the server rejects — wedges the outbox on a
+ * permanently-failing event.
+ */
+const TRACK_KINDS: readonly TrackKind[] = [
+  "source-subtitles",
+  "source-audio",
+  "target-subtitles",
+  "target-audio",
+]
 
-export const DEFAULT_TRACK_IDS: ReadonlySet<string> = new Set<string>(DEFAULT_TRACK_KINDS)
+export const DEFAULT_TRACK_IDS: ReadonlySet<string> = new Set<string>(TRACK_KINDS)
+
+/** The canonical seat of each kind. Derivation uses THESE and never the array
+ *  index, so the numbers a file's rows carry do not shift underneath a user's
+ *  persisted reorder when the Source-audio row appears later (an audio VTT is
+ *  imported) or goes away again (it is deleted). An index-based order would
+ *  quietly re-point an override that said `order: 1.5` at a different pair of
+ *  neighbours. */
+const TRACK_KIND_ORDER: Record<TrackKind, number> = {
+  "source-subtitles": 0,
+  "source-audio": 1,
+  "target-subtitles": 2,
+  "target-audio": 3,
+}
+
+/**
+ * What the file itself says about which rows it should have.
+ *
+ * Structural, like `deriveTracksForFile`'s file parameter, so this module stays
+ * import-free — see the top of the file.
+ */
+export interface TrackDerivationContext {
+  /** The file was imported from subtitles: its cells are timed text, and the
+   *  translation of that text is a row in its own right. */
+  isSubtitleImport: boolean
+  /** The file has media cells — a dubbing project, where the rows have always
+   *  been Subtitles / Source audio / Target audio. */
+  hasMediaCells: boolean
+  /** An audio-cue sibling file exists for this file, so there are cues for a
+   *  Source-audio row to draw. */
+  hasAudioCues: boolean
+}
 
 /** Own-key check rather than `in`, because these strings arrive from remote
  *  JSON and `"constructor" in TRACK_KIND_LABELS` is true. Keyed off the label
@@ -94,17 +161,49 @@ const overrideOrder = (value: unknown): number | null =>
 const isPatchObject = (value: unknown): boolean =>
   typeof value === "object" && value !== null && !Array.isArray(value)
 
-/** A fresh array every call — the merge sorts and patches in place, and
- *  TimelineEditor holds one call's result as a module constant for referential
- *  stability. */
-export function deriveDefaultTracks(): TimelineTrack[] {
-  return DEFAULT_TRACK_KINDS.map((kind, order) => ({
-    id: kind,
-    kind,
-    name: TRACK_KIND_LABELS[kind],
-    order,
-    groupId: null,
-  }))
+const trackRow = (kind: TrackKind, name: string = TRACK_KIND_LABELS[kind]): TimelineTrack => ({
+  id: kind,
+  kind,
+  name,
+  order: TRACK_KIND_ORDER[kind],
+  groupId: null,
+})
+
+/**
+ * The rows a file derives before any stored delta is applied.
+ *
+ * A fresh array every call — the merge sorts and patches in place, and
+ * TimelineEditor holds one call's result as a module constant for referential
+ * stability.
+ *
+ * With no context (the fileless caller) or with media cells, this is the
+ * three-row shape the editor has drawn since it shipped, rows and labels
+ * unchanged: every existing dubbing project must see NOTHING different after
+ * stage 2. Note the source row is named "Subtitles" here and not
+ * TRACK_KIND_LABELS["source-subtitles"] — deliberately, and not a bug: a
+ * track's `name` is per-track DATA, the gutter has always read "Subtitles" on a
+ * dubbing file, and the four-way label map exists for the kinds a user picks
+ * from, not to dictate what an existing row is called.
+ */
+export function deriveDefaultTracks(context?: TrackDerivationContext | null): TimelineTrack[] {
+  // hasMediaCells WINS. A file cannot honestly be both — media cells and
+  // imported subtitle cells are different `medium` values on the same file, and
+  // the import pipelines that set them are mutually exclusive — so if both
+  // flags arrive true the caller is looking at a file mid-transition or at a
+  // stale memo, and the legacy three-row shape is the safe answer: it is what
+  // the file was drawn as a moment ago, and it never hides a row.
+  if (!context || context.hasMediaCells || !context.isSubtitleImport) {
+    return [trackRow("source-subtitles", "Subtitles"), trackRow("source-audio"), trackRow("target-audio")]
+  }
+
+  return [
+    trackRow("source-subtitles"),
+    // No audio VTT imported yet means no cues, and a row with nothing to draw
+    // is worse than no row: it reads as "this episode has no speech".
+    ...(context.hasAudioCues ? [trackRow("source-audio")] : []),
+    trackRow("target-subtitles"),
+    trackRow("target-audio"),
+  ]
 }
 
 /**
@@ -158,9 +257,10 @@ export function mergeTrackOverrides(
       if (groupId !== null) target.groupId = groupId
       continue
     }
-    // A default id the caller left out of `defaults` stays reserved — a delta
-    // must never resurrect "subtitles" as a user-added track just because it
-    // was handed a shortened list.
+    // A reserved id the caller left out of `defaults` stays reserved — a delta
+    // must never resurrect "source-subtitles" (or "target-subtitles" on a file
+    // that does not derive it) as a user-added track just because it is absent
+    // from the list handed in.
     if (DEFAULT_TRACK_IDS.has(id)) continue
     added.push({ id, patch })
   }
@@ -194,11 +294,15 @@ export function mergeTrackOverrides(
   })
 }
 
-/** The tracks to draw for a file. Structurally typed rather than
+/** The tracks to draw for a file: the rows its context derives, patched with
+ *  the deltas it has stored. Structurally typed rather than
  *  `Pick<FileReference, …>` so this module stays import-free — see the top of
- *  the file. */
+ *  the file. The context is separate from `file` because it is computed from
+ *  the file's CELLS and its audio-cue sibling, neither of which lives on the
+ *  FileReference. */
 export function deriveTracksForFile(
   file?: { trackOverrides?: PersistedTrackOverrides | null } | null,
+  context?: TrackDerivationContext | null,
 ): TimelineTrack[] {
-  return mergeTrackOverrides(deriveDefaultTracks(), file?.trackOverrides)
+  return mergeTrackOverrides(deriveDefaultTracks(context), file?.trackOverrides)
 }

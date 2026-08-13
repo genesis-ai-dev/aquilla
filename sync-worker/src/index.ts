@@ -98,6 +98,13 @@ declare global {
       HYPERDRIVE?: Hyperdrive
       /** Shared HMAC key with identity that mints /sync-token JWTs. */
       SYNC_SECRET_KEY?: string
+      /**
+       * OPS-2: dedicated bearer for the operator-only routes (`/admin/files/*`,
+       * `DELETE /audio/*`), so ops calls never carry the token-signing key.
+       * When unset those routes fall back to SYNC_SECRET_KEY; when set, it is
+       * the only value they accept. See `lib/admin-secret.ts`.
+       */
+      ADMIN_SECRET?: string
       /** Deployment profile used to reject cross-environment custom-domain traffic. */
       ENVIRONMENT?: string
       /** Base URL of the identity worker in the same deployment environment. */

@@ -12,8 +12,8 @@ importers:
         specifier: 0.12.5
         version: 0.12.5
       hono:
-        specifier: ^4.12.21
-        version: 4.12.32
+        specifier: ^4.12.34
+        version: 4.13.1
     devDependencies:
       '@cloudflare/workers-types':
         specifier: ^5.20260808.1
@@ -768,10 +768,6 @@ packages:
     resolution: {integrity: sha512-5xoDfX+fL7faATnagmWPpbFtwh/R77WmMMqqHGS65C3vvB0YHrgF+B1YmZ3441tMj5n63k0212XNoJwzlhffQw==}
     engines: {node: ^8.16.0 || ^10.6.0 || >=11.0.0}
     os: [darwin]
-
-  hono@4.12.32:
-    resolution: {integrity: sha512-XcuyW9qE2kJn07PkecMOBd5Vq/hMy7mmGw+idz1yblbg9N17ijJODrvPkn7/dwL3Kulj8LcRJ69DLOWf91dRUg==}
-    engines: {node: '>=16.9.0'}
 
   hono@4.13.1:
     resolution: {integrity: sha512-kdJoFVv2xmayw6cY09H7AbMJMt8Jn5jdlEdXsP7AGBdF2DIptVlKlOLKXP41yPip4/a3yQPv9gVcJYI8YY04dw==}
@@ -1582,8 +1578,6 @@ snapshots:
 
   fsevents@2.3.3:
     optional: true
-
-  hono@4.12.32: {}
 
   hono@4.13.1: {}
 

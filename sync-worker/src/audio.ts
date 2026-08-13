@@ -10,8 +10,9 @@
 // `?t=` query param (mirroring the diarization /audio route) because media
 // elements (`<audio src>`) cannot attach an Authorization header — the token
 // is the same short-lived file-scoped JWT either way, just GET/read-only.
-// DELETE is admin-only (Bearer SYNC_SECRET_KEY) and mirrors the snapshot
-// admin endpoints' shape.
+// DELETE accepts the admin bearer (ADMIN_SECRET, else SYNC_SECRET_KEY —
+// mirroring the snapshot admin endpoints) or a contributor+ sync-token
+// scoped to the same (projectId, fileId) (F8 orphan cleanup).
 //
 // GET streams the R2 body and honours single `Range: bytes=` requests with
 // 206/Content-Range so browsers can start playback before the download
@@ -21,10 +22,13 @@
 // projects/{pid}/files/{fid}/, so wiping a file naturally wipes its audio.
 
 import { verifyTokenForFile, WRITE_ROLE_LEVEL } from "./auth"
+import { adminBearerMatches } from "./lib/admin-secret"
 
 export interface AudioEnv {
   SNAPSHOTS: R2Bucket
   AQUILLA_PG?: AquillaDb
+  /** OPS-2: dedicated admin bearer; preferred over SYNC_SECRET_KEY. */
+  ADMIN_SECRET?: string
   SYNC_SECRET_KEY?: string
   R2_KEY_PREFIX?: string
 }
@@ -101,7 +105,7 @@ function withAudioCors(res: Response): Response {
  *  - OPTIONS  → CORS preflight
  *  - PUT      → store body as the audio object (sync-token auth)
  *  - GET      → return raw bytes (sync-token auth) or 404
- *  - DELETE   → admin only via SYNC_SECRET_KEY
+ *  - DELETE   → admin bearer, or file-scoped contributor+ sync-token
  *
  * Returns null when the URL or method doesn't match so the dispatcher can
  * fall through to the next handler.
@@ -132,10 +136,11 @@ export async function handleAudioRequest(
 
   if (request.method === "DELETE") {
     const auth = request.headers.get("Authorization") ?? ""
-    const adminExpected = env.SYNC_SECRET_KEY
-      ? `Bearer ${env.SYNC_SECRET_KEY}`
-      : null
-    if (adminExpected && auth === adminExpected) {
+    // OPS-2: shared precedence (ADMIN_SECRET, else SYNC_SECRET_KEY) and a
+    // constant-time compare. This gate previously used `===`, so it leaked a
+    // length/prefix oracle on the signing key that admin.ts had already been
+    // hardened against.
+    if (adminBearerMatches(auth, env)) {
       // Admin DELETE: no extra scope check.
       await env.SNAPSHOTS.delete(key)
       return withAudioCors(Response.json({ ok: true }))

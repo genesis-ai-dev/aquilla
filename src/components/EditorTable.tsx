@@ -3465,6 +3465,8 @@ function SanitizedRichHtml({ html }: { html: string }) {
 
   return (
     <div
+      // OPS-3: source cell text is project content; keep it out of replays.
+      data-ph-mask
       // eslint-disable-next-line react/no-danger
       dangerouslySetInnerHTML={innerHtml}
     />
@@ -6134,7 +6136,14 @@ function EditorRow({
                       requestTargetEdit()
                     }}
                   >
-                    <div ref={targetReadContentRef}>
+                    {/* OPS-3: `data-ph-mask` is PostHog's maskTextSelector
+                        (src/lib/posthog.ts). Session replay masks inputs, but
+                        the draft translation is rendered page text, not an
+                        input — without this it is replayed verbatim to a US
+                        processor. Tagged on the shared wrapper rather than each
+                        renderer so a new target-text variant inherits the mask
+                        instead of having to remember it. */}
+                    <div ref={targetReadContentRef} data-ph-mask>
                       {remoteDraftText !== undefined ? (
                         <span data-remote-presence-draft>
                           {remoteDraftText || "\u200b"}

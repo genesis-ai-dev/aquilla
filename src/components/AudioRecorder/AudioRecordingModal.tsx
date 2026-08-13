@@ -8,7 +8,7 @@
 // preview/retake step between stop and upload.
 
 import { type ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { ChevronLeft, ChevronRight, ChevronsRight, Mic, Pin, Play, Sparkles, Square, Upload, X, Volume2, VolumeX, RefreshCw, Check } from "lucide-react"
+import { ChevronLeft, ChevronRight, ChevronsRight, ChevronUp, Maximize2, Minimize2, Mic, Pin, Play, Sparkles, Square, Upload, X, Volume2, VolumeX, RefreshCw, Check } from "lucide-react"
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
@@ -28,6 +28,10 @@ import { useCountdown } from "./useCountdown"
 import { AudioWaveform } from "./AudioWaveform"
 import { DurationBar } from "./DurationBar"
 import { RecordingVideoSurface } from "./RecordingVideoSurface"
+import {
+  setRecordingVideoCollapsed,
+  useRecordingVideoCollapsed,
+} from "@/lib/store/recording-video-collapsed-pref"
 import { TakesStrip, nextTakeLabel } from "./TakesStrip"
 import { useRecordingAutoAdvance, setRecordingAutoAdvance } from "@/lib/store/recording-auto-advance-pref"
 import { setRecordingFormatPref, useRecordingFormatPref } from "@/lib/store/recording-format-pref"
@@ -132,6 +136,19 @@ export function AudioRecordingModal({
     return raw && isLinkableVideoUrl(raw) ? raw : null
   }, [project.files, activeCell?.fileId])
 
+  // Two layouts, one control (Sam's design exploration, 2026-08-13). Expanded
+  // is a 16:9 room with the picture down the left; collapsed is a tall portrait
+  // column whose lower half is the takes drawer. A line with no film is ALWAYS
+  // the collapsed layout and never offers the toggle — there is nothing to
+  // collapse, so a control for it would be a lie.
+  const videoCollapsed = useRecordingVideoCollapsed()
+  const showFilm = filmUrl != null && !videoCollapsed
+  // Expanded, the takes list is a disclosure over the column rather than a
+  // permanent shelf: the 16:9 column is short, and the instruments are what you
+  // are looking at while recording. Collapsed, the drawer is always open
+  // because the portrait column has the room and nothing else wants it.
+  const [takesOpen, setTakesOpen] = useState(false)
+
   // Recording-slot takes for the active cell — drives the takes strip. The bus
   // refetch (poked on save below) keeps this fresh as new takes land.
   const { byCellId } = useFileAudioAttachments(open ? project.id : null, open ? (activeCell?.fileId ?? null) : null)
@@ -219,6 +236,10 @@ export function AudioRecordingModal({
     consumedBlobRef.current = null
     // …and put the picture on the new line's first frame.
     setArmNonce((n) => n + 1)
+    // The takes disclosure describes the line you were on. Carrying it open to
+    // the next line would raise a panel over the instruments listing takes that
+    // are not the ones now named beneath it.
+    setTakesOpen(false)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeCellId])
 
@@ -694,15 +715,22 @@ export function AudioRecordingModal({
         // was 512px), and why the first cut of the two-panel layout shipped
         // as two 256px shreds with every line wrapped (Sam's screenshot,
         // 2026-08-13).
-        // The cinema layout is pinned to a 16:9 FOOTPRINT (Sam, 2026-08-13:
-        // "9:16 height:width for the whole thing"), which in practice makes
-        // the dialog TALLER than its content would ask for — a content-hugging
-        // height left the film panel squat and the column airless. The
-        // max-height stays as a cap for short viewports, where the ratio
-        // yields to fitting on screen.
+        // TWO LAYOUTS, from Sam's design exploration (2026-08-13). Expanded is
+        // a 16:9 room — 960×540 in the mock — with the picture down the left.
+        // Collapsed is a tall portrait column, 400×620, whose lower half is the
+        // takes drawer; that height is what finally gives the takes somewhere
+        // to live after three attempts at squeezing them elsewhere.
+        //
+        // `sm:max-w-*` WITH the variant, always: the dialog primitive's own
+        // skeleton carries `sm:max-w-lg`, and a bare `max-w-*` cannot replace it
+        // under tailwind-merge (different modifier, different group). Every
+        // width this dialog asked for before that was understood was silently
+        // 512px.
         className={cn(
-          "flex flex-row gap-0 p-0",
-          filmUrl ? "sm:aspect-[16/9] sm:max-w-6xl" : "max-w-3xl",
+          "gap-0 p-0",
+          showFilm
+            ? "flex flex-row sm:aspect-[16/9] sm:max-w-5xl"
+            : "flex h-[620px] flex-col sm:max-w-[400px]",
         )}
         style={{ maxHeight: "min(92vh, 800px)" }}
         showCloseButton={false}
@@ -715,8 +743,12 @@ export function AudioRecordingModal({
             black bars"). Hidden on a phone-width viewport rather than stacked:
             a stacked picture would push the takes and footer off a small
             screen, and this is a desktop recording rig feature. */}
-        {filmUrl && (
-          <div className="hidden w-1/2 shrink-0 overflow-hidden rounded-l-3xl sm:block">
+        {showFilm && filmUrl && (
+          // 60% of the room, per the mock's 576-of-960. The picture carries the
+          // line's CONTEXT overlaid on it — label, position, window — which is
+          // what frees the right column to be nothing but the line and the
+          // instruments.
+          <div className="relative hidden w-[60%] shrink-0 overflow-hidden rounded-l-3xl sm:block">
             <RecordingVideoSurface
               src={filmUrl}
               startSec={activeCell.startTime ?? null}
@@ -728,13 +760,45 @@ export function AudioRecordingModal({
               armNonce={armNonce}
               overrun={targetOverrun}
             />
+            {/* Overlaid on the letterbox, not floated over the image: chips on
+                their own translucent grounds so they stay legible against any
+                frame the film happens to be sitting on. */}
+            <div className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between gap-3 p-4">
+              <div className="flex min-w-0 flex-col items-start gap-1.5">
+                <span className="truncate rounded-md bg-black/65 px-2.5 py-1 text-sm font-semibold text-white backdrop-blur-sm">
+                  {activeCell.cellLabel ?? `Cell ${activeIndex + 1}`}
+                </span>
+                <span className="rounded bg-black/65 px-2 py-0.5 font-mono text-[10px] tabular-nums text-white/70 backdrop-blur-sm">
+                  {activeIndex + 1} / {cells.length}
+                  {targetSec != null && ` · window ${targetSec.toFixed(2)}s`}
+                  {targetSec != null && targetSec < MIN_USEFUL_REGION_SEC && " · very short"}
+                </span>
+              </div>
+              <AppTooltip content="Hide the film and use the narrow recorder">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  data-testid="rec-collapse-video"
+                  onClick={() => setRecordingVideoCollapsed(true)}
+                  aria-label="Hide the film"
+                  className="pointer-events-auto h-7 shrink-0 gap-1.5 rounded-md bg-black/65 px-2.5 text-[11px] text-white/80 backdrop-blur-sm hover:bg-black/80 hover:text-white"
+                >
+                  <Minimize2 className="h-3.5 w-3.5" /> Collapse video
+                </Button>
+              </AppTooltip>
+            </div>
           </div>
         )}
-        <div className="flex min-w-0 flex-1 flex-col">
+        <div className="relative flex min-w-0 flex-1 flex-col">
 
         {/* Header: cell context — fixed, never scrolls */}
         <div className="flex shrink-0 items-start justify-between gap-4 border-b px-6 pt-5 pb-4">
           <div className="min-w-0 flex-1 space-y-1">
+            {/* The label/position/window row is the PICTURE's job when there is
+                one — see the overlay chips above. Repeating it here would say
+                the same thing twice in one dialog, three inches apart. */}
+            {!showFilm && (
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <span className="font-medium text-foreground/80">
                 {activeCell.cellLabel ?? `Cell ${activeIndex + 1}`}
@@ -765,6 +829,7 @@ export function AudioRecordingModal({
                 {activeIndex + 1} / {cells.length}
               </span>
             </div>
+            )}
             <div className="space-y-0.5">
               <div className="text-xs text-muted-foreground/60">Source</div>
               <div className="text-xs leading-snug text-muted-foreground">
@@ -845,6 +910,24 @@ export function AudioRecordingModal({
                 {beepEnabled ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
               </Button>
             </AppTooltip>
+            {/* Only when a film EXISTS but is collapsed. A line with no video
+                gets no toggle at all — offering "Show video" where there is
+                none to show is the affordance-that-lies problem again. */}
+            {filmUrl && videoCollapsed && (
+              <AppTooltip content="Show the film for this line beside the recorder">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  data-testid="rec-expand-video"
+                  onClick={() => setRecordingVideoCollapsed(false)}
+                  aria-label="Show the film"
+                  className="h-7 gap-1.5 px-2 text-[11px] text-muted-foreground/70"
+                >
+                  <Maximize2 className="h-3.5 w-3.5" /> Video
+                </Button>
+              </AppTooltip>
+            )}
             <AppTooltip content="Close (Esc)">
               <Button
                 type="button"
@@ -862,14 +945,27 @@ export function AudioRecordingModal({
 
         {/* Scrollable middle — stage + takes. Overflows internally so header
             and footer stay anchored at 100% zoom on compact viewports. */}
-        <div className="min-h-0 flex-1 overflow-y-auto">
+        {/* EXPANDED: this grows and the stage inside it sits at the BOTTOM, so
+            the instruments land under the line rather than floating in the
+            middle of a tall column (the mock's flex spacer, in effect).
+            COLLAPSED: natural height, because the takes drawer below is the
+            thing that should absorb the leftover room. */}
+        <div className={cn("overflow-y-auto", showFilm ? "min-h-0 flex-1" : "shrink-0")}>
 
         {/* Stage — changes with phase. The film is NOT in here: Sam's first
             cut of this feature put a 280px picture beside the phase content
             and it read as clutter; the film is now a full-height panel beside
             the whole column (see DialogContent), and the stage is exactly the
             single-centred-column it was before any of this existed. */}
-        <div className="relative flex min-h-[200px] flex-col items-center justify-center gap-4 p-6">
+        <div
+          className={cn(
+            "relative flex min-h-[200px] flex-col items-center gap-4 p-6",
+            // Bottom-aligned beside a picture (instruments sit under the line
+            // you are reading); centred in the narrow column, which has no
+            // spare height to push anything around in.
+            showFilm ? "h-full justify-end" : "justify-center",
+          )}
+        >
           {displayPhase === "counting" && countdown.count !== null && (
             <div className="flex flex-col items-center gap-3">
               <div
@@ -996,8 +1092,20 @@ export function AudioRecordingModal({
             always on screen, and past ~three takes it scrolls itself. */}
         {(phase === "idle" || phase === "preview" || phase === "saved" || phase === "error") &&
           activeCell &&
-          recordingTakes.length > 0 && (
-            <div className="shrink-0">
+          recordingTakes.length > 0 &&
+          // EXPANDED: a disclosure raised over the column by the footer's
+          // "Takes N" control, so the short 16:9 column keeps its instruments
+          // unobstructed while recording. COLLAPSED: always-open drawer filling
+          // the portrait column's lower half — the room the mock's 620px height
+          // exists to provide.
+          (showFilm ? takesOpen : true) && (
+            <div
+              className={cn(
+                showFilm
+                  ? "absolute inset-x-0 bottom-0 z-20 max-h-[70%] overflow-y-auto border-t bg-popover shadow-[0_-8px_24px_rgba(0,0,0,0.18)]"
+                  : "min-h-0 flex-1 overflow-y-auto bg-muted/20",
+              )}
+            >
               <TakesStrip
                 projectId={project.id}
                 fileId={activeCell.fileId}
@@ -1037,6 +1145,26 @@ export function AudioRecordingModal({
           </AppTooltip>
 
           <div className="flex-1" />
+
+          {/* The takes disclosure, expanded-view only: collapsed, the drawer is
+              already open above this bar and a control to reveal it would be
+              pointing at something visible. Mirrors the mock's "Takes 3 ⌃". */}
+          {showFilm && recordingTakes.length > 0 && (
+            <AppTooltip content={takesOpen ? "Hide takes" : "Show takes for this line"}>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                data-testid="rec-takes-toggle"
+                aria-expanded={takesOpen}
+                onClick={() => setTakesOpen((v) => !v)}
+                className="gap-1.5 text-muted-foreground"
+              >
+                Takes <span className="font-mono tabular-nums">{recordingTakes.length}</span>
+                <ChevronUp className={cn("h-3.5 w-3.5 transition-transform", takesOpen && "rotate-180")} />
+              </Button>
+            </AppTooltip>
+          )}
 
           {displayPhase === "preview" && (
             <>

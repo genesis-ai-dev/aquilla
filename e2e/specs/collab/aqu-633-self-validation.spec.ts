@@ -113,7 +113,9 @@ test("AQU-633: a self-validate 403 surfaces the reason banner (not a silent reve
   await expect(bobToggle).toHaveAttribute("aria-pressed", "false", { timeout: 15_000 })
 
   // ── 6. THE FIX (C): the rose banner surfaces the reason, not a silent revert ─
+  // Copy lives in forbidden-copy.ts (past tense — SUB-8): "1 change wasn't
+  // saved — validating your own translation wasn't allowed …"
   const banner = bob.getByText(/wasn't saved|weren't saved/i)
   await expect(banner).toBeVisible({ timeout: 15_000 })
-  await expect(banner).toContainText(/validate a cell you translated/i)
+  await expect(banner).toContainText(/validating your own translation wasn't allowed/i)
 })

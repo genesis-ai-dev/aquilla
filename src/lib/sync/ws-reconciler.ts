@@ -611,6 +611,7 @@ function parseContextualFrame(value: unknown): ContextualActivityFrame | null {
       type: "contextual.span.start",
       runId: f.runId,
       fileId: f.fileId,
+      ...(typeof f.targetLang === "string" ? { targetLang: f.targetLang } : {}),
       spanId: f.spanId,
       spanLabel: f.spanLabel,
     }

@@ -1,38 +1,26 @@
 import { test, expect } from "../../helpers/multi-user"
-import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/seed-project"
+import { jwtFor, seedProjectWithFile } from "../../helpers/seed-project"
+import { ProjectSettings } from "../../helpers/page-objects/ProjectSettings"
 
 /**
- * Project Share dialog (SharePanel).
+ * Project sharing — Add a member dialog (Settings → Members).
  *
- * The workspace sidebar nav has a "Share" button. Clicking it opens a Dialog
- * with title "Share Project" and two tabs: "Members" and "Invite link".
- * This spec verifies the dialog opens and both tabs are accessible.
+ * Sharing used to open from the workspace sidebar More menu (SharePanel).
+ * It now lives at `/project/:id/settings/members`: "Add a member" opens a
+ * dialog with "Add members" and "Invite link" tabs.
  */
-test("share dialog opens with Members and Invite link tabs", async ({ alice }) => {
+test("add a member dialog opens with members and invite-link tabs", async ({ alice }) => {
   const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `Share ${Date.now()}` })
-  await openSeededProject(alice, seeded)
+  const settings = new ProjectSettings(alice)
+  const dialog = await settings.openAddMemberDialog(seeded.projectId)
 
-  // The "Share" button is in the workspace sidebar nav.
-  // Share lives in the sidebar "More" menu (sidebar cleanup).
-  await alice.getByRole("button", { name: /More project options/i }).click()
-  const shareBtn = alice.getByRole("button", { name: /^Share$/i })
-  await expect(shareBtn).toBeVisible({ timeout: 5_000 })
-  await shareBtn.click()
+  await expect(dialog.getByRole("heading", { name: /Add a member/i })).toBeVisible()
+  await expect(dialog.getByRole("tab", { name: /^Add members$/i })).toBeVisible({ timeout: 3_000 })
+  await expect(dialog.getByRole("tab", { name: /^Invite link$/i })).toBeVisible({ timeout: 3_000 })
 
-  // The SharePanel renders as a named Dialog. Scope to it because other
-  // portaled UI, such as the sidebar More menu, may also expose role=dialog.
-  const dialog = alice.getByRole("dialog", { name: /Share Project/i })
-  await expect(dialog).toBeVisible({ timeout: 5_000 })
-  await expect(dialog.getByRole("heading", { name: /Share Project/i })).toBeVisible()
+  await dialog.getByRole("tab", { name: /^Invite link$/i }).click()
+  await expect(dialog.getByRole("button", { name: /Create invite link/i })).toBeVisible({ timeout: 3_000 })
 
-  // Both tab buttons are present.
-  await expect(dialog.getByRole("button", { name: /^Members$/i })).toBeVisible({ timeout: 3_000 })
-  await expect(dialog.getByRole("button", { name: /^Invite link$/i })).toBeVisible({ timeout: 3_000 })
-
-  // Switch to the Invite link tab and verify it renders.
-  await dialog.getByRole("button", { name: /^Invite link$/i }).click()
-
-  // Dismiss.
   await alice.keyboard.press("Escape")
   await expect(dialog).not.toBeVisible({ timeout: 3_000 })
 })

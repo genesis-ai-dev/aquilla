@@ -3,7 +3,8 @@
  *
  * Covers:
  *  - Page renders username + password fields and a Sign in button
- *  - Successful login navigates to /
+ *  - Successful login navigates to /app
+ *  - Already-signed-in visitors are redirected into the app
  *  - Auth error shown in the form
  *  - "Forgot password?" link switches to forgot-password mode
  *  - "Create an account" link points to /onboarding
@@ -21,6 +22,11 @@ import { Login } from "./Login"
 const mockLogin = vi.fn()
 vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({ login: mockLogin }),
+}))
+
+const mockHasAuthHintCookie = vi.fn(() => false)
+vi.mock("@/lib/frontier/session-store", () => ({
+  hasAuthHintCookie: () => mockHasAuthHintCookie(),
 }))
 
 // Mock FrontierForgotPasswordForm to avoid pulling in its own deps in unit tests.
@@ -68,11 +74,13 @@ function submitLogin() {
   })
 }
 
-function renderLogin() {
+function renderLogin(initialEntry = "/login") {
   return render(
-    <MemoryRouter initialEntries={["/login"]}>
+    <MemoryRouter initialEntries={[initialEntry]}>
       <Routes>
         <Route path="/login" element={<Login />} />
+        <Route path="/app" element={<div>App entry</div>} />
+        <Route path="/projects" element={<div>Projects</div>} />
       </Routes>
     </MemoryRouter>,
   )
@@ -81,6 +89,8 @@ function renderLogin() {
 beforeEach(() => {
   vi.clearAllMocks()
   navigate.mockReset()
+  mockHasAuthHintCookie.mockReturnValue(false)
+  localStorage.removeItem("codex:onboardingComplete")
 })
 
 // ---------------------------------------------------------------------------
@@ -109,6 +119,27 @@ describe("Login page — rendering", () => {
     renderLogin()
     const link = screen.getByRole("link", { name: /create an account/i })
     expect(link).toHaveAttribute("href", "/onboarding")
+  })
+})
+
+describe("Login page — already signed in", () => {
+  it("redirects to /app when the auth-hint cookie is present", () => {
+    mockHasAuthHintCookie.mockReturnValue(true)
+    renderLogin()
+    expect(screen.getByText("App entry")).toBeInTheDocument()
+    expect(screen.queryByLabelText(/username or email/i)).not.toBeInTheDocument()
+  })
+
+  it("redirects to /app when local onboarding is complete", () => {
+    localStorage.setItem("codex:onboardingComplete", "true")
+    renderLogin()
+    expect(screen.getByText("App entry")).toBeInTheDocument()
+  })
+
+  it("honors ?next= when already signed in", () => {
+    mockHasAuthHintCookie.mockReturnValue(true)
+    renderLogin("/login?next=%2Fprojects")
+    expect(screen.getByText("Projects")).toBeInTheDocument()
   })
 })
 
@@ -145,11 +176,11 @@ describe("Login page — success path", () => {
       resolveLogin({ username: "alice", jwt: "tok" })
     })
     await waitFor(() => {
-      expect(navigate).toHaveBeenCalledWith("/", { replace: true })
+      expect(navigate).toHaveBeenCalledWith("/app", { replace: true })
     })
   })
 
-  it("calls login and navigates to / on success", async () => {
+  it("calls login and navigates to /app on success", async () => {
     mockLogin.mockResolvedValue({ username: "alice", jwt: "tok" })
     renderLogin()
 
@@ -165,7 +196,7 @@ describe("Login page — success path", () => {
         }),
       )
     })
-    expect(navigate).toHaveBeenCalledWith("/", { replace: true })
+    expect(navigate).toHaveBeenCalledWith("/app", { replace: true })
   })
 })
 
@@ -221,13 +252,7 @@ describe("Login page — next param", () => {
   it("navigates to ?next= path after successful login", async () => {
     mockLogin.mockResolvedValue({ username: "alice", jwt: "tok" })
 
-    render(
-      <MemoryRouter initialEntries={["/login?next=%2Fprojects"]}>
-        <Routes>
-          <Route path="/login" element={<Login />} />
-        </Routes>
-      </MemoryRouter>,
-    )
+    renderLogin("/login?next=%2Fprojects")
 
     fillLogin("alice", "secret")
     await submitLogin()
@@ -241,7 +266,7 @@ describe("Login page — next param", () => {
     expect(navigate).toHaveBeenCalledWith("/projects", { replace: true })
   })
 
-  it("falls back to / when no ?next= is present", async () => {
+  it("falls back to /app when no ?next= is present", async () => {
     mockLogin.mockResolvedValue({ username: "alice", jwt: "tok" })
     renderLogin() // uses /login with no search params
 
@@ -253,19 +278,13 @@ describe("Login page — next param", () => {
       "secret",
       expect.objectContaining({ onMigrationRequired: expect.any(Function) }),
     ))
-    expect(navigate).toHaveBeenCalledWith("/", { replace: true })
+    expect(navigate).toHaveBeenCalledWith("/app", { replace: true })
   })
 
   it("ignores external ?next= values to prevent open-redirect", async () => {
     mockLogin.mockResolvedValue({ username: "alice", jwt: "tok" })
 
-    render(
-      <MemoryRouter initialEntries={["/login?next=https%3A%2F%2Fevil.example.com"]}>
-        <Routes>
-          <Route path="/login" element={<Login />} />
-        </Routes>
-      </MemoryRouter>,
-    )
+    renderLogin("/login?next=https%3A%2F%2Fevil.example.com")
 
     fillLogin("alice", "secret")
     await submitLogin()
@@ -275,7 +294,7 @@ describe("Login page — next param", () => {
       "secret",
       expect.objectContaining({ onMigrationRequired: expect.any(Function) }),
     ))
-    // Must NOT navigate to the external URL — falls back to /
-    expect(navigate).toHaveBeenCalledWith("/", { replace: true })
+    // Must NOT navigate to the external URL — falls back to /app
+    expect(navigate).toHaveBeenCalledWith("/app", { replace: true })
   })
 })

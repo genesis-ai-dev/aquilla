@@ -605,12 +605,12 @@ export function buildEventProjectionStmts(
         // must not resolve a proposal either. `draft.created_at <= serverTs`
         // is the rebuild causality boundary: replaying a historical commit may
         // rebuild the cell head, but it can never review a proposal staged
-        // later. Joining through the owning run supplies lane provenance
-        // without adding a redundant lane column to contextual_drafts. Text
-        // equality is exact; normalizing whitespace here would claim a
+        // later. Drafts carry their own `target_lang` (copied from the owning
+        // run at insert) so a French commit cannot apply a Spanish proposal.
+        // Text equality is exact; normalizing whitespace here would claim a
         // proposal was applied when the committed artifact differs byte-for-
         // byte. The partial live-draft index permits at most one reconciled row
-        // for this cell, so its activity fact reuses the winning commit's
+        // for this cell+lane, so its activity fact reuses the winning commit's
         // UUIDv7: stable on replay, with no invented ID shape. A malformed
         // legacy envelope skips only the evidence INSERT via the UUIDv7
         // predicate; it must never roll back the cell/draft projection.
@@ -627,14 +627,7 @@ export function buildEventProjectionStmts(
                     AND draft.cell_id = ?
                     AND draft.created_at <= to_timestamp(?::double precision / 1000.0)
                     AND draft.status = 'proposed'
-                    AND EXISTS (
-                      SELECT 1
-                        FROM contextual_runs AS owner
-                       WHERE owner.id = draft.run_id
-                         AND owner.project_id = draft.project_id
-                         AND owner.file_id = draft.file_id
-                         AND owner.target_lang = ?
-                    )
+                    AND draft.target_lang = ?
                     AND EXISTS (
                       SELECT 1
                         FROM cells AS projected

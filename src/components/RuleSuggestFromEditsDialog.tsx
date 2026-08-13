@@ -207,7 +207,6 @@ export function RuleSuggestFromEditsDialog({
             render={
               <Button
                 variant="outline"
-                size="sm"
                 disabled={!isConfigured}
               />
             }

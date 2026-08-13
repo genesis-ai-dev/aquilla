@@ -214,7 +214,6 @@ export function RuleCreateDialog({
         <DialogTrigger
           render={
             <Button
-              size="sm"
               disabled={!canManage}
             />
           }
@@ -282,7 +281,7 @@ export function RuleCreateDialog({
                       value={field.state.value}
                       onValueChange={(value) => field.handleChange(value as "major" | "minor")}
                     >
-                      <SelectTrigger className="w-full">
+                      <SelectTrigger>
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
@@ -309,7 +308,7 @@ export function RuleCreateDialog({
                       value={field.state.value}
                       onValueChange={(value) => field.handleChange(value as UserRuleCheckType)}
                     >
-                      <SelectTrigger className="w-full">
+                      <SelectTrigger>
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
@@ -438,7 +437,7 @@ export function RuleCreateDialog({
             <Input value={testSource} onChange={(e) => setTestSource(e.target.value)} placeholder="Source text..." className="text-xs" />
             <Input value={testTarget} onChange={(e) => setTestTarget(e.target.value)} placeholder="Target text..." className="text-xs" />
             <div className="flex items-center gap-2">
-              <Button type="button" variant="outline" size="sm" onClick={handleTest}>Test</Button>
+              <Button type="button" variant="outline" onClick={handleTest}>Test</Button>
               {testResult && (
                 <span className={`text-xs ${testResult.startsWith("✓") ? "text-green-600" : testResult.startsWith("✗") ? "text-destructive" : "text-amber-600"}`}>
                   {testResult}

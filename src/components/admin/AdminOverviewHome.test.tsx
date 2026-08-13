@@ -3,10 +3,17 @@
  * Needs-attention section lists at-risk projects, and the nav callbacks fire.
  */
 import { describe, it, expect, vi } from "vitest"
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen, fireEvent, within } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
 import { AdminOverviewHome } from "./AdminOverviewHome"
 import type { AdminOverview, AdminOrg, AdminUser, AdminProject, AdminActivity } from "@/lib/frontier/admin"
+
+const navigate = vi.fn()
+
+vi.mock("react-router-dom", async () => {
+  const actual = await vi.importActual<typeof import("react-router-dom")>("react-router-dom")
+  return { ...actual, useNavigate: () => navigate }
+})
 
 const overview: AdminOverview = {
   orgs: 4,
@@ -71,16 +78,36 @@ describe("AdminOverviewHome", () => {
 
   it("lists at-risk projects in Needs attention", () => {
     renderHome()
-    expect(screen.getByRole("link", { name: "Late Project" })).toBeInTheDocument()
+    const table = screen.getByTestId("admin-overview-attention-table")
+    expect(table).toHaveClass("border-0")
+    expect(within(table).getByText("Late Project")).toBeInTheDocument()
+    expect(screen.queryByRole("link", { name: "Late Project" })).not.toBeInTheDocument()
     expect(screen.getByText("Overdue")).toBeInTheDocument()
+  })
+
+  it("navigates to a project when its attention row is clicked", () => {
+    navigate.mockClear()
+    renderHome()
+    const table = screen.getByTestId("admin-overview-attention-table")
+    fireEvent.click(within(table).getByText("Late Project").closest("tr")!)
+    expect(navigate).toHaveBeenCalledWith("/projects/late")
   })
 
   it("fires nav callbacks for org and activity", () => {
     const props = renderHome()
-    fireEvent.click(screen.getByRole("button", { name: "Busy" }))
+    const orgsTable = screen.getByTestId("admin-overview-orgs-table")
+    expect(orgsTable).toHaveClass("border-0")
+    fireEvent.click(within(orgsTable).getByText("Busy").closest("tr")!)
     expect(props.onOpenOrg).toHaveBeenCalledWith(1)
     fireEvent.click(screen.getByRole("button", { name: /view all/i }))
     expect(props.onViewActivity).toHaveBeenCalled()
+  })
+
+  it("renders most active organizations as a table", () => {
+    renderHome()
+    const orgsTable = screen.getByTestId("admin-overview-orgs-table")
+    expect(within(orgsTable).getByText("Projects")).toBeInTheDocument()
+    expect(within(orgsTable).getByText("Members")).toBeInTheDocument()
   })
 
   it("shows an all-clear empty state when nothing is at risk", () => {

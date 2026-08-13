@@ -132,18 +132,29 @@ export function humanRoleName(level: number): string {
   return name.charAt(0).toUpperCase() + name.slice(1)
 }
 
-/** One-line description shown in role pickers. */
+/**
+ * Capability blurb shown under each role in RoleSelect (AD-6 / AQU-138).
+ * Name + level stay on the label line — this is the "what it does" copy only.
+ */
 export function roleDescription(level: number): string {
   switch (level) {
-    case 100: return "Read-only access to cells + comments"
-    case 200: return "Read + add comments on cells"
-    case 300: return "Read + comment + validate cells (no content edits)"
-    case 400: return "Read + comment + edit cell content"
-    case 500: return "Contributor + manage members"
-    case 600: return "Lead + manage roles"
-    case 700: return "Full control"
+    case 100: return "Can read all org projects. No edit or management actions."
+    case 200: return "Can read and leave comments. Cannot edit content."
+    case 300: return "Can read, comment, and review. Cannot make direct edits."
+    case 400: return "Can edit project content. Maximum level grantable via share link."
+    case 500: return "Can add members to projects, mint share-link invites, and lead project work."
+    case 600: return "Can create/manage teams, rename the org, set project deadlines, and remove project members."
+    case 700: return "Full control: add/remove org members, archive/restore projects, and all maintainer actions."
     default: return ""
   }
+}
+
+/** Full "Viewer (100) — …" string for tooltips and help affordances. */
+export function roleHelpText(level: number): string {
+  const description = roleDescription(level)
+  if (!description) return ""
+  const blurb = description.charAt(0).toLowerCase() + description.slice(1)
+  return `${roleDisplayLabel(level)} (${level}) — ${blurb}`
 }
 
 /**
@@ -160,6 +171,10 @@ export interface RoleOption {
 function toOption(level: RoleLevel): RoleOption {
   return { level, name: roleName(level), description: roleDescription(level) }
 }
+
+/** Full seven-rung ladder — team attach / org-owner role change. */
+export const ALL_ROLE_OPTIONS: readonly RoleOption[] =
+  ALL_ROLE_LEVELS.map(toOption)
 
 export const PROJECT_ROLE_OPTIONS: readonly RoleOption[] =
   PROJECT_ROLE_PICKER.map(toOption)

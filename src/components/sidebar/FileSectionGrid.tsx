@@ -1,5 +1,6 @@
 import { useSectionProgressState } from "@/hooks/useSectionProgress"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
 import { useT } from "@/lib/i18n/I18nProvider"
 
@@ -21,7 +22,11 @@ export function FileSectionGrid({ projectId, fileId, validationCount, getTokenFo
   const { sections, error, retry } = useSectionProgressState(projectId, fileId, validationCount, getTokenForFile)
 
   if (sections === null) {
-    return <div className="px-6 py-1 text-[10px] text-muted-foreground">{t("common.loading")}</div>
+    return (
+      <div className="flex items-center px-6 py-1 text-muted-foreground" aria-label={t("common.loading")}>
+        <Spinner className="size-3" />
+      </div>
+    )
   }
   if (sections.length === 0) {
     if (error) {

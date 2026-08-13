@@ -159,7 +159,6 @@ export function RuleSuggestDialog({ files: _files, completionSettings, onAdd, pr
             render={
               <Button
                 variant="outline"
-                size="sm"
                 disabled={!isConfigured || !canManage}
               />
             }
@@ -251,7 +250,6 @@ export function RuleSuggestDialog({ files: _files, completionSettings, onAdd, pr
                       </div>
                       <Button
                         variant={isAccepted ? "default" : "outline"}
-                        size="sm"
                         onClick={() => toggleAccept(i)}
                         className="flex-shrink-0"
                       >

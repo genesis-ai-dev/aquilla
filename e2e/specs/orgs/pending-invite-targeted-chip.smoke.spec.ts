@@ -1,5 +1,6 @@
 import { test, expect, orgRoute } from "../../helpers/multi-user"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
+import { ProjectSettings } from "../../helpers/page-objects/ProjectSettings"
 
 /**
  * PendingInvitesSection — "Targeted invite" chip on /members.
@@ -14,30 +15,20 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
  *     <span title="Open link — anyone holding the URL can redeem">open link</span>
  *
  * This spec creates an email-targeted invite (fills the optional "Recipient
- * email" field in the SharePanel invite-link tab) and verifies the targeted
- * invite chip appears on /members.
+ * email" field on Settings → Members → Add a member → Invite link) and
+ * verifies the targeted invite chip appears on /members.
  */
 test("targeted invite chip appears on /members when invite has a recipient email", async ({ alice }) => {
   const dash = new Dashboard(alice)
   await dash.goto()
   const name = `TargetedInvite ${Date.now()}`
   await dash.createProject({ name, source: "en", target: "fr" })
-  await dash.openProject(name)
+  await expect(alice).toHaveURL(/\/projects\/[^/?#]+/, { timeout: 15_000 })
 
-  // No file import needed — invite links are project-level, and skipping the
-  // import keeps this spec inside the 30s per-test budget.
+  const settings = new ProjectSettings(alice)
+  const dialog = await settings.openInviteLinkTab(settings.projectIdFromCurrentUrl())
 
-  // Open Share panel → Invite link tab.
-  // Share lives in the sidebar "More" menu (sidebar cleanup).
-  await alice.getByRole("button", { name: /More project options/i }).click()
-  const shareBtn = alice.getByRole("button", { name: /^Share$/i })
-  await shareBtn.click()
-  const dialog = alice.getByRole("dialog")
-  await expect(dialog).toBeVisible({ timeout: 5_000 })
-  await dialog.getByRole("button", { name: /^Invite link$/i }).click()
-
-  // Fill in the recipient email field.
-  const emailInput = dialog.locator("#invite-email")
+  const emailInput = dialog.locator("#pm-invite-email")
   await expect(emailInput).toBeVisible({ timeout: 5_000 })
   await emailInput.fill("targeted@example.com")
 

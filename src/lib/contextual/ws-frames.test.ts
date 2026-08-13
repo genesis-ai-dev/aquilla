@@ -244,6 +244,25 @@ describe("contextual.activity WS frames → run-store", () => {
     expect(getContextualRunState()).toMatchObject({ runId: null, status: "idle" })
     expect(getContextualRunProgress()).toEqual({ done: 0, total: 0, failed: 0 })
   })
+
+  it("adopts a named-lane run.state frame when the editor is attached to that lane", async () => {
+    await attachContextualRun(PROJECT, "file-1", "fr")
+    dispatch({
+      t: "contextual.activity",
+      project: PROJECT,
+      frame: {
+        type: "contextual.run.state",
+        runId: RUN_ID,
+        fileId: "file-1",
+        targetLang: "fr",
+        status: "running",
+        done: 2,
+        total: 9,
+      },
+    })
+    expect(getContextualRunState()).toMatchObject({ runId: RUN_ID, status: "running" })
+    expect(getContextualRunProgress()).toEqual({ done: 2, total: 9, failed: 0 })
+  })
 })
 
 describe("contextual.activity WS draft frames → scoped draft mirror", () => {

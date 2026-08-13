@@ -438,7 +438,6 @@ export function DcsUpstreamPanel({ projectId, roleLevel, client }: DcsUpstreamPa
         <div className="flex items-center gap-2">
           <Button
             variant="outline"
-            size="sm"
             onClick={handleCheck}
             disabled={checking || importing || repairing || detaching || !jwt}
           >
@@ -467,7 +466,7 @@ export function DcsUpstreamPanel({ projectId, roleLevel, client }: DcsUpstreamPa
             </p>
             {canImport ? (
               <div className="flex justify-end">
-                <Button size="sm" onClick={handleImport} disabled={importing || repairing || detaching}>
+                <Button onClick={handleImport} disabled={importing || repairing || detaching}>
                   {importing ? <Spinner className="h-4 w-4" /> : <DownloadCloud className="h-4 w-4" />}
                   Import changes
                 </Button>
@@ -509,7 +508,6 @@ export function DcsUpstreamPanel({ projectId, roleLevel, client }: DcsUpstreamPa
           <div className="space-y-1 border-t pt-3">
             <Button
               variant="ghost"
-              size="sm"
               onClick={handleRepairScan}
               disabled={checking || importing || repairing || detaching || !jwt}
             >
@@ -536,7 +534,6 @@ export function DcsUpstreamPanel({ projectId, roleLevel, client }: DcsUpstreamPa
                 )}
                 <div className="flex justify-end">
                   <Button
-                    size="sm"
                     variant="destructive"
                     onClick={() => setRepairConfirmOpen(true)}
                     disabled={checking || importing || detaching}
@@ -576,7 +573,6 @@ export function DcsUpstreamPanel({ projectId, roleLevel, client }: DcsUpstreamPa
           <div className="space-y-1 border-t pt-3">
             <Button
               variant="ghost"
-              size="sm"
               className="text-destructive hover:text-destructive"
               onClick={() => setDetachConfirmOpen(true)}
               disabled={checking || importing || repairing || detaching}

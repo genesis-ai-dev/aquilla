@@ -2,21 +2,21 @@ import { test, expect } from "../../helpers/multi-user"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
 
 /**
- * ValidationSettingsSection — "Named validators" input.
+ * ValidationSettingsSection — "Named validators" multi-select combobox.
  *
- * ValidationSettingsSection.tsx renders a text input for comma-separated
- * validator usernames:
- *   - id="validation-named-users"
- *   - placeholder="alice, bob, carol"
+ * ValidationSettingsSection.tsx renders a popup Combobox for project-member
+ * usernames:
+ *   - trigger id="validation-named-users" (avatar stack + comma-separated names)
+ *   - options with checkbox + avatar + username
+ *   - autoHighlight + Shift+Enter toggles without closing
  *
- * Filling the input marks the form dirty, which reveals the "Save changes"
+ * Selecting a member marks the form dirty, which reveals the "Save changes"
  * button in the parent ProjectSettings form.
  *
- * This spec: navigate to project settings → fill the named validators input
- * → verify Save changes button appears → clear the input → Save changes
- * button is still visible (form is still dirty with the empty string).
+ * This spec: navigate to project settings → open the named validators
+ * combobox → Shift+Enter to pick alice (auto-highlighted) → verify Save.
  */
-test("project settings named validators input makes form dirty", async ({ alice }) => {
+test("project settings named validators combobox makes form dirty", async ({ alice }) => {
   const dash = new Dashboard(alice)
   await dash.goto()
   const name = `NamedVal ${Date.now()}`
@@ -27,15 +27,20 @@ test("project settings named validators input makes form dirty", async ({ alice 
   expect(projectId).toBeTruthy()
 
   await alice.goto(`/project/${projectId}/settings/validation`)
-  // The named validators input is visible.
-  const namedUsersInput = alice.locator("#validation-named-users")
-  await expect(namedUsersInput).toBeVisible({ timeout: 10_000 })
-  await expect(namedUsersInput).toHaveAttribute("placeholder", "alice, bob, carol")
+  const trigger = alice.locator("#validation-named-users")
+  await expect(trigger).toBeVisible({ timeout: 10_000 })
 
-  // Fill the input to mark the form dirty.
-  await namedUsersInput.fill("alice, bob")
+  await trigger.click()
+  const search = alice.getByRole("combobox", { name: /Search members/i })
+  await expect(search).toBeVisible({ timeout: 10_000 })
+  await expect(alice.getByRole("option", { name: "alice" })).toBeVisible({ timeout: 10_000 })
+  await search.press("Shift+Enter")
 
-  // "Save changes" button should now appear.
+  // Trigger shows the selected username (avatar-stack + label); popup stays open.
+  await expect(trigger).toContainText("alice", { timeout: 5_000 })
+  await expect(search).toBeVisible({ timeout: 5_000 })
+
+  await alice.keyboard.press("Escape")
   const saveBtn = alice.getByRole("button", { name: /Save changes/i })
-  await expect(saveBtn).toBeVisible({ timeout: 5_000 })
+  await expect(saveBtn).toBeVisible({ timeout: 10_000 })
 })

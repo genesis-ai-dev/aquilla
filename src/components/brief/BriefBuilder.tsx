@@ -78,7 +78,7 @@ export function BriefBuilder(props: BriefBuilderProps) {
               onChange={(e) => setField(field.id, e.target.value)}
             />
             {canEdit && onHelpDraft && (
-              <Button variant="ghost" size="sm" disabled={busy}
+              <Button variant="ghost" disabled={busy}
                 onClick={async () => {
                   setBusy(true)
                   try { setField(field.id, await onHelpDraft(field.id, draft)) }
@@ -126,7 +126,7 @@ function DocumentPrefill(props: { disabled: boolean; onExtract: (text: string) =
       <div className="text-xs font-medium">Optional: paste an existing brief to pre-fill</div>
       <Textarea value={text} rows={3} disabled={props.disabled}
         placeholder="Paste notes or an existing brief…" onChange={(e) => setText(e.target.value)} />
-      <Button size="sm" variant="secondary" disabled={props.disabled || !text.trim()}
+      <Button variant="secondary" disabled={props.disabled || !text.trim()}
         onClick={() => props.onExtract(text)}>
         Pre-fill from text
       </Button>

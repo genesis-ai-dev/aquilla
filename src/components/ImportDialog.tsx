@@ -21,6 +21,7 @@ import {
   FieldError,
   FieldGroup,
   FieldLabel,
+  OptionalMark,
 } from "@/components/ui/field"
 import {
   InputGroup,
@@ -1533,7 +1534,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
             Drag & drop files here, or
           </p>
           <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" nativeButton={false} render={<label />}>
+            <Button variant="outline" nativeButton={false} render={<label />}>
               Choose Files
               <input
                 type="file"
@@ -1542,7 +1543,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
                 onChange={handleFileInput}
               />
             </Button>
-            <Button variant="outline" size="sm" nativeButton={false} render={<label />}>
+            <Button variant="outline" nativeButton={false} render={<label />}>
               Choose Folder
               {/* Folder picker for an unzipped Paratext project. */}
               <input
@@ -1785,7 +1786,7 @@ function ParatextChoice({
       <div className="flex flex-col gap-3 py-2">
         <div className="flex items-center justify-between">
           <p className="text-sm font-medium">Pick a source Bible to align against</p>
-          <Button variant="ghost" size="sm" onClick={() => setMode("choose")}>Back</Button>
+          <Button variant="ghost" onClick={() => setMode("choose")}>Back</Button>
         </div>
         <p className="text-xs text-muted-foreground">
           It just needs to be close — verses align by reference (e.g. MAT 1:1). Verses missing on either side stay blank.
@@ -1916,7 +1917,7 @@ function ParatextChoice({
         </button>
       </div>
       <div>
-        <Button variant="ghost" size="sm" onClick={onCancel}>Cancel</Button>
+        <Button variant="ghost" onClick={onCancel}>Cancel</Button>
       </div>
       {error && <p className="text-sm text-destructive">{error}</p>}
     </div>
@@ -2098,7 +2099,7 @@ function EBiblePanel({ projectId, username, sourceLanguage, targetLanguage, targ
         <p className="text-xs text-muted-foreground">
           The target column will update as the server projection lands.
         </p>
-        <Button size="sm" onClick={() => onTargetImported?.()}>Close</Button>
+        <Button onClick={() => onTargetImported?.()}>Close</Button>
       </div>
     )
   }
@@ -2652,11 +2653,10 @@ function DirectionPanel({
       {/* AQU-249: restore direction screen on failure so the user can retry */}
       {error && <FieldError role="alert">{error}</FieldError>}
       <div className="flex justify-end gap-2">
-        <Button variant="ghost" size="sm" onClick={onSkip} disabled={confirming}>
+        <Button variant="ghost" onClick={onSkip} disabled={confirming}>
           Skip for now
         </Button>
         <Button
-          size="sm"
           onClick={onConfirm}
           disabled={confirmDisabled}
         >
@@ -2730,10 +2730,10 @@ function ImportResultPanel({ importedCount, skipped, onDismiss, error }: ImportR
       </ScrollArea>
       {error ? <FieldError role="alert">{error}</FieldError> : null}
       <div className="flex justify-between gap-2">
-        <Button variant="outline" size="sm" onClick={handleCopy} disabled={dismissing}>
+        <Button variant="outline" onClick={handleCopy} disabled={dismissing}>
           {copied ? "Copied!" : "Copy report"}
         </Button>
-        <Button size="sm" onClick={handleDismiss} disabled={dismissing}>
+        <Button onClick={handleDismiss} disabled={dismissing}>
           {dismissing ? "Closing…" : "Close"}
         </Button>
       </div>
@@ -2928,10 +2928,10 @@ function CollisionPanel({ collisions, onResolve, onCancel }: CollisionPanelProps
       </div>
 
       <div className="flex justify-end gap-2">
-        <Button variant="ghost" size="sm" onClick={onCancel} disabled={resolving}>
+        <Button variant="ghost" onClick={onCancel} disabled={resolving}>
           Cancel
         </Button>
-        <Button size="sm" onClick={handleConfirm} disabled={resolving}>
+        <Button onClick={handleConfirm} disabled={resolving}>
           {resolving ? "Continuing…" : "Continue"}
         </Button>
       </div>
@@ -3267,7 +3267,7 @@ function SdbhPanel({ projectId, username, getToken, onImported }: SdbhPanelProps
         file; each sense groups as one paragraph with a cell per definition, gloss list, and comment.
       </p>
       <div className="flex flex-col gap-2">
-        <Button variant="outline" size="sm" nativeButton={false} render={<label />}>
+        <Button variant="outline" nativeButton={false} render={<label />}>
           {masterFile ? masterFile.name : "Choose master edition (SDBH-en.JSON)"}
           <input
             type="file"
@@ -3280,8 +3280,8 @@ function SdbhPanel({ projectId, username, getToken, onImported }: SdbhPanelProps
             disabled={importing}
           />
         </Button>
-        <Button variant="outline" size="sm" nativeButton={false} render={<label />}>
-          {localizedFile ? localizedFile.name : "Choose localized edition (optional)"}
+        <Button variant="outline" nativeButton={false} render={<label />}>
+          {localizedFile ? localizedFile.name : <>Choose localized edition <OptionalMark /></>}
           <input
             type="file"
             className="hidden"
@@ -3373,7 +3373,7 @@ function MaculaPanel({ projectId, username, getToken, onImported }: MaculaPanelP
         morphology (lemma, morph code, Strong's) will be preserved alongside the verse text.
       </p>
       <div className="flex flex-col gap-2">
-        <Button variant="outline" size="sm" nativeButton={false} render={<label />}>
+        <Button variant="outline" nativeButton={false} render={<label />}>
           {file ? file.name : "Choose Macula TSV file"}
           <input
             type="file"
@@ -3485,7 +3485,7 @@ function BiblicaPanel({
         sentence; export puts each block back together as InDesign set it.
       </p>
       <div className="flex flex-col gap-2">
-        <Button variant="outline" size="sm" nativeButton={false} render={<label className="cursor-pointer" />}>
+        <Button variant="outline" nativeButton={false} render={<label className="cursor-pointer" />}>
           {file ? file.name : "Choose study Bible IDML file"}
           <input
             type="file"
@@ -3614,7 +3614,7 @@ function TnPanel({ projectId, username, getToken, onImported }: TnPanelProps) {
         translation cell at the matching verse reference.
       </p>
       <div className="flex flex-col gap-2">
-        <Button variant="outline" size="sm" nativeButton={false} render={<label />}>
+        <Button variant="outline" nativeButton={false} render={<label />}>
           {file ? file.name : "Choose Translation Notes TSV"}
           <input
             type="file"

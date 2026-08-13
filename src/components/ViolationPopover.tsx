@@ -75,6 +75,7 @@ export function ViolationPopover({
               placeholder="Reason (optional)"
               value={reason}
               onChange={(e) => setReason(e.target.value)}
+              autoComplete="off"
               autoFocus
             />
             <div className="flex gap-2">

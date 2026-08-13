@@ -209,7 +209,7 @@ describe("frame application", () => {
     expect(getContextualRunProgress()).toEqual({ done: 2, total: 8, failed: 1 })
   })
 
-  it("fails closed on non-default or missing run-state lane provenance", () => {
+  it("fails closed on a sibling-language or missing run-state lane", () => {
     applyRemoteFrame(runningFrame(RUN_A, { done: 2, total: 8 }))
 
     applyRemoteFrame(runningFrame(RUN_B, {
@@ -232,6 +232,19 @@ describe("frame application", () => {
       status: "running",
     })
     expect(getContextualRunProgress()).toEqual({ done: 2, total: 8, failed: 0 })
+  })
+
+  it("adopts a named-lane run when the editor is attached to that lane", async () => {
+    await attachContextualRun("p1", "file-1", "fr")
+    applyRemoteFrame(runningFrame(RUN_A, { done: 2, total: 8, targetLang: "fr" }))
+    expect(getContextualRunState()).toMatchObject({
+      runId: RUN_A,
+      status: "running",
+    })
+    expect(getContextualRunProgress()).toEqual({ done: 2, total: 8, failed: 0 })
+
+    applyRemoteFrame(runningFrame(RUN_B, { done: 1, total: 4, targetLang: "" }))
+    expect(getContextualRunState().runId).toBe(RUN_A)
   })
 
   it("scene frame sets span label and drafting phase; span frame moves on", () => {
@@ -395,8 +408,16 @@ describe("start", () => {
     await attachContextualRun("p1", "file-1")
     const ok = await startContextualRun("p1", "file-1")
     expect(ok).toBe(true)
-    expect(transport.start).toHaveBeenCalledWith("p1", "file-1", undefined)
+    expect(transport.start).toHaveBeenCalledWith("p1", "file-1", undefined, "")
     expect(getContextualRunState()).toMatchObject({ runId: RUN_A, status: "running" })
+  })
+
+  it("forwards the attached language lane when starting", async () => {
+    const transport = makeTransport()
+    setContextualTransport(transport)
+    await attachContextualRun("p1", "file-1", "fr")
+    await startContextualRun("p1", "file-1")
+    expect(transport.start).toHaveBeenCalledWith("p1", "file-1", undefined, "fr")
   })
 
   it("forwards the anchor cell so the first wave starts where the user is looking", async () => {
@@ -404,6 +425,6 @@ describe("start", () => {
     setContextualTransport(transport)
     await attachContextualRun("p1", "file-1")
     await startContextualRun("p1", "file-1", "cell-42")
-    expect(transport.start).toHaveBeenCalledWith("p1", "file-1", "cell-42")
+    expect(transport.start).toHaveBeenCalledWith("p1", "file-1", "cell-42", "")
   })
 })

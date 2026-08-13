@@ -135,9 +135,8 @@ export function EBibleTargetReviewPanel({ translation, matchResult, onApply, onC
 
       {/* Actions */}
       <div className="flex items-center justify-end gap-2">
-        <Button variant="ghost" size="sm" onClick={onCancel}>{t("common.cancel")}</Button>
+        <Button variant="ghost" onClick={onCancel}>{t("common.cancel")}</Button>
         <Button
-          size="sm"
           disabled={selected.size === 0}
           onClick={() => onApply(selected)}
         >

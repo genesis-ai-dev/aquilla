@@ -27,6 +27,10 @@ export interface AdminTeam {
   createdAt: string
   orgId: number
   orgName: string | null
+  /** Team member with org role project_lead (500), if any — otherwise null. */
+  projectLeadUsername: string | null
+  /** Organization owner username, if set — otherwise null. */
+  ownerUsername: string | null
   memberCount: number
   projectCount: number
 }

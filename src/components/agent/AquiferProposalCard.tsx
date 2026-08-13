@@ -135,7 +135,6 @@ export function AquiferProposalCard({ proposal, projectId, jwt }: AquiferProposa
         <div className="flex items-center justify-end gap-1.5">
           <Button
             variant="ghost"
-            size="sm"
             className="h-6 text-[11px]"
             onClick={() => setState("discarded")}
             disabled={state === "applying"}
@@ -144,7 +143,6 @@ export function AquiferProposalCard({ proposal, projectId, jwt }: AquiferProposa
           </Button>
           <AppTooltip content={!jwt ? "Sign in to publish" : undefined} disabled={Boolean(jwt)}>
             <Button
-              size="sm"
               className="h-6 text-[11px]"
               onClick={() => void handleApply()}
               disabled={!jwt || state === "applying"}

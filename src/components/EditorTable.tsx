@@ -9,13 +9,16 @@ import {
 import DOMPurify from "dompurify"
 import {
   Check, CheckCheck, Circle, Trash2, AlertTriangle, AlertCircle, RefreshCw,
-  MessageCircle, Play, Pause, Mic, Sparkles, FileText, History as HistoryIcon,
+  MessageCircle, Play, Pause, Mic, MicOff, Sparkles, FileText, History as HistoryIcon,
   ArrowRight, Activity, NotebookPen, Info, Pencil, ChevronRight, ChevronDown, Music, Braces,
   Languages,
   Archive,
   Lock,
   Pilcrow,
   PilcrowRight,
+  Bold,
+  Loader2,
+  VolumeX,
 } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
@@ -77,6 +80,7 @@ import { resolveCurrentCellIndex } from "@/lib/editor/current-index"
 import { useCellAudio } from "@/hooks/useCellAudio"
 import { useTranscribeStatus } from "@/lib/audio/transcribe-status"
 import { transcribeCell } from "@/lib/audio/transcribe"
+import { notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
 import { isSourceSegmentSelected } from "@/lib/audio/batch-audio"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import {
@@ -296,7 +300,7 @@ function clampIndex(index: number, length: number): number {
   return Math.max(0, Math.min(length - 1, index))
 }
 
-function applyRowOverlays(
+export function applyRowOverlays(
   cell: CellData,
   options: {
     audioEntry?: CellAudioEntry
@@ -315,6 +319,12 @@ function applyRowOverlays(
         ...(attachment.voiceId ? { voiceId: attachment.voiceId } : {}),
         ...(attachment.referenceAudioId ? { referenceAudioId: attachment.referenceAudioId } : {}),
         ...(attachment.durationMs != null ? { durationMs: attachment.durationMs } : {}),
+        // AQU-782: forward the trim window so the text-section Transcribe
+        // control windows an imported clip to just this section (mirrors
+        // mergeCellsWithAudio). Without it, transcribeCell saw no trim and
+        // fell through to whole-clip transcription for every section.
+        ...(attachment.trimStartMs != null ? { trimStartMs: attachment.trimStartMs } : {}),
+        ...(attachment.trimEndMs != null ? { trimEndMs: attachment.trimEndMs } : {}),
       }
     }
     next = {
@@ -382,6 +392,10 @@ if (typeof window !== "undefined") {
  * A4: dismissing the popover keeps a muted "Not voiced" badge rather than
  *     clearing the failed state entirely — cell still looks unvoiced.
  */
+/** Icon shell for gutter synth status — stays inside the fixed w-5 badge column. */
+const gutterIconShell =
+  "inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md"
+
 function SynthStatusBadge({
   status, cellId: _cellId, projectId, onOpenAudioSetup,
 }: {
@@ -424,16 +438,13 @@ function SynthStatusBadge({
         : t("editor.tts.loadingVoiceModel")
     return (
       <AppTooltip content={tooltip}>
-        <span className="inline-flex items-center gap-1 rounded-md bg-primary/15 px-1.5 py-0.5 text-[9px] font-medium text-primary">
-          <span className="h-1 w-1 animate-pulse rounded-full bg-primary" />
-          {isTranslating
-            ? t("editor.completion.translating")
-            : pct != null
-              // One interpolated string rather than label + <span>: the badge
-              // has to be translatable as a whole, and "Loading" alone would
-              // duplicate common.loading.
-              ? <span className="tabular-nums">{t("editor.tts.loadingPct", { percent: pct })}</span>
-              : t("common.loading")}
+        <span
+          role="img"
+          aria-label={tooltip}
+          data-testid="synth-status-busy"
+          className={cn(gutterIconShell, "bg-primary/15 text-primary")}
+        >
+          <Loader2 className="h-3 w-3 animate-spin" />
         </span>
       </AppTooltip>
     )
@@ -441,9 +452,13 @@ function SynthStatusBadge({
   if (status.kind === "synthesizing") {
     return (
       <AppTooltip content={t("editor.tts.generatingAudio")}>
-        <span className="inline-flex items-center gap-1 rounded-md bg-primary/15 px-1.5 py-0.5 text-[9px] font-medium text-primary">
-          <span className="h-1 w-1 animate-pulse rounded-full bg-primary" />
-          {t("editor.voice.voicing")}
+        <span
+          role="img"
+          aria-label={t("editor.tts.generatingAudio")}
+          data-testid="synth-status-busy"
+          className={cn(gutterIconShell, "bg-primary/15 text-primary")}
+        >
+          <Loader2 className="h-3 w-3 animate-spin" />
         </span>
       </AppTooltip>
     )
@@ -480,15 +495,19 @@ function SynthStatusBadge({
     if (dismissed) {
       return (
         <AppTooltip content={t("editor.tts.failedTooltip")}>
-          <span className="inline-flex max-w-[80px] cursor-default items-center gap-1 truncate rounded-md bg-muted/60 px-1.5 py-0.5 text-[9px] font-medium text-muted-foreground">
-            {t("editor.tts.notVoiced")}
+          <span
+            role="img"
+            aria-label={t("editor.tts.notVoiced")}
+            data-testid="synth-status-dismissed"
+            className={cn(gutterIconShell, "bg-muted/60 text-muted-foreground")}
+          >
+            <MicOff className="h-3 w-3" />
           </span>
         </AppTooltip>
       )
     }
 
-    // A1: full error badge + popover. The trigger label "Audio failed" is more
-    // scannable than just "Failed" and the popover body is shown on first click.
+    // Icon-only trigger so the chip fits the w-5 gutter; full detail lives in the popover.
     return (
       <CellAiStatusPopover
         error={error}
@@ -497,9 +516,14 @@ function SynthStatusBadge({
         trigger={
           <button
             type="button"
-            className="inline-flex max-w-[80px] items-center gap-1 truncate rounded-md bg-destructive/15 px-1.5 py-0.5 text-[9px] font-medium text-destructive hover:bg-destructive/25"
+            aria-label={t("editor.tts.audioFailed")}
+            data-testid="synth-status-error"
+            className={cn(
+              gutterIconShell,
+              "bg-destructive/15 text-destructive hover:bg-destructive/25",
+            )}
           >
-            {t("editor.tts.audioFailed")}
+            <VolumeX className="h-3 w-3" />
           </button>
         }
       />
@@ -4966,8 +4990,17 @@ function EditorRow({
     // are SOURCE speech (→ sourceLanguage); recorded takes voice the TARGET
     // text (→ targetLanguage). Mapping to a Whisper tag happens downstream.
     const language = isSourceSegmentSelected(cell) ? project.sourceLanguage : project.targetLanguage
-    void transcribeCell({ cell, session: rowSession, projectId: project.id, language })
-  }, [cell, rowSession, project.id, project.sourceLanguage, project.targetLanguage])
+    await transcribeCell({ cell, session: rowSession, projectId: project.id, language })
+    // AQU-783: transcription persists a cell.audio.attach (source transcript on
+    // cells.transcription + karaoke timings) through the outbox but, unlike an
+    // editor commit, fired no completion callback — so the result only landed
+    // in the local projection after a manual page refresh. Reuse the commit
+    // callback (flush outbox + revalidate the cell row → picks up the new
+    // transcription) and poke the per-file audio read (timings) so the result
+    // appears immediately in both the text and media sections.
+    await onCellCommitted?.(cell.id)
+    notifyAudioAttachmentsChanged(cell.fileId)
+  }, [cell, rowSession, project.id, project.sourceLanguage, project.targetLanguage, onCellCommitted])
 
   const [validationPopoverOpen, setValidationPopoverOpen] = useState(false)
   const authoritativeSelfValidated = cell.activeValidators.includes(username)
@@ -5740,6 +5773,24 @@ function EditorRow({
                     upstreamStaleCellIds={isUpstreamStaleSource ? new Set([cell.id]) : new Set()}
                   />
                 )}
+                {showFormattingLossWarning && (
+                  <AppTooltip
+                    content={t("editor.source.formattingLossTooltip")}
+                    className="max-w-xs"
+                  >
+                    <span
+                      role="img"
+                      aria-label={t("editor.source.formattingLossTooltip")}
+                      data-testid="formatting-loss-warning"
+                      className={cn(
+                        gutterIconShell,
+                        "text-amber-600 dark:text-amber-400",
+                      )}
+                    >
+                      <Bold className="h-3 w-3" />
+                    </span>
+                  </AppTooltip>
+                )}
                 {(isSynthBusy || isSynthError) && (
                   <SynthStatusBadge status={synthStatus} cellId={cell.id} projectId={project.id} onOpenAudioSetup={onOpenAudioSetup} />
                 )}
@@ -5752,7 +5803,7 @@ function EditorRow({
                     <button
                       type="button"
                       aria-label={t("editor.comments.openAria", { count: openCommentCount })}
-                      className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full text-blue-500 transition-colors hover:bg-blue-500/10 hover:text-blue-600"
+                      className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-md text-blue-500 transition-colors hover:bg-blue-500/10 hover:text-blue-600"
                       onClick={() => onOpenComments(cell.id)}
                     >
                       <MessageCircle className="h-3.5 w-3.5" fill="currentColor" fillOpacity={0.15} />
@@ -5805,7 +5856,9 @@ function EditorRow({
             className={cn(
               // The showcase node IS the text surface so it fills the whole
               // source column. pr-7 clears the floating pencil.
-              "relative flex h-full min-h-[40px] flex-col rounded-lg px-2 py-1.5 pr-7 transition-[colors,opacity]",
+              // select-text: global chrome disables selection; source must stay
+              // selectable for add-to-termbase / Ask AI from selection.
+              "relative flex h-full min-h-[40px] flex-col rounded-lg px-2 py-1.5 pr-7 select-text transition-[colors,opacity]",
               // Match the target well — same muted fill + ring (not a darker
               // primary-tinted edit chrome).
               "focus-within:bg-muted focus-within:ring-1 focus-within:ring-ring/40 focus-within:ring-inset",
@@ -5881,14 +5934,6 @@ function EditorRow({
                 floating action rail occupies. */}
             <div data-testid="source-context-line" data-context-kind={contextIsTimecode ? "timecode" : undefined} className={cn("mb-1 flex h-4 items-center gap-1 text-xs text-muted-foreground", contextIsTimecode ? "justify-start text-left" : "justify-center text-center")} dir="ltr">
               <span>{cell.context}</span>
-              {showFormattingLossWarning && (
-                <AppTooltip content={t("editor.source.formattingLossTooltip")} className="max-w-xs">
-                  <span className="inline-flex items-center gap-0.5 rounded bg-amber-100 px-1 py-0.5 text-[9px] font-medium text-amber-700 dark:bg-amber-950 dark:text-amber-400">
-                    <AlertTriangle className="h-2.5 w-2.5" />
-                    {t("editor.source.formattingBadge")}
-                  </span>
-                </AppTooltip>
-              )}
             </div>
             <SourceReferenceAttachments metadata={cell.metadata} />
             {sourceEditing ? (
@@ -6690,7 +6735,7 @@ function EditorRow({
                               disabled={!isBacktranslationConfigured || isBacktranslating}
                               onClick={() => onBacktranslate?.(cell, "regenerate")}
                               aria-label={t("editor.bt.regenerateAria")}
-                              className="rounded-full text-muted-foreground hover:text-foreground"
+                              className="text-muted-foreground hover:text-foreground"
                             >
                               {isBacktranslating ? (
                                 <Spinner className="size-3.5" />
@@ -6709,7 +6754,7 @@ function EditorRow({
                               size="icon-xs"
                               onClick={handleBtEditStart}
                               aria-label={t("editor.bt.editTooltip")}
-                              className="rounded-full text-muted-foreground hover:text-foreground"
+                              className="text-muted-foreground hover:text-foreground"
                             >
                               <Pencil />
                             </Button>
@@ -6723,7 +6768,7 @@ function EditorRow({
                                 size="icon-xs"
                                 disabled
                                 aria-label={t("editor.bt.contributorRequired")}
-                                className="rounded-full text-muted-foreground"
+                                className="text-muted-foreground"
                               >
                                 <Pencil />
                               </Button>
@@ -6826,7 +6871,6 @@ function EditorRow({
                         <>
                           <Button
                             type="button"
-                            size="sm"
                             onClick={() => onBacktranslate?.(cell, "read-back")}
                             disabled={!isBacktranslationConfigured || isBacktranslating || visibleTranslated.trim().length === 0}
                           >
@@ -7115,7 +7159,6 @@ function EditorRow({
                       <div className="flex flex-wrap items-center justify-center gap-2">
                         <Button
                           type="button"
-                          size="sm"
                           variant="default"
                           onClick={() => onOpenRecording?.(cell.id)}
                           disabled={!editable || !onOpenRecording}

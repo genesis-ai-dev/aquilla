@@ -35,7 +35,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
 import { useI18n, useT, type TFunction } from "@/lib/i18n/I18nProvider"
 import type { MessageKey } from "@/lib/i18n/messages/en"
-import { defaultLaneDraftReviewHref } from "@/components/project-workspace-lane-deeplink"
+import { draftReviewHref } from "@/components/project-workspace-lane-deeplink"
 import {
   commandContextualRun,
   fetchContextualRunActivity,
@@ -179,7 +179,7 @@ function preferredRun(runs: ContextualRunRecord[], section: AutopilotInspectorSe
   }
   if (section === "review") {
     const review = runs.find(
-      (run) => !run.targetLang && (run.proposedDrafts ?? 0) > 0,
+      (run) => (run.proposedDrafts ?? 0) > 0,
     )
     if (review) return review
   }
@@ -381,13 +381,13 @@ function RunControls({
   if (!canControl) return null
   return (
     <div className="flex flex-wrap gap-2">
-      {run.status === "running" && !run.targetLang && (
+      {run.status === "running" && (
         <Button type="button" size="sm" variant="outline" disabled={busy !== null} onClick={() => onCommand("pause")}>
           <Pause data-icon="inline-start" aria-hidden />
           {t("common.pause")}
         </Button>
       )}
-      {run.status === "paused" && !run.targetLang && (
+      {run.status === "paused" && (
         <Button type="button" size="sm" variant="outline" disabled={busy !== null} onClick={() => onCommand("resume")}>
           <Play data-icon="inline-start" aria-hidden />
           {t("autopilot.action.resume")}
@@ -399,7 +399,7 @@ function RunControls({
           {t("common.stop")}
         </Button>
       )}
-      {run.status === "failed" && !run.targetLang && (
+      {run.status === "failed" && (
         <Button type="button" size="sm" disabled={busy !== null} onClick={onRetry}>
           <Play data-icon="inline-start" aria-hidden />
           {t("autopilot.action.run")}
@@ -590,10 +590,10 @@ function ReviewDraft({
         </CardAction>
       </CardHeader>
       {draft.text && <CardContent><p className="whitespace-pre-wrap">{draft.text}</p></CardContent>}
-      {draft.status === "proposed" && draft.fileId && !runTargetLang && (
+      {draft.status === "proposed" && draft.fileId && (
         <CardFooter>
           <a
-            href={defaultLaneDraftReviewHref(projectId, draft.fileId, draft.cellId)}
+            href={draftReviewHref(projectId, draft.fileId, draft.cellId, runTargetLang ?? "")}
             aria-label={draft.cellId
               ? t("autopilot.inspector.review.inEditorCell", { cellId: draft.cellId })
               : t("autopilot.inspector.review.inEditor")}
@@ -601,15 +601,6 @@ function ReviewDraft({
           >
             {t("autopilot.inspector.review.inEditor")}
           </a>
-        </CardFooter>
-      )}
-      {draft.status === "proposed" && runTargetLang && (
-        <CardFooter>
-          <p className="text-xs text-muted-foreground">
-            {t("autopilot.inspector.review.unsupportedLaneEvidence", {
-              language: runTargetLang,
-            })}
-          </p>
         </CardFooter>
       )}
     </Card>
@@ -778,7 +769,6 @@ export function AutopilotActivityInspector({
       const shouldFindReviewOwner = initialSection === "review" && (overview?.proposedDrafts ?? 0) > 0
       const hasScopedReviewOwner = fetchedRuns.some(
         (run) => (!focusFileId || run.fileId === focusFileId) &&
-          !run.targetLang &&
           (run.proposedDrafts ?? 0) > 0,
       )
       // A project-wide review count is authoritative across all durable runs,
@@ -812,16 +802,13 @@ export function AutopilotActivityInspector({
         const explicit = selectionOverrideRef.current
         if (explicit && scoped.some((run) => run.runId === explicit)) return explicit
         if (initialSection === "review") {
+          // The opening pre-seed points at the newest overview run, which may
+          // own none of the proposed drafts this sheet was opened to review —
+          // steer to the run that actually owns them (it may only be present
+          // via the indexed proposed-only fetch above).
           const currentRun = scoped.find((run) => run.runId === current)
           const withReview = preferredRun(scoped, "review")
-          if (
-            withReview &&
-            (currentRun?.targetLang || (currentRun?.proposedDrafts ?? 0) === 0) &&
-            !withReview.targetLang &&
-            (withReview.proposedDrafts ?? 0) > 0
-          ) {
-            return withReview.runId
-          }
+          if (withReview && (currentRun?.proposedDrafts ?? 0) === 0) return withReview.runId
         }
         if (current && scoped.some((run) => run.runId === current)) return current
         return preferredRun(scoped, initialSection)?.runId ?? null
@@ -1003,7 +990,11 @@ export function AutopilotActivityInspector({
     setBusy("retry")
     setActionMessage({ key: "autopilot.feedback.starting" })
     try {
-      const next = await startFileContextualRun(projectId, selectedRun.fileId)
+      const next = await startFileContextualRun(
+        projectId,
+        selectedRun.fileId,
+        selectedRun.targetLang ?? "",
+      )
       const now = new Date().toISOString()
       const optimisticRun: ContextualRunRecord = {
         ...selectedRun,
@@ -1110,9 +1101,6 @@ export function AutopilotActivityInspector({
       total: authoritativeDraftHistory,
     })
   const selectedRunError = selectedRun ? humanRunError(selectedRun, t) : null
-  const selectedRunHasCategoricalLaneError = Boolean(
-    selectedRun?.lastError?.includes("unsupported_target_language_lane"),
-  )
   const runsWarningText = runsWarning ? t(runsWarning) : null
   const activityWarningText = activityWarning ? t(activityWarning) : null
   const actionMessageText = noticeText(actionMessage, t)
@@ -1220,13 +1208,9 @@ export function AutopilotActivityInspector({
                       <span className="flex shrink-0 flex-col items-end gap-1">
                         {(run.proposedDrafts ?? 0) > 0 && (
                           <Badge variant="secondary">
-                            {run.targetLang
-                              ? t("autopilot.inspector.evidenceDrafts", {
-                                count: run.proposedDrafts ?? 0,
-                              })
-                              : t("autopilot.inspector.readyCount", {
-                                count: run.proposedDrafts ?? 0,
-                              })}
+                            {t("autopilot.inspector.readyCount", {
+                              count: run.proposedDrafts ?? 0,
+                            })}
                           </Badge>
                         )}
                         <StatusBadge run={run} />
@@ -1294,17 +1278,17 @@ export function AutopilotActivityInspector({
                         />
                       </div>
                     )}
-                    {selectedRunError && !selectedRunHasCategoricalLaneError && (
+                    {selectedRunError && (
                       <p className="flex items-start gap-2 text-sm text-destructive">
                         <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden />
                         {selectedRunError}
                       </p>
                     )}
-                    {selectedRun.targetLang && (
+                    {selectedRun.targetLang ? (
                       <p className="text-sm text-muted-foreground">
-                        {t("autopilot.inspector.error.unsupportedLane")}
+                        {t("autopilot.inspector.run.lane", { language: selectedRun.targetLang })}
                       </p>
-                    )}
+                    ) : null}
                     <RunControls run={selectedRun} busy={busy} canControl={canControl} onCommand={(command) => void handleCommand(command)} onRetry={() => void handleRetry()} />
                     {actionMessageText && (
                       <p role="status" aria-live="polite" className="text-sm text-muted-foreground">

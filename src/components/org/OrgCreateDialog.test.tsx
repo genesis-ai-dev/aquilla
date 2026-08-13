@@ -53,11 +53,12 @@ describe("OrgCreateDialog — footer stays within the modal (AQU-363)", () => {
   it("right-aligns footer actions in-bounds and shares the content's horizontal padding", () => {
     const content = open()
     const footer = content.querySelector("[data-slot=dialog-footer]") as HTMLElement
-    // flex-end keeps actions pinned inside the right edge; the -mx-5/p-5 bleed
+    // flex-end keeps actions pinned inside the right edge; the -mx-5/px-5 bleed
     // makes the footer's inner padding match the content body so the action
     // never sits wider than the modal's content column.
     expect(footer.className).toContain("sm:justify-end")
     expect(footer.className).toContain("-mx-5")
-    expect(footer.className).toContain("p-5")
+    expect(footer.className).toContain("px-5")
+    expect(footer.className).toContain("py-3")
   })
 })

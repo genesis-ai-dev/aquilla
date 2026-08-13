@@ -197,7 +197,6 @@ export const WorkingSetPanel = forwardRef<WorkingSetPanelHandle, WorkingSetPanel
             <AppTooltip content="Accept every pending draft, with your edits (Shift+A)">
               <Button
                 type="button"
-                size="sm"
                 className="ml-auto h-6 text-[11px]"
                 disabled={busy}
                 onClick={() => void onAcceptAll(valueFor)}
@@ -421,7 +420,6 @@ const WorkingSetRowView = memo(function WorkingSetRowView({
                 <Button
                   type="button"
                   variant="outline"
-                  size="sm"
                   className="h-5 px-1.5 text-[10px]"
                   disabled={busy || !onAccept}
                   onClick={onAccept}
@@ -433,7 +431,6 @@ const WorkingSetRowView = memo(function WorkingSetRowView({
                 <Button
                   type="button"
                   variant="ghost"
-                  size="sm"
                   className="h-5 px-1.5 text-[10px] text-muted-foreground"
                   disabled={!onReject}
                   onClick={onReject}

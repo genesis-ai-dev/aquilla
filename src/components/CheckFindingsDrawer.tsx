@@ -21,6 +21,7 @@ import type {
   RuleFindingGroup,
   TermConsistencyFinding,
 } from "@/lib/check/deterministic-check"
+import { RightSidebarPanel } from "./RightSidebarPanel"
 
 interface CheckFindingsDrawerProps {
   result: CheckRunResult | null
@@ -225,7 +226,8 @@ export function CheckFindingsDrawer({
   const termIssueCount = flaggedTermFindings.reduce((n, f) => n + f.flaggedCells.length, 0)
 
   return (
-    <div className="flex h-full min-w-0 max-w-80 shrink basis-80 flex-col overflow-hidden border-l bg-card">
+    <RightSidebarPanel storageKey="check" defaultWidth={320} resizeLabel="Resize file check panel">
+    <div className="flex h-full min-w-0 w-full flex-col overflow-hidden border-l bg-card">
       <div className="flex shrink-0 items-center justify-between gap-2 border-b p-2">
         {/* Wording tracks the "Check file" button and its "Close file check"
             tooltip — the drawer is that button's result surface. */}
@@ -313,5 +315,6 @@ export function CheckFindingsDrawer({
         </>
       )}
     </div>
+    </RightSidebarPanel>
   )
 }

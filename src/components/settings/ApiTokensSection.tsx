@@ -55,9 +55,9 @@ import {
 type TokenMessageKey = Parameters<ReturnType<typeof useT>>[0]
 
 const EXPIRY_PRESETS = [
-  { id: "30d", labelKey: "onboarding.apiTokens.expiry.30d", days: 30 },
+  { id: "30d", labelKey: "common.thirtyDays", days: 30 },
   { id: "90d", labelKey: "onboarding.apiTokens.expiry.90d", days: 90 },
-  { id: "none", labelKey: "onboarding.apiTokens.expiry.none", days: null },
+  { id: "none", labelKey: "common.noExpiry", days: null },
 ] as const satisfies readonly { id: string; labelKey: TokenMessageKey; days: number | null }[]
 type ExpiryPresetId = (typeof EXPIRY_PRESETS)[number]["id"]
 
@@ -279,7 +279,7 @@ function CredentialRow({
           {credential.name} · {scopeLabel(t, credential, orgs, projects)}
         </p>
         <p className="text-[11px] text-muted-foreground">
-          {credential.expiresAt ? t("onboarding.apiTokens.expiresOn", { date: fmtDate(credential.expiresAt, locale) }) : t("onboarding.apiTokens.expiry.none")}
+          {credential.expiresAt ? t("common.expiresOn", { date: fmtDate(credential.expiresAt, locale) }) : t("common.noExpiry")}
           {credential.lastUsedAt ? ` · ${t("onboarding.apiTokens.lastUsedOn", { date: fmtDate(credential.lastUsedAt, locale) })}` : ""}
         </p>
       </div>
@@ -294,7 +294,7 @@ function CredentialRow({
             className="text-muted-foreground hover:text-destructive"
             onClick={onRevoke}
           >
-            {t("onboarding.apiTokens.revokeButton")}
+            {t("common.revoke")}
           </Button>
         </div>
       )}
@@ -353,7 +353,7 @@ function RevokeCredentialDialog({
           </Button>
           <Button variant="destructive" onClick={() => void handleRevoke()} disabled={busy}>
             {busy && <Spinner data-icon="inline-start" />}
-            {busy ? t("onboarding.apiTokens.revokingButton") : t("onboarding.apiTokens.revokeTokenButton")}
+            {busy ? t("common.revoking") : t("onboarding.apiTokens.revokeTokenButton")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -419,7 +419,7 @@ function ShowOnceTokenDialog({
             </code>
             <Button size="sm" variant="outline" onClick={copy}>
               <Copy className="me-1 size-3.5" />
-              {copied ? t("nav.version.copiedLabel") : t("onboarding.common.copy")}
+              {copied ? t("nav.version.copiedLabel") : t("common.copy")}
             </Button>
           </div>
           <p className="text-xs text-muted-foreground">
@@ -431,7 +431,7 @@ function ShowOnceTokenDialog({
             <Copy className="me-1 size-3.5" />
             {copiedPrompt ? t("nav.version.copiedLabel") : t("onboarding.apiTokens.copyAgentInstructions")}
           </Button>
-          <Button onClick={onClose}>{t("onboarding.common.done")}</Button>
+          <Button onClick={onClose}>{t("common.done")}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -613,7 +613,7 @@ function MintTokenDialog({
             </Field>
 
             <Field>
-              <FieldLabel>{t("onboarding.apiTokens.modeLabel")}</FieldLabel>
+              <FieldLabel>{t("common.modeLabel")}</FieldLabel>
               <RadioGroup
                 value={mode}
                 onValueChange={(value) => setMode(value as CredentialMode)}

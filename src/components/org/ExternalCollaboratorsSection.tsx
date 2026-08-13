@@ -121,7 +121,7 @@ export function ExternalCollaboratorsSection({
                       content={
                         g.source === "group"
                           ? t("org.externalCollaborators.viaTeamTooltip")
-                          : t("org.membersPage.lockedHintCreator")
+                          : t("projectSettings.share.lockedHintCreator")
                       }
                       className="max-w-xs"
                     >

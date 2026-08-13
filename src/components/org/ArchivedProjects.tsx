@@ -85,7 +85,7 @@ export function ArchivedProjects() {
                     variant="outline"
                     onClick={() => void handleRestore(p.id)}
                   >
-                    {t("org.projectOverview.restore")}
+                    {t("common.restore")}
                   </Button>
                 </div>
               ))}

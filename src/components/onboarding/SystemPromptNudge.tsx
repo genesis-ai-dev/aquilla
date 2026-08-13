@@ -68,7 +68,7 @@ export function SystemPromptNudge({ project, onProjectUpdated, onCustomize }: Sy
           onCustomize()
         }}
       >
-        {t("onboarding.systemPromptNudge.customizeButton")}
+        {t("common.customize")}
       </Button>
       <Button
         type="button"

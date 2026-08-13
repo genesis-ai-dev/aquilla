@@ -45,7 +45,7 @@ export function AiProviderStep({ project, onUpdated, onSaved }: AiProviderStepPr
       return
     }
     if (selected === "custom" && !customEndpoint.trim()) {
-      setError(t("onboarding.checklist.aiProvider.endpointRequired"))
+      setError(t("projectSettings.advancedLlm.endpointRequiredError"))
       return
     }
     setError(null)
@@ -84,7 +84,7 @@ export function AiProviderStep({ project, onUpdated, onSaved }: AiProviderStepPr
 
       <ProviderOption
         icon={<Server className="h-4 w-4" />}
-        label={t("onboarding.checklist.aiProvider.customLabel")}
+        label={t("projectSettings.advancedLlm.providerCustomName")}
         description={t("onboarding.checklist.aiProvider.customDescription")}
         selected={selected === "custom"}
         onClick={() => setSelected("custom")}
@@ -94,7 +94,7 @@ export function AiProviderStep({ project, onUpdated, onSaved }: AiProviderStepPr
         <div className="ms-7 space-y-2 rounded-md bg-muted/30 p-2">
           <div>
             <FieldLabel htmlFor="ai-endpoint" className="text-xs">
-              {t("onboarding.checklist.aiProvider.endpointLabel")}
+              {t("projectSettings.advancedLlm.endpointLabel")}
             </FieldLabel>
             <Input
               id="ai-endpoint"
@@ -106,8 +106,8 @@ export function AiProviderStep({ project, onUpdated, onSaved }: AiProviderStepPr
           </div>
           <div>
             <FieldLabel htmlFor="ai-model" className="text-xs">
-              {t("onboarding.checklist.aiProvider.modelLabel")}{" "}
-              <span className="text-muted-foreground/70">{t("onboarding.checklist.aiProvider.optional")}</span>
+              {t("projectSettings.advancedLlm.modelLabel")}{" "}
+              <span className="text-muted-foreground/70">{t("common.optionalFieldNote")}</span>
             </FieldLabel>
             <Input
               id="ai-model"

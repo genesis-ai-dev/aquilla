@@ -205,14 +205,14 @@ export function TeamsList() {
                       name="description"
                       children={(field) => (
                         <Field>
-                          <FieldLabel htmlFor="create-team-desc">{t("org.teamForm.descriptionOptionalLabel")}</FieldLabel>
+                          <FieldLabel htmlFor="create-team-desc">{t("common.descriptionOptional")}</FieldLabel>
                           <Input
                             id="create-team-desc"
                             name={field.name}
                             value={field.state.value}
                             onBlur={field.handleBlur}
                             onChange={(e) => field.handleChange(e.target.value)}
-                            placeholder={t("org.teamForm.descriptionOptionalLabel")}
+                            placeholder={t("common.descriptionOptional")}
                           />
                         </Field>
                       )}
@@ -230,7 +230,7 @@ export function TeamsList() {
                   </Button>
                   <Button type="submit" form="create-team-form">
                     {createTeamForm.state.isSubmitting && <Spinner data-icon="inline-start" />}
-                    {createTeamForm.state.isSubmitting ? t("org.createDialog.submitCreating") : t("org.switcher.create")}
+                    {createTeamForm.state.isSubmitting ? t("common.creating") : t("org.switcher.create")}
                   </Button>
                 </DialogFooter>
               </DialogContent>

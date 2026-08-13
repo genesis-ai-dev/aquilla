@@ -66,7 +66,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.create.linkConsumesTarget":
       "{name} — chain case (this project translates the upstream project's target, " +
       "e.g. French → Chaluba).",
-    "projectSettings.create.submitCreating": "Creating…",
+    // "Creating…" busy label → common.creating (identical text)
     "projectSettings.create.submitCreatingAndLinking": "Creating & linking…",
     "projectSettings.create.submitCreate": "Create Project",
     "projectSettings.create.submitCreateAndLink": "Create & Link",
@@ -134,10 +134,10 @@ export const projectSettings = defineNamespace({
     "projectSettings.share.revokeBeforeRedeemedNote":
       "To revoke before it is redeemed, use the Active links list below.",
     "projectSettings.share.createAnotherLinkButton": "Create another link",
-    "projectSettings.share.roleFieldLabel": "Role",
+    // "Role" field label → common.roleLabel (identical text)
     "projectSettings.share.signInToCreateLink": "Sign in to create an invite link",
     "projectSettings.share.recipientEmailLabel": "Recipient email",
-    "projectSettings.share.optionalFieldNote": "(optional)",
+    // "(optional)" → common.optionalFieldNote (identical text)
     "projectSettings.share.emailPlaceholder": "name@example.com",
     "projectSettings.share.emailRestrictedNote":
       "Only an account with this email can redeem this link.",
@@ -147,14 +147,14 @@ export const projectSettings = defineNamespace({
     "projectSettings.share.expiryOneDay": "1 day",
     "projectSettings.share.expirySevenDays": "7 days",
     "projectSettings.share.expiryThirtyDaysDefault": "30 days (default)",
-    "projectSettings.share.expiryNoExpiry": "No expiry",
-    // "Creating…" button-busy label → projectSettings.create.submitCreating (identical text)
+    // "No expiry" → common.noExpiry (identical text)
+    // "Creating…" button-busy label → common.creating (identical text)
     "projectSettings.share.createInviteLinkButton": "Create invite link",
     "projectSettings.share.loadingActiveLinks": "Loading active links…",
     "projectSettings.share.activeLinksHeading": "Active links",
     "projectSettings.share.openLinkConnector": "open link",
-    "projectSettings.share.expiresOn": "Expires {date}",
-    "projectSettings.share.revokeButton": "Revoke",
+    // "Expires {date}" → common.expiresOn (identical text)
+    // "Revoke" button → common.revoke (identical text)
     "projectSettings.share.revokeLinkAriaLabel": "Revoke this invite link",
 
     // ── Page chrome (nav, groups, save bar, discard dialog) ──
@@ -164,7 +164,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.searchAriaLabel": "Search settings",
     "projectSettings.backLinkLabel": "Settings",
     "projectSettings.breadcrumbEditor": "Editor",
-    "projectSettings.saveChanges": "Save changes",
+    // "Save changes" → common.saveChanges (identical text)
     "projectSettings.moreSaveOptionsAriaLabel": "More save options",
     "projectSettings.saveAndClose": "Save and close",
     "projectSettings.closeWithoutSaving": "Close without saving",
@@ -232,7 +232,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.save.projectNotFoundError": "Project not found",
 
     // ── Settings-group index (SETTINGS_GROUPS) ──
-    "projectSettings.group.generalLabel": "General",
+    // "General" group label → common.general (identical text)
     "projectSettings.group.generalDescription": "Name, languages, username, Bible resources",
     "projectSettings.group.sourceSyncLabel": "Source & sync",
     "projectSettings.group.sourceSyncDescription": "Linked source project, upstream changes, git sync",
@@ -521,11 +521,11 @@ export const projectSettings = defineNamespace({
       "Hidden from the lane switcher by default. Their translations are kept; " +
       "restore a lane to make it active again.",
     "projectSettings.languages.restoringButton": "Restoring…",
-    "projectSettings.languages.restoreButton": "Restore",
+    // "Restore" button → common.restore (identical text)
     "projectSettings.languages.restoreLaneAriaLabel": "Restore lane {lane}",
     "projectSettings.languages.addLaneLabel": "Add a target lane",
     // "e.g. fr-CA" placeholder → projectSettings.create.extraLanguagesPlaceholder (identical text)
-    "projectSettings.languages.addingButton": "Adding…",
+    // "Adding…" busy label → common.adding (identical text)
     "projectSettings.languages.addLaneButton": "Add lane",
     "projectSettings.languages.alreadyDefaultError": "This is already the default target language.",
     "projectSettings.languages.alreadyExistsError": "This lane already exists.",
@@ -708,13 +708,7 @@ export const projectSettings = defineNamespace({
         },
       },
       "projectSettings.share.recipientEmailLabel": {
-        description: "Field label for the optional recipient-email input on the invite-link form. The '(optional)' qualifier is a separate, smaller-styled span using projectSettings.share.optionalFieldNote.",
-      },
-      "projectSettings.share.expiresOn": {
-        description: "Row text on an active invite link showing when it expires.",
-        placeholders: {
-          date: "The already-formatted expiry date (via formatDate), e.g. 'Aug 12, 2026'.",
-        },
+        description: "Field label for the optional recipient-email input on the invite-link form. The '(optional)' qualifier is a separate, smaller-styled span using common.optionalFieldNote.",
       },
       "projectSettings.share.openLinkConnector": {
         description: "Short connector text on an active-invite-link row shown instead of the recipient's email, when the link has no email restriction (anyone can redeem it).",

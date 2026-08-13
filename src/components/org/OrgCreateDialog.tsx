@@ -113,7 +113,7 @@ export function OrgCreateDialog({ open, onOpenChange, onCreated }: OrgCreateDial
             </Button>
             <Button type="submit" form="org-create-form">
               {form.state.isSubmitting && <Spinner data-icon="inline-start" />}
-              {form.state.isSubmitting ? t("org.createDialog.submitCreating") : t("org.createDialog.title")}
+              {form.state.isSubmitting ? t("common.creating") : t("org.createDialog.title")}
             </Button>
           </DialogFooter>
         </form>

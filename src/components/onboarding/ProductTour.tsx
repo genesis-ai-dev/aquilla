@@ -392,7 +392,7 @@ function TooltipCard({ step, stepIndex, totalSteps, pos, onNext, onPrev, onSkip 
             </Button>
           )}
           <Button size="sm" onClick={onNext} className="h-7 px-3 text-xs">
-            {isLast ? t("onboarding.common.done") : (
+            {isLast ? t("common.done") : (
               <>
                 {t("common.next")}
                 <ChevronRight className="h-3 w-3 rtl:rotate-180" />

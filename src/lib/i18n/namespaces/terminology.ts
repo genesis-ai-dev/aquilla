@@ -189,7 +189,7 @@ export const terminology = defineNamespace({
     // ── TerminologyReviewQueue.tsx ───────────────────────────────────────────
     "terminology.reviewQueue.approveAria": "Approve concept {term}",
     "terminology.reviewQueue.rejectAria": "Reject concept {term}",
-    "terminology.reviewQueue.readOnly": "Read-only",
+    // "Read-only" permission badge → common.readOnly (identical text)
     "terminology.reviewQueue.readOnlyTooltip":
       "Requires Project Lead role or higher to approve/reject concepts.",
     "terminology.reviewQueue.emptyTitle": "No concepts awaiting review.",

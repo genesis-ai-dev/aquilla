@@ -284,7 +284,7 @@ export function OrgProjectsDataTable({
         id: "role",
         accessorFn: (p) => roleByProjectId?.get(p.id)?.name ?? "",
         enableSorting: false,
-        header: ({ column }) => <DataTableColumnHeader column={column} title={t("org.membersPage.roleLabel")} />,
+        header: ({ column }) => <DataTableColumnHeader column={column} title={t("common.roleLabel")} />,
         cell: ({ row }) => (
           <div className="truncate text-start text-xs text-muted-foreground">
             {roleByProjectId?.get(row.original.id)?.name.replace(/_/g, " ") ?? "—"}

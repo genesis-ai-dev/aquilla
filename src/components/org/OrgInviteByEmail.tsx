@@ -119,7 +119,7 @@ export function OrgInviteByEmail({ orgId }: { orgId: number }) {
           <code className="truncate rounded bg-muted px-2 py-1 text-[11px]">{link}</code>
           <Button size="sm" variant="outline" onClick={copyLink}>
             <Copy className="me-1 size-3.5" />
-            {copied ? t("nav.version.copiedLabel") : t("org.inviteByEmail.copyButton")}
+            {copied ? t("nav.version.copiedLabel") : t("common.copy")}
           </Button>
         </div>
       )}

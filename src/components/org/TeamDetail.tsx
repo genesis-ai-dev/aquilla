@@ -376,14 +376,14 @@ export function TeamDetail() {
                           name="description"
                           children={(field) => (
                             <Field>
-                              <FieldLabel htmlFor="edit-team-desc">{t("org.teamForm.descriptionOptionalLabel")}</FieldLabel>
+                              <FieldLabel htmlFor="edit-team-desc">{t("common.descriptionOptional")}</FieldLabel>
                               <Input
                                 id="edit-team-desc"
                                 name={field.name}
                                 value={field.state.value}
                                 onBlur={field.handleBlur}
                                 onChange={(e) => field.handleChange(e.target.value)}
-                                placeholder={t("org.teamForm.descriptionOptionalLabel")}
+                                placeholder={t("common.descriptionOptional")}
                               />
                             </Field>
                           )}
@@ -513,7 +513,7 @@ export function TeamDetail() {
                             disabled={stagedUsernames.length === 0 || addBusy}
                           >
                             {addBusy && <Spinner data-icon="inline-start" />}
-                            {addBusy ? t("org.teamDetail.addingButton") : t("common.add")}
+                            {addBusy ? t("common.adding") : t("common.add")}
                           </Button>
                         </DialogFooter>
                       </DialogContent>

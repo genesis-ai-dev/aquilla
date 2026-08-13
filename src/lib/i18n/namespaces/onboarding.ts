@@ -20,10 +20,10 @@ export const onboarding = defineNamespace({
     // — Shared small words reused across this namespace's own surfaces ———————
     "onboarding.common.continue": "Continue",
     "onboarding.common.skipForNow": "Skip for now",
-    "onboarding.common.done": "Done",
-    "onboarding.common.copy": "Copy",
+    // "Done" reuses `common.done` (identical text)
+    // "Copy" reuses `common.copy` (identical text)
     // "Copied" reuses `nav.version.copiedLabel` (identical text)
-    "onboarding.common.creating": "Creating…",
+    // "Creating…" reuses `common.creating` (identical text)
 
     // — Shared privacy/analytics vocabulary (PrivacyStep + Preferences' Privacy row) —
     "onboarding.privacy.shareUsageData": "Share usage data",
@@ -113,16 +113,16 @@ export const onboarding = defineNamespace({
 
     // — OrgStep —
     "onboarding.step.org.signInRequired": "Sign in to create an organization.",
-    "onboarding.step.org.createFailed": "Couldn't create your organization.",
+    // create-failed error reuses `org.createDialog.genericError` (identical text)
     "onboarding.step.org.heading": "Set up your organization",
     "onboarding.step.org.description":
       "Give your team a home, and invite collaborators to get started together.",
-    "onboarding.step.org.nameLabel": "Organization name",
-    "onboarding.step.org.namePlaceholder": "Acme Bible Translation",
+    // "Organization name" label reuses `org.createDialog.nameLabel` (identical text)
+    // "Acme Bible Translation" placeholder reuses `org.createDialog.namePlaceholder` (identical text)
     "onboarding.step.org.inviteLabel": "Invite teammates (optional)",
     "onboarding.step.org.inviteDescription":
       "Comma- or space-separated emails. They'll get a link to join.",
-    "onboarding.step.org.createButton": "Create organization",
+    // "Create organization" button reuses `org.createDialog.title` (identical text)
 
     // — ProjectStep —
     "onboarding.step.project.createFailed": "Failed to create project.",
@@ -134,12 +134,12 @@ export const onboarding = defineNamespace({
     "onboarding.step.project.heading": "Create your first project",
     "onboarding.step.project.description":
       "You can import files and invite collaborators after setup.",
-    "onboarding.step.project.nameLabel": "Project name",
-    "onboarding.step.project.namePlaceholder": "My Translation Project",
-    "onboarding.step.project.sourceLanguageLabel": "Source language",
+    // "Project name" label reuses `projectSettings.info.nameLabel` (identical text)
+    // "My Translation Project" placeholder reuses `projectSettings.create.namePlaceholder` (identical text)
+    // "Source language" label reuses `projectSettings.info.sourceLanguageLabel` (identical text)
     "onboarding.step.project.sourceLanguagePlaceholder": "English",
     "onboarding.step.project.targetLanguagePlaceholder": "French",
-    "onboarding.step.project.createButton": "Create Project",
+    // "Create Project" button reuses `projectSettings.create.submitCreate` (identical text)
 
     // — ReadyStep —
     "onboarding.step.ready.heading": "You're all set!",
@@ -196,17 +196,17 @@ export const onboarding = defineNamespace({
       "AI fills in suggested translations as you go and keeps style consistent across the project. You can change this later in Project Settings.",
     "onboarding.checklist.aiProvider.frontierSignInRequired":
       "Sign in with a Frontier account to use the managed model.",
-    "onboarding.checklist.aiProvider.endpointRequired": "Endpoint URL is required",
+    // "Endpoint URL is required" reuses `projectSettings.advancedLlm.endpointRequiredError` (identical text)
     "onboarding.checklist.aiProvider.frontierLabel": "Frontier AI",
     "onboarding.checklist.aiProvider.recommendedBadge": "Recommended",
     "onboarding.checklist.aiProvider.frontierSignedIn":
       "Signed in as {username} — no setup needed.",
-    "onboarding.checklist.aiProvider.customLabel": "Custom endpoint",
+    // "Custom endpoint" reuses `projectSettings.advancedLlm.providerCustomName` (identical text)
     "onboarding.checklist.aiProvider.customDescription":
       "Self-hosted, local, or any OpenAI-compatible server.",
-    "onboarding.checklist.aiProvider.endpointLabel": "Endpoint URL",
-    "onboarding.checklist.aiProvider.modelLabel": "Model",
-    "onboarding.checklist.aiProvider.optional": "(optional)",
+    // "Endpoint URL" label reuses `projectSettings.advancedLlm.endpointLabel` (identical text)
+    // "Model" label reuses `projectSettings.advancedLlm.modelLabel` (identical text)
+    // "(optional)" reuses `common.optionalFieldNote` (identical text)
     "onboarding.checklist.aiProvider.saveButton": "Save provider",
 
     // — AiModelsStep — model metadata (was module-level ModelMeta consts)
@@ -237,7 +237,7 @@ export const onboarding = defineNamespace({
       "Highest quality, promptable voices. Needs a Google AI Studio API key. No local download.",
     "onboarding.checklist.aiModels.geminiKeySaved": "Gemini key saved",
     // replace button reuses `audio.clone.replaceButton` (identical text)
-    "onboarding.checklist.aiModels.geminiKeyLabel": "Gemini API key",
+    // "Gemini API key" label reuses `projectSettings.voice.geminiKeyLabel` (identical text)
     "onboarding.checklist.aiModels.saveKey": "Save key",
     "onboarding.checklist.aiModels.geminiKeyHelp":
       "Get a key at aistudio.google.com/apikey. Stored locally and sent directly to Google.",
@@ -277,14 +277,14 @@ export const onboarding = defineNamespace({
     "onboarding.checklist.invite.addedSuffix": "as contributor.",
     "onboarding.checklist.invite.noSuchUser": "No Aquilla user named “{username}”.",
     "onboarding.checklist.invite.addFailed": "Couldn't add member.",
-    "onboarding.checklist.invite.linkSignInRequired": "Sign in to create an invite link.",
+    // link sign-in-required error reuses `projectSettings.share.signInToInvite` (identical text)
     "onboarding.checklist.invite.linkCreateFailed":
       "Couldn't create invite. Try again, or check your permission on this project.",
     "onboarding.checklist.invite.shareLinkLabel": "Or share a link",
     "onboarding.checklist.invite.createLinkButton": "Create link",
     // "Copied!" reuses `nav.report.copied`; "Copied" (aria) reuses `nav.version.copiedLabel` — identical text
     "onboarding.checklist.invite.copyLinkAriaLabel": "Copy invite link",
-    "onboarding.checklist.invite.createAnotherLink": "Create another link",
+    // "Create another link" reuses `projectSettings.share.createAnotherLinkButton` (identical text)
     "onboarding.checklist.invite.shareLinkHint":
       "Anyone with the link joins as a contributor after signing in. Use this when you don't have the recipient's username yet.",
 
@@ -304,7 +304,7 @@ export const onboarding = defineNamespace({
       "Your AI is still using the default translation instructions.",
     "onboarding.systemPromptNudge.detail":
       "Customize them to match your project's tone and domain — shared with everyone on the project.",
-    "onboarding.systemPromptNudge.customizeButton": "Customize",
+    // "Customize" button reuses `common.customize` (identical text)
 
     // ═══════════════════════════════════════════════════════════════════════
     // Preferences (src/pages/Preferences.tsx)
@@ -316,7 +316,7 @@ export const onboarding = defineNamespace({
     "onboarding.preferences.theme.system": "System",
     "onboarding.preferences.theme.light": "Light",
     "onboarding.preferences.theme.dark": "Dark",
-    "onboarding.preferences.group.general": "General",
+    // "General" group label reuses `common.general` (identical text)
     "onboarding.preferences.group.aiPersonalization": "AI & personalization",
     "onboarding.preferences.group.account": "Account",
 
@@ -413,9 +413,9 @@ export const onboarding = defineNamespace({
     // ═══════════════════════════════════════════════════════════════════════
     // API tokens (src/components/settings/ApiTokensSection.tsx)
     // ═══════════════════════════════════════════════════════════════════════
-    "onboarding.apiTokens.expiry.30d": "30 days",
+    // "30 days" expiry option reuses `common.thirtyDays` (identical text)
     "onboarding.apiTokens.expiry.90d": "90 days",
-    "onboarding.apiTokens.expiry.none": "No expiry",
+    // "No expiry" expiry option reuses `common.noExpiry` (identical text)
     "onboarding.apiTokens.scope.projectFallback": "Project {id}",
     "onboarding.apiTokens.scope.orgFallback": "Org {id}",
     "onboarding.apiTokens.scope.unscoped": "Unscoped (personal)",
@@ -426,15 +426,15 @@ export const onboarding = defineNamespace({
       "No tokens yet. Mint one to let an agent call the Agent API on your behalf.",
     "onboarding.apiTokens.revokedBadge": "Revoked",
     "onboarding.apiTokens.expiredBadge": "Expired",
-    "onboarding.apiTokens.expiresOn": "Expires {date}",
+    // "Expires {date}" row text reuses `common.expiresOn` (identical text)
     "onboarding.apiTokens.lastUsedOn": "Last used {date}",
     "onboarding.apiTokens.agentSetupButton": "Agent setup",
-    "onboarding.apiTokens.revokeButton": "Revoke",
+    // "Revoke" button reuses `common.revoke` (identical text)
     "onboarding.apiTokens.revokeDialogTitle": "Revoke token?",
     "onboarding.apiTokens.revokeWarning":
       "({prefix}…) will stop working immediately. This can't be undone.",
     "onboarding.apiTokens.revokeFailed": "Failed to revoke token.",
-    "onboarding.apiTokens.revokingButton": "Revoking…",
+    // "Revoking…" busy label reuses `common.revoking` (identical text)
     "onboarding.apiTokens.revokeTokenButton": "Revoke token",
     "onboarding.apiTokens.newTokenDialogTitle": "Your new API token",
     "onboarding.apiTokens.showOnceWarning":
@@ -451,7 +451,7 @@ export const onboarding = defineNamespace({
     "onboarding.apiTokens.newTokenTrigger": "New token",
     "onboarding.apiTokens.newTokenDialogHeading": "New API token",
     "onboarding.apiTokens.namePlaceholder": "e.g. Import agent",
-    "onboarding.apiTokens.modeLabel": "Mode",
+    // "Mode" field label reuses `common.modeLabel` (identical text)
     "onboarding.apiTokens.modeAskLabel": "Ask",
     "onboarding.apiTokens.modeAskDescription": "every write waits for your approval.",
     "onboarding.apiTokens.modeActLabel": "Act",
@@ -591,10 +591,6 @@ export const onboarding = defineNamespace({
         description:
           "Fallback scope/name label for an org the caller can no longer resolve by name, or whose name is empty.",
         placeholders: { id: "The org's raw numeric id. Not translated." },
-      },
-      "onboarding.apiTokens.expiresOn": {
-        description: "Expiry date shown on a token's row in the personal API tokens list.",
-        placeholders: { date: "The token's expiry date, already locale-formatted." },
       },
       "onboarding.apiTokens.lastUsedOn": {
         description: "Last-used date shown on a token's row in the personal API tokens list.",

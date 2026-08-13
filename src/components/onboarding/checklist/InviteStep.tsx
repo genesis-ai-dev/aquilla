@@ -81,7 +81,7 @@ export function InviteStep({ projectId, onSharesChanged }: InviteStepProps) {
   async function handleCreateLink() {
     setLinkError(null)
     if (!session?.jwt) {
-      setLinkError(t("onboarding.checklist.invite.linkSignInRequired"))
+      setLinkError(t("projectSettings.share.signInToInvite"))
       return
     }
     setLinkBusy(true)
@@ -200,7 +200,7 @@ export function InviteStep({ projectId, onSharesChanged }: InviteStepProps) {
               className="h-7"
             >
               <Plus className="me-1 h-3 w-3" />
-              {linkBusy ? t("onboarding.common.creating") : t("onboarding.checklist.invite.createLinkButton")}
+              {linkBusy ? t("common.creating") : t("onboarding.checklist.invite.createLinkButton")}
             </Button>
           )}
         </div>
@@ -208,7 +208,7 @@ export function InviteStep({ projectId, onSharesChanged }: InviteStepProps) {
           <div className="flex flex-col gap-1.5">
             <div className="flex items-center gap-1">
               <Input value={issuedUrl} readOnly className="h-7 text-[11px] font-mono" />
-              <AppTooltip content={copied ? t("nav.report.copied") : t("onboarding.common.copy")}>
+              <AppTooltip content={copied ? t("nav.report.copied") : t("common.copy")}>
                 <Button
                   type="button"
                   size="sm"
@@ -233,7 +233,7 @@ export function InviteStep({ projectId, onSharesChanged }: InviteStepProps) {
               className="h-7 w-full text-xs"
             >
               <Plus className="me-1 h-3 w-3" />
-              {t("onboarding.checklist.invite.createAnotherLink")}
+              {t("projectSettings.share.createAnotherLinkButton")}
             </Button>
           </div>
         ) : (

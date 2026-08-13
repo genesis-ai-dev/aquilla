@@ -322,7 +322,7 @@ export function RulesSurface({
                 {!canEditOrgRules && (
                   <Badge variant="secondary" className="ms-auto">
                     <Lock data-icon="inline-start" />
-                    {t("rules.surface.readOnly")}
+                    {t("common.readOnly")}
                   </Badge>
                 )}
               </div>
@@ -346,7 +346,7 @@ export function RulesSurface({
                           <div className="flex items-center gap-2">
                             <span className="text-sm font-medium">{rule.name}</span>
                             <SeverityBadge severity={rule.severity} />
-                            <Badge>{t("rules.surface.orgBadge")}</Badge>
+                            <Badge>{t("common.org")}</Badge>
                           </div>
                           {rule.description && <p className="mt-0.5 text-xs text-muted-foreground truncate">{rule.description}</p>}
                         </div>

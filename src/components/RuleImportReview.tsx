@@ -59,7 +59,7 @@ export function RuleImportReview({
         {drafts.length} rule draft{drafts.length !== 1 ? "s" : ""} extracted. Toggle to include or exclude.
       </p>
 
-      <ul className="max-h-[400px] overflow-auto space-y-2">
+      <ul className="max-h-[400px] overflow-auto space-y-2 pr-1">
         {drafts.map((draft, i) => {
           const isAccepted = accepted.has(i)
           const Icon = draft.severity === "major" ? AlertTriangle : AlertCircle
@@ -74,13 +74,14 @@ export function RuleImportReview({
               key={i}
               className={`rounded border p-3 transition-opacity ${isAccepted ? "" : "opacity-40"}`}
             >
-              <div className="flex items-start gap-2">
+              <div className="flex items-start gap-3">
                 <Icon className={`h-4 w-4 flex-shrink-0 mt-0.5 ${sevColor}`} />
                 <div className="flex-1 min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
-                    {/* Minimal inline name edit */}
+                    {/* Minimal inline name edit. px-0 keeps the name's left edge
+                        flush with the description and check block below it. */}
                     <Input
-                      className="h-6 text-sm font-medium px-1 py-0 border-0 bg-transparent shadow-none focus-visible:ring-0 focus-visible:border-b focus-visible:border-muted min-w-0 flex-1"
+                      className="h-6 text-sm font-medium px-0 py-0 border-0 bg-transparent shadow-none focus-visible:ring-0 focus-visible:border-b focus-visible:border-muted min-w-0 flex-1"
                       value={nameOverrides[i] ?? draft.name}
                       onChange={(e) =>
                         setNameOverrides((prev) => ({ ...prev, [i]: e.target.value }))
@@ -92,11 +93,11 @@ export function RuleImportReview({
                     </span>
                   </div>
                   {draft.description && (
-                    <p className="mt-0.5 text-xs text-muted-foreground break-words">
+                    <p className="mt-1 text-xs text-muted-foreground break-words">
                       {draft.description}
                     </p>
                   )}
-                  <div className="mt-1 rounded bg-muted/50 p-1.5">
+                  <div className="mt-2 rounded bg-muted/50 px-2 py-1.5">
                     <p className="font-mono text-[11px] leading-relaxed break-all">
                       {draft.check.type === "source-target-match" && (
                         <>
@@ -120,7 +121,7 @@ export function RuleImportReview({
                     </p>
                   </div>
                   {evidence?.[i] && (
-                    <p className="mt-1 text-[10px] text-muted-foreground italic">
+                    <p className="mt-2 text-[10px] text-muted-foreground italic">
                       From doc: {evidence[i]}
                     </p>
                   )}

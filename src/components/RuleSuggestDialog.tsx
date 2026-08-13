@@ -210,7 +210,7 @@ export function RuleSuggestDialog({ files: _files, completionSettings, onAdd, pr
             <p className="text-xs text-muted-foreground">
               Analyzed {pairCount} validated pair{pairCount !== 1 ? "s" : ""}. Toggle suggestions to include or exclude.
             </p>
-            <ul className="space-y-2 max-h-[400px] overflow-auto">
+            <ul className="space-y-2 max-h-[400px] overflow-auto pr-1">
               {suggestions.map((s, i) => {
                 const isAccepted = accepted.has(i)
                 const Icon = s.severity === "major" ? AlertTriangle : AlertCircle
@@ -223,7 +223,7 @@ export function RuleSuggestDialog({ files: _files, completionSettings, onAdd, pr
                     key={i}
                     className={`rounded border p-3 transition-opacity ${isAccepted ? "" : "opacity-40"}`}
                   >
-                    <div className="flex items-start gap-2">
+                    <div className="flex items-start gap-3">
                       <Icon className={`h-4 w-4 flex-shrink-0 mt-0.5 ${sevColor}`} />
                       <div className="flex-1 min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
@@ -233,9 +233,9 @@ export function RuleSuggestDialog({ files: _files, completionSettings, onAdd, pr
                           </span>
                         </div>
                         {s.description && (
-                          <p className="mt-0.5 text-xs text-muted-foreground break-words">{s.description}</p>
+                          <p className="mt-1 text-xs text-muted-foreground break-words">{s.description}</p>
                         )}
-                        <div className="mt-1 rounded bg-muted/50 p-1.5">
+                        <div className="mt-2 rounded bg-muted/50 px-2 py-1.5">
                           <p className="font-mono text-[11px] leading-relaxed break-all">
                             {s.check.type === "source-target-match" && (
                               <>match both: <span className="font-semibold">{s.check.pattern}</span></>

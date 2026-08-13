@@ -15,6 +15,10 @@
  *  - The flag stays set until the user dismisses the banner or re-authenticates
  *    — `clearSessionExpired()` is the only way down. Navigation does not clear
  *    it; `finalizeSession()` calls it on every successful auth.
+ *  - Fetch helpers should not call `notifySessionExpired()` directly: use
+ *    `notifySessionExpiredIfCurrent(failedJwt)` from lib/frontier/session-expiry,
+ *    which drops 401s from a credential that re-login has since replaced. This
+ *    module stays dependency-free; the guard lives there.
  */
 
 const SESSION_EXPIRED_EVENT = "session-expired"

@@ -4,7 +4,7 @@ import { listMyOrgs, type OrgSummary } from "@/lib/frontier/orgs"
 import { fetchAccessibleProjects, type CloudProjectSummary } from "@/lib/sync/cloud-projects"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { UserError } from "@/lib/errors/user-error"
-import { notifySessionExpired } from "@/lib/errors/session-expired-signal"
+import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
 import {
   ALL_ORGS_PARAM,
   ORG_STORAGE_KEY,
@@ -117,7 +117,9 @@ export function OrgProvider({ children }: { children: ReactNode }) {
       setOrgs([])
       setActiveOrgId(null)
       if (e instanceof UserError && e.category === "session-expired") {
-        notifySessionExpired()
+        // Guarded: a 401 from a JWT that re-login has since replaced must not
+        // re-raise the banner (see lib/frontier/session-expiry.ts).
+        void notifySessionExpiredIfCurrent(jwt)
       }
       setError(e instanceof Error ? e.message : String(e))
       return []

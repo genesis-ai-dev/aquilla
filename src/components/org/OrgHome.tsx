@@ -26,7 +26,7 @@ import { useOrgSettings, canEditRosterProgressFloor } from "@/hooks/useOrgSettin
 import { ROLE, roleDisplayText } from "@/lib/frontier/roles"
 import { RoleLabel } from "@/components/RoleLabel"
 import { UserError } from "@/lib/errors/user-error"
-import { notifySessionExpired } from "@/lib/errors/session-expired-signal"
+import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
 import { ProjectCreateDialog } from "@/components/ProjectCreateDialog"
 import { OrgCreateDialog } from "./OrgCreateDialog"
 import { OrgSetupChecklist } from "./OrgSetupChecklist"
@@ -653,7 +653,7 @@ export function OrgHome() {
         .catch((err) => {
           if (!cancelled) {
             if (err instanceof UserError && err.category === "session-expired") {
-              notifySessionExpired()
+              void notifySessionExpiredIfCurrent(jwt)
             }
             setError(err instanceof Error ? err.message : String(err))
           }
@@ -684,7 +684,7 @@ export function OrgHome() {
       .catch((err) => {
         if (!cancelled) {
           if (err instanceof UserError && err.category === "session-expired") {
-            notifySessionExpired()
+            void notifySessionExpiredIfCurrent(jwt)
           }
           setError(err instanceof Error ? err.message : String(err))
         }

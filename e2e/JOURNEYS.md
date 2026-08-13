@@ -8,6 +8,7 @@
 | Auth        | UI sign-up / login flow                              | _gap — Plan 2 (no `/login` route; login lives in onboarding)_ |        |
 | Auth        | Password reset request                               | _gap — Plan 2_                                                |        |
 | Auth        | Switch between two signed-in accounts (cross-tab reconcile, FRO-367) | `e2e/specs/orgs/account-switch-cross-tab.spec.ts`  |        |
+| Auth        | Session expiry: banner on dead credential, persists across navigation, dismissible, cleared by re-login (AQU-293/884) | `e2e/specs/auth/session-expired-banner.spec.ts` |        |
 | Onboarding  | First-run flow to dashboard                          | _gap — Plan 2_                                                |        |
 | Projects    | Create project, appears on dashboard                 | `e2e/specs/projects/create.smoke.spec.ts`                     |   ✅   |
 | Projects    | Open / delete / restore from trash                   | `e2e/specs/projects/project-trash.smoke.spec.ts` + `dashboard-trash-expand-restore.smoke.spec.ts` | ✅ |

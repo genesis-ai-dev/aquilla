@@ -7,6 +7,7 @@ import {
   isSessionExpired,
   notifySessionExpired,
 } from "@/lib/errors/session-expired-signal";
+import { notifySessionExpiredIfCurrent } from "./session-expiry";
 
 describe("login", () => {
   beforeEach(async () => { await clearSession(); vi.restoreAllMocks(); });
@@ -102,6 +103,29 @@ describe("login", () => {
       new Response(JSON.stringify({ detail: "bad creds" }), { status: 401 })
     );
     await expect(login({ username: "x", password: "y" })).rejects.toBeInstanceOf(FrontierAuthError);
+    expect(isSessionExpired()).toBe(true);
+    clearSessionExpired();
+  });
+
+  // AQU-884 race: components whose React state lags the session store fire
+  // requests with the pre-login JWT for a few renders after re-login; their
+  // 401s land AFTER finalizeSession() lowered the flag. The guarded notifier
+  // must drop them — and still honor a genuine expiry of the new session.
+  it("a straggler 401 from the replaced JWT cannot re-raise the banner after re-login", async () => {
+    notifySessionExpired();
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({
+        access_token: "jwt-fresh",
+        token_type: "bearer",
+      }), { status: 200 })
+    );
+    await login({ username: "alice", password: "pw" });
+    expect(isSessionExpired()).toBe(false);
+
+    await notifySessionExpiredIfCurrent("jwt-dead"); // straggler from before re-login
+    expect(isSessionExpired()).toBe(false);
+
+    await notifySessionExpiredIfCurrent("jwt-fresh"); // the new session expiring later
     expect(isSessionExpired()).toBe(true);
     clearSessionExpired();
   });

@@ -114,6 +114,46 @@ describe("rendering", () => {
     expect(screen.getByText(/"assigneeId": 42/)).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Apply" })).toBeDisabled()
   })
+
+  it("renders cell creates as new rows with Apply enabled at their floor (AQU-890)", () => {
+    const proposal = makeProposal({
+      events: [
+        {
+          kind: "source.cell.create",
+          fileId: "f-1",
+          cellId: "c-new",
+          payload: { cellId: "c-new", value: "Section heading", anchorCellId: "c-1" },
+          display: { after: "Section heading" },
+        },
+      ],
+    })
+    render(<ProposalCard {...BASE_PROPS} proposal={proposal} roleLevel={ROLE.PROJECT_LEAD} />)
+    // The old behaviour was the "can't apply yet" block — the row must now
+    // render as a real change, not raw JSON.
+    expect(screen.queryByText(/not supported yet/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/can't apply yet/)).not.toBeInTheDocument()
+    expect(screen.getByText("New source row")).toBeInTheDocument()
+    expect(screen.getByText("(new row)")).toBeInTheDocument()
+    expect(screen.getByText("Section heading")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Apply" })).toBeEnabled()
+  })
+
+  it("still gates source.cell.create below project_lead (AQU-890)", () => {
+    const proposal = makeProposal({
+      events: [
+        {
+          kind: "source.cell.create",
+          fileId: "f-1",
+          cellId: "c-new",
+          payload: { cellId: "c-new", value: "Section heading" },
+          display: { after: "Section heading" },
+        },
+      ],
+    })
+    render(<ProposalCard {...BASE_PROPS} proposal={proposal} roleLevel={ROLE.CONTRIBUTOR} />)
+    expect(screen.getByRole("button", { name: "Apply" })).toBeDisabled()
+    expect(screen.getByText("Requires Project Lead role or higher")).toBeInTheDocument()
+  })
 })
 
 describe("role gate", () => {

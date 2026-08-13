@@ -684,7 +684,17 @@ export function AudioRecordingModal({
         // (Sam's markup, 2026-08-13) — so it widens to keep the recording
         // column usable. Without one it is exactly the former dialog: same
         // width, same single column, nothing to notice.
-        className={cn("flex flex-row gap-0 p-0", filmUrl ? "max-w-6xl" : "max-w-3xl")}
+        //
+        // `sm:max-w-6xl`, WITH the variant, is the load-bearing part. The
+        // dialog primitive's own skeleton carries `sm:max-w-lg`, and under
+        // tailwind-merge a bare `max-w-*` lives in a different group from a
+        // `sm:max-w-*`, so it cannot replace it — the primitive's 512px wins
+        // at every desktop width. That is also why this dialog's old
+        // `max-w-3xl` never actually applied (the "3xl" modal everyone knew
+        // was 512px), and why the first cut of the two-panel layout shipped
+        // as two 256px shreds with every line wrapped (Sam's screenshot,
+        // 2026-08-13).
+        className={cn("flex flex-row gap-0 p-0", filmUrl ? "sm:max-w-6xl" : "max-w-3xl")}
         style={{ maxHeight: "min(92vh, 800px)" }}
         showCloseButton={false}
       >

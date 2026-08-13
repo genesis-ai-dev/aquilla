@@ -263,7 +263,7 @@ export function StaffLanePopover({
               <Link
                 to={`/project/${projectId}/settings/members`}
                 className="font-medium text-foreground underline underline-offset-2"
-                onClick={() => setOpen(false)}
+                onClick={() => handleOpenChange(false)}
               >
                 Invite them to the project
               </Link>

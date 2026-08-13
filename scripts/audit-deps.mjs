@@ -73,12 +73,27 @@ const ghsaOf = (text) => (String(text).match(/GHSA-[0-9a-z-]{14,}/i) || [null])[
  * regardless of which tool produced the finding.
  */
 function normalise(raw, dir) {
-  if (!raw || !raw.trim()) return []
   let parsed
   try {
     parsed = JSON.parse(raw)
   } catch {
     throw new Error(`unparseable audit JSON from ${dir}`)
+  }
+  // A payload carrying none of the shapes this parser reads — no `advisories`
+  // (pnpm/npm-v6), no `vulnerabilities` (npm v7+), not even `metadata` — is an
+  // output-format change or an error object on stdout, not a clean audit. It
+  // must fail here rather than read as "no advisories found": a gate that
+  // passes because it could not read its input is worse than no gate.
+  if (
+    typeof parsed !== "object" ||
+    parsed === null ||
+    (!("advisories" in parsed) && !("vulnerabilities" in parsed) && !("metadata" in parsed))
+  ) {
+    throw new Error(
+      `unrecognised audit payload from ${dir}: expected advisories, vulnerabilities, or metadata; got ${
+        typeof parsed === "object" && parsed !== null ? `keys [${Object.keys(parsed).join(", ")}]` : typeof parsed
+      }`,
+    )
   }
   const out = []
 

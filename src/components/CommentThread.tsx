@@ -121,6 +121,9 @@ export function CommentThread({ thread, currentTranslated, canReply = true, canR
             {/* eslint-disable-next-line react/no-danger */}
             <div
               className="mt-0.5 text-xs"
+              // Session-replay mask (docs/OPSEC.md): comment bodies quote
+              // draft text and name collaborators.
+              data-ph-mask=""
               dangerouslySetInnerHTML={{ __html: safeCommentHtml(m.text) }}
             />
           </li>

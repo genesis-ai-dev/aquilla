@@ -1173,18 +1173,38 @@ projects.delete("/:projectId/files/:fileId", authMiddleware, async (c) => {
   }
 
   // Best-effort R2 cleanup via sync-worker's admin endpoint.
-  if (c.env.SYNC_WORKER_URL && c.env.SYNC_SECRET_KEY) {
+  //
+  // Prefer the dedicated ADMIN_SECRET, falling back to SYNC_SECRET_KEY, so
+  // this stays in step with sync-worker's `resolveAdminSecret` (OPS-2; see
+  // sync-worker/src/lib/admin-secret.ts). Both
+  // sides must be provisioned together: sync-worker stops accepting the
+  // signing key the moment its own ADMIN_SECRET is set, and because the call
+  // below only warns on failure, a one-sided rollout would 401 silently and
+  // leave every deleted file's blobs behind in R2.
+  //
+  // BOTH branches are trimmed to match `resolveAdminSecret`, which trims both.
+  // Sending an untrimmed fallback while the receiver compares a trimmed one
+  // means a `SYNC_SECRET_KEY` carrying a trailing newline — what
+  // `echo secret | wrangler secret put` stores, as against `printf %s` —
+  // authenticates nowhere, and fails down the same silent 401 path this
+  // comment is about.
+  const adminSecret = c.env.ADMIN_SECRET?.trim() || c.env.SYNC_SECRET_KEY?.trim()
+  if (c.env.SYNC_WORKER_URL && adminSecret) {
     try {
       const res = await fetch(
         `${c.env.SYNC_WORKER_URL.replace(/\/$/, "")}/admin/files/${encodeURIComponent(projectId)}/${encodeURIComponent(fileId)}`,
         {
           method: "DELETE",
-          headers: { Authorization: `Bearer ${c.env.SYNC_SECRET_KEY}` },
+          headers: { Authorization: `Bearer ${adminSecret}` },
         },
       )
       if (!res.ok) {
+        // 401 here means the two workers disagree about which secret guards
+        // /admin/*, not that the file was already gone — call it out by name
+        // so a half-finished migration is visible in the logs.
         console.warn(
-          `sync-worker R2 cleanup returned HTTP ${res.status} for ${projectId}/${fileId}`,
+          `sync-worker R2 cleanup returned HTTP ${res.status} for ${projectId}/${fileId}` +
+            (res.status === 401 ? " — ADMIN_SECRET mismatch between identity and sync" : ""),
         )
       }
     } catch (err) {

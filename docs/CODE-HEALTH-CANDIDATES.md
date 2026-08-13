@@ -43,6 +43,37 @@ a later run completes.
   — unused Phase 2b wrapper. Grep precise paths/exports before deleting: a different,
   live `fetchAccessibleProjects` exists in `cloud-projects.ts`.
 
+## 2026-08-11 — type-tightening + complexity survey (chore/code-health-2026-08-11, second run)
+
+This run removed 13 redundant non-null assertions (type-tightening theme). The same
+survey turned up a complexity-reduction (theme 2) candidate and one more type-tightening
+spot, both deferred rather than mixed into the single-theme budget.
+
+- **`src/lib/frontier/roles.ts`** (175 lines) — `roleName()` (lines ~115–126) and
+  `roleDescription()` (lines ~136–147) are two parallel `switch` statements keyed on
+  the same 7 numeric role levels (100/200/…/700). Friction: this run's budget was
+  already spent on the type-tightening theme; picking both in one PR would mix themes.
+  Proof needed: collapse to a single `Record<RoleLevel, { name; description }>` lookup
+  with `roleName`/`roleDescription` kept as thin accessors with identical signatures
+  and return values — `pnpm build` (return-type match) plus `pnpm test` (no test file
+  changes) is the proof.
+
+- **`src/components/CellAudioButton.tsx`** (lines 74–102) — `errorIcon()` and
+  `errorTooltip()` are two switch statements keyed on the same `kind` string union;
+  same lookup-table shape as above. Friction: budget, and slightly higher risk since
+  the switches return JSX rather than plain values — worth its own careful pass.
+  Proof needed: same exported signatures/return types, `pnpm build` + `pnpm test`
+  green with no test changes.
+
+- **`src/lib/text/word-diff.ts`** (~lines 32–56) — ~14 dense non-null assertions
+  (`text[i]!`-style) inside a tight DP loop, same "loop condition already bounds the
+  index" story as the ones fixed this run in `src/lib/biblica/sentence-cuts.ts`.
+  Friction: skipped this run — the density of assertions in one tight loop raised the
+  risk of a transcription typo during a bulk edit for a line-count-only benefit; wants
+  a dedicated, careful pass rather than being bundled with the other easier fixes.
+  Proof needed: `pnpm build` clean (confirms TS still infers the narrower type without
+  the assertions) plus `pnpm test` green, no test files touched.
+
 ## Prior candidates retained from the 2026-08-10/11 runs
 
 - **`src/components/Dashboard.tsx`** (466 lines) — a pre-org-model project dashboard,

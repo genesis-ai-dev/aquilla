@@ -181,12 +181,13 @@ describe("TimelineEditor", () => {
     await waitFor(() => expect(width()).toBeGreaterThan(0))
   })
 
-  it("⌘ + pinch zooms the rows, and leaves the seconds alone", async () => {
-    // 2026-08-13. A trackpad pinch ALREADY arrives as a ctrlKey wheel — that is
-    // how the horizontal zoom above is driven — so ⌘ is the only modifier that
-    // can distinguish "pinch" from "pinch for the other axis". Its own render:
-    // the horizontal zoom eases over rAF frames, so a width read taken while
-    // the test above is still gliding is a race, not a regression.
+  it("⌘ + scroll zooms the rows, and leaves the seconds alone", async () => {
+    // 2026-08-13. A SCROLL, not a pinch: macOS synthesizes a pinch as a
+    // ctrlKey wheel and drops every other modifier, so ⌘ + pinch is
+    // indistinguishable from a bare pinch and no modifier+pinch binding is
+    // implementable at all. A real two-finger scroll reports its modifiers.
+    // Its own render because the horizontal zoom eases over rAF frames, so a
+    // width read taken while the test above is still gliding is a race.
     localStorage.removeItem("codex:timelineRowHeight:metafile")
     render(
       <TimelineEditor
@@ -208,7 +209,8 @@ describe("TimelineEditor", () => {
 
     const rowsBefore = rowH()
     const widthBefore = width()
-    sendWheel({ deltaY: 100, ctrlKey: true, metaKey: true })
+    // metaKey WITHOUT ctrlKey — the shape a real ⌘ + two-finger scroll has.
+    sendWheel({ deltaY: 100, metaKey: true })
     await waitFor(() => expect(rowH()).not.toBe(rowsBefore))
     expect(width()).toBe(widthBefore)
   })

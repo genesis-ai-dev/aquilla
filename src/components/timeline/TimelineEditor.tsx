@@ -1161,8 +1161,8 @@ export function TimelineEditor({
   // React's synthetic onWheel can't reliably preventDefault (the browser would
   // page-zoom). Plain wheel (no modifier) keeps scrolling untouched.
   //
-  // Stage 3 hangs the VERTICAL zoom off the same listener under ⌘ — see the
-  // metaKey branch in onWheel for why that modifier and not ctrl.
+  // Stage 3 hangs the VERTICAL zoom off the same listener under ⌘ + scroll —
+  // see the metaKey branch in onWheel for why that gesture and not a pinch.
   //
   // Smoothness (Sam's "spazzy" feedback on v1):
   //  - the factor scales with gesture velocity (exp of deltaY) instead of a
@@ -1236,17 +1236,22 @@ export function TimelineEditor({
     const onWheel = (e: WheelEvent) => {
       if (!e.ctrlKey && !e.metaKey) return
       e.preventDefault()
-      // ⌘ + pinch zooms the ROWS instead of the seconds (Sam, 2026-08-13).
+      // ⌘ + two-finger SCROLL zooms the ROWS instead of the seconds (Sam,
+      // 2026-08-13).
       //
-      // metaKey is the only modifier that can carry this, and the reason is
-      // worth writing down: a trackpad pinch ALREADY arrives as a ctrlKey
-      // wheel — that is how the horizontal zoom below is triggered — so ctrl
-      // cannot distinguish "pinch" from "ctrl+pinch". They are the same event.
-      // ⌘ is untouched by the gesture, so ⌘+pinch reads as ctrlKey AND metaKey
-      // and is unambiguous, while a plain pinch keeps meaning what it always
-      // has. (On Windows/Linux that leaves the Win key as the vertical
-      // modifier and Ctrl+pinch still horizontal — same reason, no way round
-      // it without inventing a modifier the gesture does not report.)
+      // A SCROLL, and not a pinch, and that is not a preference — VERIFIED on
+      // macOS: a trackpad pinch reaches the page as a wheel event that the
+      // browser synthesizes with ctrlKey set, and it does NOT carry whatever
+      // else you are holding. ⌘ + pinch arrives here indistinguishable from a
+      // bare pinch and falls straight through to the horizontal zoom below.
+      // So no "modifier + pinch" binding is implementable on this platform,
+      // for any modifier — do not try again. A real two-finger scroll is an
+      // ordinary wheel event and reports its modifiers honestly, which is why
+      // this one works.
+      //
+      // ctrl is unavailable regardless: a bare pinch already sets it, so ctrl
+      // could never mean anything but "the horizontal zoom" without taking
+      // pinch-to-zoom away.
       if (e.metaKey) {
         const rowMag = Math.abs(e.deltaY)
         // Half the horizontal gain, because the two axes travel very different
@@ -1802,7 +1807,7 @@ export function TimelineEditor({
             <button
               type="button"
               aria-label="Shorter rows"
-              title="Shorter rows — fit more tracks on screen (⌘ + pinch)"
+              title="Shorter rows — fit more tracks on screen (⌘ + scroll)"
               onClick={() => applyRowHeight(rowH / 1.3)}
               className="px-1.5 py-1 text-foreground/70 hover:bg-muted"
             >
@@ -1814,7 +1819,7 @@ export function TimelineEditor({
             <button
               type="button"
               aria-label="Taller rows"
-              title="Taller rows (⌘ + pinch)"
+              title="Taller rows (⌘ + scroll)"
               onClick={() => applyRowHeight(rowH * 1.3)}
               className="px-1.5 py-1 text-foreground/70 hover:bg-muted"
             >

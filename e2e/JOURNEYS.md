@@ -295,7 +295,7 @@
 | Debug       | Debug view accessible at /debug                       | `e2e/specs/editor/debug-view.smoke.spec.ts`                   |   ✅   |
 | Debug       | Admin console tabs (users/orgs/projects/teams/activity) | `e2e/specs/orgs/admin-console.smoke.spec.ts` + `admin-console-users-tab.smoke.spec.ts` + `admin-console-orgs-tab.smoke.spec.ts` + `admin-console-projects-tab.smoke.spec.ts` + `admin-console-teams-tab.smoke.spec.ts` + `admin-console-activity-tab.smoke.spec.ts` | ✅ |
 | Tauri       | Native dialogs / deeplink / updater / fs / keychain  | _gap — Plan 3_                                                |        |
-| Editor      | BT Edit + Regenerate on an existing back-translation | _gap — needs a pre-existing cell.backtranslation (generate covered by bt-edit-locked-for-reviewer; statistical gloss expander covered by cell-expansion-bt-tab)_ |   |
+| Editor      | BT Edit + Regenerate on an existing back-translation; stale reading after the translation changes | `e2e/specs/editor/cell-expansion-bt-tab.smoke.spec.ts` (generate affordance + statistical gloss) + `e2e/specs/collab/bt-edit-locked-for-reviewer.smoke.spec.ts` (edit lock) + `src/components/BacktranslationPanel.test.tsx` (edit, stale, provenance, pairs disagreement) |   ✅   |
 | Editor      | TranslatedEditor focus-lock banner + Discard and reload | _gap — require two writers editing same cell simultaneously_ |   |
 | Editor      | StaleSourceIndicator badge (source changed since last revision) | _gap — not yet wired into CellRow/EditorTable (Phase 5 TODO in source)_ | |
 | Auth        | DevLoginRoute error state (auth-worker unavailable)  | _gap — test infrastructure component; not a user workflow_    |        |

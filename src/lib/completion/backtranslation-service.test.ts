@@ -114,6 +114,34 @@ describe("buildBacktranslationPrompt", () => {
     })
     expect(empty[0].content).toBe(expected)
   })
+
+  it("injects the statistical project-pairs reading as a non-authoritative hint", () => {
+    const messages = buildBacktranslationPrompt({
+      sourceLanguage: "English",
+      targetLanguage: "French",
+      targetText: "maison de lui",
+      examples: [],
+      projectPairsGloss: "house of him",
+    })
+    const system = messages[0].content
+    expect(system).toContain("house of him")
+    expect(system).toContain("not authoritative")
+    expect(system).toContain("Stay literal")
+  })
+
+  it("omits the project-pairs block when the gloss is empty", () => {
+    const withEmpty = buildBacktranslationPrompt({
+      sourceLanguage: "English",
+      targetLanguage: "French",
+      targetText: "Bonjour",
+      examples: [],
+      projectPairsGloss: "  ",
+    })
+    const expected = BACKTRANSLATION_SYSTEM_PROMPT
+      .replace(/\{sourceLanguage\}/g, "English")
+      .replace(/\{targetLanguage\}/g, "French")
+    expect(withEmpty[0].content).toBe(expected)
+  })
 })
 
 describe("deriveTerminologyHints", () => {

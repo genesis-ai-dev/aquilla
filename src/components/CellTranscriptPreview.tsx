@@ -4,12 +4,13 @@
 // heard, and an amber "you edited after recording" nudge. No tool names, no
 // word-count chips, no jargon: just the spoken words and one obvious next step.
 
-import { forwardRef, useMemo } from "react"
-import { AudioLines, AlertTriangle, RefreshCw, CornerDownLeft, Check } from "lucide-react"
+import { forwardRef, useMemo, useState } from "react"
+import { AudioLines, AlertTriangle, RefreshCw, CornerDownLeft, Check, Pencil } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import type { WordTiming } from "@/lib/codex-editor/types"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 interface Props {
   timings: WordTiming[] | undefined
@@ -24,6 +25,8 @@ interface Props {
   /** Commit the transcript as the cell's target text. Receives the plain
    *  transcript string. Surfaced when the transcript differs from the cell. */
   onUseAsCellText?: (transcript: string) => void
+  /** Persist a corrected transcript (Whisper mistakes) without re-running ASR. */
+  onCorrectTranscript?: (transcript: string) => void
 }
 
 function transcriptOf(timings: WordTiming[]): string {
@@ -36,9 +39,12 @@ function looselyEquals(a: string, b: string): boolean {
 }
 
 export const CellTranscriptPreview = forwardRef<HTMLDivElement, Props>(function CellTranscriptPreview({
-  timings, cellText, cellId: _cellId, alignedToCellText, editable, onRetranscribe, onUseAsCellText,
+  timings, cellText, cellId: _cellId, alignedToCellText, editable, onRetranscribe, onUseAsCellText, onCorrectTranscript,
 }: Props, ref) {
+  const t = useT()
   const transcript = useMemo(() => (timings ? transcriptOf(timings) : ""), [timings])
+  const [editing, setEditing] = useState(false)
+  const [editValue, setEditValue] = useState("")
   if (!timings || timings.length === 0) return null
 
   const matches = looselyEquals(transcript, cellText)
@@ -97,11 +103,76 @@ export const CellTranscriptPreview = forwardRef<HTMLDivElement, Props>(function 
       <div className="flex items-center gap-1.5">
         <Icon className={cn("h-3.5 w-3.5 shrink-0", iconTone)} />
         <span className="text-[11px] font-medium text-foreground">{headline}</span>
+        {editable && onCorrectTranscript && !editing && (
+          <AppTooltip content={t("editor.transcript.editTooltip")}>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              className="ml-auto rounded-full text-muted-foreground hover:text-foreground"
+              aria-label={t("editor.transcript.editAria")}
+              onClick={() => {
+                setEditValue(transcript)
+                setEditing(true)
+              }}
+            >
+              <Pencil />
+            </Button>
+          </AppTooltip>
+        )}
+        {editable === false && onCorrectTranscript && (
+          <AppTooltip content={t("editor.transcript.contributorRequired")}>
+            <span className="ml-auto inline-flex">
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                disabled
+                aria-label={t("editor.transcript.contributorRequired")}
+                className="rounded-full text-muted-foreground"
+              >
+                <Pencil />
+              </Button>
+            </span>
+          </AppTooltip>
+        )}
       </div>
 
-      {/* The heard words — the reason this panel exists. Foreground and roomy
-          when there's something to act on; whisper-quiet when it already
-          matches (nothing to do, so don't shout it). */}
+      {editing ? (
+        <div className="mt-1.5 flex flex-col gap-1.5">
+          <textarea
+            autoFocus
+            value={editValue}
+            onChange={(e) => setEditValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") setEditing(false)
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && editValue.trim()) {
+                onCorrectTranscript?.(editValue.trim())
+                setEditing(false)
+              }
+            }}
+            rows={3}
+            className="w-full resize-none rounded-lg border border-border bg-background px-3 py-2 text-[13px] leading-relaxed text-foreground outline-none focus:ring-1 focus:ring-ring"
+          />
+          <div className="flex items-center justify-end gap-1.5">
+            <Button type="button" variant="ghost" size="xs" onClick={() => setEditing(false)}>
+              {t("common.cancel")}
+            </Button>
+            <Button
+              type="button"
+              size="xs"
+              disabled={!editValue.trim()}
+              onClick={() => {
+                if (!editValue.trim()) return
+                onCorrectTranscript?.(editValue.trim())
+                setEditing(false)
+              }}
+            >
+              {t("common.save")}
+            </Button>
+          </div>
+        </div>
+      ) : (
       <p
         className={cn(
           "mt-1.5 break-words leading-relaxed",
@@ -114,8 +185,9 @@ export const CellTranscriptPreview = forwardRef<HTMLDivElement, Props>(function 
         {transcript}
         <span aria-hidden className="select-none pl-0.5 text-foreground/25">&rdquo;</span>
       </p>
+      )}
 
-      {editable && state !== "match" && (
+      {editable && state !== "match" && !editing && (
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
           {state === "stale" && onRetranscribe && (
             <AppTooltip content="Listen to the recording again and refresh the transcript">

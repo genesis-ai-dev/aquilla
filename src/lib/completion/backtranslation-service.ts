@@ -36,6 +36,12 @@ interface BuildOptions {
    * sees the corresponding rendering. Additive — omit for unchanged behavior.
    */
   terminologyHints?: TerminologyHint[]
+  /**
+   * Optional statistical gloss of THIS cell, computed from the project's own
+   * translated pairs. Injected as a non-authoritative hint so the model can
+   * prefer established project wording without treating the gloss as the answer.
+   */
+  projectPairsGloss?: string
 }
 
 /**
@@ -81,6 +87,18 @@ function buildTerminologyGuidance(hints: TerminologyHint[]): string {
   ].join("\n")
 }
 
+function buildProjectPairsGuidance(gloss: string | undefined): string {
+  const trimmed = gloss?.trim() ?? ""
+  if (!trimmed) return ""
+  return [
+    "",
+    "",
+    "A statistical reading from this project's own translated pairs (not AI, not authoritative):",
+    trimmed,
+    "Prefer these established word choices when they fit the target text. Stay literal. Do not copy the statistical reading if it disagrees with what the target text actually says.",
+  ].join("\n")
+}
+
 export function buildBacktranslationPrompt(options: BuildOptions): ChatMessage[] {
   let systemContent = BACKTRANSLATION_SYSTEM_PROMPT
     .replace(/\{sourceLanguage\}/g, options.sourceLanguage)
@@ -89,6 +107,7 @@ export function buildBacktranslationPrompt(options: BuildOptions): ChatMessage[]
   if (options.terminologyHints && options.terminologyHints.length > 0) {
     systemContent += buildTerminologyGuidance(options.terminologyHints)
   }
+  systemContent += buildProjectPairsGuidance(options.projectPairsGloss)
 
   let userContent = ""
   for (const ex of options.examples) {
@@ -135,6 +154,7 @@ export async function generateBacktranslation(options: GenerateBacktranslationOp
     targetText: options.targetText,
     examples: options.examples,
     terminologyHints,
+    projectPairsGloss: options.projectPairsGloss,
   })
 
   // Backtranslation uses a lower temperature for literal output.

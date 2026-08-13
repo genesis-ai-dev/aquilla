@@ -5,8 +5,9 @@
  * the LLM path (`generateBacktranslation`) is the only generation that
  * persists, and it runs only from the BT tab's explicit Generate/Refresh
  * buttons. The statistical glosser survives as an on-demand, local-only
- * reference (the BT tab's collapsed "Statistical gloss" section, fed by
- * ProjectWorkspace's `getStatisticalBt`) — never persisted.
+ * The statistical glosser survives as an on-demand, local-only
+ * reference (live in the BT tab as you translate, and as a disagreement
+ * card against the AI reading) — never persisted as the BT of record.
  *
  * This module does NOT mutate React state — callers own persistence.
  */

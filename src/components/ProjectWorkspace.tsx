@@ -199,6 +199,12 @@ import {
   workspaceReturnPath,
 } from "@/lib/ad11/navigation"
 import { generateBacktranslation } from "@/lib/completion/backtranslation-service"
+import {
+  recordFromHydrationRow,
+  selectBtFewShotExamples,
+  writeLocalBacktranslation,
+  type BacktranslationRecord,
+} from "@/lib/completion/bt-record"
 import { normalizeProtectedCompletion } from "@/lib/idml/completion"
 import { hasIdmlMetadata, replaceProtectedIdmlText } from "@/lib/idml/protected-html"
 import { hasIdmlCellMetadata } from "@/lib/richtext/idml-editor"
@@ -1210,7 +1216,7 @@ export function ProjectWorkspace() {
 
   const glosserCacheRef = useRef<{
     corpusCells: readonly CellSummary[]
-    backtranslationCache: Map<string, string>
+    backtranslationCache: Map<string, BacktranslationRecord>
     terminology: ProjectRecord["terminology"] | undefined
     glosser: Glosser
   } | null>(null)
@@ -2409,18 +2415,24 @@ export function ProjectWorkspace() {
   // Generation strategy:
   //  1. The BT of record is LLM-generated, and ONLY when the user asks for it
   //     (the Generate/Refresh buttons in the BT tab). Nothing auto-runs on commit.
-  //  2. The statistical Markov glosser survives as a read-only, on-demand
-  //     reference (collapsed section in the BT tab) — computed locally, never
-  //     persisted.
+  //  2. The statistical Markov glosser is a live, local-only check (shown
+  //     while typing, and as a disagreement card against the AI reading).
+  //     Human-corrected BTs re-seed it and few-shot the next LLM call.
   //
   // Persistence:
   //  - On generate: emit `cell.backtranslation.set` via outbox (non-chain-mutating).
-  //  - Local in-memory cache (`backtranslationCache`) so UI is instant.
+  //  - Local in-memory cache of full records (text + pin + provenance) so
+  //    staleness and origin stay honest across reload.
   //  - localStorage fallback so results survive page reload before server round-trip.
   //
-  const [backtranslationCache, setBacktranslationCache] = useState<Map<string, string>>(new Map())
+  const [backtranslationCache, setBacktranslationCache] = useState<Map<string, BacktranslationRecord>>(new Map())
   const [backtranslatingState, setBacktranslatingState] = useState<Set<string>>(new Set())
   const [backtranslationErrorsState, setBacktranslationErrorsState] = useState<Map<string, string>>(new Map())
+  const locallyTouchedBtRef = useRef(new Set<string>())
+  const hydrateBacktranslationsRef = useRef<(
+    fileId: string,
+    mode: "fill-missing" | "replace-untouched",
+  ) => Promise<void>>(async () => {})
 
   useEffect(() => {
     if (typeof window === "undefined") return
@@ -2430,52 +2442,57 @@ export function ProjectWorkspace() {
     }
   }, [backtranslatingState.size])
 
-  // Hydrate persisted BTs on file/project load from the cell-backtranslations-read route.
-  // Compares each BT's targetEventId against the cell's eventId to detect staleness.
-  // Falls back gracefully to local generation on any error.
+  const hydrateBacktranslations = useCallback(async (
+    fileId: string,
+    mode: "fill-missing" | "replace-untouched",
+  ) => {
+    if (!project?.id) return
+    try {
+      const jwt = await getTokenForFile(fileId)
+      if (!jwt) return
+      const { syncWorkerHttpOrigin } = await import("@/lib/sync/sync-worker-url")
+      const res = await fetch(
+        `${syncWorkerHttpOrigin()}/api/v1/projects/${encodeURIComponent(project.id)}/files/${encodeURIComponent(fileId)}/backtranslations`,
+        { headers: { Authorization: `Bearer ${jwt}` } },
+      )
+      if (!res.ok) return
+      const data = (await res.json()) as {
+        backtranslations: Array<{
+          cellId: string
+          targetEventId: string
+          btText: string
+          btHtml: string | null
+          polished: boolean
+          author: string
+          eventId: string
+          createdAt: number
+        }>
+      }
+      setBacktranslationCache((prev) => {
+        const next = new Map(prev)
+        for (const row of data.backtranslations) {
+          const incoming = recordFromHydrationRow(row)
+          const existing = next.get(row.cellId)
+          if (mode === "fill-missing" && existing) continue
+          if (mode === "replace-untouched" && locallyTouchedBtRef.current.has(row.cellId)) continue
+          next.set(row.cellId, existing?.forText
+            ? { ...incoming, forText: existing.forText }
+            : incoming)
+        }
+        return next
+      })
+    } catch (err) {
+      console.warn("[bt-hydrate] failed to fetch persisted BTs:", err)
+    }
+  }, [project?.id, getTokenForFile])
+  hydrateBacktranslationsRef.current = hydrateBacktranslations
+
+  // Hydrate persisted BTs on file/project load. Keep local in-flight edits.
   useEffect(() => {
     if (!project?.id || !activeFileId) return
-    let cancelled = false
-    void (async () => {
-      try {
-        const jwt = await getTokenForFile(activeFileId)
-        if (!jwt || cancelled) return
-        const { syncWorkerHttpOrigin } = await import("@/lib/sync/sync-worker-url")
-        const res = await fetch(
-          `${syncWorkerHttpOrigin()}/api/v1/projects/${encodeURIComponent(project.id)}/files/${encodeURIComponent(activeFileId)}/backtranslations`,
-          { headers: { Authorization: `Bearer ${jwt}` } },
-        )
-        if (!res.ok || cancelled) return
-        const data = (await res.json()) as {
-          backtranslations: Array<{
-            cellId: string
-            targetEventId: string
-            btText: string
-            btHtml: string | null
-            polished: boolean
-            author: string
-            eventId: string
-            createdAt: number
-          }>
-        }
-        if (cancelled) return
-        setBacktranslationCache((prev) => {
-          const next = new Map(prev)
-          for (const bt of data.backtranslations) {
-            // Only hydrate if not already in cache (local edits take precedence).
-            if (!next.has(bt.cellId)) {
-              next.set(bt.cellId, bt.btText)
-            }
-          }
-          return next
-        })
-      } catch (err) {
-        // Non-fatal: fall back to local generation / localStorage.
-        console.warn("[bt-hydrate] failed to fetch persisted BTs:", err)
-      }
-    })()
-    return () => { cancelled = true }
-  }, [project?.id, activeFileId, getTokenForFile])
+    locallyTouchedBtRef.current = new Set()
+    void hydrateBacktranslations(activeFileId, "fill-missing")
+  }, [project?.id, activeFileId, hydrateBacktranslations])
 
   // Same gate as the AI-completion sparkle: a signed-in Frontier session or a
   // custom endpoint+model (project settings or per-device override) counts as
@@ -2506,11 +2523,17 @@ export function ProjectWorkspace() {
     // future glosses reflect the reviewer's intent.
     const seeds: BtSeed[] = []
     const corpusByCellId = new Map(corpusCells.map((c) => [c.id, c]))
-    for (const [cellId, btText] of backtranslationCache) {
-      const cell = corpusByCellId.get(cellId)
-      if (cell?.translated) {
-        seeds.push({ source: btText, target: cell.translated, weight: 3 })
+    for (const record of backtranslationCache.values()) {
+      const cell = corpusByCellId.get(record.cellId)
+      if (!cell?.translated) continue
+      if (record.targetEventId && cell.targetEventId && record.targetEventId !== cell.targetEventId) {
+        continue
       }
+      seeds.push({
+        source: record.btText,
+        target: record.forText || cell.translated,
+        weight: record.polished === false ? 5 : 2,
+      })
     }
     // Seed from project termbase: active concepts feed preferred/admitted/forbidden
     // renderings into the glosser so terminology constraints propagate to BTs.
@@ -2597,20 +2620,20 @@ export function ProjectWorkspace() {
     // The BT pins to the commit it describes. Generation is manual-only, so
     // there is never an in-flight commit here — the projected head is current.
     const pinnedTargetEventId = resolveBtTargetEventId(undefined, cell.targetEventId)
+    const record: BacktranslationRecord = {
+      cellId: cell.id,
+      btText,
+      targetEventId: pinnedTargetEventId,
+      forText: cell.translated,
+      polished,
+      author: currentUsername,
+      createdAt: Date.now(),
+    }
 
-    // 1. In-memory cache
-    setBacktranslationCache((prev) => new Map(prev).set(cell.id, btText))
+    locallyTouchedBtRef.current.add(cell.id)
+    setBacktranslationCache((prev) => new Map(prev).set(cell.id, record))
 
-    // 2. localStorage fallback (survives reload before server round-trip)
-    try {
-      const lsKey = `bt:${project?.id ?? ""}:${cell.id}`
-      localStorage.setItem(lsKey, JSON.stringify({
-        btText,
-        polished,
-        targetEventId: pinnedTargetEventId,
-        savedAt: Date.now(),
-      }))
-    } catch { /* ignore quota/private-browsing errors */ }
+    if (project?.id) writeLocalBacktranslation(project.id, record)
 
     // 3. Outbox event
     if (!project?.id || !cell.fileId || !pinnedTargetEventId) {
@@ -2653,6 +2676,15 @@ export function ProjectWorkspace() {
     setBacktranslatingState((prev) => new Set(prev).add(cellId))
     setBacktranslationErrorsState((prev) => { const n = new Map(prev); n.delete(cellId); return n })
     try {
+      const corpusByCellId = new Map(corpusCells.map((c) => [c.id, c]))
+      const examples = selectBtFewShotExamples({
+        records: backtranslationCache.values(),
+        corpusByCellId,
+        currentCellId: cell.id,
+      })
+      const glossRaw = getGlosser().gloss(cell.translated).trim()
+      const norm = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim()
+      const projectPairsGloss = norm(glossRaw) === norm(cell.translated) ? "" : glossRaw
       const btText = await generateBacktranslation({
         // Same precedence as the AI-completion path: project settings when
         // customized, Frontier defaults otherwise. complete() layers the
@@ -2662,7 +2694,8 @@ export function ProjectWorkspace() {
         sourceLanguage: project?.sourceLanguage || "English",
         targetLanguage: project?.targetLanguage || "Unknown",
         targetText: cell.translated,
-        examples: [],
+        examples,
+        projectPairsGloss,
         // btseed-glue: seed terminology so the literal BT surfaces the
         // controlled-vocabulary source headwords for the renderings the
         // translator chose. The service derives the relevant hints from
@@ -2678,7 +2711,7 @@ export function ProjectWorkspace() {
     } finally {
       setBacktranslatingState((prev) => { const n = new Set(prev); n.delete(cellId); return n })
     }
-  }, [isBacktranslationConfigured, project?.completionSettings, project?.sourceLanguage, project?.targetLanguage, project?.terminology, frontierSession, persistBt])
+  }, [isBacktranslationConfigured, project?.completionSettings, project?.sourceLanguage, project?.targetLanguage, project?.terminology, frontierSession, persistBt, backtranslationCache, corpusCells, getGlosser])
 
   /**
    * On-demand statistical gloss for the BT tab's collapsed "statistical
@@ -2734,7 +2767,6 @@ export function ProjectWorkspace() {
 
   /** Called when a user manually saves an edited BT from the BT tab. */
   const saveBacktranslation = useCallback((cell: CellData, btText: string, polished: boolean) => {
-    setBacktranslationCache((prev) => new Map(prev).set(cell.id, btText))
     persistBt(cell, btText, polished)
   }, [persistBt])
 
@@ -3402,6 +3434,9 @@ export function ProjectWorkspace() {
               // the cells row, not the per-file audio attachments.
               if (msg.kind?.startsWith("cell.audio.") && msg.file) {
                 notifyAudioAttachmentsChanged(msg.file)
+              }
+              if (msg.kind === "cell.backtranslation.set" && msg.file && !ownWrite) {
+                void hydrateBacktranslationsRef.current(msg.file, "replace-untouched")
               }
               // Don't pop the "remote changed" banner for our own writes —
               // the editor just committed; bouncing the same event back via

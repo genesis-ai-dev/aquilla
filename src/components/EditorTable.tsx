@@ -10,7 +10,7 @@ import DOMPurify from "dompurify"
 import {
   Check, CheckCheck, Circle, Trash2, AlertTriangle, AlertCircle, RefreshCw,
   MessageCircle, Play, Pause, Mic, Sparkles, FileText, History as HistoryIcon,
-  ArrowRight, Activity, NotebookPen, Info, Pencil, ChevronRight, ChevronDown, Music, Braces,
+  ArrowRight, Activity, NotebookPen, Pencil, ChevronDown, Music, Braces,
   Languages,
   Archive,
   Lock,
@@ -41,7 +41,7 @@ import { useEditorCapabilities } from "@/hooks/useProjectPermissions"
 import { canPerform, canSwitchLanes } from "@/lib/sync/role-policy"
 import { shouldAutoValidateHumanEdit } from "@/lib/review/auto-validation"
 import { useDcsUpstreamCursor } from "@/hooks/useDcsUpstreamCursor"
-import { emitTargetCellCommit, emitSourceCellCommit, emitCellValidate, emitCellUnvalidate, emitCellWaive, emitCellUnwaive } from "@/lib/sync/events-emit"
+import { emitTargetCellCommit, emitSourceCellCommit, emitCellValidate, emitCellUnvalidate, emitCellWaive, emitCellUnwaive, emitCellAudioAttach } from "@/lib/sync/events-emit"
 import { resolveSourceCommitParent, reconcilePendingSourceCommit } from "@/lib/sync/source-commit-chain"
 import { ExamplePanel } from "./ExamplePanel"
 import { HighlightedText, buildHighlightsFromExamples } from "./HighlightedText"
@@ -56,6 +56,13 @@ import { DenoiseButton } from "./audio/DenoiseButton"
 import { TimelineAddMedia } from "./TimelineAddMedia"
 import { CellTtsButton } from "./CellTtsButton"
 import { CellTranscriptPreview } from "./CellTranscriptPreview"
+import { BacktranslationPanel } from "./BacktranslationPanel"
+import {
+  overlayBacktranslation,
+  type BacktranslationActionSource,
+  type BacktranslationRecord,
+} from "@/lib/completion/bt-record"
+import { remapTranscriptTimings } from "@/lib/audio/correct-transcript"
 import { ContextualDraftCard } from "./contextual/ContextualDraftCard"
 import { CellTranscribeBadge } from "./CellTranscribeBadge"
 import { CellActionRail, RailButton, isInteractiveTarget } from "./CellActionRail"
@@ -103,7 +110,6 @@ import { categorizeAiError } from "@/lib/audio/ai-error"
 import { CellAiStatusPopover } from "./CellAiStatusPopover"
 import { CellNumberPill } from "./cell/CellNumberPill"
 import { MilestoneNavigator, type MilestoneNavigationItem } from "./ChapterNavigator"
-import { InterlinearAlignmentPanel } from "./InterlinearAlignmentPanel"
 import { CellVoicePanel } from "./cell/CellVoicePanel"
 // CellAudioRecordButton: getUnsupportedReason used by the rail mic denied-help
 // popover (FRO-237). The component itself is no longer in the overflow popover.
@@ -300,7 +306,7 @@ function applyRowOverlays(
   cell: CellData,
   options: {
     audioEntry?: CellAudioEntry
-    backtranslationText?: string
+    backtranslation?: BacktranslationRecord
     projectId?: string | null
   },
 ): CellData {
@@ -326,32 +332,7 @@ function applyRowOverlays(
     }
   }
 
-  if (typeof options.backtranslationText === "string") {
-    next = {
-      ...next,
-      backtranslation: options.backtranslationText,
-      backtranslationForText: next.translated,
-    }
-  } else if (!next.backtranslation && options.projectId) {
-    try {
-      const raw = localStorage.getItem(`bt:${options.projectId}:${next.id}`)
-      if (raw) {
-        const { btText, targetEventId } = JSON.parse(raw) as {
-          btText: string
-          targetEventId: string
-        }
-        next = {
-          ...next,
-          backtranslation: btText,
-          backtranslationForText: targetEventId === next.targetEventId ? next.translated : "",
-        }
-      }
-    } catch {
-      // Ignore private-browsing/quota/parse failures. Server hydration can retry.
-    }
-  }
-
-  return next
+  return overlayBacktranslation(next, options.backtranslation, options.projectId)
 }
 
 function areNumberArraysEqual(a: number[], b: number[]): boolean {
@@ -594,7 +575,7 @@ const SELECTION_DRAG_THRESHOLD_PX = 3
 const SELECTION_EDGE_SCROLL_ZONE_PX = 56
 const SELECTION_EDGE_SCROLL_STEP_PX = 22
 
-export type BacktranslationActionSource = "read-back" | "refresh" | "regenerate"
+export type { BacktranslationActionSource }
 
 export interface EditorTableHandle {
   scrollToCellIndex: (index: number) => void
@@ -754,7 +735,7 @@ interface EditorTableProps {
   onBacktranslate?: (cell: CellData, source: BacktranslationActionSource) => void
   backtranslating?: Set<string>
   backtranslationErrors?: Map<string, string>
-  backtranslationByCellId?: ReadonlyMap<string, string>
+  backtranslationByCellId?: ReadonlyMap<string, BacktranslationRecord>
   /** Called when user saves a BT edit. Parent emits `cell.backtranslation.set`. */
   onSaveBacktranslation?: (cell: CellData, btText: string, polished: boolean) => void
   /** On-demand statistical gloss (corpus-derived, never persisted) for the BT
@@ -1978,13 +1959,13 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
 
   const renderListItem = useCallback(({ item: cellId, index }: LegendListRenderItemProps<string>) => {
     const audioEntry = audioByCellId.get(cellId)
-    const backtranslationText = backtranslationByCellId?.get(cellId)
+    const backtranslation = backtranslationByCellId?.get(cellId)
     return (
       <CellStoreRow
         cellId={cellId}
         cellStore={cellStore}
         audioEntry={audioEntry}
-        backtranslationText={backtranslationText}
+        backtranslation={backtranslation}
         projectId={project.id}
       >
         {(cell) => {
@@ -2557,7 +2538,7 @@ interface CellStoreRowProps {
   cellId: string
   cellStore: CellStore
   audioEntry?: CellAudioEntry
-  backtranslationText?: string
+  backtranslation?: BacktranslationRecord
   projectId?: string | null
   children: (cell: CellData) => React.ReactNode
 }
@@ -2566,15 +2547,15 @@ function CellStoreRow({
   cellId,
   cellStore,
   audioEntry,
-  backtranslationText,
+  backtranslation,
   projectId,
   children,
 }: CellStoreRowProps) {
   const cell = useCellView(cellStore, cellId)
   const hydratedCell = useMemo(() => {
     if (!cell) return null
-    return applyRowOverlays(cell, { audioEntry, backtranslationText, projectId })
-  }, [audioEntry, backtranslationText, cell, projectId])
+    return applyRowOverlays(cell, { audioEntry, backtranslation, projectId })
+  }, [audioEntry, backtranslation, cell, projectId])
 
   if (!hydratedCell) return null
   return <>{children(hydratedCell)}</>
@@ -4969,6 +4950,30 @@ function EditorRow({
     void transcribeCell({ cell, session: rowSession, projectId: project.id, language })
   }, [cell, rowSession, project.id, project.sourceLanguage, project.targetLanguage])
 
+  const handleCorrectTranscript = useCallback((corrected: string) => {
+    if (!cell.selectedAudioId || !cellAudioTimings || cellAudioTimings.length === 0) return
+    const nextTimings = remapTranscriptTimings(cellAudioTimings, corrected)
+    if (nextTimings.length === 0) return
+    const attachment = cell.attachments?.[cell.selectedAudioId]
+    if (!attachment?.url) return
+    void emitCellAudioAttach({
+      projectId: project.id,
+      fileId: cell.fileId,
+      cellId: cell.id,
+      audioId: cell.selectedAudioId,
+      url: attachment.url,
+      slot: cell.selectedAudioId === cell.selectedGeneratedVoiceAudioId ? "generatedVoice" : "recording",
+      timings: nextTimings,
+      ...(attachment.durationMs != null ? { durationMs: attachment.durationMs } : {}),
+      ...(attachment.voiceId ? { voiceId: attachment.voiceId } : {}),
+      ...(attachment.referenceAudioId ? { referenceAudioId: attachment.referenceAudioId } : {}),
+      ...(isSourceSegmentSelected(cell) ? { transcription: corrected } : {}),
+      author: username,
+    }).catch((err) => {
+      console.warn("[transcript] correct emit failed:", err)
+    })
+  }, [cell, cellAudioTimings, project.id, username])
+
   const [validationPopoverOpen, setValidationPopoverOpen] = useState(false)
   const authoritativeSelfValidated = cell.activeValidators.includes(username)
   const [optimisticSelfValidation, setOptimisticSelfValidation] = useState<boolean | null>(null)
@@ -5241,45 +5246,13 @@ function EditorRow({
     pinned: railPinned,
   })
 
-  // ── BT tab edit state ─────────────────────────────────────────────────────
-  const [btEditing, setBtEditing] = useState(false)
-  const [btEditValue, setBtEditValue] = useState("")
-  const [btSaving, setBtSaving] = useState(false)
-  // Collapsed-by-default statistical reference. The gloss is corpus-derived
-  // and local-only — computed lazily when the section is opened, never
-  // persisted as the cell's back-translation.
-  const [btStatsOpen, setBtStatsOpen] = useState(false)
+  // ── BT tab: statistical gloss is computed while the tab is open so the
+  // live "as you translate" check and AI-vs-pairs disagreement can render
+  // without waiting on a collapsed expander.
   const statisticalGloss = useMemo(() => {
-    if (!btStatsOpen || !visibleTranslated.trim()) return ""
+    if (!expanded || expansionTab !== "backtranslation" || !visibleTranslated.trim()) return ""
     return getStatisticalBt?.(visibleTranslated) ?? ""
-  }, [btStatsOpen, visibleTranslated, getStatisticalBt])
-
-  // When editing starts, seed the input with the current BT text.
-  const handleBtEditStart = useCallback(() => {
-    setBtEditValue(cell.backtranslation ?? "")
-    setBtEditing(true)
-  }, [cell.backtranslation])
-
-  const handleBtSave = useCallback(() => {
-    if (!btEditValue.trim()) {
-      setBtEditing(false)
-      return
-    }
-    setBtSaving(true)
-    try {
-      // A hand-edited BT is the human's wording, not the model's — persist
-      // it unpolished so corrected readings re-seed the statistical glosser.
-      onSaveBacktranslation?.(cell, btEditValue.trim(), false)
-    } finally {
-      setBtSaving(false)
-      setBtEditing(false)
-    }
-  }, [btEditValue, cell, onSaveBacktranslation])
-
-  const handleBtCancel = useCallback(() => {
-    setBtEditing(false)
-    setBtEditValue("")
-  }, [])
+  }, [expanded, expansionTab, visibleTranslated, getStatisticalBt])
 
   // Stable rail handlers
   const handleRowMouseEnter = () => {
@@ -6661,255 +6634,23 @@ function EditorRow({
               label: t("editor.bt.label"),
               attentionDot: isBtStale ? "amber" : undefined,
               renderContent: () => (
-                <div className="flex flex-col gap-2.5">
-                  {/* ── Header: a calm label + a quiet explainer. The controls
-                      stay subdued so the reading below is the focus, not the
-                      buttons. ─────────────────────────────────────────────── */}
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-xs font-medium text-foreground">{t("editor.bt.label")}</span>
-                      <AppTooltip content={t("editor.bt.explainTooltip")}>
-                        <Info className="h-3 w-3 cursor-help text-muted-foreground/50 transition-colors hover:text-muted-foreground" />
-                      </AppTooltip>
-                    </div>
-                    {/* Controls appear only when there's a reading to act on. */}
-                    {cell.backtranslation && !btEditing && (
-                      <div className="flex items-center gap-0.5">
-                        {/* Regenerate — re-runs the AI on the current translation.
-                            Contributor+ only (persisting a BT is a project write). */}
-                        {editable && (
-                          <AppTooltip content={
-                            !isBacktranslationConfigured
-                              ? t("editor.bt.needsAiTooltip")
-                              : t("editor.bt.regenerateTooltip")
-                          }>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon-xs"
-                              disabled={!isBacktranslationConfigured || isBacktranslating}
-                              onClick={() => onBacktranslate?.(cell, "regenerate")}
-                              aria-label={t("editor.bt.regenerateAria")}
-                              className="rounded-full text-muted-foreground hover:text-foreground"
-                            >
-                              {isBacktranslating ? (
-                                <Spinner className="size-3.5" />
-                              ) : (
-                                <RefreshCw />
-                              )}
-                            </Button>
-                          </AppTooltip>
-                        )}
-                        {/* Edit — contributor+ only. A quiet icon, not a labelled pill. */}
-                        {editable ? (
-                          <AppTooltip content={t("editor.bt.editTooltip")}>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon-xs"
-                              onClick={handleBtEditStart}
-                              aria-label={t("editor.bt.editTooltip")}
-                              className="rounded-full text-muted-foreground hover:text-foreground"
-                            >
-                              <Pencil />
-                            </Button>
-                          </AppTooltip>
-                        ) : (
-                          <AppTooltip content={t("editor.bt.contributorRequired")}>
-                            <span className="inline-flex">
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="icon-xs"
-                                disabled
-                                aria-label={t("editor.bt.contributorRequired")}
-                                className="rounded-full text-muted-foreground"
-                              >
-                                <Pencil />
-                              </Button>
-                            </span>
-                          </AppTooltip>
-                        )}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* ── Body ────────────────────────────────────────────────── */}
-                  {visibleTranslated.trim().length === 0 ? (
-                    <div className="flex flex-col items-center gap-1.5 rounded-xl bg-muted/40 px-3 py-6 text-center">
-                      <FileText className="h-4 w-4 text-muted-foreground/40" />
-                      <p className="text-xs text-muted-foreground">{t("editor.bt.translateFirst")}</p>
-                    </div>
-                  ) : cell.backtranslation ? (
-                    <>
-                      {/* Stale: one warm nudge with the fix inline — not a
-                          separate warning pill plus a separate button. */}
-                      {isBtStale && (
-                        <div className="flex items-center justify-between gap-2 rounded-lg bg-amber-500/[0.08] px-3 py-1.5">
-                          <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-amber-700 dark:text-amber-300">
-                            <AlertTriangle className="h-3 w-3 shrink-0" />
-                            {t("editor.bt.staleWarning")}
-                          </span>
-                          {editable && (
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="xs"
-                              onClick={() => onBacktranslate?.(cell, "refresh")}
-                              disabled={!isBacktranslationConfigured || isBacktranslating || visibleTranslated.trim().length === 0}
-                              className="h-auto shrink-0 gap-1 bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold text-amber-800 hover:bg-amber-500/25 dark:text-amber-200"
-                            >
-                              {isBacktranslating ? (
-                                <Spinner className="size-3.5" />
-                              ) : (
-                                <RefreshCw />
-                              )}
-                              {t("common.refresh")}
-                            </Button>
-                          )}
-                        </div>
-                      )}
-                      {btEditing ? (
-                        /* Inline editor */
-                        <div className="flex flex-col gap-1.5">
-                          <textarea
-                            autoFocus
-                            value={btEditValue}
-                            onChange={(e) => setBtEditValue(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === "Escape") handleBtCancel()
-                              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) handleBtSave()
-                            }}
-                            rows={3}
-                            className="w-full resize-none rounded-lg border border-border bg-background px-3.5 py-3 text-[15px] leading-relaxed text-foreground outline-none focus:ring-1 focus:ring-ring"
-                          />
-                          <div className="flex items-center justify-end gap-1.5">
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="xs"
-                              onClick={handleBtCancel}
-                            >
-                              {t("common.cancel")}
-                            </Button>
-                            <Button
-                              type="button"
-                              size="xs"
-                              onClick={handleBtSave}
-                              disabled={btSaving || !btEditValue.trim()}
-                            >
-                              {btSaving ? t("common.saving") : t("common.save")}
-                            </Button>
-                          </div>
-                        </div>
-                      ) : (
-                        /* The reading — the hero. Foreground, comfortable size
-                           and leading, in a soft well with a gentle tone bar
-                           (rhymes with the recording's transcript). */
-                        <div className="relative overflow-hidden rounded-xl bg-muted/50 py-3 pr-4 pl-4">
-                          <span aria-hidden className="absolute inset-y-0 left-0 w-[3px] rounded-md bg-primary/35" />
-                          <p className="text-[15px] leading-relaxed text-foreground/90">
-                            {cell.backtranslation}
-                          </p>
-                        </div>
-                      )}
-                    </>
-                  ) : (
-                    /* No reading yet — friendly, with one clear primary.
-                       Generation is AI-only and on-demand: nothing runs
-                       automatically when the translation is committed. */
-                    <div className="flex flex-col items-center gap-2.5 rounded-xl bg-muted/40 px-3 py-6 text-center">
-                      <p className="max-w-[34ch] text-xs leading-relaxed text-muted-foreground">
-                        {t("editor.bt.emptyPitch")}
-                      </p>
-                      {editable ? (
-                        <>
-                          <Button
-                            type="button"
-                            size="sm"
-                            onClick={() => onBacktranslate?.(cell, "read-back")}
-                            disabled={!isBacktranslationConfigured || isBacktranslating || visibleTranslated.trim().length === 0}
-                          >
-                            {isBacktranslating ? (
-                              <><Spinner className="size-3.5" /> {t("editor.bt.readingItBack")}</>
-                            ) : (
-                              <><Sparkles /> {t("editor.bt.readItBack")}</>
-                            )}
-                          </Button>
-                          {!isBacktranslationConfigured && (
-                            <p className="text-[11px] text-muted-foreground/70">
-                              {t("editor.bt.needsAiHint")}
-                            </p>
-                          )}
-                        </>
-                      ) : (
-                        <p className="text-[11px] text-muted-foreground/70">
-                          {t("editor.bt.contributorCanGenerate")}
-                        </p>
-                      )}
-                    </div>
-                  )}
-                  {/* ── Statistical reference — collapsed by default. A rough
-                      corpus-derived gloss kept as a cross-check on the AI
-                      reading; local-only, never saved as the cell's BT. ──── */}
-                  {visibleTranslated.trim().length > 0 && getStatisticalBt && !btEditing && (
-                    <div className="rounded-lg border border-border/60">
-                      <button
-                        type="button"
-                        onClick={() => setBtStatsOpen((v) => !v)}
-                        aria-expanded={btStatsOpen}
-                        className="flex w-full items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
-                      >
-                        <ChevronRight className={cn("h-3 w-3 shrink-0 transition-transform", btStatsOpen && "rotate-90")} />
-                        {t("editor.bt.statisticalGloss")}
-                        <span className="font-normal text-muted-foreground/60">{t("editor.bt.statisticalGlossSub")}</span>
-                      </button>
-                      {btStatsOpen && (
-                        <div className="flex flex-col gap-1.5 px-2.5 pb-2.5">
-                          {statisticalGloss.trim() ? (
-                            <p className="text-[13px] leading-relaxed text-foreground/80">{statisticalGloss}</p>
-                          ) : (
-                            <p className="text-[11px] italic text-muted-foreground">
-                              {t("editor.bt.glossNotEnoughPairs")}
-                            </p>
-                          )}
-                          <p className="text-[10px] leading-relaxed text-muted-foreground/70">
-                            {t("editor.bt.glossDisclaimer")}
-                          </p>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                  {/* ── FRO-207: Interlinear alignment panel ──────────────── */}
-                  {cell.original.trim() && visibleTranslated.trim() && getAlignmentModel && !btEditing && (
-                    <div className="rounded-lg border border-border/60">
-                      <button
-                        type="button"
-                        onClick={() => setBtAlignmentOpen((v) => !v)}
-                        aria-expanded={btAlignmentOpen}
-                        className="flex w-full items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
-                      >
-                        <ChevronRight className={cn("h-3 w-3 shrink-0 transition-transform", btAlignmentOpen && "rotate-90")} />
-                        {t("editor.bt.alignment")}
-                        <span className="font-normal text-muted-foreground/60">{t("editor.bt.alignmentSub")}</span>
-                      </button>
-                      {btAlignmentOpen && alignmentModelForExpansion && (
-                        <div data-aquilla-alignment-panel className="px-2.5 pb-2.5">
-                          <InterlinearAlignmentPanel
-                            sourceText={cell.original}
-                            targetText={visibleTranslated}
-                            alignmentModel={alignmentModelForExpansion}
-                            confirmedSeeds={project.alignmentSeeds ?? []}
-                            onSeedChange={onAlignmentSeedChange ?? (() => undefined)}
-                          />
-                        </div>
-                      )}
-                    </div>
-                  )}
-                  {backtranslationError && (
-                    <p className="text-xs text-destructive">{backtranslationError}</p>
-                  )}
-                </div>
+                <BacktranslationPanel
+                  cell={cell}
+                  visibleTranslated={visibleTranslated}
+                  editable={editable}
+                  isBacktranslationConfigured={isBacktranslationConfigured}
+                  isBacktranslating={isBacktranslating}
+                  backtranslationError={backtranslationError}
+                  statisticalGloss={statisticalGloss}
+                  alignmentOpen={btAlignmentOpen}
+                  onAlignmentOpenChange={setBtAlignmentOpen}
+                  alignmentModel={alignmentModelForExpansion}
+                  showAlignment={Boolean(getAlignmentModel)}
+                  onBacktranslate={onBacktranslate}
+                  onSaveBacktranslation={onSaveBacktranslation}
+                  onAlignmentSeedChange={onAlignmentSeedChange}
+                  confirmedSeeds={project.alignmentSeeds ?? []}
+                />
               ),
             },
             ...(showFootnotesInExpansion ? [{
@@ -7003,6 +6744,7 @@ function EditorRow({
                           editable={editable}
                           onRetranscribe={handleTranscribe}
                           onUseAsCellText={(transcript) => handleEditorCommit({ value: transcript, valueHtml: transcript })}
+                          onCorrectTranscript={handleCorrectTranscript}
                         />
                       )}
                       <div className="flex flex-wrap gap-1.5">

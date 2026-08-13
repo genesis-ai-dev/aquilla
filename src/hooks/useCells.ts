@@ -97,6 +97,9 @@ export interface CellData {
   backtranslation?: string
   backtranslationUpdatedAt?: string
   backtranslationForText?: string
+  backtranslationTargetEventId?: string
+  backtranslationPolished?: boolean
+  backtranslationAuthor?: string
   attachments?: Record<string, CodexCellAttachment>
   selectedAudioId?: string
   selectedGeneratedVoiceAudioId?: string

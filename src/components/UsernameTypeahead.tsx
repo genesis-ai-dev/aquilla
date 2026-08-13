@@ -9,6 +9,7 @@ import {
 } from "@/components/ui/input-group"
 import { Spinner } from "@/components/ui/spinner"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { useUserSearch, type UserSearchResult } from "@/hooks/useUserSearch"
 import { useExactUserLookup } from "@/hooks/useExactUserLookup"
 
@@ -515,7 +516,13 @@ export function UsernameTypeahead({
                         >
                           {checked && <Check className="h-3 w-3" />}
                         </span>
-                        <span className="truncate">{u.username}</span>
+                        <span className="min-w-0 flex-1 truncate">
+                          <UsernameWithAvatar
+                            username={u.username}
+                            size="xs"
+                            nameClassName="text-sm font-normal"
+                          />
+                        </span>
                       </button>
                     </li>
                   )
@@ -531,7 +538,11 @@ export function UsernameTypeahead({
                         isSelected ? "bg-muted/60" : ""
                       }`}
                     >
-                      <span>{u.username}</span>
+                      <UsernameWithAvatar
+                        username={u.username}
+                        size="xs"
+                        nameClassName="text-sm font-normal"
+                      />
                       {isSelected && (
                         <Check className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
                       )}
@@ -540,8 +551,8 @@ export function UsernameTypeahead({
                 )
               })}
               {isLoading && (
-                <li className="px-3 py-1 text-[10px] text-muted-foreground">
-                  Loading…
+                <li className="flex items-center px-3 py-1 text-muted-foreground">
+                  <Spinner className="size-3" />
                 </li>
               )}
             </ul>

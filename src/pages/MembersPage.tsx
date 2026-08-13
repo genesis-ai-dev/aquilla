@@ -4,7 +4,7 @@ import {
   Clock,
   Lock,
   Mail,
-  UsersRound,
+  UserPlus,
   X,
 } from "lucide-react"
 import { useLocation, useNavigate } from "react-router-dom"
@@ -63,10 +63,14 @@ export function MembersPage() {
     return (
       <MembersShell>
         <Page size="wide">
-          <PageHeader title="Members" description="People in this organization and their access." />
+          <PageHeader
+            title="Members"
+            description="People in this organization and their access."
+            inset={false}
+          />
           <div className="space-y-4">
-            <div className="h-24 animate-pulse rounded-2xl border bg-card" />
-            <div className="h-40 animate-pulse rounded-2xl border bg-card" />
+            <div className="h-24 animate-pulse rounded-lg border bg-card" />
+            <div className="h-40 animate-pulse rounded-lg border bg-card" />
           </div>
         </Page>
       </MembersShell>
@@ -77,8 +81,12 @@ export function MembersPage() {
     return (
       <MembersShell>
         <Page size="wide">
-          <PageHeader title="Members" description="People in this organization and their access." />
-          <div className="rounded-2xl border border-destructive/30 bg-destructive/5 p-4">
+          <PageHeader
+            title="Members"
+            description="People in this organization and their access."
+            inset={false}
+          />
+          <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-4">
             <p className="text-sm font-medium text-destructive">Couldn't load your organization</p>
             <p className="mt-1 text-xs text-muted-foreground">{error}</p>
             <p className="mt-2 text-xs text-muted-foreground">
@@ -95,7 +103,11 @@ export function MembersPage() {
     return (
       <MembersShell>
         <Page size="wide">
-          <PageHeader title="Members" description="People in this organization and their access." />
+          <PageHeader
+            title="Members"
+            description="People in this organization and their access."
+            inset={false}
+          />
           <EmptyState
             icon={AlertTriangle}
             title={isAllOrgs ? "Select an organization" : "Sign in to manage members"}
@@ -183,15 +195,15 @@ function MembersPageContent({ orgId, orgName }: MembersPageContentProps) {
             granted separately via the Add-to-projects flow.
           </>
         }
+        inset={false}
         actions={
           <AppTooltip content="Add someone to specific projects without granting org-wide access.">
             <Button
               variant="default"
-              size="sm"
               onClick={() => setMultiInviteOpen(true)}
               disabled={accessibleProjects.length === 0}
             >
-              <UsersRound className="mr-1.5 size-4" />
+              <UserPlus className="mr-1.5 size-4" />
               Add to projects
             </Button>
           </AppTooltip>

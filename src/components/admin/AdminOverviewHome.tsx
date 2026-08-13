@@ -1,8 +1,11 @@
 import { useMemo, useState } from "react"
-import { Link } from "react-router-dom"
+import { useNavigate } from "react-router-dom"
+import { type ColumnDef } from "@tanstack/react-table"
 import { ArrowRight, Building2, ShieldAlert } from "lucide-react"
 import { Section, StatTile } from "@/components/ui/page"
 import { EmptyState } from "@/components/ui/empty"
+import { DataTable, DataTableColumnHeader } from "@/components/ui/data-table"
+import { missingLast, SORT_MISSING_LAST } from "@/components/ui/data-table-missing"
 import { ProjectStatus } from "@/components/ProjectStatus"
 import { ValidatedBar } from "./ValidatedBar"
 import { AdminActivityTimeline } from "./AdminActivityTimeline"
@@ -11,8 +14,15 @@ import {
   mostActiveOrgs,
   recentSignupCount,
   validatedFraction,
+  type RankedProject,
 } from "@/lib/admin/insights"
 import type { AdminOverview, AdminOrg, AdminUser, AdminProject, AdminActivity } from "@/lib/frontier/admin"
+import { OrgWithAvatar } from "@/components/OrgWithAvatar"
+import {
+  ADMIN_TABLE_CLASS,
+  ADMIN_TABLE_SECTION_CONTENT,
+  ADMIN_TABLE_SECTION_HEADER,
+} from "@/components/admin/shared"
 
 /**
  * The Overview tab, rebuilt as an operator home. Stat tiles carry context via
@@ -39,6 +49,7 @@ export function AdminOverviewHome({
   onViewProjects: () => void
   onViewActivity: () => void
 }) {
+  const navigate = useNavigate()
   const [now] = useState(() => Date.now())
   const atRisk = useMemo(() => projectsNeedingAttention(projects, now, 6), [projects, now])
   const atRiskTotal = useMemo(() => projectsNeedingAttention(projects, now).length, [projects, now])
@@ -48,6 +59,86 @@ export function AdminOverviewHome({
   )
   const newSignups = useMemo(() => recentSignupCount(users, now), [users, now])
   const topOrgs = useMemo(() => mostActiveOrgs(orgs, 5), [orgs])
+
+  const atRiskColumns = useMemo<ColumnDef<RankedProject>[]>(
+    () => [
+      {
+        id: "project",
+        accessorFn: (r) => r.project.name.toLowerCase(),
+        header: ({ column }) => <DataTableColumnHeader column={column} title="Project" />,
+        cell: ({ row }) => (
+          <span className="font-medium text-foreground">{row.original.project.name}</span>
+        ),
+      },
+      {
+        id: "org",
+        accessorFn: (r) => missingLast((r.project.orgName ?? "").toLowerCase()),
+        sortUndefined: SORT_MISSING_LAST,
+        header: ({ column }) => <DataTableColumnHeader column={column} title="Org" />,
+        cell: ({ row }) =>
+          row.original.project.orgName ? (
+            <OrgWithAvatar
+              name={row.original.project.orgName}
+              size="xs"
+              nameClassName="font-normal"
+            />
+          ) : (
+            <span className="text-muted-foreground">—</span>
+          ),
+      },
+      {
+        id: "validated",
+        accessorFn: (r) => validatedFraction(r.project),
+        header: ({ column }) => <DataTableColumnHeader column={column} title="Validated" />,
+        cell: ({ row }) => <ValidatedBar fraction={validatedFraction(row.original.project)} />,
+      },
+      {
+        id: "status",
+        accessorFn: (r) => r.score,
+        header: ({ column }) => <DataTableColumnHeader column={column} title="Status" />,
+        cell: ({ row }) => (
+          <ProjectStatus
+            archived={false}
+            reasons={row.original.reasons}
+            deadlineAt={row.original.project.deadlineAt}
+          />
+        ),
+      },
+    ],
+    [],
+  )
+
+  const orgColumns = useMemo<ColumnDef<AdminOrg>[]>(
+    () => [
+      {
+        id: "organization",
+        accessorFn: (o) => (o.name ?? `#${o.id}`).toLowerCase(),
+        header: ({ column }) => <DataTableColumnHeader column={column} title="Organization" />,
+        cell: ({ row }) => (
+          <OrgWithAvatar name={row.original.name ?? `#${row.original.id}`} />
+        ),
+      },
+      {
+        accessorKey: "projectCount",
+        header: ({ column }) => (
+          <DataTableColumnHeader column={column} title="Projects" className="justify-end" />
+        ),
+        cell: ({ row }) => (
+          <div className="text-right tabular-nums">{row.original.projectCount}</div>
+        ),
+      },
+      {
+        accessorKey: "memberCount",
+        header: ({ column }) => (
+          <DataTableColumnHeader column={column} title="Members" className="justify-end" />
+        ),
+        cell: ({ row }) => (
+          <div className="text-right tabular-nums">{row.original.memberCount}</div>
+        ),
+      },
+    ],
+    [],
+  )
 
   return (
     <div className="space-y-6">
@@ -80,6 +171,8 @@ export function AdminOverviewHome({
       <Section
         title="Needs attention"
         description="Active projects that are overdue, due soon, or stalled."
+        headerClassName={ADMIN_TABLE_SECTION_HEADER}
+        contentClassName={ADMIN_TABLE_SECTION_CONTENT}
         action={
           atRiskTotal > atRisk.length ? (
             <button
@@ -92,62 +185,52 @@ export function AdminOverviewHome({
           ) : null
         }
       >
-        {atRisk.length === 0 ? (
-          <EmptyState
-            variant="inline"
-            className="py-6"
-            icon={ShieldAlert}
-            title="All clear"
-            description="No active project is overdue, due soon, or stalled right now."
-          />
-        ) : (
-          <ul className="divide-y">
-            {atRisk.map(({ project, reasons }) => (
-              <li key={project.id} className="flex items-center justify-between gap-4 py-2.5 first:pt-0 last:pb-0">
-                <div className="min-w-0">
-                  <Link to={`/projects/${project.id}`} className="font-medium text-primary hover:underline">
-                    {project.name}
-                  </Link>
-                  <p className="truncate text-xs text-muted-foreground">{project.orgName ?? "—"}</p>
-                </div>
-                <div className="flex shrink-0 items-center gap-3">
-                  <ValidatedBar fraction={validatedFraction(project)} />
-                  <ProjectStatus archived={false} reasons={reasons} />
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-      </Section>
-
-      <div className="grid gap-6 lg:grid-cols-2">
-        <Section title="Most active organizations" description="Busiest tenants by project count.">
-          {topOrgs.length === 0 ? (
+        <DataTable
+          columns={atRiskColumns}
+          data={atRisk}
+          getRowId={(r) => r.project.id}
+          onRowClick={(r) => navigate(`/projects/${r.project.id}`)}
+          initialSorting={[{ id: "status", desc: true }]}
+          testId="admin-overview-attention-table"
+          className={ADMIN_TABLE_CLASS}
+          dense
+          emptyState={
             <EmptyState
               variant="inline"
               className="py-6"
-              icon={Building2}
-              title="No organizations yet"
+              icon={ShieldAlert}
+              title="All clear"
+              description="No active project is overdue, due soon, or stalled right now."
             />
-          ) : (
-            <ul className="divide-y">
-              {topOrgs.map((o) => (
-                <li key={o.id} className="flex items-center justify-between gap-3 py-2.5 first:pt-0 last:pb-0">
-                  <button
-                    type="button"
-                    onClick={() => onOpenOrg(o.id)}
-                    className="min-w-0 truncate text-left text-sm font-medium text-foreground hover:text-primary hover:underline"
-                  >
-                    {o.name ?? `#${o.id}`}
-                  </button>
-                  <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
-                    {o.projectCount} {o.projectCount === 1 ? "project" : "projects"} · {o.memberCount}{" "}
-                    {o.memberCount === 1 ? "member" : "members"}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
+          }
+        />
+      </Section>
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        <Section
+          title="Most active organizations"
+          description="Busiest tenants by project count."
+          headerClassName={ADMIN_TABLE_SECTION_HEADER}
+          contentClassName={ADMIN_TABLE_SECTION_CONTENT}
+        >
+          <DataTable
+            columns={orgColumns}
+            data={topOrgs}
+            getRowId={(o) => String(o.id)}
+            onRowClick={(o) => onOpenOrg(o.id)}
+            initialSorting={[{ id: "projectCount", desc: true }]}
+            testId="admin-overview-orgs-table"
+            className={ADMIN_TABLE_CLASS}
+            dense
+            emptyState={
+              <EmptyState
+                variant="inline"
+                className="py-6"
+                icon={Building2}
+                title="No organizations yet"
+              />
+            }
+          />
         </Section>
 
         <Section

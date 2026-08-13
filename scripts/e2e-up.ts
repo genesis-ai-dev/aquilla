@@ -311,6 +311,10 @@ async function main(): Promise<void> {
   const browserEnv: Record<string, string> = {
     VITE_AUTH_BASE: `http://127.0.0.1:${IDENTITY_PORT}`,
     VITE_FRONTIER_BASE: `http://127.0.0.1:${IDENTITY_PORT}`,
+    // Must override .env.local's VITE_CHAT_BASE (often the old chat-worker
+    // port, now sync-worker). Chat + agent/run live on identity; the worker
+    // strips the `/chat` prefix the same way production `api.*.aquilla.app/chat` does.
+    VITE_CHAT_BASE: `http://127.0.0.1:${IDENTITY_PORT}/chat`,
     VITE_SYNC_WORKER_HOST: `127.0.0.1:${SYNC_WORKER_PORT}`,
     // Pin Google Drive import to unconfigured regardless of the developer's
     // .env.local — import-dialog.smoke.spec asserts the not-configured notice,
@@ -367,6 +371,7 @@ async function main(): Promise<void> {
   )
   attachOutput(openrouterMock, "mock-openrouter", openLogFile(path.join(LOG_DIR, "mock-openrouter.log")), VERBOSE)
   cleanup.push(() => killChildTree(openrouterMock))
+  await waitForUrl(`http://127.0.0.1:${OPENROUTER_MOCK_PORT}/healthz`, 30_000)
 
   const legacyMigrationMock = spawn(
     "npx",
@@ -452,6 +457,7 @@ async function main(): Promise<void> {
       [
         `VITE_AUTH_BASE=${browserEnv.VITE_AUTH_BASE}`,
         `VITE_FRONTIER_BASE=${browserEnv.VITE_FRONTIER_BASE}`,
+        `VITE_CHAT_BASE=${browserEnv.VITE_CHAT_BASE}`,
         `VITE_SYNC_WORKER_HOST=${browserEnv.VITE_SYNC_WORKER_HOST}`,
         `VITE_LLM_BASE_URL=${browserEnv.VITE_LLM_BASE_URL}`,
         "",

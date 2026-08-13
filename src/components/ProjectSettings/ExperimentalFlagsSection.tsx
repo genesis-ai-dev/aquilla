@@ -7,9 +7,8 @@
 // user-API-key immediate-save path in the parent page).
 
 import { useCallback, useEffect, useState } from "react"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { FieldLabel } from "@/components/ui/field"
 import { Switch } from "@/components/ui/switch"
+import { SettingsGroup, SettingsRow } from "@/components/ui/page"
 import { FLAGS } from "@/lib/features/flags"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { getProject, patchProject, updateProject } from "@/lib/store/project-index"
@@ -54,30 +53,27 @@ export function ExperimentalFlagsSection({
   }, [projectId, serverProject])
 
   return (
-    <Card id="section-experimental">
-      <CardHeader>
-        <CardTitle>{t("autopilot.settings.experimentalTitle")}</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <p className="text-xs text-muted-foreground">
-          {t("autopilot.settings.experimentalDescription")}
-        </p>
+    <div id="section-experimental">
+      <SettingsGroup label={t("autopilot.settings.experimentalTitle")}>
         {Object.entries(FLAGS).map(([key, def]) => (
-          <div key={key} className="flex items-start justify-between gap-4">
-            <div className="space-y-0.5">
-              <FieldLabel htmlFor={`experimental-${key}`} className="text-sm">
-                {t(def.labelKey)}
-              </FieldLabel>
-              <p className="text-xs text-muted-foreground">{t(def.descriptionKey)}</p>
-            </div>
-            <Switch
-              id={`experimental-${key}`}
-              checked={flags?.[key] ?? def.default}
-              onCheckedChange={(checked) => setFlag(key, checked)}
-            />
-          </div>
+          <SettingsRow
+            key={key}
+            label={<label htmlFor={`experimental-${key}`}>{t(def.labelKey)}</label>}
+            description={t(def.descriptionKey)}
+            control={
+              <Switch
+                id={`experimental-${key}`}
+                checked={flags?.[key] ?? def.default}
+                onCheckedChange={(checked) => setFlag(key, checked)}
+                aria-label={t(def.labelKey)}
+              />
+            }
+          />
         ))}
-      </CardContent>
-    </Card>
+      </SettingsGroup>
+      <p className="mt-2 px-4 text-xs text-muted-foreground">
+        {t("autopilot.settings.experimentalDescription")}
+      </p>
+    </div>
   )
 }

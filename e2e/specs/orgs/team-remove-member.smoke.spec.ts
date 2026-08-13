@@ -6,13 +6,13 @@ import { addOrgMember, getMyOrg, ROLE } from "../../helpers/frontier-api"
 /**
  * TeamDetail — remove a member from a team.
  *
- * TeamDetail.tsx renders each team member row with a
- * "Remove <username>" button (aria-label="Remove <username>").
- * Clicking it calls removeTeamMember and the row disappears.
+ * TeamDetail.tsx renders each team member row with a three-dot actions menu
+ * ("Actions for <username>") whose menu includes "Remove from team".
+ * Choosing it calls removeTeamMember and the row disappears.
  *
  * This spec: seeds bob in alice's org → creates a team → adds bob via the
- * AQU-735 multi-select dialog → clicks "Remove bob" → verifies bob no longer
- * appears in the members list.
+ * AQU-735 multi-select dialog → opens bob's actions menu → clicks
+ * "Remove from team" → verifies bob no longer appears in the members list.
  */
 test("team remove member button removes the member from the team", async ({ alice }) => {
   const aliceSession = await ensureAuthState("alice")
@@ -28,19 +28,23 @@ test("team remove member button removes the member from the team", async ({ alic
   await createBtn.click()
 
   const teamName = `RemoveMember ${Date.now()}`
-  const nameInput = alice.locator('input[placeholder*="name"], input[type="text"]').first()
+  const createDialog = alice.getByRole("dialog")
+  await expect(createDialog).toBeVisible({ timeout: 3_000 })
+  const nameInput = createDialog.getByLabel(/^Team name$/i)
   await expect(nameInput).toBeVisible({ timeout: 3_000 })
   await nameInput.fill(teamName)
-  const saveBtn = alice.getByRole("button", { name: /Save|Create|Confirm/i }).first()
-  await saveBtn.click()
+  await createDialog.getByRole("button", { name: /^Create$/i }).click()
 
   // Creating a team auto-navigates to its detail page (/teams/:id) — no click
   // needed. (A team-name locator would resolve to the breadcrumb "current page"
   // span, which is aria-disabled, so clicking it hangs until the test times out.)
   await alice.waitForURL(/\/teams\/\d+/, { timeout: 10_000 })
 
+  // Members live on the Members tab (Linear-style team page).
+  await alice.getByRole("tab", { name: /^Members$/i }).click()
+
   // Add bob to the team via multi-select (AQU-735).
-  const addMemberBtn = alice.getByRole("button", { name: /Add member/i })
+  const addMemberBtn = alice.getByRole("button", { name: /Add (a )?member/i })
   await expect(addMemberBtn).toBeVisible({ timeout: 5_000 })
   await addMemberBtn.click()
 
@@ -49,18 +53,21 @@ test("team remove member button removes the member from the team", async ({ alic
   const memberSelect = dialog.getByRole("combobox", { name: "Members to add" })
   await expect(memberSelect).toBeVisible({ timeout: 3_000 })
   await memberSelect.click()
-  await alice.getByRole("checkbox", { name: "bob" }).check()
+  const bobOption = alice.getByRole("option", { name: "bob" })
+  await expect(bobOption).toBeVisible({ timeout: 3_000 })
+  await bobOption.click()
   const confirmAdd = dialog.getByRole("button", { name: /^Add$/i })
   await expect(confirmAdd).toBeEnabled({ timeout: 3_000 })
   await confirmAdd.click()
 
-  // Wait for bob's member row. The member row uniquely carries "Remove bob".
-  const removeBtn = alice.getByRole("button", { name: /Remove bob/i })
-  await expect(removeBtn).toBeVisible({ timeout: 8_000 })
+  // Wait for bob's member row, then remove via the three-dot menu.
+  const actionsBtn = alice.getByRole("button", { name: /Actions for bob/i })
+  await expect(actionsBtn).toBeVisible({ timeout: 8_000 })
+  await actionsBtn.click()
+  const removeItem = alice.getByRole("menuitem", { name: /Remove from team/i })
+  await expect(removeItem).toBeVisible({ timeout: 3_000 })
+  await removeItem.click()
 
-  // Remove bob.
-  await removeBtn.click()
-
-  // Bob's row is gone (the remove action disappears with it).
-  await expect(removeBtn).not.toBeVisible({ timeout: 5_000 })
+  // Bob's row is gone (the actions trigger disappears with it).
+  await expect(actionsBtn).not.toBeVisible({ timeout: 5_000 })
 })

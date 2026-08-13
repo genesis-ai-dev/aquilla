@@ -71,6 +71,21 @@
     --shadow-lg: var(--shadow-soft-lg);
     --shadow-xl: var(--shadow-soft-lg);
     --shadow-2xl: var(--shadow-soft-lg);
+
+    /* OTP fake-caret blink (shadcn input-otp). */
+    --animate-caret-blink: caret-blink 1.2s ease-out infinite;
+}
+
+@keyframes caret-blink {
+  0%,
+  70%,
+  100% {
+    opacity: 1;
+  }
+  20%,
+  50% {
+    opacity: 0;
+  }
 }
 
 @layer base {
@@ -222,6 +237,16 @@
     display: none !important;
   }
 
+  /*
+   * WebKit sits capital glyphs high in the em-box inside small avatars
+   * (Geist Variable). Nudge initials down optically; Chromium is already fine.
+   */
+  @supports (-webkit-touch-callout: none) {
+    [data-slot="avatar-initials"] {
+      transform: translateY(0.08em);
+    }
+  }
+
   /* Compact overlays/lists — same fixed-track trick, smaller gutter. */
   .scrollbar-thin {
     scrollbar-width: thin;
@@ -281,6 +306,29 @@
   :where(a):not(:disabled, [aria-disabled="true"]) {
     cursor: default;
   }
+}
+
+/* App-chrome: kill drag-select everywhere. Unlayered + * so it wins over
+   @layer base/utilities and doesn't rely on user-select inheritance (which
+   WebKit treats as non-inherited `auto` with special rules). Re-enable only
+   TipTap (.ProseMirror), form fields, and explicit .select-text opt-ins. */
+*,
+*::before,
+*::after {
+  -webkit-user-select: none !important;
+  user-select: none !important;
+}
+
+.ProseMirror,
+.ProseMirror *,
+input:not([type="button"], [type="submit"], [type="reset"], [type="checkbox"], [type="radio"], [type="file"], [type="color"], [type="range"]),
+textarea,
+[contenteditable="true"],
+[contenteditable="true"] *,
+.select-text,
+.select-text * {
+  -webkit-user-select: text !important;
+  user-select: text !important;
 }
 
 .violation-blot {

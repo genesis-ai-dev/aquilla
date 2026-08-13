@@ -1,15 +1,17 @@
 import { Suspense, lazy, type ReactNode } from "react"
-import { Navigate, Routes, Route, useLocation, type Location } from "react-router-dom"
+import { Navigate, Routes, Route, useParams, useLocation, type Location } from "react-router-dom"
 import { hasAuthHintCookie } from "@/lib/frontier/session-store"
 import { OrgHome } from "@/components/org/OrgHome"
 import { OrgHomeRoute } from "@/components/org/OrgHomeRoute"
+import { OrgOverview } from "@/components/org/OrgOverview"
+import { OrgProjectsPage } from "@/components/org/OrgProjectsPage"
 import { OrgRouteGate } from "@/components/org/OrgRouteGate"
 import { ProductTourProvider } from "@/context/ProductTourContext"
 import { ArchivedProjects } from "@/components/org/ArchivedProjects"
 import { ProjectOverview } from "@/components/org/ProjectOverview"
 import { AssignedToMe } from "@/components/org/AssignedToMe"
 import { SharedProjectsPage } from "@/components/org/SharedProjectsPage"
-import { resumeOrgPath } from "@/lib/navigation/org-paths"
+import { resumeOrgPath, projectSettingsPath } from "@/lib/navigation/org-paths"
 import { JoinPage } from "@/components/JoinPage"
 import { AccessLinkPage } from "@/components/AccessLinkPage"
 import { JoinOrgPage } from "@/components/JoinOrgPage"
@@ -29,7 +31,7 @@ import { OutboxProvider } from "@/context/OutboxContext"
 import { NavHistoryProvider } from "@/context/NavHistoryContext"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { LoadingOverlay } from "@/components/ui/loading-overlay"
-import { Toaster } from "@/components/ui/sonner"
+import { Toaster } from "@/components/ui/toast"
 import { AiModelConsentDialog } from "@/components/AiModelConsentDialog"
 import { AiModelDownloadChip } from "@/components/AiModelDownloadChip"
 import { AudioBulkProgressBanner } from "@/components/AudioBulkProgressBanner"
@@ -89,6 +91,9 @@ const TeamsList = lazy(() =>
 const TeamDetail = lazy(() =>
   import("@/components/org/TeamDetail").then((m) => ({ default: m.TeamDetail })),
 )
+const TeamSettingsIndex = lazy(() =>
+  import("@/pages/TeamSettings").then((m) => ({ default: m.TeamSettingsIndex })),
+)
 const AdminConsole = lazy(() =>
   import("@/pages/AdminConsole").then((m) => ({ default: m.AdminConsole })),
 )
@@ -125,7 +130,7 @@ function SyncFreezeOverlay() {
  * doesn't branch on a cookie any more (see worker/index.ts), which is what lets
  * that page be edge-cached. So a fresh load never reaches this component at `/`;
  * only in-app navigation does. `/app` is the URL that opens the workspace, and
- * it's where the marketing nav and AppEntryBanner point.
+ * it's where the marketing nav's "Open app" CTA points.
  *
  * Signed-out visitors go to /login rather than back to the marketing page:
  * anyone arriving here clicked something that said "open the app", and bouncing
@@ -144,6 +149,13 @@ function AppEntry() {
 /** Fallback used while lazy route chunks are loading (e.g. the workspace). */
 function RouteLoadingFallback() {
   return <LoadingOverlay />
+}
+
+/** Preserve bookmarks and e2e gotos to the old workspace overlay URLs. */
+function RedirectToProjectSettingsSection({ section }: { section: string }) {
+  const { id } = useParams<{ id: string }>()
+  const { search } = useLocation()
+  return <Navigate to={`${projectSettingsPath(id!, section)}${search}`} replace />
 }
 
 function LazyRoute({ children, fallback = <RouteLoadingFallback /> }: { children: ReactNode; fallback?: ReactNode }) {
@@ -208,7 +220,7 @@ function AppRoutes() {
         {/* Eager — needed for first paint / sign-in flow */}
         <Route path="/" element={<AppEntry />} />
         {/* The workspace entry. `/` is marketing at the edge, so this is the
-            URL that opens the app — marketing nav + AppEntryBanner point here. */}
+            URL that opens the app — marketing "Open app" CTAs point here. */}
         <Route path="/app" element={<AppEntry />} />
         <Route path="/projects" element={<Navigate to={resumeOrgPath()} replace />} />
         <Route path="/projects/:id" element={<ProjectOverview />} />
@@ -239,12 +251,20 @@ function AppRoutes() {
         {/* Org shell — path is authoritative for active org. `/orgs/all` is home-only. */}
         <Route path="/orgs/all" element={<OrgHome />} />
         <Route path="/orgs/:orgId" element={<OrgRouteGate />}>
-          {/* AQU-790: member orgs → full dashboard; guest orgs → reduced overview. */}
+          {/* AQU-790: index → guest list or redirect to overview; overview/projects split for members. */}
           <Route index element={<OrgHomeRoute />} />
+          <Route path="overview" element={<OrgOverview />} />
+          <Route path="projects" element={<OrgProjectsPage />} />
           <Route path="assigned" element={<AssignedToMe />} />
           <Route path="archived" element={<ArchivedProjects />} />
+          <Route path="archived/files" element={<ArchivedProjects />} />
           <Route path="teams" element={<OrgLazyRoute><TeamsList /></OrgLazyRoute>} />
           <Route path="teams/:groupId" element={<OrgLazyRoute><TeamDetail /></OrgLazyRoute>} />
+          <Route path="teams/:groupId/settings" element={<OrgLazyRoute><TeamSettingsIndex /></OrgLazyRoute>} />
+          <Route
+            path="teams/:groupId/settings/identity"
+            element={<Navigate to=".." replace relative="path" />}
+          />
           <Route path="members" element={<OrgLazyRoute><MembersPage /></OrgLazyRoute>} />
           <Route path="members/matrix" element={<OrgLazyRoute><MembersPage /></OrgLazyRoute>} />
           <Route path="settings" element={<OrgLazyRoute><Settings /></OrgLazyRoute>} />
@@ -264,13 +284,12 @@ function AppRoutes() {
         <Route path="/project/:id/editor/file/:fileId" element={<ProjectWorkspace />} />
         <Route path="/project/:id/settings" element={<LazyRoute><ProjectSettings /></LazyRoute>} />
         <Route path="/project/:id/settings/:section" element={<LazyRoute><ProjectSettings /></LazyRoute>} />
-        <Route path="/project/:id/rules" element={<ProjectWorkspace />} />
+        <Route path="/project/:id/rules" element={<RedirectToProjectSettingsSection section="rules" />} />
         <Route path="/project/:id/agent" element={<ProjectWorkspace />} />
         <Route path="/project/:id/voice" element={<ProjectWorkspace />} />
         <Route path="/project/:id/terminology" element={<ProjectWorkspace />} />
         <Route path="/project/:id/comments" element={<ProjectWorkspace />} />
-        <Route path="/project/:id/memory" element={<ProjectWorkspace />} />
-        <Route path="/project/:id/members" element={<ProjectWorkspace />} />
+        <Route path="/project/:id/memory" element={<RedirectToProjectSettingsSection section="memory" />} />
 
         {/* Monday.com OAuth redirect URI. Stays top-level and un-scoped: the
             path is registered with Monday, so it cannot carry an org segment. */}

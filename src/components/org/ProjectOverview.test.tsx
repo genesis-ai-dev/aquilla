@@ -91,10 +91,8 @@ vi.mock("@/lib/sync/cloud-projects", async (importOriginal) => ({
   setProjectDeadline: vi.fn(),
   setProjectPm: (jwt: string, projectId: string, pmUserId: number | null) => setProjectPm(jwt, projectId, pmUserId),
   fetchAccessibleProjects: (jwt: string) => fetchAccessibleProjects(jwt),
-  // MembersTab -> useProjectOrgId (AQU-672) resolves the project's own org to
-  // seed member-add suggestions. These tests drive the roster through the
-  // member-scopes mock, so a miss keeps the suggestion path inert.
-  resolveCloudProjectResult: vi.fn(async () => ({ ok: false as const, reason: "not-found" as const })),
+  // MembersTab → useProjectOrgId reads this; keep it quiet so overview chrome still mounts.
+  resolveCloudProjectResult: vi.fn(async () => ({ ok: true as const, project: { id: "p1", orgId: 1 } })),
 }))
 const downloadProjectBundle = vi.fn()
 vi.mock("@/lib/sync/export-bundle", () => ({
@@ -642,7 +640,10 @@ describe("ProjectOverview file-breakdown column headers (AQU-492)", () => {
 // ── Archive / restore ──────────────────────────────────────────────────────
 
 describe("ProjectOverview archive/restore", () => {
-  it("owner sees Archive in overflow; clicking archives and returns to /projects", async () => {
+  const ARCHIVE_CHECKBOX =
+    "I understand this project will be hidden from the active list."
+
+  it("owner sees Archive in overflow; confirming archives and returns to /projects", async () => {
     useProject.mockReturnValue({ project: projectRecord({ level: 700 }), status: "ready", refresh })
     archiveProjectRemote.mockResolvedValue({ kind: "archived", archivedAt: "now", archivedBy: { id: 1, username: "wendi" } })
     renderOverview()
@@ -654,8 +655,31 @@ describe("ProjectOverview archive/restore", () => {
     const btn = await screen.findByRole("menuitem", { name: "Archive" })
     fireEvent.click(btn)
 
+    // Confirm dialog — archive does not run until the checkbox is checked.
+    expect(await screen.findByRole("dialog")).toBeInTheDocument()
+    expect(archiveProjectRemote).not.toHaveBeenCalled()
+    expect(screen.getByRole("button", { name: "Archive" })).toBeDisabled()
+
+    fireEvent.click(screen.getByText(ARCHIVE_CHECKBOX))
+    fireEvent.click(screen.getByRole("button", { name: "Archive" }))
+
     await waitFor(() => expect(archiveProjectRemote).toHaveBeenCalledWith("p1", "jwt"))
-    expect(navigate).toHaveBeenCalledWith("/projects")
+    expect(navigate).toHaveBeenCalledWith("/orgs/1/projects")
+  })
+
+  it("canceling the archive dialog does not archive", async () => {
+    useProject.mockReturnValue({ project: projectRecord({ level: 700 }), status: "ready", refresh })
+    renderOverview()
+
+    fireEvent.click(await screen.findByRole("button", { name: "More actions" }))
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Archive" }))
+
+    expect(await screen.findByRole("dialog")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
+    expect(archiveProjectRemote).not.toHaveBeenCalled()
+    expect(navigate).not.toHaveBeenCalled()
   })
 
   it("non-owner does not see the overflow menu (no archive)", async () => {
@@ -928,6 +952,20 @@ describe("ProjectOverview project-only invitee access (AQU-474)", () => {
     expect(
       navigate.mock.calls.some((call: unknown[]) => call[0] === "/project/p1/editor"),
     ).toBe(true)
+  })
+
+  it("exposes a Project settings link to /project/:id/settings", async () => {
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 400, files: [] }),
+      status: "ready",
+      refresh,
+    })
+    getPortfolio.mockResolvedValue([])
+
+    renderOverview()
+
+    const settings = await screen.findByRole("link", { name: "Project settings" })
+    expect(settings).toHaveAttribute("href", "/project/p1/settings")
   })
 })
 
@@ -1555,13 +1593,13 @@ describe("ProjectOverview CSV export (AQU-500)", () => {
   })
 })
 
-// ── AQU-538 §3.3: per-project lane table + lane filter pills ─────────────────
+// ── AQU-538 §3.3: per-project lane table + lane filter tabs ──────────────────
 
-describe("ProjectOverview lane table + pills (AQU-538 §3.3)", () => {
+describe("ProjectOverview lane table + tabs (AQU-538 §3.3)", () => {
   // WHY: once a project has more than one target-language lane, a PM must see
   // per-lane progress + people + quick actions directly on the overview, and be
   // able to filter the header StatTiles / per-file drill-down to one lane. N=1
-  // projects must be byte-identical to the pre-lane overview (no table, no pills).
+  // projects must be byte-identical to the pre-lane overview (no table, no tabs).
 
   const NOW = new Date("2026-07-14T12:00:00Z").getTime()
 
@@ -1621,7 +1659,7 @@ describe("ProjectOverview lane table + pills (AQU-538 §3.3)", () => {
     expect(esRow).toHaveTextContent("8%")
   })
 
-  it("does not render the lane table (or pills) for a single-lane project", async () => {
+  it("does not render the lane table (or tabs) for a single-lane project", async () => {
     useLaneProject()
     getPortfolio.mockResolvedValue([laneProject({
       lanes: [{ lane: "", totalCells: 100, filledCells: 80, validatedCells: 50, lastEditAt: NOW }],
@@ -1631,42 +1669,45 @@ describe("ProjectOverview lane table + pills (AQU-538 §3.3)", () => {
     // The progress card still renders (Translated tile present) — just no lane UI.
     await waitFor(() => expect(screen.getAllByText("Translated").length).toBeGreaterThan(0))
     expect(screen.queryByTestId("overview-lane-table")).not.toBeInTheDocument()
-    expect(screen.queryByTestId("lane-filter-pills")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("lane-filter-tabs")).not.toBeInTheDocument()
   })
 
-  it("selecting a lane pill swaps the header StatTile percentages to that lane's numbers", async () => {
+  it("selecting a lane tab swaps the header StatTile percentages to that lane's numbers", async () => {
     useLaneProject()
     getPortfolio.mockResolvedValue([laneProject()])
     renderOverview()
 
-    await screen.findByTestId("lane-filter-pills")
+    await screen.findByTestId("lane-filter-tabs")
 
     // "All" (default) — cross-lane scalars: 100/200 = 50% translated, 58/200 = 29% validated.
     expect(statTile("Translated")).toHaveTextContent("50%")
     expect(statTile("Validated")).toHaveTextContent("29%")
 
     // Filter to es — laneTranslatedPct(es) = 20/100 = 20%, laneValidatedPct = 8/100 = 8%.
-    fireEvent.click(screen.getByTestId("lane-pill-es"))
+    fireEvent.click(screen.getByRole("tab", { name: "es" }))
     await waitFor(() => expect(statTile("Translated")).toHaveTextContent("20%"))
     expect(statTile("Validated")).toHaveTextContent("8%")
 
     // Back to All restores the cross-lane figures.
-    fireEvent.click(screen.getByTestId("lane-pill-all"))
+    fireEvent.click(screen.getByRole("tab", { name: "All" }))
     await waitFor(() => expect(statTile("Translated")).toHaveTextContent("50%"))
   })
 
-  it("each lane row's Open link deep-links the workspace at that lane (?lane=)", async () => {
+  it("each lane row's Open menu item deep-links the workspace at that lane (?lane=)", async () => {
     useLaneProject()
     getPortfolio.mockResolvedValue([laneProject()])
     renderOverview()
 
     await screen.findByTestId("overview-lane-table")
+    fireEvent.click(screen.getByTestId("overview-lane-actions-es"))
     expect(screen.getByTestId("overview-lane-open-es").getAttribute("href")).toBe("/project/p1/editor?lane=es")
-    // The default lane opens the workspace with no lane param (today's behavior).
+
+    // Close and open the default-lane menu — default lane has no lane param.
+    fireEvent.click(screen.getByTestId("overview-lane-actions-default"))
     expect(screen.getByTestId("overview-lane-open-default").getAttribute("href")).toBe("/project/p1/editor")
   })
 
-  it("Assign… on a lane row mounts AssignModal pinned to that lane", async () => {
+  it("Assign… from a lane row ⋯ menu mounts AssignModal pinned to that lane", async () => {
     useLaneProject()
     getPortfolio.mockResolvedValue([laneProject()])
     renderOverview()
@@ -1675,7 +1716,8 @@ describe("ProjectOverview lane table + pills (AQU-538 §3.3)", () => {
     // Closed until launched.
     expect(screen.queryByTestId("assign-modal-mock")).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByTestId("overview-lane-assign-es"))
+    fireEvent.click(screen.getByTestId("overview-lane-actions-es"))
+    fireEvent.click(screen.getByRole("menuitem", { name: /assign/i }))
     const modal = await screen.findByTestId("assign-modal-mock")
     expect(modal.getAttribute("data-lane")).toBe("es")
   })
@@ -1716,8 +1758,8 @@ describe("ProjectOverview lane table + pills (AQU-538 §3.3)", () => {
     })
     renderOverview()
 
-    await screen.findByTestId("lane-filter-pills")
-    fireEvent.click(screen.getByTestId("lane-pill-es"))
+    await screen.findByTestId("lane-filter-tabs")
+    fireEvent.click(screen.getByRole("tab", { name: "es" }))
 
     const row = await screen.findByTestId("file-row")
     fireEvent.click(within(row).getByRole("button", { name: /^expand/i }))

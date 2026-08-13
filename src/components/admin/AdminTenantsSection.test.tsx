@@ -1,6 +1,6 @@
 /**
- * AdminTenantsSection — orgs with expandable team rows. Verifies expansion
- * reveals an org's teams, search filters orgs, and Open drills into the org.
+ * AdminTenantsSection — flat org list. Verifies search filters orgs and row
+ * click navigates into the org workspace. Nested team expansion lives on Teams.
  */
 import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
@@ -12,15 +12,15 @@ const orgs: AdminOrg[] = [
   { id: 2, name: "Beta", createdAt: "2026-02-01", ownerUsername: "be", memberCount: 1, projectCount: 0 },
 ]
 const teams: AdminTeam[] = [
-  { id: 10, name: "alpha/translators", createdAt: "2026-01-02", orgId: 1, orgName: "Alpha", memberCount: 2, projectCount: 1 },
+  { id: 10, name: "alpha/translators", createdAt: "2026-01-02", orgId: 1, orgName: "Alpha", projectLeadUsername: "al", ownerUsername: "owen", memberCount: 2, projectCount: 1 },
 ]
 
 describe("AdminTenantsSection", () => {
-  it("expands an org to reveal its teams", () => {
+  it("shows a per-org team count without nested team rows", () => {
     render(<AdminTenantsSection orgs={orgs} teams={teams} onOpenOrg={vi.fn()} />)
+    expect(screen.getByText("Alpha")).toBeInTheDocument()
     expect(screen.queryByText("translators")).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole("button", { name: /expand alpha/i }))
-    expect(screen.getByText("translators")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /expand/i })).not.toBeInTheDocument()
   })
 
   it("filters orgs by search", () => {
@@ -39,10 +39,10 @@ describe("AdminTenantsSection", () => {
     expect(screen.getByText(created)).toBeInTheDocument()
   })
 
-  it("calls onOpenOrg when Open is clicked", () => {
+  it("calls onOpenOrg when a row is clicked", () => {
     const onOpenOrg = vi.fn()
     render(<AdminTenantsSection orgs={orgs} teams={teams} onOpenOrg={onOpenOrg} />)
-    fireEvent.click(screen.getAllByRole("button", { name: /open/i })[0])
+    fireEvent.click(screen.getByText("Alpha").closest("tr")!)
     expect(onOpenOrg).toHaveBeenCalledWith(1)
   })
 })

@@ -113,6 +113,56 @@ describe("AppShell main-content error containment", () => {
     expect(container.querySelector('[data-slot="app-shell-header"]')).toHaveClass("h-[52px]", "min-h-[52px]", "justify-center")
   })
 
+  it("sits the floating content card flush under the header (no top margin)", () => {
+    const { container } = render(
+      <MemoryRouter>
+        <AppShell
+          header={<div>header</div>}
+          statusBar={null}
+          sidebar={<div>sidebar</div>}
+          main={<div>main</div>}
+        />
+      </MemoryRouter>,
+    )
+
+    const card = container.querySelector(".rounded-xl.border.border-border.bg-background")
+    expect(card).toHaveClass("mx-2", "mb-2")
+    expect(card).not.toHaveClass("m-2")
+    expect(card).not.toHaveClass("mt-2")
+  })
+
+  it("lays out aside children without a shared width shell", () => {
+    const { container, rerender } = render(
+      <MemoryRouter>
+        <AppShell
+          header={<div>header</div>}
+          statusBar={null}
+          sidebar={<div>sidebar</div>}
+          main={<div>main</div>}
+          aside={<div data-testid="right-aside">comments</div>}
+        />
+      </MemoryRouter>,
+    )
+
+    expect(screen.getByTestId("right-aside")).toBeInTheDocument()
+    expect(container.querySelector('[data-slot="app-shell-aside"]')).not.toBeInTheDocument()
+
+    rerender(
+      <MemoryRouter>
+        <AppShell
+          header={<div>header</div>}
+          statusBar={null}
+          sidebar={<div>sidebar</div>}
+          main={<div>main</div>}
+          asideEdge={<div data-testid="aside-edge">tab</div>}
+        />
+      </MemoryRouter>,
+    )
+
+    expect(screen.getByTestId("aside-edge")).toBeInTheDocument()
+    expect(screen.queryByTestId("right-aside")).not.toBeInTheDocument()
+  })
+
   it("offers a UI-language control in the chrome when an I18nProvider is present", async () => {
     render(
       <MemoryRouter>

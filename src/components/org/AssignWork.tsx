@@ -15,6 +15,7 @@ import {
   FieldError,
   FieldGroup,
   FieldLabel,
+  OptionalMark,
 } from "@/components/ui/field"
 import {
   Select,
@@ -24,6 +25,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 
 /**
  * Manager affordance (project_lead+) on the project overview: assign a book or
@@ -213,7 +215,7 @@ export function AssignWork({
 
   if (!open) {
     return (
-      <Button type="button" size="sm" variant="outline" onClick={() => setOpen(true)}>
+      <Button type="button" variant="outline" onClick={() => setOpen(true)}>
         Assign…
       </Button>
     )
@@ -241,7 +243,7 @@ export function AssignWork({
               onValueChange={(v) => setAssigneeId(v == null || v === "" ? "" : Number(v))}
               disabled={busy || isSelfAssignMode}
             >
-              <SelectTrigger id="assign-work-assignee" className="w-full">
+              <SelectTrigger id="assign-work-assignee">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -250,13 +252,28 @@ export function AssignWork({
                     members
                       .filter((m) => m.userId === callerUserId)
                       .map((m) => (
-                        <SelectItem key={m.userId} value={String(m.userId)}>{m.username} (you)</SelectItem>
+                        <SelectItem key={m.userId} value={String(m.userId)}>
+                          <UsernameWithAvatar
+                            username={m.username}
+                            label={`${m.username} (you)`}
+                            size="xs"
+                            menuSafe
+                            nameClassName="text-sm font-normal"
+                          />
+                        </SelectItem>
                       ))
                   ) : (
                     <>
                       <SelectItem value="">Select member…</SelectItem>
                       {eligibleMembers.map((m) => (
-                        <SelectItem key={m.userId} value={String(m.userId)}>{m.username}</SelectItem>
+                        <SelectItem key={m.userId} value={String(m.userId)}>
+                          <UsernameWithAvatar
+                            username={m.username}
+                            size="xs"
+                            menuSafe
+                            nameClassName="text-sm font-normal"
+                          />
+                        </SelectItem>
                       ))}
                     </>
                   )}
@@ -277,7 +294,7 @@ export function AssignWork({
               onValueChange={(v) => setFileId(v ?? "")}
               disabled={busy}
             >
-              <SelectTrigger id="assign-work-book" className="w-full">
+              <SelectTrigger id="assign-work-book">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -308,7 +325,6 @@ export function AssignWork({
                   <Button
                     type="button"
                     variant="ghost"
-                    size="sm"
                     className="h-auto px-1 py-0 text-xs"
                     disabled={busy}
                     onClick={() =>
@@ -342,7 +358,9 @@ export function AssignWork({
             )}
           </Field>
           <Field>
-            <FieldLabel htmlFor="assign-work-deadline">Deadline (optional)</FieldLabel>
+            <FieldLabel htmlFor="assign-work-deadline">
+              Deadline <OptionalMark />
+            </FieldLabel>
             <DatePicker
               id="assign-work-deadline"
               value={deadlineDate}
@@ -354,7 +372,6 @@ export function AssignWork({
         <div className="flex flex-wrap items-center gap-2">
           <Button
             type="button"
-            size="sm"
             onClick={() => void submit()}
             disabled={busy}
           >
@@ -362,7 +379,6 @@ export function AssignWork({
           </Button>
           <Button
             type="button"
-            size="sm"
             variant="outline"
             onClick={() => { setOpen(false); setError(null) }}
             disabled={busy}

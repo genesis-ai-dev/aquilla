@@ -59,6 +59,29 @@ describe("ProjectCreateDialog — submit in-flight state (AQU-711)", () => {
     mockCreateCloudProject.mockReset()
   })
 
+  it("opts create fields out of Chrome contact autocomplete", () => {
+    render(<ProjectCreateDialog onCreated={vi.fn()} />)
+    fireEvent.click(screen.getByRole("button", { name: "New project" }))
+
+    const name = screen.getByLabelText(/^Project title$/i)
+    expect(name).toHaveAttribute("autocomplete", "off")
+    expect(name).toHaveAttribute("name", "aquilla-project-title")
+    expect(name.getAttribute("name")).not.toBe("name")
+
+    const source = screen.getByLabelText(/^Source language$/i)
+    expect(source).toHaveAttribute("autocomplete", "off")
+    expect(source).toHaveAttribute("name", "aquilla-project-source-language")
+
+    const target = screen.getByLabelText(/^Target language/i)
+    expect(target).toHaveAttribute("autocomplete", "off")
+    expect(target).toHaveAttribute("name", "aquilla-project-target-language")
+
+    expect(document.getElementById("project-create-form")).toHaveAttribute(
+      "autocomplete",
+      "off",
+    )
+  })
+
   it("disables the button and shows the Creating… spinner while a create is in flight", async () => {
     let release!: () => void
     mockCreateCloudProject.mockImplementation(
@@ -66,7 +89,7 @@ describe("ProjectCreateDialog — submit in-flight state (AQU-711)", () => {
     )
 
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
-    fireEvent.click(screen.getByRole("button", { name: "New Project" }))
+    fireEvent.click(screen.getByRole("button", { name: "New project" }))
     fillValidSelfContained()
 
     const button = screen.getByRole("button", { name: /Create Project/i })
@@ -89,7 +112,7 @@ describe("ProjectCreateDialog — submit in-flight state (AQU-711)", () => {
     )
 
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
-    fireEvent.click(screen.getByRole("button", { name: "New Project" }))
+    fireEvent.click(screen.getByRole("button", { name: "New project" }))
     fillValidSelfContained()
 
     const button = screen.getByRole("button", { name: /Create Project/i })
@@ -115,7 +138,7 @@ describe("ProjectCreateDialog — submit in-flight state (AQU-711)", () => {
     mockCreateCloudProject.mockRejectedValueOnce(new Error("network blip"))
 
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
-    fireEvent.click(screen.getByRole("button", { name: "New Project" }))
+    fireEvent.click(screen.getByRole("button", { name: "New project" }))
     fillValidSelfContained()
 
     fireEvent.click(screen.getByRole("button", { name: /Create Project/i }))

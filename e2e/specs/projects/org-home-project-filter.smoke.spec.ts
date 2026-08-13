@@ -2,10 +2,10 @@ import { test, expect } from "../../helpers/multi-user"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
 
 /**
- * OrgHome project filter input.
+ * Org projects list filter input.
  *
- * OrgHome.tsx renders an input (aria-label="Filter projects by name",
- * placeholder="Filter projects…") that filters the project grid client-side.
+ * OrgProjectsPage renders an input (aria-label="Search projects…")
+ * that filters the project table client-side.
  *
  * This spec: creates two projects with distinct names → types one project's
  * name in the filter → verifies only that project is visible and the other
@@ -22,10 +22,13 @@ test("org home project filter shows only matching projects", async ({ alice }) =
   await dash.goto()
   await dash.createProject({ name: nameB })
 
-  // Navigate to org home (/ redirects to /projects; org home may be at / or /projects).
+  // Projects table (Overview is the `/` redirect landing).
   await alice.goto("/")
+  await alice.getByRole("link", { name: "Projects" }).click()
+  await expect(alice).toHaveURL(/\/orgs\/\d+\/projects/)
   // Filter input.
-  const filterInput = alice.getByRole("textbox", { name: /Filter projects/i })
+  const filterInput = alice.getByRole("textbox", { name: /Search projects/i })
+    .or(alice.locator('input[aria-label="Search projects…"]'))
     .or(alice.locator('input[aria-label="Filter projects by name"]'))
     .first()
   await expect(filterInput.first()).toBeVisible({ timeout: 10_000 })

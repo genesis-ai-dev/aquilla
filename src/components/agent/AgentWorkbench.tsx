@@ -47,7 +47,7 @@ export interface AgentWorkbenchProps {
   agent: Omit<AgentDockViewProps, "suggestedActions" | "pendingPrompt" | "onPendingPromptConsumed" | "pendingChip" | "onPendingChipConsumed">
   /** Org agent-credit gauge in the header (maintainer+ only; self-hides). */
   credits?: CreditsDialProps | null
-  /** Leave the workbench (back to the editor). */
+  /** Minimize to the dock and dismiss the editor Agent tab. */
   onClose: () => void
   /** Jump the editor to a cell ("open" on a working-set row). */
   onJumpToCell?: (fileId: string, cellId: string) => void
@@ -224,10 +224,10 @@ export function AgentWorkbench({ agent, credits, onClose, onJumpToCell }: AgentW
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      {/* Job header */}
-      <div className="flex items-center gap-2 border-b px-3 py-1.5">
-        <Bot className="h-4 w-4 text-muted-foreground" />
-        <span className="text-sm font-medium">Agent</span>
+      {/* In-main toolbar — matches Rules/Glossary height */}
+      <header className="flex shrink-0 items-center gap-2 border-b px-4 py-3">
+        <Bot className="h-5 w-5 text-muted-foreground" aria-hidden />
+        <h1 className="text-base font-semibold">Agent</h1>
         {activeRun && (
           <span className="flex items-center gap-1.5 text-xs text-muted-foreground" role="status">
             <Spinner className="h-3 w-3" />
@@ -240,38 +240,37 @@ export function AgentWorkbench({ agent, credits, onClose, onJumpToCell }: AgentW
         <span className="ml-auto flex items-center gap-1">
           {credits && <CreditsDial {...credits} />}
           {state.isStreaming && (
-            <Button type="button" variant="outline" size="sm" className="h-6 text-[11px]" onClick={stop}>
+            <Button type="button" variant="outline" onClick={stop}>
               <Square data-icon="inline-start" />
               Stop
             </Button>
           )}
-          <AppTooltip content="Drop this conversation and start a fresh session">
+          <AppTooltip content="New session">
             <Button
               type="button"
               variant="ghost"
-              size="sm"
-              className="h-6 text-[11px] text-muted-foreground"
+              size="icon-xs"
+              className="text-muted-foreground"
               onClick={reset}
+              aria-label="New session"
             >
-              <RotateCcw data-icon="inline-start" />
-              New session
+              <RotateCcw />
             </Button>
           </AppTooltip>
-          <AppTooltip content="Back to the editor">
+          <AppTooltip content="Minimize to sidebar">
             <Button
               type="button"
               variant="ghost"
-              size="sm"
-              className="h-6 text-[11px] text-muted-foreground"
+              size="icon-xs"
+              className="text-muted-foreground"
               onClick={onClose}
               aria-label="Close workbench"
             >
-              <Minimize2 data-icon="inline-start" />
-              Editor
+              <Minimize2 />
             </Button>
           </AppTooltip>
         </span>
-      </div>
+      </header>
 
       <Tabs
         value={tab}

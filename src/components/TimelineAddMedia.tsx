@@ -90,7 +90,6 @@ export function TimelineAddMedia({ onAttachFile, onAttachUrl }: TimelineAddMedia
             <p className="mt-1 text-xs text-muted-foreground">{t("editor.media.dropHint")}</p>
             <Button
               variant="outline"
-              size="sm"
               className="mt-2"
               nativeButton={false}
               render={<label />}
@@ -125,7 +124,7 @@ export function TimelineAddMedia({ onAttachFile, onAttachUrl }: TimelineAddMedia
             aria-label={t("editor.media.urlLabel")}
             className="h-8 text-sm"
           />
-          <Button size="sm" variant="outline" onClick={() => void attachUrl()} disabled={busy != null || !url.trim()}>
+          <Button variant="outline" onClick={() => void attachUrl()} disabled={busy != null || !url.trim()}>
             {busy === "url" ? <Spinner /> : t("editor.media.attach")}
           </Button>
         </div>

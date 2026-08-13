@@ -1,10 +1,9 @@
 // AQU-538 "creation fix" (spec §5 / QA-AQU538-LANES.md "UX gaps" #1): the
-// self-contained shape's target field becomes multi-entry. This file covers
-// the tag-chip UI (add/dedupe/remove) and the create → PATCH targetLanes
-// submit flow, including the non-fatal warning path when the follow-up
-// PATCH fails. The source-only and linked-target shapes are untouched — see
-// ProjectCreateDialog.linked.test.tsx / ProjectCreateDialog.addAsLane.test.tsx
-// for their coverage.
+// self-contained shape's target field is a single Combobox chips input.
+// Type → Enter → pill; first pill is targetLanguage, the rest become
+// settings.targetLanes via a follow-up PATCH. Source-only and linked-target
+// shapes stay single-field — see ProjectCreateDialog.linked.test.tsx /
+// ProjectCreateDialog.addAsLane.test.tsx.
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
@@ -70,6 +69,19 @@ const mockCreateProject = vi.mocked(createProject)
 const mockFetchProjectSettings = vi.mocked(fetchProjectSettings)
 const mockPatchProjectSettings = vi.mocked(patchProjectSettings)
 
+function targetLangInput() {
+  return screen.getByTestId("create-extra-lang-input")
+}
+
+/** Commit one or more target-language pills via type → Enter. */
+function commitTargetLanguages(...tags: string[]) {
+  const input = targetLangInput()
+  for (const tag of tags) {
+    fireEvent.change(input, { target: { value: tag } })
+    fireEvent.keyDown(input, { key: "Enter" })
+  }
+}
+
 function openDialogWithBasics(opts?: { name?: string; source?: string; target?: string }) {
   render(<ProjectCreateDialog onCreated={vi.fn()} />)
   fireEvent.click(screen.getByRole("button", { name: /new project/i }))
@@ -80,17 +92,15 @@ function openDialogWithBasics(opts?: { name?: string; source?: string; target?: 
   fireEvent.change(screen.getByPlaceholderText(/English, Grade 7 English/i), {
     target: { value: opts?.source ?? "English" },
   })
-  fireEvent.change(screen.getByPlaceholderText(/French, conversational Swahili/i), {
-    target: { value: opts?.target ?? "French" },
-  })
+  // Commit the primary target as a pill so further Enter-adds become extras.
+  commitTargetLanguages(opts?.target ?? "French")
 }
 
 function addExtraLanguage(tag: string) {
-  fireEvent.change(screen.getByTestId("create-extra-lang-input"), { target: { value: tag } })
-  fireEvent.click(screen.getByTestId("create-extra-lang-add"))
+  commitTargetLanguages(tag)
 }
 
-describe("ProjectCreateDialog — self-contained extra target languages (AQU-538 creation fix)", () => {
+describe("ProjectCreateDialog — self-contained target language chips (AQU-538)", () => {
   beforeEach(() => {
     mockCreateCloudProject.mockClear()
     mockCreateProject.mockClear()
@@ -116,17 +126,19 @@ describe("ProjectCreateDialog — self-contained extra target languages (AQU-538
   it("relabels the field 'Target language(s)' on the default self-contained shape", () => {
     openDialogWithBasics()
     expect(screen.getByText("Target language(s)")).toBeTruthy()
-    expect(screen.getByTestId("create-extra-lang-input")).toBeTruthy()
+    expect(targetLangInput()).toBeTruthy()
+    expect(screen.getByTestId("create-target-lang-chips")).toBeTruthy()
   })
 
-  it("adds a chip on Add click and on Enter", () => {
+  it("adds a chip on Enter for primary and extras", () => {
     openDialogWithBasics()
+    expect(screen.getByTestId("create-extra-lang-chip-French")).toBeTruthy()
 
     addExtraLanguage("es")
     expect(screen.getByTestId("create-extra-lang-chip-es")).toBeTruthy()
 
-    fireEvent.change(screen.getByTestId("create-extra-lang-input"), { target: { value: "pt-BR" } })
-    fireEvent.keyDown(screen.getByTestId("create-extra-lang-input"), { key: "Enter" })
+    fireEvent.change(targetLangInput(), { target: { value: "pt-BR" } })
+    fireEvent.keyDown(targetLangInput(), { key: "Enter" })
     expect(screen.getByTestId("create-extra-lang-chip-pt-BR")).toBeTruthy()
   })
 
@@ -144,12 +156,12 @@ describe("ProjectCreateDialog — self-contained extra target languages (AQU-538
 
     addExtraLanguage("french")
     expect(screen.queryByTestId("create-extra-lang-chip-french")).toBeNull()
-    expect(screen.getByText("This is already the primary target language.")).toBeTruthy()
+    expect(screen.getByText("Already added.")).toBeTruthy()
   })
 
-  it("rejects blank input", () => {
+  it("rejects blank input on Enter", () => {
     openDialogWithBasics()
-    fireEvent.click(screen.getByTestId("create-extra-lang-add"))
+    fireEvent.keyDown(targetLangInput(), { key: "Enter" })
     expect(screen.getByText("Enter a language tag.")).toBeTruthy()
   })
 
@@ -214,6 +226,31 @@ describe("ProjectCreateDialog — self-contained extra target languages (AQU-538
     expect(mockPatchProjectSettings.mock.calls[0]![2]).not.toHaveProperty("targetLanes")
   })
 
+  it("allows create with a typed primary that was never Enter-committed as a pill", async () => {
+    render(<ProjectCreateDialog onCreated={vi.fn()} />)
+    fireEvent.click(screen.getByRole("button", { name: /new project/i }))
+    fireEvent.change(screen.getByPlaceholderText("My Translation Project"), {
+      target: { value: "Draft Primary" },
+    })
+    fireEvent.change(screen.getByPlaceholderText(/English, Grade 7 English/i), {
+      target: { value: "English" },
+    })
+    // Type only — no Enter — so targetLanguage is live-synced from the draft.
+    fireEvent.change(targetLangInput(), { target: { value: "Swahili" } })
+    fireEvent.click(screen.getByRole("button", { name: /Create Project/i }))
+
+    await waitFor(() => {
+      expect(mockCreateCloudProject).toHaveBeenCalledTimes(1)
+    })
+    await waitFor(() => {
+      expect(mockPatchProjectSettings).toHaveBeenCalledTimes(1)
+    })
+    expect(mockPatchProjectSettings.mock.calls[0]![2]).toMatchObject({
+      targetLanguage: "Swahili",
+    })
+    expect(mockFetchProjectSettings).not.toHaveBeenCalled()
+  })
+
   it("PATCH failure for targetLanes still resolves with the created project, and surfaces a non-fatal warning", async () => {
     // First PATCH (seed sourceLanguage/targetLanguage) succeeds; second
     // (targetLanes) fails.
@@ -249,7 +286,7 @@ describe("ProjectCreateDialog — self-contained extra target languages (AQU-538
     expect(screen.getByText("Create New Project")).toBeTruthy()
   })
 
-  it("does not offer the extra-language UI on the source-only shape", () => {
+  it("does not offer the multi-language chips UI on the source-only shape", () => {
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
     fireEvent.click(screen.getByRole("button", { name: /new project/i }))
     fireEvent.click(screen.getByText("Advanced: project shape"))
@@ -259,14 +296,14 @@ describe("ProjectCreateDialog — self-contained extra target languages (AQU-538
     expect(screen.queryByText("Target language(s)")).toBeNull()
   })
 
-  it("does not offer the extra-language UI on the linked-target shape", () => {
+  it("does not offer the multi-language chips UI on the linked-target shape", () => {
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
     fireEvent.click(screen.getByRole("button", { name: /new project/i }))
     fireEvent.click(screen.getByText("Advanced: project shape"))
     fireEvent.click(screen.getByText(/Linked target/i))
 
     // The single "Target language" field is still there (required by the
-    // shared schema for this shape) — just without the multi-entry list.
+    // shared schema for this shape) — just without the multi-entry chips.
     expect(screen.getByText("Target language")).toBeTruthy()
     expect(screen.queryByText("Target language(s)")).toBeNull()
     expect(screen.queryByTestId("create-extra-lang-input")).toBeNull()

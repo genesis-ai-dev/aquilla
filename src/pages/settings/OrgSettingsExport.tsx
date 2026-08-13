@@ -1,5 +1,4 @@
-import { useEffect, useState } from "react"
-import { Check } from "lucide-react"
+import { useState } from "react"
 import { FieldDescription, FieldError } from "@/components/ui/field"
 import { SettingsGroup, SettingsRow } from "@/components/ui/page"
 import {
@@ -23,7 +22,6 @@ export function OrgSettingsExport() {
   const canEditExportFloor = (activeOrg?.role.level ?? 0) >= ROLE.OWNER
   const [exportRoleBusy, setExportRoleBusy] = useState(false)
   const [exportRoleError, setExportRoleError] = useState<string | null>(null)
-  const [exportRoleSaved, setExportRoleSaved] = useState(false)
 
   const exportRoleOptions = [
     { level: ROLE.VIEWER, label: "Viewer (100) — anyone with project access" },
@@ -34,23 +32,14 @@ export function OrgSettingsExport() {
   ]
   const displayedExportMinRole = exportMinRole ?? ROLE.MAINTAINER
 
-  useEffect(() => {
-    if (!exportRoleSaved) return
-    const t = setTimeout(() => setExportRoleSaved(false), 2500)
-    return () => clearTimeout(t)
-  }, [exportRoleSaved])
-
   async function handleExportRoleChange(newLevel: number) {
     setExportRoleBusy(true)
     setExportRoleError(null)
-    setExportRoleSaved(false)
     const result = await patchOrgSettings({ exportMinRole: newLevel })
     if (result.kind === "error") {
       setExportRoleError(result.message ?? "Save failed")
     } else if (result.kind === "blocked") {
       setExportRoleError("Only org owners can change the export permission policy.")
-    } else {
-      setExportRoleSaved(true)
     }
     setExportRoleBusy(false)
   }
@@ -72,7 +61,7 @@ export function OrgSettingsExport() {
             onValueChange={(v) => { if (v) void handleExportRoleChange(Number(v)) }}
             disabled={!canEditExportFloor || exportRoleBusy}
           >
-            <SelectTrigger id="export-min-role" aria-label="Who can export" className="w-full max-w-sm">
+            <SelectTrigger id="export-min-role" aria-label="Who can export">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -90,11 +79,6 @@ export function OrgSettingsExport() {
           )}
           {exportRoleError && (
             <FieldError className="text-xs">{exportRoleError}</FieldError>
-          )}
-          {exportRoleSaved && (
-            <p className="flex items-center gap-1 text-xs text-green-600 dark:text-green-400" role="status" data-testid="export-role-saved">
-              <Check className="size-3.5" /> Saved
-            </p>
           )}
         </SettingsRow>
       </SettingsGroup>

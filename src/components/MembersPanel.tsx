@@ -3,12 +3,10 @@ import { ChevronRight, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { AppTooltip } from "@/components/ui/tooltip";
 import { Checkbox } from "@/components/ui/checkbox";
-import {
-  Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue,
-} from "@/components/ui/select";
 import { formatRelativeTime, isStale } from "@/lib/time/relative";
 import { RoleLabel } from "@/components/RoleLabel";
-import { roleDisplayText } from "@/lib/frontier/roles";
+import { RoleSelect } from "@/components/RoleSelect";
+import { UsernameWithAvatar } from "@/components/UsernameWithAvatar";
 import { MemberMultiAddRow, type MemberAddOutcome } from "@/components/MemberMultiAddRow";
 import type { UserSearchResult } from "@/hooks/useUserSearch";
 
@@ -144,7 +142,7 @@ export function MembersPanel({
           return (
             <li key={m.userId} className="flex min-w-0 flex-col gap-2 overflow-x-hidden px-3 py-2">
               <div className="flex min-w-0 items-center gap-3">
-              <span className="min-w-0 truncate font-medium">{m.username}</span>
+              <UsernameWithAvatar username={m.username} className="min-w-0" />
               <RoleLabel name={m.roleName} className="text-xs text-muted-foreground" />
               {m.source === "org" && (
                 <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">via org</span>
@@ -158,32 +156,18 @@ export function MembersPanel({
               <LastActiveChip lastActiveAt={m.lastActiveAt} />
               <div className="ml-auto flex items-center gap-2">
                 {onChangeRole && !m.isLocked && !isSelf && (
-                  <Select
-                    items={[
-                      // Current role may sit above the caller's grantable cap
-                      // (e.g. owner 700); include it so the closed trigger
-                      // renders the role name instead of the raw level.
-                      ...(grantableRoles.some((r) => r.level === m.roleLevel)
-                        ? []
-                        : [{ value: String(m.roleLevel), label: roleDisplayText(m.roleName) }]),
-                      ...grantableRoles.map((r) => ({ value: String(r.level), label: roleDisplayText(r.name) })),
-                    ]}
-                    value={String(m.roleLevel)}
-                    onValueChange={(v) => onChangeRole(m.username, parseInt(v ?? "", 10))}
-                  >
-                    <SelectTrigger size="sm" aria-label="Change role">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectGroup>
-                        {grantableRoles.map((r) => (
-                          <SelectItem key={r.level} value={String(r.level)}>
-                            <RoleLabel name={r.name} />
-                          </SelectItem>
-                        ))}
-                      </SelectGroup>
-                    </SelectContent>
-                  </Select>
+                  <RoleSelect
+                    options={grantableRoles}
+                    currentOption={
+                      grantableRoles.some((r) => r.level === m.roleLevel)
+                        ? null
+                        : { level: m.roleLevel, name: m.roleName }
+                    }
+                    value={m.roleLevel}
+                    onValueChange={(level) => void onChangeRole(m.username, level)}
+                    size="sm"
+                    aria-label="Change role"
+                  />
                 )}
                 {!m.isLocked && !isSelf ? (
                   <Button
@@ -379,7 +363,7 @@ function MemberScopesEditor({
             </fieldset>
           )}
           <div className="flex items-center gap-2">
-            <Button size="sm" onClick={handleSave} disabled={saving}>
+            <Button onClick={handleSave} disabled={saving}>
               {saving ? "Saving…" : "Save scopes"}
             </Button>
             {saveError && <span className="text-destructive">{saveError}</span>}

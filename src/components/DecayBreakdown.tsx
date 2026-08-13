@@ -1,6 +1,7 @@
 import { useMemo } from "react"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { DECAY_DEFAULTS } from "@/lib/health/decay-engine"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 interface DecayBreakdownProps {
   /** Scope health 0-100 (1 - mean(decay)). */
@@ -32,6 +33,7 @@ export function DecayBreakdown({
   onJumpToCell,
   children,
 }: DecayBreakdownProps) {
+  const t = useT()
   // needsAttention ⟺ decay > warnThreshold ⟺ health < (1 - warnThreshold)*100.
   const attentionHealthCutoff = (1 - warnThreshold) * 100
 
@@ -50,7 +52,7 @@ export function DecayBreakdown({
   return (
     <Popover>
       <PopoverTrigger nativeButton={false} openOnHover delay={300} closeDelay={120} render={<span className="inline-flex">{children}</span>} />
-      <PopoverContent side="top" align="start" className="w-72 rounded-2xl border-0 bg-card p-3">
+      <PopoverContent side="top" align="start" className="w-72 rounded-lg border-0 bg-card p-3">
         <div className="mb-2 flex items-baseline justify-between">
           <span className="text-xs font-medium text-muted-foreground">
             {scopeLabel}
@@ -59,19 +61,19 @@ export function DecayBreakdown({
         </div>
 
         <p className="mb-2 text-xs text-muted-foreground">
-          {needsAttentionPct}% of cells need attention
+          {t("editor.health.needsAttention", { percent: needsAttentionPct })}
         </p>
 
         {typeof staleSourceCount === "number" && staleSourceCount > 0 && (
           <p className="mb-2 text-xs text-amber-600">
-            {staleSourceCount} cell{staleSourceCount === 1 ? "" : "s"} with stale source
+            {t("editor.health.staleSource", { count: staleSourceCount })}
           </p>
         )}
 
         {drags.length > 0 ? (
           <>
             <p className="mb-1 text-xs text-muted-foreground">
-              Biggest drags
+              {t("editor.health.biggestDrags")}
             </p>
             <ul className="space-y-0.5">
               {drags.map((c) => (
@@ -90,7 +92,7 @@ export function DecayBreakdown({
             </ul>
           </>
         ) : (
-          <p className="text-xs text-muted-foreground">No cells need attention.</p>
+          <p className="text-xs text-muted-foreground">{t("editor.health.noneNeedAttention")}</p>
         )}
       </PopoverContent>
     </Popover>

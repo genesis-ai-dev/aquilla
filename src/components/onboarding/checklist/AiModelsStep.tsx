@@ -247,7 +247,6 @@ export function AiModelsStep({ project, onUpdated }: AiModelsStepProps) {
                     </span>
                     <Button
                       variant="ghost"
-                      size="sm"
                       className="h-6 px-2 text-xs"
                       onClick={() => { setGeminiError(null); setEditingKey(true) }}
                     >
@@ -273,7 +272,7 @@ export function AiModelsStep({ project, onUpdated }: AiModelsStepProps) {
                         aria-invalid={geminiError ? true : undefined}
                         className="font-mono text-sm"
                       />
-                      <Button size="sm" className="h-8 shrink-0" onClick={commitGeminiKey}>
+                      <Button className="shrink-0" onClick={commitGeminiKey}>
                         Save key
                       </Button>
                     </div>
@@ -319,7 +318,6 @@ export function AiModelsStep({ project, onUpdated }: AiModelsStepProps) {
 
       <div className="flex items-center gap-2">
         <Button
-          size="sm"
           onClick={handleStart}
           disabled={!expanded || nothingSelected || allReady || anyDownloading}
         >
@@ -355,7 +353,6 @@ export function AiModelsStep({ project, onUpdated }: AiModelsStepProps) {
           </span>
           <Button
             variant="ghost"
-            size="sm"
             className="h-6 px-2 text-xs"
             onClick={() => void setSkipped(false)}
           >

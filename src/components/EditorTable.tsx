@@ -9,13 +9,16 @@ import {
 import DOMPurify from "dompurify"
 import {
   Check, CheckCheck, Circle, Trash2, AlertTriangle, AlertCircle, RefreshCw,
-  MessageCircle, Play, Pause, Mic, Sparkles, FileText, History as HistoryIcon,
+  MessageCircle, Play, Pause, Mic, MicOff, Sparkles, FileText, History as HistoryIcon,
   ArrowRight, Activity, NotebookPen, Info, Pencil, ChevronRight, ChevronDown, Music, Braces,
   Languages,
   Archive,
   Lock,
   Pilcrow,
   PilcrowRight,
+  Bold,
+  Loader2,
+  VolumeX,
 } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
@@ -77,6 +80,7 @@ import { resolveCurrentCellIndex } from "@/lib/editor/current-index"
 import { useCellAudio } from "@/hooks/useCellAudio"
 import { useTranscribeStatus } from "@/lib/audio/transcribe-status"
 import { transcribeCell } from "@/lib/audio/transcribe"
+import { notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
 import { isSourceSegmentSelected } from "@/lib/audio/batch-audio"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import {
@@ -137,6 +141,8 @@ import { VOICE_ASSIGN_MIME } from "./VoiceLibraryPanel"
 import type { RangeHighlight } from "./HighlightedText"
 import { TermLookupPopover } from "./TermLookupPopover"
 import type { Concept } from "@/lib/terminology/types"
+import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
+import { RichMessage } from "@/lib/i18n/RichMessage"
 import { useFileFontSizes } from "@/lib/store/file-view-prefs"
 import { getSkipReplaceConfirm, setSkipReplaceConfirm } from "@/lib/store/replace-confirm-pref"
 import { useEditorActions } from "@/context/EditorActionsContext"
@@ -161,7 +167,7 @@ import {
 import { extractUsfmFootnotes, type ExtractedFootnote } from "@/lib/footnotes/extract"
 import { createUsfmFootnoteMarker } from "@/lib/footnotes/insert"
 import { defaultFootnoteRef } from "@/lib/footnotes/refs"
-import { effectiveSourceText } from "@/lib/cell-text"
+import { displayedSourceText, effectiveSourceText, projectedSourceValue, sourceCommitFields, sourceEditorSeed } from "@/lib/cell-text"
 import { deleteFootnote, spliceFootnoteText } from "@/lib/footnotes/splice"
 import type { FootnoteViewMode, VisibleFootnoteEntry } from "@/lib/footnotes/types"
 import {
@@ -294,7 +300,7 @@ function clampIndex(index: number, length: number): number {
   return Math.max(0, Math.min(length - 1, index))
 }
 
-function applyRowOverlays(
+export function applyRowOverlays(
   cell: CellData,
   options: {
     audioEntry?: CellAudioEntry
@@ -313,6 +319,12 @@ function applyRowOverlays(
         ...(attachment.voiceId ? { voiceId: attachment.voiceId } : {}),
         ...(attachment.referenceAudioId ? { referenceAudioId: attachment.referenceAudioId } : {}),
         ...(attachment.durationMs != null ? { durationMs: attachment.durationMs } : {}),
+        // AQU-782: forward the trim window so the text-section Transcribe
+        // control windows an imported clip to just this section (mirrors
+        // mergeCellsWithAudio). Without it, transcribeCell saw no trim and
+        // fell through to whole-clip transcription for every section.
+        ...(attachment.trimStartMs != null ? { trimStartMs: attachment.trimStartMs } : {}),
+        ...(attachment.trimEndMs != null ? { trimEndMs: attachment.trimEndMs } : {}),
       }
     }
     next = {
@@ -380,6 +392,10 @@ if (typeof window !== "undefined") {
  * A4: dismissing the popover keeps a muted "Not voiced" badge rather than
  *     clearing the failed state entirely — cell still looks unvoiced.
  */
+/** Icon shell for gutter synth status — stays inside the fixed w-5 badge column. */
+const gutterIconShell =
+  "inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md"
+
 function SynthStatusBadge({
   status, cellId: _cellId, projectId, onOpenAudioSetup,
 }: {
@@ -391,6 +407,7 @@ function SynthStatusBadge({
   /** Navigate to audio/voice settings so the user can fix the setup. */
   onOpenAudioSetup?: () => void
 }) {
+  const t = useT()
   const navigate = useNavigate()
   // A2: "Open audio setup" must DO something. When the callback is provided we
   // call it (host may already be in audio mode); otherwise we navigate directly
@@ -415,29 +432,33 @@ function SynthStatusBadge({
       ? Math.round((status.loaded / status.total) * 100)
       : null
     const tooltip = isTranslating
-      ? "Translating before voicing"
+      ? t("editor.tts.translatingBeforeVoicing")
       : pct != null
-        ? `Loading voice model (${pct}%)`
-        : "Loading voice model"
+        ? t("editor.tts.loadingVoiceModelPct", { percent: pct })
+        : t("editor.tts.loadingVoiceModel")
     return (
       <AppTooltip content={tooltip}>
-        <span className="inline-flex items-center gap-1 rounded-md bg-primary/15 px-1.5 py-0.5 text-[9px] font-medium text-primary">
-          <span className="h-1 w-1 animate-pulse rounded-full bg-primary" />
-          {isTranslating
-            ? "Translating"
-            : pct != null
-              ? <>Loading <span className="tabular-nums">{pct}%</span></>
-              : "Loading"}
+        <span
+          role="img"
+          aria-label={tooltip}
+          data-testid="synth-status-busy"
+          className={cn(gutterIconShell, "bg-primary/15 text-primary")}
+        >
+          <Loader2 className="h-3 w-3 animate-spin" />
         </span>
       </AppTooltip>
     )
   }
   if (status.kind === "synthesizing") {
     return (
-      <AppTooltip content="Generating audio…">
-        <span className="inline-flex items-center gap-1 rounded-md bg-primary/15 px-1.5 py-0.5 text-[9px] font-medium text-primary">
-          <span className="h-1 w-1 animate-pulse rounded-full bg-primary" />
-          Voicing
+      <AppTooltip content={t("editor.tts.generatingAudio")}>
+        <span
+          role="img"
+          aria-label={t("editor.tts.generatingAudio")}
+          data-testid="synth-status-busy"
+          className={cn(gutterIconShell, "bg-primary/15 text-primary")}
+        >
+          <Loader2 className="h-3 w-3 animate-spin" />
         </span>
       </AppTooltip>
     )
@@ -452,7 +473,7 @@ function SynthStatusBadge({
     const actions: Array<{ label: string; primary?: boolean; onClick: () => void }> = []
     if (error.category === "missing-gemini-key") {
       actions.push({
-        label: "Open audio setup",
+        label: t("editor.tts.openAudioSetup"),
         primary: true,
         onClick: openVoiceSetup,
       })
@@ -465,7 +486,7 @@ function SynthStatusBadge({
       // Soft fixes — the popover body explains what to do; no inline action.
     } else {
       actions.push({
-        label: "Open audio setup",
+        label: t("editor.tts.openAudioSetup"),
         onClick: openVoiceSetup,
       })
     }
@@ -473,16 +494,20 @@ function SynthStatusBadge({
     // A4: dismissed — muted badge, no popover. Still communicates "not voiced".
     if (dismissed) {
       return (
-        <AppTooltip content="Audio generation failed — click Generate to retry">
-          <span className="inline-flex max-w-[80px] cursor-default items-center gap-1 truncate rounded-md bg-muted/60 px-1.5 py-0.5 text-[9px] font-medium text-muted-foreground">
-            Not voiced
+        <AppTooltip content={t("editor.tts.failedTooltip")}>
+          <span
+            role="img"
+            aria-label={t("editor.tts.notVoiced")}
+            data-testid="synth-status-dismissed"
+            className={cn(gutterIconShell, "bg-muted/60 text-muted-foreground")}
+          >
+            <MicOff className="h-3 w-3" />
           </span>
         </AppTooltip>
       )
     }
 
-    // A1: full error badge + popover. The trigger label "Audio failed" is more
-    // scannable than just "Failed" and the popover body is shown on first click.
+    // Icon-only trigger so the chip fits the w-5 gutter; full detail lives in the popover.
     return (
       <CellAiStatusPopover
         error={error}
@@ -491,9 +516,14 @@ function SynthStatusBadge({
         trigger={
           <button
             type="button"
-            className="inline-flex max-w-[80px] items-center gap-1 truncate rounded-md bg-destructive/15 px-1.5 py-0.5 text-[9px] font-medium text-destructive hover:bg-destructive/25"
+            aria-label={t("editor.tts.audioFailed")}
+            data-testid="synth-status-error"
+            className={cn(
+              gutterIconShell,
+              "bg-destructive/15 text-destructive hover:bg-destructive/25",
+            )}
           >
-            Audio failed
+            <VolumeX className="h-3 w-3" />
           </button>
         }
       />
@@ -508,6 +538,7 @@ function ValidationHistoryTimeline({
   entries: import("@/hooks/useCells").EditValidationSummary[]
   currentUsername: string
 }) {
+  const t = useT()
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null)
   // entries are value-editMap only, oldest-first. The last entry IS the current
   // state (already shown above the divider), so skip it. Show remaining newest-first.
@@ -517,7 +548,7 @@ function ValidationHistoryTimeline({
   return (
     <>
       <div className="my-1 h-px bg-border" />
-      <div className="mb-1 px-1 text-xs text-muted-foreground">History</div>
+      <div className="mb-1 px-1 text-xs text-muted-foreground">{t("editor.validation.history")}</div>
       <ul className="space-y-0.5">
         {historical.map((entry, i) => {
           const snippet = typeof entry.value === "string"
@@ -544,7 +575,7 @@ function ValidationHistoryTimeline({
               {expanded && (
                 <ul className="border-l border-border/50 pl-2 ml-1 mb-1 space-y-0.5">
                   {entry.validatorsAll.length === 0 ? (
-                    <li className="px-1 py-0.5 text-[11px] text-muted-foreground/60">No validators on this state</li>
+                    <li className="px-1 py-0.5 text-[11px] text-muted-foreground/60">{t("editor.validation.noValidatorsOnState")}</li>
                   ) : entry.validatorsAll.map(v => (
                     <li
                       key={v.username}
@@ -553,7 +584,7 @@ function ValidationHistoryTimeline({
                         v.isDeleted && "text-muted-foreground/50 line-through",
                       )}
                     >
-                      <span>{v.username}{v.username === currentUsername ? " (you)" : ""}</span>
+                      <span>{v.username}{v.username === currentUsername ? ` ${t("editor.validation.you")}` : ""}</span>
                       <span className="text-muted-foreground/60 ml-auto">
                         {new Date(v.updatedTimestamp).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
                       </span>
@@ -871,6 +902,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   onFootnoteCreated,
   chapterNavTrailing,
 }, ref) {
+  const t = useT()
   // DCS lockdown: while this project is pinned to a Door43 upstream, the
   // repair path treats any hand-edited source cell as damage and overwrites
   // it, so the "Edit source" affordance must stay off. Loading counts as
@@ -2004,7 +2036,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
         data-index={index}
         data-untimed={untimedInTimeLens ? "true" : undefined}
         data-paragraph-start={showParagraphBoundary ? "true" : undefined}
-        aria-label={untimedInTimeLens ? "No specific timing — ordered by sequence" : undefined}
+        aria-label={untimedInTimeLens ? t("editor.row.noTimingAria") : undefined}
         className={cn(
           "relative",
           untimedInTimeLens && "border-l-2 border-dashed border-amber-400/70",
@@ -2013,7 +2045,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
       >
         {untimedInTimeLens && (
           <span className="pointer-events-none absolute left-1 top-1 z-10 rounded bg-amber-400/15 px-1 text-[9px] font-medium text-amber-600 dark:text-amber-400">
-            no timing
+            {t("editor.row.noTimingBadge")}
           </span>
         )}
         {showParagraphBoundary && (
@@ -2025,7 +2057,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
               <div className="w-5 shrink-0" aria-hidden="true" />
               <div className="ml-2 flex min-w-0 flex-1 items-center gap-0.5">
                 <div className="w-5 shrink-0" aria-hidden="true" />
-                <AppTooltip content="New paragraph">
+                <AppTooltip content={t("editor.row.newParagraph")}>
                   <div
                     data-testid="paragraph-boundary-indicator"
                     className="flex min-w-0 flex-1 items-center justify-center"
@@ -2230,6 +2262,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     targetDirectionMode,
     targetTextDirection,
     username,
+    t,
   ])
   const listExtraData = useMemo(
     () => ({ cellStoreVersion, renderListItem }),
@@ -2322,7 +2355,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
               unlabeled (select + badges + number). */}
           {castGutter ? (
             <div data-testid="table-source-header" className="flex items-center gap-2">
-              Source
+              {t("editor.column.source")}
               {project.sourceLanguage && (
                 <Badge variant="secondary" className="text-[10px] font-normal normal-case tracking-normal">
                   {project.sourceLanguage}
@@ -2335,7 +2368,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           {/* In Audio mode the left column carries per-line voice controls, not
               source text, so label it "Controls" (no source-language badge). */}
           <div className="flex items-center gap-2 pl-2">
-            {castGutter ? null : audioLens ? "Controls" : "Source"}
+            {castGutter ? null : audioLens ? t("editor.column.controls") : t("editor.column.source")}
             {!castGutter && !audioLens && project.sourceLanguage && (
               <Badge variant="secondary" className="text-[10px] font-normal normal-case tracking-normal">
                 {project.sourceLanguage}
@@ -2372,7 +2405,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                       type="button"
                       data-testid="lane-switcher"
                       data-active-lane={activeLane}
-                      aria-label="Active translation lane"
+                      aria-label={t("editor.lane.activeAria")}
                       className={cn(
                         badgeVariants({ variant: "secondary" }),
                         "gap-1 text-[10px] font-normal normal-case tracking-normal transition-colors hover:bg-muted-foreground/20 hover:text-foreground",
@@ -2383,14 +2416,14 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                   {/* AQU-583: on the default lane with no project target set,
                       `project.targetLanguage` is empty — prompt to set one rather
                       than showing a blank pill. A named lane always has a tag. */}
-                  {project.targetLanguage || "Set target language"}
+                  {project.targetLanguage || t("editor.lane.setTargetLanguage")}
                   <ChevronDown className="h-2.5 w-2.5" />
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="start" className="min-w-[8rem]">
                   {/* Active lanes, shown by default. */}
                   {laneSwitcher.visible.map((lane) => {
                     const active = lane === activeLane
-                    const label = lane === "" ? (defaultLaneLabel || "Target") : lane
+                    const label = lane === "" ? (defaultLaneLabel || t("editor.column.target")) : lane
                     return (
                       <DropdownMenuItem
                         key={lane || "__default__"}
@@ -2439,7 +2472,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                           className="gap-1.5 text-xs text-muted-foreground"
                         >
                           <Archive className="h-3 w-3" />
-                          Show archived ({laneSwitcher.archived.length})
+                          {t("editor.lane.showArchived", { count: laneSwitcher.archived.length })}
                         </DropdownMenuItem>
                       )}
                     </>
@@ -2454,7 +2487,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                         className="gap-2 text-xs"
                       >
                         <Languages className="h-3.5 w-3.5" />
-                        Change target language…
+                        {t("editor.lane.changeTargetLanguageItem")}
                       </DropdownMenuItem>
                     </>
                   )}
@@ -2465,10 +2498,10 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 type="button"
                 data-testid="edit-target-language"
                 onClick={onEditTargetLanguage}
-                aria-label={project.targetLanguage ? "Change target language" : "Set target language"}
+                aria-label={project.targetLanguage ? t("editor.lane.changeTargetLanguage") : t("editor.lane.setTargetLanguage")}
                 className="flex items-center gap-1 rounded-lg bg-muted px-2 py-0.5 text-[10px] font-normal normal-case tracking-normal text-muted-foreground transition-colors hover:bg-muted-foreground/20 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               >
-                {project.targetLanguage || "Set target language"}
+                {project.targetLanguage || t("editor.lane.setTargetLanguage")}
                 <Languages className="h-2.5 w-2.5" />
               </button>
             ) : project.targetLanguage ? (
@@ -2532,8 +2565,8 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
               variant="inline"
               className="h-full py-10"
               icon={Music}
-              title="No media segments yet"
-              description="Import an audio or video file, or record a take, to populate the media layer."
+              title={t("editor.empty.noMediaSegments")}
+              description={t("editor.empty.mediaLayerHint")}
             />
           </div>
         )
@@ -3250,16 +3283,17 @@ function UsfmNoteChip({
   ordinal: number
   panelActive?: boolean
 }) {
+  const t = useT()
   const label =
     note.noteKind === "xref" ? "†" : note.caller && note.caller !== "+" && note.caller !== "-" ? note.caller : String(ordinal)
-  const kindLabel = note.noteKind === "xref" ? "Cross reference" : note.noteKind === "endnote" ? "Endnote" : "Footnote"
+  const kindLabel = note.noteKind === "xref" ? t("editor.note.crossReference") : note.noteKind === "endnote" ? t("editor.note.endnote") : t("editor.note.footnote")
   const tooltipContent = (
     <div className="max-w-72 text-xs">
       <div className="mb-0.5 flex items-center gap-1.5">
         <span className="text-[9px] font-medium text-muted-foreground">{kindLabel}</span>
         {note.ref && <span className="font-mono text-[10px] text-muted-foreground">{note.ref}</span>}
       </div>
-      <div>{note.text || <span className="italic text-muted-foreground">(empty)</span>}</div>
+      <div>{note.text || <span className="italic text-muted-foreground">{t("editor.note.empty")}</span>}</div>
     </div>
   )
   const chip = (
@@ -3292,6 +3326,9 @@ function footnoteMarkerOptions(
   targetText: string,
   anchor: FootnoteInsertionAnchor | null,
   numberOffset: number,
+  /** Passed in because this is a plain function and `t` is a hook; the option's
+   *  `label`/`description` are rendered by AddFootnoteDialog. */
+  t: TFunction,
 ): Record<FootnoteMarkerStyle, AddFootnoteMarkerOption> {
   const targetFootnotes = extractUsfmFootnotes(targetText)
   const insertionIndex = anchor?.plainPosition ?? Number.POSITIVE_INFINITY
@@ -3304,20 +3341,20 @@ function footnoteMarkerOptions(
 
   return {
     numbered: {
-      label: "Numbering",
+      label: t("editor.footnote.markerNumbered"),
       caller: "+",
       startCaller: "1",
       preview: String(numberedPreview),
       startPreview: "1",
-      description: "Use automatic numeric markers.",
+      description: t("editor.footnote.markerNumberedDesc"),
     },
     lettered: {
-      label: "Lettering",
+      label: t("editor.footnote.markerLettered"),
       caller: nextLetter,
       startCaller: "a",
       preview: nextLetter,
       startPreview: "a",
-      description: "Use letter markers for a separate note sequence.",
+      description: t("editor.footnote.markerLetteredDesc"),
     },
   }
 }
@@ -3749,6 +3786,7 @@ function TargetDecoratedText({
   onRangeClick?: (ruleId: string, anchor: HTMLElement) => void
   onTermChipClick?: (term: string, anchor: HTMLElement) => void
 }) {
+  const t = useT()
   const matches = useMemo(() => {
     const activeConcepts = concepts.filter((concept) => concept.status === "active")
     if (activeConcepts.length === 0 || !text) return []
@@ -3810,11 +3848,11 @@ function TargetDecoratedText({
           showEvidence={false}
           onRangeClick={onRangeClick}
         />
-        <AppTooltip content={`Managed term: ${match.term}`}>
+        <AppTooltip content={t("editor.term.managed", { term: match.term })}>
         <span
           role={onTermChipClick ? "button" : undefined}
           tabIndex={onTermChipClick ? 0 : undefined}
-          aria-label={`Managed term: ${match.term}`}
+          aria-label={t("editor.term.managed", { term: match.term })}
           data-source-term={match.term}
           className="term-chip term-chip-preferred"
           onClick={onTermChipClick ? (event) => {
@@ -3945,6 +3983,7 @@ function EditorRow({
   sourceFootnoteNumberOffset,
   targetFootnoteNumberOffset,
 }: EditorRowProps) {
+  const t = useT()
   // FRO perf cleanup: pure pass-through openers (never consumed by
   // EditorTable/MemoizedRow) come from context instead of the prop chain —
   // keeps them out of MemoizedRow's React.memo compare surface.
@@ -3988,7 +4027,7 @@ function EditorRow({
   // AQU-664: live editor text, published on a short debounce by TranslatedEditor
   // so terminology blots recompute off the live buffer (not the ~1.2s commit).
   const [liveTargetText, setLiveTargetText] = useState<string | null>(null)
-  const [examplesExpanded, setExamplesExpanded] = useState(false)
+  const examplesExpanded = false
   // FRO-204: chip click state for TermLookupPopover on target editor chips.
   const [termChipState, setTermChipState] = useState<{ term: string; anchor: HTMLElement } | null>(null)
   // Track whether the target editor has a non-empty text selection when a chip is clicked.
@@ -4086,8 +4125,16 @@ function EditorRow({
     [cell.metadata, cell.originalHtml],
   )
   const canEditSourceForCell = canEditSource && !idmlConfiguration
+  // AQU-847: an imported MEDIA section's `value` (→ `cell.original`) is the
+  // import FILENAME; its real source text is the transcript. The read surface
+  // already knew that (filename only as a placeholder before transcription) —
+  // the EDIT surface didn't, so opening the pencil loaded the filename and
+  // committing it overwrote the transcript with the file's title. The four
+  // `cell-text` helpers below carry that rule across seed/commit/display/
+  // reconcile so the two surfaces can't drift apart again.
+  const sourceSeed = sourceEditorSeed(cell)
   const sourceReadOnlyReasonForCell = idmlConfiguration
-    ? "IDML source text is protected because changing it would invalidate the original package locator."
+    ? t("editor.source.idmlProtected")
     : sourceReadOnlyReason
   const hasTranslatedText = Boolean(visibleTranslated?.trim())
   const showCompletionOverlay = isLoading && !hasTranslatedText
@@ -4286,16 +4333,16 @@ function EditorRow({
   // We emit a `target.cell.commit` event chained off cell.targetEventId
   // (AD-2) and pinned to cell.sourceEventId (AD-9 staleness pin), then ping
   // the parent to revalidate useCells so the projection lands.
-  const handleEditorCommit = useCallback(({ value, valueHtml }: { value: string; valueHtml: string }) => {
-    if (!editable) return
-    if (!project.id) return
+  const handleEditorCommit = useCallback(async ({ value, valueHtml }: { value: string; valueHtml: string }): Promise<boolean> => {
+    if (!editable) return false
+    if (!project.id) return false
     // FRO-273: belt-and-suspenders role-mirror check. `editable` is already
     // false for roles < CONTRIBUTOR, so this guard only fires in the unlikely
     // race where `editable` hasn't updated yet after a role downgrade — it
     // prevents a guaranteed-403 event from entering the durable outbox.
     if (!canPerform("target.cell.commit", project.syncRole?.level ?? null)) {
       console.warn("[editor-commit] aborting: role too low for target.cell.commit")
-      return
+      return false
     }
     // RACE-5 — Lock re-check at commit time. Uses the ref-backed `checkLockHolder`
     // (updated synchronously on every WS frame) as the authoritative source so
@@ -4308,12 +4355,12 @@ function EditorRow({
     if (liveHolder) {
       console.warn("[editor-commit] aborting: lock held by", liveHolder)
       void onCellCommitted?.(cell.id)
-      return
+      return false
     }
     const idmlCommitError = validateIdmlEditorCommit(idmlConfiguration, valueHtml)
     if (idmlCommitError) {
       setWriteError(idmlCommitError)
-      return
+      return false
     }
     // Optimistic local patch: applies BEFORE the outbox enqueue so this row's
     // signature (`status original translated`) shifts and `useHealth` re-runs
@@ -4337,17 +4384,18 @@ function EditorRow({
     // row's ACTIVE-lane target value, so the edited text belongs to `activeLane`.
     // emitTargetCellCommit omits `''` (default lane) on the wire, so N=1 is
     // byte-identical.
-    emitTargetCellCommit({
-      projectId: project.id,
-      fileId: cell.fileId,
-      cellId: cell.id,
-      parentId,
-      sourceEventId: cell.sourceEventId ?? null,
-      value,
-      valueHtml,
-      author: username,
-      targetLang: activeLane,
-    }).then((eventId) => {
+    try {
+      const eventId = await emitTargetCellCommit({
+        projectId: project.id,
+        fileId: cell.fileId,
+        cellId: cell.id,
+        parentId,
+        sourceEventId: cell.sourceEventId ?? null,
+        value,
+        valueHtml,
+        author: username,
+        targetLang: activeLane,
+      })
       pendingTargetEventIdRef.current = eventId
       // Restore codex behaviour: a direct human edit auto-validates the cell
       // ("a human has touched it"). The target.cell.commit above cleared any
@@ -4384,12 +4432,13 @@ function EditorRow({
       // Pass the just-assigned event id: the auto-BT in the parent pins to it
       // so the BT describes THIS commit, not the lagging projection head.
       void onCellCommitted?.(cell.id, eventId, parentId)
-    }).catch((err) => {
+      return true
+    } catch (err) {
       // RES-4/M1-3: enqueue failure (IDB quota, private-mode, InsufficientRoleError)
       // must be loud. Revert the optimistic patch so the cell doesn't show
       // "saved" styling for an event that exists nowhere durable.
       console.error("[editor-commit] enqueue failed:", err)
-      const msg = err instanceof Error ? err.message : "Could not save — please try again"
+      const msg = err instanceof Error ? err.message : t("editor.write.saveFailed")
       setWriteError(msg)
       setLocalTargetDraft(null)
       // Revert the optimistic patch to the last confirmed projection value.
@@ -4397,8 +4446,9 @@ function EditorRow({
         value: cell.translated ?? "",
         valueHtml: cell.translatedHtml ?? "",
       })
-    })
-  }, [editable, canValidate, project.id, project.syncRole?.level, project.allowSelfValidation, cell.fileId, cell.id, cell.targetEventId, cell.translated, cell.translatedHtml, cell.sourceEventId, username, activeLane, onCellCommitted, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, checkLockHolder, idmlConfiguration])
+      return false
+    }
+  }, [editable, canValidate, project.id, project.syncRole?.level, project.allowSelfValidation, cell.fileId, cell.id, cell.targetEventId, cell.translated, cell.translatedHtml, cell.sourceEventId, username, activeLane, onCellCommitted, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, checkLockHolder, idmlConfiguration, t])
 
   // AQU-618: run a single-cell AI generate/Replace, then return the translator
   // to the edited cell and confirm the save. Both entry points — the Replace
@@ -4454,19 +4504,20 @@ function EditorRow({
       fileId: cell.fileId,
       cellId: cell.id,
       parentId,
-      value,
-      valueHtml,
+      // AQU-847: on a media section this routes the typed text to
+      // `transcription` and resends the filename `value` unchanged.
+      ...sourceCommitFields(cell, { value, valueHtml }),
       author: username,
     }).then((eventId) => {
       pendingSourceCommitRef.current = { eventId, parentId }
       void onCellCommitted?.(cell.id)
     }).catch((err) => {
       console.error("[source-edit] enqueue failed:", err)
-      const msg = err instanceof Error ? err.message : "Could not save source edit — please try again"
+      const msg = err instanceof Error ? err.message : t("editor.write.saveSourceFailed")
       setWriteError(msg)
       setSourceDraft(null)
     })
-  }, [canEditSourceForCell, project.id, project.syncRole?.level, cell.fileId, cell.id, cell.sourceEventId, username, onCellCommitted])
+  }, [canEditSourceForCell, project.id, project.syncRole?.level, cell, username, onCellCommitted, t])
 
   // Reconcile the pending source head against the projection — the mirror of
   // ProjectWorkspace's target-side pendingTargetCommitHeadsRef reconciliation.
@@ -4486,9 +4537,12 @@ function EditorRow({
   }, [cell.sourceEventId])
 
   // Clear the optimistic source draft once the server projection carries it.
+  // AQU-847: a media section's edit lands on `transcription`, not `original`,
+  // so reconcile against whichever field this cell's edit actually writes —
+  // otherwise the draft never clears and the row stays on optimistic text.
   useEffect(() => {
-    if (sourceDraft && (cell.original ?? "") === sourceDraft.value) setSourceDraft(null)
-  }, [cell.original, sourceDraft])
+    if (sourceDraft && projectedSourceValue(cell) === sourceDraft.value) setSourceDraft(null)
+  }, [cell, sourceDraft])
 
   // Force-close an OPEN source editor when canEditSource flips false mid-edit
   // (e.g. a settings revalidate delivers a DCS cursor). Without this the editor
@@ -4499,10 +4553,9 @@ function EditorRow({
     if (!sourceEditing || canEditSourceForCell) return
     setSourceEditing(false)
     setWriteError(
-      sourceReadOnlyReasonForCell ??
-        "Source editing is no longer available on this project — the source editor was closed.",
+      sourceReadOnlyReasonForCell ?? t("editor.write.sourceEditingClosed"),
     )
-  }, [sourceEditing, canEditSourceForCell, sourceReadOnlyReasonForCell])
+  }, [sourceEditing, canEditSourceForCell, sourceReadOnlyReasonForCell, t])
 
   // Focus the inline source editor when entering edit mode (mirrors the target
   // editor's focus effect, but scoped to the source column so it can't grab the
@@ -4551,7 +4604,7 @@ function EditorRow({
   const openAddFootnoteDialog = useCallback((defaults?: AddFootnoteDialogDefaults) => {
     if (!pendingFootnoteAnchorRef.current) captureFootnoteAnchor()
     const anchor = pendingFootnoteAnchorRef.current
-    const markerOptions = footnoteMarkerOptions(visibleTranslated ?? "", anchor, targetFootnoteNumberOffset)
+    const markerOptions = footnoteMarkerOptions(visibleTranslated ?? "", anchor, targetFootnoteNumberOffset, t)
     const markerStyle = defaults?.markerStyle ?? footnoteMarkerStyleFromCaller(defaults?.caller)
     setAddFootnoteDefaults({
       caller: defaults?.caller ?? "+",
@@ -4568,7 +4621,7 @@ function EditorRow({
       markerOptions,
     })
     setAddFootnoteOpen(true)
-  }, [captureFootnoteAnchor, cell, visibleTranslated, targetFootnoteNumberOffset])
+  }, [captureFootnoteAnchor, cell, visibleTranslated, targetFootnoteNumberOffset, t])
 
   const handleAddFootnote = useCallback((value: AddFootnoteDialogValue) => {
     const marker = createUsfmFootnoteMarker(value)
@@ -4951,8 +5004,17 @@ function EditorRow({
     // are SOURCE speech (→ sourceLanguage); recorded takes voice the TARGET
     // text (→ targetLanguage). Mapping to a Whisper tag happens downstream.
     const language = isSourceSegmentSelected(cell) ? project.sourceLanguage : project.targetLanguage
-    void transcribeCell({ cell, session: rowSession, projectId: project.id, language })
-  }, [cell, rowSession, project.id, project.sourceLanguage, project.targetLanguage])
+    await transcribeCell({ cell, session: rowSession, projectId: project.id, language })
+    // AQU-783: transcription persists a cell.audio.attach (source transcript on
+    // cells.transcription + karaoke timings) through the outbox but, unlike an
+    // editor commit, fired no completion callback — so the result only landed
+    // in the local projection after a manual page refresh. Reuse the commit
+    // callback (flush outbox + revalidate the cell row → picks up the new
+    // transcription) and poke the per-file audio read (timings) so the result
+    // appears immediately in both the text and media sections.
+    await onCellCommitted?.(cell.id)
+    notifyAudioAttachmentsChanged(cell.fileId)
+  }, [cell, rowSession, project.id, project.sourceLanguage, project.targetLanguage, onCellCommitted])
 
   const [validationPopoverOpen, setValidationPopoverOpen] = useState(false)
   const authoritativeSelfValidated = cell.activeValidators.includes(username)
@@ -5105,7 +5167,7 @@ function EditorRow({
     <span
       className="flex items-center justify-center leading-none"
       style={{ height: `calc(${sourceFontSize}px * 1.6)` }}
-      aria-label={`Line ${numberLabel}`}
+      aria-label={t("editor.row.lineAria", { number: numberLabel })}
     >
       <CellNumberPill
         number={numberLabel}
@@ -5384,12 +5446,12 @@ function EditorRow({
   // falls back to globalReferences[0], then rowIndex+1.
   const cellRef = cell.context?.trim()
     || cell.globalReferences?.[0]?.trim()
-    || `row ${rowIndex + 1}`
+    || t("editor.row.rowFallbackRef", { index: rowIndex + 1 })
   const validationTooltip = canValidateThisCell
-    ? "Not validated — click to validate"
+    ? t("editor.validation.notValidatedTooltip")
     : canValidate
-      ? "Outside your assigned files or lanes" // AQU-633: scoped-out, not a role gate
-      : "Validation unavailable"
+      ? t("editor.validation.outOfScopeTooltip") // AQU-633: scoped-out, not a role gate
+      : t("editor.validation.unavailableTooltip")
   type PreventableReactEvent<T> = React.SyntheticEvent<T> & {
     preventBaseUIHandler?: () => void
   }
@@ -5402,10 +5464,10 @@ function EditorRow({
       aria-pressed={isSelfValidated}
       aria-label={
         isSelfValidated
-          ? `Validated — ${cellRef}. Click to remove your validation.`
+          ? t("editor.validation.ariaValidated", { ref: cellRef })
           : vs === "full-others" || vs === "others"
-            ? `Validated by others — ${cellRef}. Click to add your validation.`
-            : `Not validated — ${cellRef}. Click to validate.`
+            ? t("editor.validation.ariaValidatedByOthers", { ref: cellRef })
+            : t("editor.validation.ariaNotValidated", { ref: cellRef })
       }
       onClick={(e) => {
         if (!onClick) return
@@ -5476,19 +5538,19 @@ function EditorRow({
             >
               <ul className="space-y-0.5">
                 <li className="mb-1 px-1 text-xs text-muted-foreground">
-                  Validated by
+                  {t("editor.validation.validatedBy")}
                 </li>
                 {displayedValidators.length === 0 ? (
-                  <li className="px-1 py-1 text-xs text-muted-foreground">No active validators</li>
+                  <li className="px-1 py-1 text-xs text-muted-foreground">{t("editor.validation.noActiveValidators")}</li>
                 ) : (
                   displayedValidators.map((v) => (
                     <li key={v} className="flex items-center justify-between gap-2 rounded px-1 py-1 text-xs hover:bg-muted/50">
-                      <span className="truncate">{v}{v === username ? " (you)" : ""}</span>
+                      <span className="truncate">{v}{v === username ? ` ${t("editor.validation.you")}` : ""}</span>
                       {v === username && canValidate && (
-                        <AppTooltip content="Remove your validation">
+                        <AppTooltip content={t("editor.validation.removeYours")}>
                           <button
                             type="button"
-                            aria-label="Remove your validation"
+                            aria-label={t("editor.validation.removeYours")}
                             className="flex-shrink-0 rounded p-0.5 text-muted-foreground/70 transition-colors hover:bg-destructive/10 hover:text-destructive"
                             onClick={() => {
                               emitValidationChange(false)
@@ -5522,11 +5584,11 @@ function EditorRow({
     </div>
   )
   const cellStateLabel =
-    cell.status === "validated" ? "validated" :
-    cell.status === "empty" ? "empty" :
-    isSelfValidated ? "self-validated" :
-    "unvalidated"
-  const editorAriaLabel = `${cellRef} — ${cellStateLabel}`
+    cell.status === "validated" ? t("editor.state.validated") :
+    cell.status === "empty" ? t("editor.state.empty") :
+    isSelfValidated ? t("editor.state.selfValidated") :
+    t("editor.state.unvalidated")
+  const editorAriaLabel = t("editor.row.editorAria", { ref: cellRef, state: cellStateLabel })
 
   // FRO-297: Grid-row keydown handler. Fires when the row wrapper div has
   // focus (not TipTap). Arrow keys / j / k navigate between rows; Enter
@@ -5582,7 +5644,7 @@ function EditorRow({
         // signal is testable and not only carried by a transient CSS ring.
         data-ai-translating={isLoading ? "true" : undefined}
         tabIndex={0}
-        aria-label={`${cellRef} cell`}
+        aria-label={t("editor.row.cellAria", { ref: cellRef })}
         className={cn(
           // Flat row in a continuous list: tinted by hover/selection overlays,
           // not shadows. Depth is gone by design — the Linear model reserves
@@ -5682,12 +5744,12 @@ function EditorRow({
               See: src/components/SelectionBar.tsx, src/lib/audio/selection.ts */}
           <div className="flex w-5 shrink-0 flex-col items-center">
             <div className="mb-1 h-4 shrink-0" aria-hidden />
-            <AppTooltip content={isMultiSelected ? "Selected. Drag up or down to extend the range." : "Select cell. Drag up or down to select a range."} side="right">
+            <AppTooltip content={isMultiSelected ? t("editor.row.selectedTooltip") : t("editor.row.selectTooltip")} side="right">
               <button
                 type="button"
                 role="checkbox"
                 aria-checked={isMultiSelected}
-                aria-label={isMultiSelected ? "Selected cell. Drag to extend selection." : "Select cell. Drag to select a range."}
+                aria-label={isMultiSelected ? t("editor.row.selectedAria") : t("editor.row.selectAria")}
                 onPointerDown={onSelectionPointerDown}
                 onClick={(e) => e.stopPropagation()}
                 className={cn(
@@ -5725,6 +5787,24 @@ function EditorRow({
                     upstreamStaleCellIds={isUpstreamStaleSource ? new Set([cell.id]) : new Set()}
                   />
                 )}
+                {showFormattingLossWarning && (
+                  <AppTooltip
+                    content={t("editor.source.formattingLossTooltip")}
+                    className="max-w-xs"
+                  >
+                    <span
+                      role="img"
+                      aria-label={t("editor.source.formattingLossTooltip")}
+                      data-testid="formatting-loss-warning"
+                      className={cn(
+                        gutterIconShell,
+                        "text-amber-600 dark:text-amber-400",
+                      )}
+                    >
+                      <Bold className="h-3 w-3" />
+                    </span>
+                  </AppTooltip>
+                )}
                 {(isSynthBusy || isSynthError) && (
                   <SynthStatusBadge status={synthStatus} cellId={cell.id} projectId={project.id} onOpenAudioSetup={onOpenAudioSetup} />
                 )}
@@ -5733,11 +5813,11 @@ function EditorRow({
                     hover/focus), this icon stays visible whenever the cell
                     carries an open comment. Clicking opens the comments panel. */}
                 {onOpenComments && openCommentCount > 0 && (
-                  <AppTooltip content={`${openCommentCount} open comment${openCommentCount !== 1 ? "s" : ""}`}>
+                  <AppTooltip content={t("editor.comments.open", { count: openCommentCount })}>
                     <button
                       type="button"
-                      aria-label={`${openCommentCount} open comment${openCommentCount !== 1 ? "s" : ""} — open comments`}
-                      className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full text-blue-500 transition-colors hover:bg-blue-500/10 hover:text-blue-600"
+                      aria-label={t("editor.comments.openAria", { count: openCommentCount })}
+                      className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-md text-blue-500 transition-colors hover:bg-blue-500/10 hover:text-blue-600"
                       onClick={() => onOpenComments(cell.id)}
                     >
                       <MessageCircle className="h-3.5 w-3.5" fill="currentColor" fillOpacity={0.15} />
@@ -5790,7 +5870,9 @@ function EditorRow({
             className={cn(
               // The showcase node IS the text surface so it fills the whole
               // source column. pr-7 clears the floating pencil.
-              "relative flex h-full min-h-[40px] flex-col rounded-lg px-2 py-1.5 pr-7 transition-[colors,opacity]",
+              // select-text: global chrome disables selection; source must stay
+              // selectable for add-to-termbase / Ask AI from selection.
+              "relative flex h-full min-h-[40px] flex-col rounded-lg px-2 py-1.5 pr-7 select-text transition-[colors,opacity]",
               // Match the target well — same muted fill + ring (not a darker
               // primary-tinted edit chrome).
               "focus-within:bg-muted focus-within:ring-1 focus-within:ring-ring/40 focus-within:ring-inset",
@@ -5798,7 +5880,7 @@ function EditorRow({
               isSynthBusy && "opacity-70",
             )}
             dir={sourceCellDirection}
-            aria-label="Source text"
+            aria-label={t("editor.source.textAria")}
             data-cell-type="source"
             style={{ fontSize: `${sourceFontSize}px`, lineHeight: "1.6" }}
             onMouseUp={(!sourceEditing && (onAddConceptFromSelection || onAskAiFromSelection)) ? handleSourceMouseUp : undefined}
@@ -5826,12 +5908,12 @@ function EditorRow({
                 reserved for column alignment and is usually empty, so it has no
                 room to spare. */}
             {canEditSourceForCell ? (
-              <AppTooltip content={sourceEditing ? "Done editing source" : "Edit source text"}>
+              <AppTooltip content={sourceEditing ? t("editor.source.doneEditing") : t("editor.source.editText")}>
                 <Button
                   type="button"
                   variant="ghost"
                   size="icon-xs"
-                  aria-label={sourceEditing ? "Done editing source" : "Edit source text"}
+                  aria-label={sourceEditing ? t("editor.source.doneEditing") : t("editor.source.editText")}
                   aria-pressed={sourceEditing}
                   onClick={() => setSourceEditing((v) => !v)}
                   className={cn(
@@ -5850,7 +5932,7 @@ function EditorRow({
               // silently vanish (AQU-615 review nit).
               <AppTooltip content={sourceReadOnlyReasonForCell} className="max-w-xs">
                 <span
-                  aria-label="Source is locked"
+                  aria-label={t("editor.source.locked")}
                   className="absolute right-1 top-1 z-10 inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground/50 opacity-0 focus-visible:opacity-100 [.group:hover:not([data-follow-hover-lock]_*)_&]:opacity-100"
                 >
                   <Lock className="size-3" />
@@ -5866,43 +5948,35 @@ function EditorRow({
                 floating action rail occupies. */}
             <div data-testid="source-context-line" data-context-kind={contextIsTimecode ? "timecode" : undefined} className={cn("mb-1 flex h-4 items-center gap-1 text-xs text-muted-foreground", contextIsTimecode ? "justify-start text-left" : "justify-center text-center")} dir="ltr">
               <span>{cell.context}</span>
-              {showFormattingLossWarning && (
-                <AppTooltip content="Source has inline formatting that the target does not preserve. Formatting will be lost on export." className="max-w-xs">
-                  <span className="inline-flex items-center gap-0.5 rounded bg-amber-100 px-1 py-0.5 text-[9px] font-medium text-amber-700 dark:bg-amber-950 dark:text-amber-400">
-                    <AlertTriangle className="h-2.5 w-2.5" />
-                    formatting
-                  </span>
-                </AppTooltip>
-              )}
             </div>
             <SourceReferenceAttachments metadata={cell.metadata} />
             {sourceEditing ? (
               <TranslatedEditor
                 cellId={`${cell.id}::source`}
-                initialPlain={sourceDraft?.value ?? cell.original}
-                initialHtml={sourceDraft?.valueHtml ?? cell.originalHtml}
+                initialPlain={sourceDraft?.value ?? sourceSeed.text}
+                initialHtml={sourceDraft?.valueHtml ?? sourceSeed.html}
                 onCommit={handleSourceCommit}
                 onBlur={() => setSourceEditing(false)}
                 editable
                 // Size to content like the read surface — compactHeight skips
                 // the h-full / min-h-[40px] stretch that was jumping the row.
                 compactHeight
-                ariaLabel="Edit source text"
-                placeholder="Source text…"
+                ariaLabel={t("editor.source.editText")}
+                placeholder={t("editor.source.placeholder")}
                 className="w-full !px-0"
               />
-            ) : (sourceDraft?.valueHtml || cell.originalHtml) ? (
+            ) : (cell.medium !== "media" && (sourceDraft?.valueHtml || cell.originalHtml)) ? (
               <SanitizedRichHtml html={sourceDraft?.valueHtml || cell.originalHtml || ""} />
             ) : (
               <UsfmSourceText
                 // AQU-646: an imported media segment's stored `value` is the
                 // filename; once transcribed, the ASR transcript IS the source
                 // text users translate. Non-media cells are unaffected.
-                text={
-                  cell.medium === "media" && cell.transcription?.trim()
-                    ? cell.transcription
-                    : (sourceDraft?.value ?? cell.original)
-                }
+                // AQU-847: media rows skip the HTML branch above entirely — a
+                // transcript is plain text, and letting `originalHtml` win
+                // there is what pinned the file title over the transcript once
+                // any source commit had landed.
+                text={displayedSourceText(cell, sourceDraft?.value)}
                 highlights={highlights}
                 ranges={sourceRanges}
                 showEvidence={examplesExpanded}
@@ -5914,11 +5988,7 @@ function EditorRow({
               />
             )}
             {cellExamples.length > 0 && (
-              <ExamplePanel
-                examples={cellExamples}
-                expanded={examplesExpanded}
-                onExpandedChange={setExamplesExpanded}
-              />
+              <ExamplePanel examples={cellExamples} />
             )}
           </div>
         )}
@@ -5953,10 +6023,10 @@ function EditorRow({
               <Badge
                 variant="outline"
                 className="ml-auto h-4 shrink-0 gap-1 border-amber-500/40 bg-amber-500/10 px-1.5 text-[9px] font-medium text-amber-700 dark:text-amber-300"
-                aria-label="AI draft — individual human review required"
+                aria-label={t("editor.ai.draftBadgeAria")}
               >
                 <Sparkles className="size-2.5" />
-                AI draft · review required
+                {t("editor.ai.draftBadge")}
               </Badge>
             )}
           </div>
@@ -6164,8 +6234,8 @@ function EditorRow({
                       <Spinner className="size-3.5" aria-hidden />
                       <span>
                         {loadingPhase === "searching"
-                          ? "Looking up similar examples…"
-                          : "Generating translation…"}
+                          ? t("editor.ai.lookingUpExamples")
+                          : t("editor.ai.generatingTranslation")}
                       </span>
                     </div>
                   )}
@@ -6181,6 +6251,8 @@ function EditorRow({
                 <ContextualDraftCard
                   cellId={cell.id}
                   projectId={project.id}
+                  fileId={cell.fileId}
+                  targetLang={activeLane}
                   editable={editable}
                   dir={targetCellDirection}
                   onAccept={(text) => handleEditorCommit({ value: text, valueHtml: text })}
@@ -6247,7 +6319,7 @@ function EditorRow({
                   type="button"
                   size="icon-xs"
                   variant="ghost"
-                  aria-label="Dismiss"
+                  aria-label={t("common.dismiss")}
                   onClick={() => setWriteError(null)}
                   className="shrink-0 text-destructive hover:bg-destructive/20"
                 >
@@ -6264,7 +6336,7 @@ function EditorRow({
                 className="mt-1 flex items-center gap-1 text-[11px] font-medium text-emerald-600 dark:text-emerald-400"
               >
                 <Check className="h-3 w-3" strokeWidth={3} />
-                <span>Saved</span>
+                <span>{t("common.saved")}</span>
               </div>
             )}
           </div>
@@ -6301,16 +6373,16 @@ function EditorRow({
                 icon={<Sparkles className="h-3.5 w-3.5" />}
                 tooltip={
                   isAnonymous
-                    ? "Sign in for AI translations"
+                    ? t("editor.ai.signInForTranslations")
                     : !editable
-                      ? "Read-only (imported from git)"
+                      ? t("common.readOnlyGit")
                       : !isCompletionConfigured
-                        ? "Set up AI to enable"
+                        ? t("editor.ai.setUpToEnable")
                         : !isCompletionAvailable
-                          ? "AI service unavailable — try again shortly"
+                          ? t("editor.ai.serviceUnavailable")
                           : isLoading
-                            ? "Generating…"
-                            : "Translate with AI"
+                            ? t("editor.ai.generating")
+                            : t("editor.ai.translateWithAi")
                 }
                 onClick={() => {
                   if (isLoading) return
@@ -6382,7 +6454,7 @@ function EditorRow({
                 return (
                   <RailButton
                     icon={<PilcrowRight className="h-3.5 w-3.5" />}
-                    tooltip={groupBusy ? "Generating…" : `Draft paragraph (${paragraphGroupSize} cells)`}
+                    tooltip={groupBusy ? t("editor.ai.generating") : t("editor.ai.draftParagraph", { count: paragraphGroupSize })}
                     onClick={() => {
                       if (groupBusy) return
                       setShowParagraphConfirm(true)
@@ -6405,12 +6477,12 @@ function EditorRow({
                   icon={<RefreshCw className="h-3.5 w-3.5" />}
                   tooltip={
                     !isCompletionConfigured
-                      ? "Set up AI to enable"
+                      ? t("editor.ai.setUpToEnable")
                       : !isCompletionAvailable
-                        ? "AI service unavailable — try again shortly"
+                        ? t("editor.ai.serviceUnavailable")
                         : isLoading
-                          ? "Generating…"
-                          : "Regenerate — another AI variation"
+                          ? t("editor.ai.generating")
+                          : t("editor.ai.regenerate")
                   }
                   onClick={() => {
                     if (isLoading) return
@@ -6444,10 +6516,12 @@ function EditorRow({
                 const unsupportedReason = getUnsupportedReason()
                 const isUnsupported = unsupportedReason !== null
                 const micTooltip = micDenied
-                  ? "Microphone access blocked — click for help"
+                  ? t("editor.audio.micBlockedTooltip")
                   : isUnsupported
+                    // Browser-capability diagnostic from outside any component:
+                    // stays English (AQU-510).
                     ? `Recording unavailable — ${unsupportedReason}`
-                    : "Record audio"
+                    : t("editor.audio.record")
                 return (
                   <div className="relative">
                     <RailButton
@@ -6475,16 +6549,16 @@ function EditorRow({
                         role="tooltip"
                         className="absolute bottom-full right-0 z-50 mb-1 w-52 rounded-md border bg-popover px-3 py-2 text-[11px] leading-snug text-popover-foreground shadow-md"
                       >
-                        <strong className="block font-semibold">Microphone blocked</strong>
+                        <strong className="block font-semibold">{t("editor.audio.micBlockedTitle")}</strong>
                         <span className="mt-0.5 block text-muted-foreground">
-                          Open your browser&apos;s site settings (🔒 in the address bar) and allow microphone access, then reload the page.
+                          {t("editor.audio.micBlockedHelp")}
                         </span>
                         <button
                           type="button"
                           onClick={() => setShowMicDeniedHelp(false)}
                           className="mt-1.5 text-[10px] underline text-muted-foreground hover:text-foreground"
                         >
-                          Dismiss
+                          {t("common.dismiss")}
                         </button>
                       </span>
                     )}
@@ -6515,7 +6589,7 @@ function EditorRow({
                       <Play className="h-3.5 w-3.5" />
                     )
                   }
-                  tooltip={audioController.isPlaying ? "Pause" : "Play audio"}
+                  tooltip={audioController.isPlaying ? t("common.pause") : t("editor.audio.play")}
                   onClick={() => {
                     if (audioController.state === "loading") return
                     if (audioController.isPlaying) audioController.pause()
@@ -6554,7 +6628,7 @@ function EditorRow({
               {editable && !isLoading && (
                 <RailButton
                   icon={<NotebookPen className="h-3.5 w-3.5" />}
-                  tooltip="Add footnote"
+                  tooltip={t("editor.footnote.add")}
                   onMouseDown={(e) => {
                     e.preventDefault()
                     e.stopPropagation()
@@ -6569,8 +6643,8 @@ function EditorRow({
                   icon={<MessageCircle className="h-3.5 w-3.5" />}
                   tooltip={
                     openCommentCount > 0
-                      ? `${openCommentCount} open comment${openCommentCount !== 1 ? "s" : ""}`
-                      : "Add comment"
+                      ? t("editor.comments.open", { count: openCommentCount })
+                      : t("editor.cell.addComment")
                   }
                   onClick={() => onOpenComments(cell.id)}
                   toneClass={
@@ -6585,7 +6659,7 @@ function EditorRow({
               {onOpenHistory && (
                 <RailButton
                   icon={<HistoryIcon className="h-3.5 w-3.5" />}
-                  tooltip="Edit history"
+                  tooltip={t("editor.history.title")}
                   onClick={() => onOpenHistory(cell.id)}
                 />
               )}
@@ -6593,7 +6667,7 @@ function EditorRow({
               {onSeekToCue && (
                 <RailButton
                   icon={<Play className="h-3.5 w-3.5" />}
-                  tooltip="Play from this cue"
+                  tooltip={t("editor.cue.playFrom")}
                   onClick={() => onSeekToCue(cell.id)}
                 />
               )}
@@ -6618,18 +6692,31 @@ function EditorRow({
             {
               value: "health",
               icon: <Activity className="h-3 w-3" />,
-              label: "Retrieval support",
+              label: t("editor.expansion.retrievalSupport"),
               renderContent: () => (
                 <div className="space-y-1.5 py-3 text-xs text-muted-foreground">
                   <p>
-                    <span className="font-medium text-foreground">{cell.endorsementCount ?? 0}</span>
-                    {" "}endorsement{(cell.endorsementCount ?? 0) === 1 ? "" : "s"} · support{" "}
-                    <span className="font-medium text-foreground">{healthValue}%</span>
+                    {/* Both figures are what the line is read for, so they keep
+                        the foreground weight the muted paragraph drops. */}
+                    <RichMessage
+                      k="editor.expansion.endorsements"
+                      count={cell.endorsementCount ?? 0}
+                      values={{
+                        count: (
+                          <span className="font-medium text-foreground">
+                            {cell.endorsementCount ?? 0}
+                          </span>
+                        ),
+                        percent: (
+                          <span className="font-medium text-foreground">{healthValue}</span>
+                        ),
+                      }}
+                    />
                   </p>
                   <p>
                     {cellNeedsAttention
-                      ? "Lower retrieval support — review terminology and context closely."
-                      : "Better retrieval support — human review is still required."}
+                      ? t("editor.expansion.lowerSupport")
+                      : t("editor.expansion.betterSupport")}
                   </p>
                 </div>
               ),
@@ -6637,7 +6724,7 @@ function EditorRow({
             {
               value: "backtranslation",
               icon: <FileText className="h-3 w-3" />,
-              label: "Back-translation",
+              label: t("editor.bt.label"),
               attentionDot: isBtStale ? "amber" : undefined,
               renderContent: () => (
                 <div className="flex flex-col gap-2.5">
@@ -6646,8 +6733,8 @@ function EditorRow({
                       buttons. ─────────────────────────────────────────────── */}
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-1.5">
-                      <span className="text-xs font-medium text-foreground">Back-translation</span>
-                      <AppTooltip content="An AI reading of your translation back in your reference language. Use it to check the meaning carried over — the AI can misread, so treat it as a second opinion, not proof.">
+                      <span className="text-xs font-medium text-foreground">{t("editor.bt.label")}</span>
+                      <AppTooltip content={t("editor.bt.explainTooltip")}>
                         <Info className="h-3 w-3 cursor-help text-muted-foreground/50 transition-colors hover:text-muted-foreground" />
                       </AppTooltip>
                     </div>
@@ -6659,8 +6746,8 @@ function EditorRow({
                         {editable && (
                           <AppTooltip content={
                             !isBacktranslationConfigured
-                              ? "Sign in or add an AI model in project settings to generate back-translations"
-                              : "Regenerate with AI"
+                              ? t("editor.bt.needsAiTooltip")
+                              : t("editor.bt.regenerateTooltip")
                           }>
                             <Button
                               type="button"
@@ -6668,8 +6755,8 @@ function EditorRow({
                               size="icon-xs"
                               disabled={!isBacktranslationConfigured || isBacktranslating}
                               onClick={() => onBacktranslate?.(cell, "regenerate")}
-                              aria-label="Regenerate the back-translation"
-                              className="rounded-full text-muted-foreground hover:text-foreground"
+                              aria-label={t("editor.bt.regenerateAria")}
+                              className="text-muted-foreground hover:text-foreground"
                             >
                               {isBacktranslating ? (
                                 <Spinner className="size-3.5" />
@@ -6681,28 +6768,28 @@ function EditorRow({
                         )}
                         {/* Edit — contributor+ only. A quiet icon, not a labelled pill. */}
                         {editable ? (
-                          <AppTooltip content="Edit the back-translation">
+                          <AppTooltip content={t("editor.bt.editTooltip")}>
                             <Button
                               type="button"
                               variant="ghost"
                               size="icon-xs"
                               onClick={handleBtEditStart}
-                              aria-label="Edit the back-translation"
-                              className="rounded-full text-muted-foreground hover:text-foreground"
+                              aria-label={t("editor.bt.editTooltip")}
+                              className="text-muted-foreground hover:text-foreground"
                             >
                               <Pencil />
                             </Button>
                           </AppTooltip>
                         ) : (
-                          <AppTooltip content="Contributor+ required to edit back-translations">
+                          <AppTooltip content={t("editor.bt.contributorRequired")}>
                             <span className="inline-flex">
                               <Button
                                 type="button"
                                 variant="ghost"
                                 size="icon-xs"
                                 disabled
-                                aria-label="Contributor+ required to edit back-translations"
-                                className="rounded-full text-muted-foreground"
+                                aria-label={t("editor.bt.contributorRequired")}
+                                className="text-muted-foreground"
                               >
                                 <Pencil />
                               </Button>
@@ -6717,7 +6804,7 @@ function EditorRow({
                   {visibleTranslated.trim().length === 0 ? (
                     <div className="flex flex-col items-center gap-1.5 rounded-xl bg-muted/40 px-3 py-6 text-center">
                       <FileText className="h-4 w-4 text-muted-foreground/40" />
-                      <p className="text-xs text-muted-foreground">Translate this cell to read it back.</p>
+                      <p className="text-xs text-muted-foreground">{t("editor.bt.translateFirst")}</p>
                     </div>
                   ) : cell.backtranslation ? (
                     <>
@@ -6727,7 +6814,7 @@ function EditorRow({
                         <div className="flex items-center justify-between gap-2 rounded-lg bg-amber-500/[0.08] px-3 py-1.5">
                           <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-amber-700 dark:text-amber-300">
                             <AlertTriangle className="h-3 w-3 shrink-0" />
-                            Your translation changed since this was written
+                            {t("editor.bt.staleWarning")}
                           </span>
                           {editable && (
                             <Button
@@ -6743,7 +6830,7 @@ function EditorRow({
                               ) : (
                                 <RefreshCw />
                               )}
-                              Refresh
+                              {t("common.refresh")}
                             </Button>
                           )}
                         </div>
@@ -6769,7 +6856,7 @@ function EditorRow({
                               size="xs"
                               onClick={handleBtCancel}
                             >
-                              Cancel
+                              {t("common.cancel")}
                             </Button>
                             <Button
                               type="button"
@@ -6777,7 +6864,7 @@ function EditorRow({
                               onClick={handleBtSave}
                               disabled={btSaving || !btEditValue.trim()}
                             >
-                              {btSaving ? "Saving…" : "Save"}
+                              {btSaving ? t("common.saving") : t("common.save")}
                             </Button>
                           </div>
                         </div>
@@ -6799,31 +6886,30 @@ function EditorRow({
                        automatically when the translation is committed. */
                     <div className="flex flex-col items-center gap-2.5 rounded-xl bg-muted/40 px-3 py-6 text-center">
                       <p className="max-w-[34ch] text-xs leading-relaxed text-muted-foreground">
-                        See what your translation says when read back, so you can check the meaning carried over.
+                        {t("editor.bt.emptyPitch")}
                       </p>
                       {editable ? (
                         <>
                           <Button
                             type="button"
-                            size="sm"
                             onClick={() => onBacktranslate?.(cell, "read-back")}
                             disabled={!isBacktranslationConfigured || isBacktranslating || visibleTranslated.trim().length === 0}
                           >
                             {isBacktranslating ? (
-                              <><Spinner className="size-3.5" /> Reading it back…</>
+                              <><Spinner className="size-3.5" /> {t("editor.bt.readingItBack")}</>
                             ) : (
-                              <><Sparkles /> Read it back with AI</>
+                              <><Sparkles /> {t("editor.bt.readItBack")}</>
                             )}
                           </Button>
                           {!isBacktranslationConfigured && (
                             <p className="text-[11px] text-muted-foreground/70">
-                              Sign in or add an AI model in project settings to generate one.
+                              {t("editor.bt.needsAiHint")}
                             </p>
                           )}
                         </>
                       ) : (
                         <p className="text-[11px] text-muted-foreground/70">
-                          A contributor can generate one with AI.
+                          {t("editor.bt.contributorCanGenerate")}
                         </p>
                       )}
                     </div>
@@ -6840,8 +6926,8 @@ function EditorRow({
                         className="flex w-full items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
                       >
                         <ChevronRight className={cn("h-3 w-3 shrink-0 transition-transform", btStatsOpen && "rotate-90")} />
-                        Statistical gloss
-                        <span className="font-normal text-muted-foreground/60">— word-for-word, from this project's own pairs</span>
+                        {t("editor.bt.statisticalGloss")}
+                        <span className="font-normal text-muted-foreground/60">{t("editor.bt.statisticalGlossSub")}</span>
                       </button>
                       {btStatsOpen && (
                         <div className="flex flex-col gap-1.5 px-2.5 pb-2.5">
@@ -6849,13 +6935,11 @@ function EditorRow({
                             <p className="text-[13px] leading-relaxed text-foreground/80">{statisticalGloss}</p>
                           ) : (
                             <p className="text-[11px] italic text-muted-foreground">
-                              Not enough translated pairs in this project to build a gloss yet.
+                              {t("editor.bt.glossNotEnoughPairs")}
                             </p>
                           )}
                           <p className="text-[10px] leading-relaxed text-muted-foreground/70">
-                            Built statistically from this project's translated pairs — no AI involved.
-                            It's only as good as the corpus so far: expect rough, literal, sometimes
-                            wrong word choices. Use it as a hint, not a reading.
+                            {t("editor.bt.glossDisclaimer")}
                           </p>
                         </div>
                       )}
@@ -6871,8 +6955,8 @@ function EditorRow({
                         className="flex w-full items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
                       >
                         <ChevronRight className={cn("h-3 w-3 shrink-0 transition-transform", btAlignmentOpen && "rotate-90")} />
-                        Alignment
-                        <span className="font-normal text-muted-foreground/60">— word-level source/target view</span>
+                        {t("editor.bt.alignment")}
+                        <span className="font-normal text-muted-foreground/60">{t("editor.bt.alignmentSub")}</span>
                       </button>
                       {btAlignmentOpen && alignmentModelForExpansion && (
                         <div data-aquilla-alignment-panel className="px-2.5 pb-2.5">
@@ -6896,7 +6980,7 @@ function EditorRow({
             ...(showFootnotesInExpansion ? [{
               value: "footnotes",
               icon: <NotebookPen className="h-3 w-3" />,
-              label: "Footnotes",
+              label: t("editor.footnotes.label"),
               renderContent: () => (
                 <FootnoteInline
                   sourceFootnotes={sourceDetailFootnotes}
@@ -6922,7 +7006,7 @@ function EditorRow({
             {
               value: "audio",
               icon: <Mic className="h-3 w-3" />,
-              label: "Recording",
+              label: t("editor.expansion.recording"),
               attentionDot: transcriptNeedsAttention
                 ? "amber"
                 : (hasAudio || hasGeneratedVoice)
@@ -6956,7 +7040,7 @@ function EditorRow({
                     <div className="flex items-center justify-center rounded-lg border-2 border-dashed border-primary/50 bg-primary/5 py-2 text-xs font-medium text-primary">
                       {(() => {
                         const v = audioLens?.voices.find(vv => vv.id === dragOverVoiceId)
-                        return v ? `Synthesize with ${v.name}` : "Drop to synthesize"
+                        return v ? t("editor.voice.synthesizeWith", { name: v.name }) : t("editor.voice.dropToSynthesize")
                       })()}
                     </div>
                   )}
@@ -6995,7 +7079,7 @@ function EditorRow({
                           disabled={!editable || !onOpenRecording}
                         >
                           <Mic className="h-3 w-3" />
-                          Re-record
+                          {t("editor.audio.reRecordShort")}
                         </Button>
                         <Button
                           type="button"
@@ -7010,7 +7094,7 @@ function EditorRow({
                               isTranscribing && "animate-pulse",
                             )}
                           />
-                          {isTranscribing ? "Transcribing…" : "Transcribe"}
+                          {isTranscribing ? t("common.transcribing") : t("editor.cell.transcribeShort")}
                         </Button>
                         {/* Surfaces model-download %, failures (click-to-expand
                             with Retry), and a success flash. Errors previously
@@ -7072,7 +7156,7 @@ function EditorRow({
                         />
                       )}
                       <div className="flex flex-wrap items-center gap-1.5">
-                        <span className="text-[11px] text-muted-foreground">AI generated voice. Drag a voice from the toolbar to regenerate, or:</span>
+                        <span className="text-[11px] text-muted-foreground">{t("editor.voice.aiGeneratedHint")}</span>
                         <Button
                           type="button"
                           size="xs"
@@ -7081,7 +7165,7 @@ function EditorRow({
                           disabled={!editable || !onOpenRecording}
                         >
                           <Mic className="h-3 w-3" />
-                          Record over
+                          {t("editor.audio.recordOver")}
                         </Button>
                       </div>
                     </>
@@ -7091,18 +7175,17 @@ function EditorRow({
                         <Mic className="h-5 w-5" />
                       </div>
                       <p className="text-xs text-muted-foreground">
-                        No audio yet. Record below, or drag a voice onto this cell from the toolbar above.
+                        {t("editor.audio.noAudioYet")}
                       </p>
                       <div className="flex flex-wrap items-center justify-center gap-2">
                         <Button
                           type="button"
-                          size="sm"
                           variant="default"
                           onClick={() => onOpenRecording?.(cell.id)}
                           disabled={!editable || !onOpenRecording}
                         >
                           <Mic className="h-3 w-3" />
-                          Record
+                          {t("editor.audio.recordShort")}
                         </Button>
                       </div>
                     </div>
@@ -7113,7 +7196,7 @@ function EditorRow({
             {
               value: "issues",
               icon: <AlertTriangle className="h-3 w-3" />,
-              label: "Issues",
+              label: t("editor.expansion.issues"),
               attentionDot:
                 cellInfractions.length > 0
                   ? hasMajorInfraction
@@ -7125,7 +7208,7 @@ function EditorRow({
                 <div className="flex flex-col gap-1.5">
                   {cellInfractions.length === 0 && waivedInfractions.length === 0 ? (
                     <p className="py-3 text-center text-xs text-muted-foreground">
-                      No translation rule issues on this cell.
+                      {t("editor.issues.none")}
                     </p>
                   ) : (
                     <>
@@ -7161,7 +7244,7 @@ function EditorRow({
                       {waivedInfractions.length > 0 && (
                         <>
                           <div className="mt-2 px-1 text-xs text-muted-foreground">
-                            Waived
+                            {t("editor.issues.waived")}
                           </div>
                           {waivedInfractions.map((inf) => {
                             const rule = ruleMap.get(inf.ruleId)
@@ -7194,7 +7277,7 @@ function EditorRow({
                   {
                     value: "metadata",
                     icon: <Braces className="h-3 w-3" />,
-                    label: "Metadata",
+                    label: t("editor.expansion.metadata"),
                     renderContent: () => <CellMetadataTab metadata={cell.metadata as Record<string, unknown>} />,
                   },
                 ]
@@ -7362,25 +7445,26 @@ export function ParagraphDraftConfirmDialog({
   onConfirm,
   onCancel,
 }: ParagraphDraftConfirmDialogProps) {
+  const t = useT()
   const description = draftableCount === totalCount
-    ? `Draft this paragraph? ${totalCount} cells will be drafted as one unit.`
-    : `Draft this paragraph? ${draftableCount} of ${totalCount} cells will be drafted; already-validated cells are kept as-is.`
+    ? t("editor.paragraph.confirmAll", { total: totalCount })
+    : t("editor.paragraph.confirmPartial", { draftable: draftableCount, total: totalCount })
 
   return (
     <Dialog open={open} onOpenChange={(isOpen) => { if (!isOpen) onCancel() }}>
       <DialogContent aria-labelledby="paragraph-draft-title" aria-describedby="paragraph-draft-desc">
         <DialogHeader>
-          <DialogTitle id="paragraph-draft-title">Draft this paragraph?</DialogTitle>
+          <DialogTitle id="paragraph-draft-title">{t("editor.paragraph.confirmTitle")}</DialogTitle>
           <DialogDescription id="paragraph-draft-desc">
             {description}
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>
           <Button variant="outline" onClick={onCancel}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button onClick={onConfirm}>
-            Draft paragraph
+            {t("editor.paragraph.confirmAction")}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -6,10 +6,10 @@ import { jwtFor, seedProjectWithFile } from "../../helpers/seed-project"
  * AssignWork — submitting the assignment form.
  *
  * AssignWork.tsx renders a form with:
- *   - Assignee <select> (project members only — AQU-676)
- *   - Book <select> (project files)
- *   - Chapter <select> (optional sections)
- *   - Deadline <input type="date"> (optional)
+ *   - Assignee combobox (project members only — AQU-676)
+ *   - Book combobox (project files)
+ *   - Chapters checkbox group (optional sections)
+ *   - Deadline date picker (optional)
  *   - "Assign" button (stays enabled; validates on click)
  *
  * On submit, createAssignment() posts an assignment.create event to the

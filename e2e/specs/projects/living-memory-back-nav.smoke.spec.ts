@@ -2,38 +2,38 @@ import { test, expect } from "../../helpers/multi-user"
 import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
- * Living Memory — shell-owned navigation back to the editor.
+ * Living Memory — settings pane navigation back to the editor.
  *
- * AQU-254 moved Living Memory inside the ProjectWorkspace shell
- * (/project/:id/memory renders ProjectWorkspace with the memory surface in
- * the center). The page's own "Back to project" button was removed —
- * LivingMemoryPage.tsx: "no back button: shell owns nav". Navigation back to
- * the editor is via the persistent sidebar: clicking a file row calls
- * setActiveFileId → navigate(`/project/:id/editor/file/:fileId`).
+ * Living Memory lives under Project Settings (`/project/:id/settings/memory`).
+ * Opening Settings from the editor stamps `?return=` so the breadcrumb includes
+ * a clickable Editor crumb. Direct /settings/memory URLs do not.
  *
- * This spec: create a project → import a file → open Memory via the sidebar
- * "More" menu → verify the Living Memory page renders inside the shell →
- * click the file row in the sidebar → URL returns to the editor
- * (/project/:id/editor/file/:fileId).
+ * This spec: import a file → open Settings from the header cog →
+ * open Living Memory → verify the pane renders → click Editor → return to
+ * the file editor.
  */
-test("living memory shell nav returns to the project editor", async ({ alice }) => {
+test("living memory settings pane returns to the project editor", async ({ alice }) => {
   const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `MemoryBack ${Date.now()}` })
-  await openSeededProject(alice, seeded)
+  const ws = await openSeededProject(alice, seeded)
 
-  // Open Living Memory via the sidebar "More" menu (shell-owned nav).
-  await alice.getByRole("button", { name: /More project options/i }).click()
-  await alice.getByRole("button", { name: /^Memory$/ }).click()
-  await alice.waitForURL(/\/project\/[^/]+\/memory$/, { timeout: 5_000 })
+  await expect(alice.getByRole("button", { name: /^Settings$/i })).toBeVisible({ timeout: 10_000 })
+  await alice.getByRole("button", { name: /^Settings$/i }).click()
+  await alice.waitForURL(/\/project\/[^/]+\/settings/, { timeout: 10_000 })
 
-  // The memory surface renders inside the workspace shell.
+  await alice.getByRole("link", { name: /Living Memory/i }).click()
+  await alice.waitForURL(/\/project\/[^/]+\/settings\/memory/, { timeout: 5_000 })
   await expect(alice.getByRole("heading", { name: /Living Memory/i }).first()).toBeVisible({
     timeout: 10_000,
   })
-  await expect(alice.locator("aside")).toBeVisible()
 
-  // Click the imported file's sidebar row — shell nav back to the editor.
-  await alice.locator("aside").getByText(/sample/i).first().click()
-  await alice.waitForURL(/\/project\/[^/]+\/editor\/file\/[^/]+/, { timeout: 5_000 })
+  const breadcrumb = alice.getByRole("navigation", { name: /breadcrumb/i })
+  const editorCrumb = breadcrumb.getByRole("link", { name: /^Editor$/i }).or(
+    breadcrumb.getByRole("button", { name: /^Editor$/i }),
+  )
+  await expect(editorCrumb).toBeVisible()
+  await editorCrumb.click()
+  await alice.waitForURL(/\/project\/[^/]+\/editor(?:\/file\/[^/]+)?/, { timeout: 10_000 })
+  await ws.waitForEditor()
   await expect(alice.getByRole("heading", { name: /Living Memory/i })).not.toBeVisible({
     timeout: 5_000,
   })

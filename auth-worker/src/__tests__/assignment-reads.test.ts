@@ -23,8 +23,9 @@ async function seedOrgWithAssignments() {
     "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('pa', 2, 400, 1)",
   ).run()
   // One event for the cells' event_id FK (Postgres enforces it).
+  await env.AQUILLA_PG.prepare("INSERT INTO events (id, schema_version, project_id, kind, author, payload, client_ts, server_ts, server_seq) VALUES ('e-pa', 1, 'pa', 'file.create', 'wendi', '{}', 1000, 1000, 1)").run()
   await env.AQUILLA_PG.prepare(
-    "INSERT INTO events (id, schema_version, project_id, kind, author, payload, client_ts, server_ts, server_seq) VALUES ('e-pa', 1, 'pa', 'file.create', 'wendi', '{}', 1000, 1000, 1)",
+    "INSERT INTO files (id, project_id, name, event_id) VALUES ('f1', 'pa', '01-GEN.usfm', 'e-pa')",
   ).run()
   await env.AQUILLA_PG.prepare(
     `INSERT INTO assignments (assignment_id, project_id, assignee_user_id, scope_kind, scope_label, cells_total, created_by, created_at, unassigned_at) VALUES
@@ -123,7 +124,7 @@ describe("GET /api/v2/projects/:projectId/assignments/mine", () => {
     )
     expect(res.status).toBe(200)
     const body = (await res.json()) as {
-      assignments: Array<{ assignmentId: string; fileId: string | null; scopeKind: string; scopeLabel: string; cellsTotal: number; cellsDone: number }>
+      assignments: Array<{ assignmentId: string; fileId: string | null; fileName: string | null; scopeKind: string; scopeLabel: string; cellsTotal: number; cellsDone: number }>
     }
     // Only anna's OPEN assignment: as-anna-old is unassigned; as-bob is bob's.
     expect(body.assignments).toHaveLength(1)
@@ -132,6 +133,7 @@ describe("GET /api/v2/projects/:projectId/assignments/mine", () => {
       // AQU-690: the inbox row carries the file its scope resolved to (anna's
       // cells all live in f1) so the Editor click can open the right file.
       fileId: "f1",
+      fileName: "01-GEN.usfm",
       scopeKind: "books",
       scopeLabel: "Genesis",
       cellsTotal: 3,
@@ -155,11 +157,13 @@ describe("GET /api/v2/projects/:projectId/assignments/mine", () => {
     )
     expect(res.status).toBe(200)
     const body = (await res.json()) as {
-      assignments: Array<{ assignmentId: string; fileId: string | null }>
+      assignments: Array<{ assignmentId: string; fileId: string | null; fileName: string | null }>
     }
     const byId = Object.fromEntries(body.assignments.map((a) => [a.assignmentId, a]))
     expect(byId["as-anna-empty"].fileId).toBeNull()
+    expect(byId["as-anna-empty"].fileName).toBeNull()
     expect(byId["as-anna"].fileId).toBe("f1")
+    expect(byId["as-anna"].fileName).toBe("01-GEN.usfm")
   })
 
   it("403s a user with no access to the project", async () => {
@@ -222,7 +226,7 @@ describe("GET /api/v2/orgs/:orgId/assignments/mine (consolidated, one request fo
     )
     expect(res.status).toBe(200)
     const body = (await res.json()) as {
-      assignments: Array<{ assignmentId: string; projectId: string; projectName: string; cellsTotal: number; cellsDone: number }>
+      assignments: Array<{ assignmentId: string; projectId: string; projectName: string; fileName: string | null; cellsTotal: number; cellsDone: number }>
     }
     // anna has one OPEN assignment (as-anna); as-anna-old is unassigned → excluded.
     expect(body.assignments).toHaveLength(1)
@@ -230,6 +234,7 @@ describe("GET /api/v2/orgs/:orgId/assignments/mine (consolidated, one request fo
       assignmentId: "as-anna",
       projectId: "pa",
       projectName: "John",
+      fileName: "01-GEN.usfm",
       cellsTotal: 3,
       cellsDone: 2,
     })

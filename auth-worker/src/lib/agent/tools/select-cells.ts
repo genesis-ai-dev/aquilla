@@ -201,8 +201,9 @@ export async function resolveFileByBook(
 export async function selectCellPairs(
   db: AquillaDb,
   projectId: string,
-  scope: { fileId: string; range?: RefRange },
+  scope: { fileId: string; range?: RefRange; targetLang?: string },
 ): Promise<CellPair[]> {
+  const lanePredicate = scope.targetLang === undefined ? "" : " AND t.target_lang = ?"
   const { results } = await db
     .prepare(
       `SELECT s.cell_id, s.canonical_ref, s.sequence_index, s.anchor_cell_id,
@@ -213,10 +214,13 @@ export async function selectCellPairs(
        FROM cells s
        LEFT JOIN cells t
          ON t.project_id = s.project_id AND t.file_id = s.file_id
-        AND t.cell_id = s.cell_id AND t.side = 'target'
-       WHERE s.project_id = ? AND s.file_id = ? AND s.side = 'source'`,
+        AND t.cell_id = s.cell_id AND t.side = 'target'${lanePredicate}
+       WHERE s.project_id = ? AND s.file_id = ? AND s.side = 'source'
+         AND s.target_lang = ''`,
     )
-    .bind(projectId, scope.fileId)
+    .bind(...(scope.targetLang === undefined
+      ? [projectId, scope.fileId]
+      : [scope.targetLang, projectId, scope.fileId]))
     .all<PairRow>()
 
   let pairs: CellPair[] = results.map((r) => ({

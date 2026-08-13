@@ -47,8 +47,7 @@ test("Demo · Create an organization and change its settings", async ({ page }) 
   const NAME_INPUT = 'input[aria-label="New org name"]'
   const CREATE_BTN = 'input[aria-label="New org name"] + button'
   const SETTINGS_LINK = 'a[href="/settings"]'
-  const RENAME_BTN = '[aria-label="Rename organization"]'
-  const SAVE_BTN = 'button:has-text("Save")'
+  const ORG_NAME_INPUT = "#org-settings-name"
 
   let verified = false
   try {
@@ -97,24 +96,19 @@ test("Demo · Create an organization and change its settings", async ({ page }) 
     await expect(page.getByRole("heading", { name: /^Identity$/i })).toBeVisible({ timeout: 15_000 })
     await show.beat(300)
 
-    await show.zoomTo(RENAME_BTN, { scale: 1.5 })
-    await show.caption("Click the pencil icon to edit the organization name.")
-    await show.click(RENAME_BTN)
-    await show.zoomReset() // back to 1× so the edit form + Save are actionable
-    await page.locator("#org-name").waitFor({ state: "visible", timeout: 10_000 })
-    await show.beat(300)
-
-    await show.point("#org-name")
-    await show.caption("Edit the name…")
-    await page.fill("#org-name", ORG_RENAMED)
+    await show.zoomTo(ORG_NAME_INPUT, { scale: 1.5 })
+    await show.caption("Edit the organization name directly.")
+    await page.locator(ORG_NAME_INPUT).waitFor({ state: "visible", timeout: 10_000 })
+    await show.point(ORG_NAME_INPUT)
+    await page.fill(ORG_NAME_INPUT, ORG_RENAMED)
     await show.beat(500)
 
-    await show.caption("…and save.")
-    await show.click(SAVE_BTN)
+    await show.caption("…and it saves when you leave the field.")
+    await page.locator(ORG_NAME_INPUT).blur()
     await show.zoomReset()
 
     // Money moment 2 — the rename persisted and renders back in Identity.
-    await expect(page.getByText(ORG_RENAMED, { exact: false }).first()).toBeVisible({ timeout: 20_000 })
+    await expect(page.locator(ORG_NAME_INPUT)).toHaveValue(ORG_RENAMED, { timeout: 20_000 })
     verified = true
     await show.chapter("Saved", "The new name propagates across the app instantly.")
     await show.caption("Settings saved — the new name is live everywhere.")

@@ -27,21 +27,15 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Spinner } from "@/components/ui/spinner"
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
-import { RoleLabel } from "@/components/RoleLabel"
-import { ROLE, roleName, roleDisplayText } from "@/lib/frontier/roles"
+import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
+import { RoleSelect } from "@/components/RoleSelect"
+import { ROLE, roleName, roleDisplayText, roleDescription } from "@/lib/frontier/roles"
 import { useOrgMembers } from "@/hooks/useOrg"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { addProjectMember } from "@/lib/frontier/members"
 import { fetchMemberScopes, putMemberScopes, type MemberScope } from "@/lib/sync/member-scopes"
+import { cn } from "@/lib/utils"
 
 /** Pinned contract — wave-B agents import this exactly. */
 export interface StaffLanePopoverProps {
@@ -51,6 +45,14 @@ export interface StaffLanePopoverProps {
   orgId: number | null
   trigger?: ReactNode
   onDone?: () => void
+  /** Controlled open — pair with `onOpenChange` when launching from a ⋯ menu. */
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
+  /**
+   * Visually hide the trigger (sr-only). Use when the popover is opened from a
+   * row ⋯ menu and only needs an anchor in the actions cell.
+   */
+  anchorOnly?: boolean
 }
 
 /** The staffing role select is intentionally scoped to reviewer/contributor
@@ -68,13 +70,18 @@ export function StaffLanePopover({
   orgId,
   trigger,
   onDone,
+  open: openProp,
+  onOpenChange,
+  anchorOnly = false,
 }: StaffLanePopoverProps) {
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
   const { members: orgMembers } = useOrgMembers(orgId)
   const { members: projectMembers, refresh: refreshProjectMembers } = useProjectMembers(projectId)
 
-  const [open, setOpen] = useState(false)
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false)
+  const controlled = openProp !== undefined
+  const open = controlled ? openProp : uncontrolledOpen
   const [query, setQuery] = useState("")
   const [selected, setSelected] = useState<{ userId: number; username: string } | null>(null)
   const [role, setRole] = useState<number>(ROLE.REVIEWER)
@@ -98,7 +105,8 @@ export function StaffLanePopover({
   }
 
   function handleOpenChange(next: boolean) {
-    setOpen(next)
+    if (!controlled) setUncontrolledOpen(next)
+    onOpenChange?.(next)
     if (!next) reset()
   }
 
@@ -179,7 +187,11 @@ export function StaffLanePopover({
         render={
           <button
             type="button"
-            className="inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs hover:bg-muted"
+            className={cn(
+              anchorOnly
+                ? "sr-only"
+                : "inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs hover:bg-muted",
+            )}
             aria-label={`Staff ${laneLabel}`}
           />
         }
@@ -231,10 +243,10 @@ export function StaffLanePopover({
                   <li key={m.userId}>
                     <button
                       type="button"
-                      className="block w-full px-2 py-1.5 text-left text-xs hover:bg-muted"
+                      className="flex w-full items-center gap-2 px-2 py-1.5 text-left text-xs hover:bg-muted"
                       onClick={() => setSelected({ userId: m.userId, username: m.username })}
                     >
-                      {m.username}
+                      <UsernameWithAvatar username={m.username} size="xs" nameClassName="text-xs" />
                     </button>
                   </li>
                 ))
@@ -249,9 +261,9 @@ export function StaffLanePopover({
             <p className="text-[11px] text-muted-foreground">
               Searches your organization only. Adding someone from outside it?{" "}
               <Link
-                to={`/project/${projectId}/members`}
+                to={`/project/${projectId}/settings/members`}
                 className="font-medium text-foreground underline underline-offset-2"
-                onClick={() => setOpen(false)}
+                onClick={() => handleOpenChange(false)}
               >
                 Invite them to the project
               </Link>
@@ -261,9 +273,8 @@ export function StaffLanePopover({
         ) : (
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-medium">{selected.username}</span>
+              <UsernameWithAvatar username={selected.username} size="xs" nameClassName="text-xs" />
               <Button
-                size="sm"
                 variant="ghost"
                 className="h-6 px-1.5 text-[11px]"
                 onClick={() => setSelected(null)}
@@ -273,30 +284,20 @@ export function StaffLanePopover({
               </Button>
             </div>
 
-            <Select
-              items={STAFFABLE_ROLES.map((level) => ({
-                value: String(level),
-                label: roleDisplayText(roleName(level)),
+            <RoleSelect
+              options={STAFFABLE_ROLES.map((level) => ({
+                level,
+                name: roleName(level),
+                description: roleDescription(level),
               }))}
-              value={String(role)}
-              onValueChange={(v) => setRole(parseInt(v ?? String(ROLE.REVIEWER), 10))}
+              value={role}
+              onValueChange={setRole}
               disabled={busy}
-            >
-              <SelectTrigger size="sm" aria-label="Role">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectGroup>
-                  {STAFFABLE_ROLES.map((level) => (
-                    <SelectItem key={level} value={String(level)}>
-                      <RoleLabel name={roleName(level)} />
-                    </SelectItem>
-                  ))}
-                </SelectGroup>
-              </SelectContent>
-            </Select>
+              size="sm"
+              aria-label="Role"
+            />
 
-            <Button className="w-full" size="sm" onClick={handleConfirm} disabled={busy || !jwt}>
+            <Button className="w-full" onClick={handleConfirm} disabled={busy || !jwt}>
               {busy && <Spinner className="mr-1.5 size-3.5" />}
               Add to {laneLabel}
             </Button>

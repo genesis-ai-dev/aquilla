@@ -11,6 +11,8 @@ import {
 } from "@/components/ui/dialog"
 import { FootnoteTextEditor } from "./FootnoteTextEditor"
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field"
+import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
+import { RichMessage } from "@/lib/i18n/RichMessage"
 
 export type FootnoteMarkerStyle = "numbered" | "lettered"
 
@@ -59,9 +61,10 @@ export function AddFootnoteDialog({
   onOpenChange,
   onAdd,
 }: AddFootnoteDialogProps) {
+  const t = useT()
   const [text, setText] = useState(() => footnoteTextWithAnchor(defaults?.anchorText, defaults?.text))
   const [markerStyle, setMarkerStyle] = useState<FootnoteMarkerStyle>(defaults?.markerStyle ?? "numbered")
-  const markerOptions = defaults?.markerOptions ?? DEFAULT_MARKER_OPTIONS
+  const markerOptions = defaults?.markerOptions ?? defaultMarkerOptions(t)
   const caller = markerOptions[markerStyle].caller
   const ref = defaults?.ref ?? ""
   const initialAnchorPrefix = footnoteAnchorPrefix(defaults?.anchorText)
@@ -79,16 +82,16 @@ export function AddFootnoteDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Add footnote</DialogTitle>
+          <DialogTitle>{t("editor.footnote.add")}</DialogTitle>
           <DialogDescription>
-            Choose how the marker should appear, then add the note for this anchor.
+            {t("editor.footnote.addDescription")}
           </DialogDescription>
         </DialogHeader>
 
         <div className="grid gap-4">
           <div className="grid gap-2">
-            <div className="text-sm font-medium">Marker style</div>
-            <div className="grid gap-2 sm:grid-cols-2" role="group" aria-label="Footnote marker style">
+            <div className="text-sm font-medium">{t("editor.footnote.markerStyle")}</div>
+            <div className="grid gap-2 sm:grid-cols-2" role="group" aria-label={t("editor.footnote.markerStyleGroup")}>
               {(["numbered", "lettered"] satisfies FootnoteMarkerStyle[]).map((style) => {
                 const option = markerOptions[style]
                 const active = markerStyle === style
@@ -123,31 +126,44 @@ export function AddFootnoteDialog({
           </div>
 
           <Field>
-            <FieldLabel htmlFor="footnote-text">Footnote text</FieldLabel>
+            <FieldLabel htmlFor="footnote-text">{t("editor.footnote.textLabel")}</FieldLabel>
             <FootnoteTextEditor
               autoFocus
               rows={6}
               value={text}
               onChange={setText}
-              placeholder="Selected text: footnote text..."
-              ariaLabel="Footnote text"
+              placeholder={t("editor.footnote.textPlaceholder")}
+              ariaLabel={t("editor.footnote.textLabel")}
               initialSelectionStart={open && initialAnchorPrefix ? initialAnchorPrefix.length : null}
             />
             <FieldDescription>
               {ref ? (
                 <>
-                  Attached to <span className="font-mono text-foreground">{ref}</span>.{" "}
+                  {/* Monospacing marks the reference as machine-readable data
+                      rather than prose, the way refs are shown everywhere else. */}
+                  <RichMessage
+                    k="editor.footnote.attachedTo"
+                    values={{
+                      ref: <span className="font-mono text-foreground">{ref}</span>,
+                    }}
+                  />{" "}
                 </>
               ) : null}
-              Include the selected word or phrase before a colon when it helps clarify the note.
+              {t("editor.footnote.textHint")}
             </FieldDescription>
           </Field>
 
           {insertionPreview && (
             <div className="grid gap-1.5">
-              <div className="text-sm font-medium">Target preview</div>
+              <div className="text-sm font-medium">{t("editor.footnote.targetPreview")}</div>
               <div className="max-h-28 overflow-auto rounded-md bg-muted px-3 py-2 text-sm leading-relaxed">
-                {renderInsertionPreview(insertionPreview.before, caller, insertionPreview.after, false)}
+                {renderInsertionPreview(
+                  insertionPreview.before,
+                  caller,
+                  insertionPreview.after,
+                  false,
+                  t("editor.footnote.previewEmptyCell"),
+                )}
               </div>
             </div>
           )}
@@ -155,7 +171,7 @@ export function AddFootnoteDialog({
 
         <DialogFooter>
           <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button
             type="button"
@@ -165,7 +181,7 @@ export function AddFootnoteDialog({
               onAdd({ caller, ref, text, markerStyle, startNewSequence: false })
             }}
           >
-            Add footnote
+            {t("editor.footnote.add")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -173,23 +189,33 @@ export function AddFootnoteDialog({
   )
 }
 
-const DEFAULT_MARKER_OPTIONS: Record<FootnoteMarkerStyle, AddFootnoteMarkerOption> = {
-  numbered: {
-    label: "Numbering",
-    caller: "+",
-    startCaller: "1",
-    preview: "1",
-    startPreview: "1",
-    description: "Use automatic numeric markers.",
-  },
-  lettered: {
-    label: "Lettering",
-    caller: "a",
-    startCaller: "a",
-    preview: "a",
-    startPreview: "a",
-    description: "Use letter markers for a separate note sequence.",
-  },
+/**
+ * Fallback marker options for callers that don't compute their own (EditorTable
+ * does, from the cell's existing notes). `label`/`description` are what the
+ * dialog renders, so they are built from `t` rather than being module-level
+ * literals.
+ */
+function defaultMarkerOptions(
+  t: TFunction,
+): Record<FootnoteMarkerStyle, AddFootnoteMarkerOption> {
+  return {
+    numbered: {
+      label: t("editor.footnote.markerNumbered"),
+      caller: "+",
+      startCaller: "1",
+      preview: "1",
+      startPreview: "1",
+      description: t("editor.footnote.markerNumberedDesc"),
+    },
+    lettered: {
+      label: t("editor.footnote.markerLettered"),
+      caller: "a",
+      startCaller: "a",
+      preview: "a",
+      startPreview: "a",
+      description: t("editor.footnote.markerLetteredDesc"),
+    },
+  }
 }
 
 function footnoteTextWithAnchor(anchorText: string | undefined, text: string | undefined): string {
@@ -212,6 +238,9 @@ function renderInsertionPreview(
   caller: string,
   after: string,
   startsNewSequence: boolean,
+  /** Stand-in when the cell has no text at all; passed in because this is a
+   *  plain function and `t` is a hook. */
+  emptyLabel: string,
 ): ReactNode[] {
   const parts: ReactNode[] = []
   let ordinal = 0
@@ -227,7 +256,7 @@ function renderInsertionPreview(
     ordinal += 1
     return ordinal
   }, () => key++)
-  return parts.length > 0 ? parts : [<span key="empty" className="text-muted-foreground">Empty cell</span>]
+  return parts.length > 0 ? parts : [<span key="empty" className="text-muted-foreground">{emptyLabel}</span>]
 }
 
 function renderPreviewText(

@@ -8,6 +8,7 @@ vi.mock("@/hooks/useFrontierSession", () => ({ useFrontierSession: () => ({ sess
 const listMyOrgs = vi.fn()
 vi.mock("@/lib/frontier/orgs", () => ({ listMyOrgs: (...a: unknown[]) => listMyOrgs(...a) }))
 vi.mock("@/components/AccountSwitcher", () => ({ AccountSwitcher: () => null }))
+vi.mock("@/lib/sync/cloud-projects", () => ({ fetchAccessibleProjects: vi.fn(async () => []) }))
 const listTeams = vi.fn()
 const createTeam = vi.fn()
 vi.mock("@/lib/frontier/teams", () => ({
@@ -15,23 +16,6 @@ vi.mock("@/lib/frontier/teams", () => ({
   getTeam: vi.fn(),
   createTeam: (...a: unknown[]) => createTeam(...a),
 }))
-
-// Drive the shadcn (Base UI) Select: open the trigger, hover-highlight the
-// option, commit with Enter fired on the option itself. Under happy-dom
-// clicking an option does not reliably commit a selection, but the keyboard
-// path does (recipe adapted from AssignModal.test.tsx; Enter targets the
-// option because outside a Dialog focus may never enter the popup).
-// Waits for the trigger to render the chosen option's label.
-async function pickSelectOption(triggerName: RegExp, optionName: RegExp) {
-  const trigger = screen.getByRole("combobox", { name: triggerName })
-  fireEvent.click(trigger)
-  const option = await screen.findByRole("option", { name: optionName })
-  const label = option.textContent ?? ""
-  fireEvent.pointerMove(option)
-  fireEvent.mouseMove(option)
-  fireEvent.keyDown(option, { key: "Enter" })
-  await waitFor(() => expect(trigger.textContent).toContain(label))
-}
 
 const makeTeam = (overrides: Partial<{ id: number; name: string; memberCount: number; projectCount: number; viewerIsMember: boolean; isInternal: boolean }> = {}) => ({
   id: 10,
@@ -47,9 +31,13 @@ beforeEach(() => {
   localStorage.clear()
   listTeams.mockReset()
   createTeam.mockReset()
+  listTeams.mockResolvedValue([])
   listMyOrgs.mockResolvedValue([{ id: 7, name: "Come and See", role: { level: 700, name: "owner" } }])
 })
-afterEach(() => vi.restoreAllMocks())
+afterEach(() => {
+  listTeams.mockReset()
+  createTeam.mockReset()
+})
 
 describe("TeamsList", () => {
   it("lists the active org's teams", async () => {
@@ -71,7 +59,8 @@ describe("TeamsList admin create", () => {
     listTeams.mockResolvedValue([])
     createTeam.mockResolvedValue({ id: 99, name: "West Africa", description: null })
     render(<MemoryRouter><OrgProvider><TeamsList /></OrgProvider></MemoryRouter>)
-    await waitFor(() => expect(screen.getByText(/no teams/i)).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText(/no teams in this org yet/i)).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole("button", { name: /new team/i })).toBeInTheDocument())
     await act(async () => { screen.getByRole("button", { name: /new team/i }).click() })
     await act(async () => { fireEvent.change(screen.getByPlaceholderText(/team name/i), { target: { value: "West Africa" } }) })
     await act(async () => { screen.getByRole("button", { name: /^create$/i }).click() })
@@ -87,7 +76,7 @@ describe("TeamsList admin create", () => {
   })
 })
 
-describe("TeamsList — AQU-333: internal/public visibility toggle", () => {
+describe("TeamsList — AQU-333: internal/public visibility select", () => {
   /**
    * WHY: AQU-333 (re-scoping AQU-142) reintroduces a three-position
    * All / Internal only / Public only filter, defaulting to "Internal only"
@@ -95,23 +84,33 @@ describe("TeamsList — AQU-333: internal/public visibility toggle", () => {
    *
    * The AQU-158/AQU-165 regression guarantee — public teams (isInternal ===
    * false) must NOT be silently dropped — is preserved and re-expressed here
-   * *through the toggle*: public teams are always reachable via "All" and
+   * *through the select*: public teams are always reachable via "All" and
    * "Public only". The earlier unconditional "show all by default" assertion
    * is intentionally replaced (not deleted) because the default now filters.
    */
   const internalTeam = makeTeam({ id: 1, name: "Internal Team", isInternal: true })
   const publicTeam = makeTeam({ id: 2, name: "Public Team", isInternal: false })
 
-  it("renders the three-position toggle and defaults to Internal only", async () => {
+  /** Base UI Select: options live in a portaled listbox. */
+  async function pickVisibility(optionName: RegExp) {
+    fireEvent.click(screen.getByRole("combobox", { name: /filter teams by visibility/i }))
+    const option = await screen.findByRole("option", { name: optionName })
+    fireEvent.pointerMove(option)
+    fireEvent.mouseMove(option)
+    fireEvent.keyDown(document.activeElement ?? option, { key: "Enter" })
+    await waitFor(() => {
+      expect(screen.queryByRole("listbox")).toBeNull()
+    })
+  }
+
+  it("renders the visibility select and defaults to Internal only", async () => {
     listTeams.mockResolvedValue([internalTeam, publicTeam])
     render(<MemoryRouter><OrgProvider><TeamsList /></OrgProvider></MemoryRouter>)
     await waitFor(() => expect(screen.getByText("Internal Team")).toBeInTheDocument())
-    // Toggle controls exist alongside search + sort.
-    expect(screen.getByRole("button", { name: /^all$/i })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: /internal only/i })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: /public only/i })).toBeInTheDocument()
-    // Default is Internal only (pressed), so the public team is hidden.
-    expect(screen.getByRole("button", { name: /internal only/i })).toHaveAttribute("aria-pressed", "true")
+    const trigger = screen.getByRole("combobox", { name: /filter teams by visibility/i })
+    expect(trigger).toBeInTheDocument()
+    expect(trigger).toHaveTextContent(/internal only/i)
+    // Default is Internal only, so the public team is hidden.
     expect(screen.queryByText("Public Team")).toBeNull()
   })
 
@@ -120,11 +119,11 @@ describe("TeamsList — AQU-333: internal/public visibility toggle", () => {
     render(<MemoryRouter><OrgProvider><TeamsList /></OrgProvider></MemoryRouter>)
     await waitFor(() => expect(screen.getByText("Internal Team")).toBeInTheDocument())
     // All → both internal and public appear.
-    fireEvent.click(screen.getByRole("button", { name: /^all$/i }))
+    await pickVisibility(/^all$/i)
     await waitFor(() => expect(screen.getByText("Public Team")).toBeInTheDocument())
     expect(screen.getByText("Internal Team")).toBeInTheDocument()
     // Public only → just the public team.
-    fireEvent.click(screen.getByRole("button", { name: /public only/i }))
+    await pickVisibility(/public only/i)
     await waitFor(() => expect(screen.queryByText("Internal Team")).toBeNull())
     expect(screen.getByText("Public Team")).toBeInTheDocument()
   })
@@ -133,9 +132,11 @@ describe("TeamsList — AQU-333: internal/public visibility toggle", () => {
     listTeams.mockResolvedValue([internalTeam])
     render(<MemoryRouter><OrgProvider><TeamsList /></OrgProvider></MemoryRouter>)
     await waitFor(() => expect(screen.getByText("Internal Team")).toBeInTheDocument())
-    fireEvent.click(screen.getByRole("button", { name: /public only/i }))
+    await pickVisibility(/public only/i)
     await waitFor(() => expect(screen.queryByText("Internal Team")).toBeNull())
     expect(screen.getByText(/no public teams/i)).toBeInTheDocument()
+    // Search + visibility controls stay mounted even when the filter empties the list.
+    expect(screen.getByPlaceholderText("Search teams…")).toBeInTheDocument()
     // Clear resets the filter (to All) and the team reappears — no crash/stale list.
     fireEvent.click(screen.getByRole("button", { name: /clear/i }))
     await waitFor(() => expect(screen.getByText("Internal Team")).toBeInTheDocument())
@@ -147,7 +148,7 @@ describe("TeamsList — AQU-333: internal/public visibility toggle", () => {
     listTeams.mockResolvedValue([internalTeam, publicAlpha, publicBeta])
     render(<MemoryRouter><OrgProvider><TeamsList /></OrgProvider></MemoryRouter>)
     await waitFor(() => expect(screen.getByText("Internal Team")).toBeInTheDocument())
-    fireEvent.click(screen.getByRole("button", { name: /public only/i }))
+    await pickVisibility(/public only/i)
     await waitFor(() => expect(screen.queryByText("Internal Team")).toBeNull())
     fireEvent.change(screen.getByPlaceholderText("Search teams…"), { target: { value: "Alpha" } })
     await waitFor(() => expect(screen.getByText("Public Alpha")).toBeInTheDocument())
@@ -163,18 +164,34 @@ describe("TeamsList — AQU-166: search + sort", () => {
     makeTeam({ id: 3, name: "Gamma", memberCount: 3, projectCount: 8 }),
   ]
 
+  function teamNamesInOrder(): string[] {
+    const table = screen.getByTestId("org-teams-table")
+    return Array.from(table.querySelectorAll('[data-slot="team-name"]'))
+      .map((el) => el.textContent ?? "")
+      .filter(Boolean)
+  }
+
+  async function sortByColumn(title: RegExp, ariaSort: "ascending" | "descending") {
+    const header = screen.getByRole("button", { name: title })
+    // Text columns: asc ↔ desc. Numeric: desc ↔ asc. Sorting never clears.
+    for (let i = 0; i < 3; i++) {
+      if (header.getAttribute("aria-sort") === ariaSort) return
+      await act(async () => { fireEvent.click(header) })
+    }
+    expect(header).toHaveAttribute("aria-sort", ariaSort)
+  }
+
   it("default sort is Name A–Z (case-insensitive)", async () => {
     listTeams.mockResolvedValue(teams)
     render(<MemoryRouter><OrgProvider><TeamsList /></OrgProvider></MemoryRouter>)
     await waitFor(() => expect(screen.getByText("Alpha")).toBeInTheDocument())
-    const names = screen.getAllByText(/alpha|beta|gamma/i).map((el) => el.textContent)
-    expect(names).toEqual(["Alpha", "beta", "Gamma"])
+    expect(teamNamesInOrder()).toEqual(["Alpha", "beta", "Gamma"])
   })
 
   it("search narrows list by name (case-insensitive substring)", async () => {
     listTeams.mockResolvedValue(teams)
     render(<MemoryRouter><OrgProvider><TeamsList /></OrgProvider></MemoryRouter>)
-    await waitFor(() => expect(screen.getByPlaceholderText("Search teams…")).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText("Alpha")).toBeInTheDocument())
     // "lph" matches "Alpha" only
     fireEvent.change(screen.getByPlaceholderText("Search teams…"), { target: { value: "lph" } })
     await waitFor(() => expect(screen.getByText("Alpha")).toBeInTheDocument())
@@ -185,29 +202,23 @@ describe("TeamsList — AQU-166: search + sort", () => {
   it("sort by Members (most first) reorders correctly", async () => {
     listTeams.mockResolvedValue(teams)
     render(<MemoryRouter><OrgProvider><TeamsList /></OrgProvider></MemoryRouter>)
-    await waitFor(() => expect(screen.getByRole("combobox", { name: /sort teams by/i })).toBeInTheDocument())
-    await pickSelectOption(/sort teams by/i, /members \(most first\)/i)
-    const cards = screen.getAllByRole("button").filter((b) => ["Alpha", "beta", "Gamma"].includes(b.querySelector("span")?.textContent ?? ""))
-    expect(cards[0].querySelector("span")?.textContent).toBe("beta")   // 10
-    expect(cards[1].querySelector("span")?.textContent).toBe("Alpha")  // 5
-    expect(cards[2].querySelector("span")?.textContent).toBe("Gamma")  // 3
+    await waitFor(() => expect(screen.getByText("Alpha")).toBeInTheDocument())
+    await sortByColumn(/^Members$/i, "descending")
+    expect(teamNamesInOrder()).toEqual(["beta", "Alpha", "Gamma"])
   })
 
   it("sort by Projects (most first) reorders correctly", async () => {
     listTeams.mockResolvedValue(teams)
     render(<MemoryRouter><OrgProvider><TeamsList /></OrgProvider></MemoryRouter>)
-    await waitFor(() => expect(screen.getByRole("combobox", { name: /sort teams by/i })).toBeInTheDocument())
-    await pickSelectOption(/sort teams by/i, /projects \(most first\)/i)
-    const cards = screen.getAllByRole("button").filter((b) => ["Alpha", "beta", "Gamma"].includes(b.querySelector("span")?.textContent ?? ""))
-    expect(cards[0].querySelector("span")?.textContent).toBe("Gamma")  // 8
-    expect(cards[1].querySelector("span")?.textContent).toBe("Alpha")  // 2
-    expect(cards[2].querySelector("span")?.textContent).toBe("beta")   // 1
+    await waitFor(() => expect(screen.getByText("Alpha")).toBeInTheDocument())
+    await sortByColumn(/^Projects$/i, "descending")
+    expect(teamNamesInOrder()).toEqual(["Gamma", "Alpha", "beta"])
   })
 
   it("no-results state shows message and Clear resets search", async () => {
     listTeams.mockResolvedValue(teams)
     render(<MemoryRouter><OrgProvider><TeamsList /></OrgProvider></MemoryRouter>)
-    await waitFor(() => expect(screen.getByPlaceholderText("Search teams…")).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText("Alpha")).toBeInTheDocument())
     fireEvent.change(screen.getByPlaceholderText("Search teams…"), { target: { value: "zzz" } })
     await waitFor(() => expect(screen.getByText(/no teams match/i)).toBeInTheDocument())
     expect(screen.getByRole("button", { name: /clear/i })).toBeInTheDocument()
@@ -216,10 +227,16 @@ describe("TeamsList — AQU-166: search + sort", () => {
     expect(screen.queryByText(/no teams match/i)).toBeNull()
   })
 
-  it("empty-org state shows 'No teams in this org yet.' (no search bar)", async () => {
+  it("empty-org state shows 'No teams in this org yet.' with search still available", async () => {
     listTeams.mockResolvedValue([])
     render(<MemoryRouter><OrgProvider><TeamsList /></OrgProvider></MemoryRouter>)
-    await waitFor(() => expect(screen.getByText(/no teams in this org yet/i)).toBeInTheDocument())
-    expect(screen.queryByPlaceholderText("Search teams…")).toBeNull()
+    await waitFor(
+      () => {
+        expect(screen.getByText(/no teams in this org yet/i)).toBeInTheDocument()
+        expect(screen.getByPlaceholderText("Search teams…")).toBeInTheDocument()
+        expect(screen.getByRole("combobox", { name: /filter teams by visibility/i })).toBeInTheDocument()
+      },
+      { timeout: 3000 },
+    )
   })
 })

@@ -213,7 +213,7 @@ function milestoneFromBiblica(
 function scriptureMilestone(value: string | null | undefined): ImportMilestone | undefined {
   const match = value?.trim().match(/^([1-3]?[A-Z]{2,3})\s+(\d+)(?::.+)?$/i)
   if (!match) return undefined
-  const book = match[1]!.toUpperCase()
+  const book = match[1].toUpperCase()
   const chapter = Number(match[2])
   if (book === "OBS") {
     return {

@@ -15,10 +15,16 @@ import { loadSession } from "@/lib/frontier/session-store"
 import {
   ContextualApiError,
   ContextualAuthError,
+  commandContextualRun,
+  fetchContextualDrafts,
+  fetchContextualOverview,
+  fetchContextualRunActivity,
+  fetchContextualRuns,
   installContextualTransport,
   realContextualTransport,
   resetContextualTransportForTesting,
   sendContextualSteering,
+  startProjectContextualRun,
 } from "./transport"
 import {
   getContextualRunState,
@@ -71,6 +77,29 @@ function lastRequest(): { url: string; init: RequestInit } {
   if (!call) throw new Error("no fetch call recorded")
   return { url: call[0] as string, init: call[1] as RequestInit }
 }
+
+describe("fetchContextualDrafts", () => {
+  it("retains each owning run id for the multi-run review backlog", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({
+      drafts: [{
+        id: "draft-1",
+        runId: "older-owning-run",
+        cellId: "cell-1",
+        text: "Review me",
+        provenance: { spanId: "span-1" },
+      }],
+    }))
+
+    await expect(fetchContextualDrafts(PROJECT_ID, FILE_ID)).resolves.toEqual([{
+      draftId: "draft-1",
+      runId: "older-owning-run",
+      cellId: "cell-1",
+      text: "Review me",
+      spanLabel: "span-1",
+    }])
+    expect(lastRequest().url).toContain("/contextual/drafts?fileId=file%201&status=proposed")
+  })
+})
 
 describe("fetchSnapshot", () => {
   it("GETs /contextual/runs?fileId= with the JWT and reports an available run", async () => {
@@ -179,6 +208,189 @@ describe("steering", () => {
       body: "Prefer shorter sentences",
       runId: RUN.runId,
     })
+  })
+})
+
+describe("project Autopilot observability", () => {
+  it("GETs the overview contract and marks a successful response available", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({
+      files: [], activeRuns: 0, doneSpans: 3, totalSpans: 8, failedSpans: 0,
+      unitsSpent: 14, proposedDrafts: 2, appliedDrafts: 1,
+    }))
+    const result = await fetchContextualOverview(PROJECT_ID)
+    expect(lastRequest().url).toContain("/projects/proj%2F1/contextual/overview")
+    expect(lastRequest().init.headers).toMatchObject({ Authorization: "Bearer jwt-token" })
+    expect(result).toMatchObject({ available: true, doneSpans: 3, proposedDrafts: 2 })
+  })
+
+  it("POSTs the project-wide start contract and preserves mixed results", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({
+      scope: "project",
+      scopeGroup: "scope-1",
+      started: [{ runId: RUN.runId, fileId: FILE_ID }],
+      skipped: [{ fileId: "other", reason: "already running" }],
+      totalCandidates: 2,
+      deferred: { count: 1, reason: "batch_limit" },
+      truncated: true,
+    }, 201))
+    const result = await startProjectContextualRun(PROJECT_ID)
+    const request = lastRequest()
+    expect(request.url).toContain("/projects/proj%2F1/contextual/runs")
+    expect(request.init.method).toBe("POST")
+    expect(JSON.parse(request.init.body as string)).toEqual({ scope: "project" })
+    expect(result).toMatchObject({
+      scope: "project",
+      scopeGroup: "scope-1",
+      started: [{ runId: RUN.runId }],
+      skipped: [{ reason: "already running" }],
+      totalCandidates: 2,
+      deferred: { count: 1, reason: "batch_limit" },
+      truncated: true,
+    })
+  })
+
+  it("lists and normalizes durable run history", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({
+      available: true,
+      runs: [{
+        id: RUN.runId,
+        fileId: FILE_ID,
+        status: "paused",
+        doneSpans: 5,
+        totalSpans: 12,
+        failedSpans: 1,
+        callsSpent: 9,
+        unitsSpent: 44,
+        proposedDrafts: 3,
+        lastError: null,
+        createdAt: "2026-08-11T10:00:00.000Z",
+        updatedAt: "2026-08-11T10:05:00.000Z",
+      }],
+      truncated: true,
+      nextCursor: {
+        createdAt: "2026-08-11T10:00:00.000Z",
+        runId: RUN.runId,
+      },
+    }))
+    const page = await fetchContextualRuns(PROJECT_ID)
+    expect(lastRequest().url).toContain("/projects/proj%2F1/contextual/runs")
+    expect(lastRequest().init.method).toBeUndefined()
+    expect(page).toMatchObject({
+      available: true,
+      truncated: true,
+      nextCursor: {
+        createdAt: "2026-08-11T10:00:00.000Z",
+        runId: RUN.runId,
+      },
+    })
+    expect(page.runs[0]).toMatchObject({
+      runId: RUN.runId,
+      status: "paused",
+      done: 5,
+      total: 12,
+      failed: 1,
+      callsSpent: 9,
+      proposedDrafts: 3,
+    })
+  })
+
+  it("requests an older run-history page with the backend keyset cursor", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({
+      available: true,
+      runs: [],
+      truncated: false,
+      nextCursor: null,
+    }))
+    await fetchContextualRuns(PROJECT_ID, {
+      cursor: {
+        createdAt: "2026-08-11T09:00:00.000Z",
+        runId: "older/run",
+      },
+      proposedOnly: true,
+    })
+
+    const url = new URL(lastRequest().url)
+    expect(url.searchParams.get("beforeCreatedAt")).toBe("2026-08-11T09:00:00.000Z")
+    expect(url.searchParams.get("beforeRunId")).toBe("older/run")
+    expect(url.searchParams.get("proposedOnly")).toBe("true")
+  })
+
+  it("GETs one run's activity and keeps evidence records available", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({
+      run: { ...RUN, callsSpent: 7, unitsSpent: 30, lastError: null, createdAt: "2026-08-11T10:00:00.000Z", updatedAt: "2026-08-11T10:02:00.000Z" },
+      events: [{
+        id: "event-1", runId: RUN.runId, projectId: PROJECT_ID, fileId: FILE_ID,
+        kind: "drafts_staged", spanId: "span-1", summary: "Staged 3 drafts for review.",
+        details: { staged: 3 }, createdAt: "2026-08-11T10:01:00.000Z",
+      }],
+      sceneBriefs: [{ id: "brief-1", l1Summary: "A teacher addresses a crowd.", ambiguityRegister: [] }],
+      drafts: [{ id: "draft-1", cellId: "cell-1", status: "proposed", provenance: { runId: RUN.runId } }],
+      truncated: true,
+      truncatedCollections: { events: true, sceneBriefs: false, drafts: true },
+    }))
+    const activity = await fetchContextualRunActivity(PROJECT_ID, RUN.runId)
+    expect(lastRequest().url).toContain(`/projects/proj%2F1/contextual/runs/${RUN.runId}/activity`)
+    expect(activity.events[0]).toMatchObject({ kind: "drafts_staged", summary: "Staged 3 drafts for review.", details: { staged: 3 } })
+    expect(activity.sceneBriefs[0]).toMatchObject({ id: "brief-1" })
+    expect(activity.drafts[0]).toMatchObject({ cellId: "cell-1", status: "proposed" })
+    expect(activity.truncatedCollections).toEqual({ events: true, sceneBriefs: false, drafts: true })
+  })
+
+  it("pages proposed draft evidence and preserves authoritative status counts", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({
+      run: {
+        ...RUN,
+        proposedDrafts: 700,
+        callsSpent: 7,
+        unitsSpent: 30,
+        lastError: null,
+        createdAt: "2026-08-11T10:00:00.000Z",
+        updatedAt: "2026-08-11T10:02:00.000Z",
+      },
+      events: [],
+      sceneBriefs: [],
+      drafts: [{ id: "draft-older", cellId: "cell-older", status: "proposed" }],
+      draftCounts: { proposed: 700, applied: 20, rejected: 3, superseded: 2 },
+      draftNextCursor: { createdAt: "2026-08-11T09:00:00.000Z", draftId: "draft-older" },
+      truncated: true,
+      truncatedCollections: { events: false, sceneBriefs: false, drafts: true },
+    }))
+
+    const activity = await fetchContextualRunActivity(PROJECT_ID, RUN.runId, {
+      draftStatus: "proposed",
+      draftLimit: 100,
+      draftCursor: { createdAt: "2026-08-11T09:30:00.000Z", draftId: "draft-newer" },
+    })
+
+    const url = new URL(lastRequest().url)
+    expect(url.searchParams.get("draftStatus")).toBe("proposed")
+    expect(url.searchParams.get("draftLimit")).toBe("100")
+    expect(url.searchParams.get("draftBeforeCreatedAt")).toBe("2026-08-11T09:30:00.000Z")
+    expect(url.searchParams.get("draftBeforeId")).toBe("draft-newer")
+    expect(activity.draftCounts).toEqual({ proposed: 700, applied: 20, rejected: 3, superseded: 2 })
+    expect(activity.draftNextCursor).toEqual({
+      createdAt: "2026-08-11T09:00:00.000Z",
+      draftId: "draft-older",
+    })
+  })
+
+  it("sends guarded project-scoped controls and normalizes the returned run", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({
+      run: {
+        ...RUN,
+        status: "paused",
+        callsSpent: 8,
+        unitsSpent: 31,
+        lastError: null,
+        createdAt: "2026-08-11T10:00:00.000Z",
+        updatedAt: "2026-08-11T10:03:00.000Z",
+      },
+    }))
+    const paused = await commandContextualRun(PROJECT_ID, RUN.runId, "pause")
+    const request = lastRequest()
+    expect(request.url).toContain(`/projects/proj%2F1/contextual/runs/${RUN.runId}/pause`)
+    expect(request.init.method).toBe("POST")
+    expect(paused).toMatchObject({ runId: RUN.runId, status: "paused", callsSpent: 8 })
   })
 })
 

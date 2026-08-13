@@ -99,8 +99,7 @@ describe('buildEventProjectionStmts — source.cell.create', () => {
       stmts,
     )
 
-    // FTS maintenance adds 2 statements (delete + insert) around the cells
-    // DML, and the files-counter recompute adds 1 more.
+    // Cell UPSERT plus the file-counter recompute share the projection batch.
     expect(stmts).toHaveLength(2)
     const cellsStmts = recorded.filter(r => !r.sql.includes('cells_fts') && !r.sql.includes('WHERE false'))
     const { sql, args } = cellsStmts[0]
@@ -156,9 +155,9 @@ describe('buildEventProjectionStmts — target.cell.commit', () => {
       }),
       stmts,
     )
-    // FTS maintenance adds 2 statements (delete + insert) around the cells
-    // DML, and the files-counter recompute adds 1 more.
-    expect(stmts).toHaveLength(2)
+    // Cell UPSERT, durable contextual-draft reconciliation, then the file
+    // counter recompute all share the caller's atomic projection batch.
+    expect(stmts).toHaveLength(3)
     const cellsStmts = recorded.filter(r => !r.sql.includes('cells_fts') && !r.sql.includes('WHERE false'))
     const { sql, args } = cellsStmts[0]
     // The client never emits target.cell.create, so the commit is an UPSERT:
@@ -177,6 +176,10 @@ describe('buildEventProjectionStmts — target.cell.commit', () => {
     expect(args[4]).toBe('new text')
     expect(args[6]).toBe('evt-test-id')
     expect(args[7]).toBe('src-event-99')
+    const reconciliation = recorded.find(r => r.sql.includes('UPDATE contextual_drafts AS draft'))
+    expect(reconciliation?.sql).toContain("draft.status = 'proposed'")
+    expect(reconciliation?.sql).toContain('projected.event_id = ?')
+    expect(reconciliation?.sql).toContain('INSERT INTO contextual_run_events')
   })
 
   it('writes NULL source_event_id when omitted', () => {
@@ -205,6 +208,50 @@ describe('buildEventProjectionStmts — source.cell.commit', () => {
     const { sql } = cellsStmts[0]
     expect(sql).toContain('UPDATE cells SET')
     expect(sql).not.toContain('source_event_id =')
+  })
+
+  // AQU-847: an imported media section's `value` is the import FILENAME, so a
+  // source edit on one corrects its TRANSCRIPT instead. Before this, the
+  // payload had nowhere to put that and the correction was silently dropped.
+  it('lands a media section correction on `transcription`, scoped to the source row', () => {
+    const { db, recorded } = makeD1Stub()
+    const stmts: AquillaStatement[] = []
+    buildEventProjectionStmts(
+      db,
+      makeEvent('source.cell.commit', { value: 'episode.mp3', transcription: 'corrected transcript' }),
+      stmts,
+    )
+    const cellsStmts = recorded.filter(r => !r.sql.includes('cells_fts') && !r.sql.includes('WHERE false'))
+    const transcriptStmt = cellsStmts.find(r => r.sql.includes('transcription = ?'))
+    expect(transcriptStmt).toBeDefined()
+    expect(transcriptStmt!.sql).toContain("side = 'source'")
+    expect(transcriptStmt!.args[0]).toBe('corrected transcript')
+    // The filename `value` is resent unchanged — provenance survives the edit.
+    expect(cellsStmts[0].args[0]).toBe('episode.mp3')
+  })
+
+  it('an empty-string correction clears the transcript (it is not treated as absent)', () => {
+    const { db, recorded } = makeD1Stub()
+    const stmts: AquillaStatement[] = []
+    buildEventProjectionStmts(
+      db,
+      makeEvent('source.cell.commit', { value: 'episode.mp3', transcription: '' }),
+      stmts,
+    )
+    const transcriptStmt = recorded.find(r => r.sql.includes('transcription = ?'))
+    expect(transcriptStmt).toBeDefined()
+    expect(transcriptStmt!.args[0]).toBe('')
+  })
+
+  it('an ordinary text-cell commit writes NO transcription statement', () => {
+    const { db, recorded } = makeD1Stub()
+    const stmts: AquillaStatement[] = []
+    buildEventProjectionStmts(
+      db,
+      makeEvent('source.cell.commit', { value: 'updated source' }),
+      stmts,
+    )
+    expect(recorded.some(r => r.sql.includes('transcription = ?'))).toBe(false)
   })
 })
 

@@ -1,4 +1,4 @@
-import type { ThemeTokens } from "./types"
+import type { ThemeTokens } from "./types.ts"
 
 const TOKEN_TO_VAR: Record<keyof ThemeTokens, string> = {
   background: "--background",

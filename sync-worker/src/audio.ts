@@ -10,8 +10,9 @@
 // `?t=` query param (mirroring the diarization /audio route) because media
 // elements (`<audio src>`) cannot attach an Authorization header — the token
 // is the same short-lived file-scoped JWT either way, just GET/read-only.
-// DELETE is admin-only (Bearer SYNC_SECRET_KEY) and mirrors the snapshot
-// admin endpoints' shape.
+// DELETE accepts the admin bearer (ADMIN_SECRET, else SYNC_SECRET_KEY —
+// mirroring the snapshot admin endpoints) or a contributor+ sync-token
+// scoped to the same (projectId, fileId) (F8 orphan cleanup).
 //
 // GET streams the R2 body and honours single `Range: bytes=` requests with
 // 206/Content-Range so browsers can start playback before the download
@@ -20,7 +21,7 @@
 // The DELETE handler in admin.ts already enumerates everything under
 // projects/{pid}/files/{fid}/, so wiping a file naturally wipes its audio.
 
-import { verifyTokenForFile } from "./auth"
+import { verifyTokenForFile, WRITE_ROLE_LEVEL } from "./auth"
 import { adminBearerMatches } from "./lib/admin-secret"
 
 export interface AudioEnv {
@@ -104,7 +105,7 @@ function withAudioCors(res: Response): Response {
  *  - OPTIONS  → CORS preflight
  *  - PUT      → store body as the audio object (sync-token auth)
  *  - GET      → return raw bytes (sync-token auth) or 404
- *  - DELETE   → admin only via SYNC_SECRET_KEY
+ *  - DELETE   → admin bearer, or file-scoped contributor+ sync-token
  *
  * Returns null when the URL or method doesn't match so the dispatcher can
  * fall through to the next handler.
@@ -158,6 +159,12 @@ export async function handleAudioRequest(
         new Response("token scoped to different project", { status: 403 }),
       )
     }
+    // F8 says "contributor+" — enforce the floor the comment promises. Without
+    // this, any project member (viewer included) with a valid file-scoped
+    // token could delete another member's audio recording.
+    if (verified.claims.role < WRITE_ROLE_LEVEL) {
+      return withAudioCors(new Response("insufficient role", { status: 403 }))
+    }
     await env.SNAPSHOTS.delete(key)
     return withAudioCors(Response.json({ ok: true }))
   }
@@ -187,6 +194,12 @@ export async function handleAudioRequest(
   }
 
   if (request.method === "PUT") {
+    // Writing/overwriting audio bytes is a contributor-level action — matches
+    // the CONTRIBUTOR floor the corresponding cell.audio.attach event enforces
+    // in the structured event log (role-policy.ts). GET stays viewer-readable.
+    if (verified.claims.role < WRITE_ROLE_LEVEL) {
+      return withAudioCors(new Response("insufficient role", { status: 403 }))
+    }
     const artifactId = request.headers.get("X-Artifact-Id")?.trim()
     if (artifactId && !UUID_RE.test(artifactId)) {
       return withAudioCors(new Response("invalid artifact id", { status: 400 }))

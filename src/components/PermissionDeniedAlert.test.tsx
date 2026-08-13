@@ -71,6 +71,46 @@ describe("PermissionDeniedAlert", () => {
     )
   })
 
+  it("AQU-511 finding 4: keeps the account name visually distinct (font-medium) without a role", async () => {
+    // Regression: extraction had flattened this sentence into one plain-text
+    // catalog string, dropping the font-medium that marks the account name as
+    // the actionable fact in the sentence. A text-only assertion would still
+    // pass on that flattened version, so assert the styled element itself.
+    await addSession({ jwt: "j", username: "translator", email: "t@example.com", createdAt: "2026-01-01T00:00:00Z" })
+    render(<PermissionDeniedAlert action="add members to this project" />, { wrapper })
+    const alert = await screen.findByRole("alert")
+    await waitFor(() => expect(alert).toHaveTextContent("translator (t@example.com)"))
+    const styled = alert.querySelector(".font-medium")
+    expect(styled).not.toBeNull()
+    expect(styled).toHaveTextContent("translator (t@example.com)")
+  })
+
+  it("AQU-511 finding 4: keeps both the account name and the role visually distinct (font-medium)", async () => {
+    // Regression: extraction had flattened this sentence too, dropping
+    // font-medium from BOTH the account name and the role — the two pieces
+    // of information the user actually needs from the alert.
+    await addSession({ jwt: "j", username: "translator", email: "t@example.com", createdAt: "2026-01-01T00:00:00Z" })
+    render(
+      <PermissionDeniedAlert
+        action="change shared settings"
+        requiredRole="Maintainer or higher"
+        currentRole="Viewer"
+      />,
+      { wrapper },
+    )
+    const alert = await screen.findByRole("alert")
+    // The role clause is prop-driven and renders immediately; the account name
+    // arrives only once useFrontierSession resolves from IDB. Wait on the
+    // account text (like the sibling test above) or the styled assertions
+    // below race the session load under full-suite CPU pressure.
+    await waitFor(() => expect(alert).toHaveTextContent("translator (t@example.com)"))
+    expect(alert).toHaveTextContent("your role on this project is Viewer")
+    const styled = Array.from(alert.querySelectorAll(".font-medium"))
+    expect(styled).toHaveLength(2)
+    expect(styled.some((el) => el.textContent === "translator (t@example.com)")).toBe(true)
+    expect(styled.some((el) => el.textContent === "Viewer")).toBe(true)
+  })
+
   it("AQU-623: links to the permission-levels docs page", async () => {
     await addSession({ jwt: "j", username: "translator", createdAt: "2026-01-01T00:00:00Z" })
     render(<PermissionDeniedAlert action="change shared settings" />, { wrapper })

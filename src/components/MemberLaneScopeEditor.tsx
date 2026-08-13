@@ -115,8 +115,8 @@ export function MemberLaneScopeEditor({
       >
         <p className="font-medium">{username}'s scopes</p>
         {loading ? (
-          <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-            <Spinner className="size-3" /> Loading…
+          <div className="flex items-center text-muted-foreground">
+            <Spinner className="size-3" />
           </div>
         ) : (
           <>
@@ -149,7 +149,6 @@ export function MemberLaneScopeEditor({
                 className="h-7 text-[11px]"
               />
               <Button
-                size="sm"
                 variant="outline"
                 className="h-7 px-2 text-[11px]"
                 onClick={addLane}
@@ -158,7 +157,7 @@ export function MemberLaneScopeEditor({
                 Add
               </Button>
             </div>
-            <Button size="sm" className="w-full" onClick={handleSave} disabled={saving}>
+            <Button className="w-full" onClick={handleSave} disabled={saving}>
               {saving && <Spinner className="mr-1.5 size-3.5" />}
               Save scopes
             </Button>

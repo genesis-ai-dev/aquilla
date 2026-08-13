@@ -113,13 +113,12 @@ describe("TOUR_STEPS — AQU-262 copy and anchor correctness", () => {
     expect(orgSwitcherIdx).toBeLessThan(navOverviewIdx)
   })
 
-  it("AQU-262: projects step describes the consolidated project hub", () => {
+  it("AQU-262: overview step describes the portfolio / org home", () => {
     const step = TOUR_STEPS.find((s) => s.anchor === "nav-overview")
     expect(step).toBeDefined()
-    expect(step!.title).toBe("Projects")
-    expect(step!.body.toLowerCase()).toContain("project hub")
+    expect(step!.title).toBe("Overview")
     expect(step!.body.toLowerCase()).toContain("all organizations")
-    expect(step!.body.toLowerCase()).toMatch(/filter.*sort|sort.*filter/)
+    expect(step!.body.toLowerCase()).toMatch(/projects/)
   })
 
   it("AQU-262: splash step (anchor=null) still comes first", () => {

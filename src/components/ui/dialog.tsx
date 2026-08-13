@@ -2,6 +2,7 @@ import * as React from "react"
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog"
 
 import { cn } from "@/lib/utils"
+import { useT } from "@/lib/i18n/I18nProvider"
 import { Button } from "@/components/ui/button"
 import { XIcon } from "lucide-react"
 
@@ -45,6 +46,7 @@ function DialogContent({
 }: DialogPrimitive.Popup.Props & {
   showCloseButton?: boolean
 }) {
+  const t = useT()
   return (
     <DialogPortal>
       <DialogOverlay />
@@ -56,7 +58,7 @@ function DialogContent({
           // footer, and close button stay fixed; long bodies opt into a
           // <DialogBody> scroll region. Short dialogs never overflow, so the
           // clip is invisible to them. Width follows the shadcn default (lg).
-          "fixed top-1/2 left-1/2 z-50 flex max-h-[85dvh] w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 flex-col gap-4 overflow-hidden rounded-3xl bg-popover p-5 text-sm text-popover-foreground ring-1 ring-foreground/10 duration-100 outline-none sm:max-w-lg data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
+          "fixed top-1/2 left-1/2 z-50 flex max-h-[85dvh] w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 flex-col gap-4 overflow-hidden rounded-lg bg-popover p-5 text-sm text-popover-foreground ring-1 ring-foreground/10 duration-100 outline-none sm:max-w-lg data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
           className
         )}
         {...props}
@@ -70,7 +72,7 @@ function DialogContent({
                 variant="ghost"
                 className="absolute top-2 right-2"
                 size="icon-sm"
-                aria-label="Close"
+                aria-label={t("common.close")}
               />
             }
           >
@@ -116,11 +118,12 @@ function DialogFooter({
 }: React.ComponentProps<"div"> & {
   showCloseButton?: boolean
 }) {
+  const t = useT()
   return (
     <div
       data-slot="dialog-footer"
       className={cn(
-        "-mx-5 -mb-5 mt-1 flex shrink-0 flex-col-reverse gap-2 rounded-b-3xl bg-muted/40 p-5 sm:flex-row sm:justify-end",
+        "-mx-5 -mb-5 mt-1 flex shrink-0 flex-col-reverse gap-2 rounded-b-lg bg-muted/40 px-5 py-3 sm:flex-row sm:justify-end",
         className
       )}
       {...props}
@@ -128,7 +131,7 @@ function DialogFooter({
       {children}
       {showCloseButton && (
         <DialogPrimitive.Close render={<Button variant="outline" />}>
-          Close
+          {t("common.close")}
         </DialogPrimitive.Close>
       )}
     </div>

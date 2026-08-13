@@ -68,7 +68,6 @@ export function InactiveProjectBanner({
       </p>
       {canReactivate && (
         <Button
-          size="sm"
           variant="outline"
           className="shrink-0 border-amber-400 text-amber-900 hover:bg-amber-100 dark:border-amber-600 dark:text-amber-200 dark:hover:bg-amber-900/60"
           onClick={onReactivate}

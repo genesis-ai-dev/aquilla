@@ -19,10 +19,12 @@ export class Dashboard {
 
   async goto(): Promise<void> {
     // Prefer the authed fixture's org id (AuthedPage.orgId) so we never resume
-    // a stale org:active into OrgRouteGate's not-found shell.
+    // a stale org:active into OrgRouteGate's not-found shell. Member orgs land
+    // Overview at `/orgs/:id` (no New project / full table) — create/list
+    // journeys need the Projects page.
     const orgId = (this.page as Page & { orgId?: number }).orgId
     const target =
-      typeof orgId === "number" && orgId > 0 ? `/orgs/${orgId}` : "/"
+      typeof orgId === "number" && orgId > 0 ? `/orgs/${orgId}/projects` : "/"
     await this.page.goto(target)
     await expect(this.page.getByRole("button", { name: /new project/i }).first()).toBeVisible({
       timeout: 15_000,
@@ -30,7 +32,8 @@ export class Dashboard {
   }
 
   organizationSwitcher(): Locator {
-    return this.page.getByRole("button", { name: /^Organization switcher:/i })
+    // OrgSwitcher is a Select trigger (role=combobox), not a plain button.
+    return this.page.getByRole("combobox", { name: /^Organization switcher:/i })
   }
 
   async openOrganizationSwitcher(): Promise<Locator> {
@@ -49,8 +52,8 @@ export class Dashboard {
     // Anchored, case-insensitive labels: the AD-9 "Advanced: project shape"
     // radios carry long descriptions (e.g. the "Source-only" option mentions
     // "target language"), so we anchor with ^...$ to avoid matching those,
-    // while /i tolerates label casing ("Project name" vs "Project Name").
-    await dialog.getByLabel(/^Project name$/i).fill(name)
+    // while /i tolerates label casing ("Project title" vs "Project Title").
+    await dialog.getByLabel(/^Project title$/i).fill(name)
     await dialog.getByLabel(/^Source language$/i).fill(source)
     // Self-contained projects support extra target-language lanes and label
     // the primary field "Target language(s)"; linked-target projects retain
@@ -118,7 +121,7 @@ export class Dashboard {
     // workspace-only readiness marker and guarantees callers interact after
     // the destination route has mounted.
     await expect(
-      this.page.getByRole("button", { name: /^More project options$/i }),
+      this.page.getByTestId("workspace-import-button"),
     ).toBeVisible({ timeout: 15_000 })
     const setupSheet = this.page.getByRole("dialog", { name: /project setup/i })
     if (await setupSheet.isVisible().catch(() => false)) {

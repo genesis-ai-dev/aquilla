@@ -12,12 +12,12 @@ import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/se
  * "N cell(s) would be flagged" (fail/match) or "No matches in the current
  * file." (pass/no match).
  *
- * The preview uses the ACTIVE file's cells, so the spec must navigate to
- * the rules surface client-side (sidebar nav) — a hard goto would reload
- * the shell and drop the active file.
+ * The preview runs against project cells loaded by the settings pane.
+ * After committing a cell in the editor, navigate to /settings/rules (the
+ * pane fetches cells from the server — it does not need the editor shell).
  *
  * This spec: import a file → put a forbidden word in cell 0's target →
- * open the rules surface via the sidebar → "+ Add Rule" → default mode is
+ * open Rules in project settings → "+ Add Rule" → default mode is
  * Forbidden/Target → enter the forbidden pattern → live preview flags the
  * cell. Then switch to a non-matching pattern → preview reports no matches.
  */
@@ -30,11 +30,7 @@ test("rule editor live preview shows pass/fail for target-forbids rule", async (
   // Put the forbidden word into cell 0's target text.
   await ws.editCell(0, "this is forbidden text")
 
-  // Navigate to the rules surface WITHOUT a full page load so the active
-  // file's cells stay available to the live preview. The "Rules" nav row
-  // lives in the sidebar's "More" popover (unpinned project nav items).
-  await alice.getByRole("button", { name: "More project options" }).click()
-  await alice.getByRole("button", { name: "Rules", exact: true }).click()
+  await alice.goto(`/project/${seeded.projectId}/settings/rules`)
 
   // Open the inline RuleEditor. Default mode is Forbidden + Target, which
   // maps to a target-forbids check.

@@ -43,13 +43,18 @@ import {
 } from "@/components/git-import/FrontierSignupForm"
 import { isFieldInvalid } from "@/lib/forms/field-state"
 import { useSubmitError } from "@/lib/forms/submit-error"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 // ---------------------------------------------------------------------------
 // Inline password checklist (same logic as signup, but standalone here so the
 // signup form module doesn't need to export its private component).
 // ---------------------------------------------------------------------------
 function PasswordChecklist({ password }: { password: string }) {
+  const t = useT()
   const checks = checkPasswordRequirements(password, "")
+  // `strength` is an English word (weak/medium/strong) from shared scoring
+  // code — it is data, not UI copy, so only the "Strength:" label around it
+  // is translated (see auth.resetPassword.checklistStrengthPrefix context).
   const strength = passwordStrength(password)
   const hasTyped = password.length > 0
 
@@ -74,7 +79,7 @@ function PasswordChecklist({ password }: { password: string }) {
           <X className="h-3 w-3 text-muted-foreground shrink-0" />
         )}
         <span className={checks.minLength ? "text-green-600" : "text-muted-foreground"}>
-          At least 8 characters
+          {t("auth.resetPassword.checklistMinLength")}
         </span>
       </div>
       {hasTyped && (
@@ -82,31 +87,30 @@ function PasswordChecklist({ password }: { password: string }) {
           <div className="h-1 w-full rounded bg-muted overflow-hidden">
             <div className={`h-full rounded transition-all ${strengthColor} ${strengthWidth}`} />
           </div>
-          <p className="text-[10px] text-muted-foreground capitalize">Strength: {strength}</p>
+          <p className="text-[10px] text-muted-foreground capitalize">
+            {t("auth.resetPassword.checklistStrengthPrefix", { strength })}
+          </p>
         </div>
       )}
     </div>
   )
 }
 
-const emailSchema = z.object({
-  email: z
-    .string()
-    .trim()
-    .min(1, "Email is required")
-    .email("Enter a valid email address"),
-})
-
-const passwordSchema = z.object({
-  password: z.string().min(8, "Password must be at least 8 characters"),
-})
-
 // ---------------------------------------------------------------------------
 // Recovery form — shown when the token is invalid/expired.
 // ---------------------------------------------------------------------------
 function TokenExpiredView({ username }: { username: string }) {
+  const t = useT()
   const [sentEmail, setSentEmail] = useState<string | null>(null)
   const { submitError, setSubmitError, clearSubmitError } = useSubmitError()
+
+  const emailSchema = z.object({
+    email: z
+      .string()
+      .trim()
+      .min(1, t("auth.resetPassword.emailRequired"))
+      .email(t("auth.resetPassword.emailInvalid")),
+  })
 
   const form = useForm({
     defaultValues: { email: "" },
@@ -118,7 +122,7 @@ function TokenExpiredView({ username }: { username: string }) {
         setSentEmail(value.email.trim())
       } catch (err) {
         setSubmitError(
-          err instanceof FrontierAuthError ? err.message : "Failed to send reset email",
+          err instanceof FrontierAuthError ? err.message : t("auth.resetPassword.failedToSend"),
         )
       }
     },
@@ -128,15 +132,14 @@ function TokenExpiredView({ username }: { username: string }) {
     return (
       <div className="flex flex-col gap-3">
         <p className="text-sm">
-          A new reset link has been sent to{" "}
-          <span className="font-medium">{sentEmail}</span>. Check your inbox and
-          follow the link to choose a new password.
+          {t("auth.resetPassword.sentPrefix")}{" "}
+          <span className="font-medium">{sentEmail}</span>. {t("auth.resetPassword.sentSuffix")}
         </p>
         <a
           href="/"
           className="inline-flex w-full items-center justify-center rounded-xl border px-3 py-1.5 text-sm font-medium transition-all hover:bg-muted"
         >
-          Back to app
+          {t("auth.resetPassword.backToApp")}
         </a>
       </div>
     )
@@ -145,12 +148,12 @@ function TokenExpiredView({ username }: { username: string }) {
   return (
     <div className="flex flex-col gap-4">
       <div className="rounded-md bg-muted px-4 py-3 text-sm text-muted-foreground">
-        This reset link has expired or is invalid. Enter your email address to
-        request a new one
+        {t("auth.resetPassword.expiredBody")}
         {username ? (
           <>
             {" "}
-            for account <span className="font-medium text-foreground">{username}</span>
+            {t("auth.resetPassword.expiredForAccount")}{" "}
+            <span className="font-medium text-foreground">{username}</span>
           </>
         ) : null}
         .
@@ -170,7 +173,7 @@ function TokenExpiredView({ username }: { username: string }) {
               const invalid = isFieldInvalid(field)
               return (
                 <Field data-invalid={invalid}>
-                  <FieldLabel htmlFor="rp-email">Email</FieldLabel>
+                  <FieldLabel htmlFor="rp-email">{t("common.email")}</FieldLabel>
                   <Input
                     id="rp-email"
                     name={field.name}
@@ -190,13 +193,15 @@ function TokenExpiredView({ username }: { username: string }) {
         {submitError && <FieldError>{submitError}</FieldError>}
         <Button type="submit" form="token-expired-form" className="w-full">
           {form.state.isSubmitting && <Spinner data-icon="inline-start" />}
-          {form.state.isSubmitting ? "Sending…" : "Request a new link"}
+          {form.state.isSubmitting
+            ? t("auth.resetPassword.sending")
+            : t("auth.resetPassword.requestNewLink")}
         </Button>
         <a
           href="/"
           className="inline-flex w-full items-center justify-center text-sm text-muted-foreground hover:underline underline-offset-4"
         >
-          Back to app
+          {t("auth.resetPassword.backToApp")}
         </a>
       </form>
     </div>
@@ -209,6 +214,7 @@ function TokenExpiredView({ username }: { username: string }) {
 type VerifyState = "loading" | "valid" | "invalid"
 
 export function ResetPassword() {
+  const t = useT()
   const navigate = useNavigate()
   const { login } = useFrontierSession()
   const [searchParams] = useSearchParams()
@@ -218,6 +224,10 @@ export function ResetPassword() {
 
   const [verifyState, setVerifyState] = useState<VerifyState>("loading")
   const { submitError, setSubmitError, clearSubmitError } = useSubmitError()
+
+  const passwordSchema = z.object({
+    password: z.string().min(8, t("auth.resetPassword.passwordTooShort")),
+  })
 
   const form = useForm({
     defaultValues: { password: "" },
@@ -230,7 +240,7 @@ export function ResetPassword() {
         navigate("/", { replace: true })
       } catch (err) {
         setSubmitError(
-          err instanceof FrontierAuthError ? err.message : "Failed to reset password",
+          err instanceof FrontierAuthError ? err.message : t("auth.resetPassword.failedToReset"),
         )
       }
     },
@@ -260,16 +270,19 @@ export function ResetPassword() {
     <div className="min-h-screen flex items-center justify-center p-8">
       <div className="w-full max-w-sm flex flex-col gap-6">
         <div className="flex flex-col gap-1 text-center">
-          <h1 className="text-2xl font-semibold">Reset your password</h1>
+          <h1 className="text-2xl font-semibold">{t("auth.resetPassword.title")}</h1>
           {username && (
             <p className="text-sm text-muted-foreground">
-              Account: <span className="font-medium text-foreground">{username}</span>
+              {t("auth.resetPassword.accountPrefix")}{" "}
+              <span className="font-medium text-foreground">{username}</span>
             </p>
           )}
         </div>
 
         {verifyState === "loading" && (
-          <p className="text-center text-sm text-muted-foreground">Verifying link…</p>
+          <p className="text-center text-sm text-muted-foreground">
+            {t("auth.resetPassword.verifyingLink")}
+          </p>
         )}
 
         {verifyState === "invalid" && <TokenExpiredView username={username} />}
@@ -290,7 +303,9 @@ export function ResetPassword() {
                   const invalid = isFieldInvalid(field)
                   return (
                     <Field data-invalid={invalid}>
-                      <FieldLabel htmlFor="rp-new-password">New password</FieldLabel>
+                      <FieldLabel htmlFor="rp-new-password">
+                        {t("auth.resetPassword.newPasswordLabel")}
+                      </FieldLabel>
                       <RevealableInput
                         id="rp-new-password"
                         name={field.name}
@@ -311,7 +326,9 @@ export function ResetPassword() {
             {submitError && <FieldError>{submitError}</FieldError>}
             <Button type="submit" form="reset-password-form" className="w-full">
               {form.state.isSubmitting && <Spinner data-icon="inline-start" />}
-              {form.state.isSubmitting ? "Setting password…" : "Set new password"}
+              {form.state.isSubmitting
+                ? t("auth.resetPassword.submitSetting")
+                : t("auth.resetPassword.submitDefault")}
             </Button>
           </form>
         )}

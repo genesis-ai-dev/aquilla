@@ -593,6 +593,93 @@ export function buildEventProjectionStmts(
               ...gateBinds,
             ),
         )
+
+        // AQU-826: the winning human target commit is the durable review
+        // boundary for Autopilot drafts. Accepted cards intentionally do not
+        // call the review route: an IDB enqueue is not proof that this event
+        // won projection. Resolve every still-live proposal for this exact
+        // project/file/cell/lane in the same transaction as the cell write.
+        //
+        // `cells.event_id = event.id` is deliberately the final authority:
+        // an AD-2 sibling that lost `chainGate` did not advance the cell, so it
+        // must not resolve a proposal either. `draft.created_at <= serverTs`
+        // is the rebuild causality boundary: replaying a historical commit may
+        // rebuild the cell head, but it can never review a proposal staged
+        // later. Drafts carry their own `target_lang` (copied from the owning
+        // run at insert) so a French commit cannot apply a Spanish proposal.
+        // Text equality is exact; normalizing whitespace here would claim a
+        // proposal was applied when the committed artifact differs byte-for-
+        // byte. The partial live-draft index permits at most one reconciled row
+        // for this cell+lane, so its activity fact reuses the winning commit's
+        // UUIDv7: stable on replay, with no invented ID shape. A malformed
+        // legacy envelope skips only the evidence INSERT via the UUIDv7
+        // predicate; it must never roll back the cell/draft projection.
+        stmts.push(
+          db
+            .prepare(
+              `WITH reconciled AS (
+                 UPDATE contextual_drafts AS draft
+                    SET status = CASE WHEN draft.text = ? THEN 'applied' ELSE 'superseded' END,
+                        reviewed_at = to_timestamp(?::double precision / 1000.0),
+                        reviewed_by = ?
+                  WHERE draft.project_id = ?
+                    AND draft.file_id = ?
+                    AND draft.cell_id = ?
+                    AND draft.created_at <= to_timestamp(?::double precision / 1000.0)
+                    AND draft.status = 'proposed'
+                    AND draft.target_lang = ?
+                    AND EXISTS (
+                      SELECT 1
+                        FROM cells AS projected
+                       WHERE projected.project_id = ?
+                         AND projected.file_id = ?
+                         AND projected.cell_id = ?
+                         AND projected.side = 'target'
+                         AND projected.target_lang = ?
+                         AND projected.event_id = ?
+                    )
+                 RETURNING draft.id, draft.run_id, draft.project_id,
+                           draft.file_id, draft.cell_id, draft.status
+               )
+               INSERT INTO contextual_run_events
+                 (id, run_id, project_id, file_id, kind, span_id, span_label,
+                  status, phase, summary, details, created_at)
+               SELECT ?, run_id, project_id, file_id, 'draft_reviewed', NULL, NULL,
+                      status,
+                      NULL,
+                      CASE WHEN status = 'applied' THEN 'Draft applied' ELSE 'Draft superseded' END,
+                      jsonb_build_object(
+                        'draftId', left(id, 256),
+                        'cellId', left(cell_id, 256),
+                        'outcome', status
+                      ),
+                      to_timestamp(?::double precision / 1000.0)
+                 FROM reconciled
+                WHERE octet_length(run_id) <= 512
+                  AND octet_length(project_id) <= 512
+                  AND octet_length(file_id) <= 512
+                  AND ? ~ '^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-7[0-9A-Fa-f]{3}-[89ABab][0-9A-Fa-f]{3}-[0-9A-Fa-f]{12}$'
+               ON CONFLICT (id) DO NOTHING`,
+            )
+            .bind(
+              value,
+              event.serverTs,
+              event.author,
+              event.projectId,
+              event.fileId,
+              event.cellId,
+              event.serverTs,
+              lane,
+              event.projectId,
+              event.fileId,
+              event.cellId,
+              lane,
+              event.id,
+              event.id,
+              event.serverTs,
+              event.id,
+            ),
+        )
       } else {
         // source.cell.commit — same as target but no source_event_id pin
         // (it's null on source-side rows by definition). Source-side
@@ -625,6 +712,25 @@ export function buildEventProjectionStmts(
               ...gateBinds,
             ),
         )
+
+        // AQU-847: a source edit on an imported MEDIA section corrects its
+        // TRANSCRIPT, not its `value` — `value` holds the import filename and
+        // stays put as provenance. Conditional (only when supplied) so every
+        // ordinary text-cell source commit projects exactly as before, and
+        // scoped to side='source' like the `cell.audio.attach` transcript
+        // write it mirrors. Without this the correction was accepted, chained,
+        // and then silently discarded.
+        const sp = p as EventPayloads['source.cell.commit']
+        if (typeof sp.transcription === 'string') {
+          stmts.push(
+            db
+              .prepare(
+                `UPDATE cells SET transcription = ?
+                  WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'source'`,
+              )
+              .bind(sp.transcription, event.projectId, event.fileId, event.cellId),
+          )
+        }
       }
 
       // FTS5 maintenance (post-DML): insert the new indexed value now that

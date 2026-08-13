@@ -98,6 +98,17 @@ interface FileProjection {
   name: string
   type: string
   cellCount: number
+  /** The files-table `role` column, forwarded raw. `type` above already folds
+   *  it in as a fallback, which is lossy: a `role: "audio-cues"` sibling has
+   *  `kind: "vtt"`, so `type` reads "vtt" like any other subtitle file and the
+   *  client cannot tell the two apart. The client's isAudioCueFile needs the
+   *  unfolded value, and this endpoint is the cold load — the only place a
+   *  freshly-opened browser learns a file exists. */
+  role?: string
+  /** The file this one hangs off (`files.anchor_file_id`): for an audio-cue
+   *  sibling, the text file whose timeline its cues annotate. The sibling is
+   *  hidden from every list, so without this it is unreachable. */
+  anchorFileId?: string
   bookCode?: string
   hasScriptureContent?: boolean
   /** Timeline-segment-model order lens, read from files.meta. Omitted when
@@ -137,7 +148,7 @@ async function loadFilesByProject(
 
   const placeholders = projectIds.map(() => "?").join(",")
   const rows = await env.AQUILLA_PG.prepare(
-    `SELECT id, project_id, name, kind, role, book_code, cell_count, meta
+    `SELECT id, project_id, name, kind, role, book_code, anchor_file_id, cell_count, meta
        FROM files
       WHERE project_id IN (${placeholders})
         AND deleted_at IS NULL
@@ -151,6 +162,7 @@ async function loadFilesByProject(
       kind: string | null
       role: string | null
       book_code: string | null
+      anchor_file_id: string | null
       cell_count: number | null
       meta: string | null
     }>()
@@ -215,6 +227,8 @@ async function loadFilesByProject(
       // `file_type` collapsed into role + kind (0012); derive a compatible value.
       type: f.kind ?? f.role ?? "codex",
       cellCount: f.cell_count ?? 0,
+      ...(f.role ? { role: f.role } : {}),
+      ...(f.anchor_file_id ? { anchorFileId: f.anchor_file_id } : {}),
       ...(f.book_code ? { bookCode: f.book_code } : {}),
       ...(hasScriptureContent ? { hasScriptureContent: true } : {}),
       ...(orderedBy ? { orderedBy } : {}),

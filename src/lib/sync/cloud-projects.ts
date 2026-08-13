@@ -15,6 +15,13 @@ export interface CloudFileSummary {
   name: string
   type: string
   cellCount: number
+  /** The files-table `role`, unfolded. `type` above collapses kind ?? role, so
+   *  an audio-cue sibling (role "audio-cues", kind "vtt") is indistinguishable
+   *  from a real subtitle import through `type` alone. */
+  role?: string | null
+  /** The file this one hangs off: for an audio-cue sibling, the text file whose
+   *  timeline its cues annotate. */
+  anchorFileId?: string | null
   bookCode?: string | null
   hasScriptureContent?: boolean
   sourceLanguage?: string | null
@@ -296,6 +303,12 @@ export function minimalProjectRecord(summary: CloudProjectSummary): ProjectRecor
       type: f.type as FileType,
       createdAt: now,
       cellCount: f.cellCount,
+      // Both halves of the hidden-sibling pairing. Dropping either here means a
+      // cold-loaded browser sees the audio-cue file as an ordinary VTT: listed
+      // in the sidebar, searched, exported — everything the sibling exists to
+      // avoid. `type` cannot stand in for `role` (it is kind ?? role).
+      ...(f.role ? { role: f.role } : {}),
+      ...(f.anchorFileId ? { anchorFileId: f.anchorFileId } : {}),
       ...(f.bookCode ? { bookCode: f.bookCode } : {}),
       ...(f.hasScriptureContent ? { hasScriptureContent: true } : {}),
       ...(f.sourceLanguage ? { sourceLanguage: f.sourceLanguage } : {}),

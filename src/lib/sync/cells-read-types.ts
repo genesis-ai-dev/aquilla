@@ -20,6 +20,15 @@ export interface FileSummary {
   name: string
   /** e.g. "codex", "source", "vtt". Matches the FileType enum on the client. */
   fileType: string
+  /** The raw `role`/`kind` columns behind `fileType` (which is `kind ?? role`,
+   *  and so cannot distinguish an audio-cue sibling — role "audio-cues", kind
+   *  "vtt" — from a plain subtitle import). The route has always sent both;
+   *  declaring them is what lets a consumer of this shape, notably the Trash
+   *  listing, filter the hidden siblings out. */
+  role?: string | null
+  kind?: string | null
+  /** The text file an audio-cue sibling annotates. Null on ordinary files. */
+  anchorFileId?: string | null
   sourceLanguage: string | null
   targetLanguage: string | null
   sourceTextDirection?: "ltr" | "rtl" | null

@@ -222,6 +222,30 @@ describe("GET /api/v1/projects/:projectId/files", () => {
     for (const file of body.files) expect(file.trackOverrides).toBeNull()
   })
 
+  it("reports role/kind/anchorFileId so the client can spot a hidden sibling", async () => {
+    // `fileType` is kind ?? role, which reads "vtt" for both rows below — the
+    // audio-cue sibling is only distinguishable through the unfolded columns.
+    const { db } = await makeTestDb({
+      files: [
+        { id: "f-text", project_id: "proj-a", name: "ep-101", role: "source", kind: "vtt" },
+        {
+          id: "f-cues", project_id: "proj-a", name: "ep-101 · audio cues",
+          role: "audio-cues", kind: "vtt", anchor_file_id: "f-text",
+        },
+      ],
+    })
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "f-cues" })
+    const res = (await handleFilesReadRequest(new Request(
+      "https://w/api/v1/projects/proj-a/files/f-cues",
+      { headers: { Authorization: `Bearer ${token}` } },
+    ), envWith(db)))!
+    const body = await res.json() as {
+      file: { fileType: string; role: string | null; anchorFileId: string | null }
+    }
+
+    expect(body.file).toMatchObject({ fileType: "vtt", role: "audio-cues", anchorFileId: "f-text" })
+  })
+
   it("returns 404 for an unknown file id", async () => {
     const { db } = await makeTestDb({ files: [] })
     const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "missing" })

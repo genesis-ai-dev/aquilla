@@ -47,6 +47,7 @@ import { GlossaryRow } from "@/components/GlossaryRow"
 import { TerminologyTermDetail } from "@/components/TerminologyTermDetail"
 import { TerminologyViolationsInbox } from "@/components/TerminologyViolationsInbox"
 import { buildFileScopedTokenFetcher } from "@/lib/sync/cqrs-bridge"
+import { isAudioCueFile } from "@/lib/parsers/types"
 
 interface GlossaryEditorProps {
   /** Workspace-authoritative files include optimistic imports before the
@@ -87,8 +88,14 @@ export function GlossaryEditor({ files: workspaceFiles }: GlossaryEditorProps = 
     jwtRef.current = frontierSession?.jwt ?? null
   }, [frontierSession?.jwt])
 
+  // AQU-646 stage 2: only the `project?.files` arm needs the audio-cue filter
+  // — the workspace passes a list that has already dropped them. Their cells
+  // are a near-verbatim transcript of a film's soundtrack, which "Suggest
+  // terms" would otherwise mine as if it were translatable text.
   const projectFiles = useMemo(
-    () => (workspaceFiles ?? project?.files ?? []).map((f) => ({ id: f.id, name: f.name, type: f.type })),
+    () =>
+      (workspaceFiles ?? (project?.files ?? []).filter((f) => !isAudioCueFile(f)))
+        .map((f) => ({ id: f.id, name: f.name, type: f.type })),
     [project?.files, workspaceFiles],
   )
   const getToken = useMemo(() => {

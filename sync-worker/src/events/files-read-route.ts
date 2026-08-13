@@ -25,6 +25,7 @@ interface FileRowRaw {
   name: string
   role: string | null
   kind: string | null
+  anchor_file_id: string | null
   event_id: string
   meta: string
   cell_count: number
@@ -43,6 +44,11 @@ interface FileSummary {
   fileType: string
   role: string | null
   kind: string | null
+  /** The file this one hangs off. A `role: "audio-cues"` sibling points at the
+   *  text file whose timeline its cues annotate; that pairing is the only link
+   *  between them, since the sibling never appears in a file list. Null on
+   *  ordinary files. */
+  anchorFileId: string | null
   eventId: string
   sourceLanguage: string | null
   targetLanguage: string | null
@@ -100,6 +106,7 @@ function mapRow(row: FileRowRaw): FileSummary {
     fileType: row.kind ?? row.role ?? 'codex',
     role: row.role,
     kind: row.kind,
+    anchorFileId: row.anchor_file_id,
     eventId: row.event_id,
     sourceLanguage: meta.source_language ?? meta.sourceLanguage ?? null,
     targetLanguage: meta.target_language ?? meta.targetLanguage ?? null,
@@ -169,7 +176,7 @@ export async function handleFilesReadRequest(
   }
 
   const columns =
-    "f.id, f.project_id, f.name, f.role, f.kind, f.event_id, f.meta, " +
+    "f.id, f.project_id, f.name, f.role, f.kind, f.anchor_file_id, f.event_id, f.meta, " +
     "COALESCE(p.total_count, f.cell_count) AS cell_count, " +
     "CASE WHEN p.file_id IS NULL THEN f.approved_count ELSE COALESCE((SELECT SUM((entry.key::integer >= LEAST(15, GREATEST(1, CASE WHEN (ps.settings::jsonb->>'validationCount') ~ '^[0-9]+$' THEN (ps.settings::jsonb->>'validationCount')::integer ELSE 1 END)))::integer * entry.value::integer) FROM jsonb_each_text(p.validator_histogram) entry), 0) END AS approved_count, " +
     "COALESCE(p.filled_count, f.filled_count) AS filled_count, " +

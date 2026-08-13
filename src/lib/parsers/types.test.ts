@@ -1,7 +1,9 @@
 import { describe, it, expect } from "vitest"
 import {
+  AUDIO_CUES_ROLE,
   detectFileType,
   fileHasSections,
+  isAudioCueFile,
   isSubtitleImportFile,
   projectHasScriptureFiles,
   resolveBibleResourcesEnabled,
@@ -96,6 +98,16 @@ describe("isSubtitleImportFile", () => {
   it("no file is not a subtitle file (callers pass activeFile, which is null before one is open)", () => {
     expect(isSubtitleImportFile(null)).toBe(false)
     expect(isSubtitleImportFile(undefined)).toBe(false)
+  })
+})
+
+describe("isAudioCueFile", () => {
+  it("keys off role alone — the sibling's type is 'vtt' like a real import", () => {
+    expect(isAudioCueFile({ role: AUDIO_CUES_ROLE })).toBe(true)
+    expect(isAudioCueFile({ role: "source" })).toBe(false)
+    expect(isAudioCueFile({})).toBe(false)
+    expect(isAudioCueFile(null)).toBe(false)
+    expect(isAudioCueFile(undefined)).toBe(false)
   })
 })
 

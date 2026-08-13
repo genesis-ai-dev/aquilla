@@ -151,6 +151,26 @@ describe("minimalProjectRecord", () => {
     expect(record.files).toEqual([])
   })
 
+  it("carries role + anchorFileId so a cold load can hide the audio-cue sibling", () => {
+    // Cold load is where a fresh browser first learns the sibling exists, and
+    // `type` is kind ?? role — "vtt" for both files here. Lose `role` and the
+    // sibling is listed, searched and exported like any other subtitle import.
+    const withSibling: CloudProjectSummary = {
+      ...summary,
+      files: [
+        { id: "f-text", name: "ep-101", type: "vtt", cellCount: 650 },
+        {
+          id: "f-cues", name: "ep-101 · audio cues", type: "vtt", cellCount: 548,
+          role: "audio-cues", anchorFileId: "f-text",
+        },
+      ],
+    }
+    const record = minimalProjectRecord(withSibling)
+    expect(record.files[0]).not.toHaveProperty("role")
+    expect(record.files[1].role).toBe("audio-cues")
+    expect(record.files[1].anchorFileId).toBe("f-text")
+  })
+
   it("carries trackOverrides through verbatim, unknown kinds included", () => {
     // Cold load is the only path that hydrates a file's persisted track deltas,
     // so anything dropped here is a rename the user never sees again. Contents

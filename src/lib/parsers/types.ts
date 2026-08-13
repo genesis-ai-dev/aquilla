@@ -593,6 +593,22 @@ export interface FileReference {
    * applicable and which belong to a build newer than this one.
    */
   trackOverrides?: PersistedTrackOverrides | null
+  /**
+   * The files-table `role` column. `"source"` for every ordinary import — the
+   * value that matters is `"audio-cues"` (see `AUDIO_CUES_ROLE`), which marks a
+   * hidden timeline-only sibling. Deliberately NOT folded into `type`: the
+   * sibling's `type` is "vtt" like any other subtitle import, so `role` is the
+   * only thing that tells them apart. Absent on files whose server row predates
+   * the column, or that were never sent a role.
+   */
+  role?: string
+  /**
+   * The file this one annotates (`files.anchor_file_id`) — for an audio-cue
+   * sibling, the text file whose timeline carries its cues. The sibling appears
+   * in no file list, so this is the only route back to it. Absent on ordinary
+   * files.
+   */
+  anchorFileId?: string
 }
 
 /** Which key is authoritative for ordering a file's segments. */
@@ -612,6 +628,30 @@ export function fileOrderedBy(file: Pick<FileReference, "orderedBy">): OrderedBy
  */
 export function isSubtitleImportFile(file: Pick<FileReference, "type"> | null | undefined): boolean {
   return file?.type === "vtt" || file?.type === "srt" || file?.type === "sbv"
+}
+
+/**
+ * `role` of the audio-cue sibling: a file holding ONLY the cues of an episode's
+ * audio VTT (~550 near-verbatim transcript lines timing the film's own
+ * soundtrack), paired to its text file through `anchorFileId`.
+ *
+ * Why a whole separate file instead of extra cells on the text file: `medium`
+ * is the app's ONLY cell→surface discriminator, and audio cues are text. Put
+ * them in the text file and those 550 rows land in the dialogue table, in
+ * `files.cell_count`, in the validation percentages, in every export, and in
+ * project search — none of which has a lever to exclude them. A sibling
+ * isolates all of it at once, and the pieces that must see the cues (the
+ * timeline's Source-audio row) reach it explicitly by id.
+ */
+export const AUDIO_CUES_ROLE = "audio-cues"
+
+/**
+ * True for that sibling. The canonical predicate — every surface that lists,
+ * counts, searches, or exports project files has to hide it, so "is this an
+ * audio-cue file?" gets ONE answer, exactly like `isSubtitleImportFile`.
+ */
+export function isAudioCueFile(file: Pick<FileReference, "role"> | null | undefined): boolean {
+  return file?.role === AUDIO_CUES_ROLE
 }
 
 /**

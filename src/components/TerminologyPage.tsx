@@ -47,6 +47,7 @@ import { importConceptsCsv, exportConceptsCsv } from "@/lib/terminology/csv"
 import { importConceptsTbx, exportConceptsTbx } from "@/lib/terminology/tbx"
 import { computeTerminologyStats } from "@/lib/terminology/stats"
 import type { CellPair } from "@/lib/terminology/stats"
+import { isAudioCueFile } from "@/lib/parsers/types"
 import { cn } from "@/lib/utils"
 import { useProject } from "@/hooks/useProject"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
@@ -748,9 +749,17 @@ export function TerminologyPage() {
     jwtRef.current = frontierSession?.jwt ?? null
   }, [frontierSession?.jwt])
 
+  // AQU-646 stage 2: this page reads `project.files` itself rather than the
+  // workspace's already-filtered list, so it needs its own filter. An
+  // audio-cue sibling's cells are a near-verbatim transcript of a film's
+  // soundtrack — feeding those to candidate extraction would flood the term
+  // suggestions with spoken filler from a file that has no terminology of its
+  // own and is not translated anywhere.
   const projectFiles = useMemo(
     () =>
-      (project?.files ?? []).map((f) => ({ id: f.id, name: f.name, type: f.type })),
+      (project?.files ?? [])
+        .filter((f) => !isAudioCueFile(f))
+        .map((f) => ({ id: f.id, name: f.name, type: f.type })),
     [project?.files],
   )
 

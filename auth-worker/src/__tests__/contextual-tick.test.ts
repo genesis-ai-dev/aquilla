@@ -132,35 +132,21 @@ async function startRun(targetLang = "") {
 }
 
 describe("runOneTick", () => {
-  it("publishes the legacy run's lane provenance when rejecting a non-default run", async () => {
+  it("stages a French run into the French review queue without leaking into the default lane", async () => {
+    await seedFile()
     const run = await startRun("fr")
-    const frames: ContextualProgressFrame[] = []
-    let modelCalls = 0
+    const result = await runOneTick({ db, runId: run.id, llm: llm() })
+    expect(result.continueRun).toBe(true)
 
-    const result = await runOneTick({
-      db,
-      runId: run.id,
-      llm: async () => {
-        modelCalls += 1
-        return "unused"
-      },
-      notify: async (frame) => { frames.push(frame) },
-    })
-
-    expect(result).toMatchObject({ continueRun: false, status: "failed" })
-    expect(modelCalls).toBe(0)
+    const french = await listDrafts(db, PROJECT, FILE, "proposed", "fr")
+    const def = await listDrafts(db, PROJECT, FILE, "proposed", "")
+    expect(french.length).toBeGreaterThan(0)
+    expect(french.every((draft) => draft.targetLang === "fr")).toBe(true)
+    expect(def).toEqual([])
     expect(await getRun(db, run.id)).toMatchObject({
-      status: "failed",
+      status: "running",
       targetLang: "fr",
-      lastError: "unsupported_target_language_lane",
     })
-    expect(frames).toContainEqual(expect.objectContaining({
-      type: "contextual.run.state",
-      runId: run.id,
-      fileId: FILE,
-      targetLang: "fr",
-      status: "failed",
-    }))
   })
 
   it("injects only approved scene context from the run's target lane", async () => {

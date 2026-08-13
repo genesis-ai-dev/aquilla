@@ -64,6 +64,7 @@ export interface ContextualSpanStartFrame {
   type: "contextual.span.start"
   runId: string
   fileId: string
+  targetLang?: string
   spanId: string
   spanLabel: string
 }
@@ -204,6 +205,7 @@ export function parseContextualFrame(value: unknown): ContextualFrame | null {
       type: "contextual.span.start",
       runId: m.runId,
       fileId: m.fileId,
+      ...(typeof m.targetLang === "string" ? { targetLang: m.targetLang } : {}),
       spanId: m.spanId,
       spanLabel: m.spanLabel,
     }

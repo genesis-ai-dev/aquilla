@@ -1,5 +1,5 @@
 import * as React from "react"
-import { Link } from "react-router-dom"
+import { Link, type LinkProps } from "react-router-dom"
 import { ChevronLeft, ChevronRight } from "lucide-react"
 
 import { cn } from "@/lib/utils"
@@ -52,6 +52,7 @@ function NavRow({
   description,
   hint,
   className,
+  state,
 }: {
   to: string
   icon?: React.ComponentType<{ className?: string }>
@@ -59,10 +60,12 @@ function NavRow({
   description?: React.ReactNode
   hint?: React.ReactNode
   className?: string
+  state?: LinkProps["state"]
 }) {
   return (
     <Link
       to={to}
+      state={state}
       className={cn(
         "flex items-center gap-3 px-4 py-3.5 hover:bg-accent/40 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none focus-visible:ring-inset",
         className,

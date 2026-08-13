@@ -62,7 +62,7 @@
 | Audio/Video | Subtitles flow                                       | _gap — Plan 2_                                                |        |
 | Settings    | Settings sync between two browsers                   | _gap — Plan 2_                                                |        |
 | Settings    | Settings persist across reload                       | `e2e/specs/orgs/preferences-persist-reload.smoke.spec.ts`    |   ✅   |
-| Settings    | Preferences General controls (theme, language, privacy) render inline | `e2e/specs/orgs/preferences.smoke.spec.ts`                    |   ✅   |
+| Settings    | Preferences General controls (theme, language, privacy) render inline; in-app account menu opens Preferences as a route-modal over the untouched workspace | `e2e/specs/orgs/preferences.smoke.spec.ts` + `e2e/specs/orgs/account-switcher.smoke.spec.ts` | ✅ |
 | Settings    | Appearance theme is inline on Preferences and persists without accent presets | `e2e/specs/orgs/preferences-theme.smoke.spec.ts`          |   ✅   |
 | Export      | Primary "Download <file>" in the file's own format   | `e2e/specs/editor/export.smoke.spec.ts`                       |   ✅   |
 | Export      | IDML import → story milestone with 50-cell subsection navigation → empty and populated single-activation edits preserve pointer position and caret order while sanitizing spurious whitespace at entry (AQU-758) → IME-composed Japanese enters an empty protected slot through Chromium's real composition pipeline and lands exactly once — no doubled characters, no leaked romaji, no zero-width sentinel residue (AQU-810) → active style slots retain internal metadata without exposing raw native tooltips → typed drafts backspace to empty without tripping the protected-formatting guard → modifier word deletion owns adjacent whitespace → a trailing line break keeps its caret line box and a line-two read-view click remounts at the same document offset → strict artifact export preserves original character-style runs | `e2e/specs/editor/idml-roundtrip.smoke.spec.ts` | ✅ |
@@ -290,7 +290,7 @@
 | Terminology | Violations tab shows inbox content                    | `e2e/specs/projects/terminology-violations-tab.smoke.spec.ts` |   ✅   |
 | Terminology | Wildcard source term 'samp*' creates chip for 'sample' | `e2e/specs/terminology/wildcard-term-chip.smoke.spec.ts`     |   ✅   |
 | Terminology | Violations inbox concept group expand/collapse        | `e2e/specs/terminology/violations-inbox-expand-group.smoke.spec.ts` | ✅ |
-| Projects    | Add target language → switch lane → translate per lane; Autopilot stays explicitly default-lane-only (AQU-538/AQU-826) | `e2e/specs/projects/add-target-language.spec.ts` |   |
+| Projects    | Add target language → switch lane → translate per lane; Autopilot follows the open language lane | `e2e/specs/projects/add-target-language.spec.ts` |   |
 | Editor      | Setup checklist AI instructions edit + reset          | `e2e/specs/editor/setup-checklist-ai-instructions-edit.smoke.spec.ts` |   ✅   |
 | Editor      | Workspace actions dropdown lists available actions    | `e2e/specs/editor/workspace-actions-dropdown.smoke.spec.ts`   |   ✅   |
 | Editor      | Workspace actions cell scroll to target cell          | `e2e/specs/editor/workspace-actions-cell-scroll.smoke.spec.ts` |   ✅   |

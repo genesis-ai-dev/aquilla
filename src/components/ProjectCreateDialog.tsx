@@ -610,7 +610,7 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
                 {isSubmitting
                   ? (shape === "linked-target"
                       ? t("projectSettings.create.submitCreatingAndLinking")
-                      : t("projectSettings.create.submitCreating"))
+                      : t("common.creating"))
                   : (shape === "linked-target"
                       ? t("projectSettings.create.submitCreateAndLink")
                       : t("projectSettings.create.submitCreate"))}

@@ -95,7 +95,7 @@ export const org = defineNamespace({
     "org.orgHome.lens.nameDescription": "Projects sorted alphabetically",
     "org.orgHome.lens.pmDescription": "Projects grouped by their designated project manager",
 
-    "org.orgHome.table.orgHeader": "Org",
+    // "Org" column heading → common.org (identical text)
     "org.orgHome.table.languageHeader": "Language",
     "org.orgHome.table.translatedHeaderLabel": "Translated",
     "org.orgHome.table.translatedHeaderDescription":
@@ -120,9 +120,11 @@ export const org = defineNamespace({
 
     // -- ProjectMembersPage (AQU-180): per-project Members page --
     "org.membersPage.loadingMembers": "Loading members",
-    "org.membersPage.inviteLinkTab": "Invite link",
+    // "Invite link" tab → projectSettings.share.tabInviteLink (identical text)
     "org.membersPage.lockedHintOrgAccess": "Access via org membership — remove from org to revoke",
-    "org.membersPage.lockedHintCreator": "Project creator",
+    // "Project creator" tooltip → projectSettings.share.lockedHintCreator (identical text; see
+    // org.membersPage.sourceProjectCreator's duplicate-exceptions.ts entry for the lowercase
+    // badge-fragment sibling that stays distinct)
     "org.membersPage.removeDirectAccessTooltip":
       "Removes {username}'s direct project access. Access via org, team, or creator status is unaffected.",
     "org.membersPage.remove": "Remove",
@@ -152,13 +154,13 @@ export const org = defineNamespace({
     "org.membersPage.directGrantRemoved": "Direct grant for {username} has been removed.",
     "org.membersPage.noDirectGrantToRemove": "{username} had no direct grant to remove.",
     "org.membersPage.accessStillGrantedVia": "Access still granted via:",
-    "org.membersPage.done": "Done",
+    // "Done" → common.done (identical text)
     "org.membersPage.revokeAllAccessTitle": "Revoke all access",
     "org.membersPage.revokeAllExplanation":
       "This will remove {username}'s direct membership grant from this project. Any access they have via org, group, or creator status will remain.",
     "org.membersPage.currentGrantPathsFor": "Current grant paths for {username}:",
     "org.membersPage.typeToConfirm": "Type {username} to confirm",
-    "org.membersPage.revoking": "Revoking…",
+    // "Revoking…" → common.revoking (identical text)
     "org.membersPage.revokeAccess": "Revoke access",
     "org.membersPage.willBeRemoved": "will be removed",
     "org.membersPage.staysGranted": "stays",
@@ -170,27 +172,25 @@ export const org = defineNamespace({
     "org.membersPage.inviteLinkReadyHeading": "Invite link ready",
     "org.membersPage.inviteLinkReadyBody":
       "Send this link to the recipient. Anyone with the link can join.",
-    "org.membersPage.copyUrl": "Copy URL",
+    // "Copy URL" → projectSettings.share.copyUrlLabel (identical text)
     "org.membersPage.inviteRecipientNote":
       "The recipient signs in (or signs up) and is added as {role}. To revoke later, use the Members tab to remove them.",
-    "org.membersPage.memberFallback": "a member",
-    "org.membersPage.createAnotherLink": "Create another link",
-    "org.membersPage.createInviteLink": "Create invite link",
-    "org.membersPage.roleLabel": "Role",
-    "org.membersPage.signInToCreateLinkHint": "Sign in to create an invite link",
+    // "a member" fallback → projectSettings.share.recipientJoinsAsFallbackRole (identical text)
+    // "Create another link" → projectSettings.share.createAnotherLinkButton (identical text)
+    // "Create invite link" → projectSettings.share.createInviteLinkButton (identical text)
+    // "Role" field label → common.roleLabel (identical text)
+    // "Sign in to create an invite link" hint → projectSettings.share.signInToCreateLink (identical text)
     "org.membersPage.recipientEmailLabel": "Recipient email (optional)",
-    "org.membersPage.invalidEmailError":
-      "Enter a valid email address, or leave blank for an open link.",
-    "org.membersPage.signInRequiredError": "Sign in to create an invite link.",
-    "org.membersPage.createInviteFailedError":
-      "Couldn't create invite. You may not have permission, or the server is unreachable.",
+    // invalid-email error → projectSettings.share.inviteEmailInvalid (identical text)
+    // sign-in-required error → projectSettings.share.signInToInvite (identical text)
+    // create-invite-failed error → projectSettings.share.createInviteFailed (identical text)
     "org.membersPage.emailPrefillHint": "The join page prefills sign-up with this email.",
-    "org.membersPage.openLinkHint": "Leave blank for an open link anyone signed in can redeem.",
-    "org.membersPage.linkExpiresLabel": "Link expires",
-    "org.membersPage.expiry1Day": "1 day",
+    // open-link hint → projectSettings.share.openLinkNote (identical text)
+    // "Link expires" label → projectSettings.share.linkExpiresLabel (identical text)
+    // "1 day" expiry option → projectSettings.share.expiryOneDay (identical text)
     "org.membersPage.expiry7DaysDefault": "7 days (default)",
-    "org.membersPage.expiry30Days": "30 days",
-    "org.membersPage.expiryNone": "No expiry",
+    // "30 days" expiry option → common.thirtyDays (identical text)
+    // "No expiry" expiry option → common.noExpiry (identical text)
     // -- TeamsList: org's list of teams --
     "org.teamsList.pageDescription": "Group members and grant project access together.",
     "org.teamsList.newTeamButton": "New team",
@@ -221,7 +221,7 @@ export const org = defineNamespace({
 
     // -- Shared team-form fields (TeamsList create dialog + TeamDetail edit dialog) --
     "org.teamForm.nameLabel": "Team name",
-    "org.teamForm.descriptionOptionalLabel": "Description (optional)",
+    // "Description (optional)" → common.descriptionOptional (identical text)
 
     // -- TeamDetail: a single team's page --
     "org.teamDetail.notFoundTitle": "Team not found.",
@@ -239,7 +239,7 @@ export const org = defineNamespace({
     "org.teamDetail.allMembersAddedNotice": "All org members are already in this team.",
     "org.teamDetail.addErrorPrefix": "Couldn't add: {error}",
     "org.teamDetail.couldntBeAddedFallback": "couldn't be added",
-    "org.teamDetail.addingButton": "Adding…",
+    // "Adding…" → common.adding (identical text)
     "org.teamDetail.noMembersTitle": "No members.",
     "org.teamDetail.noMembersAdminDescription":
       "Add org members to this team to grant them shared project access.",
@@ -337,14 +337,14 @@ export const org = defineNamespace({
     "org.projectOverview.chapterProgressUnavailable": "Chapter progress unavailable. Retry",
     "org.projectOverview.signInMessage": "Sign in to open this project from the cloud.",
     "org.projectOverview.inactiveBadge": "Inactive",
-    "org.projectOverview.restore": "Restore",
+    // "Restore" → common.restore (identical text)
     "org.projectOverview.moreActionsAria": "More actions",
     "org.projectOverview.downloadDeliverable": "Download deliverable",
     "org.projectOverview.markAsActive": "Mark as Active",
     "org.projectOverview.markAsInactive": "Mark as Inactive",
     "org.projectOverview.archive": "Archive",
     "org.projectOverview.customizeStatsAria": "Customize stats",
-    "org.projectOverview.customize": "Customize",
+    // "Customize" → common.customize (identical text)
     "org.projectOverview.showStats": "Show stats",
     "org.projectOverview.aiDrafted": "AI Drafted",
     "org.projectOverview.aiDraftedTooltip":
@@ -431,16 +431,16 @@ export const org = defineNamespace({
     "org.addLanguagePopover.description":
       "Registers a new lane on this project. Manage or remove lanes in project settings.",
     "org.addLanguagePopover.loadingLanguages": "Loading languages…",
-    "org.addLanguagePopover.inputPlaceholder": "e.g. fr-CA",
+    // "e.g. fr-CA" placeholder → projectSettings.create.extraLanguagesPlaceholder (identical text)
     "org.addLanguagePopover.inputAriaLabel": "New target language tag",
-    "org.addLanguagePopover.emptyError": "Enter a language tag.",
-    "org.addLanguagePopover.tooLongError": "Must be {max} characters or fewer.",
-    "org.addLanguagePopover.isDefaultError": "This is already the default target language.",
-    "org.addLanguagePopover.alreadyExistsError": "This lane already exists.",
+    // "Enter a language tag." → projectSettings.create.extraLanguagesEmptyError (identical text)
+    // too-long error → projectSettings.create.extraLanguagesTooLongError (identical text)
+    // already-default error → projectSettings.languages.alreadyDefaultError (identical text)
+    // lane-already-exists error → projectSettings.languages.alreadyExistsError (identical text)
     "org.addLanguagePopover.loadError": "Couldn't load this project's languages. Try again.",
     "org.addLanguagePopover.conflictError": "Languages changed elsewhere. Reloaded — try adding again.",
     "org.addLanguagePopover.forbiddenError": "You don't have permission to add languages to this project.",
-    "org.addLanguagePopover.genericSaveError": "Saving failed.",
+    // generic save-failed error → projectSettings.languages.savingFailedGeneric (identical text)
 
     // -- CreditsPanel: org credits/usage panel --
 
@@ -448,7 +448,7 @@ export const org = defineNamespace({
     "org.setupChecklist.heading": "Get your organization started",
     "org.setupChecklist.dismissAriaLabel": "Dismiss checklist",
     "org.setupChecklist.progress": "{done} of {total} complete",
-    "org.setupChecklist.createProjectStep": "Create your first project",
+    // "Create your first project" step → onboarding.step.project.heading (identical text)
     "org.setupChecklist.inviteTeammateStep": "Invite a teammate to your organization",
     "org.setupChecklist.inviteButton": "Invite",
 
@@ -457,7 +457,7 @@ export const org = defineNamespace({
     "org.createDialog.description": "Give your team a workspace for projects, members, and settings.",
     "org.createDialog.nameLabel": "Organization name",
     "org.createDialog.namePlaceholder": "Acme Bible Translation",
-    "org.createDialog.submitCreating": "Creating…",
+    // "Creating…" busy label → common.creating (identical text)
     "org.createDialog.genericError": "Couldn't create your organization.",
     "org.createDialog.nameRequiredError": "Organization name is required",
 
@@ -486,7 +486,7 @@ export const org = defineNamespace({
     "org.inviteByEmail.linkCreated": "Invite link created — share it below.",
     "org.inviteByEmail.createError":
       "Couldn't create the invite. You may not have permission, or the server is unreachable.",
-    "org.inviteByEmail.copyButton": "Copy",
+    // "Copy" button → common.copy (identical text)
 
     // -- ExternalCollaboratorsSection: org-level external-collaborator governance list --
     "org.externalCollaborators.title": "External collaborators",
@@ -557,7 +557,7 @@ export const org = defineNamespace({
     "org.membersPage.orgPage.revokeInviteAriaLabel": "Revoke invitation to {project}",
     "org.membersPage.orgPage.targetedInviteTooltip":
       "Targeted invite: sign-up form will be prefilled with this email",
-    "org.membersPage.orgPage.openLinkBadge": "open link",
+    // "open link" connector → projectSettings.share.openLinkConnector (identical text)
     "org.membersPage.orgPage.openLinkTooltip": "Open link: anyone holding the URL can redeem",
     "org.membersPage.orgPage.orgOwnerHint": "Org owner",
 
@@ -1052,11 +1052,6 @@ export const org = defineNamespace({
       "org.addLanguagePopover.inputAriaLabel": {
         description:
           "Accessible name for the language-tag text input inside the add-language popover (no visible form label, just a placeholder example).",
-      },
-      "org.addLanguagePopover.tooLongError": {
-        description:
-          "Inline validation error shown when the typed language tag exceeds the maximum length.",
-        placeholders: { max: "The maximum allowed character count for a language tag (currently 64)." },
       },
       "org.setupChecklist.dismissAriaLabel": {
         description:

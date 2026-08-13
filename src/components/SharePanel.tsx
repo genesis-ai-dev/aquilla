@@ -305,7 +305,7 @@ const EXPIRY_OPTIONS: { labelKey: MessageKey; value: number | null }[] = [
   { labelKey: "projectSettings.share.expiryOneDay", value: 1 },
   { labelKey: "projectSettings.share.expirySevenDays", value: 7 },
   { labelKey: "projectSettings.share.expiryThirtyDaysDefault", value: 30 },
-  { labelKey: "projectSettings.share.expiryNoExpiry", value: null },
+  { labelKey: "common.noExpiry", value: null },
 ]
 const DEFAULT_EXPIRY_DAYS = 30
 
@@ -416,7 +416,7 @@ function InviteLinkTab({ projectId, onSharesChanged }: InviteLinkTabProps) {
       ) : (
         <div className="space-y-3">
           <div className="space-y-1">
-            <FieldLabel className="text-xs">{t("projectSettings.share.roleFieldLabel")}</FieldLabel>
+            <FieldLabel className="text-xs">{t("common.roleLabel")}</FieldLabel>
             <Select
               items={LINK_ROLE_OPTIONS.map((opt) => ({
                 value: String(opt.level),
@@ -426,7 +426,7 @@ function InviteLinkTab({ projectId, onSharesChanged }: InviteLinkTabProps) {
               onValueChange={(v) => setInviteRole(Number(v ?? ""))}
               disabled={!session?.jwt}
             >
-              <SelectTrigger className="w-full" aria-label={t("projectSettings.share.roleFieldLabel")}>
+              <SelectTrigger className="w-full" aria-label={t("common.roleLabel")}>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -451,7 +451,7 @@ function InviteLinkTab({ projectId, onSharesChanged }: InviteLinkTabProps) {
           <div className="space-y-1">
             <FieldLabel htmlFor="invite-email" className="text-xs">
               {t("projectSettings.share.recipientEmailLabel")}{" "}
-              <span className="text-muted-foreground font-normal">{t("projectSettings.share.optionalFieldNote")}</span>
+              <span className="text-muted-foreground font-normal">{t("common.optionalFieldNote")}</span>
             </FieldLabel>
             <Input
               id="invite-email"
@@ -515,7 +515,7 @@ function InviteLinkTab({ projectId, onSharesChanged }: InviteLinkTabProps) {
             disabled={busy || !session?.jwt}
             className="w-full"
           >
-            {busy ? t("projectSettings.create.submitCreating") : t("projectSettings.share.createInviteLinkButton")}
+            {busy ? t("common.creating") : t("projectSettings.share.createInviteLinkButton")}
           </Button>
         </div>
       )}
@@ -578,8 +578,8 @@ function ActiveInvitesList({ projectId, jwt, version, onRevoked }: ActiveInvites
   }
 
   function formatExpiry(expiresAt: string | null): string {
-    if (!expiresAt) return t("projectSettings.share.expiryNoExpiry")
-    return t("projectSettings.share.expiresOn", {
+    if (!expiresAt) return t("common.noExpiry")
+    return t("common.expiresOn", {
       date: formatDate(expiresAt, locale, { month: "short", day: "numeric", year: "numeric" }),
     })
   }
@@ -625,7 +625,7 @@ function ActiveInvitesList({ projectId, jwt, version, onRevoked }: ActiveInvites
                   disabled={!revokeConfirm || revoking}
                   onClick={() => void handleRevoke(inv.token)}
                 >
-                  {revoking ? "…" : t("projectSettings.share.revokeButton")}
+                  {revoking ? "…" : t("common.revoke")}
                 </Button>
                 <Button
                   size="sm"

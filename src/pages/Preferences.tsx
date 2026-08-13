@@ -295,7 +295,7 @@ interface PreferenceSection {
 }
 
 const PREFERENCE_GROUPS = [
-  "onboarding.preferences.group.general",
+  "common.general",
   "onboarding.preferences.group.aiPersonalization",
   "onboarding.preferences.group.account",
 ] as const satisfies readonly PrefMessageKey[]
@@ -305,7 +305,7 @@ const PREFERENCE_SECTIONS: PreferenceSection[] = [
     slug: "workspace",
     titleKey: "onboarding.preferences.workspace.groupLabel",
     descriptionKey: "onboarding.preferences.section.workspace.description",
-    group: "onboarding.preferences.group.general",
+    group: "common.general",
     icon: PanelLeft,
     render: () => <WorkspaceSection />,
   },
@@ -313,7 +313,7 @@ const PREFERENCE_SECTIONS: PreferenceSection[] = [
     slug: "appearance",
     titleKey: "onboarding.preferences.section.appearance.title",
     descriptionKey: "onboarding.preferences.section.appearance.description",
-    group: "onboarding.preferences.group.general",
+    group: "common.general",
     icon: Palette,
     render: () => <AppearanceSection />,
   },
@@ -321,7 +321,7 @@ const PREFERENCE_SECTIONS: PreferenceSection[] = [
     slug: "language",
     titleKey: "language.label",
     descriptionKey: "onboarding.preferences.section.language.description",
-    group: "onboarding.preferences.group.general",
+    group: "common.general",
     icon: Globe,
     render: () => <LanguageSection />,
   },
@@ -329,7 +329,7 @@ const PREFERENCE_SECTIONS: PreferenceSection[] = [
     slug: "privacy",
     titleKey: "onboarding.preferences.section.privacy.title",
     descriptionKey: "onboarding.preferences.section.privacy.description",
-    group: "onboarding.preferences.group.general",
+    group: "common.general",
     icon: ShieldCheck,
     render: () => <PrivacySection />,
   },

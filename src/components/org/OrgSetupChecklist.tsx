@@ -83,7 +83,7 @@ export function OrgSetupChecklist({
           ) : (
             <Circle className="h-5 w-5 shrink-0 text-muted-foreground" aria-hidden />
           )}
-          <span className="flex-1 text-sm">{t("org.setupChecklist.createProjectStep")}</span>
+          <span className="flex-1 text-sm">{t("onboarding.step.project.heading")}</span>
           {!createdProject && (
             <ProjectCreateDialog
               orgId={orgId}

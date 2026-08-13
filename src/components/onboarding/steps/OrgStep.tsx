@@ -81,7 +81,7 @@ export function OrgStep({
         setActiveOrg(org.id)
         onCreated(org.id)
       } catch (err) {
-        setSubmitError(err instanceof Error ? err.message : t("onboarding.step.org.createFailed"))
+        setSubmitError(err instanceof Error ? err.message : t("org.createDialog.genericError"))
       }
     },
   })
@@ -109,14 +109,14 @@ export function OrgStep({
               const invalid = isFieldInvalid(field)
               return (
                 <Field data-invalid={invalid}>
-                  <FieldLabel htmlFor="org-name">{t("onboarding.step.org.nameLabel")}</FieldLabel>
+                  <FieldLabel htmlFor="org-name">{t("org.createDialog.nameLabel")}</FieldLabel>
                   <Input
                     id="org-name"
                     name={field.name}
                     value={field.state.value}
                     onBlur={field.handleBlur}
                     onChange={(e) => field.handleChange(e.target.value)}
-                    placeholder={t("onboarding.step.org.namePlaceholder")}
+                    placeholder={t("org.createDialog.namePlaceholder")}
                     aria-invalid={invalid}
                     autoFocus
                   />
@@ -150,7 +150,7 @@ export function OrgStep({
         )}
         <Button type="submit" form="org-step-form" size="lg" className="w-full">
           {form.state.isSubmitting && <Spinner data-icon="inline-start" />}
-          {form.state.isSubmitting ? t("onboarding.common.creating") : t("onboarding.step.org.createButton")}
+          {form.state.isSubmitting ? t("common.creating") : t("org.createDialog.title")}
         </Button>
       </form>
       <Button variant="ghost" size="sm" onClick={onBack} className="w-full">

@@ -62,10 +62,10 @@ const DEFAULT_INVITE_ROLE = ROLE.CONTRIBUTOR
 // Labels resolve via t() at render time (InviteLinkTab) rather than being
 // hardcoded here, so they stay locale-reactive.
 const EXPIRY_OPTIONS: { labelKey: MessageKey; value: number | null }[] = [
-  { labelKey: "org.membersPage.expiry1Day", value: 1 },
+  { labelKey: "projectSettings.share.expiryOneDay", value: 1 },
   { labelKey: "org.membersPage.expiry7DaysDefault", value: 7 },
-  { labelKey: "org.membersPage.expiry30Days", value: 30 },
-  { labelKey: "org.membersPage.expiryNone", value: null },
+  { labelKey: "common.thirtyDays", value: 30 },
+  { labelKey: "common.noExpiry", value: null },
 ]
 const DEFAULT_EXPIRY_DAYS = 7
 
@@ -132,7 +132,7 @@ export function ProjectMembersPage() {
               : "text-muted-foreground hover:text-foreground",
           )}
         >
-          {t("org.membersPage.inviteLinkTab")}
+          {t("projectSettings.share.tabInviteLink")}
         </button>
       </div>
 
@@ -254,7 +254,7 @@ export function MembersTab({
       m.role.source === "org"
         ? t("org.membersPage.lockedHintOrgAccess")
         : m.role.source === "creator"
-          ? t("org.membersPage.lockedHintCreator")
+          ? t("projectSettings.share.lockedHintCreator")
           : undefined
 
     return (
@@ -604,7 +604,7 @@ function RevokeAllDialog({
             )}
           </div>
           <DialogFooter>
-            <Button onClick={onRevoked}>{t("org.membersPage.done")}</Button>
+            <Button onClick={onRevoked}>{t("common.done")}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -679,7 +679,7 @@ function RevokeAllDialog({
             disabled={!confirmed || busy}
             onClick={() => void handleRevoke()}
           >
-            {busy ? t("org.membersPage.revoking") : t("org.membersPage.revokeAccess")}
+            {busy ? t("common.revoking") : t("org.membersPage.revokeAccess")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -709,11 +709,11 @@ function InviteLinkTab({ projectId }: { projectId: string }) {
     setIssuedUrl(null)
     const trimmedEmail = inviteEmail.trim()
     if (trimmedEmail.length > 0 && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
-      setEmailError(t("org.membersPage.invalidEmailError"))
+      setEmailError(t("projectSettings.share.inviteEmailInvalid"))
       return
     }
     if (!session?.jwt) {
-      setServerError(t("org.membersPage.signInRequiredError"))
+      setServerError(t("projectSettings.share.signInToInvite"))
       return
     }
     setBusy(true)
@@ -727,7 +727,7 @@ function InviteLinkTab({ projectId }: { projectId: string }) {
         expiresInDays,
       )
       if (!serverInvite) {
-        setServerError(t("org.membersPage.createInviteFailedError"))
+        setServerError(t("projectSettings.share.createInviteFailed"))
         return
       }
       const url = `${window.location.origin}/join/${serverInvite.token}`
@@ -763,12 +763,12 @@ function InviteLinkTab({ projectId }: { projectId: string }) {
         </p>
         <div className="flex items-center gap-1">
           <Input value={issuedUrl} readOnly className="text-xs font-mono" />
-          <AppTooltip content={t("org.membersPage.copyUrl")}>
+          <AppTooltip content={t("projectSettings.share.copyUrlLabel")}>
             <Button
               size="sm"
               variant="ghost"
               onClick={() => copyUrl(issuedUrl)}
-              aria-label={t("org.membersPage.copyUrl")}
+              aria-label={t("projectSettings.share.copyUrlLabel")}
             >
               <Copy className="h-3.5 w-3.5" />
             </Button>
@@ -779,12 +779,12 @@ function InviteLinkTab({ projectId }: { projectId: string }) {
           {t("org.membersPage.inviteRecipientNote", {
             role: (() => {
               const opt = LINK_ROLE_OPTIONS.find((o) => o.level === inviteRole)
-              return opt ? resolveRoleName(t, opt.name) : t("org.membersPage.memberFallback")
+              return opt ? resolveRoleName(t, opt.name) : t("projectSettings.share.recipientJoinsAsFallbackRole")
             })(),
           })}
         </p>
         <Button size="sm" variant="outline" onClick={reset} className="w-full">
-          {t("org.membersPage.createAnotherLink")}
+          {t("projectSettings.share.createAnotherLinkButton")}
         </Button>
       </div>
     )
@@ -794,13 +794,13 @@ function InviteLinkTab({ projectId }: { projectId: string }) {
     <div className="mx-auto max-w-lg space-y-4">
       <h2 className="text-sm font-medium flex items-center gap-2">
         <LinkIcon className="h-4 w-4 text-muted-foreground" />
-        {t("org.membersPage.createInviteLink")}
+        {t("projectSettings.share.createInviteLinkButton")}
       </h2>
 
       <div className="rounded border p-4 space-y-4">
         {/* Role */}
         <div className="space-y-1">
-          <FieldLabel className="text-xs">{t("org.membersPage.roleLabel")}</FieldLabel>
+          <FieldLabel className="text-xs">{t("common.roleLabel")}</FieldLabel>
           <Select
             items={LINK_ROLE_OPTIONS.map((opt) => ({
               value: String(opt.level),
@@ -810,7 +810,7 @@ function InviteLinkTab({ projectId }: { projectId: string }) {
             onValueChange={(v) => setInviteRole(Number(v ?? ""))}
             disabled={!session?.jwt}
           >
-            <SelectTrigger className="w-full" aria-label={t("org.membersPage.roleLabel")}>
+            <SelectTrigger className="w-full" aria-label={t("common.roleLabel")}>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -829,7 +829,7 @@ function InviteLinkTab({ projectId }: { projectId: string }) {
                   const opt = LINK_ROLE_OPTIONS.find((o) => o.level === inviteRole)
                   return opt ? t(opt.descriptionKey) : ""
                 })()
-              : t("org.membersPage.signInToCreateLinkHint")}
+              : t("projectSettings.share.signInToCreateLink")}
           </p>
         </div>
 
@@ -857,14 +857,14 @@ function InviteLinkTab({ projectId }: { projectId: string }) {
             <p className="text-[10px] text-muted-foreground">
               {inviteEmail.trim()
                 ? t("org.membersPage.emailPrefillHint")
-                : t("org.membersPage.openLinkHint")}
+                : t("projectSettings.share.openLinkNote")}
             </p>
           )}
         </div>
 
         {/* Expiry */}
         <div className="space-y-1">
-          <FieldLabel className="text-xs">{t("org.membersPage.linkExpiresLabel")}</FieldLabel>
+          <FieldLabel className="text-xs">{t("projectSettings.share.linkExpiresLabel")}</FieldLabel>
           <Select
             items={EXPIRY_OPTIONS.map((opt) => ({
               value: String(opt.value),
@@ -878,7 +878,7 @@ function InviteLinkTab({ projectId }: { projectId: string }) {
             }
             disabled={!session?.jwt}
           >
-            <SelectTrigger className="w-full" aria-label={t("org.membersPage.linkExpiresLabel")}>
+            <SelectTrigger className="w-full" aria-label={t("projectSettings.share.linkExpiresLabel")}>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -903,7 +903,7 @@ function InviteLinkTab({ projectId }: { projectId: string }) {
           disabled={busy || !session?.jwt}
           className="w-full"
         >
-          {busy ? t("org.createDialog.submitCreating") : t("org.membersPage.createInviteLink")}
+          {busy ? t("common.creating") : t("projectSettings.share.createInviteLinkButton")}
         </Button>
       </div>
     </div>

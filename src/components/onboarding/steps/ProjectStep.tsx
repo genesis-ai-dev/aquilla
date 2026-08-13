@@ -128,14 +128,14 @@ export function ProjectStep({
               const invalid = isFieldInvalid(field)
               return (
                 <Field data-invalid={invalid}>
-                  <FieldLabel htmlFor="proj-name">{t("onboarding.step.project.nameLabel")}</FieldLabel>
+                  <FieldLabel htmlFor="proj-name">{t("projectSettings.info.nameLabel")}</FieldLabel>
                   <Input
                     id="proj-name"
                     name={field.name}
                     value={field.state.value}
                     onBlur={field.handleBlur}
                     onChange={(e) => field.handleChange(e.target.value)}
-                    placeholder={t("onboarding.step.project.namePlaceholder")}
+                    placeholder={t("projectSettings.create.namePlaceholder")}
                     aria-invalid={invalid}
                     autoFocus
                   />
@@ -150,7 +150,7 @@ export function ProjectStep({
               const invalid = isFieldInvalid(field)
               return (
                 <Field data-invalid={invalid}>
-                  <FieldLabel htmlFor="src-lang">{t("onboarding.step.project.sourceLanguageLabel")}</FieldLabel>
+                  <FieldLabel htmlFor="src-lang">{t("projectSettings.info.sourceLanguageLabel")}</FieldLabel>
                   <Input
                     id="src-lang"
                     name={field.name}
@@ -192,7 +192,7 @@ export function ProjectStep({
         )}
         <Button type="submit" form="project-step-form" size="lg" className="w-full">
           {form.state.isSubmitting && <Spinner data-icon="inline-start" />}
-          {form.state.isSubmitting ? t("onboarding.common.creating") : t("onboarding.step.project.createButton")}
+          {form.state.isSubmitting ? t("common.creating") : t("projectSettings.create.submitCreate")}
         </Button>
         <Button
           type="button"

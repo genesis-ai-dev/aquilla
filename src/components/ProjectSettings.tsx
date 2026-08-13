@@ -948,7 +948,7 @@ export function ProjectSettings() {
   }[] = [
     {
       id: "general",
-      label: t("projectSettings.group.generalLabel"),
+      label: t("common.general"),
       description: t("projectSettings.group.generalDescription"),
       icon: SlidersHorizontal,
       sectionIds: ["section-project-info", "section-languages", "section-bible-resources", "section-import", "section-user"],
@@ -1101,7 +1101,7 @@ export function ProjectSettings() {
             ) : (
               <Save data-icon="inline-start" />
             )}
-            {t("projectSettings.saveChanges")}
+            {t("common.saveChanges")}
           </Button>
           <ButtonGroupSeparator />
           <DropdownMenu>

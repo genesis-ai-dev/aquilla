@@ -1021,7 +1021,7 @@ export function ProjectOverview() {
                     </Button>
                     {isOwner && isArchived && (
                       <Button size="sm" variant="outline" onClick={handleRestore} disabled={busy}>
-                        {t("org.projectOverview.restore")}
+                        {t("common.restore")}
                       </Button>
                     )}
                     {/* Archive + Download + Lifecycle moved into overflow menu */}
@@ -1109,7 +1109,7 @@ export function ProjectOverview() {
                             }
                           >
                             <SlidersHorizontal className="size-3.5" aria-hidden />
-                            {t("org.projectOverview.customize")}
+                            {t("common.customize")}
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end" className="w-48">
                             <DropdownMenuGroup>

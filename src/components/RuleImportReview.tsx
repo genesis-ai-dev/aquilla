@@ -156,7 +156,7 @@ export function RuleImportReview({
           className="flex-1"
         >
           {committing
-            ? t("rules.importReview.adding")
+            ? t("common.adding")
             : t("rules.importReview.addButton", { count: accepted.size })}
         </Button>
       </div>

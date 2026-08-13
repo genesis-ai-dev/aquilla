@@ -281,7 +281,7 @@ export function LanguagesSection({
                       onClick={() => void handleRestore(lane)}
                     >
                       <ArchiveRestore className="h-4 w-4" />
-                      {busyLane === lane ? t("projectSettings.languages.restoringButton") : t("projectSettings.languages.restoreButton")}
+                      {busyLane === lane ? t("projectSettings.languages.restoringButton") : t("common.restore")}
                     </Button>
                   </DisabledFieldTooltip>
                 </li>
@@ -319,7 +319,7 @@ export function LanguagesSection({
               disabled={!canEdit || adding}
             >
               <Plus className="me-1 h-3.5 w-3.5" />
-              {adding ? t("projectSettings.languages.addingButton") : t("projectSettings.languages.addLaneButton")}
+              {adding ? t("common.adding") : t("projectSettings.languages.addLaneButton")}
             </Button>
           </div>
         </DisabledFieldTooltip>

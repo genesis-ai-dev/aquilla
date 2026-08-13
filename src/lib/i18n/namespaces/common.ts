@@ -54,6 +54,32 @@ export const common = defineNamespace({
     "common.searching": "Searching…",
     "common.stop": "Stop",
 
+    // — Wave-4 namespace dedupe (AQU-511/AQU-832, WS-17): six area agents fanned
+    //   out in parallel and independently minted keys for the same English. For
+    //   each duplicate below, promoting here was the chosen fix over reuse
+    //   because the two (or three) original call sites belong to genuinely
+    //   unrelated features with no single natural owner — see each key's note
+    //   for the specific surfaces it now serves.
+    "common.done": "Done",
+    "common.copy": "Copy",
+    "common.revoke": "Revoke",
+    "common.revoking": "Revoking…",
+    "common.restore": "Restore",
+    "common.customize": "Customize",
+    "common.roleLabel": "Role",
+    "common.creating": "Creating…",
+    "common.adding": "Adding…",
+    "common.expiresOn": "Expires {date}",
+    "common.org": "Org",
+    "common.thirtyDays": "30 days",
+    "common.noExpiry": "No expiry",
+    "common.descriptionOptional": "Description (optional)",
+    "common.optionalFieldNote": "(optional)",
+    "common.general": "General",
+    "common.modeLabel": "Mode",
+    "common.saveChanges": "Save changes",
+    "common.readOnly": "Read-only",
+
     // — Role vocabulary (AQU-832 wave 3, WS-08): the seven-level role ladder
     //   (src/lib/frontier/roles.ts) generated every display label by string
     //   manipulation (snake_case → spaces → capitalize) and pluralised by
@@ -424,6 +450,126 @@ export const common = defineNamespace({
           "or playback of a take. Distinct from Pause in English only by convention — use " +
           "whichever verb your language uses for 'stop', not 'pause'.",
         screenshot: "audio-studio",
+      },
+      "common.done": {
+        description:
+          "Closing button on a dialog that has nothing left to confirm — the org-member " +
+          "revoke-access dialog once access is revoked, the API-tokens dialog's close " +
+          "button, and the last step of the product tour. Unlike common.close it marks a " +
+          "flow as finished, not merely dismissed.",
+        screenshot: "project-settings",
+      },
+      "common.copy": {
+        description:
+          "Button that copies a value (an invite link, an org-invite link) to the " +
+          "clipboard. Swaps to a 'Copied' confirmation on click.",
+        screenshot: "project-settings",
+      },
+      "common.revoke": {
+        description:
+          "Destructive button that immediately invalidates a credential or link — a " +
+          "personal API token, or a project invite link.",
+        screenshot: "project-settings",
+      },
+      "common.revoking": {
+        description:
+          "Status text that replaces common.revoke while the revoke request is in " +
+          "flight — an org member's access-revoke dialog, a personal API token.",
+        screenshot: "project-settings",
+      },
+      "common.restore": {
+        description:
+          "Button that un-archives something back to its active state — an archived " +
+          "project, or an archived target-language lane.",
+        screenshot: "project-settings",
+      },
+      "common.customize": {
+        description:
+          "Button that opens a customization surface — the project-overview stats " +
+          "picker, or the editor's default-AI-instructions nudge banner.",
+        screenshot: "project-settings",
+      },
+      "common.roleLabel": {
+        description:
+          "Field label above a role-picker select — the per-project invite-link role " +
+          "picker, wherever it is rendered.",
+        screenshot: "project-settings",
+      },
+      "common.creating": {
+        description:
+          "Busy-state label on a submit button while a create request is in flight — " +
+          "creating an organization, a project, or a project invite link.",
+        screenshot: "project-settings",
+      },
+      "common.adding": {
+        description:
+          "Busy-state label on a submit button while an add request is in flight — " +
+          "adding a team member, a target-language lane, or importing a drafted rule.",
+        screenshot: "project-settings",
+      },
+      "common.expiresOn": {
+        description:
+          "Standalone row text on an item with an expiry — a personal API token, or a " +
+          "project invite link — stating the already-formatted date it stops working.",
+        placeholders: {
+          date: "The already-formatted expiry date, e.g. 'Aug 12, 2026'.",
+        },
+        screenshot: "project-settings",
+      },
+      "common.org": {
+        description:
+          "Short label abbreviating 'Organization' — the org-name table-column heading " +
+          "on the org project list, and the scope badge on an org-level translation rule.",
+        screenshot: "project-settings",
+      },
+      "common.thirtyDays": {
+        description:
+          "A duration option in an expiry picker — a project invite link's expiry " +
+          "dropdown, and a personal API token's expiry dropdown.",
+        screenshot: "project-settings",
+      },
+      "common.noExpiry": {
+        description:
+          "The 'never expires' option in an expiry picker — a project invite link's " +
+          "expiry dropdown, and a personal API token's expiry dropdown.",
+        screenshot: "project-settings",
+      },
+      "common.descriptionOptional": {
+        description:
+          "Field label for an optional free-text description — a team's create/edit " +
+          "form, and a translation rule's editor form.",
+        screenshot: "project-settings",
+      },
+      "common.optionalFieldNote": {
+        description:
+          "Small trailing qualifier appended after a field label to mark it as not " +
+          "required — the AI-provider endpoint form, and the invite-link email field.",
+        screenshot: "project-settings",
+      },
+      "common.general": {
+        description:
+          "Settings-group heading for the catch-all first section of a settings nav — " +
+          "personal Preferences, and per-project Project Settings.",
+        screenshot: "project-settings",
+      },
+      "common.modeLabel": {
+        description:
+          "Field label above a mode-picker select — a personal API token's Ask/Act " +
+          "mode, and a translation rule's Forbidden/Required/Must-match mode.",
+        screenshot: "project-settings",
+      },
+      "common.saveChanges": {
+        description:
+          "Primary button that commits pending edits on a settings-style form — the " +
+          "Project Settings save bar, and the translation-rule editor.",
+        screenshot: "project-settings",
+      },
+      "common.readOnly": {
+        description:
+          "Badge shown in place of an edit control when the caller's role doesn't meet " +
+          "the floor required to act — an org-level translation rule, and the " +
+          "terminology review queue.",
+        screenshot: "project-settings",
       },
       "common.role.viewer": {
         description:

@@ -408,7 +408,7 @@ export function ProjectTable({
           >
             <span>{t("common.project")}</span>
             {showOrg && (
-              <span className="hidden text-start @md/project-table:block">{t("org.orgHome.table.orgHeader")}</span>
+              <span className="hidden text-start @md/project-table:block">{t("common.org")}</span>
             )}
           </span>
           {/* AQU-538: lane chips column (see the LaneChips cell in each row). */}

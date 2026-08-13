@@ -64,11 +64,6 @@
       "count": 1
     }
   },
-  "src/components/CandidateTermsPanel.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 9
-    }
-  },
   "src/components/CellAiStatusPopover.tsx": {
     "i18n/no-unkeyed-string": {
       "count": 2
@@ -92,11 +87,6 @@
   "src/components/EditorTable.tsx": {
     "i18n/no-unkeyed-string": {
       "count": 1
-    }
-  },
-  "src/components/EquivalentsPanel.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 7
     }
   },
   "src/components/ErrorBoundary.tsx": {
@@ -129,16 +119,6 @@
       "count": 3
     }
   },
-  "src/components/GlossaryEditor.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 20
-    }
-  },
-  "src/components/GlossaryRow.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 10
-    }
-  },
   "src/components/ImportDialog.tsx": {
     "i18n/no-unkeyed-string": {
       "count": 146
@@ -157,11 +137,6 @@
   "src/components/JoinOrgPage.tsx": {
     "i18n/no-unkeyed-string": {
       "count": 14
-    }
-  },
-  "src/components/LivingMemoryPage.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 34
     }
   },
   "src/components/MemberAccessDrillDown.tsx": {
@@ -244,11 +219,6 @@
       "count": 11
     }
   },
-  "src/components/ProjectSettings/TermbaseSharingSection.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 17
-    }
-  },
   "src/components/ProjectWorkspace.tsx": {
     "i18n/no-unkeyed-string": {
       "count": 45
@@ -287,31 +257,6 @@
   "src/components/SuggestionBanner.tsx": {
     "i18n/no-unkeyed-string": {
       "count": 4
-    }
-  },
-  "src/components/TermLookupPopover.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 1
-    }
-  },
-  "src/components/TerminologyMergeDialog.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 13
-    }
-  },
-  "src/components/TerminologyReviewQueue.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 4
-    }
-  },
-  "src/components/TerminologyTermDetail.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 11
-    }
-  },
-  "src/components/TerminologyViolationsInbox.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 10
     }
   },
   "src/components/UpdateBanner.tsx": {
@@ -372,11 +317,6 @@
   "src/components/agent/CodeActivityBlock.tsx": {
     "i18n/no-unkeyed-string": {
       "count": 6
-    }
-  },
-  "src/components/agent/CreditsDial.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 7
     }
   },
   "src/components/agent/MemoryProposalNotice.tsx": {
@@ -539,92 +479,12 @@
       "count": 20
     }
   },
-  "src/components/onboarding/OnboardingWizard.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 1
-    }
-  },
-  "src/components/onboarding/ProductTour.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 3
-    }
-  },
-  "src/components/onboarding/SetupChecklistDrawer.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 20
-    }
-  },
-  "src/components/onboarding/SystemPromptNudge.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 4
-    }
-  },
-  "src/components/onboarding/checklist/AiInstructionsStep.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 5
-    }
-  },
   "src/components/onboarding/checklist/AiModelsStep.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 22
-    }
-  },
-  "src/components/onboarding/checklist/AiProviderStep.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 7
-    }
-  },
-  "src/components/onboarding/checklist/ComingSoonStep.tsx": {
-    "i18n/no-unkeyed-string": {
       "count": 1
-    }
-  },
-  "src/components/onboarding/checklist/ImportFilesStep.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 3
-    }
-  },
-  "src/components/onboarding/checklist/InviteStep.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 12
-    }
-  },
-  "src/components/onboarding/steps/IntentStep.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 7
-    }
-  },
-  "src/components/onboarding/steps/NameStep.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 6
     }
   },
   "src/components/onboarding/steps/OrgStep.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 8
-    }
-  },
-  "src/components/onboarding/steps/PrivacyStep.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 9
-    }
-  },
-  "src/components/onboarding/steps/ProjectStep.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 14
-    }
-  },
-  "src/components/onboarding/steps/ReadyStep.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 3
-    }
-  },
-  "src/components/onboarding/steps/SignInStep.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 7
-    }
-  },
-  "src/components/onboarding/steps/WelcomeStep.tsx": {
     "i18n/no-unkeyed-string": {
       "count": 1
     }
@@ -642,11 +502,6 @@
   "src/components/org/ProjectOverview.tsx": {
     "i18n/no-unkeyed-string": {
       "count": 1
-    }
-  },
-  "src/components/settings/ApiTokensSection.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 36
     }
   },
   "src/components/settings/AssignmentAuthoritySection.tsx": {
@@ -732,11 +587,6 @@
   "src/pages/ApproveChangeset/ApproveChangeset.tsx": {
     "i18n/no-unkeyed-string": {
       "count": 21
-    }
-  },
-  "src/pages/Preferences.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 28
     }
   },
   "src/pages/settings/OrgSettingsDetailPage.tsx": {

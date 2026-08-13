@@ -486,7 +486,7 @@ function PendingInviteRow({
           ) : (
             <AppTooltip content={t("org.membersPage.orgPage.openLinkTooltip")}>
               <span className="rounded bg-muted px-1.5 py-0.5 text-[9px] text-muted-foreground">
-                {t("org.membersPage.orgPage.openLinkBadge")}
+                {t("projectSettings.share.openLinkConnector")}
               </span>
             </AppTooltip>
           )}

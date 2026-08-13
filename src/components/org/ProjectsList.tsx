@@ -459,7 +459,7 @@ export function ProjectsList() {
                   {isAllOrgs ? (
                     <>
                       <span className="text-xs font-medium text-muted-foreground">{t("common.name")}</span>
-                      <span className="justify-self-start text-xs font-medium text-muted-foreground">{t("org.membersPage.roleLabel")}</span>
+                      <span className="justify-self-start text-xs font-medium text-muted-foreground">{t("common.roleLabel")}</span>
                     </>
                   ) : (
                     <>
@@ -471,7 +471,7 @@ export function ProjectsList() {
                         onSort={handleSort}
                       />
                       <SortButton
-                        label={t("org.membersPage.roleLabel")}
+                        label={t("common.roleLabel")}
                         colKey="role"
                         sortKey={sortKey}
                         sortDir={sortDir}

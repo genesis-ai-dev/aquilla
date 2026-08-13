@@ -43,16 +43,16 @@ function validateNewLane(
   existingLanes: string[],
 ): string | null {
   const trimmed = candidate.trim()
-  if (!trimmed) return t("org.addLanguagePopover.emptyError")
+  if (!trimmed) return t("projectSettings.create.extraLanguagesEmptyError")
   if (trimmed.length > MAX_LANE_LENGTH) {
-    return t("org.addLanguagePopover.tooLongError", { max: MAX_LANE_LENGTH })
+    return t("projectSettings.create.extraLanguagesTooLongError", { max: MAX_LANE_LENGTH })
   }
   const lower = trimmed.toLowerCase()
   if (lower === defaultTargetLanguage.trim().toLowerCase()) {
-    return t("org.addLanguagePopover.isDefaultError")
+    return t("projectSettings.languages.alreadyDefaultError")
   }
   if (existingLanes.some((l) => l.toLowerCase() === lower)) {
-    return t("org.addLanguagePopover.alreadyExistsError")
+    return t("projectSettings.languages.alreadyExistsError")
   }
   return null
 }
@@ -154,7 +154,7 @@ export function AddLanguagePopover({ projectId, jwt, onAdded }: AddLanguagePopov
       setPhase("ready")
       return
     }
-    setError(result.message || t("org.addLanguagePopover.genericSaveError"))
+    setError(result.message || t("projectSettings.languages.savingFailedGeneric"))
     setPhase("ready")
   }
 
@@ -208,7 +208,7 @@ export function AddLanguagePopover({ projectId, jwt, onAdded }: AddLanguagePopov
                   void handleAdd()
                 }
               }}
-              placeholder={t("org.addLanguagePopover.inputPlaceholder")}
+              placeholder={t("projectSettings.create.extraLanguagesPlaceholder")}
               aria-label={t("org.addLanguagePopover.inputAriaLabel")}
               className="h-8 text-xs"
               disabled={busy}

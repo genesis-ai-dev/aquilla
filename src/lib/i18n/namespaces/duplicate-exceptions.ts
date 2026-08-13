@@ -251,16 +251,18 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "case list fragment and a standalone form label take different forms in " +
     "most languages, so one shared string would be wrong in one of the two " +
     "positions.",
-  "org.membersPage.lockedHintCreator":
-    "Standalone, sentence-like TOOLTIP content ('Project creator') explaining " +
+  "org.membersPage.sourceProjectCreator":
+    "Lower-case fragment ('project creator') from the parallel source* badge " +
+    "set (sourceDirectInvite/sourceViaTeam/sourceViaOrg), always rendered as " +
+    "one item in a small access-source badge on MemberAccessPanel, never alone " +
+    "as an explanatory sentence. projectSettings.share.lockedHintCreator (WS-17 " +
+    "wave-4 dedupe: the org-membersPage twin of this key was deleted and its " +
+    "call sites now reuse projectSettings.share.lockedHintCreator directly) is " +
+    "standalone, sentence-like TOOLTIP content ('Project creator') explaining " +
     "why a locked role control is disabled — read on its own, the short-form " +
-    "sibling of org.membersPage.lockedHintOrgAccess's full sentence. " +
-    "org.membersPage.sourceProjectCreator is a lower-case fragment ('project " +
-    "creator') from the parallel source* badge set (sourceDirectInvite/" +
-    "sourceViaTeam/sourceViaOrg), always rendered as one item in a small access-" +
-    "source badge, never alone as an explanatory sentence. A standalone tooltip " +
-    "phrase and an inline badge fragment take different forms in languages that " +
-    "mark that register distinction.",
+    "sibling of org.membersPage.lockedHintOrgAccess's full sentence. A " +
+    "standalone tooltip phrase and an inline badge fragment take different " +
+    "forms in languages that mark that register distinction.",
 
   // AQU-832 (WS-14 project-settings/creation/sharing wave): each entry below
   // pairs a projectSettings.* key against a key in a namespace this wave is
@@ -347,4 +349,91 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "integration on/off. search.mode.bibleTooltip is the tooltip on the search " +
     "panel's Bible-resources search-mode toggle. A settings on/off card heading " +
     "vs a tooltip naming a search filter mode for the same underlying dataset.",
+
+  // -- AQU-511/AQU-832 wave-4 cross-namespace dedupe (WS-17) ------------------
+  // Six area agents fanned out in parallel and independently minted keys for
+  // the same English. Most of the resulting 61 collisions were genuine
+  // duplicates and got deleted in favor of one shared key (reused directly, or
+  // promoted to common.* — see common.ts's wave-4 block); the entries below are
+  // the ones a close read showed carry a real meaning split, so both sides stay.
+  "org.breadcrumb.organizationFallback":
+    "Fallback heading text shown in the org breadcrumb/page title when the " +
+    "active organization has no name yet. onboarding.apiTokens.orgLabel is the " +
+    "Title-Case FORM FIELD LABEL above the org-picker <select> in the new-API-" +
+    "token dialog. A placeholder standing in for a missing proper noun and a " +
+    "field label naming what a control selects are different grammatical " +
+    "roles, and several languages inflect a fallback name differently from a " +
+    "field label.",
+  "org.switcher.workspaceFallback":
+    "Fallback name shown in the org switcher/breadcrumb when the active " +
+    "organization has no name yet — same role as org.breadcrumb." +
+    "organizationFallback above, for 'Workspace' instead of 'Organization'. " +
+    "onboarding.preferences.workspace.groupLabel is the settings-group HEADING " +
+    "in personal Preferences that titles the sidebar-layout/confirm-replace " +
+    "section. A fallback placeholder name and a settings-section heading are " +
+    "different grammatical roles that happen to share one English noun.",
+  "org.orgHome.pendingInvitations.expiresOn":
+    "Lower-case trailing clause spliced mid-sentence into a Pending-invitations " +
+    "row (' · expires {date}'), read as a continuation of the sentence before " +
+    "it — not a standalone label. common.expiresOn (WS-17 wave-4 promotion of " +
+    "the identically-worded, Title-Case onboarding.apiTokens.expiresOn and " +
+    "projectSettings.share.expiresOn, both standalone row text reading " +
+    "'Expires {date}' on their own line) is capitalized and stands alone. A " +
+    "mid-sentence lower-case clause and a standalone capitalized sentence take " +
+    "different forms in most languages, mirroring this catalog's other " +
+    "inline-fragment-vs-standalone-label splits (e.g. org.membersPage.orgPage." +
+    "noExpiry vs org.membersPage.expiryNone, just above).",
+  "org.membersPage.orgPage.expired":
+    "Lower-case inline status word on a pending-invite row in the org-level " +
+    "Members page, in the same register as its lower-case sibling " +
+    "org.membersPage.orgPage.noExpiry — a sentence fragment, not a standalone " +
+    "badge. onboarding.apiTokens.expiredBadge is a capitalized, standalone " +
+    "shadcn Badge component on a personal API-token row. A lower-case inline " +
+    "status word and a capitalized standalone badge take different forms in " +
+    "languages that case- or register-mark that distinction.",
+  "onboarding.preferences.profile.responseLanguage.label":
+    "Field label in the personal Translator Profile (Preferences page) for " +
+    "the language the AI assistant should use when replying to THIS person in " +
+    "chat — a device-local, per-person override. projectSettings.ai." +
+    "assistantLanguageLabel is the PROJECT-WIDE default for the same-named " +
+    "setting, shared by everyone on the project, configured in Project " +
+    "Settings' AI card. Same surface word, different scope and different " +
+    "underlying data (personal profile field vs shared project setting) — " +
+    "collapsing them would risk a translator conflating a personal override " +
+    "with a shared team default.",
+  "onboarding.preferences.hint.notSet":
+    "Standalone Title-Case index-row hint on the Preferences page ('Not set'), " +
+    "alongside sibling Title-Case hints 'Personal'/'On-device'/'Sharing on'. " +
+    "projectSettings.advancedLlm.notSet is a lower-case fragment substituted " +
+    "into the middle of the Advanced-LLM summary template ('Custom: {endpoint " +
+    "or not set}'), never read on its own. A standalone Title-Case hint and an " +
+    "inline lower-case template fragment take different forms in languages " +
+    "that case- or register-mark that distinction.",
+  "rules.editor.mode.forbidden":
+    "One value of the fixed three-option RULE MODE enum (Forbidden/Required/" +
+    "Must match) selected in RuleEditor's Mode field, describing how a " +
+    "translation rule enforces its pattern. terminology.status.forbidden is " +
+    "one value of the unrelated, six-component-wide RenderingStatus enum " +
+    "(forbidden/alternate/required) describing a glossary term's lifecycle " +
+    "status. Two independent fixed vocabularies that happen to share the " +
+    "English word 'forbidden' for otherwise unrelated concepts.",
+  "rules.editor.mode.required":
+    "One value of the fixed three-option RULE MODE enum in RuleEditor's Mode " +
+    "field ('Required' — Title Case, sibling of 'Forbidden'/'Must match'), " +
+    "describing how a translation rule enforces its pattern. terminology." +
+    "status.preferred is 'required' (lower-case) in the unrelated " +
+    "RenderingStatus enum, naming a glossary term's preferred/mandatory " +
+    "rendering. Different case AND different fixed vocabularies (rule-" +
+    "enforcement mode vs term lifecycle status) that happen to share one " +
+    "English word.",
+  "org.teamDetail.detachButton":
+    "Routine, reversible action in TeamDetail: unlinks a project from a team's " +
+    "access-grant list with a single click, no confirmation dialog — the " +
+    "project can be re-attached just as easily. projectSettings.sourceLink." +
+    "detachConfirmButton is the confirm button of an irreversible, typed-" +
+    "confirmation dialog (see projectSettings.sourceLink.irreversibleTitle/" +
+    "typeToConfirm) that permanently severs a project's live upstream-source " +
+    "link and snapshots its data. A casual toggle and a one-way destructive " +
+    "operation carry very different weight, and many languages would render " +
+    "'detach' with a stronger verb for the latter.",
 }

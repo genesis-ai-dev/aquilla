@@ -159,10 +159,10 @@ export const rules = defineNamespace({
     "rules.surface.usageTooltip": "LLM usage on this project",
     "rules.surface.orgRulesCardTitle": "Org Rules ({count})",
     "rules.surface.addOrgRuleButton": "Add Org Rule",
-    "rules.surface.readOnly": "Read-only",
+    // "Read-only" permission badge → common.readOnly (identical text)
     "rules.surface.noOrgRules.title": "No org-level rules yet",
     "rules.surface.noOrgRules.description": "Add one or promote a project rule.",
-    "rules.surface.orgBadge": "Org",
+    // "Org" scope badge → common.org (identical text)
     "rules.surface.editOrgRuleTooltip": "Edit org rule",
     "rules.surface.disableOrgRuleAriaLabel": "Disable org rule: {name}",
     "rules.surface.enableOrgRuleAriaLabel": "Enable org rule: {name}",
@@ -219,7 +219,7 @@ export const rules = defineNamespace({
     "rules.importReview.checkLabel.sourceRequiresTargetPrefix": "if source has",
     "rules.importReview.checkLabel.sourceRequiresTargetSuffix": "→ target needs",
     "rules.importReview.fromDoc": "From doc: {evidence}",
-    "rules.importReview.adding": "Adding…",
+    // "Adding…" busy label → common.adding (identical text)
     "rules.importReview.addButton": plural({
       one: "Add {count} rule",
       other: "Add {count} rules",
@@ -239,9 +239,9 @@ export const rules = defineNamespace({
     "rules.editor.newRuleHeading": "New rule",
     "rules.editor.nameLabel": "Rule name",
     "rules.editor.namePlaceholder": "e.g. Preserve numbers",
-    "rules.editor.descriptionLabel": "Description (optional)",
+    // "Description (optional)" field label → common.descriptionOptional (identical text)
     "rules.editor.descriptionPlaceholder": "Numbers in source must appear in target",
-    "rules.editor.modeLabel": "Mode",
+    // "Mode" field label → common.modeLabel (identical text)
     "rules.editor.mode.forbidden": "Forbidden",
     "rules.editor.mode.required": "Required",
     "rules.editor.mode.match": "Must match",
@@ -273,7 +273,7 @@ export const rules = defineNamespace({
     "rules.editor.previewOnSampleLabel": "Preview on sample text",
     "rules.editor.sampleTextPlaceholder": "Type sample text to see before/after…",
     "rules.editor.invalidAutofixPattern": "Invalid autofix pattern",
-    "rules.editor.saveChangesButton": "Save changes",
+    // "Save changes" button → common.saveChanges (identical text)
     "rules.editor.createRuleButton": "Create rule",
 
     // ── RuleImportDialog ("Import from doc" — LLM-extracted rule drafts) ───

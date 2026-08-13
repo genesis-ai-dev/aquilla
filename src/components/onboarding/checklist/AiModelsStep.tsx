@@ -261,7 +261,7 @@ export function AiModelsStep({ project, onUpdated }: AiModelsStepProps) {
                 ) : (
                   <div className="ms-6 space-y-1 rounded-md bg-muted/30 p-2">
                     <FieldLabel htmlFor="setup-gemini-tts-key" className="text-xs">
-                      {t("onboarding.checklist.aiModels.geminiKeyLabel")}
+                      {t("projectSettings.voice.geminiKeyLabel")}
                     </FieldLabel>
                     <div className="flex items-center gap-1.5">
                       <Input

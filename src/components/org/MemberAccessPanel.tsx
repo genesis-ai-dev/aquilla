@@ -216,7 +216,7 @@ function AccessProjectRow({
               data-testid="revoke-direct-grant"
               className="rounded border px-2 py-0.5 text-[10px] hover:bg-destructive/10 hover:text-destructive disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {revoking ? t("org.membersPage.revoking") : t("org.memberAccessPanel.revokeButton")}
+              {revoking ? t("common.revoking") : t("org.memberAccessPanel.revokeButton")}
             </button>
           </AppTooltip>
         )}

@@ -136,7 +136,7 @@ function QueueRow({ concept, canManage, onApprove, onReject }: QueueRowProps) {
         ) : (
           <Tooltip>
             <TooltipTrigger render={<span className="text-xs text-muted-foreground" />}>
-              {t("terminology.reviewQueue.readOnly")}
+              {t("common.readOnly")}
             </TooltipTrigger>
             <TooltipContent>{t("terminology.reviewQueue.readOnlyTooltip")}</TooltipContent>
           </Tooltip>

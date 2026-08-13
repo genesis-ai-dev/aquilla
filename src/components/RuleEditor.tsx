@@ -277,7 +277,7 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel, className }: 
           {attempted && nameError && <FieldError>{nameError}</FieldError>}
         </Field>
         <Field>
-          <FieldLabel htmlFor="re-desc" className="text-xs">{t("rules.editor.descriptionLabel")}</FieldLabel>
+          <FieldLabel htmlFor="re-desc" className="text-xs">{t("common.descriptionOptional")}</FieldLabel>
           <Input
             id="re-desc"
             value={description}
@@ -291,7 +291,7 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel, className }: 
       {/* Mode selectors */}
       <div className="flex flex-wrap gap-3">
         <div>
-          <FieldLabel className="text-xs">{t("rules.editor.modeLabel")}</FieldLabel>
+          <FieldLabel className="text-xs">{t("common.modeLabel")}</FieldLabel>
           <div className="mt-1 flex gap-1">
             {(["forbidden", "required", "match"] as Mode[]).map((m) => (
               <button
@@ -530,7 +530,7 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel, className }: 
         )}
         <div className="flex gap-2">
           <Button size="sm" onClick={handleSave}>
-            {initialRule ? t("rules.editor.saveChangesButton") : t("rules.editor.createRuleButton")}
+            {initialRule ? t("common.saveChanges") : t("rules.editor.createRuleButton")}
           </Button>
           <Button size="sm" variant="ghost" onClick={onCancel}>
             {t("common.cancel")}

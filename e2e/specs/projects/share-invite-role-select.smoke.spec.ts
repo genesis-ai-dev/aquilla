@@ -15,10 +15,14 @@ test("share invite role select changes the link role", async ({ alice }) => {
   const settings = new ProjectSettings(alice)
   const dialog = await settings.openInviteLinkTab(seeded.projectId)
 
-  const roleLabel = dialog.getByText("Role", { exact: true })
+  // Both tabpanels stay mounted and each contains an aria-label="Role"
+  // select (MemberMultiAddRow vs InviteLinkTab), so scope to the panel.
+  const invitePanel = dialog.getByRole("tabpanel", { name: "Invite link" })
+
+  const roleLabel = invitePanel.getByText("Role", { exact: true })
   await expect(roleLabel).toBeVisible({ timeout: 3_000 })
 
-  const roleSelect = dialog.getByRole("combobox", { name: "Role", exact: true })
+  const roleSelect = invitePanel.getByRole("combobox", { name: "Role", exact: true })
   await expect(roleSelect).toBeVisible({ timeout: 3_000 })
 
   await pickSelectOption(alice, roleSelect, /^viewer/i)

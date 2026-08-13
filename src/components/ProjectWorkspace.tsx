@@ -6415,6 +6415,11 @@ export function ProjectWorkspace() {
           cells={legacyCells}
           activeCellId={recordingCellId}
           username={currentUsername}
+          // AQU-906: hand the recorder the file's linked video so the actor can
+          // watch the scene while dubbing. Withheld in audio-first timing for
+          // the same reason the timeline hides it there — the programme is
+          // re-flowed, so cell times no longer address the video's clock.
+          videoUrl={timingMode === "audioFirst" ? null : (activeFile?.coreMediaUrl ?? null)}
           onActiveCellChange={(cellId) => {
             setRecordingCellId(cellId)
             // Scroll the underlying editor to the new cell so the row is visible

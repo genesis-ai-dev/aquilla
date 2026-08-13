@@ -67,9 +67,16 @@ test("comments page Show resolved checkbox reveals resolved threads", async ({ a
     await expect(reopenBtn).toBeVisible({ timeout: 1_000 })
   }).toPass({ timeout: 15_000 })
 
-  // Expand the collapsed thread (the chevron CollapsibleTrigger is the icon
-  // button right after Reopen in the card header) — the body becomes visible.
-  await reopenBtn.locator("..").getByRole("button").last().click()
+  // A resolved thread normally mounts collapsed, but if the resolve event
+  // landed in the projection after the thread's first render, the card
+  // mounted expanded (open = !root.resolved reads mount-time state only).
+  // The local Collapsible primitive exposes no aria-expanded on the trigger,
+  // so probe the body text directly and expand via the chevron (the icon
+  // button right after Reopen in the card header) only when it's hidden.
+  const chevron = reopenBtn.locator("..").getByRole("button").last()
+  if (!(await alice.getByText(commentText).isVisible())) {
+    await chevron.click()
+  }
   await expect(alice.getByText(commentText)).toBeVisible({ timeout: 5_000 })
 
   // Uncheck — the resolved thread is hidden again (the default state).

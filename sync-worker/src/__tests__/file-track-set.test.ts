@@ -70,6 +70,20 @@ function dispatch(authed: AuthorizedEvent<'file.track.set'>) {
   return dispatchEvent(makeNoOpD1(), authed, 9999, { updateProjection: true })
 }
 
+/**
+ * A refusal is a RETURNED 400 outcome, never a throw: nothing between the
+ * handler and the worker's fetch handler catches, so a throw would 500 the
+ * whole POST and lose every other event in the batch (see DispatchOutcome in
+ * events/handlers/types.ts). The messages are what the client shows in its
+ * outbox inspector, hence the per-case regex.
+ */
+function expectRejected(outcome: ReturnType<typeof dispatch>, message: RegExp) {
+  expect(outcome.ok).toBe(false)
+  if (outcome.ok) throw new Error('unreachable')
+  expect(outcome.status).toBe(400)
+  expect(outcome.reason).toMatch(message)
+}
+
 describe('file.track.set — role floor', () => {
   it('accepts a maintainer (600)', async () => {
     const result = await authorizeTrackSetRaw({ trackId: 'source-subtitles', patch: VALID_PATCH }, 600)
@@ -134,14 +148,14 @@ describe('file.track.set — accepted writes', () => {
 })
 
 describe('file.track.set — rejected writes', () => {
-  it('throws when fileId is absent', async () => {
+  it('rejects when fileId is absent', async () => {
     // The perimeter (authorize) refuses a fileId-less event before dispatch
     // ever sees one, so clear the field on the already-authorized envelope to
     // reach the handler's own guard — the last line of defence for in-process
     // callers that skip the route.
     const authed = await authorizeTrackSet({ trackId: 'source-subtitles', patch: VALID_PATCH })
     delete (authed.event as { fileId?: string }).fileId
-    expect(() => dispatch(authed)).toThrow(/missing fileId/)
+    expectRejected(dispatch(authed), /missing fileId/)
   })
 
   const badPayloads: Array<[string, unknown, RegExp]> = [
@@ -221,7 +235,7 @@ describe('file.track.set — rejected writes', () => {
   for (const [label, payload, message] of badPayloads) {
     it(`rejects ${label}`, async () => {
       const authed = await authorizeTrackSet(payload)
-      expect(() => dispatch(authed)).toThrow(message)
+      expectRejected(dispatch(authed), message)
     })
   }
 })

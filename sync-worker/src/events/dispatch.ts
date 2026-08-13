@@ -23,13 +23,9 @@ import { handleFileTrackSet } from './handlers/file-track-set'
 import { handleFileDelete, handleFileRestore } from './handlers/file-delete-restore'
 import { handleCommentEvent, type CommentEventKind } from './handlers/comment-events'
 import { handleAssignmentEvent, type AssignmentEventKind } from './handlers/assignment-events'
-import type { DispatchResult } from './handlers/types'
+import type { DispatchOutcome } from './handlers/types'
 
-export type { DispatchResult } from './handlers/types'
-
-export type DispatchOutcome =
-  | { ok: true; result: DispatchResult }
-  | { ok: false; status: number; reason: string }
+export type { DispatchResult, DispatchOutcome } from './handlers/types'
 
 export interface DispatchOptions {
   /**
@@ -158,14 +154,13 @@ export function dispatchEvent(
       }
 
     case 'file.track.set':
-      return {
-        ok: true,
-        result: handleFileTrackSet(
-          db,
-          authed as AuthorizedEvent<'file.track.set'>,
-          serverTs,
-        ),
-      }
+      // The only handler that validates a payload shape, so the only one that
+      // can refuse — it returns the outcome itself rather than a bare result.
+      return handleFileTrackSet(
+        db,
+        authed as AuthorizedEvent<'file.track.set'>,
+        serverTs,
+      )
 
     case 'comment.create':
     case 'comment.edit':

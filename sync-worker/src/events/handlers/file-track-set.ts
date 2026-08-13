@@ -15,12 +15,16 @@
 // accepted and must never start rejecting it. Stage 1 ships the kind dormant,
 // so the very first writes to reach here will be stage 3's — the allow-list
 // is what keeps that future UI from quietly widening the stored shape.
+//
+// Every one of those refusals is RETURNED, never thrown: see DispatchOutcome
+// in ./types for why a throw here would 500 the whole POST and wedge the
+// client's outbox on the one bad event.
 
 import type { AuthorizedEvent } from '../authorize'
 import type { RealtimeMessage, ProjectionTable } from '../realtime'
 import { buildEventInsertStmt } from '../event-insert'
 import { buildFileTrackSetStmt } from '../event-projection'
-import type { DispatchResult } from './types'
+import type { DispatchOutcome } from './types'
 
 /**
  * Track ids and group ids. Wide enough for the four well-known literals and
@@ -59,34 +63,54 @@ export function handleFileTrackSet(
   db: AquillaDb,
   authed: AuthorizedEvent<'file.track.set'>,
   serverTs: number,
-): DispatchResult {
+): DispatchOutcome {
   const { event, claims } = authed
 
   if (!event.fileId) {
-    throw new Error(`file.track.set event ${event.id} is missing fileId`)
+    return {
+      ok: false,
+      status: 400,
+      reason: `file.track.set event ${event.id} is missing fileId`,
+    }
   }
 
   const { trackId, patch } = event.payload
   if (typeof trackId !== 'string' || !TRACK_ID_PATTERN.test(trackId)) {
-    throw new Error(`file.track.set event ${event.id} carries an unusable trackId: ${String(trackId)}`)
+    return {
+      ok: false,
+      status: 400,
+      reason: `file.track.set event ${event.id} carries an unusable trackId: ${String(trackId)}`,
+    }
   }
 
   if (patch !== null) {
     if (typeof patch !== 'object' || Array.isArray(patch)) {
-      throw new Error(`file.track.set event ${event.id} carries a non-object patch: ${String(patch)}`)
+      return {
+        ok: false,
+        status: 400,
+        reason: `file.track.set event ${event.id} carries a non-object patch: ${String(patch)}`,
+      }
     }
     const keys = Object.keys(patch)
     // An empty patch would store `{}` under the track id and say nothing —
     // reject it so meta only ever grows entries that mean something (and so
     // "reset this track" stays spelled exactly one way: patch: null).
     if (keys.length === 0) {
-      throw new Error(`file.track.set event ${event.id} carries an empty patch`)
+      return {
+        ok: false,
+        status: 400,
+        reason: `file.track.set event ${event.id} carries an empty patch`,
+      }
     }
     for (const key of keys) {
       // The allow-list is also what keeps the patch FLAT, which the
       // projection's recursive jsonb_strip_nulls depends on.
       if (!PATCH_KEYS.has(key)) {
-        throw new Error(`file.track.set event ${event.id} carries an unknown patch key: ${key}`)
+        return {
+          ok: false,
+          status: 400,
+          reason: `file.track.set event ${event.id} carries an unknown patch key: ${key}`,
+        }
       }
     }
 
@@ -96,10 +120,18 @@ export function handleFileTrackSet(
       // derived from the id, so an override there could only ever be a lie.
       const { kind } = patch
       if (typeof kind !== 'string' || !TRACK_KINDS.has(kind)) {
-        throw new Error(`file.track.set event ${event.id} carries an unknown track kind: ${String(kind)}`)
+        return {
+          ok: false,
+          status: 400,
+          reason: `file.track.set event ${event.id} carries an unknown track kind: ${String(kind)}`,
+        }
       }
       if (DEFAULT_TRACK_IDS.has(trackId)) {
-        throw new Error(`file.track.set event ${event.id} sets kind on default track ${trackId}`)
+        return {
+          ok: false,
+          status: 400,
+          reason: `file.track.set event ${event.id} sets kind on default track ${trackId}`,
+        }
       }
     }
 
@@ -109,7 +141,11 @@ export function handleFileTrackSet(
       // have to defend against.
       const { name } = patch
       if (typeof name !== 'string' || name.trim() === '' || name.length > MAX_TRACK_NAME_LENGTH) {
-        throw new Error(`file.track.set event ${event.id} carries an unusable track name: ${JSON.stringify(name)}`)
+        return {
+          ok: false,
+          status: 400,
+          reason: `file.track.set event ${event.id} carries an unusable track name: ${JSON.stringify(name)}`,
+        }
       }
     }
 
@@ -120,14 +156,22 @@ export function handleFileTrackSet(
       // Only non-numbers, NaN and the infinities are rejected.
       const { order } = patch
       if (typeof order !== 'number' || !Number.isFinite(order)) {
-        throw new Error(`file.track.set event ${event.id} carries a non-finite track order: ${String(order)}`)
+        return {
+          ok: false,
+          status: 400,
+          reason: `file.track.set event ${event.id} carries a non-finite track order: ${String(order)}`,
+        }
       }
     }
 
     if ('groupId' in patch && patch.groupId !== null) {
       const { groupId } = patch
       if (typeof groupId !== 'string' || !TRACK_ID_PATTERN.test(groupId)) {
-        throw new Error(`file.track.set event ${event.id} carries an unusable groupId: ${String(groupId)}`)
+        return {
+          ok: false,
+          status: 400,
+          reason: `file.track.set event ${event.id} carries an unusable groupId: ${String(groupId)}`,
+        }
       }
     }
   }
@@ -166,8 +210,11 @@ export function handleFileTrackSet(
   }
 
   return {
-    stmts: [eventInsert, fileUpdate],
-    eventFrame,
-    dirtyTables: ['events', 'files'] as ProjectionTable[],
+    ok: true,
+    result: {
+      stmts: [eventInsert, fileUpdate],
+      eventFrame,
+      dirtyTables: ['events', 'files'] as ProjectionTable[],
+    },
   }
 }

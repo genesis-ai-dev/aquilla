@@ -23,7 +23,7 @@
 import type { RawEvent } from './types'
 import type { RealtimeMessage, ProjectionTable } from './realtime'
 import { authorize } from './authorize'
-import { dispatchEvent } from './dispatch'
+import { dispatchEvent, type DispatchOutcome } from './dispatch'
 import {
   CHAIN_MUTATING_KINDS,
   fileCountersRecomputeStmt,
@@ -1036,11 +1036,34 @@ export async function handleEventsWriteRequest(
 
     // Dispatch. deferFileCounters: the O(file) counter recompute is appended
     // once per (file, chunk) at commit time instead of once per event (QW-10).
-    const outcome = dispatchEvent(db, authResult.event, serverTs, {
-      updateProjection,
-      deferFileCounters: true,
-      validationCount: validationCountForDispatch,
-    })
+    //
+    // The try/catch is a net under the whole dispatcher: an unexpected throw in
+    // ONE handler used to propagate out of the route and 500 the entire POST,
+    // taking every other event in the batch down with it and — because the
+    // client reads 5xx as transient and retries without burning its attempt
+    // budget — wedging the outbox on that one event forever.
+    //
+    // 500, deliberately NOT 400: the client's permanent-rejection filter is
+    // 4xx-only, so labelling a genuine server bug (null deref, shim failure) a
+    // client error would make it silently DELETE the user's event. A 500 in
+    // `rejected` instead falls through to markOutboxAttempt, burns the retry
+    // budget, terminates as `failed` and stays visible in the inspector —
+    // no client change, and no reclassification for the other 40+ kinds.
+    let outcome: DispatchOutcome
+    try {
+      outcome = dispatchEvent(db, authResult.event, serverTs, {
+        updateProjection,
+        deferFileCounters: true,
+        validationCount: validationCountForDispatch,
+      })
+    } catch (err) {
+      rejected.push({
+        id: rawEvent.id ?? '(unknown)',
+        status: 500,
+        reason: `handler for ${rawEvent.kind} failed: ${err instanceof Error ? err.message : String(err)}`,
+      })
+      continue
+    }
     if (!outcome.ok) {
       rejected.push({
         id: rawEvent.id ?? '(unknown)',

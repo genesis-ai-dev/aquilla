@@ -44,13 +44,15 @@ import {
   chipHeightPx,
   chipPadPx,
   clampRowHeight,
+  MIN_LABEL_SUB_H_PX,
+  MIN_SPEAKER_FULL_H_PX,
   ROW_H_DEFAULT,
   ROW_H_MAX,
   ROW_H_MIN,
   TL_ROW_H_CLASS,
 } from "@/lib/timeline/row-metrics"
 import { orderForDrop, proposeDropIndex, type RowBound } from "@/lib/timeline/track-reorder"
-import { RowMetricsContext, type RowMetrics } from "./useRowMetrics"
+import { RowMetricsContext, useRowMetrics, type RowMetrics } from "./useRowMetrics"
 // Read-only queue subscriptions only — playback COMMANDS stay in the
 // workspace (onSeekToTime), keeping this component testable with a spy prop.
 // Round 5 exception: the per-track speaker buttons write muting themselves —
@@ -291,6 +293,10 @@ function LaneLabel({
   reorder?: LaneLabelReorder
 }) {
   const lifted = reorder?.liftPx != null
+  // The same ruler the chips beside this label degrade against. Stage 3 wired
+  // it for them and left the gutter rendering at full size into a clip, which
+  // is why the names printed over each other at the compact end.
+  const { rowH } = useRowMetrics()
   return (
     // `overflow-hidden` because the two lines inside are fixed-size chrome and
     // the row around them is not any more: at the compact end of the vertical
@@ -343,7 +349,7 @@ function LaneLabel({
         />
       )}
       <div className="flex min-w-0 flex-col gap-0.5">
-        <span className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
+        <span className="flex min-w-0 items-center gap-1.5 text-xs font-semibold text-foreground">
           {/* An <svg> inside the existing name span, and it MUST NOT grow a
               `span.font-semibold` of its own: the gutter parity test reads the
               track names by selecting exactly that class and mapping
@@ -356,10 +362,18 @@ function LaneLabel({
               className="-ml-1.5 h-3.5 w-3.5 shrink-0 text-muted-foreground opacity-30 transition-opacity group-hover:opacity-100"
             />
           )}
-          <span className={cn("h-1.5 w-1.5 rounded-sm", dot)} />
-          {name}
+          <span className={cn("h-1.5 w-1.5 shrink-0 rounded-sm", dot)} />
+          {/* TRUNCATE, NEVER WRAP — and this was wrong at every row height, not
+              just the short ones. "Source subtitles" does not fit the 128px
+              gutter beside a grip and a dot, so it wrapped to two lines; that
+              is a four-line label in a row built for two, which is most of what
+              made the compact end overflow so badly. A plain span, because the
+              parity test matches `span.font-semibold` and this one must not. */}
+          <span className="truncate">{name}</span>
         </span>
-        <span className="text-[10px] text-muted-foreground">{sub}</span>
+        {/* The sublabel is the first thing to go as the row shrinks — see
+            MIN_LABEL_SUB_H_PX. */}
+        {rowH >= MIN_LABEL_SUB_H_PX && <span className="truncate text-[10px] text-muted-foreground">{sub}</span>}
       </div>
       {trailing}
     </div>
@@ -652,6 +666,7 @@ export function TimelineEditor({
 
   function speakerToggle(track: keyof TrackAudibility, name: string) {
     const audible = audibility[track]
+    const compactSpeaker = rowH < MIN_SPEAKER_FULL_H_PX
     return (
       <button
         type="button"
@@ -661,13 +676,24 @@ export function TimelineEditor({
         title={audible ? `${name} is audible — click to mute` : `${name} is muted — click to unmute`}
         onClick={() => toggleAudibility(fileId, track)}
         className={cn(
-          "inline-flex shrink-0 items-center rounded-md border border-border p-1",
+          "inline-flex shrink-0 items-center rounded-md border border-border",
+          // It shrinks rather than vanishing: at 24px the full button is
+          // exactly as tall as its row, which is what put it across two of them
+          // in Sam's screenshot. See MIN_SPEAKER_FULL_H_PX — muting a track is
+          // the thing you reach for WHILE zoomed out to see several at once, so
+          // dropping the control at the very height that makes it useful would
+          // be the wrong trade.
+          compactSpeaker ? "p-0.5" : "p-1",
           audible
             ? "bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300"
             : "bg-background text-foreground/50 hover:bg-muted",
         )}
       >
-        {audible ? <Volume2 className="h-3.5 w-3.5" /> : <VolumeX className="h-3.5 w-3.5" />}
+        {audible ? (
+          <Volume2 className={cn(compactSpeaker ? "h-3 w-3" : "h-3.5 w-3.5")} />
+        ) : (
+          <VolumeX className={cn(compactSpeaker ? "h-3 w-3" : "h-3.5 w-3.5")} />
+        )}
       </button>
     )
   }

@@ -95,6 +95,28 @@ export const MIN_CHIP_GRIP_H_PX = 18
  *  through the neighbouring lane. */
 export const MIN_SLOT_BUTTON_H_PX = 28
 
+// The GUTTER's gates. Stage 3 taught the chips to shed furniture as their rows
+// shrank and left the labels beside them rendering at full size into a clip —
+// so at the compact end the names printed over each other and the mute buttons
+// straddled two rows (Sam, screenshot, 2026-08-13). These are compared against
+// the ROW height, not the chip height: a label fills its row rather than
+// floating inside it with padding, so there is no chip box to measure.
+
+/** Below this the sublabel ("original speech", "takes · generated") goes. Two
+ *  stacked lines need about 30px of type — a 12px name over a 10px sub with a
+ *  2px gap — and a row that gives them 34 has them touching its borders top and
+ *  bottom. The sub is the first thing to drop because it is the only decorative
+ *  line in the row: it names what the track already says it is. */
+export const MIN_LABEL_SUB_H_PX = 40
+
+/** Below this the speaker button renders compact. At full size it is a 24px box
+ *  (4px padding, a 14px glyph, 1px border each side), which in a 28px row
+ *  leaves 2px of air and in a 24px row leaves none at all — that is the button
+ *  straddling its neighbours in Sam's screenshot. It SHRINKS rather than
+ *  disappearing: muting a track is the one thing you reach for while zoomed
+ *  out to see many of them at once. */
+export const MIN_SPEAKER_FULL_H_PX = 34
+
 // The row/chip box classes, in one place, so the 10-46-10 numbers are not
 // re-typed at nine sites (four row containers, five chip boxes).
 //

@@ -17,8 +17,27 @@ const mockRequest = vi.mocked(requestAdminElevation)
 const mockVerify = vi.mocked(verifyAdminElevation)
 
 beforeEach(() => vi.clearAllMocks())
-afterEach(() => {
+afterEach(async () => {
   cleanup()
+  // OPS-11 (docs/OPSEC-REVIEW-2026-08-13.md). `input-otp` schedules three
+  // setTimeouts — 0ms, 10ms, 50ms — on every value/focus change and never
+  // clears them (its `syncTimeouts` helper returns the ids and its effect
+  // returns no cleanup). Unmounting does not cancel them.
+  //
+  // If the run ends inside that 50ms window, the stray callbacks fire after
+  // Vitest has torn the happy-dom environment down: React's dispatchSetState
+  // reaches for `window`, it is gone, and the ReferenceError surfaces as an
+  // UNHANDLED error. Vitest 4 fails a run on an unhandled error even when
+  // every test passed — so `pnpm test` exited 1 with "7328 passed", the root
+  // lane failed, and the Workers Builds gate went red for every pull request
+  // in the repository from 2026-08-11 (the commit that added this file) until
+  // now, regardless of what the pull request changed.
+  //
+  // Waiting the window out here lets the callbacks land while the DOM still
+  // exists, where React discards an update to an unmounted tree in silence.
+  // The real fix belongs upstream in input-otp; this keeps the leak inside the
+  // one test file that can trigger it, at a cost of ~60ms per test.
+  await new Promise((resolve) => setTimeout(resolve, 60))
   vi.restoreAllMocks()
 })
 

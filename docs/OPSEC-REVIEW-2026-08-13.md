@@ -10,11 +10,15 @@ run at this commit) or **JUDGMENT** (reasoned inference). Findings fixed in the
 same change that adds this document say so; the rest carry a recommended owner
 decision, because they are secrets or settings calls rather than patches.
 
-**What this pass turned up that the previous two did not:** the two highest-value
-findings both came from *widening the aperture rather than looking harder*. OPS-8
+**What this pass turned up that the previous two did not:** the highest-value
+findings all came from *widening the aperture rather than looking harder*. OPS-8
 came from asking what an imported file can do rather than what an attacker with an
 account can do. OPS-9 came from pointing the dependency audit at the lockfiles
-nobody had pointed it at. Both were sitting in code the last two reviews read.
+nobody had pointed it at. OPS-11 came from checking whether the gate this series
+keeps putting controls behind was actually passing — it had not been, for any
+pull request, since 2026-08-11, and pull requests were being merged over it.
+Read OPS-11 first: for three days it determined what the rest of this document
+was worth.
 
 ---
 
@@ -238,18 +242,106 @@ import bootstrap depends on this path, and changing it unattended risks breaking
 project creation for a finding whose realistic impact is resource abuse. It
 wants a deliberate change that keeps the bootstrap and adds the quota check.
 
-### Observation — [FACT run status / cause UNVERIFIED] two scheduled Actions workflows are failing
+### OPS-11 — [FACT] The pull-request gate has been failing for every PR since ~2026-08-11, and PRs are being merged over it
 
-Noted while confirming that a scheduled workflow is a real control before adding
-one. Actions **is** executing scheduled runs (so `dependency-audit.yml` will
-run — V4a's 2026-08-06 condition is genuinely resolved). But `Refresh Dev Neon
-Branch` concluded `failure` on both its 2026-08-13 runs, and `Delta sync (content
-+ audio)` failed the same morning. Dependabot runs in the same window succeeded,
-so this is not a wholesale Actions outage.
+Found by checking whether the gate works before claiming a control rides it —
+and it is the most consequential finding in this pass, because every control the
+last two reviews placed behind that gate has not gated anything for three days.
 
-Not investigated — out of scope for an OPSEC pass, and the cause is not verified
-from here. Recorded because "a scheduled job that has been quietly failing" is
-the same failure class as V4 and OPS-4, and someone should look.
+`Workers Builds: aquilla-web-preview` is the check AQU-564 made the pull-request
+gate when it removed Actions' `pull_request` triggers. Sampling its conclusion
+across pull requests:
+
+| PR | Date | Conclusion |
+|---|---|---|
+| #310 | 2026-08-10 09:52 | **success** — last one seen |
+| #330 | 2026-08-11 12:28 | failure |
+| #335 | 2026-08-11 15:13 | failure — **and merged to `dev` anyway** |
+| #350 | 2026-08-12 14:10 | failure |
+| #377, #379, #381 | 2026-08-13 | failure — a dead-component deletion, a docs-only change, and a Dependabot bump |
+
+A docs-only PR and a dead-code deletion cannot fail a test lane. Whatever this
+is, it is not the diffs. Most of those runs report `started_at` equal to
+`completed_at`, which is the same zero-duration signature V4a recorded when
+Actions was failing before executing anything.
+
+The consequence is exact and worth stating without hedging: **`pnpm scan:secrets`,
+`pnpm test:worker`, the deployment-config guards and every worker suite have not
+gated a merge since 2026-08-11.** Those are the controls the 2026-08-06 and
+2026-08-10 reviews added, and each was recorded as fixed because it now rode "the
+enforced lane". The lane stopped enforcing and nothing said so.
+
+**Root cause, reproduced — fixed in this change.** GitHub carries no log for this
+check (its `output.text` is empty and `details_url` points into the Cloudflare
+dashboard), so the only way to see the failure was to run the gate itself:
+
+```
+WORKERS_CI=1 WORKERS_CI_BRANCH=… WORKERS_CI_COMMIT_SHA=… node scripts/cloudflare-ci-checks.mjs
+```
+
+That reproduces it exactly, and the output is worth reading twice:
+
+```
+Test Files  794 passed (794)
+     Tests  7328 passed (7328)
+    Errors  1 error
+⎯⎯ Uncaught Exception ⎯⎯
+ReferenceError: window is not defined
+ ❯ resolveUpdatePriority  react-dom-client.development.js
+ ❯ dispatchSetState       react-dom-client.development.js
+ ❯ Timeout._onTimeout     input-otp/dist/index.mjs
+This error originated in "src/components/admin/AdminElevationGate.test.tsx"
+[workers-build] Cloudflare check lane failure(s):
+root: pnpm test exited with status 1
+```
+
+Every test passes and the run still exits 1. `input-otp` schedules three
+timeouts — 0ms, 10ms, 50ms — on every value/focus change and never clears them
+(`syncTimeouts` returns the ids; the effect returns no cleanup), so unmounting
+does not cancel them. When the run ends inside that 50ms window the callbacks
+fire after Vitest has torn down the happy-dom environment, React's
+`dispatchSetState` reaches for `window`, and the `ReferenceError` surfaces as an
+*unhandled* error. Vitest 4 fails a run on an unhandled error even when every
+test passed.
+
+It is timing-dependent, which is why it does not reproduce when the file runs
+alone and why it needs no particular diff to trigger: it depends on when the
+suite happens to finish, not on what changed. That is exactly the signature the
+sampling above shows — docs-only and dead-code-deletion PRs failing identically.
+
+The dates close the loop: `d28e2488` (2026-08-11 00:18) added
+`AdminElevationGate.tsx` and its test, the first consumer of `input-otp` in the
+suite. The last green gate run was 2026-08-10 09:52; the first red one I sampled
+was 2026-08-11 12:28.
+
+**Fixed** by waiting the 50ms window out in that file's `afterEach`, so the
+stray callbacks land while the DOM still exists and React discards an update to
+an unmounted tree in silence. The real fix belongs upstream in `input-otp`; this
+keeps the leak contained to the one test file that can trigger it, at ~60ms per
+test.
+
+**Follow-up, not fixed here:** the gate reports *nothing* to GitHub when it
+fails — no failing lane name, no log excerpt. Three days of repo-wide breakage
+went unattributed partly because seeing the cause required cloning the repo and
+running the gate by hand. `scripts/cloudflare-ci-checks.mjs` already knows which
+lane failed; surfacing that line into the check output would have turned this
+into a five-minute diagnosis.
+
+I should also correct my own reasoning: an earlier draft of this document
+asserted that V4a's condition was "genuinely resolved" because Actions is
+executing scheduled runs again. That is true and irrelevant — the gate had moved
+off Actions, so the health of Actions says nothing about the health of the gate.
+This is precisely the OPS-7 mistake (reasoning about deployment behaviour instead
+of measuring it) repeated by the review that recorded it.
+
+### Observation — [FACT run status / cause UNVERIFIED] two scheduled Actions workflows are also failing
+
+Separate from OPS-11 and lower stakes. Actions itself **is** executing scheduled
+runs, so the weekly `dependency-audit.yml` added here will fire. But `Refresh Dev
+Neon Branch` concluded `failure` on both its 2026-08-13 runs and `Delta sync
+(content + audio)` failed the same morning, while Dependabot runs in the same
+window succeeded. Cause not investigated; recorded because a scheduled job that
+has been quietly failing is the same failure class as V4, OPS-4 and OPS-11.
 
 ---
 
@@ -267,6 +359,7 @@ Likelihood over roughly the next year, assuming current practices.
 | OPS-6 | Nothing watched dependencies between reviews | Certain | Medium-High | **Medium** | Fixed |
 | OPS-1 / V2 | CSP still mostly report-only | Medium | High — one XSS ⇒ 30-day token + user API keys | **Medium** | Partial |
 | SEC-2 / V8 | 30-day access tokens | Medium | High | **Medium** | Partial (revocation exists) |
+| OPS-11 | PR gate failing for every PR since ~2026-08-11 | **Certain — it was the current state** | High — every automated control was unenforced, and merges proceeded | **High** | Fixed |
 | OPS-10 / SEC-9 | Auto-register grants OWNER on an unknown project ID | Low | Low-Medium — quota bypass, resource abuse | **Low-Medium** | Open |
 
 The pattern from the last two reviews holds and is worth stating again, because
@@ -289,6 +382,7 @@ lockfiles (OPS-9), one a habit (OPS-2). None required an adversary to be clever.
 | Admin calls without the secret in shell history | `scripts/admin-request.ts` (`pnpm admin:request`) | — |
 | Dependency audit across all four lockfiles, failing on a mis-scoped run | `scripts/audit-deps.ts` (`pnpm audit:deps`) | run in CI weekly |
 | Weekly audit with an issue-filing failure path | `.github/workflows/dependency-audit.yml` | — |
+| The pull-request gate passes again (a leaked `input-otp` timer was failing every run) | `src/components/admin/AdminElevationGate.test.tsx` | the gate itself |
 | Nine advisories closed; `hono` floor raised past the `memo()` disclosure | `package.json` overrides, `auth-worker` + `agent-worker` | `pnpm audit:deps` |
 
 The series convention holds: every control above has a test, or is itself the
@@ -296,6 +390,10 @@ test. A control without one is OPS-4 waiting to happen again.
 
 ### Recommended next, in order
 
+0. ~~**Get the pull-request gate passing again (OPS-11).**~~ Root-caused and
+   fixed here. The follow-up that remains: make the gate report its failing
+   lane into the GitHub check output, so the next outage is diagnosable without
+   running the gate by hand.
 1. **Split `SECRET_KEY` / `SYNC_SECRET_KEY` per environment (SEC-1).** Third
    review running as the top item. It means a dev-environment compromise mints
    production-valid tokens, and it removes any ability to rotate one environment
@@ -385,6 +483,7 @@ Re-verified against the tree at this commit, not assumed.
 | `SYNC_SECRET_KEY` as admin bearer | Signing key in shell history (OPS-2) | Partially fixed — `ADMIN_SECRET` accepted; fallback still open |
 | Environment separation | Explicitly defeated for signing keys (SEC-1) | Open — recommendation 1 |
 | Report-only CSP | `img-src … https:` would not have blocked OPS-8 | Narrow the host lists before promoting |
+| **The PR gate itself** | Was failing for every PR since ~2026-08-11, so the controls riding it enforced nothing (OPS-11) | Fixed — and it reports no failure detail to GitHub, which is why it went three days unattributed |
 
 ### June findings, re-checked
 

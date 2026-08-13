@@ -40,7 +40,7 @@ export function deriveNavTitle(pathname: string): string {
       case "projects":
         return "Projects"
       case "archived":
-        return "Archived projects"
+        return parts[1] === "files" ? "Recently deleted" : "Archived projects"
       case "assigned":
         return "Assigned to me"
       case "settings":

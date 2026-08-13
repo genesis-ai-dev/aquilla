@@ -9,6 +9,7 @@ describe("deriveNavTitle", () => {
     expect(deriveNavTitle("/orgs/7/overview")).toBe("Overview")
     expect(deriveNavTitle("/orgs/7/projects")).toBe("Projects")
     expect(deriveNavTitle("/orgs/7/archived")).toBe("Archived projects")
+    expect(deriveNavTitle("/orgs/7/archived/files")).toBe("Recently deleted")
     expect(deriveNavTitle("/orgs/7/assigned")).toBe("Assigned to me")
     expect(deriveNavTitle("/orgs/7/settings")).toBe("Organization settings")
     expect(deriveNavTitle("/orgs/7/settings/identity")).toBe("Identity")

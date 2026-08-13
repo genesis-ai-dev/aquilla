@@ -237,6 +237,7 @@ function AppRoutes() {
           <Route path="projects" element={<OrgProjectsPage />} />
           <Route path="assigned" element={<AssignedToMe />} />
           <Route path="archived" element={<ArchivedProjects />} />
+          <Route path="archived/files" element={<ArchivedProjects />} />
           <Route path="teams" element={<TeamsList />} />
           <Route path="teams/:groupId" element={<TeamDetail />} />
           <Route path="teams/:groupId/settings" element={<TeamSettingsIndex />} />

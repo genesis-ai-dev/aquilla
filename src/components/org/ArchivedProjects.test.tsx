@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest"
 import { render, screen, waitFor, fireEvent } from "@testing-library/react"
-import { MemoryRouter } from "react-router-dom"
+import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { OrgProvider } from "@/context/OrgContext"
 import { ArchivedProjects } from "./ArchivedProjects"
 
@@ -13,8 +13,10 @@ vi.mock("@/lib/frontier/orgs", () => ({
 vi.mock("@/components/AccountSwitcher", () => ({ AccountSwitcher: () => null }))
 
 const fetchArchivedProjects = vi.fn()
+const fetchOrgDeletedFiles = vi.fn()
 vi.mock("@/lib/sync/cloud-projects", () => ({
   fetchArchivedProjects: (...a: unknown[]) => fetchArchivedProjects(...a),
+  fetchOrgDeletedFiles: (...a: unknown[]) => fetchOrgDeletedFiles(...a),
   fetchAccessibleProjects: vi.fn(async () => []),
 }))
 
@@ -23,9 +25,22 @@ vi.mock("@/lib/sync/archive", () => ({
   unarchiveProjectRemote: (...a: unknown[]) => unarchiveProjectRemote(...a),
 }))
 
-function renderArchived() {
+const emitFileRestore = vi.fn()
+vi.mock("@/lib/sync/events-emit", () => ({
+  emitFileRestore: (...a: unknown[]) => emitFileRestore(...a),
+  InsufficientRoleError: class InsufficientRoleError extends Error {},
+}))
+
+function renderArchived(path = "/orgs/1/archived") {
   return render(
-    <MemoryRouter><OrgProvider><ArchivedProjects /></OrgProvider></MemoryRouter>,
+    <MemoryRouter initialEntries={[path]}>
+      <OrgProvider>
+        <Routes>
+          <Route path="/orgs/:orgId/archived" element={<ArchivedProjects />} />
+          <Route path="/orgs/:orgId/archived/files" element={<ArchivedProjects />} />
+        </Routes>
+      </OrgProvider>
+    </MemoryRouter>,
   )
 }
 
@@ -60,6 +75,8 @@ describe("ArchivedProjects", () => {
     expect(screen.getByText("Old Project")).toBeInTheDocument()
     expect(screen.getByRole("columnheader", { name: /Project/i })).toBeInTheDocument()
     expect(screen.getByRole("columnheader", { name: /Archived/i })).toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: "Projects" })).toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: "Recently deleted" })).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole("button", { name: "More actions for Old Project" }))
     fireEvent.click(screen.getByRole("menuitem", { name: "Restore" }))
@@ -110,5 +127,61 @@ describe("ArchivedProjects", () => {
     expect(scrollContainer.className).toMatch(/\bh-full\b/)
     expect(scrollContainer.className).toMatch(/\boverflow-y-auto\b/)
     expect(scrollContainer.className).not.toMatch(/overflow-hidden/)
+  })
+
+  it("lists recently deleted files with a project column and restores on click", async () => {
+    fetchArchivedProjects.mockResolvedValue([])
+    fetchOrgDeletedFiles.mockResolvedValue([
+      {
+        fileId: "f-del",
+        name: "EXO.usfm",
+        projectId: "pa",
+        projectName: "John",
+        fileType: "usfm",
+        cellCount: 20,
+        deletedAt: 1700000000000,
+      },
+    ])
+    emitFileRestore.mockResolvedValue("evt-1")
+    renderArchived("/orgs/1/archived/files")
+
+    await waitFor(() => expect(fetchOrgDeletedFiles).toHaveBeenCalledWith("jwt", 1))
+    expect(await screen.findByTestId("org-deleted-files-table")).toBeInTheDocument()
+    expect(screen.getByText("EXO.usfm")).toBeInTheDocument()
+    expect(screen.getByText("John")).toBeInTheDocument()
+    expect(screen.getByRole("columnheader", { name: /File/i })).toBeInTheDocument()
+    expect(screen.getByRole("columnheader", { name: /Project/i })).toBeInTheDocument()
+    expect(screen.getByRole("columnheader", { name: /Deleted/i })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: "More actions for EXO.usfm" }))
+    fireEvent.click(screen.getByRole("menuitem", { name: "Restore" }))
+    await waitFor(() =>
+      expect(emitFileRestore).toHaveBeenCalledWith({
+        projectId: "pa",
+        fileId: "f-del",
+        author: "wendi",
+      }),
+    )
+  })
+
+  it("shows an empty state on the recently deleted tab", async () => {
+    fetchArchivedProjects.mockResolvedValue([])
+    fetchOrgDeletedFiles.mockResolvedValue([])
+    renderArchived("/orgs/1/archived/files")
+
+    expect(await screen.findByText("No recently deleted files.")).toBeInTheDocument()
+    expect(screen.getByTestId("org-deleted-files-table")).toHaveClass("border", "bg-card")
+  })
+
+  it("does not fetch deleted files until the recently deleted tab is opened", async () => {
+    fetchArchivedProjects.mockResolvedValue([])
+    fetchOrgDeletedFiles.mockResolvedValue([])
+    renderArchived()
+
+    await waitFor(() => expect(fetchArchivedProjects).toHaveBeenCalled())
+    expect(fetchOrgDeletedFiles).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole("tab", { name: "Recently deleted" }))
+    await waitFor(() => expect(fetchOrgDeletedFiles).toHaveBeenCalledWith("jwt", 1))
   })
 })

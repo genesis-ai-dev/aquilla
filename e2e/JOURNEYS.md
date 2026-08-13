@@ -131,7 +131,7 @@
 | Onboarding  | Wizard renders name step and advances                 | `e2e/specs/projects/onboarding-wizard.smoke.spec.ts` + `onboarding-name-step.smoke.spec.ts` + `onboarding-privacy-continue.smoke.spec.ts` + `onboarding-project-step.smoke.spec.ts` | ✅ |
 | Onboarding  | ReadyStep "Start Translating" navigates to project    | `e2e/specs/projects/onboarding-ready-step.smoke.spec.ts`      |   ✅   |
 | Projects    | Archive and restore project                           | `e2e/specs/projects/archive.smoke.spec.ts`                    |   ✅   |
-| Projects    | Archived projects page lists archived items           | `e2e/specs/projects/archived-projects-page.smoke.spec.ts`     |   ✅   |
+| Projects    | Archived page lists archived projects and recently deleted files | `e2e/specs/orgs/archived-projects-page.smoke.spec.ts`     |   ✅   |
 | Projects    | Project deadline set and clear                        | `e2e/specs/projects/project-deadline.smoke.spec.ts`           |   ✅   |
 | Projects    | Project manager assign/clear on overview; org overview PM column updates without reload (AQU-507) | `e2e/specs/projects/project-overview-pm-assignment.smoke.spec.ts` | ✅ |
 | Projects    | Project overview assign work form                     | `e2e/specs/projects/project-overview-assign-work.smoke.spec.ts` + `project-overview-assign-work-submit.smoke.spec.ts` | ✅ |

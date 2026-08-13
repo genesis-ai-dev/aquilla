@@ -4,6 +4,7 @@ import {
   editorReturnFromLocation,
   isProjectEditorPath,
   membersPath,
+  archivedPath,
   orgHomePath,
   orgKeyFromParam,
   orgPath,
@@ -69,6 +70,8 @@ describe("convenience paths", () => {
   it("builds members / settings / project settings URLs", () => {
     expect(membersPath(3)).toBe("/orgs/3/members")
     expect(membersPath(3, "matrix")).toBe("/orgs/3/members/matrix")
+    expect(archivedPath(3)).toBe("/orgs/3/archived")
+    expect(archivedPath(3, "files")).toBe("/orgs/3/archived/files")
     expect(orgSettingsPath(3, "identity")).toBe("/orgs/3/settings/identity")
     expect(projectSettingsPath("p1", "ai")).toBe("/project/p1/settings/ai")
   })

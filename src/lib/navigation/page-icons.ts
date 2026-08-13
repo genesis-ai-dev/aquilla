@@ -80,6 +80,7 @@ const LABEL_ICONS: Record<string, LucideIcon> = {
   "Members matrix": NAV_PAGE_ICONS.members,
   Archived: NAV_PAGE_ICONS.archived,
   "Archived projects": NAV_PAGE_ICONS.archived,
+  "Recently deleted": NAV_PAGE_ICONS.file,
   Settings: NAV_PAGE_ICONS.settings,
   "Organization settings": NAV_PAGE_ICONS.settings,
   "Project settings": NAV_PAGE_ICONS.settings,

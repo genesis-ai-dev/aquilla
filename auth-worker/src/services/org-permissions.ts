@@ -654,6 +654,7 @@ export interface OrgGroupDetail {
   id: number
   name: string
   description: string | null
+
   members: Array<{ userId: number; username: string; email: string | null; roleLevel: number | null }>
   projects: Array<{ id: string; name: string; grantedRoleLevel: number }>
 }
@@ -822,6 +823,17 @@ export interface PortfolioLane {
 
 export interface PortfolioRow { id: string; name: string; totalCells: number; validatedCells: number; filledCells: number; lastEditAt: number | null; audioCells: number; validatedAudioCells: number; recordedMs: number; deadlineAt: string | null; aiDraftedCells: number; sourceLanguage: string | null; targetLanguage: string | null; lanes: PortfolioLane[] }
 export interface OrgPortfolioRow extends PortfolioRow { orgId: number }
+
+/** Soft-deleted file in an org the caller can see (Archived → Recently deleted). */
+export interface OrgDeletedFile {
+  fileId: string
+  name: string
+  projectId: string
+  projectName: string
+  fileType: string
+  cellCount: number
+  deletedAt: number
+}
 
 interface PortfolioDbRow {
   org_id: number
@@ -1066,6 +1078,52 @@ export async function getOrgPortfolio(
   ).all<PortfolioDbRow>()
   const lanesByProject = await fetchPortfolioLanes(env, [orgId])
   return (rows.results ?? []).map((r) => mapPortfolioRow(r, lanesByProject))
+}
+
+/**
+ * Soft-deleted files across projects the caller can see in this org.
+ * Includes files whose parent project is archived — those still belong in
+ * Recently deleted, attributed via projectName. Same visibility predicate as
+ * the portfolio so a regular member cannot learn file names from projects
+ * they cannot open.
+ */
+export async function getOrgDeletedFiles(
+  env: Env,
+  orgId: number,
+  viewer: { userId: number; isAdmin: boolean },
+): Promise<OrgDeletedFile[]> {
+  const rows = await env.AQUILLA_PG.prepare(
+    `SELECT f.id AS file_id, f.name AS name, f.project_id AS project_id,
+            p.name AS project_name, f.kind AS kind, f.role AS role,
+            f.cell_count AS cell_count, f.deleted_at AS deleted_at
+       FROM files f
+       JOIN projects p ON p.id = f.project_id
+      WHERE p.org_id = ?
+        AND f.deleted_at IS NOT NULL
+        AND ${PORTFOLIO_VISIBILITY_PREDICATE}
+      ORDER BY f.deleted_at DESC NULLS LAST, LOWER(f.name)`,
+  ).bind(
+    orgId,
+    viewer.isAdmin ? 1 : 0, viewer.userId, viewer.userId, viewer.userId, viewer.userId,
+  ).all<{
+    file_id: string
+    name: string
+    project_id: string
+    project_name: string
+    kind: string | null
+    role: string | null
+    cell_count: number | null
+    deleted_at: number | string
+  }>()
+  return (rows.results ?? []).map((r) => ({
+    fileId: r.file_id,
+    name: r.name,
+    projectId: r.project_id,
+    projectName: r.project_name,
+    fileType: r.kind ?? r.role ?? "codex",
+    cellCount: Number(r.cell_count) || 0,
+    deletedAt: Number(r.deleted_at),
+  }))
 }
 
 /** Batched portfolio rollup for all-org dashboard/list views. */
@@ -1460,3 +1518,4 @@ export async function getTermbaseEditMinRoleForProject(
   if (!project?.org_id) return DEFAULT_TERMBASE_EDIT_MIN_ROLE
   return getTermbaseEditMinRole(env, project.org_id)
 }
+

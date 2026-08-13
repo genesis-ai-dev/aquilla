@@ -16,6 +16,9 @@ export interface TimelineLaneProps {
   /** Already lane-filtered + time-sorted (from deriveLanes). */
   cells: CellData[]
   variant: "subtitle" | "dialogue"
+  /** AQU-904: which derived text track this lane draws, for tests and for
+   *  telling two subtitle lanes apart in the DOM. Absent on the audio lanes. */
+  trackId?: string
   /** SUB-53: resolves where each card sits — the frozen file clock in dubbing
    *  mode, the laid-out programme in audio-first. Absent = dubbing. */
   layout?: TimelineLayout
@@ -37,6 +40,7 @@ export interface TimelineLaneProps {
 export function TimelineLane({
   cells,
   variant,
+  trackId,
   layout,
   pxPerSec,
   viewStartSec,
@@ -86,7 +90,12 @@ export function TimelineLane({
   }
 
   return (
-    <div data-testid="tl-lane" data-variant={variant} className="relative h-[66px] border-b border-border">
+    <div
+      data-testid="tl-lane"
+      data-variant={variant}
+      {...(trackId ? { "data-track-id": trackId } : {})}
+      className="relative h-[66px] border-b border-border"
+    >
       {visible.map((c) => (
         <TimelineCard
           key={c.id}

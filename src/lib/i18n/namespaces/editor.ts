@@ -564,6 +564,21 @@ export const editor = defineNamespace({
     "editor.timeline.laneTargetAudioSub": "takes · generated",
     "editor.timeline.laneUntimed": "Untimed",
     "editor.timeline.laneUntimedSub": "no timecode yet",
+    // AQU-904 — extra cue tracks imported into this timeline.
+    "editor.timeline.laneSubtitleTrackSub": "subtitle · cues",
+    "editor.timeline.laneAudioTrackSub": "dub · cues",
+    "editor.timeline.hideTrack": "Hide track",
+    "editor.timeline.showTrack": "Show track",
+    "editor.timeline.trackVisible": "Track is showing — click to hide",
+    "editor.timeline.trackHidden": "Track is hidden — click to show",
+    "editor.timeline.importSubtitleTrack": "Subtitle VTT",
+    "editor.timeline.importAudioTrack": "Audio VTT",
+    "editor.timeline.importSubtitleTrackTooltip":
+      "Add a subtitle VTT or SRT to this timeline as its own track.",
+    "editor.timeline.importAudioTrackTooltip":
+      "Add an audio (dubbing) VTT or SRT to this timeline as its own track. It sits beside the subtitle track rather than replacing it.",
+    "editor.timeline.importingTrack": "Adding track…",
+    "editor.timeline.importTrackFailed": "Couldn't add that track: {message}",
     "editor.timeline.muteSourceAudio": "Mute source audio",
     "editor.timeline.unmuteSourceAudio": "Unmute source audio",
     "editor.timeline.sourceAudioAudible": "Source audio is audible — click to mute",
@@ -2938,6 +2953,84 @@ export const editor = defineNamespace({
           "10px sub-label under the Untimed area, restating why those clips are " +
           "parked there: they carry no timecode.",
         maxLength: 20,
+      },
+      "editor.timeline.laneSubtitleTrackSub": {
+        description:
+          "10px sub-label under an imported subtitle cue track. The track's own " +
+          "name is the imported file's name, so this says what KIND of track it " +
+          "is: subtitle cues. Middle dot separates the two words — keep the shape.",
+        maxLength: 20,
+      },
+      "editor.timeline.laneAudioTrackSub": {
+        description:
+          "10px sub-label under an imported audio/dubbing cue track — the cue " +
+          "file that drives the spoken dub, whose timings differ from the " +
+          "subtitles. 'dub' is the recorded translation. Keep the two-word shape.",
+        maxLength: 20,
+      },
+      "editor.timeline.hideTrack": {
+        description:
+          "Screen-reader name of the eye button on a cue track's label, which " +
+          "hides that track from the timeline. A local view preference only — it " +
+          "deletes nothing. Icon-only, so this is its only name.",
+        maxLength: 18,
+      },
+      "editor.timeline.showTrack": {
+        description:
+          "Screen-reader name of the same eye button once the track is hidden: " +
+          "clicking brings the track back onto the timeline. Icon-only.",
+        maxLength: 18,
+      },
+      "editor.timeline.trackVisible": {
+        description:
+          "Hover tooltip on the eye button while the cue track is showing. States " +
+          "the current state, then what a click does — keep both halves.",
+      },
+      "editor.timeline.trackHidden": {
+        description:
+          "Hover tooltip on the eye button while the cue track is hidden. States " +
+          "the current state, then what a click does — keep both halves.",
+      },
+      "editor.timeline.importSubtitleTrack": {
+        description:
+          "Label of the toolbar button that adds a subtitle cue file (VTT or SRT) " +
+          "to this timeline as a new track. Sits next to its audio twin in a tight " +
+          "toolbar row, so it names the FILE it takes, not the whole action — the " +
+          "tooltip carries the verb. 'VTT' is a file format; leave it untranslated.",
+        maxLength: 16,
+      },
+      "editor.timeline.importAudioTrack": {
+        description:
+          "Label of the toolbar button that adds an audio/dubbing cue file (VTT or " +
+          "SRT) to this timeline as a new track. Twin of the subtitle button; same " +
+          "shape. 'VTT' is a file format; leave it untranslated.",
+        maxLength: 16,
+      },
+      "editor.timeline.importSubtitleTrackTooltip": {
+        description:
+          "Hover tooltip on the subtitle-VTT button, giving the verb its short " +
+          "label omits: this adds a track to the timeline that is open.",
+      },
+      "editor.timeline.importAudioTrackTooltip": {
+        description:
+          "Hover tooltip on the audio-VTT button. The second sentence is the " +
+          "reassurance that matters to a dubbing team: an audio cue file has its " +
+          "own timings and lands beside the subtitles rather than overwriting them.",
+      },
+      "editor.timeline.importingTrack": {
+        description:
+          "Busy label replacing the two import buttons while a cue file's cues are " +
+          "being written into the timeline. Ends in an ellipsis.",
+        maxLength: 18,
+      },
+      "editor.timeline.importTrackFailed": {
+        description:
+          "Error row under the timeline toolbar when a cue file could not be " +
+          "added — a bad format, or a file with no timecoded cues. The reason " +
+          "follows in the same sentence.",
+        placeholders: {
+          message: "The underlying reason, already a sentence (e.g. why the file had no timed cues).",
+        },
       },
       "editor.voice.volumeLevel": {
         description:

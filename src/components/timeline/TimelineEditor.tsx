@@ -5,9 +5,11 @@
 // preview (the remote host serves Range — no streaming work needed here).
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react"
-import { AudioLines, Film, LocateFixed, Magnet, Minus, Plus, Volume2, VolumeX, X } from "lucide-react"
+import { AudioLines, Eye, EyeOff, Film, LocateFixed, Magnet, Minus, Plus, Volume2, VolumeX, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { deriveLanes } from "@/lib/timeline/lanes"
+import { DEFAULT_TRACK_ID, deriveTracks, type TimelineTrackKind } from "@/lib/timeline/tracks"
+import { loadHiddenTracks, saveHiddenTracks } from "@/lib/timeline/track-visibility"
 import { chipOverlaps } from "@/lib/timeline/lane-timing"
 import { buildTimelineLayout, type TimelineLayout } from "@/lib/timeline/layout"
 import { computeFollowScroll } from "@/lib/timeline/follow"
@@ -30,6 +32,7 @@ import { TimelineLane } from "./TimelineLane"
 import { TargetAudioLane, type TargetAudioItem } from "./TargetAudioLane"
 import { TimelinePlayhead } from "./TimelinePlayhead"
 import { TimelineChipStrip } from "./TimelineChipStrip"
+import { TimelineImportTrack } from "./TimelineImportTrack"
 import { useTimelineClock } from "./useTimelineClock"
 import { resolveEntryAudio, useClipAudioMissing } from "./useClipAudioMissing"
 import type { CellData } from "@/hooks/useCells"
@@ -61,6 +64,9 @@ export interface TimelineEditorProps {
   onTogglePlay?(): void
   /** When provided, shows a "Link video" control. null clears the link. */
   onLinkVideo?(url: string | null): void
+  /** AQU-904: when provided, shows the subtitle/audio cue-file import pair —
+   *  each pick appends the file's cues to THIS timeline as a new track. */
+  onImportTrack?(file: File, kind: TimelineTrackKind): Promise<void>
   /** AQU-646: navigate audio playback to a file-timeline second — ruler
    *  clicks and clean card clicks route through this (the workspace decides
    *  whether to jump the live queue or cue a paused one). */
@@ -209,6 +215,7 @@ export function TimelineEditor({
   onTrimTarget,
   onTogglePlay,
   onLinkVideo,
+  onImportTrack,
   onSeekToTime,
   onOpenRecording,
   initialSelectedCellId,
@@ -236,6 +243,7 @@ export function TimelineEditor({
   const online = useOnline()
   const batchProgress = useBatchProgress()
   const [audibility, setAudibility] = useState<TrackAudibility>(() => loadAudibility(fileId))
+  const [hiddenTracks, setHiddenTracks] = useState<Set<string>>(() => loadHiddenTracks(fileId))
   const [snapOn, setSnapOn] = useState(loadSnapEnabled)
   const audioQuality = useAudioQualityPref()
   // Seeded by the text→media trace (AQU-646 round 3): the seed alone opens
@@ -366,6 +374,47 @@ export function TimelineEditor({
     })
   }
 
+  // AQU-904: hiding a cue track is a local view preference (same class as the
+  // speaker mutes above) — it never touches the cells.
+  //
+  // The DEFAULT track gains its eye only once a second track exists: on the
+  // ordinary single-track file there is nothing to hide it in favour of, and an
+  // eye that empties the whole timeline reads as a bug.
+  const isTrackHideable = (isDefault: boolean) => !isDefault || textTracks.length > 1
+  const isTrackHidden = (trackId: string, isDefault: boolean) =>
+    isTrackHideable(isDefault) && hiddenTracks.has(trackId)
+
+  function toggleTrackHidden(trackId: string) {
+    setHiddenTracks((prev) => {
+      const next = new Set(prev)
+      if (next.has(trackId)) next.delete(trackId)
+      else next.add(trackId)
+      saveHiddenTracks(fileId, next)
+      return next
+    })
+  }
+
+  function trackEyeToggle(trackId: string, hidden: boolean) {
+    return (
+      <button
+        type="button"
+        data-testid={`tl-track-eye-${trackId}`}
+        aria-label={t(hidden ? "editor.timeline.showTrack" : "editor.timeline.hideTrack")}
+        aria-pressed={!hidden}
+        title={t(hidden ? "editor.timeline.trackHidden" : "editor.timeline.trackVisible")}
+        onClick={() => toggleTrackHidden(trackId)}
+        className={cn(
+          "inline-flex shrink-0 items-center rounded-md border border-border p-1",
+          hidden
+            ? "bg-background text-foreground/50 hover:bg-muted"
+            : "bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300",
+        )}
+      >
+        {hidden ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+      </button>
+    )
+  }
+
   function speakerToggle(track: keyof TrackAudibility) {
     const audible = audibility[track]
     const keys = SPEAKER_TOGGLE_KEYS[track]
@@ -390,6 +439,18 @@ export function TimelineEditor({
   }
 
   const { subtitle, dialogue, untimed } = useMemo(() => deriveLanes(cells), [cells])
+  // AQU-904: the subtitle lane is now one lane PER cue track. A file that has
+  // never had a track imported derives exactly one (the default), so this is
+  // the lane the editor has always drawn.
+  // An empty file still shows the (empty) Subtitles lane it always has, so the
+  // track column never collapses to nothing.
+  const defaultTrackLabel = t("editor.timeline.laneSubtitle")
+  const textTracks = useMemo(() => {
+    const derived = deriveTracks(subtitle, defaultTrackLabel)
+    return derived.length > 0
+      ? derived
+      : [{ id: DEFAULT_TRACK_ID, label: defaultTrackLabel, kind: "subtitle" as const, isDefault: true, cells: [] }]
+  }, [subtitle, defaultTrackLabel])
   // SUB-53: the single answer to "where does this go on the track?". Dubbing
   // returns the pre-SUB-53 geometry verbatim; audio-first returns the laid-out
   // programme. Everything below reads positions through this.
@@ -918,6 +979,9 @@ export function TimelineEditor({
               {coreMediaUrl ? t("editor.timeline.changeVideo") : t("editor.timeline.linkVideo")}
             </button>
           )}
+          {/* AQU-904: sits next to "Link video" — the two things you bring to a
+              timeline are the video and its cue files. */}
+          {onImportTrack && editable && <TimelineImportTrack onImportTrack={onImportTrack} />}
           <div className="inline-flex items-center rounded-md border border-border">
             <button
               type="button"
@@ -1014,11 +1078,39 @@ export function TimelineEditor({
       <div className="grid min-h-0 grid-cols-[128px_1fr]">
         <div className="border-r border-border bg-muted/20">
           <div className="h-7 border-b border-border" />
-          <LaneLabel
-            name={t("editor.timeline.laneSubtitle")}
-            sub={t("editor.timeline.laneSubtitleSub")}
-            dot="bg-zinc-400 dark:bg-zinc-600"
-          />
+          {/* AQU-904: one label per cue track. The default track keeps the
+              built-in copy; an imported track is named by its file and can be
+              hidden, which collapses BOTH columns to the same short row so the
+              two halves of the grid stay aligned. */}
+          {textTracks.map((track) =>
+            isTrackHidden(track.id, track.isDefault) ? (
+              <div
+                key={track.id}
+                className="flex h-8 items-center justify-between gap-1 border-b border-border px-3"
+              >
+                <span className="truncate text-[11px] text-muted-foreground">{track.label}</span>
+                {trackEyeToggle(track.id, true)}
+              </div>
+            ) : (
+              <LaneLabel
+                key={track.id}
+                name={track.label}
+                sub={
+                  track.isDefault
+                    ? t("editor.timeline.laneSubtitleSub")
+                    : t(
+                        track.kind === "audio"
+                          ? "editor.timeline.laneAudioTrackSub"
+                          : "editor.timeline.laneSubtitleTrackSub",
+                      )
+                }
+                dot={track.kind === "audio" ? "bg-violet-500" : "bg-zinc-400 dark:bg-zinc-600"}
+                {...(isTrackHideable(track.isDefault)
+                  ? { trailing: trackEyeToggle(track.id, false) }
+                  : {})}
+              />
+            ),
+          )}
           <LaneLabel
             name={t("editor.timeline.laneSourceAudio")}
             sub={t("editor.timeline.laneSourceAudioSub")}
@@ -1059,7 +1151,21 @@ export function TimelineEditor({
             <TimelineRuler durationSec={durationSec} pxPerSec={pxPerSec} onScrub={seekTo} />
             {/* SUB-53: a subtitle span is expressed against the original's
                 clock, so it can't be dragged on a re-flowed track. */}
-            <TimelineLane cells={subtitle} variant="subtitle" retimable={!audioFirst} snapEnabled={snapOn} {...laneProps} />
+            {textTracks.map((track) =>
+              isTrackHidden(track.id, track.isDefault) ? (
+                <div key={track.id} data-testid="tl-lane-hidden" className="h-8 border-b border-border" />
+              ) : (
+                <TimelineLane
+                  key={track.id}
+                  cells={track.cells}
+                  trackId={track.id}
+                  variant="subtitle"
+                  retimable={!audioFirst}
+                  snapEnabled={snapOn}
+                  {...laneProps}
+                />
+              ),
+            )}
             {/* Round 6: the source split is FROZEN at import — never retimable. */}
             <TimelineLane cells={dialogue} variant="dialogue" retimable={false} {...laneProps} />
             <TargetAudioLane

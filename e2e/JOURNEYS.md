@@ -60,6 +60,7 @@
 | Sharing     | Email invites to multiple projects from the org view (AQU-471) | `e2e/specs/orgs/multi-project-invite-submit.smoke.spec.ts` (test 2) | ✅ |
 | Audio/Video | Import mp3 → silence-split clips → Play all          | `e2e/specs/editor/audio-import-playback.smoke.spec.ts`        |   ✅   |
 | Audio/Video | Subtitles flow                                       | _gap — Plan 2_                                                |        |
+| Audio/Video | Import a second (audio/dubbing) VTT into an open timeline as its own track; both cue tracks coexist with per-track hide | _gap — AQU-904; covered by `src/components/timeline/TimelineEditor.tracks.test.tsx` + `src/lib/timeline/import-vtt-track.test.ts` until a spec lands_ | |
 | Settings    | Settings sync between two browsers                   | _gap — Plan 2_                                                |        |
 | Settings    | Settings persist across reload                       | `e2e/specs/orgs/preferences-persist-reload.smoke.spec.ts`    |   ✅   |
 | Settings    | Preferences General controls (theme, language, privacy) render inline; in-app account menu opens Preferences as a route-modal over the untouched workspace | `e2e/specs/orgs/preferences.smoke.spec.ts` + `e2e/specs/orgs/account-switcher.smoke.spec.ts` | ✅ |

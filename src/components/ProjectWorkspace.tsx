@@ -126,6 +126,8 @@ import { runDiarization, findFileClip, type DiarizationPhase } from "@/lib/diari
 import { extractVoiceReference } from "@/lib/audio/reference-extract"
 import { getVoiceLibrary, newVoiceId, VOICE_PALETTE } from "@/lib/audio/voices"
 import { attachMediaFileToTimeline, attachMediaUrlToTimeline } from "@/lib/timeline/attach-media"
+import { importTrackToTimeline } from "@/lib/timeline/import-vtt-track"
+import type { TimelineTrackKind } from "@/lib/timeline/tracks"
 import { useCellsAuditStatsWithOverlay } from "@/hooks/useCellsAuditStatsWithOverlay"
 import { useComments } from "@/hooks/useComments"
 import { Film, Bot, MessagesSquare, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, BookOpen, Users, UserCheck, ArrowRight, PanelLeftClose, Mic, Plus, Pencil, FolderInput, Download } from "lucide-react"
@@ -1728,6 +1730,28 @@ export function ProjectWorkspace() {
     await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
     revalidateCells()
   }, [project?.id, activeFileId, currentUsername, getTokenForFile, getTokenForProjectFile, revalidateCells])
+
+  // AQU-904: add a second cue file (Come and See's audio/dubbing VTT, whose
+  // timings differ from the subtitle VTT) to the OPEN timeline as its own
+  // track, rather than as a second file with a second timeline. Errors
+  // propagate to TimelineImportTrack, which renders them.
+  const handleImportTrack = useCallback(async (file: File, kind: TimelineTrackKind) => {
+    if (!project?.id || !activeFileId) return
+    const existing = getActiveCells()
+    const maxSequenceIndex = existing.reduce(
+      (max, c) => (typeof c.sequenceIndex === "number" && c.sequenceIndex > max ? c.sequenceIndex : max),
+      0,
+    )
+    await importTrackToTimeline(file, {
+      projectId: project.id,
+      fileId: activeFileId,
+      author: currentUsername,
+      maxSequenceIndex,
+      anchorCellId: existing.length > 0 ? existing[existing.length - 1].id : null,
+    }, { kind })
+    await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+    revalidateCells()
+  }, [project?.id, activeFileId, currentUsername, getActiveCells, getTokenForProjectFile, revalidateCells])
 
   // Timeline editor, round 6 (SUB-36): retiming exists only on the SUBTITLE
   // row. A TEXT cell's own timing IS its subtitle timing → cell.retime as
@@ -6041,6 +6065,7 @@ export function ProjectWorkspace() {
                     onTrimTarget={handleTrimTarget}
                     onTogglePlay={handleTimelineTogglePlay}
                     onLinkVideo={handleLinkVideo}
+                    onImportTrack={handleImportTrack}
                     onSeekToTime={handleTimelineSeekToTime}
                     timingMode={timingMode}
                     onChangeTimingMode={canEditTimingMode ? handleChangeTimingMode : undefined}

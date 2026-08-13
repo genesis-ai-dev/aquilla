@@ -8,11 +8,15 @@
 // has no global toast system.
 
 import { useEffect, useRef, useState } from "react"
-import { useNavigate, useSearchParams } from "react-router-dom"
+import { Link, useNavigate, useSearchParams } from "react-router-dom"
 import { Spinner } from "@/components/ui/spinner"
 import { completeMondayOAuth } from "@/lib/monday/api"
 
-const FALLBACK = "/settings/monday"
+// Last resort only — callers always send an explicit `backTo`. This page has no
+// org in scope, so it can't name an org-scoped settings route; org home is the
+// nearest real one. (It used to be "/settings/monday", which has no route at
+// all: every OAuth round trip that fell back here landed on the 404 page.)
+const FALLBACK = "/orgs/all"
 
 function withParam(path: string, params: Record<string, string>): string {
   const qs = new URLSearchParams(params).toString()
@@ -22,21 +26,18 @@ function withParam(path: string, params: Record<string, string>): string {
 export function MondayOAuthCallback() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
-  const [failed, setFailed] = useState(false)
+  const [exchangeError, setExchangeError] = useState<string | null>(null)
   const ranRef = useRef(false)
 
-  useEffect(() => {
-    if (ranRef.current) return
-    ranRef.current = true
+  const code = searchParams.get("code")
+  const state = searchParams.get("state")
+  // Derived, not stateful: whether Monday sent us the params is knowable at
+  // render time, so it never needs an effect.
+  const failed = !code || !state ? "missing code or state" : exchangeError
 
-    const code = searchParams.get("code")
-    const state = searchParams.get("state")
-    if (!code || !state) {
-      navigate(withParam(FALLBACK, { monday: "error", reason: "missing code or state" }), {
-        replace: true,
-      })
-      return
-    }
+  useEffect(() => {
+    if (ranRef.current || !code || !state) return
+    ranRef.current = true
 
     void completeMondayOAuth(code, state).then((result) => {
       if (result.ok) {
@@ -45,18 +46,30 @@ export function MondayOAuthCallback() {
         const backTo = result.backTo.startsWith("/") ? result.backTo : FALLBACK
         navigate(withParam(backTo, { monday: "connected" }), { replace: true })
       } else {
-        setFailed(true)
-        navigate(withParam(FALLBACK, { monday: "error", reason: result.reason }), {
-          replace: true,
-        })
+        // Reported here rather than bounced onward: a failed exchange has no
+        // `backTo` to return to, so redirecting could only guess — and the
+        // guess was a route that didn't exist.
+        setExchangeError(result.reason)
       }
     })
-  }, [navigate, searchParams])
+  }, [navigate, code, state])
+
+  if (failed) {
+    return (
+      <div className="flex h-screen flex-col items-center justify-center gap-3 px-6 text-center">
+        <p className="text-sm font-medium">Couldn't finish connecting to Monday.com</p>
+        <p className="text-sm text-muted-foreground">{failed}</p>
+        <Link to={FALLBACK} className="text-sm font-medium underline underline-offset-4">
+          Back to Aquilla
+        </Link>
+      </div>
+    )
+  }
 
   return (
     <div className="flex h-screen items-center justify-center">
       <p className="flex items-center gap-2 text-sm text-muted-foreground">
-        <Spinner /> {failed ? "Redirecting…" : "Connecting to Monday.com…"}
+        <Spinner /> Connecting to Monday.com…
       </p>
     </div>
   )

@@ -12,6 +12,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Link } from "react-router-dom"
+import { Sparkles } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { SettingsGroup, SettingsRow } from "@/components/ui/page"
@@ -52,6 +53,7 @@ import {
 import type { MondayMapping } from "@/lib/monday/types"
 import { MondayMappingTable } from "./MondayMappingEditor"
 import { MondayLinkedView } from "./MondayLinkedView"
+import { MondaySetupWizard } from "./MondaySetupWizard"
 
 const MAINTAINER = 600
 
@@ -93,6 +95,9 @@ export function MondayIntegrationSection({ projectId, orgId, roleLevel }: Props)
   const [syncNotice, setSyncNotice] = useState<string | null>(null)
   const [unlinkOpen, setUnlinkOpen] = useState(false)
   const [unlinking, setUnlinking] = useState(false)
+  const [wizardOpen, setWizardOpen] = useState(false)
+  /** Manual board+mapping path, revealed on demand — the AI wizard is primary. */
+  const [manualOpen, setManualOpen] = useState(false)
 
   const aliveRef = useRef(true)
   useEffect(() => {
@@ -129,9 +134,11 @@ export function MondayIntegrationSection({ projectId, orgId, roleLevel }: Props)
   const orgConnected = link?.orgConnected ?? connection?.connected ?? false
 
   // ── Boards list (unlinked, maintainer only) ──────────────────────────────
+  // Only fetched once the manual path is opened; the wizard picks the board
+  // server-side, so the default path costs no board listing at all.
   useEffect(() => {
     if (!jwt || orgId == null || !canManage || loading || link || !orgConnected) return
-    if (boards !== null) return
+    if (!manualOpen || boards !== null) return
     let alive = true
     fetchMondayBoards(jwt, orgId)
       .then((got) => {
@@ -146,7 +153,7 @@ export function MondayIntegrationSection({ projectId, orgId, roleLevel }: Props)
     return () => {
       alive = false
     }
-  }, [jwt, orgId, canManage, loading, link, orgConnected, boards])
+  }, [jwt, orgId, canManage, loading, link, orgConnected, boards, manualOpen])
 
   // ── Board structure (selected or linked board) ───────────────────────────
   const structureBoardId = link?.boardId ?? selectedBoardId
@@ -319,14 +326,21 @@ export function MondayIntegrationSection({ projectId, orgId, roleLevel }: Props)
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Spinner /> Loading Monday integration…
             </div>
-          ) : !orgConnected ? (
+          ) : !orgConnected && !canManage ? (
             <div className="space-y-2 text-sm text-muted-foreground">
               <p>Your organization hasn&apos;t connected Monday.com yet.</p>
               <p>
                 An org maintainer can connect it in{" "}
-                <Link to="/settings/monday" className="font-medium text-foreground underline underline-offset-4">
-                  organization settings
-                </Link>
+                {orgId != null ? (
+                  <Link
+                    to={`/orgs/${orgId}/settings/monday`}
+                    className="font-medium text-foreground underline underline-offset-4"
+                  >
+                    organization settings
+                  </Link>
+                ) : (
+                  "organization settings"
+                )}
                 , or ask an org maintainer to set it up.
               </p>
             </div>
@@ -358,37 +372,57 @@ export function MondayIntegrationSection({ projectId, orgId, roleLevel }: Props)
               <p className="text-sm text-muted-foreground">
                 Link a Monday board to push this project&apos;s translation progress automatically.
               </p>
-              <div className="flex items-center gap-2">
-                <Select
-                  items={Object.fromEntries((boards ?? []).map((b) => [b.id, b.name]))}
-                  value={selectedBoardId || null}
-                  onValueChange={(value) => setSelectedBoardId((value as string) ?? "")}
-                  disabled={boards === null}
-                >
-                  <SelectTrigger aria-label="Monday board" className="bg-background">
-                    <SelectValue placeholder={boards === null ? "Loading boards…" : "Pick a board"} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectGroup>
-                      {(boards ?? []).map((b) => (
-                        <SelectItem key={b.id} value={b.id}>
-                          {b.name}
-                          {b.workspace?.name ? ` — ${b.workspace.name}` : ""}
-                        </SelectItem>
-                      ))}
-                    </SelectGroup>
-                  </SelectContent>
-                </Select>
-                <span className="flex items-center gap-1 text-sm text-muted-foreground">
-                  <SparkleButton
-                    disabled={!selectedBoardId}
-                    loading={analyzing}
-                    onComplete={() => void runAnalyze(selectedBoardId)}
-                    tooltip="Use AI to configure"
-                  />
-                  Use AI to configure
-                </span>
-              </div>
+              <Button onClick={() => setWizardOpen(true)} data-testid="monday-setup-with-ai">
+                <Sparkles data-icon="inline-start" />
+                Set up with AI
+              </Button>
+              <p className="text-xs text-muted-foreground">
+                Picks the board, maps your progress metrics to its columns, and shows you the plan
+                before anything is written.
+              </p>
+              {/* Manual board+mapping path, kept as an escape hatch. Hidden until
+                  the org is connected — without a token it can only ever show an
+                  empty board picker. */}
+              {orgConnected &&
+                (!manualOpen ? (
+                  <Button variant="ghost" onClick={() => setManualOpen(true)}>
+                    Set it up manually instead
+                  </Button>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <Select
+                      items={Object.fromEntries((boards ?? []).map((b) => [b.id, b.name]))}
+                      value={selectedBoardId || null}
+                      onValueChange={(value) => setSelectedBoardId((value as string) ?? "")}
+                      disabled={boards === null}
+                    >
+                      <SelectTrigger aria-label="Monday board" className="bg-background">
+                        <SelectValue
+                          placeholder={boards === null ? "Loading boards…" : "Pick a board"}
+                        />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectGroup>
+                          {(boards ?? []).map((b) => (
+                            <SelectItem key={b.id} value={b.id}>
+                              {b.name}
+                              {b.workspace?.name ? ` — ${b.workspace.name}` : ""}
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                    <span className="flex items-center gap-1 text-sm text-muted-foreground">
+                      <SparkleButton
+                        disabled={!selectedBoardId}
+                        loading={analyzing}
+                        onComplete={() => void runAnalyze(selectedBoardId)}
+                        tooltip="Use AI to configure"
+                      />
+                      Use AI to configure
+                    </span>
+                  </div>
+                ))}
               {analyzing && (
                 <p className="flex items-center gap-2 text-sm text-muted-foreground">
                   <Spinner /> Analyzing the board and this project…
@@ -420,6 +454,26 @@ export function MondayIntegrationSection({ projectId, orgId, roleLevel }: Props)
           {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
         </SettingsRow>
       </SettingsGroup>
+
+      <MondaySetupWizard
+        open={wizardOpen}
+        onOpenChange={setWizardOpen}
+        projectId={projectId}
+        orgId={orgId}
+        jwt={jwt}
+        orgConnected={orgConnected}
+        accountSlug={connection?.account?.slug ?? null}
+        onLinked={(next) => {
+          setLink(next)
+          setWarnings([])
+        }}
+        onUnlinked={() => {
+          setLink(null)
+          setBoards(null)
+          setSelectedBoardId("")
+        }}
+        onConnected={() => void load()}
+      />
 
       <Dialog open={unlinkOpen} onOpenChange={setUnlinkOpen}>
         <DialogContent>

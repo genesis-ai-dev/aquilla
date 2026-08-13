@@ -71,42 +71,46 @@ export function MondayMappingTable({
   )
 }
 
-interface EditorRow {
-  columnId: string
-  metric: MondayMetricKey
+/** Resolve a column's Monday type from live structure, falling back to the type
+ *  already recorded on the row (structure may be unfetchable for this caller). */
+function resolveColumnType(
+  structure: MondayBoardStructure | null,
+  columnId: string,
+  previous: MondayColumnMapping[],
+): string {
+  return (
+    structure?.columns.find((c) => c.id === columnId)?.type ??
+    previous.find((c) => c.columnId === columnId)?.columnType ??
+    "text"
+  )
 }
 
 /**
- * Manual mapping editor — rows of (Monday column, metric) with add/remove and
- * an explicit Save (maps to PATCH { config }). Column types are resolved from
- * the board structure at save time; obviously read-only column types are kept
- * out of the picker (the server enforces this too).
+ * Controlled (Monday column → metric) rows with add/remove. Shared by the
+ * linked-board editor below and by the setup wizard's review step, so an AI
+ * proposal is corrected with exactly the same controls used to edit a saved
+ * mapping — one implementation, one set of affordances.
+ *
+ * Read-only column types are kept out of the picker (the server enforces this
+ * too); an already-mapped id missing from structure still renders so a stale
+ * row stays visible and removable.
  */
-export function MondayMappingEditor({
-  initialColumns,
+export function MondayMappingRows({
+  rows,
   structure,
   disabled,
-  saving,
-  onSave,
+  onChange,
 }: {
-  initialColumns: MondayColumnMapping[]
+  rows: MondayColumnMapping[]
   structure: MondayBoardStructure | null
   disabled: boolean
-  saving: boolean
-  onSave: (columns: MondayColumnMapping[]) => void
+  onChange: (rows: MondayColumnMapping[]) => void
 }) {
-  const [rows, setRows] = useState<EditorRow[]>(
-    initialColumns.map((c) => ({ columnId: c.columnId, metric: c.metric })),
-  )
-
   const writableColumns = useMemo(
     () => (structure?.columns ?? []).filter((c) => !MONDAY_READONLY_COLUMN_TYPES.has(c.type)),
     [structure],
   )
 
-  // Options for the column Select: writable structure columns, plus any
-  // already-mapped column id not present in structure (stale/unfetchable) so
-  // an existing row still renders its value.
   const columnItems = useMemo(() => {
     const items: Record<string, string> = {}
     for (const c of writableColumns) items[c.id] = c.title
@@ -122,34 +126,12 @@ export function MondayMappingEditor({
     return items
   }, [])
 
-  const isDirty = useMemo(() => {
-    const current = rows.map((r) => `${r.columnId}:${r.metric}`).join("|")
-    const base = initialColumns.map((c) => `${c.columnId}:${c.metric}`).join("|")
-    return current !== base
-  }, [rows, initialColumns])
-
-  const complete = rows.every((r) => r.columnId !== "")
-
-  function updateRow(index: number, patch: Partial<EditorRow>) {
-    setRows((prev) => prev.map((r, i) => (i === index ? { ...r, ...patch } : r)))
-  }
-
-  function handleSave() {
-    const columns: MondayColumnMapping[] = rows
-      .filter((r) => r.columnId)
-      .map((r) => ({
-        columnId: r.columnId,
-        columnType:
-          structure?.columns.find((c) => c.id === r.columnId)?.type ??
-          initialColumns.find((c) => c.columnId === r.columnId)?.columnType ??
-          "text",
-        metric: r.metric,
-      }))
-    onSave(columns)
+  function updateRow(index: number, patch: Partial<MondayColumnMapping>) {
+    onChange(rows.map((r, i) => (i === index ? { ...r, ...patch } : r)))
   }
 
   return (
-    <div className="space-y-3" data-testid="monday-mapping-editor">
+    <div className="space-y-3">
       <Table>
         <TableHeader>
           <TableRow>
@@ -167,7 +149,13 @@ export function MondayMappingEditor({
                 <Select
                   items={columnItems}
                   value={row.columnId || null}
-                  onValueChange={(value) => updateRow(i, { columnId: (value as string) ?? "" })}
+                  onValueChange={(value) => {
+                    const columnId = (value as string) ?? ""
+                    updateRow(i, {
+                      columnId,
+                      columnType: resolveColumnType(structure, columnId, rows),
+                    })
+                  }}
                   disabled={disabled}
                 >
                   <SelectTrigger aria-label="Monday column">
@@ -211,7 +199,7 @@ export function MondayMappingEditor({
                   size="icon"
                   aria-label="Remove mapping row"
                   disabled={disabled}
-                  onClick={() => setRows((prev) => prev.filter((_, j) => j !== i))}
+                  onClick={() => onChange(rows.filter((_, j) => j !== i))}
                 >
                   <Trash2 className="h-4 w-4" />
                 </Button>
@@ -220,21 +208,60 @@ export function MondayMappingEditor({
           ))}
         </TableBody>
       </Table>
-      <div className="flex items-center gap-2">
-        <Button
-          variant="outline"
-          disabled={disabled}
-          onClick={() => setRows((prev) => [...prev, { columnId: "", metric: "completion_pct" }])}
-        >
-          <Plus data-icon="inline-start" /> Add row
-        </Button>
-        <Button
-          disabled={disabled || saving || !isDirty || !complete}
-          onClick={handleSave}
-        >
-          {saving ? "Saving…" : "Save mapping"}
-        </Button>
-      </div>
+      <Button
+        variant="outline"
+        disabled={disabled}
+        onClick={() =>
+          onChange([...rows, { columnId: "", columnType: "text", metric: "completion_pct" }])
+        }
+      >
+        <Plus data-icon="inline-start" /> Add row
+      </Button>
+    </div>
+  )
+}
+
+/**
+ * Manual mapping editor for a linked board — the shared rows plus an explicit
+ * Save (maps to PATCH { config }).
+ */
+export function MondayMappingEditor({
+  initialColumns,
+  structure,
+  disabled,
+  saving,
+  onSave,
+}: {
+  initialColumns: MondayColumnMapping[]
+  structure: MondayBoardStructure | null
+  disabled: boolean
+  saving: boolean
+  onSave: (columns: MondayColumnMapping[]) => void
+}) {
+  const [rows, setRows] = useState<MondayColumnMapping[]>(initialColumns)
+
+  const isDirty = useMemo(() => {
+    const current = rows.map((r) => `${r.columnId}:${r.metric}`).join("|")
+    const base = initialColumns.map((c) => `${c.columnId}:${c.metric}`).join("|")
+    return current !== base
+  }, [rows, initialColumns])
+
+  const complete = rows.every((r) => r.columnId !== "")
+
+  return (
+    <div className="space-y-3" data-testid="monday-mapping-editor">
+      <MondayMappingRows
+        rows={rows}
+        structure={structure}
+        disabled={disabled}
+        onChange={setRows}
+      />
+      <Button
+        disabled={disabled || saving || !isDirty || !complete}
+        onClick={() => onSave(rows.filter((r) => r.columnId))}
+      >
+        {saving ? "Saving…" : "Save mapping"}
+      </Button>
     </div>
   )
 }

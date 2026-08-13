@@ -179,14 +179,19 @@ export function RecordingVideoSurface({
   if (failed) return null
 
   return (
-    <div className="w-full space-y-1.5">
-      <div
-        className={cn(
-          "relative aspect-video w-full overflow-hidden rounded-md bg-black",
-          // The caller's overrun flag, drawn where the overrun is happening.
-          overrun && "ring-2 ring-red-500",
-        )}
-      >
+    // A full-height CINEMA panel, not a card (Sam's markup, 2026-08-13: the
+    // first cut was a 280px thumbnail inside the stage and it read as
+    // clutter). The panel is black and the video is object-contain inside it,
+    // so the bars above and below fall out of the geometry — they are
+    // letterboxing, not wasted space, and nothing is drawn to "fill" them.
+    <div
+      className={cn(
+        "relative flex h-full w-full items-center justify-center overflow-hidden bg-black",
+        // The caller's overrun flag, drawn inset so the ring reads against
+        // the black rather than being clipped by the dialog's rounding.
+        overrun && "ring-2 ring-inset ring-red-500",
+      )}
+    >
         <video
           ref={videoRef}
           key={src}
@@ -239,18 +244,19 @@ export function RecordingVideoSurface({
             {audible ? <Headphones className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
           </Button>
         </AppTooltip>
-        {/* Headphones, not Volume2: the countdown-beep toggle in this same
-            dialog's header already uses Volume2, and two identical glyphs
-            meaning different things in one dialog is a legibility bug. */}
-      </div>
+      {/* Headphones, not Volume2: the countdown-beep toggle in this same
+          dialog's header already uses Volume2, and two identical glyphs
+          meaning different things in one dialog is a legibility bug. */}
       {/* Permanent while audible, in every phase — not a toast and not tied to
           recording. The consequence is a ruined take, and the setting is sticky
           across cells and across sessions, so the operator has to be able to
-          see the state they left themselves in before they press record. */}
+          see the state they left themselves in before they press record.
+          Overlaid on the lower letterbox bar: amber on cinema black, beside
+          the mute button it argues with. */}
       {audible && (
         <p
           data-testid="rec-film-audible-warning"
-          className="flex items-start gap-1.5 text-[11px] leading-snug text-amber-700 dark:text-amber-400"
+          className="absolute inset-x-0 bottom-0 z-10 flex items-start gap-1.5 bg-gradient-to-t from-black/80 to-transparent py-2 pl-3 pr-12 text-[11px] leading-snug text-amber-400"
         >
           <AlertTriangle className="mt-px h-3.5 w-3.5 shrink-0" aria-hidden />
           <span>

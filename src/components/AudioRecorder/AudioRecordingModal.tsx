@@ -679,15 +679,11 @@ export function AudioRecordingModal({
         initialFocus={dialogSurfaceRef}
         finalFocus={false}
         data-recorder-dialog=""
-        // A ROW, always: the film (when there is one) is a half-width column on
-        // the left, and everything the modal has always been is a column on the
-        // right. With no film the dialog is its old width and the right column
-        // is the whole dialog — the row wrapper changes nothing visible, which
-        // is what keeps audio-import files pixel-where-it-matters identical.
-        // Sam's markup (2026-08-13): the picture at half the dialog, vertically
-        // centred, not a 280px thumbnail crowding the translation. The dialog
-        // base is translate-centred on the viewport, so widening it re-centres
-        // the whole automatically.
+        // With a film linked the dialog is TWO panels side by side — a
+        // cinema-black video panel and the recording column, roughly equal
+        // (Sam's markup, 2026-08-13) — so it widens to keep the recording
+        // column usable. Without one it is exactly the former dialog: same
+        // width, same single column, nothing to notice.
         className={cn("flex flex-row gap-0 p-0", filmUrl ? "max-w-6xl" : "max-w-3xl")}
         style={{ maxHeight: "min(92vh, 800px)" }}
         showCloseButton={false}
@@ -695,12 +691,13 @@ export function AudioRecordingModal({
         <DialogTitle className="sr-only">
           Record audio — {activeCell.cellLabel ?? `Cell ${activeIndex + 1}`}
         </DialogTitle>
+        {/* The film, full height of the dialog, letterboxed on black — the
+            bars above and below are the point, not a defect (Sam: "cinematic
+            black bars"). Hidden on a phone-width viewport rather than stacked:
+            a stacked picture would push the takes and footer off a small
+            screen, and this is a desktop recording rig feature. */}
         {filmUrl && (
-          // Hidden below `sm` rather than stacked: on a phone the old
-          // single-column dialog already fills the screen, and a picture
-          // squeezed above the stage pushes Start below the fold — the one
-          // control that must never need scrolling to reach.
-          <div className="hidden w-1/2 shrink-0 flex-col items-center justify-center gap-2 border-r bg-muted/20 p-6 sm:flex">
+          <div className="hidden w-1/2 shrink-0 overflow-hidden rounded-l-3xl sm:block">
             <RecordingVideoSurface
               src={filmUrl}
               startSec={activeCell.startTime ?? null}
@@ -710,13 +707,12 @@ export function AudioRecordingModal({
               // makes an overrun readable.
               running={displayPhase === "recording"}
               armNonce={armNonce}
-              // One overrun signal in the dialog, drawn twice, rather than two
-              // that can disagree.
               overrun={targetOverrun}
             />
           </div>
         )}
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <div className="flex min-w-0 flex-1 flex-col">
+
         {/* Header: cell context — fixed, never scrolls */}
         <div className="flex shrink-0 items-start justify-between gap-4 border-b px-6 pt-5 pb-4">
           <div className="min-w-0 flex-1 space-y-1">
@@ -849,10 +845,11 @@ export function AudioRecordingModal({
             and footer stay anchored at 100% zoom on compact viewports. */}
         <div className="min-h-0 flex-1 overflow-y-auto">
 
-        {/* Stage — changes with phase. Single-column again: the film moved out
-            to its own half-width column on the dialog (Sam's markup,
-            2026-08-13 — a 280px thumbnail in here "looked pretty bad"), so this
-            region is exactly what it was before any picture existed. */}
+        {/* Stage — changes with phase. The film is NOT in here: Sam's first
+            cut of this feature put a 280px picture beside the phase content
+            and it read as clutter; the film is now a full-height panel beside
+            the whole column (see DialogContent), and the stage is exactly the
+            single-centred-column it was before any of this existed. */}
         <div className="relative flex min-h-[200px] flex-col items-center justify-center gap-4 p-6">
           {displayPhase === "counting" && countdown.count !== null && (
             <div className="flex flex-col items-center gap-3">
@@ -1119,7 +1116,7 @@ export function AudioRecordingModal({
             </Button>
           )}
         </div>
-        </div>{/* end right column */}
+        </div>{/* end recording column */}
 
         <style>{`
           @keyframes pop {

@@ -48,11 +48,19 @@ action over it.
 
 The current posture, threat model, and open items live in:
 
-- `docs/OPSEC-REVIEW-2026-08-11.md` — **the current review.** Its §6 carries the live status
-  of every finding from both documents below. Start here.
+- `docs/OPSEC-REVIEW-2026-08-11.md` — **the current review.** Start here: its §0.1 maps how
+  these documents relate, and its §6 carries the live status of the OPS/SEC findings.
+- `docs/OPSEC.md` — a parallel standing review (findings **V1–V9**) written 2026-08-06 on a
+  separate branch and merged later. It overlaps the OPS series substantially but is **not**
+  redundant — V1, V3 and V9 appear nowhere else. Check its §3 as well as the current review's
+  §6 before concluding a finding is open or closed.
 - `docs/OPSEC-REVIEW-2026-08-10.md` — the previous pass (OPS-1…OPS-7); still the reference
   for the asset ranking (§1) and threat model (§2), which the current review does not restate.
 - `docs/SECURITY-NOTES-2026-06-10.md` — the original point-in-time code audit (SEC-1…SEC-11).
+
+Two numbering series (V-n and OPS-n/SEC-n) currently coexist because two reviews ran in
+parallel without sight of each other. Merging them into one standing document with one status
+table is outstanding work — see §0.1 of the current review.
 
 When a report lands, update the status table in the current review so the documents never
 disagree about what is still open. For routine re-checks, amend the current review in place

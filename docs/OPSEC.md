@@ -1,5 +1,17 @@
 # Operational Security Review — 2026-08-06
 
+> **Not the only OPSEC review in this repo — check status elsewhere before acting.**
+> This document (findings **V1–V9**) was written on a branch that could not see the parallel
+> **OPS-n** series, and reached `dev` after it. Several findings here were independently found
+> and fixed there as well (V2≈OPS-1, V4≈OPS-4, V6≈OPS-6/8/9, V7=SEC-1, V8=SEC-2), and some
+> items still listed below as open have since been closed — notably the "plaintext admin
+> bearer" noted under D1, which now has a dedicated `ADMIN_SECRET`.
+>
+> **V1, V3 and V9 appear in no other document, so this review is not superseded.** For the
+> current consolidated status see `docs/OPSEC-REVIEW-2026-08-11.md` — §0.1 maps the two series
+> against each other and §6 carries the live status table. Merging the two series into one
+> standing document is outstanding work.
+
 _Standing OPSEC review of Aquilla's handling of sensitive data. Complements
 `docs/SECURITY-NOTES-2026-06-10.md` (application-security findings, June audit)
 and the 2026-08-03 pen-test remediation work._

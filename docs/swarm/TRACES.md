@@ -395,3 +395,44 @@ isolation the merge protocol depends on.
 Also of note: bidi isolation belongs on VISIBLE text only. WS-11 wrapped an aria-label in
 FSI/PDI, which broke `toHaveAccessibleName` — screen readers linearise text, so the invisible
 control characters are pure noise in an accessible name.
+
+## Adversarial review before promotion (3 read-only skeptics over `git diff dev...HEAD`)
+
+### Fixed before merge
+- [DONE] (plural-latn) **BLOCKER.** Four `plural()` keys were fed counts formatted by
+  `formatNumber`, which does not force `numberingSystem: "latn"`. `pluralCountFrom` recovers
+  magnitude by stripping non-ASCII digits, so an Arabic locale rendering Arabic-Indic numerals
+  yielded `undefined` and pinned EVERY count to the `other` form — silently, permanently, and
+  only in Arabic. Sites: DcsPanel ×2, HelloaoPanel, BiblicaPanel (the reviewer found 3; a
+  sweep found the 4th). Verified exhaustively: 0 plural keys fed by a non-latn formatter.
+- [DONE] (nav-title-english) **SERIOUS.** `deriveNavTitle` resolves against the English base
+  catalog by design, so the workspace breadcrumb and nav-history label were English in every
+  locale. Both `ProjectWorkspace` call sites migrated to `deriveNavTitleKey` + `t()`. The
+  `section === "Editor"` check compared a RENDERED label and would have stopped matching once
+  translated; it now compares the message key.
+
+### Traced, NOT fixed before merge (deliberate)
+- [OPEN] (arrows-in-strings) **SERIOUS.** Literal `→`/`←` inside catalog STRINGS:
+  `autopilot.ts:493`, `nav.ts:349`, `rules.ts:202,216`, `importExport.ts:40`. CSS cannot mirror
+  a glyph embedded in prose, so it points against the reading flow in Arabic. NOT fixed here
+  because changing the English invalidates those keys' translations in four locales and
+  triggers a re-translation cycle — do it as its own pass with the import loop, not under
+  merge pressure.
+- [OPEN] (bidi-import-panels) **SERIOUS.** None of the 8 import panels wrap embedded numbers in
+  `bidiIsolate`, while `StatusBar`/`FileDetailsModal` correctly do. Multi-digit counts inside
+  Arabic sentences are exposed to bidi reordering. Mechanical but touches 8 components;
+  deserves its own verified pass.
+- [OPEN] (originsRef-exits) MINOR/latent. `UploadPanel`'s `originsRef` is not cleared on the
+  parse-failure early return or the checkpoint fast-path. Not exploitable today — the upload
+  and gdrive variants are separate mounts and the Drive picker always overwrites before use —
+  but it becomes real if a dropzone is ever added beside the picker in one instance.
+- [OPEN] (ungrouped-sentinel) MINOR. `group-by-corpus.ts:57` still emits the literal
+  `"Ungrouped"`, compared in `AssignModal.tsx:293,613` and `ExpandableFileList.tsx:132,135`.
+  Pre-existing gap, unchanged by this diff; needs an identity key split from the display label.
+
+### Clean on review
+Deletions verified genuinely unreachable in the MERGED tree (dev had not advanced past the
+merge base). Tests not weakened — removals are exactly the deleted components' own specs;
+`it()` blocks went 47 removed / 99 added. `roles.ts` keeps `roleName()` untranslated for
+comparisons. Placeholder agreement across all six Arabic plural forms: 163/163 keys, 0
+mismatches. RTL conversion correctly left media timelines/waveforms/playheads physical.

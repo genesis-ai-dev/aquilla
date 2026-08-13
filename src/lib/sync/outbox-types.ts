@@ -70,6 +70,11 @@ export type OutboxEventKind =
   // Timeline editor: set/clear a file's core video URL (stored in files.meta).
   | "file.video.set"
   | "file.timing.set"
+  // Stage 1 (first-class timeline tracks): one track's presentation overrides
+  // — rename, reorder, group — also in files.meta. DORMANT on arrival: the
+  // pipeline ships complete, but nothing emits this kind until stage 3 puts
+  // renaming and adding tracks in the UI.
+  | "file.track.set"
   // AQU-478: "accept upstream change as-is" (repin). Non-chain-mutating —
   // updates ONLY the target row's source_event_id; validated/endorsement
   // state and value are untouched. Guarded server-side by
@@ -409,6 +414,27 @@ export interface OutboxEventPayloads {
   // it replaces in Project Settings.
   "file.timing.set": {
     timingMode: "dubbing" | "audioFirst" | null
+  }
+  // Stage 1: ONE track's presentation delta, merged per-field into
+  // files.meta.trackOverrides[trackId]. `patch: null` deletes the entry —
+  // dropping a user-added track, or resetting a default back to pure
+  // defaults. Inside a patch, null means "clear THAT override" and an absent
+  // key means "leave it alone"; `kind` has no null form because a track's
+  // kind is its identity. The patch is FLAT on purpose — the projection
+  // strips nulls recursively. Maintainer floor, like file.timing.set.
+  //
+  // The kind union is spelled out here rather than imported from
+  // @/lib/timeline/tracks: this module is the wire mirror of
+  // sync-worker/src/events/types.ts and stays free of app imports, so drift
+  // shows up against the server, not against a local re-export.
+  "file.track.set": {
+    trackId: string
+    patch: {
+      kind?: "subtitles" | "source-audio" | "target-audio"
+      name?: string | null
+      order?: number | null
+      groupId?: string | null
+    } | null
   }
   // Timeline editor: set/clear a file's core video URL (timeline preview).
   "file.video.set": {

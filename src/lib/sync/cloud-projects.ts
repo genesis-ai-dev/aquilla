@@ -5,6 +5,7 @@
 // browser resolves instead of spinning "Loading..." forever.
 
 import type { FileType, ProjectRecord } from "@/lib/parsers/types"
+import type { PersistedTrackOverrides } from "@/lib/timeline/tracks"
 import { FRONTIER_API_URL } from "./sync-token"
 import { fetchProjectState, type ProjectStateResponse } from "./archive"
 import { UserError } from "@/lib/errors/user-error"
@@ -26,6 +27,10 @@ export interface CloudFileSummary {
   coreMediaUrl?: string | null
   /** The file's audio timing mode; absent ⇒ the project default applies. */
   timingMode?: "dubbing" | "audioFirst" | null
+  /** Per-track deltas keyed by track id; absent ⇒ the file draws the three
+   *  default tracks. NEVER the full track list — consume only through
+   *  mergeTrackOverrides. */
+  trackOverrides?: PersistedTrackOverrides | null
 }
 
 export interface CloudProjectSummary {
@@ -300,6 +305,12 @@ export function minimalProjectRecord(summary: CloudProjectSummary): ProjectRecor
       ...(f.targetTextDirection === "ltr" || f.targetTextDirection === "rtl" ? { targetTextDirection: f.targetTextDirection } : {}),
       ...(f.coreMediaUrl ? { coreMediaUrl: f.coreMediaUrl } : {}),
       ...(f.timingMode === "dubbing" || f.timingMode === "audioFirst" ? { timingMode: f.timingMode } : {}),
+      // Shape-checked despite the declared type — this is raw JSON off the
+      // wire. Entries pass through unread: mergeTrackOverrides is the only
+      // validator, and narrowing here would drop a kind a newer client wrote.
+      ...(f.trackOverrides && typeof f.trackOverrides === "object" && !Array.isArray(f.trackOverrides)
+        ? { trackOverrides: f.trackOverrides }
+        : {}),
     })),
     members: [],
     syncRole: {

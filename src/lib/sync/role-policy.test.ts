@@ -16,6 +16,15 @@ describe("role-policy (client mirror)", () => {
     expect(requiredRoleFor("some.future.kind")).toBeNull()
   })
 
+  it("keeps the structural file.* kinds at the maintainer floor", () => {
+    // Both relayout the timeline for every collaborator, so they sit a rung
+    // above the contributor-level editing kinds. Drift here costs a redundant
+    // 403 rather than a hole, but it defeats the guard — so pin both sides.
+    expect(requiredRoleFor("file.timing.set")).toBe(ROLE.MAINTAINER)
+    expect(requiredRoleFor("file.track.set")).toBe(ROLE.MAINTAINER)
+    expect(requiredRoleFor("file.video.set")).toBe(ROLE.CONTRIBUTOR)
+  })
+
   describe("canPerform", () => {
     it("blocks only when role is KNOWN and provably below the requirement", () => {
       expect(canPerform("cell.validate", ROLE.COMMENTER)).toBe(false) // 200 < 300

@@ -7,6 +7,7 @@ import type { QueueState, QueueProgress } from "@/lib/audio/play-queue"
 import { selectQueueForFile } from "@/lib/audio/queue-scope"
 import { sourceClipAudioForCell } from "@/lib/audio/track-audio"
 import { resetVideoDurationsForTests, setVideoDurationSec } from "@/lib/timeline/video-duration"
+import { deriveTracksForFile } from "@/lib/timeline/tracks"
 import { ZOOM_MAX } from "@/lib/timeline/scale"
 
 // AQU-646: the editor subscribes to the play-queue (read-only) for playhead
@@ -1117,5 +1118,84 @@ describe("TimelineEditor — the source-audio band", () => {
         .map((el) => Number(el.getAttribute("data-region-start")))
       expect(gapStarts).toContain(20)
     })
+  })
+})
+
+// AQU-646 stage 1: the label gutter and the lanes beside it are ONE list now,
+// not two hand-mirrored blocks of JSX. Every other test in this file is the
+// parity net for that refactor (they all pass untouched); these two are the
+// insurance for what it was for — stages 2 and 3 rename, reorder and add
+// tracks by changing the list and nothing else.
+describe("TimelineEditor — rows come from the track model", () => {
+  beforeEach(() => { topOwner.value = 1 })
+
+  const rowCells = [cell({ id: "m1", original: "One", medium: "media", startTime: 0, endTime: 10 })]
+
+  // The gutter carries no testid of its own, and must not grow one: this
+  // refactor's whole contract is that it renders exactly the DOM the hardcoded
+  // rows did. It is the grid column before the scrolling track.
+  const gutterNames = () =>
+    Array.from(
+      screen.getByTestId("tl-scroll").previousElementSibling!.querySelectorAll("span.font-semibold"),
+    ).map((el) => el.textContent)
+
+  const laneRows = () =>
+    Array.from(
+      screen
+        .getByTestId("tl-scroll")
+        .querySelectorAll('[data-testid="tl-lane"],[data-testid="tl-target-lane"]'),
+    ).map((el) => el.getAttribute("data-variant") ?? el.getAttribute("data-testid"))
+
+  it("draws the gutter and the lanes from the same list, in its order", () => {
+    render(
+      <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={rowCells} onRetimeSubtitle={() => {}} />,
+    )
+    expect(gutterNames()).toEqual(["Subtitles", "Source audio", "Target audio"])
+    expect(laneRows()).toEqual(["subtitle", "dialogue", "tl-target-lane"])
+  })
+
+  it("a renamed, reordered track moves its label AND its lane", () => {
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={rowCells} onRetimeSubtitle={() => {}}
+        // Through the real merge, from the deltas a file would carry: the
+        // Target row named and lifted to the top.
+        tracks={deriveTracksForFile({
+          trackOverrides: { "target-audio": { name: "Armenian dub", order: -1 } },
+        })}
+      />,
+    )
+    expect(gutterNames()).toEqual(["Armenian dub", "Subtitles", "Source audio"])
+    expect(laneRows()).toEqual(["tl-target-lane", "subtitle", "dialogue"])
+  })
+})
+
+// AQU-646 stage 1: Free timing does not exist for a subtitle import — its cues
+// are already timed to a video — so such a file has exactly one mode, and the
+// workspace withholds the control entirely rather than showing an
+// unchangeable label. A choice nobody can make is only a question.
+describe("TimelineEditor — withholding the timing-mode control", () => {
+  beforeEach(() => { topOwner.value = 1 })
+
+  const editor = (extra: Record<string, unknown>) => (
+    <TimelineEditor
+      fileId="hidemode" coreMediaUrl={null} editable cells={[]} onRetimeSubtitle={() => {}} {...extra}
+    />
+  )
+
+  it("hideTimingMode removes it above the maintainer floor and below it alike", () => {
+    const { rerender } = render(editor({ hideTimingMode: true, onChangeTimingMode: vi.fn() }))
+    expect(screen.queryByTestId("tl-timing-mode")).toBeNull()
+    expect(screen.queryByTestId("tl-timing-mode-dubbing")).toBeNull()
+    // Below the floor the same prop must not leave the read-only label behind.
+    rerender(editor({ hideTimingMode: true }))
+    expect(screen.queryByTestId("tl-timing-mode")).toBeNull()
+    expect(screen.queryByTestId("tl-timing-mode-dubbing")).toBeNull()
+  })
+
+  it("is shown by default — an imported recording still chooses its mode", () => {
+    render(editor({ onChangeTimingMode: vi.fn() }))
+    expect(screen.getByTestId("tl-timing-mode")).toHaveAttribute("data-mode", "dubbing")
+    expect(screen.getByTestId("tl-timing-mode-audioFirst")).toBeInTheDocument()
   })
 })

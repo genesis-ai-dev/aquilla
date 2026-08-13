@@ -14,6 +14,7 @@ import { isLineEmpty, isUserAddedLine } from "@/lib/timeline/user-lines"
 import { SourceRegionLane } from "./SourceRegionLane"
 import { chipOverlaps, MIN_ADDABLE_SPAN_SEC } from "@/lib/timeline/lane-timing"
 import { buildTimelineLayout, type TimelineLayout } from "@/lib/timeline/layout"
+import { deriveTracksForFile, type TimelineTrack, type TrackKind } from "@/lib/timeline/tracks"
 import { computeFollowScroll } from "@/lib/timeline/follow"
 import { secToPx, pxToSec, ZOOM_MIN, ZOOM_MAX, ZOOM_DEFAULT } from "@/lib/timeline/scale"
 // Read-only queue subscriptions only — playback COMMANDS stay in the
@@ -118,6 +119,11 @@ export interface TimelineEditorProps {
   /** Pre-merge round: change THIS FILE's mode (file.timing.set). Absent = the
    *  control is read-only (the server requires maintainer to write it). */
   onChangeTimingMode?(mode: AudioTimingMode): void
+  /** AQU-646 stage 1: withhold the timing-mode control altogether. A subtitle
+   *  import resolves to Original timing whatever it has stored, so there is
+   *  only one mode it can be in — a picker with a single choice, or a label
+   *  saying so, is a question the user cannot act on. */
+  hideTimingMode?: boolean
   /** Needed by the missing-audio probe behind the chip strip's badge. */
   project?: ProjectRecord
   /** Fires when the highlighted section changes so a sibling transport (the
@@ -140,7 +146,18 @@ export interface TimelineEditorProps {
     /** Kick the measure-all batch (progress rides AudioBulkProgressBanner). */
     onMeasure(): void
   }
+  /** AQU-646 stage 1: the rows to draw, top to bottom — the label gutter and
+   *  the lanes are both this one list, so they cannot fall out of step the way
+   *  two hand-mirrored blocks of JSX could. Absent (focused tests, any other
+   *  mount) = the three derived defaults, unchanged from what this editor has
+   *  always drawn. */
+  tracks?: TimelineTrack[]
 }
+
+/** The default prop, resolved ONCE. A `deriveTracksForFile(null)` call in the
+ *  parameter list would hand every render a new array and churn every memo
+ *  downstream of it. */
+const DEFAULT_TRACKS = deriveTracksForFile(null)
 
 const zoomKey = (fileId: string) => `codex:timelineZoom:${fileId}`
 
@@ -185,6 +202,31 @@ function LaneLabel({ name, sub, dot, trailing }: { name: string; sub: string; do
   )
 }
 
+// How this build DRAWS each kind: the sublabel under the name, the colour of
+// the dot beside it, and whether the row carries a speaker button (with the
+// name that button uses for the thing it mutes).
+//
+// Deliberately not part of the persisted track contract in lib/timeline/tracks.
+// That contract is data — it syncs between clients, outlives this build, and a
+// client that has never seen a kind still has to store it faithfully. A zinc
+// dot and the words "text · reading" are this build's rendering of a kind, and
+// a later one is free to draw the same track completely differently without
+// anybody migrating anything.
+const TRACK_RENDER: Record<
+  TrackKind,
+  { sub: string; dot: string; audibilityKey: keyof TrackAudibility | null; speakerName: string }
+> = {
+  // No speaker button: the Subtitles row makes no sound to mute.
+  subtitles: { sub: "text · reading", dot: "bg-zinc-400 dark:bg-zinc-600", audibilityKey: null, speakerName: "" },
+  // The speaker button publishes through setQueueAudibility, which reaches the
+  // queue's own elements. While the source chips come from a linked video there
+  // are none — so MediaVideoPane reads the same flag and mutes the picture
+  // itself. Muting the original while you listen back to a take is the whole
+  // reason to want this button on this row. (2026-08-11)
+  "source-audio": { sub: "original speech", dot: "bg-sky-600", audibilityKey: "source", speakerName: "source audio" },
+  "target-audio": { sub: "takes · generated", dot: "bg-emerald-600", audibilityKey: "target", speakerName: "target audio" },
+}
+
 export function TimelineEditor({
   cells,
   coreMediaUrl,
@@ -208,11 +250,13 @@ export function TimelineEditor({
   activateRequest,
   timingMode = "dubbing",
   onChangeTimingMode,
+  hideTimingMode = false,
   project,
   onSelectCell,
   session,
   audioByCellId,
   legacyMeasure,
+  tracks = DEFAULT_TRACKS,
 }: TimelineEditorProps) {
   const audioFirst = timingMode === "audioFirst"
   const [pxPerSec, setPxPerSec] = useState(() => loadZoom(fileId))
@@ -849,6 +893,106 @@ export function TimelineEditor({
     },
   }
 
+  // One row of the track column. Declared HERE, in the component body, because
+  // it reads the lanes, the layout, the zoom window, the snap flag and every
+  // handler above — hoisting it to module scope would mean threading twenty
+  // reactive values through a parameter object, and the first one anybody
+  // forgot to pass would be a lane that quietly stopped updating.
+  function laneForTrack(track: TimelineTrack): ReactNode {
+    switch (track.kind) {
+      case "subtitles":
+        // SUB-53: a subtitle span is expressed against the original's clock,
+        // so it can't be dragged on a re-flowed track.
+        return (
+          <TimelineLane
+            key={track.id}
+            cells={subtitle}
+            variant="subtitle"
+            retimable={!audioFirst}
+            // AQU-646 round 8: an imported VTT cue is frozen. Its timing is
+            // the file's, not ours to nudge — arguing for the VTT's integrity
+            // while letting anyone drag its cues is incoherent (Sam,
+            // 2026-08-11). A line someone added here still moves, bounded by
+            // its neighbours. Only this arrangement passes the predicate, so
+            // SUB-36's deliberately draggable subtitle mirror is untouched —
+            // and cannot collide with it anyway, since that mirror exists
+            // only when there ARE dialogue cells and the band needs none.
+            canRetimeCell={drawsSourceBand ? isUserAddedLine : undefined}
+            // ...and the line it may move within is the space its neighbours
+            // leave it. Only here: SUB-36's media-subtitle card is meant to
+            // sit wherever it likes, so this must never be on by default.
+            boundNeighbours={drawsSourceBand}
+            snapEnabled={snapOn}
+            {...laneProps}
+            // AQU-646: the stretches of film with no line of their own. Only
+            // this arrangement offers them — everywhere else the lane is
+            // exactly as it was.
+            emptySpans={addableSpans}
+            onAddLine={canAddLine && onAddLine ? (s, e) => void onAddLine(s, e) : undefined}
+            // Only a line someone added here, and only while it is still
+            // empty — deleting a cell with takes or comments on it would
+            // leave every one of them behind.
+            canRemove={drawsSourceBand && canAddLine ? (c) => isUserAddedLine(c) && isLineEmpty(c) : undefined}
+            onRemove={onRemoveLine}
+          />
+        )
+      case "source-audio":
+        // AQU-646: a file with footage and no media cells of its own gets the
+        // video's audio as source chips — the same cards an mp3 import's
+        // source row draws, broken at the VTT timestamps, with a dashed empty
+        // chip over each silence. Otherwise the original dialogue lane, whose
+        // source split is FROZEN at import and never retimable (Round 6).
+        return drawsSourceBand ? (
+          <SourceRegionLane
+            key={track.id}
+            map={sourceRegions}
+            cells={subtitle}
+            pxPerSec={pxPerSec}
+            viewStartSec={viewStartSec}
+            viewEndSec={viewEndSec}
+            selectedId={selectedId}
+            editable={editable}
+            onSelect={selectFromChip}
+            onSeek={laneProps.onSeek}
+            onSeekSec={handleGapClick}
+          />
+        ) : (
+          <TimelineLane key={track.id} cells={dialogue} variant="dialogue" retimable={false} {...laneProps} />
+        )
+      case "target-audio":
+        return (
+          <TargetAudioLane
+            key={track.id}
+            items={targetItems}
+            layout={layout}
+            pxPerSec={pxPerSec}
+            viewStartSec={viewStartSec}
+            viewEndSec={viewEndSec}
+            selectedId={selectedId}
+            loadingCellId={loadingCellId}
+            missingCellIds={missingCellIds}
+            editable={editable}
+            snapEnabled={snapOn && !audioFirst}
+            onSelect={selectFromChip}
+            onSeek={laneProps.onSeek}
+            // SUB-53: a chip's position is computed in audio-first, so there
+            // is nothing to drag it to. Trimming stays — and re-flows.
+            onRetimeTarget={audioFirst ? undefined : onRetimeTarget}
+            onTrimTarget={onTrimTarget}
+            onOpenRecording={onOpenRecording}
+            emptyCells={emptyTargets}
+            // AQU-646: the mic over a stretch with no cell at all creates the
+            // blank line first, then opens the recorder — same line the "T"
+            // above would have made.
+            emptySpans={addableSpans}
+            onAddLineAndRecord={
+              canAddLine && onAddLine ? (s, e) => void onAddLine(s, e, { thenRecord: true }) : undefined
+            }
+          />
+        )
+    }
+  }
+
   return (
     // 2026-08-07: intrinsic height — the editor stacks above the text table
     // in a shrink-0 wrapper now, so it must not claim the full column.
@@ -861,44 +1005,48 @@ export function TimelineEditor({
             toolbar. Same clearance as before: `onChangeTimingMode` absent =
             below the maintainer floor = the active mode renders as a plain
             label instead of buttons. The wrapper keeps its testid +
-            data-mode so browser passes read the mode exactly as before. */}
-        <div
-          data-testid="tl-timing-mode"
-          data-mode={timingMode}
-          className="ml-2 inline-flex items-center overflow-hidden rounded-md border border-border text-[11px]"
-        >
-          {(["dubbing", "audioFirst"] as const).map((mode) =>
-            onChangeTimingMode ? (
-              <button
-                key={mode}
-                type="button"
-                data-testid={`tl-timing-mode-${mode}`}
-                aria-pressed={timingMode === mode}
-                title={AUDIO_TIMING_MODE_LABELS[mode].description}
-                onClick={() => {
-                  if (timingMode !== mode) onChangeTimingMode(mode)
-                }}
-                className={cn(
-                  "px-2 py-1",
-                  timingMode === mode
-                    ? "bg-sky-100 font-medium text-sky-700 dark:bg-sky-950 dark:text-sky-300"
-                    : "bg-background text-foreground/60 hover:bg-muted",
-                )}
-              >
-                {AUDIO_TIMING_MODE_LABELS[mode].name}
-              </button>
-            ) : timingMode === mode ? (
-              <span
-                key={mode}
-                data-testid={`tl-timing-mode-${mode}`}
-                title={`${AUDIO_TIMING_MODE_LABELS[mode].description} Only a maintainer can change this.`}
-                className="px-2 py-1 text-foreground/70"
-              >
-                {AUDIO_TIMING_MODE_LABELS[mode].name}
-              </span>
-            ) : null,
-          )}
-        </div>
+            data-mode so browser passes read the mode exactly as before.
+            AQU-646 stage 1: withheld outright for a file with only one mode
+            available to it — see `hideTimingMode`. */}
+        {!hideTimingMode && (
+          <div
+            data-testid="tl-timing-mode"
+            data-mode={timingMode}
+            className="ml-2 inline-flex items-center overflow-hidden rounded-md border border-border text-[11px]"
+          >
+            {(["dubbing", "audioFirst"] as const).map((mode) =>
+              onChangeTimingMode ? (
+                <button
+                  key={mode}
+                  type="button"
+                  data-testid={`tl-timing-mode-${mode}`}
+                  aria-pressed={timingMode === mode}
+                  title={AUDIO_TIMING_MODE_LABELS[mode].description}
+                  onClick={() => {
+                    if (timingMode !== mode) onChangeTimingMode(mode)
+                  }}
+                  className={cn(
+                    "px-2 py-1",
+                    timingMode === mode
+                      ? "bg-sky-100 font-medium text-sky-700 dark:bg-sky-950 dark:text-sky-300"
+                      : "bg-background text-foreground/60 hover:bg-muted",
+                  )}
+                >
+                  {AUDIO_TIMING_MODE_LABELS[mode].name}
+                </button>
+              ) : timingMode === mode ? (
+                <span
+                  key={mode}
+                  data-testid={`tl-timing-mode-${mode}`}
+                  title={`${AUDIO_TIMING_MODE_LABELS[mode].description} Only a maintainer can change this.`}
+                  className="px-2 py-1 text-foreground/70"
+                >
+                  {AUDIO_TIMING_MODE_LABELS[mode].name}
+                </span>
+              ) : null,
+            )}
+          </div>
+        )}
         <div className="ml-auto flex items-center gap-1.5">
           {/* Meeting 2026-08-05: generated voices default to compressed
               playback; fast connections can opt into the original WAV. Mic
@@ -1076,15 +1224,24 @@ export function TimelineEditor({
       <div className="grid min-h-0 grid-cols-[128px_1fr]">
         <div className="border-r border-border bg-muted/20">
           <div className="h-7 border-b border-border" />
-          <LaneLabel name="Subtitles" sub="text · reading" dot="bg-zinc-400 dark:bg-zinc-600" />
-          {/* The speaker button publishes through setQueueAudibility, which
-              reaches the queue's own elements. While the source chips come from
-              a linked video there are none — so MediaVideoPane reads the same
-              flag and mutes the picture itself. Muting the original while you
-              listen back to a take is the whole reason to want this button on
-              this row. (2026-08-11) */}
-          <LaneLabel name="Source audio" sub="original speech" dot="bg-sky-600" trailing={speakerToggle("source", "source audio")} />
-          <LaneLabel name="Target audio" sub="takes · generated" dot="bg-emerald-600" trailing={speakerToggle("target", "target audio")} />
+          {/* The gutter is the track list, exactly as the lanes beside it are —
+              one row here per row there, in the same order, off the same
+              array. `name` comes from the track and not from the kind, which
+              is the whole seam a rename arrives through. */}
+          {tracks.map((track) => {
+            const render = TRACK_RENDER[track.kind]
+            return (
+              <LaneLabel
+                key={track.id}
+                name={track.name}
+                sub={render.sub}
+                dot={render.dot}
+                trailing={
+                  render.audibilityKey ? speakerToggle(render.audibilityKey, render.speakerName) : undefined
+                }
+              />
+            )
+          })}
           {/* SUB-37: the untimed parking strip only exists when something is
               actually untimed — an always-on empty row read as a mystery. */}
           {untimed.length > 0 && (
@@ -1117,87 +1274,7 @@ export function TimelineEditor({
               viewEndSec={viewEndSec}
               onScrub={seekTo}
             />
-            {/* SUB-53: a subtitle span is expressed against the original's
-                clock, so it can't be dragged on a re-flowed track. */}
-            <TimelineLane
-              cells={subtitle}
-              variant="subtitle"
-              retimable={!audioFirst}
-              // AQU-646 round 8: an imported VTT cue is frozen. Its timing is
-              // the file's, not ours to nudge — arguing for the VTT's integrity
-              // while letting anyone drag its cues is incoherent (Sam,
-              // 2026-08-11). A line someone added here still moves, bounded by
-              // its neighbours. Only this arrangement passes the predicate, so
-              // SUB-36's deliberately draggable subtitle mirror is untouched —
-              // and cannot collide with it anyway, since that mirror exists
-              // only when there ARE dialogue cells and the band needs none.
-              canRetimeCell={drawsSourceBand ? isUserAddedLine : undefined}
-              // ...and the line it may move within is the space its neighbours
-              // leave it. Only here: SUB-36's media-subtitle card is meant to
-              // sit wherever it likes, so this must never be on by default.
-              boundNeighbours={drawsSourceBand}
-              snapEnabled={snapOn}
-              {...laneProps}
-              // AQU-646: the stretches of film with no line of their own. Only
-              // this arrangement offers them — everywhere else the lane is
-              // exactly as it was.
-              emptySpans={addableSpans}
-              onAddLine={canAddLine && onAddLine ? (s, e) => void onAddLine(s, e) : undefined}
-              // Only a line someone added here, and only while it is still
-              // empty — deleting a cell with takes or comments on it would
-              // leave every one of them behind.
-              canRemove={drawsSourceBand && canAddLine ? (c) => isUserAddedLine(c) && isLineEmpty(c) : undefined}
-              onRemove={onRemoveLine}
-            />
-            {/* AQU-646: a file with footage and no media cells of its own gets
-                the video's audio as source chips — the same cards an mp3
-                import's source row draws, broken at the VTT timestamps, with a
-                dashed empty chip over each silence. Otherwise the original
-                dialogue lane, whose source split is FROZEN at import and never
-                retimable (Round 6). */}
-            {drawsSourceBand ? (
-              <SourceRegionLane
-                map={sourceRegions}
-                cells={subtitle}
-                pxPerSec={pxPerSec}
-                viewStartSec={viewStartSec}
-                viewEndSec={viewEndSec}
-                selectedId={selectedId}
-                editable={editable}
-                onSelect={selectFromChip}
-                onSeek={laneProps.onSeek}
-                onSeekSec={handleGapClick}
-              />
-            ) : (
-              <TimelineLane cells={dialogue} variant="dialogue" retimable={false} {...laneProps} />
-            )}
-            <TargetAudioLane
-              items={targetItems}
-              layout={layout}
-              pxPerSec={pxPerSec}
-              viewStartSec={viewStartSec}
-              viewEndSec={viewEndSec}
-              selectedId={selectedId}
-              loadingCellId={loadingCellId}
-              missingCellIds={missingCellIds}
-              editable={editable}
-              snapEnabled={snapOn && !audioFirst}
-              onSelect={selectFromChip}
-              onSeek={laneProps.onSeek}
-              // SUB-53: a chip's position is computed in audio-first, so there
-              // is nothing to drag it to. Trimming stays — and re-flows.
-              onRetimeTarget={audioFirst ? undefined : onRetimeTarget}
-              onTrimTarget={onTrimTarget}
-              onOpenRecording={onOpenRecording}
-              emptyCells={emptyTargets}
-              // AQU-646: the mic over a stretch with no cell at all creates the
-              // blank line first, then opens the recorder — same line the "T"
-              // above would have made.
-              emptySpans={addableSpans}
-              onAddLineAndRecord={
-                canAddLine && onAddLine ? (s, e) => void onAddLine(s, e, { thenRecord: true }) : undefined
-              }
-            />
+            {tracks.map(laneForTrack)}
             {untimed.length > 0 && (
               <div className="flex h-12 items-center gap-2 overflow-x-auto border-b border-border px-3">
                 {untimed.map((c) => (

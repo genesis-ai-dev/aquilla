@@ -1,5 +1,13 @@
 import { describe, it, expect } from "vitest"
-import { detectFileType, fileHasSections, projectHasScriptureFiles, resolveBibleResourcesEnabled, type FileType } from "./types"
+import {
+  detectFileType,
+  fileHasSections,
+  isSubtitleImportFile,
+  projectHasScriptureFiles,
+  resolveBibleResourcesEnabled,
+  resolveFileTimingMode,
+  type FileType,
+} from "./types"
 
 describe("detectFileType", () => {
   it.each([
@@ -61,5 +69,62 @@ describe("projectHasScriptureFiles", () => {
   it("false for undefined/empty file lists", () => {
     expect(projectHasScriptureFiles(undefined)).toBe(false)
     expect(projectHasScriptureFiles([])).toBe(false)
+  })
+})
+
+// AQU-646: Free timing was withdrawn for subtitle imports at the RESOLVER, not
+// at the picker. These tests are the guard on that choice — each one below
+// stands for a way the mode reaches a VTT file with the control already hidden
+// (its own stored value, the legacy project-level fallback, a write from an
+// older client that still offers it), and every one of them must read as
+// Original timing. Non-subtitle files are untouched: the mode still exists for
+// audio/video imports, and the cases proving that are here too so nobody
+// "simplifies" the guard into an unconditional return.
+
+describe("isSubtitleImportFile", () => {
+  it.each([
+    ["vtt", true],
+    ["srt", true],
+    ["sbv", true],
+    ["audio", false],
+    ["video", false],
+    ["usfm", false],
+  ] as const)("%s -> %s", (type, expected) => {
+    expect(isSubtitleImportFile({ type })).toBe(expected)
+  })
+
+  it("no file is not a subtitle file (callers pass activeFile, which is null before one is open)", () => {
+    expect(isSubtitleImportFile(null)).toBe(false)
+    expect(isSubtitleImportFile(undefined)).toBe(false)
+  })
+})
+
+describe("resolveFileTimingMode", () => {
+  it.each(["vtt", "srt", "sbv"] as const)(
+    "%s ignores its own stored audioFirst — whoever wrote it, including an older client",
+    (type) => {
+      expect(resolveFileTimingMode({ type, timingMode: "audioFirst" }, null)).toBe("dubbing")
+    },
+  )
+
+  it("a vtt with no mode of its own ignores the legacy project-level audioFirst", () => {
+    expect(resolveFileTimingMode({ type: "vtt" }, { audioTimingMode: "audioFirst" })).toBe("dubbing")
+  })
+
+  it("audio files keep Free timing, from their own value or the project's", () => {
+    expect(resolveFileTimingMode({ type: "audio", timingMode: "audioFirst" }, null)).toBe("audioFirst")
+    expect(resolveFileTimingMode({ type: "audio" }, { audioTimingMode: "audioFirst" })).toBe("audioFirst")
+  })
+
+  it("a non-subtitle file's own mode still wins over the project's", () => {
+    expect(
+      resolveFileTimingMode({ type: "audio", timingMode: "dubbing" }, { audioTimingMode: "audioFirst" }),
+    ).toBe("dubbing")
+  })
+
+  it("no file / no project defaults to Original timing", () => {
+    expect(resolveFileTimingMode(null, null)).toBe("dubbing")
+    expect(resolveFileTimingMode(undefined, undefined)).toBe("dubbing")
+    expect(resolveFileTimingMode({ type: "audio" }, {})).toBe("dubbing")
   })
 })

@@ -35,7 +35,7 @@ import { completionBatchSizeFor, workspaceActions, getVisibleActions } from "@/l
 import type { WorkspaceAction } from "@/lib/workspace-actions/types"
 import type { FileReference } from "@/lib/parsers/types"
 import { fileHasSections, fileOrderedBy, isMediaFileType, projectHasScriptureFiles, resolveBibleResourcesEnabled } from "@/lib/parsers/types"
-import { resolveFileTimingMode, type AudioTimingMode } from "@/lib/parsers/types"
+import { isSubtitleImportFile, resolveFileTimingMode, type AudioTimingMode } from "@/lib/parsers/types"
 import { isFlagEnabled } from "@/lib/features/flags"
 import { isDiscourseFile } from "@/lib/contextual/discourse-file"
 import { applyRemoteFrame as applyContextualFrame } from "@/lib/contextual/run-store"
@@ -95,6 +95,7 @@ import { isLineEmpty, isUserAddedLine, userLineOrigin } from "@/lib/timeline/use
 import { MIN_ADDABLE_SPAN_SEC, targetOffsetMsFor } from "@/lib/timeline/lane-timing"
 import { audioIdSeededWith } from "@/lib/audio/upload"
 import { deriveSourceRegions, insertSlotsByCell, EMPTY_INSERT_SLOTS } from "@/lib/timeline/source-regions"
+import { deriveTracksForFile } from "@/lib/timeline/tracks"
 import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
 import { isBulkValidationEligible } from "@/lib/review/review-eligibility"
 import { TimelineEditor } from "@/components/timeline/TimelineEditor"
@@ -1456,7 +1457,10 @@ export function ProjectWorkspace() {
   // (eye) menu, rendered by EditorTable.
   const fontSizes = useFileFontSizes(activeFileId)
 
-  const isSubtitleFile = activeFile?.type === "vtt" || activeFile?.type === "srt"
+  // AQU-646: one answer for "is this a subtitle import?", shared with the
+  // timing-mode resolver. The hand-rolled check this replaced missed `sbv`,
+  // which imports to exactly the same timed cues as the other two.
+  const isSubtitleFile = isSubtitleImportFile(activeFile)
 
   const workspaceBreadcrumb = useMemo(() => ({
     surfaceLabel:
@@ -4900,6 +4904,12 @@ export function ProjectWorkspace() {
   // own inherits the legacy project-level value (so projects that chose Free
   // timing in Project Settings keep it), else Original timing.
   const timingMode = resolveFileTimingMode(activeFile, project ?? undefined)
+  // AQU-646 stage 1: the timeline's rows. Every file's overrides are empty
+  // today — nothing writes `file.track.set` yet — so this always merges out to
+  // the three defaults. Wiring the REAL merge now anyway is the point: when
+  // renames and extra tracks arrive, they arrive as data on the file, with no
+  // plumbing left to lay.
+  const timelineTracks = useMemo(() => deriveTracksForFile(activeFile), [activeFile])
   // Pre-merge round: the control returned to the timeline toolbar, gated by
   // the same clearance the setting had in Project Settings (maintainer). The
   // gate is "don't pass the callback": below the floor the toolbar renders
@@ -5026,6 +5036,11 @@ export function ProjectWorkspace() {
   )
   const handleChangeTimingMode = useCallback(
     (mode: AudioTimingMode) => {
+      // AQU-646: a subtitle import has no Free timing to switch to, and the
+      // picker that could have asked for it is not rendered for one. Silent
+      // because it is unreachable from the UI — this exists so no future
+      // programmatic caller can write a mode the resolver would then ignore.
+      if (mode === "audioFirst" && isSubtitleFile) return
       if (!activeFileId) return
       // The mode rides the outbox, so offline it would sit queued while the
       // toolbar kept reading the old value — say so instead of half-doing it.
@@ -5042,7 +5057,7 @@ export function ProjectWorkspace() {
       }
       void applyTimingMode(mode, activeFileId)
     },
-    [activeFileId, activeFile?.coreMediaUrl, applyTimingMode],
+    [activeFileId, activeFile?.coreMediaUrl, isSubtitleFile, applyTimingMode],
   )
   // The transport speaks file seconds in dubbing and programme seconds in
   // audio-first, so it has to know which before anything seeks.
@@ -6353,8 +6368,14 @@ export function ProjectWorkspace() {
                     onRevealGap={revealGap}
                     canLinkVideo={canPerform("file.video.set", project?.syncRole?.level ?? null)}
                     onSeekToTime={handleTimelineSeekToTime}
+                    tracks={timelineTracks}
                     timingMode={timingMode}
                     onChangeTimingMode={canEditTimingMode ? handleChangeTimingMode : undefined}
+                    // Hidden rather than gated: gating only the callback would
+                    // still draw the read-only label, and its "only a
+                    // maintainer can change this" title would be a lie — a
+                    // maintainer cannot change it here either.
+                    hideTimingMode={isSubtitleFile}
                     onOpenRecording={handleOpenRecording}
                     project={editorProject ?? project ?? undefined}
                     onSelectCell={setTimelineSelectedCellId}

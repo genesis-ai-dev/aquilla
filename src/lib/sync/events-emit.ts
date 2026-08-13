@@ -28,6 +28,7 @@ import {
 import posthog from "@/lib/posthog"
 import { FIRST_CELL_COMMIT, FIRST_CELL_VALIDATE } from "@/lib/event-names"
 import { noteAbDraftText, reportAbOutcome } from "@/lib/ab/feedback"
+import type { TrackKind } from "@/lib/timeline/tracks"
 
 // Session-scoped flags — reset on page reload (true "first in session" semantics).
 let _firstCommitFired = false
@@ -649,6 +650,51 @@ export async function emitFileTimingSet(input: FileTimingSetInput): Promise<stri
     parentId: null,
     author: input.author,
     payload: { timingMode: input.timingMode },
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
+export interface FileTrackSetInput {
+  projectId: string
+  fileId: string
+  /** The track this delta is about. Default tracks use their kind as the id
+   *  ("subtitles" / "source-audio" / "target-audio"); user-added tracks carry
+   *  a generated one. An id is forever once written — it is the meta key. */
+  trackId: string
+  /**
+   * The delta to merge, or null to DELETE the whole entry (drop a user-added
+   * track, reset a default back to pure defaults). Within a patch, null on a
+   * field clears just that override and an absent field leaves it alone —
+   * so a rename by one collaborator and a reorder by another both survive.
+   * `kind` has no null form: a track's kind is its identity.
+   */
+  patch: {
+    kind?: TrackKind
+    name?: string | null
+    order?: number | null
+    groupId?: string | null
+  } | null
+  author: string
+  clientTs?: number
+}
+
+/** Emit a `file.track.set` — one track's presentation overrides, stored in
+ *  files.meta under `trackOverrides`. Maintainer floor: the server rejects
+ *  lower roles.
+ *
+ *  DORMANT in stage 1 — nothing calls this yet. It stays one generic helper
+ *  on purpose: stage 3's UI wraps it in intent-named functions (renameTrack,
+ *  addTargetTrack, …) so components never assemble raw patches, which is what
+ *  keeps the allow-listed payload shape in one place when it grows. */
+export async function emitFileTrackSet(input: FileTrackSetInput): Promise<string> {
+  const { eventId } = await enqueueEvent({
+    kind: "file.track.set",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    parentId: null,
+    author: input.author,
+    payload: { trackId: input.trackId, patch: input.patch },
     clientTs: input.clientTs,
   })
   return eventId

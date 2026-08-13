@@ -1,4 +1,5 @@
 import type { ImportMilestone, ImportSourceLocator } from "../../../shared/import-contract"
+import type { PersistedTrackOverrides } from "@/lib/timeline/tracks"
 
 export type FileType = "md" | "docx" | "pptx" | "idml" | "xlsx" | "txt" | "html" | "json" | "po" | "properties" | "vtt" | "srt" | "sbv" | "usfm" | "ebible" | "helloao" | "xliff" | "tmx" | "csv" | "tsv" | "audio" | "video" | "obs" | "sdbh" | "custom"
 
@@ -580,6 +581,18 @@ export interface FileReference {
    * default applies (see `resolveFileTimingMode`).
    */
   timingMode?: AudioTimingMode | null
+  /**
+   * Persisted per-track DELTAS keyed by track id — renames, reorders, groups,
+   * and the entries that bring user-added tracks into existence. Stored in
+   * files.meta JSON (set via the `file.track.set` event). Absent ⇒ the pure
+   * derived defaults.
+   *
+   * This is NEVER the full track list, which is exactly why the field is not
+   * called `tracks`. Consume it ONLY through `mergeTrackOverrides` (via
+   * `deriveTracksForFile`) — that is the one place that knows which deltas are
+   * applicable and which belong to a build newer than this one.
+   */
+  trackOverrides?: PersistedTrackOverrides | null
 }
 
 /** Which key is authoritative for ordering a file's segments. */
@@ -591,15 +604,40 @@ export function fileOrderedBy(file: Pick<FileReference, "orderedBy">): OrderedBy
 }
 
 /**
- * Resolve a file's audio timing mode: the file's own choice, else the
- * project-level value (the legacy Project Settings field, kept as a read-only
- * fallback so pre-existing projects keep the mode they had chosen), else
- * Original timing. Mixed-mode projects are allowed by design.
+ * True for the formats whose cues arrive already timed against someone else's
+ * video. The canonical predicate — "is this a subtitle import?" gets ONE answer
+ * across the app, because the hand-rolled `vtt || srt` check this replaces
+ * (ProjectWorkspace) missed `sbv`, which imports to exactly the same timed cues
+ * as the other two.
+ */
+export function isSubtitleImportFile(file: Pick<FileReference, "type"> | null | undefined): boolean {
+  return file?.type === "vtt" || file?.type === "srt" || file?.type === "sbv"
+}
+
+/**
+ * Resolve a file's audio timing mode: Original timing for every subtitle import
+ * (see below), else the file's own choice, else the project-level value (the
+ * legacy Project Settings field, kept as a read-only fallback so pre-existing
+ * projects keep the mode they had chosen), else Original timing. Mixed-mode
+ * projects are allowed by design.
  */
 export function resolveFileTimingMode(
-  file: Pick<FileReference, "timingMode"> | null | undefined,
+  file: Pick<FileReference, "timingMode" | "type"> | null | undefined,
   project: Pick<ProjectRecord, "audioTimingMode"> | null | undefined,
 ): AudioTimingMode {
+  // AQU-646: Free timing does not exist for subtitle imports — their cues are
+  // already timed to a video, so laying them end to end has nothing to fit.
+  // Withdrawing it at RESOLUTION rather than from the picker is the whole
+  // point: hiding the control would have left three ways back in. (a) The
+  // file's own stored `timingMode`, written before the mode was withdrawn.
+  // (b) Inheritance from the LEGACY project-level `audioTimingMode` below — a
+  // VTT nobody has ever touched still resolves to Free timing off a project
+  // setting made back when the control lived in Project Settings. (c) A
+  // `file.timing.set` from an OLDER client that still offers the mode; the
+  // server deliberately keeps accepting it, since rejecting it would break
+  // those clients for no gain. A stray "audioFirst" on a subtitle file is
+  // simply inert from here on — nothing migrates it away.
+  if (isSubtitleImportFile(file)) return "dubbing"
   if (file?.timingMode === "audioFirst" || file?.timingMode === "dubbing") return file.timingMode
   // Only "audioFirst" opts out of the original behaviour — anything else,
   // including a value the settings blob happens to carry (the server accepts

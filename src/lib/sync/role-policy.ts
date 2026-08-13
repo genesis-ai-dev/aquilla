@@ -68,6 +68,10 @@ const REQUIRED_ROLE: Record<string, number> = {
   "file.video.set": ROLE.CONTRIBUTOR,
   // Structural — keeps the clearance the setting had in Project Settings.
   "file.timing.set": ROLE.MAINTAINER,
+  // Track structure IS file structure: a rename or reorder relayouts the
+  // timeline for everyone who opens the file, so it sits with file.timing.set
+  // rather than with the contributor-level file.rename / file.video.set.
+  "file.track.set": ROLE.MAINTAINER,
 
   // AQU-478: repin ("accept upstream change as-is") — same authority bar
   // as validating (spec §12). Bulk repin is gated higher (project_lead 500)

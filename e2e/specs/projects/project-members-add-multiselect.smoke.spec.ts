@@ -7,7 +7,8 @@ import { addOrgMember, getMyOrg, ROLE } from "../../helpers/frontier-api"
  * Project members multi-select add (AQU-734 parity on the project surfaces).
  *
  * MembersTab (embedded on the org-side project overview /projects/:id AND the
- * in-workspace /project/:id/members page — one component, two surfaces) offers
+ * settings Members pane at /project/:id/settings/members — one component family,
+ * two surfaces) offers
  * eligible org colleagues as checkbox rows the moment the add field is
  * focused (AQU-672 suggestions), stages checked people as removable chips
  * that survive a new search term, and grants the whole batch in ONE request.

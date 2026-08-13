@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom"
-import { Archive, BookMarked, Building2, Download, EyeOff, KeyRound, UserCheck, Users, UsersRound, Workflow } from "lucide-react"
+import { Archive, BookMarked, Building2, Download, EyeOff, KeyRound, UserCheck, Workflow } from "lucide-react"
 import { OrgBreadcrumb } from "@/components/org/OrgBreadcrumb"
 import { PageHeader } from "@/components/ui/page"
 import { NavList, NavRow } from "@/components/ui/nav-list"
@@ -7,6 +7,7 @@ import { useActiveOrg } from "@/context/OrgContext"
 import { useOrgSettings } from "@/hooks/useOrgSettings"
 import { ROLE } from "@/lib/frontier/roles"
 import { membersPath, orgPath, orgSettingsPath } from "@/lib/navigation/org-paths"
+import { NAV_PAGE_ICONS } from "@/lib/navigation/page-icons"
 import { FLOOR_LABEL } from "./constants"
 import { OrgSettingsShell } from "./OrgSettingsShell"
 
@@ -33,7 +34,7 @@ export function OrgSettingsIndex() {
           </>
         }
       />
-      <div className="space-y-6">
+      <div className="flex flex-col gap-12">
         <NavList label="Organization">
           <NavRow to={orgSettingsPath(activeOrgId, "identity")} icon={Building2} title="Identity" hint={activeOrg?.name ?? "Untitled"} />
           <NavRow to={orgSettingsPath(activeOrgId, "export")} icon={Download} title="Export permissions" hint={FLOOR_LABEL[displayedExportMinRole] ?? "Maintainer"} />
@@ -55,8 +56,8 @@ export function OrgSettingsIndex() {
         </NavList>
 
         <NavList label="People & Projects">
-          <NavRow to={membersPath(activeOrgId)} icon={Users} title="Members" hint="Roles & invites" />
-          <NavRow to={orgPath(activeOrgId, "/teams")} icon={UsersRound} title="Teams" hint="Groups" />
+          <NavRow to={membersPath(activeOrgId)} icon={NAV_PAGE_ICONS.members} title="Members" hint="Roles & invites" />
+          <NavRow to={orgPath(activeOrgId, "/teams")} icon={NAV_PAGE_ICONS.teams} title="Teams" hint="Groups" />
           <NavRow to={orgPath(activeOrgId, "/archived")} icon={Archive} title="Archived projects" hint="Restore" />
         </NavList>
       </div>

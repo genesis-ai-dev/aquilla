@@ -4,6 +4,7 @@ import { FlaskConical, RefreshCw } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { DataTable } from "@/components/ui/data-table"
+import { missingLast, SORT_MISSING_LAST } from "@/components/ui/data-table-missing"
 import { EmptyState } from "@/components/ui/empty"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Spinner } from "@/components/ui/spinner"
@@ -78,7 +79,8 @@ export function AbResultsPanel({ jwt }: { jwt: string }) {
       },
       {
         id: "avgEdit",
-        accessorKey: "avgEditDistance",
+        accessorFn: (r) => missingLast(r.avgEditDistance ?? undefined),
+        sortUndefined: SORT_MISSING_LAST,
         header: "Avg edit",
         cell: ({ row }) => <EditDistanceCell value={row.original.avgEditDistance} />,
       },
@@ -149,7 +151,8 @@ export function AbResultsPanel({ jwt }: { jwt: string }) {
       },
       {
         id: "latency",
-        accessorKey: "avgLatencyMs",
+        accessorFn: (r) => missingLast(r.avgLatencyMs ?? undefined),
+        sortUndefined: SORT_MISSING_LAST,
         header: () => <div className="text-right">Latency</div>,
         cell: ({ row }) => (
           <div className="text-right tabular-nums text-muted-foreground">

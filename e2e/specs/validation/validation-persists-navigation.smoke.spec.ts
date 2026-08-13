@@ -1,4 +1,4 @@
-import { test, expect } from "../../helpers/multi-user"
+import { test, expect, orgRoute } from "../../helpers/multi-user"
 import { Workspace } from "../../helpers/page-objects/Workspace"
 import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/seed-project"
 
@@ -25,11 +25,10 @@ test("validated cell stays validated after navigating away and back", async ({ a
   // Validate cell 0 — waits for "— validated" title attribute.
   await ws.validateCell(0)
 
-  // Navigate away. The /projects list has no "Projects" heading (the
-  // OrgBreadcrumb renders plain spans) — assert arrival via the New Project
-  // button instead.
-  await alice.goto("/projects")
-  await expect(alice.getByRole("button", { name: /new project/i })).toBeVisible({
+  // Navigate away to the org Projects table (bare `/projects` lands Overview,
+  // which has no New project control for non-empty orgs).
+  await alice.goto(orgRoute(alice, "/projects"))
+  await expect(alice.getByRole("button", { name: /new project/i }).first()).toBeVisible({
     timeout: 5_000,
   })
 

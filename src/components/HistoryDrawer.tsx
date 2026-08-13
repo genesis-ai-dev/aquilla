@@ -8,6 +8,9 @@ import type { CellHistoryEntry } from "@/lib/parsers/types"
 import { cn } from "@/lib/utils"
 import { useCellEditHistory } from "@/hooks/useCellEditHistory"
 import { FootnotedTextValue } from "./footnotes/FootnoteInline"
+import { RightSidebarPanel } from "./RightSidebarPanel"
+import { useT } from "@/lib/i18n/I18nProvider"
+import { RichMessage } from "@/lib/i18n/RichMessage"
 
 interface HistoryDrawerProps {
   cell: CellData
@@ -119,6 +122,7 @@ function commonSuffixLength(a: string, b: string, prefixLen: number): number {
 }
 
 export function HistoryDrawer({ cell, onClose, projectId, fileId, getTokenForFile, isSynced = false, onPromote }: HistoryDrawerProps) {
+  const t = useT()
   const enabled = !!projectId && !!fileId && !!getTokenForFile
   // Target side is the typical edit surface in this translation app, so we
   // use `targetEventId` as the AD-2 chain head when computing stale-branch
@@ -176,58 +180,62 @@ export function HistoryDrawer({ cell, onClose, projectId, fileId, getTokenForFil
   }
 
   return (
-    <div className="flex h-full w-96 flex-col border-l bg-card">
+    <RightSidebarPanel storageKey="history" defaultWidth={384} resizeLabel="Resize history panel">
+    <div className="flex h-full w-full flex-col border-l bg-card">
       <div className="flex items-center justify-between border-b p-2">
         <h3 className="text-sm font-semibold">
-          Edit history {cell.context && <span className="text-muted-foreground">· {cell.context}</span>}
+          {t("editor.history.title")} {cell.context && <span className="text-muted-foreground">· {cell.context}</span>}
         </h3>
-        <Button variant="ghost" size="icon-sm" onClick={onClose} aria-label="Close history">
+        <Button variant="ghost" size="icon-sm" onClick={onClose} aria-label={t("editor.history.close")}>
           <X />
         </Button>
       </div>
 
       <div className="border-b px-3 py-2 text-xs">
-        <div className="text-muted-foreground">Source</div>
+        <div className="text-muted-foreground">{t("editor.column.source")}</div>
         <div className="mt-0.5">{cell.original}</div>
       </div>
 
       <div className="flex-1 overflow-auto p-3 space-y-2">
         {isSynced && d1Loading && history.length === 0 ? (
-          <p className="text-xs text-muted-foreground">Loading history…</p>
+          <p className="text-xs text-muted-foreground">{t("editor.history.loading")}</p>
         ) : isSynced && d1Error && history.length === 0 ? (
           // A failed D1 fetch on a synced project used to fall through to
           // "No edits yet." — confidently wrong for cells with real history.
           <div className="space-y-1.5">
-            <p className="text-xs text-muted-foreground">Couldn't load edit history.</p>
+            <p className="text-xs text-muted-foreground">{t("editor.history.loadFailed")}</p>
             <button
               type="button"
               onClick={revalidate}
               className="text-[11px] font-medium text-primary hover:text-primary/80 underline underline-offset-2"
             >
-              Retry
+              {t("common.retry")}
             </button>
           </div>
         ) : history.length === 0 ? (
-          <p className="text-xs text-muted-foreground">No edits yet.</p>
+          <p className="text-xs text-muted-foreground">{t("editor.history.noEdits")}</p>
         ) : (
           <>
             {isSynced && d1Error && (
               <p className="text-[10px] text-muted-foreground">
-                Couldn't refresh from the server — showing local edits.{" "}
+                {t("editor.history.refreshFailed")}{" "}
                 <button
                   type="button"
                   onClick={revalidate}
                   className="font-medium text-primary hover:text-primary/80 underline underline-offset-2"
                 >
-                  Retry
+                  {t("common.retry")}
                 </button>
               </p>
             )}
             <p className="text-[10px] text-muted-foreground">
-              {groups.length} significant {groups.length === 1 ? "revision" : "revisions"}
+              {t("editor.history.revisions", { count: groups.length })}
               {hiddenCount > 0 && (
                 <span className="ml-1 normal-case text-muted-foreground/70">
-                  ({history.length} total, {hiddenCount} minor intermediate edits collapsed)
+                  {t("editor.history.collapsedNote", {
+                    total: history.length,
+                    hidden: hiddenCount,
+                  })}
                 </span>
               )}
             </p>
@@ -240,7 +248,11 @@ export function HistoryDrawer({ cell, onClose, projectId, fileId, getTokenForFil
                   isStale && groups.findIndex((g) => g.terminal.isStale ?? false) === i
                 return (
                   <GroupItem
-                    key={`${group.terminal.timestamp}-${group.startIndex}`}
+                    // Keyed on the event id, not the timestamp: a commit's
+                    // timestamp changes when the server-confirmed entry
+                    // replaces the locally pending one, and remounting on that
+                    // swap collapses an expanded group under the reader.
+                    key={group.terminal.eventId ?? `${group.terminal.timestamp}-${group.startIndex}`}
                     group={group}
                     isCurrent={i === currentGroupIndex}
                     formatTimestamp={formatTimestamp}
@@ -254,6 +266,7 @@ export function HistoryDrawer({ cell, onClose, projectId, fileId, getTokenForFil
         )}
       </div>
     </div>
+    </RightSidebarPanel>
   )
 }
 
@@ -273,6 +286,7 @@ function GroupItem({
   refForFirstStale: React.RefObject<HTMLLIElement | null> | null
   onPromote?: (entry: CellHistoryEntry) => void
 }) {
+  const t = useT()
   const [expanded, setExpanded] = useState(false)
   const [pendingPromote, setPendingPromote] = useState(false)
   const terminal = group.terminal
@@ -308,36 +322,36 @@ function GroupItem({
         </span>
         <span className={cn("flex items-center gap-0.5 rounded px-1.5 py-0.5 font-medium", validatedColor)}>
           {terminal.validated ? <Check className="h-3 w-3" /> : null}
-          {terminal.validated ? "validated" : "unvalidated"}
+          {terminal.validated ? t("editor.state.validated") : t("editor.state.unvalidated")}
         </span>
         {isStale && (
           <AppTooltip
-            content="This edit lost the first-child-of-parent race for its slot. It was logged but never applied to the cell's current value."
+            content={t("editor.history.staleTooltip")}
             className="max-w-xs"
           >
             <span className="flex items-center gap-0.5 rounded bg-amber-200/60 px-1.5 py-0.5 font-medium text-amber-900 dark:bg-amber-800/50 dark:text-amber-200">
               <GitBranch className="h-3 w-3" />
-              stale branch
+              {t("editor.history.staleBadge")}
             </span>
           </AppTooltip>
         )}
         {terminal.syncState === "pending" && (
           <span className="flex items-center gap-0.5 rounded bg-muted px-1.5 py-0.5 font-medium text-muted-foreground">
             <Spinner className="size-3" />
-            syncing
+            {t("editor.history.syncing")}
           </span>
         )}
         {terminal.syncState === "failed" && (
-          <AppTooltip content="This edit is safe in this browser, but it could not sync to the server. Use the sync indicator to retry or inspect the failure.">
+          <AppTooltip content={t("editor.history.syncFailedTooltip")}>
             <span className="flex items-center gap-0.5 rounded bg-destructive/10 px-1.5 py-0.5 font-medium text-destructive">
               <CloudOff className="h-3 w-3" />
-              sync failed
+              {t("editor.history.syncFailed")}
             </span>
           </AppTooltip>
         )}
         {hasSubEntries && (
           <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-            +{group.entries.length - 1} minor edit{group.entries.length - 1 !== 1 ? "s" : ""}
+            {t("editor.history.minorEdits", { count: group.entries.length - 1 })}
           </span>
         )}
         <span className="ml-auto text-muted-foreground">
@@ -345,11 +359,16 @@ function GroupItem({
         </span>
       </div>
       <div className="text-xs text-muted-foreground">
-        by <span className="font-medium">{terminal.author}</span>
-        {isCurrent && <span className="ml-1.5 text-primary">· current</span>}
+        {/* The name is the one scannable word in a line of muted metadata, so it
+            keeps its weight inside the translated attribution. */}
+        <RichMessage
+          k="editor.history.author"
+          values={{ author: <span className="font-medium">{terminal.author}</span> }}
+        />
+        {isCurrent && <span className="ml-1.5 text-primary">{t("editor.history.currentMarker")}</span>}
         {isStale && (
           <span className="ml-1.5 text-amber-700 dark:text-amber-300">
-            · bumped by a concurrent edit
+            {t("editor.history.bumpedMarker")}
           </span>
         )}
       </div>
@@ -359,7 +378,7 @@ function GroupItem({
       {terminal.examples && terminal.examples.length > 0 && (
         <div className="mt-1 flex items-center gap-1 text-[10px] text-muted-foreground">
           <BookOpen className="h-3 w-3" />
-          {terminal.examples.length} example{terminal.examples.length !== 1 ? "s" : ""} used
+          {t("editor.history.examples", { count: terminal.examples.length })}
         </div>
       )}
       {isStale && onPromote && !pendingPromote && (
@@ -367,23 +386,23 @@ function GroupItem({
           onClick={() => setPendingPromote(true)}
           className="mt-2 text-[11px] font-medium text-amber-700 hover:text-amber-900 dark:text-amber-300 dark:hover:text-amber-100 underline underline-offset-2"
         >
-          Promote to current
+          {t("editor.history.promote")}
         </button>
       )}
       {isStale && onPromote && pendingPromote && (
         <div className="mt-2 flex items-center gap-2 text-[11px]">
-          <span className="text-muted-foreground">Make this the current value?</span>
+          <span className="text-muted-foreground">{t("editor.history.promoteConfirm")}</span>
           <button
             onClick={() => { onPromote(terminal); setPendingPromote(false) }}
             className="font-medium text-primary hover:text-primary/80"
           >
-            Confirm
+            {t("common.confirm")}
           </button>
           <button
             onClick={() => setPendingPromote(false)}
             className="text-muted-foreground hover:text-foreground"
           >
-            Cancel
+            {t("common.cancel")}
           </button>
         </div>
       )}
@@ -394,7 +413,7 @@ function GroupItem({
             className="mt-2 flex items-center gap-0.5 text-[10px] text-muted-foreground hover:text-foreground"
           >
             {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-            {expanded ? "Hide" : "Show"} intermediate edits
+            {expanded ? t("editor.history.hideIntermediate") : t("editor.history.showIntermediate")}
           </button>
           {expanded && (
             <ol className="mt-1 space-y-1 border-l-2 pl-2">

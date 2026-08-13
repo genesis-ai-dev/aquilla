@@ -8,8 +8,9 @@ import {
   FieldLabel,
 } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import { RoleSelect } from "@/components/RoleSelect"
 import { createOrgInvite } from "@/lib/frontier/orgs"
-import { ROLE, ORG_ROLE_PICKER, roleName, roleDisplayText } from "@/lib/frontier/roles"
+import { ROLE, ORG_ROLE_OPTIONS } from "@/lib/frontier/roles"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import posthog from "@/lib/posthog"
 import { INVITE_SENT } from "@/lib/event-names"
@@ -83,6 +84,8 @@ export function OrgInviteByEmail({ orgId }: { orgId: number }) {
           <Input
             id="org-invite-email"
             type="email"
+            inputMode="email"
+            autoComplete="off"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             placeholder="teammate@example.com (optional)"
@@ -91,20 +94,15 @@ export function OrgInviteByEmail({ orgId }: { orgId: number }) {
         </Field>
         <Field>
           <FieldLabel htmlFor="org-invite-role">Org role</FieldLabel>
-          <select
+          <RoleSelect
             id="org-invite-role"
+            options={ORG_ROLE_OPTIONS}
             value={role}
-            onChange={(e) => setRole(Number(e.target.value))}
-            className="h-9 rounded-md border border-border bg-background px-2 text-sm"
-          >
-            {ORG_ROLE_PICKER.map((level) => (
-              <option key={level} value={level}>
-                {roleDisplayText(roleName(level))}
-              </option>
-            ))}
-          </select>
+            onValueChange={setRole}
+            aria-label="Org role"
+          />
         </Field>
-        <Button size="sm" onClick={submit} disabled={busy}>
+        <Button onClick={submit} disabled={busy}>
           {busy ? "Sending…" : "Send invite"}
         </Button>
       </FieldGroup>
@@ -113,7 +111,7 @@ export function OrgInviteByEmail({ orgId }: { orgId: number }) {
       {link && (
         <div className="flex items-center gap-2">
           <code className="truncate rounded bg-muted px-2 py-1 text-[11px]">{link}</code>
-          <Button size="sm" variant="outline" onClick={copyLink}>
+          <Button variant="outline" onClick={copyLink}>
             <Copy className="mr-1 size-3.5" />
             {copied ? "Copied" : "Copy"}
           </Button>

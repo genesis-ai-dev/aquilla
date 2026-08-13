@@ -7,6 +7,7 @@
 
 export type ContextualBroadcastRunStatus =
   | "running"
+  | "pausing"
   | "paused"
   | "parked"
   | "done"
@@ -15,6 +16,7 @@ export type ContextualBroadcastRunStatus =
 
 const RUN_STATUSES: ReadonlySet<string> = new Set([
   "running",
+  "pausing",
   "paused",
   "parked",
   "done",
@@ -26,6 +28,7 @@ export interface ContextualRunStateFrame {
   type: "contextual.run.state"
   runId: string
   fileId: string
+  targetLang: string
   status: ContextualBroadcastRunStatus
   done: number
   total: number
@@ -49,6 +52,10 @@ export interface ContextualSpanFrame {
   skipped: number
   verdictSummary: string
   spanId?: string
+  outcome?: "complete" | "partial" | "failed"
+  reasons?: ContextualSpanReason[]
+  calls?: number
+  units?: number
 }
 
 /** A span lane opens (before the first model call — kills the start-up dead
@@ -57,6 +64,7 @@ export interface ContextualSpanStartFrame {
   type: "contextual.span.start"
   runId: string
   fileId: string
+  targetLang?: string
   spanId: string
   spanLabel: string
 }
@@ -75,14 +83,36 @@ export interface ContextualDraftsFrame {
   type: "contextual.drafts"
   runId: string
   fileId: string
+  targetLang: string
+  spanId?: string
   spanLabel: string
+  draftCount?: number
   drafts: { draftId: string; cellId: string; text: string }[]
   truncated?: boolean
 }
 
 export type ContextualSpanPhase = "reading" | "drafting" | "checking" | "staging"
 
+export type ContextualSpanReason =
+  | "scene_construal_incomplete"
+  | "draft_failed"
+  | "no_draft_returned"
+  | "verification_unavailable"
+  | "rejected_by_quorum"
+  | "target_already_filled"
+  | "span_failed"
+
 const SPAN_PHASES: ReadonlySet<string> = new Set(["reading", "drafting", "checking", "staging"])
+const SPAN_OUTCOMES: ReadonlySet<string> = new Set(["complete", "partial", "failed"])
+const SPAN_REASONS: ReadonlySet<string> = new Set([
+  "scene_construal_incomplete",
+  "draft_failed",
+  "no_draft_returned",
+  "verification_unavailable",
+  "rejected_by_quorum",
+  "target_already_filled",
+  "span_failed",
+])
 
 /** Ceiling on drafts carried in one frame — mirrors MAX_DRAFTS_PER_FRAME in
  *  auth-worker/src/lib/contextual/tick.ts. A frame over this is rejected
@@ -109,6 +139,7 @@ export function parseContextualFrame(value: unknown): ContextualFrame | null {
 
   if (m.type === "contextual.run.state") {
     if (typeof m.fileId !== "string") return null
+    if (typeof m.targetLang !== "string") return null
     if (typeof m.status !== "string" || !RUN_STATUSES.has(m.status)) return null
     if (typeof m.done !== "number" || typeof m.total !== "number") return null
     if (m.failed !== undefined && typeof m.failed !== "number") return null
@@ -116,6 +147,7 @@ export function parseContextualFrame(value: unknown): ContextualFrame | null {
       type: "contextual.run.state",
       runId: m.runId,
       fileId: m.fileId,
+      targetLang: m.targetLang,
       status: m.status as ContextualBroadcastRunStatus,
       done: m.done,
       total: m.total,
@@ -143,6 +175,13 @@ export function parseContextualFrame(value: unknown): ContextualFrame | null {
     if (typeof m.staged !== "number" || typeof m.skipped !== "number") return null
     if (typeof m.verdictSummary !== "string") return null
     if (m.spanId !== undefined && typeof m.spanId !== "string") return null
+    if (m.outcome !== undefined && (typeof m.outcome !== "string" || !SPAN_OUTCOMES.has(m.outcome))) return null
+    if (m.calls !== undefined && typeof m.calls !== "number") return null
+    if (m.units !== undefined && typeof m.units !== "number") return null
+    if (
+      m.reasons !== undefined &&
+      (!Array.isArray(m.reasons) || !m.reasons.every((reason) => typeof reason === "string" && SPAN_REASONS.has(reason)))
+    ) return null
     return {
       type: "contextual.span",
       runId: m.runId,
@@ -151,6 +190,10 @@ export function parseContextualFrame(value: unknown): ContextualFrame | null {
       skipped: m.skipped,
       verdictSummary: m.verdictSummary,
       ...(typeof m.spanId === "string" ? { spanId: m.spanId } : {}),
+      ...(typeof m.outcome === "string" ? { outcome: m.outcome as ContextualSpanFrame["outcome"] } : {}),
+      ...(Array.isArray(m.reasons) ? { reasons: m.reasons as ContextualSpanReason[] } : {}),
+      ...(typeof m.calls === "number" ? { calls: m.calls } : {}),
+      ...(typeof m.units === "number" ? { units: m.units } : {}),
     }
   }
 
@@ -162,6 +205,7 @@ export function parseContextualFrame(value: unknown): ContextualFrame | null {
       type: "contextual.span.start",
       runId: m.runId,
       fileId: m.fileId,
+      ...(typeof m.targetLang === "string" ? { targetLang: m.targetLang } : {}),
       spanId: m.spanId,
       spanLabel: m.spanLabel,
     }
@@ -182,10 +226,13 @@ export function parseContextualFrame(value: unknown): ContextualFrame | null {
 
   if (m.type === "contextual.drafts") {
     if (typeof m.fileId !== "string") return null
+    if (typeof m.targetLang !== "string") return null
     if (typeof m.spanLabel !== "string") return null
-    if (!Array.isArray(m.drafts) || m.drafts.length === 0) return null
+    if (!Array.isArray(m.drafts) || (m.drafts.length === 0 && m.truncated !== true)) return null
     if (m.drafts.length > MAX_DRAFTS_PER_FRAME) return null
     if (m.truncated !== undefined && typeof m.truncated !== "boolean") return null
+    if (m.spanId !== undefined && typeof m.spanId !== "string") return null
+    if (m.draftCount !== undefined && (typeof m.draftCount !== "number" || m.draftCount < m.drafts.length)) return null
     const drafts: ContextualDraftsFrame["drafts"] = []
     for (const raw of m.drafts as unknown[]) {
       if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null
@@ -199,7 +246,10 @@ export function parseContextualFrame(value: unknown): ContextualFrame | null {
       type: "contextual.drafts",
       runId: m.runId,
       fileId: m.fileId,
+      targetLang: m.targetLang,
+      ...(typeof m.spanId === "string" ? { spanId: m.spanId } : {}),
       spanLabel: m.spanLabel,
+      ...(typeof m.draftCount === "number" ? { draftCount: m.draftCount } : {}),
       drafts,
       ...(m.truncated === true ? { truncated: true } : {}),
     }

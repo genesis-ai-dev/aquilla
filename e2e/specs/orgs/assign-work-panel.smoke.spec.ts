@@ -6,10 +6,10 @@ import { jwtFor, seedProjectWithFile } from "../../helpers/seed-project"
  *
  * AssignWork.tsx renders as a button labelled "Assign…" when collapsed.
  * When opened it shows a group with aria-label="Assign work" containing:
- *   - <select aria-label="Assignee">
- *   - <select aria-label="Book">
- *   - <select aria-label="Chapter">
- *   - <input aria-label="Deadline (optional)">
+ *   - Assignee combobox (shadcn Select)
+ *   - Book combobox (shadcn Select)
+ *   - Chapters checkbox group
+ *   - Deadline date picker
  *
  * The component is rendered in ProjectOverview.tsx for maintainer+ users.
  * Alice is the project owner so she should see the Assign panel.

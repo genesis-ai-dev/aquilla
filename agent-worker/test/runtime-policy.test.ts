@@ -11,8 +11,20 @@ describe("sandbox runtime policy", () => {
   })
 
   it("uses the SDK image variant that actually provides Python and pip", () => {
+    const pkg = JSON.parse(read("../package.json")) as {
+      dependencies: Record<string, string>
+    }
+    const version = pkg.dependencies["@cloudflare/sandbox"]
+    expect(version, "package.json must pin @cloudflare/sandbox").toMatch(
+      /^\d+\.\d+\.\d+$/,
+    )
+    // Dockerfile FROM must stay on the -python tag of the same SDK version —
+    // the generic image is not guaranteed to ship pip (see Dockerfile).
     expect(read("../Dockerfile")).toMatch(
-      /^FROM docker\.io\/cloudflare\/sandbox:0\.7\.0-python$/m,
+      new RegExp(
+        `^FROM docker\\.io/cloudflare/sandbox:${version.replaceAll(".", "\\.")}-python$`,
+        "m",
+      ),
     )
   })
 })

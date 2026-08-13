@@ -1,17 +1,16 @@
 import { test, expect, orgRoute } from "../../helpers/multi-user"
-import { expectSelectValue, pickSelectOption } from "../../helpers/base-ui"
 
 /**
- * TeamsList (/teams) — search filter and sort select.
+ * TeamsList (/teams) — search filter and column sort.
  *
- * TeamsList.tsx renders (when teams exist):
- *   - input type="search" placeholder="Search teams…"
- *   - Base UI Select aria-label="Sort teams by" with options: Name (A–Z),
- *     Members (most first), Projects (most first)
+ * TeamsList.tsx renders (when teams exist) an admin-style DataTable with:
+ *   - search placeholder "Search teams…"
+ *   - sortable Team / Members / Projects column headers
+ *   - All / Internal only / Public only visibility select
  *
- * This spec: creates a team → navigates to /teams → verifies the search
- * input is visible → types a non-matching query → verifies "No teams match"
- → clears → team is visible again → changes sort to "Members".
+ * This spec: creates a team → navigates to /teams → verifies search →
+ * types a non-matching query → verifies "No teams match" → clears →
+ * team is visible again → sorts by Members via the column header.
  */
 test("teams list filter and sort controls work", async ({ alice }) => {
   // Create a team so the search/sort controls appear.
@@ -21,10 +20,12 @@ test("teams list filter and sort controls work", async ({ alice }) => {
   await createBtn.click()
 
   const teamName = `SortFilter ${Date.now()}`
-  const nameInput = alice.locator('input[type="text"], input:not([type])').first()
+  const dialog = alice.getByRole("dialog")
+  await expect(dialog).toBeVisible({ timeout: 3_000 })
+  const nameInput = dialog.getByLabel(/^Team name$/i)
   await expect(nameInput).toBeVisible({ timeout: 3_000 })
   await nameInput.fill(teamName)
-  await alice.getByRole("button", { name: /Create|Save/i }).first().click()
+  await dialog.getByRole("button", { name: /^Create$/i }).click()
 
   // Creating a team navigates straight to its detail page (/teams/:id);
   // return to the list where the search/sort controls live.
@@ -34,7 +35,7 @@ test("teams list filter and sort controls work", async ({ alice }) => {
   await expect(alice.getByText(teamName)).toBeVisible({ timeout: 8_000 })
 
   // Search filter input appears.
-  const searchInput = alice.locator('input[type="search"], input[placeholder*="Search teams"]')
+  const searchInput = alice.getByPlaceholder("Search teams…")
   await expect(searchInput).toBeVisible({ timeout: 5_000 })
 
   // Type a non-matching query.
@@ -45,13 +46,9 @@ test("teams list filter and sort controls work", async ({ alice }) => {
   await searchInput.fill("")
   await expect(alice.getByText(teamName)).toBeVisible({ timeout: 3_000 })
 
-  // Change sort to "Members (most first)".
-  const sortSelect = alice.getByRole("combobox", { name: "Sort teams by" })
-  await expect(sortSelect).toBeVisible({ timeout: 3_000 })
-  await pickSelectOption(alice, sortSelect, "Members (most first)")
-  await expectSelectValue(sortSelect, "Members (most first)")
-
-  // Restore sort.
-  await pickSelectOption(alice, sortSelect, "Name (A–Z)")
-  await expectSelectValue(sortSelect, "Name (A–Z)")
+  // Sort by Members via the column header (unsorted → descending).
+  const membersHeader = alice.getByRole("button", { name: /^Members$/i })
+  await expect(membersHeader).toBeVisible({ timeout: 3_000 })
+  await membersHeader.click()
+  await expect(membersHeader).toHaveAttribute("aria-sort", "descending")
 })

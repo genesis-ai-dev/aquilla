@@ -1,71 +1,16 @@
-import type { ImportMilestone, ImportSourceLocator } from "../../../shared/import-contract"
+// The parse-core data types (TranslatableString and friends) live in
+// core-types.ts (pure — importable by the parse Web Worker and the sync-worker
+// without dragging in this module's deeper workspace type graph). Re-exported
+// here so every existing "@/lib/parsers/types" import keeps working unchanged.
+export type {
+  CellType,
+  SourceLocation,
+  TranslatableString,
+  ParsedTextFileResult,
+  ExportCellFields,
+} from "./core-types"
 
 export type FileType = "md" | "docx" | "pptx" | "idml" | "xlsx" | "txt" | "html" | "json" | "po" | "properties" | "vtt" | "srt" | "sbv" | "usfm" | "ebible" | "helloao" | "xliff" | "tmx" | "csv" | "tsv" | "audio" | "video" | "obs" | "sdbh" | "custom"
-
-export type CellType =
-  | "text"
-  | "heading"
-  | "list"
-  | "blockquote"
-  | "cue"
-  | "verse"
-  | "paratext"
-
-export interface SourceLocation {
-  file: string       // e.g. "word/document.xml", "ppt/slides/slide3.xml"
-  blockPath: string  // indexed path to block, e.g. "w:p[2]" or "p:sp[1]/p:txBody/a:p[3]"
-}
-
-export interface TranslatableString {
-  id: string
-  original: string
-  originalHtml?: string
-  translated: string
-  /** Rich target initialized by format-aware parsers. IDML uses this for its
-   * protected empty slot anchors even before any translated words exist. */
-  translatedHtml?: string
-  context: string
-  group: string
-  /** Optional section label for navigation/progress. USFM/ebible set this to "BOOK CHAPTER" (e.g. "GEN 1"). */
-  section?: string
-  /** Explicit semantic milestone supplied by a specialized parser. The shared
-   * planner validates/fills this into every normalized import unit. */
-  milestone?: ImportMilestone
-  /**
-   * Semantic tags external to cell identity. For scripture, the verse ref(s) this cell represents,
-   * e.g. ["LUK 1:1"] or ["LUK 1:1", "LUK 1:2"] for a verse range. Mirrors the codex-editor
-   * extension's `metadata.data.globalReferences`. Empty/omitted for non-scripture content.
-   * Section labels in the sidebar are derived from these when present.
-   */
-  globalReferences?: string[]
-  /** Cue start/end in seconds, parsed from a subtitle timestamp line. Present
-   *  only for `type: "cue"` strings from VTT/SRT import; drives `start_ms`/
-   *  `end_ms` persistence. */
-  start?: number
-  end?: number
-  /** Speaker extracted from a `<v Name>` VTT voice tag, if present. Maps to a
-   *  Cast member on import. */
-  speaker?: string
-  /** Timeline-segment-model: primary content kind. Absent ⇒ 'text'. Set to
-   *  'media' only by the audio/video media-import path (Part B). */
-  medium?: "text" | "media"
-  /** D1: true on the first cell of a paragraph block. Absent/false = continuation.
-   *  Drives paragraph grouping for multi-cell draft operations. */
-  paragraphStart?: boolean
-  /**
-   * Extensible per-cell metadata bucket, mirrored through the import path into
-   * `BulkImportCell.metadata` → `source.cell.create` payload → `cells.metadata`
-   * (JSONB). OBS populates `{ attachments: [{ type: "image", url, alt }] }` —
-   * one frame's reference image per cell. Future attachment kinds (gif/video/
-   * audio) reuse the same bucket without a schema change. Absent for content
-   * with no attachments.
-   */
-  metadata?: Record<string, unknown>
-  type: CellType
-  sourceLocation?: SourceLocation
-  /** Exact format locator when a package-block locator would lose identity. */
-  sourceLocator?: ImportSourceLocator
-}
 
 /** File types whose parsers produce scripture-style sections (globalReferences populated, section labels meaningful). */
 export const SCRIPTURE_FILE_TYPES: ReadonlySet<FileType> = new Set(["usfm", "ebible", "helloao"])
@@ -464,10 +409,10 @@ export interface ProjectRecord {
   /** Soft-delete marker. When present the project is in Trash; the Dashboard
    * hides it from "Your projects" and shows it under the Trash section. Set by
    * owner-triggered archive (local projects) or by a sync signal from
-   * frontier-server (cloud-synced projects). */
+   * auth-worker (cloud-synced projects). */
   deletedAt?: string
-  /** Display name of whoever archived the project. Populated from frontier-
-   * server's response, or from the local session for purely local projects. */
+  /** Display name of whoever archived the project. Populated from
+   * auth-worker's response, or from the local session for purely local projects. */
   deletedBy?: string
   /**
    * Active/inactive lifecycle state (migration 0033, AQU-214).

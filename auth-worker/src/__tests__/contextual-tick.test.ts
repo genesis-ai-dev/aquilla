@@ -21,10 +21,19 @@ import {
   appendSteering,
   readUnconsumedSteering,
   listDrafts,
+  listContextualRunEvents,
+  setSpanCursor,
+  recordWaveOutcome,
 } from "../../../db/shared/contextual-runs"
-import { listSceneBriefs } from "../../../db/shared/scene-briefs"
+import {
+  listSceneBriefs,
+  getSceneBrief,
+  proposeSceneBrief,
+  reviewSceneBrief,
+} from "../../../db/shared/scene-briefs"
 import { runOneTick, makeLlmCall, type ContextualProgressFrame } from "../lib/contextual/tick"
 import { scriptMockResponse } from "../../../scripts/mock-openrouter"
+import type { AquillaDb } from "../../../db/shim/postgres"
 
 const db = env.AQUILLA_PG
 const PROJECT = "proj-tick"
@@ -110,10 +119,11 @@ async function seedFile(): Promise<void> {
   await seedCell("c5", "MRK 2:2", "he returned home")
 }
 
-async function startRun() {
+async function startRun(targetLang = "") {
   const created = await createRun(db, {
     projectId: PROJECT,
     fileId: FILE,
+    targetLang,
     initiatedBy: "tester",
     roleSnapshot: { userId: 1, username: "tester", level: 400 },
   })
@@ -122,6 +132,123 @@ async function startRun() {
 }
 
 describe("runOneTick", () => {
+  it("stages a French run into the French review queue without leaking into the default lane", async () => {
+    await seedFile()
+    const run = await startRun("fr")
+    const result = await runOneTick({ db, runId: run.id, llm: llm() })
+    expect(result.continueRun).toBe(true)
+
+    const french = await listDrafts(db, PROJECT, FILE, "proposed", "fr")
+    const def = await listDrafts(db, PROJECT, FILE, "proposed", "")
+    expect(french.length).toBeGreaterThan(0)
+    expect(french.every((draft) => draft.targetLang === "fr")).toBe(true)
+    expect(def).toEqual([])
+    expect(await getRun(db, run.id)).toMatchObject({
+      status: "running",
+      targetLang: "fr",
+    })
+  })
+
+  it("injects only approved scene context from the run's target lane", async () => {
+    await seedFile()
+    const approveNeighbor = async (targetLang: string, summary: string) => {
+      const proposed = await proposeSceneBrief(db, {
+        projectId: PROJECT,
+        fileId: FILE,
+        startCellId: "c4",
+        endCellId: "c5",
+        targetLang,
+        construal: summary,
+        l1Summary: summary,
+      })
+      if (proposed.status !== "ok") throw new Error(proposed.message)
+      const reviewed = await reviewSceneBrief(db, {
+        id: proposed.brief.id,
+        action: "approve",
+        reviewedBy: "lead",
+      })
+      expect(reviewed.status).toBe("ok")
+    }
+    await approveNeighbor("", "DEFAULT_NEIGHBOR_ONLY")
+    await approveNeighbor("fr", "FRENCH_NEIGHBOR_MUST_NOT_LEAK")
+
+    const run = await startRun()
+    const construePrompts: string[] = []
+    let construeCalls = 0
+    const laneCheckingLlm: ReturnType<typeof llm> = async (request) => {
+      if (request.system.includes("[[ctx:construe]]")) {
+        construeCalls += 1
+        construePrompts.push(request.user)
+        return JSON.stringify({
+          situation: "A narrator addresses a reader.",
+          participants: ["narrator", "reader"],
+          tenor: "neutral",
+          moves: ["relate"],
+          closed: construeCalls > 1,
+          openQuestions: construeCalls > 1 ? [] : ["Need adjacent scene context"],
+          evidenceCellIds: ["c1", "c2", "c3"],
+        })
+      }
+      const response = scriptMockResponse([
+        { role: "system", content: request.system },
+        { role: "user", content: request.user },
+      ])
+      return response.choices[0]?.message.content ?? ""
+    }
+
+    await runOneTick({ db, runId: run.id, llm: laneCheckingLlm, concurrency: 1 })
+
+    expect(construePrompts.some((prompt) => prompt.includes("DEFAULT_NEIGHBOR_ONLY"))).toBe(true)
+    expect(construePrompts.every((prompt) => !prompt.includes("FRENCH_NEIGHBOR_MUST_NOT_LEAK")))
+      .toBe(true)
+  })
+
+  it("keeps translating when durable activity storage is temporarily unavailable", async () => {
+    await seedFile()
+    const run = await startRun()
+    const telemetryDownDb = new Proxy(db, {
+      get(target, property, receiver) {
+        if (property === "prepare") {
+          return (query: string) => {
+            if (query.includes("contextual_run_events")) throw new Error("activity table unavailable")
+            return target.prepare(query)
+          }
+        }
+        const value = Reflect.get(target, property, receiver) as unknown
+        return typeof value === "function" ? value.bind(target) : value
+      },
+    }) as AquillaDb
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    try {
+      await expect(runOneTick({ db: telemetryDownDb, runId: run.id, llm: llm() }))
+        .resolves.toMatchObject({ continueRun: true, status: "running" })
+    } finally {
+      warn.mockRestore()
+    }
+
+    expect((await getRun(db, run.id))?.doneSpans).toBe(1)
+    expect((await listDrafts(db, PROJECT, FILE, "proposed"))).toHaveLength(2)
+  })
+
+  it("keeps translating when the live collaborator relay is unavailable", async () => {
+    await seedFile()
+    const run = await startRun()
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    try {
+      await expect(runOneTick({
+        db,
+        runId: run.id,
+        llm: llm(),
+        notify: async () => { throw new Error("sync relay unavailable") },
+      })).resolves.toMatchObject({ continueRun: true, status: "running" })
+    } finally {
+      warn.mockRestore()
+    }
+
+    expect((await getRun(db, run.id))?.doneSpans).toBe(1)
+    expect((await listDrafts(db, PROJECT, FILE, "proposed"))).toHaveLength(2)
+  })
+
   it("first tick derives seeds, processes exactly span 1, stages drafts + a scene brief, advances the cursor", async () => {
     await seedFile()
     const run = await startRun()
@@ -183,6 +310,46 @@ describe("runOneTick", () => {
       "c4",
       "c5",
     ])
+  })
+
+  it("never publishes cropped draft text as a complete live suggestion", async () => {
+    await seedFile()
+    const run = await startRun()
+    const frames: ContextualProgressFrame[] = []
+    const baseLlm = llm()
+    const longText = `LONG ${"x".repeat(2_100)}`
+
+    await runOneTick({
+      db,
+      runId: run.id,
+      llm: async (request) => {
+        if (request.system.includes("[[ctx:draft]]")) {
+          return JSON.stringify([
+            { i: 1, t: longText },
+            { i: 2, t: "SHORT COMPLETE DRAFT" },
+          ])
+        }
+        return baseLlm(request)
+      },
+      notify: async (frame) => { frames.push(frame) },
+    })
+
+    const persisted = await listDrafts(db, PROJECT, FILE, "proposed")
+    expect(persisted.find((draft) => draft.cellId === "c2")?.text).toBe(longText)
+
+    const live = frames.find((frame) => frame.type === "contextual.drafts")
+    expect(live).toMatchObject({
+      type: "contextual.drafts",
+      runId: run.id,
+      targetLang: "",
+      draftCount: 2,
+      truncated: true,
+    })
+    if (!live || live.type !== "contextual.drafts") throw new Error("missing draft frame")
+    expect(live.drafts).toEqual([
+      expect.objectContaining({ cellId: "c3", text: "SHORT COMPLETE DRAFT" }),
+    ])
+    expect(live.drafts.some((draft) => draft.text === longText.slice(0, 2_000))).toBe(false)
   })
 
   it("steering directions are consumed exactly once and injected into the construe + draft prompts", async () => {
@@ -285,6 +452,48 @@ describe("runOneTick", () => {
     )
   })
 
+  it("does not refresh a scene brief from another file or target lane", async () => {
+    await seedFile()
+    const run = await startRun()
+    await runOneTick({ db, runId: run.id, llm: llm(), concurrency: 1 })
+
+    const makeForeignBrief = async (fileId: string, targetLang: string) => {
+      const proposed = await proposeSceneBrief(db, {
+        projectId: PROJECT,
+        fileId,
+        startCellId: "c1",
+        endCellId: "c3",
+        targetLang,
+        construal: `Foreign ${fileId}/${targetLang || "default"} scene.`,
+        l1Summary: "Must not be injected or refreshed.",
+      })
+      if (proposed.status !== "ok") throw new Error(proposed.message)
+      return proposed.brief
+    }
+    const otherFile = await makeForeignBrief("file-other", "")
+    const otherLane = await makeForeignBrief(FILE, "fr")
+    for (const brief of [otherFile, otherLane]) {
+      await appendSteering(db, {
+        projectId: PROJECT,
+        fileId: FILE,
+        runId: run.id,
+        kind: "refresh_span",
+        body: brief.id,
+      })
+    }
+
+    await runOneTick({ db, runId: run.id, llm: llm(), concurrency: 1 })
+
+    expect((await getSceneBrief(db, otherFile.id))?.staleSince).toBeNull()
+    expect((await getSceneBrief(db, otherLane.id))?.staleSince).toBeNull()
+    expect((await getRun(db, run.id))?.spanCursor?.seeds).toHaveLength(2)
+    expect(await readUnconsumedSteering(db, {
+      projectId: PROJECT,
+      fileId: FILE,
+      runId: run.id,
+    })).toEqual([])
+  })
+
   it("a pause requested mid-run stops continuation at the span edge; resume continues the cursor", async () => {
     await seedFile()
     const run = await startRun()
@@ -311,6 +520,94 @@ describe("runOneTick", () => {
     const after = await getRun(db, run.id)
     expect(after?.doneSpans).toBe(2)
     expect(after?.spanCursor?.nextIndex).toBe(2)
+  })
+
+  it("a pause requested during an in-flight wave converges to paused at that same edge", async () => {
+    await seedFile()
+    const run = await startRun()
+    const baseLlm = llm()
+    let releaseFirstCall: (() => void) | undefined
+    let markFirstCallStarted: (() => void) | undefined
+    const firstCallStarted = new Promise<void>((resolve) => { markFirstCallStarted = resolve })
+    const firstCallRelease = new Promise<void>((resolve) => { releaseFirstCall = resolve })
+    let callCount = 0
+    const deferredLlm: typeof baseLlm = async (...args) => {
+      callCount += 1
+      if (callCount === 1) {
+        markFirstCallStarted?.()
+        await firstCallRelease
+      }
+      return baseLlm(...args)
+    }
+    const frames: ContextualProgressFrame[] = []
+
+    const tick = runOneTick({
+      db,
+      runId: run.id,
+      llm: deferredLlm,
+      notify: async (frame) => { frames.push(frame) },
+    })
+    await firstCallStarted
+    expect((await requestPause(db, run.id)).status).toBe("ok")
+    releaseFirstCall?.()
+
+    const result = await tick
+    expect(result).toMatchObject({ continueRun: false, status: "paused" })
+    expect((await getRun(db, run.id))?.status).toBe("paused")
+    const liveStates = frames
+      .filter((frame) => frame.type === "contextual.run.state")
+      .map((frame) => frame.status)
+    expect(liveStates.at(-1)).toBe("paused")
+    const durable = await listContextualRunEvents(db, {
+      projectId: PROJECT,
+      runId: run.id,
+    })
+    expect(durable.events.filter((event) => event.kind === "run_state").at(-1)?.status).toBe("paused")
+  })
+
+  it("resume after a paused final failure restores terminal attention instead of idle", async () => {
+    await seedFile()
+    const run = await startRun()
+    const cursor = {
+      seeds: [{
+        id: `${FILE}#failed`,
+        fileId: FILE,
+        anchorCellId: "c2",
+        startCellId: "c2",
+        endCellId: "c3",
+        seedSource: "canonical-ref",
+      }],
+      nextIndex: 1,
+    }
+    await setSpanCursor(db, run.id, cursor)
+    await recordWaveOutcome(db, run.id, {
+      cursor,
+      doneCount: 0,
+      failedCount: 1,
+      unitsUsed: 1,
+      callsUsed: 1,
+      lastError: "This passage could not produce a reviewable draft.",
+    })
+    expect((await requestPause(db, run.id)).status).toBe("ok")
+    expect(await runOneTick({ db, runId: run.id, llm: llm() })).toMatchObject({ status: "paused" })
+    expect((await resumeRun(db, run.id)).status).toBe("ok")
+
+    let modelCalls = 0
+    const resumed = await runOneTick({
+      db,
+      runId: run.id,
+      llm: async () => {
+        modelCalls++
+        return "unused"
+      },
+    })
+    expect(resumed).toMatchObject({ continueRun: false, status: "failed" })
+    expect(modelCalls).toBe(0)
+    expect(await getRun(db, run.id)).toMatchObject({
+      status: "failed",
+      failedSpans: 1,
+      lastError: "This passage could not produce a reviewable draft.",
+    })
   })
 
   it("an LLM failure records a failed span (cursor still advances; run keeps going)", async () => {

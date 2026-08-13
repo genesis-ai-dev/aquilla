@@ -161,14 +161,14 @@ export function AddLanguagePopover({ projectId, jwt, onAdded }: AddLanguagePopov
           <button
             type="button"
             data-testid={`org-add-lang-${projectId}`}
-            className="inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-xs text-muted-foreground hover:bg-muted"
+            className="inline-flex items-center gap-0.5 rounded-md border px-1.5 py-0.5 text-xs text-muted-foreground hover:bg-muted"
             aria-label="Add a target language lane"
             onClick={(e) => e.stopPropagation()}
           />
         }
       >
         <Languages className="size-3.5" aria-hidden />
-        Language
+        <Plus className="size-3.5" aria-hidden />
       </PopoverTrigger>
       <PopoverContent
         data-testid={`org-add-lang-popover-${projectId}`}
@@ -207,7 +207,7 @@ export function AddLanguagePopover({ projectId, jwt, onAdded }: AddLanguagePopov
               className="h-8 text-xs"
               disabled={busy}
             />
-            <Button size="sm" onClick={() => void handleAdd()} disabled={busy || !snapshot}>
+            <Button onClick={() => void handleAdd()} disabled={busy || !snapshot}>
               {busy ? <Spinner className="mr-1 size-3.5" /> : <Plus className="mr-1 size-3.5" />}
               Add
             </Button>

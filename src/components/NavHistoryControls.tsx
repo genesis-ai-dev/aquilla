@@ -1,169 +1,192 @@
 /**
- * NavHistoryControls — browser-style back/forward buttons for the top-left of
- * the app chrome.
+ * NavHistoryControls — browser-style back/forward plus a previously-viewed
+ * menu of concrete projects, teams, and editor files (max 15).
  *
- * - Click an arrow: go back / forward one step.
- * - Press and hold an arrow (or right-click it): open a popover listing the
- *   human-readable history in that direction; click an entry to jump to it.
+ * - Clock: open recently viewed entities; click to jump.
+ * - Click an arrow: go back / forward one browser-history step.
  *
  * Renders nothing when there's no NavHistoryProvider (e.g. in page-level tests).
  */
-import { useRef, useState, type PointerEvent as ReactPointerEvent, type MouseEvent as ReactMouseEvent } from "react"
+import { useState } from "react"
 import { ChevronLeft, ChevronRight, Clock } from "lucide-react"
-import { useNavHistory, type NavEntry, type NavHistoryValue } from "@/context/NavHistoryContext"
-import { Popover, PopoverContent } from "@/components/ui/popover"
+import { InitialsAvatar } from "@/components/InitialsAvatar"
+import { useNavHistory, type NavHistoryValue } from "@/context/NavHistoryContext"
+import { NAV_PAGE_ICONS } from "@/lib/navigation/page-icons"
+import {
+  MAX_RECENT_VISITS,
+  type RecentEntity,
+  type RecentKind,
+} from "@/lib/navigation/recent-visits"
 import { Button } from "@/components/ui/button"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import { AppTooltip } from "@/components/ui/tooltip"
+import { useT } from "@/lib/i18n/I18nProvider"
 
-const HOLD_MS = 350
+/** Muted, slightly faded — the default disabled:opacity-50 washes these out. */
+const disabledChrome = "cursor-default text-muted-foreground/70 disabled:opacity-100"
 
 export function NavHistoryControls() {
   const nav = useNavHistory()
+  const t = useT()
   if (!nav) return null
   return (
-    <div className="flex items-center gap-0.5" role="group" aria-label="Page history">
+    <div className="flex items-center gap-0.5" role="group" aria-label={t("nav.historyControls.groupLabel")}>
+      <HistoryMenuButton nav={nav} />
       <NavArrowButton direction="back" nav={nav} />
       <NavArrowButton direction="forward" nav={nav} />
     </div>
   )
 }
 
-interface HistoryTarget {
-  entry: NavEntry
-  target: number
+function HistoryMenuButton({ nav }: { nav: NavHistoryValue }) {
+  const t = useT()
+  const [open, setOpen] = useState(false)
+  const list = nav.recent.slice(0, MAX_RECENT_VISITS)
+  const hasRecent = list.length > 0
+  const previouslyViewedLabel = t("nav.historyControls.previouslyViewed")
+
+  if (!hasRecent) {
+    return (
+      <AppTooltip content={t("nav.historyControls.noPreviouslyViewed")} side="bottom" disabled={open}>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          disabled
+          aria-label={previouslyViewedLabel}
+          className={disabledChrome}
+        >
+          <Clock className="size-3.5" />
+        </Button>
+      </AppTooltip>
+    )
+  }
+
+  return (
+    <DropdownMenu open={open} onOpenChange={setOpen}>
+      <AppTooltip content={previouslyViewedLabel} side="bottom" disabled={open}>
+        <DropdownMenuTrigger
+          render={
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              aria-label={previouslyViewedLabel}
+            >
+              <Clock className="size-3.5" />
+            </Button>
+          }
+        />
+      </AppTooltip>
+      <DropdownMenuContent align="end" side="bottom" sideOffset={4} className="min-w-56 w-max max-w-96 text-sm">
+        <DropdownMenuGroup>
+          <DropdownMenuLabel className="px-2 py-1 text-sm font-normal">
+            {previouslyViewedLabel}
+          </DropdownMenuLabel>
+          {list.map((entry) => (
+            <RecentItem
+              key={`${entry.kind}-${entry.id}`}
+              entry={entry}
+              onPick={() => {
+                setOpen(false)
+                nav.openRecent(entry.pathname, entry.search)
+              }}
+            />
+          ))}
+        </DropdownMenuGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
+function recentKindLabel(t: ReturnType<typeof useT>, kind: RecentKind): string {
+  switch (kind) {
+    case "project":
+      return t("common.project")
+    case "team":
+      return t("nav.historyControls.recentKind.team")
+    case "file":
+      return t("common.file")
+  }
+}
+
+function RecentItem({ entry, onPick }: { entry: RecentEntity; onPick: () => void }) {
+  const t = useT()
+  const kindLabel = recentKindLabel(t, entry.kind)
+  const ProjectIcon = NAV_PAGE_ICONS.project
+  const FileIcon = NAV_PAGE_ICONS.file
+  // Color is hashed from the full team title (same as TeamWithAvatar).
+  // `singleInitial` only shrinks the glyph — it does not affect colorFromName.
+  const teamName = entry.title.trim()
+  // Kind and title share the same type size/weight; only color differs.
+  const itemText = "text-sm font-normal leading-5"
+  return (
+    <DropdownMenuItem onClick={onPick} className="gap-2 px-2 py-1.5 text-sm">
+      <span className={`w-14 shrink-0 ${itemText} text-muted-foreground`}>{kindLabel}</span>
+      {entry.kind === "team" ? (
+        <InitialsAvatar
+          name={teamName}
+          size="xs"
+          className="size-4!"
+          menuSafe
+          singleInitial
+        />
+      ) : entry.kind === "file" ? (
+        <FileIcon className="size-4" />
+      ) : (
+        <ProjectIcon className="size-4" />
+      )}
+      <span className={`min-w-0 flex-1 truncate ${itemText}`}>{entry.title}</span>
+    </DropdownMenuItem>
+  )
 }
 
 function NavArrowButton({ direction, nav }: { direction: "back" | "forward"; nav: NavHistoryValue }) {
+  const t = useT()
   const isBack = direction === "back"
   const enabled = isBack ? nav.canGoBack : nav.canGoForward
-  const [open, setOpen] = useState(false)
-  const btnRef = useRef<HTMLButtonElement>(null)
-  const holdTimer = useRef<number | null>(null)
-  const heldRef = useRef(false)
-
-  // Entries in this direction, nearest-first.
-  const list: HistoryTarget[] = []
-  if (isBack) {
-    for (let i = nav.index - 1; i >= 0; i--) list.push({ entry: nav.entries[i], target: i })
-  } else {
-    for (let i = nav.index + 1; i < nav.entries.length; i++) list.push({ entry: nav.entries[i], target: i })
-  }
-
-  function clearHold() {
-    if (holdTimer.current !== null) {
-      window.clearTimeout(holdTimer.current)
-      holdTimer.current = null
-    }
-  }
-
-  function onPointerDown(e: ReactPointerEvent<HTMLButtonElement>) {
-    if (!enabled || e.button !== 0) return
-    heldRef.current = false
-    clearHold()
-    holdTimer.current = window.setTimeout(() => {
-      heldRef.current = true
-      setOpen(true)
-    }, HOLD_MS)
-  }
-
-  function onClick() {
-    clearHold()
-    // A hold opened the popover — swallow the click so we don't also navigate.
-    if (heldRef.current) {
-      heldRef.current = false
-      return
-    }
-    if (isBack) nav.goBack()
-    else nav.goForward()
-  }
-
-  function onContextMenu(e: ReactMouseEvent<HTMLButtonElement>) {
-    if (!enabled) return
-    e.preventDefault()
-    setOpen(true)
-  }
-
-  const label = isBack ? "Back" : "Forward"
+  const plainLabel = isBack ? t("nav.historyControls.back") : t("nav.historyControls.forward")
   const Icon = isBack ? ChevronLeft : ChevronRight
-  const nearest = list[0]?.entry.title
+  const nearest = isBack
+    ? nav.entries[nav.index - 1]?.title
+    : nav.entries[nav.index + 1]?.title
 
-  const button = (
-    <Button
-      ref={btnRef}
-      type="button"
-      variant="ghost"
-      size="icon-xs"
-      disabled={!enabled}
-      aria-label={enabled && nearest ? `${label} to ${nearest}` : label}
-      onPointerDown={onPointerDown}
-      onPointerUp={clearHold}
-      onPointerLeave={clearHold}
-      onPointerCancel={clearHold}
-      onClick={onClick}
-      onContextMenu={onContextMenu}
-      className={enabled ? undefined : "cursor-default text-muted-foreground/30"}
+  return (
+    <AppTooltip
+      content={
+        enabled
+          ? plainLabel
+          : t(isBack ? "nav.historyControls.noBackHistory" : "nav.historyControls.noForwardHistory")
+      }
+      side="bottom"
     >
-      <Icon className="size-4" aria-hidden />
-    </Button>
-  )
-
-  return (
-    <>
-      {/* Suppressed while the history popover is open, so the tooltip doesn't
-          sit on the menu as a second "header" tab. */}
-      <Tooltip disabled={open}>
-        <TooltipTrigger render={button} />
-        <TooltipContent side="bottom">
-          {enabled ? `${label} · hold for history` : `No ${label.toLowerCase()} history`}
-        </TooltipContent>
-      </Tooltip>
-      <Popover open={open} onOpenChange={setOpen}>
-        <PopoverContent
-          anchor={btnRef}
-          side="bottom"
-          align="start"
-          sideOffset={6}
-          className="w-64 p-1"
-        >
-          <HistoryList
-            list={list}
-            onPick={(target) => {
-              setOpen(false)
-              nav.go(target)
-            }}
-          />
-        </PopoverContent>
-      </Popover>
-    </>
-  )
-}
-
-function HistoryList({
-  list,
-  onPick,
-}: {
-  list: HistoryTarget[]
-  onPick: (target: number) => void
-}) {
-  if (list.length === 0) {
-    return <div className="px-2 py-3 text-center text-xs text-muted-foreground">No history</div>
-  }
-  return (
-    <div className="max-h-80 overflow-y-auto">
-      <ul className="flex flex-col">
-        {list.map(({ entry, target }) => (
-          <li key={`${entry.key}-${target}`}>
-            <button
-              type="button"
-              onClick={() => onPick(target)}
-              className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm hover:bg-accent/60"
-            >
-              <Clock className="size-3.5 shrink-0 text-muted-foreground/70" aria-hidden />
-              <span className="truncate">{entry.title}</span>
-            </button>
-          </li>
-        ))}
-      </ul>
-    </div>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-sm"
+        disabled={!enabled}
+        aria-label={
+          enabled && nearest
+            ? isBack
+              ? t("nav.historyControls.backTo", { target: nearest })
+              : t("nav.historyControls.forwardTo", { target: nearest })
+            : plainLabel
+        }
+        onClick={() => {
+          if (isBack) nav.goBack()
+          else nav.goForward()
+        }}
+        className={enabled ? undefined : disabledChrome}
+      >
+        <Icon className="size-3.5" />
+      </Button>
+    </AppTooltip>
   )
 }

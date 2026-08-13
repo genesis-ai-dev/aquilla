@@ -93,7 +93,7 @@ describe("ProjectStep — signed-in: skip affordance prominence (AQU-432)", () =
   it("project creation form is still present so users who want to create can", () => {
     renderStep()
     expect(screen.getByRole("button", { name: /create project/i })).toBeInTheDocument()
-    expect(screen.getByLabelText(/project name/i)).toBeInTheDocument()
+    expect(screen.getByLabelText(/project title/i)).toBeInTheDocument()
   })
 })
 

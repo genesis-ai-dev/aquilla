@@ -1,5 +1,15 @@
-import { useState, forwardRef, useImperativeHandle, type ReactNode, type RefObject } from "react"
-import { AlertTriangle, Settings, X } from "lucide-react"
+import {
+  useState,
+  useEffect,
+  useMemo,
+  useCallback,
+  useRef,
+  forwardRef,
+  useImperativeHandle,
+  type ReactNode,
+  type RefObject,
+} from "react"
+import { Settings } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Label } from "@/components/ui/label"
@@ -14,10 +24,17 @@ import { Separator } from "@/components/ui/separator"
 import { Switch } from "@/components/ui/switch"
 import { SegmentTabs } from "@/components/ui/tabs"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { toast } from "@/components/ui/toast"
 import { cn } from "@/lib/utils"
 import { MIN_FONT_SIZE, MAX_FONT_SIZE, FONT_SIZE_STEP } from "@/lib/store/file-view-prefs"
 import type { FootnoteViewMode } from "@/lib/footnotes/types"
 import type { DirectionMode, TextDirection, TextDirectionSummary } from "@/lib/text-direction"
+import { useT } from "@/lib/i18n/I18nProvider"
+import { RichMessage } from "@/lib/i18n/RichMessage"
+import type { MessageKey } from "@/lib/i18n/messages/en"
+
+/** Stable id so a lingering mismatch upserts instead of stacking. */
+export const DIRECTION_MISMATCH_TOAST_ID = "editor.view.directionMismatch"
 
 export interface ViewSettingsMenuHandle {
   open: () => void
@@ -53,10 +70,10 @@ interface ViewSettingsMenuProps {
   onFootnoteViewModeChange?: (v: FootnoteViewMode) => void
 }
 
-const FOOTNOTE_OPTIONS: { value: FootnoteViewMode; label: string }[] = [
-  { value: "off", label: "Hidden" },
-  { value: "inline", label: "Inline under cells" },
-  { value: "tray", label: "Bottom tray" },
+const FOOTNOTE_OPTIONS: { value: FootnoteViewMode; labelKey: MessageKey }[] = [
+  { value: "off", labelKey: "editor.view.footnotesHidden" },
+  { value: "inline", labelKey: "editor.view.footnotesInline" },
+  { value: "tray", labelKey: "editor.view.footnotesTray" },
 ]
 
 export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsMenuProps>(function ViewSettingsMenu({
@@ -83,13 +100,23 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
   onTnSidebarChange,
   onFootnoteViewModeChange,
 }, ref) {
+  const t = useT()
   const [menuOpen, setMenuOpen] = useState(false)
-  const mismatch = getManualDirectionMismatch({
-    sourceMode: sourceDirectionMode,
-    targetMode: targetDirectionMode,
-    sourceSummary: sourceAutoDirectionSummary,
-    targetSummary: targetAutoDirectionSummary,
-  })
+  const mismatch = useMemo(
+    () =>
+      getManualDirectionMismatch({
+        sourceMode: sourceDirectionMode,
+        targetMode: targetDirectionMode,
+        sourceSummary: sourceAutoDirectionSummary,
+        targetSummary: targetAutoDirectionSummary,
+      }),
+    [
+      sourceDirectionMode,
+      targetDirectionMode,
+      sourceAutoDirectionSummary,
+      targetAutoDirectionSummary,
+    ],
+  )
   const mismatchSignature = mismatch
     ? `${directionWarningScope ?? ""}:${mismatch.side}:${mismatch.forced}:${mismatch.detected}`
     : null
@@ -98,82 +125,72 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
     fileOpen &&
     mismatch &&
     mismatchSignature &&
-    dismissedMismatchSignature !== mismatchSignature &&
-    !menuOpen,
+    dismissedMismatchSignature !== mismatchSignature,
   )
-  const detectedManualDirection = mismatch?.detected === "mixed" ? null : (mismatch?.detected ?? null)
 
   useImperativeHandle(ref, () => ({
     open: () => setMenuOpen(true),
   }))
 
-  function applyDirectionMismatchFix(mode: DirectionMode) {
+  const applyDirectionMismatchFix = useCallback((mode: DirectionMode) => {
     if (!mismatch) return
     if (mismatch.side === "source") onSourceDirectionModeChange(mode)
     else onTargetDirectionModeChange(mode)
-  }
+  }, [mismatch, onSourceDirectionModeChange, onTargetDirectionModeChange])
+  const applyDirectionMismatchFixRef = useRef(applyDirectionMismatchFix)
+  applyDirectionMismatchFixRef.current = applyDirectionMismatchFix
+
+  useEffect(() => {
+    if (!showMismatchWarning || !mismatch || !mismatchSignature) {
+      toast.close(DIRECTION_MISMATCH_TOAST_ID)
+      return
+    }
+
+    toast.add({
+      id: DIRECTION_MISMATCH_TOAST_ID,
+      type: "warning",
+      timeout: 0,
+      title: (
+        <RichMessage
+          k="editor.view.directionMismatch"
+          values={{
+            side: t(sideLabelKey(mismatch.side)),
+            forced: <strong>{t(directionNameKey(mismatch.forced))}</strong>,
+            detected: <strong>{t(detectedDirectionNameKey(mismatch.detected))}</strong>,
+          }}
+        />
+      ),
+      actionProps: {
+        children: t("editor.view.directionAuto"),
+        onClick: () => {
+          applyDirectionMismatchFixRef.current("auto")
+          toast.close(DIRECTION_MISMATCH_TOAST_ID)
+        },
+      },
+      onClose: () => {
+        setDismissedMismatchSignature(mismatchSignature)
+      },
+    })
+  }, [showMismatchWarning, mismatch, mismatchSignature, t])
+
+  useEffect(() => {
+    return () => {
+      toast.close(DIRECTION_MISMATCH_TOAST_ID)
+    }
+  }, [])
 
   return (
     // When anchored to the file-options ⋯ button, skip the header-only gap hack.
     <div className={cn("relative flex items-center", hideTrigger && !anchor && "-ml-1")}>
-      {showMismatchWarning && mismatch && (
-        <div
-          className={cn(
-            "absolute right-full top-1/2 z-30 mr-2 flex -translate-y-1/2 items-center gap-2 whitespace-nowrap",
-            "rounded-2xl bg-card px-3 py-2 text-xs",
-            "animate-in fade-in-0 slide-in-from-right-2 duration-200",
-          )}
-          role="status"
-        >
-          <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-600" />
-          <span className="text-foreground">
-            {mismatch.sideLabel} is forced{" "}
-            <strong>{directionName(mismatch.forced)}</strong>, but content looks{" "}
-            <strong>{detectedDirectionName(mismatch.detected)}</strong>
-          </span>
-          <button
-            type="button"
-            onClick={() => applyDirectionMismatchFix("auto")}
-            className="rounded-md px-2 py-0.5 text-[11px] font-medium text-primary transition-all duration-150 ease-out hover:bg-card active:scale-[0.95]"
-          >
-            Auto
-          </button>
-          {detectedManualDirection && (
-            <button
-              type="button"
-              onClick={() => applyDirectionMismatchFix(detectedManualDirection)}
-              className="rounded-md px-2 py-0.5 text-[11px] font-medium text-primary transition-all duration-150 ease-out hover:bg-card active:scale-[0.95]"
-            >
-              {detectedManualDirection.toUpperCase()}
-            </button>
-          )}
-          <AppTooltip content="Dismiss">
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-xs"
-              onClick={() => setDismissedMismatchSignature(mismatchSignature)}
-              aria-label="Dismiss direction warning"
-              className="size-5 rounded-lg text-muted-foreground/70"
-            >
-              <X className="h-3 w-3" />
-            </Button>
-          </AppTooltip>
-          <span
-            className="absolute left-full top-1/2 -translate-y-1/2 border-y-4 border-l-4 border-y-transparent border-l-card"
-            aria-hidden="true"
-          />
-        </div>
-      )}
       <Popover open={menuOpen} onOpenChange={setMenuOpen}>
         {!anchor && (
-          <AppTooltip content="Editor settings">
+          <AppTooltip content={t("editor.view.settings")}>
             <PopoverTrigger
               render={
                 <Button
                   variant="ghost"
                   size="icon"
-                  aria-label="Editor settings"
+                  aria-label={t("editor.view.settings")}
                   className={cn(hideTrigger ? "sr-only" : "relative")}
                 >
                   <Settings className="h-4 w-4" />
@@ -190,25 +207,25 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
           data-testid="view-settings-popover"
           className="w-72"
         >
-          <PopoverTitle className="sr-only">Editor settings</PopoverTitle>
+          <PopoverTitle className="sr-only">{t("editor.view.settings")}</PopoverTitle>
 
           <FieldGroup className="gap-3">
             <SwitchRow
               id="view-show-line-numbers"
-              label="Show line numbers"
+              label={t("editor.view.showLineNumbers")}
               checked={lineNumbersEnabled}
               disabled={!fileOpen}
               onCheckedChange={onLineNumbersChange}
             />
             <SwitchRow
               id="view-show-cell-labels"
-              label="Show cell labels"
+              label={t("editor.view.showCellLabels")}
               checked={cellLabelsEnabled}
               onCheckedChange={onCellLabelsChange}
             />
             <SwitchRow
               id="view-show-translation-notes"
-              label="Show translation notes"
+              label={t("editor.view.showTranslationNotes")}
               checked={tnSidebarEnabled}
               onCheckedChange={onTnSidebarChange}
             />
@@ -218,7 +235,7 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
             <>
               <Separator />
               <div className="flex flex-col gap-2">
-                <SectionLabel>Footnotes</SectionLabel>
+                <SectionLabel>{t("editor.footnotes.label")}</SectionLabel>
                 <RadioGroup
                   value={footnoteViewMode}
                   disabled={!fileOpen}
@@ -231,7 +248,7 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
                       <div key={option.value} className="flex items-center gap-3">
                         <RadioGroupItem id={id} value={option.value} />
                         <Label htmlFor={id} layout="inline" className="font-normal">
-                          {option.label}
+                          {t(option.labelKey)}
                         </Label>
                       </div>
                     )
@@ -243,15 +260,15 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
 
           <Separator />
           <div className="flex flex-col gap-2">
-            <SectionLabel>Text Direction</SectionLabel>
+            <SectionLabel>{t("editor.view.textDirection")}</SectionLabel>
             <DirectionModeRow
-              label="Source"
+              label={t("editor.column.source")}
               disabled={!fileOpen}
               mode={sourceDirectionMode}
               onChange={onSourceDirectionModeChange}
             />
             <DirectionModeRow
-              label="Target"
+              label={t("editor.column.target")}
               disabled={!fileOpen}
               mode={targetDirectionMode}
               onChange={onTargetDirectionModeChange}
@@ -260,15 +277,15 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
 
           <Separator />
           <div className="flex flex-col gap-2">
-            <SectionLabel>Font Size</SectionLabel>
+            <SectionLabel>{t("editor.view.fontSize")}</SectionLabel>
             <FontSizeRow
-              label="Source"
+              label={t("editor.column.source")}
               value={sourceFontSize}
               disabled={!fileOpen}
               onChange={onSourceFontSizeChange}
             />
             <FontSizeRow
-              label="Target"
+              label={t("editor.column.target")}
               value={targetFontSize}
               disabled={!fileOpen}
               onChange={onTargetFontSizeChange}
@@ -328,6 +345,7 @@ function FontSizeRow({
   disabled: boolean
   onChange: (v: number) => void
 }) {
+  const t = useT()
   return (
     <div
       className={cn(
@@ -337,12 +355,12 @@ function FontSizeRow({
     >
       <span>{label}</span>
       <span className="flex items-center gap-1">
-        <AppTooltip content={`Decrease ${label.toLowerCase()} font size`}>
+        <AppTooltip content={t("editor.view.decreaseFontSize", { side: label.toLowerCase() })}>
           <Button
             type="button"
             variant="ghost"
             size="icon-xs"
-            aria-label={`Decrease ${label.toLowerCase()} font size`}
+            aria-label={t("editor.view.decreaseFontSize", { side: label.toLowerCase() })}
             disabled={disabled || value <= MIN_FONT_SIZE}
             onClick={() => onChange(Math.max(MIN_FONT_SIZE, value - FONT_SIZE_STEP))}
             className="size-5"
@@ -351,12 +369,12 @@ function FontSizeRow({
           </Button>
         </AppTooltip>
         <span className="w-9 text-center text-[10px] tabular-nums text-muted-foreground">{value}px</span>
-        <AppTooltip content={`Increase ${label.toLowerCase()} font size`}>
+        <AppTooltip content={t("editor.view.increaseFontSize", { side: label.toLowerCase() })}>
           <Button
             type="button"
             variant="ghost"
             size="icon-xs"
-            aria-label={`Increase ${label.toLowerCase()} font size`}
+            aria-label={t("editor.view.increaseFontSize", { side: label.toLowerCase() })}
             disabled={disabled || value >= MAX_FONT_SIZE}
             onClick={() => onChange(Math.min(MAX_FONT_SIZE, value + FONT_SIZE_STEP))}
             className="size-5"
@@ -380,16 +398,17 @@ function DirectionModeRow({
   disabled: boolean
   onChange: (mode: DirectionMode) => void
 }) {
+  const t = useT()
   return (
     <div className={cn("flex flex-col gap-1.5", disabled && "opacity-50")}>
       <span className="text-sm">{label}</span>
       <SegmentTabs<DirectionMode>
         value={mode}
         onValueChange={onChange}
-        aria-label={`${label} direction`}
+        aria-label={t("editor.view.directionOf", { side: label })}
         listClassName="w-full"
         options={[
-          { label: "Auto", value: "auto", disabled },
+          { label: t("editor.view.directionAuto"), value: "auto", disabled },
           { label: "LTR", value: "ltr", disabled },
           { label: "RTL", value: "rtl", disabled },
         ]}
@@ -407,7 +426,6 @@ interface DirectionMismatchInput {
 
 interface DirectionMismatch {
   side: "source" | "target"
-  sideLabel: "Source" | "Target"
   forced: TextDirection
   detected: TextDirectionSummary
 }
@@ -431,19 +449,18 @@ function getManualDirectionMismatchForSide(
 ): DirectionMismatch | null {
   if (mode === "auto" || summary == null) return null
   if (summary === mode) return null
-  return {
-    side,
-    sideLabel: side === "source" ? "Source" : "Target",
-    forced: mode,
-    detected: summary,
-  }
+  return { side, forced: mode, detected: summary }
 }
 
-function directionName(direction: TextDirection): string {
-  return direction === "rtl" ? "right-to-left" : "left-to-right"
+function sideLabelKey(side: "source" | "target"): MessageKey {
+  return side === "source" ? "editor.column.source" : "editor.column.target"
 }
 
-function detectedDirectionName(direction: TextDirectionSummary): string {
-  if (direction === "mixed") return "mixed"
-  return directionName(direction)
+function directionNameKey(direction: TextDirection): MessageKey {
+  return direction === "rtl" ? "editor.view.dirRtl" : "editor.view.dirLtr"
+}
+
+function detectedDirectionNameKey(direction: TextDirectionSummary): MessageKey {
+  if (direction === "mixed") return "editor.view.dirMixed"
+  return directionNameKey(direction)
 }

@@ -135,7 +135,9 @@ test("lane: repeat sparkle in a secondary lane never dead-letters", async ({ ali
     await expect(targetCell(alice)).toContainText("hola dos", { timeout: 15_000 })
   } catch {
     const errLine = await alice
-      .locator("[data-cell-id]").first().locator("p.text-destructive")
+      // AQU-891: the inline cell error is now InlineAiError (a role="alert"
+      // <span>, not a bare <p>) — a friendly line plus an info popover.
+      .locator("[data-cell-id]").first().locator("[role='alert'].text-destructive")
       .textContent()
       .catch(() => null)
     throw new Error(

@@ -5,11 +5,11 @@
 // dismiss). Replaces the prior tooltip-only treatment that hid errors in
 // `title=` attributes.
 
-import type { ReactElement } from "react"
+import { useState, type ReactElement } from "react"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
-import { AlertCircle, X } from "lucide-react"
+import { AlertCircle, Check, Copy, X } from "lucide-react"
 import type { ActionableError } from "@/lib/audio/ai-error"
 
 export interface AiStatusAction {
@@ -23,11 +23,27 @@ interface Props {
   trigger: ReactElement
   error: ActionableError
   actions: AiStatusAction[]
-  /** Always rendered as a "Dismiss" button next to the actions. */
-  onDismiss: () => void
+  /** Rendered as a "Dismiss" button next to the actions. Omit for surfaces
+   *  whose error clears on its own (an inline row error goes away on the next
+   *  attempt) so the popover doesn't offer a control that does nothing. */
+  onDismiss?: () => void
 }
 
 export function CellAiStatusPopover({ trigger, error, actions, onDismiss }: Props) {
+  const [copied, setCopied] = useState(false)
+
+  // AQU-891: the raw provider message is what support needs. Selecting it out
+  // of a scrolling <pre> is fiddly, so hand it over in one click.
+  const copyRaw = () => {
+    void navigator.clipboard?.writeText(error.raw).then(
+      () => {
+        setCopied(true)
+        window.setTimeout(() => setCopied(false), 2000)
+      },
+      () => undefined,
+    )
+  }
+
   return (
     <Popover>
       <PopoverTrigger render={trigger} />
@@ -50,22 +66,34 @@ export function CellAiStatusPopover({ trigger, error, actions, onDismiss }: Prop
                 <pre className="mt-1 max-h-24 overflow-auto whitespace-pre-wrap rounded bg-muted/50 p-1.5 text-[10px] text-muted-foreground">
                   {error.raw}
                 </pre>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={copyRaw}
+                  className="mt-1 h-6 gap-1 px-1.5 text-[10px]"
+                >
+                  {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+                  {copied ? "Copied" : "Copy error"}
+                </Button>
               </details>
             )}
           </div>
         </div>
 
         <div className="flex flex-wrap items-center justify-end gap-1.5">
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            onClick={onDismiss}
-            className="h-7 gap-1 px-2 text-[11px]"
-          >
-            <X className="h-3 w-3" />
-            Dismiss
-          </Button>
+          {onDismiss && (
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              onClick={onDismiss}
+              className="h-7 gap-1 px-2 text-[11px]"
+            >
+              <X className="h-3 w-3" />
+              Dismiss
+            </Button>
+          )}
           {actions.map((action, i) => (
             <Button
               key={`${action.label}-${i}`}

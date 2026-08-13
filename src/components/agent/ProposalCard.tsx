@@ -30,6 +30,7 @@ import { applyStagedEvents, type ApplyContext } from "@/lib/agent/apply"
 import { ValidationQueueCard } from "./cards/ValidationQueueCard"
 import { isValidationProposal } from "./cards/registry"
 import { canApply, isSupportedApplyKind } from "@/lib/agent/role-floors"
+import { InlineAiError } from "@/components/InlineAiError"
 
 // ── Lint ───────────────────────────────────────────────────────────────────
 
@@ -312,7 +313,7 @@ function StagedProposalCard({
       </div>
 
       {applyError && (
-        <div className="text-[11px] text-destructive">Apply failed: {applyError}</div>
+        <InlineAiError message={applyError} label="Apply failed" className="text-[11px]" />
       )}
 
       {state === "applied" ? (

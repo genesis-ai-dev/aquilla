@@ -101,6 +101,7 @@ import { AppTooltip } from "@/components/ui/tooltip"
 import { isLaneArchived } from "@/components/project-lane-archive"
 import { categorizeAiError } from "@/lib/audio/ai-error"
 import { CellAiStatusPopover } from "./CellAiStatusPopover"
+import { InlineAiError } from "./InlineAiError"
 import { CellNumberPill } from "./cell/CellNumberPill"
 import { MilestoneNavigator, type MilestoneNavigationItem } from "./ChapterNavigator"
 import { InterlinearAlignmentPanel } from "./InterlinearAlignmentPanel"
@@ -6219,7 +6220,11 @@ function EditorRow({
                 `violation-blot-term` decoration in the editor — the amber
                 advisory band was removed so a forbidden rendering shows one
                 signal (the blot), not two. */}
-            {error && <p className="mt-0.5 text-xs text-destructive">{error}</p>}
+            {/* AQU-891: never render the raw provider message here — a 413 from
+                the chat proxy is a JSON payload, and it lands on every cell in
+                a paragraph draft. InlineAiError shows a plain-language line and
+                keeps the verbatim text in a copyable popover. */}
+            {error && <InlineAiError message={error} className="mt-0.5" />}
             {/* FRO-297: polite live region for transient inline feedback that
                 is NOT already assertive (FRO-274 write-failure banners use
                 role="alert" aria-live="assertive" — don't double-announce those).
@@ -6907,7 +6912,7 @@ function EditorRow({
                     </div>
                   )}
                   {backtranslationError && (
-                    <p className="text-xs text-destructive">{backtranslationError}</p>
+                    <InlineAiError message={backtranslationError} label="Back-translation failed" />
                   )}
                 </div>
               ),

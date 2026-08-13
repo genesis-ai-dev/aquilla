@@ -348,6 +348,7 @@ function fidelityFor(fileType: FileType): RoundTripFidelity {
     case "txt":
     case "md":
     case "html":
+    case "epub":
     case "json":
     case "po":
     case "properties":

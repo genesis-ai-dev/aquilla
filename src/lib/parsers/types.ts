@@ -10,7 +10,7 @@ export type {
   ExportCellFields,
 } from "./core-types"
 
-export type FileType = "md" | "docx" | "pptx" | "idml" | "xlsx" | "txt" | "html" | "json" | "po" | "properties" | "vtt" | "srt" | "sbv" | "usfm" | "ebible" | "helloao" | "xliff" | "tmx" | "csv" | "tsv" | "audio" | "video" | "obs" | "sdbh" | "custom"
+export type FileType = "md" | "docx" | "pptx" | "idml" | "xlsx" | "txt" | "html" | "epub" | "json" | "po" | "properties" | "vtt" | "srt" | "sbv" | "usfm" | "ebible" | "helloao" | "xliff" | "tmx" | "csv" | "tsv" | "audio" | "video" | "obs" | "sdbh" | "custom"
 
 /** File types whose parsers produce scripture-style sections (globalReferences populated, section labels meaningful). */
 export const SCRIPTURE_FILE_TYPES: ReadonlySet<FileType> = new Set(["usfm", "ebible", "helloao"])
@@ -768,6 +768,7 @@ export function detectFileType(fileName: string): FileType | null {
     txt: "txt",
     html: "html",
     htm: "html",
+    epub: "epub",
     json: "json",
     arb: "json",
     po: "po",

@@ -135,7 +135,10 @@ export function extractHtmlStrings(content: string): TranslatableString[] {
  * out of scope. The surrounding tag structure (lists, tables, headings,
  * attributes) is fully preserved.
  */
-export function exportHtml(originalHtml: string, cells: CellData[]): Blob {
+export function applyHtmlTranslations(
+  originalHtml: string,
+  cells: Array<{ translated: string; original: string }>,
+): string {
   const doc = new DOMParser().parseFromString(originalHtml, "text/html")
   const blocks = matchedBlocks(doc)
 
@@ -146,6 +149,9 @@ export function exportHtml(originalHtml: string, cells: CellData[]): Blob {
 
   const hadDoctype = originalHtml.toLowerCase().includes("<!doctype")
   const serialized = doc.documentElement?.outerHTML ?? ""
-  const html = hadDoctype ? `<!DOCTYPE html>\n${serialized}` : serialized
-  return new Blob([html], { type: "text/html;charset=utf-8" })
+  return hadDoctype ? `<!DOCTYPE html>\n${serialized}` : serialized
+}
+
+export function exportHtml(originalHtml: string, cells: CellData[]): Blob {
+  return new Blob([applyHtmlTranslations(originalHtml, cells)], { type: "text/html;charset=utf-8" })
 }

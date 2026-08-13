@@ -1559,7 +1559,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
           <div className="mt-3 space-y-1 text-xs text-muted-foreground">
             <p><span className="font-medium text-foreground/70">Scripture</span> — USFM, USX, SFM</p>
             <p><span className="font-medium text-foreground/70">Translation</span> — XLIFF/XLF, TMX, CSV/TSV</p>
-            <p><span className="font-medium text-foreground/70">Documents</span> — DOCX, TXT, MD, HTML, JSON/ARB, PPTX, IDML (InDesign)</p>
+            <p><span className="font-medium text-foreground/70">Documents</span> — DOCX, TXT, MD, HTML, EPUB, JSON/ARB, PPTX, IDML (InDesign)</p>
             <p><span className="font-medium text-foreground/70">Localization</span> — PO/POT, Java properties</p>
             <p><span className="font-medium text-foreground/70">Subtitles</span> — VTT, SRT, SBV</p>
             <p><span className="font-medium text-foreground/70">Paratext project</span> — .zip or folder</p>

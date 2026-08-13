@@ -50,6 +50,7 @@ import { extractPptxStrings } from "./parsers/pptx"
 import { extractIdmlStrings } from "./parsers/idml"
 import { extractBiblicaStudyNoteStrings } from "./parsers/biblica"
 import { extractHtmlStrings } from "./parsers/html"
+import { extractEpubStrings } from "./parsers/epub"
 import { bulkUploadSource, type BulkImportCell } from "./sync/bulk-import"
 import {
   assertSourceUploadByteLength,
@@ -673,7 +674,7 @@ export async function prepareImportFile(
     // or an XLIFF named .xml by an upstream tool, is not flattened as prose.
     if (isMediaFileType(extensionType)) return { fileType: extensionType, results: [] }
     try {
-      if (extensionType === "docx" || extensionType === "pptx" || extensionType === "idml") {
+      if (extensionType === "docx" || extensionType === "pptx" || extensionType === "idml" || extensionType === "epub") {
         return preparedParsedFile(
           file,
           extensionType,
@@ -2424,6 +2425,17 @@ export async function parseFile(
       const bytes = await file.arrayBuffer()
       const text = decodeImportText(bytes, file.name)
       return [{ name: file.name, strings: extractHtmlStrings(text), rawBytes: bytes, rawSourceFormat: "html" }]
+    }
+    case "epub": {
+      const buffer = await file.arrayBuffer()
+      const strings = await extractEpubStrings(buffer)
+      return [{
+        name: file.name,
+        strings,
+        rawBytes: buffer,
+        rawSourceFormat: "epub",
+        roundTripFidelity: "content-only",
+      }]
     }
     case "xliff": {
       const bytes = await file.arrayBuffer()

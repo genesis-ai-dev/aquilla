@@ -123,9 +123,18 @@ third consecutive review in which `hono`'s declared floor has been the finding,
 which is worth noticing on its own: the floor keeps being raised to the advisory
 of the day and then goes stale, because nothing was watching between reviews.
 
+Worth being precise about what was actually deployed: auth-worker's pnpm
+lockfile — the one Cloudflare Workers Builds installs from — resolved `hono`
+**4.12.25**, below the advisory floor. This was not a "declared range is stale
+but the resolution is fine" finding of the kind SEC-7 turned out to be; the
+vulnerable version was the one shipping.
+
 **Fixed:** `hono` floor raised to `^4.12.34` in auth-worker and agent-worker,
-both lockfiles updated (`sync-worker` was already on `^4.13.1`). All four
-lockfiles now audit clean.
+with **both** lockfiles per worker updated — each has an npm `package-lock.json`
+(used by `npm test`) *and* a `pnpm-lock.yaml` (used by the Workers Builds
+`pnpm install --frozen-lockfile`). Updating only one is how the first push of
+this change went red. `sync-worker` was already on `^4.13.1`. All four
+production trees now audit clean.
 
 ### OPS-3 — [FACT] Session replay captured the editor verbatim; `maskAllInputs` never covered it — **fixed in this change**
 

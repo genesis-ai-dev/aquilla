@@ -82,6 +82,8 @@ import { readCursor } from "@/lib/dcs/cursor"
 import { UpstreamChangesPanel } from "./linked/UpstreamChangesPanel"
 import { buildFileScopedTokenFetcher } from "@/lib/sync/cqrs-bridge"
 import { useOrg } from "@/hooks/useOrg"
+import { useOrgSettings } from "@/hooks/useOrgSettings"
+import { useActiveOrgOptional } from "@/context/OrgContext"
 import { ApiKeyField } from "./ApiKeyField"
 import { SettingsNav, type SettingsSection } from "./ProjectSettings/SettingsNav"
 import { NavList, NavRow } from "@/components/ui/nav-list"
@@ -260,10 +262,19 @@ export function ProjectSettings() {
   // server calls re-validate org-membership / org-ownership, so a mismatch just
   // yields graceful empty/403 states.
   const { org } = useOrg()
-
-  // AQU-311: AI post-edit metrics
+  const activeOrg = useActiveOrgOptional()
   const { session } = useFrontierSession()
   const isCloudProject = !!(project?.syncRole)
+  // AQU-485: Members is a privacy-gated settings pane. Hide it entirely for
+  // callers below rosterViewMinRole — no "Roster hidden" disclosure, no nav
+  // row. Local (unsynced) projects have no org floor, so the pane stays.
+  const rosterOrgId = project?.orgId ?? activeOrg?.activeOrgId ?? null
+  const { canViewRoster } = useOrgSettings(
+    rosterOrgId,
+    activeOrg?.activeOrg?.role?.level,
+    project?.syncRole?.level ?? null,
+  )
+  const canSeeMembers = !isCloudProject || canViewRoster
   const metricsFiles = useMemo(
     () => (project?.files ?? []).map((f) => ({ id: f.id, name: f.name })),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -882,7 +893,7 @@ export function ProjectSettings() {
     { id: "section-bible-resources", label: "Bible resources", keywords: ["bible resources", "aquifer", "bibletranslation", "reference", "scholarly", "translation notes"] },
     { id: "section-import", label: "Import", keywords: ["import", "usfm", "front matter", "book title", "book name", "introduction", "toc", "running header", "paratext", "door43"] },
     { id: "section-user", label: "User", keywords: ["username", "author"] },
-    { id: "section-members", label: "Team members", keywords: ["members", "invite", "invite link", "link", "join", "share", "access", "role", "roster", "collaborator"] },
+    { id: "section-members", label: "Team members", keywords: ["members", "invite", "invite link", "link", "join", "share", "access", "role", "roster", "collaborator"], visible: canSeeMembers },
     { id: "section-ai-instructions", label: "AI Instructions", keywords: ["ai", "llm", "instructions", "batch size", "completions batch", "validation batch", "batch validate", "top_k", "examples", "context window", "assistant language", "few shot"] },
     { id: "section-system-prompt", label: "System prompt", keywords: ["system prompt", "ai instructions", "prompt", "product", "tone", "style", "domain", "guidance"] },
     { id: "section-draft-context", label: "Draft Context", keywords: ["draft context", "preceding cells", "left context", "paragraph drafting", "context budget"] },

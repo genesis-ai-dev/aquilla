@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { type ColumnDef } from "@tanstack/react-table"
 import {
-  AlertTriangle, Lock, ShieldOff, ShieldUser, UserMinus,
+  AlertTriangle, ShieldOff, ShieldUser, UserMinus,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -219,20 +219,11 @@ export function MembersSection({ projectId }: { projectId: string }) {
     [],
   )
 
-  if (rosterHidden) {
-    return (
-      <div id="section-members" data-testid="settings-members-section">
-        <div className="flex flex-col items-center gap-2 py-10 text-center text-muted-foreground">
-          <Lock className="h-5 w-5" />
-          <p className="text-sm font-medium text-foreground">Roster hidden</p>
-          <p className="max-w-xs text-xs">
-            This organization has restricted who can view the member list. Ask an owner or
-            maintainer if you need access.
-          </p>
-        </div>
-      </div>
-    )
-  }
+  // AQU-485: below-floor callers must not see this pane at all (ProjectSettings
+  // omits the nav row). If we still mount — a stale deep-link, or a race
+  // before the org-settings fetch settles — render nothing. Do not disclose
+  // that a restricted roster exists.
+  if (rosterHidden) return null
 
   return (
     <>

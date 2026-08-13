@@ -2,13 +2,12 @@ import { useState } from "react"
 import {
   AlertTriangle,
   Clock,
-  Lock,
   Mail,
   UserPlus,
   X,
 } from "lucide-react"
-import { useLocation, useNavigate } from "react-router-dom"
-import { membersPath } from "@/lib/navigation/org-paths"
+import { useLocation, useNavigate, Navigate } from "react-router-dom"
+import { membersPath, orgOverviewPath } from "@/lib/navigation/org-paths"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -18,6 +17,7 @@ import { AppShell } from "@/components/AppShell"
 import { OrgSidebar } from "@/components/org/OrgSidebar"
 import { OrgBreadcrumb } from "@/components/org/OrgBreadcrumb"
 import { useOrgMembers } from "@/hooks/useOrg"
+import { useOrgSettings } from "@/hooks/useOrgSettings"
 import { useAccessibleProjects } from "@/hooks/useAccessibleProjects"
 import { useOrgInvites } from "@/hooks/useOrgInvites"
 import { MembersPanel, type MembersPanelMember } from "@/components/MembersPanel"
@@ -152,6 +152,10 @@ interface MembersPageContentProps {
 function MembersPageContent({ orgId, orgName }: MembersPageContentProps) {
   const callerUserId = null // FrontierSession has no userId; server enforces self-block.
   const { activeOrg } = useActiveOrg()
+  const { canViewRoster, hasFetched: rosterPolicyReady } = useOrgSettings(
+    orgId,
+    activeOrg?.role?.level,
+  )
   // AQU-326: the External-collaborators governance view is maintainer+ only.
   const canGovern = (activeOrg?.role.level ?? 0) >= ROLE.MAINTAINER
   const { members, isLoading: membersLoading, error: membersError, rosterHidden, add, addMany, remove, listMemberProjects, refresh } =
@@ -169,6 +173,24 @@ function MembersPageContent({ orgId, orgName }: MembersPageContentProps) {
   function setTab(next: MembersTab) {
     if (orgId == null) return
     navigate(membersPath(orgId, next), { replace: true })
+  }
+
+  // AQU-485: below-floor callers must not see this page exist. Redirect to
+  // the org overview rather than a "Roster hidden" disclosure.
+  if (!rosterPolicyReady) {
+    return (
+      <MembersShell>
+        <Page size="wide">
+          <div className="space-y-4">
+            <div className="h-24 animate-pulse rounded-lg border bg-card" />
+            <div className="h-40 animate-pulse rounded-lg border bg-card" />
+          </div>
+        </Page>
+      </MembersShell>
+    )
+  }
+  if (!canViewRoster || rosterHidden) {
+    return <Navigate to={orgOverviewPath(orgId)} replace />
   }
 
   const panelMembers: MembersPanelMember[] = members.map((m) => ({
@@ -232,24 +254,12 @@ function MembersPageContent({ orgId, orgName }: MembersPageContentProps) {
               <p className="text-xs text-destructive">{membersError}</p>
             )}
 
-            {membersLoading && members.length === 0 && !rosterHidden ? (
+            {membersLoading && members.length === 0 ? (
               <Section title="Roster">
                 <div className="flex items-center justify-center py-8 text-muted-foreground">
                   <Spinner className="mr-2" />
                   <span className="text-sm">Loading members…</span>
                 </div>
-              </Section>
-            ) : rosterHidden ? (
-              // AQU-485: the org's rosterViewMinRole policy hides the roster (and
-              // count) from this caller. Render a distinct "hidden" state — never
-              // an empty roster, which would falsely imply zero members.
-              <Section title="Roster">
-                <EmptyState
-                  variant="inline"
-                  icon={Lock}
-                  title="Roster hidden"
-                  description="This organization has restricted who can view the member list. Ask an owner or maintainer if you need access."
-                />
               </Section>
             ) : (
               <>

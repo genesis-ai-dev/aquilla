@@ -3,6 +3,7 @@ import { NavLink, useNavigate } from "react-router-dom"
 import type { LucideIcon } from "lucide-react"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
+import { useOrgSettings } from "@/hooks/useOrgSettings"
 import { usePlatformAdmin } from "@/hooks/usePlatformAdmin"
 import { partitionSharedProjects } from "@/lib/frontier/shared-projects"
 import { isProjectNew, readProjectOpenedAt } from "@/lib/frontier/opened-shared-store"
@@ -59,6 +60,14 @@ export function OrgSidebar() {
   const isGuestOrg = activeGuestOrg != null
   const isMemberOrg = !isAllOrgs && activeOrgId != null && !isGuestOrg
   const isAdmin = isMemberOrg && (activeOrg?.role.level ?? 0) >= 600
+  // AQU-485: Members is a roster-visibility surface, not a generic admin
+  // tool. Follow rosterViewMinRole so a below-floor maintainer does not see
+  // the nav item, and a lowered floor can surface it for contributors.
+  const { canViewRoster } = useOrgSettings(
+    isMemberOrg ? activeOrgId : null,
+    activeOrg?.role?.level,
+  )
+  const showMembersNav = isMemberOrg && canViewRoster
   // Platform-operator (site-wide admin) — separate axis from the org role.
   const { isAdmin: isPlatformAdmin } = usePlatformAdmin()
 
@@ -151,12 +160,16 @@ export function OrgSidebar() {
             Assigned to me
           </OrgNavLink>
         </>}
-        {isAdmin && activeOrgId != null && <>
+        {isMemberOrg && activeOrgId != null && (showMembersNav || isAdmin) && (
           <div className="my-1 border-t" />
+        )}
+        {showMembersNav && activeOrgId != null && (
           <OrgNavLink to={orgPath(activeOrgId, "/members")} className={link}>
             <NavIcon icon={NAV_PAGE_ICONS.members} />
             Members
           </OrgNavLink>
+        )}
+        {isAdmin && activeOrgId != null && <>
           <OrgNavLink to={orgPath(activeOrgId, "/archived")} className={link}>
             <NavIcon icon={NAV_PAGE_ICONS.archived} />
             Archived

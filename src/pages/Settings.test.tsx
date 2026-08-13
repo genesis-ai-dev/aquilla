@@ -21,6 +21,8 @@ vi.mock("@/lib/frontier/orgs", () => ({
   renameOrg: vi.fn(async () => {}),
 }))
 vi.mock("@/components/AccountSwitcher", () => ({ AccountSwitcher: () => null }))
+
+const rosterSettings = vi.hoisted(() => ({ canViewRoster: true }))
 vi.mock("@/hooks/useOrgSettings", () => ({
   useOrgSettings: () => ({
     exportMinRole: null,
@@ -38,7 +40,7 @@ vi.mock("@/hooks/useOrgSettings", () => ({
     canEditOrgKeys: true,
     // AQU-485: roster/member-progress visibility — default floor (Maintainer)
     // and the mocked caller (owner, role 700) passes it.
-    canViewRoster: true,
+    canViewRoster: rosterSettings.canViewRoster,
     rosterViewMinRole: 600,
     canViewMemberProgress: true,
     memberProgressViewMinRole: 600,
@@ -54,7 +56,10 @@ vi.mock("@/hooks/useOrgSettings", () => ({
   canEditAssignmentAuthority: (level: number | null | undefined) => (level ?? 0) >= 700,
 }))
 
-beforeEach(() => localStorage.clear())
+beforeEach(() => {
+  localStorage.clear()
+  rosterSettings.canViewRoster = true
+})
 afterEach(() => vi.clearAllMocks())
 
 // Drive the shadcn (Base UI) Select: open the trigger, hover-highlight the
@@ -167,5 +172,13 @@ describe("Roster & member-progress visibility settings (AQU-485)", () => {
 
     expect(await screen.findByText(/server error/i)).toBeDefined()
     expect(screen.queryByText(/^Saved$/i)).toBeNull()
+  })
+
+  it("omits the Members settings row when the caller is below the roster floor", async () => {
+    rosterSettings.canViewRoster = false
+    renderSettings("/orgs/1/settings")
+    await waitFor(() => expect(screen.getByText("Organization settings")).toBeInTheDocument())
+    expect(screen.queryByRole("link", { name: "Members" })).not.toBeInTheDocument()
+    expect(screen.getByRole("link", { name: /roster & progress visibility/i })).toBeInTheDocument()
   })
 })

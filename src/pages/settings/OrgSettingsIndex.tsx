@@ -13,7 +13,7 @@ import { OrgSettingsShell } from "./OrgSettingsShell"
 
 export function OrgSettingsIndex() {
   const { activeOrg, activeOrgId } = useActiveOrg()
-  const { exportMinRole, rosterViewMinRole, allowSelfAssignment, termbaseEditMinRole } = useOrgSettings(
+  const { exportMinRole, rosterViewMinRole, allowSelfAssignment, termbaseEditMinRole, canViewRoster } = useOrgSettings(
     activeOrgId,
     activeOrg?.role?.level,
   )
@@ -56,7 +56,9 @@ export function OrgSettingsIndex() {
         </NavList>
 
         <NavList label="People & Projects">
-          <NavRow to={membersPath(activeOrgId)} icon={NAV_PAGE_ICONS.members} title="Members" hint="Roles & invites" />
+          {canViewRoster && (
+            <NavRow to={membersPath(activeOrgId)} icon={NAV_PAGE_ICONS.members} title="Members" hint="Roles & invites" />
+          )}
           <NavRow to={orgPath(activeOrgId, "/teams")} icon={NAV_PAGE_ICONS.teams} title="Teams" hint="Groups" />
           <NavRow to={orgPath(activeOrgId, "/archived")} icon={Archive} title="Archived projects" hint="Restore" />
         </NavList>

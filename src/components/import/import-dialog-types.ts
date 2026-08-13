@@ -23,6 +23,7 @@ export type Screen =
   | "paired"
   | "sdbh"
   | "dcs"
+  | "gdrive"
 
 export interface CollisionResolution {
   skipKeys: ReadonlySet<string>

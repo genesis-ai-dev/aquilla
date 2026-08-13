@@ -33,7 +33,7 @@ import { ContextualSteering } from "./ContextualSteering"
 interface PillProps {
   projectId: string
   fileId: string
-  /** Empty string is Project default. v1 does not operate in other lanes. */
+  /** Empty string is Project default. Autopilot follows the editor's open lane. */
   activeLane?: string
   /** Server mutations require contributor access. Omitted is fail-closed. */
   canControl?: boolean
@@ -89,15 +89,19 @@ function ContextualRunPillScoped({
   const [controlError, setControlError] = useState<string | null>(null)
 
   // The store is a single mirror mounted inside one editor. During a React
-  // file-switch render the previous file can remain visible until the attach
-  // effect runs; fail closed so that brief window can never expose commands
-  // for another file's run.
-  const belongsToOpenFile = state.projectId === projectId && state.fileId === fileId
+  // file/lane-switch render the previous scope can remain visible until the
+  // attach effect runs; fail closed so that brief window can never expose
+  // commands for another file or language lane.
+  const belongsToOpenFile =
+    state.projectId === projectId &&
+    state.fileId === fileId &&
+    state.targetLang === activeLane
   const visibleState = belongsToOpenFile ? state : {
     available: false,
     projectId,
     runId: null,
     fileId,
+    targetLang: activeLane,
     status: "idle" as const,
     phase: null,
     spanLabel: null,
@@ -110,7 +114,7 @@ function ContextualRunPillScoped({
   const pendingDrafts =
     drafts.projectId === projectId &&
     drafts.fileId === fileId &&
-    drafts.targetLang === ""
+    drafts.targetLang === activeLane
       ? drafts.pending
       : 0
   const { available, status, phase, spanLabel, runId, activeDirections, lanes } = visibleState
@@ -131,23 +135,12 @@ function ContextualRunPillScoped({
     lastError: null,
     createdAt: "",
     updatedAt: "",
+    targetLang: activeLane,
     activeDirections,
     proposedDrafts: pendingDrafts,
-  }) : null, [activeDirections, fileId, pendingDrafts, phase, progress.done, progress.failed, progress.total, runId, spanLabel, status])
+  }) : null, [activeDirections, activeLane, fileId, pendingDrafts, phase, progress.done, progress.failed, progress.total, runId, spanLabel, status])
 
-  // Autopilot v1 is deliberately default-lane-only. Do not leave a hidden
-  // default run's controls or inspector mounted while edits commit into a
-  // multilingual lane; show the boundary in plain language instead.
-  if (activeLane !== "") {
-    return (
-      <div className={PILL_BASE} data-testid="contextual-run-pill" role="status">
-        <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
-        <span className="text-muted-foreground">
-          {t("autopilot.pill.defaultLaneOnly")}
-        </span>
-      </div>
-    )
-  }
+  const parkedNeedsAttention = status === "parked" && progress.failed > 0 && parkedRemaining === 0
 
   // Drafts waiting on a human are the run's RESULT, so they outrank its
   // machinery: a translator wants "12 ready for you", not a span count.
@@ -196,6 +189,7 @@ function ContextualRunPillScoped({
       projectId={projectId}
       fileId={fileId}
       runId={runId}
+      targetLang={activeLane}
       directions={activeDirections}
     />
   ) : null
@@ -228,7 +222,7 @@ function ContextualRunPillScoped({
           onClick={() => {
             setControlError(null)
             if (!available) { onSetupNeeded?.(); return }
-            void startContextualRun(projectId, fileId, anchorCellId ?? undefined).then((started) => {
+            void startContextualRun(projectId, fileId, anchorCellId ?? undefined, activeLane).then((started) => {
               if (!started) {
                 setControlError(t("autopilot.pill.startFailed"))
               }
@@ -295,14 +289,28 @@ function ContextualRunPillScoped({
   } else if (status === "parked") {
     announcement = parkedRemaining > 0
       ? t("autopilot.pill.announcement.queued", { count: parkedRemaining })
-      : t("autopilot.pill.announcement.idle")
+      : parkedNeedsAttention
+        ? t("autopilot.pill.announcement.completeWithAttention", {
+            done: progress.done,
+            total: progress.total,
+            failed: progress.failed,
+          })
+        : t("autopilot.pill.announcement.idle")
     content = (
       <>
-        <Eye className="h-3.5 w-3.5 text-muted-foreground" />
-        <span className="text-muted-foreground">
+        {parkedNeedsAttention
+          ? <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-destructive" aria-hidden />
+          : <Eye className="h-3.5 w-3.5 text-muted-foreground" />}
+        <span className={parkedNeedsAttention ? undefined : "text-muted-foreground"}>
           {parkedRemaining > 0
             ? t("autopilot.pill.queuedRemaining", { count: parkedRemaining })
-            : t("autopilot.pill.idle")}
+            : parkedNeedsAttention
+              ? t("autopilot.pill.completeWithAttention", {
+                  done: progress.done,
+                  total: progress.total,
+                  failed: progress.failed,
+                })
+              : t("autopilot.pill.idle")}
         </span>
         {pendingChip}
       </>
@@ -464,11 +472,10 @@ export function ContextualRunPillMount({ projectId, fileId, activeLane, onSetupN
   const { requestScrollToSection } = useEditorScroll()
 
   useEffect(() => {
-    if (activeLane !== "") return
     // Slice D2: swap the run-store's stub transport for the real auth-worker
     // client before the first snapshot fetch. Idempotent (first call wins).
     installContextualTransport()
-    void attachContextualRun(projectId, fileId)
+    void attachContextualRun(projectId, fileId, activeLane)
   }, [activeLane, projectId, fileId])
 
   return (

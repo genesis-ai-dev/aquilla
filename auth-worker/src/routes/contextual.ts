@@ -64,7 +64,7 @@ import {
   type AppendContextualRunEventInput,
 } from "../../../db/shared/contextual-runs"
 import { getSceneBrief, listSceneBriefsByRun } from "../../../db/shared/scene-briefs"
-import { loadProjectContext } from "../lib/contextual/project-context"
+import { isRegisteredTargetLane, loadProjectContext } from "../lib/contextual/project-context"
 import { computeContextReadiness, type ContextReadiness } from "../lib/contextual/readiness"
 import {
   runOneTick,
@@ -573,10 +573,10 @@ contextual.post(
     const user = c.get("user")
     const body = c.req.valid("json")
     const lane = (body.targetLang ?? "").trim()
-    if (lane !== "") {
+    if (!(await isRegisteredTargetLane(c.env.AQUILLA_PG, projectId, lane))) {
       const { body: err, status } = errorJson(
         "validation_failed",
-        "Autopilot currently supports only the project's default target-language lane.",
+        "That target-language lane is not registered on this project.",
         400,
       )
       return c.json(err, status)
@@ -882,7 +882,7 @@ contextual.get("/:projectId/contextual/runs", authMiddleware, async (c) => {
     ? await readUnconsumedSteering(c.env.AQUILLA_PG, { projectId, fileId, runId: run.id })
     : []
   const [draftCounts, runDraftCounts] = await Promise.all([
-    countDrafts(c.env.AQUILLA_PG, projectId, fileId),
+    countDrafts(c.env.AQUILLA_PG, projectId, fileId, targetLang),
     run
       ? countDraftsByRun(c.env.AQUILLA_PG, projectId, run.id)
       : Promise.resolve({ proposed: 0, applied: 0, rejected: 0, superseded: 0 }),
@@ -1102,7 +1102,7 @@ contextual.post(
   },
 )
 
-// GET /:projectId/contextual/drafts?fileId=&status= — staged drafts (VIEWER).
+// GET /:projectId/contextual/drafts?fileId=&status=&targetLang= — staged drafts (VIEWER).
 contextual.get("/:projectId/contextual/drafts", authMiddleware, async (c) => {
   const projectId = c.req.param("projectId") ?? ""
   const gate = await requireRole(c, projectId, ROLE.VIEWER)
@@ -1122,6 +1122,7 @@ contextual.get("/:projectId/contextual/drafts", authMiddleware, async (c) => {
     projectId,
     fileId,
     statusParam as "proposed" | "applied" | "rejected" | "superseded" | undefined,
+    c.req.query("targetLang") ?? "",
   )
   return c.json({ drafts })
 })

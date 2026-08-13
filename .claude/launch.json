@@ -1,8 +1,83 @@
 {
   "version": "0.0.1",
   "configurations": [
-    { "name": "swarm-qa", "runtimeExecutable": "env",
-      "runtimeArgs": ["DEV_STACK_IDENTITY_PORT=18798","DEV_STACK_SYNC_PORT=18799","npm","run","dev","--","--vite-port=15373"],
-      "port": 15373 }
+    {
+      "name": "agent-qa-stack",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "dev",
+        "--",
+        "--vite-port=5173"
+      ],
+      "port": 5173
+    },
+    {
+      "name": "web",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev:vite",
+        "--",
+        "--port",
+        "5180",
+        "--strictPort"
+      ],
+      "port": 5180
+    },
+    {
+      "name": "stack-header-declutter",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": [
+        "-c",
+        "cd /Users/ryderwishart/prototypes/codex-web-app-worktrees/header-declutter && DEV_STACK_IDENTITY_PORT=8821 DEV_STACK_SYNC_PORT=8822 npm run dev -- --vite-port=5221"
+      ],
+      "port": 5221
+    },
+    {
+      "name": "stack-sdbh",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": [
+        "-c",
+        "cd /Users/ryderwishart/prototypes/codex-web-app-worktrees/sdbh-importer && DEV_STACK_IDENTITY_PORT=8831 DEV_STACK_SYNC_PORT=8832 npm run dev -- --vite-port=5231"
+      ],
+      "port": 5231
+    },
+    {
+      "name": "stack-qa",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "DEV_STACK_IDENTITY_PORT=18788",
+        "DEV_STACK_SYNC_PORT=18789",
+        "npm",
+        "run",
+        "dev",
+        "--",
+        "--vite-port=15173"
+      ],
+      "port": 15173
+    },
+    {
+      "name": "stack-qa-fro414",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "DEV_STACK_IDENTITY_PORT=18888",
+        "DEV_STACK_SYNC_PORT=18889",
+        "npm",
+        "run",
+        "dev",
+        "--",
+        "--vite-port=15273"
+      ],
+      "port": 15273
+    },
+    {
+      "name": "stack-gdrive-import",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": [
+        "-c",
+        "cd /Users/ryderwishart/frontierrnd/aquilla/.claude/worktrees/google-drive-import && DEV_STACK_IDENTITY_PORT=18841 DEV_STACK_SYNC_PORT=18842 npm run dev -- --vite-port=15241"
+      ],
+      "port": 15241
+    }
   ]
 }

@@ -180,8 +180,6 @@ export const autopilot = defineNamespace({
       "Draft suggestions stay in review until a person accepts them.",
 
     // — Editor run pill —————————————————————————————————————————————
-    "autopilot.pill.defaultLaneOnly":
-      "Autopilot works in Project default only. Switch to that lane to run it.",
     "autopilot.pill.suggestionsWaiting": "Suggestions waiting in your cells",
     "autopilot.pill.suggestionsReady": plural({
       one: "{count} suggestion ready to review",
@@ -223,6 +221,10 @@ export const autopilot = defineNamespace({
       other: "Queued · {count} passages remaining",
     }),
     "autopilot.pill.idle": "Idle · no work queued",
+    "autopilot.pill.completeWithAttention":
+      "{done}/{total} complete · {failed} need attention",
+    "autopilot.pill.announcement.completeWithAttention":
+      "Autopilot finished {done} of {total} passages. {failed} still need attention.",
 
     // — Inline proposal review ——————————————————————————————————————
     "autopilot.draft.draftedFrom": "Drafted from {spanLabel}",
@@ -260,10 +262,6 @@ export const autopilot = defineNamespace({
     "autopilot.inspector.scanningPassages": "Scanning passages",
     "autopilot.inspector.targetLanguage": "Target: {language}",
     "autopilot.inspector.defaultLane": "Default language lane",
-    "autopilot.inspector.evidenceDrafts": plural({
-      one: "{count} evidence draft",
-      other: "{count} evidence drafts",
-    }),
     "autopilot.inspector.readyCount": plural({
       one: "{count} ready to review",
       other: "{count} ready to review",
@@ -286,6 +284,7 @@ export const autopilot = defineNamespace({
     "autopilot.inspector.run.stopped": "This run was stopped.",
     "autopilot.inspector.run.failed": "This run stopped before it could finish.",
     "autopilot.inspector.run.passagesComplete": "Passages complete",
+    "autopilot.inspector.run.lane": "Language: {language}",
     "autopilot.inspector.run.updatedAt": "Updated {time}",
     "autopilot.inspector.run.calls": plural({
       one: "{count} call",
@@ -312,7 +311,7 @@ export const autopilot = defineNamespace({
 
     // — Inspector: errors, recovery, and live announcements —————————
     "autopilot.inspector.error.unsupportedLane":
-      "This run targets a multilingual lane that Autopilot doesn’t support yet. Its history is available, but it can’t be retried.",
+      "This run targeted a language lane Autopilot couldn’t draft at the time. Retry it on that lane.",
     "autopilot.inspector.error.requestAborted":
       "The model request ended before it completed. Retry when you’re ready.",
     "autopilot.inspector.error.transport":
@@ -393,8 +392,6 @@ export const autopilot = defineNamespace({
     "autopilot.inspector.review.noProvenance": "No provenance metadata recorded",
     "autopilot.inspector.review.inEditor": "Review in editor",
     "autopilot.inspector.review.inEditorCell": "Review in editor: cell {cellId}",
-    "autopilot.inspector.review.unsupportedLaneEvidence":
-      "Evidence only — this draft belongs to the unsupported {language} lane and can’t be applied from Autopilot.",
     "autopilot.inspector.review.noneLoaded": plural({
       one: "No ready-to-review drafts are loaded from this bounded page yet. {count} remains recorded for this run.",
       other: "No ready-to-review drafts are loaded from this bounded page yet. {count} remain recorded for this run.",
@@ -512,11 +509,6 @@ export const autopilot = defineNamespace({
         description:
           "Safety explanation below the device-local Autopilot discovery switch in project settings.",
         screenshot: "project-settings",
-      },
-      "autopilot.pill.defaultLaneOnly": {
-        description:
-          "Editor-pill boundary message shown when a multilingual target lane is open and Autopilot cannot operate there.",
-        screenshot: "editor-table",
       },
       "autopilot.draft.suggested": {
         description:
@@ -660,6 +652,26 @@ export const autopilot = defineNamespace({
         "Compact visible editor-pill label for queued passages remaining.",
         { count: "Number of queued passages remaining." },
       ),
+      "autopilot.pill.completeWithAttention": withPlaceholders(
+        "Editor-pill summary when a run finished some passages and left others needing a person.",
+        {
+          done: "Number of passages that produced reviewable drafts.",
+          total: "Total number of passages in the run.",
+          failed: "Number of passages that still need attention.",
+        },
+      ),
+      "autopilot.pill.announcement.completeWithAttention": withPlaceholders(
+        "Polite live-region announcement that Autopilot finished with some passages still needing attention.",
+        {
+          done: "Number of passages that produced reviewable drafts.",
+          total: "Total number of passages in the run.",
+          failed: "Number of passages that still need attention.",
+        },
+      ),
+      "autopilot.inspector.run.lane": withPlaceholders(
+        "Selected-run label identifying the target-language lane Autopilot is drafting into.",
+        { language: "Target-language code stored on the run; do not translate the substituted value." },
+      ),
       "autopilot.draft.draftedFrom": withPlaceholders(
         "Tooltip identifying the passage from which an inline suggestion was drafted.",
         { spanLabel: "Human-readable passage reference; do not translate its substituted value." },
@@ -675,10 +687,6 @@ export const autopilot = defineNamespace({
       "autopilot.inspector.targetLanguage": withPlaceholders(
         "Run-list label identifying a historic multilingual target lane.",
         { language: "Target-language code stored on the run; do not translate the substituted value." },
-      ),
-      "autopilot.inspector.evidenceDrafts": withPlaceholders(
-        "Run-list badge counting evidence-only drafts on an unsupported historic lane.",
-        { count: "Number of evidence drafts." },
       ),
       "autopilot.inspector.readyCount": withPlaceholders(
         "Run-list badge counting proposals ready for human review.",
@@ -723,10 +731,6 @@ export const autopilot = defineNamespace({
       "autopilot.inspector.review.inEditorCell": withPlaceholders(
         "Accessible name of an editor review link that identifies its target cell.",
         { cellId: "Stable target-cell identifier; do not translate its substituted value." },
-      ),
-      "autopilot.inspector.review.unsupportedLaneEvidence": withPlaceholders(
-        "Evidence-only note for a proposal from an unsupported historic language lane.",
-        { language: "Target-language code stored on the run; do not translate the substituted value." },
       ),
       "autopilot.inspector.review.noneLoaded": withPlaceholders(
         "Bounded-page message when authoritative proposals exist but none are loaded yet.",

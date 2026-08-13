@@ -6,6 +6,7 @@ import type { PreparedImportFile } from "@/lib/import/import-service"
 import type { ImportUploadProgress } from "@/components/import/PreviewPanel"
 import { ParatextChoice } from "./ParatextChoice"
 import { formatBytesProgress } from "@/lib/format-bytes"
+import { GoogleDrivePanel } from "@/components/import/GoogleDrivePanel"
 import { useI18n, useT } from "@/lib/i18n/I18nProvider"
 import { t as tStandalone } from "@/lib/i18n/standalone"
 import { formatNumber } from "@/lib/i18n/format"
@@ -21,6 +22,12 @@ import { IMPORT_FAILED } from "@/lib/event-names"
 import type { CollisionResolution } from "./import-dialog-types"
 
 interface UploadPanelProps {
+  /**
+   * AQU-823: "gdrive" swaps the dropzone for the Google Drive picker while
+   * reusing this panel's whole state machine (importing, progress, error,
+   * Paratext choice). Same file sink, different file source.
+   */
+  variant?: "upload" | "gdrive"
   projectId: string
   username: string
   sourceLanguage: string
@@ -95,7 +102,7 @@ function idmlParsePhase(
   })
 }
 
-export function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targetLang, identityToken, getToken, onImported, ttsSettings, onCastUpdated, existingFiles, onCollision, onPreview, onCommitPhase, onCommitProgress, onCommitError, onSpreadsheetFile, excludeFrontMatter }: UploadPanelProps) {
+export function UploadPanel({ variant = "upload", projectId, username, sourceLanguage, targetLanguage, targetLang, identityToken, getToken, onImported, ttsSettings, onCastUpdated, existingFiles, onCollision, onPreview, onCommitPhase, onCommitProgress, onCommitError, onSpreadsheetFile, excludeFrontMatter }: UploadPanelProps) {
   const { locale } = useI18n()
   const t = useT()
   const [importing, setImporting] = useState(false)
@@ -103,6 +110,9 @@ export function UploadPanel({ projectId, username, sourceLanguage, targetLanguag
   const [error, setError] = useState<string | null>(null)
   const [phase, setPhase] = useState<string>("")
   const [progress, setProgress] = useState<ImportUploadProgress | null>(null)
+  // AQU-823: file provenance from the Google Drive picker, stamped into the
+  // import manifest at commit time. One-shot — see the finally below.
+  const originsRef = useRef<Map<string, Record<string, unknown>> | null>(null)
   const parseAbortRef = useRef<AbortController | null>(null)
   const finalizationCheckpointRef = useRef<{
     files: File[]
@@ -327,6 +337,7 @@ export function UploadPanel({ projectId, username, sourceLanguage, targetLanguag
             targetLang,
             identityToken,
             reimportFileIds,
+            origins: originsRef.current ?? undefined,
             getToken,
             onCellEnqueued: (count, total) => {
               const p = t("importExport.upload.uploadingFile", { fileName: file.name })
@@ -408,6 +419,9 @@ export function UploadPanel({ projectId, username, sourceLanguage, targetLanguag
           onCommitError?.(message)
         }
       } finally {
+        // AQU-823: one-shot Drive provenance — a later plain upload must not
+        // inherit origins from a previous Google Drive batch.
+        originsRef.current = null
         setImporting(false)
         setProgress(null)
         onCommitProgress?.(null)
@@ -449,6 +463,24 @@ export function UploadPanel({ projectId, username, sourceLanguage, targetLanguag
         onCollision={onCollision}
         excludeFrontMatter={excludeFrontMatter}
       />
+    )
+  }
+
+  // AQU-823: Google Drive variant — same panel state machine (importing,
+  // progress, error, Paratext choice above), different file source.
+  if (variant === "gdrive" && !importing) {
+    return (
+      <div>
+        <GoogleDrivePanel
+          onFiles={async (files, origins) => {
+            // Cleared in doCommit's finally — the preview flow commits later
+            // from a closure, so clearing here would race the actual upload.
+            originsRef.current = origins
+            await handleFiles(files)
+          }}
+        />
+        {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
+      </div>
     )
   }
 

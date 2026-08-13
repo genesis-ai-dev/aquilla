@@ -155,10 +155,10 @@ export function ImportDialog({
     /** Commits the parsed results to the server once user confirms. */
     commit: () => void | Promise<void>
     /** Surface to restore if the user cancels the preview. */
-    returnScreen: "upload" | "spreadsheet"
+    returnScreen: "upload" | "spreadsheet" | "gdrive"
   } | null>(null)
   const [spreadsheetSeedFile, setSpreadsheetSeedFile] = useState<File | null>(null)
-  const [spreadsheetReturnScreen, setSpreadsheetReturnScreen] = useState<"landing" | "upload">("landing")
+  const [spreadsheetReturnScreen, setSpreadsheetReturnScreen] = useState<"landing" | "upload" | "gdrive">("landing")
   // AQU-430: upload progress surfaced from UploadPanel's doCommit while the
   // preview screen is active (UploadPanel is unmounted; these live here so
   // PreviewPanel can render an in-flight indicator).
@@ -458,6 +458,47 @@ export function ImportDialog({
             onSpreadsheetFile={(file) => {
               setSpreadsheetSeedFile(file)
               setSpreadsheetReturnScreen("upload")
+              setScreen("spreadsheet")
+            }}
+            onCommitPhase={setPreviewUploadPhase}
+            onCommitProgress={setPreviewUploadProgress}
+            onCommitError={setPreviewCommitError}
+            onImported={handleChildImported}
+            excludeFrontMatter={excludeFrontMatter}
+          />
+        )}
+
+        {screen === "gdrive" && (
+          <UploadPanel
+            variant="gdrive"
+            projectId={projectId}
+            username={username}
+            sourceLanguage={sourceLanguage}
+            targetLanguage={targetLanguage}
+            targetLang={targetLang}
+            identityToken={identityToken}
+            getToken={getToken}
+            ttsSettings={ttsSettings}
+            onCastUpdated={onCastUpdated}
+            existingFiles={existingFiles}
+            onCollision={(collisions, proceed) => {
+              posthog.capture(IMPORT_COLLISION_DETECTED, {
+                collision_count: collisions.length,
+                project_id: projectId,
+              })
+              setCollisionState({ collisions, proceed })
+              setScreen("collision")
+            }}
+            onPreview={(results, commit) => {
+              setPreviewUploadPhase("")
+              setPreviewUploadProgress(null)
+              setPreviewCommitError(null)
+              setPreviewState({ results, commit, returnScreen: "gdrive" })
+              setScreen("preview")
+            }}
+            onSpreadsheetFile={(file) => {
+              setSpreadsheetSeedFile(file)
+              setSpreadsheetReturnScreen("gdrive")
               setScreen("spreadsheet")
             }}
             onCommitPhase={setPreviewUploadPhase}

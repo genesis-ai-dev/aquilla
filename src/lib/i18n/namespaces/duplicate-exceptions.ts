@@ -495,4 +495,11 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "picker, sitting beside 'Source' and 'Audio' as a kind-of-thing label. A " +
     "specific instance and a category name take different forms wherever nouns " +
     "inflect for definiteness.",
+  "importExport.paratext.languageLabel":
+    "Labels the SOURCE LANGUAGE detected in a Paratext project during import — a " +
+    "property of the file being read. autopilot.inspector.run.lane names the " +
+    "language LANE an Autopilot run targeted, i.e. which translation track the " +
+    "run wrote into. One describes an input's language, the other identifies a " +
+    "destination track; languages that mark that difference with case or an " +
+    "adposition cannot share a single rendering.",
 }

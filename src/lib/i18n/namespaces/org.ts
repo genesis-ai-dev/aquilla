@@ -49,6 +49,11 @@ export const org = defineNamespace({
     "org.orgHome.dueDate": "Due {date}",
     "org.orgHome.pctTranslated": "{pct}% translated",
     "org.orgHome.pctValidated": "{pct}% validated",
+    // AQU-883: the project directory backs shared/guest projects; its failure used to
+    // be indistinguishable from an empty list, so it gets its own announced state.
+    "org.orgHome.projectDirectoryError.title": "Couldn’t load your project directory",
+    "org.orgHome.projectDirectoryError.description":
+      "Projects shared with you and guest organizations may be missing from this view.",
     "org.orgHome.noProjectsYet": "No projects yet.",
 
     "org.orgHome.organizationsPanel.countFraction": "{shown} of {total}",
@@ -334,7 +339,7 @@ export const org = defineNamespace({
     "org.projectOverview.unreachableMessage":
       "Can't reach the server — this project may still be available.",
     "org.projectOverview.verseProgressUnavailable": "Verse progress unavailable. Retry",
-    "org.projectOverview.chapterProgressUnavailable": "Chapter progress unavailable. Retry",
+    "org.projectOverview.chapterProgressUnavailable": "Progress unavailable. Retry",
     "org.projectOverview.signInMessage": "Sign in to open this project from the cloud.",
     "org.projectOverview.inactiveBadge": "Inactive",
     // "Restore" → common.restore (identical text)
@@ -413,9 +418,9 @@ export const org = defineNamespace({
     "org.projectOverview.restoreForbidden": "Only owners can restore a project.",
     "org.projectOverview.loadingVerses": "Loading verses…",
     "org.projectOverview.versesAria": "{chapter} verses",
-    "org.projectOverview.loadingChapterBreakdown": "Loading chapter breakdown…",
+    "org.projectOverview.loadingChapterBreakdown": "Loading breakdown…",
     "org.projectOverview.chaptersAria": "{book} chapters",
-    "org.projectOverview.noChapterStructure": "No chapter structure detected for this file.",
+    "org.projectOverview.noChapterStructure": "No section breakdown available for this file.",
     "org.projectOverview.sectionBreakdownAria": "Section breakdown",
     "org.projectOverview.chapterBreakdownAria": "Chapter breakdown",
     "org.projectOverview.audioRecordedSummary": "{minutes} min recorded · {percent} of cells have audio",

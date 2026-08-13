@@ -164,7 +164,10 @@ describe("ProjectsList — orgs fetch failure (RES-5)", () => {
     await waitFor(() => {
       expect(screen.getByText(/can't reach the server/i)).toBeInTheDocument()
     })
-    expect(screen.getByRole("button", { name: /retry/i })).toBeInTheDocument()
+    // AQU-882: the sidebar org switcher grew its own retry affordance for this
+    // same failure, so scope to the banner rather than matching any /retry/.
+    const banner = screen.getByTestId("projects-unreachable-banner")
+    expect(within(banner).getByRole("button", { name: /retry/i })).toBeInTheDocument()
     expect(screen.queryByText(/no projects in this org yet/i)).not.toBeInTheDocument()
     // The projects fetch never ran (no org id) — and must not be needed for
     // the banner to appear.
@@ -180,8 +183,8 @@ describe("ProjectsList — orgs fetch failure (RES-5)", () => {
     })
 
     render(<MemoryRouter><OrgProvider><ProjectsList /></OrgProvider></MemoryRouter>)
-    const retry = await screen.findByRole("button", { name: /retry/i })
-    retry.click()
+    const banner = await screen.findByTestId("projects-unreachable-banner")
+    within(banner).getByRole("button", { name: /retry/i }).click()
 
     await waitFor(() => expect(screen.getByText("John")).toBeInTheDocument())
     expect(screen.queryByText(/can't reach the server/i)).not.toBeInTheDocument()

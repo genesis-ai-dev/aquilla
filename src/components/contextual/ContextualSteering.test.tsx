@@ -210,7 +210,7 @@ describe("ContextualSteering", () => {
       activeDirections: [],
     })
     expect(newScopeFetch).toHaveBeenCalledTimes(1)
-    expect(newScopeFetch).toHaveBeenCalledWith("p2", "file-2")
+    expect(newScopeFetch).toHaveBeenCalledWith("p2", "file-2", "")
   })
 
   it("shows queued directions as chips with a count badge on the trigger", () => {

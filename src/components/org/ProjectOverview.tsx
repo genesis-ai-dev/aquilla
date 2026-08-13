@@ -32,6 +32,7 @@ import { fetchSyncToken } from "@/lib/sync/sync-token"
 import {
   progressToCanonicalRollup,
   sectionProgressToVerseRollup,
+  formatFlatSectionKey,
   type BookRollup,
   type ChapterRollup,
   type VerseRollup,
@@ -332,7 +333,7 @@ function FlatSectionRow({ section }: { section: FlatSectionRollup }) {
       data-testid="section-row"
       className="flex w-full items-center gap-2 py-0.5 text-xs"
     >
-      <span className="w-10 shrink-0 font-medium">{section.key}</span>
+      <span className="w-14 shrink-0 font-medium">{formatFlatSectionKey(section.key)}</span>
       <MiniRollupBar filledPct={section.filledPct} approvedPct={section.approvedPct} />
       <span className="text-[10px] tabular-nums text-muted-foreground">
         {section.filledCount}/{section.approvedCount}/{section.totalCount}

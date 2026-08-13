@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
-import { Link, useNavigate } from "react-router-dom"
+import { Link, Navigate, useLocation, useNavigate } from "react-router-dom"
 import { AppShell } from "@/components/AppShell"
 import { LoadingOverlay } from "@/components/ui/loading-overlay"
 import { Skeleton } from "@/components/ui/skeleton"
 import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
 import { useActiveOrg } from "@/context/OrgContext"
-import { membersPath, orgHomePath } from "@/lib/navigation/org-paths"
+import { ALL_ORGS_PARAM, membersPath, orgHomePath, parseOrgPath } from "@/lib/navigation/org-paths"
+import { resolveAllOrgsLanding } from "@/lib/navigation/all-orgs-landing"
 import type { OrgSummary } from "@/lib/frontier/orgs"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { getPortfolio, getPortfolios, translatedPct, validatedPct, attentionRank, audioPct, deadlineStatus, languagePairLabel, type PortfolioProject } from "@/lib/frontier/portfolio"
@@ -31,6 +32,7 @@ import { RoleLabel } from "@/components/RoleLabel"
 import { UserError } from "@/lib/errors/user-error"
 import { notifySessionExpired } from "@/lib/errors/session-expired-signal"
 import { ProjectCreateDialog } from "@/components/ProjectCreateDialog"
+import { OrgCreateDialog } from "./OrgCreateDialog"
 import { OrgSetupChecklist } from "./OrgSetupChecklist"
 import { OrgProjectsDataTable } from "./OrgProjectsDataTable"
 import { LaneChips } from "./LaneChips"
@@ -57,7 +59,7 @@ import { Page, PageHeader, StatTile, EmptyState } from "@/components/ui/page"
 import { SegmentTabs } from "@/components/ui/tabs"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
-import { FolderPlus, Search, X, Building2, Sparkles, CircleCheck, Mic } from "lucide-react"
+import { FolderPlus, Search, X, Building2, Sparkles, CircleCheck, Mic, AlertTriangle } from "lucide-react"
 
 function DashboardRowTemplate() {
   return (
@@ -578,12 +580,23 @@ export function OrgHome() {
     orgs,
     accessibleProjects,
     accessibleProjectsLoading,
+    accessibleProjectsError,
     isLoading: orgLoading,
+    error: orgsError,
     setActiveOrg,
+    refresh: refreshOrgs,
     refreshAccessibleProjects,
+    retryOrgLoad,
   } = useActiveOrg()
   const { session, loading: sessionLoading } = useFrontierSession()
   const navigate = useNavigate()
+  const location = useLocation()
+  // AQU-864: this component is mounted both at `/orgs/all` and (via
+  // OrgHomeRoute) at `/orgs/:orgId`. The landing guard below must only ever
+  // apply to the former — `activeOrgId` is briefly null on the first render
+  // after navigating into a concrete org, and redirecting on that would hijack
+  // a perfectly good org route.
+  const isAllOrgsRoute = parseOrgPath(location.pathname)?.orgKey === ALL_ORGS_PARAM
   const jwt = session?.jwt ?? null
   const portfolioScopeKey = !jwt || orgLoading
     ? null
@@ -613,6 +626,9 @@ export function OrgHome() {
   const [resolvedPortfolioScopeKey, setResolvedPortfolioScopeKey] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [projectQuery, setProjectQuery] = useState("")
+  // AQU-864: the no-organization empty state needs a working action; without a
+  // real org there is nothing to create a project in, so the offer is the org.
+  const [orgCreateOpen, setOrgCreateOpen] = useState(false)
   const [orgQuery, setOrgQuery] = useState("")
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all")
   const [projectLens, setProjectLens] = useState<ProjectLens>(readProjectLens)
@@ -755,6 +771,51 @@ export function OrgHome() {
         <OrgHomeLoadingTemplate />
       </LoadingOverlay>
     )
+  }
+
+  // AQU-864: `/orgs/all` has something to aggregate only at 2+ memberships.
+  // Below that it used to render the single-org dashboard with no org in
+  // scope — a "Your organization is ready" card with 0/0/0 stats, no create
+  // dialog (it needs an org id) and an "Invite your team" button that
+  // navigated nowhere. Send the caller to the surface that does list what they
+  // can reach instead of stranding them on a page with nothing clickable.
+  if (isAllOrgsRoute) {
+    const landing = resolveAllOrgsLanding({ orgs, accessibleProjects, orgsError, accessibleProjectsError })
+    if (landing.kind === "org") {
+      return <Navigate to={orgHomePath(landing.orgId)} replace />
+    }
+    if (landing.kind === "shared") {
+      return <Navigate to="/shared" replace />
+    }
+    if (landing.kind === "error") {
+      // An org-list failure leaves `orgs` empty just like a genuine zero.
+      // Say so and offer a retry rather than painting a fake-empty workspace.
+      // AQU-882: retry must re-issue the project-directory fetch too — the
+      // resolver reads `accessibleProjects`, so refreshing orgs alone could
+      // land a project-only user on "empty" instead of /shared.
+      return (
+        <AppShell
+          sidebar={<OrgSidebar />}
+          header={<OrgBreadcrumb section="Projects" />}
+          statusBar={null}
+          main={
+            <Page size="wide">
+              <PageHeader title="All organizations" />
+              <EmptyState
+                data-testid="org-load-error"
+                icon={AlertTriangle}
+                title="Couldn’t load your organizations"
+                description={orgsError ?? accessibleProjectsError ?? "Something went wrong loading your workspace."}
+                action={
+                  <Button onClick={() => { void retryOrgLoad() }}>Retry</Button>
+                }
+              />
+            </Page>
+          }
+        />
+      )
+    }
+    // "portfolio" and "empty" both render below.
   }
 
   // Rollup stats
@@ -1136,13 +1197,39 @@ export function OrgHome() {
                         data-testid="projects-scroll"
                         className="min-h-0 overscroll-contain lg:overflow-y-auto"
                       >
-                        {projects.length === 0 ? (
+                        {/* AQU-883: the project directory backs shared/guest
+                            projects and the guest orgs derived from them. Its
+                            failure used to fold into an empty list, leaving
+                            this panel indistinguishable from "nothing is
+                            shared with you". Announce it above whatever member
+                            projects the portfolio did load — hiding those would
+                            overstate the failure — and offer an in-place retry. */}
+                        {accessibleProjectsError ? (
                           <EmptyState
+                            data-testid="project-directory-error"
                             variant="inline"
                             className="py-10"
-                            icon={FolderPlus}
-                            title={t("org.orgHome.noProjectsYet")}
+                            icon={AlertTriangle}
+                            title={t("org.orgHome.projectDirectoryError.title")}
+                            description={t("org.orgHome.projectDirectoryError.description")}
+                            action={
+                              <Button size="sm" onClick={() => { void refreshAccessibleProjects() }}>
+                                {t("common.retry")}
+                              </Button>
+                            }
                           />
+                        ) : null}
+                        {projects.length === 0 ? (
+                          // Suppress the plain empty state while the directory
+                          // error above is explaining the blank panel.
+                          accessibleProjectsError ? null : (
+                            <EmptyState
+                              variant="inline"
+                              className="py-10"
+                              icon={FolderPlus}
+                              title="No projects yet."
+                            />
+                          )
                         ) : visible.length === 0 ? (
                           <EmptyState
                             variant="inline"
@@ -1182,7 +1269,23 @@ export function OrgHome() {
                   </div>
 
                   {/* Status filter + admin-style project table */}
-                  {projects.length === 0 ? (
+                  {projects.length === 0 && activeOrgId == null ? (
+                    /* AQU-864: no org in scope at all — the caller is a member
+                       of none. "Your organization is ready" was a lie here, and
+                       both its actions needed an org id they didn't have. Offer
+                       the only thing that moves them forward: create one. */
+                    <EmptyState
+                      data-testid="no-organizations-empty"
+                      icon={Building2}
+                      title="You're not part of an organization yet"
+                      description="Create one to start a translation project, or ask a teammate to invite you to theirs."
+                      action={
+                        <Button onClick={() => setOrgCreateOpen(true)}>
+                          Create organization
+                        </Button>
+                      }
+                    />
+                  ) : projects.length === 0 ? (
                     <EmptyState
                       icon={FolderPlus}
                       title={t("org.orgHome.readyTitle")}
@@ -1241,6 +1344,17 @@ export function OrgHome() {
                   )}
                 </>
               )}
+
+              {/* AQU-864: the action behind the no-organization empty state. */}
+              <OrgCreateDialog
+                open={orgCreateOpen}
+                onOpenChange={setOrgCreateOpen}
+                onCreated={(orgId) => {
+                  setActiveOrg(orgId)
+                  void refreshOrgs()
+                  navigate(orgHomePath(orgId))
+                }}
+              />
 
               {jwt && !isAllOrgs && activeOrgId != null && (
                 <SectionVisibilityGate

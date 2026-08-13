@@ -1625,6 +1625,25 @@ case 'cell.audio.attach': {
       return ['files']
     }
 
+    case 'file.track.set': {
+      // Per-track presentation overrides — rebuild path; the dispatch path
+      // (handlers/file-track-set.ts) uses the same shared SQL builder.
+      //
+      // This case is a deliberately PERMISSIVE pass-through: rebuild.ts
+      // replays already-accepted history through this very function, so
+      // history that the live handler once accepted must never start being
+      // rejected here. All shape validation lives in the handler, which only
+      // ever sees new writes.
+      const p = event.payload as EventPayloads['file.track.set']
+      if (!event.fileId) {
+        throw new Error(`file.track.set event ${event.id} is missing fileId`)
+      }
+      stmts.push(
+        buildFileTrackSetStmt(db, event.projectId, event.fileId, event.id, p.trackId, p.patch),
+      )
+      return ['files']
+    }
+
     case 'source.cell.mirror': {
       // AQU-476: advance a downstream source cell to match the upstream.
       // UPSERT (the target.cell.commit INSERT…ON CONFLICT shape), NOT the
@@ -1899,6 +1918,64 @@ export function buildFileTimingSetStmt(
         WHERE id = ? AND project_id = ?`,
     )
     .bind(timingMode, eventId, fileId, projectId)
+}
+
+/**
+ * Shared meta-merge for ONE timeline track's presentation overrides, kept in
+ * files.meta under `trackOverrides` keyed by track id. Used by both the live
+ * handler (handlers/file-track-set.ts) and the rebuild projection case above.
+ * A null patch removes the whole entry — a user-added track disappears, a
+ * default track falls back to pure defaults.
+ *
+ * The upsert merges per FIELD, not per entry: A renaming a track while B
+ * reorders the same track leaves BOTH changes standing, because each `||`
+ * only replaces the keys it actually carries (last-write-wins per field
+ * instead of per track). jsonb_set is deliberately not used — it silently
+ * no-ops when the parent key ('trackOverrides') does not exist yet, which is
+ * precisely the first-override case.
+ *
+ * WARNING: jsonb_strip_nulls is RECURSIVE. It is what turns `{"name": null}`
+ * into "drop the name override", so patches MUST stay FLAT — a nested,
+ * object-valued field would have its own nulls silently eaten too. The
+ * handler's key allow-list is what enforces flatness today; anyone adding an
+ * object-valued patch field later has to revisit this builder first.
+ */
+export function buildFileTrackSetStmt(
+  db: AquillaDb,
+  projectId: string,
+  fileId: string,
+  eventId: string,
+  trackId: string,
+  patch: EventPayloads['file.track.set']['patch'],
+): AquillaStatement {
+  const NOW = "(extract(epoch from now()) * 1000)::bigint"
+  const META = "COALESCE(NULLIF(meta, ''), '{}')::jsonb"
+  if (patch == null) {
+    return db
+      .prepare(
+        `UPDATE files
+            SET meta = (${META} #- ARRAY['trackOverrides', ?::text])::text,
+                event_id = ?, updated_at = ${NOW}
+          WHERE id = ? AND project_id = ?`,
+      )
+      .bind(trackId, eventId, fileId, projectId)
+  }
+  // The patch binds through ::text::jsonb: postgres.js re-encodes an
+  // already-serialized string when the parameter is typed jsonb directly, so
+  // the entry would land as a JSON string instead of an object (the
+  // json-bind-contract test greps the tree for exactly that mistake). trackId
+  // binds twice — once as the key written, once to read the entry it merges
+  // onto.
+  return db
+    .prepare(
+      `UPDATE files
+          SET meta = (${META} || jsonb_build_object('trackOverrides',
+                COALESCE(${META} -> 'trackOverrides', '{}'::jsonb) || jsonb_build_object(?::text,
+                  jsonb_strip_nulls(COALESCE(${META} -> 'trackOverrides' -> ?::text, '{}'::jsonb) || ?::text::jsonb))))::text,
+              event_id = ?, updated_at = ${NOW}
+        WHERE id = ? AND project_id = ?`,
+    )
+    .bind(trackId, trackId, JSON.stringify(patch), eventId, fileId, projectId)
 }
 
 /**

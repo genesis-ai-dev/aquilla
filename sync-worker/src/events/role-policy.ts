@@ -121,6 +121,12 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
   // everyone — structural, so it keeps the clearance the setting had when it
   // lived in Project Settings (the shared-settings maintainer floor).
   'file.timing.set': ROLE.MAINTAINER,
+  // Track structure IS file structure: renaming, reordering or regrouping a
+  // track relayouts the timeline for every collaborator who opens the file —
+  // the same rationale that put file.timing.set at this floor. Deliberately
+  // NOT the CONTRIBUTOR floor that file.rename and file.video.set sit at;
+  // those are normal editing flow, this changes the shared layout.
+  'file.track.set': ROLE.MAINTAINER,
 
   // AQU-476: mirror-engine kinds are server-emitted only (link-sync.ts calls
   // buildEventProjectionStmts directly in-process — never through the client

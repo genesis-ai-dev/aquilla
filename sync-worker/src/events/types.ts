@@ -101,6 +101,15 @@ export type EventKind =
   // with is per-file too. Non-chain-mutating; maintainer floor (structural,
   // same clearance as project settings).
   | 'file.timing.set'
+  // Stage 1 (first-class timeline tracks): one track's presentation overrides
+  // — rename, reorder, group, or the whole record of a user-added track —
+  // stored in files.meta JSON under `trackOverrides`. Non-chain-mutating;
+  // maintainer floor (track structure is file structure).
+  //
+  // DORMANT on arrival: the write path ships complete and tested, but nothing
+  // emits this kind until stage 3 puts renaming and adding tracks in the UI.
+  // Shipping the pipeline first means stage 3 is a UI change, not a migration.
+  | 'file.track.set'
   // AQU-476: live source links — mirror engine. Server-emitted only (the
   // mirror sync engine in link-sync.ts; never a client outbox kind). Mirror
   // events replicate an ordering the UPSTREAM already arbitrated, so they
@@ -574,6 +583,23 @@ export interface EventPayloads {
   // ProjectWideSettings.audioTimingMode, else "dubbing").
   'file.timing.set': {
     timingMode: 'dubbing' | 'audioFirst' | null
+  }
+  // Stage 1: ONE track's presentation delta, merged per-field into
+  // files.meta.trackOverrides[trackId]. `patch: null` deletes the entry —
+  // dropping a user-added track, or resetting a default back to pure
+  // defaults. Inside a patch, null means "clear THAT override" and an absent
+  // key means "leave it alone"; `kind` has no null form because a track's
+  // kind is its identity. The patch is FLAT on purpose — the projection
+  // strips nulls recursively (see buildFileTrackSetStmt). No emitter until
+  // stage 3.
+  'file.track.set': {
+    trackId: string
+    patch: {
+      kind?: 'subtitles' | 'source-audio' | 'target-audio'
+      name?: string | null
+      order?: number | null
+      groupId?: string | null
+    } | null
   }
 
   // ── AQU-476: live source links — mirror engine (server-emitted) ────────

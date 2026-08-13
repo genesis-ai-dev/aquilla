@@ -851,6 +851,7 @@ describe('isChainMutatingKind', () => {
     'cell.lane.retime': false,
     'file.video.set': false,
     'file.timing.set': false,
+    'file.track.set': false,
     // AQU-476: mirror events replicate an ordering the upstream already
     // arbitrated — see CHAIN_MUTATING_KINDS's doc comment.
     'source.cell.mirror': false,

@@ -155,6 +155,73 @@ describe("GET /api/v1/projects/:projectId/files", () => {
     expect(body.file.name).toBe("Genesis")
   })
 
+  it("maps meta.trackOverrides through untouched, unknown kinds included", async () => {
+    // The route forwards the stored deltas verbatim — the client's
+    // mergeTrackOverrides is the only validator. A kind this build cannot draw
+    // still has to reach a newer client that can.
+    const { db } = await makeTestDb({
+      files: [{
+        id: "file-tracks", project_id: "proj-a", name: "ep-101",
+        meta: JSON.stringify({
+          trackOverrides: {
+            subtitles: { name: "Script" },
+            "trk-x9": { kind: "character-audio", order: 7 },
+          },
+        }),
+      }],
+    })
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-tracks" })
+    const res = (await handleFilesReadRequest(new Request(
+      "https://w/api/v1/projects/proj-a/files/file-tracks",
+      { headers: { Authorization: `Bearer ${token}` } },
+    ), envWith(db)))!
+    const body = await res.json() as { file: { trackOverrides: unknown } }
+
+    expect(body.file.trackOverrides).toEqual({
+      subtitles: { name: "Script" },
+      "trk-x9": { kind: "character-audio", order: 7 },
+    })
+  })
+
+  it("reports null trackOverrides for a file that has never had one set", async () => {
+    const { db } = await makeTestDb({
+      files: [{
+        id: "file-plain", project_id: "proj-a", name: "ep-102",
+        meta: JSON.stringify({ timingMode: "dubbing" }),
+      }],
+    })
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-plain" })
+    const res = (await handleFilesReadRequest(new Request(
+      "https://w/api/v1/projects/proj-a/files/file-plain",
+      { headers: { Authorization: `Bearer ${token}` } },
+    ), envWith(db)))!
+    const body = await res.json() as { file: { trackOverrides: unknown } }
+
+    expect(body.file.trackOverrides).toBeNull()
+  })
+
+  it("nulls a trackOverrides that is not a plain object", async () => {
+    // An array is `typeof 'object'` and would hydrate client-side as a map with
+    // numeric keys; an empty map means exactly what an absent key means. Both
+    // collapse so the client has one "no overrides" case, not three.
+    const { db } = await makeTestDb({
+      files: [
+        { id: "f-arr", project_id: "proj-a", name: "arr", meta: JSON.stringify({ trackOverrides: [{ name: "x" }] }) },
+        { id: "f-str", project_id: "proj-a", name: "str", meta: JSON.stringify({ trackOverrides: "subtitles" }) },
+        { id: "f-empty", project_id: "proj-a", name: "empty", meta: JSON.stringify({ trackOverrides: {} }) },
+      ],
+    })
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "any" })
+    const res = (await handleFilesReadRequest(new Request(
+      "https://w/api/v1/projects/proj-a/files",
+      { headers: { Authorization: `Bearer ${token}` } },
+    ), envWith(db)))!
+    const body = await res.json() as { files: Array<{ fileId: string; trackOverrides: unknown }> }
+
+    expect(body.files).toHaveLength(3)
+    for (const file of body.files) expect(file.trackOverrides).toBeNull()
+  })
+
   it("returns 404 for an unknown file id", async () => {
     const { db } = await makeTestDb({ files: [] })
     const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "missing" })

@@ -57,6 +57,12 @@ interface FileSummary {
   /** The file's audio timing mode (file.timing.set), read from meta. Null ⇒
    *  the project-level default applies. */
   timingMode: 'dubbing' | 'audioFirst' | null
+  /** Per-track deltas keyed by track id (file.track.set), read from meta —
+   *  NEVER the full track list, which the client derives. Null ⇒ the file
+   *  draws the three defaults. Patch fields stay widened (`kind: string`)
+   *  because a newer client may have persisted a kind this build cannot name;
+   *  the route's job is to forward it intact, not to judge it. */
+  trackOverrides: Record<string, { kind?: string; name?: string; order?: number; groupId?: string }> | null
   cellCount: number
   approvedCount: number
   /** Target cells with content (TRIM(value) != ''): the "translated" count. */
@@ -80,6 +86,7 @@ function mapRow(row: FileRowRaw): FileSummary {
     orderedBy?: string
     coreMediaUrl?: string
     timingMode?: string
+    trackOverrides?: unknown
   } = {}
   try {
     meta = row.meta ? JSON.parse(row.meta) : {}
@@ -101,6 +108,7 @@ function mapRow(row: FileRowRaw): FileSummary {
     orderedBy: meta.orderedBy ?? null,
     coreMediaUrl: meta.coreMediaUrl ?? null,
     timingMode: meta.timingMode === 'dubbing' || meta.timingMode === 'audioFirst' ? meta.timingMode : null,
+    trackOverrides: normalizeTrackOverrides(meta.trackOverrides),
     cellCount: row.cell_count,
     approvedCount: row.approved_count,
     filledCount: row.filled_count,
@@ -112,6 +120,17 @@ function mapRow(row: FileRowRaw): FileSummary {
 
 function normalizeTextDirection(value: string | undefined): 'ltr' | 'rtl' | null {
   return value === 'ltr' || value === 'rtl' ? value : null
+}
+
+// Unlike the scalars above, this one is shape-checked rather than value-checked:
+// an array is `typeof 'object'` and would reach the client's merge as a map with
+// numeric keys, and the projection's delete branch (`#- ARRAY[…]`) can leave an
+// empty map behind, which means the same thing as no key at all. Both collapse
+// to null so the client has exactly one "no overrides" case to handle.
+function normalizeTrackOverrides(value: unknown): FileSummary['trackOverrides'] {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null
+  const overrides = value as NonNullable<FileSummary['trackOverrides']>
+  return Object.keys(overrides).length > 0 ? overrides : null
 }
 
 // Active listing:  GET /api/v1/projects/:projectId/files

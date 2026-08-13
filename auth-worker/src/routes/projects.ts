@@ -115,6 +115,13 @@ interface FileProjection {
   /** The file's audio timing mode (file.timing.set), read from files.meta.
    *  Omitted when unset → client falls back to the project-level default. */
   timingMode?: "dubbing" | "audioFirst"
+  /** Per-track deltas keyed by track id (file.track.set), read from files.meta
+   *  — NEVER the full track list, which the client derives. Omitted when unset
+   *  → client draws the three defaults. Shape is spelled out structurally
+   *  rather than imported from the client's tracks.ts: `kind` stays a bare
+   *  string here on purpose, so a kind persisted by a newer client survives the
+   *  round trip instead of being narrowed away. */
+  trackOverrides?: Record<string, { kind?: string; name?: string; order?: number; groupId?: string }>
 }
 
 /**
@@ -159,12 +166,14 @@ async function loadFilesByProject(
     let hasScriptureContent: boolean | undefined
     let coreMediaUrl: string | undefined
     let timingMode: "dubbing" | "audioFirst" | undefined
+    let trackOverrides: FileProjection["trackOverrides"]
     if (f.meta) {
       try {
         const m = JSON.parse(f.meta) as {
           orderedBy?: string
           coreMediaUrl?: unknown
           timingMode?: unknown
+          trackOverrides?: unknown
           source_language?: string
           target_language?: string
           sourceLanguage?: string
@@ -183,6 +192,19 @@ async function loadFilesByProject(
         if (m.aquillaImport?.hasScriptureContent === true) hasScriptureContent = true
         if (typeof m.coreMediaUrl === "string" && m.coreMediaUrl.trim()) coreMediaUrl = m.coreMediaUrl
         if (m.timingMode === "dubbing" || m.timingMode === "audioFirst") timingMode = m.timingMode
+        // Shape-checked, not value-checked: an array is `typeof "object"` and
+        // would reach the client's merge as a map with numeric keys, and the
+        // delete projection can leave an empty map behind, which means the same
+        // thing as no key at all. Contents pass through untouched — the client's
+        // mergeTrackOverrides is the one validator.
+        if (
+          typeof m.trackOverrides === "object" &&
+          m.trackOverrides !== null &&
+          !Array.isArray(m.trackOverrides) &&
+          Object.keys(m.trackOverrides).length > 0
+        ) {
+          trackOverrides = m.trackOverrides as FileProjection["trackOverrides"]
+        }
       } catch {
         // malformed meta → leave orderedBy unset (client defaults to sequence)
       }
@@ -202,6 +224,7 @@ async function loadFilesByProject(
       ...(targetTextDirection ? { targetTextDirection } : {}),
       ...(coreMediaUrl ? { coreMediaUrl } : {}),
       ...(timingMode ? { timingMode } : {}),
+      ...(trackOverrides ? { trackOverrides } : {}),
     })
     byProject.set(f.project_id, list)
   }

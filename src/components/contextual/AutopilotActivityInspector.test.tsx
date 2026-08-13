@@ -864,6 +864,67 @@ describe("AutopilotActivityInspector", () => {
     expect(screen.getByRole("button", { name: /French\.usfm/ })).toHaveAttribute("aria-pressed", "true")
   })
 
+  it("steers off the pre-seeded newest run to the historical review owner", async () => {
+    // Mirrors the project-overview flow: the overview file row pre-seeds the
+    // selection with the newest run (no proposed drafts), and the run that
+    // owns the review evidence only surfaces via the proposedOnly fetch.
+    const newestRun = {
+      ...run,
+      runId: "newest-no-drafts",
+      status: "terminated",
+      proposedDrafts: 0,
+      updatedAt: "2026-08-11T10:02:00.000Z",
+    }
+    const evidenceRun = {
+      ...run,
+      runId: "historical-owner",
+      status: "parked",
+      proposedDrafts: 2,
+      updatedAt: "2026-08-11T10:01:00.000Z",
+    }
+    runsMock.mockImplementation(async (_projectId, options) =>
+      runPage(options?.proposedOnly ? [evidenceRun] : [newestRun]))
+    activityMock.mockImplementation(async (_projectId, runId) => ({
+      ...activity,
+      run: runId === evidenceRun.runId ? evidenceRun : newestRun,
+    }))
+
+    renderInspector({
+      initialSection: "review",
+      overview: {
+        available: true,
+        proposedDrafts: 2,
+        files: [{
+          fileId: "file-1",
+          runId: newestRun.runId,
+          targetLang: "",
+          status: "terminated",
+          doneSpans: 0,
+          totalSpans: 1,
+          failedSpans: 0,
+          unitsSpent: 0,
+          proposedDrafts: 0,
+          appliedDrafts: 0,
+          updatedAt: newestRun.updatedAt,
+          lastError: null,
+        }],
+        activeRuns: 0,
+        doneSpans: 0,
+        totalSpans: 1,
+        failedSpans: 0,
+        unitsSpent: 0,
+        appliedDrafts: 0,
+      },
+    })
+
+    await vi.waitFor(() => expect(activityMock).toHaveBeenCalledWith(
+      "p1",
+      evidenceRun.runId,
+      expect.objectContaining({ draftStatus: "proposed" }),
+    ))
+    expect(screen.getByText("2 ready to review")).toBeInTheDocument()
+  })
+
   it.each([
     ["span_partial_cells_skipped", /completed suggestions were preserved for review/i],
     ["span_all_cells_skipped", /could not produce a reviewable draft/i],

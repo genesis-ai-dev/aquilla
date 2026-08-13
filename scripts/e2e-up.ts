@@ -157,6 +157,23 @@ function runOnce(
   })
 }
 
+/** If wrangler/workerd exits mid-suite, Playwright would otherwise keep
+ * going and every remaining spec would fail in 0s with ECONNREFUSED.
+ * Abort the shard immediately and dump worker logs. */
+function abortIfWorkerDies(worker: SpawnedWorker, label: string): void {
+  worker.child.on("exit", (code, signal) => {
+    if (shuttingDown) return
+    const reason = code != null ? `exit ${code}` : `signal ${signal ?? "unknown"}`
+    console.error(
+      `\n${TAG}[fail] ${label} worker on :${worker.port} died (${reason}).\n` +
+        `${TAG}[fail] Remaining tests would fail with ECONNREFUSED ${worker.port} — aborting now.\n` +
+        `${TAG}[hint] Tail ${logFiles[label] ?? `${LOG_DIR}/`}. Common causes: another e2e-up / pnpm dev fighting the port, workerd OOM, or Postgres gone.`,
+    )
+    dumpLogs()
+    void shutdown(1)
+  })
+}
+
 /** Print the last N lines of each known log file to stderr. Used when a
  * subcommand fails so the developer can see what went wrong without
  * needing to know the log paths. */
@@ -422,6 +439,7 @@ async function main(): Promise<void> {
     streamToParent: VERBOSE,
   })
   cleanup.push(() => identity.kill())
+  abortIfWorkerDies(identity, "identity")
 
   // 4. Boot sync-worker. Same Hyperdrive override so sync SQL also hits Postgres.
   console.log(`${TAG}[boot 4/8] starting sync-worker on :${SYNC_WORKER_PORT}…`)
@@ -435,6 +453,7 @@ async function main(): Promise<void> {
     streamToParent: VERBOSE,
   })
   cleanup.push(() => sync.kill())
+  abortIfWorkerDies(sync, "sync")
 
   // 5. Boot mock LLM (binds to an OS-assigned free port, so shards never clash).
   console.log(`${TAG}[boot 5/8] starting mock LLM…`)

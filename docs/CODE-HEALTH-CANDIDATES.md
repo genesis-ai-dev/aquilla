@@ -39,28 +39,24 @@ a later run completes.
 - **`src/components/TerminologyPage.tsx`** and its test (2,034 lines total) — superseded
   by `GlossaryEditorContent` / `GlossaryEditor`. This needs a dedicated review because of
   its size; confirm no e2e spec still depends on it.
-- **`src/lib/sync/projects-read.ts`**, `projects-read-types.ts`, and their test (220 lines)
-  — unused Phase 2b wrapper. Grep precise paths/exports before deleting: a different,
-  live `fetchAccessibleProjects` exists in `cloud-projects.ts`.
+- **`src/lib/sync/projects-read.ts`**, `projects-read-types.ts`, and their test
+  `projects-read.test.ts` (~220 lines total) — confirmed zero real importers on
+  2026-08-13 (only `./projects-read-types` ↔ `projects-read.ts` import each other, plus
+  their own test; every real caller of `fetchAccessibleProjects` app-wide goes through
+  the live `cloud-projects.ts` instead). **Blocked, not just deferred**: deleting the two
+  source files orphans `projects-read.test.ts`, and this routine's behavior-preservation
+  gate forbids touching any `*.test.ts` file (even to delete one paired 1:1 with dead
+  code). A run that wants this needs either an explicit human-approved exception to that
+  rule for test-file deletion, or to fold it into a non-code-health cleanup pass.
 
-## Prior candidates retained from the 2026-08-10/11 runs
+## Newly orphaned by the 2026-08-13 Dashboard.tsx deletion
 
-- **`src/components/Dashboard.tsx`** (466 lines) — a pre-org-model project dashboard,
-  apparently superseded by `src/components/org/OrgHome.tsx`; no import found anywhere
-  (route table in `App.tsx` doesn't reference it). At 466 lines this alone would consume
-  most of a single run's budget — worth a dedicated pass rather than bundling with
-  smaller deletions. Proof needed: zero importers/JSX usage (component + string route
-  matches), and confirm `OrgHome.tsx` covers the same surface before deleting.
-  (Entry was dropped in a prior stacked-ledger conflict resolution while the file still
-  exists with zero importers — restored 2026-08-12.)
-- **`src/components/CellActionsMenu.tsx`**, `ProgressDot.tsx`, and
-  `useSubscribedConcepts.ts` — re-check zero importers before deletion.
-- **`src/lib/sync/settings-read.ts`** / `settings-read-types.ts` and
-  **`src/lib/timeline/diarization-loader.ts`** — deferred from the 2026-08-11 survey;
-  confirm no newer feature path introduced a caller.
-- **`src/lib/sync/sync-debug.ts`**, the deprecated `EditorScrollContext` compatibility
-  fields, and the deprecated `ExamplePanel` prop pass-through were recorded as candidates
-  in the earlier run; verify the current source before taking further action.
+- **`src/lib/projects/dedupe-cloud.ts`** (`filterCloudOnly`, 34 lines) — its only real
+  caller was the now-deleted `src/components/Dashboard.tsx`; grep confirms zero other
+  importers. **Same test-file block as `projects-read.ts` above**: `dedupe-cloud.test.ts`
+  exists and would be orphaned by deleting the source, which this routine's rules forbid
+  touching. Candidate for whatever future pass ends up handling the `projects-read.ts`
+  case, since both hit the identical blocker.
 
 The 2026-08-10 run also recorded an E2E limitation in the Claude Code web sandbox: its
 Docker/Wrangler setup was not reliable enough to complete the smoke suite. This is an

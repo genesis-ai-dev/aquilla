@@ -694,7 +694,16 @@ export function AudioRecordingModal({
         // was 512px), and why the first cut of the two-panel layout shipped
         // as two 256px shreds with every line wrapped (Sam's screenshot,
         // 2026-08-13).
-        className={cn("flex flex-row gap-0 p-0", filmUrl ? "sm:max-w-6xl" : "max-w-3xl")}
+        // The cinema layout is pinned to a 16:9 FOOTPRINT (Sam, 2026-08-13:
+        // "9:16 height:width for the whole thing"), which in practice makes
+        // the dialog TALLER than its content would ask for — a content-hugging
+        // height left the film panel squat and the column airless. The
+        // max-height stays as a cap for short viewports, where the ratio
+        // yields to fitting on screen.
+        className={cn(
+          "flex flex-row gap-0 p-0",
+          filmUrl ? "sm:aspect-[16/9] sm:max-w-6xl" : "max-w-3xl",
+        )}
         style={{ maxHeight: "min(92vh, 800px)" }}
         showCloseButton={false}
       >
@@ -974,23 +983,35 @@ export function AudioRecordingModal({
           )}
         </div>
 
-        {/* Takes — audition / circle / delete prior recordings for this cell. */}
-        {(phase === "idle" || phase === "preview" || phase === "saved" || phase === "error") && activeCell && (
-          <TakesStrip
-            projectId={project.id}
-            fileId={activeCell.fileId}
-            cellId={activeCell.id}
-            takes={recordingTakes}
-            onLastTakeRemoved={onLastTakeRemoved}
-            selectedAudioId={audioEntry?.selectedAudioId ?? null}
-            selectedGeneratedAudioId={audioEntry?.selectedGeneratedVoiceAudioId ?? null}
-            sourceClip={sourceClip}
-            author={username}
-            session={session ?? null}
-          />
-        )}
+        </div>{/* end scrollable middle — the STAGE only, since the takes moved
+            to their own shelf below */}
 
-        </div>{/* end scrollable middle */}
+        {/* Takes — audition / circle / delete prior recordings for this cell.
+            A pinned shelf with ITS OWN scrollbar, third attempt at this
+            geometry and each failure taught the shape (Sam, 2026-08-13): the
+            strip first grew with every take and stretched the whole dialog
+            (stacking); then, moved inside the scrollable middle of a
+            fixed-height dialog, a long stage pushed it below the fold and
+            takes silently "disappeared". Pinned between stage and footer it is
+            always on screen, and past ~three takes it scrolls itself. */}
+        {(phase === "idle" || phase === "preview" || phase === "saved" || phase === "error") &&
+          activeCell &&
+          recordingTakes.length > 0 && (
+            <div className="shrink-0">
+              <TakesStrip
+                projectId={project.id}
+                fileId={activeCell.fileId}
+                cellId={activeCell.id}
+                takes={recordingTakes}
+                onLastTakeRemoved={onLastTakeRemoved}
+                selectedAudioId={audioEntry?.selectedAudioId ?? null}
+                selectedGeneratedAudioId={audioEntry?.selectedGeneratedVoiceAudioId ?? null}
+                sourceClip={sourceClip}
+                author={username}
+                session={session ?? null}
+              />
+            </div>
+          )}
 
         {/* Footer: nav + primary action — fixed, never scrolls */}
         <div className="flex shrink-0 items-center gap-2 border-t bg-muted/30 px-5 py-3">

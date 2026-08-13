@@ -344,8 +344,15 @@ export function TakesStrip({
       <div className="mb-2 text-xs text-muted-foreground/60">
         Takes ({takes.length})
       </div>
-      {/* Round 8: rows, not chips — one take per line, name first. */}
-      <div className="flex flex-col gap-1">
+      {/* Round 8: rows, not chips — one take per line, name first.
+          Stage 5 QA (Sam): the LIST scrolls, the strip does not grow. The
+          dialog has a fixed footprint now, so a strip that stretched with
+          every take (as it originally did) would eat the stage, and one that
+          merely sat inside the middle scroll region vanished below the fold.
+          The heading stays pinned above the scroll so "Takes (12)" is always
+          the count of what is IN the drawer, not of what happens to be
+          visible. ~3.5 rows tall, the half-row being the scroll affordance. */}
+      <div className="flex max-h-32 flex-col gap-1 overflow-y-auto">
         {ordered.map(({ att, isCleaned }) => {
           // Use optimistic override while in-flight; fall back to server value.
           const effectiveSelectedId = optimisticSelectedId ?? activeTakeId

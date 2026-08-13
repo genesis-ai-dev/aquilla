@@ -73,6 +73,10 @@ export interface EmitStageResult {
 // Kinds whose payload writes the target chain → need parent/source resolution.
 const TARGET_CHAIN_KINDS = new Set(["target.cell.commit"])
 
+// AQU-890: genesis kinds — they mint a row instead of advancing a chain, so
+// they take the opposite staging path (no parent, no `before`, id must be free).
+const CELL_CREATE_KINDS = new Set(["source.cell.create", "target.cell.create"])
+
 /** Resolve ':file' / ':cell' / '#c1'-style references in an id-ish string. */
 function resolveRef(
   value: string,
@@ -201,7 +205,58 @@ async function stageOne(
   const needsCell =
     kind.startsWith("target.cell.") || kind.startsWith("source.cell.") ||
     kind.startsWith("cell.")
-  if (needsCell || kind === "comment.create") {
+
+  if (CELL_CREATE_KINDS.has(kind)) {
+    // AQU-890. A create MINTS a row, so it inverts every assumption the
+    // chain-advancing branch below makes: there is no parent, no `before`, and
+    // an id that already resolves is a collision rather than the target.
+    if (!fileId) return { kind: "rejected", reason: `${kind} needs fileId` }
+    if (typeof payload.value !== "string") {
+      return { kind: "rejected", reason: `${kind} payload needs a string \`value\`` }
+    }
+
+    // The anchor is the EXISTING row the new one lands after (null = first).
+    // Validating it here is what keeps a mis-anchored row from being staged
+    // into a silently wrong position.
+    const anchor = payload.anchorCellId
+    if (anchor !== undefined && anchor !== null) {
+      if (typeof anchor !== "string") {
+        return { kind: "rejected", reason: "anchorCellId must be a string or null" }
+      }
+      const anchorPair = await fetchCellPair(db, ctx.projectId, fileId, anchor)
+      if (!anchorPair.source && !anchorPair.target) {
+        return {
+          kind: "rejected",
+          reason: `anchorCellId ${ctx.aliases.alias(anchor, "c")} does not exist in that file — re-read it`,
+        }
+      }
+    } else {
+      payload.anchorCellId = null
+    }
+
+    if (cellId) {
+      const pair = await fetchCellPair(db, ctx.projectId, fileId, cellId)
+      const occupied = kind === "source.cell.create" ? pair.source : pair.target
+      if (occupied) {
+        const commitKind = kind === "source.cell.create" ? "source.cell.commit" : "target.cell.commit"
+        return {
+          kind: "rejected",
+          reason: `a ${kind === "source.cell.create" ? "source" : "target"} cell already exists at that id — use ${commitKind} to change it`,
+        }
+      }
+    } else {
+      // The model has no way to know a free id, so it does not have to supply
+      // one; the client's apply path repeats this id into the payload.
+      cellId = crypto.randomUUID()
+    }
+    payload.cellId = cellId
+
+    if (typeof payload.canonicalRef === "string") display.canonicalRef = payload.canonicalRef
+    display.after = payload.value
+    // Provenance injection (AQU-292), same as target.cell.commit.
+    payload.ai_suggestion = true
+    payload.agent_run_id = ctx.runId
+  } else if (needsCell || kind === "comment.create") {
     if (needsCell && (!fileId || !cellId)) {
       return { kind: "rejected", reason: `${kind} needs fileId and cellId` }
     }

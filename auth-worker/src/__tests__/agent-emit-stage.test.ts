@@ -254,3 +254,97 @@ describe("stageEvents — comment.create defaults", () => {
     expect(result.modelVerdictBlock).toContain("1 of 2 staged")
   })
 })
+
+describe("stageEvents — cell creates (AQU-890)", () => {
+  it("stages a source.cell.create at PROJECT_LEAD, minting a cellId and injecting provenance", async () => {
+    const result = await stageEvents(
+      env.AQUILLA_PG,
+      [
+        {
+          kind: "source.cell.create",
+          fileId: FILE,
+          payload: { value: "Section heading", type: "heading", anchorCellId: CELL },
+        },
+      ],
+      ctx({ roleLevel: 500 }),
+    )
+    expect(result.proposal).not.toBeNull()
+    const ev = result.proposal!.events[0]
+    expect(ev.kind).toBe("source.cell.create")
+    expect(ev.fileId).toBe(FILE)
+    // The model needn't know a free id — the server mints one and repeats it
+    // into the payload, where the projection reads it.
+    expect(typeof ev.cellId).toBe("string")
+    expect(ev.payload.cellId).toBe(ev.cellId)
+    expect(ev.payload.anchorCellId).toBe(CELL)
+    expect(ev.payload.ai_suggestion).toBe(true)
+    expect(ev.payload.agent_run_id).toBe(RUN_ID)
+    // Genesis: no parent is resolved, and there is no prior text to diff.
+    expect(ev.parentId).toBeUndefined()
+    expect(ev.display.before).toBeUndefined()
+    expect(ev.display.after).toBe("Section heading")
+  })
+
+  it("rejects source.cell.create below PROJECT_LEAD but allows target.cell.create at CONTRIBUTOR", async () => {
+    const low = await stageEvents(
+      env.AQUILLA_PG,
+      [{ kind: "source.cell.create", fileId: FILE, payload: { value: "x" } }],
+      ctx({ roleLevel: 400 }),
+    )
+    expect(low.proposal).toBeNull()
+    expect(low.modelVerdictBlock).toContain("requires project_lead (500)")
+
+    const ok = await stageEvents(
+      env.AQUILLA_PG,
+      [{ kind: "target.cell.create", fileId: FILE, payload: { value: "Título" } }],
+      ctx({ roleLevel: 400 }),
+    )
+    expect(ok.proposal).not.toBeNull()
+    expect(ok.proposal!.events[0].payload.anchorCellId).toBeNull()
+  })
+
+  it("rejects a create whose cellId is already occupied on that side", async () => {
+    const result = await stageEvents(
+      env.AQUILLA_PG,
+      [{ kind: "source.cell.create", fileId: FILE, cellId: CELL, payload: { value: "x" } }],
+      ctx({ roleLevel: 500 }),
+    )
+    expect(result.proposal).toBeNull()
+    expect(result.modelVerdictBlock).toContain("a source cell already exists at that id")
+    expect(result.modelVerdictBlock).toContain("source.cell.commit")
+  })
+
+  it("rejects a create anchored to a cell that does not exist in the file", async () => {
+    const result = await stageEvents(
+      env.AQUILLA_PG,
+      [
+        {
+          kind: "source.cell.create",
+          fileId: FILE,
+          payload: { value: "x", anchorCellId: "77777777-7777-4777-8777-777777777777" },
+        },
+      ],
+      ctx({ roleLevel: 500 }),
+    )
+    expect(result.proposal).toBeNull()
+    expect(result.modelVerdictBlock).toContain("does not exist in that file")
+  })
+
+  it("rejects a create with no fileId or no string value", async () => {
+    const noFile = await stageEvents(
+      env.AQUILLA_PG,
+      [{ kind: "source.cell.create", payload: { value: "x" } }],
+      ctx({ roleLevel: 500 }),
+    )
+    expect(noFile.proposal).toBeNull()
+    expect(noFile.modelVerdictBlock).toContain("needs fileId")
+
+    const noValue = await stageEvents(
+      env.AQUILLA_PG,
+      [{ kind: "source.cell.create", fileId: FILE, payload: {} }],
+      ctx({ roleLevel: 500 }),
+    )
+    expect(noValue.proposal).toBeNull()
+    expect(noValue.modelVerdictBlock).toContain("needs a string `value`")
+  })
+})

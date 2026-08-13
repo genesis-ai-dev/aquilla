@@ -17,7 +17,7 @@
  */
 
 import { useMemo, useState } from "react"
-import { Check, ChevronDown, ChevronUp, MessageSquare, Pencil, ShieldCheck } from "lucide-react"
+import { Check, ChevronDown, ChevronUp, MessageSquare, Pencil, Plus, ShieldCheck } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -104,8 +104,17 @@ function TruncatableText({ text, className }: { text: string; className?: string
 
 const KIND_META: Record<string, { label: string; Icon: typeof Pencil }> = {
   "target.cell.commit": { label: "Edit", Icon: Pencil },
+  // AQU-890: creates read as "new row" — the label names the lane so a source
+  // insertion is never mistaken for a translation.
+  "source.cell.create": { label: "New source row", Icon: Plus },
+  "target.cell.create": { label: "New target row", Icon: Plus },
   "comment.create": { label: "Comment", Icon: MessageSquare },
   "cell.validate": { label: "Validate", Icon: ShieldCheck },
+}
+
+/** True for the genesis kinds that mint a row rather than editing one. */
+function isCellCreateKind(kind: string): boolean {
+  return kind === "source.cell.create" || kind === "target.cell.create"
 }
 
 function StagedEventRow({
@@ -166,6 +175,20 @@ function StagedEventRow({
           )}
           <div>
             <TruncatableText text={ev.display.after ?? ""} />
+          </div>
+        </div>
+      )}
+
+      {isCellCreateKind(ev.kind) && (
+        <div className="space-y-0.5 text-xs">
+          <div className="text-[10px] italic text-muted-foreground">(new row)</div>
+          <div>
+            <TruncatableText
+              text={
+                ev.display.after ??
+                (typeof ev.payload.value === "string" ? ev.payload.value : "")
+              }
+            />
           </div>
         </div>
       )}
@@ -246,7 +269,9 @@ function StagedProposalCard({
   const lintByIndex = useMemo(() => {
     const out = new Map<number, RuleInfraction[]>()
     proposal.events.forEach((ev, i) => {
-      if (ev.kind !== "target.cell.commit") return
+      // Rules run over TARGET text only — a new target row is draft text just
+      // like a commit, but source text must never be linted as a translation.
+      if (ev.kind !== "target.cell.commit" && ev.kind !== "target.cell.create") return
       if (enabledRules.length === 0) return
       const cell = lintCellFor(ev, resolveCell)
       out.set(i, checkRulesForCell(cell, ev.fileId ?? "", enabledRules))

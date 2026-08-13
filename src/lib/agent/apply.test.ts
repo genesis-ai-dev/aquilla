@@ -184,6 +184,92 @@ describe("applyStagedEvent — cell.validate", () => {
   })
 })
 
+describe("applyStagedEvent — cell creates (AQU-890)", () => {
+  function createEvent(overrides: Partial<StagedEvent> = {}): StagedEvent {
+    return {
+      kind: "source.cell.create",
+      fileId: "f-1",
+      cellId: "c-new",
+      payload: {
+        cellId: "c-new",
+        anchorCellId: "c-1",
+        value: "Section heading",
+        type: "heading",
+        ai_suggestion: true,
+        agent_run_id: "run-1",
+      },
+      display: { after: "Section heading" },
+      ...overrides,
+    }
+  }
+
+  it("enqueues source.cell.create as a GENESIS event (parentId null) with provenance intact", async () => {
+    await applyStagedEvent(createEvent(), CTX)
+    const input = mockEnqueue.mock.calls[0][0]
+    expect(input.kind).toBe("source.cell.create")
+    expect(input.fileId).toBe("f-1")
+    expect(input.cellId).toBe("c-new")
+    expect(input.author).toBe("anna")
+    // Genesis: isGenesisKind requires a null parent — a create must never
+    // chain onto a neighbour's head or the projection rejects it.
+    expect(input.parentId).toBeNull()
+    expect(input.payload).toEqual({
+      cellId: "c-new",
+      anchorCellId: "c-1",
+      value: "Section heading",
+      type: "heading",
+      ai_suggestion: true,
+      agent_run_id: "run-1",
+    })
+  })
+
+  it("enqueues target.cell.create the same way", async () => {
+    await applyStagedEvent(
+      createEvent({ kind: "target.cell.create", payload: { cellId: "c-new", value: "Título" } }),
+      CTX,
+    )
+    const input = mockEnqueue.mock.calls[0][0]
+    expect(input.kind).toBe("target.cell.create")
+    expect(input.parentId).toBeNull()
+    expect(input.payload).toEqual({ cellId: "c-new", value: "Título", anchorCellId: null })
+  })
+
+  it("defaults a missing anchorCellId to null (first row) rather than dropping the key", async () => {
+    await applyStagedEvent(
+      createEvent({ payload: { cellId: "c-new", value: "Heading" } }),
+      CTX,
+    )
+    expect(mockEnqueue.mock.calls[0][0].payload).toMatchObject({ anchorCellId: null })
+  })
+
+  it("falls back to the envelope cellId when the payload omits it, and repeats it into the payload", async () => {
+    await applyStagedEvent(
+      createEvent({ cellId: "c-env", payload: { value: "Heading" } }),
+      CTX,
+    )
+    const input = mockEnqueue.mock.calls[0][0]
+    expect(input.cellId).toBe("c-env")
+    // The projection reads the new row's id out of the PAYLOAD, so the two
+    // must agree or the row lands under a different id than the card showed.
+    expect(input.payload).toMatchObject({ cellId: "c-env" })
+  })
+
+  it("rejects a create with no cellId anywhere", async () => {
+    await expect(
+      applyStagedEvent(
+        { kind: "source.cell.create", fileId: "f-1", payload: { value: "x" }, display: {} },
+        CTX,
+      ),
+    ).rejects.toThrow(/needs fileId and cellId/)
+  })
+
+  it("rejects a create whose payload carries no string value", async () => {
+    await expect(
+      applyStagedEvent(createEvent({ payload: { cellId: "c-new" } }), CTX),
+    ).rejects.toThrow(/needs a string value/)
+  })
+})
+
 describe("applyStagedEvents", () => {
   it("chains successive commits to the SAME cell within one proposal", async () => {
     const ids = await applyStagedEvents(
@@ -194,6 +280,46 @@ describe("applyStagedEvents", () => {
     // Second commit's parent must be the FIRST commit's freshly-minted id,
     // not the (now stale) staged parentId — otherwise the server sees a
     // losing sibling and dead-letters it.
+    expect(mockEnqueue.mock.calls[1][0].parentId).toBe("evt-1")
+  })
+
+  it("chains a target commit onto a target create for the SAME new cell (AQU-890)", async () => {
+    const ids = await applyStagedEvents(
+      [
+        {
+          kind: "target.cell.create",
+          fileId: "f-1",
+          cellId: "c-new",
+          payload: { cellId: "c-new", value: "" },
+          display: {},
+        },
+        commitEvent({ cellId: "c-new", parentId: undefined, payload: { value: "drafted" } }),
+      ],
+      CTX,
+    )
+    expect(ids).toEqual(["evt-1", "evt-2"])
+    expect(mockEnqueue.mock.calls[0][0].parentId).toBeNull()
+    // The commit must chain onto the create it just minted — otherwise the
+    // server sees a genesis sibling on an occupied slot.
+    expect(mockEnqueue.mock.calls[1][0].parentId).toBe("evt-1")
+  })
+
+  it("gives a target commit its AD-9 source fallback from a source create in the same proposal", async () => {
+    await applyStagedEvents(
+      [
+        {
+          kind: "source.cell.create",
+          fileId: "f-1",
+          cellId: "c-new",
+          payload: { cellId: "c-new", value: "Heading" },
+          display: {},
+        },
+        commitEvent({ cellId: "c-new", parentId: undefined, payload: { value: "Título" } }),
+      ],
+      CTX,
+    )
+    // No target head exists, so the commit falls through to the source genesis
+    // the previous event minted rather than enqueuing with a null parent.
     expect(mockEnqueue.mock.calls[1][0].parentId).toBe("evt-1")
   })
 

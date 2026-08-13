@@ -103,3 +103,46 @@ describe("deriveWorkingSet", () => {
     expect(rows[0].target).toBe("borrador aplicado")
   })
 })
+
+// AQU-846 — the workbench grid is an approval surface too: a row the user
+// accepts must say which file it lands in.
+describe("deriveWorkingSet — destination file name (AQU-846)", () => {
+  const namedProposal = (fileName?: string): AgentRunUi["items"][number] => ({
+    id: "i1",
+    kind: "proposal",
+    proposal: {
+      proposalId: "p1",
+      runId: "run-1",
+      summary: "Draft 1 cell",
+      events: [
+        {
+          kind: "target.cell.commit",
+          fileId: "f-gen",
+          cellId: "c1",
+          payload: { value: "En el principio" },
+          display: { canonicalRef: "GEN 1:1", after: "En el principio", ...(fileName ? { fileName } : {}) },
+        },
+      ],
+    },
+  })
+
+  it("carries the staged event's fileName onto the pending row", () => {
+    const rows = deriveWorkingSet([run([namedProposal("Genesis.usfm")])])
+    expect(rows[0].fileName).toBe("Genesis.usfm")
+    expect(rows[0].fileId).toBe("f-gen")
+  })
+
+  it("keeps the fileName once the row is decided", () => {
+    const rows = deriveWorkingSet(
+      [run([namedProposal("Genesis.usfm")])],
+      new Map([[proposalRowKey("p1", "c1"), { outcome: "accepted" as const, value: "En el principio" }]]),
+    )
+    expect(rows[0].fileName).toBe("Genesis.usfm")
+    expect(rows[0].outcome).toBe("accepted")
+  })
+
+  it("leaves fileName unset when the server sent none", () => {
+    const rows = deriveWorkingSet([run([namedProposal()])])
+    expect(rows[0].fileName).toBeUndefined()
+  })
+})

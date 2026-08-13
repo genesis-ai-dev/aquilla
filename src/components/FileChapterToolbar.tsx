@@ -102,7 +102,6 @@ export function FileChapterToolbar({
           triggerVariant="outline"
           triggerSize="icon"
           triggerClassName="bg-card shadow-xs"
-          tooltip="File options"
           ariaLabel="File options"
           testId="file-options-menu"
         />

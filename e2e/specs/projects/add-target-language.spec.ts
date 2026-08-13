@@ -17,7 +17,7 @@
  *   3. Assert the lane switcher does NOT render (only the default lane exists).
  *   4. Open Settings → Languages, add lane "es".
  *   5. Back in the workspace, the switcher appears; switch to "es".
- *   6. Cell 0's target is EMPTY and Autopilot explains that v1 is default-lane-only.
+ *   6. Cell 0's target is EMPTY; Autopilot remains available on the open lane.
  *   7. Type Spanish text, commit (targetLang: "es" on the wire).
  *   8. Switch back to the default lane — the original French text is intact.
  *   9. Switch to "es" again — the Spanish text is intact.
@@ -74,13 +74,12 @@ test("add target language, switch lane, translate independently per lane", async
   await expect(ws.laneSwitcher()).toBeVisible({ timeout: 10_000 })
 
   // Switch to "es" — cell 0's target is empty (lanes are independent; no
-  // Spanish translation has been committed yet).
+  // Spanish translation has been committed yet). Autopilot follows the open
+  // lane, so Run Autopilot stays available.
   await ws.switchLane("es")
   expect(await ws.readActiveLane()).toBe("es")
   expect(await ws.readTargetText(0)).toBe("")
-  const autopilot = alice.getByTestId("contextual-run-pill")
-  await expect(autopilot).toContainText("Autopilot works in Project default only")
-  await expect(alice.getByRole("button", { name: "Run Autopilot" })).not.toBeVisible()
+  await expect(alice.getByRole("button", { name: "Run Autopilot" })).toBeVisible()
 
   // Translate cell 0 in the "es" lane.
   const spanishText = `Hola e2e ${Date.now()}`
@@ -98,7 +97,7 @@ test("add target language, switch lane, translate independently per lane", async
   // Switch to "es" again — the Spanish text persisted.
   await ws.switchLane("es")
   await expect(ws.cellRow(0)).toContainText(spanishText, { timeout: 5_000 })
-  await expect(autopilot).toContainText("Autopilot works in Project default only")
+  await expect(alice.getByRole("button", { name: "Run Autopilot" })).toBeVisible()
 
   // Reload and re-check BOTH lanes from the server projection. The in-memory
   // optimistic shadow satisfied the assertions above even when the server had

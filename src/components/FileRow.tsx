@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { ChevronRight, MoreHorizontal, Sparkles, AudioWaveform } from "lucide-react"
 import type { FileReference } from "@/lib/parsers/types"
 import { fileHasSections, fileOrderedBy } from "@/lib/parsers/types"
@@ -6,8 +6,15 @@ import { cn } from "@/lib/utils"
 import { AppTooltip } from "@/components/ui/tooltip"
 import {
   ContextMenu,
+  ContextMenuContent,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import { createMenuHandle } from "@/components/ui/menu-parts"
 import { FileActionMenu } from "./FileActionMenu"
 import { useT } from "@/lib/i18n/I18nProvider"
 
@@ -29,34 +36,26 @@ interface FileRowProps {
   onShowDetails?: () => void
   onStartRename: () => void
   onMove: () => void
+  /** Opens the Export dialog for this file. */
+  onExport?: () => void
+  onExportSource?: () => void
+  /** Opens Assign work scoped to this file. Hidden when the caller cannot assign. */
+  onAssignWork?: () => void
   /** AQU-271: Optional — pass undefined to hide delete for roles below project_lead. */
   onDelete?: () => void
-  onExportSource?: () => void
   onApplySuggestion?: () => void
-}
-
-/** Open the parent ContextMenu at the pointer (used by the ⋯ button). */
-function openContextMenuAtPointer(target: EventTarget & Element, clientX: number, clientY: number) {
-  target.dispatchEvent(
-    new MouseEvent("contextmenu", {
-      bubbles: true,
-      cancelable: true,
-      clientX,
-      clientY,
-      button: 2,
-    }),
-  )
 }
 
 export function FileRow(props: FileRowProps) {
   const {
     file, active, expanded, progress, hasSuggestion, editing,
     onEditCommit, onEditCancel, onToggleExpand, onSelect, onShowDetails, onStartRename,
-    onMove, onDelete, onExportSource, onApplySuggestion,
+    onMove, onExport, onExportSource, onAssignWork, onDelete, onApplySuggestion,
   } = props
   const t = useT()
   const inputRef = useRef<HTMLInputElement>(null)
   const [draft, setDraft] = useState(file.name)
+  const actionsMenu = useMemo(() => createMenuHandle(), [])
 
   useEffect(() => {
     if (editing) {
@@ -79,150 +78,167 @@ export function FileRow(props: FileRowProps) {
     ? t("nav.fileRow.importedAsTooltip", { name: file.name, originalName: file.originalName })
     : file.name
 
+  // The same items under both roots: right-click anywhere on the row, or the ⋯
+  // button. Two roots because a context menu always anchors to the pointer.
+  const actions = (
+    <FileActionMenu
+      onShowDetails={onShowDetails}
+      onRename={onStartRename}
+      onMove={onMove}
+      onExport={onExport}
+      onExportSource={onExportSource}
+      onAssignWork={onAssignWork}
+      onDelete={onDelete}
+    />
+  )
+
   return (
-    <ContextMenu>
-      <ContextMenuTrigger
-        render={
-          <div
-            // Showcase label: addressable, readable target for video scripts/cursor
-            // (see docs/distribution/SHOWCASE-LABELS.md). The whole row is the click
-            // target that opens the file — what "click the sidebar file" should hit.
-            data-showcase="sidebar.file"
-            data-showcase-name={file.name}
-            className={cn(
-              "group relative flex h-7 items-center gap-1 rounded-lg px-2 text-[13px] transition-colors",
-              active ? "bg-accent text-foreground" : "hover:bg-accent",
-            )}
-            onClick={() => { if (!editing) onSelect() }}
-            onKeyDown={(e) => {
-              if (editing) return
-              if (e.key.toLowerCase() === "r" && !e.metaKey && !e.ctrlKey) {
-                e.preventDefault(); onStartRename()
-              }
-            }}
-            tabIndex={0}
-          />
-        }
-      >
-        {canExpand ? (
-          <AppTooltip
-            content={expanded ? t("nav.fileRow.collapseSections") : t("nav.fileRow.expandSections")}
-            side="right"
-          >
-            <button
-              className="p-0.5 rounded-md text-muted-foreground transition-colors hover:text-foreground"
-              onClick={(e) => { e.stopPropagation(); onToggleExpand() }}
-              aria-label={expanded ? t("nav.fileRow.collapse") : t("nav.fileRow.expand")}
-            >
-              <ChevronRight className={cn("h-3 w-3 transition-transform", expanded && "rotate-90")} />
-            </button>
-          </AppTooltip>
-        ) : (
-          <span className="w-[18px] shrink-0" aria-hidden="true" />
-        )}
-        {isTimeOrdered && (
-          <AppTooltip content={t("nav.fileRow.timelineOrderedTooltip")} side="right">
-            <span
-              className="shrink-0 text-muted-foreground/70"
-              aria-label={t("nav.fileRow.timelineOrderedFile")}
-            >
-              <AudioWaveform className="h-3.5 w-3.5" />
-            </span>
-          </AppTooltip>
-        )}
-        <div className="flex-1 min-w-0">
-          {editing ? (
-            <input
-              ref={inputRef}
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onBlur={() => onEditCommit(draft)}
+    // A handle, because neither root can contain the other: the ⋯ button has to
+    // sit inside the row (the context-menu trigger), while its popup has to stay
+    // outside it — React bubbles a portal's events along the React tree, and a
+    // click on the row opens the file.
+    <>
+      <ContextMenu>
+        <ContextMenuTrigger
+          render={
+            <div
+              // Showcase label: addressable, readable target for video scripts/cursor
+              // (see docs/distribution/SHOWCASE-LABELS.md). The whole row is the click
+              // target that opens the file — what "click the sidebar file" should hit.
+              data-showcase="sidebar.file"
+              data-showcase-name={file.name}
+              className={cn(
+                "group relative flex h-7 items-center gap-1 rounded-lg px-2 text-[13px] transition-colors",
+                active ? "bg-accent text-foreground" : "hover:bg-accent",
+              )}
+              onClick={() => { if (!editing) onSelect() }}
               onKeyDown={(e) => {
-                if (e.key === "Enter") { e.preventDefault(); onEditCommit(draft) }
-                else if (e.key === "Escape") { e.preventDefault(); onEditCancel() }
+                if (editing) return
+                if (e.key.toLowerCase() === "r" && !e.metaKey && !e.ctrlKey) {
+                  e.preventDefault(); onStartRename()
+                }
               }}
-              className="w-full select-text rounded-lg bg-background px-2 py-0.5 text-sm outline-none"
-              onClick={(e) => e.stopPropagation()}
+              tabIndex={0}
             />
-          ) : (
-            <AppTooltip content={fileNameTooltip} side="right">
+          }
+        >
+          {canExpand ? (
+            <AppTooltip
+              content={expanded ? t("nav.fileRow.collapseSections") : t("nav.fileRow.expandSections")}
+              side="right"
+            >
               <button
-                type="button"
-                tabIndex={-1}
-                className="block w-full truncate text-left"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  onSelect()
-                }}
+                className="p-0.5 rounded-md text-muted-foreground transition-colors hover:text-foreground"
+                onClick={(e) => { e.stopPropagation(); onToggleExpand() }}
+                aria-label={expanded ? t("nav.fileRow.collapse") : t("nav.fileRow.expand")}
               >
-                {file.name}
+                <ChevronRight className={cn("h-3 w-3 transition-transform", expanded && "rotate-90")} />
               </button>
             </AppTooltip>
+          ) : (
+            <span className="w-[18px] shrink-0" aria-hidden="true" />
           )}
-        </div>
-        {/* AQU-341: reserve a fixed-width slot for the progress meter whether or
-            not this file has progress, so the `flex-1 min-w-0` name column above
-            keeps the same width across every row. Rendering the meter only when
-            progress exists let same-named files diverge: a fully-imported file
-            (meter shown) and a partial/empty import residue of the same name (no
-            meter) gave their name labels different available widths, so they
-            truncated at different points. A stable reservation makes identical
-            names truncate identically. */}
-        {!editing && (
-          <div
-            className="flex w-[50px] shrink-0 items-center justify-end gap-0.5"
-            data-testid="file-row-progress-slot"
-            aria-label={
-              progress && progress.total > 0
-                ? t("nav.fileRow.progressAriaLabel", { translated: translatedPct, validated: validatedPct })
-                : undefined
-            }
-          >
-            {progress && progress.total > 0 && (
-              <>
-                <span className="h-2 w-6 rounded-full bg-muted overflow-hidden">
-                  <span className="block h-full bg-amber-500" style={{ width: `${translatedPct}%` }} />
-                </span>
-                <span className="h-2 w-6 rounded-full bg-muted overflow-hidden">
-                  <span className="block h-full bg-emerald-500" style={{ width: `${validatedPct}%` }} />
-                </span>
-              </>
+          {isTimeOrdered && (
+            <AppTooltip content={t("nav.fileRow.timelineOrderedTooltip")} side="right">
+              <span
+                className="shrink-0 text-muted-foreground/70"
+                aria-label={t("nav.fileRow.timelineOrderedFile")}
+              >
+                <AudioWaveform className="h-3.5 w-3.5" />
+              </span>
+            </AppTooltip>
+          )}
+          <div className="flex-1 min-w-0">
+            {editing ? (
+              <input
+                ref={inputRef}
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                onBlur={() => onEditCommit(draft)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") { e.preventDefault(); onEditCommit(draft) }
+                  else if (e.key === "Escape") { e.preventDefault(); onEditCancel() }
+                }}
+                autoComplete="off"
+                className="w-full select-text rounded-lg bg-background px-2 py-0.5 text-sm outline-none"
+                onClick={(e) => e.stopPropagation()}
+              />
+            ) : (
+              <AppTooltip content={fileNameTooltip} side="right">
+                <button
+                  type="button"
+                  tabIndex={-1}
+                  className="block w-full truncate text-left"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onSelect()
+                  }}
+                >
+                  {file.name}
+                </button>
+              </AppTooltip>
             )}
           </div>
-        )}
-        {!editing && (
-          <AppTooltip content={t("nav.fileRow.fileActions")} side="right">
-            <button
-              className="p-1 rounded-md text-muted-foreground opacity-0 transition-colors hover:text-foreground group-hover:opacity-100 focus-visible:opacity-100"
-              onClick={(e) => {
-                e.stopPropagation()
-                openContextMenuAtPointer(e.currentTarget, e.clientX, e.clientY)
-              }}
+          {/* AQU-341: reserve a fixed-width slot for the progress meter whether or
+              not this file has progress, so the `flex-1 min-w-0` name column above
+              keeps the same width across every row. Rendering the meter only when
+              progress exists let same-named files diverge: a fully-imported file
+              (meter shown) and a partial/empty import residue of the same name (no
+              meter) gave their name labels different available widths, so they
+              truncated at different points. A stable reservation makes identical
+              names truncate identically. */}
+          {!editing && (
+            <div
+              className="flex w-[50px] shrink-0 items-center justify-end gap-0.5"
+              data-testid="file-row-progress-slot"
+              aria-label={
+                progress && progress.total > 0
+                  ? t("nav.fileRow.progressAriaLabel", { translated: translatedPct, validated: validatedPct })
+                  : undefined
+              }
+            >
+              {progress && progress.total > 0 && (
+                <>
+                  <span className="h-2 w-6 rounded-full bg-muted overflow-hidden">
+                    <span className="block h-full bg-amber-500" style={{ width: `${translatedPct}%` }} />
+                  </span>
+                  <span className="h-2 w-6 rounded-full bg-muted overflow-hidden">
+                    <span className="block h-full bg-emerald-500" style={{ width: `${validatedPct}%` }} />
+                  </span>
+                </>
+              )}
+            </div>
+          )}
+          {!editing && (
+            <DropdownMenuTrigger
+              handle={actionsMenu}
+              className="rounded-md p-1 text-muted-foreground opacity-0 transition-colors group-hover:opacity-100 hover:text-foreground focus-visible:opacity-100 aria-expanded:opacity-100 aria-expanded:text-foreground"
+              // The row itself opens the file; this press belongs to the menu.
+              onClick={(e) => e.stopPropagation()}
               aria-label={t("nav.fileRow.fileActions")}
             >
               <MoreHorizontal className="h-3.5 w-3.5" />
-            </button>
-          </AppTooltip>
-        )}
-        {hasSuggestion && !editing && (
-          <AppTooltip content={t("nav.fileRow.suggestionTooltip")} side="right" className="max-w-xs">
-            <button
-              className="p-1 rounded-md shrink-0 transition-colors hover:text-foreground"
-              onClick={(e) => { e.stopPropagation(); onApplySuggestion?.() }}
-              aria-label={t("nav.fileRow.applyRenameSuggestion")}
-            >
-              <Sparkles className="h-3 w-3 text-amber-500" />
-            </button>
-          </AppTooltip>
-        )}
-      </ContextMenuTrigger>
-      <FileActionMenu
-        onShowDetails={onShowDetails}
-        onRename={onStartRename}
-        onMove={onMove}
-        onDelete={onDelete}
-        onExportSource={onExportSource}
-      />
-    </ContextMenu>
+            </DropdownMenuTrigger>
+          )}
+          {hasSuggestion && !editing && (
+            <AppTooltip content={t("nav.fileRow.suggestionTooltip")} side="right" className="max-w-xs">
+              <button
+                className="p-1 rounded-md shrink-0 transition-colors hover:text-foreground"
+                onClick={(e) => { e.stopPropagation(); onApplySuggestion?.() }}
+                aria-label={t("nav.fileRow.applyRenameSuggestion")}
+              >
+                <Sparkles className="h-3 w-3 text-amber-500" />
+              </button>
+            </AppTooltip>
+          )}
+        </ContextMenuTrigger>
+        <ContextMenuContent className="w-44">{actions}</ContextMenuContent>
+      </ContextMenu>
+      <DropdownMenu handle={actionsMenu}>
+        <DropdownMenuContent align="end" className="w-44">
+          {actions}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </>
   )
 }

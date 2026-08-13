@@ -25,7 +25,7 @@ export function ImportFilesStep({ project, onOpenImport }: ImportFilesStepProps)
         </p>
       )}
 
-      <Button size="sm" className="w-full" onClick={onOpenImport}>
+      <Button className="w-full" onClick={onOpenImport}>
         {fileCount > 0 ? "Import more files" : "Import files"}
       </Button>
     </div>

@@ -158,7 +158,7 @@ export function MondayMappingRows({
                   }}
                   disabled={disabled}
                 >
-                  <SelectTrigger aria-label="Monday column" className="w-full">
+                  <SelectTrigger aria-label="Monday column">
                     <SelectValue placeholder="Pick a column" />
                   </SelectTrigger>
                   <SelectContent>
@@ -179,7 +179,7 @@ export function MondayMappingRows({
                   onValueChange={(value) => updateRow(i, { metric: value as MondayMetricKey })}
                   disabled={disabled}
                 >
-                  <SelectTrigger aria-label="Metric" className="w-full">
+                  <SelectTrigger aria-label="Metric">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -210,7 +210,6 @@ export function MondayMappingRows({
       </Table>
       <Button
         variant="outline"
-        size="sm"
         disabled={disabled}
         onClick={() =>
           onChange([...rows, { columnId: "", columnType: "text", metric: "completion_pct" }])
@@ -258,7 +257,6 @@ export function MondayMappingEditor({
         onChange={setRows}
       />
       <Button
-        size="sm"
         disabled={disabled || saving || !isDirty || !complete}
         onClick={() => onSave(rows.filter((r) => r.columnId))}
       >

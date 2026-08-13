@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import {
   buildProjectWsUrl,
   createLinkUpstreamChangedHandler,
+  createReconnectResyncHandler,
   createWsReconciler,
   fileInventoryChanged,
   isOwnWriteEcho,
@@ -577,6 +578,20 @@ describe("isOwnWriteEcho", () => {
     expect(isOwnWriteEcho({}, "ryder")).toBe(false)
     expect(isOwnWriteEcho({ by: "" }, "ryder")).toBe(false)
   })
+
+  it("treats an Agent API commit as remote even when `by` is this user", () => {
+    // An external agent commits an ask-mode changeset via the Agent API; the
+    // sync-worker routes it through /events with a token minted for the
+    // credential OWNER, so `by` is the owner's own username. If that owner has
+    // the project open, NO outbox write happened in this client — suppressing
+    // the echo would silently hide the agent's committed translation until a
+    // manual reload. `via: "external"` must defeat the `by` match.
+    expect(isOwnWriteEcho({ by: "ryder", via: "external" }, "ryder")).toBe(false)
+  })
+
+  it("`via: external` on another user's write stays remote (no accidental flip)", () => {
+    expect(isOwnWriteEcho({ by: "alice", via: "external" }, "ryder")).toBe(false)
+  })
 })
 
 describe("createLinkUpstreamChangedHandler (AQU-479 push accelerator)", () => {
@@ -736,5 +751,48 @@ describe("fileInventoryChanged (AQU-744 staged-import reveal)", () => {
 
   it("stays progress-only for a known file without the signal", () => {
     expect(fileInventoryChanged(frame("f1", false), new Set(["f1", "f2"]))).toBe(false)
+  })
+})
+
+// AQU-845: the project DO broadcasts `event.applied` live and never replays it,
+// so every frame that lands while a client's socket is down is lost to that
+// client. Without a resync on reopen, a peer's committed cell renders blank
+// until the user happens to blur+refocus the window — the reported "cells are
+// empty for the other member, then fill in on their own".
+describe("createReconnectResyncHandler (AQU-845 missed-broadcast recovery)", () => {
+  it("does not resync on the first open — the initial read is already in flight", () => {
+    const onResync = vi.fn()
+    const onOpen = createReconnectResyncHandler(onResync)
+
+    onOpen()
+
+    expect(onResync).not.toHaveBeenCalled()
+  })
+
+  it("resyncs on every reopen after the first", () => {
+    const onResync = vi.fn()
+    const onOpen = createReconnectResyncHandler(onResync)
+
+    onOpen() // initial connect
+    onOpen() // reconnect after a sync-worker redeploy
+    expect(onResync).toHaveBeenCalledTimes(1)
+
+    onOpen() // and again after the next drop
+    onOpen()
+    expect(onResync).toHaveBeenCalledTimes(3)
+  })
+
+  it("keeps each project's reconciler on its own first-open ledger", () => {
+    const a = vi.fn()
+    const b = vi.fn()
+    const onOpenA = createReconnectResyncHandler(a)
+    const onOpenB = createReconnectResyncHandler(b)
+
+    onOpenA()
+    onOpenA()
+    onOpenB()
+
+    expect(a).toHaveBeenCalledTimes(1)
+    expect(b).not.toHaveBeenCalled()
   })
 })

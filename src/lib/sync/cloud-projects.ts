@@ -205,6 +205,39 @@ export async function fetchArchivedProjects(
   }
 }
 
+export interface OrgDeletedFile {
+  fileId: string
+  name: string
+  projectId: string
+  projectName: string
+  fileType: string
+  cellCount: number
+  deletedAt: number
+}
+
+/**
+ * GET /api/v2/orgs/:orgId/deleted-files — soft-deleted files across projects
+ * the caller can see. Powers the Archived page's Recently deleted tab.
+ * Returns [] on any error so the tab can still render an empty state.
+ */
+export async function fetchOrgDeletedFiles(
+  jwt: string,
+  orgId: number,
+  apiUrl: string = FRONTIER_API_URL,
+): Promise<OrgDeletedFile[]> {
+  try {
+    const res = await fetch(`${apiUrl}/api/v2/orgs/${orgId}/deleted-files`, {
+      method: "GET",
+      headers: { Authorization: `Bearer ${jwt}` },
+    })
+    if (!res.ok) return []
+    const body = (await res.json()) as { files?: OrgDeletedFile[] }
+    return body.files ?? []
+  } catch {
+    return []
+  }
+}
+
 /**
  * PATCH /api/v2/projects/:id/deadline — set (ISO date string) or clear (null)
  * a project's deadline. Maintainer+ only (server-enforced). Throws on failure.

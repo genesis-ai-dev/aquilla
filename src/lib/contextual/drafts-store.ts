@@ -29,7 +29,7 @@ import { useSyncExternalStore } from "react"
 export interface ContextualDraftEntry {
   projectId: string
   fileId: string
-  /** Empty string is the only lane Autopilot may draft in for v1. */
+  /** Empty string is the project-default lane. */
   targetLang: string
   runId: string | null
   draftId: string
@@ -69,7 +69,7 @@ export interface ContextualDraftsFrame {
   type: "contextual.drafts"
   runId: string
   fileId: string
-  /** Required wire provenance. v1 accepts only the empty/default lane. */
+  /** Required wire provenance. Must match the attached editor lane. */
   targetLang: string
   spanLabel: string
   drafts: { draftId: string; cellId: string; text: string }[]
@@ -172,13 +172,12 @@ export function applyContextualDraftsFrame(
   frame: ContextualDraftsFrame,
   currentRunId: string | null,
 ): { needsRefetch: boolean } {
-  // Draft frames carry explicit lane provenance, and v1 only produces the
-  // project-default lane. A project/file/lane must already be attached; never
-  // let an early or project-wide frame choose the editor scope for us.
+  // Draft frames carry explicit lane provenance. A project/file/lane must
+  // already be attached; never let an early or project-wide frame choose the
+  // editor scope for us, and never apply a sibling language's proposals.
   if (
     _summary.projectId !== projectId ||
     _summary.fileId !== frame.fileId ||
-    frame.targetLang !== "" ||
     _summary.targetLang !== frame.targetLang
   ) return { needsRefetch: false }
   // Multiple historic runs may legitimately own REST-hydrated proposals, but
@@ -254,11 +253,9 @@ export function hydrateContextualDrafts(
   scope: ContextualDraftsScope,
   drafts: { draftId: string; runId?: string; cellId: string; text: string; spanLabel?: string }[],
 ): boolean {
-  // The editor snapshot endpoint is default-lane-only. Even if a future
-  // caller accidentally fetches it while a multilingual lane is open, keep
-  // that evidence out of a lane where accepting it would commit different
-  // translation data.
-  if (!isCurrentScope(scope) || scope.targetLang !== "") return false
+  // The editor snapshot is lane-scoped. A stale response for another
+  // project/file/lane cannot land in the open editor.
+  if (!isCurrentScope(scope)) return false
   const next = new Map<string, ContextualDraftEntry>()
   for (const d of drafts) {
     next.set(d.cellId, {

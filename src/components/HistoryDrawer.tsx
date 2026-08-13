@@ -8,6 +8,7 @@ import type { CellHistoryEntry } from "@/lib/parsers/types"
 import { cn } from "@/lib/utils"
 import { useCellEditHistory } from "@/hooks/useCellEditHistory"
 import { FootnotedTextValue } from "./footnotes/FootnoteInline"
+import { RightSidebarPanel } from "./RightSidebarPanel"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { RichMessage } from "@/lib/i18n/RichMessage"
 
@@ -179,7 +180,8 @@ export function HistoryDrawer({ cell, onClose, projectId, fileId, getTokenForFil
   }
 
   return (
-    <div className="flex h-full w-96 flex-col border-l bg-card">
+    <RightSidebarPanel storageKey="history" defaultWidth={384} resizeLabel="Resize history panel">
+    <div className="flex h-full w-full flex-col border-l bg-card">
       <div className="flex items-center justify-between border-b p-2">
         <h3 className="text-sm font-semibold">
           {t("editor.history.title")} {cell.context && <span className="text-muted-foreground">· {cell.context}</span>}
@@ -246,7 +248,11 @@ export function HistoryDrawer({ cell, onClose, projectId, fileId, getTokenForFil
                   isStale && groups.findIndex((g) => g.terminal.isStale ?? false) === i
                 return (
                   <GroupItem
-                    key={`${group.terminal.timestamp}-${group.startIndex}`}
+                    // Keyed on the event id, not the timestamp: a commit's
+                    // timestamp changes when the server-confirmed entry
+                    // replaces the locally pending one, and remounting on that
+                    // swap collapses an expanded group under the reader.
+                    key={group.terminal.eventId ?? `${group.terminal.timestamp}-${group.startIndex}`}
                     group={group}
                     isCurrent={i === currentGroupIndex}
                     formatTimestamp={formatTimestamp}
@@ -260,6 +266,7 @@ export function HistoryDrawer({ cell, onClose, projectId, fileId, getTokenForFil
         )}
       </div>
     </div>
+    </RightSidebarPanel>
   )
 }
 

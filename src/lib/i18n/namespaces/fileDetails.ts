@@ -15,22 +15,13 @@ export const fileDetails = defineNamespace({
     "fileDetails.imported": "Imported",
     "fileDetails.progress": "Progress",
     "fileDetails.progressValue": "{translated}% translated · {validated}% validated",
-    "fileDetails.rename": "Rename",
-    "fileDetails.moveToCorpus": "Move to corpus…",
-    "fileDetails.exportSource": "Export source (.SFM)",
-    "fileDetails.exportDisabledType": "Only USFM files support round-trip source export.",
-    "fileDetails.exportDisabledPolicy":
-      "Source export is disabled by your organization's export policy.",
-    "fileDetails.deleteRequiresRole":
-      "Deleting files requires the Project Lead role or above.",
   },
   context: {
     _context: {
       description:
-        "The 'File details' modal, opened from a file row's overflow (⋯) menu in the " +
-        "workspace sidebar. Shows a metadata table (label on the left, value on the " +
-        "right) followed by a column of file action buttons; actions the user lacks " +
-        "permission for are disabled with an explanatory sentence underneath.",
+        "The 'File details' modal, opened from a file row's overflow (⋯) or " +
+        "right-click menu in the workspace sidebar. Shows a metadata table " +
+        "(label on the left, value on the right). File actions stay on the row menu.",
     },
     keys: {
       "fileDetails.menuItem": {
@@ -114,40 +105,6 @@ export const fileDetails = defineNamespace({
           translated: "Whole number 0–100: percentage of segments with a translation.",
           validated: "Whole number 0–100: percentage of segments validated by a reviewer.",
         },
-      },
-      "fileDetails.rename": {
-        description:
-          "Action button that closes the modal and starts inline renaming of the file " +
-          "in the sidebar. Imperative verb.",
-        maxLength: 24,
-      },
-      "fileDetails.moveToCorpus": {
-        description:
-          "Action button that opens a dialog to move the file into a different corpus " +
-          "(named file group). Ends with an ellipsis because a dialog follows.",
-        maxLength: 30,
-      },
-      "fileDetails.exportSource": {
-        description:
-          "Action button that downloads the file back in its source format. '.SFM' is " +
-          "a file extension — keep it verbatim.",
-        maxLength: 30,
-      },
-      "fileDetails.exportDisabledType": {
-        description:
-          "Sentence under the disabled export button explaining that only USFM-format " +
-          "files can be exported. 'USFM' is a format name — keep it verbatim.",
-      },
-      "fileDetails.exportDisabledPolicy": {
-        description:
-          "Sentence under the disabled export button explaining that the user's " +
-          "organization has turned off source export for members.",
-      },
-      "fileDetails.deleteRequiresRole": {
-        description:
-          "Sentence under the disabled delete button explaining the required project " +
-          "role. 'Project Lead' is a role name shown elsewhere in the app; translate it " +
-          "consistently with the members page.",
       },
     },
   },

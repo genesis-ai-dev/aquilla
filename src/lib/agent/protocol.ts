@@ -95,7 +95,9 @@ export interface StagedEvent {
   parentId?: string             // resolved current cells.event_id (server resolves at stage time)
   payload: Record<string, unknown> // server injects ai_suggestion: true and agent_run_id for cell commits
   // display context the client card needs:
-  display: { canonicalRef?: string; before?: string; after?: string }
+  // fileName (AQU-846) is what the approval UI shows so the user can see which
+  // file each proposed cell lands in before approving.
+  display: { canonicalRef?: string; fileName?: string; before?: string; after?: string }
 }
 
 // ── Aquifer publish proposal (Bible-resources answer) ──────────────────────

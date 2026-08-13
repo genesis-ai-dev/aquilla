@@ -29,7 +29,12 @@ import { useCellConfidence } from "@/hooks/useCellConfidence"
 import { useRules } from "@/hooks/useRules"
 import { useOrgSettings } from "@/hooks/useOrgSettings"
 import { useActiveOrg } from "@/context/OrgContext"
-import { ALL_ORGS_PARAM, orgHomePath } from "@/lib/navigation/org-paths"
+import {
+  ALL_ORGS_PARAM,
+  editorReturnFromLocation,
+  orgHomePath,
+  withEditorReturn,
+} from "@/lib/navigation/org-paths"
 import { updateProject, patchProject, getProject, mergeServerProjectWithLocalCache } from "@/lib/store/project-index"
 import { completionBatchSizeFor, workspaceActions, getVisibleActions } from "@/lib/workspace-actions/registry"
 import type { WorkspaceAction } from "@/lib/workspace-actions/types"
@@ -59,6 +64,7 @@ import { warmFileDubs } from "@/lib/audio/warm-dubs"
 import { effectiveSourceText } from "@/lib/cell-text"
 import { resolveDeepLinkLaneFromSearchParams } from "./project-workspace-lane-deeplink"
 import { resolveActiveTargetLanguage } from "./project-workspace-lane-target"
+import { resolveActiveSourceLanguage } from "./project-workspace-source-language"
 import { useWorkspaceSearch } from "@/hooks/useWorkspaceSearch"
 import { ParallelPassagesPanel, type ParallelPanelMode, type ParallelPanelScope, type ReplaceAllPayload } from "./ParallelPassagesPanel"
 import type { EditorTableHandle } from "./EditorTable"
@@ -77,10 +83,8 @@ import { generateCellVoice } from "@/lib/audio/voice-generate-helpers"
 import { CombinedBoundaryEditor } from "./voice/CombinedBoundaryEditor"
 import { useProjectTts } from "@/hooks/useProjectTts"
 import { RuleDrawer } from "./RuleDrawer"
-import { RulesSurface } from "./RulesSurface"
 import { CommentsDrawer } from "./CommentsDrawer"
 import { HistoryDrawer } from "./HistoryDrawer"
-import { SharePanel } from "./SharePanel"
 import { VideoPlayer, type VideoPlayerHandle } from "./VideoPlayer"
 import { VideoAttachmentDialog } from "./VideoAttachmentDialog"
 import { parseTimestampRange, extractCuesFromCells } from "@/lib/video/vtt-generator"
@@ -124,8 +128,8 @@ import { getVoiceLibrary, newVoiceId, VOICE_PALETTE } from "@/lib/audio/voices"
 import { attachMediaFileToTimeline, attachMediaUrlToTimeline } from "@/lib/timeline/attach-media"
 import { useCellsAuditStatsWithOverlay } from "@/hooks/useCellsAuditStatsWithOverlay"
 import { useComments } from "@/hooks/useComments"
-import { Film, Scale, MessagesSquare, Share2, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, BookMarked, BookOpen, Users, UserCheck, ArrowRight, PanelLeftClose, Mic, Plus, Pencil, FolderInput, Download } from "lucide-react"
-import { toast } from "sonner"
+import { Film, Bot, MessagesSquare, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, BookOpen, Users, UserCheck, ArrowRight, PanelLeftClose, Mic, Plus, Pencil, FolderInput, Download } from "lucide-react"
+import { toast } from "@/components/ui/toast"
 import { AgentDockPanel } from "./AgentDockPanel"
 import { agentSessionStore } from "@/lib/agent/session-store"
 import { AgentWorkbench } from "./agent/AgentWorkbench"
@@ -242,15 +246,8 @@ const FileTargetImportDialog = lazy(() =>
 const CommentsPageContent = lazy(() =>
   import("./CommentsPage").then((mod) => ({ default: mod.CommentsPage })),
 )
-const LivingMemoryPageContent = lazy(() =>
-  import("./LivingMemoryPage").then((mod) => ({ default: mod.LivingMemoryPage })),
-)
 const GlossaryEditorContent = lazy(() =>
   import("./GlossaryEditor").then((mod) => ({ default: mod.GlossaryEditor })),
-)
-// FRO-180: per-project members management surface.
-const ProjectMembersPageContent = lazy(() =>
-  import("./ProjectMembersPage").then((mod) => ({ default: mod.ProjectMembersPage })),
 )
 // FRO-249 fix (Fix 2): module-level promise chain that serializes
 // handleImported's getProject→updateProject read-modify-write so that
@@ -360,6 +357,38 @@ function writePersistedActiveLane(projectId: string, lane: string): void {
   }
 }
 
+/** Persist whether the Agent editor tab is open for a project (survives file-tab switches). */
+function agentTabStorageKey(projectId: string): string {
+  return `codex:agent-tab:${projectId}`
+}
+function readAgentTabOpen(projectId: string | undefined): boolean {
+  if (!projectId) return false
+  try {
+    return localStorage.getItem(agentTabStorageKey(projectId)) === "1"
+  } catch {
+    return false
+  }
+}
+function writeAgentTabOpen(projectId: string | undefined, open: boolean): void {
+  if (!projectId) return
+  try {
+    if (open) localStorage.setItem(agentTabStorageKey(projectId), "1")
+    else localStorage.removeItem(agentTabStorageKey(projectId))
+  } catch {
+    /* storage unavailable — tab open-state stays in-memory only */
+  }
+}
+
+/** Sidebar Agent rail click: focus the workbench only while it is the
+ *  active center surface. A leftover Agent tab in the strip (after
+ *  minimize / switching to a file) must not steal the click — that is
+ *  dock mode again. */
+export function resolveSidebarAgentClick(
+  workbenchActive: boolean,
+): "activate-editor-tab" | "open-dock" {
+  return workbenchActive ? "activate-editor-tab" : "open-dock"
+}
+
 /**
  * Reconcile Autopilot's lossy realtime mirrors whenever the project socket
  * opens, including reconnects on the same route. The captured draft scope is
@@ -370,7 +399,7 @@ export async function reconcileContextualAfterRealtimeOpen(args: {
   projectId: string
   currentFileId: string | null
   draftScope: ContextualDraftsScope | null
-  attachRun: (projectId: string, fileId: string) => Promise<void>
+  attachRun: (projectId: string, fileId: string, targetLang?: string) => Promise<void>
   refreshDrafts: (scope: ContextualDraftsScope) => Promise<void>
 }): Promise<void> {
   const { projectId, currentFileId, draftScope } = args
@@ -378,21 +407,20 @@ export async function reconcileContextualAfterRealtimeOpen(args: {
     !draftScope ||
     !currentFileId ||
     draftScope.projectId !== projectId ||
-    draftScope.fileId !== currentFileId ||
-    draftScope.targetLang !== ""
+    draftScope.fileId !== currentFileId
   ) return
   await Promise.all([
-    args.attachRun(projectId, currentFileId),
+    args.attachRun(projectId, currentFileId, draftScope.targetLang),
     args.refreshDrafts(draftScope),
   ])
 }
 
 /**
  * A target commit and contextual-draft reconciliation land atomically in the
- * sync projection. Re-read the durable default-lane proposal list when that
- * applied-event echo reaches the exact editor scope, including for our own
- * writes. The echo is the first point at which the server-side projection is
- * known to be authoritative; an earlier client review request may have raced
+ * sync projection. Re-read the durable proposal list for the open lane when
+ * that applied-event echo reaches the exact editor scope, including for our
+ * own writes. The echo is the first point at which the server-side projection
+ * is known to be authoritative; an earlier client review request may have raced
  * it or failed independently.
  */
 export async function reconcileContextualDraftsAfterAppliedEvent(args: {
@@ -414,8 +442,7 @@ export async function reconcileContextualDraftsAfterAppliedEvent(args: {
     event.fileId !== args.currentFileId ||
     !draftScope ||
     draftScope.projectId !== args.projectId ||
-    draftScope.fileId !== event.fileId ||
-    draftScope.targetLang !== ""
+    draftScope.fileId !== event.fileId
   ) return
   await args.refreshDrafts(draftScope)
 }
@@ -497,7 +524,7 @@ export function ProjectWorkspace() {
   // X button and "apply" flows actually need.)
   const [suggestionsDismissed, setSuggestionsDismissed] = useState(false)
   // Transient post-action confirmations (label import, direction-role fallback, …)
-  // go through sonner — see toast.* call sites below.
+  // go through toast — see toast.add call sites below.
 
   useEffect(() => {
     optimisticFileIdsRef.current = new Set()
@@ -697,16 +724,15 @@ export function ProjectWorkspace() {
   useEffect(() => {
     if (!project || !projectId) return
 
-    // The in-project overlay surfaces (/rules, /comments, /memory, /terminology,
-    // /members) deliberately carry no file in the URL — don't treat that as
+    // The in-project overlay surfaces (/comments, /terminology, /agent)
+    // deliberately carry no file in the URL — don't treat that as
     // "no file selected" and bounce back to the editor, or these surfaces become
-    // unreachable. (FRO-194 added /rules; FRO-254 adds the others; FRO-180 adds /members.)
+    // unreachable. (FRO-254 added comments/terminology; agent is a takeover.)
+    // Rules and Living Memory live at /project/:id/settings/{rules,memory}.
+    // Members live at /project/:id/settings/members (not a workspace surface).
     if (
-      location.pathname.endsWith("/rules") ||
       location.pathname.endsWith("/comments") ||
-      location.pathname.endsWith("/memory") ||
       location.pathname.endsWith("/terminology") ||
-      location.pathname.endsWith("/members") ||
       location.pathname.endsWith("/agent")
     ) return
 
@@ -773,18 +799,26 @@ export function ProjectWorkspace() {
 
   // Center surface — derived from the URL path so deep-links work and the
   // shell (sidebar + top bar + bottom status bar) never unmounts.
-  // FRO-194 added "rules"; FRO-254 adds "comments", "memory", "terminology";
-  // FRO-180 adds "members".
-  const centerSurface: "editor" | "rules" | "comments" | "memory" | "terminology" | "members" | "agent" =
-    location.pathname.endsWith("/rules") ? "rules" :
+  // FRO-254: comments / terminology. Agent is a takeover surface.
+  // Rules and Living Memory live under /project/:id/settings/{rules,memory}.
+  const centerSurface: "editor" | "comments" | "terminology" | "agent" =
     location.pathname.endsWith("/comments") ? "comments" :
-    location.pathname.endsWith("/memory") ? "memory" :
     location.pathname.endsWith("/terminology") ? "terminology" :
-    location.pathname.endsWith("/members") ? "members" :
     location.pathname.endsWith("/agent") ? "agent" :
     "editor"
 
-  const [editingRuleId, setEditingRuleId] = useState<string | "new" | null>(null)
+  const editorReturnPath = useMemo(() => {
+    if (!projectId) return null
+    if (centerSurface === "editor") return workspaceReturnPath(projectId, activeFileId)
+    return editorReturnFromLocation(location.pathname, location.search, projectId)
+  }, [projectId, centerSurface, activeFileId, location.pathname, location.search])
+
+  const openOverlay = useCallback((
+    surface: "comments" | "terminology" | "agent",
+  ) => {
+    if (!projectId) return
+    navigate(withEditorReturn(`/project/${projectId}/${surface}`, editorReturnPath))
+  }, [projectId, navigate, editorReturnPath])
 
   useEffect(() => {
     const open = searchParams.get("openRule")
@@ -807,9 +841,14 @@ export function ProjectWorkspace() {
   const [parallelOpen, setParallelOpen] = useState(false)
   const [parallelMode, setParallelMode] = useState<ParallelPanelMode>("search")
   const [parallelScope, setParallelScope] = useState<ParallelPanelScope>("project")
-  const [shareOpen, setShareOpen] = useState(false)
   // FRO-308: left dock active tab (null = collapsed rail only)
   const [dockTab, setDockTab] = useState<DockTab | null>("files")
+  // Agent editor tab is in the strip while the workbench is open. Minimize
+  // and the tab's × dismiss it. Switching to a file tab leaves the surface
+  // but keeps the tab until then.
+  const [agentTabOpen, setAgentTabOpen] = useState(
+    () => centerSurface === "agent" || readAgentTabOpen(projectId),
+  )
   // Agent workbench (agent-mode-v2 §4) is a takeover surface: collapse the
   // dock to the rail on entry (a second agent chat beside the workbench is
   // confusing) and restore the user's tab on exit. Manual reopen still wins —
@@ -828,6 +867,8 @@ export function ProjectWorkspace() {
       // Entry forces the scope picker ("files"), so treat that forced default
       // (or a collapsed rail) as "no manual choice" and restore the saved tab.
       // Any other tab was picked manually mid-takeover — keep it.
+      // Minimize returns to dock mode: if the user expanded from the Agent
+      // panel, restore that panel rather than leaving them on Files.
       setDockTab((cur) =>
         cur === null || cur === "files" ? dockTabBeforeAgentRef.current : cur,
       )
@@ -851,6 +892,26 @@ export function ProjectWorkspace() {
     return id ? projectFiles.find((f) => f.id === id) ?? null : null
   }, [agentScopeFileId, activeFileId, projectFiles])
 
+  useEffect(() => {
+    setAgentTabOpen(centerSurface === "agent" || readAgentTabOpen(projectId))
+  }, [projectId]) // eslint-disable-line react-hooks/exhaustive-deps -- remount open-state per project
+  useEffect(() => {
+    if (centerSurface === "agent") setAgentTabOpen(true)
+  }, [centerSurface])
+  useEffect(() => {
+    writeAgentTabOpen(projectId, agentTabOpen)
+  }, [projectId, agentTabOpen])
+  const openAgentTab = useCallback(() => {
+    setAgentTabOpen(true)
+    openOverlay("agent")
+  }, [openOverlay])
+  const closeAgentTab = useCallback(() => {
+    setAgentTabOpen(false)
+    if (centerSurface === "agent" && projectId) {
+      navigate(editorReturnPath ?? `/project/${projectId}/editor`)
+    }
+  }, [centerSurface, editorReturnPath, navigate, projectId])
+
   // A source selection the user sent to the agent via "Ask AI". Opens the
   // Agent dock and is inserted into the composer as a context chip.
   const [pendingChip, setPendingChip] = useState<ContextChip | null>(null)
@@ -869,6 +930,9 @@ export function ProjectWorkspace() {
   const [makeCharacterSeedCellId, setMakeCharacterSeedCellId] = useState<string | null>(null)
   // FRO-192: Assign… modal
   const [assignModalOpen, setAssignModalOpen] = useState(false)
+  // File the sidebar context menu asked to assign; null means "use the
+  // editor's active file" (overflow-menu launch).
+  const [assignTargetFileId, setAssignTargetFileId] = useState<string | null>(null)
   // Increment to force a refresh of the assignments pickup panel after a new
   // assignment is created. The EditorTable assignmentsByCellId map is also
   // rebuilt on the same tick.
@@ -1332,9 +1396,9 @@ export function ProjectWorkspace() {
   const contextualDraftScopeRef = useRef<ContextualDraftsScope | null>(null)
   const refreshContextualDrafts = useCallback(async (requestedScope?: ContextualDraftsScope) => {
     const scope = requestedScope ?? contextualDraftScopeRef.current
-    if (!scope || scope.targetLang !== "") return
+    if (!scope) return
     try {
-      const drafts = await fetchContextualDrafts(scope.projectId, scope.fileId)
+      const drafts = await fetchContextualDrafts(scope.projectId, scope.fileId, scope.targetLang)
       hydrateContextualDrafts(scope, drafts)
     } catch {
       /* backend not deployed, offline, or signed out — pill reports the run */
@@ -1345,8 +1409,7 @@ export function ProjectWorkspace() {
 
   // Attach before paint on every project/file/lane switch. The scope token
   // race-guards the later snapshot, including the same file id reused across
-  // projects and A → B → A navigation. Non-default lanes deliberately do
-  // not fetch v1's default-lane-only draft endpoint.
+  // projects and A → B → A navigation.
   useLayoutEffect(() => {
     if (!contextualAutopilotEnabled || !project?.id || !activeFileId) {
       contextualDraftScopeRef.current = null
@@ -1355,7 +1418,7 @@ export function ProjectWorkspace() {
     }
     const scope = attachContextualDrafts(project.id, activeFileId, activeLane)
     contextualDraftScopeRef.current = scope
-    if (activeLane === "") void refreshContextualDrafts(scope)
+    void refreshContextualDrafts(scope)
   }, [activeFileId, activeLane, contextualAutopilotEnabled, project?.id, refreshContextualDrafts])
 
   useEffect(() => () => {
@@ -1450,7 +1513,16 @@ export function ProjectWorkspace() {
     if (next >= 0) editorRef.current?.focusCellEditorIndex(next)
   }, [findNextUnfinished])
   const activeFile = activeFileId ? project?.files.find((f) => f.id === activeFileId) : null
-  const activeSourceLanguage = activeFile?.sourceLanguage || project?.sourceLanguage
+  // AQU-848: the SOURCE language is the project setting, never the file's
+  // import-time stamp — same rule the target side settled in AQU-583. A file
+  // stamped at import (some importers stamp a literal, e.g. `"en"` for OBS)
+  // otherwise shadows the setting forever, so a project configured for a
+  // low-resource language keeps reporting English in the editor and in AI
+  // prompts, and changing Settings can never clear it.
+  const activeSourceLanguage = resolveActiveSourceLanguage(
+    activeFile?.sourceLanguage,
+    project?.sourceLanguage,
+  )
   // The DEFAULT (`''`) lane's target language — the PROJECT default only. Used to
   // label the default-lane switch option, which must always name the project
   // default regardless of which lane is active. AQU-583: the per-file target is
@@ -1544,7 +1616,8 @@ export function ProjectWorkspace() {
   const workspaceBreadcrumb = useMemo(() => ({
     surfaceLabel:
       centerSurface === "editor" ? "Editor" : deriveNavTitle(location.pathname),
-  }), [centerSurface, location.pathname])
+    editorHref: centerSurface === "editor" ? undefined : editorReturnPath ?? undefined,
+  }), [centerSurface, location.pathname, editorReturnPath])
 
   const handleVisibleFootnotesChange = useCallback((entries: VisibleFootnoteEntry[]) => {
     const key = entries
@@ -1900,12 +1973,6 @@ export function ProjectWorkspace() {
   // Org-level rules: fetch from org settings and merge with project rules.
   const {
     orgRules,
-    promotionRequests,
-    canEdit: canEditOrgSettings,
-    canRequestPromotion,
-    requestPromotion,
-    patch: patchOrgSettings,
-    version: orgSettingsVersion,
     canExport: canExportByOrgPolicy,
     hasFetched: orgSettingsFetched,
     // AQU-496: whether below-lead members may self-assign work.
@@ -1920,9 +1987,7 @@ export function ProjectWorkspace() {
     project?.syncRole?.level ?? null,
   )
 
-  // FRO-194: also destructure rule CRUD for RulesSurface (patchSettings is the
-  // sync function; it matches the PatchSharedFn signature from useProjectSettings).
-  const { rules, userRules, builtinRules, addRule, updateRule, deleteRule, setBuiltinOverride } = useRules(
+  const { rules } = useRules(
     project ?? null,
     refresh,
     patchSettings as Parameters<typeof useRules>[2],
@@ -2659,7 +2724,11 @@ export function ProjectWorkspace() {
         // per-device provider override on top.
         settings: project?.completionSettings ?? FALLBACK_COMPLETION_SETTINGS,
         session: frontierSession,
-        sourceLanguage: project?.sourceLanguage || "English",
+        // AQU-848: never claim English on the project's behalf. The configured
+        // source language is what the model must be told to back-translate
+        // into; when the project has none, the service substitutes a
+        // language-neutral phrase rather than inventing one.
+        sourceLanguage: project?.sourceLanguage?.trim() || "",
         targetLanguage: project?.targetLanguage || "Unknown",
         targetText: cell.translated,
         examples: [],
@@ -3248,7 +3317,7 @@ export function ProjectWorkspace() {
     let cancelled = false
     let reconciler: import("@/lib/sync/ws-reconciler").WsReconciler | null = null
     void (async () => {
-      const { createWsReconciler, isOwnWriteEcho, isValidationEvent, createLinkUpstreamChangedHandler, fileInventoryChanged } =
+      const { createWsReconciler, isOwnWriteEcho, isValidationEvent, createLinkUpstreamChangedHandler, createReconnectResyncHandler, fileInventoryChanged } =
         await import("@/lib/sync/ws-reconciler")
       const { syncWorkerHttpOrigin } = await import("@/lib/sync/sync-worker-url")
       if (cancelled || !project?.id) return
@@ -3271,6 +3340,20 @@ export function ProjectWorkspace() {
             revalidateCellsRef.current()
           })
         },
+      })
+      // AQU-845: the DO never replays `event.applied`, so anything broadcast
+      // while this client's socket was down is gone. Reopening the socket is
+      // the only in-app signal that such a gap may exist — pull the open
+      // file's projection (and the progress/validation reads that hang off it)
+      // back, instead of waiting for a window focus that may never come.
+      const handleReconnectResync = createReconnectResyncHandler(() => {
+        if (cancelled) return
+        revalidateCellsRef.current()
+        revalidateAuditStats()
+        invalidateProjectFileProgress(pid)
+        void refreshAllFilesProgress().catch(() => {
+          // The next normal sidebar refresh retries a transient failure.
+        })
       })
       reconciler = createWsReconciler(
         {
@@ -3297,6 +3380,9 @@ export function ProjectWorkspace() {
               currentFileId: activeFileIdRef.current,
               selection: null,
             })
+            // Skips the first open (the initial read is already in flight);
+            // every reconnect after that closes the missed-broadcast gap.
+            handleReconnectResync()
             // The project relay is intentionally lossy. A reconnect may have
             // missed terminal progress or staged-draft frames, so reconcile
             // both mirrors from their durable sources for the exact scope
@@ -3579,6 +3665,7 @@ export function ProjectWorkspace() {
     sendPresenceUpdate,
     refreshContextualDrafts,
     refreshAllFilesProgress,
+    revalidateAuditStats,
   ])
 
   // FRO-288: workspace-level focus-lock with renewal.
@@ -4038,7 +4125,11 @@ export function ProjectWorkspace() {
       // returned record is discarded — persistence flows through file.rename.
       renameFile(project, fileId, newName)
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Rename failed")
+      toast.add({
+        type: "error",
+        priority: "high",
+        title: e instanceof Error ? e.message : "Rename failed",
+      })
       return
     }
     await applyRenames([{ fileId, name: newName.trim() }])
@@ -4200,16 +4291,21 @@ export function ProjectWorkspace() {
         setClientProject(project)
         void updateProject(project)
         refresh()
-        toast.error(e instanceof Error ? `Rename failed: ${e.message}` : "Rename failed")
+        toast.add({
+          type: "error",
+          priority: "high",
+          title: e instanceof Error ? `Rename failed: ${e.message}` : "Rename failed",
+        })
         return
       }
     }
     refresh()
     const applied = effective
-    toast("Applied renames.", {
-      duration: 10_000,
-      action: {
-        label: "Undo",
+    const toastId = toast.add({
+      title: "Applied renames.",
+      timeout: 10_000,
+      actionProps: {
+        children: "Undo",
         onClick: () => {
           const p = projectForUndoRef.current
           if (!p) return
@@ -4234,6 +4330,7 @@ export function ProjectWorkspace() {
             for (const s of applied) next.delete(s.fileId)
             return next
           })
+          toast.close(toastId)
         },
       },
     })
@@ -4339,32 +4436,25 @@ export function ProjectWorkspace() {
     rebuildSearchIndex()
   }, [project?.id, isReadOnly, getActiveCell, activeFileId, applyOptimisticTargetEdit, activeLane, resolveTargetCommitParentId, rememberPendingTargetCommit, currentUsername, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell, rebuildSearchIndex])
 
+  const openProjectSettings = useCallback(() => {
+    if (!projectId) return
+    window.location.assign(buildProjectSettingsHandoffUrl({
+      projectId,
+      returnTo: workspaceReturnPath(projectId, activeFileId),
+    }))
+  }, [projectId, activeFileId])
+
   const projectNavItems = useMemo(() => {
     const items = [
-      { id: "rules", label: "Rules", icon: Scale,
-        onClick: () => navigate(`/project/${projectId}/rules`) },
       // Pinned below Comments: Terminology is a frequent destination, so it
       // stays visible; everything else unpinned collapses into "More".
       { id: "comments", label: "Comments", icon: MessagesSquare, pinned: true,
         badge: Array.from(openCommentCount.values()).reduce((a, b) => a + b, 0),
-        onClick: () => navigate(`/project/${projectId}/comments`) },
+        onClick: () => openOverlay("comments") },
       { id: "terminology", label: "Terminology", icon: BookOpen, pinned: true,
-        onClick: () => navigate(`/project/${projectId}/terminology`) },
-      { id: "living-memory", label: "Memory", icon: BookMarked,
-        onClick: () => navigate(`/project/${projectId}/memory`) },
-      // Audio/Media lens lives in the header EditorModeToggle — keep it out of
-      // the sidebar More menu so the overflow list stays structural (share,
-      // settings, trash) rather than view-mode toggles.
-      { id: "share", label: "Share", icon: Share2,
-        onClick: () => setShareOpen(true) },
-      { id: "settings", label: "Settings", icon: SettingsIcon,
-        onClick: () => {
-          if (!projectId) return
-          window.location.assign(buildProjectSettingsHandoffUrl({
-            projectId,
-            returnTo: workspaceReturnPath(projectId, activeFileId),
-          }))
-        } },
+        onClick: () => openOverlay("terminology") },
+      // Project settings is a header cog beside Import. Audio/Media lens lives
+      // in the header EditorModeToggle. Sharing lives in Settings → Members.
       // FRO-272: trash moved out of the always-visible files footer into the
       // "More" menu — it opens a dialog now (project_lead+ only).
       ...(currentRoleLevel >= ROLE.PROJECT_LEAD
@@ -4373,7 +4463,7 @@ export function ProjectWorkspace() {
         : []),
     ]
     return items
-  }, [projectId, activeFileId, navigate, openCommentCount, currentRoleLevel])
+  }, [openCommentCount, currentRoleLevel, openOverlay])
 
   // AQU-646 P0: cells from the store never carry audio attachments — only
   // mergeCellsWithAudio adds them (EditorTable and VoicePlaybackBar each merge
@@ -4506,15 +4596,26 @@ export function ProjectWorkspace() {
       // AQU-646 P0: merge attachments in — needsTranscription gates on
       // selectedAudioId, which raw store cells never carry.
       const cells = mergeCellsWithAudio(getActiveCells(), workspaceAudioByCellId)
-      void runBatchTranscribeAll({
-        cells,
-        projectId: project.id,
-        session: frontierSession ?? null,
-        // AQU-646: language follows the audio — media segments are source
-        // speech, recorded takes voice the target text (per-cell in the batch).
-        sourceLanguage: project.sourceLanguage,
-        targetLanguage: project.targetLanguage,
-      })
+      const fileId = activeFileId
+      void (async () => {
+        await runBatchTranscribeAll({
+          cells,
+          projectId: project.id,
+          session: frontierSession ?? null,
+          // AQU-646: language follows the audio — media segments are source
+          // speech, recorded takes voice the target text (per-cell in the batch).
+          sourceLanguage: project.sourceLanguage,
+          targetLanguage: project.targetLanguage,
+        })
+        // AQU-783: the batch enqueues one cell.audio.attach per cell but never
+        // revalidated, so the transcripts only surfaced after a manual reload.
+        // Flush the outbox once and revalidate the file so every transcript +
+        // timing appears immediately.
+        await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+        await refreshOutboxPending()
+        revalidateCells()
+        notifyAudioAttachmentsChanged(fileId)
+      })()
     },
     runSynthAll: () => {
       if (!activeFileId || !project) return
@@ -4527,7 +4628,7 @@ export function ProjectWorkspace() {
       })
     },
     navigate,
-  }), [activeFileId, completeBatch, getActiveCells, cellSummaries, project, frontierSession, currentUsername, activeLane, navigate, openImportFlow, openExportFlow, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell, workspaceAudioByCellId])
+  }), [activeFileId, completeBatch, getActiveCells, cellSummaries, project, frontierSession, currentUsername, activeLane, navigate, openImportFlow, openExportFlow, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell, revalidateCells, workspaceAudioByCellId])
 
   // AQU-661: the dynamic primary-action button was removed; its actions now live
   // in the ⋯ overflow menu. This preserves the button's confirmation flow —
@@ -4574,17 +4675,20 @@ export function ProjectWorkspace() {
       username: currentUsername,
     }).then((r) => {
       if (r.failed > 0) {
-        toast.warning(
-          `Measured ${r.measured} recording${r.measured === 1 ? "" : "s"}; ${r.failed} could not be measured — re-record to fix those.`,
-        )
+        toast.add({
+          type: "warning",
+          title: `Measured ${r.measured} recording${r.measured === 1 ? "" : "s"}; ${r.failed} could not be measured — re-record to fix those.`,
+        })
       } else if (r.measured > 0) {
-        toast.success(`Measured ${r.measured} recording${r.measured === 1 ? "" : "s"}.`)
+        toast.add({
+          type: "success",
+          title: `Measured ${r.measured} recording${r.measured === 1 ? "" : "s"}.`,
+        })
       }
     })
   }, [project?.id, activeFileId, timelineAudioByCellId, frontierSession, currentUsername])
 
   const legacyCellsNeeded =
-    centerSurface === "rules" ||
     dockTab === "voices" ||
     timelineEditorVisible ||
     lens === "audio" ||
@@ -4662,9 +4766,11 @@ export function ProjectWorkspace() {
         refresh()
       } catch (e) {
         timingAck.clearOwnWrite()
-        toast.error(
-          e instanceof Error ? `Couldn't change the timing mode: ${e.message}` : "Couldn't change the timing mode.",
-        )
+        toast.add({
+          type: "error",
+          priority: "high",
+          title: e instanceof Error ? `Couldn't change the timing mode: ${e.message}` : "Couldn't change the timing mode.",
+        })
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the ack callbacks are stable (useCallback([]))
@@ -4676,7 +4782,11 @@ export function ProjectWorkspace() {
       // The mode rides the outbox, so offline it would sit queued while the
       // toolbar kept reading the old value — say so instead of half-doing it.
       if (!navigator.onLine) {
-        toast.error("The timing mode can't be changed while offline.")
+        toast.add({
+          type: "error",
+          priority: "high",
+          title: "The timing mode can't be changed while offline.",
+        })
         return
       }
       if (mode === "audioFirst" && activeFile?.coreMediaUrl) {
@@ -4913,7 +5023,7 @@ export function ProjectWorkspace() {
             : "Diarize"
 
     const actionItems: OverflowMenuItem[] = project === null ? [] : getVisibleActions(workspaceActions, actionCtx)
-      .filter((a) => a.id !== "import-new")
+      .filter((a) => a.id !== "import-new" && a.id !== "export")
       .map((a) => ({
         id: `action-${a.id}`,
         label: a.label,
@@ -4942,15 +5052,6 @@ export function ProjectWorkspace() {
         onClick: handleJumpNextUnfinished,
       },
     )
-
-    if (canAssignWork) {
-      items.push({
-        id: "assign-work",
-        label: "Assign work",
-        icon: UserCheck,
-        onClick: () => setAssignModalOpen(true),
-      })
-    }
 
     if (lens === "audio" && canDiarize) {
       items.push({
@@ -5011,6 +5112,23 @@ export function ProjectWorkspace() {
         },
       },
     )
+    if (canAssignWork) {
+      items.push({
+        id: "assign-work",
+        label: "Assign work",
+        icon: UserCheck,
+        onClick: () => {
+          setAssignTargetFileId(null)
+          setAssignModalOpen(true)
+        },
+      })
+    }
+    items.push({
+      id: "file-export",
+      label: "Export",
+      icon: Download,
+      onClick: openExportFlow,
+    })
     if (activeFile && canExportSourceFile(activeFile, canExportByOrgPolicy)) {
       items.push({
         id: "file-export-source",
@@ -5061,6 +5179,7 @@ export function ProjectWorkspace() {
     hasUnfinished,
     isSubtitleFile,
     lens,
+    openExportFlow,
     project,
     projectId,
     suggestions.length,
@@ -5251,9 +5370,10 @@ export function ProjectWorkspace() {
               `[FRO-249] skipping language seed — role ${roleLevel} is below server floor ${serverFloor}. ` +
               "Mismatch note: EDIT_ROLE_FLOOR in useProjectSettings is PROJECT_LEAD(500) but server requires MAINTAINER(600); tracked for follow-up.",
             )
-            toast.warning(
-              "Direction applied locally only — saving project-wide needs a maintainer.",
-            )
+            toast.add({
+              type: "warning",
+              title: "Direction applied locally only — saving project-wide needs a maintainer.",
+            })
           }
         }
       }
@@ -5367,7 +5487,7 @@ export function ProjectWorkspace() {
         dockStorageKey={projectId}
         logoAccessory={
           dockTab !== null ? (
-            <AppTooltip content="Collapse sidebar" side="right">
+            <AppTooltip content="Collapse sidebar" side="bottom">
               <Button
                 type="button"
                 variant="ghost"
@@ -5384,10 +5504,15 @@ export function ProjectWorkspace() {
           <LeftDock
             activeTab={dockTab}
             onActiveTabChange={(t) => {
-              // While the workbench IS the agent surface, the dock's Agent tab
-              // has nothing to show but a pointer back to it — a wide panel of
-              // dead chrome beside the takeover. Make that state unreachable.
-              if (t === "agent" && centerSurface === "agent") return
+              // Agent rail: while the workbench is showing, re-focus it;
+              // otherwise open the compact panel in the dock (even if an
+              // Agent editor tab is still sitting in the strip).
+              if (t === "agent") {
+                if (resolveSidebarAgentClick(centerSurface === "agent") === "activate-editor-tab") {
+                  openAgentTab()
+                  return
+                }
+              }
               setDockTab(t)
               // Opening the Voices tab puts the editor into the Audio lens so
               // the per-line voice controls show alongside the panel.
@@ -5456,6 +5581,14 @@ export function ProjectWorkspace() {
                     setMoveTargetId(fileId)
                     setMoveCorpus(project.files.find((f) => f.id === fileId)?.corpusMarker ?? "")
                   }}
+                  onExport={(fileId) => {
+                    if (fileId !== activeFileId) workspaceTabs.openFile(fileId)
+                    openExportFlow()
+                  }}
+                  onAssignWork={canAssignWork ? (fileId) => {
+                    setAssignTargetFileId(fileId)
+                    setAssignModalOpen(true)
+                  } : undefined}
                   onDelete={currentRoleLevel >= ROLE.PROJECT_LEAD ? (fileId) => setPendingDeleteId(fileId) : undefined}
                   onApplySuggestion={handleApplyOneSuggestion}
                   onRenameCorpus={handleRenameCorpus}
@@ -5536,7 +5669,7 @@ export function ProjectWorkspace() {
                 pendingChip={pendingChip}
                 onPendingChipConsumed={() => setPendingChip(null)}
                 credits={jwt && projectOrg ? { jwt, orgId: projectOrg.id, orgRoleLevel: projectOrg.role.level } : null}
-                onExpand={() => navigate(`/project/${projectId}/agent`)}
+                onExpand={openAgentTab}
                 expanded={centerSurface === "agent"}
               />
             }
@@ -5576,8 +5709,10 @@ export function ProjectWorkspace() {
           <WorkspaceHeader
             project={project}
             onImport={project ? handleHeaderImport : undefined}
+            onSettings={project ? openProjectSettings : undefined}
             overviewHref={projectId ? `/projects/${projectId}` : undefined}
             surfaceLabel={workspaceBreadcrumb.surfaceLabel}
+            editorHref={workspaceBreadcrumb.editorHref}
           >
             {/* AQU-615: Door43 upstream-sync badge — visible hint that source
                 cells are managed by a DCS link. Self-gated: renders nothing
@@ -5595,27 +5730,27 @@ export function ProjectWorkspace() {
           </WorkspaceHeader>
         }
         aboveCard={
-          // Agent workbench is a takeover surface — file tabs stay with the editor.
-          centerSurface === "agent" ? null :
           <TabStrip
             tabs={workspaceTabs.tabs}
-            // While a non-editor surface (Rules) is showing, no file tab is
-            // "active" even though selectedFileId still remembers the last
-            // file — the surface tab is the active one.
+            // While a non-editor surface (Agent) is showing, no file
+            // tab is "active" even though selectedFileId still remembers the
+            // last file — the surface tab is the active one.
             activeTabId={centerSurface === "editor" ? workspaceTabs.activeTabId : null}
             files={projectFiles}
             onActivate={workspaceTabs.activateTab}
             onClose={handleCloseTab}
-            surfaceTab={
-              centerSurface === "rules" && projectId
-                ? {
-                    label: "Rules",
-                    // Navigating to the bare project route lets the
-                    // restore-location effect re-open the last active file.
-                    onClose: () => navigate(`/project/${projectId}/editor`),
-                  }
-                : null
-            }
+            surfaceTabs={[
+              ...(agentTabOpen && projectId
+                ? [{
+                    id: "agent",
+                    label: "Agent",
+                    icon: Bot,
+                    active: centerSurface === "agent",
+                    onActivate: () => openOverlay("agent"),
+                    onClose: closeAgentTab,
+                  }]
+                : []),
+            ]}
           />
         }
         beforeMain={
@@ -5809,57 +5944,19 @@ export function ProjectWorkspace() {
             />
           ) : undefined
         }
-        main={centerSurface === "rules" ? (
-          // FRO-194: Rules surface renders inside the shell; shell stays mounted.
-          <RulesSurface
-            project={project}
-            projectId={projectId!}
-            userRules={userRules}
-            builtinRules={builtinRules}
-            addRule={addRule}
-            updateRule={updateRule}
-            deleteRule={deleteRule}
-            setBuiltinOverride={setBuiltinOverride}
-            infractions={infractions}
-            cells={legacyCells}
-            completionSettings={project.completionSettings}
-            orgRules={orgRules}
-            canEditOrgRules={canEditOrgSettings}
-            patchOrgSettings={patchOrgSettings}
-            orgSettingsVersion={orgSettingsVersion}
-            promotionRequests={promotionRequests}
-            canRequestPromotion={canRequestPromotion}
-            requestPromotion={requestPromotion}
-            editingRuleId={editingRuleId}
-            setEditingRuleId={setEditingRuleId}
-          />
-        ) : centerSurface === "comments" ? (
-          // FRO-254: Comments page inside the shell — back button in the page
-          // navigates to /project/:id,/editor which the restore-location effect turns
-          // into the user's last open file (including scroll position).
+        main={centerSurface === "comments" ? (
+          // FRO-254: Comments page inside the shell — no page-level back
+          // button; breadcrumb + history arrows + sidebar own navigation.
           <div className="h-full overflow-y-auto">
             <Suspense fallback={<LoadingPanel label="Loading comments" />}>
               <CommentsPageContent />
             </Suspense>
           </div>
-        ) : centerSurface === "memory" ? (
-          // FRO-254: Living Memory page inside the shell — page owns its own
-          // toolbar + scroll like Rules/Glossary.
-          <Suspense fallback={<LoadingPanel label="Loading living memory" />}>
-            <LivingMemoryPageContent />
-          </Suspense>
         ) : centerSurface === "terminology" ? (
           // FRO-254: Terminology page inside the shell.
           <div className="h-full overflow-y-auto">
             <Suspense fallback={<LoadingPanel label="Loading terminology" />}>
               <GlossaryEditorContent files={projectFiles} />
-            </Suspense>
-          </div>
-        ) : centerSurface === "members" ? (
-          // FRO-180: Per-project members management inside the shell.
-          <div className="h-full overflow-y-auto">
-            <Suspense fallback={<LoadingPanel label="Loading members" />}>
-              <ProjectMembersPageContent />
             </Suspense>
           </div>
         ) : centerSurface === "agent" ? (
@@ -5882,7 +5979,7 @@ export function ProjectWorkspace() {
               onApplied: handleAgentApplied,
             }}
             credits={jwt && projectOrg ? { jwt, orgId: projectOrg.id, orgRoleLevel: projectOrg.role.level } : null}
-            onClose={() => navigate(`/project/${projectId}/editor`)}
+            onClose={closeAgentTab}
             onJumpToCell={(fileId, cellId) =>
               navigate(`/project/${projectId}/editor/file/${fileId}?cellId=${encodeURIComponent(cellId)}`)
             }
@@ -6066,93 +6163,129 @@ export function ProjectWorkspace() {
             onRetryClick={retryCells}
           />
         )}
-        aside={
-          <>
-            {/* Parallel Bibles (helloao): edge tab → slide-out panel showing the
-                scroll-tracked verse in other bible versions. Scripture files only. */}
-            {centerSurface === "editor" && activeFile && fileHasSections(activeFile) && (
-              <ParallelBiblesSidebar
-                key={activeFile.id}
-                trackedRef={trackedCellRef}
-                open={parallelBiblesOpen}
-                onToggle={() => {
-                  const next = !parallelBiblesOpen
-                  setParallelBiblesOpen(next)
-                  if (projectId) writeParallelBiblesOpen(projectId, next)
-                }}
-              />
-            )}
-            {/* FRO-179: Translation Notes sidebar — shown when a TN file exists
-                and a translation cell with a matching canonicalRef is focused. */}
-            <TranslationNotesSidebar
-              projectId={projectId!}
-              canonicalRef={focusedCellCanonicalRef}
-              getToken={getTokenForFile}
-              visible={tnSidebarVisible}
+        aside={(() => {
+          const showParallelBibles =
+            centerSurface === "editor" && !!activeFile && fileHasSections(activeFile)
+          const hasRightAside =
+            (showParallelBibles && parallelBiblesOpen) ||
+            tnSidebarVisible ||
+            checkOpen ||
+            drawerRuleId !== null ||
+            !!commentsCell ||
+            !!historyCell
+          if (!hasRightAside) return undefined
+          return (
+            <>
+              {/* Parallel Bibles (helloao): open panel only — collapsed edge tab
+                  rides in asideEdge so it isn't stretched by Resizable. */}
+              {showParallelBibles && parallelBiblesOpen && (
+                <ParallelBiblesSidebar
+                  key={activeFile!.id}
+                  trackedRef={trackedCellRef}
+                  open
+                  onToggle={() => {
+                    const next = !parallelBiblesOpen
+                    setParallelBiblesOpen(next)
+                    if (projectId) writeParallelBiblesOpen(projectId, next)
+                  }}
+                />
+              )}
+              {/* FRO-179: Translation Notes sidebar — shown when a TN file exists
+                  and a translation cell with a matching canonicalRef is focused. */}
+              {tnSidebarVisible && (
+                <TranslationNotesSidebar
+                  projectId={projectId!}
+                  canonicalRef={focusedCellCanonicalRef}
+                  getToken={getTokenForFile}
+                  visible={tnSidebarVisible}
+                  onToggle={() => {
+                    const next = !tnSidebarVisible
+                    setTnSidebarVisible(next)
+                    if (projectId) writeTnSidebarVisible(projectId, next)
+                  }}
+                />
+              )}
+              {checkOpen && (
+                <CheckFindingsDrawer
+                  result={checkResult}
+                  running={checkRunning}
+                  cells={legacyCells}
+                  onClose={() => setCheckOpen(false)}
+                  onNavigateToCell={jumpToCellId}
+                  onOpenComments={(cellId) => {
+                    // Reuse the existing comments drawer; one aside at a time.
+                    setCheckOpen(false)
+                    setCommentsCellId(cellId)
+                  }}
+                />
+              )}
+              {drawerRuleId && (
+                <RuleDrawer
+                  rule={drawerRule}
+                  infractions={drawerInfractions}
+                  cells={legacyCells}
+                  onClose={() => setDrawerRuleId(null)}
+                  onNavigateToCell={() => {}}
+                  project={project}
+                  username={currentUsername}
+                  refresh={refresh}
+                  cellsByFile={drawerCellsByFile}
+                />
+              )}
+              {commentsCell && (
+                <CommentsDrawer
+                  project={project} cell={commentsCell}
+                  liveComments={allProjectComments.filter(
+                    (c) => c.cellId === commentsCell.id && c.deletedAt === null
+                  )}
+                  onClose={() => setCommentsCellId(null)}
+                  onNewThread={(text) => addThread(commentsCell.id, text)}
+                  onReply={(threadId, text) => addMessage(commentsCell.id, threadId, text)}
+                  onResolve={(threadId, msg) => resolveThread(commentsCell.id, threadId, msg)}
+                  onReopen={(threadId) => reopenThread(commentsCell.id, threadId)}
+                />
+              )}
+              {historyCell && (
+                <HistoryDrawer
+                  cell={historyCell}
+                  onClose={() => setHistoryCellId(null)}
+                  projectId={project?.id ?? null}
+                  fileId={activeFileId}
+                  getTokenForFile={getTokenForFile}
+                  isSynced={!!project?.syncRole}
+                  onPromote={handlePromoteToCurrentCell}
+                />
+              )}
+            </>
+          )
+        })()}
+        asideEdge={
+          centerSurface === "editor" &&
+          activeFile &&
+          fileHasSections(activeFile) &&
+          !parallelBiblesOpen ? (
+            <ParallelBiblesSidebar
+              key={`${activeFile.id}-edge`}
+              trackedRef={trackedCellRef}
+              open={false}
               onToggle={() => {
-                const next = !tnSidebarVisible
-                setTnSidebarVisible(next)
-                if (projectId) writeTnSidebarVisible(projectId, next)
+                const next = !parallelBiblesOpen
+                setParallelBiblesOpen(next)
+                if (projectId) writeParallelBiblesOpen(projectId, next)
               }}
             />
-            {checkOpen && (
-              <CheckFindingsDrawer
-                result={checkResult}
-                running={checkRunning}
-                cells={legacyCells}
-                onClose={() => setCheckOpen(false)}
-                onNavigateToCell={jumpToCellId}
-                onOpenComments={(cellId) => {
-                  // Reuse the existing comments drawer; one aside at a time.
-                  setCheckOpen(false)
-                  setCommentsCellId(cellId)
-                }}
-              />
-            )}
-            {drawerRuleId && (
-              <RuleDrawer
-                rule={drawerRule}
-                infractions={drawerInfractions}
-                cells={legacyCells}
-                onClose={() => setDrawerRuleId(null)}
-                onNavigateToCell={() => {}}
-                project={project}
-                username={currentUsername}
-                refresh={refresh}
-                cellsByFile={drawerCellsByFile}
-              />
-            )}
-            {commentsCell && (
-              <CommentsDrawer
-                project={project} cell={commentsCell}
-                liveComments={allProjectComments.filter(
-                  (c) => c.cellId === commentsCell.id && c.deletedAt === null
-                )}
-                onClose={() => setCommentsCellId(null)}
-                onNewThread={(text) => addThread(commentsCell.id, text)}
-                onReply={(threadId, text) => addMessage(commentsCell.id, threadId, text)}
-                onResolve={(threadId, msg) => resolveThread(commentsCell.id, threadId, msg)}
-                onReopen={(threadId) => reopenThread(commentsCell.id, threadId)}
-              />
-            )}
-            {historyCell && (
-              <HistoryDrawer
-                cell={historyCell}
-                onClose={() => setHistoryCellId(null)}
-                projectId={project?.id ?? null}
-                fileId={activeFileId}
-                getTokenForFile={getTokenForFile}
-                isSynced={!!project?.syncRole}
-                onPromote={handlePromoteToCurrentCell}
-              />
-            )}
-          </>
+          ) : null
         }
         statusBar={
           (() => {
+            // Audio playback chrome belongs to the open file — hide it on
+            // overlay surfaces (Terminology / Agent / …) even if the audio
+            // lens is still selected from a prior editor visit.
+            const showAudioToolbar =
+              lens === "audio" && centerSurface === "editor" && !!project
             const syncStatus = (
               <WorkspaceStatusBar
-                className={lens === "audio" && project && centerSurface !== "agent" ? "px-0 py-0.5" : undefined}
+                className={showAudioToolbar ? "px-0 py-0.5" : undefined}
                 left={
                   <div className="flex min-w-0 items-center gap-1.5">
                     <PeerPresence peers={presencePeers} onJumpToPeer={handleJumpToPresencePeer} />
@@ -6178,7 +6311,7 @@ export function ProjectWorkspace() {
               centerSurface !== "agent" &&
               (cellAreaState.kind === "ready" || cellAreaState.kind === "ready-empty") ? (
               <StatusBar
-                className={lens === "audio" && project ? "px-0 py-0.5" : undefined}
+                className={showAudioToolbar ? "px-0 py-0.5" : undefined}
                 cells={cellSummaries}
                 projectHealth={projectHealth}
                 healthMap={healthMap}
@@ -6187,7 +6320,7 @@ export function ProjectWorkspace() {
               />
             ) : null
 
-            if (lens === "audio" && project && centerSurface !== "agent") {
+            if (showAudioToolbar && project) {
               return (
                 <VoicePlaybackBar
                   cells={legacyCells}
@@ -6251,9 +6384,12 @@ export function ProjectWorkspace() {
       {project && canAssignWork && (
         <AssignModal
           open={assignModalOpen}
-          onOpenChange={setAssignModalOpen}
+          onOpenChange={(open) => {
+            setAssignModalOpen(open)
+            if (!open) setAssignTargetFileId(null)
+          }}
           projectId={project.id}
-          activeFileId={activeFileId}
+          activeFileId={assignTargetFileId ?? activeFileId}
           projectFiles={projectFiles}
           targetLanes={project.targetLanes}
           defaultLane={activeLane}
@@ -6262,7 +6398,11 @@ export function ProjectWorkspace() {
           roleLevel={currentRoleLevel}
           allowSelfAssignment={allowSelfAssignment}
           callerUserId={currentUserId}
-          selectedCellIds={getSelectedIds()}
+          selectedCellIds={
+            assignTargetFileId != null && assignTargetFileId !== activeFileId
+              ? new Set<string>()
+              : getSelectedIds()
+          }
           jwt={jwt ?? ""}
           author={currentUsername}
           onAssigned={() => setAssignmentsRefreshKey((k) => k + 1)}
@@ -6333,17 +6473,20 @@ export function ProjectWorkspace() {
           excludeFrontMatter={project.importExcludeFrontMatter}
           onLabelsImported={(r) => {
             if (r.applied === 0) {
-              toast.warning(
-                `No labels applied — the CSV doesn't match ${r.fileName}. Re-download the template and try again.`,
-              )
+              toast.add({
+                type: "warning",
+                title: `No labels applied — the CSV doesn't match ${r.fileName}. Re-download the template and try again.`,
+              })
             } else if (r.unmatched > 0) {
-              toast.warning(
-                `Applied ${r.applied} of ${r.applied + r.unmatched} labels to ${r.fileName}.`,
-              )
+              toast.add({
+                type: "warning",
+                title: `Applied ${r.applied} of ${r.applied + r.unmatched} labels to ${r.fileName}.`,
+              })
             } else {
-              toast.success(
-                `Applied ${r.applied} label${r.applied !== 1 ? "s" : ""} to ${r.fileName}.`,
-              )
+              toast.add({
+                type: "success",
+                title: `Applied ${r.applied} label${r.applied !== 1 ? "s" : ""} to ${r.fileName}.`,
+              })
             }
           }}
           patchDcsCursor={async (cursor) => {
@@ -6371,7 +6514,7 @@ export function ProjectWorkspace() {
           />
         </Suspense>
       )}
-      {/* Label-import / direction-role results use sonner (see toast.* above). */}
+      {/* Label-import / direction-role results use toast (see toast.add above). */}
       <Suspense fallback={null}>
         <ExportDialog
           open={exportOpen}
@@ -6420,11 +6563,6 @@ export function ProjectWorkspace() {
         onAfterReplace={rebuildSearchIndex}
         onReplaceAll={handleReplaceAll}
       />
-      <SharePanel
-        open={shareOpen} onOpenChange={setShareOpen}
-        projectId={projectId!}
-        onSharesChanged={refreshChecklistShares}
-      />
       <VideoAttachmentDialog
         open={videoDialogOpen} onOpenChange={setVideoDialogOpen}
         current={videoAttachment} onSave={saveVideo}
@@ -6442,40 +6580,12 @@ export function ProjectWorkspace() {
           onConfirm={() => { pendingActionConfirm.run(actionCtx, actionArgs); setPendingActionConfirm(null) }}
         />
       )}
-      {/* "File details" modal — metadata plus permission-aware actions for a sidebar file row. */}
+      {/* "File details" modal — metadata for a sidebar file row. */}
       <FileDetailsModal
         open={detailsFileId !== null}
         onOpenChange={(v) => { if (!v) setDetailsFileId(null) }}
         file={detailsFileId ? project.files.find((f) => f.id === detailsFileId) ?? null : null}
         progress={detailsFileId ? fileProgress.get(detailsFileId) : undefined}
-        roleLevel={currentRoleLevel}
-        canExportByOrgPolicy={canExportByOrgPolicy}
-        onRename={() => {
-          if (detailsFileId) setRenameSignal({ fileId: detailsFileId, nonce: Date.now() })
-          setDetailsFileId(null)
-        }}
-        onMove={() => {
-          if (detailsFileId) {
-            setMoveTargetId(detailsFileId)
-            setMoveCorpus(project.files.find((f) => f.id === detailsFileId)?.corpusMarker ?? "")
-          }
-          setDetailsFileId(null)
-        }}
-        onExportSource={() => {
-          const f = detailsFileId ? project.files.find((x) => x.id === detailsFileId) : null
-          if (f) {
-            void exportSourceFile({
-              projectId: project.id,
-              file: f,
-              getToken: getTokenForFile,
-              targetLang: activeLane,
-            })
-          }
-        }}
-        onDelete={() => {
-          if (detailsFileId) setPendingDeleteId(detailsFileId)
-          setDetailsFileId(null)
-        }}
       />
       {/* FRO-272: soft-delete confirmation — file moves to "Recently deleted" (30-day retention). */}
       <ConfirmActionDialog
@@ -6615,10 +6725,10 @@ function MoveToCorpusDialog({
             value={selection}
             onValueChange={(v) => { if (v != null) setSelection(v) }}
           >
-            <SelectTrigger className="w-full" aria-label="Corpus">
+            <SelectTrigger aria-label="Corpus">
               <SelectValue />
             </SelectTrigger>
-            <SelectContent alignItemWithTrigger={false}>
+            <SelectContent>
               <SelectGroup>
                 {existingItems.map((item) => (
                   <SelectItem key={item.value} value={item.value}>
@@ -6728,7 +6838,7 @@ function TrashedProjectScreen({ project, onClose, onRestore }: TrashedProjectScr
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-6">
-        <div className="bg-card max-w-md rounded-2xl p-8 text-center">
+        <div className="bg-card max-w-md rounded-lg p-8 text-center">
         <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-muted">
           <Trash2 className="h-6 w-6 text-muted-foreground" />
         </div>

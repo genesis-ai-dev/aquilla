@@ -1,6 +1,6 @@
 import { v4 as uuid } from "uuid"
-import type { TranslatableString } from "./types"
-import type { CellData } from "@/hooks/useCells"
+import type { TranslatableString } from "./core-types"
+import type { ExportCellFields } from "./core-types"
 
 /**
  * JSON i18n-resource importer/exporter (e.g. locale files like en.json).
@@ -174,14 +174,14 @@ export interface ExportJsonOptions {
  */
 export function exportJson(
   originalContent: string,
-  cells: CellData[],
+  cells: ExportCellFields[],
   options: ExportJsonOptions = {},
 ): Blob {
   const parsed = parseJson(originalContent, "original i18n resource file")
 
   let replaced: unknown
   if (options.keyed) {
-    const byPath = new Map<string, CellData>()
+    const byPath = new Map<string, ExportCellFields>()
     for (const cell of cells) byPath.set(cell.context, cell)
     replaced = walkStringLeaves(parsed, "", (path) => {
       const cell = byPath.get(path)

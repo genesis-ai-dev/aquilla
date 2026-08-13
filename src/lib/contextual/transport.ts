@@ -116,10 +116,13 @@ async function postRunCommand(runId: string, command: "pause" | "resume" | "term
 // ── Transport ───────────────────────────────────────────────────────────────
 
 export const realContextualTransport: ContextualTransport = {
-  async fetchSnapshot(projectId: string, fileId: string): Promise<ContextualTransportSnapshot> {
+  async fetchSnapshot(projectId: string, fileId: string, targetLang = ""): Promise<ContextualTransportSnapshot> {
     const jwt = await requireJwt()
+    const laneQuery = targetLang
+      ? `&targetLang=${encodeURIComponent(targetLang)}`
+      : ""
     const res = await fetchWithTimeout(
-      `${runsBase(projectId)}?fileId=${encodeURIComponent(fileId)}`,
+      `${runsBase(projectId)}?fileId=${encodeURIComponent(fileId)}${laneQuery}`,
       { headers: authHeaders(jwt) },
     )
     // Route not deployed / feature not enabled server-side: report the
@@ -131,13 +134,22 @@ export const realContextualTransport: ContextualTransport = {
     return { available: true, run: run ?? null }
   },
 
-  async start(projectId: string, fileId: string, anchorCellId?: string): Promise<{ runId: string }> {
+  async start(
+    projectId: string,
+    fileId: string,
+    anchorCellId?: string,
+    targetLang = "",
+  ): Promise<{ runId: string }> {
     const jwt = await requireJwt()
     const res = await fetchWithTimeout(runsBase(projectId), {
       method: "POST",
       headers: authHeaders(jwt),
       // The anchor rotates the first wave to start where the user is looking.
-      body: JSON.stringify({ fileId, ...(anchorCellId ? { anchorCellId } : {}) }),
+      body: JSON.stringify({
+        fileId,
+        ...(anchorCellId ? { anchorCellId } : {}),
+        ...(targetLang ? { targetLang } : {}),
+      }),
     })
     if (!res.ok) return throwFromResponse(res, "start contextual run failed")
     const { runId } = (await res.json()) as { runId: string }
@@ -177,11 +189,15 @@ interface DraftListRow {
 export async function fetchContextualDrafts(
   projectId: string,
   fileId: string,
+  targetLang = "",
 ): Promise<ContextualDraftRecord[]> {
   const jwt = await requireJwt()
+  const laneQuery = targetLang
+    ? `&targetLang=${encodeURIComponent(targetLang)}`
+    : ""
   const res = await fetchWithTimeout(
     `${AUTH_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/contextual/drafts` +
-      `?fileId=${encodeURIComponent(fileId)}&status=proposed`,
+      `?fileId=${encodeURIComponent(fileId)}&status=proposed${laneQuery}`,
     { headers: authHeaders(jwt) },
   )
   if (res.status === 404 || res.status === 501) return []
@@ -689,8 +705,9 @@ export async function startProjectContextualRun(
 export async function startFileContextualRun(
   projectId: string,
   fileId: string,
+  targetLang = "",
 ): Promise<{ runId: string }> {
-  return realContextualTransport.start(projectId, fileId)
+  return realContextualTransport.start(projectId, fileId, undefined, targetLang)
 }
 
 export type ContextualRunCommand = "pause" | "resume" | "terminate"

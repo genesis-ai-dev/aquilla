@@ -29,7 +29,7 @@ test("project settings discard dialog: Keep editing stays on settings page", asy
   const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `DiscardSettings ${Date.now()}` })
 
   // Navigate to project settings.
-  // AQU-501: Project name lives in the "General" sub-menu pane.
+  // AQU-501: Project title lives in the "General" sub-menu pane.
   await alice.goto(`/project/${seeded.projectId}/settings/general`)
   const sourceLanguage = alice.locator("#sl")
   await expect(sourceLanguage).toBeVisible({ timeout: 10_000 })
@@ -68,7 +68,7 @@ test("project settings discard dialog: Keep editing stays on settings page", asy
 test("project settings discard dialog: Discard navigates away from settings", async ({ alice }) => {
   const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `DiscardNav ${Date.now()}` })
 
-  // AQU-501: Project name lives in the "General" sub-menu pane.
+  // AQU-501: Project title lives in the "General" sub-menu pane.
   await alice.goto(`/project/${seeded.projectId}/settings/general`)
   const sourceLanguage = alice.locator("#sl")
   await expect(sourceLanguage).toBeVisible({ timeout: 10_000 })

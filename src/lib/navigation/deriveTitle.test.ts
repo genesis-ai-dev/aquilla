@@ -4,9 +4,12 @@ import { deriveNavTitle } from "./deriveTitle"
 describe("deriveNavTitle", () => {
   it("maps org-shell routes to readable labels", () => {
     expect(deriveNavTitle("/")).toBe("Home")
-    expect(deriveNavTitle("/orgs/all")).toBe("Projects")
+    expect(deriveNavTitle("/orgs/all")).toBe("Overview")
     expect(deriveNavTitle("/orgs/7")).toBe("Projects")
+    expect(deriveNavTitle("/orgs/7/overview")).toBe("Overview")
+    expect(deriveNavTitle("/orgs/7/projects")).toBe("Projects")
     expect(deriveNavTitle("/orgs/7/archived")).toBe("Archived projects")
+    expect(deriveNavTitle("/orgs/7/archived/files")).toBe("Recently deleted")
     expect(deriveNavTitle("/orgs/7/assigned")).toBe("Assigned to me")
     expect(deriveNavTitle("/orgs/7/settings")).toBe("Organization settings")
     expect(deriveNavTitle("/orgs/7/settings/identity")).toBe("Identity")
@@ -21,6 +24,8 @@ describe("deriveNavTitle", () => {
     expect(deriveNavTitle("/project/abc/editor/file/7")).toBe("File")
     expect(deriveNavTitle("/project/abc/settings")).toBe("Project settings")
     expect(deriveNavTitle("/project/abc/settings/ai")).toBe("Project settings")
+    expect(deriveNavTitle("/project/abc/settings/rules")).toBe("Checks & rules")
+    expect(deriveNavTitle("/project/abc/settings/memory")).toBe("Project memory")
     expect(deriveNavTitle("/project/abc/rules")).toBe("Checks & rules")
     expect(deriveNavTitle("/project/abc/terminology")).toBe("Terminology")
     expect(deriveNavTitle("/project/abc/comments")).toBe("Comments")

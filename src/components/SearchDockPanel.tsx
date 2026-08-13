@@ -29,6 +29,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { SegmentTabs } from "@/components/ui/tabs"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { Spinner } from "@/components/ui/spinner"
 import { MarkedSnippet } from "@/components/search/MarkedSnippet"
 import { ChatMarkdown } from "@/components/chat/ChatMarkdown"
 import type { WorkspaceSearchResult } from "@/hooks/useWorkspaceSearch"
@@ -240,7 +241,11 @@ export function SearchDockPanel({
 
         <CommandList className="max-h-none flex-1 overflow-y-auto px-2 py-1">
           {loading && (
-            <CommandEmpty>{t("common.searching")}</CommandEmpty>
+            <CommandEmpty>
+              <span className="inline-flex items-center justify-center text-muted-foreground">
+                <Spinner className="size-3.5" />
+              </span>
+            </CommandEmpty>
           )}
           {!loading && query && results.length === 0 && (
             <CommandEmpty>{t("search.noResults")}</CommandEmpty>
@@ -500,7 +505,13 @@ function BibleResourcesPanel({
 
         <CommandList className="max-h-none flex-1 overflow-y-auto px-2 py-1">
           {error && <CommandEmpty className="text-destructive">{error}</CommandEmpty>}
-          {(searching || pageLoading) && <CommandEmpty>{t("common.loading")}</CommandEmpty>}
+          {(searching || pageLoading) && (
+            <CommandEmpty>
+              <span className="inline-flex items-center justify-center text-muted-foreground">
+                <Spinner className="size-3.5" />
+              </span>
+            </CommandEmpty>
+          )}
           {!searching && !error && query && results.length === 0 && (
             <CommandEmpty>{t("search.bible.noResults")}</CommandEmpty>
           )}

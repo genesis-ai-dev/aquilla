@@ -5,11 +5,11 @@ import { addOrgMember, getMyOrg, ROLE } from "../../helpers/frontier-api"
 /**
  * TeamDetail — add a member to a team (AQU-735 multi-select).
  *
- * TeamDetail opens an "Add members" dialog with a combobox whose checkbox rows
- * stage people as chips; one Add grants the whole batch.
+ * TeamDetail opens an "Add members" dialog with MemberMultiSelect (same
+ * checkbox combobox as named validators). One Add grants the whole batch.
  *
  * This spec: seed bob in the org → create a team → navigate to team detail →
- * click "Add member" → check bob → click Add → bob appears in the members list.
+ * click "Add member" → select bob → click Add → bob appears in the members list.
  */
 test("team add member workflow shows new member in members list", async ({ alice }) => {
   // Seed bob in alice's org.
@@ -26,27 +26,31 @@ test("team add member workflow shows new member in members list", async ({ alice
   await nameInput.fill(teamName)
   await alice.getByRole("button", { name: /^Create$/i }).click()
   await alice.waitForURL(/\/teams\/\d+$/, { timeout: 10_000 })
-  // "Add member" button appears for admin.
-  const addMemberBtn = alice.getByRole("button", { name: /Add member/i })
+  // Members live on the Members tab (Linear-style team page).
+  await alice.getByRole("tab", { name: /^Members$/i }).click()
+  // "Add a member" button appears for admin.
+  const addMemberBtn = alice.getByRole("button", { name: /Add (a )?member/i })
   await expect(addMemberBtn).toBeVisible({ timeout: 5_000 })
   await addMemberBtn.click()
 
   const dialog = alice.getByRole("dialog")
   await expect(dialog).toBeVisible({ timeout: 3_000 })
+  await expect(dialog.getByRole("heading", { name: new RegExp(`Add members to '${teamName}'`) })).toBeVisible()
 
-  // Open the multi-select combobox and check bob.
+  // Open the multi-select combobox and pick bob (checkbox + avatar + username option).
   const memberSelect = dialog.getByRole("combobox", { name: "Members to add" })
   await expect(memberSelect).toBeVisible({ timeout: 3_000 })
   await memberSelect.click()
-  const bobCheckbox = alice.getByRole("checkbox", { name: "bob" })
-  await expect(bobCheckbox).toBeVisible({ timeout: 3_000 })
-  await bobCheckbox.check()
+  const bobOption = alice.getByRole("option", { name: "bob" })
+  await expect(bobOption).toBeVisible({ timeout: 3_000 })
+  await bobOption.click()
+  await expect(memberSelect).toContainText("bob", { timeout: 3_000 })
 
   // Click Add — enabled once someone is staged.
   const addBtn = dialog.getByRole("button", { name: /^Add$/i })
   await expect(addBtn).toBeEnabled({ timeout: 3_000 })
   await addBtn.click()
 
-  // Bob appears in the Members list (Remove bob is unique to the member row).
-  await expect(alice.getByRole("button", { name: /Remove bob/i })).toBeVisible({ timeout: 5_000 })
+  // Bob appears in the Members list (row actions menu is unique to the member).
+  await expect(alice.getByRole("button", { name: /Actions for bob/i })).toBeVisible({ timeout: 5_000 })
 })

@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react"
 import { getOrgUsage, type OrgUsage } from "@/lib/sync/usage"
 import { Section } from "@/components/ui/page"
+import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 
 /**
  * Per-member usage rollup for the org Overview (manager oversight). Fetches
@@ -46,7 +47,7 @@ export function UsageRollup({ jwt, orgId, action }: { jwt: string; orgId: number
           return (
             <div key={m.userId} className="flex items-center gap-4 py-2.5 first:pt-0">
               <div className="min-w-0 flex-1">
-                <p className="truncate font-medium">{m.username ?? `User ${m.userId}`}</p>
+                <UsernameWithAvatar username={m.username ?? `User ${m.userId}`} />
               </div>
               <div className="shrink-0 text-right">
                 <p className="text-sm font-semibold tabular-nums">{audioLabel}</p>

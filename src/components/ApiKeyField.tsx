@@ -6,13 +6,13 @@
 // user-saved key exists, the field shows it (masked) and the "Using your
 // saved key" hint appears.
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, type ReactNode } from "react"
 import { RevealableInput } from "@/components/ui/revealable-input"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field"
 
 interface ApiKeyFieldProps {
-  label: string
+  label: ReactNode
   placeholder?: string
   projectKey: string
   userKey: string

@@ -55,6 +55,8 @@ export interface MyAssignment {
    * resolved to zero cells.
    */
   fileId: string | null
+  /** Display name for `fileId` from `files.name`; null when `fileId` is null. */
+  fileName?: string | null
   scopeKind: string
   scopeLabel: string
   /** AQU-538 (§3.5): target-language lane. '' / absent = default lane. */

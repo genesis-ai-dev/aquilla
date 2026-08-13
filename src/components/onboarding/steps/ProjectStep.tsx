@@ -19,7 +19,7 @@ import { useSubmitError } from "@/lib/forms/submit-error"
 import type { ProjectRecord } from "@/lib/parsers/types"
 
 const formSchema = z.object({
-  name: requiredString("Project name"),
+  name: requiredString("Project title"),
   sourceLanguage: requiredString("Source language"),
   targetLanguage: requiredString("Target language"),
 })
@@ -113,6 +113,7 @@ export function ProjectStep({
       </div>
       <form
         id="project-step-form"
+        autoComplete="off"
         onSubmit={(e) => {
           e.preventDefault()
           void form.handleSubmit()
@@ -126,10 +127,15 @@ export function ProjectStep({
               const invalid = isFieldInvalid(field)
               return (
                 <Field data-invalid={invalid}>
-                  <FieldLabel htmlFor="proj-name">Project name</FieldLabel>
+                  <FieldLabel htmlFor="proj-title">Project title</FieldLabel>
                   <Input
-                    id="proj-name"
-                    name={field.name}
+                    id="proj-title"
+                    // Avoid DOM name="name" — Chrome contact autofill heuristic.
+                    name="aquilla-project-title"
+                    autoComplete="off"
+                    autoCorrect="off"
+                    autoCapitalize="none"
+                    spellCheck={false}
                     value={field.state.value}
                     onBlur={field.handleBlur}
                     onChange={(e) => field.handleChange(e.target.value)}
@@ -151,7 +157,11 @@ export function ProjectStep({
                   <FieldLabel htmlFor="src-lang">Source language</FieldLabel>
                   <Input
                     id="src-lang"
-                    name={field.name}
+                    name="aquilla-project-source-language"
+                    autoComplete="off"
+                    autoCorrect="off"
+                    autoCapitalize="none"
+                    spellCheck={false}
                     value={field.state.value}
                     onBlur={field.handleBlur}
                     onChange={(e) => field.handleChange(e.target.value)}
@@ -172,7 +182,11 @@ export function ProjectStep({
                   <FieldLabel htmlFor="tgt-lang">Target language</FieldLabel>
                   <Input
                     id="tgt-lang"
-                    name={field.name}
+                    name="aquilla-project-target-language"
+                    autoComplete="off"
+                    autoCorrect="off"
+                    autoCapitalize="none"
+                    spellCheck={false}
                     value={field.state.value}
                     onBlur={field.handleBlur}
                     onChange={(e) => field.handleChange(e.target.value)}
@@ -203,7 +217,7 @@ export function ProjectStep({
           Do this later
         </Button>
       </form>
-      <Button variant="ghost" size="sm" onClick={onBack} className="w-full">
+      <Button variant="ghost" onClick={onBack} className="w-full">
         ← Back
       </Button>
     </div>

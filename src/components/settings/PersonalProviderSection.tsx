@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useState } from "react"
 import { useForm } from "@tanstack/react-form"
 import { z } from "zod"
 import { ChevronDown, ChevronRight } from "lucide-react"
@@ -9,7 +9,7 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible"
 import { Input } from "@/components/ui/input"
-import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
+import { Field, FieldError, FieldGroup, FieldLabel, OptionalMark } from "@/components/ui/field"
 import { SettingsGroup } from "@/components/ui/page"
 import { isFieldInvalid } from "@/lib/forms/field-state"
 import { optionalString, requiredString } from "@/lib/forms/schemas"
@@ -34,8 +34,6 @@ const formSchema = z.object({
 export function PersonalProviderSection() {
   const [open, setOpen] = useState(false)
   const [hasOverride, setHasOverride] = useState(false)
-  const [saved, setSaved] = useState(false)
-  const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const form = useForm({
     defaultValues: {
@@ -51,9 +49,6 @@ export function PersonalProviderSection() {
         apiKey: value.apiKey.trim() || undefined,
       })
       setHasOverride(true)
-      setSaved(true)
-      if (savedTimerRef.current) clearTimeout(savedTimerRef.current)
-      savedTimerRef.current = setTimeout(() => setSaved(false), 2500)
     },
   })
 
@@ -143,7 +138,7 @@ export function PersonalProviderSection() {
                 children={(field) => (
                   <Field>
                     <FieldLabel htmlFor="prov-model">
-                      Model <span className="text-muted-foreground/70">(optional)</span>
+                      Model <OptionalMark />
                     </FieldLabel>
                     <Input
                       id="prov-model"
@@ -163,7 +158,7 @@ export function PersonalProviderSection() {
                 children={(field) => (
                   <Field>
                     <FieldLabel htmlFor="prov-key">
-                      API key <span className="text-muted-foreground/70">(optional)</span>
+                      API key <OptionalMark />
                     </FieldLabel>
                     <Input
                       id="prov-key"
@@ -185,18 +180,11 @@ export function PersonalProviderSection() {
             </FieldGroup>
 
             <div className="flex items-center justify-between gap-2 pt-2">
-              <div className="flex items-center gap-3">
-                <Button type="submit" form="personal-provider-form" size="sm">
-                  {hasOverride ? "Update override" : "Save override"}
-                </Button>
-                {saved && (
-                  <span className="text-xs text-green-600 dark:text-green-400" role="status" data-testid="provider-override-saved">
-                    Saved
-                  </span>
-                )}
-              </div>
+              <Button type="submit" form="personal-provider-form">
+                {hasOverride ? "Update override" : "Save override"}
+              </Button>
               {hasOverride && (
-                <Button type="button" variant="ghost" size="sm" onClick={handleClear}>
+                <Button type="button" variant="ghost" onClick={handleClear}>
                   Remove override
                 </Button>
               )}

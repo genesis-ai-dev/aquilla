@@ -1,7 +1,6 @@
 import { useState, useMemo, useCallback, useRef, useEffect } from "react"
 import { useParams, useNavigate } from "react-router-dom"
 import {
-  ArrowLeft,
   Plus,
   Trash2,
   Pencil,
@@ -31,7 +30,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
-import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
+import { Field, FieldError, FieldGroup, FieldLabel, OptionalMark } from "@/components/ui/field"
 import { Badge } from "@/components/ui/badge"
 import {
   Select,
@@ -302,7 +301,6 @@ function ConceptDialog({ open, onOpenChange, initial, onSave }: ConceptDialogPro
             </div>
             <Button
               variant="outline"
-              size="sm"
               onClick={handleAddRendering}
               className="mt-1"
             >
@@ -312,7 +310,9 @@ function ConceptDialog({ open, onOpenChange, initial, onSave }: ConceptDialogPro
           </Field>
 
           <Field>
-            <FieldLabel htmlFor="concept-notes">Notes (optional)</FieldLabel>
+            <FieldLabel htmlFor="concept-notes">
+              Notes <OptionalMark />
+            </FieldLabel>
             <Input
               id="concept-notes"
               value={notes}
@@ -330,7 +330,7 @@ function ConceptDialog({ open, onOpenChange, initial, onSave }: ConceptDialogPro
                 setStatus((v ?? "draft") as Concept["status"])
               }
             >
-              <SelectTrigger id="concept-status" className="w-full">
+              <SelectTrigger id="concept-status">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -428,7 +428,7 @@ function TermbaseImportDialog({
               className={cn(
                 "rounded px-3 py-1 capitalize transition-colors",
                 tab === fmt
-                  ? "bg-primary text-primary-foreground"
+                  ? "bg-background text-foreground shadow-sm"
                   : "text-muted-foreground hover:text-foreground",
               )}
             >
@@ -458,7 +458,6 @@ function TermbaseImportDialog({
               </p>
               <Button
                 variant="outline"
-                size="sm"
                 nativeButton={false}
                 render={<label />}
               >
@@ -1103,14 +1102,6 @@ export function TerminologyPage() {
     <div className="min-h-screen bg-background">
       {/* Header */}
       <header className="flex items-center gap-4 border-b px-4 py-2">
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => navigate(`/project/${id}/editor`)}
-        >
-          <ArrowLeft className="mr-1 h-4 w-4" />
-          Back to Editor
-        </Button>
         <BookOpen className="h-4 w-4 text-muted-foreground" />
         <h2 className="font-semibold">Terminology</h2>
         <div className="flex-1" />
@@ -1121,7 +1112,6 @@ export function TerminologyPage() {
             allowed={canManageTermbase}
             tip={termbaseGateTip}
             variant="outline"
-            size="sm"
             onClick={handleExportCsv}
             disabled={concepts.length === 0}
             aria-label="Export CSV"
@@ -1133,7 +1123,6 @@ export function TerminologyPage() {
             allowed={canManageTermbase}
             tip={termbaseGateTip}
             variant="outline"
-            size="sm"
             onClick={handleExportTbx}
             disabled={concepts.length === 0}
             aria-label="Export TBX"
@@ -1148,7 +1137,6 @@ export function TerminologyPage() {
           allowed={canManageTermbase}
           tip={termbaseGateTip}
           variant="outline"
-          size="sm"
           onClick={() => setImportOpen(true)}
         >
           <Upload className="mr-1 h-3.5 w-3.5" />
@@ -1159,7 +1147,6 @@ export function TerminologyPage() {
         <GatedButton
           allowed={canManageTermbase}
           tip={termbaseGateTip}
-          size="sm"
           onClick={() => setAddOpen(true)}
         >
           <Plus className="mr-1 h-3.5 w-3.5" />
@@ -1205,7 +1192,7 @@ export function TerminologyPage() {
                 className={cn(
                   "rounded px-3 py-1 transition-colors",
                   tab === t.key
-                    ? "bg-primary text-primary-foreground"
+                    ? "bg-background text-foreground shadow-sm"
                     : "text-muted-foreground hover:text-foreground",
                 )}
               >
@@ -1218,7 +1205,6 @@ export function TerminologyPage() {
           {concepts.length >= 2 && canManageTermbase && (
             <Button
               variant="outline"
-              size="sm"
               onClick={() => setMergeOpen(true)}
               aria-label="Merge duplicate concepts"
               data-testid="merge-duplicates-btn"
@@ -1300,7 +1286,6 @@ export function TerminologyPage() {
                   allowed={canManageTermbase}
                   tip={termbaseGateTip}
                   variant="outline"
-                  size="sm"
                   onClick={() => setAddOpen(true)}
                 >
                   <Plus className="mr-1 h-3.5 w-3.5" />

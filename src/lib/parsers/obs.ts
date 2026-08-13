@@ -11,7 +11,7 @@
 // Deterministic and fully offline: this only parses an in-memory markdown
 // string. Network fetching (door43) lives in import.ts's importObs().
 
-import type { TranslatableString } from "./types"
+import type { TranslatableString } from "./core-types"
 
 /** One parsed OBS frame's attachment image, normalized for `metadata.attachments`. */
 interface ObsImageAttachment {

@@ -1,16 +1,13 @@
-// AQU-180: Unit tests for ProjectMembersPage surface.
+// Unit tests for project members building blocks (MembersTab / InviteLinkTab).
 //
-// Why these tests exist:
-//   - Route is reachable at /project/:id/members without crashing
-//   - Members list renders correctly for different grant sources
-//   - "Revoke all" button shows the typed-confirmation dialog
-//   - Confirmation gating: button is disabled until username typed
-//   - Invite-link tab shows the form and renders the invite URL after creation
+// Canonical route is `/project/:id/settings/members` (MembersSection tests).
+// These cover the shared MembersTab embedded on ProjectOverview and the
+// invite/revoke helpers reused by settings.
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
-import { MemoryRouter, Route, Routes } from "react-router-dom"
-import { ProjectMembersPage } from "./ProjectMembersPage"
+import { MemoryRouter } from "react-router-dom"
+import { MembersTab, InviteLinkTab } from "./ProjectMembersPage"
 import { partitionMembers, type ProjectMember } from "@/lib/frontier/members"
 import type { OrgMember } from "@/lib/frontier/orgs"
 
@@ -151,18 +148,23 @@ vi.mock("@/lib/sync/invites", () => ({
 
 function renderPage(projectId = "proj-1") {
   return render(
-    <MemoryRouter initialEntries={[`/project/${projectId}/members`]}>
-      <Routes>
-        <Route path="/project/:id/members" element={<ProjectMembersPage />} />
-        <Route path="/project/:id/editor" element={<div>Editor</div>} />
-      </Routes>
+    <MemoryRouter>
+      <MembersTab projectId={projectId} />
+    </MemoryRouter>,
+  )
+}
+
+function renderInvite(projectId = "proj-1") {
+  return render(
+    <MemoryRouter>
+      <InviteLinkTab projectId={projectId} />
     </MemoryRouter>,
   )
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────
 
-describe("ProjectMembersPage", () => {
+describe("MembersTab", () => {
   beforeEach(() => {
     vi.clearAllMocks()
   })
@@ -186,15 +188,6 @@ describe("ProjectMembersPage", () => {
     expect(status).toHaveAttribute("aria-busy", "true")
     expect(status.querySelector("[data-slot='spinner']")).not.toBeNull()
     expect(screen.queryByText("No members yet.")).not.toBeInTheDocument()
-  })
-
-  it("renders the page header and tab bar", () => {
-    renderPage()
-    expect(screen.getByText("Back to project")).toBeInTheDocument()
-    // "Members" appears twice: header div + tab button — verify both exist
-    const allMembers = screen.getAllByText("Members")
-    expect(allMembers.length).toBeGreaterThanOrEqual(1)
-    expect(screen.getByText("Invite link")).toBeInTheDocument()
   })
 
   it("renders the current members list", () => {
@@ -307,33 +300,35 @@ describe("ProjectMembersPage", () => {
     })
   })
 
-  it("navigates to invite tab and shows the invite form", async () => {
+  it("adds a single typed member via one batch call (AQU-734 parity)", async () => {
     renderPage()
-    // The invite tab button — there can be multiple "Create invite link" texts
-    // (heading + button), so just check the section heading appears.
-    const tabs = screen.getAllByRole("button")
-    const inviteTab = tabs.find((b) => b.textContent === "Invite link")
-    expect(inviteTab).toBeTruthy()
-    fireEvent.click(inviteTab!)
+
+    const input = screen.getByPlaceholderText("Aquilla username")
+    fireEvent.change(input, { target: { value: "dave" } })
+
+    fireEvent.click(screen.getByRole("button", { name: "Add" }))
+
     await waitFor(() => {
-      // The heading h2 rendered inside the invite form
-      expect(screen.getAllByText("Create invite link").length).toBeGreaterThan(0)
+      expect(mockAddMany).toHaveBeenCalledTimes(1)
+      expect(mockAddMany).toHaveBeenCalledWith([{ username: "dave", role: 400 }])
     })
+  })
+})
+
+describe("InviteLinkTab", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it("shows the invite form", () => {
+    renderInvite()
+    expect(screen.getAllByText("Create invite link").length).toBeGreaterThan(0)
   })
 
   it("creates an invite link and shows the URL", async () => {
     const { createServerInvite } = await import("@/lib/sync/invites")
-    renderPage()
+    renderInvite()
 
-    const tabs = screen.getAllByRole("button")
-    const inviteTab = tabs.find((b) => b.textContent === "Invite link")!
-    fireEvent.click(inviteTab)
-
-    await waitFor(() =>
-      expect(screen.getAllByText("Create invite link").length).toBeGreaterThan(0),
-    )
-
-    // Click the "Create invite link" button (not the heading)
     const createButtons = screen.getAllByRole("button", { name: "Create invite link" })
     fireEvent.click(createButtons[createButtons.length - 1])
 
@@ -351,20 +346,6 @@ describe("ProjectMembersPage", () => {
     await waitFor(() => {
       expect(screen.getByText("Invite link ready")).toBeInTheDocument()
       expect(screen.getByDisplayValue(/\/join\/test-token-abc123/)).toBeInTheDocument()
-    })
-  })
-
-  it("adds a single typed member via one batch call (AQU-734 parity)", async () => {
-    renderPage()
-
-    const input = screen.getByPlaceholderText("Aquilla username")
-    fireEvent.change(input, { target: { value: "dave" } })
-
-    fireEvent.click(screen.getByRole("button", { name: "Add" }))
-
-    await waitFor(() => {
-      expect(mockAddMany).toHaveBeenCalledTimes(1)
-      expect(mockAddMany).toHaveBeenCalledWith([{ username: "dave", role: 400 }])
     })
   })
 })
@@ -461,7 +442,7 @@ describe("partitionMembers (AQU-454)", () => {
   })
 })
 
-describe("ProjectMembersPage — AQU-454 roster sectioning", () => {
+describe("MembersTab — AQU-454 roster sectioning", () => {
   beforeEach(() => {
     vi.clearAllMocks()
   })
@@ -496,7 +477,7 @@ describe("ProjectMembersPage — AQU-454 roster sectioning", () => {
   })
 })
 
-describe("ProjectMembersPage — AQU-485 roster visibility", () => {
+describe("MembersTab — AQU-485 roster visibility", () => {
   beforeEach(() => {
     vi.clearAllMocks()
   })

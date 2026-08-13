@@ -34,7 +34,7 @@ interface ContextualDraftCardProps {
   cellId: string
   projectId: string
   fileId: string
-  /** Empty string is Project default. Autopilot v1 never proposes elsewhere. */
+  /** Empty string is Project default. Autopilot proposes into the open lane. */
   targetLang: string
   /** False for roles below contributor — evidence remains visible, but no
    *  commit or review action is offered. */
@@ -58,7 +58,6 @@ export function ContextualDraftCard({
   const drafts = useContextualDrafts()
   const summary = useContextualDraftsSummary()
   const draft =
-    targetLang === "" &&
     summary.projectId === projectId &&
     summary.fileId === fileId &&
     summary.targetLang === targetLang

@@ -69,7 +69,7 @@ Reference usage: see `src/pages/Settings.tsx` and
 
 ## Interactive states (always provide all four)
 
-- **Loading**: skeleton blocks matching the real layout (`animate-pulse rounded-2xl border bg-card`), not a centered spinner.
+- **Loading**: skeleton blocks matching the real layout (`animate-pulse rounded-lg border bg-card`), not a centered spinner.
 - **Empty**: `<EmptyState>` with a one-line "how to populate this."
 - **Error**: inline `text-xs text-destructive` near the control.
 - **Saved/success**: `text-xs text-green-600 dark:text-green-400` with a lucide `<Check className="size-3.5" />`. **Preserve existing `data-testid`s** (e.g. `export-role-saved`, `org-key-saved`).
@@ -80,10 +80,10 @@ Reference usage: see `src/pages/Settings.tsx` and
 1. **Behavior-preserving.** Do not change data hooks, API calls, role gates, or
    permission logic. This is presentation only. Keep every `data-testid`,
    `aria-*`, `role`, and `htmlFor` wiring intact.
-2. **Use the primitives.** No new ad-hoc `rounded-lg border bg-card` sections.
-   No hand-rolled `<h1>/<p>` page headers.
-3. **Radius `rounded-2xl`** for cards/sections/tiles (matches the canonical
-   `Card`). Not `rounded-lg`.
+2. **Use the primitives.** Prefer `Section` / `StatTile` / `Card` over ad-hoc
+   bordered surfaces.
+3. **Radius `rounded-lg`** for cards/sections/tiles (matches the canonical
+   `Card` and the app `--radius` token). Not `rounded-2xl`.
 4. **Terminology**: obey `docs/UI-GLOSSARY.md` (lint-guarded by
    `src/components/ui-jargon-guard.test.ts`). Never surface internal IDs
    (FRO-…, AD-…) in UI copy.

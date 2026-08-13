@@ -52,8 +52,8 @@ export const TOUR_STEPS: TourStep[] = [
   },
   {
     anchor: "nav-overview",
-    title: "Projects",
-    body: "Open the project hub for the current organization or All organizations, then filter, sort, open, or create projects from one place.",
+    title: "Overview",
+    body: "Start here for rollups across All organizations, or an org’s operator home. In a single org, open Projects for the full table to filter, sort, open, or create.",
     placement: "right",
   },
   {

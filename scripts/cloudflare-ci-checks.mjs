@@ -3,7 +3,17 @@ import { pathToFileURL } from "node:url"
 import { workersBuildMetadata } from "./assert-workers-build-env.mjs"
 
 const ROOT_LANE = { name: "root", steps: [["pnpm", ["test"]]] }
-const LINT_LANE = { name: "lint", steps: [["pnpm", ["lint"]]] }
+// The credential scan (docs/OPSEC.md §5) rides in the lint lane rather than
+// its own so it shares an already-required check — a secret scan that can be
+// merged past is decoration. This script is the gate that actually runs on
+// pull requests (AQU-564); the ci.yml lint job mirrors it for dispatch runs.
+const LINT_LANE = {
+  name: "lint",
+  steps: [
+    ["pnpm", ["lint"]],
+    ["pnpm", ["run", "scan:secrets"]],
+  ],
+}
 const IDENTITY_LANE = { name: "identity", steps: [["pnpm", ["run", "build:workers-build:identity"]]] }
 const SYNC_LANE = { name: "sync", steps: [["pnpm", ["run", "build:workers-build:sync"]]] }
 const RELEASE_LANE = {

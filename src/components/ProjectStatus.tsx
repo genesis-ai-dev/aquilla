@@ -1,4 +1,4 @@
-import type { ComponentType } from "react"
+import type { ComponentType, ReactNode } from "react"
 import {
   Archive,
   CircleDashed,
@@ -6,6 +6,7 @@ import {
   type LucideIcon,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { AppTooltip } from "@/components/ui/tooltip"
 import {
   PROJECT_STATUS_LABEL,
   type ProjectAttentionKind,
@@ -79,6 +80,26 @@ const KIND_CONFIG: Record<
   archived: { icon: Archive, tone: "muted", label: PROJECT_STATUS_LABEL.archived },
 }
 
+function formatDeadlineDate(value: string): string {
+  const parsed = Date.parse(value)
+  if (!Number.isFinite(parsed)) return value
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(new Date(parsed))
+}
+
+/** Tooltip body matching the org projects table deadline hover — date only. */
+export function deadlineStatusTooltip(
+  _status: "overdue" | "soon",
+  deadlineAt: string | null | undefined,
+): ReactNode {
+  if (!deadlineAt) return null
+  return `Due ${formatDeadlineDate(deadlineAt)}`
+}
+
 /** Linear-style status: tinted icon orb + label (no pill). */
 export function LinearStatus({
   icon: Icon,
@@ -129,17 +150,36 @@ export function ProjectStatusChip({
 /** One or more attention reasons (overdue / due soon / stalled). */
 export function ProjectAttentionStatuses({
   reasons,
+  deadlineAt,
   className,
 }: {
   reasons: ProjectAttentionReason[]
+  /** When set, overdue/due-soon chips show the org-projects deadline tooltip on hover. */
+  deadlineAt?: string | null
   className?: string
 }) {
   if (reasons.length === 0) return null
   return (
     <div className={cn("flex flex-col gap-1.5", className)}>
-      {reasons.map((r) => (
-        <ProjectStatusChip key={r.kind} kind={r.kind} />
-      ))}
+      {reasons.map((r) => {
+        if ((r.kind === "overdue" || r.kind === "soon") && deadlineAt) {
+          return (
+            <AppTooltip
+              key={r.kind}
+              content={deadlineStatusTooltip(r.kind, deadlineAt)}
+              side="bottom"
+            >
+              <span
+                tabIndex={0}
+                className="w-fit rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+              >
+                <ProjectStatusChip kind={r.kind} />
+              </span>
+            </AppTooltip>
+          )
+        }
+        return <ProjectStatusChip key={r.kind} kind={r.kind} />
+      })}
     </div>
   )
 }
@@ -163,13 +203,20 @@ export function ProjectDeadlineStatuses({
 export function ProjectStatus({
   archived,
   reasons,
+  deadlineAt,
   className,
 }: {
   archived: boolean
   reasons: ProjectAttentionReason[]
+  /** When set, overdue/due-soon chips show the org-projects deadline tooltip on hover. */
+  deadlineAt?: string | null
   className?: string
 }) {
   if (archived) return <ProjectStatusChip kind="archived" className={className} />
-  if (reasons.length > 0) return <ProjectAttentionStatuses reasons={reasons} className={className} />
+  if (reasons.length > 0) {
+    return (
+      <ProjectAttentionStatuses reasons={reasons} deadlineAt={deadlineAt} className={className} />
+    )
+  }
   return <ProjectStatusChip kind="on-track" className={className} />
 }

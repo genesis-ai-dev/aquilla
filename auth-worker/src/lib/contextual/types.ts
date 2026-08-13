@@ -187,7 +187,13 @@ export interface SkippedCell {
   reason: string
 }
 
-export type ClosureExit = "model-closed" | "fixpoint" | "window-exhausted" | "max-iterations" | "budget"
+export type ClosureExit =
+  | "model-closed"
+  | "fixpoint"
+  | "window-exhausted"
+  | "max-iterations"
+  | "unparseable"
+  | "budget"
 
 /**
  * Coarse progress phase within one span, reported for live UI only — never a

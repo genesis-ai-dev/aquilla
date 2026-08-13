@@ -4,7 +4,8 @@ import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
-import { FieldLabel } from "@/components/ui/field"
+import { FieldLabel, OptionalMark } from "@/components/ui/field"
+import { Spinner } from "@/components/ui/spinner"
 import {
   Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select"
@@ -38,9 +39,9 @@ import {
   ROLE,
   LINK_ROLE_OPTIONS,
   PROJECT_ROLE_OPTIONS,
-  roleDisplayText,
 } from "@/lib/frontier/roles"
 import { RoleLabel } from "@/components/RoleLabel"
+import { RoleSelect } from "@/components/RoleSelect"
 
 interface SharePanelProps {
   open: boolean
@@ -75,7 +76,7 @@ export function SharePanel({ open, onOpenChange, projectId, onSharesChanged }: S
             onClick={() => setTab("members")}
             className={`px-3 py-1.5 text-sm ${
               tab === "members"
-                ? "border-b-2 border-primary font-medium"
+                ? "border-b-2 border-foreground font-medium"
                 : "text-muted-foreground"
             }`}
           >
@@ -86,7 +87,7 @@ export function SharePanel({ open, onOpenChange, projectId, onSharesChanged }: S
             onClick={() => setTab("link")}
             className={`px-3 py-1.5 text-sm ${
               tab === "link"
-                ? "border-b-2 border-primary font-medium"
+                ? "border-b-2 border-foreground font-medium"
                 : "text-muted-foreground"
             }`}
           >
@@ -257,7 +258,9 @@ function MembersTab({ projectId }: { projectId: string }) {
     <div>
       {error && <p className="mb-2 text-xs text-destructive">{error}</p>}
       {isLoading && members.length === 0 ? (
-        <p className="text-xs text-muted-foreground">Loading…</p>
+        <div className="flex items-center text-muted-foreground">
+          <Spinner className="size-3.5" />
+        </div>
       ) : (
         <MembersPanel
           members={panelMembers}
@@ -378,7 +381,7 @@ function InviteLinkTab({ projectId, onSharesChanged }: InviteLinkTabProps) {
           <div className="flex items-center gap-1">
             <Input value={issuedUrl} readOnly className="text-xs font-mono" />
             <AppTooltip content="Copy URL">
-              <Button size="sm" variant="ghost" onClick={() => copyUrl(issuedUrl)} aria-label="Copy URL">
+              <Button variant="ghost" onClick={() => copyUrl(issuedUrl)} aria-label="Copy URL">
                 <Copy className="h-3.5 w-3.5" />
               </Button>
             </AppTooltip>
@@ -392,7 +395,7 @@ function InviteLinkTab({ projectId, onSharesChanged }: InviteLinkTabProps) {
             a fresh one for the next person.
             To revoke before it is redeemed, use the Active links list below.
           </p>
-          <Button size="sm" variant="outline" onClick={reset} className="w-full">
+          <Button variant="outline" onClick={reset} className="w-full">
             Create another link
           </Button>
         </div>
@@ -400,37 +403,22 @@ function InviteLinkTab({ projectId, onSharesChanged }: InviteLinkTabProps) {
         <div className="space-y-3">
           <div className="space-y-1">
             <FieldLabel className="text-xs">Role</FieldLabel>
-            <Select
-              items={LINK_ROLE_OPTIONS.map((opt) => ({
-                value: String(opt.level),
-                label: roleDisplayText(opt.name),
-              }))}
-              value={String(inviteRole)}
-              onValueChange={(v) => setInviteRole(Number(v ?? ""))}
+            <RoleSelect
+              options={LINK_ROLE_OPTIONS}
+              value={inviteRole}
+              onValueChange={setInviteRole}
               disabled={!session?.jwt}
-            >
-              <SelectTrigger className="w-full" aria-label="Role">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectGroup>
-                  {LINK_ROLE_OPTIONS.map((opt) => (
-                    <SelectItem key={opt.level} value={String(opt.level)}>
-                      <RoleLabel name={opt.name} />
-                    </SelectItem>
-                  ))}
-                </SelectGroup>
-              </SelectContent>
-            </Select>
-            <p className="text-[10px] text-muted-foreground">
-              {session?.jwt
-                ? LINK_ROLE_OPTIONS.find((o) => o.level === inviteRole)?.description
-                : "Sign in to create an invite link"}
-            </p>
+              aria-label="Role"
+            />
+            {!session?.jwt && (
+              <p className="text-[10px] text-muted-foreground">
+                Sign in to create an invite link
+              </p>
+            )}
           </div>
           <div className="space-y-1">
             <FieldLabel htmlFor="invite-email" className="text-xs">
-              Recipient email <span className="text-muted-foreground font-normal">(optional)</span>
+              Recipient email <OptionalMark />
             </FieldLabel>
             <Input
               id="invite-email"
@@ -468,7 +456,7 @@ function InviteLinkTab({ projectId, onSharesChanged }: InviteLinkTabProps) {
               }
               disabled={!session?.jwt}
             >
-              <SelectTrigger className="w-full" aria-label="Link expires">
+              <SelectTrigger aria-label="Link expires">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -489,7 +477,6 @@ function InviteLinkTab({ projectId, onSharesChanged }: InviteLinkTabProps) {
             </p>
           )}
           <Button
-            size="sm"
             onClick={handleCreate}
             disabled={busy || !session?.jwt}
             className="w-full"
@@ -595,7 +582,6 @@ function ActiveInvitesList({ projectId, jwt, version, onRevoked }: ActiveInvites
                   Confirm
                 </label>
                 <Button
-                  size="sm"
                   variant="destructive"
                   className="h-6 px-2 text-[10px]"
                   disabled={!revokeConfirm || revoking}
@@ -604,7 +590,6 @@ function ActiveInvitesList({ projectId, jwt, version, onRevoked }: ActiveInvites
                   {revoking ? "…" : "Revoke"}
                 </Button>
                 <Button
-                  size="sm"
                   variant="ghost"
                   className="h-6 px-1 text-[10px]"
                   onClick={() => { setRevokeTarget(null); setRevokeConfirm(false) }}
@@ -615,7 +600,6 @@ function ActiveInvitesList({ projectId, jwt, version, onRevoked }: ActiveInvites
             ) : (
               <AppTooltip content="Revoke this invite link">
                 <Button
-                  size="sm"
                   variant="ghost"
                   className="h-6 shrink-0 px-1 text-muted-foreground hover:text-destructive"
                   onClick={() => { setRevokeTarget(inv.token); setRevokeConfirm(false) }}

@@ -69,7 +69,7 @@ export { ProjectSync } from "./project-do"
 export { FileSync } from "./file-sync-legacy"
 import { makePostgres } from "../../db/shim/postgres"
 import { shipLog, shipErrorResponse } from "./posthog-logs"
-import { deploymentEnvironmentError } from "./environment-guard"
+import { deploymentEnvironmentError, unauthenticatedBypassError } from "./environment-guard"
 
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace -- Cloudflare namespace augmentation requires this syntax
@@ -98,6 +98,13 @@ declare global {
       HYPERDRIVE?: Hyperdrive
       /** Shared HMAC key with identity that mints /sync-token JWTs. */
       SYNC_SECRET_KEY?: string
+      /**
+       * OPS-2: dedicated bearer for the operator-only routes (`/admin/files/*`,
+       * `DELETE /audio/*`), so ops calls never carry the token-signing key.
+       * When unset those routes fall back to SYNC_SECRET_KEY; when set, it is
+       * the only value they accept. See `lib/admin-secret.ts`.
+       */
+      ADMIN_SECRET?: string
       /** Deployment profile used to reject cross-environment custom-domain traffic. */
       ENVIRONMENT?: string
       /** Base URL of the identity worker in the same deployment environment. */
@@ -216,6 +223,20 @@ const worker = {
       console.error("Refusing request with cross-environment worker bindings", {
         environmentError,
       })
+      return withCors(
+        new Response("Worker deployment configuration does not match this API environment", {
+          status: 503,
+        }),
+        request,
+      )
+    }
+
+    // Separate from the binding check above: that one only fires on the two
+    // first-party API hostnames, while the auth bypass is unsafe on ANY
+    // deployed worker (workers.dev aliases and PR previews included).
+    const bypassError = unauthenticatedBypassError(env)
+    if (bypassError) {
+      console.error("Refusing request with the sync auth bypass enabled", { bypassError })
       return withCors(
         new Response("Worker deployment configuration does not match this API environment", {
           status: 503,

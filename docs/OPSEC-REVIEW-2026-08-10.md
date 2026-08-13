@@ -1,5 +1,10 @@
 # Operational Security Review — 2026-08-10
 
+> **Superseded for status by [`OPSEC-REVIEW-2026-08-11.md`](./OPSEC-REVIEW-2026-08-11.md).**
+> That pass closed OPS-6 with an actual gate and moved OPS-2 and OPS-3 to half-closed; its §6
+> is the authoritative status table. **This document remains the reference for §1 (critical
+> data) and §2 (threats)**, which the newer review deliberately does not restate.
+
 _Scope: the operational security of **this project** — the data Aquilla handles, who would want it, where the practices around it are weak, and what changed since the last pass. Follow-up to `docs/SECURITY-NOTES-2026-06-10.md` (code-level findings, SEC-1…SEC-11), which this review re-checks in §6 rather than repeats._
 
 Findings raised here are numbered **OPS-n** to keep them distinct from the June **SEC-n** series. Each is labelled **FACT** (verified against the tree at this commit) or **JUDGMENT** (reasoned inference). Two findings are fixed in the same change that adds this document; the rest are recorded with a recommended owner-decision, because they are configuration or policy calls rather than code.

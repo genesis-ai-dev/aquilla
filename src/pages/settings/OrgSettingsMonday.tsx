@@ -225,7 +225,6 @@ export function OrgSettingsMonday() {
                   </span>
                   {canManage && (
                     <Button
-                      size="sm"
                       variant="outline"
                       className="shrink-0"
                       onClick={() => setAdminStepOpen(true)}
@@ -346,7 +345,6 @@ export function OrgSettingsMonday() {
                 )}
                 <Button
                   variant="outline"
-                  size="sm"
                   className="shrink-0"
                   disabled={!connection?.installUrl}
                   onClick={() => {

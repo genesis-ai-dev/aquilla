@@ -76,7 +76,7 @@ function LoadError({
       description={t("editor.file.loadErrorBody")}
       action={
         onRetryClick ? (
-          <Button size="sm" variant="outline" onClick={onRetryClick}>
+          <Button variant="outline" onClick={onRetryClick}>
             <RefreshCw data-icon="inline-start" />
             {t("editor.file.retryLoad")}
           </Button>
@@ -102,7 +102,7 @@ function SkeletonRows() {
       <div className="flex h-full min-h-64 flex-col">
         <div className="flex flex-1 flex-col gap-2 overflow-hidden p-4">
           {Array.from({ length: 8 }).map((_, i) => (
-            <div key={i} className={`bg-card grid ${GRID_COLS} items-start gap-3 rounded-2xl px-4 py-3`}>
+            <div key={i} className={`bg-card grid ${GRID_COLS} items-start gap-3 rounded-lg px-4 py-3`}>
               <Skeleton className="h-6 w-10" />
               <Skeleton className="h-16 w-full" />
               <Skeleton className="h-16 w-full" />
@@ -155,7 +155,7 @@ function NoFileEmpty({
         description={t("editor.file.noFilesBody")}
         action={
           onImportClick ? (
-            <Button size="sm" onClick={onImportClick}>
+            <Button onClick={onImportClick}>
               <Upload data-icon="inline-start" />
               {t("editor.file.importFile")}
             </Button>
@@ -196,7 +196,7 @@ function ReadyEmpty({
       description={t("editor.file.emptyBody")}
       action={
         onImportClick ? (
-          <Button size="sm" onClick={onImportClick}>
+          <Button onClick={onImportClick}>
             <Sparkles data-icon="inline-start" />
             {t("editor.file.importContent")}
           </Button>

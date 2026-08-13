@@ -48,9 +48,12 @@ action over it.
 
 The current posture, threat model, and open items live in:
 
-- `docs/OPSEC-REVIEW-2026-08-10.md` — the operational security review, including the live
-  status of every finding from the audit below.
-- `docs/SECURITY-NOTES-2026-06-10.md` — the original point-in-time code audit.
+- `docs/OPSEC-REVIEW-2026-08-11.md` — **the current review.** Its §6 carries the live status
+  of every finding from both documents below. Start here.
+- `docs/OPSEC-REVIEW-2026-08-10.md` — the previous pass (OPS-1…OPS-7); still the reference
+  for the asset ranking (§1) and threat model (§2), which the current review does not restate.
+- `docs/SECURITY-NOTES-2026-06-10.md` — the original point-in-time code audit (SEC-1…SEC-11).
 
-When a report lands, update the status table in the operational review so the two never
-disagree about what is still open.
+When a report lands, update the status table in the current review so the documents never
+disagree about what is still open. For routine re-checks, amend the current review in place
+rather than adding another dated file — see its §0.

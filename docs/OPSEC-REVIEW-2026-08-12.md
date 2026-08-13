@@ -66,6 +66,34 @@ falls back to `SYNC_SECRET_KEY`; `Env.ADMIN_SECRET` in `auth-worker/src/types.ts
 `sync-worker/wrangler.toml` says in capitals to set both workers to the same value in one
 sitting. `.dev.vars.example` on both workers carries the pairing note.
 
+#### OPS-13a — [FACT] The two sides normalised the fallback differently — **found on the merged tree, fixed in this change**
+
+Caught while verifying the merge, and worth recording because it is the same failure
+reaching the same place by a third route. `resolveAdminSecret` trims **both** candidates
+(`env.SYNC_SECRET_KEY?.trim()`); auth-worker's call sent
+`c.env.ADMIN_SECRET?.trim() || c.env.SYNC_SECRET_KEY` — the fallback **untrimmed**. So a
+`SYNC_SECRET_KEY` carrying surrounding whitespace authenticated on neither side of the
+pair, and did it down the identical silent-401 path: `console.warn`, blobs stranded in R2.
+
+The trigger is not exotic. `echo secret | wrangler secret put` stores a trailing newline;
+`printf %s secret |` does not, which is why the recipe in `wrangler.toml` uses `printf`.
+Note also that this was a *regression window* opened by the OPS-2 fix itself: the previous
+`admin.ts` compared against an untrimmed `SYNC_SECRET_KEY`, matching what auth-worker
+sent, so an environment with a newline-terminated secret worked before and would have
+stopped working after — silently, and only on the cleanup path.
+
+**Fixed:** both branches trim, so the two ends normalise identically.
+`sync-worker/src/lib/admin-secret.test.ts` pins the contract from the receiving side,
+including an explicit case asserting that an *untrimmed* sender is rejected — so if either
+end stops trimming, a test says so instead of R2 quietly filling up.
+
+Blast radius checked rather than assumed: `adminBearerMatches` gates exactly two surfaces.
+`DELETE /audio/*` cannot break this way (a failed match falls through to sync-token
+verification, so the client path still works), and the `/admin/projects/*` notifications
+(`member-removed`, `settings-changed`, `contextual-activity`, `archive`) are handled
+earlier in the chain by their own `SYNC_SECRET_KEY` checks and never reach this gate. The
+file-delete cleanup was the only affected caller.
+
 ### OPS-14 — [FACT] Route-level handlers return raw error text to authenticated callers — **recorded, not fixed**
 
 The global handlers are clean (`auth-worker/src/index.ts` returns a flat

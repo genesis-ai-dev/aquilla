@@ -1181,7 +1181,14 @@ projects.delete("/:projectId/files/:fileId", authMiddleware, async (c) => {
   // signing key the moment its own ADMIN_SECRET is set, and because the call
   // below only warns on failure, a one-sided rollout would 401 silently and
   // leave every deleted file's blobs behind in R2.
-  const adminSecret = c.env.ADMIN_SECRET?.trim() || c.env.SYNC_SECRET_KEY
+  //
+  // BOTH branches are trimmed to match `resolveAdminSecret`, which trims both.
+  // Sending an untrimmed fallback while the receiver compares a trimmed one
+  // means a `SYNC_SECRET_KEY` carrying a trailing newline — what
+  // `echo secret | wrangler secret put` stores, as against `printf %s` —
+  // authenticates nowhere, and fails down the same silent 401 path this
+  // comment is about.
+  const adminSecret = c.env.ADMIN_SECRET?.trim() || c.env.SYNC_SECRET_KEY?.trim()
   if (c.env.SYNC_WORKER_URL && adminSecret) {
     try {
       const res = await fetch(

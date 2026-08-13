@@ -3,7 +3,8 @@ import { render, screen, waitFor, act } from "@testing-library/react"
 import { MemoryRouter, useNavigate } from "react-router-dom"
 import { OrgProvider, useActiveOrg } from "./OrgContext"
 import { UserError } from "@/lib/errors/user-error"
-import { onSessionExpired } from "@/lib/errors/session-expired-signal"
+import { clearSessionExpired, onSessionExpired } from "@/lib/errors/session-expired-signal"
+import { clearSession, saveSession } from "@/lib/frontier/session-store"
 
 // This vitest/happy-dom env doesn't provide localStorage (the reason this
 // suite was red before FRO-367 added the shim). OrgContext reads/writes it
@@ -339,6 +340,9 @@ describe("OrgProvider", () => {
     })
 
     it("still signals session-expired on a 401 (AQU-293 path intact)", async () => {
+      // The guarded notifier (AQU-884 race fix) checks the session store, so
+      // the store must hold the same JWT the provider is fetching with.
+      await saveSession({ jwt: "jwt", username: "anna", createdAt: "x" })
       const expired = vi.fn()
       const unsubscribe = onSessionExpired(expired)
       listMyOrgs.mockRejectedValue(new UserError(401, "token expired"))
@@ -347,6 +351,28 @@ describe("OrgProvider", () => {
       // Still an error state — the banner and the retry affordance coexist.
       expect(screen.getByTestId("error").textContent).not.toBe("none")
       unsubscribe()
+      await clearSession()
+      clearSessionExpired()
+    })
+
+    // AQU-884 race fix: a 401 from a JWT the session store no longer holds
+    // (re-login replaced it while the request was in flight or React state
+    // lagged) must NOT signal — it would re-latch the banner over a healthy
+    // dashboard.
+    it("does not signal when the failing JWT is no longer the active credential", async () => {
+      await saveSession({ jwt: "jwt-fresh", username: "anna", createdAt: "x" })
+      const expired = vi.fn()
+      const unsubscribe = onSessionExpired(expired)
+      // The provider still fetches with the mocked hook's stale "jwt".
+      listMyOrgs.mockRejectedValue(new UserError(401, "token expired"))
+      render(<MemoryRouter><OrgProvider><Probe /></OrgProvider></MemoryRouter>)
+      // Wait for the failure to surface, then flush the guard's async check.
+      await waitFor(() => expect(screen.getByTestId("error").textContent).not.toBe("none"))
+      await act(async () => {})
+      expect(expired).not.toHaveBeenCalled()
+      unsubscribe()
+      await clearSession()
+      clearSessionExpired()
     })
   })
 })

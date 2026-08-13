@@ -10,7 +10,7 @@ import { partitionSharedProjects } from "@/lib/frontier/shared-projects"
 import { isProjectNew, readProjectOpenedAt } from "@/lib/frontier/opened-shared-store"
 import { ProjectCreateDialog } from "@/components/ProjectCreateDialog"
 import type { ProjectRecord } from "@/lib/parsers/types"
-import { notifySessionExpired } from "@/lib/errors/session-expired-signal"
+import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
 import { attentionRank, deadlineStatus, getPortfolios, translatedPct, type PortfolioProject } from "@/lib/frontier/portfolio"
 import { UserError } from "@/lib/errors/user-error"
 import { buttonVariants } from "@/components/ui/button"
@@ -257,7 +257,7 @@ export function ProjectsList() {
           setUnreachable(result.reason === "unreachable")
           // AQU-293: 401/403 from the projects fetch means the session is no
           // longer valid — raise the global session-expired banner.
-          if (result.reason === "unauthorized") notifySessionExpired()
+          if (result.reason === "unauthorized") void notifySessionExpiredIfCurrent(jwt)
         }
       })
       .finally(() => { if (!cancelled) setLoading(false) })
@@ -287,7 +287,7 @@ export function ProjectsList() {
       .catch((err) => {
         if (!cancelled) {
           setPortfolioProjects([])
-          if (err instanceof UserError && err.category === "session-expired") notifySessionExpired()
+          if (err instanceof UserError && err.category === "session-expired") void notifySessionExpiredIfCurrent(jwt)
         }
       })
     return () => { cancelled = true }

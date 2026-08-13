@@ -24,6 +24,7 @@ import {
   patchSessionEmails,
   saveSession,
 } from "./session-store";
+import { clearSessionExpired } from "@/lib/errors/session-expired-signal";
 
 export class FrontierAuthError extends Error {
   public status: number;
@@ -410,5 +411,12 @@ async function finalizeSession(
     ...(email ? { email } : {}),
   };
   await saveSession(session);
+  // AQU-884: every successful auth path funnels through here, so this is the
+  // one place that has to lower the session-expired flag — otherwise the
+  // banner (which no longer clears on navigation) would outlive the re-login.
+  // The ordering matters: saveSession() above committed the new JWT first, so
+  // any straggler 401 still carrying the old JWT is provably stale by the time
+  // this clear runs (see notifySessionExpiredIfCurrent in ./session-expiry).
+  clearSessionExpired();
   return session;
 }

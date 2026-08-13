@@ -18,7 +18,7 @@ import { listMyPendingInvites, type MyPendingInvite } from "@/lib/sync/invites"
 import { roleDisplayText } from "@/lib/frontier/roles"
 import { RoleLabel } from "@/components/RoleLabel"
 import { UserError } from "@/lib/errors/user-error"
-import { notifySessionExpired } from "@/lib/errors/session-expired-signal"
+import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
 import { OrgCreateDialog } from "./OrgCreateDialog"
 import { LaneChips } from "./LaneChips"
 import { ProjectMetricHeader } from "./ProjectMetricHeader"
@@ -558,7 +558,7 @@ export function OrgHome() {
       .catch((err) => {
         if (!cancelled) {
           if (err instanceof UserError && err.category === "session-expired") {
-            notifySessionExpired()
+            void notifySessionExpiredIfCurrent(jwt)
           }
           setError(err instanceof Error ? err.message : String(err))
         }

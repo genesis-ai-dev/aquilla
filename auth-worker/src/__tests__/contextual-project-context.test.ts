@@ -263,7 +263,7 @@ describe("computeContextReadiness", () => {
     expect(byId.get("terminology")?.level).toBe("missing")
     expect(byId.get("terminology")?.href).toBe("terminology")
     expect(byId.get("brief")?.level).toBe("missing")
-    expect(byId.get("brief")?.href).toBe("memory")
+    expect(byId.get("brief")?.href).toBe("settings/memory")
     expect(byId.get("examples")?.level).toBe("missing")
   })
 

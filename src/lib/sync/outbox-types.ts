@@ -125,6 +125,10 @@ export interface OutboxEventPayloads {
   "source.cell.commit": {
     value: string
     valueHtml?: string
+    /** AQU-847: corrected source text for a MEDIA section. An imported media
+     *  cell's `value` is the import filename, so the user's edit lands here —
+     *  the field `effectiveSourceText` (and therefore export + AI) reads. */
+    transcription?: string
   }
   "source.cell.delete": Record<string, never>
   "source.cell.reorder": {

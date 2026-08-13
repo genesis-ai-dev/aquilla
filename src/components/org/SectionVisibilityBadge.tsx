@@ -159,7 +159,7 @@ export function SectionVisibilityBadge({
             onValueChange={(v) => void handleChange(v)}
             disabled={busy}
           >
-            <SelectTrigger aria-label="Who can see this section" size="sm" className="w-full">
+            <SelectTrigger aria-label="Who can see this section" size="sm">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>

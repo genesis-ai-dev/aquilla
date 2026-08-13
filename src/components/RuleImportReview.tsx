@@ -127,7 +127,6 @@ export function RuleImportReview({
                 </div>
                 <Button
                   variant={isAccepted ? "default" : "outline"}
-                  size="sm"
                   onClick={() => toggleAccept(i)}
                   className="flex-shrink-0"
                 >

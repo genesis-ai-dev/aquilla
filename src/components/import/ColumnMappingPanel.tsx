@@ -82,7 +82,7 @@ function ColSelect({
         value={value === null ? "" : String(value)}
         onValueChange={(v) => onChange(v === "" || v == null ? null : parseInt(v, 10))}
       >
-        <SelectTrigger size="sm" className="flex-1 text-xs">
+        <SelectTrigger size="sm" className="text-xs">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -249,11 +249,10 @@ export function ColumnMappingPanel({ sheet, onConfirm, onCancel, mode = "create"
 
       {/* Actions */}
       <div className="flex justify-end gap-2">
-        <Button variant="ghost" size="sm" onClick={onCancel}>
+        <Button variant="ghost" onClick={onCancel}>
           Cancel
         </Button>
         <Button
-          size="sm"
           disabled={!canConfirm}
           onClick={() => onConfirm(mapping, hasHeader)}
         >

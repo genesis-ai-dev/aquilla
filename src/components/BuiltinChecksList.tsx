@@ -87,7 +87,6 @@ export function BuiltinChecksList({ builtinRules, infractions, onSetOverride, on
                   }
                 >
                   <Button
-                    size="sm"
                     variant="outline"
                     disabled={!canHarmonize}
                     onClick={() => onHarmonize(rule, count)}

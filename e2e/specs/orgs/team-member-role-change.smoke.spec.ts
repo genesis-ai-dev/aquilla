@@ -4,16 +4,15 @@ import { ensureAuthState } from "../../helpers/auth"
 import { addOrgMember, getMyOrg, ROLE } from "../../helpers/frontier-api"
 
 /**
- * TeamDetail — change a team member's role via the role select.
+ * TeamDetail — change a team member's role via the row actions dialog.
  *
- * TeamDetail.tsx renders a Base UI Select with aria-label="Role for
- * ${m.username}" for each member when the viewer is org owner. The select
- * contains role options: viewer(100), commenter(200), reviewer(300),
- * contributor(400), project_lead(500), maintainer(600), owner(700).
+ * TeamDetail shows the current role as plain text in the Role column. Owners
+ * open the three-dot menu → "Change role" → dialog with a Base UI Select
+ * (aria-label="Role for ${username}") → Save.
  *
  * This spec: seed bob in alice's org → create a team → add bob as a team
- * member (AQU-735 multi-select) → change "Role for bob" to "maintainer"
- * → verify the select trigger shows "maintainer".
+ * member (AQU-735 multi-select) → change bob's role to maintainer via the
+ * dialog → verify the Role column shows "Maintainer".
  */
 test("team member role select changes member role", async ({ alice }) => {
   // Seed bob in alice's org.
@@ -28,38 +27,58 @@ test("team member role select changes member role", async ({ alice }) => {
   await createBtn.click()
 
   const teamName = `RoleTeam ${Date.now()}`
-  const nameInput = alice.locator('input[placeholder*="name"], input[type="text"]').first()
+  const createDialog = alice.getByRole("dialog")
+  await expect(createDialog).toBeVisible({ timeout: 3_000 })
+  const nameInput = createDialog.getByLabel(/^Team name$/i)
   await expect(nameInput).toBeVisible({ timeout: 3_000 })
   await nameInput.fill(teamName)
-  await alice.getByRole("button", { name: /Save|Create|Confirm/i }).first().click()
+  await createDialog.getByRole("button", { name: /^Create$/i }).click()
 
   await alice.waitForURL(/\/teams\/\d+/, { timeout: 10_000 })
   await expect(alice.getByRole("heading", { name: teamName })).toBeVisible({ timeout: 5_000 })
 
+  // Members live on the Members tab (Linear-style team page).
+  await alice.getByRole("tab", { name: /^Members$/i }).click()
+
   // Add bob via the multi-select "Members to add" combobox (AQU-735).
-  const addMemberBtn = alice.getByRole("button", { name: /Add member/i })
+  const addMemberBtn = alice.getByRole("button", { name: /Add (a )?member/i })
   await expect(addMemberBtn).toBeVisible({ timeout: 10_000 })
   await addMemberBtn.click()
 
-  const dialog = alice.getByRole("dialog")
-  await expect(dialog).toBeVisible({ timeout: 3_000 })
-  const memberSelect = dialog.getByRole("combobox", { name: "Members to add" })
+  const addDialog = alice.getByRole("dialog")
+  await expect(addDialog).toBeVisible({ timeout: 3_000 })
+  const memberSelect = addDialog.getByRole("combobox", { name: "Members to add" })
   await expect(memberSelect).toBeVisible({ timeout: 3_000 })
   await memberSelect.click()
-  await alice.getByRole("checkbox", { name: "bob" }).check()
+  const bobOption = alice.getByRole("option", { name: "bob" })
+  await expect(bobOption).toBeVisible({ timeout: 3_000 })
+  await bobOption.click()
 
-  const addBtn = dialog.getByRole("button", { name: /^Add$/i })
+  const addBtn = addDialog.getByRole("button", { name: /^Add$/i })
   await expect(addBtn).toBeEnabled({ timeout: 3_000 })
   await addBtn.click()
 
   // Bob now appears in the member list.
-  await expect(alice.getByRole("button", { name: /Remove bob/i })).toBeVisible({ timeout: 10_000 })
+  const actionsBtn = alice.getByRole("button", { name: /Actions for bob/i })
+  await expect(actionsBtn).toBeVisible({ timeout: 10_000 })
+  await expect(alice.getByText("Contributor")).toBeVisible({ timeout: 5_000 })
 
-  // The "Role for bob" select is visible (alice is owner).
-  const roleSelect = alice.getByRole("combobox", { name: "Role for bob" })
-  await expect(roleSelect).toBeVisible({ timeout: 5_000 })
+  // Open Change role dialog from the three-dot menu.
+  await actionsBtn.click()
+  await alice.getByRole("menuitem", { name: /Change role/i }).click()
+  const roleDialog = alice.getByRole("dialog", { name: /Change role for bob/i })
+  await expect(roleDialog).toBeVisible({ timeout: 3_000 })
 
-  // Change bob's role to maintainer (600) — the trigger shows the label.
-  await pickSelectOption(alice, roleSelect, "maintainer")
+  const roleSelect = roleDialog.getByRole("combobox", { name: "Role for bob" })
+  await expect(roleSelect).toBeVisible({ timeout: 3_000 })
+  await pickSelectOption(alice, roleSelect, /^Maintainer\b/i)
   await expectSelectValue(roleSelect, /Maintainer/i)
+  await roleDialog.getByRole("button", { name: /^Save$/i }).click()
+
+  // Wait for the dialog to close, then assert the Role column (avoid matching
+  // leftover select/portal text that also contains "maintainer").
+  await expect(alice.getByRole("dialog", { name: /Change role for bob/i })).not.toBeVisible({ timeout: 5_000 })
+  await expect(alice.getByRole("row", { name: /bob/i }).getByText(/^Maintainer$/i)).toBeVisible({
+    timeout: 8_000,
+  })
 })

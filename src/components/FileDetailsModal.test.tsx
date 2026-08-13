@@ -1,17 +1,13 @@
 /**
- * FileDetailsModal — permission-aware action gating.
+ * FileDetailsModal — metadata only.
  *
- * The modal must always SHOW every file action, but disable (with a visible
- * reason) the ones the caller lacks permission for:
- *   - Delete requires project_lead (500)+ (AQU-271).
- *   - Export requires an exportable type (USFM) AND org export policy (AQU-253).
- * Rename/Move carry no role gate today and must stay enabled.
+ * File actions (rename / move / export / delete) live on the row menu, not
+ * in this dialog.
  */
 
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen } from "@testing-library/react"
 import { describe, it, expect, vi } from "vitest"
 import type { FileReference } from "@/lib/parsers/types"
-import { ROLE } from "@/lib/frontier/roles"
 import { I18nProvider } from "@/lib/i18n/I18nProvider"
 import { FileDetailsModal } from "./FileDetailsModal"
 
@@ -26,23 +22,16 @@ const usfmFile: FileReference = {
 }
 
 function renderModal(overrides: Partial<Parameters<typeof FileDetailsModal>[0]> = {}) {
-  const handlers = {
-    onRename: vi.fn(), onMove: vi.fn(), onExportSource: vi.fn(), onDelete: vi.fn(),
-  }
   render(
     <I18nProvider>
       <FileDetailsModal
         file={usfmFile}
         open
         onOpenChange={vi.fn()}
-        roleLevel={ROLE.OWNER}
-        canExportByOrgPolicy
-        {...handlers}
         {...overrides}
       />
     </I18nProvider>,
   )
-  return handlers
 }
 
 describe("FileDetailsModal", () => {
@@ -54,38 +43,17 @@ describe("FileDetailsModal", () => {
     expect(screen.getByText("1533")).toBeTruthy()
   })
 
-  it("enables all actions for project_lead+ on an exportable file", () => {
-    const h = renderModal({ roleLevel: ROLE.PROJECT_LEAD })
-    for (const name of [/rename/i, /move to corpus/i, /export source/i, /^delete$/i]) {
-      const btn = screen.getByRole("button", { name }) as HTMLButtonElement
-      expect(btn.disabled).toBe(false)
-    }
-    fireEvent.click(screen.getByRole("button", { name: /^delete$/i }))
-    expect(h.onDelete).toHaveBeenCalledOnce()
+  it("does not render file actions", () => {
+    renderModal()
+    expect(screen.queryByRole("button", { name: /rename/i })).toBeNull()
+    expect(screen.queryByRole("button", { name: /move to corpus/i })).toBeNull()
+    expect(screen.queryByRole("button", { name: /export source/i })).toBeNull()
+    expect(screen.queryByRole("button", { name: /^delete$/i })).toBeNull()
   })
 
-  it("disables Delete with a reason below project_lead, keeping it visible", () => {
-    const h = renderModal({ roleLevel: ROLE.CONTRIBUTOR })
-    const btn = screen.getByRole("button", { name: /^delete$/i }) as HTMLButtonElement
-    expect(btn.disabled).toBe(true)
-    expect(screen.getByText(/requires the project lead role/i)).toBeTruthy()
-    fireEvent.click(btn)
-    expect(h.onDelete).not.toHaveBeenCalled()
-    // Rename/Move stay enabled — they carry no role gate.
-    expect((screen.getByRole("button", { name: /rename/i }) as HTMLButtonElement).disabled).toBe(false)
-  })
-
-  it("disables Export when org policy forbids it", () => {
-    renderModal({ canExportByOrgPolicy: false })
-    const btn = screen.getByRole("button", { name: /export source/i }) as HTMLButtonElement
-    expect(btn.disabled).toBe(true)
-    expect(screen.getByText(/organization's export policy/i)).toBeTruthy()
-  })
-
-  it("disables Export for non-USFM files with a type reason", () => {
-    renderModal({ file: { ...usfmFile, type: "txt" } })
-    const btn = screen.getByRole("button", { name: /export source/i }) as HTMLButtonElement
-    expect(btn.disabled).toBe(true)
-    expect(screen.getByText(/only usfm files/i)).toBeTruthy()
+  it("shows progress when stats are provided", () => {
+    renderModal({ progress: { translated: 10, validated: 5, total: 20 } })
+    expect(screen.getByText(/50% translated/i)).toBeTruthy()
+    expect(screen.getByText(/25% validated/i)).toBeTruthy()
   })
 })

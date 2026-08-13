@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react"
-import { HelpCircle, ExternalLink, Mail, BookOpen, Map, Flag, ChevronDown } from "lucide-react"
+import { HelpCircle, ExternalLink, Mail, BookOpen, Map, Flag, ChevronDown, Home } from "lucide-react"
 import { Discord } from "@/components/icons/Discord"
 import { cn } from "@/lib/utils"
 import { useProductTourContext } from "@/context/ProductTourContext"
@@ -23,6 +23,9 @@ const DISCORD_URL =
 const SUPPORT_EMAIL =
   (import.meta.env.VITE_SUPPORT_EMAIL as string | undefined)?.trim() ||
   "support@aquilla.app"
+
+/** Match NavHistoryControls recent-item row height (px-2 py-1.5, gap-2). */
+const HELP_ITEM_CLASS = "gap-2 px-2 py-1.5 text-sm"
 
 interface HelpMenuProps {
   /** Icon-only trigger for the collapsed dock rail. */
@@ -60,39 +63,57 @@ export function HelpMenu({ compact = false, showTour = true }: HelpMenuProps) {
               type="button"
               aria-label={t("nav.help.menuLabel")}
               className={cn(
-                "flex items-center gap-2 rounded-md text-xs text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground data-popup-open:bg-accent/60 data-popup-open:text-foreground",
+                // Match OrgSidebar nav links: text-sm + px-2 py-1.5 + size-4 icon.
+                "flex items-center gap-2 rounded-md text-sm font-normal text-muted-foreground transition-colors hover:bg-accent hover:text-foreground data-popup-open:bg-accent data-popup-open:text-foreground",
                 compact ? "size-8 justify-center" : "w-full px-2 py-1.5",
               )}
             />
           }
         >
-          <HelpCircle className="h-3.5 w-3.5 shrink-0" aria-hidden />
+          <HelpCircle className="size-4 shrink-0" aria-hidden />
           {!compact && (
             <>
               {t("nav.help.menuLabel")}
               {/* AQU-699: advertise that the trigger expands, so the Tour housed
                   inside it stays discoverable. Omitted when collapsed to an icon. */}
               <ChevronDown
-                className="ml-auto h-3.5 w-3.5 opacity-50"
+                className="ml-auto size-4 opacity-50"
                 aria-hidden
               />
             </>
           )}
         </DropdownMenuTrigger>
         <DropdownMenuContent
-          className={cn("rounded-lg", compact ? "w-56" : "w-(--anchor-width)")}
+          className={cn("rounded-lg text-sm", compact ? "w-56" : "w-(--anchor-width)")}
           side="top"
-          align="start"
+          align={compact ? "end" : "start"}
           sideOffset={4}
         >
           <DropdownMenuGroup>
             {showTour ? (
-              <DropdownMenuItem onClick={handleTour}>
+              <DropdownMenuItem onClick={handleTour} className={HELP_ITEM_CLASS}>
                 <Map />
                 {t("nav.help.tour")}
               </DropdownMenuItem>
             ) : null}
             <DropdownMenuItem
+              className={HELP_ITEM_CLASS}
+              render={
+                // Hard <a>: /homepage is the separate marketing entry point.
+                <a
+                  href="/homepage"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={() => setOpen(false)}
+                />
+              }
+            >
+              <Home />
+              Homepage
+              <ExternalLink className="ml-auto opacity-60" />
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              className={HELP_ITEM_CLASS}
               render={
                 <a
                   href={DOCS_URL}
@@ -107,6 +128,7 @@ export function HelpMenu({ compact = false, showTour = true }: HelpMenuProps) {
               <ExternalLink className="ml-auto opacity-60" />
             </DropdownMenuItem>
             <DropdownMenuItem
+              className={HELP_ITEM_CLASS}
               render={
                 <a
                   href={DISCORD_URL}
@@ -121,6 +143,7 @@ export function HelpMenu({ compact = false, showTour = true }: HelpMenuProps) {
               <ExternalLink className="ml-auto opacity-60" />
             </DropdownMenuItem>
             <DropdownMenuItem
+              className={HELP_ITEM_CLASS}
               render={
                 <a href={`mailto:${SUPPORT_EMAIL}`} onClick={() => setOpen(false)} />
               }
@@ -129,7 +152,7 @@ export function HelpMenu({ compact = false, showTour = true }: HelpMenuProps) {
               {t("nav.help.contactSupport")}
               <ExternalLink className="ml-auto opacity-60" />
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={handleReport}>
+            <DropdownMenuItem onClick={handleReport} className={HELP_ITEM_CLASS}>
               <Flag />
               {t("nav.help.report")}
             </DropdownMenuItem>

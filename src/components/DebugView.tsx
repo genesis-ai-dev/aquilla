@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 import { useParams, useLocation } from "react-router-dom"
 import { listProjects, getProject } from "@/lib/store/project-index"
+import { Spinner } from "@/components/ui/spinner"
 
 export function DebugView() {
   const { id } = useParams<{ id: string }>()
@@ -32,7 +33,13 @@ export function DebugView() {
     load()
   }, [id, location.pathname])
 
-  if (loading) return <pre>Loading...</pre>
+  if (loading) {
+    return (
+      <div className="flex items-center p-4 text-muted-foreground">
+        <Spinner />
+      </div>
+    )
+  }
 
   return (
     <pre style={{ padding: "1rem", fontFamily: "monospace", fontSize: "0.875rem" }}>

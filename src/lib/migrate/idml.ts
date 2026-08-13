@@ -234,7 +234,7 @@ function exactSourceTextMatch(
   const validation = validateIdmlTranslation(unit.sourceHtml, candidateHtml, unit.metadata)
   return validation.valid
     && validation.slots.length === unit.slots.length
-    && validation.slots.every((text, index) => text === unit.slots[index]!.text)
+    && validation.slots.every((text, index) => text === unit.slots[index].text)
 }
 
 function migrationDiagnostic(

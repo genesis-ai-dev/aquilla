@@ -1,62 +1,77 @@
-import { Pencil, FolderInput, Trash2, Download, Info } from "lucide-react"
+import { Pencil, FolderInput, Trash2, Download, Info, UserCheck } from "lucide-react"
 import { useT } from "@/lib/i18n/I18nProvider"
 import {
-  ContextMenuContent,
-  ContextMenuGroup,
-  ContextMenuItem,
-  ContextMenuSeparator,
-} from "@/components/ui/context-menu"
+  MenuGroup,
+  MenuItem,
+  MenuSeparator,
+} from "@/components/ui/menu-parts"
 
 interface FileActionMenuProps {
-  /** Opens the FileDetailsModal (metadata + permission-aware actions). */
+  /** Opens the FileDetailsModal (metadata only). */
   onShowDetails?: () => void
   onRename: () => void
   onMove: () => void
-  /** AQU-271: Optional — only shown for project_lead+ (level >= 500). */
-  onDelete?: () => void
+  /** Opens the Export dialog for this file. Always shown — the dialog
+   *  explains the block when org policy forbids export (AQU-253). */
+  onExport?: () => void
   /** Optional. Present only for file types we can export back to source
    *  format with round-trip fidelity (USFM today). */
   onExportSource?: () => void
+  /** Opens Assign work scoped to this file. Hidden when the caller
+   *  cannot open the assign UI. */
+  onAssignWork?: () => void
+  /** AQU-271: Optional — only shown for project_lead+ (level >= 500). */
+  onDelete?: () => void
 }
 
 /**
- * Context-menu content for a sidebar file row. Must be rendered as a child of
- * `<ContextMenu>` (alongside a `<ContextMenuTrigger>`).
+ * The items of a sidebar file row's menu. Rendered inside a popup by `FileRow`,
+ * once per way of opening it (row right-click, ⋯ button).
  */
 export function FileActionMenu({
-  onShowDetails, onRename, onMove, onDelete, onExportSource,
+  onShowDetails, onRename, onMove, onExport, onExportSource, onAssignWork, onDelete,
 }: FileActionMenuProps) {
   const t = useT()
   return (
-    <ContextMenuContent side="bottom" align="start" alignOffset={0} sideOffset={4} className="w-44">
-      <ContextMenuGroup>
+    <>
+      <MenuGroup>
         {onShowDetails && (
-          <ContextMenuItem onClick={onShowDetails}>
+          <MenuItem onClick={onShowDetails}>
             <Info /> {t("fileDetails.menuItem")}
-          </ContextMenuItem>
+          </MenuItem>
         )}
-        <ContextMenuItem onClick={onRename}>
+        <MenuItem onClick={onRename}>
           <Pencil /> Rename
-        </ContextMenuItem>
-        <ContextMenuItem onClick={onMove}>
+        </MenuItem>
+        <MenuItem onClick={onMove}>
           <FolderInput /> Move to corpus…
-        </ContextMenuItem>
-        {onExportSource && (
-          <ContextMenuItem onClick={onExportSource}>
-            <Download /> Export source (.SFM)
-          </ContextMenuItem>
+        </MenuItem>
+        {onAssignWork && (
+          <MenuItem onClick={onAssignWork}>
+            <UserCheck /> {t("dialog.assign.title")}
+          </MenuItem>
         )}
-      </ContextMenuGroup>
+        {onExport && (
+          <MenuItem onClick={onExport}>
+            <Download /> {t("nav.fileRow.export")}
+          </MenuItem>
+        )}
+        {onExportSource && (
+          <MenuItem onClick={onExportSource}>
+            <Download /> Export source (.SFM)
+          </MenuItem>
+        )}
+      </MenuGroup>
       {onDelete && (
         <>
-          <ContextMenuSeparator />
-          <ContextMenuGroup>
-            <ContextMenuItem variant="destructive" onClick={onDelete}>
+          <MenuSeparator />
+          <MenuGroup>
+            <MenuItem variant="destructive" onClick={onDelete}>
               <Trash2 /> Delete
-            </ContextMenuItem>
-          </ContextMenuGroup>
+            </MenuItem>
+          </MenuGroup>
         </>
       )}
-    </ContextMenuContent>
+    </>
   )
 }

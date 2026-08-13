@@ -33,6 +33,14 @@ import {
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { SegmentTabs } from "@/components/ui/tabs"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Spinner } from "@/components/ui/spinner"
@@ -939,7 +947,7 @@ export function ExportDialog({
           {/* SDBH XML skeleton picker — the original MARBLE edition to reinject into. */}
           {format === "sdbh-xml" && (
             <div className="mt-1.5 flex flex-col gap-1">
-              <Button variant="outline" size="sm" nativeButton={false} render={<label className="self-start" />}>
+              <Button variant="outline" nativeButton={false} render={<label className="self-start" />}>
                 {sdbhSkeleton ? sdbhSkeleton.name : "Choose skeleton (SDBH-<lang>.XML)"}
                 <input
                   type="file"
@@ -970,17 +978,30 @@ export function ExportDialog({
             <legend className="text-xs font-medium text-muted-foreground mb-1.5">
               Voice
             </legend>
-            <select
+            <Select
+              items={[
+                { value: "", label: "All voices" },
+                ...distinctVoices.map((v) => ({ value: v, label: v })),
+              ]}
               value={voiceFilter}
-              onChange={(e) => setVoiceFilter(e.target.value)}
-              aria-label="Filter export by voice"
-              className="h-7 w-full rounded-md border bg-background px-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+              onValueChange={(v) => setVoiceFilter(v ?? "")}
             >
-              <option value="">All voices</option>
-              {distinctVoices.map((v) => (
-                <option key={v} value={v}>{v}</option>
-              ))}
-            </select>
+              <SelectTrigger
+                size="sm"
+                className="w-full"
+                aria-label="Filter export by voice"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  <SelectItem value="">All voices</SelectItem>
+                  {distinctVoices.map((v) => (
+                    <SelectItem key={v} value={v}>{v}</SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
             {voiceFilter && (
               <p className="text-[10px] text-muted-foreground">
                 Export will include only cells assigned to <strong>{voiceFilter}</strong>, across all camera angles.
@@ -1203,7 +1224,6 @@ export function ExportDialog({
                 <span className="flex flex-wrap items-center gap-2 pt-1">
                   <Button
                     type="button"
-                    size="sm"
                     variant="outline"
                     onClick={() => {
                       downloadBlob(
@@ -1218,7 +1238,6 @@ export function ExportDialog({
                   </Button>
                   <Button
                     type="button"
-                    size="sm"
                     variant="outline"
                     onClick={() => {
                       handleOpenChange(false)

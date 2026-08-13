@@ -108,7 +108,6 @@ export function PermissionDeniedAlert({ action, requiredRole, currentRole, class
           {otherSessions.map((s) => (
             <Button
               key={s.key}
-              size="sm"
               variant="outline"
               onClick={() => activate(s.key)}
             >

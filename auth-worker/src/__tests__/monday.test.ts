@@ -557,9 +557,16 @@ describe("POST /api/v2/monday/projects/:projectId/analyze", () => {
     const body = (await res.json()) as {
       proposal: { columns: Array<{ columnId: string }> }
       summary: string
+      warnings: string[]
     }
     expect(body.proposal.columns.map((c) => c.columnId)).toEqual(["numbers_1"])
     expect(body.summary).toContain("Progress")
+    // The clamp is REPORTED, not silently swallowed: the user can see
+    // "Computed" on their board, so a proposal that ignores it without saying
+    // why reads as arbitrary AI behaviour rather than an API constraint.
+    expect(
+      body.warnings.some((w) => w.includes("formula_1") && w.includes("read-only")),
+    ).toBe(true)
   })
 
   it("contributor (400) gets 403", async () => {
@@ -783,5 +790,255 @@ describe("analyze LLM robustness", () => {
     expect(res.status).toBe(502)
     const body = (await res.json()) as { error: string }
     expect(body.error).toContain("Monday API error")
+  })
+})
+
+// ── Board selection (analyze with boardId omitted) ─────────────────────────
+//
+// The wizard's first gate. Picking among ~200 visible boards is the most
+// ambiguous decision in setup, so the AI gets to make it — but only where a
+// real choice exists, and never further than the real board list allows.
+
+describe("analyze board selection", () => {
+  /** Boards visible to the token. Each gets its OWN numbers column id, so the
+   *  surviving proposal column proves which board was actually analyzed. */
+  const visibleBoards: Array<{
+    id: string
+    name: string
+    workspace: { id: string; name: string } | null
+  }> = [
+    { id: "board-1", name: "Sprint Backlog", workspace: { id: "w1", name: "Engineering" } },
+    { id: "board-7", name: "Ruth Translation Tracker", workspace: { id: "w2", name: "Scripture" } },
+    { id: "board-42", name: "Localization Delivery", workspace: { id: "w2", name: "Scripture" } },
+  ]
+
+  const columnIdFor = (boardId: string) => `numbers_${boardId.replace("board-", "")}`
+
+  /** Board id a structure/items GraphQL body targets (`boards(ids: "…")`). */
+  const targetBoardId = (body: string): string | null => {
+    const m = /boards\(ids: \\"([^\\]+)\\"\)/.exec(body)
+    return m ? m[1] : null
+  }
+
+  /**
+   * Stub the whole discovery→analyze chain: listBoards, per-board structure +
+   * items, the board-selection LLM call and the mapping LLM call.
+   *
+   * `boardChoice: null` makes the board-selection call fail upstream (503).
+   * The mapping call always proposes EVERY board's column — sanitizeMapping
+   * keeps only the one that exists on the board that was actually fetched.
+   */
+  function mockSelectionFlow(opts: {
+    boardChoice: { boardId: string; reason: string } | null
+    boards?: typeof visibleBoards
+  }) {
+    const boards = opts.boards ?? visibleBoards
+    const llmPrompts: string[] = []
+    const structureBoards: string[] = []
+    const fetchMock = mockFetch((url, body) => {
+      if (url.startsWith("https://api.monday.com/v2")) {
+        if (body.includes("state: active")) {
+          return jsonResponse({ data: { boards } })
+        }
+        const target = targetBoardId(body)
+        if (!target) return null
+        if (body.includes("settings_str")) {
+          structureBoards.push(target)
+          return jsonResponse({
+            data: {
+              boards: [
+                {
+                  columns: [{ id: columnIdFor(target), title: "Progress", type: "numbers" }],
+                  groups: [],
+                },
+              ],
+            },
+          })
+        }
+        if (body.includes("items_page")) {
+          return jsonResponse({ data: { boards: [{ items_page: { items: [] } }] } })
+        }
+        return null
+      }
+      if (url.includes("/chat/completions")) {
+        llmPrompts.push(body)
+        if (body.includes("Boards available:")) {
+          if (!opts.boardChoice) return new Response("selector exploded", { status: 503 })
+          return jsonResponse({
+            choices: [{ message: { content: JSON.stringify(opts.boardChoice) } }],
+          })
+        }
+        return jsonResponse({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  mapping: {
+                    version: 1,
+                    itemGranularity: "project",
+                    columns: boards.map((b) => ({
+                      columnId: columnIdFor(b.id),
+                      columnType: "numbers",
+                      metric: "completion_pct",
+                    })),
+                  },
+                  summary: "Maps completion.",
+                }),
+              },
+            },
+          ],
+        })
+      }
+      return null
+    })
+    return { fetchMock, llmPrompts, structureBoards }
+  }
+
+  interface AnalyzeBody {
+    proposal: { columns: Array<{ columnId: string }> }
+    summary: string
+    warnings: string[]
+    boardId: string
+    boardName: string | null
+    boardReason: string
+  }
+
+  it("with no boardId, analyzes the board the AI named and returns it to the client", async () => {
+    await seedOrgProject()
+    await seedConnection()
+    const { llmPrompts, structureBoards } = mockSelectionFlow({
+      boardChoice: {
+        boardId: "board-42",
+        reason: "Localization Delivery is the team's active l10n tracker.",
+      },
+    })
+
+    const res = await request("anna", "POST", "/api/v2/monday/projects/proj-1/analyze", {})
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as AnalyzeBody
+
+    // board-42 is neither the first board nor the name-overlap winner
+    // (board-7 "Ruth Translation Tracker" shares two tokens with "Ruth
+    // Translation"), so ONLY the model's answer explains this outcome.
+    expect(llmPrompts[0]).toContain("Boards available:")
+    expect(structureBoards).toEqual(["board-42"])
+    expect(body.proposal.columns.map((c) => c.columnId)).toEqual(["numbers_42"])
+    // The wizard has to show and then save the chosen board — a proposal it
+    // can't attribute to a board is not usable.
+    expect(body.boardId).toBe("board-42")
+    expect(body.boardName).toBe("Localization Delivery")
+    expect(body.boardReason).toContain("l10n")
+  })
+
+  it("chooses the single visible board WITHOUT a model call (deterministic where it can be)", async () => {
+    await seedOrgProject()
+    await seedConnection()
+    const { llmPrompts, structureBoards } = mockSelectionFlow({
+      boardChoice: null, // would 503 — proving it is never reached
+      boards: [{ id: "board-7", name: "Ops Kanban", workspace: null }],
+    })
+
+    const res = await request("anna", "POST", "/api/v2/monday/projects/proj-1/analyze", {})
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as AnalyzeBody
+
+    // With one board there is no choice to make: spending a model call (and
+    // its latency, cost and failure mode) on a foregone conclusion is waste.
+    expect(llmPrompts).toHaveLength(1)
+    expect(llmPrompts[0]).toContain("Propose a column mapping")
+    expect(llmPrompts.some((p) => p.includes("Boards available:"))).toBe(false)
+
+    expect(body.boardId).toBe("board-7")
+    expect(body.boardName).toBe("Ops Kanban")
+    // No model spoke, so there is no rationale to attribute to one.
+    expect(body.boardReason).toBe("")
+    expect(structureBoards).toEqual(["board-7"])
+  })
+
+  it("falls back to a REAL board when the AI names an id that isn't in the list", async () => {
+    await seedOrgProject()
+    await seedConnection()
+    const { fetchMock, structureBoards } = mockSelectionFlow({
+      boardChoice: { boardId: "board-hallucinated", reason: "This one feels right." },
+    })
+
+    const res = await request("anna", "POST", "/api/v2/monday/projects/proj-1/analyze", {})
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as AnalyzeBody
+
+    // A bogus id must never reach Monday (404s) nor the saved link (a link to
+    // a board that doesn't exist). Name overlap picks board-7 instead.
+    expect(body.boardId).toBe("board-7")
+    expect(body.boardName).toBe("Ruth Translation Tracker")
+    expect(structureBoards).toEqual(["board-7"])
+    const leaked = fetchMock.mock.calls.filter(([, init]) =>
+      String((init as RequestInit | undefined)?.body ?? "").includes("board-hallucinated"),
+    )
+    expect(leaked).toHaveLength(0)
+    // The rationale belonged to the discarded id — keeping it would explain a
+    // choice that was not made.
+    expect(body.boardReason).toBe("")
+    expect(body.proposal.columns.map((c) => c.columnId)).toEqual(["numbers_7"])
+  })
+
+  it("still produces a usable proposal when the board-selection call fails", async () => {
+    await seedOrgProject()
+    await seedConnection()
+    const { llmPrompts, structureBoards } = mockSelectionFlow({ boardChoice: null })
+
+    const res = await request("anna", "POST", "/api/v2/monday/projects/proj-1/analyze", {})
+    // An AI outage on the *suggestion* must degrade the suggestion, not the
+    // wizard — the user can change the board either way.
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as AnalyzeBody
+    expect(llmPrompts[0]).toContain("Boards available:")
+    expect(body.boardId).toBe("board-7")
+    expect(body.boardName).toBe("Ruth Translation Tracker")
+    expect(body.boardReason).toBe("")
+    expect(structureBoards).toEqual(["board-7"])
+    expect(body.proposal.columns.map((c) => c.columnId)).toEqual(["numbers_7"])
+  })
+
+  it("an explicit boardId skips discovery entirely (reconfigure path unchanged)", async () => {
+    await seedOrgProject()
+    await seedConnection()
+    const { fetchMock, llmPrompts, structureBoards } = mockSelectionFlow({
+      boardChoice: null, // any board-selection call would 503
+    })
+
+    const res = await request("anna", "POST", "/api/v2/monday/projects/proj-1/analyze", {
+      boardId: "board-1",
+    })
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as AnalyzeBody
+
+    // The caller already knows its board; listing every board in the account
+    // and asking a model to re-pick it would be cost and latency for nothing.
+    const bodies = fetchMock.mock.calls.map(([, init]) =>
+      String((init as RequestInit | undefined)?.body ?? ""),
+    )
+    expect(bodies.some((b) => b.includes("state: active"))).toBe(false)
+    expect(llmPrompts).toHaveLength(1)
+    expect(llmPrompts.some((p) => p.includes("Boards available:"))).toBe(false)
+
+    expect(structureBoards).toEqual(["board-1"])
+    expect(body.boardId).toBe("board-1")
+    expect(body.proposal.columns.map((c) => c.columnId)).toEqual(["numbers_1"])
+  })
+
+  it("an account with no boards is 409 (user-actionable), not a 502 blaming Monday", async () => {
+    await seedOrgProject()
+    await seedConnection()
+    mockSelectionFlow({ boardChoice: null, boards: [] })
+
+    const res = await request("anna", "POST", "/api/v2/monday/projects/proj-1/analyze", {})
+
+    // Monday answered fine — the account just has nothing to sync to. A 502
+    // would tell the SPA "upstream broke, retry", and retrying can never fix
+    // an empty account; the user has to go create a board.
+    expect(res.status).toBe(409)
+    const body = (await res.json()) as { error: string; noBoards?: boolean }
+    expect(body.noBoards).toBe(true)
+    expect(body.error).toMatch(/no boards/i)
   })
 })

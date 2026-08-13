@@ -68,8 +68,9 @@ export const dialog = defineNamespace({
       },
       "dialog.assign.title": {
         description:
-          "Heading of the AssignModal dialog, next to a check-user icon. Names the " +
-          "action the whole dialog performs.",
+          "Heading of the AssignModal dialog, next to a check-user icon. Also the " +
+          "file-row menu item that opens this dialog (FileActionMenu) — same phrase, " +
+          "same act, so one key. Names the action the whole dialog performs.",
         screenshot: "assign-modal",
       },
       "dialog.assign.scopeLabel": {

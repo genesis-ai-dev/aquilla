@@ -114,6 +114,46 @@ describe("rendering", () => {
     expect(screen.getByText(/"assigneeId": 42/)).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Apply" })).toBeDisabled()
   })
+
+  it("renders cell creates as new rows with Apply enabled at their floor (AQU-890)", () => {
+    const proposal = makeProposal({
+      events: [
+        {
+          kind: "source.cell.create",
+          fileId: "f-1",
+          cellId: "c-new",
+          payload: { cellId: "c-new", value: "Section heading", anchorCellId: "c-1" },
+          display: { after: "Section heading" },
+        },
+      ],
+    })
+    render(<ProposalCard {...BASE_PROPS} proposal={proposal} roleLevel={ROLE.PROJECT_LEAD} />)
+    // The old behaviour was the "can't apply yet" block — the row must now
+    // render as a real change, not raw JSON.
+    expect(screen.queryByText(/not supported yet/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/can't apply yet/)).not.toBeInTheDocument()
+    expect(screen.getByText("New source row")).toBeInTheDocument()
+    expect(screen.getByText("(new row)")).toBeInTheDocument()
+    expect(screen.getByText("Section heading")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Apply" })).toBeEnabled()
+  })
+
+  it("still gates source.cell.create below project_lead (AQU-890)", () => {
+    const proposal = makeProposal({
+      events: [
+        {
+          kind: "source.cell.create",
+          fileId: "f-1",
+          cellId: "c-new",
+          payload: { cellId: "c-new", value: "Section heading" },
+          display: { after: "Section heading" },
+        },
+      ],
+    })
+    render(<ProposalCard {...BASE_PROPS} proposal={proposal} roleLevel={ROLE.CONTRIBUTOR} />)
+    expect(screen.getByRole("button", { name: "Apply" })).toBeDisabled()
+    expect(screen.getByText("Requires Project Lead role or higher")).toBeInTheDocument()
+  })
 })
 
 describe("role gate", () => {
@@ -174,5 +214,43 @@ describe("apply / discard", () => {
     expect(screen.getByText(/Discarded: Draft 1 cell in MRK 4/)).toBeInTheDocument()
     expect(mockApply).not.toHaveBeenCalled()
     expect(screen.queryByRole("button", { name: "Apply" })).not.toBeInTheDocument()
+  })
+})
+
+// AQU-846 — the drafts landed in a file the user wasn't looking at, and the
+// card gave them no way to notice before clicking Apply.
+describe("destination file (AQU-846)", () => {
+  it("names the file each proposed cell belongs to", () => {
+    render(
+      <ProposalCard
+        {...BASE_PROPS}
+        proposal={makeProposal({
+          events: [
+            {
+              kind: "target.cell.commit",
+              fileId: "f-gen",
+              cellId: "c-1",
+              payload: { value: "En el principio" },
+              display: { canonicalRef: "GEN 1:1", fileName: "Genesis.usfm", after: "En el principio" },
+            },
+            {
+              kind: "target.cell.commit",
+              fileId: "f-mrk",
+              cellId: "c-2",
+              payload: { value: "Y comenzó" },
+              display: { canonicalRef: "MRK 4:1", fileName: "Mark.usfm", after: "Y comenzó" },
+            },
+          ],
+        })}
+      />,
+    )
+    expect(screen.getByText("Genesis.usfm")).toBeInTheDocument()
+    expect(screen.getByText("Mark.usfm")).toBeInTheDocument()
+  })
+
+  it("omits the file badge rather than guessing when the server sent no name", () => {
+    render(<ProposalCard {...BASE_PROPS} proposal={makeProposal()} />)
+    expect(screen.getByText("MRK 4:1")).toBeInTheDocument()
+    expect(screen.queryByText(/\.usfm$/)).not.toBeInTheDocument()
   })
 })

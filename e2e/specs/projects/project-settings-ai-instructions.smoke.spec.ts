@@ -2,30 +2,31 @@ import { test, expect } from "../../helpers/multi-user"
 import { jwtFor, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
- * ProjectSettings — AI Instructions section.
+ * ProjectSettings — System prompt lives on a nested page under AI & completion.
  *
- * The AI Instructions card has:
- *   - textarea id="sp" (system prompt)
- *   - Input id="top-k" (examples retrieved, 1–20)
- *
- * Changing either field makes the form dirty and shows "Save changes".
- *
- * This spec: navigates to settings → fills the system prompt textarea →
- * verifies "Save changes" button appears.
+ * Journey:
+ *   settings/ai → NavRow "System prompt" (chevron) → textarea id="sp"
+ * Changing the prompt makes the form dirty and shows "Save changes".
  */
-test("project settings AI instructions textarea makes form dirty", async ({ alice }) => {
+test("project settings system prompt nested page makes form dirty", async ({ alice }) => {
   const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `AIInstr ${Date.now()}` })
 
   await alice.goto(`/project/${seeded.projectId}/settings/ai`)
-  // The system prompt textarea.
+  // Chevron NavRow opens the nested system-prompt page.
+  await expect(alice.getByRole("link", { name: /System prompt/i })).toBeVisible({
+    timeout: 10_000,
+  })
+  await alice.getByRole("link", { name: /System prompt/i }).click()
+  await expect(alice).toHaveURL(
+    new RegExp(`/project/${seeded.projectId}/settings/system-prompt`),
+  )
+
   const textarea = alice.locator("#sp")
   await expect(textarea).toBeVisible({ timeout: 10_000 })
 
-  // Fill it with something unique.
   const instruction = `Translate clearly and concisely. (test-${Date.now()})`
   await textarea.fill(instruction)
 
-  // "Save changes" button should now be visible (form is dirty).
   const saveBtn = alice.getByRole("button", { name: /Save changes/i })
   await expect(saveBtn).toBeVisible({ timeout: 5_000 })
 })

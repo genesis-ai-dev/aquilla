@@ -101,7 +101,6 @@ export function SignInStep({
       {import.meta.env.DEV && (
         <Button
           variant="outline"
-          size="sm"
           onClick={async () => {
             const session = await devLogin()
             if (session) onNext()
@@ -112,7 +111,7 @@ export function SignInStep({
           Dev login (skip auth)
         </Button>
       )}
-      <Button variant="ghost" size="sm" onClick={onBack} className="w-full">
+      <Button variant="ghost" onClick={onBack} className="w-full">
         ← Back
       </Button>
     </div>

@@ -10,7 +10,7 @@ import { seedUser } from "./helpers/db"
 import { AliasMap } from "../lib/agent/compress"
 import type { EmitStageContext } from "../lib/agent/emit-stage"
 import { parseRefRange, orderPairs, statusOf, type CellPair } from "../lib/agent/tools/select-cells"
-import { executeRead } from "../lib/agent/tools/read"
+import { executeRead, resolveScope } from "../lib/agent/tools/read"
 import { executeExamples, orTsquery } from "../lib/agent/tools/examples"
 import { executeSearch } from "../lib/agent/tools/search"
 import { executeDraft, parseDraftReply } from "../lib/agent/tools/draft"
@@ -158,6 +158,97 @@ describe("executeRead", () => {
     })
     expect(out.ok).toBe(true)
     expect(out.data?.cells?.map((c) => c.ref)).toEqual(["MRK 4:1", "MRK 4:2", "MRK 4:3", "MRK 4:10"])
+  })
+})
+
+// AQU-846 — the agent drafted five verses into Mark while the user had Genesis
+// open, then the approval card never said where they were going. These pin the
+// resolution half: the open file wins, an explicitly named file still wins over
+// it, and an unanchored request must ask rather than pick.
+describe("resolveScope — target-file resolution (AQU-846)", () => {
+  const GEN_FILE = "44444444-4444-4444-8444-444444444444"
+
+  async function seedGenesis() {
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO files (id, project_id, name, book_code, event_id) VALUES (?, ?, 'Genesis', 'GEN', ?)`,
+    )
+      .bind(GEN_FILE, PROJECT, crypto.randomUUID())
+      .run()
+    const id = "55555555-5555-4555-8555-555555555555"
+    for (const side of ["source", "target"] as const) {
+      await env.AQUILLA_PG.prepare(
+        `INSERT INTO cells (project_id, file_id, cell_id, side, value, canonical_ref, event_id, last_edit_at)
+         VALUES (?, ?, ?, ?, ?, 'GEN 1:1', ?, 0)`,
+      )
+        .bind(PROJECT, GEN_FILE, id, side, side === "source" ? "In the beginning" : "", crypto.randomUUID())
+        .run()
+    }
+  }
+
+  it("keeps a same-book ref in the OPEN file instead of re-resolving by book code", async () => {
+    await seedWorld()
+    await seedGenesis()
+    // A second Genesis file the book-code lookup could land on instead.
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO files (id, project_id, name, book_code, event_id) VALUES (?, ?, 'Genesis (draft)', 'GEN', ?)`,
+    )
+      .bind("66666666-6666-4666-8666-666666666666", PROJECT, crypto.randomUUID())
+      .run()
+
+    const scope = await resolveScope(env.AQUILLA_PG, { ref: "GEN 1" }, {
+      projectId: PROJECT,
+      focusedFileId: GEN_FILE,
+      aliases: new AliasMap(),
+    })
+    expect(scope.ok).toBe(true)
+    expect(scope.ok && scope.fileId).toBe(GEN_FILE)
+  })
+
+  it("still honours a ref that names a DIFFERENT book than the open file", async () => {
+    await seedWorld()
+    await seedGenesis()
+    const scope = await resolveScope(env.AQUILLA_PG, { ref: "MRK 4" }, {
+      projectId: PROJECT,
+      focusedFileId: GEN_FILE, // Genesis is open, but the user said Mark
+      aliases: new AliasMap(),
+    })
+    expect(scope.ok).toBe(true)
+    expect(scope.ok && scope.fileId).toBe(FILE)
+  })
+
+  it("uses the open file when the request names no scope at all", async () => {
+    await seedWorld()
+    await seedGenesis()
+    const scope = await resolveScope(env.AQUILLA_PG, {}, {
+      projectId: PROJECT,
+      focusedFileId: GEN_FILE,
+      aliases: new AliasMap(),
+    })
+    expect(scope.ok).toBe(true)
+    expect(scope.ok && scope.fileId).toBe(GEN_FILE)
+  })
+
+  it("refuses to pick a file — and names the candidates — when nothing is focused", async () => {
+    await seedWorld()
+    await seedGenesis()
+    const scope = await resolveScope(env.AQUILLA_PG, {}, {
+      projectId: PROJECT,
+      aliases: new AliasMap(),
+    })
+    expect(scope.ok).toBe(false)
+    expect(scope.ok === false && scope.error).toContain("ASK THE USER")
+    expect(scope.ok === false && scope.error).toContain("Genesis")
+    expect(scope.ok === false && scope.error).toContain("Mark")
+  })
+
+  it("auto-picks only when the project has a single candidate document", async () => {
+    await seedWorld() // Mark alone
+    const scope = await resolveScope(env.AQUILLA_PG, {}, {
+      projectId: PROJECT,
+      aliases: new AliasMap(),
+    })
+    expect(scope.ok).toBe(true)
+    expect(scope.ok && scope.fileId).toBe(FILE)
   })
 })
 

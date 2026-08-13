@@ -1,7 +1,10 @@
 import { describe, expect, it, beforeEach, afterEach } from "vitest"
 import {
   ALL_ORGS_PARAM,
+  editorReturnFromLocation,
+  isProjectEditorPath,
   membersPath,
+  archivedPath,
   orgHomePath,
   orgKeyFromParam,
   orgPath,
@@ -10,7 +13,10 @@ import {
   projectEditorPath,
   projectSettingsPath,
   resumeOrgPath,
+  safeReturnPath,
   swapOrgInPath,
+  withEditorReturn,
+  withSettingsReturn,
   ORG_STORAGE_KEY,
 } from "./org-paths"
 
@@ -64,8 +70,48 @@ describe("convenience paths", () => {
   it("builds members / settings / project settings URLs", () => {
     expect(membersPath(3)).toBe("/orgs/3/members")
     expect(membersPath(3, "matrix")).toBe("/orgs/3/members/matrix")
+    expect(archivedPath(3)).toBe("/orgs/3/archived")
+    expect(archivedPath(3, "files")).toBe("/orgs/3/archived/files")
     expect(orgSettingsPath(3, "identity")).toBe("/orgs/3/settings/identity")
     expect(projectSettingsPath("p1", "ai")).toBe("/project/p1/settings/ai")
+  })
+})
+
+describe("editor settings handoff", () => {
+  it("accepts same-origin relative return paths and rejects protocol-relative", () => {
+    expect(safeReturnPath("/project/p1/editor")).toBe("/project/p1/editor")
+    expect(safeReturnPath("/project/p1/editor/file/f1")).toBe("/project/p1/editor/file/f1")
+    expect(safeReturnPath("//evil.example/phish")).toBeNull()
+    expect(safeReturnPath("https://evil.example")).toBeNull()
+    expect(safeReturnPath(null)).toBeNull()
+  })
+
+  it("recognizes this project's editor, including a file under it", () => {
+    expect(isProjectEditorPath("/project/p1/editor", "p1")).toBe(true)
+    expect(isProjectEditorPath("/project/p1/editor/file/f1", "p1")).toBe(true)
+    expect(isProjectEditorPath("/project/p1/settings", "p1")).toBe(false)
+    expect(isProjectEditorPath("/project/p2/editor", "p1")).toBe(false)
+  })
+
+  it("keeps ?return= on in-settings links and leaves other paths alone", () => {
+    expect(withSettingsReturn("/project/p1/settings/ai", "/project/p1/editor"))
+      .toBe("/project/p1/settings/ai?return=%2Fproject%2Fp1%2Feditor")
+    expect(withSettingsReturn("/project/p1/settings", null)).toBe("/project/p1/settings")
+  })
+
+  it("merges ?return= into an overlay path that already has a query", () => {
+    expect(withEditorReturn("/project/p1/settings/rules?ruleId=r1", "/project/p1/editor/file/f1"))
+      .toBe("/project/p1/settings/rules?ruleId=r1&return=%2Fproject%2Fp1%2Feditor%2Ffile%2Ff1")
+  })
+
+  it("reads the editor handoff from the current editor URL or ?return=", () => {
+    expect(editorReturnFromLocation("/project/p1/editor/file/f1", "", "p1"))
+      .toBe("/project/p1/editor/file/f1")
+    expect(editorReturnFromLocation("/project/p1/comments", "?return=%2Fproject%2Fp1%2Feditor", "p1"))
+      .toBe("/project/p1/editor")
+    expect(editorReturnFromLocation("/project/p1/comments", "", "p1")).toBeNull()
+    expect(editorReturnFromLocation("/project/p1/comments", "?return=%2Fproject%2Fp2%2Feditor", "p1"))
+      .toBeNull()
   })
 })
 

@@ -168,7 +168,7 @@ export function ApiTokensSection() {
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center justify-between gap-4 px-1">
+      <div className="flex items-center justify-between gap-4 pl-4">
         <p className="font-heading text-base font-medium tracking-tight text-foreground">
           Access
         </p>
@@ -185,7 +185,9 @@ export function ApiTokensSection() {
       <SettingsGroup>
         <SettingsRow label="Your tokens" block>
           {loading && !credentials ? (
-            <p className="text-xs text-muted-foreground">Loading…</p>
+            <div className="flex items-center text-muted-foreground">
+              <Spinner className="size-3.5" />
+            </div>
           ) : error ? (
             <p className="text-xs text-destructive" role="alert">
               {error}
@@ -411,7 +413,7 @@ function ShowOnceTokenDialog({
             <code className="min-w-0 flex-1 truncate rounded bg-muted px-2 py-1.5 text-xs">
               {result.token}
             </code>
-            <Button size="sm" variant="outline" onClick={copy}>
+            <Button variant="outline" onClick={copy}>
               <Copy className="mr-1 size-3.5" />
               {copied ? "Copied" : "Copy"}
             </Button>
@@ -592,7 +594,7 @@ function MintTokenDialog({
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger render={<Button size="sm" />}>New token</DialogTrigger>
+      <DialogTrigger render={<Button />}>New token</DialogTrigger>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>New API token</DialogTitle>
@@ -637,7 +639,7 @@ function MintTokenDialog({
             <Field>
               <FieldLabel htmlFor="token-org">Organization</FieldLabel>
               <Select value={orgId} onValueChange={(value) => setOrgId(value ?? "")}>
-                <SelectTrigger id="token-org" className="w-full">
+                <SelectTrigger id="token-org">
                   <SelectValue placeholder="No organization (personal)" />
                 </SelectTrigger>
                 <SelectContent>
@@ -658,7 +660,7 @@ function MintTokenDialog({
             <Field>
               <FieldLabel htmlFor="token-project">Project</FieldLabel>
               <Select value={projectId} onValueChange={(value) => setProjectId(value ?? "")}>
-                <SelectTrigger id="token-project" className="w-full">
+                <SelectTrigger id="token-project">
                   <SelectValue placeholder="No project (org-wide)" />
                 </SelectTrigger>
                 <SelectContent>
@@ -679,7 +681,7 @@ function MintTokenDialog({
                 value={expiry}
                 onValueChange={(value) => setExpiry((value ?? "90d") as ExpiryPresetId)}
               >
-                <SelectTrigger id="token-expiry" className="w-full">
+                <SelectTrigger id="token-expiry">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>

@@ -70,6 +70,7 @@ export function OrgCreateDialog({ open, onOpenChange, onCreated }: OrgCreateDial
         </DialogHeader>
         <form
           id="org-create-form"
+          autoComplete="off"
           onSubmit={(e) => {
             e.preventDefault()
             void form.handleSubmit()
@@ -85,7 +86,12 @@ export function OrgCreateDialog({ open, onOpenChange, onCreated }: OrgCreateDial
                     <FieldLabel htmlFor="org-create-name">Organization name</FieldLabel>
                     <Input
                       id="org-create-name"
-                      name={field.name}
+                      // Avoid DOM name="name" — Chrome contact autofill heuristic.
+                      name="aquilla-org-name"
+                      autoComplete="off"
+                      autoCorrect="off"
+                      autoCapitalize="none"
+                      spellCheck={false}
                       value={field.state.value}
                       onBlur={field.handleBlur}
                       onChange={(e) => field.handleChange(e.target.value)}

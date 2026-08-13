@@ -20,9 +20,19 @@ import { roleDisplayLabel } from "@/lib/frontier/roles"
 
 export { ROLE }
 
-/** Event kinds the agent ProposalCard knows how to Apply in v1. */
+/**
+ * Event kinds the agent ProposalCard knows how to Apply in v1.
+ *
+ * AQU-890: the two `*.cell.create` kinds are genesis events — they mint a new
+ * row rather than advancing an existing chain. They carry no extra gate here:
+ * `canApply` reads their floors straight out of the shared role-policy mirror
+ * (source.cell.create → project_lead, target.cell.create → contributor), which
+ * is the same floor the native add-row affordance answers to.
+ */
 export const SUPPORTED_APPLY_KINDS = [
   "target.cell.commit",
+  "source.cell.create",
+  "target.cell.create",
   "comment.create",
   "cell.validate",
 ] as const

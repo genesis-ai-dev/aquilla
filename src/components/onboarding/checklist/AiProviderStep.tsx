@@ -3,7 +3,7 @@ import { Sparkles, Server, Check } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
-import { FieldError, FieldLabel } from "@/components/ui/field"
+import { FieldError, FieldLabel, OptionalMark } from "@/components/ui/field"
 import { Spinner } from "@/components/ui/spinner"
 import { FRONTIER_CHAT_URL } from "@/hooks/useCompletionSettings"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
@@ -105,7 +105,7 @@ export function AiProviderStep({ project, onUpdated, onSaved }: AiProviderStepPr
           </div>
           <div>
             <FieldLabel htmlFor="ai-model" className="text-xs">
-              Model <span className="text-muted-foreground/70">(optional)</span>
+              Model <OptionalMark />
             </FieldLabel>
             <Input
               id="ai-model"
@@ -120,7 +120,6 @@ export function AiProviderStep({ project, onUpdated, onSaved }: AiProviderStepPr
 
       {error && <FieldError>{error}</FieldError>}
       <Button
-        size="sm"
         onClick={handleSave}
         className="w-full"
       >

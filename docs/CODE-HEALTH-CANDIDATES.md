@@ -108,4 +108,18 @@ spot, both deferred rather than mixed into the single-theme budget.
 
 The 2026-08-10 run also recorded an E2E limitation in the Claude Code web sandbox: its
 Docker/Wrangler setup was not reliable enough to complete the smoke suite. This is an
-environment note, not a product regression.
+environment note, not a product regression. The 2026-08-12 run hit the same limitation
+(`pnpm test:e2e:smoke` → `Docker unavailable`, no local Postgres socket, all 3 shards
+refuse to run rather than reset against a stale schema) — still an environment gap, not
+something a code-health PR should try to patch around.
+
+## Remaining "frontier-server" comment mention (frozen — test file)
+
+- **File**: `src/lib/frontier/roles.test.ts:24` — a code comment referencing
+  "frontier-server's `ROLE_NAMES` / migration 0013" inside a test file.
+- **Friction**: same stale-terminology issue as the (now-fixed) src comments — the service
+  is `auth-worker`/`aquilla-identity`, not `frontier-server`.
+- **Why deferred**: the code-health routine's frozen zones forbid touching test files, even
+  for a comment. Needs a human or a non-code-health change to fix.
+- **Proof needed**: comment-only edit inside a test file; would need explicit sign-off
+  since it falls outside the routine's "no test files" rule.

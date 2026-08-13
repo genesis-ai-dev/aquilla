@@ -122,7 +122,7 @@ describe("AudioRecordingModal — takes strip contents", () => {
     renderModal(cellWith("bonjour"))
     expect(screen.getByTestId("take-row-audio-c1-200-take.webm")).toBeInTheDocument()
     expect(screen.queryByTestId("take-row-audio-f1-100-clip.mp3")).toBeNull()
-    expect(screen.getByText("Takes (1)")).toBeInTheDocument()
+    expect(screen.getByTestId("rec-takes-count")).toHaveTextContent("Takes 1")
   })
 
   it("generated TTS attachments appear as takes alongside recordings (round 8c)", () => {
@@ -133,7 +133,7 @@ describe("AudioRecordingModal — takes strip contents", () => {
     renderModal(cellWith("bonjour"))
     expect(screen.getByTestId("take-row-audio-c1-200-take.webm")).toBeInTheDocument()
     expect(screen.getByTestId("take-row-audio-c1-300-tts.wav")).toBeInTheDocument()
-    expect(screen.getByText("Takes (2)")).toBeInTheDocument()
+    expect(screen.getByTestId("rec-takes-count")).toHaveTextContent("Takes 2")
   })
 })
 
@@ -211,7 +211,7 @@ describe("AudioRecordingModal — Generate TTS (round 8)", () => {
     renderModal(cellWith(""))
     const btn = screen.getByTestId("rec-generate-tts")
     expect(btn).toBeDisabled()
-    expect(screen.getByRole("button", { name: /Start/ })).toBeInTheDocument()
+    expect(screen.getByTestId("rec-start")).toBeInTheDocument()
   })
 
   it("generates durably with the modal's project/cell/session/username", async () => {
@@ -356,6 +356,7 @@ describe("AudioRecordingModal — auto-advance toggle (SUB-50)", () => {
   it("defaults to on — saving still moves to the next line", async () => {
     recorderState.value = stopped
     renderTwo()
+    fireEvent.click(screen.getByTestId("rec-settings"))
     expect(screen.getByTestId("rec-auto-advance")).toHaveAttribute("aria-pressed", "true")
     fireEvent.click(screen.getByRole("button", { name: /Save/ }))
     await waitFor(() => expect(onActiveCellChange).toHaveBeenCalledWith("c2"), { timeout: 2000 })
@@ -364,6 +365,7 @@ describe("AudioRecordingModal — auto-advance toggle (SUB-50)", () => {
   it("turned off, saving stays on the same line for another take", async () => {
     recorderState.value = stopped
     renderTwo()
+    fireEvent.click(screen.getByTestId("rec-settings"))
     fireEvent.click(screen.getByTestId("rec-auto-advance"))
     expect(screen.getByTestId("rec-auto-advance")).toHaveAttribute("aria-pressed", "false")
 
@@ -374,11 +376,15 @@ describe("AudioRecordingModal — auto-advance toggle (SUB-50)", () => {
   })
 
   it("the choice survives a remount", () => {
+    // Auto-advance moved behind the utility strip's settings button in the
+    // split-stage rebuild, so both halves of this have to open it first.
     const { unmount } = renderTwo()
+    fireEvent.click(screen.getByTestId("rec-settings"))
     fireEvent.click(screen.getByTestId("rec-auto-advance"))
     unmount()
     resetRecordingAutoAdvanceCacheForTests() // simulate a fresh page load
     renderTwo()
+    fireEvent.click(screen.getByTestId("rec-settings"))
     expect(screen.getByTestId("rec-auto-advance")).toHaveAttribute("aria-pressed", "false")
   })
 })

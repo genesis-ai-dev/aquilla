@@ -7,12 +7,13 @@
 // "capture-and-save" hook is not reused here because the modal adds a
 // preview/retake step between stop and upload.
 
-import { type ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { ChevronLeft, ChevronRight, ChevronsRight, ChevronUp, Maximize2, Minimize2, Mic, Pin, Play, Sparkles, Square, Upload, X, Volume2, VolumeX, RefreshCw, Check } from "lucide-react"
+import { type ChangeEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
+import { Check, ChevronLeft, ChevronRight, ChevronsRight, ChevronUp, Lock, Maximize2, Mic, Minimize2, RefreshCw, Settings2, Sparkles, Square, Upload, Volume2, VolumeX, X } from "lucide-react"
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
 import { MIN_USEFUL_REGION_SEC } from "@/lib/timeline/lane-timing"
 import { isLinkableVideoUrl } from "@/components/timeline/LinkVideoUrlDialog"
@@ -148,6 +149,75 @@ export function AudioRecordingModal({
   // are looking at while recording. Collapsed, the drawer is always open
   // because the portrait column has the room and nothing else wants it.
   const [takesOpen, setTakesOpen] = useState(false)
+
+  // THE READ-ALOUD BLOCK NEVER SCROLLS AND NEVER CLIPS (Sam, 2026-08-13). It
+  // owns the height of five line boxes; a line too long for that gets a smaller
+  // font until it fits. Scrolling to find the rest of your own sentence is not
+  // something anyone should be doing with a live mic and a countdown running,
+  // and truncation is worse still.
+  //
+  // Measured, not estimated: where a line wraps depends on the actual glyphs,
+  // so character counts lie — especially across the scripts this app targets.
+  // Binary-search the largest whole pixel size whose RENDERED height fits the
+  // budget. Whole pixels because a half-pixel font size buys nothing and costs
+  // a blurry baseline.
+  const readAloudRef = useRef<HTMLParagraphElement | null>(null)
+  const readAloudBoxRef = useRef<HTMLDivElement | null>(null)
+  const readAloudBase = showFilm ? 26 : 23
+  // Kept as a ratio rather than a fixed px line-height so the whole block
+  // scales together — shrinking the type while leaving 33px leading would open
+  // gaps that waste the very space we are trying to buy.
+  const readAloudRatio = showFilm ? 33 / 26 : 30 / 23
+  const readAloudBudget = 5 * (showFilm ? 33 : 30)
+  const [readAloudPx, setReadAloudPx] = useState(readAloudBase)
+  const readAloudText = activeCell?.translated ?? ""
+  // Re-fit when the column's WIDTH changes (window resize) — a narrower box
+  // rewraps and can need a smaller size. Width only: the box's height is what
+  // the fit itself moves, and observing that would chase its own tail.
+  const [readAloudWidth, setReadAloudWidth] = useState(0)
+  const hasActiveCell = activeCell != null
+  useEffect(() => {
+    const box = readAloudBoxRef.current
+    if (!box || typeof ResizeObserver === "undefined") return
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect.width ?? 0
+      setReadAloudWidth((prev) => (Math.abs(prev - w) > 0.5 ? w : prev))
+    })
+    ro.observe(box)
+    return () => ro.disconnect()
+  }, [open, hasActiveCell])
+  useLayoutEffect(() => {
+    const el = readAloudRef.current
+    if (!el) return
+    // A floor, because a legible-but-small line beats an unreadable one: past
+    // half size the block stops being something you can perform from. Below the
+    // floor the box scrolls as a last resort, so the words still exist.
+    const floor = Math.max(12, Math.round(readAloudBase * 0.5))
+    const fits = (px: number) => {
+      el.style.fontSize = `${px}px`
+      el.style.lineHeight = `${Math.round(px * readAloudRatio)}px`
+      // The half-pixel absorbs sub-pixel rounding; a whole extra line box is an
+      // order of magnitude larger and cannot hide inside it.
+      return el.scrollHeight <= readAloudBudget + 0.5
+    }
+    let best = floor
+    if (fits(readAloudBase)) best = readAloudBase
+    else {
+      let lo = floor
+      let hi = readAloudBase - 1
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1
+        if (fits(mid)) {
+          best = mid
+          lo = mid + 1
+        } else {
+          hi = mid - 1
+        }
+      }
+      fits(best)
+    }
+    setReadAloudPx(best)
+  }, [readAloudText, readAloudBase, readAloudRatio, readAloudBudget, readAloudWidth])
 
   // Recording-slot takes for the active cell — drives the takes strip. The bus
   // refetch (poked on save below) keeps this fresh as new takes land.
@@ -666,8 +736,13 @@ export function AudioRecordingModal({
         if (phase === "recording") { stopRecording(); return }
         if (phase === "preview") { void save(); return }
       }
-      if (e.key === "ArrowRight") { e.preventDefault(); gotoIndex(activeIndex + 1); return }
-      if (e.key === "ArrowLeft") { e.preventDefault(); gotoIndex(activeIndex - 1); return }
+      // ⌥/Alt + arrow, not bare arrow. The preview phase puts an <audio
+      // controls> in this dialog, and a focused media control treats bare
+      // arrows as SCRUBBING — so an operator nudging through a take would jump
+      // to the next line instead. The modifier keeps the two apart, and it is
+      // what the header's ‹ › buttons announce in their tooltips.
+      if (e.altKey && e.key === "ArrowRight") { e.preventDefault(); gotoIndex(activeIndex + 1); return }
+      if (e.altKey && e.key === "ArrowLeft") { e.preventDefault(); gotoIndex(activeIndex - 1); return }
       if (e.key === "Enter" && phase === "preview") { e.preventDefault(); void save(); return }
     }
     window.addEventListener("keydown", onKey)
@@ -700,34 +775,18 @@ export function AudioRecordingModal({
         initialFocus={dialogSurfaceRef}
         finalFocus={false}
         data-recorder-dialog=""
-        // With a film linked the dialog is TWO panels side by side — a
-        // cinema-black video panel and the recording column, roughly equal
-        // (Sam's markup, 2026-08-13) — so it widens to keep the recording
-        // column usable. Without one it is exactly the former dialog: same
-        // width, same single column, nothing to notice.
+        // TWO FOOTPRINTS, ONE PANEL. Expanded is the mock's 16:9 room with the
+        // picture down the left at 60%; collapsed is a 400×620 portrait column
+        // whose lower half is the takes drawer. The panel itself is the SAME
+        // tree in both — only its width and what sits beside it change, which
+        // is what stops the two layouts drifting apart.
         //
-        // `sm:max-w-6xl`, WITH the variant, is the load-bearing part. The
-        // dialog primitive's own skeleton carries `sm:max-w-lg`, and under
-        // tailwind-merge a bare `max-w-*` lives in a different group from a
-        // `sm:max-w-*`, so it cannot replace it — the primitive's 512px wins
-        // at every desktop width. That is also why this dialog's old
-        // `max-w-3xl` never actually applied (the "3xl" modal everyone knew
-        // was 512px), and why the first cut of the two-panel layout shipped
-        // as two 256px shreds with every line wrapped (Sam's screenshot,
-        // 2026-08-13).
-        // TWO LAYOUTS, from Sam's design exploration (2026-08-13). Expanded is
-        // a 16:9 room — 960×540 in the mock — with the picture down the left.
-        // Collapsed is a tall portrait column, 400×620, whose lower half is the
-        // takes drawer; that height is what finally gives the takes somewhere
-        // to live after three attempts at squeezing them elsewhere.
-        //
-        // `sm:max-w-*` WITH the variant, always: the dialog primitive's own
-        // skeleton carries `sm:max-w-lg`, and a bare `max-w-*` cannot replace it
-        // under tailwind-merge (different modifier, different group). Every
-        // width this dialog asked for before that was understood was silently
-        // 512px.
+        // `sm:max-w-*` WITH the variant is mandatory: the dialog primitive's
+        // skeleton carries `sm:max-w-lg`, and a bare `max-w-*` cannot replace
+        // it under tailwind-merge (different modifier, different group). Every
+        // width this dialog asked for before that was understood was 512px.
         className={cn(
-          "gap-0 p-0",
+          "gap-0 overflow-hidden p-0",
           showFilm
             ? "flex flex-row sm:aspect-[16/9] sm:max-w-5xl"
             : "flex h-[620px] flex-col sm:max-w-[400px]",
@@ -738,17 +797,15 @@ export function AudioRecordingModal({
         <DialogTitle className="sr-only">
           Record audio — {activeCell.cellLabel ?? `Cell ${activeIndex + 1}`}
         </DialogTitle>
-        {/* The film, full height of the dialog, letterboxed on black — the
-            bars above and below are the point, not a defect (Sam: "cinematic
-            black bars"). Hidden on a phone-width viewport rather than stacked:
-            a stacked picture would push the takes and footer off a small
-            screen, and this is a desktop recording rig feature. */}
+
+        {/* ─── THE PICTURE ──────────────────────────────────────────────────
+            Three things live here and nothing else: the film, the collapse
+            control, and the mute (inside the surface). Identity and navigation
+            deliberately do NOT — they belong to the panel header, which
+            survives a collapse that the picture does not, and one nav
+            treatment is better than two (Sam, 2026-08-13). */}
         {showFilm && filmUrl && (
-          // 60% of the room, per the mock's 576-of-960. The picture carries the
-          // line's CONTEXT overlaid on it — label, position, window — which is
-          // what frees the right column to be nothing but the line and the
-          // instruments.
-          <div className="relative hidden w-[60%] shrink-0 overflow-hidden rounded-l-3xl sm:block">
+          <div className="relative hidden w-[60%] shrink-0 overflow-hidden rounded-l-3xl bg-black sm:block">
             <RecordingVideoSurface
               src={filmUrl}
               startSec={activeCell.startTime ?? null}
@@ -760,522 +817,578 @@ export function AudioRecordingModal({
               armNonce={armNonce}
               overrun={targetOverrun}
             />
-            {/* Overlaid on the letterbox, not floated over the image: chips on
-                their own translucent grounds so they stay legible against any
-                frame the film happens to be sitting on. */}
-            <div className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between gap-3 p-4">
-              <div className="flex min-w-0 flex-col items-start gap-1.5">
-                <span className="truncate rounded-md bg-black/65 px-2.5 py-1 text-sm font-semibold text-white backdrop-blur-sm">
-                  {activeCell.cellLabel ?? `Cell ${activeIndex + 1}`}
-                </span>
-                <span className="rounded bg-black/65 px-2 py-0.5 font-mono text-[10px] tabular-nums text-white/70 backdrop-blur-sm">
-                  {activeIndex + 1} / {cells.length}
-                  {targetSec != null && ` · window ${targetSec.toFixed(2)}s`}
-                  {targetSec != null && targetSec < MIN_USEFUL_REGION_SEC && " · very short"}
-                </span>
-              </div>
-              <AppTooltip content="Hide the film and use the narrow recorder">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  data-testid="rec-collapse-video"
-                  onClick={() => setRecordingVideoCollapsed(true)}
-                  aria-label="Hide the film"
-                  className="pointer-events-auto h-7 shrink-0 gap-1.5 rounded-md bg-black/65 px-2.5 text-[11px] text-white/80 backdrop-blur-sm hover:bg-black/80 hover:text-white"
-                >
-                  <Minimize2 className="h-3.5 w-3.5" /> Collapse video
-                </Button>
-              </AppTooltip>
-            </div>
-          </div>
-        )}
-        <div className="relative flex min-w-0 flex-1 flex-col">
-
-        {/* Header: cell context — fixed, never scrolls */}
-        <div className="flex shrink-0 items-start justify-between gap-4 border-b px-6 pt-5 pb-4">
-          <div className="min-w-0 flex-1 space-y-1">
-            {/* The label/position/window row is the PICTURE's job when there is
-                one — see the overlay chips above. Repeating it here would say
-                the same thing twice in one dialog, three inches apart. */}
-            {!showFilm && (
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <span className="font-medium text-foreground/80">
-                {activeCell.cellLabel ?? `Cell ${activeIndex + 1}`}
-              </span>
-              {targetSec != null && (
-                <span
-                  data-testid="recorder-window"
-                  className={cn(
-                    "rounded px-1.5 py-0.5 tabular-nums",
-                    // AQU-646: a section this short is very likely a mistake —
-                    // say so and let them carry on anyway. Never a block; it
-                    // stays the user's call (Sam).
-                    targetSec < MIN_USEFUL_REGION_SEC
-                      ? "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300"
-                      : "bg-muted",
-                  )}
-                  title={
-                    targetSec < MIN_USEFUL_REGION_SEC
-                      ? "This section is very short — you can still record, but there is barely room for anything."
-                      : undefined
-                  }
-                >
-                  {targetSec.toFixed(1)}s window
-                  {targetSec < MIN_USEFUL_REGION_SEC ? " — very short" : ""}
-                </span>
-              )}
-              <span className="ml-auto tabular-nums">
-                {activeIndex + 1} / {cells.length}
-              </span>
-            </div>
-            )}
-            <div className="space-y-0.5">
-              <div className="text-xs text-muted-foreground/60">Source</div>
-              <div className="text-xs leading-snug text-muted-foreground">
-                {activeCell.original || <span className="italic text-muted-foreground/60">empty</span>}
-              </div>
-            </div>
-            <div className="space-y-1 pt-2">
-              <div className="text-xs text-muted-foreground/60">Read aloud</div>
-              <div className="text-2xl font-medium leading-relaxed">
-                {activeCell.translated || <span className="italic text-base text-muted-foreground/60">not translated</span>}
-              </div>
-            </div>
-          </div>
-          <div className="flex items-center gap-1">
-            {/* TEXT, not an icon: there is no glyph that reads as "WAV", and
-                the choice is between two words the operator already knows.
-                Disabled once a take is in hand — the bytes exist, so flipping
-                this then would only mislead. Base UI tooltips do not fire on a
-                disabled button, hence the span wrapper (same as rec-start). */}
-            <AppTooltip
-              content={
-                takeInHand
-                  ? "This take is already captured — the format applies to the next one."
-                  : recordingFormat === "wav"
-                    ? "Recording at full WAV quality — about three times the file size. Click to record compressed instead."
-                    : "Recording compressed — much smaller files, slightly less detail. Click to record at full WAV quality."
-              }
-            >
-              <span className="inline-flex">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  data-testid="rec-format"
-                  aria-pressed={recordingFormat === "wav"}
-                  aria-label={
-                    recordingFormat === "wav"
-                      ? "Recording format: WAV — click to record compressed"
-                      : "Recording format: compressed — click to record in WAV"
-                  }
-                  disabled={takeInHand}
-                  onClick={() => setRecordingFormatPref(recordingFormat === "wav" ? "webm" : "wav")}
-                  className="h-7 rounded-full px-2.5 text-[11px] font-semibold tracking-wide text-muted-foreground/70"
-                >
-                  {recordingFormat === "wav" ? "WAV" : "Compressed"}
-                </Button>
-              </span>
-            </AppTooltip>
-            <AppTooltip
-              content={
-                autoAdvance
-                  ? "Moving to the next line after each save — click to stay here"
-                  : "Staying on this line after each save — click to move on automatically"
-              }
-            >
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-sm"
-                data-testid="rec-auto-advance"
-                aria-pressed={autoAdvance}
-                onClick={() => setRecordingAutoAdvance(!autoAdvance)}
-                aria-label={autoAdvance ? "Stay on this line after saving" : "Move to the next line after saving"}
-                className="text-muted-foreground/60"
-              >
-                {autoAdvance ? <ChevronsRight className="h-4 w-4" /> : <Pin className="h-4 w-4" />}
-              </Button>
-            </AppTooltip>
-            <AppTooltip content={beepEnabled ? "Mute countdown beep" : "Enable countdown beep"}>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-sm"
-                onClick={() => setBeepEnabled((v) => !v)}
-                aria-label={beepEnabled ? "Mute countdown beep" : "Enable countdown beep"}
-                className="text-muted-foreground/60"
-              >
-                {beepEnabled ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
-              </Button>
-            </AppTooltip>
-            {/* Only when a film EXISTS but is collapsed. A line with no video
-                gets no toggle at all — offering "Show video" where there is
-                none to show is the affordance-that-lies problem again. */}
-            {filmUrl && videoCollapsed && (
-              <AppTooltip content="Show the film for this line beside the recorder">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  data-testid="rec-expand-video"
-                  onClick={() => setRecordingVideoCollapsed(false)}
-                  aria-label="Show the film"
-                  className="h-7 gap-1.5 px-2 text-[11px] text-muted-foreground/70"
-                >
-                  <Maximize2 className="h-3.5 w-3.5" /> Video
-                </Button>
-              </AppTooltip>
-            )}
-            <AppTooltip content="Close (Esc)">
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-sm"
-                onClick={onClose}
-                aria-label="Close"
-                className="text-muted-foreground/60"
-              >
-                <X />
-              </Button>
-            </AppTooltip>
-          </div>
-        </div>
-
-        {/* Scrollable middle — stage + takes. Overflows internally so header
-            and footer stay anchored at 100% zoom on compact viewports. */}
-        {/* EXPANDED: this grows and the stage inside it sits at the BOTTOM, so
-            the instruments land under the line rather than floating in the
-            middle of a tall column (the mock's flex spacer, in effect).
-            COLLAPSED: natural height, because the takes drawer below is the
-            thing that should absorb the leftover room. */}
-        <div className={cn("overflow-y-auto", showFilm ? "min-h-0 flex-1" : "shrink-0")}>
-
-        {/* Stage — changes with phase. The film is NOT in here: Sam's first
-            cut of this feature put a 280px picture beside the phase content
-            and it read as clutter; the film is now a full-height panel beside
-            the whole column (see DialogContent), and the stage is exactly the
-            single-centred-column it was before any of this existed. */}
-        <div
-          className={cn(
-            "relative flex min-h-[200px] flex-col items-center gap-4 p-6",
-            // Bottom-aligned beside a picture (instruments sit under the line
-            // you are reading); centred in the narrow column, which has no
-            // spare height to push anything around in.
-            showFilm ? "h-full justify-end" : "justify-center",
-          )}
-        >
-          {displayPhase === "counting" && countdown.count !== null && (
-            <div className="flex flex-col items-center gap-3">
-              <div
-                key={countdown.count}
-                className="text-7xl font-semibold tabular-nums text-foreground/80"
-                style={{ animation: "pop 700ms ease-out" }}
-              >
-                {countdown.count === 0 ? "GO" : countdown.count}
-              </div>
-              <p className="text-xs text-muted-foreground">Recording starts in…</p>
-            </div>
-          )}
-
-          {displayPhase === "recording" && (
-            <div className="w-full space-y-4">
-              <div className="flex items-center justify-center gap-2">
-                <span className="inline-block h-2.5 w-2.5 animate-pulse rounded-full bg-red-500" />
-                <span className="text-sm font-medium">Recording</span>
-              </div>
-              <AudioWaveform stream={recorder.stream} height={56} className="rounded-md border bg-muted/40" />
-              {targetSec != null
-                ? <DurationBar elapsedMs={elapsedMs} targetSec={targetSec} />
-                : <div className="text-center text-2xl font-semibold tabular-nums">{formatClock(elapsedMs)}</div>}
-              {targetOverrun && (
-                <p className="text-center text-xs font-medium text-red-500">
-                  Past target duration — this will overrun the cue.
-                </p>
-              )}
-              {isNearLimit && (
-                <p className="text-center text-xs font-medium text-amber-500">
-                  {/* Derived, never restated: WAV is ~3× the bytes of a
-                      compressed take, so its window is much shorter, and both
-                      windows are computed from the upload cap. A hardcoded
-                      "25 … 30" here was already wrong the moment WAV became the
-                      default. */}
-                  Recording is {minutesOf(formatLimits.warnMs)} minutes — it will stop
-                  automatically at {minutesOf(formatLimits.hardStopMs)} minutes.
-                </p>
-              )}
-            </div>
-          )}
-
-          {displayPhase === "preview" && previewUrl && (
-            <div className="w-full space-y-4">
-              <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
-                <Check className="h-4 w-4 text-emerald-500" /> Captured — review and save, or retake.
-              </div>
-              <audio
-                ref={previewAudioRef}
-                src={previewUrl}
-                controls
-                className="w-full"
-                preload="auto"
-              />
-              {targetSec != null && (
-                <DurationBar elapsedMs={elapsedMs} targetSec={targetSec} />
-              )}
-              {/* Connectivity died mid-flow: the take is safe (capture is
-                  local) — say why Save is disabled. Derived, so it clears
-                  itself the moment the connection returns. */}
-              {!online && (
-                <p data-testid="rec-offline-notice" className="text-center text-xs font-medium text-amber-500">
-                  {OFFLINE_MESSAGE}
-                </p>
-              )}
-              {/* A save that FAILED bounced back here with its take intact.
-                  The offline story is carried by the notice above (and clears
-                  with the connection); anything else says why, in red, with
-                  Save still offered for the retry. */}
-              {online && errorMessage != null && errorMessage !== OFFLINE_MESSAGE && (
-                <p data-testid="rec-save-error" className="text-center text-xs font-medium text-destructive">
-                  Saving failed — the take is safe, try Save again. ({errorMessage})
-                </p>
-              )}
-            </div>
-          )}
-
-          {displayPhase === "uploading" && (
-            <div className="flex flex-col items-center gap-3 text-muted-foreground">
-              <Spinner className="size-7" />
-              <p className="text-sm">Uploading…</p>
-            </div>
-          )}
-
-          {displayPhase === "saved" && (
-            <div className="flex flex-col items-center gap-3">
-              <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-emerald-500/10">
-                <Check className="h-6 w-6 text-emerald-500" />
-              </div>
-              <p className="text-sm text-muted-foreground">Saved — moving to next cell…</p>
-            </div>
-          )}
-
-          {displayPhase === "idle" && (
-            <div className="flex flex-col items-center gap-3 text-center">
-              <Mic className="h-10 w-10 text-muted-foreground/60" />
-              <p className="text-sm text-muted-foreground">
-                Press <kbd className="rounded border bg-muted px-1 py-0.5 text-[11px] font-medium">Space</kbd> or click Start.
-                The beep plays a 3-2-1 countdown before recording.
-              </p>
-            </div>
-          )}
-
-          {displayPhase === "error" && (
-            <div className="space-y-2 text-center">
-              <p data-testid="rec-error-message" className="text-sm font-medium text-destructive">
-                {errorMessage ?? "Something went wrong."}
-              </p>
-              <p className="text-xs text-muted-foreground">Press Space or Start to try again.</p>
-            </div>
-          )}
-        </div>
-
-        </div>{/* end scrollable middle — the STAGE only, since the takes moved
-            to their own shelf below */}
-
-        {/* Takes — audition / circle / delete prior recordings for this cell.
-            A pinned shelf with ITS OWN scrollbar, third attempt at this
-            geometry and each failure taught the shape (Sam, 2026-08-13): the
-            strip first grew with every take and stretched the whole dialog
-            (stacking); then, moved inside the scrollable middle of a
-            fixed-height dialog, a long stage pushed it below the fold and
-            takes silently "disappeared". Pinned between stage and footer it is
-            always on screen, and past ~three takes it scrolls itself. */}
-        {(phase === "idle" || phase === "preview" || phase === "saved" || phase === "error") &&
-          activeCell &&
-          recordingTakes.length > 0 &&
-          // EXPANDED: a disclosure raised over the column by the footer's
-          // "Takes N" control, so the short 16:9 column keeps its instruments
-          // unobstructed while recording. COLLAPSED: always-open drawer filling
-          // the portrait column's lower half — the room the mock's 620px height
-          // exists to provide.
-          (showFilm ? takesOpen : true) && (
-            <div
-              className={cn(
-                showFilm
-                  ? "absolute inset-x-0 bottom-0 z-20 max-h-[70%] overflow-y-auto border-t bg-popover shadow-[0_-8px_24px_rgba(0,0,0,0.18)]"
-                  : "min-h-0 flex-1 overflow-y-auto bg-muted/20",
-              )}
-            >
-              <TakesStrip
-                projectId={project.id}
-                fileId={activeCell.fileId}
-                cellId={activeCell.id}
-                takes={recordingTakes}
-                onLastTakeRemoved={onLastTakeRemoved}
-                selectedAudioId={audioEntry?.selectedAudioId ?? null}
-                selectedGeneratedAudioId={audioEntry?.selectedGeneratedVoiceAudioId ?? null}
-                sourceClip={sourceClip}
-                author={username}
-                session={session ?? null}
-              />
-            </div>
-          )}
-
-        {/* Footer: nav + primary action — fixed, never scrolls */}
-        <div className="flex shrink-0 items-center gap-2 border-t bg-muted/30 px-5 py-3">
-          <AppTooltip content="Previous cell (←)">
-            <Button
-              variant="ghost"
-              size="sm"
-              disabled={!canNav || activeIndex <= 0}
-              onClick={() => gotoIndex(activeIndex - 1)}
-            >
-              <ChevronLeft className="mr-1 h-4 w-4" /> Prev
-            </Button>
-          </AppTooltip>
-          <AppTooltip content="Next cell (→)">
-            <Button
-              variant="ghost"
-              size="sm"
-              disabled={!canNav || activeIndex >= cells.length - 1}
-              onClick={() => gotoIndex(activeIndex + 1)}
-            >
-              Next <ChevronRight className="ml-1 h-4 w-4" />
-            </Button>
-          </AppTooltip>
-
-          <div className="flex-1" />
-
-          {/* The takes disclosure, expanded-view only: collapsed, the drawer is
-              already open above this bar and a control to reveal it would be
-              pointing at something visible. Mirrors the mock's "Takes 3 ⌃". */}
-          {showFilm && recordingTakes.length > 0 && (
-            <AppTooltip content={takesOpen ? "Hide takes" : "Show takes for this line"}>
+            <AppTooltip content="Hide the film and use the narrow recorder">
               <Button
                 type="button"
                 variant="ghost"
                 size="sm"
-                data-testid="rec-takes-toggle"
-                aria-expanded={takesOpen}
-                onClick={() => setTakesOpen((v) => !v)}
-                className="gap-1.5 text-muted-foreground"
+                data-testid="rec-collapse-video"
+                onClick={() => setRecordingVideoCollapsed(true)}
+                aria-label="Hide the film"
+                className="absolute top-3 right-3 z-10 h-7 gap-1.5 rounded-md bg-black/65 px-2.5 text-[11px] text-white/80 backdrop-blur-sm hover:bg-black/80 hover:text-white"
               >
-                Takes <span className="font-mono tabular-nums">{recordingTakes.length}</span>
-                <ChevronUp className={cn("h-3.5 w-3.5 transition-transform", takesOpen && "rotate-180")} />
+                <Minimize2 className="h-3.5 w-3.5" /> Collapse video
               </Button>
             </AppTooltip>
-          )}
+          </div>
+        )}
 
-          {displayPhase === "preview" && (
-            <>
-              <AppTooltip content="Retake (Esc)">
-                <Button variant="outline" size="sm" onClick={retake}>
-                  <RefreshCw className="mr-1 h-4 w-4" /> Retake
+        {/* ─── THE PANEL ────────────────────────────────────────────────── */}
+        <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+
+          {/* HEADER — identity and navigation only. Two rows on purpose: a long
+              label truncates on its own line while the counter and its arrows
+              keep a fixed, unwrappable width beneath it. The single-row version
+              of this is what shredded into three wrapped columns at 400px. */}
+          <div className="shrink-0 border-b px-4 py-3">
+            <div className="flex items-center gap-2">
+              <span className="min-w-0 flex-1 truncate text-sm font-semibold">
+                {activeCell.cellLabel ?? `Cell ${activeIndex + 1}`}
+              </span>
+              {/* Only when a film EXISTS but is collapsed — a line without one
+                  never offers to show a picture it does not have. */}
+              {filmUrl && videoCollapsed && (
+                <AppTooltip content="Show the film for this line beside the recorder">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    data-testid="rec-expand-video"
+                    onClick={() => setRecordingVideoCollapsed(false)}
+                    aria-label="Show the film"
+                    className="h-7 shrink-0 gap-1.5 px-2 text-[11px] text-muted-foreground/70"
+                  >
+                    <Maximize2 className="h-3.5 w-3.5" /> Video
+                  </Button>
+                </AppTooltip>
+              )}
+              <AppTooltip content="Close (Esc)">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={onClose}
+                  aria-label="Close"
+                  className="shrink-0 text-muted-foreground/60"
+                >
+                  <X />
                 </Button>
               </AppTooltip>
-              <AppTooltip content={online ? "Save (Space or Enter)" : OFFLINE_MESSAGE}>
-                <span className="inline-flex">
-                  <Button size="sm" data-testid="rec-save" disabled={!online} onClick={save}>
-                    <Check className="mr-1 h-4 w-4" /> Save
-                  </Button>
-                </span>
+            </div>
+            {/* The arrows FLANK the counter rather than sitting at the row's
+                edges: together they read as one navigation control, and they
+                stay put when the counter's width changes between lines. */}
+            <div className="mt-1.5 flex items-center gap-0.5">
+              <AppTooltip content="Previous line (⌥←)">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  data-testid="rec-prev"
+                  disabled={!canNav || activeIndex <= 0}
+                  onClick={() => gotoIndex(activeIndex - 1)}
+                  aria-label="Previous line"
+                  className="h-6 w-6 shrink-0 text-muted-foreground/70"
+                >
+                  <ChevronLeft className="h-3.5 w-3.5" />
+                </Button>
               </AppTooltip>
-            </>
-          )}
-
-          {displayPhase === "recording" && (
-            <AppTooltip content="Stop (Space or Esc)">
-              <Button variant="destructive" size="sm" onClick={stopRecording}>
-                <Square className="mr-1 h-4 w-4" /> Stop
-              </Button>
-            </AppTooltip>
-          )}
-
-          {(displayPhase === "idle" || displayPhase === "error") && (
-            <>
-              {/* Round 8: a clear re-record vs REGENERATE choice — durable TTS
-                  right where recording lives. Round 8c: the result is a TAKE —
-                  it joins the list below (sparkle row) and becomes the one
-                  that sounds. */}
-              <AppTooltip
-                content={
-                  !online
-                    ? OFFLINE_MESSAGE
-                    : !activeCell?.translated?.trim()
-                      ? "Translate this line first to generate voice"
-                      : ttsDone
-                        ? "Voice generated — it plays on the Target track"
-                        : "Generate this line's voice with the project's engine"
+              <span
+                data-testid="recorder-window"
+                className={cn(
+                  "min-w-0 truncate px-1 font-mono text-[10px] tabular-nums",
+                  // AQU-646: a window this short is very likely a mistake — say
+                  // so and let them carry on anyway. Never a block; it stays the
+                  // user's call (Sam).
+                  targetSec != null && targetSec < MIN_USEFUL_REGION_SEC
+                    ? "text-amber-600 dark:text-amber-400"
+                    : "text-muted-foreground",
+                )}
+                title={
+                  targetSec != null && targetSec < MIN_USEFUL_REGION_SEC
+                    ? "This section is very short — you can still record, but there is barely room for anything."
+                    : undefined
                 }
               >
-                <span className="inline-flex">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    data-testid="rec-generate-tts"
-                    disabled={!online || !activeCell?.translated?.trim() || ttsBusy}
-                    onClick={() => void generateTts()}
-                  >
-                    {ttsBusy ? (
-                      <Spinner className="mr-1 size-4" />
-                    ) : ttsDone ? (
-                      <Check className="mr-1 h-4 w-4 text-emerald-500" />
-                    ) : (
-                      <Sparkles className="mr-1 h-4 w-4" />
-                    )}
-                    Generate TTS
-                  </Button>
-                </span>
+                {activeIndex + 1} / {cells.length}
+                {targetSec != null && ` · window ${targetSec.toFixed(2)}s`}
+                {targetSec != null && targetSec < MIN_USEFUL_REGION_SEC && " · very short"}
+              </span>
+              <AppTooltip content="Next line (⌥→)">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  data-testid="rec-next"
+                  disabled={!canNav || activeIndex >= cells.length - 1}
+                  onClick={() => gotoIndex(activeIndex + 1)}
+                  aria-label="Next line"
+                  className="h-6 w-6 shrink-0 text-muted-foreground/70"
+                >
+                  <ChevronRight className="h-3.5 w-3.5" />
+                </Button>
               </AppTooltip>
-              {/* Upload a file instead of recording one. Offered in `idle` and
-                  `error` only — and `error` is the one that matters, because a
-                  blocked microphone lands there and "I can't record, let me
-                  upload" is the single best moment for this button to exist.
-                  Never in preview: a take is already in hand there, and a second
-                  source beside it is a save-the-wrong-thing hazard. */}
-              <input
-                ref={uploadInputRef}
-                type="file"
-                accept={ACCEPT}
-                className="sr-only"
-                onChange={onUploadInputChange}
-                aria-label="Upload audio file"
-                // Diverges from the cell rail's copy of this input ON PURPOSE:
-                // inside a focus trap an invisible tab stop is a real
-                // annoyance, and the visible button below already carries the
-                // accessible name and the click.
-                tabIndex={-1}
-              />
-              <AppTooltip content={online ? "Attach an audio file as a take" : OFFLINE_MESSAGE}>
-                <span className="inline-flex">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    data-testid="rec-upload"
-                    disabled={!online}
-                    onClick={() => uploadInputRef.current?.click()}
-                  >
-                    <Upload className="mr-1 h-4 w-4" /> Upload audio
-                  </Button>
-                </span>
-              </AppTooltip>
-              <AppTooltip content={online ? "Start recording (Space)" : OFFLINE_MESSAGE}>
-                <span className="inline-flex">
-                  <Button size="sm" data-testid="rec-start" disabled={!online} onClick={startFlow}>
-                    <Play className="mr-1 h-4 w-4" /> Start
-                  </Button>
-                </span>
-              </AppTooltip>
-            </>
-          )}
+            </div>
+          </div>
 
-          {displayPhase === "counting" && (
-            <Button variant="outline" size="sm" onClick={() => { countdown.cancel(); setPhase("idle") }}>
-              Cancel countdown
-            </Button>
+          {/* THE LINE — source above, the line to speak below.
+              The read-aloud block owns the space of FIVE line boxes (26/33
+              expanded, 23/30 collapsed) and a longer line shrinks to fit it
+              rather than scrolling — see the fit effect above. The box keeps
+              `overflow-y-auto` only as the floor's safety valve: past half size
+              the text is allowed to scroll rather than become unreadable. */}
+          {/* THE LINE AND THE INSTRUMENTS, in one region that can shrink.
+              Deliberately NOT `shrink-0`: on a viewport shorter than the
+              dialog's own height the max-height clamp kicks in, and a rigid
+              upper region would push the takes drawer to zero and then clip
+              itself against `overflow-hidden` — the button you need would be
+              the thing that vanished. Shrinkable, it scrolls instead, and the
+              read-aloud block inside keeps its own four-line cap regardless. */}
+          <div
+            className={cn(
+              "flex min-h-0 flex-col overflow-y-auto",
+              // Expanded it also GROWS, so the spacer below can push the
+              // instruments to the bottom of the column.
+              showFilm && "flex-1",
+            )}
+          >
+          <div className="shrink-0 px-4 pt-3">
+            <div className="text-[10px] font-medium tracking-wide text-muted-foreground/60 uppercase">
+              Source
+            </div>
+            <p className="mt-0.5 line-clamp-2 text-xs leading-snug text-muted-foreground">
+              {activeCell.original || <span className="text-muted-foreground/60 italic">empty</span>}
+            </p>
+            <div className="mt-3 text-[10px] font-medium tracking-wide text-muted-foreground/60 uppercase">
+              Read aloud
+            </div>
+            <div
+              ref={readAloudBoxRef}
+              className="mt-1 overflow-y-auto"
+              style={{
+                maxHeight: readAloudBudget,
+                scrollbarGutter: "stable",
+              }}
+            >
+              <p
+                ref={readAloudRef}
+                data-testid="rec-read-aloud"
+                className="font-medium tracking-[-0.01em]"
+                style={{
+                  fontSize: readAloudPx,
+                  lineHeight: `${Math.round(readAloudPx * readAloudRatio)}px`,
+                }}
+              >
+                {activeCell.translated || (
+                  <span className="text-base text-muted-foreground/60 italic">not translated</span>
+                )}
+              </p>
+            </div>
+          </div>
+
+          {/* Beside a picture the instruments sit at the BOTTOM of the column,
+              so the eye runs from the line down to the meter and the button.
+              Collapsed there is nothing to push them with — the takes drawer
+              below is what absorbs the leftover height. */}
+          {showFilm && <div className="min-h-[8px] flex-1" />}
+
+          {/* INSTRUMENTS + ANCHOR — the same skeleton in every phase: what the
+              take looks like, then the one button that acts on it, then the
+              alternatives to it. Only the middle changes. */}
+          <div className="shrink-0 space-y-3 px-4 pt-4 pb-4">
+            {/* ── the phase's own instrument ── */}
+            {displayPhase === "counting" && (
+              <div className="flex h-[76px] flex-col items-center justify-center">
+                <div
+                  key={countdown.count}
+                  className="text-5xl font-semibold tabular-nums text-foreground/80"
+                  style={{ animation: "pop 700ms ease-out" }}
+                >
+                  {countdown.count === 0 ? "GO" : countdown.count}
+                </div>
+              </div>
+            )}
+
+            {displayPhase === "recording" && (
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <span className="inline-block h-2 w-2 shrink-0 animate-pulse rounded-full bg-red-500" />
+                  <span className="text-xs font-semibold text-red-500">REC</span>
+                  <span className="font-mono text-lg tabular-nums">{formatClock(elapsedMs)}</span>
+                  <span className="ml-auto shrink-0 font-mono text-[10px] text-muted-foreground">
+                    max {minutesOf(formatLimits.hardStopMs)}m
+                  </span>
+                </div>
+                <AudioWaveform stream={recorder.stream} height={44} className="rounded-md border bg-muted/40" />
+                {targetSec != null && <DurationBar elapsedMs={elapsedMs} targetSec={targetSec} />}
+                {targetOverrun && (
+                  <p className="text-xs font-medium text-red-500">Past the window — this will overrun the cue.</p>
+                )}
+                {isNearLimit && (
+                  <p className="text-xs font-medium text-amber-500">
+                    {/* Derived from the ACTIVE format's limits: WAV is ~3× the
+                        bytes of a compressed take, so its window is much
+                        shorter, and both are computed from the upload cap. */}
+                    Recording is {minutesOf(formatLimits.warnMs)} minutes — it stops automatically at{" "}
+                    {minutesOf(formatLimits.hardStopMs)}.
+                  </p>
+                )}
+              </div>
+            )}
+
+            {displayPhase === "preview" && previewUrl && (
+              <div className="space-y-2">
+                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <Check className="h-3.5 w-3.5 shrink-0 text-emerald-500" /> Captured — review, then keep or retake.
+                </div>
+                <audio ref={previewAudioRef} src={previewUrl} controls className="h-9 w-full" preload="auto" />
+                {targetSec != null && <DurationBar elapsedMs={elapsedMs} targetSec={targetSec} />}
+                {!online && (
+                  <p data-testid="rec-offline-notice" className="text-xs font-medium text-amber-500">
+                    {OFFLINE_MESSAGE}
+                  </p>
+                )}
+                {online && errorMessage != null && errorMessage !== OFFLINE_MESSAGE && (
+                  <p data-testid="rec-save-error" className="text-xs font-medium text-destructive">
+                    Saving failed — the take is safe, try Save again. ({errorMessage})
+                  </p>
+                )}
+              </div>
+            )}
+
+            {displayPhase === "uploading" && (
+              <div className="flex h-[76px] flex-col items-center justify-center gap-2 text-muted-foreground">
+                <Spinner className="size-6" />
+                <p className="text-xs">Uploading…</p>
+              </div>
+            )}
+
+            {displayPhase === "saved" && (
+              <div className="flex h-[76px] flex-col items-center justify-center gap-2">
+                <Check className="h-7 w-7 text-emerald-500" />
+                <p className="text-xs text-muted-foreground">Saved</p>
+              </div>
+            )}
+
+            {/* IDLE and ERROR share an instrument: the window, with nothing in
+                it yet. No waveform, no mic block, no elapsed readout — the bar
+                shows the target notch and the two numbers, and the button below
+                is the thing you are meant to be looking at. */}
+            {(displayPhase === "idle" || displayPhase === "error") && (
+              <div className="space-y-2">
+                {targetSec != null ? (
+                  <DurationBar elapsedMs={0} targetSec={targetSec} />
+                ) : (
+                  <p className="text-xs text-muted-foreground">This line has no timed window.</p>
+                )}
+                {displayPhase === "error" && (
+                  <p data-testid="rec-error-message" className="text-xs font-medium text-destructive">
+                    {errorMessage ?? "Something went wrong."}
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* ── the anchor ── one 52px action, always in the same place, so
+                the button never moves between phases. Preview is the single
+                exception the design asks for: discarding and keeping are a
+                genuine fork, so they sit side by side at equal weight. */}
+            {displayPhase === "preview" ? (
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  data-testid="rec-retake"
+                  onClick={retake}
+                  className="h-[52px] flex-1 text-sm font-semibold"
+                >
+                  <RefreshCw className="mr-1.5 h-4 w-4" /> Retake
+                </Button>
+                <AppTooltip content={online ? "Save (Space or Enter)" : OFFLINE_MESSAGE}>
+                  <span className="inline-flex flex-1">
+                    <Button
+                      data-testid="rec-save"
+                      disabled={!online}
+                      onClick={save}
+                      className="h-[52px] w-full text-sm font-semibold"
+                    >
+                      <Check className="mr-1.5 h-4 w-4" /> Save
+                    </Button>
+                  </span>
+                </AppTooltip>
+              </div>
+            ) : displayPhase === "recording" ? (
+              <Button
+                variant="destructive"
+                data-testid="rec-stop"
+                onClick={stopRecording}
+                className="h-[52px] w-full text-sm font-semibold"
+              >
+                <Square className="mr-2 h-4 w-4" /> Stop <span className="ml-1.5 opacity-60">· SPACE</span>
+              </Button>
+            ) : displayPhase === "counting" ? (
+              <Button
+                variant="outline"
+                onClick={() => { countdown.cancel(); setPhase("idle") }}
+                className="h-[52px] w-full text-sm font-semibold"
+              >
+                Cancel <span className="ml-1.5 opacity-60">· ESC</span>
+              </Button>
+            ) : (
+              <AppTooltip content={online ? "Start recording (Space)" : OFFLINE_MESSAGE}>
+                <span className="inline-flex w-full">
+                  <Button
+                    data-testid="rec-start"
+                    disabled={!online || displayPhase === "uploading" || displayPhase === "saved"}
+                    onClick={startFlow}
+                    className="h-[52px] w-full text-sm font-semibold"
+                  >
+                    <Mic className="mr-2 h-4 w-4" /> Record <span className="ml-1.5 opacity-60">· SPACE</span>
+                  </Button>
+                </span>
+              </AppTooltip>
+            )}
+
+            {/* ── the alternatives ── shorter, outlined, quieter than the
+                anchor. Hidden from the countdown onwards so the waveform gets
+                the room; kept in ERROR, which is exactly where a blocked
+                microphone lands and where "let me upload instead" earns its
+                place. */}
+            {(displayPhase === "idle" || displayPhase === "error") && (
+              <div className="flex gap-2">
+                <AppTooltip
+                  content={
+                    !online
+                      ? OFFLINE_MESSAGE
+                      : !activeCell?.translated?.trim()
+                        ? "Translate this line first to generate voice"
+                        : ttsDone
+                          ? "Voice generated — it plays on the Target track"
+                          : "Generate this line's voice with the project's engine"
+                  }
+                >
+                  <span className="inline-flex min-w-0 flex-1">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      data-testid="rec-generate-tts"
+                      disabled={!online || !activeCell?.translated?.trim() || ttsBusy}
+                      onClick={() => void generateTts()}
+                      className="h-9 w-full bg-muted/30 text-xs font-normal text-muted-foreground"
+                    >
+                      {ttsBusy ? (
+                        <Spinner className="mr-1.5 size-3.5" />
+                      ) : ttsDone ? (
+                        <Check className="mr-1.5 h-3.5 w-3.5 text-emerald-500" />
+                      ) : (
+                        <Sparkles className="mr-1.5 h-3.5 w-3.5" />
+                      )}
+                      <span className="truncate">Generate</span>
+                    </Button>
+                  </span>
+                </AppTooltip>
+                <input
+                  ref={uploadInputRef}
+                  type="file"
+                  accept={ACCEPT}
+                  className="sr-only"
+                  onChange={onUploadInputChange}
+                  aria-label="Upload audio file"
+                  // Diverges from the cell rail's copy of this input ON PURPOSE:
+                  // inside a focus trap an invisible tab stop is a real
+                  // annoyance, and the visible button beside it already carries
+                  // the accessible name and the click.
+                  tabIndex={-1}
+                />
+                <AppTooltip content={online ? "Attach an audio file as a take" : OFFLINE_MESSAGE}>
+                  <span className="inline-flex min-w-0 flex-1">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      data-testid="rec-upload"
+                      disabled={!online}
+                      onClick={() => uploadInputRef.current?.click()}
+                      className="h-9 w-full bg-muted/30 text-xs font-normal text-muted-foreground"
+                    >
+                      <Upload className="mr-1.5 h-3.5 w-3.5 shrink-0" />
+                      <span className="truncate">Upload</span>
+                    </Button>
+                  </span>
+                </AppTooltip>
+              </div>
+            )}
+          </div>
+
+          </div>{/* end line + instruments */}
+
+          {/* THE UTILITY STRIP — takes, the format the takes are in, and the
+              settings that describe recording. One row, always in the same
+              place. Expanded it is a disclosure bar with the list raised over
+              the column; collapsed it is the header of a drawer that fills the
+              rest of the panel. `relative` so the raised list can anchor to it. */}
+          <div className="relative shrink-0 border-t bg-muted/20">
+            {/* The raised list, expanded only. `bottom-full` puts it directly
+                above this strip; capped so it can never cover the line being
+                read, and scrolling inside that cap. */}
+            {showFilm && takesOpen && recordingTakes.length > 0 && activeCell && (
+              <div className="absolute inset-x-0 bottom-full z-20 max-h-[260px] overflow-y-auto border-t bg-popover shadow-[0_-10px_28px_rgba(0,0,0,0.2)]">
+                <TakesStrip
+                  chromeless
+                  projectId={project.id}
+                  fileId={activeCell.fileId}
+                  cellId={activeCell.id}
+                  takes={recordingTakes}
+                  onLastTakeRemoved={onLastTakeRemoved}
+                  selectedAudioId={audioEntry?.selectedAudioId ?? null}
+                  selectedGeneratedAudioId={audioEntry?.selectedGeneratedVoiceAudioId ?? null}
+                  sourceClip={sourceClip}
+                  author={username}
+                  session={session ?? null}
+                />
+              </div>
+            )}
+            <div className="flex items-center gap-2 px-4 py-2">
+              {showFilm ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  data-testid="rec-takes-toggle"
+                  aria-expanded={takesOpen}
+                  disabled={recordingTakes.length === 0}
+                  onClick={() => setTakesOpen((v) => !v)}
+                  className="h-7 shrink-0 gap-1.5 px-2 text-xs text-muted-foreground"
+                >
+                  Takes <span className="font-mono tabular-nums">{recordingTakes.length}</span>
+                  <ChevronUp className={cn("h-3.5 w-3.5 transition-transform", takesOpen && "rotate-180")} />
+                </Button>
+              ) : (
+                <span data-testid="rec-takes-count" className="shrink-0 px-1 text-xs font-medium">
+                  Takes <span className="font-mono tabular-nums text-muted-foreground">{recordingTakes.length}</span>
+                </span>
+              )}
+
+              {/* The format lives HERE, not in the header: it describes the
+                  bytes of the takes listed under it, and once a take is in hand
+                  it is a statement about that take rather than a choice. */}
+              <AppTooltip
+                content={
+                  takeInHand
+                    ? "This take is already captured — the format applies to the next one."
+                    : recordingFormat === "wav"
+                      ? "Recording at full WAV quality — about three times the file size. Click to record compressed instead."
+                      : "Recording compressed — much smaller files, slightly less detail. Click to record at full WAV quality."
+                }
+              >
+                <span className="ml-auto inline-flex shrink-0">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    data-testid="rec-format"
+                    aria-pressed={recordingFormat === "wav"}
+                    aria-label={
+                      recordingFormat === "wav"
+                        ? "Recording format: WAV — click to record compressed"
+                        : "Recording format: compressed — click to record in WAV"
+                    }
+                    disabled={takeInHand}
+                    onClick={() => setRecordingFormatPref(recordingFormat === "wav" ? "webm" : "wav")}
+                    className="h-7 gap-1 px-2 font-mono text-[10px] tracking-wide text-muted-foreground/70"
+                  >
+                    {recordingFormat === "wav" ? "WAV" : "COMPRESSED"}
+                    {takeInHand && <Lock className="h-3 w-3" />}
+                  </Button>
+                </span>
+              </AppTooltip>
+
+              {/* Auto-advance and the countdown beep: consulted rarely, and out
+                  of the header entirely so it can be identity and navigation. */}
+              <Popover>
+                <PopoverTrigger
+                  render={
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      data-testid="rec-settings"
+                      aria-label="Recorder settings"
+                      className="h-7 w-7 shrink-0 text-muted-foreground/70"
+                    >
+                      <Settings2 className="h-3.5 w-3.5" />
+                    </Button>
+                  }
+                />
+                <PopoverContent align="end" side="top" className="w-64 p-1.5">
+                  <button
+                    type="button"
+                    data-testid="rec-auto-advance"
+                    aria-pressed={autoAdvance}
+                    onClick={() => setRecordingAutoAdvance(!autoAdvance)}
+                    className="flex w-full items-start gap-2.5 rounded-md p-2 text-left hover:bg-muted"
+                  >
+                    <ChevronsRight
+                      className={cn("mt-0.5 h-4 w-4 shrink-0", autoAdvance ? "text-foreground" : "text-muted-foreground/50")}
+                    />
+                    <span className="min-w-0">
+                      <span className="block text-xs font-medium">Move on after saving</span>
+                      <span className="block text-[11px] leading-snug text-muted-foreground">
+                        {autoAdvance ? "Jumps to the next line" : "Stays on this line"}
+                      </span>
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="rec-beep"
+                    aria-pressed={beepEnabled}
+                    onClick={() => setBeepEnabled(!beepEnabled)}
+                    className="flex w-full items-start gap-2.5 rounded-md p-2 text-left hover:bg-muted"
+                  >
+                    {beepEnabled ? (
+                      <Volume2 className="mt-0.5 h-4 w-4 shrink-0" />
+                    ) : (
+                      <VolumeX className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground/50" />
+                    )}
+                    <span className="min-w-0">
+                      <span className="block text-xs font-medium">Countdown beep</span>
+                      <span className="block text-[11px] leading-snug text-muted-foreground">
+                        {beepEnabled ? "3-2-1 tones before recording" : "Silent countdown"}
+                      </span>
+                    </span>
+                  </button>
+                </PopoverContent>
+              </Popover>
+            </div>
+          </div>
+
+          {/* THE DRAWER, collapsed only — takes every pixel the panel has left,
+              and is ALWAYS rendered even with nothing in it. A conditional
+              drawer left the strip above floating mid-dialog with dead space
+              beneath it, and made the whole bottom of the panel jump as takes
+              came and went between phases. */}
+          {!showFilm && (
+            <div className="min-h-0 flex-1 overflow-y-auto bg-muted/20">
+              {recordingTakes.length > 0 && activeCell ? (
+                <TakesStrip
+                  chromeless
+                  projectId={project.id}
+                  fileId={activeCell.fileId}
+                  cellId={activeCell.id}
+                  takes={recordingTakes}
+                  onLastTakeRemoved={onLastTakeRemoved}
+                  selectedAudioId={audioEntry?.selectedAudioId ?? null}
+                  selectedGeneratedAudioId={audioEntry?.selectedGeneratedVoiceAudioId ?? null}
+                  sourceClip={sourceClip}
+                  author={username}
+                  session={session ?? null}
+                />
+              ) : (
+                <p className="px-4 py-6 text-center text-xs text-muted-foreground/60">
+                  No takes yet — record one and it lands here.
+                </p>
+              )}
+            </div>
           )}
         </div>
-        </div>{/* end recording column */}
 
         <style>{`
           @keyframes pop {

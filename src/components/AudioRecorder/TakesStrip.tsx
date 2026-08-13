@@ -63,6 +63,10 @@ interface Props {
   sourceClip?: AudioAttachmentOut | null
   author: string
   session: FrontierSession | null
+  /** Rows only: no border, no "Takes (N)" heading, tighter padding. The
+   *  recorder's utility strip owns that chrome and the count, so the two
+   *  cannot say the same thing twice. */
+  chromeless?: boolean
 }
 
 export function TakesStrip({
@@ -76,6 +80,7 @@ export function TakesStrip({
   sourceClip = null,
   author,
   session,
+  chromeless = false,
 }: Props) {
   const [playingId, setPlayingId] = useState<string | null>(null)
   const [loadingId, setLoadingId] = useState<string | null>(null)
@@ -340,10 +345,15 @@ export function TakesStrip({
   const haveTake = new Set(takes.map((t) => t.audioId))
 
   return (
-    <div className="border-t px-5 py-3">
-      <div className="mb-2 text-xs text-muted-foreground/60">
-        Takes ({takes.length})
-      </div>
+    <div className={chromeless ? "px-4 py-2" : "border-t px-5 py-3"}>
+      {/* The recorder's utility strip carries the count and the border itself,
+          so inside it this component renders rows and nothing else — two
+          "Takes (3)" headings three inches apart is the failure this avoids. */}
+      {!chromeless && (
+        <div className="mb-2 text-xs text-muted-foreground/60">
+          Takes ({takes.length})
+        </div>
+      )}
       {/* Round 8: rows, not chips — one take per line, name first.
           The strip does NOT cap or scroll itself: its container does. In the
           narrow recorder it is a drawer filling the column's lower half; beside

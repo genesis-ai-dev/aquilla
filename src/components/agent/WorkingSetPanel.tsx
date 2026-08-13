@@ -336,6 +336,15 @@ const WorkingSetRowView = memo(function WorkingSetRowView({
             {row.ref ?? "·"}
           </span>
         </AppTooltip>
+        {/* AQU-846: the destination file, so an accept never lands somewhere
+            the user didn't expect. */}
+        {row.fileName && (
+          <AppTooltip content={`In ${row.fileName}`}>
+            <span className="max-w-full truncate text-[10px] text-muted-foreground">
+              {row.fileName}
+            </span>
+          </AppTooltip>
+        )}
         {stateLabel && <span className={cn("text-[10px] font-medium", stateClass)}>{stateLabel}</span>}
         {row.fileId && onJumpToCell && (
           <AppTooltip content="Open in editor">

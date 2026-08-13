@@ -17,7 +17,7 @@
  */
 
 import { useMemo, useState } from "react"
-import { Check, ChevronDown, ChevronUp, MessageSquare, Pencil, ShieldCheck } from "lucide-react"
+import { Check, ChevronDown, ChevronUp, FileText, MessageSquare, Pencil, ShieldCheck } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -143,6 +143,17 @@ function StagedEventRow({
       <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
         <Icon className="h-3 w-3 shrink-0 text-muted-foreground" />
         <span className="font-medium">{label}</span>
+        {/* AQU-846: name the destination file on every row. The user approves
+            believing the change lands in the file they have open — say so
+            explicitly rather than leaving it to a bare verse ref. */}
+        {ev.display.fileName && (
+          <AppTooltip content={`This change lands in ${ev.display.fileName}`}>
+            <Badge variant="outline" className="max-w-[12rem] gap-1 px-1.5 py-0 text-[10px]">
+              <FileText className="h-2.5 w-2.5 shrink-0" />
+              <span className="truncate">{ev.display.fileName}</span>
+            </Badge>
+          </AppTooltip>
+        )}
         {ev.display.canonicalRef && (
           <Badge variant="secondary" className="px-1.5 py-0 font-mono text-[10px]">
             {ev.display.canonicalRef}

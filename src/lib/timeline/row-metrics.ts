@@ -91,9 +91,43 @@ export const MIN_CHIP_LABEL_H_PX = 22
 export const MIN_CHIP_REMOVE_H_PX = 26
 /** Below this the resize grips are a target smaller than the pointer. */
 export const MIN_CHIP_GRIP_H_PX = 18
-/** Below this the `h-7` hover circle would spill out of its row and be clicked
- *  through the neighbouring lane. */
-export const MIN_SLOT_BUTTON_H_PX = 28
+/** The pencil/mic circle at full size — the `h-7` it was hard-coded to. */
+export const SLOT_BUTTON_MAX_PX = 28
+/** ...and the smallest it is worth drawing. Below a 16px target the circle is
+ *  smaller than the pointer that has to hit it, and an icon inside it is a
+ *  smudge. */
+export const SLOT_BUTTON_MIN_PX = 16
+
+/**
+ * How big the "add a line here" / "record here" circle is in a slot this tall
+ * and this wide.
+ *
+ * IT SHRINKS, IT DOES NOT VANISH. Stage 3 gated it to disappear below a 28px
+ * chip, reasoning that a fixed circle would overhang a short row and be
+ * clickable from the lane above — true, but the wrong repair, and Sam has now
+ * made the same correction twice (the gutter's mute button, then this): a
+ * control that no longer fits gets smaller, it does not get taken away. These
+ * are the only way to put a line in a silence, and a compact timeline is
+ * exactly when you can see all the silences at once.
+ *
+ * Height is the constraint that actually bites; width is allowed to overhang a
+ * narrow gap the way it always has (`MIN_SLOT_PX` is 5px, deliberately), which
+ * is why the floor applies after both. Nothing changes at the default row: 46px
+ * of chip and any normal gap give back exactly the 28px that was hard-coded.
+ */
+export function slotButtonPx(chipH: number, slotWidthPx: number): number {
+  if (!Number.isFinite(chipH) || !Number.isFinite(slotWidthPx)) return SLOT_BUTTON_MAX_PX
+  // -4 so the circle keeps a little air inside its slot rather than reaching
+  // the chip's own edges, where it reads as a badge rather than a button.
+  const fits = Math.min(SLOT_BUTTON_MAX_PX, Math.floor(chipH) - 4, Math.floor(slotWidthPx))
+  return Math.max(SLOT_BUTTON_MIN_PX, Math.min(SLOT_BUTTON_MAX_PX, fits))
+}
+
+/** The glyph inside it. Half the circle — at the full 28px that is the 14px
+ *  (`h-3.5`) the icons were written with, so the default is untouched. */
+export function slotIconPx(buttonPx: number): number {
+  return Math.max(8, Math.round(buttonPx / 2))
+}
 
 // The GUTTER's gates. Stage 3 taught the chips to shed furniture as their rows
 // shrank and left the labels beside them rendering at full size into a clip —

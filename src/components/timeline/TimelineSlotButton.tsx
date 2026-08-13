@@ -22,10 +22,13 @@
 
 import type { ReactNode } from "react"
 
+import { SLOT_BUTTON_MAX_PX } from "@/lib/timeline/row-metrics"
+
 export function TimelineSlotButton({
   testId,
   label,
   hot,
+  sizePx = SLOT_BUTTON_MAX_PX,
   onClick,
   children,
 }: {
@@ -35,6 +38,10 @@ export function TimelineSlotButton({
   /** The lane says the pointer is on this slot. See the header for why the
    *  browser is not asked. */
   hot: boolean
+  /** The circle's diameter, from `slotButtonPx` — the lane knows how tall its
+   *  rows are and how wide this slot is, and this button does not. Defaults to
+   *  the size it was hard-coded to before the vertical zoom existed. */
+  sizePx?: number
   onClick(): void
   children: ReactNode
 }) {
@@ -50,8 +57,9 @@ export function TimelineSlotButton({
         e.stopPropagation()
         onClick()
       }}
+      style={{ width: `${sizePx}px`, height: `${sizePx}px` }}
       className={[
-        "flex h-7 w-7 items-center justify-center rounded-full text-muted-foreground opacity-0 transition-all",
+        "flex shrink-0 items-center justify-center rounded-full text-muted-foreground opacity-0 transition-all",
         // The circle arrives with the pointer, not before.
         hot ? "bg-background opacity-100 shadow-sm ring-1 ring-border" : "",
         "hover:text-foreground",

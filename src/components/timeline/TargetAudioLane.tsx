@@ -23,7 +23,8 @@ import { isVisible, secToPx, pxToSec, chipRadiusPx } from "@/lib/timeline/scale"
 import {
   MIN_CHIP_GRIP_H_PX,
   MIN_CHIP_META_H_PX,
-  MIN_SLOT_BUTTON_H_PX,
+  slotButtonPx,
+  slotIconPx,
   TL_CHIP_BOX_CLASS,
   TL_ROW_H_CLASS,
 } from "@/lib/timeline/row-metrics"
@@ -652,13 +653,12 @@ export function TargetAudioLane({
   // add-and-record slot and an empty-section slot can never both be lit. Keys
   // are prefixed because a span start and a cell id share no namespace.
   const { hotKey, slotHoverProps } = useHotSlot(viewStartSec, pxPerSec)
-  // AQU-646 stage 3: the mic is an `h-7` circle in a slot with no
-  // overflow-hidden, so on a short row it draws over the lanes above and below
-  // and can be clicked from either. Hover-only anyway, so it costs nothing to
-  // drop where the row is a colour band rather than a place anyone records
-  // from.
+  // The mic is a circle in a slot with no overflow-hidden, so at a fixed size it
+  // draws over the lanes above and below on a short row. Stage 3 hid it there;
+  // it shrinks now instead, because a compact timeline is exactly when you can
+  // see every un-dubbed stretch at once and want to record into one. See
+  // `slotButtonPx`.
   const { chipH } = useRowMetrics()
-  const showsSlotButton = chipH >= MIN_SLOT_BUTTON_H_PX
 
   // SUB-51: a record button hiding in the empty space under each dub-free
   // section. Rendered BEFORE the chips and with no z-index, so a real chip —
@@ -709,16 +709,21 @@ export function TargetAudioLane({
             className={`absolute ${TL_CHIP_BOX_CLASS} flex items-center justify-center`}
             {...slotHoverProps(`add-${span.startSec}`)}
           >
-            {showsSlotButton && (
+            {(() => {
+              const buttonPx = slotButtonPx(chipH, widthPx)
+              const iconPx = slotIconPx(buttonPx)
+              return (
               <TimelineSlotButton
                 testId={`tl-target-add-${span.startSec}-record`}
                 label="Record over this stretch"
                 hot={hotKey === `add-${span.startSec}`}
+                sizePx={buttonPx}
                 onClick={() => onAddLineAndRecord(span.startSec, span.endSec)}
               >
-                <Mic className="h-3.5 w-3.5" />
+                <Mic style={{ width: `${iconPx}px`, height: `${iconPx}px` }} />
               </TimelineSlotButton>
-            )}
+              )
+            })()}
           </div>
         )
       })}
@@ -730,19 +735,24 @@ export function TargetAudioLane({
           className={`absolute ${TL_CHIP_BOX_CLASS} flex items-center justify-center`}
           {...slotHoverProps(`empty-${cell.id}`)}
         >
-          {showsSlotButton && (
-            <TimelineSlotButton
-              testId={`tl-target-empty-${cell.id}-record`}
-              label="Record audio for this line"
-              hot={hotKey === `empty-${cell.id}`}
-              onClick={() => {
-                onSelect(cell.id)
-                onOpenRecording?.(cell.id)
-              }}
-            >
-              <Mic className="h-3.5 w-3.5" />
-            </TimelineSlotButton>
-          )}
+          {(() => {
+            const buttonPx = slotButtonPx(chipH, widthPx)
+            const iconPx = slotIconPx(buttonPx)
+            return (
+              <TimelineSlotButton
+                testId={`tl-target-empty-${cell.id}-record`}
+                label="Record audio for this line"
+                hot={hotKey === `empty-${cell.id}`}
+                sizePx={buttonPx}
+                onClick={() => {
+                  onSelect(cell.id)
+                  onOpenRecording?.(cell.id)
+                }}
+              >
+                <Mic style={{ width: `${iconPx}px`, height: `${iconPx}px` }} />
+              </TimelineSlotButton>
+            )
+          })()}
         </div>
       ))}
       {chips.map((chip, i) =>

@@ -988,7 +988,8 @@ export function TimelineEditor({
    * horizontal moves at all. Adding an anchor here would be motion for its own
    * sake.
    */
-  function applyRowHeight(next: number) {
+  /** Commit a height without disturbing the pinch accumulator. */
+  function commitRowHeight(next: number) {
     const h = clampRowHeight(next)
     setRowH(h)
     try {
@@ -996,6 +997,15 @@ export function TimelineEditor({
     } catch {
       /* private mode / unavailable — the height just won't persist */
     }
+  }
+
+  /** The stepper's entry point, and anything else that sets a height outright:
+   *  commit it AND re-seat the pinch accumulator, so a pinch begun after a
+   *  button press carries on from what the button did rather than from wherever
+   *  the last pinch happened to stop. */
+  function applyRowHeight(next: number) {
+    rowHTargetRef.current = clampRowHeight(next)
+    commitRowHeight(next)
   }
 
   /**
@@ -1165,10 +1175,20 @@ export function TimelineEditor({
   //    detach/re-attach gaps.
   const pxPerSecRef = useRef(pxPerSec)
   pxPerSecRef.current = pxPerSec
-  // Same trick for the row height: the wheel listener attaches once, so it
-  // cannot close over the state.
-  const rowHRef = useRef(rowH)
-  rowHRef.current = rowH
+  /**
+   * The row height a ⌘-pinch is steering toward, advanced SYNCHRONOUSLY on
+   * every wheel event.
+   *
+   * This is not the same thing as a ref that mirrors the state, and the first
+   * cut of the gesture used one of those and barely moved. A pinch emits dozens
+   * of events per frame while React re-renders once, so every event in a burst
+   * read the same stale height, computed the same small step from it, and threw
+   * all but the last away — a vigorous pinch advanced about one step per frame
+   * and read as broken. The horizontal zoom has always had this accumulator
+   * (`zoomTargetRef`); the vertical one skipped it along with the easing loop it
+   * sits next to, and only the easing was genuinely unwanted.
+   */
+  const rowHTargetRef = useRef(rowH)
   const zoomAnchorRef = useRef<{ timeSec: number; offsetX: number } | null>(null)
   // Eased zoom: wheel/pinch moves a TARGET; the committed zoom glides toward it
   // (~35%/frame exponential approach) for a light accel/decel feel. The first
@@ -1229,17 +1249,23 @@ export function TimelineEditor({
       // it without inventing a modifier the gesture does not report.)
       if (e.metaKey) {
         const rowMag = Math.abs(e.deltaY)
-        const rowSpeed = rowMag >= 90 ? rowMag * 0.0022 : Math.min(rowMag * 0.019, 0.55)
-        const from = rowHRef.current
-        const raw = from * Math.exp(e.deltaY < 0 ? rowSpeed : -rowSpeed)
-        // A ROW HEIGHT IS AN INTEGER (see clampRowHeight — half pixels blur
-        // every border-b), so a proportional step has a floor the horizontal
-        // zoom does not: at 66px a gentle tick works out to a third of a pixel,
-        // which rounds straight back to 66 and the gesture does nothing at all
-        // no matter how long it is held. Below one pixel the step becomes one
-        // pixel, which is also the finest move this control HAS.
-        const delta = raw - from
-        applyRowHeight(from + (Math.abs(delta) < 1 ? Math.sign(delta) : delta))
+        // Half the horizontal gain, because the two axes travel very different
+        // distances for the same gesture: seconds/px spans 8→240, a factor of
+        // 30, while a row spans 24→160, under 7. Sharing the exponent made the
+        // rows arrive at their limit about four times sooner than the seconds
+        // do, which reads as a control with two settings.
+        const rowSpeed = (rowMag >= 90 ? rowMag * 0.0022 : Math.min(rowMag * 0.019, 0.55)) * 0.5
+        // FRACTIONAL, and from the accumulator rather than the rendered height.
+        // Both halves matter. A row height is an integer — half pixels blur the
+        // border under every lane — so a gentle tick's third-of-a-pixel step
+        // rounds straight back to where it started, and a gesture built on the
+        // committed value cannot move at all however long it is held. The
+        // fraction is kept here and only the DISPLAY is rounded, so slow pinches
+        // accumulate instead of being thrown away one tick at a time.
+        const from = rowHTargetRef.current
+        const next = from * Math.exp(e.deltaY < 0 ? rowSpeed : -rowSpeed)
+        rowHTargetRef.current = Math.min(ROW_H_MAX, Math.max(ROW_H_MIN, next))
+        commitRowHeight(rowHTargetRef.current)
         return
       }
       // Two very different inputs share this event: trackpad PINCH ticks are
@@ -1511,7 +1537,21 @@ export function TimelineEditor({
         // TimelineCard's labelText). Frozen: moving a translation would mean
         // moving the cue, which is the source row's timing and not ours.
         return (
-          <TimelineLane key={track.id} cells={subtitle} variant="target-subtitle" retimable={false} {...laneProps} />
+          <TimelineLane
+            key={track.id}
+            cells={subtitle}
+            variant="target-subtitle"
+            retimable={false}
+            {...laneProps}
+            // The same pencil, in the same silences, doing the same thing —
+            // and that is the point (Sam, 2026-08-13). It creates the SAME cell
+            // the source row's pencil creates, because these two rows are two
+            // views of one set of cues. Offering it on one row and not the
+            // other would have the user learn which half of a pair of identical
+            // rows accepts a new line, which is a rule with no reason behind it.
+            emptySpans={addableSpans}
+            onAddLine={canAddLine && onAddLine ? (s, e) => void onAddLine(s, e) : undefined}
+          />
         )
       case "target-audio":
         return (

@@ -6,19 +6,32 @@ a later run completes.
 
 ## "D1 is the live datastore" comment drift
 
-- **Files**: systemic — 500+ hits across dozens of files (sampled instances:
-  `src/hooks/useCells.ts:1`, `src/components/HistoryDrawer.tsx:20`,
-  `src/components/EditorTable.tsx:697,4816`, `src/components/CellActionsMenu.tsx:29,43`).
-- **Friction**: comments describe D1 as the live datastore/audit source; the D1→Postgres
-  (Neon/Hyperdrive) cutover is complete per CLAUDE.md. Misleads readers about where reads
-  actually go.
-- **Why deferred**: too large for one ≤300-line/≤8-file PR. Needs its own dedicated
-  "comment/doc drift" run (theme 6) scoped to a manageable slice (e.g. just `src/hooks/` +
-  `src/components/` in one pass, then the rest in a follow-up), rather than attempting all
-  500+ hits at once.
+- **Status**: `src/hooks/` and `src/components/` slice done in the 2026-08-11 run (7 files:
+  `useCellsAuditStatsWithOverlay.ts`, `useRules.ts`, `HistoryDrawer.tsx`, `EditorTable.tsx`,
+  `TerminologyTermDetail.tsx`, `ProjectWorkspace.tsx`, `RuleSuggestFromEditsDialog.tsx`) —
+  comment-only, reworded to "Postgres"/"server" instead of "D1".
+- **Remaining files**: `src/lib/` still has real hits describing D1 as the live datastore —
+  `src/lib/sync/audit-stats-overlay.ts:2,4` ("D1-backed audit stats" / "D1 is the source of
+  truth"), `src/lib/sync/project-settings.ts:50` ("Synced to D1"), `src/lib/sync/
+  file-projection.ts:18` ("the D1 rows remain"), `src/lib/sync/events-emit.ts:62`
+  ("round-tripped to D1"), `src/lib/audio/transcribe.ts:3,204,295` ("D1 event log" /
+  "Persist ... durably via D1"), `src/lib/audio/timings.ts:3`, `src/lib/rules/edit-miner.ts:
+  7,32`, `src/lib/export/export-service.ts:3`, `src/lib/frontier/members.ts:20`,
+  `src/lib/global-tm/index.ts:17`, `src/lib/migrate/group-sync.ts:5` (this last one already
+  frames it as historical — "completing the D1→Neon cutover" — verify before touching, it
+  may already be correct).
+- **False positives to skip** (not database D1 — a paragraph-model spec-section tag, see
+  `docs/superpowers/specs/2026-06-18-paragraph-drafting-retrieval-context-design.md`):
+  `src/hooks/useCells.ts:123,309`, `src/lib/parsers/paragraphs.ts`, `src/lib/parsers/types.ts:
+  52`, `src/lib/sync/bulk-import.ts:67`, `src/lib/parsers/usfm-lossless.ts:31`,
+  `src/lib/parsers/text-splitter.ts:6`. Also skip `AD-2 chain pointer... entry came from D1`
+  at `src/lib/parsers/types.ts:723` only after re-reading in context (mixed usage nearby).
+- **Why deferred further**: `src/lib/` is ~50 subsystems; doing it in the same pass as
+  `src/hooks/`+`src/components/` would have exceeded the ≤8-file budget. Good candidate for
+  the next comment-drift-themed run.
 - **Proof needed**: comment-only edits; verify each hit is genuinely describing D1 as live
-  (not historical "migrated from D1" framing) before touching it — some framing may already
-  be correct and should be left alone.
+  (not historical "migrated from D1" framing, not the paragraph-model tag above) before
+  touching it.
 
 ## "frontier-server" mentions in sync-worker
 

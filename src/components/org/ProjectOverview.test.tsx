@@ -1693,18 +1693,16 @@ describe("ProjectOverview lane table + tabs (AQU-538 §3.3)", () => {
     await waitFor(() => expect(statTile("Translated")).toHaveTextContent("50%"))
   })
 
-  it("each lane row's Open menu item deep-links the workspace at that lane (?lane=)", async () => {
+  it("lane row ⋯ menu has Assign and Staff, not Open", async () => {
     useLaneProject()
     getPortfolio.mockResolvedValue([laneProject()])
     renderOverview()
 
     await screen.findByTestId("overview-lane-table")
     fireEvent.click(screen.getByTestId("overview-lane-actions-es"))
-    expect(screen.getByTestId("overview-lane-open-es").getAttribute("href")).toBe("/project/p1/editor?lane=es")
-
-    // Close and open the default-lane menu — default lane has no lane param.
-    fireEvent.click(screen.getByTestId("overview-lane-actions-default"))
-    expect(screen.getByTestId("overview-lane-open-default").getAttribute("href")).toBe("/project/p1/editor")
+    expect(screen.queryByRole("menuitem", { name: /^open$/i })).not.toBeInTheDocument()
+    expect(screen.getByRole("menuitem", { name: /assign/i })).toBeInTheDocument()
+    expect(screen.getByRole("menuitem", { name: /staff/i })).toBeInTheDocument()
   })
 
   it("Assign… from a lane row ⋯ menu mounts AssignModal pinned to that lane", async () => {

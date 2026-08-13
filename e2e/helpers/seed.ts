@@ -1,3 +1,5 @@
+import { withTransportRetry } from "./transport-retry"
+
 const FRONTIER_BASE =
   process.env.VITE_FRONTIER_BASE ?? "http://127.0.0.1:8787"
 
@@ -14,12 +16,16 @@ export const SEED_USERS: SeedUser[] = [
 ]
 
 /** Hits the /__test__/reset route to truncate + reseed the local D1.
- * Throws on any non-2xx response. */
+ * Throws on any non-2xx response. Retries transient wrangler transport
+ * errors (ECONNREFUSED / fetch failed) the same way login does — a dead
+ * identity worker still fails the test after the last attempt. */
 export async function resetBackend(): Promise<void> {
-  const r = await fetch(`${FRONTIER_BASE}/__test__/reset`, { method: "POST" })
-  if (!r.ok) {
-    throw new Error(`backend reset failed: HTTP ${r.status} — ${await r.text()}`)
-  }
+  await withTransportRetry(async () => {
+    const r = await fetch(`${FRONTIER_BASE}/__test__/reset`, { method: "POST" })
+    if (!r.ok) {
+      throw new Error(`backend reset failed: HTTP ${r.status} — ${await r.text()}`)
+    }
+  })
 }
 
 /** Lookup a seed user by username. */

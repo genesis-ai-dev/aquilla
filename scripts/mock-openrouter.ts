@@ -19,8 +19,6 @@
 // Run: npx tsx scripts/mock-openrouter.ts [port]
 
 import http from "node:http"
-import { resolve } from "node:path"
-import { fileURLToPath } from "node:url"
 
 const PORT = Number(process.argv[2]) || 9456
 
@@ -360,6 +358,11 @@ export function scriptMockResponse(messages: ChatMessage[]) {
 }
 
 const server = http.createServer((req, res) => {
+  if (req.method === "GET" && (req.url === "/" || req.url === "/healthz")) {
+    res.writeHead(200, { "Content-Type": "application/json" })
+    res.end(JSON.stringify({ ok: true }))
+    return
+  }
   if (req.method !== "POST" || !req.url?.endsWith("/chat/completions")) {
     res.writeHead(404).end("not found")
     return
@@ -395,9 +398,9 @@ const server = http.createServer((req, res) => {
   })
 })
 
-const isDirectRun = process.argv[1]
-  ? resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url))
-  : false
+const isDirectRun = process.argv.some((arg) =>
+  arg.replace(/\\/g, "/").endsWith("scripts/mock-openrouter.ts"),
+)
 
 if (isDirectRun) {
   server.listen(PORT, "127.0.0.1", () => {

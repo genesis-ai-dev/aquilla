@@ -144,7 +144,6 @@ export function InviteStep({ projectId, onSharesChanged }: InviteStepProps) {
                     <Button
                       type="submit"
                       form="invite-member-form"
-                      size="sm"
                       disabled={form.state.isSubmitting || !session?.jwt}
                     >
                       {form.state.isSubmitting ? (
@@ -190,7 +189,6 @@ export function InviteStep({ projectId, onSharesChanged }: InviteStepProps) {
           {!issuedUrl && (
             <Button
               type="button"
-              size="sm"
               variant="outline"
               onClick={handleCreateLink}
               disabled={linkBusy || !session?.jwt}
@@ -208,7 +206,6 @@ export function InviteStep({ projectId, onSharesChanged }: InviteStepProps) {
               <AppTooltip content={copied ? "Copied!" : "Copy"}>
                 <Button
                   type="button"
-                  size="sm"
                   variant="ghost"
                   onClick={() => copyUrl(issuedUrl)}
                   className="h-7 w-7 p-0"
@@ -224,7 +221,6 @@ export function InviteStep({ projectId, onSharesChanged }: InviteStepProps) {
             </div>
             <Button
               type="button"
-              size="sm"
               variant="ghost"
               onClick={() => { setIssuedUrl(null); setCopied(false) }}
               className="h-7 w-full text-xs"

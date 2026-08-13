@@ -3,12 +3,10 @@ import { ChevronRight, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { AppTooltip } from "@/components/ui/tooltip";
 import { Checkbox } from "@/components/ui/checkbox";
-import {
-  Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue,
-} from "@/components/ui/select";
 import { formatRelativeTime, isStale } from "@/lib/time/relative";
 import { RoleLabel } from "@/components/RoleLabel";
-import { roleDisplayText } from "@/lib/frontier/roles";
+import { RoleSelect } from "@/components/RoleSelect";
+import { UsernameWithAvatar } from "@/components/UsernameWithAvatar";
 import { MemberMultiAddRow, type MemberAddOutcome } from "@/components/MemberMultiAddRow";
 import type { UserSearchResult } from "@/hooks/useUserSearch";
 
@@ -79,6 +77,16 @@ interface MembersPanelProps {
    * single batch request (never a client-side fan-out).
    */
   onAdd: (usernames: string[], role: number) => Promise<MemberAddOutcome[]>;
+  /**
+   * AQU-780: map a whole-batch add failure (a thrown error where nothing
+   * landed — e.g. a 403 owner-gate, a 429, or a 5xx) to the message shown
+   * under the add row. Forwarded verbatim to MemberMultiAddRow. Without it,
+   * the row falls back to a generic "Could not add — please try again.",
+   * which hides the real cause (a non-owner was told to doubt the username
+   * exists). Return null to suppress the inline message when the caller
+   * surfaces the failure itself.
+   */
+  onAddBatchError?: (e: unknown) => string | null;
   onRemove: (userId: number) => Promise<void>;
   onChangeRole?: (username: string, role: number) => Promise<void>;
   /** Caller's own user id, used to block self-edit affordances. Pass null when
@@ -107,6 +115,7 @@ export function MembersPanel({
   roleOptions,
   newMemberDefaultRole,
   onAdd,
+  onAddBatchError,
   onRemove,
   onChangeRole,
   callerUserId,
@@ -144,7 +153,7 @@ export function MembersPanel({
           return (
             <li key={m.userId} className="flex min-w-0 flex-col gap-2 overflow-x-hidden px-3 py-2">
               <div className="flex min-w-0 items-center gap-3">
-              <span className="min-w-0 truncate font-medium">{m.username}</span>
+              <UsernameWithAvatar username={m.username} className="min-w-0" />
               <RoleLabel name={m.roleName} className="text-xs text-muted-foreground" />
               {m.source === "org" && (
                 <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">via org</span>
@@ -158,32 +167,18 @@ export function MembersPanel({
               <LastActiveChip lastActiveAt={m.lastActiveAt} />
               <div className="ml-auto flex items-center gap-2">
                 {onChangeRole && !m.isLocked && !isSelf && (
-                  <Select
-                    items={[
-                      // Current role may sit above the caller's grantable cap
-                      // (e.g. owner 700); include it so the closed trigger
-                      // renders the role name instead of the raw level.
-                      ...(grantableRoles.some((r) => r.level === m.roleLevel)
-                        ? []
-                        : [{ value: String(m.roleLevel), label: roleDisplayText(m.roleName) }]),
-                      ...grantableRoles.map((r) => ({ value: String(r.level), label: roleDisplayText(r.name) })),
-                    ]}
-                    value={String(m.roleLevel)}
-                    onValueChange={(v) => onChangeRole(m.username, parseInt(v ?? "", 10))}
-                  >
-                    <SelectTrigger size="sm" aria-label="Change role">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectGroup>
-                        {grantableRoles.map((r) => (
-                          <SelectItem key={r.level} value={String(r.level)}>
-                            <RoleLabel name={r.name} />
-                          </SelectItem>
-                        ))}
-                      </SelectGroup>
-                    </SelectContent>
-                  </Select>
+                  <RoleSelect
+                    options={grantableRoles}
+                    currentOption={
+                      grantableRoles.some((r) => r.level === m.roleLevel)
+                        ? null
+                        : { level: m.roleLevel, name: m.roleName }
+                    }
+                    value={m.roleLevel}
+                    onValueChange={(level) => void onChangeRole(m.username, level)}
+                    size="sm"
+                    aria-label="Change role"
+                  />
                 )}
                 {!m.isLocked && !isSelf ? (
                   <Button
@@ -219,6 +214,7 @@ export function MembersPanel({
         roleOptions={grantableRoles}
         defaultRole={newMemberDefaultRole}
         onAdd={onAdd}
+        onBatchErrorMessage={onAddBatchError}
         excludedUserIds={existingUserIds}
         scopedUserSearch={scopedUserSearch}
         suggestions={suggestions}
@@ -379,7 +375,7 @@ function MemberScopesEditor({
             </fieldset>
           )}
           <div className="flex items-center gap-2">
-            <Button size="sm" onClick={handleSave} disabled={saving}>
+            <Button onClick={handleSave} disabled={saving}>
               {saving ? "Saving…" : "Save scopes"}
             </Button>
             {saveError && <span className="text-destructive">{saveError}</span>}

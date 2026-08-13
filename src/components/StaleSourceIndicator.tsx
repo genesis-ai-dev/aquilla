@@ -28,6 +28,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import { useStaleSourceCells } from "@/hooks/useStaleSourceCells"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 interface BaseProps {
   cellId: string
@@ -66,10 +67,6 @@ interface StandaloneProps extends BaseProps {
 
 export type StaleSourceIndicatorProps = ManagedProps | StandaloneProps
 
-const DEFAULT_TOOLTIP =
-  "The source has changed since this translation was last revised."
-const DEFAULT_UPSTREAM_TOOLTIP =
-  "Something further upstream in the translation chain has changed — this cell's ancestry is stale."
 
 export function StaleSourceIndicator(props: StaleSourceIndicatorProps) {
   if (isManaged(props)) {
@@ -125,6 +122,7 @@ function StaleBadge({
   upstreamTooltipText?: string
   iconClassName?: string
 }) {
+  const t = useT()
   if (!direct && !inherited) return null
   // Direct (amber) takes priority when both apply — it's the more
   // actionable signal (this project's own pin moved), and showing both
@@ -136,7 +134,7 @@ function StaleBadge({
           render={
             <span
               role="img"
-              aria-label="Source changed since last revision"
+              aria-label={t("editor.stale.directLabel")}
               className="inline-flex items-center text-amber-600 dark:text-amber-400"
               data-testid="stale-source-indicator"
             />
@@ -145,7 +143,7 @@ function StaleBadge({
           <AlertTriangle className={iconClassName ?? "h-3 w-3"} />
         </TooltipTrigger>
         <TooltipContent side="top">
-          {tooltipText ?? DEFAULT_TOOLTIP}
+          {tooltipText ?? t("editor.stale.directTooltip")}
         </TooltipContent>
       </Tooltip>
     )
@@ -156,7 +154,7 @@ function StaleBadge({
         render={
           <span
             role="img"
-            aria-label="Upstream ancestry changed"
+            aria-label={t("editor.stale.upstreamLabel")}
             className="inline-flex items-center rounded-sm border border-dotted border-violet-500 text-violet-600 dark:border-violet-400 dark:text-violet-400"
             data-testid="upstream-stale-source-indicator"
           />
@@ -165,7 +163,7 @@ function StaleBadge({
         <GitBranchPlus className={iconClassName ?? "h-3 w-3"} />
       </TooltipTrigger>
       <TooltipContent side="top">
-        {upstreamTooltipText ?? DEFAULT_UPSTREAM_TOOLTIP}
+        {upstreamTooltipText ?? t("editor.stale.upstreamTooltip")}
       </TooltipContent>
     </Tooltip>
   )

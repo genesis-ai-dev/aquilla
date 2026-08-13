@@ -1,4 +1,4 @@
-import type { BrandData } from "../types"
+import type { BrandData } from "../types.ts"
 
 // Clean "Linear" identity. Flat surfaces separated by stepped background
 // lightness (chrome greyer than content, content below white cards/popovers)

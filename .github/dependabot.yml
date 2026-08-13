@@ -14,6 +14,13 @@ updates:
       npm-major:
         update-types:
           - major
+    ignore:
+      # v9 is a full API rewrite (no useReactTable/getCoreRowModel root
+      # exports); ~18 files still use the v8 API. Remove once a deliberate
+      # migration lands.
+      - dependency-name: "@tanstack/react-table"
+        update-types:
+          - "version-update:semver-major"
 
   - package-ecosystem: npm
     directory: "/auth-worker"

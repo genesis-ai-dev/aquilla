@@ -1,5 +1,5 @@
-// AQU-538 §3.2 — org "Language Grid" on the project table: lane chips,
-// expandable per-lane sub-rows, "+ Language" quick action gating.
+// AQU-538 §3.2 — org "Language Grid" on the project table: lane chips and
+// expandable per-lane sub-rows.
 
 import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent, within } from "@testing-library/react"
@@ -72,15 +72,91 @@ function renderTable(
 }
 
 describe("OrgProjectsDataTable lane chips (AQU-538 §3.2)", () => {
-  it("uses compact accessible metric headings and left-aligned values", () => {
+  it("renders admin-style Status before Updated and keeps Updated as a date", () => {
+    const stalled = baseProject({
+      id: "stalled",
+      name: "Stalled Gospels",
+      filledCells: 10,
+      lastEditAt: now - 30 * 24 * 60 * 60 * 1000,
+    })
+    renderTable([stalled])
+
+    expect(screen.getByRole("button", { name: /Status/i })).toBeInTheDocument()
+    expect(screen.getByText("Stalled")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /Updated/i })).toBeInTheDocument()
+    // Updated no longer substitutes activity labels for the date.
+    const updatedHeader = screen.getByRole("button", { name: /Updated/i })
+    const headerRow = updatedHeader.closest("tr")
+    const headers = within(headerRow!).getAllByRole("columnheader").map((el) => el.textContent)
+    expect(headers.indexOf("Status")).toBeLessThan(headers.indexOf("Updated"))
+  })
+
+  it("uses teams-style text metric headers and right-aligned muted values", () => {
     renderTable([baseProject({ id: "metrics", filledCells: 40, validatedCells: 20, audioCells: 10 })])
 
-    expect(screen.getByTestId("project-table-translated-header")).toHaveAttribute("aria-label", "Translated")
-    expect(screen.getByTestId("project-table-validated-header")).toHaveAttribute("aria-label", "Validated")
-    expect(screen.getByTestId("project-table-audio-header")).toHaveAttribute("aria-label", "Has audio")
-    expect(screen.getByTestId("project-table-translated-value")).toHaveClass("text-left")
-    expect(screen.getByTestId("project-table-validated-value")).toHaveClass("text-left")
-    expect(screen.getByTestId("project-table-audio-value")).toHaveClass("text-left")
+    expect(screen.getByRole("button", { name: /Translated/i })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /Validated/i })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /^Audio$/i })).toBeInTheDocument()
+    expect(screen.getByTestId("project-table-translated-value")).toHaveClass(
+      "text-right",
+      "tabular-nums",
+      "text-muted-foreground",
+    )
+    expect(screen.getByTestId("project-table-validated-value")).toHaveClass(
+      "text-right",
+      "tabular-nums",
+      "text-muted-foreground",
+    )
+    expect(screen.getByTestId("project-table-audio-value")).toHaveClass(
+      "text-right",
+      "tabular-nums",
+      "text-muted-foreground",
+    )
+  })
+
+  it("fits the embedded overview table to the card instead of overflowing", () => {
+    render(
+      <MemoryRouter>
+        <OrgProjectsDataTable
+          layout="embedded"
+          showOrg
+          testId="project-table"
+          projects={[
+            {
+              ...baseProject({
+                id: "wide",
+                name: "Retry Test for AQU-712 with a deliberately long project name",
+              }),
+              orgName: "Dev Org",
+            },
+          ]}
+          now={now}
+        />
+      </MemoryRouter>,
+    )
+
+    const table = screen.getByTestId("project-table")
+    expect(table).toHaveClass("min-w-0", "w-full")
+    expect(table.className).toContain("[&_[data-slot=table-container]]:overflow-hidden")
+    expect(table.className).not.toContain("overflow-x-auto")
+
+    const htmlTable = table.querySelector('[data-slot="table"]')
+    expect(htmlTable).toHaveClass("table-fixed")
+
+    const nameCell = screen.getByTestId("project-table-name").closest("td")
+    expect(nameCell).toHaveClass("min-w-0", "max-w-0")
+    expect(table.className).toContain("[&_td]:overflow-hidden")
+    expect(screen.getByTestId("project-table-organization")).toHaveClass("min-w-0", "max-w-full")
+    expect(screen.getByRole("button", { name: /^Status$/i })).toBeInTheDocument()
+  })
+
+  it("renders teams-style panel chrome and team-detail cell typography", () => {
+    renderTable([baseProject({ id: "chrome", name: "Gospels" })])
+    expect(screen.getByTestId("org-projects-table")).toHaveClass("rounded-lg!", "bg-card")
+    expect(screen.getByRole("textbox", { name: /Search projects/i })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /Project/i })).toBeInTheDocument()
+    expect(screen.getByText("Gospels")).toHaveClass("font-medium")
+    expect(screen.getByText("maintainer")).toHaveClass("capitalize")
   })
 
   it("renders one chip per lane with the '' default lane first, labeled with the target language", () => {
@@ -98,7 +174,7 @@ describe("OrgProjectsDataTable lane chips (AQU-538 §3.2)", () => {
     const defaultChip = screen.getByTestId("lane-chip-p1-")
     expect(defaultChip).toHaveTextContent("en-target")
     expect(defaultChip).toHaveTextContent("68%")
-    expect(defaultChip.parentElement).toHaveClass("min-w-0", "max-w-full", "flex-1")
+    expect(defaultChip.parentElement).toHaveClass("min-w-0", "max-w-full")
     expect(defaultChip).toHaveClass("min-w-0", "max-w-full", "overflow-hidden")
     const esChip = screen.getByTestId("lane-chip-p1-es")
     expect(esChip).toHaveTextContent("es")
@@ -215,33 +291,5 @@ describe("OrgProjectsDataTable expandable lane sub-rows (AQU-538 §3.2)", () => 
     fireEvent.click(screen.getByTestId("project-row-actions-p1"))
     fireEvent.click(screen.getByRole("menuitem", { name: /assign work/i }))
     expect(screen.getByTestId("assign-open-p1-")).toBeInTheDocument()
-  })
-})
-
-describe("OrgProjectsDataTable '+ Language' quick action (AQU-538 §3.2)", () => {
-  it("shows the + Language action for a maintainer (600+)", () => {
-    renderTable([baseProject({ id: "p1" })], { role: 600 })
-    expect(screen.getByTestId("org-add-lang-p1")).toBeInTheDocument()
-  })
-
-  it("hides the + Language action for a below-maintainer role", () => {
-    renderTable([baseProject({ id: "p1" })], { role: 400 })
-    expect(screen.queryByTestId("org-add-lang-p1")).not.toBeInTheDocument()
-  })
-
-  it("still shows the + Language action when the row's role is unknown (403 surfaces later)", () => {
-    // No role entry for this project id → level is undefined.
-    render(
-      <MemoryRouter>
-        <OrgProjectsDataTable
-          projects={[baseProject({ id: "p1" })]}
-          now={now}
-          roleByProjectId={new Map()}
-          jwt="jwt"
-          author="anna"
-        />
-      </MemoryRouter>,
-    )
-    expect(screen.getByTestId("org-add-lang-p1")).toBeInTheDocument()
   })
 })

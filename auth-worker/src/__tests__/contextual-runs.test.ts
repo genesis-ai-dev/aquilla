@@ -7,6 +7,7 @@
 
 import { env } from "cloudflare:test"
 import { describe, it, expect } from "vitest"
+import { PostgresDb, type PgExecutor } from "../../../db/shim/postgres"
 import {
   createRun,
   getRun,
@@ -25,9 +26,18 @@ import {
   markSteeringConsumed,
   insertDrafts,
   listDrafts,
+  listDraftsByRun,
+  findProposedCellsFromOtherRuns,
   reviewDraft,
   countDrafts,
+  getProjectAutopilotSummary,
+  appendContextualRunEvent,
+  listContextualRunEvents,
+  tryAcquireContextualProjectLease,
+  renewContextualProjectLease,
+  releaseContextualProjectLease,
   STEERING_MAX_BYTES,
+  type ContextualRunEventDetails,
   type SpanCursor,
 } from "../../../db/shared/contextual-runs"
 
@@ -55,6 +65,25 @@ async function newRun(over: { fileId?: string; targetLang?: string } = {}) {
   expect(r.status).toBe("ok")
   if (r.status !== "ok") throw new Error("unreachable")
   return r.run
+}
+
+async function seedTargetCell(
+  cellId: string,
+  value: string,
+  targetLang = "",
+): Promise<void> {
+  await db.prepare(
+    `INSERT INTO cells
+        (project_id, file_id, cell_id, side, target_lang, value, event_id, last_edit_at)
+     VALUES (?, ?, ?, 'target', ?, ?, ?, 0)`,
+  ).bind(
+    PROJECT,
+    FILE,
+    cellId,
+    targetLang,
+    value,
+    `ev-${cellId}-${targetLang || "default"}`,
+  ).run()
 }
 
 describe("run creation — one active run per (project, file, lane)", () => {
@@ -87,7 +116,84 @@ describe("run creation — one active run per (project, file, lane)", () => {
     await terminateRun(db, run.id)
     expect(await getActiveRun(db, PROJECT, FILE)).toBeNull()
     // Terminated runs still list (history).
-    expect((await listRuns(db, PROJECT, FILE)).map((r) => r.id)).toContain(run.id)
+    expect((await listRuns(db, PROJECT, { fileId: FILE })).runs.map((r) => r.id)).toContain(run.id)
+  })
+
+  it("bounds newest-first history and attributes review drafts to their owning run", async () => {
+    const older = await newRun()
+    await insertDrafts(db, {
+      runId: older.id,
+      projectId: PROJECT,
+      fileId: FILE,
+      drafts: [{ cellId: "older-review-cell", text: "older review draft" }],
+    })
+    await terminateRun(db, older.id)
+    const newer = await newRun()
+    await db.prepare("UPDATE contextual_runs SET created_at = '2026-01-01T00:00:00Z' WHERE id = ?")
+      .bind(older.id)
+      .run()
+    await db.prepare("UPDATE contextual_runs SET created_at = '2026-01-02T00:00:00Z' WHERE id = ?")
+      .bind(newer.id)
+      .run()
+
+    const firstPage = await listRuns(db, PROJECT, { limit: 1 })
+    expect(firstPage.runs.map((run) => [run.id, run.proposedDrafts])).toEqual([[newer.id, 0]])
+    expect(firstPage.truncated).toBe(true)
+    expect(firstPage.nextCursor).not.toBeNull()
+
+    const secondPage = await listRuns(db, PROJECT, {
+      limit: 1,
+      before: firstPage.nextCursor ?? undefined,
+    })
+    expect(secondPage.runs.map((run) => [run.id, run.proposedDrafts])).toEqual([[older.id, 1]])
+    expect(secondPage.truncated).toBe(false)
+  })
+})
+
+describe("cross-isolate project capacity leases", () => {
+  it("atomically refuses a second worker over the weighted cap and reclaims stale capacity", async () => {
+    await db.prepare(
+      `INSERT INTO projects (id, name, created_by)
+       VALUES (?, 'Lease project', 1) ON CONFLICT (id) DO NOTHING`,
+    ).bind(PROJECT).run()
+    const first = await newRun({ fileId: "lease-file-one" })
+    const second = await newRun({ fileId: "lease-file-two" })
+
+    // These calls represent independent Worker isolates: neither shares the
+    // route module's in-memory semaphore, so Postgres is the sole authority.
+    const leaseOne = await tryAcquireContextualProjectLease(db, {
+      projectId: PROJECT,
+      runId: first.id,
+      weight: 3,
+      limit: 4,
+    })
+    expect(leaseOne).not.toBeNull()
+    expect(await tryAcquireContextualProjectLease(db, {
+      projectId: PROJECT,
+      runId: second.id,
+      weight: 2,
+      limit: 4,
+    })).toBeNull()
+
+    // An evicted Worker cannot run finally; expiry is the durable recovery
+    // path, and acquisition deletes that stale lease under the project lock.
+    await db.prepare(
+      "UPDATE contextual_project_leases SET expires_at = now() - interval '1 second' WHERE id = ?",
+    ).bind(leaseOne?.id).run()
+    const leaseTwo = await tryAcquireContextualProjectLease(db, {
+      projectId: PROJECT,
+      runId: second.id,
+      weight: 2,
+      limit: 4,
+    })
+    expect(leaseTwo).not.toBeNull()
+    if (!leaseTwo) throw new Error("stale capacity was not reclaimed")
+    expect(await renewContextualProjectLease(db, leaseTwo)).toBe(true)
+    await releaseContextualProjectLease(db, leaseTwo)
+    const remaining = await db.prepare(
+      "SELECT COUNT(*) AS count FROM contextual_project_leases WHERE project_id = ?",
+    ).bind(PROJECT).first<{ count: number }>()
+    expect(Number(remaining?.count ?? -1)).toBe(0)
   })
 })
 
@@ -127,7 +233,7 @@ describe("guarded transitions", () => {
     const woken = await resumeRun(db, run.id)
     expect(woken.status).toBe("ok")
 
-    const failed = await failRun(db, run.id, "llm exploded")
+    const failed = await failRun(db, run.id, "llm\nexploded\u0000")
     expect(failed.status).toBe("ok")
     expect((await getRun(db, run.id))?.lastError).toBe("llm exploded")
 
@@ -167,12 +273,229 @@ describe("span cursor + outcome accounting", () => {
       outcome: "failed",
       unitsUsed: 5,
       callsUsed: 1,
-      lastError: "construal did not close",
+      lastError: "password=hunter2",
     })
     expect(afterFail?.doneSpans).toBe(1)
     expect(afterFail?.failedSpans).toBe(1)
     expect(afterFail?.unitsSpent).toBe(17)
-    expect(afterFail?.lastError).toBe("construal did not close")
+    expect(afterFail?.lastError).toMatch(/redacted/i)
+    expect(afterFail?.lastError).not.toContain("hunter2")
+  })
+})
+
+describe("durable sanitized activity", () => {
+  it("passes run cursor/role and draft evidence as structured JSON at the production adapter boundary", async () => {
+    let roleParam: unknown
+    let cursorParam: unknown
+    let verdictParam: unknown
+    let provenanceParam: unknown
+    let runRow: Record<string, unknown> | null = null
+    let draftId = ""
+    const executor: PgExecutor = {
+      async run(sql, params) {
+        if (sql.includes("SELECT id FROM contextual_runs")) return { rows: [], rowCount: 0 }
+        if (sql.includes("FROM contextual_runs WHERE id")) {
+          return { rows: runRow ? [runRow] : [], rowCount: runRow ? 1 : 0 }
+        }
+        if (sql.includes("INSERT INTO contextual_runs")) {
+          roleParam = params[5]
+          runRow = {
+            id: params[0], project_id: params[1], file_id: params[2], target_lang: params[3],
+            status: "running", initiated_by: params[4], role_snapshot: params[5], span_cursor: null,
+            done_spans: 0, total_spans: 0, failed_spans: 0, units_spent: 0, calls_spent: 0,
+            last_error: null, steering_cursor: null, anchor_cell_id: params[6], scope_group: params[7],
+            created_at: "2026-08-11T00:00:00.000Z", updated_at: "2026-08-11T00:00:00.000Z",
+          }
+          return { rows: [runRow], rowCount: 1 }
+        }
+        if (sql.includes("UPDATE contextual_runs") && sql.includes("SET span_cursor")) {
+          cursorParam = params[0]
+          runRow = { ...runRow, span_cursor: params[0], total_spans: params[1] }
+          return { rows: [runRow as Record<string, unknown>], rowCount: 1 }
+        }
+        if (sql.includes("UPDATE contextual_drafts")) return { rows: [], rowCount: 0 }
+        if (sql.includes("INSERT INTO contextual_drafts")) {
+          draftId = String(params[0])
+          verdictParam = params[8]
+          provenanceParam = params[9]
+          return { rows: [], rowCount: 1 }
+        }
+        if (sql.includes("SELECT id, run_id") && sql.includes("FROM contextual_drafts")) {
+          return {
+            rows: [{
+              id: draftId, run_id: (runRow as Record<string, unknown>).id,
+              project_id: PROJECT, file_id: FILE, cell_id: "c-json",
+              target_lang: "", scene_brief_id: null,
+              text: "structured", verdicts: verdictParam, provenance: provenanceParam,
+              status: "proposed", created_at: "2026-08-11T00:00:00.000Z",
+              reviewed_at: null, reviewed_by: null,
+            }],
+            rowCount: 1,
+          }
+        }
+        throw new Error(`unexpected adapter SQL: ${sql}`)
+      },
+      begin: (fn) => fn(executor),
+    }
+    const adapterDb = new PostgresDb(executor)
+    const created = await createRun(adapterDb, {
+      projectId: PROJECT,
+      fileId: FILE,
+      roleSnapshot: { userId: 7, username: "adapter", level: 400 },
+    })
+    if (created.status !== "ok") throw new Error("run not created")
+    const cursor: SpanCursor = { seeds: [seed(1)], nextIndex: 0 }
+    await setSpanCursor(adapterDb, created.run.id, cursor)
+    const drafts = await insertDrafts(adapterDb, {
+      runId: created.run.id,
+      projectId: PROJECT,
+      fileId: FILE,
+      drafts: [{
+        cellId: "c-json",
+        text: "structured",
+        verdicts: { ambiguity: "approved" },
+        provenance: { spanId: "span-json", exampleIds: ["e1"] },
+      }],
+    })
+
+    expect(roleParam).toEqual({ userId: 7, username: "adapter", level: 400 })
+    expect(cursorParam).toEqual(cursor)
+    expect(verdictParam).toEqual({ ambiguity: "approved" })
+    expect(provenanceParam).toEqual({ spanId: "span-json", exampleIds: ["e1"] })
+    expect(drafts[0]).toMatchObject({
+      verdicts: verdictParam,
+      provenance: provenanceParam,
+    })
+  })
+
+  it("passes details as structured JSON at the production Postgres adapter boundary", async () => {
+    let adapterDetails: unknown
+    const executor: PgExecutor = {
+      async run(_sql, params) {
+        adapterDetails = params[10]
+        return {
+          rows: [{
+            id: params[0],
+            run_id: params[1],
+            project_id: params[2],
+            file_id: params[3],
+            kind: params[4],
+            span_id: params[5],
+            span_label: params[6],
+            status: params[7],
+            phase: params[8],
+            summary: params[9],
+            details: params[10],
+            created_at: "2026-08-11T00:00:00.000Z",
+          }],
+          rowCount: 1,
+        }
+      },
+      begin: (fn) => fn(executor),
+    }
+
+    const adapterDb = new PostgresDb(executor)
+    const event = await appendContextualRunEvent(adapterDb, {
+      runId: "run-adapter-boundary",
+      projectId: PROJECT,
+      fileId: FILE,
+      kind: "drafts_staged",
+      status: "complete",
+      details: { count: 2, cellIds: ["c1", "c2"] },
+    })
+
+    // postgres.js infers the cast parameter as jsonb and JSON-serializes it.
+    // A pre-stringified value is therefore encoded twice and reaches Postgres
+    // as a jsonb string, violating contextual_run_events_details_check.
+    expect(adapterDetails).toEqual({ count: 2, cellIds: ["c1", "c2"] })
+    expect(typeof adapterDetails).toBe("object")
+    expect(event.details).toEqual(adapterDetails)
+  })
+
+  it("keeps superseded draft evidence first-class through the typed sanitizer", async () => {
+    const run = await newRun()
+    const event = await appendContextualRunEvent(db, {
+      runId: run.id,
+      projectId: PROJECT,
+      fileId: FILE,
+      kind: "draft_reviewed",
+      status: "superseded",
+      details: {
+        draftId: "draft-old",
+        cellId: "cell-1",
+        outcome: "superseded",
+      },
+    })
+
+    expect(event).toMatchObject({
+      status: "superseded",
+      summary: "Draft superseded",
+      details: {
+        draftId: "draft-old",
+        cellId: "cell-1",
+        outcome: "superseded",
+      },
+    })
+  })
+
+  it("drops unapproved prose/token keys, bounds cell ids, and returns the latest ordered tail", async () => {
+    const run = await newRun()
+    const cellIds = Array.from({ length: 140 }, (_, i) => `cell-${i}`)
+    const maliciousDetails = {
+      count: 140,
+      cellIds,
+      promptText: "full private prompt",
+      draftText: "a model-generated draft",
+      reasoning: "hidden chain of thought",
+      completionTokens: 999,
+    } as ContextualRunEventDetails
+    const first = await appendContextualRunEvent(db, {
+      runId: run.id,
+      projectId: PROJECT,
+      fileId: FILE,
+      kind: "drafts_staged",
+      status: "complete",
+      details: maliciousDetails,
+    })
+    expect(first.details.count).toBe(140)
+    expect(first.details.cellIds).toHaveLength(100)
+    expect(first.details.truncated).toBe(true)
+    expect(Object.keys(first.details).sort()).toEqual(["cellIds", "count", "truncated"])
+    expect(JSON.stringify(first)).not.toMatch(/private prompt|model-generated|reasoning|Tokens/)
+
+    const second = await appendContextualRunEvent(db, {
+      runId: run.id,
+      projectId: PROJECT,
+      fileId: FILE,
+      kind: "run_state",
+      status: "parked",
+      details: { done: 2, total: 2, failed: 0 },
+    })
+    expect(second.summary).toBe("Autopilot is idle")
+    const queued = await appendContextualRunEvent(db, {
+      runId: run.id,
+      projectId: PROJECT,
+      fileId: FILE,
+      kind: "run_state",
+      status: "parked",
+      details: { done: 2, total: 5, failed: 0 },
+    })
+    expect(queued.summary).toBe("Autopilot has work queued")
+    // Explicit timestamps make the latest-tail assertion independent of two
+    // uuidv7s generated within the same millisecond.
+    await db.prepare("UPDATE contextual_run_events SET created_at = '2026-01-01T00:00:00Z' WHERE id = ?")
+      .bind(first.id)
+      .run()
+    await db.prepare("UPDATE contextual_run_events SET created_at = '2026-01-02T00:00:00Z' WHERE id = ?")
+      .bind(second.id)
+      .run()
+    await db.prepare("UPDATE contextual_run_events SET created_at = '2026-01-03T00:00:00Z' WHERE id = ?")
+      .bind(queued.id)
+      .run()
+    const tail = await listContextualRunEvents(db, { projectId: PROJECT, runId: run.id, limit: 1 })
+    expect(tail.truncated).toBe(true)
+    expect(tail.events.map((event) => event.id)).toEqual([queued.id])
+    expect((await listContextualRunEvents(db, { projectId: "other", runId: run.id })).events).toEqual([])
   })
 })
 
@@ -206,6 +529,74 @@ describe("steering inbox", () => {
 })
 
 describe("staged drafts", () => {
+  it("keeps sibling-language proposals in independent review queues", async () => {
+    const defaultOwner = await newRun()
+    await insertDrafts(db, {
+      runId: defaultOwner.id,
+      projectId: PROJECT,
+      fileId: FILE,
+      drafts: [{ cellId: "shared-cell", text: "default lane proposal" }],
+    })
+    await terminateRun(db, defaultOwner.id)
+
+    const frenchOwner = await newRun({ targetLang: "fr" })
+    await insertDrafts(db, {
+      runId: frenchOwner.id,
+      projectId: PROJECT,
+      fileId: FILE,
+      drafts: [{ cellId: "shared-cell", text: "proposition française" }],
+    })
+    await terminateRun(db, frenchOwner.id)
+
+    const spanishOwner = await newRun({ targetLang: "es" })
+    await insertDrafts(db, {
+      runId: spanishOwner.id,
+      projectId: PROJECT,
+      fileId: FILE,
+      drafts: [{ cellId: "shared-cell", text: "propuesta española" }],
+    })
+
+    expect((await listDrafts(db, PROJECT, FILE, "proposed")).map((draft) => draft.text))
+      .toEqual(["default lane proposal"])
+    expect((await listDrafts(db, PROJECT, FILE, "proposed", "fr")).map((draft) => draft.text))
+      .toEqual(["proposition française"])
+    expect((await listDrafts(db, PROJECT, FILE, "proposed", "es")).map((draft) => draft.text))
+      .toEqual(["propuesta española"])
+    expect(await countDrafts(db, PROJECT, FILE)).toMatchObject({ proposed: 1 })
+    expect(await countDrafts(db, PROJECT, FILE, "fr")).toMatchObject({ proposed: 1 })
+    expect(await countDrafts(db, PROJECT, FILE, "es")).toMatchObject({ proposed: 1 })
+
+    const currentDefault = await newRun()
+    expect([
+      ...(await findProposedCellsFromOtherRuns(db, {
+        projectId: PROJECT,
+        fileId: FILE,
+        runId: currentDefault.id,
+        targetLang: "",
+      })),
+    ]).toEqual(["shared-cell"])
+    expect([
+      ...(await findProposedCellsFromOtherRuns(db, {
+        projectId: PROJECT,
+        fileId: FILE,
+        runId: currentDefault.id,
+        targetLang: "fr",
+      })),
+    ]).toEqual(["shared-cell"])
+
+    const proposedOwners = (await listRuns(db, PROJECT, { proposedOnly: true })).runs.map((run) => run.id)
+    expect(proposedOwners).toEqual(expect.arrayContaining([
+      defaultOwner.id,
+      frenchOwner.id,
+      spanishOwner.id,
+    ]))
+
+    const overview = await getProjectAutopilotSummary(db, PROJECT)
+    expect(overview.proposedDrafts).toBe(3)
+    expect(overview.files.find((row) => row.runId === frenchOwner.id)?.proposedDrafts).toBe(1)
+    expect(overview.files.find((row) => row.runId === spanishOwner.id)?.proposedDrafts).toBe(1)
+  })
+
   it("a re-propose supersedes the old proposed row in the same batch (partial UNIQUE holds)", async () => {
     const run = await newRun()
     const first = await insertDrafts(db, {
@@ -238,18 +629,57 @@ describe("staged drafts", () => {
 
     const counts = await countDrafts(db, PROJECT, FILE)
     expect(counts).toEqual({ proposed: 2, applied: 0, rejected: 0, superseded: 1 })
+
+    await db.prepare("UPDATE contextual_drafts SET created_at = '2026-01-01T00:00:00Z' WHERE run_id = ?")
+      .bind(run.id)
+      .run()
+    await db.prepare("UPDATE contextual_drafts SET created_at = '2026-01-02T00:00:00Z' WHERE id = ?")
+      .bind(second[0].id)
+      .run()
+    expect((await listDraftsByRun(db, PROJECT, run.id, 1)).map((draft) => draft.id)).toEqual([
+      second[0].id,
+    ])
   })
 
-  it("review transitions: only proposed rows; applied/rejected are terminal", async () => {
-    const run = await newRun()
-    const [draft] = await insertDrafts(db, {
-      runId: run.id,
+  it("only acknowledges applied after the exact draft is current in its owning target lane", async () => {
+    const defaultRun = await newRun()
+    const initialDrafts = await insertDrafts(db, {
+      runId: defaultRun.id,
       projectId: PROJECT,
       fileId: FILE,
-      drafts: [{ cellId: "c9", text: "review me" }],
+      drafts: [
+        { cellId: "missing-target", text: "not projected yet" },
+        { cellId: "mismatched-target", text: "the proposed wording" },
+      ],
     })
+    const missingTarget = initialDrafts.find((draft) => draft.cellId === "missing-target")
+    const mismatchedTarget = initialDrafts.find((draft) => draft.cellId === "mismatched-target")
+    if (!missingTarget || !mismatchedTarget) throw new Error("expected both review drafts")
 
-    const applied = await reviewDraft(db, { id: draft.id, action: "applied", reviewedBy: "lead" })
+    expect(await reviewDraft(db, { id: missingTarget.id, action: "applied" }))
+      .toEqual({ status: "not_projected" })
+
+    await seedTargetCell("mismatched-target", "a different human edit")
+    expect(await reviewDraft(db, { id: mismatchedTarget.id, action: "applied" }))
+      .toEqual({ status: "not_projected" })
+
+    const frenchRun = await newRun({ targetLang: "fr" })
+    const [laneOwnedDraft] = await insertDrafts(db, {
+      runId: frenchRun.id,
+      projectId: PROJECT,
+      fileId: FILE,
+      drafts: [{ cellId: "lane-owned", text: "proposition exacte" }],
+    })
+    await seedTargetCell("lane-owned", "proposition exacte", "")
+    expect(await reviewDraft(db, { id: laneOwnedDraft.id, action: "applied" }))
+      .toEqual({ status: "not_projected" })
+
+    await seedTargetCell("lane-owned", "proposition exacte", "fr")
+    const applied = await reviewDraft(db, {
+      id: laneOwnedDraft.id,
+      action: "applied",
+      reviewedBy: "lead",
+    })
     expect(applied.status).toBe("ok")
     if (applied.status === "ok") {
       expect(applied.draft.status).toBe("applied")
@@ -257,9 +687,39 @@ describe("staged drafts", () => {
       expect(applied.draft.reviewedAt).not.toBeNull()
     }
 
-    // Double review loses the guard.
-    const again = await reviewDraft(db, { id: draft.id, action: "rejected" })
+    const retry = await reviewDraft(db, {
+      id: laneOwnedDraft.id,
+      action: "applied",
+      reviewedBy: "lead",
+    })
+    expect(retry.status).toBe("already")
+    if (retry.status === "already") expect(retry.draft.status).toBe("applied")
+
+    // A conflicting second decision still loses the guard.
+    const again = await reviewDraft(db, { id: laneOwnedDraft.id, action: "rejected" })
     expect(again).toEqual({ status: "invalid_state", current: "applied" })
     expect((await reviewDraft(db, { id: "no-such", action: "applied" })).status).toBe("not_found")
+  })
+
+  it("still rejects a proposed draft without requiring a target projection", async () => {
+    const run = await newRun()
+    const [draft] = await insertDrafts(db, {
+      runId: run.id,
+      projectId: PROJECT,
+      fileId: FILE,
+      drafts: [{ cellId: "reject-without-target", text: "dismiss me" }],
+    })
+
+    const rejected = await reviewDraft(db, {
+      id: draft.id,
+      action: "rejected",
+      reviewedBy: "lead",
+    })
+    expect(rejected.status).toBe("ok")
+    if (rejected.status === "ok") {
+      expect(rejected.draft.status).toBe("rejected")
+      expect(rejected.draft.reviewedBy).toBe("lead")
+      expect(rejected.draft.reviewedAt).not.toBeNull()
+    }
   })
 })

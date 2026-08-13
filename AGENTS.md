@@ -75,7 +75,7 @@ For the broader discipline, see the `verify` and `superpowers:verification-befor
 
 The SignIn step renders a **"Dev login (skip auth)"** button when `import.meta.env.DEV` — clicking it calls `/__dev__/login` and stores the session like a real login. For agents driving the app via Playwright MCP, prefer the auto-login URL **`http://127.0.0.1:5173/__dev/login`** — it logs in and redirects to `/project/dev-project` in one navigate.
 
-Both routes 404 unless `WRANGLER_LOCAL=1`. Prod `wrangler.toml` never sets it; the bypass also resolves to a hardcoded username, so the blast radius if it ever leaked is "log in as a user that doesn't exist in prod." See [auth-worker/src/routes/dev-seed.ts](auth-worker/src/routes/dev-seed.ts).
+Both routes 404 unless `WRANGLER_LOCAL=1`; prod `wrangler.toml` never sets it. **Never set it on a deployed worker.** This used to say the blast radius was "log in as a user that doesn't exist in prod" — that is wrong (SEC-8): `/__dev__/login` runs the seed *before* minting the token, so it creates `dev`/`alice`/`bob` with password `dev` in whatever database is bound and then hands back a valid session. See [auth-worker/src/routes/dev-seed.ts](auth-worker/src/routes/dev-seed.ts) and [docs/OPSEC.md](docs/OPSEC.md).
 
 For the E2E suite, prefer the existing `/__test__/reset` + alice/bob/carol helpers (`e2e/helpers/seed.ts`) — those give clean isolation per test. The `/__dev__/login` bypass is for manual browser dev and ad-hoc Playwright probes.
 

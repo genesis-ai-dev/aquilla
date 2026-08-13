@@ -5,7 +5,7 @@ import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/se
 /**
  * CommentsPage — "Sort" select changes sort order.
  *
- * CommentsPage.tsx renders a <select> labeled "Sort" with options:
+ * CommentsPage.tsx renders a Sort combobox (shadcn Select) with options:
  *   - "unresolved-first" (default)
  *   - "recent-activity"
  *   - "creation"

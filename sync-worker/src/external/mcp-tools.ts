@@ -30,10 +30,10 @@ export const MCP_TOOLS: McpToolDef[] = [
       'Discover what this API and THIS credential can do before attempting anything. ' +
       'Returns the API version, the autonomy mode of the calling credential (ask|act), ' +
       'the domain command kinds available (SetTranslation, PlanImport, CreateProject, ' +
-      'UpdateProjectSettings, LinkMedia — note PlanImport is staged over REST only, there ' +
-      'is no MCP staging tool for it yet; the other four all stage/commit via ' +
-      'prepare_translations/confirm_changeset — see the returned projectLifecycle and ' +
-      'linkMedia fields for their per-kind rules), the operational limits (changeset ' +
+      'UpdateProjectSettings, LinkMedia — PlanImport stages via preview_import/' +
+      'prepare_import or REST, the other four stage/commit via ' +
+      'prepare_translations/confirm_changeset — see the returned importing, ' +
+      'projectLifecycle and linkMedia fields for per-kind rules), the operational limits (changeset ' +
       'expiry, PlanImport max cells, artifact max bytes, max commands per changeset), the ' +
       'full list of stable machine-actionable error codes, and an explanation of the ' +
       'ask-mode approval flow (prepare -> approvalUrl -> a human approves in a browser -> ' +
@@ -149,11 +149,13 @@ export const MCP_TOOLS: McpToolDef[] = [
       'CreateProject, UpdateProjectSettings, or LinkMedia. Resolves preconditions from live ' +
       'state and computes a server-side effect summary (nothing is silently dropped) before ' +
       'returning { changesetId, summary, digest, mode, approvalUrl? }. If mode is "ask" you ' +
-      'CANNOT commit directly: surface the approvalUrl to a human, wait for them to approve ' +
-      'in the browser, then call confirm_changeset. If mode is "act", call confirm_changeset ' +
-      'to commit immediately.\n\n' +
-      'PlanImport is NOT accepted via `commands` — it remains REST-only ' +
-      '(see get_capabilities.planImport).\n\n' +
+      'CANNOT commit directly: first DESCRIBE the staged plan in the conversation — the ' +
+      'summary counts plus 2-3 representative before/after samples — so the human can review ' +
+      'without leaving the chat, and give them the approvalUrl (the full approval page shows ' +
+      'every per-cell diff). Wait for them to approve, then call confirm_changeset. If mode ' +
+      'is "act", call confirm_changeset to commit immediately.\n\n' +
+      'PlanImport is NOT accepted via `commands` — stage file imports with the dedicated ' +
+      'preview_import / prepare_import tools (or REST; see get_capabilities.importing).\n\n' +
       '`commands` shapes (each enforced server-side; a validation_failed error names the ' +
       'violated rule):\n' +
       '  { kind: "CreateProject", name, projectId?, orgId? } — receipt-only (a plain row ' +
@@ -268,6 +270,99 @@ export const MCP_TOOLS: McpToolDef[] = [
         },
       },
       required: ['projectId'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'preview_import',
+    description:
+      'Parse an uploaded source artifact with Aquilla\'s built-in importers and PREVIEW the ' +
+      'result WITHOUT staging anything. This is step 2 of the artifact-first import ' +
+      'workflow: (1) upload the original file bytes via REST ' +
+      'POST .../projects/:projectId/artifacts with header "x-artifact-name" (25MB cap) — ' +
+      'upload is REST-only because MCP is JSON-RPC text and cannot carry a binary body ' +
+      '(from Claude Code, curl the upload); preserving the original in storage also enables ' +
+      'round-trip export later. (2) preview_import to check the parse. (3) prepare_import ' +
+      'to stage a PlanImport changeset. (4) the normal confirm_changeset / approval flow. ' +
+      'Server-parseable formats: txt, md, json, po, properties, obs, vtt, srt, sbv, csv, ' +
+      'tsv, usfm (format is auto-detected; pass fileType to override — required for po/' +
+      'properties/obs/sbv, which are not sniffable). DOM-bound formats (docx, pptx, html, ' +
+      'xliff, tmx, usx, idml) are NOT server-parseable — they return validation_failed ' +
+      'naming the client-side alternatives (in-app Import dialog, or raw PlanImport cells). ' +
+      'Returns { fileName, fileType, totalCells, sampleCells (first 10), warnings, ' +
+      'results } — `results` lists every parsed file when a multi-book USFM splits into ' +
+      'several (stage each via prepare_import\'s resultIndex). Cell cap per import: 5000.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...projectIdProp,
+        artifactId: {
+          type: 'string',
+          description: 'A source artifact already uploaded via REST POST .../artifacts.',
+        },
+        fileType: {
+          type: 'string',
+          description:
+            'Override format detection: txt|md|json|po|properties|obs|vtt|srt|sbv|csv|tsv|usfm (sfm, markdown, plaintext, text accepted as aliases).',
+        },
+        fileName: { type: 'string', description: 'Name for the file to be created (default: the artifact name).' },
+        sourceLanguage: { type: 'string', description: 'BCP-47-ish source language tag for the created file.' },
+        targetLanguage: { type: 'string', description: 'Target language tag for the created file.' },
+        resultIndex: {
+          type: 'number',
+          description: 'Which parsed file to preview when the parse yields several (multi-book USFM). Default 0.',
+        },
+        excludeFrontMatter: {
+          type: 'boolean',
+          description: 'USFM only: drop book-name/title/TOC front matter cells.',
+        },
+      },
+      required: ['projectId', 'artifactId'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'prepare_import',
+    description:
+      'Parse an uploaded source artifact with Aquilla\'s built-in importers AND stage the ' +
+      'result as a PlanImport changeset (sole command, artifactId linked so the original ' +
+      'is preserved for round-trip export). Nothing is applied here — like every write ' +
+      'this returns { changesetId, summary, digest, mode, approvalUrl? } for the normal ' +
+      'confirm_changeset flow (ask mode: a human must approve at the approvalUrl first). ' +
+      'Workflow: REST-upload the original bytes to POST .../projects/:projectId/artifacts ' +
+      '(25MB cap; upload is REST-only — MCP JSON-RPC cannot carry binary, so agents like ' +
+      'Claude Code should curl it), preview_import to check the parse, then this tool, ' +
+      'then confirm_changeset. Same formats/limits as preview_import (5000-cell cap, ' +
+      'validation_failed above it); a multi-book USFM artifact must be staged one book per ' +
+      'changeset via resultIndex. Requires PROJECT_LEAD role (the floor of the compiled ' +
+      'file.create/source.cell.create events).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...projectIdProp,
+        artifactId: {
+          type: 'string',
+          description: 'A source artifact already uploaded via REST POST .../artifacts.',
+        },
+        fileType: {
+          type: 'string',
+          description:
+            'Override format detection: txt|md|json|po|properties|obs|vtt|srt|sbv|csv|tsv|usfm (sfm, markdown, plaintext, text accepted as aliases).',
+        },
+        fileName: { type: 'string', description: 'Name for the created file (default: the artifact name).' },
+        sourceLanguage: { type: 'string', description: 'BCP-47-ish source language tag for the created file.' },
+        targetLanguage: { type: 'string', description: 'Target language tag for the created file.' },
+        resultIndex: {
+          type: 'number',
+          description: 'Which parsed file to stage when the parse yields several (multi-book USFM); required in that case.',
+        },
+        excludeFrontMatter: {
+          type: 'boolean',
+          description: 'USFM only: drop book-name/title/TOC front matter cells.',
+        },
+        changesetId: { type: 'string', description: 'Optional client-supplied UUIDv7 for idempotency.' },
+      },
+      required: ['projectId', 'artifactId'],
       additionalProperties: false,
     },
   },

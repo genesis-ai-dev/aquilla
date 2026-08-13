@@ -4,13 +4,24 @@
     {
       "name": "agent-qa-stack",
       "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["dev", "--", "--vite-port=5173"],
+      "runtimeArgs": [
+        "dev",
+        "--",
+        "--vite-port=5173"
+      ],
       "port": 5173
     },
     {
       "name": "web",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev:vite", "--", "--port", "5180", "--strictPort"],
+      "runtimeArgs": [
+        "run",
+        "dev:vite",
+        "--",
+        "--port",
+        "5180",
+        "--strictPort"
+      ],
       "port": 5180
     },
     {
@@ -58,6 +69,15 @@
         "--vite-port=15273"
       ],
       "port": 15273
+    },
+    {
+      "name": "stack-gdrive-import",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": [
+        "-c",
+        "cd /Users/ryderwishart/frontierrnd/aquilla/.claude/worktrees/google-drive-import && DEV_STACK_IDENTITY_PORT=18841 DEV_STACK_SYNC_PORT=18842 npm run dev -- --vite-port=15241"
+      ],
+      "port": 15241
     }
   ]
 }

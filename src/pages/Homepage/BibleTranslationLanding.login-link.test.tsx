@@ -1,22 +1,12 @@
 /**
- * AQU-282: Homepage "Open app" link target
- *
- * Verifies that:
- *  - When no auth-hint cookie is present, "Open app" links point to /login
- *  - When the auth-hint cookie is present, "Open app" links point to /
- *
- * The Homepage component is rendered with heavy mocks to isolate just the
- * link-target behaviour.
+ * BibleTranslationLanding nav CTAs: Sign in → /login (or Docs when signed in),
+ * Open app → /app.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { render, screen, waitFor } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
 import { BibleTranslationLanding } from "./BibleTranslationLanding"
-
-// ---------------------------------------------------------------------------
-// Heavy component mocks — keeps the test focused on link targets only.
-// ---------------------------------------------------------------------------
 
 vi.mock("@/branding/use-brand", () => ({
   useBrand: () => ({
@@ -39,19 +29,18 @@ vi.mock("@/components/HealthRing", () => ({
   HealthRing: () => null,
 }))
 
-// CSS import — no-op in tests.
 vi.mock("./homepage.css", () => ({}))
 
+const mockHasAuthHintCookie = vi.fn(() => false)
+const mockLoadActiveSession = vi.fn<() => Promise<{ username: string } | null>>(() =>
+  Promise.resolve(null),
+)
 vi.mock("@/lib/frontier/session-store", () => ({
-  // AppEntryBanner reads the session; these specs only care about the nav link.
-  loadActiveSession: () => Promise.resolve(null),
+  hasAuthHintCookie: () => mockHasAuthHintCookie(),
+  loadActiveSession: () => mockLoadActiveSession(),
 }))
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function renderHomepage() {
+function renderLanding() {
   return render(
     <MemoryRouter>
       <BibleTranslationLanding />
@@ -61,20 +50,39 @@ function renderHomepage() {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  mockHasAuthHintCookie.mockReturnValue(false)
+  mockLoadActiveSession.mockResolvedValue(null)
 })
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
+describe("BibleTranslationLanding — nav CTAs", () => {
+  it("points Sign in at /login when signed out", () => {
+    renderLanding()
 
-describe("BibleTranslationLanding — Open app link target", () => {
-  // `/` is the marketing homepage for every visitor now, so "open app" must not
-  // point there — /app is the workspace entry and it redirects signed-out
-  // visitors to /login itself. The link is identity-independent on purpose:
-  // these pages are prerendered and edge-cached, so their markup cannot depend
-  // on who is asking. Signed-in visitors are steered by AppEntryBanner instead.
-  it("points at /app regardless of session state", () => {
-    renderHomepage()
+    const links = screen.getAllByRole("link", { name: /^sign in$/i })
+    expect(links.length).toBeGreaterThan(0)
+    links.forEach((link) => {
+      expect(link).toHaveAttribute("href", "/login")
+    })
+  })
+
+  it("swaps Sign in for Docs when a session is present", async () => {
+    mockLoadActiveSession.mockResolvedValue({ username: "dev" })
+    renderLanding()
+
+    await waitFor(() => {
+      const docsCtas = screen
+        .getAllByRole("link", { name: /^docs$/i })
+        .filter((link) => link.className.includes("aq-btn"))
+      expect(docsCtas.length).toBeGreaterThan(0)
+      docsCtas.forEach((link) => {
+        expect(link).toHaveAttribute("href", "https://help.aquilla.app")
+      })
+    })
+    expect(screen.queryByRole("link", { name: /^sign in$/i })).not.toBeInTheDocument()
+  })
+
+  it("points Open app at /app", () => {
+    renderLanding()
 
     const links = screen.getAllByRole("link", { name: /open app/i })
     expect(links.length).toBeGreaterThan(0)
@@ -83,8 +91,18 @@ describe("BibleTranslationLanding — Open app link target", () => {
     })
   })
 
-  it("never links back to /, which would bounce the user to marketing again", () => {
-    renderHomepage()
+  it("uses Open app as the hero primary CTA", () => {
+    renderLanding()
+
+    const hero = document.querySelector(".aq-hero-actions")
+    expect(hero).toBeTruthy()
+    const primary = hero!.querySelector("a.aq-btn-gold")
+    expect(primary).toHaveAttribute("href", "/app")
+    expect(primary).toHaveTextContent(/open app/i)
+  })
+
+  it("never links Open app back to /, which would bounce the user to marketing again", () => {
+    renderLanding()
 
     screen.getAllByRole("link", { name: /open app/i }).forEach((link) => {
       expect(link).not.toHaveAttribute("href", "/")

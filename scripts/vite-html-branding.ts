@@ -1,6 +1,6 @@
 import type { Plugin } from "vite"
-import type { BrandData } from "../src/branding/types"
-import { buildBrandThemeStyle } from "../src/branding/theme-vars"
+import type { BrandData } from "../src/branding/types.ts"
+import { buildBrandThemeStyle } from "../src/branding/theme-vars.ts"
 
 export function brandingHtmlPlugin(brand: BrandData): Plugin {
   return {

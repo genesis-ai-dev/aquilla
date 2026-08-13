@@ -12,14 +12,13 @@ test("direction mismatch Auto action restores content-driven target direction", 
   // Auto already renders the committed Arabic target RTL without a banner.
   const target = alice.locator('[data-cell-type="target"] [data-target-read-view]').first()
   await expect(target).toHaveAttribute("dir", "rtl")
-  await expect(alice.locator('[role="status"]').filter({ hasText: /content looks right-to-left/i })).toHaveCount(0)
+  await expect(alice.getByRole("dialog").filter({ hasText: /content looks right-to-left/i })).toHaveCount(0)
 
   await ws.openViewSettingsMenu()
   const panel = alice.getByTestId("view-settings-popover")
   await panel.getByRole("tablist", { name: "Target direction" }).getByRole("tab", { name: "LTR" }).click()
-  await alice.keyboard.press("Escape")
 
-  const warning = alice.locator('[role="status"]').filter({ hasText: /content looks right-to-left/i })
+  const warning = alice.getByRole("dialog").filter({ hasText: /content looks right-to-left/i })
   await expect(warning).toBeVisible({ timeout: 5_000 })
   await warning.getByRole("button", { name: "Auto", exact: true }).click()
 

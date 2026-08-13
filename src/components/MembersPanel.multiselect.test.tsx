@@ -11,6 +11,7 @@ import type { ReactElement } from "react"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { MembersPanel, type MembersPanelMember } from "./MembersPanel"
+import { UserError, toUserFacingError } from "@/lib/errors/user-error"
 
 // Drive the typeahead deterministically: echo the query (so the component's
 // searchMatchesInput gate passes) and return a canned roster filtered by an
@@ -115,6 +116,67 @@ describe("MembersPanel multi-select add (AQU-734)", () => {
     // amir stays staged for a retry; alice (succeeded) is gone.
     expect(screen.getByRole("button", { name: "Remove amir" })).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "Remove alice" })).not.toBeInTheDocument()
+  })
+
+  // AQU-780: a whole-batch add throw (nothing landed — 403 owner-gate, 429,
+  // 5xx) must surface the REAL cause via onAddBatchError, not a generic
+  // "Could not add" and never a misleading "username may not exist." The org
+  // roster maps forbidden → an owner-permission message; other classes → the
+  // status-mapped message. A genuinely unknown username is a per-person
+  // `user_not_found` RESULT (covered above), never a thrown batch error.
+  const orgBatchError = (e: unknown) => {
+    const uf = toUserFacingError(e, "org")
+    return uf.category === "forbidden" ? "Only org owners can add members." : uf.message
+  }
+
+  async function stageAliceAndAdd(
+    onAdd: (usernames: string[], role: number) => Promise<{ username: string; ok: boolean; error?: string }[]>,
+  ) {
+    renderPanel(
+      <MembersPanel {...baseProps(onAdd)} onAddBatchError={orgBatchError} />,
+    )
+    typeSearch("al")
+    fireEvent.click(await screen.findByRole("checkbox", { name: "alice" }))
+    fireEvent.click(screen.getByRole("button", { name: "Add" }))
+  }
+
+  it("surfaces a permission message (not 'may not exist') when a non-owner add is rejected with 403", async () => {
+    const onAdd = vi.fn(async () => {
+      throw new UserError(403, "only org owners can add members", "org")
+    })
+    await stageAliceAndAdd(onAdd)
+
+    await waitFor(() =>
+      expect(screen.getByText("Only org owners can add members.")).toBeInTheDocument(),
+    )
+    expect(screen.queryByText(/may not exist/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/could not add/i)).not.toBeInTheDocument()
+    // The rejected person stays staged for a retry after the caller fixes perms.
+    expect(screen.getByRole("button", { name: "Remove alice" })).toBeInTheDocument()
+  })
+
+  it("surfaces a distinct transient message (not 'may not exist') on a 5xx", async () => {
+    const onAdd = vi.fn(async () => {
+      throw new UserError(500, "boom", "org")
+    })
+    await stageAliceAndAdd(onAdd)
+
+    await waitFor(() =>
+      expect(screen.getByText(/something went wrong on the server/i)).toBeInTheDocument(),
+    )
+    expect(screen.queryByText(/may not exist/i)).not.toBeInTheDocument()
+  })
+
+  it("surfaces a distinct rate-limit message on a 429", async () => {
+    const onAdd = vi.fn(async () => {
+      throw new UserError(429, "slow down", "org")
+    })
+    await stageAliceAndAdd(onAdd)
+
+    await waitFor(() =>
+      expect(screen.getByText(/too many requests/i)).toBeInTheDocument(),
+    )
+    expect(screen.queryByText(/may not exist/i)).not.toBeInTheDocument()
   })
 
   it("disables Add when nothing is staged and re-disables after the last chip is removed", async () => {

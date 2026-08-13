@@ -119,7 +119,7 @@ describe("makeLlmCall capacity retry", () => {
       return new Response("bad model", { status: 400 })
     })
     const llm = makeLlmCall({ url: URL_, apiKey: "k", models: MODELS })
-    await expect(llm(req())).rejects.toThrow(/openrouter_error 400/)
+    await expect(llm(req())).rejects.toThrow(/provider_http_error status=400/)
     expect(n).toBe(1)
   })
 
@@ -130,7 +130,16 @@ describe("makeLlmCall capacity retry", () => {
       return new Response("busy", { status: 429 })
     })
     const llm = makeLlmCall({ url: URL_, apiKey: "k", models: MODELS })
-    await expect(llm(req())).rejects.toThrow(/openrouter_error 429/)
+    await expect(llm(req())).rejects.toThrow(/provider_http_error status=429/)
     expect(n).toBe(5)
   }, 30_000)
+
+  it("categorizes an invalid success body without persisting its contents", async () => {
+    vi.stubGlobal("fetch", async () => new Response(
+      "Authorization: Bearer opaque-invalid-json user material",
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    ))
+    const llm = makeLlmCall({ url: URL_, apiKey: "k", models: MODELS })
+    await expect(llm(req())).rejects.toThrow(/^provider_invalid_response status=200$/)
+  })
 })

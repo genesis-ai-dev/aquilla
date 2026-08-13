@@ -790,4 +790,41 @@ describe('POST /events — ProjectSync event.applied fan-out', () => {
       expect(m.project).toBe('proj-a')
     }
   })
+
+  it("marks Agent API writes with `via: 'external'` so the owner's own client refetches", async () => {
+    // The token bridge (external/token-bridge.ts) mints internal sync tokens
+    // with src: 'external' for Agent API commits, and `by` is the credential
+    // OWNER's username. If that owner has the project open, no outbox write
+    // happened in their browser — without this marker, isOwnWriteEcho would
+    // swallow the frame and the editor would never show the agent's committed
+    // translation until a manual reload.
+    const token = await makeToken({ username: 'alice', src: 'external' })
+    const { db } = await makeTestDb()
+    const { env, bodies } = makeProjectSyncEnv(db)
+
+    const res = await handleEventsWriteRequest(await makeRequest([targetCreate()], token), env)
+    expect(res?.status).toBe(200)
+
+    const applied = bodies.filter((b) => b.t === 'event.applied')
+    expect(applied.length).toBe(1)
+    expect(applied[0].by).toBe('alice')
+    expect(applied[0].via).toBe('external')
+  })
+
+  it('browser-token role-resolution `src` values do NOT leak a `via` marker', async () => {
+    // Regular sync tokens reuse `src` for the role-resolution path (AQU-346:
+    // 'override' | 'group' | 'org' | 'creator' | 'platform'). None of those
+    // may set `via`, or the own-write echo suppression (and its double-fetch
+    // savings) silently regresses for every browser write.
+    const token = await makeToken({ username: 'alice', src: 'org' })
+    const { db } = await makeTestDb()
+    const { env, bodies } = makeProjectSyncEnv(db)
+
+    const res = await handleEventsWriteRequest(await makeRequest([targetCreate()], token), env)
+    expect(res?.status).toBe(200)
+
+    const applied = bodies.filter((b) => b.t === 'event.applied')
+    expect(applied.length).toBe(1)
+    expect('via' in applied[0]).toBe(false)
+  })
 })

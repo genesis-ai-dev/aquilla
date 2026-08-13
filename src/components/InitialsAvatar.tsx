@@ -20,8 +20,13 @@ const textClasses: Record<InitialsAvatarSize, string> = {
   lg: "text-sm font-semibold",
 }
 
-/** Inline color survives dropdown item `focus:**:text-accent-foreground`. */
-function menuSafeStyle(color: string | undefined): CSSProperties | undefined {
+/**
+ * Inline color on the initials node survives menu/combobox descendant paint
+ * (`focus:**:text-accent-foreground`, `data-highlighted:**:text-accent-foreground`).
+ * Class color on the fallback alone is not enough — those selectors set `color`
+ * on the nested initials span.
+ */
+function initialsColorStyle(color: string | undefined): CSSProperties | undefined {
   return color ? { color } : undefined
 }
 
@@ -56,9 +61,14 @@ export function InitialsAvatar({
   const bg = color ?? colorFromName(name)
   const hasCustomFallback = Boolean(fallbackClassName)
   const usesColoredFallback = !children && !hasCustomFallback
-  const preservedColor = menuSafe
+  // Colored fallbacks always pin white inline so button hover:text-* and
+  // menu **:text-* cannot recolor the glyph. menuSafe extends the same
+  // protection to non-colored / custom menuSafeColor cases.
+  const initialsColor = menuSafe
     ? (menuSafeColor ?? (usesColoredFallback ? "#ffffff" : undefined))
-    : undefined
+    : usesColoredFallback
+      ? "#ffffff"
+      : undefined
 
   return (
     <Avatar
@@ -70,18 +80,18 @@ export function InitialsAvatar({
       )}
     >
       <AvatarFallback
-        className={cn(
-          circle && "rounded-full",
-          textClasses[size],
-          usesColoredFallback && !menuSafe && "text-white",
-          fallbackClassName,
-        )}
-        style={{
-          ...(usesColoredFallback ? { backgroundColor: bg } : {}),
-          ...menuSafeStyle(preservedColor),
-        }}
+        className={cn(circle && "rounded-full", fallbackClassName)}
+        style={usesColoredFallback ? { backgroundColor: bg } : undefined}
       >
-        {children ?? label}
+        {children ?? (
+          <span
+            data-slot="avatar-initials"
+            className={cn("leading-none", textClasses[size])}
+            style={initialsColorStyle(initialsColor)}
+          >
+            {label}
+          </span>
+        )}
       </AvatarFallback>
     </Avatar>
   )

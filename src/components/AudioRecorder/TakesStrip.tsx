@@ -7,6 +7,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Bird, Check, CloudUpload, Pause, Pencil, Play, RotateCcw, Sparkles, Trash2 } from "lucide-react"
+import { useT } from "@/lib/i18n/I18nProvider"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -70,6 +71,7 @@ export function TakesStrip({
   author,
   session,
 }: Props) {
+  const t = useT()
   const [playingId, setPlayingId] = useState<string | null>(null)
   const [loadingId, setLoadingId] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
@@ -252,9 +254,13 @@ export function TakesStrip({
   const displayLabel = useCallback(
     (att: AudioAttachmentOut): string =>
       labelOverrides.get(att.audioId) ??
+      // A stored name is user data — never translated. Only the placeholder
+      // shown until a name exists (or is backfilled) is a UI string.
       att.label ??
-      (isDenoisedAudioId(att.audioId) ? "Cleaned" : "Take"),
-    [labelOverrides],
+      (isDenoisedAudioId(att.audioId)
+        ? t("audio.takesStrip.cleanedLabel")
+        : t("audio.takesStrip.takeFallback")),
+    [labelOverrides, t],
   )
 
   // Inline rename (pencil → input; Enter/blur commits, Esc cancels).
@@ -327,7 +333,7 @@ export function TakesStrip({
   return (
     <div className="border-t px-5 py-3">
       <div className="mb-2 text-xs text-muted-foreground/60">
-        Takes ({takes.length})
+        {t("audio.takesStrip.heading", { count: takes.length })}
       </div>
       {/* Round 8: rows, not chips — one take per line, name first. */}
       <div className="flex flex-col gap-1">
@@ -361,13 +367,13 @@ export function TakesStrip({
                     : "border-border bg-muted/30",
               )}
             >
-              <AppTooltip content={isPlaying ? "Stop" : "Play take"}>
+              <AppTooltip content={isPlaying ? t("common.stop") : t("audio.takesStrip.playTakeTooltip")}>
                 <Button
                   type="button"
                   variant="ghost"
                   size="icon-xs"
                   onClick={() => void play(att)}
-                  aria-label={isPlaying ? "Stop" : "Play take"}
+                  aria-label={isPlaying ? t("common.stop") : t("audio.takesStrip.playTakeTooltip")}
                   className="rounded-md hover:bg-background"
                 >
                   {isLoading ? <Spinner className="size-3.5" />
@@ -406,7 +412,7 @@ export function TakesStrip({
                       // SUB-48: no measured length. Say so — a blank space read
                       // as "fine" while the chip was quietly section-width.
                       <span
-                        title="Length unknown — re-record or re-upload to fix"
+                        title={t("audio.takesStrip.unknownLengthTooltip")}
                         data-testid={`take-unknown-length-${att.audioId}`}
                         className="shrink-0 text-muted-foreground/50"
                       >
@@ -415,14 +421,14 @@ export function TakesStrip({
                     )}
                     {att.pendingSync && (
                       <span
-                        title="Saving — kept safe on this device until it syncs"
+                        title={t("audio.takesStrip.pendingSyncTooltip")}
                         data-testid={`take-saving-${att.audioId}`}
                         className="flex shrink-0 items-center gap-0.5 text-[10px] text-muted-foreground/70"
                       >
-                        <CloudUpload className="h-3 w-3 animate-pulse" /> saving…
+                        <CloudUpload className="h-3 w-3 animate-pulse" /> {t("common.saving")}
                       </span>
                     )}
-                    <AppTooltip content="Rename take">
+                    <AppTooltip content={t("audio.takesStrip.renameTooltip")}>
                       <Button
                         type="button"
                         variant="ghost"
@@ -431,7 +437,7 @@ export function TakesStrip({
                           setRenameDraft(displayLabel(att))
                           setRenamingId(att.audioId)
                         }}
-                        aria-label="Rename take"
+                        aria-label={t("audio.takesStrip.renameTooltip")}
                         className="rounded-md text-muted-foreground/40 hover:bg-background hover:text-foreground"
                       >
                         <Pencil className="h-3 w-3" />
@@ -441,14 +447,14 @@ export function TakesStrip({
                 )}
               </span>
               {!isCleaned && !isGenerated && (
-                <AppTooltip content="Remove noise (adds a cleaned take)">
+                <AppTooltip content={t("audio.takesStrip.removeNoiseTooltip")}>
                   <Button
                     type="button"
                     variant="ghost"
                     size="icon-xs"
                     onClick={() => void denoise(att)}
                     disabled={!session?.jwt || denoisingId !== null}
-                    aria-label="Remove noise (adds a cleaned take)"
+                    aria-label={t("audio.takesStrip.removeNoiseTooltip")}
                     className="rounded-md text-muted-foreground/60 hover:bg-background"
                   >
                     {isDenoising ? <Spinner className="size-3.5" /> : <Bird className="h-3.5 w-3.5" />}
@@ -456,28 +462,28 @@ export function TakesStrip({
                 </AppTooltip>
               )}
               {canRevert && (
-                <AppTooltip content="Revert to the original recording">
+                <AppTooltip content={t("audio.takesStrip.revertTooltip")}>
                   <Button
                     type="button"
                     variant="ghost"
                     size="icon-xs"
                     onClick={() => void circle(revertTo)}
                     disabled={isSelectInFlight}
-                    aria-label="Revert to the original recording"
+                    aria-label={t("audio.takesStrip.revertTooltip")}
                     className="rounded-md text-muted-foreground/60 hover:bg-background"
                   >
                     <RotateCcw className="h-3.5 w-3.5" />
                   </Button>
                 </AppTooltip>
               )}
-              <AppTooltip content={isCircled ? "Active take" : "Use this take"}>
+              <AppTooltip content={isCircled ? t("audio.takesStrip.activeTakeTooltip") : t("audio.takesStrip.useTakeTooltip")}>
                 <Button
                   type="button"
                   variant="ghost"
                   size="icon-xs"
                   onClick={() => void circle(att.audioId)}
                   disabled={isSelectInFlight || isCircled}
-                  aria-label={isCircled ? "Active take" : "Use this take"}
+                  aria-label={isCircled ? t("audio.takesStrip.activeTakeTooltip") : t("audio.takesStrip.useTakeTooltip")}
                   className={cn(
                     "rounded-md hover:bg-background",
                     isCircled
@@ -490,14 +496,14 @@ export function TakesStrip({
                   {isBusy ? <Spinner className="size-3.5" /> : <Check className="h-3.5 w-3.5" />}
                 </Button>
               </AppTooltip>
-              <AppTooltip content="Delete take">
+              <AppTooltip content={t("audio.takesStrip.deleteTakeTooltip")}>
                 <Button
                   type="button"
                   variant="ghost"
                   size="icon-xs"
                   onClick={() => void remove(att.audioId)}
                   disabled={isBusy}
-                  aria-label="Delete take"
+                  aria-label={t("audio.takesStrip.deleteTakeTooltip")}
                   className="rounded-md text-muted-foreground/50 hover:bg-destructive/10 hover:text-destructive"
                 >
                   <Trash2 className="h-3.5 w-3.5" />

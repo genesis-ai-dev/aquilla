@@ -181,10 +181,18 @@ interface PendingOverlay {
   valueHtml?: string
   eventId?: string
   aiDrafted?: boolean
+  /** Target-language lane this edit belongs to (`''` = Project default). */
+  targetLang?: string
 }
 
 interface OptimisticEdit extends PendingOverlay {
+  cellId: string
+  targetLang: string
   seq: number
+}
+
+function targetOverlayKey(cellId: string, targetLang: string): string {
+  return `${cellId}\u0000${targetLang}`
 }
 
 interface DerivedCache {
@@ -685,9 +693,10 @@ export class CellStore {
     const changed = new Set<string>()
     for (const row of serverRows) {
       if (row.side !== "target") continue
-      const shadow = this.optimisticEdits.get(row.cellId)
+      const key = targetOverlayKey(row.cellId, laneOf(row))
+      const shadow = this.optimisticEdits.get(key)
       if (shadow && shadow.seq <= fetchStartSeq && (row.value ?? "") === shadow.value) {
-        this.optimisticEdits.delete(row.cellId)
+        this.optimisticEdits.delete(key)
         changed.add(row.cellId)
       }
     }
@@ -701,13 +710,23 @@ export class CellStore {
   mergeProtectedRows(buffer: CellRow[], fetchStartSeq: number): { rows: CellRow[]; discardedCellIds: Set<string> } {
     const protectedIds = new Set<string>()
     for (const [id, seq] of this.freshnessFloors) if (seq > fetchStartSeq) protectedIds.add(id)
-    for (const id of this.optimisticEdits.keys()) protectedIds.add(id)
+    for (const shadow of this.optimisticEdits.values()) protectedIds.add(shadow.cellId)
     const discardedCellIds = new Set<string>()
     if (protectedIds.size === 0) return { rows: buffer, discardedCellIds }
 
+    // A target row is identified by cell AND lane. Collapsing every target
+    // for a cell onto `${cellId}|target` makes a protected concurrent delta
+    // keep whichever lane happened to be visited last and silently discard
+    // its siblings. The selector can then say `es` while the Spanish target
+    // is gone from the in-memory row set even though it projected correctly.
+    const protectedRowKey = (row: CellRow): string => (
+      row.side === "target"
+        ? `${row.cellId}|target|${laneOf(row)}`
+        : `${row.cellId}|source`
+    )
     const keep = new Map<string, CellRow>()
     for (const row of this.toRows()) {
-      if (protectedIds.has(row.cellId)) keep.set(`${row.cellId}|${row.side}`, row)
+      if (protectedIds.has(row.cellId)) keep.set(protectedRowKey(row), row)
     }
 
     const out: CellRow[] = []
@@ -717,7 +736,7 @@ export class CellStore {
         continue
       }
       discardedCellIds.add(row.cellId)
-      const key = `${row.cellId}|${row.side}`
+      const key = protectedRowKey(row)
       const current = keep.get(key)
       if (current) {
         out.push(current)
@@ -729,16 +748,25 @@ export class CellStore {
   }
 
   setPendingOverlay(next: Map<string, PendingOverlay>): void {
+    const activeLane = this.ctx.lane ?? ""
+    const normalized = new Map<string, PendingOverlay>()
+    for (const [cellId, overlay] of next) {
+      normalized.set(cellId, {
+        ...overlay,
+        targetLang: overlay.targetLang ?? activeLane,
+      })
+    }
     const changed = symmetricChangedKeys(
       this.pendingOverlay,
-      next,
+      normalized,
       (a, b) => a.value === b.value
         && a.valueHtml === b.valueHtml
         && a.eventId === b.eventId
-        && a.aiDrafted === b.aiDrafted,
+        && a.aiDrafted === b.aiDrafted
+        && a.targetLang === b.targetLang,
     )
     if (changed.size === 0) return
-    this.pendingOverlay = next
+    this.pendingOverlay = normalized
     this.bumpCells(changed)
     this.rebuildDerivedIndexes()
     this.emit(changed)
@@ -754,9 +782,10 @@ export class CellStore {
   }
 
   clearOptimisticIfValue(cellId: string, value: string): boolean {
-    const shadow = this.optimisticEdits.get(cellId)
+    const key = targetOverlayKey(cellId, this.ctx.lane ?? "")
+    const shadow = this.optimisticEdits.get(key)
     if (!shadow || shadow.value !== value) return false
-    this.optimisticEdits.delete(cellId)
+    this.optimisticEdits.delete(key)
     this.bumpCells([cellId])
     this.rebuildDerivedIndexes()
     this.emit([cellId])
@@ -765,7 +794,13 @@ export class CellStore {
 
   applyOptimisticTargetEdit(cellId: string, patch: PendingOverlay): void {
     const seq = ++this.writeSeq
-    this.optimisticEdits.set(cellId, { ...patch, seq })
+    const targetLang = this.ctx.lane ?? ""
+    this.optimisticEdits.set(targetOverlayKey(cellId, targetLang), {
+      ...patch,
+      cellId,
+      targetLang,
+      seq,
+    })
     this.freshnessFloors.set(cellId, seq)
 
     const existing = this.targetById.get(cellId)
@@ -787,6 +822,7 @@ export class CellStore {
       this.targetById.set(cellId, {
         ...source,
         side: "target",
+        targetLang,
         value: patch.value,
         valueHtml: patch.valueHtml ?? null,
         eventId: "",
@@ -865,7 +901,14 @@ export class CellStore {
     let orderChanged = false
     for (const patch of patches) {
       const seq = ++this.writeSeq
-      this.optimisticEdits.set(patch.cellId, { value: patch.value, valueHtml: patch.valueHtml, seq })
+      const targetLang = this.ctx.lane ?? ""
+      this.optimisticEdits.set(targetOverlayKey(patch.cellId, targetLang), {
+        cellId: patch.cellId,
+        targetLang,
+        value: patch.value,
+        valueHtml: patch.valueHtml,
+        seq,
+      })
       this.freshnessFloors.set(patch.cellId, seq)
 
       const existing = this.targetById.get(patch.cellId)
@@ -880,6 +923,7 @@ export class CellStore {
         this.targetById.set(patch.cellId, {
           ...source,
           side: "target",
+          targetLang,
           value: patch.value,
           valueHtml: patch.valueHtml ?? null,
           eventId: "",
@@ -976,14 +1020,16 @@ export class CellStore {
 
   private applyContentOverlays(cell: CellData): void {
     const pending = this.pendingOverlay.get(cell.id)
-    if (pending) {
-      cell.translated = pending.value
-      if (pending.valueHtml !== undefined) cell.translatedHtml = pending.valueHtml
-      cell.status = deriveStatus(pending.value, false)
-      cell.aiDrafted = pending.aiDrafted ?? false
+    const activeLane = this.ctx.lane ?? ""
+    const activePending = pending?.targetLang === activeLane ? pending : undefined
+    if (activePending) {
+      cell.translated = activePending.value
+      if (activePending.valueHtml !== undefined) cell.translatedHtml = activePending.valueHtml
+      cell.status = deriveStatus(activePending.value, false)
+      cell.aiDrafted = activePending.aiDrafted ?? false
       cell.hasPendingEdit = true
     }
-    const optimistic = this.optimisticEdits.get(cell.id)
+    const optimistic = this.optimisticEdits.get(targetOverlayKey(cell.id, activeLane))
     if (optimistic) {
       cell.translated = optimistic.value
       // The optimistic value is authoritative for BOTH text and html. When an
@@ -995,7 +1041,7 @@ export class CellStore {
       cell.aiDrafted = optimistic.aiDrafted ?? false
       cell.hasPendingEdit = true
     }
-    if (pending || optimistic) {
+    if (activePending || optimistic) {
       // The overlay changed `translated`/`status`; recompute validationStatus
       // from the overlaid text so the row's aria/ring can't keep reporting
       // "empty" (or a stale validator state) while showing the fresh value.
@@ -1065,8 +1111,10 @@ export class CellStore {
         const endorsements = audit
           ? audit.activeValidators.length
           : Math.max(0, target?.endorsementCount ?? 0)
-        const targetValue = this.optimisticEdits.get(id)?.value
-          ?? this.pendingOverlay.get(id)?.value
+        const activeLane = this.ctx.lane ?? ""
+        const pending = this.pendingOverlay.get(id)
+        const targetValue = this.optimisticEdits.get(targetOverlayKey(id, activeLane))?.value
+          ?? (pending?.targetLang === activeLane ? pending.value : undefined)
           ?? target?.value
           ?? ''
         const hasAuthoritativeEndorsements = audit !== undefined || target?.endorsementCount !== undefined
@@ -1140,8 +1188,10 @@ export class CellStore {
       let validated = 0
       for (const cellId of cellIds) {
         const target = this.targetById.get(cellId)
-        const targetValue = this.optimisticEdits.get(cellId)?.value
-          ?? this.pendingOverlay.get(cellId)?.value
+        const activeLane = this.ctx.lane ?? ""
+        const pending = this.pendingOverlay.get(cellId)
+        const targetValue = this.optimisticEdits.get(targetOverlayKey(cellId, activeLane))?.value
+          ?? (pending?.targetLang === activeLane ? pending.value : undefined)
           ?? target?.value
           ?? ""
         if (targetValue.trim()) translated += 1
@@ -1438,21 +1488,34 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
   }, [projectId, fileId, enabled])
 
   useEffect(() => {
-    if (!enabled || !fileId) {
+    if (!enabled || !projectId || !fileId) {
       store.setPendingOverlay(new Map())
       store.setPendingProgressEventIds([])
       return
     }
+    const activeProjectId = projectId
+    const activeFileId = fileId
+    const activeLane = lane
     let cancelled = false
     async function refresh() {
       const all = await peekOutboxBatch(2000)
       if (cancelled) return
-      const fid = fileRef.current
       const next = new Map<string, PendingOverlay>()
       const pendingProgressEventIds: string[] = []
       for (const record of all) {
-        if (fid && record.event.fileId !== fid) continue
+        if (record.event.projectId !== activeProjectId || record.event.fileId !== activeFileId) continue
         const kind = record.event.kind
+        const payload = record.event.payload as {
+          value?: string
+          valueHtml?: string
+          ai_suggestion?: true
+          targetLang?: string
+        }
+        const eventLane = typeof payload.targetLang === "string" ? payload.targetLang : ""
+        const laneScoped = kind.startsWith("target.cell.")
+          || kind === "cell.validate"
+          || kind === "cell.unvalidate"
+        if (laneScoped && eventLane !== activeLane) continue
         const failed = (record.status ?? "pending") === "failed"
         if (!failed && (
           kind.startsWith("source.cell.") ||
@@ -1465,7 +1528,6 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
         if (kind !== "target.cell.commit" && kind !== "target.cell.create") continue
         const cellId = record.event.cellId
         if (!cellId) continue
-        const payload = record.event.payload as { value?: string; valueHtml?: string; ai_suggestion?: true }
         if (failed) {
           if (typeof payload.value === "string") store.clearOptimisticIfValue(cellId, payload.value)
           continue
@@ -1476,6 +1538,7 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
           valueHtml: payload.valueHtml,
           eventId: record.event.id,
           aiDrafted: payload.ai_suggestion === true,
+          targetLang: eventLane,
         })
       }
       store.setPendingOverlay(next)
@@ -1487,7 +1550,7 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
       cancelled = true
       unsub()
     }
-  }, [enabled, fileId, store])
+  }, [enabled, fileId, lane, projectId, store])
 
   useEffect(() => () => {
     if (tokenRetryRef.current) clearTimeout(tokenRetryRef.current)

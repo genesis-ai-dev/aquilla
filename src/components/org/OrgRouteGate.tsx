@@ -2,11 +2,20 @@
  * Gate for `/orgs/:orgId/...` — path is authoritative.
  * Unknown / inaccessible org ids stay on the URL with a not-found / no-access
  * state (no silent fallback to last-org localStorage).
+ *
+ * FRO-367: every gate state still mounts AccountSwitcher. Switching accounts
+ * in another tab can land this tab on an org the new account can't access;
+ * without the switcher the user has no way to see who they are or switch back
+ * without a reload (and the cross-tab account-menu assertion has nowhere to
+ * land).
  */
+import type { ReactNode } from "react"
 import { Link, Navigate, Outlet, useLocation, useParams } from "react-router-dom"
 import { useActiveOrg } from "@/context/OrgContext"
 import { orgKeyFromParam, ALL_ORGS_PARAM, orgHomePath, parseOrgPath } from "@/lib/navigation/org-paths"
+import { AccountSwitcher } from "@/components/AccountSwitcher"
 import { Button } from "@/components/ui/button"
+import { Spinner } from "@/components/ui/spinner"
 
 export function OrgRouteGate() {
   const { orgId: orgIdParam } = useParams<{ orgId: string }>()
@@ -21,9 +30,11 @@ export function OrgRouteGate() {
 
   if (isLoading) {
     return (
-      <div className="flex h-screen items-center justify-center text-sm text-muted-foreground">
-        Loading…
-      </div>
+      <OrgGateChrome>
+        <div className="flex items-center justify-center text-muted-foreground">
+          <Spinner className="size-5" />
+        </div>
+      </OrgGateChrome>
     )
   }
 
@@ -39,9 +50,11 @@ export function OrgRouteGate() {
     // not fetched yet" — wait instead of flashing not-found on a guest reload.
     if (accessibleProjectsLoading) {
       return (
-        <div className="flex h-screen items-center justify-center text-sm text-muted-foreground">
-          Loading…
-        </div>
+        <OrgGateChrome>
+          <div className="flex items-center justify-center text-sm text-muted-foreground">
+            Loading…
+          </div>
+        </OrgGateChrome>
       )
     }
     return <OrgAccessProblem reason="missing" orgId={orgKey} />
@@ -81,14 +94,32 @@ function OrgAccessProblem({
         : `You don’t have access to organization #${orgId}, or it doesn’t exist.`
 
   return (
-    <div className="flex h-screen flex-col items-center justify-center gap-4 px-6 text-center">
-      <div className="space-y-2">
-        <h1 className="text-lg font-medium">{title}</h1>
-        <p className="max-w-md text-sm text-muted-foreground">{body}</p>
+    <OrgGateChrome>
+      <div className="flex flex-col items-center justify-center gap-4 px-6 text-center">
+        <div className="space-y-2">
+          <h1 className="text-lg font-medium">{title}</h1>
+          <p className="max-w-md text-sm text-muted-foreground">{body}</p>
+        </div>
+        <Button nativeButton={false} render={<Link to={orgHomePath(ALL_ORGS_PARAM)} />}>
+          All organizations
+        </Button>
       </div>
-      <Button nativeButton={false} render={<Link to={orgHomePath(ALL_ORGS_PARAM)} />}>
-        All organizations
-      </Button>
+    </OrgGateChrome>
+  )
+}
+
+/** Minimal chrome so gate states (loading / not-found / error) still expose
+ *  the account menu. Full OrgSidebar is wrong here — it would render member
+ *  nav for an org the caller cannot access. */
+function OrgGateChrome({ children }: { children: ReactNode }) {
+  return (
+    <div className="flex h-screen flex-col">
+      <div className="flex justify-end border-b px-3 py-2">
+        <div className="w-64">
+          <AccountSwitcher variant="header" />
+        </div>
+      </div>
+      <div className="flex flex-1 flex-col items-center justify-center">{children}</div>
     </div>
   )
 }

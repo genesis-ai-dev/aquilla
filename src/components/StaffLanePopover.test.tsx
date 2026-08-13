@@ -234,6 +234,6 @@ describe("StaffLanePopover", () => {
     openPopover()
 
     const invite = screen.getByRole("link", { name: /invite them to the project/i })
-    expect(invite).toHaveAttribute("href", "/project/proj-1/members")
+    expect(invite).toHaveAttribute("href", "/project/proj-1/settings/members")
   })
 })

@@ -20,6 +20,10 @@ vi.mock("@/context/OrgContext", () => ({
   useActiveOrg: () => orgContext,
 }))
 
+vi.mock("@/components/AccountSwitcher", () => ({
+  AccountSwitcher: () => <div data-testid="account-switcher" />,
+}))
+
 function LocationProbe() {
   const location = useLocation()
   return <output data-testid="location">{location.pathname}</output>
@@ -87,5 +91,17 @@ describe("OrgRouteGate (AQU-790 guest orgs)", () => {
     orgContext.accessibleProjectsLoading = false
     renderGate("/orgs/999")
     expect(screen.getByText("Organization not found")).toBeInTheDocument()
+  })
+
+  it("keeps the account switcher on not-found so a cross-tab account switch is visible (FRO-367)", () => {
+    orgContext.accessibleProjectsLoading = false
+    renderGate("/orgs/999")
+    expect(screen.getByTestId("account-switcher")).toBeInTheDocument()
+  })
+
+  it("keeps the account switcher while orgs are loading", () => {
+    orgContext.isLoading = true
+    renderGate("/orgs/7")
+    expect(screen.getByTestId("account-switcher")).toBeInTheDocument()
   })
 })

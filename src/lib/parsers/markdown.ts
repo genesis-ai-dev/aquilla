@@ -1,5 +1,5 @@
 import { v4 as uuid } from "uuid"
-import type { TranslatableString, CellType } from "./types"
+import type { TranslatableString, CellType } from "./core-types"
 import { splitIntoSegments } from "./text-splitter"
 
 export function extractMarkdownStrings(content: string): TranslatableString[] {

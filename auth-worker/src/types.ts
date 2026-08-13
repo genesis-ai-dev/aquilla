@@ -242,6 +242,17 @@ export interface Env {
   // CREDIT_ENFORCE: set to "true" to enforce caps with 429s. Default: false.
   CREDIT_ENFORCE?: string
 
+  // ── Stripe Field Plan billing ──────────────────────────────────────────
+  // Secret: `wrangler secret put STRIPE_SECRET_KEY` / auth-worker/.dev.vars.
+  // Never commit the secret. Publishable key + price ids are plain vars.
+  STRIPE_SECRET_KEY?: string
+  STRIPE_WEBHOOK_SECRET?: string
+  STRIPE_PUBLISHABLE_KEY?: string
+  /** Recurring $500 / 4-week Field Plan price id (price_…). */
+  STRIPE_PRICE_FIELD?: string
+  /** One-time $200 / 100k-word add-on price id (price_…). */
+  STRIPE_PRICE_ADDON?: string
+
   /**
    * When set to "1", exposes `/__test__/reset` and skips authentication on
    * sensitive routes that the E2E harness needs to seed. NEVER set in

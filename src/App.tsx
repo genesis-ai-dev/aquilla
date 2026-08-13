@@ -64,6 +64,9 @@ const Settings = lazy(() =>
 const OrgSettingsIdentity = lazy(() =>
   import("@/pages/Settings").then((m) => ({ default: m.OrgSettingsIdentity })),
 )
+const OrgSettingsBilling = lazy(() =>
+  import("@/pages/Settings").then((m) => ({ default: m.OrgSettingsBilling })),
+)
 const OrgSettingsExport = lazy(() =>
   import("@/pages/Settings").then((m) => ({ default: m.OrgSettingsExport })),
 )
@@ -273,6 +276,7 @@ function AppRoutes() {
           <Route path="members/matrix" element={<OrgLazyRoute><MembersPage /></OrgLazyRoute>} />
           <Route path="settings" element={<OrgLazyRoute><Settings /></OrgLazyRoute>} />
           <Route path="settings/identity" element={<OrgLazyRoute><OrgSettingsIdentity /></OrgLazyRoute>} />
+          <Route path="settings/billing" element={<OrgLazyRoute><OrgSettingsBilling /></OrgLazyRoute>} />
           <Route path="settings/export" element={<OrgLazyRoute><OrgSettingsExport /></OrgLazyRoute>} />
           <Route path="settings/roster" element={<OrgLazyRoute><OrgSettingsRoster /></OrgLazyRoute>} />
           <Route path="settings/assignment" element={<OrgLazyRoute><OrgSettingsAssignment /></OrgLazyRoute>} />

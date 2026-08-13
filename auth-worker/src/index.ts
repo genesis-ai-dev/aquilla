@@ -92,6 +92,7 @@ import contextualRoutes from "./routes/contextual"
 import agentArtifactsRoutes from "./routes/agent-artifacts"
 import mondayRoutes from "./routes/monday"
 import contactRoutes from "./routes/contact"
+import billingRoutes from "./routes/billing"
 import { flushDirtyLinks } from "./lib/monday/push"
 import { sweepStrandedContextualRuns } from "./routes/contextual"
 import {
@@ -255,6 +256,8 @@ app.route("/api/v2/invites", invitesRoutes)
 // Public contact surface (marketing homepage "book a call" form) — no auth;
 // honeypot + per-IP throttle inside (routes/contact.ts).
 app.route("/api/v2/contact", contactRoutes)
+// Stripe Field Plan: org checkout/portal + unsigned webhook (signature-verified).
+app.route("/api/v2", billingRoutes)
 // AQU-626: per-user deep link + PIN (fresh-browser / diode-zone flow). Mint is
 // project_lead-gated; redeem is public (the link + PIN is the credential).
 app.route("/api/v2/access-links", accessLinksRoutes)

@@ -22,6 +22,8 @@ import { resolveProjectRole } from "../services/project-permissions"
 import { runAiGuard } from "../lib/ai-budget"
 import { getPlatformSettingsCached, type PlatformSettings } from "../lib/platform-settings"
 import { creditGuard, recordCredit } from "../lib/credits"
+import { countWords } from "../lib/billing/plans"
+import { recordWords, wordCapBody, wordGuard } from "../lib/billing/words"
 import { openRouterExtras } from "../lib/llm-vendor"
 import {
   AB_OUTCOMES,
@@ -166,6 +168,11 @@ chat.post(
         429,
       )
     }
+    const chatWordCheck = await wordGuard(c.env.AQUILLA_PG, orgId)
+    if (!chatWordCheck.ok) {
+      return c.json(wordCapBody(chatWordCheck.reason), 429)
+    }
+    const chatWords = countWords(request.messages.map((m) => m.content).join(" "))
 
     try {
       const startedAt = Date.now()
@@ -216,6 +223,7 @@ chat.post(
         // point). Record a flat 1¢ fallback estimate so the ledger always has
         // a row — this is the cheap/low-priority rail.
         await recordCredit(c.env.AQUILLA_PG, orgId, user.id, "llm", 1, 1)
+        await recordWords(c.env.AQUILLA_PG, orgId, user.id, "llm", chatWords)
         const streamHeaders = new Headers({
           "Content-Type": "text/event-stream",
           "Cache-Control": "no-cache",
@@ -240,6 +248,7 @@ chat.post(
       }
       // Record asynchronously (graceful-degrade) — never block the response.
       await recordCredit(c.env.AQUILLA_PG, orgId, user.id, "llm", costCents, 1)
+      await recordWords(c.env.AQUILLA_PG, orgId, user.id, "llm", chatWords)
 
       if (ab) {
         c.header("X-AB-Request-Id", ab.requestId)

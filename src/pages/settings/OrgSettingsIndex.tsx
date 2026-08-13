@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom"
-import { Archive, BookMarked, Building2, Download, EyeOff, KeyRound, UserCheck, Workflow } from "lucide-react"
+import { Archive, BookMarked, Building2, CreditCard, Download, EyeOff, KeyRound, UserCheck, Workflow } from "lucide-react"
 import { OrgBreadcrumb } from "@/components/org/OrgBreadcrumb"
 import { PageHeader } from "@/components/ui/page"
 import { NavList, NavRow } from "@/components/ui/nav-list"
@@ -37,6 +37,7 @@ export function OrgSettingsIndex() {
       <div className="flex flex-col gap-12">
         <NavList label="Organization">
           <NavRow to={orgSettingsPath(activeOrgId, "identity")} icon={Building2} title="Identity" hint={activeOrg?.name ?? "Untitled"} />
+          <NavRow to={orgSettingsPath(activeOrgId, "billing")} icon={CreditCard} title="Billing & usage" hint="Field Plan" />
           <NavRow to={orgSettingsPath(activeOrgId, "export")} icon={Download} title="Export permissions" hint={FLOOR_LABEL[displayedExportMinRole] ?? "Maintainer"} />
           <NavRow to={orgSettingsPath(activeOrgId, "roster")} icon={EyeOff} title="Roster & progress visibility" hint={FLOOR_LABEL[rosterViewMinRole] ?? "Maintainer"} />
           <NavRow

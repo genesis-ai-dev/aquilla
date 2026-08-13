@@ -81,3 +81,10 @@ MONDAY_REDIRECT_URI="http://localhost:5173/oauth/callback"
 # /__dev__/{seed,login} — see routes/dev-seed.ts and routes/test-reset.ts.
 # If you launch auth-worker manually via `wrangler dev`, prepend
 # `WRANGLER_LOCAL=1` on the command line; never persist it.
+
+# Stripe test mode. Secret never goes in wrangler.toml.
+# STRIPE_SECRET_KEY="sk_test_..."
+# STRIPE_WEBHOOK_SECRET="whsec_..."
+# STRIPE_PUBLISHABLE_KEY="pk_test_..."
+# STRIPE_PRICE_FIELD="price_..."
+# STRIPE_PRICE_ADDON="price_..."

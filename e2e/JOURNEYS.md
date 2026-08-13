@@ -157,6 +157,7 @@
 | Projects    | Multi-select member add on project surfaces (overview Members card + `/project/:id/settings/members`) | `e2e/specs/projects/project-members-add-multiselect.smoke.spec.ts` + `share-invite-username-verified.smoke.spec.ts` | ✅ |
 | Orgs        | Org rename from Identity (inline blur-to-save)        | `e2e/specs/orgs/org-rename.smoke.spec.ts` | ✅ |
 | Orgs        | Org settings page renders; Identity rename round-trip | `e2e/specs/orgs/org-settings.smoke.spec.ts` + `org-settings-rename.smoke.spec.ts` | ✅ |
+| Orgs        | Billing & usage: Field Plan CTA + word meter for maintainers | `e2e/specs/orgs/org-settings-billing.smoke.spec.ts` | ✅ |
 | Orgs        | Member access panel expand shows per-project access   | `e2e/specs/orgs/member-access-panel-expand.smoke.spec.ts`     |   ✅   |
 | Orgs        | Assigned to me page shows inbox                       | `e2e/specs/orgs/assigned-to-me-page.smoke.spec.ts` + `assigned.smoke.spec.ts` | ✅ |
 | Orgs        | Preferences page analytics toggle                     | `e2e/specs/orgs/preferences-analytics-toggle.smoke.spec.ts` + `preferences-analytics-disabled-warning.smoke.spec.ts` | ✅ |

@@ -53,6 +53,10 @@ test("org settings page renders Identity section and stats", async ({ alice }) =
     timeout: 5_000,
   })
 
+  await expect(alice.getByRole("link", { name: /Billing & usage/i })).toBeVisible({
+    timeout: 5_000,
+  })
+
   // AQU-485: roster & progress visibility is a first-class settings sub-page.
   await expect(alice.getByRole("link", { name: /Roster & progress visibility/i })).toBeVisible({
     timeout: 5_000,

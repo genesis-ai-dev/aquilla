@@ -4,6 +4,7 @@ import { test, expect } from "../../helpers/multi-user"
  * PersonalProviderSection — "Save override" validates endpoint on submit.
  *
  * Submit stays enabled; clicking with an empty endpoint shows a validation error.
+ * Successful saves are silent (no Saved ack) — success is the Active state / button label.
  */
 test("preferences AI provider Save override validates empty endpoint on click", async ({
   alice,
@@ -25,7 +26,13 @@ test("preferences AI provider Save override validates empty endpoint on click", 
 
   await endpointInput.fill("https://openrouter.ai/api/v1")
   await saveBtn.click()
-  await expect(alice.getByTestId("provider-override-saved")).toBeVisible({ timeout: 3_000 })
+  await expect(alice.getByText(/Active — your projects use this endpoint/i)).toBeVisible({
+    timeout: 3_000,
+  })
+  await expect(alice.getByRole("button", { name: /Update override/i })).toBeVisible({
+    timeout: 3_000,
+  })
+  await expect(alice.getByText(/^Saved$/i)).toHaveCount(0)
 
   await endpointInput.clear()
   await saveBtn.click()

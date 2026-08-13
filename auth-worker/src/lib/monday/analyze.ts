@@ -15,7 +15,7 @@ import {
   type MondayBoardGroup,
   type MondayMapping,
 } from "./types"
-import type { MondayItemSample } from "./client"
+import type { MondayItemSample, MondayBoardSummary } from "./client"
 import type { ProjectMetricsSummary } from "./metrics"
 
 export interface AnalyzeArgs {
@@ -168,6 +168,115 @@ async function callLlm(env: Env, model: string, prompt: string): Promise<string>
   const content = data.choices?.[0]?.message?.content
   if (!content) throw new Error("LLM returned no content")
   return content
+}
+
+// ── Board selection ────────────────────────────────────────────────────────
+// The wizard's first gate: with ~200 boards visible to a token, picking one is
+// the most ambiguous decision in setup, so it is the one worth spending an LLM
+// call on. Kept as a SEPARATE, cheap call (names + workspaces only) rather than
+// folded into the mapping prompt — fetching structure + sample items for every
+// board to mapping-prompt them all would be hundreds of GraphQL round trips.
+
+export interface BoardChoice {
+  boardId: string
+  boardName: string
+  /** One short sentence for the user; empty when chosen without an LLM call. */
+  reason: string
+}
+
+/** The token can see no active boards. A user-actionable state (go make a
+ *  board), NOT a Monday outage — the route maps it to 409, not 502, so the SPA
+ *  doesn't offer a retry that can never succeed. */
+export class NoBoardsError extends Error {
+  constructor() {
+    super("no boards found in this Monday account")
+    this.name = "NoBoardsError"
+  }
+}
+
+/** Token-overlap score between a board name and the project's name/files.
+ *  Also the fallback when the LLM names a board that isn't in the list. */
+function scoreBoard(board: MondayBoardSummary, summary: ProjectMetricsSummary): number {
+  const tokenize = (s: string) =>
+    s.toLowerCase().split(/[\s\p{P}]+/u).filter((t) => t.length > 2)
+  const needle = new Set([
+    ...tokenize(summary.projectName),
+    ...summary.files.flatMap((f) => tokenize(f.fileName)),
+  ])
+  if (needle.size === 0) return 0
+  return tokenize(board.name).filter((t) => needle.has(t)).length
+}
+
+function bestByName(boards: MondayBoardSummary[], summary: ProjectMetricsSummary): MondayBoardSummary {
+  let best = boards[0]
+  let bestScore = scoreBoard(best, summary)
+  for (const b of boards.slice(1)) {
+    const score = scoreBoard(b, summary)
+    if (score > bestScore) {
+      best = b
+      bestScore = score
+    }
+  }
+  return best
+}
+
+/**
+ * Pick the board this project's progress should be pushed to.
+ *
+ * Deterministic wherever it can be: zero boards is an error, one board needs no
+ * model at all. Only a genuine choice reaches the LLM, and its answer is
+ * validated against the real board list — a hallucinated id falls back to the
+ * best name-overlap match rather than propagating.
+ */
+export async function selectBoardForProject(
+  env: Env,
+  args: { boards: MondayBoardSummary[]; summary: ProjectMetricsSummary },
+): Promise<BoardChoice> {
+  const { boards, summary } = args
+  if (boards.length === 0) throw new NoBoardsError()
+  if (boards.length === 1) {
+    return { boardId: boards[0].id, boardName: boards[0].name, reason: "" }
+  }
+
+  const settings = await getPlatformSettingsCached(env)
+  const model = settings.defaultLlmModel || env.DEFAULT_LLM_MODEL || "anthropic/claude-sonnet-4.5"
+
+  const prompt = [
+    "You are picking which Monday.com board an Aquilla translation project should push its progress to.",
+    "",
+    `Project: ${summary.projectName}`,
+    `Files (${summary.files.length}): ${summary.files.map((f) => f.fileName).slice(0, 40).join(", ") || "(none yet)"}`,
+    "",
+    "Boards available:",
+    JSON.stringify(
+      boards.map((b) => ({ id: b.id, name: b.name, workspace: b.workspace?.name ?? null })),
+    ),
+    "",
+    "Prefer a board whose name or workspace matches the project, or that looks like a translation/localization tracker.",
+    'Respond with STRICT JSON: {"boardId": "<id from the list>", "reason": "<one short sentence>"}',
+  ].join("\n")
+
+  let chosen: MondayBoardSummary | undefined
+  let reason = ""
+  try {
+    const parsed = tryParseProposal(await callLlm(env, model, prompt)) as
+      | { boardId?: unknown; reason?: unknown }
+      | null
+    if (parsed && typeof parsed.boardId === "string") {
+      chosen = boards.find((b) => b.id === parsed.boardId)
+    }
+    if (chosen && typeof parsed?.reason === "string") reason = parsed.reason
+  } catch (err) {
+    // A board still gets picked by name overlap — the user can change it in the
+    // wizard either way, so an AI outage degrades the suggestion, not the flow.
+    console.error("[monday] board selection failed, falling back to name match:", err)
+  }
+
+  if (!chosen) {
+    chosen = bestByName(boards, summary)
+    reason = ""
+  }
+  return { boardId: chosen.id, boardName: chosen.name, reason }
 }
 
 /** Run the LLM analysis and clamp its proposal. Throws on upstream/parse failure. */

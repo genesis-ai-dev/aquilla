@@ -1,18 +1,13 @@
 import { test, expect, orgRoute } from "../../helpers/multi-user"
 
 /**
- * Team rename — TeamDetail page.
+ * Team rename — Team settings (inline name field).
  *
- * The teams.smoke.spec.ts already creates a team and navigates to its
- * detail page. This spec extends that by:
- *   1. Creating a team
- *   2. Clicking "Edit" (inline rename — no dialog)
- *   3. Changing the name and saving
- *   4. Verifying the new name appears in the h1
+ * Create a team, open settings via the gear, edit the name, blur to save,
+ * then verify the team detail heading shows the new name.
  */
 test("team rename saves new name on team detail page", async ({ alice }) => {
   await alice.goto(orgRoute(alice, "/teams"))
-  // Create a new team.
   const newTeamBtn = alice.getByRole("button", { name: /New team/i })
   await expect(newTeamBtn).toBeVisible({ timeout: 10_000 })
   await newTeamBtn.click()
@@ -23,27 +18,35 @@ test("team rename saves new name on team detail page", async ({ alice }) => {
   await nameInput.fill(originalName)
   await alice.getByRole("button", { name: /^Create$/i }).click()
 
-  // Navigate to the team detail page.
   await alice.waitForURL(/\/teams\/\d+$/, { timeout: 10_000 })
-  // h1 shows the team name.
-  await expect(alice.locator("h1").filter({ hasText: originalName })).toBeVisible({ timeout: 5_000 })
+  await expect(alice.locator("h1").filter({ hasText: originalName })).toBeVisible({
+    timeout: 5_000,
+  })
 
-  // "Edit" link opens inline rename input.
-  const editBtn = alice.getByRole("button", { name: /^Edit$/i })
-  await expect(editBtn).toBeVisible({ timeout: 5_000 })
-  await editBtn.click()
+  await alice.getByRole("link", { name: /Team settings/i }).click()
+  await alice.waitForURL(/\/teams\/\d+\/settings$/, { timeout: 10_000 })
 
-  // Inline input with the current name.
-  const editInput = alice.locator('input[value="' + originalName + '"]')
-    .or(alice.locator("input.border.rounded").first())
+  const editInput = alice.getByLabel(/^Team name$/i)
   await expect(editInput).toBeVisible({ timeout: 3_000 })
+  await expect(editInput).toHaveValue(originalName)
 
   const newTeamName = `${originalName} — renamed`
   await editInput.fill(newTeamName)
+  const saveResponse = alice.waitForResponse(
+    (response) =>
+      response.request().method() === "PATCH" &&
+      /\/groups\/\d+/.test(response.url()) &&
+      response.ok(),
+    { timeout: 10_000 },
+  )
+  await editInput.blur()
+  await saveResponse
+  await expect(editInput).toHaveValue(newTeamName)
 
-  // Save button.
-  await alice.getByRole("button", { name: /^Save$/i }).first().click()
-
-  // h1 updates to new name.
-  await expect(alice.locator("h1").filter({ hasText: newTeamName })).toBeVisible({ timeout: 5_000 })
+  // Back to team detail via breadcrumb / settings parent.
+  await alice.getByRole("link", { name: newTeamName }).first().click()
+  await alice.waitForURL(/\/teams\/\d+$/, { timeout: 10_000 })
+  await expect(alice.locator("h1").filter({ hasText: newTeamName })).toBeVisible({
+    timeout: 5_000,
+  })
 })

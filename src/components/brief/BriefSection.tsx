@@ -32,7 +32,7 @@ export function BriefSection(props: BriefSectionProps) {
           <p className="mb-3">
             Capture this project&apos;s purpose, audience, and standards so the AI drafts to your brief.
           </p>
-          {canEdit && <Button size="sm" onClick={onEdit} disabled={busy}>Create brief</Button>}
+          {canEdit && <Button onClick={onEdit} disabled={busy}>Create brief</Button>}
         </div>
       ) : (
         <div className="rounded-lg border border-border/50 p-4 space-y-3">
@@ -43,8 +43,8 @@ export function BriefSection(props: BriefSectionProps) {
           )}
           {canEdit && (
             <div className="flex gap-2">
-              <Button size="sm" variant="outline" onClick={onEdit} disabled={busy}>Edit brief</Button>
-              <Button size="sm" variant={stale ? "default" : "ghost"} onClick={onGenerate} disabled={busy}>
+              <Button variant="outline" onClick={onEdit} disabled={busy}>Edit brief</Button>
+              <Button variant={stale ? "default" : "ghost"} onClick={onGenerate} disabled={busy}>
                 {busy ? "Generating…" : brief?.l1Summary ? "Regenerate summary" : "Generate summary"}
               </Button>
             </div>

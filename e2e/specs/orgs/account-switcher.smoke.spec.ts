@@ -44,9 +44,9 @@ test("account switcher dropdown opens with session info", async ({ alice }) => {
   await expect(preferencesDialog).toBeVisible()
   await expect(preferencesDialog.locator("h1").filter({ hasText: "Preferences" })).toBeVisible()
 
-  await preferencesDialog.getByRole("link", { name: /Appearance/i }).click()
-  await expect(alice).toHaveURL(/\/preferences\/appearance$/)
-  await expect(preferencesDialog.getByRole("heading", { name: "Appearance" })).toBeVisible()
+  await preferencesDialog.getByRole("link", { name: /Workspace/i }).click()
+  await expect(alice).toHaveURL(/\/preferences\/workspace$/)
+  await expect(preferencesDialog.getByRole("heading", { name: "Workspace" })).toBeVisible()
 
   await preferencesDialog.getByRole("button", { name: "Close" }).click()
   await expect(alice).toHaveURL(backgroundUrl)

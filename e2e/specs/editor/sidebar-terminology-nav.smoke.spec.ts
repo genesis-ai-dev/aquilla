@@ -27,6 +27,8 @@ test("sidebar Terminology is visible below Comments and navigates to glossary", 
 
   // Terminology must be a sibling pinned row, not buried in More.
   await expect(alice.getByRole("button", { name: /^More project options$/i })).toBeVisible()
+  // Project settings lives in the header cog, not the sidebar overflow.
+  await expect(aside.getByRole("button", { name: /^Settings$/i })).toHaveCount(0)
   // Glossary no longer sits above the file list — Terminology owns that nav.
   await expect(aside.getByRole("button", { name: /^Glossary$/i })).toHaveCount(0)
   const boxComments = await comments.boundingBox()

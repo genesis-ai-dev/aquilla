@@ -4,6 +4,11 @@ import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { OrgProvider } from "@/context/OrgContext"
 import { Settings, OrgSettingsIdentity, OrgSettingsExport, OrgSettingsRoster, OrgSettingsAssignment } from "./Settings"
 import { renameOrg, listMyOrgs } from "@/lib/frontier/orgs"
+import { toast } from "@/components/ui/toast"
+
+vi.mock("@/components/ui/toast", () => ({
+  toast: { add: vi.fn(), close: vi.fn(), update: vi.fn(), promise: vi.fn() },
+}))
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const mockPatch = vi.fn<() => Promise<any>>(async () => ({ kind: "ok", value: { orgId: 1, settings: {}, version: 1, updatedAt: null, updatedBy: null } }))
@@ -86,47 +91,50 @@ function renderSettings(path = "/orgs/1/settings") {
 }
 
 describe("Org Settings", () => {
-  it("shows the org name and an owner can rename it", async () => {
+  it("shows the org name and an owner can rename it on blur", async () => {
     renderSettings("/orgs/1/settings/identity")
-    await waitFor(() => expect(screen.getAllByText("Come and See").length).toBeGreaterThan(0))
-    fireEvent.click(screen.getByRole("button", { name: /rename/i }))
-    const input = await screen.findByLabelText(/organization name/i)
+    const input = await screen.findByLabelText(/^Organization name$/i)
+    await waitFor(() => expect(input).toHaveValue("Come and See"))
     fireEvent.change(input, { target: { value: "CAS" } })
-    fireEvent.click(screen.getByRole("button", { name: "Save" }))
+    fireEvent.blur(input)
     await waitFor(() => expect(renameOrg).toHaveBeenCalledWith("jwt", 1, "CAS"))
+    expect(toast.add).toHaveBeenCalledWith({
+      type: "success",
+      title: "Organization name updated",
+    })
   })
 
-  it("hides the rename control for a non-admin", async () => {
+  it("disables the name field for a non-admin", async () => {
     vi.mocked(listMyOrgs).mockResolvedValueOnce([{ id: 1, name: "Come and See", role: { level: 100, name: "viewer" } }])
     renderSettings("/orgs/1/settings/identity")
-    await waitFor(() => expect(screen.getAllByText("Come and See").length).toBeGreaterThan(0))
-    expect(screen.queryByRole("button", { name: /rename/i })).not.toBeInTheDocument()
+    const input = await screen.findByLabelText(/^Organization name$/i)
+    await waitFor(() => expect(input).toHaveValue("Come and See"))
+    expect(input).toBeDisabled()
   })
 })
 
-describe("Export policy saved acknowledgment", () => {
-  it("shows Saved after a successful export-role change", async () => {
+describe("Export policy silent auto-save", () => {
+  it("patches on change without a Saved acknowledgment", async () => {
     mockPatch.mockResolvedValueOnce({ kind: "ok", value: { orgId: 1, settings: {}, version: 2, updatedAt: null, updatedBy: null } })
     renderSettings("/orgs/1/settings/export")
-    // Wait for the export permissions section to appear.
     await waitFor(() => expect(screen.getByLabelText(/who can export/i)).toBeDefined())
 
     await pickSelectOption(/who can export/i, /contributor \(400\)/i)
 
-    await waitFor(() => expect(screen.getByTestId("export-role-saved")).toBeDefined())
-    expect(screen.getByTestId("export-role-saved").textContent).toContain("Saved")
+    await waitFor(() => expect(mockPatch).toHaveBeenCalledWith({ exportMinRole: 400 }))
+    expect(screen.queryByText(/^Saved$/i)).toBeNull()
+    expect(toast.add).not.toHaveBeenCalled()
   })
 
-  it("does not show Saved when the save fails", async () => {
+  it("surfaces a server error when the save fails", async () => {
     mockPatch.mockResolvedValueOnce({ kind: "error" as const, status: 500, message: "Server error" })
     renderSettings("/orgs/1/settings/export")
     await waitFor(() => expect(screen.getByLabelText(/who can export/i)).toBeDefined())
 
     await pickSelectOption(/who can export/i, /contributor \(400\)/i)
 
-    // The server error must surface, and the Saved acknowledgment must not.
     expect(await screen.findByText(/server error/i)).toBeDefined()
-    expect(screen.queryByTestId("export-role-saved")).toBeNull()
+    expect(screen.queryByText(/^Saved$/i)).toBeNull()
   })
 })
 
@@ -138,16 +146,16 @@ describe("Roster & member-progress visibility settings (AQU-485)", () => {
     expect(screen.getByLabelText(/who can view member progress/i)).toBeDefined()
   })
 
-  it("shows Saved after successfully changing the roster floor, independent of the progress floor", async () => {
+  it("silently patches the roster floor without a Saved acknowledgment", async () => {
     mockPatch.mockResolvedValueOnce({ kind: "ok", value: { orgId: 1, settings: { rosterViewMinRole: 400 }, version: 2, updatedAt: null, updatedBy: null } })
     renderSettings("/orgs/1/settings/roster")
     await waitFor(() => expect(screen.getByLabelText(/who can view the roster/i)).toBeDefined())
 
     await pickSelectOption(/who can view the roster/i, /contributor \(400\)/i)
 
-    await waitFor(() => expect(screen.getByTestId("roster-role-saved")).toBeDefined())
-    // Changing the roster floor must not touch the progress floor's ack state.
-    expect(screen.queryByTestId("progress-role-saved")).toBeNull()
+    await waitFor(() => expect(mockPatch).toHaveBeenCalledWith({ rosterViewMinRole: 400 }))
+    expect(screen.queryByText(/^Saved$/i)).toBeNull()
+    expect(toast.add).not.toHaveBeenCalled()
   })
 
   it("surfaces a server error for the member-progress floor without a false Saved", async () => {
@@ -158,6 +166,6 @@ describe("Roster & member-progress visibility settings (AQU-485)", () => {
     await pickSelectOption(/who can view member progress/i, /owner \(700\)/i)
 
     expect(await screen.findByText(/server error/i)).toBeDefined()
-    expect(screen.queryByTestId("progress-role-saved")).toBeNull()
+    expect(screen.queryByText(/^Saved$/i)).toBeNull()
   })
 })

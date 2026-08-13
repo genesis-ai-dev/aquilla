@@ -66,6 +66,7 @@ function CommandDialog({
 
 function CommandInput({
   className,
+  autoComplete = "off",
   ...props
 }: React.ComponentProps<typeof CommandPrimitive.Input>) {
   return (
@@ -76,6 +77,7 @@ function CommandInput({
         </InputGroupAddon>
         <CommandPrimitive.Input
           data-slot="command-input"
+          autoComplete={autoComplete}
           className={cn(
             "w-full text-sm outline-hidden disabled:cursor-not-allowed disabled:opacity-50",
             className

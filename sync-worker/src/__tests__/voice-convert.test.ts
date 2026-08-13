@@ -168,6 +168,19 @@ describe("POST /api/v1/voice/convert", () => {
     expect(res.status).toBe(400)
   })
 
+  it("403 when the token is viewer-role (conversion requires CONTRIBUTOR+)", async () => {
+    const env = makeEnv()
+    env.SNAPSHOTS._seed(voiceRefObjectKey(env, "p1", "ref1.wav"), new Uint8Array([9]), "audio/wav")
+    const form = new FormData()
+    form.append("projectId", "p1")
+    form.append("fileId", "f1")
+    form.append("referenceAudioId", "ref1.wav")
+    form.append("source", new Blob([new Uint8Array([1])], { type: "audio/wav" }), "source")
+    const viewerToken = await makeToken({ role: 100 })
+    const res = (await call(env, convertReq(form, viewerToken)))!
+    expect(res.status).toBe(403)
+  })
+
   it("404 when the reference clip is absent", async () => {
     const env = makeEnv()
     stubModal(() => new Response(new Uint8Array([1]).buffer, { status: 200 }))
@@ -302,6 +315,14 @@ describe("GET/PUT /api/v1/voice/reference/:projectId/:referenceAudioId", () => {
     const get = (await callRef(env, refReq("GET", "ref1.webm", token)))!
     expect(get.status).toBe(200)
     expect(Array.from(new Uint8Array(await get.arrayBuffer()))).toEqual([3, 3, 3])
+  })
+
+  it("rejects PUT (overwrite) from a viewer-role token", async () => {
+    const env = makeEnv()
+    const viewerToken = await makeToken({ role: 100 })
+    const res = (await callRef(env, refReq("PUT", "ref1.webm", viewerToken, new Uint8Array([3]))))!
+    expect(res.status).toBe(403)
+    expect(env.SNAPSHOTS._allKeys()).not.toContain(voiceRefObjectKey(env, "p1", "ref1.webm"))
   })
 
   it("accepts a file-scoped token (project-level auth) and 404s missing clips", async () => {

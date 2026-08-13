@@ -1,12 +1,18 @@
 /**
- * AdminPeopleSection — users with a platform-admin badge and an orphan-admin
- * callout. Verifies the badge is applied by email match and the callout lists
- * allowlisted emails with no account. Also covers TanStack search / sort.
+ * AdminPeopleSection — users with a Role column for platform admins and an
+ * orphan-admin callout. Verifies Role is applied by email match and the callout
+ * lists allowlisted emails with no account. Also covers TanStack search / sort.
  */
-import { describe, it, expect } from "vitest"
-import { render, screen, fireEvent, within } from "@testing-library/react"
+import { describe, it, expect, vi } from "vitest"
+import { render, screen, fireEvent, within, waitFor } from "@testing-library/react"
+import { toast } from "@/components/ui/toast"
 import { AdminPeopleSection } from "./AdminPeopleSection"
 import type { AdminUser, AdminAdmin } from "@/lib/frontier/admin"
+
+vi.mock("@/components/ui/toast", () => ({
+  toast: { add: vi.fn(), close: vi.fn(), update: vi.fn(), promise: vi.fn() },
+}))
+
 
 const users: AdminUser[] = [
   { id: 1, username: "ryder", email: "Ryder@example.com", displayName: "Ryder", createdAt: "2026-01-01", orgCount: 2, lastActiveAt: "2026-06-30" },
@@ -22,15 +28,42 @@ const bodyFirstCells = () =>
   screen
     .getAllByRole("row")
     .slice(1)
-    .map((tr) => (within(tr).getAllByRole("cell")[0]?.textContent ?? "").replace(/\s*Platform admin$/i, ""))
+    .map((tr) => {
+      const cell = within(tr).getAllByRole("cell")[0]
+      return (
+        cell?.querySelector('[data-slot="username"]')?.textContent
+        ?? cell?.textContent
+        ?? ""
+      )
+    })
 
 describe("AdminPeopleSection", () => {
-  it("badges the allowlisted user (case-insensitive email match)", () => {
+  it("shows Platform admin in the Role column for allowlisted users", () => {
     render(<AdminPeopleSection users={users} admins={admins} />)
+    expect(screen.getByRole("columnheader", { name: /^Role$/i })).toBeInTheDocument()
     const ryderRow = screen.getByText(/Ryder \(ryder\)/).closest("tr")!
-    expect(within(ryderRow).getByText(/platform admin/i)).toBeInTheDocument()
+    expect(within(ryderRow).getByText("Platform admin")).toBeInTheDocument()
     const caseyRow = screen.getByText("casey").closest("tr")!
-    expect(within(caseyRow).queryByText(/platform admin/i)).not.toBeInTheDocument()
+    expect(within(caseyRow).queryByText("Platform admin")).not.toBeInTheDocument()
+    const caseyRoleCell = within(caseyRow).getAllByRole("cell")[2]
+    expect(caseyRoleCell).toHaveTextContent("")
+  })
+
+  it("copies email when the muted email button is clicked", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    })
+    render(<AdminPeopleSection users={users} admins={admins} />)
+    const btn = screen.getByRole("button", { name: /copy casey@example.com/i })
+    expect(btn).toHaveClass("text-muted-foreground")
+    fireEvent.click(btn)
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("casey@example.com"))
+    expect(toast.add).toHaveBeenCalledWith({
+      type: "success",
+      title: "Email copied to clipboard",
+    })
   })
 
   it("warns about allowlisted emails with no account", () => {
@@ -66,10 +99,11 @@ describe("AdminPeopleSection", () => {
     expect(screen.getAllByText(joined).length).toBeGreaterThanOrEqual(1)
   })
 
-  it("cycles Orgs sort on header click: desc → asc → clear", () => {
+  it("cycles Orgs sort on header click: desc ↔ asc (never clears)", () => {
     render(<AdminPeopleSection users={users} admins={admins} />)
     const orgsHeader = screen.getByRole("button", { name: /Orgs/i })
-    // Default initial sort is lastActive desc — capture names after switching to Orgs.
+    // Default initial sort is user A→Z — capture names after switching to Orgs.
+    // orgCount is numeric → first click descends (highest first).
     fireEvent.click(orgsHeader) // desc by orgCount
     expect(bodyFirstCells()).toEqual([
       "Alpha (alpha)",
@@ -82,11 +116,11 @@ describe("AdminPeopleSection", () => {
       "Ryder (ryder)",
       "Alpha (alpha)",
     ])
-    fireEvent.click(orgsHeader) // clear — falls back to insertion order
+    fireEvent.click(orgsHeader) // desc again — sorting never clears
     expect(bodyFirstCells()).toEqual([
+      "Alpha (alpha)",
       "Ryder (ryder)",
       "casey",
-      "Alpha (alpha)",
     ])
   })
 })

@@ -1,4 +1,4 @@
-import { toast } from "sonner"
+import { toast } from "@/components/ui/toast"
 import type { FileReference } from "@/lib/parsers/types"
 import { downloadSourceFile, SourceExportError } from "@/lib/sync/source-export"
 
@@ -27,7 +27,7 @@ export async function exportSourceFile(args: {
       getToken: args.getToken,
       targetLang: args.targetLang ?? "",
     })
-    toast.success(`Exported ${name}`)
+    toast.add({ type: "success", title: `Exported ${name}` })
   } catch (err) {
     const msg =
       err instanceof SourceExportError && err.status === 404
@@ -35,6 +35,6 @@ export async function exportSourceFile(args: {
         : err instanceof Error
           ? `Export failed: ${err.message}`
           : "Export failed."
-    toast.error(msg)
+    toast.add({ type: "error", priority: "high", title: msg })
   }
 }

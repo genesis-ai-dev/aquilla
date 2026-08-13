@@ -30,9 +30,9 @@ vi.mock("@/lib/sync/cloud-projects", () => ({
   fetchAccessibleProjects: (...a: unknown[]) => fetchAccessibleProjects(...a),
 }))
 
-function renderSidebar() {
+function renderSidebar(path = "/") {
   return render(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={[path]}>
       <OrgProvider>
         <OrgSidebar />
       </OrgProvider>
@@ -119,11 +119,31 @@ describe("OrgSidebar in a guest org (AQU-790)", () => {
     await screen.findByRole("link", { name: "Shared with you" })
     expect(screen.getByRole("link", { name: "Projects" })).toHaveAttribute("href", "/orgs/2")
     // Member-only actions are gone (they previously linked into the owned org).
+    // Guest keeps "Projects" (not Overview) — only member orgs and all-orgs use Overview.
+    expect(screen.queryByRole("link", { name: "Overview" })).not.toBeInTheDocument()
     expect(screen.queryByRole("link", { name: "Members" })).not.toBeInTheDocument()
     expect(screen.queryByRole("link", { name: "Settings" })).not.toBeInTheDocument()
     expect(screen.queryByRole("link", { name: "Archived" })).not.toBeInTheDocument()
     expect(screen.queryByRole("link", { name: "Teams" })).not.toBeInTheDocument()
     expect(screen.queryByRole("link", { name: "Assigned to me" })).not.toBeInTheDocument()
+  })
+})
+
+describe("OrgSidebar all-organizations scope", () => {
+  it("shows Overview (not Projects) as the sole portfolio home link", async () => {
+    listMyOrgs.mockResolvedValue([
+      { id: 1, name: "Acme", role: { level: 700, name: "owner" } },
+      { id: 2, name: "Beta", role: { level: 700, name: "owner" } },
+    ])
+    fetchAccessibleProjects.mockResolvedValue([])
+
+    renderSidebar("/orgs/all")
+
+    const overview = await screen.findByRole("link", { name: "Overview" })
+    expect(overview).toHaveAttribute("href", "/orgs/all")
+    expect(overview).toHaveAttribute("data-tour", "nav-overview")
+    expect(screen.queryByRole("link", { name: "Projects" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("link", { name: "Teams" })).not.toBeInTheDocument()
   })
 })
 

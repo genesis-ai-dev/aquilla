@@ -258,7 +258,7 @@ export function UpstreamChangesPanel({
         {canBulk && selectedItems.length > 0 && (
           <div className="flex items-center justify-between rounded border bg-muted/40 px-3 py-2">
             <span className="text-sm">{selectedItems.length} selected</span>
-            <Button size="sm" onClick={() => void handleBulkRepin()}>
+            <Button onClick={() => void handleBulkRepin()}>
               <CheckCheck className="mr-1.5 h-4 w-4" />
               Accept as-is ({selectedItems.length})
             </Button>
@@ -335,14 +335,13 @@ export function UpstreamChangesPanel({
                         )}
                       </div>
                       <div className="flex shrink-0 items-center gap-1.5">
-                        <Button variant="outline" size="sm" onClick={() => openToRetranslate(item)}>
+                        <Button variant="outline" onClick={() => openToRetranslate(item)}>
                           <ArrowRight className="mr-1 h-3.5 w-3.5" />
                           Open
                         </Button>
                         {item.target && (
                           <Button
                             variant="secondary"
-                            size="sm"
                             disabled={!canRepin || busy}
                             onClick={() => void handleRepinSingle(item)}
                           >

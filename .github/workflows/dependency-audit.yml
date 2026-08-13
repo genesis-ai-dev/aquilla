@@ -1,0 +1,42 @@
+name: Dependency audit
+
+# OPS-6. Deliberately NOT a pull-request gate.
+#
+# A per-PR advisory check fails on advisories in tooling the PR author did not
+# touch and cannot fix, and the learned response to that is to ignore the lane —
+# which is how the repo ended up with a live XSS advisory in its own HTML
+# sanitizer for a day. A weekly scheduled run puts the finding in front of a
+# maintainer at a moment when acting on it is the only thing being asked.
+#
+# The job is red only for advisories that are NOT in .github/audit-allowlist.json,
+# so "still red" always means "something new arrived", never "the usual noise".
+# See scripts/audit-deps.mjs.
+
+on:
+  schedule:
+    # Mondays 09:00 UTC — a working morning rather than a weekend backlog.
+    - cron: "0 9 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dependency-audit
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      # The audit reads lockfiles, not node_modules, so no install step is
+      # needed — which also keeps this lane from going red on an unrelated
+      # install failure and being mistaken for an advisory.
+      - name: Audit production dependencies
+        run: node scripts/audit-deps.mjs

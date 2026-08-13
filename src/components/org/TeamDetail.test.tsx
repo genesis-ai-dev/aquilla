@@ -17,8 +17,6 @@ vi.mock("@/lib/frontier/orgs", () => ({
 const getTeam = vi.fn()
 const addTeamMembers = vi.fn()
 const removeTeamMember = vi.fn()
-const deleteTeam = vi.fn()
-const updateTeam = vi.fn()
 const attachProject = vi.fn()
 const changeProjectRole = vi.fn()
 const detachProject = vi.fn()
@@ -26,8 +24,6 @@ vi.mock("@/lib/frontier/teams", () => ({
   getTeam: (...a: unknown[]) => getTeam(...a),
   addTeamMembers: (...a: unknown[]) => addTeamMembers(...a),
   removeTeamMember: (...a: unknown[]) => removeTeamMember(...a),
-  deleteTeam: (...a: unknown[]) => deleteTeam(...a),
-  updateTeam: (...a: unknown[]) => updateTeam(...a),
   attachProject: (...a: unknown[]) => attachProject(...a),
   changeProjectRole: (...a: unknown[]) => changeProjectRole(...a),
   detachProject: (...a: unknown[]) => detachProject(...a),
@@ -63,6 +59,14 @@ function renderDetail() {
   )
 }
 
+async function openTeamTab(name: RegExp) {
+  // Tabs are only rendered once the team has loaded.
+  await waitFor(() => expect(screen.getByRole("tablist", { name: /team sections/i })).toBeInTheDocument())
+  await act(async () => {
+    screen.getByRole("tab", { name }).click()
+  })
+}
+
 beforeEach(() => {
   localStorage.clear()
   listMyOrgs.mockResolvedValue([{ id: 1, name: "CAS", role: { level: 700, name: "owner" } }])
@@ -75,8 +79,6 @@ beforeEach(() => {
   addTeamMembers.mockReset()
   addTeamMembers.mockResolvedValue([])
   removeTeamMember.mockResolvedValue(undefined)
-  deleteTeam.mockResolvedValue(undefined)
-  updateTeam.mockResolvedValue({ id: 10, name: "WA2", description: null })
 })
 afterEach(() => {
   vi.restoreAllMocks()
@@ -91,8 +93,9 @@ describe("TeamDetail project management", () => {
     ;(cp.fetchAccessibleProjects as unknown as ReturnType<typeof vi.fn>).mockResolvedValue([{ id: "pa", name: "Bambara", orgId: 1, role: { level: 700, name: "owner", source: "creator" }, files: [] }])
     getTeam.mockResolvedValue({ id: 10, name: "WA", members: [], projects: [] })
     renderDetail()
-    await waitFor(() => expect(screen.getByText(/projects/i)).toBeInTheDocument())
+    await openTeamTab(/^projects$/i)
     await act(async () => { (await screen.findByRole("button", { name: /attach project/i })).click() })
+    expect(screen.getByRole("dialog", { name: /attach project to 'wa'/i })).toBeInTheDocument()
     await pickSelectOption(/project to attach/i, /bambara/i)
     await pickSelectOption(/granted role/i, /contributor/i)
     await act(async () => { screen.getByRole("button", { name: /^attach$/i }).click() })
@@ -102,9 +105,27 @@ describe("TeamDetail project management", () => {
   it("detaches a project", async () => {
     getTeam.mockResolvedValue({ id: 10, name: "WA", members: [], projects: [{ id: "pa", name: "Bambara", grantedRoleLevel: 400 }] })
     renderDetail()
+    await openTeamTab(/^projects$/i)
     await waitFor(() => expect(screen.getByText("Bambara")).toBeInTheDocument())
-    await act(async () => { screen.getByRole("button", { name: /detach bambara/i }).click() })
+    await act(async () => { screen.getByRole("button", { name: /actions for bambara/i }).click() })
+    await act(async () => { screen.getByRole("menuitem", { name: /detach bambara/i }).click() })
     await waitFor(() => expect(detachProject).toHaveBeenCalledWith("jwt", 1, 10, "pa"))
+  })
+
+  it("changes a project grant role via the actions menu dialog", async () => {
+    getTeam.mockResolvedValue({ id: 10, name: "WA", members: [], projects: [{ id: "pa", name: "Bambara", grantedRoleLevel: 400 }] })
+    changeProjectRole.mockResolvedValue(undefined)
+    renderDetail()
+    await openTeamTab(/^projects$/i)
+    await waitFor(() => expect(screen.getByText("Bambara")).toBeInTheDocument())
+    // Role is display-only text — not an inline select.
+    expect(screen.queryByRole("combobox", { name: /role for bambara/i })).toBeNull()
+    expect(screen.getByText("Contributor")).toBeInTheDocument()
+    await act(async () => { screen.getByRole("button", { name: /actions for bambara/i }).click() })
+    await act(async () => { screen.getByRole("menuitem", { name: /^change role$/i }).click() })
+    await pickSelectOption(/role for bambara/i, /^viewer\b/i)
+    await act(async () => { screen.getByRole("button", { name: /^save$/i }).click() })
+    await waitFor(() => expect(changeProjectRole).toHaveBeenCalledWith("jwt", 1, 10, "pa", 100))
   })
 })
 
@@ -115,37 +136,40 @@ describe("TeamDetail admin management", () => {
       { username: "zara", ok: true },
     ])
     renderDetail()
+    await openTeamTab(/^members$/i)
     await waitFor(() => expect(screen.getByText("anna")).toBeInTheDocument())
-    await act(async () => { (await screen.findByRole("button", { name: /add member/i })).click() })
+    await act(async () => { (await screen.findByRole("button", { name: /add (a )?member/i })).click() })
     const picker = screen.getByRole("combobox", { name: /members to add/i })
-    expect(picker).toHaveTextContent("Search members...")
+    expect(picker).toHaveTextContent("Select members…")
     fireEvent.click(picker)
-    // anna is already in the team — never offered as a checkbox.
-    expect(screen.queryByRole("checkbox", { name: /^anna$/ })).toBeNull()
-    // Check Ben, then narrow the search to zara — Ben must stay staged.
-    fireEvent.click(await screen.findByRole("checkbox", { name: /^Ben$/ }))
-    expect(screen.getByRole("button", { name: /remove Ben/i })).toBeInTheDocument()
-    fireEvent.change(screen.getByRole("textbox", { name: /search org members/i }), {
+    // anna is already in the team — never offered as an option.
+    expect(screen.queryByRole("option", { name: /^anna$/ })).toBeNull()
+    // Select Ben, then narrow the search to zara — Ben must stay staged on the trigger.
+    fireEvent.click(await screen.findByRole("option", { name: /^Ben$/ }))
+    expect(picker).toHaveTextContent("Ben")
+    fireEvent.change(screen.getByRole("combobox", { name: /search members/i }), {
       target: { value: "za" },
     })
-    expect(screen.queryByRole("checkbox", { name: /^Ben$/ })).toBeNull()
-    expect(screen.getByRole("button", { name: /remove Ben/i })).toBeInTheDocument()
-    fireEvent.click(await screen.findByRole("checkbox", { name: /^zara$/ }))
+    expect(screen.queryByRole("option", { name: /^Ben$/ })).toBeNull()
+    expect(picker).toHaveTextContent("Ben")
+    fireEvent.click(await screen.findByRole("option", { name: /^zara$/ }))
     await act(async () => { screen.getByRole("button", { name: /^add$/i }).click() })
     // ONE batch call carrying both usernames — no client-side fan-out.
     await waitFor(() => expect(addTeamMembers).toHaveBeenCalledTimes(1))
     expect(addTeamMembers).toHaveBeenCalledWith("jwt", 1, 10, ["Ben", "zara"])
   })
 
-  it("Add is disabled until someone is staged, and removing the last chip re-disables it", async () => {
+  it("Add is disabled until someone is staged, and deselecting the last member re-disables it", async () => {
     renderDetail()
+    await openTeamTab(/^members$/i)
     await waitFor(() => expect(screen.getByText("anna")).toBeInTheDocument())
-    await act(async () => { (await screen.findByRole("button", { name: /add member/i })).click() })
+    await act(async () => { (await screen.findByRole("button", { name: /add (a )?member/i })).click() })
     expect(screen.getByRole("button", { name: /^add$/i })).toBeDisabled()
     fireEvent.click(screen.getByRole("combobox", { name: /members to add/i }))
-    fireEvent.click(await screen.findByRole("checkbox", { name: /^Ben$/ }))
+    fireEvent.click(await screen.findByRole("option", { name: /^Ben$/ }))
     expect(screen.getByRole("button", { name: /^add$/i })).toBeEnabled()
-    fireEvent.click(screen.getByRole("button", { name: /remove Ben/i }))
+    // Toggle Ben off again (same checkbox option).
+    fireEvent.click(screen.getByRole("option", { name: /^Ben$/ }))
     expect(screen.getByRole("button", { name: /^add$/i })).toBeDisabled()
     expect(addTeamMembers).not.toHaveBeenCalled()
   })
@@ -156,37 +180,75 @@ describe("TeamDetail admin management", () => {
       { username: "zara", ok: false, error: { code: "not_org_member", message: "not an org member" } },
     ])
     renderDetail()
+    await openTeamTab(/^members$/i)
     await waitFor(() => expect(screen.getByText("anna")).toBeInTheDocument())
-    await act(async () => { (await screen.findByRole("button", { name: /add member/i })).click() })
-    fireEvent.click(screen.getByRole("combobox", { name: /members to add/i }))
-    fireEvent.click(await screen.findByRole("checkbox", { name: /^Ben$/ }))
-    fireEvent.click(await screen.findByRole("checkbox", { name: /^zara$/ }))
+    await act(async () => { (await screen.findByRole("button", { name: /add (a )?member/i })).click() })
+    const picker = screen.getByRole("combobox", { name: /members to add/i })
+    fireEvent.click(picker)
+    fireEvent.click(await screen.findByRole("option", { name: /^Ben$/ }))
+    fireEvent.click(await screen.findByRole("option", { name: /^zara$/ }))
     await act(async () => { screen.getByRole("button", { name: /^add$/i }).click() })
     await waitFor(() =>
       expect(screen.getByText(/zara \(not an org member\)/)).toBeInTheDocument(),
     )
     // zara (failed) stays staged for a retry; Ben (succeeded) is dropped.
-    expect(screen.getByRole("button", { name: /remove zara/i })).toBeInTheDocument()
-    expect(screen.queryByRole("button", { name: /remove Ben/i })).toBeNull()
+    expect(picker).toHaveTextContent("zara")
+    expect(picker).not.toHaveTextContent("Ben")
   })
 
   it("removes a member", async () => {
     renderDetail()
+    await openTeamTab(/^members$/i)
     await waitFor(() => expect(screen.getByText("anna")).toBeInTheDocument())
-    await act(async () => { (await screen.findByRole("button", { name: /remove anna/i })).click() })
+    await act(async () => { (await screen.findByRole("button", { name: /actions for anna/i })).click() })
+    await act(async () => { (await screen.findByRole("menuitem", { name: /remove from team/i })).click() })
     await waitFor(() => expect(removeTeamMember).toHaveBeenCalledWith("jwt", 1, 10, 2))
   })
 
-  it("deletes the team after confirm", async () => {
+  it("links admins to team settings", async () => {
     renderDetail()
-    // Wait for the team heading to confirm both org and team data are loaded.
-    // Using role="heading" is unambiguous — unlike /members/i which also
-    // matches the sidebar nav link (visible before team data arrives) and
-    // causes a race when the full suite runs with concurrent file execution.
     await waitFor(() => expect(screen.getByRole("heading", { name: "WA" })).toBeInTheDocument())
-    await act(async () => { screen.getByRole("button", { name: /delete team/i }).click() })
-    await act(async () => { screen.getByRole("button", { name: /confirm/i }).click() })
-    await waitFor(() => expect(deleteTeam).toHaveBeenCalledWith("jwt", 1, 10))
+    const settings = screen.getByRole("link", { name: /team settings/i })
+    expect(settings).toHaveAttribute("href", "/orgs/1/teams/10/settings")
+  })
+
+  it("omits the description element when the team has none", async () => {
+    getTeam.mockResolvedValue({
+      id: 10,
+      name: "WA",
+      description: "   ",
+      members: [],
+      projects: [],
+    })
+    renderDetail()
+    await waitFor(() => expect(screen.getByRole("heading", { name: "WA" })).toBeInTheDocument())
+    const title = screen.getByRole("heading", { name: "WA" })
+    expect(title.nextElementSibling).toBeNull()
+  })
+
+  it("renders the description under the title when present", async () => {
+    getTeam.mockResolvedValue({
+      id: 10,
+      name: "WA",
+      description: "West Africa translation",
+      members: [],
+      projects: [],
+    })
+    renderDetail()
+    await waitFor(() => expect(screen.getByRole("heading", { name: "WA" })).toBeInTheDocument())
+    expect(screen.getByText("West Africa translation")).toBeInTheDocument()
+  })
+
+  it("bleeds the avatar outside the wide well instead of padding max-w-6xl", async () => {
+    renderDetail()
+    await waitFor(() => expect(screen.getByRole("heading", { name: "WA" })).toBeInTheDocument())
+    const well = screen.getByRole("heading", { name: "WA" }).closest(".max-w-6xl")
+    expect(well).toBeTruthy()
+    expect(well).not.toHaveClass("pl-14")
+    expect(well).not.toHaveClass("sm:pl-16")
+    const avatar = screen.getByTestId("team-detail-avatar")
+    expect(avatar).toHaveClass("absolute", "right-full")
+    expect(well?.contains(avatar)).toBe(true)
   })
 })
 
@@ -195,11 +257,15 @@ describe("TeamDetail non-admin gating", () => {
     listMyOrgs.mockResolvedValue([{ id: 1, name: "CAS", role: { level: 100, name: "viewer" } }])
     getTeam.mockResolvedValue({ id: 10, name: "WA", members: [{ userId: 2, username: "anna", roleLevel: 100 }], projects: [{ id: "pa", name: "Bambara", grantedRoleLevel: 400 }] })
     renderDetail()
+    await openTeamTab(/^projects$/i)
     await waitFor(() => expect(screen.getByText("Bambara")).toBeInTheDocument())
     expect(screen.queryByRole("button", { name: /attach project/i })).toBeNull()
-    expect(screen.queryByRole("button", { name: /detach bambara/i })).toBeNull()
-    expect(screen.queryByRole("button", { name: /add member/i })).toBeNull()
-    expect(screen.queryByRole("button", { name: /delete team/i })).toBeNull()
+    expect(screen.queryByRole("button", { name: /actions for bambara/i })).toBeNull()
+    expect(screen.queryByRole("combobox", { name: /role for bambara/i })).toBeNull()
+    expect(screen.getByText("Contributor")).toBeInTheDocument()
+    await openTeamTab(/^members$/i)
+    expect(screen.queryByRole("button", { name: /add (a )?member/i })).toBeNull()
+    expect(screen.queryByRole("link", { name: /team settings/i })).toBeNull()
   })
 
   // AQU-789: a non-maintainer who can view a team (they're a member) must see a
@@ -208,6 +274,7 @@ describe("TeamDetail non-admin gating", () => {
     listMyOrgs.mockResolvedValue([{ id: 1, name: "CAS", role: { level: 100, name: "viewer" } }])
     getTeam.mockResolvedValue({ id: 10, name: "WA", members: [{ userId: 2, username: "anna", roleLevel: 100 }], projects: [] })
     renderDetail()
+    await openTeamTab(/^members$/i)
     await waitFor(() => expect(screen.getByText("anna")).toBeInTheDocument())
     // No actionable (enabled) remove button for a non-admin…
     expect(screen.queryByRole("button", { name: /remove anna/i })).toBeNull()
@@ -224,42 +291,48 @@ describe("TeamDetail member role editing (AQU-139)", () => {
     addOrgMember.mockResolvedValue({ userId: 2, username: "anna", role: { level: 400, name: "contributor" } })
   })
 
-  it("owner sees a role selector for each member", async () => {
-    // Owner (700) must see a combobox to change org-level role — this is what makes permission editing possible.
+  it("owner sees a Change role action that opens a role dialog", async () => {
+    // Owner (700) changes org-level roles via the row menu → dialog — not an inline select.
     listMyOrgs.mockResolvedValue([{ id: 1, name: "CAS", role: { level: 700, name: "owner" } }])
     getTeam.mockResolvedValue({ id: 10, name: "WA", members: [{ userId: 2, username: "anna", roleLevel: 100 }], projects: [] })
     renderDetail()
+    await openTeamTab(/^members$/i)
     await waitFor(() => expect(screen.getByText("anna")).toBeInTheDocument())
-    // The role selector for "anna" must be rendered (owner can change roles)
+    // Role column shows the current role as plain text, not a combobox.
+    expect(screen.queryByRole("combobox", { name: /role for anna/i })).toBeNull()
+    expect(screen.getByText("Viewer")).toBeInTheDocument()
+    await act(async () => { (await screen.findByRole("button", { name: /actions for anna/i })).click() })
+    await act(async () => { (await screen.findByRole("menuitem", { name: /change role/i })).click() })
+    expect(screen.getByRole("dialog", { name: /change role for anna/i })).toBeInTheDocument()
     expect(screen.getByRole("combobox", { name: /role for anna/i })).toBeInTheDocument()
   })
 
-  it("owner changing a member role calls addOrgMember (upsert) with correct args", async () => {
+  it("owner changing a member role via the dialog calls addOrgMember (upsert) with correct args", async () => {
     // Calling addOrgMember on an existing user updates their org role — this is the only role-change API.
     listMyOrgs.mockResolvedValue([{ id: 1, name: "CAS", role: { level: 700, name: "owner" } }])
     getTeam.mockResolvedValue({ id: 10, name: "WA", members: [{ userId: 2, username: "anna", roleLevel: 100 }], projects: [] })
     renderDetail()
+    await openTeamTab(/^members$/i)
     await waitFor(() => expect(screen.getByText("anna")).toBeInTheDocument())
-    await pickSelectOption(/role for anna/i, /^contributor$/)
+    await act(async () => { (await screen.findByRole("button", { name: /actions for anna/i })).click() })
+    await act(async () => { (await screen.findByRole("menuitem", { name: /change role/i })).click() })
+    await pickSelectOption(/role for anna/i, /contributor/i)
+    await act(async () => { screen.getByRole("button", { name: /^save$/i }).click() })
     await waitFor(() => expect(addOrgMember).toHaveBeenCalledWith("jwt", 1, "anna", 400))
   })
 
-  it("maintainer (600) cannot see the role selector — only read-only label with tooltip", async () => {
+  it("maintainer (600) cannot see Change role — only read-only role text with tooltip", async () => {
     // Maintainers can manage teams but only owners can change org-level roles (POST /orgs/:id/members requires 700).
     listMyOrgs.mockResolvedValue([{ id: 1, name: "CAS", role: { level: 600, name: "maintainer" } }])
     getTeam.mockResolvedValue({ id: 10, name: "WA", members: [{ userId: 2, username: "anna", roleLevel: 100 }], projects: [] })
     renderDetail()
+    await openTeamTab(/^members$/i)
     await waitFor(() => expect(screen.getByText("anna")).toBeInTheDocument())
     // No role-change combobox for maintainer
     expect(screen.queryByRole("combobox", { name: /role for anna/i })).toBeNull()
     // Read-only org-level role label with shadcn tooltip is present
     expect(screen.getByLabelText(/org-level role: viewer/i)).toBeInTheDocument()
-  })
-
-  it("access level definitions tooltip is present on the Members heading", async () => {
-    // The "?" help affordance next to Members heading explains what each level grants — regression guard.
-    renderDetail()
-    await waitFor(() => expect(screen.getByRole("heading", { name: "WA" })).toBeInTheDocument())
-    expect(screen.getByLabelText(/access level definitions/i)).toBeInTheDocument()
+    await act(async () => { (await screen.findByRole("button", { name: /actions for anna/i })).click() })
+    expect(screen.queryByRole("menuitem", { name: /change role/i })).toBeNull()
   })
 })

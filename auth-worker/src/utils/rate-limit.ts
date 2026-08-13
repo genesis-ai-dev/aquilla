@@ -58,6 +58,18 @@ export const REGISTER_MAX_PER_IP = 15
 // a stale/mistyped link a few times never gets locked out.
 export const PASSWORD_RESET_ATTEMPT_MAX_FAILURES = 10
 
+// [Pen test] API security & data exposure (2026-08-13): POST /api/v2/credentials
+// (PAT minting) had no attempt limiting, unlike every other credential-issuing
+// route in this file. An authenticated caller (e.g. one riding a stolen but
+// still-live session JWT) could mint unbounded long-lived API tokens as a
+// persistence mechanism, or simply flood api_credentials. Scoped per-user
+// (unlike register/contact, minting requires an authenticated session already
+// tied to a user id) and counts every attempt, not just failures — there's no
+// "wrong password" state here, just successful mints. Wide enough that a real
+// user provisioning several tokens for different tools in one sitting never
+// hits it.
+export const CREDENTIAL_MINT_MAX_PER_USER = 10
+
 export type RateLimitKind =
   | "login"
   | "password_reset_request"
@@ -65,6 +77,7 @@ export type RateLimitKind =
   | "contact"
   | "admin_elevation_verify"
   | "register"
+  | "credential_mint"
 
 /** Roughly 1-in-50 calls also prunes stale rows so the table stays bounded
  *  without a scheduled job. Cheap (indexed on created_at via the lookup
@@ -92,6 +105,10 @@ export function loginIdentifier(usernameOrEmail: string): string {
 
 export function ipIdentifier(ip: string): string {
   return scopedIdentifier("ip", ip)
+}
+
+export function userIdentifier(userId: string | number): string {
+  return scopedIdentifier("user", String(userId))
 }
 
 /** Best-effort: a logging failure must never block the auth flow it's throttling. */

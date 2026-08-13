@@ -23,6 +23,7 @@ import { resolveProjectRole } from "../services/project-permissions"
 import { getEffectiveOrgRole } from "../services/org-permissions"
 import { isPlatformAdmin } from "../middleware/platform-admin"
 import { mintApiToken } from "../../../db/shared/api-credentials"
+import { countRecentEvents, recordAuthEvent, userIdentifier, CREDENTIAL_MINT_MAX_PER_USER } from "../utils/rate-limit"
 
 // Re-exported so the command layer imports credential validation from one place.
 export { validateApiCredential } from "../../../db/shared/api-credentials"
@@ -70,6 +71,18 @@ function toDto(r: CredentialRow) {
 credentials.post("/", authMiddleware, zValidator("json", createSchema), async (c) => {
   const user = c.get("user")
   const { name, mode, orgId, projectId, expiresAt } = c.req.valid("json")
+
+  // [Pen test] API security & data exposure (2026-08-13): throttle minting
+  // before doing any scope resolution — see rate-limit.ts for rationale.
+  const mintIdent = userIdentifier(user.id)
+  const recentMints = await countRecentEvents(c.env.AQUILLA_PG, "credential_mint", mintIdent, { onlyFailures: false })
+  if (recentMints >= CREDENTIAL_MINT_MAX_PER_USER) {
+    return c.json(
+      { error: "rate_limited", message: "Too many credentials minted recently. Please try again later." },
+      429,
+    )
+  }
+  await recordAuthEvent(c.env.AQUILLA_PG, "credential_mint", mintIdent, true)
 
   // Resolve the caller's live authority on the requested scope. A credential
   // can only be scoped where the user holds >= CONTRIBUTOR; 'act' needs

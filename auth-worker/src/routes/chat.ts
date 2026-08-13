@@ -189,7 +189,14 @@ chat.post(
       }
 
       if (!upstream.ok) {
-        const errorText = await upstream.text()
+        // [Pen test] API security & data exposure (2026-08-13): the raw
+        // upstream body was passed through unbounded. OpenRouter error
+        // payloads can include provider-internal routing/debug detail (and,
+        // unbounded, are a soft amplification vector); every other upstream
+        // passthrough in this codebase (see import-sandbox.ts) already caps
+        // what reaches the client. Bearer key itself was never in the body,
+        // but "never was" isn't a reason to keep forwarding it whole.
+        const errorText = (await upstream.text()).slice(0, 500)
         return new Response(
           JSON.stringify({
             error: "openrouter_error",

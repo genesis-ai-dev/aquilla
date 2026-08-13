@@ -115,11 +115,21 @@ export const DEFAULT_TRACK_IDS: ReadonlySet<string> = new Set<string>(TRACK_KIND
  *  persisted reorder when the Source-audio row appears later (an audio VTT is
  *  imported) or goes away again (it is deleted). An index-based order would
  *  quietly re-point an override that said `order: 1.5` at a different pair of
- *  neighbours. */
+ *  neighbours.
+ *
+ *  THESE VALUES ARE FROZEN THE MOMENT ANYTHING PERSISTS AN ORDER. A stored
+ *  `order` is an absolute number, not a reference to a seat, so renumbering
+ *  seats afterwards moves every un-reordered row out from under every reordered
+ *  one — a data migration, not an edit. Stage 3 renumbers Target subtitles from
+ *  2 to 1 (Sam's new default: it belongs directly under Source subtitles) and
+ *  that is free ONLY because `file.track.set` has never been emitted, so no
+ *  `trackOverrides` entry exists anywhere. SEQUENCING CONSTRAINT: this renumber
+ *  must ship in the same release as the drag-to-reorder that starts emitting.
+ *  Ship the drag first and the window closes. */
 const TRACK_KIND_ORDER: Record<TrackKind, number> = {
   "source-subtitles": 0,
-  "source-audio": 1,
-  "target-subtitles": 2,
+  "target-subtitles": 1,
+  "source-audio": 2,
   "target-audio": 3,
 }
 
@@ -184,6 +194,15 @@ const trackRow = (kind: TrackKind, name: string = TRACK_KIND_LABELS[kind]): Time
  * track's `name` is per-track DATA, the gutter has always read "Subtitles" on a
  * dubbing file, and the four-way label map exists for the kinds a user picks
  * from, not to dictate what an existing row is called.
+ *
+ * THE LITERALS BELOW ARE WRITTEN IN SEAT ORDER, AND THAT IS A CONTRACT, NOT
+ * TIDINESS. This function does not sort — only mergeTrackOverrides does — so
+ * the array it returns IS what an override-free file draws, and its index is
+ * also the `seats` map the merge uses as its tie-break. Reseat a kind without
+ * moving its literal and both go wrong at once, silently: the rows render in
+ * the old sequence, and the tie-break goes on encoding the old sequence too.
+ * (`deriveDefaultTracks returns its rows already in ascending order` in
+ * tracks.test.ts is the guard.)
  */
 export function deriveDefaultTracks(context?: TrackDerivationContext | null): TimelineTrack[] {
   // hasMediaCells WINS. A file cannot honestly be both — media cells and
@@ -192,18 +211,57 @@ export function deriveDefaultTracks(context?: TrackDerivationContext | null): Ti
   // flags arrive true the caller is looking at a file mid-transition or at a
   // stale memo, and the legacy three-row shape is the safe answer: it is what
   // the file was drawn as a moment ago, and it never hides a row.
+  //
+  // THE STAGE-3 RESEAT MUST NOT BE VISIBLE IN THIS SHAPE. These three rows'
+  // orders went [0, 1, 3] → [0, 2, 3] — same rows, same sequence, same
+  // "Subtitles" label, still ascending — and a dubbing file cannot observe the
+  // difference: nothing derives seat 1 on a file with no Target-subtitles row,
+  // and with no persisted overrides (the state every existing project is in)
+  // these numbers are never compared against anything but each other. That
+  // invisibility is the guarantee the whole renumber hangs on; it is the
+  // highest-blast-radius part of the change and tracks.test.ts pins it twice.
   if (!context || context.hasMediaCells || !context.isSubtitleImport) {
     return [trackRow("source-subtitles", "Subtitles"), trackRow("source-audio"), trackRow("target-audio")]
   }
 
   return [
     trackRow("source-subtitles"),
+    trackRow("target-subtitles"),
     // No audio VTT imported yet means no cues, and a row with nothing to draw
     // is worse than no row: it reads as "this episode has no speech".
     ...(context.hasAudioCues ? [trackRow("source-audio")] : []),
-    trackRow("target-subtitles"),
     trackRow("target-audio"),
   ]
+}
+
+/**
+ * THE total order over tracks, and the only one: `order` ascending, then the
+ * derived seat (so defaults keep the sequence they were derived in when their
+ * orders are equal), then id ascending by code point — not `localeCompare`,
+ * which would sort differently for different users.
+ *
+ * Exported rather than inlined into the merge because the drag-to-reorder
+ * overlay sorts its own optimistically-patched copy of the list. Two
+ * implementations of this can only ever differ on a TIE — and equal `order`
+ * values are a real, reachable state (see the total-order cases in
+ * tracks.test.ts) — so the row would swap places between the optimistic list
+ * and the settled one at the exact instant the user let go of it.
+ *
+ * `seats` is the PRE-patch derived index. Ids it does not know (user-added
+ * tracks) take `fallbackSeat`, which callers set past the last default so those
+ * tracks sort below every default they tie with.
+ */
+export function compareTracksBySeat(
+  seats: ReadonlyMap<string, number>,
+  fallbackSeat: number,
+): (a: TimelineTrack, b: TimelineTrack) => number {
+  return (a, b) => {
+    if (a.order !== b.order) return a.order - b.order
+    const seatA = seats.get(a.id) ?? fallbackSeat
+    const seatB = seats.get(b.id) ?? fallbackSeat
+    if (seatA !== seatB) return seatA - seatB
+    return a.id < b.id ? -1 : a.id > b.id ? 1 : 0
+  }
 }
 
 /**
@@ -219,10 +277,8 @@ export function deriveDefaultTracks(context?: TrackDerivationContext | null): Ti
  * OVERRIDE entry, which returns the row to its pure default rather than taking
  * it away.
  *
- * TOTAL ORDER, so a reorder UI can rely on equal `order` values not jittering:
- * `order` ascending, then defaults before user-added tracks (defaults keeping
- * the sequence they were derived in), then id ascending by code point — not
- * `localeCompare`, which would sort differently for different users.
+ * Sorted by `compareTracksBySeat` above, so a reorder UI can rely on equal
+ * `order` values not jittering.
  */
 export function mergeTrackOverrides(
   defaults: TimelineTrack[],
@@ -285,13 +341,7 @@ export function mergeTrackOverrides(
     })
   }
 
-  return tracks.sort((a, b) => {
-    if (a.order !== b.order) return a.order - b.order
-    const seatA = seats.get(a.id) ?? userSeat
-    const seatB = seats.get(b.id) ?? userSeat
-    if (seatA !== seatB) return seatA - seatB
-    return a.id < b.id ? -1 : a.id > b.id ? 1 : 0
-  })
+  return tracks.sort(compareTracksBySeat(seats, userSeat))
 }
 
 /** The tracks to draw for a file: the rows its context derives, patched with

@@ -90,7 +90,7 @@ import {
   buildFileScopedTokenFetcher,
   buildProjectAwareMinter,
 } from "@/lib/sync/cqrs-bridge"
-import { emitTargetCellCommit, emitCellBacktranslationSet, emitFileRename, emitFileDelete, emitFileRestore, emitCellValidate, emitCellRetime, emitCellLaneRetime, emitCellAudioAttach, emitFileVideoSet, emitFileTimingSet, enqueueEvents } from "@/lib/sync/events-emit"
+import { emitTargetCellCommit, emitCellBacktranslationSet, emitFileRename, emitFileDelete, emitFileRestore, emitCellValidate, emitCellRetime, emitCellLaneRetime, emitCellAudioAttach, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, enqueueEvents } from "@/lib/sync/events-emit"
 import { v7 as uuidv7 } from "uuid"
 import { sequenceBetween } from "@/lib/timeline/derive"
 import { isLineEmpty, isUserAddedLine, userLineOrigin } from "@/lib/timeline/user-lines"
@@ -98,6 +98,7 @@ import { MIN_ADDABLE_SPAN_SEC, targetOffsetMsFor } from "@/lib/timeline/lane-tim
 import { audioIdSeededWith } from "@/lib/audio/upload"
 import { deriveSourceRegions, insertSlotsByCell, EMPTY_INSERT_SLOTS } from "@/lib/timeline/source-regions"
 import { deriveTracksForFile } from "@/lib/timeline/tracks"
+import { applyPendingOrders, renormaliseOrders, settledPendingOrders } from "@/lib/timeline/track-reorder"
 import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
 import { isBulkValidationEligible } from "@/lib/review/review-eligibility"
 import { TimelineEditor } from "@/components/timeline/TimelineEditor"
@@ -166,6 +167,13 @@ import {
   VIDEO_PANE_TABLE_MIN_WIDTH,
 } from "./timeline/video-pane-layout"
 import {
+  readStoredTimelinePaneHeight,
+  writeStoredTimelinePaneHeight,
+  MEDIA_BODY_MIN_HEIGHT,
+  TIMELINE_PANE_MAX_SHARE,
+  TIMELINE_PANE_MIN_HEIGHT,
+} from "./timeline/timeline-pane-layout"
+import {
   setVideoClockSec,
   setVideoClockPlaying,
   useVideoClockPlaying,
@@ -174,6 +182,12 @@ import {
 import { setVideoDurationSec, useVideoDurationSec } from "@/lib/timeline/video-duration"
 import { uiSlotRef } from "@/lib/ui-slots"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
+// Straight from the library, because `ui/resizable` wraps the COMPONENTS and
+// has no hooks to re-export. The timeline panel needs the imperative handle:
+// `defaultSize` is read once at mount and the panel is not remounted on a file
+// switch, so a stored per-file height can only be applied by asking the panel
+// to resize itself (see the effect that does it).
+import { usePanelRef } from "react-resizable-panels"
 import { TimingModeChangedDialog } from "./timeline/TimingModeChangedDialog"
 import { useTimingModeAck } from "@/hooks/useTimingModeAck"
 import { PeerPresence } from "./PeerPresence"
@@ -5043,19 +5057,77 @@ export function ProjectWorkspace() {
     }),
     [isSubtitleFile, audioMergedCells, audioCues],
   )
-  // Stage 1: every file's overrides are empty today — nothing writes
-  // `file.track.set` yet — so this merges out to the derived defaults. Wiring
-  // the REAL merge now anyway is the point: when renames and extra tracks
-  // arrive, they arrive as data on the file, with no plumbing left to lay.
-  const timelineTracks = useMemo(
+  // Stage 1 wired the real merge before anything wrote to it; stage 3 is the
+  // first emitter. This is the SETTLED list — what the server says, with no
+  // in-flight drag laid over it — and it is what the overlay is reconciled
+  // against below.
+  const serverTimelineTracks = useMemo(
     () => deriveTracksForFile(activeFile, trackContext),
     [activeFile, trackContext],
   )
+  /**
+   * A drag the server has not confirmed yet, as `trackId → new order`.
+   *
+   * DISPLAY-ONLY, and that is the invariant this whole feature rests on. It
+   * patches the in-memory list the timeline draws and NOTHING else: never
+   * `file.trackOverrides`, never IDB, and nothing derived from it is ever put
+   * into an event. The forward-compatibility rule in lib/timeline/tracks says a
+   * merged list must never be written back (it drops kinds this build has never
+   * heard of); an overlay that leaked into an emit would break exactly that.
+   *
+   * BOUND TO ITS FILE, like `timingVideoWarnFor` — a bare Map would be applied
+   * to whatever file happened to be open when the refresh landed, which on a
+   * project of 168 episodes is a reorder appearing on the wrong one.
+   *
+   * It exists because `refresh()` is a full project GET: without it the dragged
+   * row snaps back to where it was and then jumps forward again a second later,
+   * which reads as the app fighting the user.
+   */
+  const [pendingTrackOrders, setPendingTrackOrders] = useState<{
+    fileId: string
+    orders: Map<string, number>
+  } | null>(null)
+  const timelineTracks = useMemo(() => {
+    if (!pendingTrackOrders || pendingTrackOrders.fileId !== activeFile?.id) return serverTimelineTracks
+    // Sorted by tracks.ts's exported comparator (inside applyPendingOrders), so
+    // the optimistic order and the settled one cannot disagree on a tie and
+    // swap the row back at the instant the user lets go of it.
+    return applyPendingOrders(serverTimelineTracks, pendingTrackOrders.orders)
+  }, [serverTimelineTracks, pendingTrackOrders, activeFile?.id])
+  // Drop each pending order once the server read carries it — the same shape as
+  // the optimistic-rename reconciliation above, and driven for free: the
+  // dragger's own `file.track.set` frame comes back over the WS and triggers
+  // the refresh this reads. An order the server echoes back DIFFERENT is
+  // somebody else's write winning, and letting it settle would have this client
+  // fighting the winner, so `settledPendingOrders` matches exactly.
+  useEffect(() => {
+    if (!pendingTrackOrders || pendingTrackOrders.fileId !== activeFileId) return
+    const settled = settledPendingOrders(pendingTrackOrders.orders, serverTimelineTracks)
+    if (settled.length === 0) return
+    setPendingTrackOrders((current) => {
+      if (!current || current.fileId !== activeFileId) return current
+      const next = new Map(current.orders)
+      for (const id of settled) next.delete(id)
+      return next.size === 0 ? null : { fileId: current.fileId, orders: next }
+    })
+  }, [serverTimelineTracks, pendingTrackOrders, activeFileId])
+  // The third way out: leaving the file (or the project) abandons the overlay.
+  // Whatever the server ends up storing is the truth for a file you are no
+  // longer looking at, and an overlay held across a switch would be applied to
+  // a list it was never computed against.
+  useEffect(() => {
+    setPendingTrackOrders(null)
+  }, [activeFileId, projectId])
   // Pre-merge round: the control returned to the timeline toolbar, gated by
   // the same clearance the setting had in Project Settings (maintainer). The
   // gate is "don't pass the callback": below the floor the toolbar renders
   // the active mode as a plain label.
   const canEditTimingMode = (serverRoleLevel ?? project?.syncRole?.level ?? 0) >= ROLE.MAINTAINER
+  // Stage 3: track order is PROJECT-WIDE (Sam's call) and rides `file.track.set`,
+  // which the server floors at maintainer — the same clearance, read the same
+  // way, as the timing mode beside it. The gate is "don't pass the callback":
+  // below the floor the gutter has no grip, no grab cursor and no tab stop.
+  const canReorderTracks = (serverRoleLevel ?? project?.syncRole?.level ?? 0) >= ROLE.MAINTAINER
   // Flow A (file-scoped): switching a file that HAS a linked video to Free
   // timing hides the video — confirm before emitting. Holds the FILE the
   // warning was raised for, not a bare flag, so the confirm can only ever
@@ -5066,6 +5138,24 @@ export function ProjectWorkspace() {
     coreMediaUrl: activeFile?.coreMediaUrl,
     timingMode,
   })
+  /**
+   * Stage 3: re-apply the stored timeline height on a FILE switch.
+   *
+   * `defaultSize` is read once, when the panel mounts, and the panel does not
+   * remount when the active file changes (same subtree, no key) — so without
+   * this the height Sam asked to be remembered per file would in fact be
+   * remembered per session, and the first drag on episode 2 would overwrite
+   * episode 2's stored number with episode 1's. The horizontal zoom and the row
+   * height inside TimelineEditor had exactly the same gap and are fixed in the
+   * same round, because one half of "remembered per file" behaving differently
+   * from the other is what reads as a bug rather than as a limitation.
+   */
+  const timelinePanelRef = usePanelRef()
+  useEffect(() => {
+    if (!activeFileId) return
+    timelinePanelRef.current?.resize(readStoredTimelinePaneHeight(activeFileId))
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the panel ref is stable
+  }, [activeFileId])
 
   /**
    * Does the PICTURE own this file's transport?
@@ -5199,6 +5289,114 @@ export function ProjectWorkspace() {
       void applyTimingMode(mode, activeFileId)
     },
     [activeFileId, activeFile?.coreMediaUrl, isSubtitleFile, applyTimingMode],
+  )
+  /**
+   * Persist a dragged (or Alt+Arrow'd) track order: overlay first so the row
+   * stays where it was dropped, then emit + flush + refresh — the same shape as
+   * `applyTimingMode` above, on the same files.meta home.
+   *
+   * THE PATCH CARRIES ONLY `order`. Not name, not kind, not groupId: the server
+   * merges a track patch field by field into jsonb, so naming a field is
+   * claiming it. Send the whole track and a collaborator's rename, landing in
+   * the same second, is silently overwritten by whatever this client last read.
+   */
+  const applyTrackOrder = useCallback(
+    async (forFileId: string, changes: Array<{ trackId: string; order: number }>) => {
+      if (!project?.id || changes.length === 0) return
+      setPendingTrackOrders({ fileId: forFileId, orders: new Map(changes.map((c) => [c.trackId, c.order])) })
+      // Bound to the file the drag was made on, so a refresh that arrives after
+      // the user has moved on cannot revert a different file's overlay.
+      const revert = () =>
+        setPendingTrackOrders((current) => (current && current.fileId === forFileId ? null : current))
+      try {
+        if (changes.length === 1) {
+          await emitFileTrackSet({
+            projectId: project.id,
+            fileId: forFileId,
+            trackId: changes[0].trackId,
+            patch: { order: changes[0].order },
+            author: currentUsername,
+          })
+        } else {
+          // The renormalise fallback: N independent single-track deltas in ONE
+          // IDB transaction (one notify, one overlay rebuild), never a list.
+          await enqueueEvents(
+            changes.map((c) => ({
+              kind: "file.track.set" as const,
+              projectId: project.id,
+              fileId: forFileId,
+              parentId: null,
+              author: currentUsername,
+              payload: { trackId: c.trackId, patch: { order: c.order } },
+            })),
+          )
+        }
+        await flushOutboxBatch({
+          getTokenForFile: getTokenForProjectFile,
+          // A per-event 4xx arrives inside a 200 and the flusher drops it —
+          // without this hook the row would simply slide back with no
+          // explanation, which reads as the app undoing the user's work.
+          onRejected: (entries) => {
+            const mine = entries.filter((r) => r.kind === "file.track.set" && r.fileId === forFileId)
+            if (mine.length === 0) return
+            revert()
+            toast.error(`Couldn't move the track: ${mine[0].reason}`)
+          },
+        })
+        refresh()
+      } catch (e) {
+        revert()
+        const level = serverRoleLevel ?? project.syncRole?.level ?? null
+        toast.error(
+          canPerform("file.track.set", level)
+            ? e instanceof Error
+              ? e.message
+              : "Couldn't move the track."
+            : denialMessage(ROLE.MAINTAINER, level),
+        )
+      }
+    },
+    [project?.id, project?.syncRole?.level, serverRoleLevel, currentUsername, getTokenForProjectFile, refresh],
+  )
+  const handleReorderTrack = useCallback(
+    (trackId: string, order: number) => {
+      if (!activeFileId) return
+      // The offline guard sits HERE, at commit time, and not at pointerdown:
+      // connectivity can drop mid-drag, and refusing to lift a row because the
+      // wifi blinked when the finger went down is heavy-handed. Before the
+      // overlay is set, so the row snaps back with a reason rather than sitting
+      // in its new place waiting for a flush that cannot happen.
+      if (!navigator.onLine) {
+        toast.error("Track order can't be changed while offline.")
+        return
+      }
+      // Belt and braces. `orderForDrop` already refuses to hand out a non-finite
+      // number, but this one is the last thing between a NaN and files.meta.
+      if (!Number.isFinite(order)) return
+      // A tie means the dropped row's own sort key no longer decides where it
+      // sits — the comparator's seat/id tie-break does — so the drop would land
+      // somewhere the user did not point. `orderForDrop` calls this
+      // `needsRenormalise`; the test is restated here rather than passed through
+      // because it is a question about what can be PERSISTED, and this is the
+      // only place that persists. (The two agree: in a list sorted by `order`, a
+      // row sharing a value with the insertion point is always one of its
+      // immediate neighbours, which is exactly what orderForDrop compares.)
+      const tied = serverTimelineTracks.some((t) => t.id !== trackId && t.order === order)
+      if (!tied) {
+        void applyTrackOrder(activeFileId, [{ trackId, order }])
+        return
+      }
+      // Untangle it by numbering the intended sequence 0..n-1. The rows are put
+      // in the order the drop asked for, then handed to `renormaliseOrders`
+      // carrying their PERSISTED numbers — not the pending one — so a row that
+      // happens to already sit at its index emits nothing, while the dragged row
+      // (whose new number has never been stored) always does.
+      const intended = applyPendingOrders(serverTimelineTracks, new Map([[trackId, order]]))
+      const stored = new Map(serverTimelineTracks.map((t) => [t.id, t.order]))
+      const changes = renormaliseOrders(intended.map((t) => ({ ...t, order: stored.get(t.id) ?? t.order })))
+      void applyTrackOrder(activeFileId, changes)
+    },
+    [activeFileId, serverTimelineTracks, applyTrackOrder],
   )
   // The transport speaks file seconds in dubbing and programme seconds in
   // audio-first, so it has to know which before anything seeks.
@@ -6483,9 +6681,37 @@ export function ProjectWorkspace() {
                   stacks the timeline above it. The provider wraps both so the
                   table's row actions work identically in either position. */}
               <EditorActionsProvider value={editorActionsValue}>
-              <div className="flex h-full min-h-0 flex-col">
+              {/* AQU-646 stage 3: the timeline/table split is a DRAGGABLE
+                  divider now — the rows have multiplied (four tracks, more
+                  later) and a timeline sized to its own content was squeezing
+                  the panes below it. This group replaces the plain
+                  `flex h-full min-h-0 flex-col` div that used to be here; the
+                  wrapper already forces the same box (`flex h-full w-full`
+                  plus `flex-col` at vertical orientation), so nothing about the
+                  stacking changed.
+
+                  The timeline panel and its separator sit inside a FRAGMENT,
+                  exactly as the media-video pair below does, and for the same
+                  reason: it keeps `EditorTable` at a constant depth in the
+                  tree, so toggling the lens never remounts it and loses its
+                  virtualization state (and the separator stays a direct DOM
+                  child of its Group, which the library requires). */}
+              <ResizablePanelGroup orientation="vertical" className="min-h-0">
               {timelineStacked && activeFile ? (
-                <div className="shrink-0">
+                <>
+                  <ResizablePanel
+                    id="media-timeline"
+                    panelRef={timelinePanelRef}
+                    defaultSize={readStoredTimelinePaneHeight(activeFile.id)}
+                    minSize={TIMELINE_PANE_MIN_HEIGHT}
+                    maxSize={TIMELINE_PANE_MAX_SHARE}
+                    groupResizeBehavior="preserve-pixel-size"
+                    onResize={(size) => {
+                      if (size.inPixels >= TIMELINE_PANE_MIN_HEIGHT) {
+                        writeStoredTimelinePaneHeight(activeFile.id, size.inPixels)
+                      }
+                    }}
+                  >
                   <TimelineEditor
                     cells={audioMergedCells}
                     initialSelectedCellId={mediaTraceCellId}
@@ -6537,9 +6763,21 @@ export function ProjectWorkspace() {
                         ? { count: legacyMeasureCount, onMeasure: handleMeasureLegacy }
                         : undefined
                     }
+                    onReorderTrack={canReorderTracks ? handleReorderTrack : undefined}
                   />
-                </div>
+                  </ResizablePanel>
+                  <ResizableHandle withHandle />
+                </>
               ) : null}
+              {/* `minSize` is the only thing keeping the dialogue table usable
+                  now that the timeline above it has a height control — and it
+                  is the mechanism behind an existing browser pass's floor check
+                  (browser-verify-media-table-sync.mjs asserts the table clears
+                  80px on a 1280x700 window). */}
+              <ResizablePanel
+                id="media-body"
+                minSize={timelineStacked ? MEDIA_BODY_MIN_HEIGHT : undefined}
+              >
               {/* AQU-646: in the media lens a linked video docks to the LEFT of
                   the table, under the chip strip. Dragging the divider shut is
                   how you hide it; the table carries a pixel floor so a narrow
@@ -6672,7 +6910,8 @@ export function ProjectWorkspace() {
               </div>
               </ResizablePanel>
               </ResizablePanelGroup>
-              </div>
+              </ResizablePanel>
+              </ResizablePanelGroup>
               </EditorActionsProvider>
             </div>
             {footnoteViewMode === "tray" && (

@@ -21,6 +21,14 @@ import { TimelineSlotButton } from "./TimelineSlotButton"
 import { MIN_SLOT_PX, useHotSlot } from "./slot-hover"
 import { isVisible, secToPx, pxToSec, chipRadiusPx } from "@/lib/timeline/scale"
 import {
+  MIN_CHIP_GRIP_H_PX,
+  MIN_CHIP_META_H_PX,
+  MIN_SLOT_BUTTON_H_PX,
+  TL_CHIP_BOX_CLASS,
+  TL_ROW_H_CLASS,
+} from "@/lib/timeline/row-metrics"
+import { useRowMetrics } from "./useRowMetrics"
+import {
   targetChipGeom,
   chipOverflowState,
   chipOverlaps,
@@ -146,6 +154,10 @@ function TargetAudioChip({
   const [drag, setDrag] = useState<{ mode: ChipDragMode; dx: number } | null>(null)
   const [hovered, setHovered] = useState(false)
   const movedRef = useRef(false)
+  // AQU-646 stage 3: how tall this chip is drawn. Outside a timeline (this
+  // lane's own tests) the context answers with the shipped 46px chip, so every
+  // height gate below reads exactly as it did before it existed.
+  const { chipH } = useRowMetrics()
   // SUB-48: this clip is saved on this device but its event is still queued.
   const pendingSync = Boolean(cell.attachments?.[chip.item.audioId]?.pendingSync)
 
@@ -257,8 +269,12 @@ function TargetAudioChip({
   const truncatedHead = paintedStart > span.start + 0.0005
   const truncatedTail = paintedEnd < span.end - 0.0005
   const truncated = truncatedHead || truncatedTail
+  // The height term is the same argument as the width one: a trim handle is a
+  // target you have to hit, and on a compact band it is smaller than the
+  // pointer that has to find it.
   const canResize =
     editable && Boolean(onTrimTarget) && chip.resizable &&
+    chipH >= MIN_CHIP_GRIP_H_PX &&
     secToPx(geom.end - geom.start, pxPerSec) >= 24
 
   function beginDrag(mode: ChipDragMode, e: React.PointerEvent) {
@@ -312,8 +328,20 @@ function TargetAudioChip({
   // alone whenever any glyph wants it.
   const leftGlyph: "missing" | "loading" | "saving" | null =
     missing ? "missing" : loading ? "loading" : pendingSync ? "saving" : null
-  const showLeftGlyph = leftGlyph != null && paintedPx >= 20
-  const showRecordButton = editable && Boolean(onOpenRecording) && fullPx >= (leftGlyph != null ? 46 : 28)
+  // AQU-646 stage 3: everything on this chip beyond its kind icon and its
+  // colours — the "?" unknown-length badge, that corner priority slot, the
+  // hover record button — is fixed-size furniture pinned near the top edge, so
+  // on a short chip the chip's own overflow-hidden clips it to a sliver of a
+  // circle. Below the meta height they all go.
+  //
+  // What deliberately STAYS at any height, because it is load-bearing and
+  // costs nothing: the kind icon, the amber soft-overflow ring, the red
+  // overlap body and the truncation chevrons. A row squeezed down to colour
+  // bands must still be able to say "these two dubs collide".
+  const fitsBadges = chipH >= MIN_CHIP_META_H_PX
+  const showLeftGlyph = leftGlyph != null && fitsBadges && paintedPx >= 20
+  const showRecordButton =
+    editable && Boolean(onOpenRecording) && fitsBadges && fullPx >= (leftGlyph != null ? 46 : 28)
   const kindTitle = chip.item.kind === "take" ? "Recorded take" : "Generated voice"
   // SUB-53: audio-first says how the two compare instead of warning. Longer is
   // normal here; shorter is equally unremarkable.
@@ -422,7 +450,9 @@ function TargetAudioChip({
         zIndex: (drag ? 2000 : selected || hovered ? 1000 : 0) + paintOrder,
       }}
       className={cn(
-        "group/chip absolute top-2.5 flex h-[46px] touch-none select-none items-center justify-center overflow-hidden border",
+        "group/chip absolute flex touch-none select-none items-center justify-center overflow-hidden border",
+        // The row's live geometry, or 10-46-10 outside a timeline.
+        TL_CHIP_BOX_CLASS,
         chip.item.kind === "take"
           ? "border-emerald-500/60 bg-emerald-100/80 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300"
           : "border-violet-500/60 bg-violet-100/80 text-violet-800 dark:bg-violet-950/70 dark:text-violet-300",
@@ -453,7 +483,7 @@ function TargetAudioChip({
       <Icon className="h-3.5 w-3.5 shrink-0" />
       {/* SUB-48: an unmeasurable clip says so instead of quietly borrowing
           the section's width and passing for a measured take. */}
-      {geom.usingFallback && (
+      {geom.usingFallback && fitsBadges && (
         <span
           aria-hidden
           data-testid={`tl-target-${cell.id}-unknown-length`}
@@ -622,6 +652,13 @@ export function TargetAudioLane({
   // add-and-record slot and an empty-section slot can never both be lit. Keys
   // are prefixed because a span start and a cell id share no namespace.
   const { hotKey, slotHoverProps } = useHotSlot(viewStartSec, pxPerSec)
+  // AQU-646 stage 3: the mic is an `h-7` circle in a slot with no
+  // overflow-hidden, so on a short row it draws over the lanes above and below
+  // and can be clicked from either. Hover-only anyway, so it costs nothing to
+  // drop where the row is a colour band rather than a place anyone records
+  // from.
+  const { chipH } = useRowMetrics()
+  const showsSlotButton = chipH >= MIN_SLOT_BUTTON_H_PX
 
   // SUB-51: a record button hiding in the empty space under each dub-free
   // section. Rendered BEFORE the chips and with no z-index, so a real chip —
@@ -657,7 +694,7 @@ export function TargetAudioLane({
 
   return (
     // `isolate`: chip z-indexes stack within the lane — never over the playhead.
-    <div data-testid="tl-target-lane" className="isolate relative h-[66px] border-b border-border">
+    <div data-testid="tl-target-lane" className={`isolate relative ${TL_ROW_H_CLASS} border-b border-border`}>
       {(emptySpans ?? []).map((span) => {
         const leftPx = secToPx(span.startSec, pxPerSec)
         const widthPx = secToPx(span.endSec - span.startSec, pxPerSec)
@@ -669,17 +706,19 @@ export function TargetAudioLane({
             key={`addrec-${span.startSec}`}
             data-testid={`tl-target-add-${span.startSec}`}
             style={{ left: `${leftPx}px`, width: `${widthPx}px` }}
-            className="absolute top-2.5 flex h-[46px] items-center justify-center"
+            className={`absolute ${TL_CHIP_BOX_CLASS} flex items-center justify-center`}
             {...slotHoverProps(`add-${span.startSec}`)}
           >
-            <TimelineSlotButton
-              testId={`tl-target-add-${span.startSec}-record`}
-              label="Record over this stretch"
-              hot={hotKey === `add-${span.startSec}`}
-              onClick={() => onAddLineAndRecord(span.startSec, span.endSec)}
-            >
-              <Mic className="h-3.5 w-3.5" />
-            </TimelineSlotButton>
+            {showsSlotButton && (
+              <TimelineSlotButton
+                testId={`tl-target-add-${span.startSec}-record`}
+                label="Record over this stretch"
+                hot={hotKey === `add-${span.startSec}`}
+                onClick={() => onAddLineAndRecord(span.startSec, span.endSec)}
+              >
+                <Mic className="h-3.5 w-3.5" />
+              </TimelineSlotButton>
+            )}
           </div>
         )
       })}
@@ -688,20 +727,22 @@ export function TargetAudioLane({
           key={`empty-${cell.id}`}
           data-testid={`tl-target-empty-${cell.id}`}
           style={{ left: `${leftPx}px`, width: `${widthPx}px` }}
-          className="absolute top-2.5 flex h-[46px] items-center justify-center"
+          className={`absolute ${TL_CHIP_BOX_CLASS} flex items-center justify-center`}
           {...slotHoverProps(`empty-${cell.id}`)}
         >
-          <TimelineSlotButton
-            testId={`tl-target-empty-${cell.id}-record`}
-            label="Record audio for this line"
-            hot={hotKey === `empty-${cell.id}`}
-            onClick={() => {
-              onSelect(cell.id)
-              onOpenRecording?.(cell.id)
-            }}
-          >
-            <Mic className="h-3.5 w-3.5" />
-          </TimelineSlotButton>
+          {showsSlotButton && (
+            <TimelineSlotButton
+              testId={`tl-target-empty-${cell.id}-record`}
+              label="Record audio for this line"
+              hot={hotKey === `empty-${cell.id}`}
+              onClick={() => {
+                onSelect(cell.id)
+                onOpenRecording?.(cell.id)
+              }}
+            >
+              <Mic className="h-3.5 w-3.5" />
+            </TimelineSlotButton>
+          )}
         </div>
       ))}
       {chips.map((chip, i) =>

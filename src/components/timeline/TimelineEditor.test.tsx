@@ -1286,6 +1286,9 @@ describe("TimelineEditor — rows come from the track model", () => {
     expect(laneRows()).toEqual(["subtitle", "target-subtitle", "tl-target-lane"])
   })
 
+  // Stage 3 reseated Target subtitles from 2 to 1 (Sam: the translation belongs
+  // directly under the cue it translates), so the imported audio row now lands
+  // BELOW both text rows rather than between them.
   it("importing an audio VTT drops the Source-audio row into its own seat", () => {
     render(
       <TimelineEditor
@@ -1295,8 +1298,8 @@ describe("TimelineEditor — rows come from the track model", () => {
         onRetimeSubtitle={() => {}}
       />,
     )
-    expect(gutterNames()).toEqual(["Source subtitles", "Source audio", "Target subtitles", "Target audio"])
-    expect(laneRows()).toEqual(["subtitle", "source-audio-cues", "target-subtitle", "tl-target-lane"])
+    expect(gutterNames()).toEqual(["Source subtitles", "Target subtitles", "Source audio", "Target audio"])
+    expect(laneRows()).toEqual(["subtitle", "target-subtitle", "source-audio-cues", "tl-target-lane"])
   })
 
   it("the Target-subtitles row shows the translation, not the source text", () => {
@@ -1310,6 +1313,37 @@ describe("TimelineEditor — rows come from the track model", () => {
     const target = rows.find((l) => l.getAttribute("data-variant") === "target-subtitle")!
     expect(within(target).getByTestId("tl-card-s1")).toHaveTextContent("Uno")
     expect(within(target).queryByText("One")).toBeNull()
+  })
+
+  // ── Stage 3: dragging a track's name up or down ──
+  //
+  // The KEYBOARD path, and it is here rather than a pointer drag on purpose: it
+  // runs the identical wiring (a gutter label → proposeDropIndex's sibling
+  // orderForDrop → onReorderTrack) with no geometry at all, and happy-dom gives
+  // every element a 0x0 rect at the origin, so a pointer test would be
+  // measuring the mock rather than the code. What it pins is the part that can
+  // silently be wrong: which track moved, and what sort key it moved to.
+  it("Alt+ArrowDown on a focused label moves it one place", () => {
+    const onReorderTrack = vi.fn()
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={rowCells} onRetimeSubtitle={() => {}}
+        onReorderTrack={onReorderTrack}
+      />,
+    )
+    const gutter = screen.getByTestId("tl-scroll").previousElementSibling!
+    const labels = gutter.querySelectorAll<HTMLElement>("[data-tl-track-row]")
+    expect(labels).toHaveLength(3)
+    labels[0].focus()
+    fireEvent.keyDown(labels[0], { key: "ArrowDown", altKey: true })
+    // The dubbing shape's seats are 0 / 2 / 3, so Subtitles landing below
+    // Source audio is the midpoint of its two NEW neighbours — one event, one
+    // track, nothing else renumbered.
+    expect(onReorderTrack).toHaveBeenCalledTimes(1)
+    expect(onReorderTrack).toHaveBeenCalledWith("source-subtitles", 2.5)
+    // And the editor does not move the row itself: the order is project-wide
+    // data, so the optimistic overlay belongs to the workspace that persists it.
+    expect(gutterNames()).toEqual(["Subtitles", "Source audio", "Target audio"])
   })
 })
 

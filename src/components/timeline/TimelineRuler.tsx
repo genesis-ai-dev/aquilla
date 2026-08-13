@@ -48,7 +48,33 @@ function TimelineRulerImpl({
   return (
     <div
       data-testid="tl-ruler"
-      className="relative h-7 select-none border-b border-border bg-muted/30"
+      // AQU-646 stage 3: the ruler stays put while the track stack scrolls
+      // under it, and that turns its background into a correctness problem.
+      //
+      //   OPACITY. `bg-muted/30` is 30% — it only ever looked solid because
+      //   nothing passed behind it. With chips scrolling underneath they would
+      //   be plainly visible THROUGH the ruler, tick labels and all. So the
+      //   opaque `bg-background` (what the card behind it paints) carries the
+      //   composite and the 30% tint moves to an inset pseudo-element, which
+      //   reproduces today's two layers in today's order. A pseudo-element and
+      //   not a child div because TimelineRuler.test.tsx counts this element's
+      //   children to assert the tick window — an extra child would break three
+      //   assertions that have nothing to do with backgrounds. It reaches one
+      //   pixel PAST the padding box on purpose: in dark mode `--border` is 10%
+      //   white, so the bottom border is translucent and needs the same tint
+      //   under it or the seam reads a shade off.
+      //
+      //   z-20, NOT z-30. It must beat the lanes and a selected chip, and it
+      //   must LOSE to two things drawn at the same level later in the DOM: the
+      //   playhead (at z-30 its triangle would vanish and its line would be cut
+      //   for the ruler's 28px) and a card being dragged, whose millisecond
+      //   readout is anchored above the chip and so renders inside the ruler
+      //   band for anything in the first lane.
+      //
+      // relative -> sticky is safe: sticky is still "positioned", so the
+      // absolutely positioned ticks below keep this element as their
+      // containing block.
+      className="sticky top-0 z-20 h-7 select-none border-b border-border bg-background before:absolute before:inset-x-0 before:top-0 before:-bottom-px before:bg-muted/30"
       style={{ width: `${width}px` }}
       onClick={(e) => {
         const rect = e.currentTarget.getBoundingClientRect()

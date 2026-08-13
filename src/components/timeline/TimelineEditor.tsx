@@ -4,9 +4,32 @@
 // own — the play queue is the master clock, and the linked video lives beside
 // the text table as MediaVideoPane (AQU-646).
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+  type ReactNode,
+} from "react"
 import { createPortal } from "react-dom"
-import { AudioLines, Film, LocateFixed, Magnet, Minus, Plus, Volume2, VolumeX, X } from "lucide-react"
+import {
+  AudioLines,
+  ChevronsDownUp,
+  ChevronsUpDown,
+  Film,
+  GripVertical,
+  LocateFixed,
+  Magnet,
+  Minus,
+  Plus,
+  Volume2,
+  VolumeX,
+  X,
+} from "lucide-react"
 import { cn } from "@/lib/utils"
 import { deriveLanes } from "@/lib/timeline/lanes"
 import { deriveSourceRegions, EMPTY_SOURCE_REGIONS } from "@/lib/timeline/source-regions"
@@ -17,6 +40,17 @@ import { buildTimelineLayout, type TimelineLayout } from "@/lib/timeline/layout"
 import { deriveTracksForFile, type TimelineTrack, type TrackKind } from "@/lib/timeline/tracks"
 import { computeFollowScroll } from "@/lib/timeline/follow"
 import { secToPx, pxToSec, ZOOM_MIN, ZOOM_MAX, ZOOM_DEFAULT } from "@/lib/timeline/scale"
+import {
+  chipHeightPx,
+  chipPadPx,
+  clampRowHeight,
+  ROW_H_DEFAULT,
+  ROW_H_MAX,
+  ROW_H_MIN,
+  TL_ROW_H_CLASS,
+} from "@/lib/timeline/row-metrics"
+import { orderForDrop, proposeDropIndex, type RowBound } from "@/lib/timeline/track-reorder"
+import { RowMetricsContext, type RowMetrics } from "./useRowMetrics"
 // Read-only queue subscriptions only — playback COMMANDS stay in the
 // workspace (onSeekToTime), keeping this component testable with a spy prop.
 // Round 5 exception: the per-track speaker buttons write muting themselves —
@@ -171,6 +205,20 @@ export interface TimelineEditorProps {
    *  mount) = the three derived defaults, unchanged from what this editor has
    *  always drawn. */
   tracks?: TimelineTrack[]
+  /**
+   * AQU-646 stage 3: give one track a new sort key, because the user dragged
+   * its name up or down the gutter (or pressed Alt+Arrow on it). The order is
+   * PROJECT-WIDE — the workspace persists it with `file.track.set` — so this is
+   * a write, not a view preference, and the number is a SORT KEY: fractional
+   * and negative values are normal, and only the named track changes.
+   *
+   * ABSENT IS THE PERMISSION GATE, and it withholds the whole affordance: no
+   * pointerdown handler, no grip, no grab cursor, no tab stop. Rendering a
+   * draggable-looking row that mints a 403 on release is the same lie
+   * `hideTimingMode` was added to stop telling — a control you cannot use is
+   * worse than no control, because you have to try it to find out.
+   */
+  onReorderTrack?(trackId: string, order: number): void
 }
 
 /** The default prop, resolved ONCE. A `deriveTracksForFile(null)` call in the
@@ -189,11 +237,125 @@ function loadZoom(fileId: string): number {
   }
 }
 
-function LaneLabel({ name, sub, dot, trailing }: { name: string; sub: string; dot: string; trailing?: ReactNode }) {
+const rowHeightKey = (fileId: string) => `codex:timelineRowHeight:${fileId}`
+
+/**
+ * Stage 3's vertical zoom, remembered PER FILE exactly as the horizontal one is
+ * (Sam's call): a four-row episode and a two-row dubbing file want different
+ * heights, and one global setting would have each visit undo the other.
+ *
+ * Clamped on the way in as well as on the way out. The stored number is written
+ * by whatever build the user last opened this file in, and a value from a wider
+ * range — or a fractional one — would blur every `border-b` down the timeline
+ * (see `clampRowHeight`).
+ */
+function loadRowHeight(fileId: string): number {
+  try {
+    const v = Number(localStorage.getItem(rowHeightKey(fileId)))
+    return Number.isFinite(v) && v >= ROW_H_MIN && v <= ROW_H_MAX ? clampRowHeight(v) : ROW_H_DEFAULT
+  } catch {
+    return ROW_H_DEFAULT
+  }
+}
+
+/**
+ * Everything a gutter row needs to be DRAGGED, or undefined for a user who may
+ * not reorder tracks — in which case the row renders exactly the DOM it always
+ * has. See `onReorderTrack` for why the gate is all-or-nothing.
+ */
+interface LaneLabelReorder {
+  trackId: string
+  /** How far this row is currently lifted, in px; null unless it is the one
+   *  under the pointer. Raw pointer delta — no rAF, no easing (TimelineCard's
+   *  drag does the same on the other axis, and a lifted label that lags the
+   *  finger reads as the app being busy). */
+  liftPx: number | null
+  /** Which of this row's own edges carries the 2px drop-indicator line, if
+   *  either. The line is the whole readout — there is no drag chip. */
+  dropEdge: "top" | "bottom" | null
+  onPointerDown(e: ReactPointerEvent<HTMLDivElement>): void
+  onKeyDown(e: ReactKeyboardEvent<HTMLDivElement>): void
+}
+
+function LaneLabel({
+  name,
+  sub,
+  dot,
+  trailing,
+  reorder,
+}: {
+  name: string
+  sub: string
+  dot: string
+  trailing?: ReactNode
+  reorder?: LaneLabelReorder
+}) {
+  const lifted = reorder?.liftPx != null
   return (
-    <div className="flex h-[66px] items-center justify-between gap-1 border-b border-border px-3">
+    // `overflow-hidden` because the two lines inside are fixed-size chrome and
+    // the row around them is not any more: at the compact end of the vertical
+    // zoom the sublabel is taller than its row, and without the clip it would
+    // print across the label below it rather than being cut off by it.
+    //
+    // Stage 3: THE WHOLE LABEL IS THE DRAG HANDLE (Sam: "dragging on the
+    // name"). The grip beside the dot is an affordance and nothing more — it
+    // has no handler of its own, so there is no thin target to hunt for.
+    // `role="listitem"` and deliberately NOT `role="button"`: the app's
+    // keyboard layer treats buttons as controls that refuse Space
+    // (`spacebarShouldToggle`), so a focused label would silently kill the
+    // timeline's transport key.
+    <div
+      // How `beginTrackDrag` finds the rows to measure. A data attribute and
+      // not a testid, and only on the draggable rows: the gutter's contract is
+      // that it renders what the hardcoded rows did, and the untimed strip
+      // below the tracks is not one of them.
+      data-tl-track-row={reorder ? "" : undefined}
+      role={reorder ? "listitem" : undefined}
+      aria-roledescription={reorder ? "sortable track" : undefined}
+      tabIndex={reorder ? 0 : undefined}
+      onPointerDown={reorder?.onPointerDown}
+      onKeyDown={reorder?.onKeyDown}
+      className={cn(
+        "flex items-center justify-between gap-1 overflow-hidden border-b border-border px-3",
+        TL_ROW_H_CLASS,
+        // Everything on this line is withheld from a user who cannot reorder,
+        // down to the `relative` — the row a viewer sees is byte-for-byte the
+        // row that shipped. `touch-none` for the same reason TimelineCard has
+        // it: without it the browser claims a vertical drag as a scroll gesture
+        // and the pointer stream stops mid-drag.
+        reorder && "group relative cursor-grab touch-none select-none outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sky-500",
+        // The lift. Opaque background + shadow because the row it passes over
+        // is still drawn where it always was — the other rows deliberately do
+        // NOT part (see the gutter's comment), so the only thing separating the
+        // travelling row from the stationary one underneath is this.
+        lifted && "z-10 cursor-grabbing bg-background opacity-90 shadow-lg",
+      )}
+      style={lifted ? { transform: `translateY(${reorder?.liftPx}px)` } : undefined}
+    >
+      {reorder?.dropEdge && (
+        <span
+          aria-hidden
+          data-testid="tl-track-drop-line"
+          className={cn(
+            "pointer-events-none absolute inset-x-0 z-20 h-0.5 bg-sky-500",
+            reorder.dropEdge === "top" ? "top-0" : "bottom-0",
+          )}
+        />
+      )}
       <div className="flex min-w-0 flex-col gap-0.5">
         <span className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
+          {/* An <svg> inside the existing name span, and it MUST NOT grow a
+              `span.font-semibold` of its own: the gutter parity test reads the
+              track names by selecting exactly that class and mapping
+              textContent, so a wrapper here would read back as a nameless
+              extra row. An icon contributes no text, so the names are
+              untouched. */}
+          {reorder && (
+            <GripVertical
+              data-testid={`tl-track-grip-${reorder.trackId}`}
+              className="-ml-1.5 h-3.5 w-3.5 shrink-0 text-muted-foreground opacity-30 transition-opacity group-hover:opacity-100"
+            />
+          )}
           <span className={cn("h-1.5 w-1.5 rounded-sm", dot)} />
           {name}
         </span>
@@ -266,9 +428,19 @@ export function TimelineEditor({
   audioByCellId,
   legacyMeasure,
   tracks = DEFAULT_TRACKS,
+  onReorderTrack,
 }: TimelineEditorProps) {
   const audioFirst = timingMode === "audioFirst"
   const [pxPerSec, setPxPerSec] = useState(() => loadZoom(fileId))
+  // Stage 3: the OTHER zoom. Every row container and every chip box reads these
+  // three numbers through CSS custom properties on the root below, so one state
+  // value resizes the gutter, four lanes and everything drawn on them at once —
+  // there is no second copy of the geometry to fall out of step.
+  const [rowH, setRowH] = useState(() => loadRowHeight(fileId))
+  const rowMetrics = useMemo<RowMetrics>(
+    () => ({ rowH, chipH: chipHeightPx(rowH), chipPad: chipPadPx(rowH) }),
+    [rowH],
+  )
   // Dismissal is per-visit on purpose: while unmeasured takes remain, the
   // notice returns next time the timeline mounts — quiet, but not forgotten.
   // It is keyed by FILE because this component is not remounted on a file
@@ -291,9 +463,38 @@ export function TimelineEditor({
   const [viewportPx, setViewportPx] = useState(0)
   const [follow, setFollow] = useState(true)
   const scrollRef = useRef<HTMLDivElement>(null)
+  /** The clipped label column, and the div inside it that carries the vertical
+   *  offset. The gutter does not scroll — see `handleTrackScroll`. */
+  const gutterRef = useRef<HTMLDivElement>(null)
+  const gutterInnerRef = useRef<HTMLDivElement>(null)
+  /** The horizontal offset this component has already reacted to. Stage 3 made
+   *  the track column scroll in y as well, so a scroll event no longer implies
+   *  a horizontal move — everything keyed on one has to check first. */
+  const lastScrollLeft = useRef(0)
   /** Programmatic scrolls stamp this; the onScroll handler treats scroll
    *  events within 150ms of a stamp as our own, not a user disengage. */
   const lastProgrammaticScrollAt = useRef(0)
+  /**
+   * Stage 3: a track being dragged up or down the gutter.
+   *
+   * `bounds` is snapshotted from the live DOM at pointerdown and carried in the
+   * state rather than recomputed per move — the rows deliberately do not move
+   * during a drag, so one measurement is the whole truth, and measuring 60x a
+   * second would be four forced layouts per frame for an answer that cannot
+   * have changed. It is also why the row height never appears in this code:
+   * hit-testing measured midpoints is correct with rows of different heights
+   * and survives the vertical zoom being changed between two drags, which
+   * dividing a pointer offset by a row height is not and does not.
+   */
+  const [trackDrag, setTrackDrag] = useState<{
+    fromIndex: number
+    /** Where it would land on release — an index into `tracks`, already past
+     *  proposeDropIndex's lifted-row adjustment. */
+    toIndex: number
+    /** Raw pointer travel, straight onto the row's transform. */
+    dy: number
+    bounds: RowBound[]
+  } | null>(null)
   const clock = useTimelineClock()
   const chipStripSlot = useUiSlot("media-chip-strip")
 
@@ -382,6 +583,26 @@ export function TimelineEditor({
   // video pane seeds the same value on its own mount — see seedAudibility.
   useEffect(() => {
     seedAudibility(fileId)
+  }, [fileId])
+
+  // Stage 3: RE-READ THE PER-FILE VIEW PREFERENCES WHEN THE FILE CHANGES.
+  //
+  // Both are `useState(() => load…(fileId))`, and an initialiser runs once —
+  // but this component is NOT remounted on a file switch (same subtree, no
+  // key), so without this the two settings Sam asked to be remembered per file
+  // were in fact remembered per session: open episode 2 and it kept episode 1's
+  // zoom, then wrote it back under episode 2's key the moment you touched a
+  // stepper. The horizontal zoom has carried that gap since it shipped; the row
+  // height would have arrived with it, and one of the pair silently behaving
+  // differently from the other is exactly what reads as a bug rather than as a
+  // limitation. Skipped on the first run for the file we mounted with, so a
+  // freshly-mounted editor never re-renders for values it already has.
+  const loadedPrefsFor = useRef(fileId)
+  useEffect(() => {
+    if (loadedPrefsFor.current === fileId) return
+    loadedPrefsFor.current = fileId
+    setPxPerSec(loadZoom(fileId))
+    setRowH(loadRowHeight(fileId))
   }, [fileId])
 
   // Round 7 (SUB-44): transport keys while the timeline is on screen.
@@ -662,7 +883,45 @@ export function TimelineEditor({
     if (!el) return
     lastProgrammaticScrollAt.current = performance.now()
     el.scrollLeft = left
+    // Belt and braces for the axis test in handleTrackScroll: the scroll event
+    // this write provokes already knows where we put it. (If the browser clamps
+    // to a different offset the values differ, the handler runs in full, and the
+    // real number wins — which is exactly what should happen.)
+    lastScrollLeft.current = left
     setScrollLeft(left)
+  }
+
+  /**
+   * The one scroll handler on the track column, which owns BOTH axes now.
+   *
+   * The gutter transform is written FIRST and synchronously. Scroll steps run
+   * before paint, so the labels land in the same frame as the rows they name;
+   * routing the offset through React state instead would draw one frame of
+   * labels sitting beside the wrong lanes on every wheel tick.
+   *
+   * Then: NOTHING ELSE HAPPENS UNLESS THE HORIZONTAL OFFSET ACTUALLY MOVED.
+   * Everything below this line is about x — the visibility window, the viewport
+   * measurement, and above all the follow-playhead release, which reads a manual
+   * scroll as "stop following me". That is a horizontal statement. Scrolling
+   * down to look at another track says nothing about whether you still want the
+   * view to track playback, and without this check it would silently turn
+   * following off every time.
+   */
+  function handleTrackScroll() {
+    const el = scrollRef.current
+    if (!el) return
+    const inner = gutterInnerRef.current
+    if (inner) inner.style.transform = `translateY(${-el.scrollTop}px)`
+    if (el.scrollLeft === lastScrollLeft.current) return
+    lastScrollLeft.current = el.scrollLeft
+    setScrollLeft(el.scrollLeft)
+    setViewportPx(el.clientWidth)
+    // A MANUAL scroll while playback runs means "stop following me". Our own
+    // programmatic scrolls fire this handler too — the 150ms stamp window
+    // filters them out.
+    if (transportPlaying && performance.now() - lastProgrammaticScrollAt.current > 150) {
+      setFollow(false)
+    }
   }
 
   function applyZoom(next: number) {
@@ -689,6 +948,177 @@ export function TimelineEditor({
       /* private mode / unavailable — zoom just won't persist */
     }
   }
+
+  /**
+   * The vertical zoom's `applyZoom`, and deliberately the plainer of the two:
+   * there is no anchor to keep, no re-scroll to schedule.
+   *
+   * `applyZoom` needs that dance because changing px/sec rewrites the track's
+   * WIDTH, which invalidates the scroll offset it is measured in — the browser
+   * would clamp it to the old width and the time under the cursor would jump.
+   * Row height only ever makes the stack taller or shorter; every existing
+   * scrollTop stays a legal scrollTop (the browser clamps a now-too-large one
+   * for us and emits the scroll event that re-syncs the gutter), and nothing
+   * horizontal moves at all. Adding an anchor here would be motion for its own
+   * sake.
+   */
+  function applyRowHeight(next: number) {
+    const h = clampRowHeight(next)
+    setRowH(h)
+    try {
+      localStorage.setItem(rowHeightKey(fileId), String(h))
+    } catch {
+      /* private mode / unavailable — the height just won't persist */
+    }
+  }
+
+  /**
+   * The pointer's position in the gutter's CONTENT coordinates — the frame
+   * `RowBound`s are stored in.
+   *
+   * The `scrollTop` term is the whole point. The gutter is dragged along by the
+   * track column, which the user can keep scrolling mid-drag (a wheel still
+   * works, and edge-autoscroll would too if it is ever added); bounds taken
+   * once at pointerdown would be wrong by exactly the distance scrolled from
+   * that moment on, so the pointer is converted into their frame instead of
+   * them being re-measured into its.
+   *
+   * The gutter COLUMN's top is the origin, not the inner div's: the inner div
+   * is the thing carrying `translateY(-scrollTop)`, so measuring against it
+   * would cancel the offset out again and quietly reintroduce the bug.
+   */
+  function gutterContentY(clientY: number): number {
+    const top = gutterRef.current?.getBoundingClientRect().top ?? 0
+    return clientY - top + (scrollRef.current?.scrollTop ?? 0)
+  }
+
+  /** Where the drag ends up, as a single `file.track.set` write. Shared by the
+   *  pointer drop and the keyboard move — one implementation, two inputs. */
+  function commitTrackMove(fromIndex: number, toIndex: number) {
+    if (!onReorderTrack) return
+    const drop = orderForDrop(tracks, fromIndex, toIndex)
+    // null covers both "did not move" and an index off either end (which is how
+    // Alt+ArrowUp on the top row resolves), so neither needs its own guard.
+    if (!drop) return
+    onReorderTrack(drop.trackId, drop.order)
+  }
+
+  /**
+   * TimelineCard's `beginDrag`, retargeted from clientX to clientY, plus the
+   * two things a vertical drag inside a scroller needs that a chip drag does
+   * not: a `pointercancel` listener (the browser can and does take the pointer
+   * back — a touch turning into a scroll, a system gesture) and the body's
+   * `userSelect` saved and restored, both exactly as EditorTable's drag-select
+   * does them. Without the cancel listener a taken-back pointer leaves the row
+   * lifted forever with window listeners still attached.
+   */
+  function beginTrackDrag(fromIndex: number, e: ReactPointerEvent<HTMLDivElement>) {
+    if (!onReorderTrack || e.button !== 0) return
+    // The speaker toggle lives INSIDE the label, and the label is the handle:
+    // without this, muting a track starts a drag and the click never lands.
+    if (e.target instanceof Element && e.target.closest("button")) return
+    const inner = gutterInnerRef.current
+    if (!inner) return
+    const rows = Array.from(inner.querySelectorAll<HTMLElement>("[data-tl-track-row]"))
+    if (rows.length !== tracks.length) return
+    const originTop = gutterRef.current?.getBoundingClientRect().top ?? 0
+    const scrolled = scrollRef.current?.scrollTop ?? 0
+    const bounds: RowBound[] = rows.map((row) => {
+      const rect = row.getBoundingClientRect()
+      return { top: rect.top - originTop + scrolled, bottom: rect.bottom - originTop + scrolled }
+    })
+
+    const startY = e.clientY
+    try {
+      ;(e.currentTarget as Element).setPointerCapture?.(e.pointerId)
+    } catch {
+      /* happy-dom / unsupported — the window listeners still carry the drag */
+    }
+    const restoreUserSelect = document.body.style.userSelect
+    document.body.style.userSelect = "none"
+    setTrackDrag({ fromIndex, toIndex: fromIndex, dy: 0, bounds })
+    // Same 3px threshold TimelineCard uses: a drag has to be INTENDED. Below
+    // it the row does not follow and a release commits nothing, so a click that
+    // wobbles by a pixel cannot silently reorder the timeline.
+    let moved = false
+    const onMove = (ev: PointerEvent) => {
+      const dy = ev.clientY - startY
+      if (Math.abs(dy) > 3) moved = true
+      const toIndex = moved ? proposeDropIndex(fromIndex, gutterContentY(ev.clientY), bounds) : fromIndex
+      setTrackDrag((d) => (d ? { ...d, dy, toIndex } : d))
+    }
+    const stop = () => {
+      window.removeEventListener("pointermove", onMove)
+      window.removeEventListener("pointerup", onUp)
+      window.removeEventListener("pointercancel", onCancel)
+      document.body.style.userSelect = restoreUserSelect
+      setTrackDrag(null)
+    }
+    const onUp = (ev: PointerEvent) => {
+      stop()
+      if (!moved) return
+      commitTrackMove(fromIndex, proposeDropIndex(fromIndex, gutterContentY(ev.clientY), bounds))
+    }
+    // A CANCELLED drag commits nothing. The pointer was taken away, so there is
+    // no release position to read as an intention.
+    const onCancel = () => stop()
+    window.addEventListener("pointermove", onMove)
+    window.addEventListener("pointerup", onUp)
+    window.addEventListener("pointercancel", onCancel)
+  }
+
+  /**
+   * The same move from the keyboard. ~20 lines because the arithmetic already
+   * exists — this is a second INPUT to one implementation, not a second
+   * implementation, which is what makes it worth having rather than a TODO.
+   *
+   * Alt+Arrow, and the handler is ON THE ELEMENT: a document-level listener
+   * would have to enter the audio-shortcut ownership stack to know whether it
+   * is allowed to act, and a plain ArrowUp/ArrowDown would fight the scroller
+   * the label sits in.
+   *
+   * Focus survives the move for free, because the gutter rows are keyed by
+   * track id: React moves the existing DOM node rather than rebuilding the row
+   * in place. Key them by index and holding Alt+ArrowDown would move a
+   * different track on every press, with nothing to say why.
+   */
+  function onTrackLabelKeyDown(fromIndex: number, e: ReactKeyboardEvent<HTMLDivElement>) {
+    if (!e.altKey || (e.key !== "ArrowUp" && e.key !== "ArrowDown")) return
+    e.preventDefault()
+    e.stopPropagation()
+    commitTrackMove(fromIndex, e.key === "ArrowDown" ? fromIndex + 1 : fromIndex - 1)
+  }
+
+  /**
+   * The insertion boundary the drop-indicator line is drawn at: 0..tracks.length,
+   * counting the gaps between rows rather than the rows themselves.
+   *
+   * It is `proposeDropIndex`'s lifted-row adjustment read backwards — dragging
+   * DOWN to index i means the line sits below row i (boundary i+1), dragging up
+   * means above it. null while the drop would change nothing, so a drag that
+   * has not left its own slot draws no promise it will not keep.
+   */
+  const dropBoundary =
+    trackDrag && trackDrag.toIndex !== trackDrag.fromIndex
+      ? trackDrag.toIndex > trackDrag.fromIndex
+        ? trackDrag.toIndex + 1
+        : trackDrag.toIndex
+      : null
+  /**
+   * The same line, in the LANE column, in content pixels.
+   *
+   * The two columns share a coordinate frame by construction: the gutter's
+   * non-translating spacer is the same `h-7` as the ruler, so a row's content-y
+   * measured in the gutter is the same content-y in the scroller — which is
+   * exactly what `top` inside the track content div means. If either height
+   * ever changes without the other, the line will be off by the difference.
+   */
+  const dropLineContentY =
+    trackDrag && dropBoundary != null
+      ? dropBoundary < trackDrag.bounds.length
+        ? trackDrag.bounds[dropBoundary].top
+        : trackDrag.bounds[trackDrag.bounds.length - 1].bottom
+      : null
 
   // SUB-12: cursor-centered wheel/pinch zoom (⌘/ctrl + wheel — trackpad pinch
   // arrives as a ctrlKey wheel). Native listener with passive:false because
@@ -780,9 +1210,31 @@ export function TimelineEditor({
       if (zoomAnimRef.current === null) step() // immediate first step; rAF glides the rest
     }
 
+    // Stage 3: the same gesture, over the LABEL GUTTER. The gutter is
+    // `overflow-hidden` — it is dragged along by the track column, it does not
+    // scroll — so a wheel there finds nothing to scroll and, worse, a ctrl+wheel
+    // there PAGE-ZOOMS THE BROWSER, because the preventDefault listener above is
+    // bound to the track column and never sees the event. Both cases are
+    // consumed here and forwarded: the pinch reaches the same zoom path (its
+    // anchor lands a gutter-width left of the viewport, which is where the
+    // pointer genuinely is), the plain wheel drives the column's own scroller,
+    // whose scroll event then slides the gutter back under the pointer.
+    const onGutterWheel = (e: WheelEvent) => {
+      if (e.ctrlKey || e.metaKey) {
+        onWheel(e)
+        return
+      }
+      e.preventDefault()
+      el.scrollTop += e.deltaY
+      el.scrollLeft += e.deltaX
+    }
+
+    const gutter = gutterRef.current
     el.addEventListener("wheel", onWheel, { passive: false })
+    gutter?.addEventListener("wheel", onGutterWheel, { passive: false })
     return () => {
       el.removeEventListener("wheel", onWheel)
+      gutter?.removeEventListener("wheel", onGutterWheel)
       if (zoomAnimRef.current !== null) cancelAnimationFrame(zoomAnimRef.current)
       zoomAnimRef.current = null
     }
@@ -1037,11 +1489,33 @@ export function TimelineEditor({
   }
 
   return (
-    // 2026-08-07: intrinsic height — the editor stacks above the text table
-    // in a shrink-0 wrapper now, so it must not claim the full column.
-    <div data-testid="tl-editor" className="flex min-h-0 flex-col">
+    // Stage 3: the editor FILLS the height it is given, and gives it all to the
+    // tracks. It sits in a resizable panel now, so it no longer sizes itself to
+    // its content (which is what the 2026-08-07 note here used to say) — every
+    // piece of chrome is `shrink-0` and the track grid is the sole `flex-1
+    // min-h-0`, so dragging the divider lengthens and shortens the scrolling
+    // stack and nothing else. `overflow-hidden` is what makes that true rather
+    // than merely intended: without it the grid reports its content height, the
+    // flex floor keeps the panel from shrinking, and there is no scrollbar.
+    //
+    // The custom properties are the whole vertical zoom: they are inherited by
+    // the gutter labels, all four lanes and every chip on them, so the geometry
+    // exists in exactly one place. The context beside them carries the same
+    // numbers to the components that need to make DECISIONS about the height
+    // (which pieces of a chip still fit) rather than merely be that tall.
+    <div
+      data-testid="tl-editor"
+      className="flex h-full min-h-0 flex-col overflow-hidden"
+      style={
+        {
+          "--tl-row-h": `${rowMetrics.rowH}px`,
+          "--tl-chip-h": `${rowMetrics.chipH}px`,
+          "--tl-chip-top": `${rowMetrics.chipPad}px`,
+        } as CSSProperties
+      }
+    >
       {/* toolbar */}
-      <div className="flex items-center gap-2 border-b border-border bg-muted/30 px-3 py-1.5">
+      <div className="flex shrink-0 items-center gap-2 border-b border-border bg-muted/30 px-3 py-1.5">
         <span className="text-xs font-medium text-muted-foreground">Timeline</span>
         {/* Pre-merge round: the mode is FILE-level again (the video link it
             interacts with is per-file), so the control returns to the
@@ -1218,6 +1692,36 @@ export function TimelineEditor({
               <Plus className="h-3.5 w-3.5" />
             </button>
           </div>
+          {/* Stage 3: the vertical zoom, in the horizontal one's chrome and
+              immediately beside it — same stepper, the other axis.
+              "Shorter rows"/"Taller rows" rather than another zoom pair: two
+              controls both labelled some flavour of "zoom" leave a user
+              hovering to find out which is which, and the readout says the
+              number of pixels for the same reason — a second "1.0×" next door
+              to the first is unreadable at a glance. */}
+          <div className="inline-flex items-center rounded-md border border-border">
+            <button
+              type="button"
+              aria-label="Shorter rows"
+              title="Shorter rows — fit more tracks on screen"
+              onClick={() => applyRowHeight(rowH / 1.3)}
+              className="px-1.5 py-1 text-foreground/70 hover:bg-muted"
+            >
+              <ChevronsDownUp className="h-3.5 w-3.5" />
+            </button>
+            <span className="border-x border-border px-2 font-mono text-[11px] tabular-nums text-muted-foreground">
+              {rowH}px
+            </span>
+            <button
+              type="button"
+              aria-label="Taller rows"
+              title="Taller rows"
+              onClick={() => applyRowHeight(rowH * 1.3)}
+              className="px-1.5 py-1 text-foreground/70 hover:bg-muted"
+            >
+              <ChevronsUpDown className="h-3.5 w-3.5" />
+            </button>
+          </div>
         </div>
       </div>
 
@@ -1229,7 +1733,7 @@ export function TimelineEditor({
       {coreMediaUrl && audioFirst && (
         <div
           data-testid="tl-video-hidden-note"
-          className="border-b border-border bg-muted/30 px-3 py-1.5 text-[11px] text-muted-foreground"
+          className="shrink-0 border-b border-border bg-muted/30 px-3 py-1.5 text-[11px] text-muted-foreground"
         >
           The linked video is hidden here — it plays on the original recording's timing, which this view no longer follows.
         </div>
@@ -1243,7 +1747,7 @@ export function TimelineEditor({
       {legacyMeasure && legacyMeasure.count > 0 && !measureNoteDismissed && (
         <div
           data-testid="tl-measure-note"
-          className="flex items-center gap-2 border-b border-border bg-amber-500/10 px-3 py-1.5 text-[11px] text-muted-foreground"
+          className="flex shrink-0 items-center gap-2 border-b border-border bg-amber-500/10 px-3 py-1.5 text-[11px] text-muted-foreground"
         >
           <span className="min-w-0 flex-1">
             {legacyMeasure.count === 1
@@ -1282,99 +1786,174 @@ export function TimelineEditor({
       )}
 
       {/* timeline */}
-      <div className="grid min-h-0 grid-cols-[128px_1fr]">
-        <div className="border-r border-border bg-muted/20">
-          <div className="h-7 border-b border-border" />
-          {/* The gutter is the track list, exactly as the lanes beside it are —
-              one row here per row there, in the same order, off the same
-              array. `name` comes from the track and not from the kind, which
-              is the whole seam a rename arrives through. */}
-          {tracks.map((track) => {
-            const render = TRACK_RENDER[track.kind]
-            // Stage 2: EXACTLY ONE source-mute control on screen, whatever the
-            // arrangement. The film's mute now lives on the film itself (the
-            // video pane's header), and this button can only reach the play
-            // queue's own elements — which exist only for a file with media
-            // cells. So a dubbing file keeps its gutter speaker and this one
-            // loses it, rather than showing two buttons for the same sound or
-            // (worse) one that silences nothing.
-            const speaker =
-              render.audibilityKey === "source" && subtitleFileWithFootage ? null : render.audibilityKey
-            return (
-              <LaneLabel
-                key={track.id}
-                name={track.name}
-                sub={render.sub}
-                dot={render.dot}
-                trailing={speaker ? speakerToggle(speaker, render.speakerName) : undefined}
-              />
-            )
-          })}
-          {/* SUB-37: the untimed parking strip only exists when something is
-              actually untimed — an always-on empty row read as a mystery. */}
-          {untimed.length > 0 && (
-            <div className="flex h-12 flex-col justify-center px-3">
-              <span className="text-xs font-semibold text-foreground">Untimed</span>
-              <span className="text-[10px] text-muted-foreground">no timecode yet</span>
+      {/* Stage 3, and the layout the whole round turns on: the TRACK COLUMN
+          owns both scroll axes and the gutter beside it is clipped and slaved
+          to it. The obvious arrangement — one scroller around both columns,
+          ruler `sticky top-0` — cannot work: this column is `overflow-x-auto`,
+          CSS computes the unspecified axis to `auto`, so it is ALREADY a
+          scrollport in y and establishes the sticky context for everything
+          inside it. A sticky ruler would stick to a box with no y-overflow and
+          never offset. There is no way out of that (`overflow-y: visible`
+          beside `overflow-x: auto` is DEFINED to compute back to `auto`), so
+          the gutter follows the scroller rather than sharing one with it.
+
+          `grid-rows-[minmax(0,1fr)]` is load-bearing, not tidiness: with an
+          implicit `auto` row the row sizes to its content, the columns overflow
+          the panel, and there is NO SCROLLBAR AT ALL — a failure that looks
+          exactly like the resizable panel not having taken. */}
+      <RowMetricsContext.Provider value={rowMetrics}>
+        <div className="grid min-h-0 flex-1 grid-cols-[128px_1fr] grid-rows-[minmax(0,1fr)]">
+          {/* NOTHING MAY BE INSERTED BETWEEN THESE TWO COLUMNS, and the gutter
+              must not grow a testid: TimelineEditor.test.tsx reads the labels
+              through `tl-scroll`'s previousElementSibling, on the stated
+              contract that the gutter renders exactly the DOM the hardcoded
+              rows did. */}
+          <div ref={gutterRef} className="overflow-hidden border-r border-border bg-muted/20">
+            {/* The ruler's opposite number. It does NOT translate — the labels
+                below slide under it exactly as the chips slide under the sticky
+                ruler — which is why it has to be opaque. The column's
+                `bg-muted/20` is a tint over the page, so a label scrolling
+                through it would still be perfectly legible; this paints
+                `bg-background` and lays the same tint back over it, reproducing
+                today's composite to the pixel. */}
+            <div className="relative z-10 h-7 border-b border-border bg-background">
+              <div className="absolute inset-0 bg-muted/20" />
             </div>
-          )}
-        </div>
-        <div
-          ref={scrollRef}
-          data-testid="tl-scroll"
-          className="overflow-x-auto"
-          onScroll={(e) => {
-            setScrollLeft(e.currentTarget.scrollLeft)
-            setViewportPx(e.currentTarget.clientWidth)
-            // A MANUAL scroll while playback runs means "stop following me".
-            // Our own programmatic scrolls fire this handler too — the 150ms
-            // stamp window filters them out.
-            if (transportPlaying && performance.now() - lastProgrammaticScrollAt.current > 150) {
-              setFollow(false)
-            }
-          }}
-        >
-          <div className="relative" style={{ width: `${trackWidthPx}px` }}>
-            <TimelineRuler
-              durationSec={durationSec}
-              pxPerSec={pxPerSec}
-              viewStartSec={viewStartSec}
-              viewEndSec={viewEndSec}
-              onScrub={seekTo}
-            />
-            {tracks.map(laneForTrack)}
-            {untimed.length > 0 && (
-              <div className="flex h-12 items-center gap-2 overflow-x-auto border-b border-border px-3">
-                {untimed.map((c) => (
-                  <button
-                    key={c.id}
-                    type="button"
-                    data-testid={`tl-untimed-${c.id}`}
-                    onClick={() => selectFromChip(c.id)}
-                    className={cn(
-                      "shrink-0 rounded-md border border-dashed border-zinc-400 bg-background px-2 py-1 text-[10px] text-foreground/80 hover:bg-muted dark:border-zinc-600",
-                      selectedId === c.id && "ring-2 ring-sky-500",
-                    )}
-                  >
-                    {(c.original || c.transcription || c.cellLabel || "untimed").slice(0, 36)}
-                  </button>
-                ))}
-              </div>
-            )}
-            <TimelinePlayhead
-              currentSec={clock.currentSec}
-              pxPerSec={pxPerSec}
-              playing={transportPlaying}
-              rate={transportRate}
-            />
+            {/* Slaved to the track column's scrollTop by handleTrackScroll.
+                `role="list"` only when the rows can actually be reordered: it
+                is the reorder affordance's announcement, and a list of one
+                immovable thing after another is noise. (The untimed strip below
+                is a sibling in here and carries no listitem role — it is not a
+                track, and it cannot be moved.) */}
+            <div
+              ref={gutterInnerRef}
+              role={onReorderTrack ? "list" : undefined}
+              aria-label={onReorderTrack ? "Timeline tracks — drag a name, or press Alt with the arrow keys, to reorder" : undefined}
+            >
+              {/* The gutter is the track list, exactly as the lanes beside it are —
+                  one row here per row there, in the same order, off the same
+                  array. `name` comes from the track and not from the kind, which
+                  is the whole seam a rename arrives through. */}
+              {tracks.map((track, index) => {
+                const render = TRACK_RENDER[track.kind]
+                // Stage 2: EXACTLY ONE source-mute control on screen, whatever the
+                // arrangement. The film's mute now lives on the film itself (the
+                // video pane's header), and this button can only reach the play
+                // queue's own elements — which exist only for a file with media
+                // cells. So a dubbing file keeps its gutter speaker and this one
+                // loses it, rather than showing two buttons for the same sound or
+                // (worse) one that silences nothing.
+                const speaker =
+                  render.audibilityKey === "source" && subtitleFileWithFootage ? null : render.audibilityKey
+                return (
+                  <LaneLabel
+                    key={track.id}
+                    name={track.name}
+                    sub={render.sub}
+                    dot={render.dot}
+                    trailing={speaker ? speakerToggle(speaker, render.speakerName) : undefined}
+                    reorder={
+                      onReorderTrack
+                        ? {
+                            trackId: track.id,
+                            liftPx: trackDrag?.fromIndex === index ? trackDrag.dy : null,
+                            dropEdge:
+                              dropBoundary === index
+                                ? "top"
+                                : dropBoundary === tracks.length && index === tracks.length - 1
+                                  ? "bottom"
+                                  : null,
+                            onPointerDown: (e) => beginTrackDrag(index, e),
+                            onKeyDown: (e) => onTrackLabelKeyDown(index, e),
+                          }
+                        : undefined
+                    }
+                  />
+                )
+              })}
+              {/* SUB-37: the untimed parking strip only exists when something is
+                  actually untimed — an always-on empty row read as a mystery. */}
+              {untimed.length > 0 && (
+                <div className="flex h-12 flex-col justify-center px-3">
+                  <span className="text-xs font-semibold text-foreground">Untimed</span>
+                  <span className="text-[10px] text-muted-foreground">no timecode yet</span>
+                </div>
+              )}
+            </div>
+          </div>
+          {/* `overflow-auto` says out loud what `overflow-x-auto` already
+              computed to. `overscroll-contain` is new and deliberate: now that
+              there is somewhere to scroll vertically, running out of track
+              would otherwise chain the gesture into the page behind it and
+              scroll the whole workspace away. */}
+          <div
+            ref={scrollRef}
+            data-testid="tl-scroll"
+            className="overflow-auto overscroll-contain"
+            onScroll={handleTrackScroll}
+          >
+            <div className="relative" style={{ width: `${trackWidthPx}px` }}>
+              <TimelineRuler
+                durationSec={durationSec}
+                pxPerSec={pxPerSec}
+                viewStartSec={viewStartSec}
+                viewEndSec={viewEndSec}
+                onScrub={seekTo}
+              />
+              {tracks.map(laneForTrack)}
+              {untimed.length > 0 && (
+                <div className="flex h-12 items-center gap-2 overflow-x-auto border-b border-border px-3">
+                  {untimed.map((c) => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      data-testid={`tl-untimed-${c.id}`}
+                      onClick={() => selectFromChip(c.id)}
+                      className={cn(
+                        "shrink-0 rounded-md border border-dashed border-zinc-400 bg-background px-2 py-1 text-[10px] text-foreground/80 hover:bg-muted dark:border-zinc-600",
+                        selectedId === c.id && "ring-2 ring-sky-500",
+                      )}
+                    >
+                      {(c.original || c.transcription || c.cellLabel || "untimed").slice(0, 36)}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <TimelinePlayhead
+                currentSec={clock.currentSec}
+                pxPerSec={pxPerSec}
+                playing={transportPlaying}
+                rate={transportRate}
+              />
+              {/* The drop indicator's other half. THE ROWS DELIBERATELY DO NOT
+                  PART AND THE LANES DO NOT MOVE while a track is dragged: the
+                  lanes carry absolutely positioned cards on a pixel timeline
+                  with a playhead drawn across the whole stack, so animating
+                  four of them apart would mean re-laying out every card sixty
+                  times a second and visually severing the playhead for the
+                  length of the drag. One 2px line in each column says where the
+                  row will land, and on release both columns move together
+                  because they are rendered off the same array. */}
+              {dropLineContentY != null && (
+                <div
+                  aria-hidden
+                  data-testid="tl-track-drop-line-lane"
+                  className="pointer-events-none absolute inset-x-0 z-30 h-0.5 bg-sky-500"
+                  style={{ top: `${dropLineContentY}px` }}
+                />
+              )}
+            </div>
           </div>
         </div>
-      </div>
+      </RowMetricsContext.Provider>
 
       {/* 2026-08-08 (Sam): the NUMBERS stay with the timeline — they measure
           the chips above, not the dialogue below — and close this section off
-          at its bottom edge. */}
-      <TimelineTimingRow cell={currentCell} chipStats={currentChipStats} audioMissing={audioMissing} />
+          at its bottom edge. The wrapper is the row's `shrink-0`: it is chrome,
+          and the panel's height belongs to the tracks. */}
+      <div className="shrink-0">
+        <TimelineTimingRow cell={currentCell} chipStats={currentChipStats} audioMissing={audioMissing} />
+      </div>
       {/* The section label, the line's own context and the segment navigator
           head the TEXT column of the band below, opposite the Video header.
           The slot is owned by the workspace; portal when it exists, render

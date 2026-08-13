@@ -14,6 +14,14 @@ import { useRef, useState } from "react"
 import { X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { secToPx, pxToSec, clampRange, chipRadiusPx } from "@/lib/timeline/scale"
+import {
+  MIN_CHIP_GRIP_H_PX,
+  MIN_CHIP_LABEL_H_PX,
+  MIN_CHIP_META_H_PX,
+  MIN_CHIP_REMOVE_H_PX,
+  TL_CHIP_BOX_CLASS,
+} from "@/lib/timeline/row-metrics"
+import { useRowMetrics } from "./useRowMetrics"
 import { subtitleMirrorText } from "@/lib/timeline/lanes"
 import { subtitleSpanSec } from "@/lib/timeline/lane-timing"
 import { snapSpan, SNAP_THRESHOLD_PX } from "@/lib/timeline/snap"
@@ -143,6 +151,10 @@ export function TimelineCard({
   // drag must not also yank playback to the clip's start.
   const movedRef = useRef(false)
   const canRetime = editable && retimable
+  // AQU-646 stage 3: how tall this chip is drawn. Outside a timeline (which is
+  // what this component's own tests do) the context answers with the shipped
+  // 46px row, so every gate below reads exactly as it did before it existed.
+  const { chipH } = useRowMetrics()
 
   // The one span transform shared by drag PREVIEW, READOUT and COMMIT: the
   // per-mode delta, then snapping, then the neighbour walls, then the minimum
@@ -195,15 +207,30 @@ export function TimelineCard({
   // Round 9b: the corner shrinks with the chip. A constant 8px radius on a 26px
   // chip is a third of its width, and against a dashed neighbour that reads as
   // two shapes interlocking. See chipRadiusPx.
-  const radiusPx = chipRadiusPx(width)
+  //
+  // Stage 3 caps it by HEIGHT as well, through the existing `maxPx` parameter:
+  // 8px of corner on an 18px band leaves almost no straight edge and the chip
+  // reads as a lozenge rather than as a stripe of the track. A third of the
+  // height is the cap — unchanged at 46px (min(8, 15) is still 8), 6px at 18.
+  const radiusPx = chipRadiusPx(width, Math.min(8, Math.round(chipH / 3)))
 
-  // Round 9: what there is room to SAY at this width. A dragging card always
-  // shows its text — you are looking straight at it, and its own drag chip is
-  // the readout that matters.
-  const showsText = width >= MIN_CARD_TEXT_PX || Boolean(drag)
+  // Round 9: what there is room to SAY at this width. Stage 3 asks the same
+  // question on the other axis, one gate per piece of furniture, because they
+  // stop fitting at different heights.
+  //
+  // A dragging card always shows its text — you are looking straight at it, and
+  // its own drag chip is the readout that matters. THAT ESCAPE HATCH OVERRIDES
+  // THE WIDTH GATE ONLY. A drag does not change the chip's height, so letting
+  // it bypass a height gate would pop a label and a timecode into a 14px band
+  // for the duration of the gesture and take them away again on release.
+  const fitsLabel = chipH >= MIN_CHIP_LABEL_H_PX
+  const showsLabel = fitsLabel && (width >= MIN_CARD_TEXT_PX || Boolean(drag))
+  const showsMeta = showsLabel && chipH >= MIN_CHIP_META_H_PX
+  const showsRemove = showsLabel && chipH >= MIN_CHIP_REMOVE_H_PX
   // Grips stay while a drag is live, or a resize would cancel itself the moment
   // it dragged the chip below the threshold.
-  const showsGrips = canRetime && (width >= MIN_CARD_GRIP_PX || Boolean(drag))
+  const showsGrips =
+    canRetime && chipH >= MIN_CHIP_GRIP_H_PX && (width >= MIN_CARD_GRIP_PX || Boolean(drag))
 
   // SUB-11: live preview TIMES during drag; equal to the committed props idle.
   const previewStart = dragged?.startSec ?? startSec
@@ -290,14 +317,16 @@ export function TimelineCard({
       }}
       onPointerDown={(e) => beginDrag("move", e)}
       className={cn(
-        "group absolute top-2.5 flex h-[46px] touch-none select-none flex-col justify-center gap-0.5 border transition-colors",
+        "group absolute flex touch-none select-none flex-col justify-center gap-0.5 border transition-colors",
+        // The row's live geometry, or 10-46-10 outside a timeline.
+        TL_CHIP_BOX_CLASS,
         // The padding comes off before the chip gets narrow enough for it to
         // LIE ABOUT THE CHIP'S WIDTH. px-2.5 plus two 1px borders is 22px of
         // chrome, and under border-box that is a hard floor on the rendered
         // box — so a cue shorter than 22px was drawn 22px wide and spilled
         // into its neighbour. That is the "two real chips overlap" Sam saw:
         // the chip was positioned correctly and simply drawn too big. Keyed on
-        // width alone rather than `showsText`, so a chip being dragged cannot
+        // width alone rather than `showsLabel`, so a chip being dragged cannot
         // re-inflate itself while you are placing it.
         width >= MIN_CARD_PADDING_PX ? "px-2.5" : "px-0",
         // SUB-11: the drag chip renders above the card bounds, so overflow can't
@@ -344,7 +373,7 @@ export function TimelineCard({
           borderBottomLeftRadius: `${radiusPx}px`,
         }}
       />
-      {onRemove && showsText && (
+      {onRemove && showsRemove && (
         // Same manners as the slot buttons: nothing at rest, faint on the
         // chip's hover. It must not reach the card's own click, which would
         // select and seek on the way out.
@@ -377,8 +406,8 @@ export function TimelineCard({
           <span className="h-4 w-0.5 rounded bg-foreground/30" />
         </span>
       )}
-      {showsText && <div className="truncate pl-1 text-[11px] leading-tight">{label}</div>}
-      {showsText && (
+      {showsLabel && <div className="truncate pl-1 text-[11px] leading-tight">{label}</div>}
+      {showsMeta && (
       // min-w-0 + truncate: the clock now shrinks to an ellipsis like the label
       // above it instead of wrapping onto extra lines and being sliced
       // mid-glyph by the card's overflow — which is what made narrow chips look

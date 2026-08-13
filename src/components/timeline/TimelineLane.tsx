@@ -8,6 +8,12 @@
 
 import { Pencil } from "lucide-react"
 import { isVisible } from "@/lib/timeline/scale"
+import {
+  MIN_SLOT_BUTTON_H_PX,
+  TL_CHIP_BOX_CLASS,
+  TL_ROW_H_CLASS,
+} from "@/lib/timeline/row-metrics"
+import { useRowMetrics } from "./useRowMetrics"
 import { TimelineSlotButton } from "./TimelineSlotButton"
 import { MIN_SLOT_PX, useHotSlot } from "./slot-hover"
 import { subtitleSpanSec } from "@/lib/timeline/lane-timing"
@@ -80,6 +86,13 @@ export function TimelineLane({
   // Which add-line slot the pointer is on. State rather than CSS `:hover` —
   // see TimelineSlotButton's header for the six-lit-at-once bug that forced it.
   const { hotKey, slotHoverProps } = useHotSlot(viewStartSec, pxPerSec)
+  // AQU-646 stage 3: the pencil is an `h-7` circle inside a slot with no
+  // overflow-hidden, so on a short row it draws straight over the lanes above
+  // and below and can be clicked from either of them. It is hover-only anyway,
+  // so dropping it at compact heights costs a user nothing — the row is a
+  // colour band at that point, not a place anyone is editing from.
+  const { chipH } = useRowMetrics()
+  const showsSlotButton = chipH >= MIN_SLOT_BUTTON_H_PX
 
   const spanOf = (c: CellData): { start: number; end: number } => {
     if (layout) {
@@ -158,23 +171,25 @@ export function TimelineLane({
       : []
 
   return (
-    <div data-testid="tl-lane" data-variant={variant} className="relative h-[66px] border-b border-border">
+    <div data-testid="tl-lane" data-variant={variant} className={`relative ${TL_ROW_H_CLASS} border-b border-border`}>
       {addSlots.map(({ span, leftPx, widthPx }) => (
         <div
           key={`add-${span.startSec}`}
           data-testid={`tl-add-line-${span.startSec}`}
           style={{ left: `${leftPx}px`, width: `${widthPx}px` }}
-          className="absolute top-2.5 flex h-[46px] items-center justify-center"
+          className={`absolute ${TL_CHIP_BOX_CLASS} flex items-center justify-center`}
           {...slotHoverProps(String(span.startSec))}
         >
-          <TimelineSlotButton
-            testId={`tl-add-line-${span.startSec}-button`}
-            label="Add a line here"
-            hot={hotKey === String(span.startSec)}
-            onClick={() => addLine?.(span.startSec, span.endSec)}
-          >
-            <Pencil className="h-3.5 w-3.5" />
-          </TimelineSlotButton>
+          {showsSlotButton && (
+            <TimelineSlotButton
+              testId={`tl-add-line-${span.startSec}-button`}
+              label="Add a line here"
+              hot={hotKey === String(span.startSec)}
+              onClick={() => addLine?.(span.startSec, span.endSec)}
+            >
+              <Pencil className="h-3.5 w-3.5" />
+            </TimelineSlotButton>
+          )}
         </div>
       ))}
       {visible.map((c) => {

@@ -41,10 +41,14 @@ const shape = (tracks: ReturnType<typeof mergeTrackOverrides>) =>
 /** The rows a media file (and a caller with no context at all) derives: the
  *  three the editor has drawn since it shipped, ids renamed in stage 2 but
  *  every visible LABEL identical — "Subtitles" and not "Source subtitles",
- *  because a name is per-track data and that row has always read that way. */
+ *  because a name is per-track data and that row has always read that way.
+ *
+ *  Source audio's number went 1 → 2 in stage 3, when Target subtitles took seat
+ *  1. Nothing here derives seat 1, so the gap is unobservable: same rows, same
+ *  labels, same sequence. That is the guarantee the renumber hangs on. */
 const DEFAULT_SHAPE = [
   ["source-subtitles", "source-subtitles", "Subtitles", 0, null],
-  ["source-audio", "source-audio", "Source audio", 1, null],
+  ["source-audio", "source-audio", "Source audio", 2, null],
   ["target-audio", "target-audio", "Target audio", 3, null],
 ]
 
@@ -72,6 +76,28 @@ describe("deriveDefaultTracks", () => {
     expect(a[0]).not.toBe(b[0])
   })
 
+  it("returns its rows already in ascending order, in every context", () => {
+    // THE guard for the literal-reorder trap. deriveDefaultTracks does not
+    // sort — only mergeTrackOverrides does — so reseating a kind without moving
+    // its array literal fails twice over and silently: the gutter renders in
+    // the old sequence, and the merge's `seats` tie-break goes on encoding the
+    // old sequence too. Nothing else here would go red.
+    const contexts: Array<TrackDerivationContext | null | undefined> = [
+      undefined,
+      null,
+      MEDIA,
+      { ...MEDIA, hasAudioCues: true },
+      SUBTITLE_IMPORT,
+      { ...SUBTITLE_IMPORT, hasAudioCues: true },
+      { isSubtitleImport: true, hasMediaCells: true, hasAudioCues: true },
+    ]
+    for (const context of contexts) {
+      const orders = deriveDefaultTracks(context).map((t) => t.order)
+      expect(orders).toEqual([...orders].sort((a, b) => a - b))
+      expect(new Set(orders).size).toBe(orders.length) // strictly ascending
+    }
+  })
+
   it("DEFAULT_TRACK_IDS reserves all four kinds, not just the derived rows", () => {
     // Reserved, not derived: no shape below draws all four at once, and that
     // is exactly why the set has to list them — see the resurrection case.
@@ -96,10 +122,23 @@ describe("deriveDefaultTracks — the derivation context", () => {
     expect(shape(deriveDefaultTracks({ ...MEDIA, hasAudioCues: true }))).toEqual(DEFAULT_SHAPE)
   })
 
+  it("keeps a dubbing file's three rows exactly where the stage-3 reseat found them", () => {
+    // Spelled out rather than reusing DEFAULT_SHAPE, because this is the pin
+    // with the highest blast radius in stage 3 and it should read as a literal:
+    // every dubbing project that exists draws these three rows, in this
+    // sequence, under these labels, before and after Target subtitles took
+    // seat 1.
+    expect(shape(deriveDefaultTracks(MEDIA))).toEqual([
+      ["source-subtitles", "source-subtitles", "Subtitles", 0, null],
+      ["source-audio", "source-audio", "Source audio", 2, null],
+      ["target-audio", "target-audio", "Target audio", 3, null],
+    ])
+  })
+
   it("gives a subtitle import no Source-audio row until an audio VTT is imported", () => {
     expect(shape(deriveDefaultTracks(SUBTITLE_IMPORT))).toEqual([
       ["source-subtitles", "source-subtitles", "Source subtitles", 0, null],
-      ["target-subtitles", "target-subtitles", "Target subtitles", 2, null],
+      ["target-subtitles", "target-subtitles", "Target subtitles", 1, null],
       ["target-audio", "target-audio", "Target audio", 3, null],
     ])
   })
@@ -107,16 +146,17 @@ describe("deriveDefaultTracks — the derivation context", () => {
   it("draws it once there are cues for it to hold", () => {
     expect(shape(deriveDefaultTracks({ ...SUBTITLE_IMPORT, hasAudioCues: true }))).toEqual([
       ["source-subtitles", "source-subtitles", "Source subtitles", 0, null],
-      ["source-audio", "source-audio", "Source audio", 1, null],
-      ["target-subtitles", "target-subtitles", "Target subtitles", 2, null],
+      ["target-subtitles", "target-subtitles", "Target subtitles", 1, null],
+      ["source-audio", "source-audio", "Source audio", 2, null],
       ["target-audio", "target-audio", "Target audio", 3, null],
     ])
   })
 
   it("keeps every other row's order identical across that row appearing", () => {
     // Orders are per-KIND and never the array index, so a persisted reorder
-    // survives an audio-VTT import: `order: 2.5` has to go on meaning "between
-    // Target subtitles and Target audio" whether or not Source audio is drawn.
+    // survives an audio-VTT import: `order: 0.5` has to go on meaning "between
+    // Source subtitles and Target subtitles" whether or not Source audio is
+    // drawn. An index-based order would slide every row below the new one.
     const before = deriveDefaultTracks(SUBTITLE_IMPORT)
     const after = new Map(
       deriveDefaultTracks({ ...SUBTITLE_IMPORT, hasAudioCues: true }).map((t) => [t.id, t.order]),
@@ -230,8 +270,8 @@ describe("mergeTrackOverrides — user-added tracks", () => {
     const tracks = merge({ "trk-a": { kind: "target-audio", name: "Spanish", order: 1.5, groupId: "es" } })
     expect(shape(tracks)).toEqual([
       ["source-subtitles", "source-subtitles", "Subtitles", 0, null],
-      ["source-audio", "source-audio", "Source audio", 1, null],
       ["trk-a", "target-audio", "Spanish", 1.5, "es"],
+      ["source-audio", "source-audio", "Source audio", 2, null],
       ["target-audio", "target-audio", "Target audio", 3, null],
     ])
   })
@@ -299,8 +339,10 @@ describe("mergeTrackOverrides — forward compatibility", () => {
 describe("mergeTrackOverrides — total order", () => {
   it("breaks a tie between defaults by their derived sequence, not by id", () => {
     // "source-audio" < "source-subtitles" by code point, so an id-first tie-break would
-    // flip the two rows on screen for no reason the user asked for.
-    const tracks = merge({ "source-subtitles": { order: 1 } })
+    // flip the two rows on screen for no reason the user asked for. The override
+    // has to name Source audio's CURRENT seat (2 since stage 3, 1 before it) or
+    // this stops being a tie and the case passes while asserting nothing.
+    const tracks = merge({ "source-subtitles": { order: 2 } })
     expect(shape(tracks).map((t) => t[0])).toEqual(["source-subtitles", "source-audio", "target-audio"])
   })
 
@@ -318,10 +360,12 @@ describe("mergeTrackOverrides — total order", () => {
   })
 
   it("is stable across repeated merges of the same data", () => {
+    // 2 is Source audio's derived seat, so all four rows below tie on it —
+    // the widest tie the merge has to keep still.
     const overrides: PersistedTrackOverrides = {
-      "trk-a": { kind: "target-audio", order: 1 },
-      "trk-b": { kind: "target-audio", order: 1 },
-      "source-subtitles": { order: 1 },
+      "trk-a": { kind: "target-audio", order: 2 },
+      "trk-b": { kind: "target-audio", order: 2 },
+      "source-subtitles": { order: 2 },
     }
     const first = shape(merge(overrides))
     expect(shape(merge(overrides))).toEqual(first)
@@ -395,7 +439,7 @@ describe("deriveTracksForFile", () => {
     )
     expect(shape(tracks)).toEqual([
       ["source-subtitles", "source-subtitles", "Source subtitles", 0, null],
-      ["target-subtitles", "target-subtitles", "Armenian", 2, null],
+      ["target-subtitles", "target-subtitles", "Armenian", 1, null],
       ["target-audio", "target-audio", "Target audio", 3, null],
     ])
   })

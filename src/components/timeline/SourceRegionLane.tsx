@@ -22,6 +22,12 @@
 import { memo } from "react"
 import { secToPx, isVisible, chipRadiusPx } from "@/lib/timeline/scale"
 import { MIN_ADDABLE_SPAN_SEC } from "@/lib/timeline/lane-timing"
+import {
+  MIN_CHIP_META_H_PX,
+  TL_CHIP_BOX_CLASS,
+  TL_ROW_H_CLASS,
+} from "@/lib/timeline/row-metrics"
+import { useRowMetrics } from "./useRowMetrics"
 import { fmtClock } from "./format"
 import { MIN_CARD_TEXT_PX, TimelineCard } from "./TimelineCard"
 import type { CellData } from "@/hooks/useCells"
@@ -80,6 +86,7 @@ function SourceRegionLaneImpl({
     const s = spanOf(c)
     return isVisible(s.start, s.end, viewStartSec, viewEndSec)
   })
+  const { chipH } = useRowMetrics()
   const visibleGaps = map.regions.filter(
     (r) =>
       r.kind === "gap" &&
@@ -88,7 +95,7 @@ function SourceRegionLaneImpl({
   )
 
   return (
-    <div data-testid="tl-source-regions" data-variant="source-audio-cues" className="relative h-[66px] border-b border-border">
+    <div data-testid="tl-source-regions" data-variant="source-audio-cues" className={`relative ${TL_ROW_H_CLASS} border-b border-border`}>
       {visibleGaps.map((g) => {
         const widthPx = secToPx(g.endSec - g.startSec, pxPerSec)
         return (
@@ -105,7 +112,7 @@ function SourceRegionLaneImpl({
           // TimelineCard's geometry and radius, dashed and unfilled — the
           // established "slot with nothing in it yet" treatment (the untimed
           // strip's chips are the precedent), kept in the lane's sky family.
-          className="absolute top-2.5 h-[46px] cursor-pointer overflow-hidden border border-dashed border-sky-300 bg-sky-50/30 transition-colors hover:bg-sky-100/40 dark:border-sky-900 dark:bg-sky-950/20 dark:hover:bg-sky-950/40"
+          className={`absolute ${TL_CHIP_BOX_CLASS} cursor-pointer overflow-hidden border border-dashed border-sky-300 bg-sky-50/30 transition-colors hover:bg-sky-100/40 dark:border-sky-900 dark:bg-sky-950/20 dark:hover:bg-sky-950/40`}
           // The radius shrinks with the chip. A narrow silence flush against a
           // solid-walled cue is exactly where the two used to read as one
           // interlocked shape.
@@ -122,8 +129,12 @@ function SourceRegionLaneImpl({
               where overflow-hidden slices them mid-glyph. Fully zoomed out that
               read as time ranges bleeding across neighbouring chips. Same
               threshold as a card's own text — one number for "is there room
-              to say anything here", across every chip on the timeline. */}
-          {widthPx >= MIN_CARD_TEXT_PX && (
+              to say anything here", across every chip on the timeline.
+              Stage 3: a short chip is that identical failure on the other axis
+              — the same 9px line, the same `bottom-1` anchor, the same
+              overflow-hidden slicing it — so it goes at the same height a
+              card's own timecode does. */}
+          {widthPx >= MIN_CARD_TEXT_PX && chipH >= MIN_CHIP_META_H_PX && (
             <span className="absolute bottom-1 left-2.5 font-mono text-[9px] tabular-nums whitespace-nowrap text-muted-foreground">
               {fmtClock(g.startSec, true)}–{fmtClock(g.endSec, true)}
             </span>

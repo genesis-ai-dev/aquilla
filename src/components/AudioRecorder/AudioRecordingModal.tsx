@@ -679,13 +679,44 @@ export function AudioRecordingModal({
         initialFocus={dialogSurfaceRef}
         finalFocus={false}
         data-recorder-dialog=""
-        className="flex max-w-3xl flex-col gap-0 p-0"
+        // A ROW, always: the film (when there is one) is a half-width column on
+        // the left, and everything the modal has always been is a column on the
+        // right. With no film the dialog is its old width and the right column
+        // is the whole dialog — the row wrapper changes nothing visible, which
+        // is what keeps audio-import files pixel-where-it-matters identical.
+        // Sam's markup (2026-08-13): the picture at half the dialog, vertically
+        // centred, not a 280px thumbnail crowding the translation. The dialog
+        // base is translate-centred on the viewport, so widening it re-centres
+        // the whole automatically.
+        className={cn("flex flex-row gap-0 p-0", filmUrl ? "max-w-6xl" : "max-w-3xl")}
         style={{ maxHeight: "min(92vh, 800px)" }}
         showCloseButton={false}
       >
         <DialogTitle className="sr-only">
           Record audio — {activeCell.cellLabel ?? `Cell ${activeIndex + 1}`}
         </DialogTitle>
+        {filmUrl && (
+          // Hidden below `sm` rather than stacked: on a phone the old
+          // single-column dialog already fills the screen, and a picture
+          // squeezed above the stage pushes Start below the fold — the one
+          // control that must never need scrolling to reach.
+          <div className="hidden w-1/2 shrink-0 flex-col items-center justify-center gap-2 border-r bg-muted/20 p-6 sm:flex">
+            <RecordingVideoSurface
+              src={filmUrl}
+              startSec={activeCell.startTime ?? null}
+              // The PHASE, not the end of the countdown: recorder.start() is
+              // async, so binding the picture to the phase is what makes
+              // picture-start equal capture-start — and that equality is what
+              // makes an overrun readable.
+              running={displayPhase === "recording"}
+              armNonce={armNonce}
+              // One overrun signal in the dialog, drawn twice, rather than two
+              // that can disagree.
+              overrun={targetOverrun}
+            />
+          </div>
+        )}
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         {/* Header: cell context — fixed, never scrolls */}
         <div className="flex shrink-0 items-start justify-between gap-4 border-b px-6 pt-5 pb-4">
           <div className="min-w-0 flex-1 space-y-1">
@@ -818,24 +849,11 @@ export function AudioRecordingModal({
             and footer stay anchored at 100% zoom on compact viewports. */}
         <div className="min-h-0 flex-1 overflow-y-auto">
 
-        {/* Stage — changes with phase. With a film linked it splits into two
-            columns on anything wider than a phone: side by side costs ZERO
-            extra height in the common case (a 280px 16:9 picture is 157px,
-            inside the stage's existing 200px minimum) and vertical space is the
-            scarce resource in this dialog. With no film the second column is
-            ABSENT — not hidden, not a placeholder — so an audio-import file
-            gets exactly the markup it had before any of this existed. */}
-        <div
-          className={cn(
-            "relative flex min-h-[200px] flex-col items-center justify-center gap-4 p-6",
-            filmUrl && "sm:flex-row sm:items-center",
-          )}
-        >
-          {/* The per-phase blocks, in a wrapper that carries the stage's own
-              centring: `flex-1` alone would grow to the full height of the
-              200px box and strand its content at the top, which is a visible
-              change for every file that has no film. */}
-          <div className="flex min-w-0 flex-1 flex-col items-center justify-center">
+        {/* Stage — changes with phase. Single-column again: the film moved out
+            to its own half-width column on the dialog (Sam's markup,
+            2026-08-13 — a 280px thumbnail in here "looked pretty bad"), so this
+            region is exactly what it was before any picture existed. */}
+        <div className="relative flex min-h-[200px] flex-col items-center justify-center gap-4 p-6">
           {displayPhase === "counting" && countdown.count !== null && (
             <div className="flex flex-col items-center gap-3">
               <div
@@ -945,25 +963,6 @@ export function AudioRecordingModal({
                 {errorMessage ?? "Something went wrong."}
               </p>
               <p className="text-xs text-muted-foreground">Press Space or Start to try again.</p>
-            </div>
-          )}
-          </div>{/* end per-phase column */}
-
-          {filmUrl && (
-            <div className="w-full shrink-0 sm:w-[280px]">
-              <RecordingVideoSurface
-                src={filmUrl}
-                startSec={activeCell.startTime ?? null}
-                // The PHASE, not the end of the countdown: recorder.start() is
-                // async, so binding the picture to the phase is what makes
-                // picture-start equal capture-start — and that equality is what
-                // makes an overrun readable.
-                running={displayPhase === "recording"}
-                armNonce={armNonce}
-                // One overrun signal in the dialog, drawn twice, rather than two
-                // that can disagree.
-                overrun={targetOverrun}
-              />
             </div>
           )}
         </div>
@@ -1120,6 +1119,7 @@ export function AudioRecordingModal({
             </Button>
           )}
         </div>
+        </div>{/* end right column */}
 
         <style>{`
           @keyframes pop {

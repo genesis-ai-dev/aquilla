@@ -52,9 +52,18 @@ a later run completes.
 - **`src/components/TerminologyPage.tsx`** and its test (2,034 lines total) — superseded
   by `GlossaryEditorContent` / `GlossaryEditor`. This needs a dedicated review because of
   its size; confirm no e2e spec still depends on it.
-- **`src/lib/sync/projects-read.ts`**, `projects-read-types.ts`, and their test (220 lines)
-  — unused Phase 2b wrapper. Grep precise paths/exports before deleting: a different,
-  live `fetchAccessibleProjects` exists in `cloud-projects.ts`.
+- **`src/lib/sync/projects-read.ts`**, `projects-read-types.ts`, and their test
+  `projects-read.test.ts` (220 lines total) — reconfirmed 2026-08-13: zero production
+  importers anywhere in the repo; the only reference is a stale doc-comment in the
+  (now-deleted, see below) `useSubscribedConcepts.ts`. A separate, live
+  `fetchAccessibleProjects` exists in `cloud-projects.ts:176` and is what every real call
+  site (`ExternalCollaboratorsSection.tsx`, `SharedProjectsPage.tsx`, `TeamDetail.tsx`,
+  plus several `*.test.ts` mocks) actually imports. **Why still deferred**: deleting the
+  source file also requires deleting `projects-read.test.ts`, and the code-health routine's
+  frozen zones forbid touching any `**/*.test.ts` file even to remove it alongside its dead
+  subject — needs a human (or a non-code-health change) to delete all three together.
+  Proof needed: same zero-importer grep as this note, then delete the pair + test file in
+  one non-routine commit.
 
 ## 2026-08-11 — type-tightening + complexity survey (chore/code-health-2026-08-11, second run)
 
@@ -87,24 +96,24 @@ spot, both deferred rather than mixed into the single-theme budget.
   Proof needed: `pnpm build` clean (confirms TS still infers the narrower type without
   the assertions) plus `pnpm test` green, no test files touched.
 
-## Prior candidates retained from the 2026-08-10/11 runs
+## Done 2026-08-13 (dead-code deletion run)
 
-- **`src/components/Dashboard.tsx`** (466 lines) — a pre-org-model project dashboard,
-  apparently superseded by `src/components/org/OrgHome.tsx`; no import found anywhere
-  (route table in `App.tsx` doesn't reference it). At 466 lines this alone would consume
-  most of a single run's budget — worth a dedicated pass rather than bundling with
-  smaller deletions. Proof needed: zero importers/JSX usage (component + string route
-  matches), and confirm `OrgHome.tsx` covers the same surface before deleting.
-  (Entry was dropped in a prior stacked-ledger conflict resolution while the file still
-  exists with zero importers — restored 2026-08-12.)
-- **`src/components/CellActionsMenu.tsx`**, `ProgressDot.tsx`, and
-  `useSubscribedConcepts.ts` — re-check zero importers before deletion.
-- **`src/lib/sync/settings-read.ts`** / `settings-read-types.ts` and
-  **`src/lib/timeline/diarization-loader.ts`** — deferred from the 2026-08-11 survey;
-  confirm no newer feature path introduced a caller.
-- **`src/lib/sync/sync-debug.ts`**, the deprecated `EditorScrollContext` compatibility
-  fields, and the deprecated `ExamplePanel` prop pass-through were recorded as candidates
-  in the earlier run; verify the current source before taking further action.
+- **`src/components/Dashboard.tsx`** (499 lines) and **`src/hooks/useSubscribedConcepts.ts`**
+  (140 lines, plus its `fetchTermbaseConcepts` export) — both reconfirmed zero real
+  importers repo-wide (only unrelated same-named hits: `OrgHome.tsx`'s
+  `DashboardRowTemplate`/`DashboardPanelTemplate` skeletons, and doc-comment mentions of
+  `useSubscribedConcepts` in `useRules.ts`/`TermbaseSharingSection.tsx`/
+  `termbase-subscriptions.ts`). Neither had a test file. Deleted, 639 lines removed
+  across 2 files.
+- **`src/components/CellActionsMenu.tsx`**, **`src/components/sidebar/ProgressDot.tsx`**,
+  **`src/lib/sync/settings-read.ts`** / **`settings-read-types.ts`**,
+  **`src/lib/timeline/diarization-loader.ts`**, and **`src/lib/sync/sync-debug.ts`** —
+  reconfirmed 2026-08-13 that all of these were **already deleted** in prior code-health
+  commits (`a43f5e11`, `7287808b`, `eefbd15f`, `737ea8e2`, `54bf8c9b`); these ledger
+  entries were stale and are pruned rather than acted on again.
+- The deprecated `EditorScrollContext` compatibility fields and deprecated `ExamplePanel`
+  prop pass-through mentioned in the original entry were not re-verified this run — if
+  still present, re-add as a fresh candidate with current file/line references.
 
 The 2026-08-10 run also recorded an E2E limitation in the Claude Code web sandbox: its
 Docker/Wrangler setup was not reliable enough to complete the smoke suite. This is an

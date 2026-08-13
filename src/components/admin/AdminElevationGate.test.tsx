@@ -5,7 +5,7 @@
  * calls onElevated on success.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react"
 import { AdminElevationGate } from "./AdminElevationGate"
 
 vi.mock("@/lib/frontier/admin", () => ({
@@ -17,7 +17,10 @@ const mockRequest = vi.mocked(requestAdminElevation)
 const mockVerify = vi.mocked(verifyAdminElevation)
 
 beforeEach(() => vi.clearAllMocks())
-afterEach(() => vi.restoreAllMocks())
+afterEach(() => {
+  cleanup()
+  vi.restoreAllMocks()
+})
 
 describe("AdminElevationGate", () => {
   it("requests a code, then verifies it and calls onElevated", async () => {

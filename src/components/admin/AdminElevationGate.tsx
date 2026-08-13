@@ -107,6 +107,9 @@ export function AdminElevationGate({
               inputMode="numeric"
               aria-label="Verification code"
               containerClassName="gap-0"
+              // OTP fields don't get password-manager badges; probing them
+              // polls `window` on an interval that survives happy-dom teardown.
+              pushPasswordManagerStrategy="none"
             >
               <InputOTPGroup>
                 {Array.from({ length: CODE_LENGTH }, (_, i) => (

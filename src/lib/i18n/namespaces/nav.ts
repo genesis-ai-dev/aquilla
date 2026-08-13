@@ -112,7 +112,7 @@ export const nav = defineNamespace({
     "nav.fileRow.progressAriaLabel": "{translated}% translated, {validated}% validated",
     "nav.fileRow.fileActions": "File actions",
     "nav.fileRow.export": "Export",
-    "nav.fileRow.assignWork": "Assign work",
+    // Assign-work menu item reuses dialog.assign.title (same phrase, same act).
     "nav.fileRow.suggestionTooltip":
       "A cleaner name was detected for this file. Click to apply, or use the Apply button at the top of the sidebar.",
     "nav.fileRow.applyRenameSuggestion": "Apply rename suggestion",
@@ -653,12 +653,6 @@ export const nav = defineNamespace({
           "Menu item that opens the Export dialog for this file. Imperative verb. " +
           "Distinct from 'Export source (.SFM)', which downloads USFM immediately.",
         maxLength: 20,
-      },
-      "nav.fileRow.assignWork": {
-        description:
-          "Menu item that opens the Assign work dialog scoped to this file. " +
-          "Noun phrase matching the dialog title.",
-        maxLength: 24,
       },
       "nav.fileRow.suggestionTooltip": {
         description:

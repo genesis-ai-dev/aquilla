@@ -48,7 +48,7 @@ export function FileActionMenu({
         </MenuItem>
         {onAssignWork && (
           <MenuItem onClick={onAssignWork}>
-            <UserCheck /> {t("nav.fileRow.assignWork")}
+            <UserCheck /> {t("dialog.assign.title")}
           </MenuItem>
         )}
         {onExport && (

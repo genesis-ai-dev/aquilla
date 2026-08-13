@@ -33,6 +33,8 @@ export interface SecondarySrc {
 export interface ProjectMember {
   userId: number;
   username: string;
+  /** Account email when the members API includes it; omitted on older payloads. */
+  email?: string | null;
   role: ProjectMemberRole;
   /**
    * Every contributing path whose level > 0 except the winning one.

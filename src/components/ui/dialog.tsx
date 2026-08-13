@@ -58,7 +58,7 @@ function DialogContent({
           // footer, and close button stay fixed; long bodies opt into a
           // <DialogBody> scroll region. Short dialogs never overflow, so the
           // clip is invisible to them. Width follows the shadcn default (lg).
-          "fixed top-1/2 left-1/2 z-50 flex max-h-[85dvh] w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 flex-col gap-4 overflow-hidden rounded-3xl bg-popover p-5 text-sm text-popover-foreground ring-1 ring-foreground/10 duration-100 outline-none sm:max-w-lg data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
+          "fixed top-1/2 left-1/2 z-50 flex max-h-[85dvh] w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 flex-col gap-4 overflow-hidden rounded-lg bg-popover p-5 text-sm text-popover-foreground ring-1 ring-foreground/10 duration-100 outline-none sm:max-w-lg data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
           className
         )}
         {...props}
@@ -123,7 +123,7 @@ function DialogFooter({
     <div
       data-slot="dialog-footer"
       className={cn(
-        "-mx-5 -mb-5 mt-1 flex shrink-0 flex-col-reverse gap-2 rounded-b-3xl bg-muted/40 p-5 sm:flex-row sm:justify-end",
+        "-mx-5 -mb-5 mt-1 flex shrink-0 flex-col-reverse gap-2 rounded-b-lg bg-muted/40 px-5 py-3 sm:flex-row sm:justify-end",
         className
       )}
       {...props}

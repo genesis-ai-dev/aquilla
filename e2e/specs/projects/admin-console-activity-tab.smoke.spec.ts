@@ -4,7 +4,7 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
 /**
  * AdminConsole — Activity tab.
  *
- * AdminConsole.tsx has tabs: Overview, Tenants, People, Projects, Activity, Platform.
+ * AdminConsole.tsx has tabs: Overview, Tenants, Teams, People, Projects, Activity, Platform.
  * The Activity tab renders a timeline headed "Activity".
  *
  * This spec: navigate to /admin → click "Activity" tab → verify the "When"

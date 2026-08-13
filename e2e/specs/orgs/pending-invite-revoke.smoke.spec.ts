@@ -1,5 +1,6 @@
 import { test, expect, orgRoute } from "../../helpers/multi-user"
-import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/seed-project"
+import { jwtFor, seedProjectWithFile } from "../../helpers/seed-project"
+import { ProjectSettings } from "../../helpers/page-objects/ProjectSettings"
 
 /**
  * PendingInvitesSection — create an invite link then revoke it from /members.
@@ -10,7 +11,7 @@ import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/se
  * removes the row.
  *
  * Flow:
- *   1. Alice creates a project and opens the Share panel.
+ *   1. Alice creates a project and opens Settings → Members → Add a member.
  *   2. She creates an invite link on the "Invite link" tab.
  *   3. She navigates to /members.
  *   4. The PendingInvitesSection shows the pending invite row.
@@ -20,16 +21,8 @@ import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/se
 test("pending invite appears on /members and can be revoked", async ({ alice }) => {
   const name = `RevokeInvite ${Date.now()}`
   const seeded = await seedProjectWithFile(await jwtFor("alice"), { name })
-  await openSeededProject(alice, seeded)
-
-  // Open Share panel → Invite link tab → Create invite link.
-  // Share lives in the sidebar "More" menu (sidebar cleanup).
-  await alice.getByRole("button", { name: /More project options/i }).click()
-  const shareBtn = alice.getByRole("button", { name: /^Share$/i })
-  await shareBtn.click()
-  const dialog = alice.getByRole("dialog")
-  await expect(dialog).toBeVisible({ timeout: 5_000 })
-  await dialog.getByRole("button", { name: /^Invite link$/i }).click()
+  const settings = new ProjectSettings(alice)
+  const dialog = await settings.openInviteLinkTab(seeded.projectId)
   const createBtn = dialog.getByRole("button", { name: /Create invite link/i })
   await expect(createBtn).toBeEnabled({ timeout: 5_000 })
   await createBtn.click()

@@ -18,12 +18,12 @@
 // shared-settings field on this page; `sharedConflict` in the parent already
 // renders the "Settings changed elsewhere" banner when the hook detects one.
 import { useState } from "react"
-import { Globe, Archive, ArchiveRestore, Plus } from "lucide-react"
+import { Archive, ArchiveRestore, Plus } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { FieldLabel } from "@/components/ui/field"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { SettingsGroup, SettingsRow } from "@/components/ui/page"
 import { DisabledFieldTooltip } from "./DisabledFieldTooltip"
 import type { ProjectWideSettings } from "@/lib/sync/project-settings"
 import type { PatchOutcome } from "@/hooks/useProjectSettings"
@@ -169,28 +169,20 @@ export function LanguagesSection({
   }
 
   return (
-    <Card id="section-languages">
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Globe className="h-4 w-4 text-muted-foreground" />
-          Languages
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div>
-          <FieldLabel>Default target language</FieldLabel>
-          <p className="mt-1 text-sm text-foreground">{defaultTargetLanguage || "—"}</p>
-          <p className="text-xs text-muted-foreground">
-            The default (unnamed) lane. Change it on Project Info, above.
-          </p>
-        </div>
+    <div id="section-languages">
+      <SettingsGroup label="Languages">
+        <SettingsRow
+          label="Default target language"
+          description="The default (unnamed) lane. Change it on Project Info, above."
+        >
+          <p className="text-sm text-foreground">{defaultTargetLanguage || "—"}</p>
+        </SettingsRow>
 
-        <div>
-          <FieldLabel>Additional target lanes</FieldLabel>
-          <p className="mb-2 text-xs text-muted-foreground">
-            Extra target-language lanes for this project — e.g. dialect variants or
-            parallel drafts of the same source.
-          </p>
+        <SettingsRow
+          label="Additional target lanes"
+          description="Extra target-language lanes for this project — e.g. dialect variants or parallel drafts of the same source."
+          block
+        >
           {active.length === 0 ? (
             <p className="text-sm text-muted-foreground">No additional lanes yet.</p>
           ) : (
@@ -198,7 +190,7 @@ export function LanguagesSection({
               {active.map((lane) => (
                 <li
                   key={lane}
-                  className="flex items-center gap-2 rounded border bg-card px-2 py-1.5 text-sm"
+                  className="flex items-center gap-2 rounded border bg-background px-2 py-1.5 text-sm"
                 >
                   <Badge variant="outline" className="shrink-0">
                     {lane}
@@ -213,7 +205,6 @@ export function LanguagesSection({
                       </span>
                       <Button
                         variant="destructive"
-                        size="sm"
                         disabled={busyLane === lane}
                         onClick={() => void handleConfirmArchive(lane)}
                       >
@@ -221,7 +212,6 @@ export function LanguagesSection({
                       </Button>
                       <Button
                         variant="ghost"
-                        size="sm"
                         disabled={busyLane === lane}
                         onClick={() => setPendingArchive(null)}
                       >
@@ -250,15 +240,14 @@ export function LanguagesSection({
               ))}
             </ul>
           )}
-        </div>
+        </SettingsRow>
 
-        {archived.length > 0 && (
-          <div>
-            <FieldLabel>Archived lanes</FieldLabel>
-            <p className="mb-2 text-xs text-muted-foreground">
-              Hidden from the lane switcher by default. Their translations are kept;
-              restore a lane to make it active again.
-            </p>
+        {archived.length > 0 ? (
+          <SettingsRow
+            label="Archived lanes"
+            description="Hidden from the lane switcher by default. Their translations are kept; restore a lane to make it active again."
+            block
+          >
             <ul data-testid="archived-lanes-list" className="flex flex-col gap-1">
               {archived.map((lane) => (
                 <li
@@ -272,7 +261,6 @@ export function LanguagesSection({
                   <DisabledFieldTooltip disabled={!canEdit} tooltip={disabledTooltip}>
                     <Button
                       variant="ghost"
-                      size="sm"
                       className="h-7 shrink-0 gap-1"
                       disabled={!canEdit || busyLane === lane}
                       data-testid={`restore-lane-${lane}`}
@@ -286,47 +274,58 @@ export function LanguagesSection({
                 </li>
               ))}
             </ul>
-          </div>
-        )}
-        {laneActionError && <p className="text-xs text-destructive">{laneActionError}</p>}
+          </SettingsRow>
+        ) : null}
 
-        <DisabledFieldTooltip disabled={!canEdit} tooltip={disabledTooltip}>
-          <div className="flex items-end gap-2">
-            <div className="flex-1">
-              <FieldLabel htmlFor="add-target-lang">Add a target lane</FieldLabel>
-              <Input
-                id="add-target-lang"
-                data-testid="add-target-lang-input"
-                value={newLane}
-                onChange={(e) => {
-                  setNewLane(e.target.value)
-                  setAddError(null)
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault()
-                    void handleAdd()
-                  }
-                }}
-                placeholder="e.g. fr-CA"
+        {laneActionError ? (
+          <p className="px-4 pb-2 text-xs text-destructive">{laneActionError}</p>
+        ) : null}
+
+        <SettingsRow
+          label={<label htmlFor="add-target-lang">Add a target lane</label>}
+          block
+        >
+          <DisabledFieldTooltip disabled={!canEdit} tooltip={disabledTooltip}>
+            <div className="flex items-end gap-2">
+              <div className="flex-1">
+                <FieldLabel htmlFor="add-target-lang" className="sr-only">
+                  Add a target lane
+                </FieldLabel>
+                <Input
+                  id="add-target-lang"
+                  data-testid="add-target-lang-input"
+                  value={newLane}
+                  onChange={(e) => {
+                    setNewLane(e.target.value)
+                    setAddError(null)
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault()
+                      void handleAdd()
+                    }
+                  }}
+                  placeholder="e.g. fr-CA"
+                  disabled={!canEdit || adding}
+                  className="bg-background"
+                />
+              </div>
+              <Button
+                data-testid="add-target-lang-btn"
+                onClick={() => void handleAdd()}
                 disabled={!canEdit || adding}
-              />
+              >
+                <Plus className="mr-1 h-3.5 w-3.5" />
+                {adding ? "Adding…" : "Add lane"}
+              </Button>
             </div>
-            <Button
-              data-testid="add-target-lang-btn"
-              onClick={() => void handleAdd()}
-              disabled={!canEdit || adding}
-            >
-              <Plus className="mr-1 h-3.5 w-3.5" />
-              {adding ? "Adding…" : "Add lane"}
-            </Button>
-          </div>
-        </DisabledFieldTooltip>
-        {addError && <p className="text-xs text-destructive">{addError}</p>}
-        {!canEdit && disabledTooltip && (
-          <p className="text-xs text-muted-foreground">{disabledTooltip}</p>
-        )}
-      </CardContent>
-    </Card>
+          </DisabledFieldTooltip>
+          {addError ? <p className="mt-2 text-xs text-destructive">{addError}</p> : null}
+          {!canEdit && disabledTooltip ? (
+            <p className="mt-2 text-xs text-muted-foreground">{disabledTooltip}</p>
+          ) : null}
+        </SettingsRow>
+      </SettingsGroup>
+    </div>
   )
 }

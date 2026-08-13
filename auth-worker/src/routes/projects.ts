@@ -885,6 +885,7 @@ projects.get("/:projectId/members", authMiddleware, async (c) => {
     members: members.map((m) => ({
       userId: m.userId,
       username: m.username,
+      email: m.email,
       role: {
         level: m.roleLevel,
         name: roleNameFor(m.roleLevel),
@@ -1174,7 +1175,8 @@ projects.delete("/:projectId/files/:fileId", authMiddleware, async (c) => {
   // Best-effort R2 cleanup via sync-worker's admin endpoint.
   //
   // Prefer the dedicated ADMIN_SECRET, falling back to SYNC_SECRET_KEY, so
-  // this stays in step with sync-worker's `adminCredential` (OPS-2). Both
+  // this stays in step with sync-worker's `resolveAdminSecret` (OPS-2; see
+  // sync-worker/src/lib/admin-secret.ts). Both
   // sides must be provisioned together: sync-worker stops accepting the
   // signing key the moment its own ADMIN_SECRET is set, and because the call
   // below only warns on failure, a one-sided rollout would 401 silently and

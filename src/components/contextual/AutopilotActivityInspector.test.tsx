@@ -94,7 +94,11 @@ const commandMock = vi.fn<(
   _runId: string,
   _command: string,
 ) => Promise<ContextualRunRecord>>(async () => ({ ...run, status: "paused" }))
-const retryMock = vi.fn<(_projectId: string, _fileId: string) => Promise<{ runId: string }>>(
+const retryMock = vi.fn<(
+  _projectId: string,
+  _fileId: string,
+  _targetLang?: string,
+) => Promise<{ runId: string }>>(
   async () => ({ runId: "new-run" }),
 )
 
@@ -113,7 +117,8 @@ vi.mock("@/lib/contextual/transport", () => ({
     options?: ContextualRunActivityOptions,
   ) => activityMock(projectId, runId, options),
   commandContextualRun: (projectId: string, runId: string, command: string) => commandMock(projectId, runId, command),
-  startFileContextualRun: (projectId: string, fileId: string) => retryMock(projectId, fileId),
+  startFileContextualRun: (projectId: string, fileId: string, targetLang?: string) =>
+    retryMock(projectId, fileId, targetLang),
 }))
 
 beforeEach(() => {
@@ -755,7 +760,7 @@ describe("AutopilotActivityInspector", () => {
         blockingGaps: 2,
         items: [
           { id: "terminology", label: "Key terms", level: "missing", detail: "Missing", href: "terminology" },
-          { id: "brief", label: "Translation brief", level: "missing", detail: "Missing", href: "memory" },
+          { id: "brief", label: "Translation brief", level: "missing", detail: "Missing", href: "settings/memory" },
         ],
       },
     })
@@ -766,55 +771,55 @@ describe("AutopilotActivityInspector", () => {
     )
     expect(screen.getByRole("link", { name: "Set up Translation brief" })).toHaveAttribute(
       "href",
-      "/project/p1/memory",
+      "/project/p1/settings/memory",
     )
   })
 
-  it("keeps a historic multilingual lane inspectable but cannot retry it", async () => {
-    const legacyLane = {
+  it("retries a named-language lane and reviews its drafts in that lane", async () => {
+    const frenchLane = {
       ...run,
       status: "failed",
       targetLang: "fr",
       lastError: "unsupported_target_language_lane",
     }
-    runsMock.mockResolvedValue(runPage([legacyLane]))
-    activityMock.mockResolvedValue({ ...activity, run: legacyLane })
+    runsMock.mockResolvedValue(runPage([frenchLane]))
+    activityMock.mockResolvedValue({ ...activity, run: frenchLane })
 
     renderInspector({ initialSection: "attention" })
 
     expect(await screen.findByText("Target: fr")).toBeInTheDocument()
-    expect(screen.getAllByText(/multilingual lane that Autopilot doesn’t support yet/)).toHaveLength(1)
+    expect(await screen.findByText(/couldn’t draft at the time/)).toBeInTheDocument()
     expect(screen.queryByText("unsupported_target_language_lane")).not.toBeInTheDocument()
-    expect(screen.queryByRole("button", { name: "Run Autopilot" })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Run Autopilot" }))
+    await vi.waitFor(() => expect(retryMock).toHaveBeenCalledWith("p1", "file-1", "fr"))
     await screen.findByText("3 reviewable drafts staged")
     fireEvent.click(screen.getByRole("button", { name: /Ready for review/ }))
-    expect(screen.queryByRole("link", { name: /Review in editor/ })).not.toBeInTheDocument()
-    expect(await screen.findByText(/Evidence only.*unsupported fr lane/)).toBeInTheDocument()
-    expect(retryMock).not.toHaveBeenCalled()
+    const reviewLink = await screen.findByRole("link", { name: /Review in editor/ })
+    expect(reviewLink).toHaveAttribute("href", expect.stringContaining("lane=fr"))
   })
 
-  it("keeps stop and evidence for a paused multilingual run but suppresses resume", async () => {
-    const pausedLegacyLane = {
+  it("resumes a paused named-language run", async () => {
+    const pausedFrench = {
       ...run,
       status: "paused",
       targetLang: "fr",
       lastError: null,
     }
-    runsMock.mockResolvedValue(runPage([pausedLegacyLane]))
-    activityMock.mockResolvedValue({ ...activity, run: pausedLegacyLane })
+    runsMock.mockResolvedValue(runPage([pausedFrench]))
+    activityMock.mockResolvedValue({ ...activity, run: pausedFrench })
 
     renderInspector()
 
-    expect(await screen.findByText(/multilingual lane that Autopilot doesn’t support yet/)).toBeInTheDocument()
-    expect(screen.queryByRole("button", { name: "Resume" })).not.toBeInTheDocument()
+    expect(await screen.findByText("Language: fr")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Resume" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument()
     expect(await screen.findByText("3 reviewable drafts staged")).toBeInTheDocument()
   })
 
-  it("does not select a historic multilingual proposal as the actionable review owner", async () => {
-    const legacyLane = {
+  it("selects a named-lane proposal as the actionable review owner", async () => {
+    const frenchReview = {
       ...run,
-      runId: "newer-legacy-lane",
+      runId: "newer-french-lane",
       fileId: "file-1",
       status: "done",
       targetLang: "fr",
@@ -828,18 +833,17 @@ describe("AutopilotActivityInspector", () => {
       targetLang: "",
       proposedDrafts: 1,
     }
-    runsMock.mockResolvedValue(runPage([legacyLane, defaultReview]))
+    runsMock.mockResolvedValue(runPage([frenchReview, defaultReview]))
     activityMock.mockImplementation(async (_projectId, runId) => ({
       ...activity,
-      run: runId === defaultReview.runId ? defaultReview : legacyLane,
-      drafts: runId === defaultReview.runId ? activity.drafts : [],
+      run: runId === defaultReview.runId ? defaultReview : frenchReview,
     }))
 
     renderInspector({
       initialSection: "review",
       overview: {
         available: true,
-        proposedDrafts: 1,
+        proposedDrafts: 3,
         files: [],
         activeRuns: 0,
         doneSpans: 2,
@@ -848,16 +852,77 @@ describe("AutopilotActivityInspector", () => {
         unitsSpent: 2,
         appliedDrafts: 0,
       },
-      fileNames: new Map([["file-1", "Legacy.usfm"], ["file-2", "Default.usfm"]]),
+      fileNames: new Map([["file-1", "French.usfm"], ["file-2", "Default.usfm"]]),
     })
 
     await vi.waitFor(() => expect(activityMock).toHaveBeenCalledWith(
       "p1",
-      defaultReview.runId,
+      frenchReview.runId,
       expect.objectContaining({ draftStatus: "proposed" }),
     ))
-    expect(screen.getByText("2 evidence drafts")).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: /Default\.usfm/ })).toHaveAttribute("aria-pressed", "true")
+    expect(screen.getByText("2 ready to review")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /French\.usfm/ })).toHaveAttribute("aria-pressed", "true")
+  })
+
+  it("steers off the pre-seeded newest run to the historical review owner", async () => {
+    // Mirrors the project-overview flow: the overview file row pre-seeds the
+    // selection with the newest run (no proposed drafts), and the run that
+    // owns the review evidence only surfaces via the proposedOnly fetch.
+    const newestRun = {
+      ...run,
+      runId: "newest-no-drafts",
+      status: "terminated",
+      proposedDrafts: 0,
+      updatedAt: "2026-08-11T10:02:00.000Z",
+    }
+    const evidenceRun = {
+      ...run,
+      runId: "historical-owner",
+      status: "parked",
+      proposedDrafts: 2,
+      updatedAt: "2026-08-11T10:01:00.000Z",
+    }
+    runsMock.mockImplementation(async (_projectId, options) =>
+      runPage(options?.proposedOnly ? [evidenceRun] : [newestRun]))
+    activityMock.mockImplementation(async (_projectId, runId) => ({
+      ...activity,
+      run: runId === evidenceRun.runId ? evidenceRun : newestRun,
+    }))
+
+    renderInspector({
+      initialSection: "review",
+      overview: {
+        available: true,
+        proposedDrafts: 2,
+        files: [{
+          fileId: "file-1",
+          runId: newestRun.runId,
+          targetLang: "",
+          status: "terminated",
+          doneSpans: 0,
+          totalSpans: 1,
+          failedSpans: 0,
+          unitsSpent: 0,
+          proposedDrafts: 0,
+          appliedDrafts: 0,
+          updatedAt: newestRun.updatedAt,
+          lastError: null,
+        }],
+        activeRuns: 0,
+        doneSpans: 0,
+        totalSpans: 1,
+        failedSpans: 0,
+        unitsSpent: 0,
+        appliedDrafts: 0,
+      },
+    })
+
+    await vi.waitFor(() => expect(activityMock).toHaveBeenCalledWith(
+      "p1",
+      evidenceRun.runId,
+      expect.objectContaining({ draftStatus: "proposed" }),
+    ))
+    expect(screen.getByText("2 ready to review")).toBeInTheDocument()
   })
 
   it.each([

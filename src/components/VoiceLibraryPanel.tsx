@@ -373,7 +373,6 @@ function MenuItem({
     <Button
       type="button"
       variant={destructive ? "destructive" : "ghost"}
-      size="sm"
       onClick={onClick}
       className="w-full justify-start"
     >

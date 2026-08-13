@@ -99,6 +99,8 @@ export interface ContextualDraft {
   projectId: string
   fileId: string
   cellId: string
+  /** Lane copied from the owning run at insert. '' = project default. */
+  targetLang: string
   sceneBriefId: string | null
   text: string
   verdicts: Record<string, string> | null
@@ -367,6 +369,7 @@ interface DraftRow {
   project_id: string
   file_id: string
   cell_id: string
+  target_lang: string
   scene_brief_id: string | null
   text: string
   verdicts: unknown
@@ -384,6 +387,7 @@ function rowToDraft(r: DraftRow): ContextualDraft {
     projectId: r.project_id,
     fileId: r.file_id,
     cellId: r.cell_id,
+    targetLang: r.target_lang,
     sceneBriefId: r.scene_brief_id,
     text: r.text,
     verdicts: parseObject<Record<string, string>>(r.verdicts),
@@ -395,7 +399,7 @@ function rowToDraft(r: DraftRow): ContextualDraft {
   }
 }
 
-const DRAFT_COLS = `id, run_id, project_id, file_id, cell_id, scene_brief_id, text,
+const DRAFT_COLS = `id, run_id, project_id, file_id, cell_id, target_lang, scene_brief_id, text,
   verdicts, provenance, status, created_at, reviewed_at, reviewed_by`
 
 interface RunEventRow {
@@ -485,10 +489,8 @@ function truncateUtf8(value: string, maxBytes: number): string {
  * field through which model output could slip. */
 function safeEventString(value: unknown, maxChars = CONTEXTUAL_EVENT_DETAIL_STRING_MAX_CHARS): string | null {
   if (typeof value !== "string") return null
-  /* Stripping control characters is the point here: this sanitises model
-   * output before storage so NULs and escape sequences cannot ride into a
-   * log line or a terminal. */
-  // eslint-disable-next-line no-control-regex
+  // Control chars (NUL–US, DEL) collapse to spaces so labels stay printable.
+  // eslint-disable-next-line no-control-regex -- intentional control-char strip
   const collapsed = value.replace(/[\u0000-\u001f\u007f]+/g, " ").trim().slice(0, maxChars)
   if (!collapsed) return null
   return detectSecret(collapsed) ? "[redacted]" : collapsed
@@ -873,9 +875,8 @@ export interface ListRunsResult {
 }
 
 /** Newest-first, bounded run history with a stable keyset cursor. The draft
- * count is joined by run id. Normal history retains legacy non-default-lane
- * evidence; `proposedOnly` without an explicit lane is the actionable v1
- * default-lane queue. */
+ * count is joined by run id. `proposedOnly` without an explicit lane returns
+ * every language that still has reviewable proposals. */
 export async function listRuns(
   db: AquillaDb,
   projectId: string,
@@ -892,11 +893,6 @@ export async function listRuns(
     binds.push(input.targetLang)
   }
   if (input.proposedOnly) {
-    // The editor review queue is deliberately default-lane-only in v1. A
-    // historic non-default run may still be inspected through normal history,
-    // but it must not become the owner selected by the actionable project
-    // review count.
-    if (input.targetLang === undefined) where.push("target_lang = ''")
     where.push(`EXISTS (
       SELECT 1 FROM contextual_drafts proposed
        WHERE proposed.project_id = contextual_runs.project_id
@@ -981,9 +977,7 @@ const REDACTED_RUN_ERROR = "Autopilot error details were redacted because they m
 function sanitizeRunError(value: string | null | undefined): string | null {
   if (value == null) return null
   const collapsed = value
-    // Stripping control characters is the point here: run errors are echoed
-    // back and stored, so NULs and escape sequences must not ride along.
-    // eslint-disable-next-line no-control-regex
+    // eslint-disable-next-line no-control-regex -- intentional control-char strip
     .replace(/[\u0000-\u001f\u007f]+/g, " ")
     .replace(/\s+/g, " ")
     .trim()
@@ -1263,39 +1257,47 @@ export interface InsertDraftsInput {
 
 /**
  * Stage span drafts. A new proposal supersedes any existing `proposed` row on
- * the same cell — the supersede UPDATE and the INSERTs run in one atomic
- * batch, so the partial UNIQUE (contextual_drafts_live) never conflicts
- * *within* this call.
+ * the same cell in the same language lane — the supersede UPDATE and the
+ * INSERTs run in one atomic batch, so the partial UNIQUE
+ * (contextual_drafts_live) never conflicts *within* this call. Sibling lanes
+ * keep independent live proposals.
  *
- * ON CONFLICT closes the ACROSS-call race that waves introduce: two spans in
- * the same wave can overlap a cell (a `refresh_span` re-enqueue, or a seed
- * subdivided after new cells landed). Serially that was impossible, so a bare
- * INSERT was safe; concurrently a bare INSERT would throw a unique violation
- * and fail an otherwise-good span. Last writer wins the live proposal, which
- * matches the supersede rule the serial path already had.
+ * Lane identity is copied from the owning run so a caller cannot stage a
+ * French draft onto a Spanish run. ON CONFLICT closes the ACROSS-call race
+ * that waves introduce: two spans in the same wave can overlap a cell. Last
+ * writer wins the live proposal, which matches the supersede rule the serial
+ * path already had.
  */
 export async function insertDrafts(
   db: AquillaDb,
   input: InsertDraftsInput,
 ): Promise<ContextualDraft[]> {
   if (input.drafts.length === 0) return []
+  const owner = await getRun(db, input.runId)
+  if (
+    !owner ||
+    owner.projectId !== input.projectId ||
+    owner.fileId !== input.fileId
+  ) return []
+  const lane = owner.targetLang
   const cellIds = input.drafts.map((d) => d.cellId)
   const placeholders = cellIds.map(() => "?").join(",")
   const stmts = [
     db
       .prepare(
         `UPDATE contextual_drafts SET status = 'superseded', reviewed_at = now()
-          WHERE project_id = ? AND file_id = ? AND cell_id IN (${placeholders})
+          WHERE project_id = ? AND file_id = ? AND target_lang = ?
+            AND cell_id IN (${placeholders})
             AND status = 'proposed'`,
       )
-      .bind(input.projectId, input.fileId, ...cellIds),
+      .bind(input.projectId, input.fileId, lane, ...cellIds),
     ...input.drafts.map((d) =>
       db
         .prepare(
           `INSERT INTO contextual_drafts
-              (id, run_id, project_id, file_id, cell_id, scene_brief_id, text, verdicts, provenance)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb)
-           ON CONFLICT (project_id, file_id, cell_id) WHERE status = 'proposed'
+              (id, run_id, project_id, file_id, cell_id, target_lang, scene_brief_id, text, verdicts, provenance)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb)
+           ON CONFLICT (project_id, file_id, cell_id, target_lang) WHERE status = 'proposed'
            DO UPDATE SET
              id = EXCLUDED.id,
              run_id = EXCLUDED.run_id,
@@ -1311,6 +1313,7 @@ export async function insertDrafts(
           input.projectId,
           input.fileId,
           d.cellId,
+          lane,
           input.sceneBriefId ?? null,
           d.text,
           d.verdicts ?? null,
@@ -1322,10 +1325,10 @@ export async function insertDrafts(
   const { results } = await db
     .prepare(
       `SELECT ${DRAFT_COLS} FROM contextual_drafts
-        WHERE project_id = ? AND file_id = ? AND status = 'proposed'
+        WHERE project_id = ? AND file_id = ? AND target_lang = ? AND status = 'proposed'
           AND cell_id IN (${placeholders})`,
     )
-    .bind(input.projectId, input.fileId, ...cellIds)
+    .bind(input.projectId, input.fileId, lane, ...cellIds)
     .all<DraftRow>()
   return results.map(rowToDraft)
 }
@@ -1343,17 +1346,7 @@ export async function listDrafts(
     where.push("status = ?")
     binds.push(status)
   }
-  // contextual_drafts predates lane ownership. Join through its durable run
-  // rather than treating every proposal for a file as belonging to whichever
-  // lane the editor currently shows. V1 only exposes the default lane; historic
-  // non-default rows remain reachable as run evidence via listDraftPageByRun.
-  where.push(`EXISTS (
-    SELECT 1 FROM contextual_runs owner
-     WHERE owner.id = contextual_drafts.run_id
-       AND owner.project_id = contextual_drafts.project_id
-       AND owner.file_id = contextual_drafts.file_id
-       AND owner.target_lang = ?
-  )`)
+  where.push("target_lang = ?")
   binds.push(targetLang)
   const { results } = await db
     .prepare(
@@ -1494,17 +1487,13 @@ export async function reviewDraft(
   const appliedProjectionGate = input.action === "applied"
     ? ` AND EXISTS (
           SELECT 1
-            FROM contextual_runs owner
-            JOIN cells target
-              ON target.project_id = contextual_drafts.project_id
+            FROM cells target
+           WHERE target.project_id = contextual_drafts.project_id
              AND target.file_id = contextual_drafts.file_id
              AND target.cell_id = contextual_drafts.cell_id
              AND target.side = 'target'
-             AND target.target_lang = owner.target_lang
+             AND target.target_lang = contextual_drafts.target_lang
              AND target.value = contextual_drafts.text
-           WHERE owner.id = contextual_drafts.run_id
-             AND owner.project_id = contextual_drafts.project_id
-             AND owner.file_id = contextual_drafts.file_id
         )`
     : ""
   const row = await db
@@ -1581,13 +1570,7 @@ export async function findProposedCellsFromOtherRuns(
       `SELECT cell_id FROM contextual_drafts
         WHERE project_id = ? AND file_id = ? AND status = 'proposed'
           AND run_id <> ?
-          AND EXISTS (
-            SELECT 1 FROM contextual_runs owner
-             WHERE owner.id = contextual_drafts.run_id
-               AND owner.project_id = contextual_drafts.project_id
-               AND owner.file_id = contextual_drafts.file_id
-               AND owner.target_lang = ?
-          )`,
+          AND target_lang = ?`,
     )
     .bind(scope.projectId, scope.fileId, scope.runId, scope.targetLang)
     .all<{ cell_id: string }>()
@@ -1904,10 +1887,9 @@ export interface ProjectAutopilotSummary {
 
 /**
  * One query per project for the overview: the newest run per file/language
- * lane plus draft counts attributable to that exact run. Project-level backlog
- * totals retain older DEFAULT-lane review work, so the compact actionable count
- * and `proposedOnly` drill-down cannot disagree. Legacy non-default rows remain
- * available through run history/activity as evidence, not editor actions.
+ * lane plus draft counts attributable to that exact run. Project-level
+ * backlog totals include every language lane so the compact review count and
+ * `proposedOnly` drill-down cannot disagree.
  */
 export async function getProjectAutopilotSummary(
   db: AquillaDb,
@@ -1928,11 +1910,6 @@ export async function getProjectAutopilotSummary(
                 COUNT(*) FILTER (WHERE d.status = 'proposed') AS proposed,
                 COUNT(*) FILTER (WHERE d.status = 'applied')  AS applied
            FROM contextual_drafts d
-           JOIN contextual_runs owner
-             ON owner.id = d.run_id
-            AND owner.project_id = d.project_id
-            AND owner.file_id = d.file_id
-            AND owner.target_lang = ''
           WHERE d.project_id = ?
           GROUP BY d.run_id
        ),
@@ -1999,8 +1976,7 @@ export async function getProjectAutopilotSummary(
   }
 }
 
-/** Draft counts by status for the editor pill's lane-scoped snapshot. V1
- * callers omit targetLang and therefore read only the default lane. */
+/** Draft counts by status for the editor pill's lane-scoped snapshot. */
 export async function countDrafts(
   db: AquillaDb,
   projectId: string,
@@ -2010,14 +1986,7 @@ export async function countDrafts(
   const { results } = await db
     .prepare(
       `SELECT status, COUNT(*) AS n FROM contextual_drafts
-        WHERE project_id = ? AND file_id = ?
-          AND EXISTS (
-            SELECT 1 FROM contextual_runs owner
-             WHERE owner.id = contextual_drafts.run_id
-               AND owner.project_id = contextual_drafts.project_id
-               AND owner.file_id = contextual_drafts.file_id
-               AND owner.target_lang = ?
-          )
+        WHERE project_id = ? AND file_id = ? AND target_lang = ?
         GROUP BY status`,
     )
     .bind(projectId, fileId, targetLang)

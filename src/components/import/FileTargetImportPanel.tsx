@@ -242,7 +242,7 @@ export function FileTargetImportPanel({
         </div>
         {error && <p className="text-xs text-destructive">{error}</p>}
         <div className="flex justify-end">
-          <Button variant="ghost" size="sm" onClick={onCancel}>Cancel</Button>
+          <Button variant="ghost" onClick={onCancel}>Cancel</Button>
         </div>
       </div>
     )
@@ -273,7 +273,7 @@ export function FileTargetImportPanel({
           ))}
         </div>
         <div className="flex justify-end">
-          <Button variant="ghost" size="sm" onClick={onCancel}>Cancel</Button>
+          <Button variant="ghost" onClick={onCancel}>Cancel</Button>
         </div>
       </div>
     )
@@ -363,9 +363,8 @@ export function FileTargetImportPanel({
             {selectedCellIds.size === matched.length ? "Deselect all" : "Select all"}
           </button>
           <div className="flex gap-2">
-            <Button variant="ghost" size="sm" onClick={onCancel}>Cancel</Button>
+            <Button variant="ghost" onClick={onCancel}>Cancel</Button>
             <Button
-              size="sm"
               disabled={selectedCellIds.size === 0 || applying}
               onClick={handleApply}
             >

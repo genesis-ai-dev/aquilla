@@ -14,7 +14,7 @@ import { compileConceptsToRules } from "@/lib/terminology/compile"
 import type { Concept } from "@/lib/terminology/types"
 
 /**
- * Optional callback that syncs the given partial settings slice to D1.
+ * Optional callback that syncs the given partial settings slice to Postgres.
  * Pass `useProjectSettings(...).patch` from the caller.
  */
 type PatchSharedFn = (partial: ProjectWideSettings) => Promise<unknown>
@@ -143,7 +143,7 @@ export function useRules(
     // carries the authoritative array either way) but keeps any legacy
     // IDB-backed project record in sync for offline/local-only projects.
     void patchProject(project.id, (p) => ({ ...p, rules: [...(p.rules || []), newRule] }))
-    // AQU-455: await the shared-settings write (D1 project_settings PATCH).
+    // AQU-455: await the shared-settings write (Postgres project_settings PATCH).
     // patchShared's write is queued (useProjectSettings.patch →
     // runSerialized), so back-to-back calls don't clobber each other
     // server-side *once they're properly ordered* — but when this call was
@@ -197,7 +197,7 @@ export function useRules(
       ...p,
       algorithmicChecks: { ...(p.algorithmicChecks ?? {}), [checkId]: override },
     }))
-    // Sync to D1 like `rules`/`rulePenalties`: under AD-3 the read path is the
+    // Sync to Postgres like `rules`/`rulePenalties`: under AD-3 the read path is the
     // server projection, so an IDB-only write here is invisible to useProject.
     // Top-level settings keys replace wholesale — send the full merged map.
     void patchShared?.({

@@ -99,9 +99,10 @@ declare global {
       /** Shared HMAC key with identity that mints /sync-token JWTs. */
       SYNC_SECRET_KEY?: string
       /**
-       * Dedicated bearer for /admin/* routes. Preferred over SYNC_SECRET_KEY,
-       * which is accepted only as a provisioning fallback — see
-       * `adminCredential` in ./admin (OPS-2).
+       * OPS-2: dedicated bearer for the operator-only routes (`/admin/files/*`,
+       * `DELETE /audio/*`), so ops calls never carry the token-signing key.
+       * When unset those routes fall back to SYNC_SECRET_KEY; when set, it is
+       * the only value they accept. See `lib/admin-secret.ts`.
        */
       ADMIN_SECRET?: string
       /** Deployment profile used to reject cross-environment custom-domain traffic. */

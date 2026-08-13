@@ -13,8 +13,7 @@
 // sync-worker (authorize.ts self-assign carve-out); this UI is the
 // affordance only.
 
-import { useEffect, useState } from "react"
-import { Check } from "lucide-react"
+import { useState } from "react"
 import { FieldDescription, FieldError } from "@/components/ui/field"
 import { SettingsGroup, SettingsRow } from "@/components/ui/page"
 import { Switch } from "@/components/ui/switch"
@@ -31,25 +30,15 @@ export function AssignmentAuthoritySection({ orgSettings, canEdit }: AssignmentA
 
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [saved, setSaved] = useState(false)
-
-  useEffect(() => {
-    if (!saved) return
-    const t = setTimeout(() => setSaved(false), 2500)
-    return () => clearTimeout(t)
-  }, [saved])
 
   async function handleChange(next: boolean) {
     setBusy(true)
     setError(null)
-    setSaved(false)
     const result = await patch({ allowSelfAssignment: next })
     if (result.kind === "error") {
       setError(result.message ?? "Save failed")
     } else if (result.kind === "blocked") {
       setError("Only org owners can change the assignment authority policy.")
-    } else {
-      setSaved(true)
     }
     setBusy(false)
   }
@@ -67,15 +56,6 @@ export function AssignmentAuthoritySection({ orgSettings, canEdit }: AssignmentA
               <FieldDescription>Only org owners can change the assignment authority policy.</FieldDescription>
             )}
             {error && <FieldError className="text-xs">{error}</FieldError>}
-            {saved && (
-              <p
-                className="flex items-center gap-1 text-xs text-green-600 dark:text-green-400"
-                role="status"
-                data-testid="assignment-authority-saved"
-              >
-                <Check className="size-3.5" /> Saved
-              </p>
-            )}
           </div>
           <Switch
             id="allow-self-assignment"

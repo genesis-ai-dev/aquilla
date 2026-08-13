@@ -16,6 +16,7 @@
 //   GET  /api/v2/users/lookup
 //   GET  /api/v2/users/search
 //   GET  /api/v2/orgs/me
+//   GET  /api/v2/orgs/:orgId/deleted-files
 //   GET  /api/v2/orgs/:orgId/members
 //   POST /api/v2/orgs/:orgId/members
 //   DELETE /api/v2/orgs/:orgId/members/:userId

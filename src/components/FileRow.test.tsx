@@ -4,7 +4,7 @@
 // affordances (progress meter, etc.) that row happens to render.
 
 import { describe, it, expect, vi } from "vitest"
-import { render, within } from "@testing-library/react"
+import { render, within, fireEvent } from "@testing-library/react"
 import { FileRow } from "./FileRow"
 import { I18nProvider } from "@/lib/i18n/I18nProvider"
 import type { FileReference } from "@/lib/parsers/types"
@@ -93,5 +93,55 @@ describe("FileRow — AQU-341 truncation consistency", () => {
     const { container } = renderRow()
     // The accessible name is the full string even though it renders truncated.
     expect(nameLabel(container).textContent).toBe(LONG_NAME)
+  })
+})
+
+describe("FileRow — file actions menu", () => {
+  it("opens the row's own menu from the ⋯ button, however it was activated", () => {
+    const { getByRole } = renderRow({ onDelete: vi.fn() })
+    const trigger = getByRole("button", { name: "File actions" })
+
+    expect(trigger).toHaveAttribute("aria-haspopup", "menu")
+
+    // A keyboard activation reports no pointer coordinates. The button used to
+    // dispatch a synthetic `contextmenu` at those coordinates, which anchored the
+    // menu to the top-left corner of the viewport; the popup is now the button's
+    // own, so it anchors to the button either way.
+    fireEvent.click(trigger, { detail: 0, clientX: 0, clientY: 0 })
+
+    const popup = document.querySelector('[data-slot="dropdown-menu-content"]')
+    expect(popup).not.toBeNull()
+    expect(trigger.getAttribute("aria-controls")).toBe(popup!.id)
+    expect(getByRole("menuitem", { name: /rename/i })).toBeInTheDocument()
+  })
+
+  it("keeps a menu press from also opening the file", () => {
+    const onSelect = vi.fn()
+    const onStartRename = vi.fn()
+    const { getByRole } = renderRow({ onSelect, onStartRename })
+
+    fireEvent.click(getByRole("button", { name: "File actions" }))
+    fireEvent.click(getByRole("menuitem", { name: /rename/i }))
+
+    expect(onStartRename).toHaveBeenCalledTimes(1)
+    // Clicking the row opens the file, and React bubbles a portalled popup's
+    // events along the React tree — so the popup lives outside the row.
+    expect(onSelect).not.toHaveBeenCalled()
+  })
+
+  it("opens Export and Assign work from the ⋯ menu without opening the file", () => {
+    const onSelect = vi.fn()
+    const onExport = vi.fn()
+    const onAssignWork = vi.fn()
+    const { getByRole } = renderRow({ onSelect, onExport, onAssignWork })
+
+    fireEvent.click(getByRole("button", { name: "File actions" }))
+    fireEvent.click(getByRole("menuitem", { name: /^Export$/ }))
+    expect(onExport).toHaveBeenCalledTimes(1)
+
+    fireEvent.click(getByRole("button", { name: "File actions" }))
+    fireEvent.click(getByRole("menuitem", { name: /assign work/i }))
+    expect(onAssignWork).toHaveBeenCalledTimes(1)
+    expect(onSelect).not.toHaveBeenCalled()
   })
 })

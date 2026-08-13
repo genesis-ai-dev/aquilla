@@ -254,3 +254,76 @@ describe("stageEvents — comment.create defaults", () => {
     expect(result.modelVerdictBlock).toContain("1 of 2 staged")
   })
 })
+
+// AQU-846 — the user approved five drafts believing they landed in the file
+// they had open; they landed in another one. The proposal has to SAY where it
+// is going, so every staged event carries its file's display name.
+describe("stageEvents — destination file naming (AQU-846)", () => {
+  const OTHER_FILE = "77777777-7777-4777-8777-777777777777"
+  const OTHER_CELL = "88888888-8888-4888-8888-888888888888"
+
+  async function seedFileRow(id: string, name: string, bookCode: string) {
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO files (id, project_id, name, book_code, event_id) VALUES (?, ?, ?, ?, ?)`,
+    )
+      .bind(id, PROJECT, name, bookCode, crypto.randomUUID())
+      .run()
+  }
+
+  it("stamps every staged event with its file's display name", async () => {
+    await seedFileRow(FILE, "Genesis.usfm", "GEN")
+    const result = await stageEvents(
+      env.AQUILLA_PG,
+      [{ kind: "target.cell.commit", fileId: FILE, cellId: CELL, payload: { value: "En el principio" } }],
+      ctx(),
+    )
+    expect(result.proposal).not.toBeNull()
+    expect(result.proposal!.events[0].display.fileName).toBe("Genesis.usfm")
+  })
+
+  it("names the destination file in the summary the user reads before approving", async () => {
+    await seedFileRow(FILE, "Genesis.usfm", "GEN")
+    const result = await stageEvents(
+      env.AQUILLA_PG,
+      [{ kind: "target.cell.commit", fileId: FILE, cellId: CELL, payload: { value: "x" } }],
+      ctx(),
+    )
+    expect(result.proposal!.summary).toContain("Genesis.usfm")
+  })
+
+  it("names EACH file when a batch spans more than one", async () => {
+    await seedFileRow(FILE, "Genesis.usfm", "GEN")
+    await seedFileRow(OTHER_FILE, "Mark.usfm", "MRK")
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO cells (project_id, file_id, cell_id, side, value, canonical_ref, event_id, last_edit_at)
+       VALUES (?, ?, ?, 'source', 'And he began', 'MRK 4:1', ?, 0)`,
+    )
+      .bind(PROJECT, OTHER_FILE, OTHER_CELL, crypto.randomUUID())
+      .run()
+
+    const result = await stageEvents(
+      env.AQUILLA_PG,
+      [
+        { kind: "target.cell.commit", fileId: FILE, cellId: CELL, payload: { value: "a" } },
+        { kind: "target.cell.commit", fileId: OTHER_FILE, cellId: OTHER_CELL, payload: { value: "b" } },
+      ],
+      ctx(),
+    )
+    expect(result.proposal!.events.map((e) => e.display.fileName)).toEqual([
+      "Genesis.usfm",
+      "Mark.usfm",
+    ])
+    expect(result.proposal!.summary).toContain("Genesis.usfm")
+    expect(result.proposal!.summary).toContain("Mark.usfm")
+  })
+
+  it("still stages when the file row is missing — naming is cosmetic", async () => {
+    const result = await stageEvents(
+      env.AQUILLA_PG,
+      [{ kind: "target.cell.commit", fileId: FILE, cellId: CELL, payload: { value: "x" } }],
+      ctx(),
+    )
+    expect(result.proposal).not.toBeNull()
+    expect(result.proposal!.events[0].display.fileName).toBeUndefined()
+  })
+})

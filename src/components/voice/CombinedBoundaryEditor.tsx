@@ -180,7 +180,7 @@ export function CombinedBoundaryEditor(props: CombinedBoundaryEditorProps) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal="true">
-      <div className="w-full max-w-2xl rounded-2xl border border-border bg-card p-5">
+      <div className="w-full max-w-2xl rounded-lg border border-border bg-card p-5">
         <div className="mb-1 flex items-center justify-between">
           <h2 className="text-sm font-semibold">{t("audio.boundaryEditor.title")}</h2>
           <Button
@@ -284,8 +284,8 @@ export function CombinedBoundaryEditor(props: CombinedBoundaryEditorProps) {
         </ul>
 
         <div className="mt-4 flex items-center justify-end gap-2">
-          <Button type="button" variant="ghost" size="sm" onClick={onClose} disabled={saving}>{t("common.cancel")}</Button>
-          <Button type="button" size="sm" onClick={() => void onSave()} disabled={saving || !cuts}>
+          <Button type="button" variant="ghost" onClick={onClose} disabled={saving}>{t("common.cancel")}</Button>
+          <Button type="button" onClick={() => void onSave()} disabled={saving || !cuts}>
             {saving ? <Spinner className="mr-1 size-3.5" /> : null}
             {t("audio.boundaryEditor.saveSplits")}
           </Button>

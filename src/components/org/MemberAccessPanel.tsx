@@ -6,6 +6,7 @@ import { getMemberAccess, type MemberEffectiveAccess, type ProjectAccessBreakdow
 import { removeProjectMember } from "@/lib/frontier/members"
 import { ROLE } from "@/lib/frontier/roles"
 import { RoleLevelLabel } from "@/components/RoleLabel"
+import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { denialMessage } from "@/lib/permissions/denial"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -95,7 +96,7 @@ export function MemberAccessRow({
         ) : (
           <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground" />
         )}
-        <span className="font-medium">{username}</span>
+        <UsernameWithAvatar username={username} size="xs" nameClassName="text-xs" />
         {data && (
           <span className="text-[10px] text-muted-foreground">
             {data.projects.length > 0
@@ -108,9 +109,8 @@ export function MemberAccessRow({
       {open && (
         <div className="ml-4 mt-1 space-y-2">
           {loading && (
-            <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
+            <span className="inline-flex items-center text-muted-foreground">
               <Spinner className="size-3" />
-              Loading…
             </span>
           )}
           {error && <p className="text-[10px] text-destructive">{error}</p>}

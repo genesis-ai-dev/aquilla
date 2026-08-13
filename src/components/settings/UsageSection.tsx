@@ -9,6 +9,7 @@
 import { useEffect, useState } from "react"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { SettingsGroup, SettingsRow } from "@/components/ui/page"
+import { Spinner } from "@/components/ui/spinner"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { getMyUsage, type MyUsage } from "@/lib/sync/usage"
 
@@ -103,7 +104,9 @@ export function UsageSection() {
     <SettingsGroup label="This week">
       <SettingsRow label="Activity" block>
         {loading ? (
-          <p className="text-xs text-muted-foreground">Loading…</p>
+          <div className="flex items-center text-muted-foreground">
+            <Spinner className="size-3.5" />
+          </div>
         ) : !hasAnyData ? (
           <p className="text-xs text-muted-foreground">No usage recorded yet.</p>
         ) : (

@@ -37,14 +37,25 @@ export function resolveDeepLinkLaneFromSearchParams(
   )
 }
 
-/** A proposed Autopilot draft always opens the editor's Project-default lane. */
+/** Open the editor at a proposed Autopilot draft in the given language lane. */
+export function draftReviewHref(
+  projectId: string,
+  fileId: string,
+  cellId?: string | null,
+  targetLang = "",
+): string {
+  const lane = `lane=${encodeURIComponent(targetLang)}`
+  const query = cellId
+    ? `cellId=${encodeURIComponent(cellId)}&${lane}`
+    : lane
+  return `/project/${encodeURIComponent(projectId)}/editor/file/${encodeURIComponent(fileId)}?${query}`
+}
+
+/** @deprecated Use draftReviewHref. Kept for existing default-lane callers. */
 export function defaultLaneDraftReviewHref(
   projectId: string,
   fileId: string,
   cellId?: string | null,
 ): string {
-  const query = cellId
-    ? `cellId=${encodeURIComponent(cellId)}&lane=`
-    : "lane="
-  return `/project/${encodeURIComponent(projectId)}/editor/file/${encodeURIComponent(fileId)}?${query}`
+  return draftReviewHref(projectId, fileId, cellId, "")
 }

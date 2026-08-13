@@ -56,6 +56,10 @@ function TableRow({ className, ...props }: React.ComponentProps<"tr">) {
       data-slot="table-row"
       className={cn(
         "border-b hover:bg-muted/50 has-aria-expanded:bg-muted/50 data-[state=selected]:bg-muted",
+        // Ghost buttons sit on the row hover wash — keep them chrome-free,
+        // except row ⋯ actions which keep their hover/open background.
+        "[&_[data-slot=button][data-variant=ghost]:not([data-row-actions])]:hover:bg-transparent",
+        "[&_[data-slot=button][data-variant=ghost]:not([data-row-actions])]:aria-expanded:bg-transparent",
         className
       )}
       {...props}
@@ -68,7 +72,7 @@ function TableHead({ className, ...props }: React.ComponentProps<"th">) {
     <th
       data-slot="table-head"
       className={cn(
-        "h-10 px-2 text-left align-middle font-medium whitespace-nowrap text-foreground [&:has([role=checkbox])]:pr-0",
+        "h-10 px-2 text-left align-middle font-medium whitespace-nowrap text-muted-foreground [&:has([role=checkbox])]:pr-0",
         className
       )}
       {...props}

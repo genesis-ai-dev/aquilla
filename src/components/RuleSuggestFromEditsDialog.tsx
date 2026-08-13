@@ -142,7 +142,7 @@ export function RuleSuggestFromEditsDialog({
     try {
       // AQU-455: this loop calls onAdd (= useRules.addRule) once per accepted
       // suggestion, and correctness now depends on addRule fully awaiting its
-      // shared-settings (D1 project_settings) write before resolving — see
+      // shared-settings (Postgres project_settings) write before resolving — see
       // useRules.ts addRule for the fix. Previously addRule fired that write
       // fire-and-forget, so N concurrent in-flight PATCH requests could
       // resolve out of order and silently drop all but the last accepted
@@ -207,7 +207,6 @@ export function RuleSuggestFromEditsDialog({
             render={
               <Button
                 variant="outline"
-                size="sm"
                 disabled={!isConfigured}
               />
             }

@@ -2,14 +2,25 @@ import { useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { type ColumnDef } from "@tanstack/react-table"
 import { FolderOpen } from "lucide-react"
-import { Button } from "@/components/ui/button"
 import { DataTable, DataTableColumnHeader } from "@/components/ui/data-table"
+import { missingLast, SORT_MISSING_LAST } from "@/components/ui/data-table-missing"
 import { EmptyState } from "@/components/ui/empty"
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { ProjectStatus } from "@/components/ProjectStatus"
 import { ValidatedBar } from "./ValidatedBar"
 import { attentionReasons, attentionScore, validatedFraction } from "@/lib/admin/insights"
 import type { AdminProject } from "@/lib/frontier/admin"
 import { DateTooltip } from "@/components/ui/date-tooltip"
+import { OrgWithAvatar } from "@/components/OrgWithAvatar"
+import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
+import { ADMIN_TABLE_PANEL_CLASS } from "@/components/admin/shared"
 
 type Lens = "all" | "needs-attention" | "active" | "archived"
 const LENSES: { value: Lens; label: string }[] = [
@@ -59,15 +70,31 @@ export function AdminProjectsSection({ projects }: { projects: AdminProject[] })
       },
       {
         id: "org",
-        accessorFn: (p) => (p.orgName ?? "").toLowerCase(),
+        accessorFn: (p) => missingLast((p.orgName ?? "").toLowerCase()),
+        sortUndefined: SORT_MISSING_LAST,
         header: ({ column }) => <DataTableColumnHeader column={column} title="Org" />,
-        cell: ({ row }) => row.original.orgName ?? "—",
+        cell: ({ row }) =>
+          row.original.orgName ? (
+            <OrgWithAvatar name={row.original.orgName} size="xs" nameClassName="font-normal" />
+          ) : (
+            "—"
+          ),
       },
       {
         id: "creator",
-        accessorFn: (p) => (p.creatorUsername ?? "").toLowerCase(),
+        accessorFn: (p) => missingLast((p.creatorUsername ?? "").toLowerCase()),
+        sortUndefined: SORT_MISSING_LAST,
         header: ({ column }) => <DataTableColumnHeader column={column} title="Creator" />,
-        cell: ({ row }) => row.original.creatorUsername ?? "—",
+        cell: ({ row }) =>
+          row.original.creatorUsername ? (
+            <UsernameWithAvatar
+              username={row.original.creatorUsername}
+              size="xs"
+              nameClassName="font-normal"
+            />
+          ) : (
+            "—"
+          ),
       },
       {
         id: "validated",
@@ -86,16 +113,9 @@ export function AdminProjectsSection({ projects }: { projects: AdminProject[] })
       },
       {
         id: "edited",
-        accessorFn: (p) => p.lastEditAt ?? null,
+        accessorFn: (p) => missingLast(p.lastEditAt ?? undefined),
+        sortUndefined: SORT_MISSING_LAST,
         header: ({ column }) => <DataTableColumnHeader column={column} title="Last edit" />,
-        sortingFn: (a, b) => {
-          const av = a.original.lastEditAt
-          const bv = b.original.lastEditAt
-          if (av == null && bv == null) return 0
-          if (av == null) return 1
-          if (bv == null) return -1
-          return av < bv ? -1 : av > bv ? 1 : 0
-        },
         cell: ({ row }) => (
           <DateTooltip
             value={row.original.lastEditAt}
@@ -111,7 +131,11 @@ export function AdminProjectsSection({ projects }: { projects: AdminProject[] })
         cell: ({ row }) => {
           const p = row.original
           return (
-            <ProjectStatus archived={p.archived} reasons={attentionReasons(p, now)} />
+            <ProjectStatus
+              archived={p.archived}
+              reasons={attentionReasons(p, now)}
+              deadlineAt={p.deadlineAt}
+            />
           )
         },
       },
@@ -145,64 +169,75 @@ export function AdminProjectsSection({ projects }: { projects: AdminProject[] })
   }, [lens])
 
   const emptyState = (
-    <div
-      className="w-full overflow-hidden rounded-md border border-dashed"
-      data-testid="admin-projects-empty"
-    >
-      <EmptyState
-        variant="inline"
-        className="flex-none py-12"
-        icon={FolderOpen}
-        title={emptyCopy.title}
-        description={emptyCopy.description}
-      />
-    </div>
+    <EmptyState
+      variant="inline"
+      className="flex-none py-12"
+      icon={FolderOpen}
+      title={emptyCopy.title}
+      description={emptyCopy.description}
+    />
+  )
+
+  const initialSorting = useMemo(
+    () =>
+      lens === "needs-attention"
+        ? [{ id: "status", desc: true }]
+        : [{ id: "name", desc: false }],
+    [lens],
   )
 
   return (
-    <div className="flex flex-col gap-3">
-      <div className="flex flex-wrap items-center gap-1">
-        {LENSES.map((l) => (
-          <Button
-            key={l.value}
-            type="button"
-            size="xs"
-            variant={lens === l.value ? "default" : "secondary"}
-            onClick={() => setLens(l.value)}
+    <DataTable
+      // Remount when the lens changes so sort resets to the lens default
+      // (status urgency for needs-attention; name A→Z otherwise).
+      key={lens}
+      columns={columns}
+      data={data}
+      getRowId={(p) => p.id}
+      onRowClick={(p) => {
+        if (!p.archived) navigate(`/projects/${p.id}`)
+      }}
+      initialSorting={initialSorting}
+      searchPlaceholder="Search projects…"
+      globalFilterFn={(row, _columnId, filterValue) => {
+        const q = String(filterValue).trim().toLowerCase()
+        if (!q) return true
+        const p = row.original
+        return `${p.name} ${p.orgName ?? ""} ${p.creatorUsername ?? ""}`
+          .toLowerCase()
+          .includes(q)
+      }}
+      toolbar={(table) => (
+        <>
+          <Select
+            items={LENSES}
+            value={lens}
+            onValueChange={(v) => setLens((v as Lens) ?? "all")}
           >
-            {l.label}
-          </Button>
-        ))}
-      </div>
-
-      <DataTable
-        columns={columns}
-        data={data}
-        getRowId={(p) => p.id}
-        onRowClick={(p) => {
-          if (!p.archived) navigate(`/projects/${p.id}`)
-        }}
-        initialSorting={[{ id: "status", desc: true }]}
-        searchPlaceholder="Search projects…"
-        globalFilterFn={(row, _columnId, filterValue) => {
-          const q = String(filterValue).trim().toLowerCase()
-          if (!q) return true
-          const p = row.original
-          return `${p.name} ${p.orgName ?? ""} ${p.creatorUsername ?? ""}`
-            .toLowerCase()
-            .includes(q)
-        }}
-        toolbar={(table) => (
+            <SelectTrigger className="bg-card" aria-label="Filter projects">
+              <SelectValue className="flex-none" />
+            </SelectTrigger>
+            <SelectContent align="start">
+              <SelectGroup>
+                {LENSES.map((l) => (
+                  <SelectItem key={l.value} value={l.value}>
+                    {l.label}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
           <span className="ml-auto text-xs tabular-nums text-muted-foreground">
             {table.getFilteredRowModel().rows.length === data.length
               ? `${data.length}`
               : `${table.getFilteredRowModel().rows.length} of ${data.length}`}
           </span>
-        )}
-        emptyState={emptyState}
-        testId="admin-projects-table"
-        dense
-      />
-    </div>
+        </>
+      )}
+      emptyState={emptyState}
+      testId="admin-projects-table"
+      className={ADMIN_TABLE_PANEL_CLASS}
+      dense
+    />
   )
 }

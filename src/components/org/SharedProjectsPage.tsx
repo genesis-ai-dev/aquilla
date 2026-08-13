@@ -4,6 +4,7 @@ import { Share2 } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { EmptyState } from "@/components/ui/page"
 import { Badge } from "@/components/ui/badge"
+import { Spinner } from "@/components/ui/spinner"
 import { RoleLabel } from "@/components/RoleLabel"
 import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
@@ -101,7 +102,9 @@ export function SharedProjectsPage() {
             </p>
           </div>
           {loading ? (
-            <p className="text-sm text-muted-foreground">Loading&hellip;</p>
+            <div className="flex items-center text-muted-foreground">
+              <Spinner className="size-4" />
+            </div>
           ) : sharedProjects.length === 0 ? (
             <EmptyState
               icon={Share2}
@@ -109,7 +112,7 @@ export function SharedProjectsPage() {
               description="When someone invites you to a project in another organization, it shows up here."
             />
           ) : (
-            <section data-testid="shared-with-you" className="rounded-2xl border divide-y">
+            <section data-testid="shared-with-you" className="rounded-lg border divide-y">
               {sharedProjects.map((p) => {
                 const orgLabel = p.orgName ?? (p.orgId != null ? `Org #${p.orgId}` : null)
                 // AQU-696: new until the user has opened it (recorded on

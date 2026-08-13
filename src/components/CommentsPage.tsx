@@ -8,7 +8,7 @@
 import { useMemo, useState, useRef, useEffect } from "react"
 import { useNavigate, useParams } from "react-router-dom"
 import {
-  ArrowLeft, MessageCircle, CheckCircle, ChevronDown, ChevronRight,
+  MessageCircle, CheckCircle, ChevronDown, ChevronRight,
   AlertCircle, Search, SlidersHorizontal, ArrowUpRight,
   MoreHorizontal, Pencil, Trash2,
 } from "lucide-react"
@@ -26,6 +26,7 @@ import {
   InputGroupInput,
 } from "@/components/ui/input-group"
 import { cn } from "@/lib/utils"
+import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { useComments } from "@/hooks/useComments"
 import type { CommentRecord } from "@/lib/sync/comments-read-types"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
@@ -359,7 +360,11 @@ function CommentBubble({ comment, currentUsername, onEdit, onDelete }: CommentBu
   return (
     <div className={cn("flex flex-col gap-0.5", comment.parentCommentId ? "pl-6" : "")}>
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
-        <span className="font-medium text-foreground">{comment.authorLabel ?? comment.authorId}</span>
+        <UsernameWithAvatar
+          username={comment.authorLabel ?? comment.authorId}
+          size="xs"
+          nameClassName="text-xs font-medium text-foreground"
+        />
         <span>{formatTs(comment.createdAt)}</span>
         {comment.updatedAt !== comment.createdAt && (
           <span className="italic">{t("comments.bubble.edited")}</span>
@@ -510,10 +515,9 @@ function CommentThreadCard({
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="ghost" size="sm" onClick={cancelDelete}>{t("common.cancel")}</Button>
+            <Button variant="ghost" onClick={cancelDelete}>{t("common.cancel")}</Button>
             <Button
               variant="destructive"
-              size="sm"
               onClick={confirmDelete}
             >
               {t("common.delete")}
@@ -547,7 +551,6 @@ function CommentThreadCard({
                 return exists ? (
                   <AppTooltip content={t("comments.goToCell")}>
                     <Button
-                      size="sm"
                       variant="ghost"
                       className="h-6 px-2 text-xs"
                       onClick={() => onNavigate(root)}
@@ -559,7 +562,6 @@ function CommentThreadCard({
                 ) : (
                   <AppTooltip content={t("comments.fileDeletedTooltip")}>
                     <Button
-                      size="sm"
                       variant="ghost"
                       className="h-6 px-2 text-xs cursor-not-allowed opacity-50"
                       disabled
@@ -571,7 +573,6 @@ function CommentThreadCard({
                 )
               })()}
               <Button
-                size="sm"
                 variant="ghost"
                 className="h-6 px-2 text-xs"
                 onClick={() => onResolve(root.commentId, !root.resolved)}
@@ -612,7 +613,6 @@ function CommentThreadCard({
                       />
                       <div className="flex gap-1.5">
                         <Button
-                          size="sm"
                           className="h-6 px-2 text-xs"
                           onClick={saveEdit}
                           disabled={isSavingEdit || !editBody.trim()}
@@ -620,7 +620,6 @@ function CommentThreadCard({
                           {isSavingEdit ? <Spinner className="size-3" /> : t("common.save")}
                         </Button>
                         <Button
-                          size="sm"
                           variant="ghost"
                           className="h-6 px-2 text-xs"
                           onClick={cancelEdit}
@@ -694,7 +693,6 @@ function FilterControls({ filter, onChange, fileOptions, authorOptions }: Filter
           />
         </InputGroup>
         <Button
-          size="sm"
           variant={expanded ? "secondary" : "outline"}
           className="h-8 gap-1.5 text-xs"
           onClick={() => setExpanded((v) => !v)}
@@ -749,7 +747,7 @@ function FilterControls({ filter, onChange, fileOptions, authorOptions }: Filter
                 value={filter.fileId}
                 onValueChange={(v) => onChange({ ...filter, fileId: v ?? "" })}
               >
-                <SelectTrigger size="sm" className="max-w-[180px] text-xs">
+                <SelectTrigger size="sm" className="text-xs">
                   <SelectValue className="truncate" />
                 </SelectTrigger>
                 <SelectContent>
@@ -820,7 +818,6 @@ function FilterControls({ filter, onChange, fileOptions, authorOptions }: Filter
 
           {/* Reset */}
           <Button
-            size="sm"
             variant="ghost"
             className="h-6 px-2 text-xs text-muted-foreground"
             onClick={() => onChange(DEFAULT_FILTER)}
@@ -935,15 +932,6 @@ export function CommentsPage() {
 
   return (
     <div className="mx-auto max-w-3xl space-y-6 p-8">
-      <div className="flex items-center justify-between">
-        <Button variant="ghost" size="sm" onClick={() => navigate(`/project/${projectId}/editor`)}>
-          <ArrowLeft className="mr-2 h-4 w-4" /> {t("comments.backToProject")}
-        </Button>
-        <Button variant="outline" size="sm" onClick={refresh} disabled={isLoading}>
-          {isLoading ? <Spinner className="size-3.5" /> : t("common.refresh")}
-        </Button>
-      </div>
-
       <div className="flex items-center gap-2">
         <MessageCircle className="h-5 w-5 text-muted-foreground" />
         <h1 className="text-xl font-semibold">
@@ -963,6 +951,10 @@ export function CommentsPage() {
               : t("comments.filterCount.one", { count: activeFilterCount })}
           </Badge>
         )}
+        <div className="flex-1" />
+        <Button variant="outline" onClick={refresh} disabled={isLoading}>
+          {isLoading ? <Spinner className="size-3.5" /> : t("common.refresh")}
+        </Button>
       </div>
 
       <FilterControls
@@ -1004,7 +996,7 @@ export function CommentsPage() {
           <CardContent className="flex flex-col items-center gap-3 py-8 text-center">
             <Search className="h-8 w-8 text-muted-foreground" />
             <div className="text-base font-medium">{t("comments.noMatch.title")}</div>
-            <Button size="sm" variant="outline" onClick={() => setFilter(DEFAULT_FILTER)}>
+            <Button variant="outline" onClick={() => setFilter(DEFAULT_FILTER)}>
               {t("comments.noMatch.clear")}
             </Button>
           </CardContent>

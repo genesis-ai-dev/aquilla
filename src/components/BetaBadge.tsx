@@ -9,7 +9,7 @@ import {
 } from "@/components/ui/dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { MessageCircleIcon } from "lucide-react"
+import { Discord } from "@/components/icons/Discord"
 import { useT } from "@/lib/i18n/I18nProvider"
 
 const BETA_ENABLED = import.meta.env.VITE_BETA_FLAG === "1"
@@ -22,7 +22,7 @@ export function BetaBadge() {
     <Dialog>
       <DialogTrigger
         render={
-          <button type="button">
+          <button type="button" className="inline-flex items-center">
             <Badge>{t("nav.beta.badge")}</Badge>
           </button>
         }
@@ -43,7 +43,7 @@ export function BetaBadge() {
             nativeButton={false}
             render={<a href="https://discord.gg/T2EndwXe4W" target="_blank" rel="noopener noreferrer" />}
           >
-            <MessageCircleIcon className="mr-1.5 h-4 w-4" />
+            <Discord className="mr-1.5 h-4 w-4" />
             {t("nav.beta.joinDiscord")}
           </Button>
         </DialogFooter>

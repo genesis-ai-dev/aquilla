@@ -197,7 +197,6 @@ export const WorkingSetPanel = forwardRef<WorkingSetPanelHandle, WorkingSetPanel
             <AppTooltip content="Accept every pending draft, with your edits (Shift+A)">
               <Button
                 type="button"
-                size="sm"
                 className="ml-auto h-6 text-[11px]"
                 disabled={busy}
                 onClick={() => void onAcceptAll(valueFor)}
@@ -337,6 +336,15 @@ const WorkingSetRowView = memo(function WorkingSetRowView({
             {row.ref ?? "·"}
           </span>
         </AppTooltip>
+        {/* AQU-846: the destination file, so an accept never lands somewhere
+            the user didn't expect. */}
+        {row.fileName && (
+          <AppTooltip content={`In ${row.fileName}`}>
+            <span className="max-w-full truncate text-[10px] text-muted-foreground">
+              {row.fileName}
+            </span>
+          </AppTooltip>
+        )}
         {stateLabel && <span className={cn("text-[10px] font-medium", stateClass)}>{stateLabel}</span>}
         {row.fileId && onJumpToCell && (
           <AppTooltip content="Open in editor">
@@ -421,7 +429,6 @@ const WorkingSetRowView = memo(function WorkingSetRowView({
                 <Button
                   type="button"
                   variant="outline"
-                  size="sm"
                   className="h-5 px-1.5 text-[10px]"
                   disabled={busy || !onAccept}
                   onClick={onAccept}
@@ -433,7 +440,6 @@ const WorkingSetRowView = memo(function WorkingSetRowView({
                 <Button
                   type="button"
                   variant="ghost"
-                  size="sm"
                   className="h-5 px-1.5 text-[10px] text-muted-foreground"
                   disabled={!onReject}
                   onClick={onReject}

@@ -6,12 +6,15 @@
 # sync-worker compromise cannot forge Frontier access tokens.
 SYNC_SECRET_KEY="test-sync-secret-key"
 
+# OPS-2: dedicated bearer for the operator-only routes (/admin/files/*,
+# DELETE /audio/*). Kept separate from SYNC_SECRET_KEY so routine ops calls
+# never put the token-signing key on a command line. When unset, those routes
+# fall back to SYNC_SECRET_KEY; when set, only this value is accepted. Set the
+# SAME value in auth-worker's .dev.vars — it calls /admin/files/* for R2
+# cleanup, and a one-sided value 401s that cleanup silently.
+ADMIN_SECRET="test-admin-secret"
+
 # Dev bypass. Lets clients connect without a valid sync-token JWT. Safe for
 # local dev while the client isn't yet fetching /sync-token. DO NOT set this
 # in production — prod default (unset) enforces strict auth.
 ALLOW_UNAUTHENTICATED="true"
-
-# Dedicated bearer for /admin/* routes. When unset, those routes fall back to
-# accepting SYNC_SECRET_KEY (see sync-worker/src/admin.ts). Set the SAME value
-# in auth-worker's .dev.vars — it calls /admin/files/* for R2 cleanup.
-ADMIN_SECRET="test-admin-secret"

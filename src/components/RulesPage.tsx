@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo } from "react"
 import { useParams, useNavigate, useSearchParams } from "react-router-dom"
-import { ArrowLeft, AlertTriangle, AlertCircle, Trash2, Wand2, ChevronDown, ChevronUp, BookOpen } from "lucide-react"
+import { AlertTriangle, AlertCircle, Trash2, Wand2, ChevronDown, ChevronUp, BookOpen } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { LoadingPanel } from "@/components/ui/loading-overlay"
 import { Input } from "@/components/ui/input"
@@ -188,12 +188,9 @@ export function RulesPage() {
         />
       )}
       <header className="flex items-center gap-4 border-b px-4 py-2">
-        <Button variant="ghost" size="sm" onClick={() => navigate(`/project/${id}/editor`)}>
-          <ArrowLeft className="mr-1 h-4 w-4" /> Back to Editor
-        </Button>
         <h2 className="font-semibold">Translation Rules</h2>
         <div className="flex-1" />
-        <Button variant="outline" size="sm" onClick={() => navigate(`/project/${id}/terminology`)}>
+        <Button variant="outline" onClick={() => navigate(`/project/${id}/terminology`)}>
           <BookOpen className="mr-1 h-3.5 w-3.5" />
           Terminology
         </Button>
@@ -265,12 +262,12 @@ export function RulesPage() {
                           {rule.description && <p className="mt-0.5 text-xs text-muted-foreground truncate">{rule.description}</p>}
                         </div>
                         <AppTooltip content="Opens the editor with this rule's drawer">
-                          <Button size="sm" variant="outline" onClick={() => navigate(`/project/${id}/editor?openRule=${rule.id}`)}>
+                          <Button variant="outline" onClick={() => navigate(`/project/${id}/editor?openRule=${rule.id}`)}>
                             <Wand2 className="mr-1 h-3.5 w-3.5" />
                             Try to fix all
                           </Button>
                         </AppTooltip>
-                        <Button variant="ghost" size="sm" onClick={() => toggleExpanded(rule.id)}>
+                        <Button variant="ghost" onClick={() => toggleExpanded(rule.id)}>
                           {expanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                         </Button>
                         <label className="flex items-center gap-1 text-xs">
@@ -280,7 +277,7 @@ export function RulesPage() {
                           <span className="text-muted-foreground">Enabled</span>
                         </label>
                         <AppTooltip content={manageRulesDeniedReason ?? undefined} disabled={canManageRules || !manageRulesDeniedReason}>
-                          <Button variant="ghost" size="sm" aria-label={`Delete rule ${rule.name}`}
+                          <Button variant="ghost" aria-label={`Delete rule ${rule.name}`}
                             disabled={!canManageRules}
                             onClick={() => setPendingDeleteRuleId(rule.id)}>
                             <Trash2 className="h-3.5 w-3.5 text-muted-foreground" />
@@ -333,10 +330,10 @@ function AutofixEditor({ rule, onUpdate, disabled = false }: { rule: Translation
         <Input placeholder="Flags (e.g. gi)" value={flags} onChange={(e) => setFlags(e.target.value)} disabled={disabled} />
       </div>
       <div className="flex gap-2">
-        <Button size="sm" disabled={disabled} onClick={() => onUpdate(pattern ? { kind: "regex-replace", pattern, replacement, flags } : undefined)}>
+        <Button disabled={disabled} onClick={() => onUpdate(pattern ? { kind: "regex-replace", pattern, replacement, flags } : undefined)}>
           Save autofix
         </Button>
-        <Button size="sm" variant="ghost" disabled={disabled} onClick={() => onUpdate(undefined)}>Clear</Button>
+        <Button variant="ghost" disabled={disabled} onClick={() => onUpdate(undefined)}>Clear</Button>
       </div>
     </div>
   )

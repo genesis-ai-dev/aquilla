@@ -67,7 +67,15 @@ interface Props {
   onClose: () => void
 }
 
-type Phase = "idle" | "counting" | "recording" | "preview" | "uploading" | "saved" | "error"
+// There is deliberately NO "saved" phase (Sam, 2026-08-13). Saving a take is
+// not an end state — the overwhelmingly normal next move is another take on the
+// same line — so a take that lands returns the panel to `idle` with every entry
+// point live, and the confirmation rides alongside as a note (`savedNote`)
+// instead of becoming a mode. The state it replaced disabled Record, hid
+// Generate and Upload, ignored Space, and had no transition out of itself: with
+// auto-advance switched off it was a genuine dead end, escapable only by
+// navigating to another line or closing the dialog.
+type Phase = "idle" | "counting" | "recording" | "preview" | "uploading" | "error"
 
 export function AudioRecordingModal({
   open, project, cells, activeCellId, username,
@@ -92,6 +100,13 @@ export function AudioRecordingModal({
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const previewAudioRef = useRef<HTMLAudioElement | null>(null)
   const consumedBlobRef = useRef<Blob | null>(null)
+  // The acknowledgement that replaced the "saved" screen: the take's own name,
+  // shown under the duration bar for a couple of seconds and then gone. The
+  // DURABLE record of the save is the takes strip a few pixels below — the
+  // counter ticks up and the take is there to play — so this only has to mark
+  // the moment, not stand in for it.
+  const [savedNote, setSavedNote] = useState<string | null>(null)
+  const savedNoteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   // AQU-646 stage 5: takes are captured at WAV quality by default, with the
   // historic webm/opus as the opt-out. Read REACTIVELY here — for the header
   // pill's label and the near-limit copy only. The recorder hook reads the same
@@ -304,6 +319,10 @@ export function AudioRecordingModal({
     setErrorMessage(null)
     if (previewUrl) { URL.revokeObjectURL(previewUrl); setPreviewUrl(null) }
     consumedBlobRef.current = null
+    // The note names a take on the line you just left; carrying it over would
+    // credit this line with a take it does not have.
+    if (savedNoteTimerRef.current) { clearTimeout(savedNoteTimerRef.current); savedNoteTimerRef.current = null }
+    setSavedNote(null)
     // …and put the picture on the new line's first frame.
     setArmNonce((n) => n + 1)
     // The takes disclosure describes the line you were on. Carrying it open to
@@ -337,6 +356,8 @@ export function AudioRecordingModal({
     consumedBlobRef.current = null
     setPhase("idle")
     setErrorMessage(null)
+    if (savedNoteTimerRef.current) { clearTimeout(savedNoteTimerRef.current); savedNoteTimerRef.current = null }
+    setSavedNote(null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
 
@@ -359,7 +380,20 @@ export function AudioRecordingModal({
     }
   }, [recorder.state, phase])
 
+  // Acting on this line OVERRIDES a pending auto-advance. Saving now leaves you
+  // here rather than parking you in a dead end, so the 450ms hop and a fresh
+  // Record or Upload press can genuinely collide — and reaching for a control is
+  // the less ambiguous statement of the two about which line you meant. Without
+  // this, a quick second take counts down and is then yanked to the next line
+  // mid-countdown, and a file picked in that window attaches to the wrong line.
+  const stayOnThisLine = useCallback(() => {
+    if (advanceTimerRef.current) { clearTimeout(advanceTimerRef.current); advanceTimerRef.current = null }
+    if (savedNoteTimerRef.current) { clearTimeout(savedNoteTimerRef.current); savedNoteTimerRef.current = null }
+    setSavedNote(null)
+  }, [])
+
   const startFlow = useCallback(() => {
+    stayOnThisLine()
     // Offline gates FIRST — when both fail it is the truer cause ("sign in"
     // is unactionable without a connection anyway).
     if (!online) {
@@ -399,7 +433,7 @@ export function AudioRecordingModal({
         },
       })
     })
-  }, [beepEnabled, countdown, recorder, session?.jwt, online])
+  }, [beepEnabled, countdown, recorder, session?.jwt, online, stayOnThisLine])
 
   const stopRecording = useCallback(() => {
     recorder.stop()
@@ -413,6 +447,25 @@ export function AudioRecordingModal({
     // Immediately start the next take — user already signalled intent.
     setTimeout(startFlow, 0)
   }, [recorder, previewUrl, startFlow])
+
+  // Hand the line back exactly as it was before the take that just landed:
+  // Record armed, Generate and Upload beside it, the window bar showing the
+  // target again. The stopped blob has to go with it — leaving it in the
+  // recorder would let the preview effect re-adopt it and drop the user back
+  // into a review of a take they have already kept.
+  const returnToReady = useCallback((note: string) => {
+    recorder.reset()
+    if (previewUrl) { URL.revokeObjectURL(previewUrl); setPreviewUrl(null) }
+    consumedBlobRef.current = null
+    setErrorMessage(null)
+    setPhase("idle")
+    setSavedNote(note)
+    if (savedNoteTimerRef.current) clearTimeout(savedNoteTimerRef.current)
+    savedNoteTimerRef.current = setTimeout(() => {
+      savedNoteTimerRef.current = null
+      setSavedNote(null)
+    }, 2500)
+  }, [recorder, previewUrl])
 
   // Round 8: durable TTS from the recording surface — the clear "regenerate"
   // counterpart to re-recording. Uses the project engine + this cell's
@@ -455,13 +508,14 @@ export function AudioRecordingModal({
   }, [online, activeCell, session, ttsBusy, project, username, recordingTakes, audioEntry?.selectedAudioId, sourceClip])
 
   // Settle on the next line after a brief success indication. Shared by the
-  // recorded and the uploaded path so "saved" means exactly the same thing
-  // either way — the upload control below exists to inherit this, among the
-  // rest of the phase machine.
+  // recorded and the uploaded path so keeping a take means exactly the same
+  // thing either way — the upload control below exists to inherit this, among
+  // the rest of the phase machine.
   //
   // SUB-50: opt-out for repeat takes on one line, and the handle is tracked so
   // closing or navigating inside the 450ms window can't fire a stray jump after
-  // the fact.
+  // the fact. `stayOnThisLine` cancels it outright when the user reaches for
+  // Record or Upload inside that window.
   const scheduleAutoAdvance = useCallback(() => {
     if (!autoAdvance) return
     if (advanceTimerRef.current) clearTimeout(advanceTimerRef.current)
@@ -585,7 +639,7 @@ export function AudioRecordingModal({
       // The take is real now. Tell the workspace, so a line that has only ever
       // held audio gets the target row that makes it countable and validatable.
       onTakeSaved?.(activeCell.id)
-      setPhase("saved")
+      returnToReady(`${takeLabel} saved`)
       // Fire Whisper transcription in the background — user gets karaoke as
       // soon as the model is ready; doesn't block the auto-advance.
       const fullAudioId = `${result.audioId}.${result.ext}`
@@ -621,7 +675,7 @@ export function AudioRecordingModal({
       // that struck mid-upload retries with the SAME take after reconnect.
       setPhase(recorder.state.kind === "stopped" ? "preview" : "error")
     }
-  }, [recorder.state, online, session, activeCell, project.id, username, recordingTakes, scheduleAutoAdvance])
+  }, [recorder.state, online, session, activeCell, project.id, username, recordingTakes, scheduleAutoAdvance, returnToReady])
 
   // Attach an existing FILE as a take, through this dialog's phase machine.
   //
@@ -642,6 +696,11 @@ export function AudioRecordingModal({
     }
     setPhase("uploading")
     setErrorMessage(null)
+    // Round 8: takes are BORN with their permanent name. The strip sits ~100px
+    // below this button, so an unlabelled "Take" next to "Take 1" reads as a
+    // defect. (Not auto-transcribed, deliberately — an uploaded file routinely
+    // is not this line; see attach-file.ts.)
+    const label = nextTakeLabel(recordingTakes)
     try {
       await attachAudioFileToCell({
         session: session ?? null,
@@ -650,20 +709,16 @@ export function AudioRecordingModal({
         cellId: activeCell.id,
         file,
         username,
-        // Round 8: takes are BORN with their permanent name. The strip sits
-        // ~100px below this button, so an unlabelled "Take" next to "Take 1"
-        // reads as a defect. (Not auto-transcribed, deliberately — an uploaded
-        // file routinely is not this line; see attach-file.ts.)
-        label: nextTakeLabel(recordingTakes),
+        label,
       })
       onTakeSaved?.(activeCell.id)
-      setPhase("saved")
+      returnToReady(`${label} added`)
       scheduleAutoAdvance()
     } catch (e) {
       setErrorMessage(e instanceof Error ? e.message : String(e))
       setPhase("error")
     }
-  }, [activeCell, session, project.id, username, recordingTakes, onTakeSaved, scheduleAutoAdvance])
+  }, [activeCell, session, project.id, username, recordingTakes, onTakeSaved, scheduleAutoAdvance, returnToReady])
 
   const uploadInputRef = useRef<HTMLInputElement | null>(null)
   const onUploadInputChange = useCallback((e: ChangeEvent<HTMLInputElement>) => {
@@ -679,11 +734,13 @@ export function AudioRecordingModal({
     () => () => {
       if (advanceTimerRef.current) clearTimeout(advanceTimerRef.current)
       advanceTimerRef.current = null
+      if (savedNoteTimerRef.current) clearTimeout(savedNoteTimerRef.current)
+      savedNoteTimerRef.current = null
     },
     [],
   )
 
-  const canNav = phase === "idle" || phase === "preview" || phase === "error" || phase === "saved"
+  const canNav = phase === "idle" || phase === "preview" || phase === "error"
   const gotoIndex = useCallback((idx: number) => {
     if (!canNav) return
     if (idx < 0 || idx >= cells.length) return
@@ -1063,17 +1120,12 @@ export function AudioRecordingModal({
               </div>
             )}
 
-            {displayPhase === "saved" && (
-              <div className="flex h-[76px] flex-col items-center justify-center gap-2">
-                <Check className="h-7 w-7 text-emerald-500" />
-                <p className="text-xs text-muted-foreground">Saved</p>
-              </div>
-            )}
-
             {/* IDLE and ERROR share an instrument: the window, with nothing in
                 it yet. No waveform, no mic block, no elapsed readout — the bar
                 shows the target notch and the two numbers, and the button below
-                is the thing you are meant to be looking at. */}
+                is the thing you are meant to be looking at. A take that has just
+                been kept lands HERE, not in a state of its own: the note below
+                marks it and everything else stays exactly where it was. */}
             {(displayPhase === "idle" || displayPhase === "error") && (
               <div className="space-y-2">
                 {targetSec != null ? (
@@ -1084,6 +1136,14 @@ export function AudioRecordingModal({
                 {displayPhase === "error" && (
                   <p data-testid="rec-error-message" className="text-xs font-medium text-destructive">
                     {errorMessage ?? "Something went wrong."}
+                  </p>
+                )}
+                {savedNote != null && (
+                  <p
+                    data-testid="rec-saved-note"
+                    className="flex items-center gap-1.5 text-xs font-medium text-emerald-500"
+                  >
+                    <Check className="h-3.5 w-3.5 shrink-0" /> {savedNote}
                   </p>
                 )}
               </div>
@@ -1138,7 +1198,7 @@ export function AudioRecordingModal({
                 <span className="inline-flex w-full">
                   <Button
                     data-testid="rec-start"
-                    disabled={!online || displayPhase === "uploading" || displayPhase === "saved"}
+                    disabled={!online || displayPhase === "uploading"}
                     onClick={startFlow}
                     className="h-[52px] w-full text-sm font-semibold"
                   >
@@ -1206,7 +1266,7 @@ export function AudioRecordingModal({
                       size="sm"
                       data-testid="rec-upload"
                       disabled={!online}
-                      onClick={() => uploadInputRef.current?.click()}
+                      onClick={() => { stayOnThisLine(); uploadInputRef.current?.click() }}
                       className="h-9 w-full bg-muted/30 text-xs font-normal text-muted-foreground"
                     >
                       <Upload className="mr-1.5 h-3.5 w-3.5 shrink-0" />

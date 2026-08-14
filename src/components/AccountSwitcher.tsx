@@ -236,6 +236,7 @@ export function AccountSwitcher({
                     : "w-full rounded-md px-1.5 py-1.5 hover:bg-accent",
               )}
               aria-label={t("nav.account.menuLabel", { username: active.username })}
+              data-account-switcher-surface={variant}
             />
           }
         >

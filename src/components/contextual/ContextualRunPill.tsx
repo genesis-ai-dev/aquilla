@@ -431,7 +431,11 @@ function ContextualRunPillScoped({
   return (
     <>
       <span className="sr-only" role="status" aria-live="polite" aria-atomic="true">{announcement}</span>
-      <div className={pillClass} data-testid="contextual-run-pill">
+      <div
+        className={pillClass}
+        data-testid="contextual-run-pill"
+        data-contextual-available={available ? "true" : "false"}
+      >
         {content}
         {steer}
         {activityButton}

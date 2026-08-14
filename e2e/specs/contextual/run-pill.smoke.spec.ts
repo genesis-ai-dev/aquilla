@@ -29,9 +29,10 @@ test("contextual run pill drives a seeded file to parked with staged drafts", as
   // hydrating. Wait for that authoritative response before pressing Play so
   // the test does not race the intentional "backend unavailable" setup path.
   const contextualSnapshotLoaded = alice.waitForResponse((r) =>
-    r.request().method() === "GET" &&
-    r.url().includes("/contextual/runs?") &&
-    r.status() === 200,
+    r.request().method() === "GET"
+    && new URL(r.url()).pathname.endsWith(`/projects/${seeded.projectId}/contextual/runs`)
+    && new URL(r.url()).searchParams.get("fileId") === seeded.fileId
+    && r.status() === 200,
   )
   const ws = await openSeededProject(alice, seeded)
   await ws.waitForEditor()
@@ -40,6 +41,10 @@ test("contextual run pill drives a seeded file to parked with staged drafts", as
   // Idle pill: play affordance visible inside the editor viewport.
   const pill = alice.getByTestId("contextual-run-pill")
   await expect(pill).toBeVisible()
+  // A Playwright response event fires before the app necessarily parses the
+  // body and commits it into the run-store. Wait for that producer output to
+  // reach the pill; otherwise a fast click takes the intentional setup path.
+  await expect(pill).toHaveAttribute("data-contextual-available", "true")
   const play = alice.getByRole("button", { name: "Run Autopilot" })
   await expect(play).toBeVisible()
 

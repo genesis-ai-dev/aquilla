@@ -68,10 +68,19 @@ describe("ContextualRunPill", () => {
   it("idle + backend unavailable: Play is clickable and opens setup (never disabled)", () => {
     const onSetupNeeded = vi.fn()
     render(<ContextualRunPill projectId="p1" fileId="file-1" onSetupNeeded={onSetupNeeded} canControl />)
+    expect(screen.getByTestId("contextual-run-pill")).toHaveAttribute("data-contextual-available", "false")
     const play = screen.getByRole("button", { name: "Run Autopilot" })
     expect(play).not.toBeDisabled()
     fireEvent.click(play)
     expect(onSetupNeeded).toHaveBeenCalledTimes(1)
+  })
+
+  it("exposes when the available backend snapshot has reached the control", async () => {
+    setContextualTransport(makeTransport())
+    await act(async () => { await attachContextualRun("p1", "file-1") })
+    render(<ContextualRunPill projectId="p1" fileId="file-1" canControl />)
+
+    expect(screen.getByTestId("contextual-run-pill")).toHaveAttribute("data-contextual-available", "true")
   })
 
   it("announces a visible recovery message when starting fails", async () => {

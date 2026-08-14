@@ -1,5 +1,6 @@
 import { test, expect, orgRoute } from "../../helpers/multi-user"
 import { ensureAuthState, injectAdditionalSession } from "../../helpers/auth"
+import { AccountSwitcherPage } from "../../helpers/page-objects/AccountSwitcher"
 import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
@@ -21,9 +22,9 @@ test("account switcher dropdown opens with session info", async ({ alice }) => {
   await openSeededProject(alice, seeded)
   // The AccountSwitcher renders as a button showing the username.
   // Alice is seeded as "alice".
+  const switcher = new AccountSwitcherPage(alice)
+  await switcher.openMenu("alice")
   const accountBtn = alice.getByRole("button", { name: /Account menu: alice/i })
-  await expect(accountBtn).toBeVisible({ timeout: 10_000 })
-  await accountBtn.click()
 
   // Dropdown opens showing the active account.
   await expect(alice.getByText(/alice/i).first()).toBeVisible({ timeout: 3_000 })
@@ -63,11 +64,7 @@ test("logging out promotes another signed-in account", async ({ alice }) => {
   await alice.goto(orgRoute(alice))
   await injectAdditionalSession(alice, bobSession)
 
-  const accountBtn = alice.getByRole("button", { name: /Account menu: alice/i })
-  await expect(accountBtn).toBeVisible({ timeout: 10_000 })
-  await accountBtn.click()
-  await expect(alice.getByRole("menuitem", { name: /bob/i })).toBeVisible({ timeout: 10_000 })
-  await alice.getByRole("menuitem", { name: /^Log out$/i }).click()
+  await new AccountSwitcherPage(alice).logOutCurrentAccount("alice", "bob")
 
   // handleLogout is async: wait until alice is gone and bob is active. Still on
   // alice's org URL, OrgRouteGate shows not-found (no account switcher) — that

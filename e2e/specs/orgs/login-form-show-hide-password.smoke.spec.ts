@@ -1,4 +1,5 @@
 import { test, expect, orgRoute } from "../../helpers/multi-user"
+import { AccountSwitcherPage } from "../../helpers/page-objects/AccountSwitcher"
 
 /**
  * FrontierLoginForm — show/hide password toggle in the login dialog.
@@ -15,15 +16,7 @@ import { test, expect, orgRoute } from "../../helpers/multi-user"
  */
 test("login form show/hide password toggle switches input type", async ({ alice }) => {
   await alice.goto(orgRoute(alice, "/overview"))
-  // Open account switcher.
-  const accountBtn = alice.getByRole("button", { name: /Account menu: alice/i })
-  await expect(accountBtn).toBeVisible({ timeout: 10_000 })
-  await accountBtn.click()
-
-  // Click "Add another account…"
-  const addAccountBtn = alice.getByRole("menuitem", { name: /Add another account/i })
-  await expect(addAccountBtn).toBeVisible({ timeout: 3_000 })
-  await addAccountBtn.click()
+  await new AccountSwitcherPage(alice).openAddAccountDialog()
 
   // The login dialog opens — "Add Frontier account" heading visible.
   await expect(

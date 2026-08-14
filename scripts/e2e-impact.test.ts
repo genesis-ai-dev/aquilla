@@ -64,8 +64,8 @@ describe("affected E2E run mode", () => {
     expect(affectedRunMode(FAST_AFFECTED_SPEC_LIMIT)).toEqual({ viteMode: "dev", shards: 1 })
   })
 
-  it("routes a 115-spec selection to three preview-mode shards", () => {
-    expect(affectedRunMode(115)).toEqual({ viteMode: "preview", shards: 3 })
+  it("caps a 115-spec selection at two preview stacks to avoid local worker OOM", () => {
+    expect(affectedRunMode(115)).toEqual({ viteMode: "preview", shards: 2 })
   })
 
   it("never writes Vite's watched env file in dev mode", () => {

@@ -1,4 +1,5 @@
 import { test, expect, orgRoute } from "../../helpers/multi-user"
+import { AccountSwitcherPage } from "../../helpers/page-objects/AccountSwitcher"
 
 /**
  * FrontierSignupForm — PasswordChecklist shows requirement status and
@@ -15,15 +16,7 @@ import { test, expect, orgRoute } from "../../helpers/multi-user"
  */
 test("signup form password checklist shows strength indicator", async ({ alice }) => {
   await alice.goto(orgRoute(alice, "/overview"))
-  // Open account switcher.
-  const accountBtn = alice.getByRole("button", { name: /Account menu: alice/i })
-  await expect(accountBtn).toBeVisible({ timeout: 10_000 })
-  await accountBtn.click()
-
-  // Add another account.
-  const addAccountBtn = alice.getByRole("menuitem", { name: /Add another account/i })
-  await expect(addAccountBtn).toBeVisible({ timeout: 3_000 })
-  await addAccountBtn.click()
+  await new AccountSwitcherPage(alice).openAddAccountDialog()
 
   // Switch to signup form.
   const createAccountBtn = alice.getByRole("button", { name: /Create an account/i })

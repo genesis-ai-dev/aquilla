@@ -51,6 +51,10 @@ export async function ensureAuthState(username: SeedUser["username"]): Promise<P
     const session: PersistedSession = {
       jwt: auth.access_token,
       username: u.username,
+      // Match finalizeSession(), the production auth producer. Omitting this
+      // made AccountSwitcher backfill /auth/me as soon as its menu opened;
+      // that session write could remount the shell underneath the first click.
+      email: u.email,
       createdAt: new Date().toISOString(),
     }
     await writePersistedSession(session)

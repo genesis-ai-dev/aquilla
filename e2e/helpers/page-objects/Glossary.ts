@@ -1,6 +1,11 @@
 import { type Locator, type Page, expect } from "@playwright/test"
 import { pickSelectOption } from "../base-ui"
 
+// This route hydrates project access, files, settings, and terminology before
+// replacing the workspace loading overlay. Under isolated shard contention it
+// can legitimately exceed the ordinary 10-second interaction budget.
+const GLOSSARY_READY_TIMEOUT_MS = 30_000
+
 /** User-level interactions for the editor-style Glossary surface. */
 export class Glossary {
   private readonly page: Page
@@ -11,7 +16,9 @@ export class Glossary {
 
   async goto(projectId: string): Promise<void> {
     await this.page.goto(`/project/${projectId}/terminology`)
-    await expect(this.page.getByRole("heading", { name: "Glossary" })).toBeVisible({ timeout: 10_000 })
+    await expect(this.page.getByRole("heading", { name: "Glossary" })).toBeVisible({
+      timeout: GLOSSARY_READY_TIMEOUT_MS,
+    })
   }
 
   row(sourceTerm: string): Locator {

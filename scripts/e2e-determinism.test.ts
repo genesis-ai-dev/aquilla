@@ -97,6 +97,7 @@ describe("E2E auth-state isolation", () => {
     const sessions = Array.from({ length: 40 }, (_, index) => ({
       jwt: `token-${index}-${"x".repeat(16_384)}`,
       username: "alice",
+      email: "alice@example.test",
       createdAt: new Date(index).toISOString(),
     }))
 
@@ -106,6 +107,7 @@ describe("E2E auth-state isolation", () => {
         for (let index = 0; index < 80; index++) {
           const session = await readPersistedSession("alice", base, root)
           expect(session.username).toBe("alice")
+          expect(session.email).toBe("alice@example.test")
           expect(session.jwt).toMatch(/^token-\d+-x+$/)
         }
       })

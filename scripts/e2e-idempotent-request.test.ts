@@ -16,7 +16,7 @@ describe("postIdempotentJson", () => {
       .mockResolvedValueOnce(new Response("worker restarted", { status: 503 }))
       .mockResolvedValueOnce(new Response(null, { status: 200 }))
 
-    await expect(request(fetchMock as typeof fetch)).resolves.toBeUndefined()
+    await expect(request(fetchMock as typeof fetch)).resolves.toMatchObject({ status: 200 })
     expect(fetchMock).toHaveBeenCalledTimes(2)
     expect(fetchMock.mock.calls[0][1]?.body).toBe(fetchMock.mock.calls[1][1]?.body)
   })

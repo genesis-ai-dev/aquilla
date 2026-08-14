@@ -1,4 +1,5 @@
 import { test, expect, orgRoute } from "../../helpers/multi-user"
+import { AccountSwitcherPage } from "../../helpers/page-objects/AccountSwitcher"
 
 /**
  * AccountSwitcher — "Add another account" dialog + forgot password flow.
@@ -16,15 +17,7 @@ import { test, expect, orgRoute } from "../../helpers/multi-user"
  */
 test("account switcher add-account dialog Forgot password switches to reset mode", async ({ alice }) => {
   await alice.goto(orgRoute(alice, "/overview"))
-  // Open the account switcher (username button with ChevronsUpDown icon).
-  const accountBtn = alice.getByRole("button", { name: /Account menu: alice/i })
-  await expect(accountBtn).toBeVisible({ timeout: 10_000 })
-  await accountBtn.click()
-
-  // Click "Add another account…"
-  const addAccountBtn = alice.getByRole("menuitem", { name: /Add another account/i })
-  await expect(addAccountBtn).toBeVisible({ timeout: 3_000 })
-  await addAccountBtn.click()
+  await new AccountSwitcherPage(alice).openAddAccountDialog()
 
   // Dialog opens with "Add Frontier account" title.
   await expect(

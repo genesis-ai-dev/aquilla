@@ -1,4 +1,5 @@
 import { test, expect, orgRoute } from "../../helpers/multi-user"
+import { AccountSwitcherPage } from "../../helpers/page-objects/AccountSwitcher"
 
 /**
  * FrontierForgotPasswordForm — validates email on submit.
@@ -7,13 +8,7 @@ import { test, expect, orgRoute } from "../../helpers/multi-user"
  */
 test("forgot password form validates email on submit", async ({ alice }) => {
   await alice.goto(orgRoute(alice, "/overview"))
-  const accountBtn = alice.getByRole("button", { name: /Account menu: alice/i })
-  await expect(accountBtn).toBeVisible({ timeout: 10_000 })
-  await accountBtn.click()
-
-  const addAccountBtn = alice.getByRole("menuitem", { name: /Add another account/i })
-  await expect(addAccountBtn).toBeVisible({ timeout: 3_000 })
-  await addAccountBtn.click()
+  await new AccountSwitcherPage(alice).openAddAccountDialog()
 
   const forgotBtn = alice.getByRole("button", { name: /Forgot password\?/i })
   await expect(forgotBtn).toBeVisible({ timeout: 5_000 })

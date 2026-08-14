@@ -4446,8 +4446,8 @@ export function ProjectWorkspace() {
 
   const projectNavItems = useMemo(() => {
     const items = [
-      // Pinned below Comments: Terminology is a frequent destination, so it
-      // stays visible; everything else unpinned collapses into "More".
+      // Pinned below Comments: Terminology and Recently deleted stay visible.
+      // Unpinned items (none today) still collapse into "More".
       { id: "comments", label: "Comments", icon: MessagesSquare, pinned: true,
         badge: Array.from(openCommentCount.values()).reduce((a, b) => a + b, 0),
         onClick: () => openOverlay("comments") },
@@ -4455,10 +4455,11 @@ export function ProjectWorkspace() {
         onClick: () => openOverlay("terminology") },
       // Project settings is a header cog beside Import. Audio/Media lens lives
       // in the header EditorModeToggle. Sharing lives in Settings → Members.
-      // FRO-272: trash moved out of the always-visible files footer into the
-      // "More" menu — it opens a dialog now (project_lead+ only).
+      // FRO-272: trash opens a dialog (project_lead+). Pinned in the same
+      // footer slot as "More" used to occupy — recovery is a destination,
+      // not an overflow item.
       ...(currentRoleLevel >= ROLE.PROJECT_LEAD
-        ? [{ id: "trash", label: "Recently deleted", icon: Trash2,
+        ? [{ id: "trash", label: "Recently deleted", icon: Trash2, pinned: true,
             onClick: () => setTrashOpen(true) }]
         : []),
     ]
@@ -6594,7 +6595,7 @@ export function ProjectWorkspace() {
         title="Move file to Recently deleted"
         description={(() => {
           const f = pendingDeleteId ? project.files.find((x) => x.id === pendingDeleteId) : null
-          return f ? `Move "${f.name}" to Recently deleted? Cells and audio are kept for 30 days. You can restore the file or permanently delete it from "Recently deleted" in the sidebar's More menu.` : ""
+          return f ? `Move "${f.name}" to Recently deleted? Cells and audio are kept for 30 days. You can restore the file or permanently delete it from "Recently deleted" in the sidebar.` : ""
         })()}
         confirmLabel="Move to Recently deleted"
         variant="destructive"
@@ -6627,8 +6628,8 @@ export function ProjectWorkspace() {
           if (target) void applyTimingMode("audioFirst", target)
         }}
       />
-      {/* FRO-272: "Recently deleted" trash list — opened from the sidebar's
-          More menu (project_lead+); was an inline expander in the files panel. */}
+      {/* FRO-272: "Recently deleted" trash list — opened from the pinned
+          sidebar row (project_lead+); was an inline expander in the files panel. */}
       <Dialog open={trashOpen} onOpenChange={setTrashOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader><DialogTitle>Recently deleted</DialogTitle></DialogHeader>

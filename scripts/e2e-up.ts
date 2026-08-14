@@ -7,6 +7,7 @@ import {
   killChildTree,
   attachOutput,
   openLogFile,
+  isolatedWranglerName,
   type SpawnedWorker,
 } from "./lib/spawn-worker"
 import { MockLLMServer } from "../e2e/helpers/mock-llm-server"
@@ -37,6 +38,9 @@ const SYNC_WORKER_DIR = path.join(REPO_ROOT, "sync-worker")
 // sync-worker (writes files/cells/events) see the same aquilla-db rows. Without
 // --persist-to each cwd gets its own isolated sqlite and the two drift apart.
 // Per-shard so concurrent stacks don't trample each other's DO storage.
+// The file-based *dev registry* is a separate concern: spawnWranglerDev
+// isolates WRANGLER_REGISTRY_PATH per worker, and e2e-up also passes a unique
+// --name so Wrangler 3.114 cannot crash on a shared utimesSync heartbeat.
 const PERSIST_DIR = path.join(REPO_ROOT, `.wrangler-e2e-state${SUFFIX}`)
 // Local Postgres used as the Hyperdrive target for e2e. Wrangler reads
 // WRANGLER_HYPERDRIVE_LOCAL_CONNECTION_STRING_<BINDING> to override the
@@ -167,7 +171,7 @@ function abortIfWorkerDies(worker: SpawnedWorker, label: string): void {
     console.error(
       `\n${TAG}[fail] ${label} worker on :${worker.port} died (${reason}).\n` +
         `${TAG}[fail] Remaining tests would fail with ECONNREFUSED ${worker.port} — aborting now.\n` +
-        `${TAG}[hint] Tail ${logFiles[label] ?? `${LOG_DIR}/`}. Common causes: another e2e-up / pnpm dev fighting the port, workerd OOM, or Postgres gone.`,
+        `${TAG}[hint] Tail ${logFiles[label] ?? `${LOG_DIR}/`}. Common causes: another e2e-up / pnpm dev fighting the port, workerd OOM, Postgres gone, or Wrangler crashing on a shared ~/.wrangler/registry heartbeat file.`,
     )
     dumpLogs()
     void shutdown(1)
@@ -411,6 +415,10 @@ async function main(): Promise<void> {
     cwd: AUTH_WORKER_DIR,
     port: IDENTITY_PORT,
     label: "identity",
+    // Unique local name so this stack's registry heartbeat file cannot
+    // collide with `pnpm dev` or another e2e shard (Wrangler 3.114 dies
+    // on `utimesSync` ENOENT when the shared file is unlinked).
+    name: isolatedWranglerName("aquilla-identity-local", SUFFIX),
     env: { ...HYPERDRIVE_ENV },
     // ADMIN_EMAILS: site-admin identity is by account email; the admin-console
     // specs need alice to be a platform admin. Her seeded email is
@@ -447,6 +455,7 @@ async function main(): Promise<void> {
     cwd: SYNC_WORKER_DIR,
     port: SYNC_WORKER_PORT,
     label: "sync",
+    name: isolatedWranglerName("aquilla-sync-worker-local", SUFFIX),
     env: { ...HYPERDRIVE_ENV },
     extraArgs: ["--persist-to", PERSIST_DIR],
     logFile: openLogFile(logFiles.sync),

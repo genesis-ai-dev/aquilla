@@ -176,5 +176,12 @@ screenshots, video, and service logs are retained.
   `.e2e-logs-s0/identity.log` (shard 1). On a Mac the Docker runtime is Colima
   (`colima start` before push); if Postgres/workerd is gone, every remaining
   test fails the same way.
+- **`sync worker died` / `ENOENT: … utime …/.wrangler/registry/aquilla-sync-worker-local`**
+  → Wrangler 3.114 heartbeats `utimesSync` on a user-level registry file named
+  after the worker. Three smoke shards (and `pnpm dev`) used to share
+  `aquilla-sync-worker-local`, so one process unlinking the file crashed the
+  others. `e2e-up` now gives each stack its own `--name` and
+  `WRANGLER_REGISTRY_PATH`. If you still see the default path in `sync.log`,
+  the orchestrator is not the one that spawned that wrangler.
 - **Cold-start latency** → first run is ~4–5 min on a cold machine (wrangler downloads
   workerd, browser caches build, etc.). Subsequent runs are faster.

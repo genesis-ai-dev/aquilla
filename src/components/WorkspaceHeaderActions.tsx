@@ -9,31 +9,43 @@ interface WorkspaceHeaderActionsProps {
   menuItems: OverflowMenuItem[]
 }
 
-/** Header right-side actions: Import + Settings cog, then ⋯ overflow for the rest. */
+/** Header right-side actions: Import + ⋯ overflow grouped, Settings cog beside. */
 export function WorkspaceHeaderActions({
   onImport,
   onSettings,
   menuItems,
 }: WorkspaceHeaderActionsProps) {
   return (
-    <ButtonGroup className="shadow-xs">
-      <Button
-        type="button"
-        variant="outline"
-        size="default"
-        className="bg-card"
-        onClick={onImport}
-        data-testid="workspace-import-button"
-      >
-        <Plus data-icon="inline-start" />
-        Import
-      </Button>
+    <div className="flex items-center gap-1">
+      <ButtonGroup className="shadow-xs">
+        <Button
+          type="button"
+          variant="outline"
+          size="default"
+          className="bg-card"
+          onClick={onImport}
+          data-testid="workspace-import-button"
+        >
+          <Plus data-icon="inline-start" />
+          Import
+        </Button>
+        {menuItems.length > 0 ? (
+          <OverflowMenu
+            items={menuItems}
+            triggerVariant="outline"
+            triggerSize="icon"
+            triggerClassName="bg-card"
+            ariaLabel="More"
+            testId="workspace-more-menu"
+          />
+        ) : null}
+      </ButtonGroup>
       {onSettings ? (
         <Button
           type="button"
           variant="outline"
           size="icon"
-          className="bg-card"
+          className="bg-card shadow-xs"
           onClick={onSettings}
           aria-label="Settings"
           data-testid="workspace-settings-button"
@@ -41,16 +53,6 @@ export function WorkspaceHeaderActions({
           <Settings className="h-4 w-4" />
         </Button>
       ) : null}
-      {menuItems.length > 0 ? (
-        <OverflowMenu
-          items={menuItems}
-          triggerVariant="outline"
-          triggerSize="icon"
-          triggerClassName="bg-card"
-          ariaLabel="More"
-          testId="workspace-more-menu"
-        />
-      ) : null}
-    </ButtonGroup>
+    </div>
   )
 }

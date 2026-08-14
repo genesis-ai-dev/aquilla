@@ -33,7 +33,7 @@ const sameName = (a: string, b: string) =>
 
 interface MemberMultiAddRowProps {
   /** Roles offered in the picker — pass them already capped to the caller. */
-  roleOptions: MemberAddRoleOption[];
+  roleOptions: readonly MemberAddRoleOption[];
   /** Initial value of the role picker (local UI state only). */
   defaultRole: number;
   /**

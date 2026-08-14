@@ -1,6 +1,7 @@
-import { useContext, useEffect, useState, type ReactNode } from "react"
+import { useContext, useEffect, useState, useSyncExternalStore, type ReactNode } from "react"
 import { Link, useLocation } from "react-router-dom"
 import { usePanelRef } from "react-resizable-panels"
+import { PanelLeft } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { BrandContext } from "@/branding/use-brand"
 import { useI18nOptional } from "@/lib/i18n/I18nProvider"
@@ -9,11 +10,34 @@ import { VersionTag } from "./VersionBadge"
 import { BetaBadge } from "./BetaBadge"
 import { NavHistoryControls } from "./NavHistoryControls"
 import { ErrorBoundary } from "./ErrorBoundary"
+import { AppTooltip } from "@/components/ui/tooltip"
+import { Button } from "@/components/ui/button"
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet"
 import {
   ResizableHandle,
   ResizablePanel,
   ResizablePanelGroup,
 } from "@/components/ui/resizable"
+
+/** Tailwind `lg` — below this, org chrome (not the editor dock) moves into a sheet. */
+const LG_MIN_WIDTH_QUERY = "(min-width: 1024px)"
+
+function useIsLgUp(): boolean {
+  return useSyncExternalStore(
+    (onStoreChange) => {
+      const mq = window.matchMedia(LG_MIN_WIDTH_QUERY)
+      mq.addEventListener("change", onStoreChange)
+      return () => mq.removeEventListener("change", onStoreChange)
+    },
+    () => window.matchMedia(LG_MIN_WIDTH_QUERY).matches,
+    () => true,
+  )
+}
 
 // Project-wide z-index scale (Tailwind v4 dynamic):
 //   (no z) — in-flow chrome (workspace header, status bar, sidebar). It sits
@@ -172,6 +196,21 @@ export function AppShell({
   const dockPanelRef = usePanelRef()
   const [dockWidth] = useState(() => readStoredDockWidth(dockStorageKey))
   const [videoHeight] = useState(() => readStoredVideoHeight())
+  const lgUp = useIsLgUp()
+  // Org chrome (`sidebar`, not the editor `leftDock`) hides in-flow below lg
+  // (1024px) and opens from a PanelLeft control beside the breadcrumbs.
+  const mobileNav = !useDockResize && Boolean(sidebar) && !lgUp
+  const [navOpen, setNavOpen] = useState(false)
+  const openSidebarLabel = i18n?.t("nav.shell.openSidebar") ?? "Open sidebar"
+  const navigationLabel = i18n?.t("nav.shell.navigation") ?? "Navigation"
+
+  useEffect(() => {
+    setNavOpen(false)
+  }, [pathname])
+
+  useEffect(() => {
+    if (lgUp) setNavOpen(false)
+  }, [lgUp])
 
   // Keep the resizable dock panel in sync with tab collapse/expand.
   useEffect(() => {
@@ -241,8 +280,10 @@ export function AppShell({
       className={cn(
         "relative z-10 flex h-full min-h-0 min-w-0 shrink-0 flex-col overflow-hidden",
         // Org pages use a fixed-width sidebar; project workspace width is
-        // owned by the Resizable panel below.
-        !leftDock && "w-56",
+        // owned by the Resizable panel below. In the mobile sheet the sheet
+        // owns width, so the aside stretches to fill it.
+        !leftDock && !mobileNav && "w-56",
+        mobileNav && "w-full",
         // Collapsed rail: mirror the floating main card's 8px left inset (m-2
         // below) so the centered icon column reads as centered in the visible
         // chrome band instead of being pulled toward the screen edge.
@@ -303,8 +344,36 @@ export function AppShell({
     <div className="flex h-full min-w-0 flex-1 flex-col overflow-hidden">
       {/* Every route gets the same fixed header band. File tabs are a
           separate row below it and must not move the breadcrumb baseline. */}
-      <div data-slot="app-shell-header" className="flex h-[52px] min-h-[52px] shrink-0 flex-col justify-center">
-        {header}
+      <div data-slot="app-shell-header" className="flex h-[52px] min-h-[52px] shrink-0 items-center">
+        {mobileNav ? (
+          <div className="flex shrink-0 items-center pl-2" data-slot="app-shell-sidebar-trigger">
+            <AppTooltip content={openSidebarLabel} side="bottom">
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                aria-label={openSidebarLabel}
+                aria-expanded={navOpen}
+                onClick={() => setNavOpen(true)}
+              >
+                <PanelLeft />
+              </Button>
+            </AppTooltip>
+          </div>
+        ) : null}
+        {/* Org breadcrumbs keep `px-3` as the desktop header inset. When the
+            sheet trigger owns that inset, pull most of it back so the title
+            sits with the button — leave 4px (`-ml-2` vs `px-3`) so they
+            don't kiss. */}
+        <div
+          data-slot="app-shell-header-body"
+          className={cn(
+            "flex min-h-0 min-w-0 flex-1 flex-col justify-center",
+            mobileNav && "-ml-2",
+          )}
+        >
+          {header}
+        </div>
       </div>
       {aboveCard ? (
         <div className="mx-2 mb-2 flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -354,8 +423,22 @@ export function AppShell({
         </ResizablePanelGroup>
       ) : (
         <>
-          {asideEl}
+          {mobileNav ? null : asideEl}
           {workspaceColumn}
+          {mobileNav ? (
+            <Sheet open={navOpen} onOpenChange={setNavOpen}>
+              <SheetContent
+                side="left"
+                showCloseButton={false}
+                className="gap-0 bg-sidebar p-0 data-[side=left]:w-56 data-[side=left]:sm:max-w-56"
+              >
+                <SheetHeader className="sr-only">
+                  <SheetTitle>{navigationLabel}</SheetTitle>
+                </SheetHeader>
+                {asideEl}
+              </SheetContent>
+            </Sheet>
+          ) : null}
         </>
       )}
     </div>

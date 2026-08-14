@@ -173,6 +173,32 @@ vi.mock("@/hooks/useProjectOrgId", () => ({
   useProjectOrgId: () => null,
 }))
 
+const rosterSettings = vi.hoisted(() => ({ canViewRoster: true }))
+vi.mock("@/hooks/useOrgSettings", () => ({
+  useOrgSettings: () => ({
+    settings: {},
+    orgRules: [],
+    promotionRequests: [],
+    canRequestPromotion: false,
+    version: 1,
+    hasFetched: true,
+    canEdit: true,
+    canEditOrgKeys: true,
+    orgProviderKeys: {},
+    canExport: true,
+    exportMinRole: null,
+    canViewRoster: rosterSettings.canViewRoster,
+    rosterViewMinRole: 600,
+    canViewMemberProgress: true,
+    memberProgressViewMinRole: 600,
+    allowSelfAssignment: false,
+    termbaseEditMinRole: 500,
+    refresh: vi.fn(async () => null),
+    patch: vi.fn(async () => ({ kind: "ok" as const, value: { orgId: 1, settings: {}, version: 2, updatedAt: null, updatedBy: null } })),
+    requestPromotion: vi.fn(async () => ({ kind: "blocked" as const })),
+  }),
+}))
+
 vi.mock("@/context/OrgContext", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/context/OrgContext")>()
   return {
@@ -205,6 +231,7 @@ function renderAt(path: string) {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  rosterSettings.canViewRoster = true
 })
 
 describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
@@ -374,5 +401,19 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
 
     renderAt(`/project/${PROJECT_ID}/settings/ai`)
     expect(screen.queryByText(/term base sharing/i)).toBeNull()
+  })
+
+  it("hides the Members settings pane when the caller is below the roster floor", () => {
+    rosterSettings.canViewRoster = false
+    renderAt(`/project/${PROJECT_ID}/settings`)
+
+    expect(screen.queryByRole("link", { name: "Members" })).toBeNull()
+    expect(screen.getByText("General")).toBeTruthy()
+
+    renderAt(`/project/${PROJECT_ID}/settings/members`)
+    // Unknown/hidden pane falls back to the index — no roster, no disclosure.
+    expect(screen.queryByTestId("settings-members-section")).toBeNull()
+    expect(screen.queryByText(/roster hidden/i)).toBeNull()
+    expect(screen.getByText("General")).toBeTruthy()
   })
 })

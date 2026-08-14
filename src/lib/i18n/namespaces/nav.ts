@@ -56,6 +56,8 @@ export const nav = defineNamespace({
     "nav.dock.agentTab": "Agent",
     "nav.dock.agentUnread": "{count} unread",
     "nav.dock.expandSidebar": "Expand sidebar",
+    "nav.shell.openSidebar": "Open sidebar",
+    "nav.shell.navigation": "Navigation",
 
     // -- SidebarProjectSection: pinned rows + "More" overflow popover --
     "nav.sidebarSection.more": "More",
@@ -581,6 +583,17 @@ export const nav = defineNamespace({
         description:
           "Tooltip and accessible name for the button on the collapsed 40px icon rail " +
           "that expands the dock back open to the Files tab.",
+      },
+      "nav.shell.openSidebar": {
+        description:
+          "Tooltip and accessible name for the PanelLeft control to the left of the " +
+          "org breadcrumbs. Below the lg breakpoint (1024px), outside the editor, it opens the " +
+          "org sidebar in a left sheet.",
+      },
+      "nav.shell.navigation": {
+        description:
+          "Accessible title of the mobile org-sidebar sheet. Not visible; announced " +
+          "when the sheet opens so the overlay has a dialog name.",
       },
 
       // -- SidebarProjectSection --

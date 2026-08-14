@@ -589,6 +589,14 @@ describe("Role × Scope edit gates", () => {
         env,
       )
       expect(res.status).toBe(200)
+      const body = (await res.json()) as {
+        members: Array<{ username: string; email: string | null }>
+      }
+      expect(body.members).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ username: "owner", email: "owner@example.com" }),
+        ]),
+      )
     })
 
     it("non-member gets 403 on GET /orgs/:orgId/portfolio", async () => {

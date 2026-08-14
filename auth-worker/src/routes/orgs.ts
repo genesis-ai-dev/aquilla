@@ -411,6 +411,7 @@ orgs.get("/:orgId/members", async (c) => {
     members: members.map((m) => ({
       userId: m.userId,
       username: m.username,
+      email: m.email,
       role: { level: m.roleLevel, name: ROLE_NAMES[m.roleLevel] ?? "unknown" },
       lastActiveAt: m.lastActiveAt,
     })),

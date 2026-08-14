@@ -70,10 +70,11 @@ const EVENT_LINES: Record<string, string> = {
   "target.cell.commit":
     "target.cell.commit {value, valueHtml?} — write a target cell's text. Needs fileId+cellId. Server resolves parentId (current target head) and sourceEventId (AD-9 staleness pin) and injects ai_suggestion+agent_run_id.",
   "target.cell.create":
-    "target.cell.create {cellId, value, anchorCellId?} — new target cell (rare; most target rows exist from import).",
+    "target.cell.create {value, anchorCellId?, cellId?} — mint a NEW target row. Needs fileId. anchorCellId is the existing cell it lands after (null/omitted = first); server mints cellId when omitted and injects ai_suggestion+agent_run_id. Rare — most target rows already exist from import; use target.cell.commit to fill one.",
   "target.cell.delete": "target.cell.delete {} — delete a target cell. Needs fileId+cellId.",
   "target.cell.reorder": "target.cell.reorder {anchorCellId|null} — move a cell after another.",
-  "source.cell.create": "source.cell.create {cellId, value, canonicalRef?, anchorCellId?} — import-path only; avoid.",
+  "source.cell.create":
+    "source.cell.create {value, anchorCellId?, canonicalRef?, type?, cellId?} — mint a NEW source row (e.g. a heading the import missed). Needs fileId. anchorCellId is the existing cell it lands after (null/omitted = first); server mints cellId when omitted. Structural — propose only when asked to add a row.",
   "source.cell.commit": "source.cell.commit {value, valueHtml?} — edit source text; avoid unless explicitly asked.",
   "source.cell.delete": "source.cell.delete {} — delete a source cell; avoid.",
   "source.cell.reorder": "source.cell.reorder {anchorCellId|null} — reorder source; avoid.",

@@ -5,8 +5,8 @@ import { fetchAccessibleProjects, type CloudProjectSummary } from "@/lib/sync/cl
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { isJwtExpired } from "@/lib/frontier/auth"
 import { UserError } from "@/lib/errors/user-error"
-import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
 import { notifySessionExpired } from "@/lib/errors/session-expired-signal"
+import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
 import {
   ALL_ORGS_PARAM,
   ORG_STORAGE_KEY,

@@ -38,6 +38,7 @@ import { BudgetMeter } from "./BudgetMeter"
 import { ChangesetCard } from "./ChangesetCard"
 import { CodeActivityBlock } from "./CodeActivityBlock"
 import { BriefProposalNotice, MemoryProposalNotice } from "./MemoryProposalNotice"
+import { InlineAiError } from "@/components/InlineAiError"
 
 const TOOL_ICON: Record<ToolKind, typeof Database> = {
   sql: Database,
@@ -191,7 +192,16 @@ export function AgentRunView({
           <MarkerIcon>
             <AlertTriangle />
           </MarkerIcon>
-          <MarkerContent>{run.errorMessage || "Agent run failed."}</MarkerContent>
+          {/* AQU-891: a failed run reports the provider's message verbatim.
+              Categorize it so the marker reads as a sentence, and keep the raw
+              text one click away (copyable) instead of inline. */}
+          <MarkerContent>
+            <InlineAiError
+              message={run.errorMessage || "Agent run failed."}
+              announce={false}
+              className="text-inherit"
+            />
+          </MarkerContent>
         </Marker>
       )}
 

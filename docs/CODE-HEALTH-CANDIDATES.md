@@ -87,31 +87,28 @@ spot, both deferred rather than mixed into the single-theme budget.
   Proof needed: `pnpm build` clean (confirms TS still infers the narrower type without
   the assertions) plus `pnpm test` green, no test files touched.
 
-## Prior candidates retained from the 2026-08-10/11 runs
+## `src/hooks/useSubscribedConcepts.ts` — looks dead, is not
 
-- **`src/components/Dashboard.tsx`** (466 lines) — a pre-org-model project dashboard,
-  apparently superseded by `src/components/org/OrgHome.tsx`; no import found anywhere
-  (route table in `App.tsx` doesn't reference it). At 466 lines this alone would consume
-  most of a single run's budget — worth a dedicated pass rather than bundling with
-  smaller deletions. Proof needed: zero importers/JSX usage (component + string route
-  matches), and confirm `OrgHome.tsx` covers the same surface before deleting.
-  (Entry was dropped in a prior stacked-ledger conflict resolution while the file still
-  exists with zero importers — restored 2026-08-12.)
-- **`src/components/CellActionsMenu.tsx`**, `ProgressDot.tsx`, and
-  `useSubscribedConcepts.ts` — re-check zero importers before deletion.
-- **`src/lib/sync/settings-read.ts`** / `settings-read-types.ts` and
-  **`src/lib/timeline/diarization-loader.ts`** — deferred from the 2026-08-11 survey;
-  confirm no newer feature path introduced a caller.
-- **`src/lib/sync/sync-debug.ts`**, the deprecated `EditorScrollContext` compatibility
-  fields, and the deprecated `ExamplePanel` prop pass-through were recorded as candidates
-  in the earlier run; verify the current source before taking further action.
+- **File**: `src/hooks/useSubscribedConcepts.ts` (140 lines). Zero real importers (only
+  doc-comment mentions in `TermbaseSharingSection.tsx` and `useRules.ts`), no colocated
+  test file — flagged by a zero-importer grep sweep in the 2026-08-14 run.
+- **Why NOT deleted**: the file's own header comment is a `SWARM-TODO` marking it as
+  deliberately-staged scaffolding for a planned server route
+  (`GET /api/v2/projects/:id/termbase/concepts`, see `docs/swarm/TERM3-ORG-API.md`) — it
+  treats any non-2xx as "no concepts yet" specifically so "the ordering/merge wiring...
+  starts returning real concepts the moment the server route lands, with NO client change
+  required." That reads as in-flight work, not abandoned debris; deleting it would erase
+  a documented forward-compat contract.
+- **What would need to change before revisiting**: confirm with a human (or check for a
+  newer doc) whether the SWARM-TODO is still active or has gone stale/abandoned. If truly
+  abandoned, it's a clean deletion (zero importers, self-contained).
 
 The 2026-08-10 run also recorded an E2E limitation in the Claude Code web sandbox: its
 Docker/Wrangler setup was not reliable enough to complete the smoke suite. This is an
-environment note, not a product regression. The 2026-08-12 run hit the same limitation
-(`pnpm test:e2e:smoke` → `Docker unavailable`, no local Postgres socket, all 3 shards
-refuse to run rather than reset against a stale schema) — still an environment gap, not
-something a code-health PR should try to patch around.
+environment note, not a product regression. The 2026-08-12 and 2026-08-14 runs hit the
+same limitation (`pnpm test:e2e:smoke` → `Docker unavailable`, no local Postgres socket,
+all 3 shards refuse to run rather than reset against a stale schema) — still an
+environment gap, not something a code-health PR should try to patch around.
 
 ## Remaining "frontier-server" comment mention (frozen — test file)
 

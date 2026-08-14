@@ -77,6 +77,19 @@ interface Props {
 // navigating to another line or closing the dialog.
 type Phase = "idle" | "counting" | "recording" | "preview" | "uploading" | "error"
 
+// The read-aloud block's geometry, in one place and independent of whether the
+// film is showing. The line the operator performs from should look the same
+// whichever way the dialog is arranged; only the column width differs, and the
+// fit measures that.
+const READ_ALOUD_BASE_PX = 26
+const READ_ALOUD_LINE_PX = 33
+const READ_ALOUD_LINE_RATIO = READ_ALOUD_LINE_PX / READ_ALOUD_BASE_PX
+const READ_ALOUD_LINES = 5
+/** Where shrinking stops and scrolling starts. Half the base size: below this
+ *  the line stops being something you can perform from, so more shrinking would
+ *  be trading readability for a scrollbar we would rather just have. */
+const READ_ALOUD_MIN_PX = Math.round(READ_ALOUD_BASE_PX * 0.5)
+
 export function AudioRecordingModal({
   open, project, cells, activeCellId, username,
   onActiveCellChange, onTakeSaved, onLastTakeRemoved, onClose,
@@ -178,12 +191,19 @@ export function AudioRecordingModal({
   // a blurry baseline.
   const readAloudRef = useRef<HTMLParagraphElement | null>(null)
   const readAloudBoxRef = useRef<HTMLDivElement | null>(null)
-  const readAloudBase = showFilm ? 26 : 23
+  // ONE size, ONE leading, ONE budget, ONE floor — deliberately NOT branched on
+  // `showFilm` (2026-08-14, Sam). They used to be: 26px/33px/165px beside the
+  // picture and 23px/30px/150px collapsed, which made the same line land at a
+  // different size in the two states, and could make the type SHRINK on
+  // collapse even though the rule was supposed to be identical. The only thing
+  // that legitimately differs between the states is the column's WIDTH, and the
+  // fit below reads that from the DOM, so it adapts on its own.
+  const readAloudBase = READ_ALOUD_BASE_PX
   // Kept as a ratio rather than a fixed px line-height so the whole block
   // scales together — shrinking the type while leaving 33px leading would open
   // gaps that waste the very space we are trying to buy.
-  const readAloudRatio = showFilm ? 33 / 26 : 30 / 23
-  const readAloudBudget = 5 * (showFilm ? 33 : 30)
+  const readAloudRatio = READ_ALOUD_LINE_RATIO
+  const readAloudBudget = READ_ALOUD_LINES * READ_ALOUD_LINE_PX
   const [readAloudPx, setReadAloudPx] = useState(readAloudBase)
   const readAloudText = activeCell?.translated ?? ""
   // Re-fit when the column's WIDTH changes (window resize) — a narrower box
@@ -200,14 +220,17 @@ export function AudioRecordingModal({
     })
     ro.observe(box)
     return () => ro.disconnect()
-  }, [open, hasActiveCell])
+    // `showFilm` is in here because collapsing the picture is the one moment the
+    // column can be rebuilt around a different element; observing the old,
+    // detached box would freeze the width at its pre-collapse value and leave
+    // the type sized for a column that no longer exists.
+  }, [open, hasActiveCell, showFilm])
   useLayoutEffect(() => {
     const el = readAloudRef.current
     if (!el) return
-    // A floor, because a legible-but-small line beats an unreadable one: past
-    // half size the block stops being something you can perform from. Below the
-    // floor the box scrolls as a last resort, so the words still exist.
-    const floor = Math.max(12, Math.round(readAloudBase * 0.5))
+    // Step down a whole pixel at a time to the floor; only past it does the box
+    // scroll, so the words always exist even for a line no size can fit.
+    const floor = READ_ALOUD_MIN_PX
     const fits = (px: number) => {
       el.style.fontSize = `${px}px`
       el.style.lineHeight = `${Math.round(px * readAloudRatio)}px`
@@ -1000,7 +1023,7 @@ export function AudioRecordingModal({
               upper region would push the takes drawer to zero and then clip
               itself against `overflow-hidden` — the button you need would be
               the thing that vanished. Shrinkable, it scrolls instead, and the
-              read-aloud block inside keeps its own four-line cap regardless. */}
+              read-aloud block inside keeps its own five-line cap regardless. */}
           <div
             className={cn(
               "flex min-h-0 flex-col overflow-y-auto",

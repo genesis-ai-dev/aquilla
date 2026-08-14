@@ -17,6 +17,7 @@
 // charge is decided once, by whether this file has any playable audio.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { Volume2, VolumeX } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import type { CellData } from "@/hooks/useCells"
@@ -637,17 +638,7 @@ export function MediaVideoPane({
       data-video-state={slaved ? "slaved" : "standalone"}
       className="flex h-full min-h-0 flex-col overflow-hidden border-r border-border"
     >
-      <VideoPaneHeader
-        src={src}
-        // Only the standalone arrangement gets the button. A slaved picture is
-        // force-muted below whatever the preference says, so offering it there
-        // would be a control that visibly does nothing.
-        muteControl={
-          slaved
-            ? undefined
-            : { audible: sourceAudible, onToggle: () => toggleAudibility(fileId, "source") }
-        }
-      />
+      <VideoPaneHeader src={src} />
       {/* The black field fills everything under the header, and the picture is
           centred in it at the video's own proportions — leftover space becomes
           cinema bars instead of blank page. */}
@@ -760,6 +751,46 @@ export function MediaVideoPane({
            the line in the black below it. Anchored to the FIELD, so it
            lands in the bar when there is one. */}
       {hasCaption && placement === "bar" && <VideoPaneCaption {...captionProps} />}
+      {/* The film's own soundtrack, muted from the corner of the film — the
+          same place and the same gesture as the recording modal's (2026-08-14,
+          Sam). It began life as a speaker button on the timeline's Source-audio
+          track, then spent a day in this pane's header; neither put it on the
+          thing it silences.
+
+          Two things about the position. It rides the FIELD, not the picture, so
+          it keeps its corner when the picture is letterboxed down to a small
+          box — exactly why VideoPaneControls sits here too. And it clears the
+          bottom 44px, because a standalone picture keeps the browser's own
+          control bar, which owns the true bottom-right corner (the fullscreen
+          button); overlapping it would mean two controls fighting for one
+          click target.
+
+          Only the standalone arrangement has it at all: a slaved picture is
+          force-muted below whatever the preference says, so the control would
+          visibly do nothing. */}
+      {!slaved && (
+        <button
+          type="button"
+          data-testid="video-pane-mute"
+          aria-label={sourceAudible ? "Mute the video's sound" : "Unmute the video's sound"}
+          aria-pressed={sourceAudible}
+          title={
+            sourceAudible
+              ? "The video's sound is on — click to mute"
+              : "The video is muted — click to unmute"
+          }
+          onClick={() => toggleAudibility(fileId, "source")}
+          className={cn(
+            "absolute right-2 bottom-11 z-30 inline-flex h-7 w-7 items-center justify-center rounded-md",
+            "bg-black/55 backdrop-blur-sm transition-colors",
+            sourceAudible
+              ? "text-white hover:bg-black/70"
+              : "text-white/60 hover:bg-black/70 hover:text-white",
+          )}
+        >
+          {sourceAudible ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
+        </button>
+      )}
       <VideoPaneControls
         mode={mode}
         placement={placement}

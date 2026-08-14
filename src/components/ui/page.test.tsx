@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react"
 import { describe, expect, it } from "vitest"
 
-import { Page, PageHeader, StatTile } from "./page"
+import { Page, PageHeader, StatTile, STAT_TILE_GRID } from "./page"
 
 describe("StatTile", () => {
   it("keeps multi-digit values compact without crowding adjacent numerals", () => {
@@ -10,6 +10,20 @@ describe("StatTile", () => {
     const value = screen.getByText("388")
     expect(value).toHaveClass("tracking-normal", "tabular-nums")
     expect(value).not.toHaveClass("tracking-tight", "tracking-wide")
+  })
+
+  it("is a single horizontal row on small screens and a stacked tile from sm", () => {
+    const { container } = render(<StatTile label="Projects" value={3} />)
+    const tile = container.firstElementChild
+    expect(tile).toHaveClass("flex", "flex-row-reverse", "items-center", "justify-between")
+    expect(tile).toHaveClass("sm:flex-col", "sm:items-start")
+  })
+})
+
+describe("STAT_TILE_GRID", () => {
+  it("stacks to one card per row below sm", () => {
+    expect(STAT_TILE_GRID).toContain("grid-cols-1")
+    expect(STAT_TILE_GRID).not.toContain("grid-cols-2")
   })
 })
 

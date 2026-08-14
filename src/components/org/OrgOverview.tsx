@@ -28,7 +28,7 @@ import {
   useOrgPortfolio,
   type AttentionRow,
 } from "@/hooks/useOrgPortfolio"
-import { Page, PageHeader, Section, StatTile } from "@/components/ui/page"
+import { Page, PageHeader, Section, StatTile, STAT_TILE_GRID } from "@/components/ui/page"
 import { EmptyState } from "@/components/ui/empty"
 import { DataTable, DataTableColumnHeader } from "@/components/ui/data-table"
 import { buttonVariants } from "@/components/ui/button"
@@ -66,13 +66,13 @@ function OverviewLoadingTemplate() {
         main={
           <Page size="wide">
             <Skeleton className="mb-8 h-7 w-48" />
-            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-6">
+            <div className={STAT_TILE_GRID}>
               {Array.from({ length: 6 }).map((_, index) => (
                 <div
                   key={index}
-                  className="flex h-[88px] flex-col gap-2 rounded-lg border bg-card px-5 py-4"
+                  className="flex h-12 items-center justify-between rounded-lg border bg-card px-5 py-3 sm:h-[88px] sm:flex-col sm:items-start sm:justify-start sm:gap-2 sm:py-4"
                 >
-                  <Skeleton className="h-6 w-12" />
+                  <Skeleton className="order-last h-6 w-12 sm:order-none" />
                   <Skeleton className="h-3 w-20" />
                 </div>
               ))}
@@ -246,7 +246,7 @@ export function OrgOverview() {
                 />
               )}
 
-              <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-6">
+              <div className={STAT_TILE_GRID}>
                 <StatTile label="Projects" value={portfolio.projects.length} />
                 <StatTile
                   label="Avg translated"

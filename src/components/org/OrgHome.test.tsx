@@ -9,9 +9,12 @@ import { renderWithTooltips, expectTooltip } from "@/test-utils/tooltip"
 import type { PortfolioProject } from "@/lib/frontier/portfolio"
 
 function projectsRollupStat() {
-  // Overview (and all-orgs) rollup tiles sit outside the nav.
+  // Overview (and all-orgs) rollup tiles sit outside the nav. The label lives
+  // in a nested wrapper so the tile can be a single row on small screens.
   const label = screen.getAllByText("Projects").find((el) => !el.closest("nav"))!
-  return label.parentElement!
+  const tile = label.parentElement?.parentElement
+  if (!tile) throw new Error("rollup tile root not found")
+  return tile
 }
 
 function renderMemberShell(path: string) {
@@ -527,6 +530,8 @@ describe("OrgOverview / OrgProjects", () => {
     await waitFor(() => expect(screen.getByText("Avg translated")).toBeInTheDocument())
     const projectsStat = projectsRollupStat()
     expect(within(projectsStat).getByText("2")).toBeInTheDocument()
+    expect(projectsStat).toHaveClass("flex-row-reverse")
+    expect(projectsStat.parentElement).toHaveClass("grid-cols-1")
   })
 
   it("shows the overdue rollup card and at-risk rows on overview", async () => {

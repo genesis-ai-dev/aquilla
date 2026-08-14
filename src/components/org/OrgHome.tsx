@@ -28,7 +28,7 @@ import { OrgProjectsDataTable } from "./OrgProjectsDataTable"
 import type { StatusFilter } from "@/hooks/useOrgPortfolio"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Page, PageHeader, Section, StatTile, EmptyState } from "@/components/ui/page"
+import { Page, PageHeader, Section, StatTile, STAT_TILE_GRID, EmptyState } from "@/components/ui/page"
 import { DataTable, DataTableColumnHeader } from "@/components/ui/data-table"
 import { OrgWithAvatar } from "@/components/OrgWithAvatar"
 import {
@@ -108,13 +108,13 @@ function OrgHomeLoadingTemplate() {
           <Page size="wide">
             <Skeleton className="mb-8 h-7 w-48" />
             <div className="flex flex-col gap-6">
-              <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-6">
+              <div className={STAT_TILE_GRID}>
                 {Array.from({ length: 6 }).map((_, index) => (
                   <div
                     key={index}
-                    className="flex h-[88px] flex-col gap-2 rounded-lg border bg-card px-5 py-4"
+                    className="flex h-12 items-center justify-between rounded-lg border bg-card px-5 py-3 sm:h-[88px] sm:flex-col sm:items-start sm:justify-start sm:gap-2 sm:py-4"
                   >
-                    <Skeleton className="h-6 w-12" />
+                    <Skeleton className="order-last h-6 w-12 sm:order-none" />
                     <Skeleton className="h-3 w-20" />
                   </div>
                 ))}
@@ -808,7 +808,7 @@ export function OrgHome() {
                 </Section>
               )}
 
-              <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-6">
+              <div className={STAT_TILE_GRID}>
                 <StatTile label="Organizations" value={orgs.length} />
                 <StatTile label="Projects" value={projects.length} />
                 <StatTile label="Avg translated" value={`${Math.round(avgTranslatedPct * 100)}%`} />

@@ -2,7 +2,7 @@ import { useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { type ColumnDef } from "@tanstack/react-table"
 import { ArrowRight, Building2, ShieldAlert } from "lucide-react"
-import { Section, StatTile } from "@/components/ui/page"
+import { Section, StatTile, STAT_TILE_GRID } from "@/components/ui/page"
 import { EmptyState } from "@/components/ui/empty"
 import { DataTable, DataTableColumnHeader } from "@/components/ui/data-table"
 import { missingLast, SORT_MISSING_LAST } from "@/components/ui/data-table-missing"
@@ -142,7 +142,7 @@ export function AdminOverviewHome({
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
+      <div className={STAT_TILE_GRID}>
         <StatTile label="Organizations" value={overview.orgs} />
         <StatTile label="Teams" value={overview.teams} />
         <StatTile

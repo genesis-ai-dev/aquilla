@@ -182,8 +182,18 @@ function Section({
 }
 
 /**
+ * Stat-tile strip: one full-width card per row on small screens, 3-up from
+ * `sm`, 6-up on wide. Pair with `StatTile` (and matching loading skeletons).
+ */
+const STAT_TILE_GRID = "grid grid-cols-1 gap-4 sm:grid-cols-3 xl:grid-cols-6"
+
+/**
  * A single at-a-glance metric. Numbers use tabular-nums so columns of figures
  * line up and don't jitter as values change.
+ *
+ * On small screens the tile is a single row (label left, value right) so a
+ * six-metric strip doesn't become a cramped 2×3 grid. From `sm` it stacks
+ * value-on-top like a dashboard tile.
  */
 function StatTile({
   label,
@@ -197,12 +207,20 @@ function StatTile({
   className?: string
 }) {
   return (
-    <div className={cn("rounded-lg border bg-card px-5 py-4", className)}>
+    <div
+      className={cn(
+        "flex flex-row-reverse items-center justify-between gap-4 rounded-lg border bg-card px-5 py-3",
+        "sm:flex-col sm:items-start sm:justify-start sm:gap-0 sm:py-4",
+        className,
+      )}
+    >
       <div className="text-2xl leading-none font-semibold tracking-normal tabular-nums text-foreground">
         {value}
       </div>
-      <div className="mt-1.5 text-sm text-muted-foreground">{label}</div>
-      {hint ? <div className="mt-1 text-xs text-muted-foreground">{hint}</div> : null}
+      <div className="min-w-0">
+        <div className="text-sm text-muted-foreground sm:mt-1.5">{label}</div>
+        {hint ? <div className="mt-0.5 text-xs text-muted-foreground sm:mt-1">{hint}</div> : null}
+      </div>
     </div>
   )
 }
@@ -292,4 +310,4 @@ function SettingsRow({
   )
 }
 
-export { Page, PageHeader, Section, SettingsGroup, SettingsRow, StatTile, EmptyState }
+export { Page, PageHeader, Section, SettingsGroup, SettingsRow, StatTile, STAT_TILE_GRID, EmptyState }

@@ -5,6 +5,7 @@
 import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent, within } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
+import { STAT_TILE_GRID } from "@/components/ui/page"
 import { AdminOverviewHome } from "./AdminOverviewHome"
 import type { AdminOverview, AdminOrg, AdminUser, AdminProject, AdminActivity } from "@/lib/frontier/admin"
 
@@ -74,6 +75,13 @@ describe("AdminOverviewHome", () => {
     renderHome()
     expect(screen.getByText("Organizations")).toBeInTheDocument()
     expect(screen.getByText(/archived/)).toBeInTheDocument()
+  })
+
+  it("stacks the stat strip to one card per row on small screens", () => {
+    renderHome()
+    const tile = screen.getByText("Organizations").parentElement?.parentElement
+    expect(tile).toHaveClass("flex-row-reverse")
+    expect(tile?.parentElement).toHaveClass(...STAT_TILE_GRID.split(" "))
   })
 
   it("lists at-risk projects in Needs attention", () => {

@@ -12,18 +12,20 @@ describe("StatTile", () => {
     expect(value).not.toHaveClass("tracking-tight", "tracking-wide")
   })
 
-  it("is a single horizontal row on small screens and a stacked tile from sm", () => {
+  it("is a single horizontal row on the narrowest screens and a stacked tile from 480px", () => {
     const { container } = render(<StatTile label="Projects" value={3} />)
     const tile = container.firstElementChild
-    expect(tile).toHaveClass("flex", "flex-row-reverse", "items-center", "justify-between")
-    expect(tile).toHaveClass("sm:flex-col", "sm:items-start")
+    expect(tile).toHaveClass("flex", "flex-row-reverse", "items-center", "justify-between", "min-h-[88px]")
+    expect(tile).toHaveClass("min-[480px]:flex-col", "min-[480px]:items-start")
   })
 })
 
 describe("STAT_TILE_GRID", () => {
-  it("stacks to one card per row below sm", () => {
+  it("steps from 1-up to 2-up at 480px, then 3-up, then 6-up", () => {
     expect(STAT_TILE_GRID).toContain("grid-cols-1")
-    expect(STAT_TILE_GRID).not.toContain("grid-cols-2")
+    expect(STAT_TILE_GRID).toContain("min-[480px]:grid-cols-2")
+    expect(STAT_TILE_GRID).toContain("md:grid-cols-3")
+    expect(STAT_TILE_GRID).toContain("xl:grid-cols-6")
   })
 })
 

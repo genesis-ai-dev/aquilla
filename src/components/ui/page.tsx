@@ -184,18 +184,19 @@ function Section({
 }
 
 /**
- * Stat-tile strip: one full-width card per row on small screens, 3-up from
- * `sm`, 6-up on wide. Pair with `StatTile` (and matching loading skeletons).
+ * Stat-tile strip: 1-up (single-row cards) only on the narrowest screens,
+ * 2-up from 480px so that step lasts through large phones, 3-up from `md`,
+ * 6-up on wide. Pair with `StatTile` (and matching loading skeletons).
  */
-const STAT_TILE_GRID = "grid grid-cols-1 gap-4 sm:grid-cols-3 xl:grid-cols-6"
+const STAT_TILE_GRID =
+  "grid grid-cols-1 gap-4 min-[480px]:grid-cols-2 md:grid-cols-3 xl:grid-cols-6"
 
 /**
  * A single at-a-glance metric. Numbers use tabular-nums so columns of figures
  * line up and don't jitter as values change.
  *
- * On small screens the tile is a single row (label left, value right) so a
- * six-metric strip doesn't become a cramped 2×3 grid. From `sm` it stacks
- * value-on-top like a dashboard tile.
+ * Below 480px the tile is a single row (label left, value right). From 480px
+ * it stacks value-on-top with the 2-up / 3-up / 6-up grid.
  */
 function StatTile({
   label,
@@ -211,8 +212,8 @@ function StatTile({
   return (
     <div
       className={cn(
-        "flex flex-row-reverse items-center justify-between gap-4 rounded-lg border bg-card px-5 py-3",
-        "sm:flex-col sm:items-start sm:justify-start sm:gap-0 sm:py-4",
+        "flex min-h-[88px] flex-row-reverse items-center justify-between gap-4 rounded-lg border bg-card px-5 py-4",
+        "min-[480px]:flex-col min-[480px]:items-start min-[480px]:justify-start min-[480px]:gap-0",
         className,
       )}
     >
@@ -220,8 +221,10 @@ function StatTile({
         {value}
       </div>
       <div className="min-w-0">
-        <div className="text-sm text-muted-foreground sm:mt-1.5">{label}</div>
-        {hint ? <div className="mt-0.5 text-xs text-muted-foreground sm:mt-1">{hint}</div> : null}
+        <div className="text-sm text-muted-foreground min-[480px]:mt-1.5">{label}</div>
+        {hint ? (
+          <div className="mt-0.5 text-xs text-muted-foreground min-[480px]:mt-1">{hint}</div>
+        ) : null}
       </div>
     </div>
   )

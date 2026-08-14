@@ -253,7 +253,7 @@ function ConsoleSkeleton() {
         <Skeleton className="h-8 w-72 rounded-md" />
         <div className={STAT_TILE_GRID}>
           {Array.from({ length: 6 }).map((_, i) => (
-            <Skeleton key={i} className="h-12 rounded-lg border bg-card sm:h-20" />
+            <Skeleton key={i} className="h-[88px] rounded-lg border bg-card" />
           ))}
         </div>
         <Skeleton className="h-48 rounded-lg border bg-card" />

@@ -112,9 +112,9 @@ function OrgHomeLoadingTemplate() {
                 {Array.from({ length: 6 }).map((_, index) => (
                   <div
                     key={index}
-                    className="flex h-12 items-center justify-between rounded-lg border bg-card px-5 py-3 sm:h-[88px] sm:flex-col sm:items-start sm:justify-start sm:gap-2 sm:py-4"
+                    className="flex h-[88px] items-center justify-between rounded-lg border bg-card px-5 py-4 min-[480px]:flex-col min-[480px]:items-start min-[480px]:justify-start min-[480px]:gap-2"
                   >
-                    <Skeleton className="order-last h-6 w-12 sm:order-none" />
+                    <Skeleton className="order-last h-6 w-12 min-[480px]:order-none" />
                     <Skeleton className="h-3 w-20" />
                   </div>
                 ))}

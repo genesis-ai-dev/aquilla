@@ -193,7 +193,7 @@ function NeutralLoadingTemplate() {
             <Skeleton className="h-7 w-48" />
             <div className={STAT_TILE_GRID}>
               {Array.from({ length: 6 }).map((_, index) => (
-                <Skeleton key={index} className="h-12 rounded-lg sm:h-[88px]" />
+                <Skeleton key={index} className="h-[88px] rounded-lg" />
               ))}
             </div>
             <div className="grid gap-6 lg:grid-cols-[minmax(14rem,1fr)_minmax(30rem,2fr)]">

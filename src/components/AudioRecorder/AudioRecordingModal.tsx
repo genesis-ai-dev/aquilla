@@ -16,7 +16,7 @@ import { AppTooltip } from "@/components/ui/tooltip"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
 import { MIN_USEFUL_REGION_SEC, targetOffsetMsFor } from "@/lib/timeline/lane-timing"
-import { takeMarginTrims } from "@/lib/audio/take-margins"
+import { takeTrims } from "@/lib/audio/take-margins"
 import { isLinkableVideoUrl } from "@/components/timeline/LinkVideoUrlDialog"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectRecord } from "@/lib/parsers/types"
@@ -655,16 +655,25 @@ export function AudioRecordingModal({
       // worse than the number already in hand. Do not re-add one for either
       // branch.
       const takeDurationMs = Math.round(recorder.state.durationSec * 1000)
-      // Round 5: the take is BORN trimmed to what was performed. The pre-roll
-      // and the stop-grace are real audio and stay in the file — the window
-      // simply starts and ends where the performance does, plus a sliver of
-      // runway at each end. This is what keeps a well-placed take from being
-      // drawn (and flagged) as though it overlapped its neighbours: both
-      // margins used to stick out into the gap between two hand-written cues
-      // and collide there. The edge handles walk the margin back whenever a
-      // line disagrees. See take-margins.ts for the full reasoning.
-      const takeTrims = takeMarginTrims({
-        preRollMs,
+      // Round 5: the take is BORN trimmed. The pre-roll and the stop-grace are
+      // real audio and stay in the file — the window simply OPENS ON THE CUE'S
+      // OWN START and closes just past the end of the performance. That is what
+      // keeps a well-placed take from being drawn (and flagged) as though it
+      // overlapped its neighbours: both margins used to stick out into the gap
+      // between two hand-written cues and collide there. The edge handles walk
+      // the margin back whenever a line disagrees.
+      //
+      // The lane offset is resolved HERE, before the attach, precisely so the
+      // head trim can undo exactly the shift that gets stored — including the
+      // file-zero clamp. Deriving it from `preRollMs` instead would drift,
+      // because the pre-roll ring keeps whole buffers and so hands back rather
+      // more than the 200ms it was asked for. See take-margins.ts.
+      const laneOffsetMs =
+        preRollMs > 0 && activeCell.startTime != null
+          ? targetOffsetMsFor(activeCell, activeCell.startTime - preRollMs / 1000)
+          : null
+      const takeTrimWindow = takeTrims({
+        targetOffsetMs: laneOffsetMs ?? undefined,
         tailGraceMs: recorder.state.tailGraceMs,
         durationMs: takeDurationMs,
       })
@@ -705,7 +714,7 @@ export function AudioRecordingModal({
           slot: "recording",
           mimeType: blob.type || undefined,
           durationMs: takeDurationMs,
-          ...takeTrims,
+          ...takeTrimWindow,
           label: takeLabel,
           author: username,
         })
@@ -738,8 +747,8 @@ export function AudioRecordingModal({
         // The SAME window the attach carried — an optimistic chip drawn at full
         // clip length would flash its margins (and any overlap warning they
         // trip) until the server projection lands and silently corrected it.
-        trimStartMs: takeTrims.trimStartMs ?? null,
-        trimEndMs: takeTrims.trimEndMs ?? null,
+        trimStartMs: takeTrimWindow.trimStartMs ?? null,
+        trimEndMs: takeTrimWindow.trimEndMs ?? null,
       }, attachEventId)
       notifyAudioAttachmentsChanged(activeCell.fileId)
       // THE PRE-ROLL'S OTHER HALF. Kept head audio that isn't repositioned
@@ -747,25 +756,28 @@ export function AudioRecordingModal({
       // hat — so the take is anchored preRollMs BEFORE its line: the sample
       // at the mark (the GO instant) lands exactly on the line's start, and
       // an early entrance sounds exactly as early as it was performed.
-      // Nothing is DELETED: the take attaches with a window that starts at the
-      // performance (see takeTrims above), so the anchor and the trim compose —
-      // sample zero sits `preRollMs` early, the window opens HEAD_KEEP_MS before
-      // the line, and dragging the head handle out walks the rest of the
-      // pre-roll back into audibility. This deliberately re-derives the anchor
-      // on every save — a
-      // hand-dragged chip position describes the PREVIOUS take, and the new
-      // recording was performed against the line's own start. Non-fatal on
-      // failure: the take is already attached and merely sits at the line
-      // start, `preRollMs` late, until someone drags it.
-      // (targetOffsetMsFor clamps at file zero, so a line in the first 200ms
-      // of the film keeps what runway it has.)
-      if (preRollMs > 0 && activeCell.startTime != null) {
+      //
+      // Nothing is DELETED: the anchor and the trim compose. Sample zero sits
+      // `preRollMs` early, and the head trim above undoes precisely that, so
+      // the take OPENS ON THE LINE'S OWN START — dragging the head handle out
+      // walks the pre-roll back into audibility whenever a performance wants it.
+      // The offset is the one already resolved above; recomputing it here would
+      // let the two drift apart, and the trim's whole job is to be its exact
+      // inverse.
+      //
+      // Deliberately re-derived on every save — a hand-dragged chip position
+      // describes the PREVIOUS take, and the new recording was performed
+      // against the line's own start. Non-fatal on failure: the take is already
+      // attached, and it merely sits `preRollMs` late until someone drags it.
+      // (targetOffsetMsFor clamps at file zero, so a line in the first 200ms of
+      // the film keeps what runway it has — and the trim inherits the clamp.)
+      if (laneOffsetMs != null) {
         try {
           await emitCellLaneRetime({
             projectId: project.id,
             fileId: activeCell.fileId,
             cellId: activeCell.id,
-            targetOffsetMs: targetOffsetMsFor(activeCell, activeCell.startTime - preRollMs / 1000),
+            targetOffsetMs: laneOffsetMs,
             author: username,
           })
         } catch {

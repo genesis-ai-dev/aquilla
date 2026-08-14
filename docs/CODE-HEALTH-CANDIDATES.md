@@ -62,14 +62,10 @@ This run removed 13 redundant non-null assertions (type-tightening theme). The s
 survey turned up a complexity-reduction (theme 2) candidate and one more type-tightening
 spot, both deferred rather than mixed into the single-theme budget.
 
-- **`src/lib/frontier/roles.ts`** (175 lines) — `roleName()` (lines ~115–126) and
-  `roleDescription()` (lines ~136–147) are two parallel `switch` statements keyed on
-  the same 7 numeric role levels (100/200/…/700). Friction: this run's budget was
-  already spent on the type-tightening theme; picking both in one PR would mix themes.
-  Proof needed: collapse to a single `Record<RoleLevel, { name; description }>` lookup
-  with `roleName`/`roleDescription` kept as thin accessors with identical signatures
-  and return values — `pnpm build` (return-type match) plus `pnpm test` (no test file
-  changes) is the proof.
+- ~~**`src/lib/frontier/roles.ts`**~~ — done in the 2026-08-14 run: `roleName()` and
+  `roleDescription()` now share a single `ROLE_INFO` lookup table keyed by numeric
+  level; both functions kept identical signatures/return values. `roles.test.ts`
+  (22 tests, unchanged) stayed green.
 
 - **`src/components/CellAudioButton.tsx`** (lines 74–102) — `errorIcon()` and
   `errorTooltip()` are two switch statements keyed on the same `kind` string union;

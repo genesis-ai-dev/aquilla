@@ -166,4 +166,23 @@ describe("E2E backend-reset transport retry", () => {
     expect(source).toMatch(/abortIfWorkerDies\(identity,\s*"identity"\)/)
     expect(source).toMatch(/abortIfWorkerDies\(sync,\s*"sync"\)/)
   })
+
+  it("isolates Wrangler registry heartbeat files per e2e stack", () => {
+    const source = readFileSync(path.join(REPO_ROOT, "scripts/e2e-up.ts"), "utf8")
+    expect(source).toContain("isolatedWranglerName")
+    expect(source).toMatch(
+      /name:\s*isolatedWranglerName\(\s*"aquilla-identity-local",\s*SUFFIX\s*\)/,
+    )
+    expect(source).toMatch(
+      /name:\s*isolatedWranglerName\(\s*"aquilla-sync-worker-local",\s*SUFFIX\s*\)/,
+    )
+
+    const spawnSource = readFileSync(
+      path.join(REPO_ROOT, "scripts/lib/spawn-worker.ts"),
+      "utf8",
+    )
+    expect(spawnSource).toContain("WRANGLER_REGISTRY_PATH")
+    expect(spawnSource).toContain("MINIFLARE_REGISTRY_PATH")
+    expect(spawnSource).toContain("defaultWranglerRegistryDir")
+  })
 })

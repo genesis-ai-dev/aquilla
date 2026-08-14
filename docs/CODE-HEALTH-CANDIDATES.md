@@ -62,24 +62,17 @@ This run removed 13 redundant non-null assertions (type-tightening theme). The s
 survey turned up a complexity-reduction (theme 2) candidate and one more type-tightening
 spot, both deferred rather than mixed into the single-theme budget.
 
-- ~~**`src/lib/frontier/roles.ts`**~~ — done in the 2026-08-14 run: `roleName()` and
-  `roleDescription()` now share a single `ROLE_INFO` lookup table keyed by numeric
-  level; both functions kept identical signatures/return values. `roles.test.ts`
-  (22 tests, unchanged) stayed green.
+- **Status**: both complexity-reduction candidates were completed on 2026-08-14.
+  `roles.ts` now uses the single canonical `ROLE_INFO` lookup integrated from PR #395;
+  `CellAudioButton.tsx` uses the icon and tooltip lookups from PR #391. Their exported
+  signatures and fallback values remain unchanged.
 
-- **`src/components/CellAudioButton.tsx`** (lines 74–102) — `errorIcon()` and
-  `errorTooltip()` are two switch statements keyed on the same `kind` string union;
-  same lookup-table shape as above. Friction: budget, and slightly higher risk since
-  the switches return JSX rather than plain values — worth its own careful pass.
-  Proof needed: same exported signatures/return types, `pnpm build` + `pnpm test`
-  green with no test changes.
-
-- **`src/lib/text/word-diff.ts`** (~lines 32–56) — ~14 dense non-null assertions
-  (`text[i]!`-style) inside a tight DP loop, same "loop condition already bounds the
-  index" story as the ones fixed this run in `src/lib/biblica/sentence-cuts.ts`.
-  Friction: skipped this run — the density of assertions in one tight loop raised the
-  risk of a transcription typo during a bulk edit for a line-count-only benefit; wants
-  a dedicated, careful pass rather than being bundled with the other easier fixes.
+- **`src/lib/text/word-diff.ts`** (~lines 32–56) — remaining type-tightening spot: ~14
+  dense non-null assertions (`text[i]!`-style) inside a tight DP loop, same "loop
+  condition already bounds the index" story as the ones fixed in
+  `src/lib/biblica/sentence-cuts.ts`. Friction: the density of assertions in one tight
+  loop raises the risk of a transcription typo during a bulk edit for a line-count-only
+  benefit; wants a dedicated, careful pass rather than being bundled with other fixes.
   Proof needed: `pnpm build` clean (confirms TS still infers the narrower type without
   the assertions) plus `pnpm test` green, no test files touched.
 

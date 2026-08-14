@@ -62,21 +62,19 @@ This run removed 13 redundant non-null assertions (type-tightening theme). The s
 survey turned up a complexity-reduction (theme 2) candidate and one more type-tightening
 spot, both deferred rather than mixed into the single-theme budget.
 
-- **`src/lib/frontier/roles.ts`** (175 lines) — `roleName()` (lines ~115–126) and
-  `roleDescription()` (lines ~136–147) are two parallel `switch` statements keyed on
-  the same 7 numeric role levels (100/200/…/700). Friction: this run's budget was
-  already spent on the type-tightening theme; picking both in one PR would mix themes.
-  Proof needed: collapse to a single `Record<RoleLevel, { name; description }>` lookup
-  with `roleName`/`roleDescription` kept as thin accessors with identical signatures
-  and return values — `pnpm build` (return-type match) plus `pnpm test` (no test file
-  changes) is the proof.
+- **Status**: the two complexity-reduction candidates below (`roles.ts`, `CellAudioButton.tsx`)
+  were completed in the 2026-08-14 run — both switch pairs collapsed to `Record` lookups
+  with identical exported signatures/return values; `pnpm build` + `pnpm test` green,
+  no test files touched.
 
-- **`src/components/CellAudioButton.tsx`** (lines 74–102) — `errorIcon()` and
-  `errorTooltip()` are two switch statements keyed on the same `kind` string union;
-  same lookup-table shape as above. Friction: budget, and slightly higher risk since
-  the switches return JSX rather than plain values — worth its own careful pass.
-  Proof needed: same exported signatures/return types, `pnpm build` + `pnpm test`
-  green with no test changes.
+- **`src/lib/text/word-diff.ts`** (~lines 32–56) — remaining type-tightening spot: ~14
+  dense non-null assertions (`text[i]!`-style) inside a tight DP loop, same "loop
+  condition already bounds the index" story as the ones fixed in
+  `src/lib/biblica/sentence-cuts.ts`. Friction: the density of assertions in one tight
+  loop raises the risk of a transcription typo during a bulk edit for a line-count-only
+  benefit; wants a dedicated, careful pass rather than being bundled with other fixes.
+  Proof needed: `pnpm build` clean (confirms TS still infers the narrower type without
+  the assertions) plus `pnpm test` green, no test files touched.
 
 - **`src/lib/text/word-diff.ts`** (~lines 32–56) — ~14 dense non-null assertions
   (`text[i]!`-style) inside a tight DP loop, same "loop condition already bounds the

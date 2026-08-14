@@ -111,18 +111,19 @@ export function roleDisplayLabel(level: number): string {
   return roleDisplayText(roleName(level))
 }
 
+const ROLE_NAMES: Readonly<Record<number, string>> = {
+  100: "viewer",
+  200: "commenter",
+  300: "reviewer",
+  400: "contributor",
+  500: "project_lead",
+  600: "maintainer",
+  700: "owner",
+}
+
 /** Canonical role name for a given level (mirrors server's ROLE_NAMES). */
 export function roleName(level: number): string {
-  switch (level) {
-    case 100: return "viewer"
-    case 200: return "commenter"
-    case 300: return "reviewer"
-    case 400: return "contributor"
-    case 500: return "project_lead"
-    case 600: return "maintainer"
-    case 700: return "owner"
-    default: return `level_${level}`
-  }
+  return ROLE_NAMES[level] ?? `level_${level}`
 }
 
 /** Human display form of a role level: 500 → "Project lead". Use this (never
@@ -136,17 +137,18 @@ export function humanRoleName(level: number): string {
  * Capability blurb shown under each role in RoleSelect (AD-6 / AQU-138).
  * Name + level stay on the label line — this is the "what it does" copy only.
  */
+const ROLE_DESCRIPTIONS: Readonly<Record<number, string>> = {
+  100: "Can read all org projects. No edit or management actions.",
+  200: "Can read and leave comments. Cannot edit content.",
+  300: "Can read, comment, and review. Cannot make direct edits.",
+  400: "Can edit project content. Maximum level grantable via share link.",
+  500: "Can add members to projects, mint share-link invites, and lead project work.",
+  600: "Can create/manage teams, rename the org, set project deadlines, and remove project members.",
+  700: "Full control: add/remove org members, archive/restore projects, and all maintainer actions.",
+}
+
 export function roleDescription(level: number): string {
-  switch (level) {
-    case 100: return "Can read all org projects. No edit or management actions."
-    case 200: return "Can read and leave comments. Cannot edit content."
-    case 300: return "Can read, comment, and review. Cannot make direct edits."
-    case 400: return "Can edit project content. Maximum level grantable via share link."
-    case 500: return "Can add members to projects, mint share-link invites, and lead project work."
-    case 600: return "Can create/manage teams, rename the org, set project deadlines, and remove project members."
-    case 700: return "Full control: add/remove org members, archive/restore projects, and all maintainer actions."
-    default: return ""
-  }
+  return ROLE_DESCRIPTIONS[level] ?? ""
 }
 
 /** Full "Viewer (100) — …" string for tooltips and help affordances. */

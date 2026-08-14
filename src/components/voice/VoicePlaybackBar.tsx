@@ -19,6 +19,7 @@ import {
   hasAnyPlayableAudio, pauseQueue, queueClockIsFileTime, resumeQueue, seekQueueToTime,
   setQueueRate, setQueueVolume, skipBack, skipForward, startQueue, updateQueueCells,
 } from "@/lib/audio/play-queue"
+import { toggleAudibility, useQueueAudibility } from "@/lib/audio/audibility"
 import { useTransportForFile } from "@/hooks/useTransportForFile"
 import { useVideoController } from "@/lib/timeline/video-controller"
 import { spacebarShouldToggle } from "@/lib/audio/playback-keys"
@@ -92,6 +93,7 @@ export function VoicePlaybackBar({
   })
   const videoController = useVideoController()
   const drivesVideo = transport.source === "video"
+  const sourceAudible = useQueueAudibility().source
   const { currentTime, duration, rate, volume } = transport.progress
 
   // A picture is always playable; the queue needs a clip to play.
@@ -276,7 +278,22 @@ export function VoicePlaybackBar({
 
         {/* Volume — matching flex-1 balances the left column for true center */}
         <div className="flex min-w-0 flex-1 items-center justify-end self-center">
-          <VolumeControl volume={volume} onChange={(v) => (drivesVideo ? videoController?.setVolume(v) : setQueueVolume(v))} />
+          <VolumeControl
+            volume={volume}
+            // Driving the film, the mute that counts is the audibility flag the
+            // corner button owns — the same one, so the two surfaces cannot
+            // disagree. Driving the queue there is no such flag and mute stays
+            // what it always was: volume 0.
+            muted={drivesVideo ? !sourceAudible : volume === 0}
+            onChange={(v) => (drivesVideo ? videoController?.setVolume(v) : setQueueVolume(v))}
+            onToggleMute={() => {
+              if (drivesVideo && fileId) {
+                toggleAudibility(fileId, "source")
+                return
+              }
+              setQueueVolume(volume === 0 ? 1 : 0)
+            }}
+          />
         </div>
       </div>
     </div>
@@ -377,8 +394,28 @@ function SpeedButton({ rate, onChange }: { rate: number; onChange: (r: number) =
   )
 }
 
-function VolumeControl({ volume, onChange }: { volume: number; onChange: (v: number) => void }) {
-  const muted = volume === 0
+/**
+ * Volume, plus a mute that may not be volume at all.
+ *
+ * Driving the queue, mute has always just been volume 0 — there is no other
+ * flag to reach. Driving the FILM there is: the button in the corner of the
+ * picture sets the element's real `muted` property through the audibility
+ * module, and a real mute OVERRIDES volume. So the caller passes both, and this
+ * control reports whichever silence is in force. Without that, the bar happily
+ * read "volume 80%" beside a film muted from the corner, and nothing on screen
+ * said why it was silent. (2026-08-14)
+ */
+function VolumeControl({
+  volume,
+  muted,
+  onChange,
+  onToggleMute,
+}: {
+  volume: number
+  muted: boolean
+  onChange: (v: number) => void
+  onToggleMute: () => void
+}) {
   return (
     <div className="flex items-center gap-2">
       <AppTooltip content={muted ? "Unmute" : "Mute"}>
@@ -387,7 +424,8 @@ function VolumeControl({ volume, onChange }: { volume: number; onChange: (v: num
           size="icon-sm"
           variant="ghost"
           aria-label={muted ? "Unmute" : "Mute"}
-          onClick={() => onChange(muted ? 1 : 0)}
+          aria-pressed={muted}
+          onClick={onToggleMute}
         >
           {muted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
         </Button>
@@ -397,7 +435,14 @@ function VolumeControl({ volume, onChange }: { volume: number; onChange: (v: num
         max={1}
         step={0.01}
         value={[volume]}
-        onValueChange={(next) => onChange(Array.isArray(next) ? next[0] : next)}
+        onValueChange={(next) => {
+          const v = Array.isArray(next) ? next[0] : next
+          onChange(v)
+          // Reaching for the slider is asking to hear it. Leaving the mute on
+          // would make the slider look broken — you would drag it up and get
+          // nothing, with the reason two panes away.
+          if (muted && v > 0) onToggleMute()
+        }}
         aria-label="Volume"
         className="hidden w-24 sm:block"
       />

@@ -34,7 +34,12 @@ export function VideoPaneCaption({
       aria-hidden="true"
       data-testid="video-pane-caption"
       className="pointer-events-none absolute bottom-2 left-1/2 z-10 flex -translate-x-1/2 flex-col items-center gap-1 px-2 text-center"
-      style={{ maxWidth: "92%" }}
+      // A fixed 40px gutter each side rather than a percentage, so the line
+      // stays centred AND always clears the mute button in the bottom right
+      // corner (28px + its 8px inset) at any pane width. A percentage cannot
+      // promise that: 8% of a narrow pane is a few pixels, and a long caption
+      // would slide straight under the button. (2026-08-14)
+      style={{ maxWidth: "calc(100% - 80px)" }}
     >
       {/* The translucent plate is invisible against a real black bar, and it is
           what saves the line when there ISN'T one — a tall-enough field, or a

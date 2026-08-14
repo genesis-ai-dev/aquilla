@@ -12,9 +12,13 @@
 // ONE exception, and it is not a special case so much as the original job: a
 // subtitle file can have a linked video and no audio attachments at all, and
 // then the queue can never start. There the video IS the player — it keeps its
-// native controls, keeps its sound, and reports its own time back up to drive
-// the playhead. The clock therefore has two possible drivers; which one is in
-// charge is decided once, by whether this file has any playable audio.
+// sound and reports its own time back up to drive the playhead. The clock
+// therefore has two possible drivers; which one is in charge is decided once,
+// by whether this file has any playable audio.
+//
+// It does NOT keep the browser's controls, in either arrangement (2026-08-14):
+// the app's own playback bar drives it, and a control bar whose size no API
+// reports cannot be laid out around. The long note beside the element explains.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Volume2, VolumeX } from "lucide-react"
@@ -664,16 +668,39 @@ export function MediaVideoPane({
           className="h-full w-full object-contain"
           playsInline
           preload="metadata"
-          // Slaved: silent picture, no competing controls. Standalone: this IS
-          // the player, so it keeps both — and it is also the SOURCE AUDIO, so
-          // the mute button in this pane's own HEADER silences it. (It lived on
-          // the timeline's Source-audio track until stage 2 made that track cue
-          // data, which mutes nothing.) The button publishes through the
-          // audibility module into the queue store, which reaches the queue's
-          // own elements; there are none in this arrangement, so the pane
-          // honours the same flag directly. (AQU-646, 2026-08-11 / 2026-08-13)
+          // Slaved: a silent picture. Standalone: this IS the player, and it is
+          // also the SOURCE AUDIO, so the mute in the corner below silences it.
+          // (That button lived on the timeline's Source-audio track until stage
+          // 2 made that track cue data, which mutes nothing, and in this pane's
+          // header for a day after.) It publishes through the audibility module
+          // into the queue store, which reaches the queue's own elements; there
+          // are none in this arrangement, so the pane honours the flag directly.
+          // (AQU-646, 2026-08-11 / 2026-08-13)
           muted={slaved || !sourceAudible}
-          controls={!slaved}
+          // NO NATIVE CONTROLS, in either arrangement (2026-08-14, Sam).
+          //
+          // The standalone picture used to keep them, on the reasoning that it
+          // is the player and therefore needs a transport. It does — but we
+          // built that transport: VoicePlaybackBar has play/pause, prev/next
+          // line, a seek slider, speed and volume, and routes all of them to
+          // this element through the video controller whenever the film owns
+          // the file. So the browser's bar was a SECOND set of controls for the
+          // same picture, and the two could disagree.
+          //
+          // What settled it is that its geometry is unknowable. Safari draws a
+          // large floating pill, Chrome a slim strip; neither reports its size.
+          // Every overlay we own — both caption placements and both control
+          // clusters — was landing on top of it or under it, and no arrangement
+          // fixes that, because we are laying out against a box whose dimensions
+          // another program decides. Accepted losses, all deliberate: fullscreen
+          // (nothing does it today; rebuild it here when it is wanted, on the
+          // FIELD not the element, or the captions do not come along), AirPlay,
+          // and the ±15s skips, which prev/next LINE beats for this work.
+          controls={false}
+          // A floating window outlives this pane, so it would go on playing,
+          // driving nothing, after you navigated away. The recording modal
+          // refuses it for the same reason.
+          disablePictureInPicture
           onError={() => {
             setFailed(true)
             // Whatever length we had is no longer trustworthy — a track sized
@@ -757,13 +784,17 @@ export function MediaVideoPane({
           track, then spent a day in this pane's header; neither put it on the
           thing it silences.
 
-          Two things about the position. It rides the FIELD, not the picture, so
-          it keeps its corner when the picture is letterboxed down to a small
-          box — exactly why VideoPaneControls sits here too. And it clears the
-          bottom 44px, because a standalone picture keeps the browser's own
-          control bar, which owns the true bottom-right corner (the fullscreen
-          button); overlapping it would mean two controls fighting for one
-          click target.
+          It rides the FIELD, not the picture, so it keeps its corner when the
+          picture is letterboxed down to a small box — exactly why
+          VideoPaneControls sits here too. It can sit flush now that the
+          browser's own control bar is gone; it spent a few hours lifted clear
+          of it.
+
+          This is a TRUE MUTE and it overrides the volume slider in the playback
+          bar, the way mute works everywhere else. The bar reads the same flag,
+          so the two surfaces always agree — the failure this avoids is a bar
+          reading "volume 80%" over a film that is silent, with nothing on
+          screen saying why.
 
           Only the standalone arrangement has it at all: a slaved picture is
           force-muted below whatever the preference says, so the control would
@@ -781,7 +812,7 @@ export function MediaVideoPane({
           }
           onClick={() => toggleAudibility(fileId, "source")}
           className={cn(
-            "absolute right-2 bottom-11 z-30 inline-flex h-7 w-7 items-center justify-center rounded-md",
+            "absolute right-2 bottom-2 z-30 inline-flex h-7 w-7 items-center justify-center rounded-md",
             "bg-black/55 backdrop-blur-sm transition-colors",
             sourceAudible
               ? "text-white hover:bg-black/70"

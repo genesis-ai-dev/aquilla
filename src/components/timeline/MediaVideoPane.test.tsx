@@ -309,16 +309,23 @@ describe("MediaVideoPane", () => {
     // This is deliberately asserted on a file that DOES carry a dub, because
     // "has playable audio" was the first thing tried here and is wrong: it says
     // yes for this file, the pane slaves itself, every tick then fails the
-    // file-time test and pauses — leaving a frozen frame with no controls.
+    // file-time test and pauses — leaving a frozen frame nothing can restart.
     const subtitleCells = [
       cell({ id: "s1", medium: "text", original: "Line one", translated: "Ligne un", attachments: { a1: { url: "blob:x", type: "audio" } } }),
     ]
     const onVideoTime = vi.fn()
     render(<MediaVideoPane src="https://cdn/episode.webm" fileId="f1" cells={subtitleCells} onVideoTime={onVideoTime} />)
     const video = screen.getByTestId("video-pane-media") as HTMLVideoElement
-    expect(video.controls).toBe(true)
+    // What "the video is the player" means here is that it keeps its SOUND and
+    // its own clock — not that it keeps the browser's controls. Those are off
+    // in both arrangements as of 2026-08-14; the app's playback bar drives this
+    // element through the video controller, and a native bar whose size no API
+    // reports cannot be laid out around (it was landing on the captions).
+    expect(video.controls).toBe(false)
     expect(video.muted).toBe(false)
     expect(screen.getByTestId("tl-video-pane")).toHaveAttribute("data-video-state", "standalone")
+    // The mute the operator actually gets, in the corner of the picture.
+    expect(screen.getByTestId("video-pane-mute")).toBeInTheDocument()
 
     fireEvent.timeUpdate(video)
     expect(onVideoTime).toHaveBeenCalled()

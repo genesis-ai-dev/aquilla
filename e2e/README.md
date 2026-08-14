@@ -2,6 +2,16 @@
 
 Playwright-driven end-to-end tests against a hermetic local backend.
 
+Smoke covers **~25 cross-layer product journeys** (data persistence, collab,
+access, import/export contracts) — not every UI click. Toggles, dialogs, empty
+states, and keyboard chrome belong in Vitest/RTL (`src/**/*.test.tsx`).
+
+| Gate | Command | When | Budget |
+| --- | --- | --- | --- |
+| Affected | `pnpm test:e2e:affected` | **pre-push** | Changed smoke files + domain sentinels; skips browser for docs/unit-only pushes |
+| Smoke | `pnpm test:e2e:smoke` | **merge / deploy / release** | Keep-list + surface sessions (~35 files), **<2 min** wall-clock on a warm machine |
+| Full | `pnpm test:e2e` | Release / format / agent extras | Smoke + expensive `*.spec.ts` (IDML, Biblica, autopilot, access lifecycle, …) |
+
 ## Prerequisites
 
 - **Docker** must be running. `scripts/e2e-up.ts` (via `pnpm test:e2e`) starts a
@@ -31,10 +41,10 @@ npx playwright install chromium
 # Run the fast changed-file gate used by pre-push
 pnpm test:e2e:affected
 
-# Run every smoke spec (merge/deploy/release gate)
+# Run every smoke journey (merge/deploy/release gate)
 pnpm test:e2e:smoke
 
-# Run full suite
+# Run full suite (smoke + expensive format/agent/access specs)
 pnpm test:e2e
 
 # Debug a single spec
@@ -45,8 +55,23 @@ pnpm test:e2e:ui
 specs changed by the pushed commits, and adds a small sentinel set for affected
 product domains. It skips browser startup for docs/unit-test-only pushes. Up to
 eight selected specs use a single Vite dev-mode stack; larger selections use
-two or three isolated preview-mode shards. `test:e2e:smoke` still runs every
-smoke spec and is required at the merge/deploy/release boundary.
+two or three isolated preview-mode shards. `test:e2e:smoke` runs the keep-list
+in `e2e/JOURNEYS.md` (~25 files) and is required at the merge/deploy/release
+boundary — not on every push.
+
+## Smoke admission
+
+Add a new `*.smoke.spec.ts` only when **all** of these hold:
+
+1. A user can lose data, access, or a committed artifact if it breaks.
+2. The assertion crosses at least two of: SPA, auth-worker, sync-worker,
+   Postgres, R2, a second browser context.
+3. No existing smoke journey already covers that contract — extend that file.
+
+Otherwise: Vitest/RTL or a worker unit test. Prefer deleting a redundant smoke
+after RTL exists over renaming it to non-smoke.
+
+Canonical map: [`e2e/JOURNEYS.md`](./JOURNEYS.md).
 
 ## Architecture
 
@@ -71,12 +96,22 @@ VITE_LLM_BASE_URL=http://127.0.0.1:<random>
 
 Playwright runs against `http://127.0.0.1:6173`.
 
+Workers stay **serial inside a shard** (`workers: 1`) because `/__test__/reset`
+is not transactional — do not parallelize Playwright workers.
+
 ## Per-test isolation
 
 Every test calls `resetBackend()` (via the multi-user fixture or directly) which hits
 `POST /__test__/reset` on `auth-worker`. That truncates user/org/project tables and
 reseeds three known users (`alice`, `bob`, `carol`) plus org `Acme`. The route is gated
 behind `WRANGLER_LOCAL=1`; production deploys return 404.
+
+Surface-session specs collapse chrome into **one** `test()` (with `test.step()`)
+so N checks cost **1** `resetBackend()` via the `{ alice }` fixture — not one
+reset per former micro-test. A `beforeEach` that seeds without requesting
+`{ alice }` races the fixture wipe and is wrong. Files that mutate conflicting
+state (e.g. teams CRUD, invite accept) stay hermetic per-test; see
+[`JOURNEYS.md`](./JOURNEYS.md#surface-sessions-one-test-one-reset).
 
 ## Multi-user fixture
 
@@ -115,8 +150,9 @@ Stick with `resetBackend()` + the multi-user fixture for anything checked in.
 
 ## Spec naming
 
-- `*.smoke.spec.ts` — runs on `git push`. Keep total suite <2 min.
-- `*.spec.ts` — full suite, runs on `pnpm test:e2e`.
+- `*.smoke.spec.ts` — merge/deploy smoke gate. Keep the suite to the JOURNEYS
+  keep-list (~25 files, <2 min). Pre-push runs **affected**, not full smoke.
+- `*.spec.ts` — full suite only (expensive format/agent/access journeys).
 - Files under `e2e/tauri/` — manual pre-release only (not implemented in v1).
 
 ## Adding a test

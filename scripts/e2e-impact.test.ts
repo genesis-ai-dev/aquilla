@@ -10,9 +10,9 @@ const specs = [
   "e2e/specs/auth/login-account-setup-status.smoke.spec.ts",
   "e2e/specs/collab/concurrent-edit.smoke.spec.ts",
   "e2e/specs/editor/import-and-edit.smoke.spec.ts",
-  "e2e/specs/editor/search-keyboard-shortcut.smoke.spec.ts",
+  "e2e/specs/editor/search.smoke.spec.ts",
   "e2e/specs/editor/workspace-actions-dropdown.smoke.spec.ts",
-  "e2e/specs/projects/project-settings-validation.smoke.spec.ts",
+  "e2e/specs/projects/project-settings.smoke.spec.ts",
   "e2e/specs/projects/route-health.smoke.spec.ts",
   "e2e/specs/rules/violation.smoke.spec.ts",
 ]
@@ -26,7 +26,7 @@ describe("changed-file E2E impact selection", () => {
     expect(selectAffectedE2E([
       "src/components/ProjectSettings/ProjectSettingsValidation.tsx",
     ], specs).specs).toEqual([
-      "e2e/specs/projects/project-settings-validation.smoke.spec.ts",
+      "e2e/specs/projects/project-settings.smoke.spec.ts",
       "e2e/specs/projects/route-health.smoke.spec.ts",
     ])
   })

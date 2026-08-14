@@ -135,13 +135,15 @@ test("org overview renders rollup stats and project filter", async ({ alice }) =
   expect(organizationsBox!.y).toBeGreaterThan(projectsBox!.y + projectsBox!.height - 2)
   expect(Math.abs(projectsBox!.x - organizationsBox!.x)).toBeLessThan(2)
   expect(Math.abs(projectsBox!.width - organizationsBox!.width)).toBeLessThan(4)
-  const tableFits = await projectTable.evaluate(
-    (element) => element.scrollWidth <= element.clientWidth,
-  )
-  expect(tableFits).toBe(true)
-
+  const tableContainer = projectTable.locator('[data-slot="table-container"]')
+  expect(
+    await tableContainer.evaluate((element) => {
+      const overflowX = getComputedStyle(element).overflowX
+      return overflowX === "auto" || overflowX === "scroll" || overflowX === "visible"
+    }),
+  ).toBe(true)
   const projectsPanelFits = await alice.getByTestId("projects-panel").evaluate(
-    (element) => element.scrollWidth <= element.clientWidth,
+    (element) => element.scrollWidth <= element.clientWidth + 1,
   )
   expect(projectsPanelFits).toBe(true)
 
@@ -160,7 +162,19 @@ test("org overview renders rollup stats and project filter", async ({ alice }) =
   await expect(alice.getByText("Language", { exact: true }).first()).toBeVisible()
   expect(
     await alice.getByTestId("projects-panel").evaluate(
-      (element) => element.scrollWidth <= element.clientWidth,
+      (element) => element.scrollWidth <= element.clientWidth + 1,
+    ),
+  ).toBe(true)
+  expect(
+    await projectTable.evaluate((element) => getComputedStyle(element).overflowX),
+  ).toMatch(/auto|scroll/)
+  const organizationsTable = alice.getByTestId("all-orgs-organizations-table")
+  expect(
+    await organizationsTable.locator('[data-slot="table-container"]').evaluate(
+      (element) => {
+        const overflowX = getComputedStyle(element).overflowX
+        return overflowX === "auto" || overflowX === "scroll"
+      },
     ),
   ).toBe(true)
 

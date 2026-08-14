@@ -159,6 +159,7 @@
 | Orgs        | Org settings page renders Security link + Identity rename round-trip | `e2e/specs/orgs/org-settings.smoke.spec.ts` + `org-settings-rename.smoke.spec.ts` | ✅ |
 | Orgs        | Member access panel expand shows per-project access   | `e2e/specs/orgs/member-access-panel-expand.smoke.spec.ts`     |   ✅   |
 | Orgs        | Assigned to me page shows inbox                       | `e2e/specs/orgs/assigned-to-me-page.smoke.spec.ts` + `assigned.smoke.spec.ts` | ✅ |
+| Orgs        | Below 1024px, org sidebar opens in a left sheet from a PanelLeft control beside the breadcrumbs | `e2e/specs/orgs/mobile-sidebar-sheet.smoke.spec.ts` | ✅ |
 | Orgs        | Preferences page analytics toggle                     | `e2e/specs/orgs/preferences-analytics-toggle.smoke.spec.ts` + `preferences-analytics-disabled-warning.smoke.spec.ts` | ✅ |
 | Orgs        | Preferences AI provider expand/save/clear             | `e2e/specs/orgs/preferences-ai-provider.smoke.spec.ts` + `preferences-ai-provider-expand.smoke.spec.ts` + `preferences-ai-provider-save.smoke.spec.ts` | ✅ |
 | Orgs        | Team create, rename, edit description                 | `e2e/specs/orgs/teams.smoke.spec.ts` + `team-rename.smoke.spec.ts` + `team-edit-description.smoke.spec.ts` | ✅ |
@@ -261,7 +262,7 @@
 | Voice       | Audio by character view                               | `e2e/specs/orgs/audio-by-character.smoke.spec.ts`             |   ✅   |
 | Voice       | Audio recording modal opens                           | `e2e/specs/orgs/audio-recording-modal.smoke.spec.ts`          |   ✅   |
 | Voice       | Subtitle VTT round-trip: import with voice tags + export preserves them | `e2e/specs/projects/subtitle-voice-roundtrip.spec.ts` | ✅ |
-| Projects    | Org overview page renders rollup + filter             | `e2e/specs/projects/org-overview.smoke.spec.ts`               |   ✅   |
+| Projects    | Org overview page renders rollup + filter; all-orgs tables scroll horizontally inside the card | `e2e/specs/projects/org-overview.smoke.spec.ts`               |   ✅   |
 | Projects    | Project create form validation (name + source required) | `e2e/specs/projects/project-create-form-validation.smoke.spec.ts` |   ✅   |
 | Projects    | Project create language tooltip                       | `e2e/specs/projects/project-create-language-tooltip.smoke.spec.ts` |   ✅   |
 | Projects    | Project create advanced shape section (radio buttons) | `e2e/specs/projects/project-create-advanced-shape.smoke.spec.ts` |   ✅   |

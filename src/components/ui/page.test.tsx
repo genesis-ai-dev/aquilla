@@ -38,6 +38,15 @@ describe("Page", () => {
     expect(well).toHaveClass("py-18")
   })
 
+  it("pads the scroll shell so a max-width column never kisses the card", () => {
+    const { container } = render(
+      <Page>
+        <div>body</div>
+      </Page>,
+    )
+    expect(container.firstElementChild).toHaveClass("px-6")
+  })
+
   it("reserves a stable scrollbar gutter so centered columns do not nudge", () => {
     const { container } = render(
       <Page>

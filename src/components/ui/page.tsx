@@ -28,7 +28,9 @@ type PageSize = "default" | "wide" | "full"
  * `<div className="h-full overflow-y-auto"><div className="p-6">` boilerplate.
  *
  * - `default` (max-w-2xl, mx-auto): forms & settings — centered, fills up to
- *   max width. No page insets; headers carry their own left padding.
+ *   max width. Horizontal pad lives on the scroll shell so the column never
+ *   kisses the AppShell card; headers still carry their own left padding to
+ *   align with settings-card text.
  * - `wide` (max-w-6xl, mx-auto): list/grid surfaces (Overview, Members, Teams).
  * - `full`: no max width, for surfaces that manage their own width.
  *
@@ -52,7 +54,7 @@ function Page({
   children: React.ReactNode
 } & Omit<React.ComponentProps<"div">, "children" | "className">) {
   return (
-    <div className="h-full overflow-y-auto scrollbar-gutter-stable" {...props}>
+    <div className="h-full overflow-y-auto px-6 scrollbar-gutter-stable" {...props}>
       <div
         className={cn(
           "mx-auto w-full py-18",

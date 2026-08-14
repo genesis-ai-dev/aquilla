@@ -130,6 +130,19 @@ export class Dashboard {
     }
   }
 
+  /** PanelLeft control that opens the org sidebar sheet below the lg breakpoint (1024px). */
+  openSidebarButton(): Locator {
+    return this.page.getByRole("button", { name: "Open sidebar" })
+  }
+
+  async openMobileSidebar(): Promise<Locator> {
+    await expect(this.openSidebarButton()).toBeVisible({ timeout: 10_000 })
+    await this.openSidebarButton().click()
+    const sheet = this.page.getByRole("dialog", { name: "Navigation" })
+    await expect(sheet).toBeVisible({ timeout: 10_000 })
+    return sheet
+  }
+
   async deleteProject(name: string): Promise<void> {
     const card = this.page.locator(`text=${name}`).first()
     await card.hover()

@@ -233,7 +233,7 @@ const ORG_SUMMARY_COLUMNS: ColumnDef<OrgPortfolioSummary>[] = [
     id: "organization",
     accessorFn: (s) => orgDisplayName(s.org).toLowerCase(),
     header: ({ column }) => <DataTableColumnHeader column={column} title="Organization" />,
-    meta: { className: "min-w-0" },
+    meta: { className: "min-w-[12rem]" },
     cell: ({ row }) => (
       <OrgWithAvatar name={orgDisplayName(row.original.org)} size="xs" className="max-w-full" />
     ),
@@ -917,7 +917,7 @@ export function OrgHome() {
                 >
                   <div
                     data-testid="organizations-scroll"
-                    className="min-h-0 min-w-0 overflow-x-hidden overflow-y-auto overscroll-contain"
+                    className="min-h-0 min-w-0 overflow-x-auto overflow-y-auto overscroll-contain"
                   >
                     {orgSummaries.length === 0 ? (
                       <EmptyState
@@ -942,9 +942,9 @@ export function OrgHome() {
                         testId="all-orgs-organizations-table"
                         className={cn(
                           ADMIN_TABLE_CLASS,
-                          // No -mx-2 bleed here: it widens past the card and
-                          // creates a horizontal scrollbar on the scrollport.
-                          "mx-0 overflow-x-hidden [&_[data-slot=table-container]]:overflow-x-hidden",
+                          // Keep the -mx-2 bleed inside the card; the table
+                          // container owns horizontal scroll when columns overflow.
+                          "mx-0",
                         )}
                         dense
                         emptyState={

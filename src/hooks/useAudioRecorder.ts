@@ -60,11 +60,36 @@ export const RECORDING_HARD_STOP_MS = WEBM_LIMITS.hardStopMs  // 30 minutes
 // builds into the frame cap.
 const STOP_TAIL_GRACE_MS = 250
 
+// The head-side counterpart (2026-08-14 round 3): the armed graph keeps the
+// newest 200ms of countdown audio and the mark releases it as the take's
+// head. An operator on a three-beep count-in comes in a breath EARLY when the
+// count-in is working — Sam's first word kept losing its first consonant to
+// the mark — and that early attack is performance, not noise (his standing
+// ruling). NOT trimmed and NOT silenced: the caller anchors the take this
+// much earlier on the timeline (see the modal's save), so the kept audio
+// plays exactly where it was performed. 200ms covers human anticipation with
+// room to spare while staying far clear of the countdown's last beep, which
+// ends over a second before zero.
+const PRE_ROLL_MS = 200
+
 export type RecorderState =
   | { kind: "idle" }
   | { kind: "requesting" }
   | { kind: "recording"; startedAt: number }
-  | { kind: "stopped"; blob: Blob; mimeType: string; ext: string; durationSec: number }
+  | {
+      kind: "stopped"
+      blob: Blob
+      mimeType: string
+      ext: string
+      /** The WHOLE clip, pre-roll included — what a duration probe would say. */
+      durationSec: number
+      /** How much of the clip's head predates the mark (sample-exact, ms).
+       *  The saver anchors the take this much before the line so the head
+       *  plays where it was performed. 0 on the MediaRecorder path, which has
+       *  no ring. Additive on purpose: consumers that mock this hook with
+       *  partial objects read it as undefined and treat it as 0. */
+      preRollMs?: number
+    }
   | { kind: "error"; message: string }
 
 export interface UseAudioRecorderOptions {
@@ -200,6 +225,7 @@ export function useAudioRecorder(opts?: UseAudioRecorderOptions): UseAudioRecord
         // Sample-exact, unlike the webm branch's wall clock (which is all
         // Chrome leaves us, since it writes no duration header).
         const durationSec = handle.frames() / handle.sampleRate
+        const preRollMs = (handle.preRollFrames() / handle.sampleRate) * 1000
         // Release the mic only now: the flush above had to complete first, or
         // the last ~85ms — the end of the final word — is lost on every take.
         if (streamRef.current) {
@@ -209,7 +235,7 @@ export function useAudioRecorder(opts?: UseAudioRecorderOptions): UseAudioRecord
         setStream(null)
         if (tickRef.current) { clearInterval(tickRef.current); tickRef.current = null }
         pcmRef.current = null
-        setState({ kind: "stopped", blob, mimeType: "audio/wav", ext: "wav", durationSec })
+        setState({ kind: "stopped", blob, mimeType: "audio/wav", ext: "wav", durationSec, preRollMs })
       } catch (e) {
         cleanup()
         setState({ kind: "error", message: e instanceof Error ? e.message : String(e) })
@@ -267,6 +293,7 @@ export function useAudioRecorder(opts?: UseAudioRecorderOptions): UseAudioRecord
         const handle = await startPcmCapture({
           stream,
           armed: true,
+          preRollMs: PRE_ROLL_MS,
           maxFrames: limits.maxFrames,
           onLimit: () => finishWavTake(),
         })

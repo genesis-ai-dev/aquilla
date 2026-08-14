@@ -54,6 +54,7 @@ vi.mock("@/lib/audio/audio-attachments-bus", () => ({
 }))
 const emitAttach = vi.hoisted(() => vi.fn(async (..._args: unknown[]) => "evt-attach"))
 vi.mock("@/lib/sync/events-emit", () => ({
+  emitCellLaneRetime: vi.fn(async () => "evt"),
   emitCellAudioAttach: (...args: unknown[]) => emitAttach(...args),
   emitCellAudioSelect: vi.fn(async () => "evt"),
   emitCellAudioRemove: vi.fn(async () => "evt"),

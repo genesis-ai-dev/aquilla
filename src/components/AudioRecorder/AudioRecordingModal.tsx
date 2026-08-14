@@ -15,7 +15,7 @@ import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
-import { MIN_USEFUL_REGION_SEC } from "@/lib/timeline/lane-timing"
+import { MIN_USEFUL_REGION_SEC, targetOffsetMsFor } from "@/lib/timeline/lane-timing"
 import { isLinkableVideoUrl } from "@/components/timeline/LinkVideoUrlDialog"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectRecord } from "@/lib/parsers/types"
@@ -41,7 +41,7 @@ import { ACCEPT, OFFLINE_MESSAGE, attachAudioFileToCell, validateAudioFile } fro
 import { recordingLimitsFor } from "@/lib/audio/recording-limits"
 import { MAX_AUDIO_UPLOAD_BYTES, audioIdSeededWith, buildAudioId, uploadCellAudio, deleteCellAudio, fetchCellAudio, parseFrontierAudioUrl } from "@/lib/audio/upload"
 import { audioCachePutBlob } from "@/lib/audio/bytes-cache"
-import { emitCellAudioAttach, emitCellAudioSelect } from "@/lib/sync/events-emit"
+import { emitCellAudioAttach, emitCellAudioSelect, emitCellLaneRetime } from "@/lib/sync/events-emit"
 import { notifyAudioAttachmentsChanged, injectOptimisticAudioAttachment } from "@/lib/audio/audio-attachments-bus"
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
 import { markProjectHasAudioDataSoon } from "@/lib/audio/project-audio-state"
@@ -604,6 +604,10 @@ export function AudioRecordingModal({
     try {
       const blob = recorder.state.blob
       const ext = recorder.state.ext
+      // The armed recorder keeps ~200ms of the countdown as the take's head so
+      // an early entrance — the count-in working — is IN the file. Read here,
+      // used after the attach to anchor the take that much before its line.
+      const preRollMs = recorder.state.preRollMs ?? 0
       // Belt and braces. The hard stop that ends a take is DERIVED from this
       // same cap (recording-limits.ts), so this should be unreachable — it is
       // here so that a future change to the capture rate or bitrate fails
@@ -696,6 +700,33 @@ export function AudioRecordingModal({
         trimEndMs: null,
       }, attachEventId)
       notifyAudioAttachmentsChanged(activeCell.fileId)
+      // THE PRE-ROLL'S OTHER HALF. Kept head audio that isn't repositioned
+      // just plays everything late — the original take-shift bug in a new
+      // hat — so the take is anchored preRollMs BEFORE its line: the sample
+      // at the mark (the GO instant) lands exactly on the line's start, and
+      // an early entrance sounds exactly as early as it was performed.
+      // Nothing is trimmed: Sam's standing ruling is that room tone and
+      // breaths are performance, and the trim handles remain for lines that
+      // disagree. This deliberately re-derives the anchor on every save — a
+      // hand-dragged chip position describes the PREVIOUS take, and the new
+      // recording was performed against the line's own start. Non-fatal on
+      // failure: the take is already attached and merely sits at the line
+      // start, `preRollMs` late, until someone drags it.
+      // (targetOffsetMsFor clamps at file zero, so a line in the first 200ms
+      // of the film keeps what runway it has.)
+      if (preRollMs > 0 && activeCell.startTime != null) {
+        try {
+          await emitCellLaneRetime({
+            projectId: project.id,
+            fileId: activeCell.fileId,
+            cellId: activeCell.id,
+            targetOffsetMs: targetOffsetMsFor(activeCell, activeCell.startTime - preRollMs / 1000),
+            author: username,
+          })
+        } catch {
+          /* anchored at the line start instead — playable, just not early */
+        }
+      }
       // The take is real now. Tell the workspace, so a line that has only ever
       // held audio gets the target row that makes it countable and validatable.
       onTakeSaved?.(activeCell.id)
@@ -1148,7 +1179,15 @@ export function AudioRecordingModal({
                   </div>
                 )}
                 <div className="relative">
-                  <AudioWaveform stream={recorder.stream} height={44} className="rounded-md border bg-muted/40" />
+                  <AudioWaveform
+                    stream={recorder.stream}
+                    height={44}
+                    // Grey while the countdown runs — the mic is hot, the take
+                    // has not begun — and red from zero. Same element, same
+                    // audio graph, different ink (Sam, 2026-08-14).
+                    tone={displayPhase === "recording" ? "live" : "armed"}
+                    className="rounded-md border bg-muted/40"
+                  />
                   {/* Zero's visual beat. The count block above flips to REC
                       within a frame of GO, so without this the word GO is
                       gone before it lands — and the silent fourth beat needs

@@ -105,6 +105,16 @@ export interface PcmCaptureOptions {
    * hot, but they fall before the mark and are never emitted.
    */
   armed?: boolean
+  /**
+   * Armed captures only: keep this much of the newest pre-mark audio and
+   * release it as the head of the take. A performer on a count-in comes in a
+   * breath EARLY when it works — the ring is what keeps that attack. The kept
+   * length is reported sample-exactly via preRollFrames(), because the caller
+   * must anchor the take that much earlier: pre-roll that isn't repositioned
+   * just plays everything late. Short enough (≤~500ms) that the countdown's
+   * last beep — over a second before the mark — can never be inside it.
+   */
+  preRollMs?: number
 }
 
 export interface PcmCaptureHandle {
@@ -119,9 +129,14 @@ export interface PcmCaptureHandle {
    *  was armed, counts from mark() — pre-mark audio never leaves the worklet. */
   frames(): number
   /** Armed captures only: from this instant, samples count. Sample 0 of the
-   *  take is the first frame the worklet processes after receiving this. No-op
-   *  on an unarmed capture (it has been emitting since construction). */
+   *  take is the first frame the worklet processes after receiving this —
+   *  minus the pre-roll, when one was requested. No-op on an unarmed capture
+   *  (it has been emitting since construction). */
   mark(): void
+  /** Exactly how many pre-mark frames the mark released as the take's head.
+   *  0 until the worklet acknowledges the mark, and always 0 without a
+   *  preRollMs. The caller anchors the take this many frames early. */
+  preRollFrames(): number
   /** Flush the worklet's partial buffer and tear the graph down. Resolves to
    *  every chunk captured, in order, ready for encodeWavPcm16Chunks. */
   finish(): Promise<Pcm16Chunk[]>
@@ -161,7 +176,15 @@ export async function startPcmCapture(opts: PcmCaptureOptions): Promise<PcmCaptu
       // the signal and sound thin rather than obviously wrong.
       channelCount: 1,
       channelCountMode: "explicit",
-      processorOptions: { armed: opts.armed === true },
+      processorOptions: {
+        armed: opts.armed === true,
+        // Converted HERE, with the context's real rate — the caller thinks in
+        // ms and must not have to know that Firefox may refuse 48k.
+        preRollFrames:
+          opts.armed === true && opts.preRollMs != null && opts.preRollMs > 0
+            ? Math.round((opts.preRollMs / 1000) * ctx.sampleRate)
+            : 0,
+      },
     })
 
     // The graph has to terminate somewhere for the worklet to be pulled, and
@@ -175,11 +198,12 @@ export async function startPcmCapture(opts: PcmCaptureOptions): Promise<PcmCaptu
 
     const chunks: Pcm16Chunk[] = []
     let frames = 0
+    let preRoll = 0
     let limitFired = false
     let resolveDone: (() => void) | null = null
 
     node.port.onmessage = (e: MessageEvent) => {
-      const msg = e.data as { pcm?: Pcm16Chunk; done?: boolean }
+      const msg = e.data as { pcm?: Pcm16Chunk; done?: boolean; marked?: boolean; preRollFrames?: number }
       if (msg.pcm) {
         chunks.push(msg.pcm)
         frames += msg.pcm.length
@@ -187,6 +211,13 @@ export async function startPcmCapture(opts: PcmCaptureOptions): Promise<PcmCaptu
           limitFired = true
           opts.onLimit?.()
         }
+      }
+      if (msg.marked && typeof msg.preRollFrames === "number") {
+        // The worklet's own count of what the mark released — the ring plus
+        // its partial buffer, so it can exceed the request by up to one chunk.
+        // Never computed host-side: only the audio thread knows where the
+        // boundary fell.
+        preRoll = msg.preRollFrames
       }
       if (msg.done) {
         const done = resolveDone
@@ -243,6 +274,7 @@ export async function startPcmCapture(opts: PcmCaptureOptions): Promise<PcmCaptu
       mark: () => {
         try { node.port.postMessage({ type: "mark" }) } catch {}
       },
+      preRollFrames: () => preRoll,
       finish,
       dispose: teardown,
     }

@@ -54,6 +54,7 @@ vi.mock("@/lib/audio/audio-attachments-bus", () => ({
   injectOptimisticAudioRemove: vi.fn(),
 }))
 vi.mock("@/lib/sync/events-emit", () => ({
+  emitCellLaneRetime: vi.fn(async () => "evt"),
   emitCellAudioAttach: vi.fn(async () => "evt"),
   emitCellAudioSelect: vi.fn(async () => "evt"),
   emitCellAudioRemove: vi.fn(async () => "evt"),
@@ -152,12 +153,15 @@ describe("AudioRecordingModal — the film", () => {
     // The permission probe resolves async; the countdown UI mounts the meter.
     await waitFor(() => expect(document.querySelector("canvas")).not.toBeNull())
     const duringCountdown = document.querySelector("canvas")
+    // Hot mic, no take yet: the trace is grey.
+    expect(duringCountdown).toHaveAttribute("data-tone", "armed")
 
     recorderState.value = { kind: "recording", startedAt: Date.now() }
     rerender(modal(projectNoFilesKey))
     await waitFor(() => expect(screen.getByText("REC")).toBeInTheDocument())
-    // The SAME element, not an equal one.
+    // The SAME element, not an equal one — recoloured, never remounted.
     expect(document.querySelector("canvas")).toBe(duringCountdown)
+    expect(duringCountdown).toHaveAttribute("data-tone", "live")
   })
 
   // NOT "only while capturing" any more (2026-08-14): the picture also rolls

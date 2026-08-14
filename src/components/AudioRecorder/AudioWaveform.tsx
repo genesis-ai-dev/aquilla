@@ -24,12 +24,27 @@ interface Props {
   /** Seconds of audio shown across the canvas width. */
   windowSec?: number
   className?: string
+  /** "armed" draws the trace grey — the mic is hot but the take has not begun
+   *  (the countdown). "live" is the recording red. A COLOUR, not a lifecycle:
+   *  flipping it must never rebuild the audio graph, which is why it is read
+   *  through a ref inside the draw loop and is deliberately NOT a dependency
+   *  of the graph effect below. */
+  tone?: "armed" | "live"
 }
 
-export function AudioWaveform({ stream, height = 48, windowSec = 8, className }: Props) {
+const TONE_STYLES = {
+  armed: { stroke: "rgb(148,163,184)", fill: "rgba(148,163,184,0.08)" }, // slate-400
+  live: { stroke: "rgb(239,68,68)", fill: "rgba(239,68,68,0.08)" }, // red-500
+} as const
+
+export function AudioWaveform({ stream, height = 48, windowSec = 8, className, tone = "live" }: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const ctxRef = useRef<AudioContext | null>(null)
   const rafRef = useRef<number | null>(null)
+  const toneRef = useRef(tone)
+  useEffect(() => {
+    toneRef.current = tone
+  }, [tone])
 
   useEffect(() => {
     if (!stream) {
@@ -100,11 +115,12 @@ export function AudioWaveform({ stream, height = 48, windowSec = 8, className }:
       if (!canvas || !ctx) return
       const w = canvas.clientWidth || 200
       const h = height
+      const style = TONE_STYLES[toneRef.current]
       ctx.clearRect(0, 0, w, h)
-      ctx.fillStyle = "rgba(239,68,68,0.08)" // red-500/8 subtle background
+      ctx.fillStyle = style.fill
       ctx.fillRect(0, 0, w, h)
       const mid = h / 2
-      ctx.strokeStyle = "rgb(239,68,68)"
+      ctx.strokeStyle = style.stroke
       ctx.lineWidth = 1
       ctx.beginPath()
       for (let x = 0; x < w; x++) {
@@ -141,6 +157,7 @@ export function AudioWaveform({ stream, height = 48, windowSec = 8, className }:
       ref={canvasRef}
       className={className}
       style={{ width: "100%", height, display: "block" }}
+      data-tone={tone}
       aria-hidden="true"
     />
   )

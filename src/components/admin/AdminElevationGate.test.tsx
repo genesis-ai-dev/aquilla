@@ -17,8 +17,12 @@ const mockRequest = vi.mocked(requestAdminElevation)
 const mockVerify = vi.mocked(verifyAdminElevation)
 
 beforeEach(() => vi.clearAllMocks())
-afterEach(() => {
+afterEach(async () => {
   cleanup()
+  // AQU-919: input-otp leaves 0/10/50 ms callbacks pending after unmount.
+  // Let them settle before happy-dom removes `window`, otherwise the root
+  // suite can finish all assertions and still exit non-zero on the leak.
+  await new Promise((resolve) => setTimeout(resolve, 60))
   vi.restoreAllMocks()
 })
 

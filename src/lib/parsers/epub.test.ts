@@ -1,8 +1,15 @@
 import { describe, expect, it } from "vitest"
 import JSZip from "jszip"
 import type { CellData } from "@/hooks/useCells"
-import { buildEpub, TWO_CHAPTER_EPUB } from "./__fixtures__/build-epub"
-import { exportEpub, extractEpubStrings } from "./epub"
+import { buildEpub, MIXED_SPINE_EPUB, TWO_CHAPTER_EPUB } from "./__fixtures__/build-epub"
+import {
+  classifyEpubMember,
+  defaultEpubSkipMemberPaths,
+  exportEpub,
+  extractEpubImport,
+  extractEpubStrings,
+  filterEpubStrings,
+} from "./epub"
 
 function cellsFor(
   strings: Awaited<ReturnType<typeof extractEpubStrings>>,
@@ -109,6 +116,42 @@ describe("extractEpubStrings", () => {
         html: "<html><body><img src='cover.jpg' alt=''/></body></html>",
       }],
     }))).rejects.toThrow(/importable text/i)
+  })
+
+  it("does not extract the document title as a second heading", async () => {
+    const strings = await extractEpubStrings(await buildEpub(MIXED_SPINE_EPUB))
+    const chapter = strings.filter((value) => value.sourceLocation?.file.endsWith("ch1.xhtml"))
+    expect(chapter.map((value) => value.original)).toEqual(["Chapter One", "The river was wide."])
+  })
+})
+
+describe("EPUB member roles", () => {
+  it("classifies nav, cover, notes, and chapters", () => {
+    expect(classifyEpubMember({ id: "nav", href: "nav.xhtml", properties: "nav", linear: true, cellCount: 2 })).toBe("nav")
+    expect(classifyEpubMember({ id: "cover", href: "Text/cover.xhtml", properties: "", linear: true, cellCount: 1 })).toBe("cover")
+    expect(classifyEpubMember({ id: "n1", href: "Text/notes.xhtml", properties: "", linear: false, cellCount: 2 })).toBe("notes")
+    expect(classifyEpubMember({ id: "ch1", href: "Text/ch1.xhtml", properties: "", linear: true, cellCount: 2 })).toBe("chapter")
+    expect(classifyEpubMember({ id: "ch1", href: "Text/ch1.xhtml", properties: "", linear: true, cellCount: 0 })).toBe("empty")
+  })
+
+  it("defaults to chapters only and can filter the extracted strings", async () => {
+    const extracted = await extractEpubImport(await buildEpub(MIXED_SPINE_EPUB))
+    expect(extracted.members.map((member) => [member.role, member.includedByDefault, member.title])).toEqual([
+      ["cover", false, "Cover"],
+      ["nav", false, "Contents"],
+      ["chapter", true, "Chapter One"],
+      ["notes", false, "Endnotes"],
+    ])
+    const skip = defaultEpubSkipMemberPaths(extracted.members)
+    expect([...skip].sort()).toEqual([
+      "oebps/nav.xhtml",
+      "oebps/text/cover.xhtml",
+      "oebps/text/notes.xhtml",
+    ])
+    expect(filterEpubStrings(extracted.strings, skip).map((value) => value.original)).toEqual([
+      "Chapter One",
+      "The river was wide.",
+    ])
   })
 })
 

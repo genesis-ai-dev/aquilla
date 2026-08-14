@@ -6,6 +6,7 @@ export interface EpubChapterSpec {
   html: string
   mediaType?: string
   linear?: "yes" | "no"
+  properties?: string
 }
 
 export interface EpubSpec {
@@ -40,7 +41,7 @@ export async function buildEpub(spec: EpubSpec): Promise<ArrayBuffer> {
   </rootfiles>
 </container>`)
   const manifest = spec.chapters.map((chapter) => (
-    `<item id="${chapter.id}" href="${chapter.href}" media-type="${chapter.mediaType ?? "application/xhtml+xml"}"/>`
+    `<item id="${chapter.id}" href="${chapter.href}" media-type="${chapter.mediaType ?? "application/xhtml+xml"}"${chapter.properties ? ` properties="${chapter.properties}"` : ""}/>`
   )).join("\n    ")
   const spine = spec.chapters.map((chapter) => (
     chapter.linear === "no"
@@ -81,6 +82,35 @@ export const TWO_CHAPTER_EPUB: EpubSpec = {
       id: "ch2",
       href: "Text/ch2.xhtml",
       html: "<html><body><h1>Chapter Two</h1><p>The mountain was steep.</p></body></html>",
+    },
+  ],
+}
+
+/** Spine includes nav, cover, notes, and a chapter that repeats <title>. */
+export const MIXED_SPINE_EPUB: EpubSpec = {
+  title: "Mixed Book",
+  chapters: [
+    {
+      id: "cover",
+      href: "Text/cover.xhtml",
+      html: "<html><body><h1>Cover</h1><p>A painted front.</p></body></html>",
+    },
+    {
+      id: "nav",
+      href: "nav.xhtml",
+      properties: "nav",
+      html: "<html><body><nav><h1>Contents</h1><ol><li>Chapter One</li></ol></nav></body></html>",
+    },
+    {
+      id: "ch1",
+      href: "Text/ch1.xhtml",
+      html: "<html><head><title>Chapter One</title></head><body><h1>Chapter One</h1><p>The river was wide.</p></body></html>",
+    },
+    {
+      id: "notes",
+      href: "Text/notes.xhtml",
+      linear: "no",
+      html: "<html><body><h1>Endnotes</h1><p>A hidden note.</p></body></html>",
     },
   ],
 }

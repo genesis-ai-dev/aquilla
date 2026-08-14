@@ -50,7 +50,7 @@ import { extractPptxStrings } from "./parsers/pptx"
 import { extractIdmlStrings } from "./parsers/idml"
 import { extractBiblicaStudyNoteStrings } from "./parsers/biblica"
 import { extractHtmlStrings } from "./parsers/html"
-import { extractEpubStrings } from "./parsers/epub"
+import { extractEpubImport, type EpubSpineMember } from "./parsers/epub"
 import { bulkUploadSource, type BulkImportCell } from "./sync/bulk-import"
 import {
   assertSourceUploadByteLength,
@@ -440,6 +440,8 @@ export interface ImportResult {
   /** Exact container for a multi-book import. Stored once and bound to every
    * emitted book instead of becoming every book's export skeleton. */
   sharedSourceArtifact?: TargetImportArtifact
+  /** EPUB spine members shown in the chapter picker. Absent for other formats. */
+  epubMembers?: EpubSpineMember[]
 }
 
 export interface ImportContext {
@@ -2428,13 +2430,14 @@ export async function parseFile(
     }
     case "epub": {
       const buffer = await file.arrayBuffer()
-      const strings = await extractEpubStrings(buffer)
+      const extracted = await extractEpubImport(buffer)
       return [{
         name: file.name,
-        strings,
+        strings: extracted.strings,
         rawBytes: buffer,
         rawSourceFormat: "epub",
         roundTripFidelity: "content-only",
+        epubMembers: extracted.members,
       }]
     }
     case "xliff": {

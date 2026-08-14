@@ -22,10 +22,32 @@ const HTML_MEDIA_TYPES = new Set([
   "text/html",
   "application/x-dtbook+xml",
 ])
+const HTML_EXTRACT_OPTIONS = { skipDocumentTitle: true } as const
+
+export const EPUB_MEMBER_ROLES = ["chapter", "nav", "cover", "notes", "empty"] as const
+export type EpubMemberRole = (typeof EPUB_MEMBER_ROLES)[number]
+
+export interface EpubSpineMember {
+  memberPath: string
+  role: EpubMemberRole
+  linear: boolean
+  includedByDefault: boolean
+  title: string
+  cellCount: number
+}
+
+export interface EpubExtractResult {
+  strings: TranslatableString[]
+  members: EpubSpineMember[]
+}
 
 interface EpubChapter {
   memberPath: string
   html: string
+  id: string
+  href: string
+  properties: string
+  linear: boolean
 }
 
 interface EpubPackage {
@@ -97,6 +119,36 @@ function chapterTitle(strings: TranslatableString[], memberPath: string, bookTit
   return base.replace(/\.[^.]+$/, "") || memberPath
 }
 
+export function classifyEpubMember(input: {
+  id: string
+  href: string
+  properties: string
+  linear: boolean
+  cellCount: number
+}): EpubMemberRole {
+  if (input.cellCount === 0) return "empty"
+  const properties = input.properties.toLowerCase()
+  const id = input.id.toLowerCase()
+  const href = input.href.toLowerCase()
+  if (
+    properties.split(/\s+/).includes("nav")
+    || id === "nav"
+    || id === "toc"
+    || /(^|\/)(nav|toc)(?:[-_.]|$)/.test(href)
+  ) {
+    return "nav"
+  }
+  if (properties.split(/\s+/).includes("cover") || /\bcover\b/.test(id) || /\bcover\b/.test(href)) {
+    return "cover"
+  }
+  if (!input.linear) return "notes"
+  return "chapter"
+}
+
+function includedByDefault(role: EpubMemberRole): boolean {
+  return role === "chapter"
+}
+
 async function loadEpubPackage(buffer: ArrayBuffer): Promise<EpubPackage> {
   assertSafeArchiveInputSize(buffer.byteLength, "EPUB file")
   const archive = await JSZip.loadAsync(buffer)
@@ -146,6 +198,10 @@ async function loadEpubPackage(buffer: ArrayBuffer): Promise<EpubPackage> {
     chapters.push({
       memberPath,
       html: await member.async("string"),
+      id: idref,
+      href,
+      properties: item.getAttribute("properties")?.trim() ?? "",
+      linear: itemref.getAttribute("linear")?.trim().toLowerCase() !== "no",
     })
   }
 
@@ -156,32 +212,69 @@ async function loadEpubPackage(buffer: ArrayBuffer): Promise<EpubPackage> {
   return { archive, title: packageTitle(opf), chapters }
 }
 
-export async function extractEpubStrings(buffer: ArrayBuffer): Promise<TranslatableString[]> {
+export async function extractEpubImport(buffer: ArrayBuffer): Promise<EpubExtractResult> {
   const pack = await loadEpubPackage(buffer)
-  const results: TranslatableString[] = []
+  const strings: TranslatableString[] = []
+  const members: EpubSpineMember[] = []
 
   for (const chapter of pack.chapters) {
-    const strings = extractHtmlStrings(chapter.html)
-    if (strings.length === 0) continue
-    const section = chapterTitle(strings, chapter.memberPath, pack.title)
-    for (const value of strings) {
+    const extracted = extractHtmlStrings(chapter.html, HTML_EXTRACT_OPTIONS)
+    const role = classifyEpubMember({
+      id: chapter.id,
+      href: chapter.href,
+      properties: chapter.properties,
+      linear: chapter.linear,
+      cellCount: extracted.length,
+    })
+    const title = chapterTitle(extracted, chapter.memberPath, pack.title)
+    members.push({
+      memberPath: chapter.memberPath,
+      role,
+      linear: chapter.linear,
+      includedByDefault: includedByDefault(role),
+      title,
+      cellCount: extracted.length,
+    })
+    if (extracted.length === 0) continue
+    for (const value of extracted) {
       const sourceLocation: SourceLocation = {
         file: chapter.memberPath,
-        blockPath: value.sourceLocation?.blockPath ?? String(results.length),
+        blockPath: value.sourceLocation?.blockPath ?? String(strings.length),
       }
-      results.push({
+      strings.push({
         ...value,
-        section,
-        context: section ? `${section} · ${value.context}` : value.context,
+        section: title,
+        context: title ? `${title} · ${value.context}` : value.context,
         sourceLocation,
       })
     }
   }
 
-  if (results.length === 0) {
+  if (strings.length === 0) {
     throw new Error("EPUB file did not contain any importable text.")
   }
-  return results
+  return { strings, members }
+}
+
+export async function extractEpubStrings(buffer: ArrayBuffer): Promise<TranslatableString[]> {
+  return (await extractEpubImport(buffer)).strings
+}
+
+export function defaultEpubSkipMemberPaths(members: readonly EpubSpineMember[]): Set<string> {
+  return new Set(
+    members
+      .filter((member) => !member.includedByDefault)
+      .map((member) => member.memberPath.toLowerCase()),
+  )
+}
+
+export function filterEpubStrings<T extends { sourceLocation?: SourceLocation }>(
+  strings: readonly T[],
+  skipMemberPaths: ReadonlySet<string>,
+): T[] {
+  if (skipMemberPaths.size === 0) return [...strings]
+  const skip = new Set([...skipMemberPaths].map((path) => path.toLowerCase()))
+  return strings.filter((value) => !skip.has((value.sourceLocation?.file ?? "").toLowerCase()))
 }
 
 export async function exportEpub(
@@ -201,7 +294,10 @@ export async function exportEpub(
   for (const chapter of pack.chapters) {
     const chapterCells = byMember.get(chapter.memberPath)
     if (!chapterCells?.length) continue
-    pack.archive.file(chapter.memberPath, applyHtmlTranslations(chapter.html, chapterCells))
+    pack.archive.file(
+      chapter.memberPath,
+      applyHtmlTranslations(chapter.html, chapterCells, HTML_EXTRACT_OPTIONS),
+    )
   }
 
   return pack.archive.generateAsync({

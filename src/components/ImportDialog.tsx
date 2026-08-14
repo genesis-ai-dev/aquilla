@@ -61,10 +61,11 @@ import type { PreparedImportFile } from "@/lib/import/import-service"
 import { GoogleDrivePanel } from "@/components/import/GoogleDrivePanel"
 import { importSdbh, type SdbhImportProgress } from "@/lib/import-sdbh"
 import { assertSourceUploadByteLength } from "@/lib/sync/source-upload"
-import { PreviewPanel, type ImportUploadProgress } from "@/components/import/PreviewPanel"
+import { PreviewPanel, type ImportUploadProgress, type PreviewConfirmOptions } from "@/components/import/PreviewPanel"
 import { formatBytesProgress } from "@/lib/format-bytes"
 import type { FileReference, ProjectTtsSettings } from "@/lib/parsers/types"
 import { detectFileType, isMediaFileType } from "@/lib/parsers/types"
+import { filterEpubStrings } from "@/lib/parsers/epub"
 import { buildCastAdditions } from "@/lib/import/cast-from-speakers"
 import { v7 as uuidv7 } from "uuid"
 import { filesToProjectEntries } from "@/lib/import/file-entries"
@@ -236,7 +237,7 @@ export function ImportDialog({
   const [previewState, setPreviewState] = useState<{
     results: ImportResult[]
     /** Commits the parsed results to the server once user confirms. */
-    commit: () => void | Promise<void>
+    commit: (options?: PreviewConfirmOptions) => void | Promise<void>
     /** Surface to restore if the user cancels the preview. */
     returnScreen: "upload" | "spreadsheet" | "gdrive"
   } | null>(null)
@@ -799,9 +800,9 @@ export function ImportDialog({
         {screen === "preview" && previewState && (
           <PreviewPanel
             results={previewState.results}
-            onConfirm={async () => {
+            onConfirm={async (options) => {
               setPreviewCommitError(null)
-              await previewState.commit()
+              await previewState.commit(options)
             }}
             onCancel={() => {
               const returnScreen = previewState.returnScreen
@@ -1069,7 +1070,7 @@ interface UploadPanelProps {
    * AQU-310: called after client-side parsing completes, before any upload.
    * Parent shows a preview screen; commit() triggers the actual bulk upload.
    */
-  onPreview?: (results: ImportResult[], commit: () => Promise<void>) => void
+  onPreview?: (results: ImportResult[], commit: (options?: PreviewConfirmOptions) => Promise<void>) => void
   /**
    * AQU-430: callbacks for the parent to receive upload progress while the
    * preview screen is shown (UploadPanel is unmounted during preview). The
@@ -1250,7 +1251,20 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
 
         // Hand off to parent to show the preview screen.
         // The commit closure does the actual upload.
-        onPreview(allParsedResults, async () => {
+        onPreview(allParsedResults, async (options) => {
+          if (options?.skipMemberPaths && options.skipMemberPaths.size > 0) {
+            for (const [file, prepared] of preparedByFile) {
+              preparedByFile.set(file, {
+                ...prepared,
+                results: prepared.results.map((result) => ({
+                  ...result,
+                  strings: result.epubMembers
+                    ? filterEpubStrings(result.strings, options.skipMemberPaths!)
+                    : result.strings,
+                })),
+              })
+            }
+          }
           await doCommit(list, preparedByFile, reimportFileIds)
         })
         return

@@ -23,6 +23,7 @@
 | Orgs        | Send & accept invite                                 | `e2e/specs/orgs/invite-to-projects.smoke.spec.ts` + `pending-invite-revoke.smoke.spec.ts` | ✅ |
 | Editor      | Import markdown, edit cell, persists across reload   | `e2e/specs/editor/import-and-edit.smoke.spec.ts`              |   ✅   |
 | Editor      | Import EPUB, chapter cells appear in spine order     | `e2e/specs/editor/import-epub.smoke.spec.ts`                  |   ✅   |
+| Editor      | EPUB chapter picker excludes nav/cover/notes by default | `e2e/specs/editor/import-epub-picker.smoke.spec.ts`        |   ✅   |
 | Editor      | Re-import updates stable source units while preserving target content | `e2e/specs/editor/reimport-preserves-target.smoke.spec.ts` | ✅ |
 | Editor      | AI-classify unknown text, review recipe, import source + target lane | `e2e/specs/editor/import-ai-recipe.smoke.spec.ts` | ✅ |
 | Editor      | Upload spreadsheet auto-routes to column mapping; headings stay structural and canonical verse refs survive preview/commit | `e2e/specs/editor/import-spreadsheet-mapping.smoke.spec.ts` | ✅ |

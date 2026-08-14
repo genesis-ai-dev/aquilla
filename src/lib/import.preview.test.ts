@@ -150,6 +150,7 @@ describe("parseFile — parse phase only (no upload)", () => {
       "OEBPS/Text/ch2.xhtml",
       "OEBPS/Text/ch2.xhtml",
     ])
+    expect(results[0].epubMembers?.map((member) => member.role)).toEqual(["chapter", "chapter"])
     expect(captured).toHaveLength(0)
   })
 

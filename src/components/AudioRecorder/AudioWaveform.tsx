@@ -2,8 +2,20 @@
 // trace of the last ~8 seconds by pushing RMS samples into a circular buffer
 // and rendering on rAF. No audio is routed to output — the stream → analyser
 // chain is tap-only.
+//
+// THIS COMPONENT'S MOUNT TIMING IS PART OF THE RECORDER'S CORRECTNESS
+// (2026-08-14). Its AudioContext attaches to the same microphone the capture
+// graph is recording, and opening a context against a live input can make the
+// browser/OS reconfigure the device — degraded input, a hard gap, then a
+// fade-in, all measured at ~1.4s in one of Sam's takes, eating his first word.
+// Two rules follow: the modal mounts this DURING the countdown (so any
+// renegotiation lands in discarded pre-mark audio, not the take), and the
+// context is pinned to the capture rate below so there is no rate disagreement
+// to renegotiate. Do not move this back inside the recording-only branch.
 
 import { useEffect, useRef } from "react"
+
+import { WAV_SAMPLE_RATE } from "@/lib/audio/recording-limits"
 
 interface Props {
   stream: MediaStream | null
@@ -35,7 +47,15 @@ export function AudioWaveform({ stream, height = 48, windowSec = 8, className }:
     if (!ctx) return
 
     const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
-    const audioCtx = new AudioCtx()
+    // The CAPTURE rate, never the default: a default-rate context (often the
+    // device's 44.1k) coexisting with the 48k capture context on one mic is
+    // exactly the rate disagreement that forces a device restart mid-take.
+    let audioCtx: AudioContext
+    try {
+      audioCtx = new AudioCtx({ sampleRate: WAV_SAMPLE_RATE })
+    } catch {
+      audioCtx = new AudioCtx()
+    }
     ctxRef.current = audioCtx
     const source = audioCtx.createMediaStreamSource(stream)
     const analyser = audioCtx.createAnalyser()

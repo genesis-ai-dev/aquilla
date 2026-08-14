@@ -17,7 +17,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
 import { act, renderHook } from "@testing-library/react"
 
-import { COUNTDOWN_FROM, useCountdown } from "./useCountdown"
+import { COUNTDOWN_FROM, resetCountdownBeepContextForTests, useCountdown } from "./useCountdown"
 
 /** Counts beeps by standing in for the AudioContext beepOnce builds per tick.
  *  happy-dom has none, so without this the real code's try/catch would swallow
@@ -53,7 +53,9 @@ function installAudioContextSpy(): { beeps: number[] } {
 }
 
 describe("useCountdown — zero is one instant", () => {
-  beforeEach(() => { vi.useFakeTimers() })
+  // The beep context is a deliberate module singleton (open/close churn of the
+  // audio device is what ate take heads); drop it so each test's fake counts.
+  beforeEach(() => { vi.useFakeTimers(); resetCountdownBeepContextForTests() })
   afterEach(() => { vi.useRealTimers() })
 
   it("hands off AT zero, not a tick later", () => {

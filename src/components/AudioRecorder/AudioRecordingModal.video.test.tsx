@@ -136,6 +136,30 @@ describe("AudioRecordingModal — the film", () => {
     expect((screen.getByTestId("rec-video") as HTMLVideoElement).muted).toBe(false)
   })
 
+  // ONE canvas from the countdown into the take. The waveform owns an
+  // AudioContext attached to the live microphone, and a remount at zero closes
+  // and reopens that context at the exact moment nothing may touch the audio
+  // device — the input restart that replaced the first ~1.4s of a take with
+  // near-silence and a fade-in (2026-08-14). Mounted during the countdown, any
+  // renegotiation lands in discarded pre-mark audio instead of the take.
+  it("keeps ONE waveform canvas from the countdown into the take", async () => {
+    // The dialog renders through a portal, so the canvas lives under
+    // document.body, not the render container.
+    const { rerender } = render(modal(projectNoFilesKey))
+    expect(document.querySelector("canvas")).toBeNull()
+
+    fireEvent.click(screen.getByTestId("rec-start"))
+    // The permission probe resolves async; the countdown UI mounts the meter.
+    await waitFor(() => expect(document.querySelector("canvas")).not.toBeNull())
+    const duringCountdown = document.querySelector("canvas")
+
+    recorderState.value = { kind: "recording", startedAt: Date.now() }
+    rerender(modal(projectNoFilesKey))
+    await waitFor(() => expect(screen.getByText("REC")).toBeInTheDocument())
+    // The SAME element, not an equal one.
+    expect(document.querySelector("canvas")).toBe(duringCountdown)
+  })
+
   // NOT "only while capturing" any more (2026-08-14): the picture also rolls
   // through the countdown as a lead-in, arriving at the line's first frame at
   // zero. What stays true — and is what this pins — is the two states where it

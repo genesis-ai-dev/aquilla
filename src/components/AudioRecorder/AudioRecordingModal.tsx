@@ -379,6 +379,16 @@ export function AudioRecordingModal({
     if (phase === "counting" || phase === "preview") setArmNonce((n) => n + 1)
   }, [phase])
 
+  // The lead-in retires only once the take is visibly RUNNING (or the flow
+  // left the countdown some other way — error, a cancel path that missed one).
+  // Retiring it at zero itself would pause the film for the one commit where
+  // recorder state has flipped but the phase has not. In the commit where both
+  // change together, the surface sees running=true before it ever sees the
+  // lead-in gone, and the picture just keeps rolling through the handoff.
+  useEffect(() => {
+    if (phase !== "counting") setLeadIn((prev) => (prev == null ? prev : null))
+  }, [phase])
+
   // Close cleanup.
   useEffect(() => {
     if (open) return
@@ -473,8 +483,12 @@ export function AudioRecordingModal({
         from: COUNTDOWN_FROM,
         onDone: () => {
           // ZERO. The countdown says "now", the film is on the line's first
-          // frame, and the take begins — one instant, not three.
-          setLeadIn(null)
+          // frame, and the take begins — one instant, not three. `leadIn` is
+          // NOT cleared here: the phase flips to "recording" one commit after
+          // the recorder's state does, and clearing the lead-in first would
+          // hand the surface a render with neither flag set — a pause() and a
+          // play() one frame apart, a stutter landing exactly on the
+          // operator's entrance. The phase effect below retires it instead.
           void recorder.start()
         },
       })
@@ -1100,35 +1114,60 @@ export function AudioRecordingModal({
               take looks like, then the one button that acts on it, then the
               alternatives to it. Only the middle changes. */}
           <div className="shrink-0 space-y-3 px-4 pt-4 pb-4">
-            {/* ── the phase's own instrument ── */}
-            {displayPhase === "counting" && (
-              <div className="flex h-[76px] flex-col items-center justify-center">
-                <div
-                  key={countdown.count}
-                  className="text-5xl font-semibold tabular-nums text-foreground/80"
-                  style={{ animation: "pop 700ms ease-out" }}
-                >
-                  {countdown.count === 0 ? "GO" : countdown.count}
-                </div>
-              </div>
-            )}
-
-            {displayPhase === "recording" && (
+            {/* ── the phase's own instrument ──
+                COUNTING and RECORDING share ONE block so the waveform below is
+                a SINGLE mounted element across the flip. That is a correctness
+                rule, not tidiness: the waveform owns an AudioContext on the
+                live mic, and unmount/remount at zero would close and reopen it
+                exactly when nothing is allowed to touch the audio device — the
+                device restart that ate the first word of a take (2026-08-14).
+                Mounted from the countdown's first frame, any renegotiation it
+                does cause lands in discarded pre-mark audio; it also puts the
+                live meter under the count, which is the honest version of
+                "the mic is already hot when GO appears". */}
+            {(displayPhase === "counting" || displayPhase === "recording") && (
               <div className="space-y-2">
-                <div className="flex items-center gap-2">
-                  <span className="inline-block h-2 w-2 shrink-0 animate-pulse rounded-full bg-red-500" />
-                  <span className="text-xs font-semibold text-red-500">REC</span>
-                  <span className="font-mono text-lg tabular-nums">{formatClock(elapsedMs)}</span>
-                  <span className="ml-auto shrink-0 font-mono text-[10px] text-muted-foreground">
-                    max {minutesOf(formatLimits.hardStopMs)}m
-                  </span>
+                {displayPhase === "counting" ? (
+                  <div className="flex h-[28px] items-center justify-center">
+                    <div
+                      key={countdown.count}
+                      className="text-2xl font-semibold tabular-nums text-foreground/80"
+                      style={{ animation: "pop 700ms ease-out" }}
+                    >
+                      {countdown.count === 0 ? "GO" : countdown.count}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <span className="inline-block h-2 w-2 shrink-0 animate-pulse rounded-full bg-red-500" />
+                    <span className="text-xs font-semibold text-red-500">REC</span>
+                    <span className="font-mono text-lg tabular-nums">{formatClock(elapsedMs)}</span>
+                    <span className="ml-auto shrink-0 font-mono text-[10px] text-muted-foreground">
+                      max {minutesOf(formatLimits.hardStopMs)}m
+                    </span>
+                  </div>
+                )}
+                <div className="relative">
+                  <AudioWaveform stream={recorder.stream} height={44} className="rounded-md border bg-muted/40" />
+                  {/* Zero's visual beat. The count block above flips to REC
+                      within a frame of GO, so without this the word GO is
+                      gone before it lands — and the silent fourth beat needs
+                      its visual (the audible one would print into the take). */}
+                  {displayPhase === "recording" && elapsedMs < 700 && (
+                    <div
+                      className="pointer-events-none absolute inset-0 flex items-center justify-center text-3xl font-semibold text-foreground/70"
+                      style={{ animation: "pop 700ms ease-out" }}
+                      aria-hidden
+                    >
+                      GO
+                    </div>
+                  )}
                 </div>
-                <AudioWaveform stream={recorder.stream} height={44} className="rounded-md border bg-muted/40" />
-                {targetSec != null && <DurationBar elapsedMs={elapsedMs} targetSec={targetSec} />}
-                {targetOverrun && (
+                {displayPhase === "recording" && targetSec != null && <DurationBar elapsedMs={elapsedMs} targetSec={targetSec} />}
+                {displayPhase === "recording" && targetOverrun && (
                   <p className="text-xs font-medium text-red-500">Past the window — this will overrun the cue.</p>
                 )}
-                {isNearLimit && (
+                {displayPhase === "recording" && isNearLimit && (
                   <p className="text-xs font-medium text-amber-500">
                     {/* Derived from the ACTIVE format's limits: WAV is ~3× the
                         bytes of a compressed take, so its window is much

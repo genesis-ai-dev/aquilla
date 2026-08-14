@@ -21,6 +21,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 
+import { WAV_SAMPLE_RATE } from "@/lib/audio/recording-limits"
+
 /** Ticks before zero. Exported because the film's rolling lead-in has to cover
  *  exactly this much runway — the picture reaches the line's first frame as the
  *  count reaches zero, so the two cues say "now" at the same instant. */
@@ -34,10 +36,34 @@ export interface UseCountdown {
   cancel: () => void
 }
 
+// ONE context for every beep, opened on the first and NEVER closed. It used to
+// be a context per beep, closed when its tone ended — three open/close cycles
+// of the output device inside the three seconds before every take. Opening and
+// closing audio contexts is what makes the browser/OS reconfigure the shared
+// audio device, and on combined input/output hardware (headsets) that churn
+// reaches the MICROPHONE: measured in a take as a degraded head, a hard gap
+// and a fade-in that ate the operator's first word. Pinned to the capture rate
+// so this context can never be the rate disagreement that forces the restart.
+let beepCtx: AudioContext | null = null
+
+/** The singleton outlives any one test's AudioContext fake — a test that
+ *  counts beeps must drop it first, or it beeps into an earlier test's fake. */
+export function resetCountdownBeepContextForTests(): void {
+  beepCtx = null
+}
+
 function beepOnce(freq: number, durationMs: number) {
   try {
-    const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
-    const ctx = new Ctx()
+    if (!beepCtx || beepCtx.state === "closed") {
+      const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
+      try {
+        beepCtx = new Ctx({ sampleRate: WAV_SAMPLE_RATE })
+      } catch {
+        beepCtx = new Ctx()
+      }
+    }
+    const ctx = beepCtx
+    if (ctx.state === "suspended") void ctx.resume()
     const osc = ctx.createOscillator()
     const gain = ctx.createGain()
     osc.type = "sine"
@@ -51,7 +77,11 @@ function beepOnce(freq: number, durationMs: number) {
     gain.gain.exponentialRampToValueAtTime(0.0001, now + durationMs / 1000)
     osc.start(now)
     osc.stop(now + durationMs / 1000 + 0.02)
-    osc.onended = () => ctx.close().catch(() => {})
+    // The NODES are released; the context is not. See the block comment above.
+    osc.onended = () => {
+      try { osc.disconnect() } catch {}
+      try { gain.disconnect() } catch {}
+    }
   } catch { /* no-op: AudioContext may be restricted */ }
 }
 

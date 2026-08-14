@@ -53,6 +53,7 @@ interface MeterRow {
   model: string | null
   prompt_tokens: number
   completion_tokens: number
+  cost_cents: number
   latency_ms: number
   ok: boolean
 }
@@ -106,7 +107,7 @@ async function main(): Promise<void> {
 
     const { rows } = await client.query<MeterRow>(
       `SELECT surface, run_id, project_id, kind, label, span_id, tier, model,
-              prompt_tokens, completion_tokens, latency_ms, ok
+              prompt_tokens, completion_tokens, cost_cents, latency_ms, ok
          FROM agent_cost_meter ${clause}
         ORDER BY id`,
       binds,
@@ -185,6 +186,34 @@ async function main(): Promise<void> {
     p(`failed calls     ${failed.length}  (${pct(failed.length, rows.length)} of all calls)`)
     p(`model wall-clock ${(wallMs / 1000 / 60).toFixed(1)} min summed across calls`)
     p()
+
+    // ── Real reported cost (OpenRouter `usage.include`, cost-meter.ts) ─────
+    // The PRICES table below is a hand-maintained rate card and has no row for
+    // a model it doesn't know about — it would silently price an unlisted
+    // model at $0. cost_cents is what the vendor actually billed for this
+    // call, independent of that table, so it's the only number that's honest
+    // for a model not yet in PRICES.
+    const realCostByModel = new Map<string, number>()
+    for (const r of llm) {
+      const key = r.model || "(unknown model)"
+      realCostByModel.set(key, (realCostByModel.get(key) ?? 0) + (r.cost_cents ?? 0))
+    }
+    const totalRealCents = [...realCostByModel.values()].reduce((a, b) => a + b, 0)
+    if (totalRealCents > 0 || realCostByModel.size > 0) {
+      p(`── real reported cost (usage.include, actual vendor billing) ${"─".repeat(10)}`)
+      for (const [model, cents] of [...realCostByModel.entries()].sort((a, b) => b[1] - a[1])) {
+        const dollars = cents / 100
+        const perDelivered = deliveredWords > 0 ? dollars * (10_000 / deliveredWords) : 0
+        p(`  ${model.padEnd(30)}${usd(dollars).padStart(11)}  total` +
+          (deliveredWords > 0 ? `   ${usd(perDelivered)} / 10k delivered words` : ""))
+      }
+      p(`  ${"TOTAL".padEnd(30)}${usd(totalRealCents / 100).padStart(11)}`)
+      if (totalRealCents === 0) {
+        p(`  (all zero — either COST_METER=1 wasn't set, the upstream isn't OpenRouter,`)
+        p(`   or usage.include wasn't requested for these calls.)`)
+      }
+      p()
+    }
 
     // ── Where the compute goes ─────────────────────────────────────────────
     p(`── by node / tool ${"─".repeat(56)}`)
@@ -374,9 +403,10 @@ async function main(): Promise<void> {
     if (AS_JSON) {
       console.log(JSON.stringify({
         rows: rows.length, llmCalls: llm.length, toolCalls: tools.length,
-        promptTokens, completionTokens, sourceWords, failed: failed.length,
+        promptTokens, completionTokens, sourceWords, deliveredWords, failed: failed.length,
         byLabel: labelRows,
         perRunCost: Object.fromEntries(priceKeys.map((k) => [k, priceOf(promptTokens, completionTokens, k)])),
+        realCostCentsByModel: Object.fromEntries(realCostByModel),
       }, null, 2))
     } else {
       console.log(out.join("\n"))

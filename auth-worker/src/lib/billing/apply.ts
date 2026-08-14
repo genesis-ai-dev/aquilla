@@ -78,6 +78,7 @@ export async function upsertOrgBilling(
     periodStart?: string | null
     periodEnd?: string | null
     addonPacks?: number
+    complimentaryWords?: number
     hardCapWords?: number | null
     resetAddons?: boolean
   },
@@ -92,6 +93,7 @@ export async function upsertOrgBilling(
     current_period_start: patch.periodStart ?? current.current_period_start,
     current_period_end: patch.periodEnd ?? current.current_period_end,
     addon_packs: patch.resetAddons ? 0 : (patch.addonPacks ?? current.addon_packs),
+    complimentary_words: patch.complimentaryWords ?? current.complimentary_words,
     hard_cap_words: patch.hardCapWords === undefined ? current.hard_cap_words : patch.hardCapWords,
   }
 
@@ -99,15 +101,19 @@ export async function upsertOrgBilling(
     current.current_period_start != null &&
     next.current_period_start != null &&
     current.current_period_start !== next.current_period_start
-  if (periodRolled) next.addon_packs = 0
+  if (periodRolled) {
+    next.addon_packs = 0
+    next.complimentary_words = 0
+  }
 
   try {
     await db
       .prepare(
         `INSERT INTO org_billing (
            org_id, stripe_customer_id, stripe_subscription_id, plan, status,
-           current_period_start, current_period_end, addon_packs, hard_cap_words, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, now())
+           current_period_start, current_period_end, addon_packs, complimentary_words,
+           hard_cap_words, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now())
          ON CONFLICT (org_id) DO UPDATE SET
            stripe_customer_id     = EXCLUDED.stripe_customer_id,
            stripe_subscription_id = EXCLUDED.stripe_subscription_id,
@@ -116,6 +122,7 @@ export async function upsertOrgBilling(
            current_period_start   = EXCLUDED.current_period_start,
            current_period_end     = EXCLUDED.current_period_end,
            addon_packs            = EXCLUDED.addon_packs,
+           complimentary_words    = EXCLUDED.complimentary_words,
            hard_cap_words         = EXCLUDED.hard_cap_words,
            updated_at             = now()`,
       )
@@ -128,11 +135,45 @@ export async function upsertOrgBilling(
         next.current_period_start,
         next.current_period_end,
         next.addon_packs,
+        next.complimentary_words,
         next.hard_cap_words,
       )
       .run()
   } catch (err) {
     if (isMissingTableError(err)) return
+    const msg = err instanceof Error ? err.message : String(err)
+    if (msg.includes("complimentary_words") || msg.includes("undefined_column")) {
+      await db
+        .prepare(
+          `INSERT INTO org_billing (
+             org_id, stripe_customer_id, stripe_subscription_id, plan, status,
+             current_period_start, current_period_end, addon_packs, hard_cap_words, updated_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, now())
+           ON CONFLICT (org_id) DO UPDATE SET
+             stripe_customer_id     = EXCLUDED.stripe_customer_id,
+             stripe_subscription_id = EXCLUDED.stripe_subscription_id,
+             plan                   = EXCLUDED.plan,
+             status                 = EXCLUDED.status,
+             current_period_start   = EXCLUDED.current_period_start,
+             current_period_end     = EXCLUDED.current_period_end,
+             addon_packs            = EXCLUDED.addon_packs,
+             hard_cap_words         = EXCLUDED.hard_cap_words,
+             updated_at             = now()`,
+        )
+        .bind(
+          next.org_id,
+          next.stripe_customer_id,
+          next.stripe_subscription_id,
+          next.plan,
+          next.status,
+          next.current_period_start,
+          next.current_period_end,
+          next.addon_packs,
+          next.hard_cap_words,
+        )
+        .run()
+      return
+    }
     throw err
   }
 }
@@ -166,6 +207,14 @@ export async function applyAddonPurchase(db: AquillaDb, orgId: number, packs: nu
   await upsertOrgBilling(db, {
     orgId,
     addonPacks: current.addon_packs + Math.max(1, Math.floor(packs)),
+  })
+}
+
+export async function applyComplimentaryWords(db: AquillaDb, orgId: number, words: number): Promise<void> {
+  const current = await readOrgBilling(db, orgId)
+  await upsertOrgBilling(db, {
+    orgId,
+    complimentaryWords: current.complimentary_words + Math.max(0, Math.floor(words)),
   })
 }
 

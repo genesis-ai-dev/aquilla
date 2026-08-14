@@ -4,6 +4,7 @@
 import {
   type BillingPlan,
   type BillingStatus,
+  type ResolvedFieldPlan,
   type WordBlockReason,
   FIELD_PLAN,
   checkWordAllowance,
@@ -24,6 +25,7 @@ export interface OrgBillingRow {
   current_period_start: string | null
   current_period_end: string | null
   addon_packs: number
+  complimentary_words: number
   hard_cap_words: number | null
 }
 
@@ -35,6 +37,7 @@ export interface OrgWordSnapshot {
   wordsUsed: number
   trailingYearWords: number
   addonPacks: number
+  complimentaryWords: number
   includedWords: number
   allowanceWords: number | null
   remaining: number | null
@@ -69,7 +72,19 @@ export function emptyBillingRow(orgId: number): OrgBillingRow {
     current_period_start: null,
     current_period_end: null,
     addon_packs: 0,
+    complimentary_words: 0,
     hard_cap_words: null,
+  }
+}
+
+function normalizeBillingRow(row: OrgBillingRow): OrgBillingRow {
+  return {
+    ...row,
+    plan: (row.plan as BillingPlan) || "none",
+    status: (row.status as BillingStatus) || "none",
+    addon_packs: Number(row.addon_packs) || 0,
+    complimentary_words: Number(row.complimentary_words) || 0,
+    hard_cap_words: row.hard_cap_words == null ? null : Number(row.hard_cap_words),
   }
 }
 
@@ -79,21 +94,35 @@ export async function readOrgBilling(db: AquillaDb, orgId: number): Promise<OrgB
       .prepare(
         `SELECT org_id, stripe_customer_id, stripe_subscription_id, plan, status,
                 current_period_start::text, current_period_end::text,
-                addon_packs, hard_cap_words
+                addon_packs, complimentary_words, hard_cap_words
            FROM org_billing WHERE org_id = ?`,
       )
       .bind(orgId)
       .first<OrgBillingRow>()
     if (!row) return emptyBillingRow(orgId)
-    return {
-      ...row,
-      plan: (row.plan as BillingPlan) || "none",
-      status: (row.status as BillingStatus) || "none",
-      addon_packs: Number(row.addon_packs) || 0,
-      hard_cap_words: row.hard_cap_words == null ? null : Number(row.hard_cap_words),
-    }
+    return normalizeBillingRow(row)
   } catch (err) {
     if (isMissingTableError(err)) return emptyBillingRow(orgId)
+    const msg = err instanceof Error ? err.message : String(err)
+    if (msg.includes("complimentary_words") || msg.includes("undefined_column")) {
+      try {
+        const row = await db
+          .prepare(
+            `SELECT org_id, stripe_customer_id, stripe_subscription_id, plan, status,
+                    current_period_start::text, current_period_end::text,
+                    addon_packs, hard_cap_words
+               FROM org_billing WHERE org_id = ?`,
+          )
+          .bind(orgId)
+          .first<OrgBillingRow>()
+        if (!row) return emptyBillingRow(orgId)
+        return normalizeBillingRow({ ...row, complimentary_words: 0 })
+      } catch (inner) {
+        if (isMissingTableError(inner)) return emptyBillingRow(orgId)
+        console.error("[billing] readOrgBilling fallback error:", inner)
+        return emptyBillingRow(orgId)
+      }
+    }
     console.error("[billing] readOrgBilling error:", err)
     return emptyBillingRow(orgId)
   }
@@ -150,17 +179,39 @@ function periodStartDate(billing: OrgBillingRow): string {
   return nDaysAgoUtc(FIELD_PLAN.intervalDays - 1)
 }
 
-export async function readWordSnapshot(db: AquillaDb, orgId: number): Promise<OrgWordSnapshot> {
+export async function resetWordUsage(db: AquillaDb, orgId: number, since?: string): Promise<number> {
+  try {
+    const stmt = since
+      ? db.prepare(`DELETE FROM org_word_usage_daily WHERE org_id = ? AND date_utc >= ?`).bind(orgId, since)
+      : db.prepare(`DELETE FROM org_word_usage_daily WHERE org_id = ?`).bind(orgId)
+    const result = await stmt.run()
+    return Number(result.meta?.changes ?? 0)
+  } catch (err) {
+    if (isMissingTableError(err)) return 0
+    throw err
+  }
+}
+
+export async function readWordSnapshot(
+  db: AquillaDb,
+  orgId: number,
+  catalog?: Pick<ResolvedFieldPlan, "includedWords" | "addonWords" | "talkToUsWordsPerYear">,
+): Promise<OrgWordSnapshot> {
   const billing = await readOrgBilling(db, orgId)
   const periodStart = periodStartDate(billing)
   const [wordsUsed, trailingYearWords] = await Promise.all([
     sumWordsSince(db, orgId, periodStart),
     sumWordsSince(db, orgId, nDaysAgoUtc(364)),
   ])
+  const includedWords = catalog?.includedWords ?? FIELD_PLAN.includedWords
+  const addonWords = catalog?.addonWords ?? FIELD_PLAN.addonWords
   const allowanceWords = periodAllowanceWords({
     plan: billing.plan,
     addonPacks: billing.addon_packs,
     hardCapWords: billing.hard_cap_words,
+    complimentaryWords: billing.complimentary_words,
+    includedWords,
+    addonWords,
   })
   const periodDays = periodDaysBetween(billing.current_period_start, billing.current_period_end)
   return {
@@ -171,7 +222,8 @@ export async function readWordSnapshot(db: AquillaDb, orgId: number): Promise<Or
     wordsUsed,
     trailingYearWords,
     addonPacks: billing.addon_packs,
-    includedWords: billing.plan === "field" ? FIELD_PLAN.includedWords : 0,
+    complimentaryWords: billing.complimentary_words,
+    includedWords: billing.plan === "field" ? includedWords : 0,
     allowanceWords,
     remaining: remainingWords(wordsUsed, allowanceWords),
     hardCapWords: billing.hard_cap_words,
@@ -180,6 +232,7 @@ export async function readWordSnapshot(db: AquillaDb, orgId: number): Promise<Or
       periodWords: wordsUsed,
       periodDays,
       trailingYearWords,
+      threshold: catalog?.talkToUsWordsPerYear,
     }),
     stripeCustomerId: billing.stripe_customer_id,
     stripeSubscriptionId: billing.stripe_subscription_id,

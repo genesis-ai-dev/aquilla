@@ -28,8 +28,12 @@ export type BillingStatus =
   | "unpaid"
   | "paused"
 
-export function fieldAllowanceWords(addonPacks: number): number {
-  return FIELD_PLAN.includedWords + Math.max(0, Math.floor(addonPacks)) * FIELD_PLAN.addonWords
+export function fieldAllowanceWords(
+  addonPacks: number,
+  includedWords: number = FIELD_PLAN.includedWords,
+  addonWords: number = FIELD_PLAN.addonWords,
+): number {
+  return includedWords + Math.max(0, Math.floor(addonPacks)) * addonWords
 }
 
 /** Paid allowance for the current period. `null` = no paid cap (plan none). */
@@ -37,12 +41,16 @@ export function periodAllowanceWords(args: {
   plan: BillingPlan
   addonPacks: number
   hardCapWords: number | null
+  complimentaryWords?: number
+  includedWords?: number
+  addonWords?: number
 }): number | null {
+  const extra = Math.max(0, Math.floor(args.complimentaryWords ?? 0))
   if (args.plan === "none") return null
   if (args.plan === "enterprise") {
-    return args.hardCapWords ?? FIELD_PLAN.talkToUsWordsPerYear
+    return (args.hardCapWords ?? FIELD_PLAN.talkToUsWordsPerYear) + extra
   }
-  return fieldAllowanceWords(args.addonPacks)
+  return fieldAllowanceWords(args.addonPacks, args.includedWords, args.addonWords) + extra
 }
 
 export function remainingWords(used: number, allowance: number | null): number | null {
@@ -60,11 +68,13 @@ export function shouldTalkToUs(args: {
   periodWords: number
   periodDays: number
   trailingYearWords?: number
+  threshold?: number
 }): boolean {
   if (args.plan === "enterprise") return false
+  const limit = args.threshold ?? FIELD_PLAN.talkToUsWordsPerYear
   const annualized = annualizedWords(args.periodWords, args.periodDays)
   const trailing = args.trailingYearWords ?? 0
-  return annualized > FIELD_PLAN.talkToUsWordsPerYear || trailing > FIELD_PLAN.talkToUsWordsPerYear
+  return annualized > limit || trailing > limit
 }
 
 export type WordBlockReason = "allowance" | "hard_cap"

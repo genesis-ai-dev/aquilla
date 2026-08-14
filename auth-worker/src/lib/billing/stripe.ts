@@ -154,6 +154,36 @@ export async function createPortalSession(
   return { url: json.url }
 }
 
+export async function retrievePrice(
+  env: Env,
+  priceId: string,
+): Promise<{ id: string; product: string; unitAmount: number | null; type: string }> {
+  const json = await stripeForm(env, "GET", `/prices/${encodeURIComponent(priceId)}`)
+  return {
+    id: String(json.id),
+    product: String(json.product),
+    unitAmount: typeof json.unit_amount === "number" ? json.unit_amount : Number(json.unit_amount) || null,
+    type: String(json.type ?? ""),
+  }
+}
+
+export async function createCatalogPrice(
+  env: Env,
+  args: { productId: string; unitAmountCents: number; recurring: boolean },
+): Promise<string> {
+  const params: Record<string, string | number | undefined> = {
+    product: args.productId,
+    currency: "usd",
+    unit_amount: args.unitAmountCents,
+  }
+  if (args.recurring) {
+    params["recurring[interval]"] = "week"
+    params["recurring[interval_count]"] = 4
+  }
+  const json = await stripeForm(env, "POST", "/prices", params)
+  return String(json.id)
+}
+
 export async function retrieveSubscription(
   env: Env,
   subscriptionId: string,

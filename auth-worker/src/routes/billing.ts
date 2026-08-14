@@ -16,7 +16,8 @@ import {
   rememberBillingEvent,
   subscriptionFromStripeObject,
 } from "../lib/billing/apply"
-import { FIELD_PLAN } from "../lib/billing/plans"
+import { FIELD_PLAN, resolveFieldPlan } from "../lib/billing/plans"
+import { loadPlatformSettings } from "../lib/platform-settings"
 import {
   addonPriceId,
   createCheckoutSession,
@@ -50,7 +51,8 @@ billing.get("/orgs/:orgId/billing", authMiddleware, async (c) => {
   if (!Number.isFinite(orgId)) return c.json({ error: "invalid orgId" }, 400)
   if (!(await requireMaintainer(c, orgId))) return c.json({ error: "forbidden" }, 403)
 
-  const snapshot = await readWordSnapshot(c.env.AQUILLA_PG, orgId)
+  const catalog = resolveFieldPlan((await loadPlatformSettings(c.env)).settings.fieldPlan, c.env)
+  const snapshot = await readWordSnapshot(c.env.AQUILLA_PG, orgId, catalog)
   return c.json({
     plan: snapshot.plan,
     status: snapshot.status,
@@ -59,6 +61,7 @@ billing.get("/orgs/:orgId/billing", authMiddleware, async (c) => {
     wordsUsed: snapshot.wordsUsed,
     trailingYearWords: snapshot.trailingYearWords,
     addonPacks: snapshot.addonPacks,
+    complimentaryWords: snapshot.complimentaryWords,
     includedWords: snapshot.includedWords,
     allowanceWords: snapshot.allowanceWords,
     remainingWords: snapshot.remaining,
@@ -69,13 +72,13 @@ billing.get("/orgs/:orgId/billing", authMiddleware, async (c) => {
     canManage: Boolean(snapshot.stripeCustomerId) && stripeConfigured(c.env),
     stripeConfigured: stripeConfigured(c.env),
     fieldPlan: {
-      name: FIELD_PLAN.name,
-      intervalDays: FIELD_PLAN.intervalDays,
-      priceCents: FIELD_PLAN.priceCents,
-      includedWords: FIELD_PLAN.includedWords,
-      addonWords: FIELD_PLAN.addonWords,
-      addonPriceCents: FIELD_PLAN.addonPriceCents,
-      talkToUsWordsPerYear: FIELD_PLAN.talkToUsWordsPerYear,
+      name: catalog.name,
+      intervalDays: catalog.intervalDays,
+      priceCents: catalog.priceCents,
+      includedWords: catalog.includedWords,
+      addonWords: catalog.addonWords,
+      addonPriceCents: catalog.addonPriceCents,
+      talkToUsWordsPerYear: catalog.talkToUsWordsPerYear,
     },
   })
 })
@@ -97,7 +100,8 @@ billing.post("/orgs/:orgId/billing/checkout", authMiddleware, async (c) => {
     return c.json({ error: "invalid body" }, 400)
   }
 
-  const snapshot = await readWordSnapshot(c.env.AQUILLA_PG, orgId)
+  const catalog = resolveFieldPlan((await loadPlatformSettings(c.env)).settings.fieldPlan, c.env)
+  const snapshot = await readWordSnapshot(c.env.AQUILLA_PG, orgId, catalog)
   if (snapshot.plan === "enterprise") {
     return c.json({ error: "enterprise_org", message: "Enterprise orgs are billed offline. Talk to us to change the cap." }, 409)
   }
@@ -116,7 +120,10 @@ billing.post("/orgs/:orgId/billing/checkout", authMiddleware, async (c) => {
     const session = await createCheckoutSession(c.env, {
       customerId: snapshot.stripeCustomerId ?? undefined,
       customerEmail: snapshot.stripeCustomerId ? undefined : user.email,
-      priceId: body.kind === "field" ? fieldPriceId(c.env) : addonPriceId(c.env),
+      priceId:
+        body.kind === "field"
+          ? (catalog.stripePriceField ?? fieldPriceId(c.env))
+          : (catalog.stripePriceAddon ?? addonPriceId(c.env)),
       mode: body.kind === "field" ? "subscription" : "payment",
       quantity: body.kind === "addon" ? (body.packs ?? 1) : 1,
       successUrl: billingReturnUrl(c.env, orgId, "?checkout=success"),

@@ -36,6 +36,12 @@ describe("periodAllowanceWords", () => {
     expect(periodAllowanceWords({ plan: "field", addonPacks: 2, hardCapWords: null })).toBe(300_000)
   })
 
+  it("adds complimentary words on top of the purchased allowance", () => {
+    expect(
+      periodAllowanceWords({ plan: "field", addonPacks: 0, hardCapWords: null, complimentaryWords: 50_000 }),
+    ).toBe(150_000)
+  })
+
   it("uses the configured hard cap for Enterprise, defaulting to the 25M/yr routing line", () => {
     expect(periodAllowanceWords({ plan: "enterprise", addonPacks: 0, hardCapWords: 5_000_000 })).toBe(5_000_000)
     expect(periodAllowanceWords({ plan: "enterprise", addonPacks: 99, hardCapWords: null })).toBe(

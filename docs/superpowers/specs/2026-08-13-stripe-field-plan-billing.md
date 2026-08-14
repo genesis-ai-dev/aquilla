@@ -29,3 +29,7 @@ pricing stays offline; Enterprise orgs only get a hard usage cap.
 - `POST /api/v2/billing/webhook` (Stripe-Signature)
 - Org settings → Billing & usage
 - Org overview → AI words panel (maintainer+)
+- Admin → Platform → Billing: catalog amounts, complimentary word/credit
+  grants, usage resets, plan/hard-cap assignment. Dollar amount changes
+  create a new Stripe Price when Stripe is configured; existing
+  subscribers keep their current price. Grants and resets never touch Stripe.

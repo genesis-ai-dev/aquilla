@@ -17,6 +17,7 @@ export interface OrgBilling {
   wordsUsed: number
   trailingYearWords: number
   addonPacks: number
+  complimentaryWords?: number
   includedWords: number
   allowanceWords: number | null
   remainingWords: number | null

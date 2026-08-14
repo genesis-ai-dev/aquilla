@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS org_billing (
   current_period_start     TIMESTAMPTZ,
   current_period_end       TIMESTAMPTZ,
   addon_packs              INTEGER NOT NULL DEFAULT 0,
+  complimentary_words      INTEGER NOT NULL DEFAULT 0,
   hard_cap_words           BIGINT,
   created_at               TIMESTAMPTZ DEFAULT now(),
   updated_at               TIMESTAMPTZ DEFAULT now()

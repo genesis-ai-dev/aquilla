@@ -13,9 +13,9 @@ const members = [
 describe("MembershipAvatars", () => {
   it("renders up to maxVisible avatars and an overflow chip", () => {
     render(<MembershipAvatars members={members} maxVisible={3} />);
-    expect(screen.getByText("W")).toBeInTheDocument();
-    expect(screen.getByText("A")).toBeInTheDocument();
-    expect(screen.getByText("C")).toBeInTheDocument();
+    expect(screen.getByText("WE")).toBeInTheDocument();
+    expect(screen.getByText("AN")).toBeInTheDocument();
+    expect(screen.getByText("CL")).toBeInTheDocument();
     expect(screen.getByText("+2")).toBeInTheDocument();
   });
 

@@ -98,7 +98,7 @@ function LanePeople({ members }: { members: ProjectMember[] }) {
     <AvatarGroup data-size="sm">
       {shown.map((m) => (
         <AppTooltip key={m.userId} content={m.username}>
-          <InitialsAvatar name={m.username} size="sm" singleInitial />
+          <InitialsAvatar name={m.username} size="sm" />
         </AppTooltip>
       ))}
       {extra > 0 && <AvatarGroupCount>+{extra}</AvatarGroupCount>}

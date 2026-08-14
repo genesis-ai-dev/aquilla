@@ -1813,7 +1813,6 @@ export function ProjectOverview() {
                                 <InitialsAvatar
                                   name={w.username ?? t("org.workloadRollup.unknownUser", { id: w.userId })}
                                   size="sm"
-                                  singleInitial
                                   className="shrink-0"
                                 />
                                 <ExpandableName name={w.username ?? t("org.workloadRollup.unknownUser", { id: w.userId })} />

@@ -23,7 +23,7 @@ export function MembershipAvatars({ members, maxVisible = 4 }: MembershipAvatars
     >
       {visible.map((m) => (
         <AppTooltip key={m.userId} content={`${m.username} (${resolveRoleName(t, m.role.name)})`}>
-          <InitialsAvatar name={m.username} size="sm" singleInitial />
+          <InitialsAvatar name={m.username} size="sm" />
         </AppTooltip>
       ))}
       {overflow > 0 && (

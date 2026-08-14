@@ -39,6 +39,7 @@ export type OutboxEventKind =
   | "cell.audio.select"
   | "cell.audio.remove"
   | "cell.audio.rename"
+  | "cell.audio.trim"
   | "cell.audio.measure"
   // Back-translation (contributor-level; non-chain-mutating).
   | "cell.backtranslation.set"
@@ -283,6 +284,18 @@ export interface OutboxEventPayloads {
   "cell.audio.rename": {
     audioId: string
     label: string | null
+  }
+  /**
+   * The clip's COMPLETE playback trim window — both ends always stated, null
+   * meaning "back to the clip edge". Required-and-nullable rather than
+   * optional: an absent field is exactly what made "no opinion" and "clear it"
+   * indistinguishable, so a re-attach carrying word timings wiped the window a
+   * take had just been given. Sets nothing else.
+   */
+  "cell.audio.trim": {
+    audioId: string
+    trimStartMs: number | null
+    trimEndMs: number | null
   }
   // Duration backfill for takes that predate duration capture. The server
   // fills only a NULL duration_ms — never selection/url/slot/trims — so

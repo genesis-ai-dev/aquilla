@@ -321,10 +321,18 @@ export async function transcribeCell(args: TranscribeCellArgs): Promise<number> 
         timings,
         // Preserve attachment fields the projection UPSERT would otherwise
         // null out — belt and braces now that the projection COALESCEs them
-        // too (SUB-49). The trim window is load-bearing for imported segments
-        // (it defines the cell's slice of the shared clip).
-        ...(attachment?.trimStartMs != null ? { trimStartMs: attachment.trimStartMs } : {}),
-        ...(attachment?.trimEndMs != null ? { trimEndMs: attachment.trimEndMs } : {}),
+        // too (SUB-49).
+        //
+        // The TRIM WINDOW is deliberately not forwarded here, and forwarding it
+        // is not a fix anyone should re-add. This attach lands ~800ms after a
+        // take is saved, and callers hand `cell` in as a small hand-built stub
+        // (see AudioRecordingModal's save) — so `attachment.trimStartMs` was
+        // reliably undefined, the field was omitted, and the projection read
+        // that omission as "clear it", wiping the window every recorded take
+        // had just been given. The window is owned by `cell.audio.trim` now and
+        // an attach can no longer clear one, so this event simply cannot reach
+        // it. That is the point: correctness here must not depend on a caller
+        // remembering to echo a field back.
         ...(attachment?.durationMs != null ? { durationMs: attachment.durationMs } : {}),
         ...(attachment?.voiceId ? { voiceId: attachment.voiceId } : {}),
         ...(attachment?.referenceAudioId ? { referenceAudioId: attachment.referenceAudioId } : {}),

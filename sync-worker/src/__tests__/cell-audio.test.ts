@@ -140,7 +140,16 @@ describe("cell-audio projection", () => {
     }
   })
 
-  it("attach: trims stay a plain overwrite so dragging to the clip edge still CLEARS them", () => {
+  // 2026-08-14: this test used to assert the OPPOSITE — that trims stayed a
+  // plain overwrite "so dragging to the clip edge still CLEARS them". That
+  // exemption was the last instance of the very bug the test above describes,
+  // and it cost three takes in a row: an attach carrying only word timings
+  // (the transcription's, ~800ms after a take is saved) nulled the trim window
+  // the save had just written, and the take was left anchored a few hundred ms
+  // early with nothing to undo the shift. Clearing now belongs to
+  // cell.audio.trim, which states both ends and can therefore mean NULL out
+  // loud — see audio-trim-projection.test.ts.
+  it("attach: trims are COALESCEd too — an attach may SET a window, never wipe one", () => {
     const { db, recorded } = makeRecordingDb()
     buildEventProjectionStmts(
       db,
@@ -152,10 +161,8 @@ describe("cell-audio projection", () => {
       [],
     )
     const sql = recorded.find((s) => s.sql.includes("INSERT INTO cell_audio"))!.sql
-    expect(sql).toContain("trim_start_ms = excluded.trim_start_ms")
-    expect(sql).toContain("trim_end_ms = excluded.trim_end_ms")
-    expect(sql).not.toContain("COALESCE(excluded.trim_start_ms")
-    expect(sql).not.toContain("COALESCE(excluded.trim_end_ms")
+    expect(sql).toContain("trim_start_ms = COALESCE(excluded.trim_start_ms, cell_audio.trim_start_ms)")
+    expect(sql).toContain("trim_end_ms = COALESCE(excluded.trim_end_ms, cell_audio.trim_end_ms)")
   })
 
   it("select: deselects siblings then selects the target", () => {

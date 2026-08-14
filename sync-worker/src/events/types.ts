@@ -45,6 +45,11 @@ export type EventKind =
   | 'cell.audio.select'
   | 'cell.audio.remove'
   | 'cell.audio.rename'
+  // Set a clip's playback trim window. Its own event because `attach` USED to
+  // own the trim columns, and every re-attach that wasn't about trimming (word
+  // timings, a duration heal) wiped them: "no opinion" and "cleared" were both
+  // expressed as an absent field. See the payload doc below.
+  | 'cell.audio.trim'
   // Backfill a measured duration onto a take that predates duration capture.
   // Fills only a NULL duration_ms — never selects, never touches url/slot/
   // trims (a re-attach would re-select the clip and plain-assign trims).
@@ -349,7 +354,15 @@ export interface EventPayloads {
     durationMs?: number
     /** AQU-646 round 8: the take's PERMANENT display name ("Take 3"). */
     label?: string
-    /** Non-destructive playback trim window into the clip, in ms. */
+    /**
+     * Non-destructive playback trim window into the clip, in ms — the clip's
+     * BIRTH values only. The projection COALESCEs these, so an attach may SET a
+     * window but can never clear one; changing or clearing a window afterwards
+     * is `cell.audio.trim`. That asymmetry is load-bearing: a re-attach that
+     * has nothing to do with trimming (word timings, a duration heal) sends no
+     * trim fields, and those used to be plain-assigned as NULL — silently
+     * wiping the window a second after it was written.
+     */
     trimStartMs?: number
     trimEndMs?: number
     timings?: { word: string; t0: number; t1: number; start: number; end: number }[]
@@ -372,6 +385,18 @@ export interface EventPayloads {
   'cell.audio.rename': {
     audioId: string
     label: string | null
+  }
+  /**
+   * The clip's COMPLETE playback trim window — both ends, always stated, with
+   * `null` meaning "back to the clip edge". Required-and-nullable rather than
+   * optional on purpose: an absent field is what made "I have no opinion"
+   * indistinguishable from "clear it", and the projection could only guess.
+   * Sets nothing else — not selection, slot, url, duration or timings.
+   */
+  'cell.audio.trim': {
+    audioId: string
+    trimStartMs: number | null
+    trimEndMs: number | null
   }
   // Measured duration for a take that predates duration capture. Fills only
   // a NULL duration_ms; a repeat delivery or a race with a real re-attach is

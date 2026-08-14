@@ -19,7 +19,7 @@ import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { useCellAudio } from "@/hooks/useCellAudio"
 import { setCellPref } from "@/lib/store/audio-cell-prefs"
-import { emitCellAudioAttach } from "@/lib/sync/events-emit"
+import { emitCellAudioTrim } from "@/lib/sync/events-emit"
 import { notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
 import { cn } from "@/lib/utils"
 import type { CellData } from "@/hooks/useCells"
@@ -148,19 +148,19 @@ export function CombinedBoundaryEditor(props: CombinedBoundaryEditorProps) {
         const cell = cells[i]
         // Live cache the player reads.
         setCellPref(project.id, cell.id, { trimStart: start, trimEnd: end })
-        // Durable, cross-device: re-attach the shared clip with this slice.
-        // Fortify pass: no mimeType on a trim re-attach — the clip may be
-        // webm/opus now (compressed generations); a hardcoded audio/wav would
-        // overwrite the real container type. Absent field = COALESCE keeps it.
-        void emitCellAudioAttach({
+        // Durable, cross-device: this cell's slice of the shared clip. The
+        // generator already attached that clip to every one of these cells,
+        // untrimmed, so the row exists and only its window is in question.
+        //
+        // 2026-08-14: this MUST be the trim event rather than a re-attach.
+        // An attach can now only ever SET a window, never move one, so
+        // re-adjusting boundaries a second time would have gone silently
+        // nowhere — the first slice would have stuck forever.
+        void emitCellAudioTrim({
           projectId: project.id,
           fileId,
           cellId: cell.id,
           audioId,
-          url,
-          slot: "generatedVoice",
-          voiceId,
-          ...(referenceAudioId ? { referenceAudioId } : {}),
           trimStartMs: Math.round(start * 1000),
           trimEndMs: Math.round(end * 1000),
           author: username,

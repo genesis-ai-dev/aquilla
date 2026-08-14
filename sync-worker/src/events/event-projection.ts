@@ -992,8 +992,17 @@ case 'cell.audio.attach': {
       // recording's duration (its chip lost its length), its mime type and its
       // voice; a later trim then nulled the timings straight back. `label` was
       // the only protected column, which is why names survived and everything
-      // else didn't. Trims stay plain assignments on purpose: dragging an edge
-      // back to the clip boundary CLEARS them, and that must keep working.
+      // else didn't.
+      //
+      // 2026-08-14: the trim columns joined them, and the exemption they used
+      // to carry ("dragging an edge back to the clip boundary CLEARS them") was
+      // the last instance of the same bug. Clearing and having-no-opinion were
+      // both spelled "field absent", so the transcription's word-timings attach
+      // — which lands ~800ms after a take is saved — wiped the window every
+      // recorded take had just been given, leaving it anchored a few hundred ms
+      // early with nothing to undo the shift. An attach may now SET a window
+      // (a clip's birth values) and never clear one; clearing belongs to
+      // cell.audio.trim, which states both ends and can therefore mean NULL.
       stmts.push(
         db
           .prepare(
@@ -1010,8 +1019,8 @@ case 'cell.audio.attach': {
               reference_audio_id = COALESCE(excluded.reference_audio_id, cell_audio.reference_audio_id),
               duration_ms        = COALESCE(excluded.duration_ms, cell_audio.duration_ms),
               label              = COALESCE(excluded.label, cell_audio.label),
-              trim_start_ms      = excluded.trim_start_ms,
-              trim_end_ms        = excluded.trim_end_ms,
+              trim_start_ms      = COALESCE(excluded.trim_start_ms, cell_audio.trim_start_ms),
+              trim_end_ms        = COALESCE(excluded.trim_end_ms, cell_audio.trim_end_ms),
               timings_json       = COALESCE(excluded.timings_json, cell_audio.timings_json),
               selected           = 1,
               deleted            = 0,
@@ -1097,6 +1106,33 @@ case 'cell.audio.attach': {
               WHERE project_id = ? AND file_id = ? AND cell_id = ? AND audio_id = ?`,
           )
           .bind(p.label, event.projectId, event.fileId, event.cellId, p.audioId),
+      )
+      return ['cell_audio']
+    }
+
+    case 'cell.audio.trim': {
+      // The clip's playback trim window, and nothing else — no selection, no
+      // slot, no url, no duration. Both ends are always stated (null = the clip
+      // edge), so unlike the attach UPSERT above this one CAN clear, which is
+      // the whole reason it exists: absence had to stop meaning two things.
+      const p = event.payload as EventPayloads['cell.audio.trim']
+      if (!event.fileId || !event.cellId) {
+        throw new Error(`cell.audio.trim event ${event.id} is missing fileId or cellId`)
+      }
+      stmts.push(
+        db
+          .prepare(
+            `UPDATE cell_audio SET trim_start_ms = ?, trim_end_ms = ?
+              WHERE project_id = ? AND file_id = ? AND cell_id = ? AND audio_id = ?`,
+          )
+          .bind(
+            p.trimStartMs ?? null,
+            p.trimEndMs ?? null,
+            event.projectId,
+            event.fileId,
+            event.cellId,
+            p.audioId,
+          ),
       )
       return ['cell_audio']
     }

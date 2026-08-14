@@ -199,7 +199,7 @@ describe("transcribeCell — imported media segments (AQU-646)", () => {
     expect(opts.language).toBeUndefined()
   })
 
-  it("re-emits attach carrying the transcription AND the preserved trim window", async () => {
+  it("re-emits attach carrying the transcription, and NEVER the trim window", async () => {
     await audioCachePut(AUDIO_ID, EXT, new Uint8Array([1, 2, 3]))
     __setTranscribeAudioForTests(fakeTranscribe(["bonjour", "monde"]))
 
@@ -208,12 +208,17 @@ describe("transcribeCell — imported media segments (AQU-646)", () => {
     expect(emitCellAudioAttach).toHaveBeenCalledOnce()
     const input = emitCellAudioAttach.mock.calls[0][0] as Record<string, unknown>
     expect(input.transcription).toBe("bonjour monde")
-    // Latent-bug guard: the projection UPSERT overwrites trim columns with the
-    // emitted values, so the re-emit MUST carry them or the segment loses its
-    // slice of the shared clip.
-    expect(input.trimStartMs).toBe(1000)
-    expect(input.trimEndMs).toBe(4000)
     expect(input.durationMs).toBe(3000)
+    // 2026-08-14: this used to assert the OPPOSITE — that the re-emit had to
+    // echo the trim window back, because the projection overwrote those columns
+    // with whatever it was sent. That "guard" only ever worked when the caller
+    // happened to hand in a fully-populated cell; the recording modal passes a
+    // small stub, so for every recorded take the echo was empty and the window
+    // was wiped ~800ms after the take was saved. The projection COALESCEs the
+    // trim columns now, so an attach cannot reach them at all — and correctness
+    // no longer depends on a caller remembering to echo a field back.
+    expect(input).not.toHaveProperty("trimStartMs")
+    expect(input).not.toHaveProperty("trimEndMs")
   })
 
   it("recorded takes (non-media) never emit transcription", async () => {

@@ -847,6 +847,7 @@ describe('isChainMutatingKind', () => {
     'cast.assign': false,
     'cell.retime': false,
     'cell.audio.rename': false,
+    'cell.audio.trim': false,
     'cell.audio.measure': false,
     'cell.lane.retime': false,
     'file.video.set': false,

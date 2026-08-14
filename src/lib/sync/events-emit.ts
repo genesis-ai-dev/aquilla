@@ -475,6 +475,47 @@ export async function emitCellAudioRename(input: CellAudioRenameInput): Promise<
   return eventId
 }
 
+export interface CellAudioTrimInput {
+  projectId: string
+  fileId: string
+  cellId: string
+  audioId: string
+  /** The COMPLETE window. null on either end = back to the clip's own edge. */
+  trimStartMs: number | null
+  trimEndMs: number | null
+  author: string
+  clientTs?: number
+}
+
+/**
+ * Emit a `cell.audio.trim` — the playback window ONLY; never selection, slot,
+ * url, duration or timings.
+ *
+ * This is deliberately not a re-attach. Trims used to ride `cell.audio.attach`,
+ * where "clear this window" and "I'm not here about the window" were both
+ * spelled as an absent field — so the transcription's word-timings re-attach,
+ * landing ~800ms after a take was saved, wiped the window that take had just
+ * been given and left it playing a few hundred ms early. Stating both ends,
+ * always, is what makes a clear expressible without making silence dangerous.
+ */
+export async function emitCellAudioTrim(input: CellAudioTrimInput): Promise<string> {
+  const { eventId } = await enqueueEvent({
+    kind: "cell.audio.trim",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    cellId: input.cellId,
+    parentId: null,
+    author: input.author,
+    payload: {
+      audioId: input.audioId,
+      trimStartMs: input.trimStartMs,
+      trimEndMs: input.trimEndMs,
+    },
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
 export interface CellAudioMeasureInput {
   projectId: string
   fileId: string

@@ -82,7 +82,7 @@ import { useProjectPermissions } from "@/hooks/useProjectPermissions"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { eagerlyPrefetchPeaks } from "@/lib/audio/eager-peaks"
 import { runTranscribeAll as runBatchTranscribeAll, runSynthAll as runBatchSynthAll, needsTranscription, needsSynthesis, takesNeedingMeasure, runMeasureAll } from "@/lib/audio/batch-audio"
-import { injectOptimisticAudioAttachment, notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
+import { injectOptimisticAudioTrim, notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
 import { useOutbox } from "@/context/OutboxContext"
 import { useReconcileOnDrain } from "@/hooks/useReconcileOnDrain"
 import {
@@ -90,7 +90,7 @@ import {
   buildFileScopedTokenFetcher,
   buildProjectAwareMinter,
 } from "@/lib/sync/cqrs-bridge"
-import { emitTargetCellCommit, emitCellBacktranslationSet, emitFileRename, emitFileDelete, emitFileRestore, emitCellValidate, emitCellRetime, emitCellLaneRetime, emitCellAudioAttach, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, enqueueEvents } from "@/lib/sync/events-emit"
+import { emitTargetCellCommit, emitCellBacktranslationSet, emitFileRename, emitFileDelete, emitFileRestore, emitCellValidate, emitCellRetime, emitCellLaneRetime, emitCellAudioTrim, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, enqueueEvents } from "@/lib/sync/events-emit"
 import { v7 as uuidv7 } from "uuid"
 import { sequenceBetween } from "@/lib/timeline/derive"
 import { isLineEmpty, isUserAddedLine, userLineOrigin } from "@/lib/timeline/user-lines"
@@ -1729,26 +1729,22 @@ export function ProjectWorkspace() {
       const att = cell?.attachments?.[audioId]
       if (!cell || !att) return
       const slot = audioId === cell.selectedAudioId ? "recording" : "generatedVoice"
-      // No mimeType on a trim re-attach — the merged attachment's `type` field
-      // is the literal discriminator "audio", NOT a MIME; sending it would
-      // permanently overwrite the clip's real container type (the projection
-      // COALESCEs, so an ABSENT field keeps the stored value — exactly what a
-      // trim wants for every clip property it isn't changing).
-      const trimP = emitCellAudioAttach({
+      // 2026-08-14: a trim is its own event now, not a re-attach echoing back
+      // every field it isn't changing. That echo was where trims got lost —
+      // absence meant both "clear it" and "not my business" — and it also
+      // re-selected the clip on the way past, so trimming a non-selected
+      // generated voice promoted it over the real take. Both ends are always
+      // stated; null means back to the clip's own edge.
+      const trimP = emitCellAudioTrim({
         projectId: project.id,
         fileId: activeFileId,
         cellId,
         audioId,
-        url: att.url,
-        slot,
-        ...(att.voiceId ? { voiceId: att.voiceId } : {}),
-        ...(att.referenceAudioId ? { referenceAudioId: att.referenceAudioId } : {}),
-        ...(att.durationMs != null ? { durationMs: att.durationMs } : {}),
-        trimStartMs: trims.trimStartMs,
-        trimEndMs: trims.trimEndMs,
+        trimStartMs: trims.trimStartMs ?? null,
+        trimEndMs: trims.trimEndMs ?? null,
         author: currentUsername,
       })
-      injectOptimisticAudioAttachment(activeFileId, cellId, {
+      injectOptimisticAudioTrim(activeFileId, cellId, {
         audioId,
         url: att.url,
         slot,

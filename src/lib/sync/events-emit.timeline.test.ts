@@ -5,7 +5,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 vi.mock("./cqrs-bridge", () => ({ getCqrsOutboxBridge: () => null }))
 vi.mock("./outbox", () => ({ enqueueOutboxEvent: vi.fn(async () => {}) }))
 
-import { emitCellRetime, emitFileTrackSet, emitFileVideoSet } from "./events-emit"
+import { emitCellAudioTrim, emitCellRetime, emitFileTrackSet, emitFileVideoSet } from "./events-emit"
 import { enqueueOutboxEvent } from "./outbox"
 
 const mockEnqueue = enqueueOutboxEvent as unknown as ReturnType<typeof vi.fn>
@@ -27,6 +27,43 @@ describe("emitCellRetime", () => {
     expect(ev.cellId).toBe("c1")
     expect(ev.parentId).toBeNull()
     expect(ev.payload).toEqual({ startMs: 400, endMs: 6000 })
+  })
+})
+
+describe("emitCellAudioTrim", () => {
+  it("states BOTH ends, always — absence is what used to get windows wiped", async () => {
+    await emitCellAudioTrim({
+      projectId: "p1",
+      fileId: "f1",
+      cellId: "c1",
+      audioId: "a1.wav",
+      trimStartMs: 304,
+      trimEndMs: 3656,
+      author: "u",
+    })
+    const ev = mockEnqueue.mock.calls.at(-1)![0] as any
+    expect(ev.kind).toBe("cell.audio.trim")
+    expect(ev.cellId).toBe("c1")
+    expect(ev.parentId).toBeNull()
+    expect(ev.payload).toEqual({ audioId: "a1.wav", trimStartMs: 304, trimEndMs: 3656 })
+  })
+
+  it("carries an explicit null to clear a bound back to the clip edge", async () => {
+    await emitCellAudioTrim({
+      projectId: "p1",
+      fileId: "f1",
+      cellId: "c1",
+      audioId: "a1.wav",
+      trimStartMs: null,
+      trimEndMs: null,
+      author: "u",
+    })
+    const ev = mockEnqueue.mock.calls.at(-1)![0] as any
+    // Present-and-null, never omitted: the projection must be able to tell a
+    // clear apart from an event that simply has no opinion about trims.
+    expect(Object.keys(ev.payload).sort()).toEqual(["audioId", "trimEndMs", "trimStartMs"])
+    expect(ev.payload.trimStartMs).toBeNull()
+    expect(ev.payload.trimEndMs).toBeNull()
   })
 })
 

@@ -1,6 +1,11 @@
 import { type Locator, type Page, expect } from "@playwright/test"
 import { pickSelectOption } from "../base-ui"
 
+// This route hydrates project access, files, settings, and terminology before
+// replacing the workspace loading overlay. Under isolated shard contention it
+// can legitimately exceed the ordinary 10-second interaction budget.
+const GLOSSARY_READY_TIMEOUT_MS = 30_000
+
 /** User-level interactions for the editor-style Glossary surface. */
 export class Glossary {
   private readonly page: Page
@@ -11,7 +16,9 @@ export class Glossary {
 
   async goto(projectId: string): Promise<void> {
     await this.page.goto(`/project/${projectId}/terminology`)
-    await expect(this.page.getByRole("heading", { name: "Glossary" })).toBeVisible({ timeout: 10_000 })
+    await expect(this.page.getByRole("heading", { name: "Glossary" })).toBeVisible({
+      timeout: GLOSSARY_READY_TIMEOUT_MS,
+    })
   }
 
   row(sourceTerm: string): Locator {
@@ -25,7 +32,9 @@ export class Glossary {
     const dialog = this.page.getByRole("dialog")
     await expect(dialog).toBeVisible({ timeout: 5_000 })
     await dialog.getByPlaceholder("New source term…").fill(sourceTerm)
-    if (rendering) await dialog.getByPlaceholder("rendering", { exact: true }).fill(rendering)
+    if (rendering) {
+      await dialog.getByRole("textbox", { name: "Rendering", exact: true }).fill(rendering)
+    }
     const saved = this.waitForSettingsPatch()
     await dialog.getByRole("button", { name: "Add term" }).click()
     await this.expectSettingsPatchOk(saved)

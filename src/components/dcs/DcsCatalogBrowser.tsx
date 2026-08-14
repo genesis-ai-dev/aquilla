@@ -5,6 +5,8 @@
 // only, so it stays reusable for the aligned-target flow too.
 
 import { useCallback, useEffect, useRef, useState } from "react"
+import { useI18n } from "@/lib/i18n/I18nProvider"
+import { formatDate } from "@/lib/i18n/format"
 import { Search, RefreshCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -62,14 +64,15 @@ export interface DcsCatalogBrowserProps {
   defaultLang?: string
 }
 
-function formatReleased(iso: string): string {
+function formatReleased(iso: string, locale: string): string {
   if (!iso) return ""
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return ""
-  return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })
+  return formatDate(d, locale, { year: "numeric", month: "short", day: "numeric" })
 }
 
 export function DcsCatalogBrowser({ onPick, client, defaultLang }: DcsCatalogBrowserProps) {
+  const { locale } = useI18n()
   // A stable client instance across renders (real network unless injected).
   const clientRef = useRef<DcsClient>(client ?? new DcsClient())
 
@@ -249,8 +252,8 @@ export function DcsCatalogBrowser({ onPick, client, defaultLang }: DcsCatalogBro
                     onClick={() => onPick(entry)}
                     className={
                       supported
-                        ? "flex w-full flex-col items-start gap-1 px-3 py-2 text-left hover:bg-accent focus-visible:bg-accent focus-visible:outline-none"
-                        : "flex w-full cursor-not-allowed flex-col items-start gap-1 px-3 py-2 text-left opacity-50"
+                        ? "flex w-full flex-col items-start gap-1 px-3 py-2 text-start hover:bg-accent focus-visible:bg-accent focus-visible:outline-none"
+                        : "flex w-full cursor-not-allowed flex-col items-start gap-1 px-3 py-2 text-start opacity-50"
                     }
                   >
                     <div className="flex w-full items-baseline gap-2">
@@ -269,7 +272,7 @@ export function DcsCatalogBrowser({ onPick, client, defaultLang }: DcsCatalogBro
                     <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
                       {entry.subject && <span>{entry.subject}</span>}
                       {entry.language && <span>· {entry.languageTitle || entry.language}</span>}
-                      {entry.released && <span>· {formatReleased(entry.released)}</span>}
+                      {entry.released && <span>· {formatReleased(entry.released, locale)}</span>}
                     </div>
                   </button>
                 </li>

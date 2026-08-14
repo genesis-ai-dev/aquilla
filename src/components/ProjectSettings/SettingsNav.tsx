@@ -4,6 +4,7 @@ import {
   InputGroupAddon,
   InputGroupInput,
 } from "@/components/ui/input-group"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 export interface SettingsSection {
   id: string
@@ -25,6 +26,7 @@ interface SettingsNavProps {
  * omit it — matching org settings / Preferences (no search bar on detail).
  */
 export function SettingsNav({ onSearch, searchQuery }: SettingsNavProps) {
+  const t = useT()
   return (
     <InputGroup className="h-8 bg-card">
       <InputGroupAddon>
@@ -33,9 +35,9 @@ export function SettingsNav({ onSearch, searchQuery }: SettingsNavProps) {
       <InputGroupInput
         value={searchQuery}
         onChange={(e) => onSearch(e.target.value)}
-        placeholder="Search settings…"
+        placeholder={t("projectSettings.searchPlaceholder")}
         className="text-xs"
-        aria-label="Search settings"
+        aria-label={t("projectSettings.searchAriaLabel")}
       />
     </InputGroup>
   )

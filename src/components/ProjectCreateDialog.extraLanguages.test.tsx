@@ -302,9 +302,12 @@ describe("ProjectCreateDialog — self-contained target language chips (AQU-538)
     fireEvent.click(screen.getByText("Advanced: project shape"))
     fireEvent.click(screen.getByText(/Linked target/i))
 
-    // The single "Target language" field is still there (required by the
-    // shared schema for this shape) — just without the multi-entry chips.
-    expect(screen.getByText("Target language")).toBeTruthy()
+    // The single "Target Language" field is still there (required by the
+    // shared schema for this shape) — just without the multi-entry list.
+    // AQU-832: this label now reuses projectSettings.info.targetLanguageLabel
+    // (Title Case, shared with the Project Info card) instead of a separate
+    // sentence-case duplicate, so the create dialog renders "Target Language".
+    expect(screen.getByText("Target Language")).toBeTruthy()
     expect(screen.queryByText("Target language(s)")).toBeNull()
     expect(screen.queryByTestId("create-extra-lang-input")).toBeNull()
   })

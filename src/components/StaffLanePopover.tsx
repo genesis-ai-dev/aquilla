@@ -29,7 +29,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Spinner } from "@/components/ui/spinner"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { RoleSelect } from "@/components/RoleSelect"
-import { ROLE, roleName, roleDisplayText, roleDescription } from "@/lib/frontier/roles"
+import { ROLE, roleName, roleDisplayLabel, roleDescription } from "@/lib/frontier/roles"
 import { useOrgMembers } from "@/hooks/useOrg"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
@@ -153,7 +153,7 @@ export function StaffLanePopover({
       }
       await refreshProjectMembers()
       setPhase("done")
-      setMessage(`${selected.username} is now ${roleDisplayText(roleName(role))} on ${laneLabel}.`)
+      setMessage(`${selected.username} is now ${roleDisplayLabel(role)} on ${laneLabel}.`)
       onDone?.()
     } catch (err) {
       setPhase("error")
@@ -220,7 +220,7 @@ export function StaffLanePopover({
           <div className="space-y-2">
             <div className="relative">
               <Search
-                className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
+                className="pointer-events-none absolute start-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
                 aria-hidden
               />
               <Input
@@ -228,7 +228,7 @@ export function StaffLanePopover({
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Search your organization"
                 aria-label="Search org members"
-                className="h-8 pl-7 text-xs"
+                className="h-8 ps-7 text-xs"
               />
             </div>
             <ul className="max-h-40 divide-y overflow-y-auto rounded border">
@@ -243,7 +243,7 @@ export function StaffLanePopover({
                   <li key={m.userId}>
                     <button
                       type="button"
-                      className="flex w-full items-center gap-2 px-2 py-1.5 text-left text-xs hover:bg-muted"
+                      className="flex w-full items-center gap-2 px-2 py-1.5 text-start text-xs hover:bg-muted"
                       onClick={() => setSelected({ userId: m.userId, username: m.username })}
                     >
                       <UsernameWithAvatar username={m.username} size="xs" nameClassName="text-xs" />
@@ -297,8 +297,8 @@ export function StaffLanePopover({
               aria-label="Role"
             />
 
-            <Button className="w-full" onClick={handleConfirm} disabled={busy || !jwt}>
-              {busy && <Spinner className="mr-1.5 size-3.5" />}
+            <Button className="w-full" size="sm" onClick={handleConfirm} disabled={busy || !jwt}>
+              {busy && <Spinner className="me-1.5 size-3.5" />}
               Add to {laneLabel}
             </Button>
 

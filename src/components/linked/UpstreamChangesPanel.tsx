@@ -46,6 +46,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Spinner } from "@/components/ui/spinner"
 import { DiffText } from "./DiffText"
+import { useI18n } from "@/lib/i18n/I18nProvider"
+import { formatDateTime } from "@/lib/i18n/format"
 import {
   useUpstreamChangesReview,
   type ReviewItem,
@@ -78,6 +80,7 @@ export function UpstreamChangesPanel({
   roleLevel,
   username,
 }: UpstreamChangesPanelProps) {
+  const { locale } = useI18n()
   const navigate = useNavigate()
   const { groups, totalFlagged, isLoading, isError, revalidate } = useUpstreamChangesReview({
     projectId,
@@ -258,8 +261,8 @@ export function UpstreamChangesPanel({
         {canBulk && selectedItems.length > 0 && (
           <div className="flex items-center justify-between rounded border bg-muted/40 px-3 py-2">
             <span className="text-sm">{selectedItems.length} selected</span>
-            <Button onClick={() => void handleBulkRepin()}>
-              <CheckCheck className="mr-1.5 h-4 w-4" />
+            <Button size="sm" onClick={() => void handleBulkRepin()}>
+              <CheckCheck className="me-1.5 h-4 w-4" />
               Accept as-is ({selectedItems.length})
             </Button>
           </div>
@@ -275,9 +278,9 @@ export function UpstreamChangesPanel({
               open={isOpen}
               onOpenChange={() => toggleBatch(group.batchId)}
             >
-              <CollapsibleTrigger className="flex w-full items-center justify-between rounded border px-3 py-2 text-left text-sm font-medium hover:bg-muted/40">
+              <CollapsibleTrigger className="flex w-full items-center justify-between rounded border px-3 py-2 text-start text-sm font-medium hover:bg-muted/40">
                 <span>
-                  Sync batch — {new Date(group.serverTs).toLocaleString()}
+                  Sync batch — {formatDateTime(group.serverTs, locale)}
                 </span>
                 <Badge variant="outline">{group.cellCount} cell{group.cellCount === 1 ? "" : "s"}</Badge>
               </CollapsibleTrigger>
@@ -335,8 +338,8 @@ export function UpstreamChangesPanel({
                         )}
                       </div>
                       <div className="flex shrink-0 items-center gap-1.5">
-                        <Button variant="outline" onClick={() => openToRetranslate(item)}>
-                          <ArrowRight className="mr-1 h-3.5 w-3.5" />
+                        <Button variant="outline" size="sm" onClick={() => openToRetranslate(item)}>
+                          <ArrowRight className="me-1 h-3.5 w-3.5" />
                           Open
                         </Button>
                         {item.target && (
@@ -345,7 +348,7 @@ export function UpstreamChangesPanel({
                             disabled={!canRepin || busy}
                             onClick={() => void handleRepinSingle(item)}
                           >
-                            {busy ? <Spinner className="h-3.5 w-3.5" /> : <CheckCheck className="mr-1 h-3.5 w-3.5" />}
+                            {busy ? <Spinner className="h-3.5 w-3.5" /> : <CheckCheck className="me-1 h-3.5 w-3.5" />}
                             Accept as-is
                           </Button>
                         )}

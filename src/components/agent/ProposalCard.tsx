@@ -30,6 +30,9 @@ import { applyStagedEvents, type ApplyContext } from "@/lib/agent/apply"
 import { ValidationQueueCard } from "./cards/ValidationQueueCard"
 import { isValidationProposal } from "./cards/registry"
 import { canApply, isSupportedApplyKind } from "@/lib/agent/role-floors"
+import { useT } from "@/lib/i18n/I18nProvider"
+import { translateRuleName } from "@/lib/lqa/builtin-resolver"
+import { formatInfractionMessage } from "@/lib/rules/format-infraction"
 import { InlineAiError } from "@/components/InlineAiError"
 
 // ── Lint ───────────────────────────────────────────────────────────────────
@@ -90,12 +93,12 @@ function TruncatableText({ text, className }: { text: string; className?: string
         <button
           type="button"
           onClick={() => setExpanded((v) => !v)}
-          className="ml-1 inline-flex items-center align-baseline text-[10px] text-muted-foreground underline underline-offset-2 hover:text-foreground"
+          className="ms-1 inline-flex items-center align-baseline text-[10px] text-muted-foreground underline underline-offset-2 hover:text-foreground"
         >
           {expanded ? (
-            <>Show less <ChevronUp className="ml-0.5 h-2.5 w-2.5" /></>
+            <>Show less <ChevronUp className="ms-0.5 h-2.5 w-2.5" /></>
           ) : (
-            <>Show more <ChevronDown className="ml-0.5 h-2.5 w-2.5" /></>
+            <>Show more <ChevronDown className="ms-0.5 h-2.5 w-2.5" /></>
           )}
         </button>
       )}
@@ -121,10 +124,15 @@ function isCellCreateKind(kind: string): boolean {
 function StagedEventRow({
   ev,
   infractions,
+  ruleById,
 }: {
   ev: StagedEvent
   infractions: RuleInfraction[]
+  /** Rule lookup for the lint badges below — needed so a `builtin:` id
+   *  translates its check name instead of showing the raw id. */
+  ruleById: Map<string, TranslationRule>
 }) {
+  const t = useT()
   const meta = KIND_META[ev.kind]
 
   if (!meta) {
@@ -169,11 +177,15 @@ function StagedEventRow({
             {ev.display.canonicalRef}
           </Badge>
         )}
-        {infractions.map((inf) => (
-          <Badge key={inf.ruleId} variant="destructive" className="px-1.5 py-0 text-[10px]">
-            {inf.message}
-          </Badge>
-        ))}
+        {infractions.map((inf) => {
+          const rule = ruleById.get(inf.ruleId)
+          const ruleName = rule ? translateRuleName(rule, t) : inf.ruleId
+          return (
+            <Badge key={inf.ruleId} variant="destructive" className="px-1.5 py-0 text-[10px]">
+              {formatInfractionMessage(inf, ruleName, t)}
+            </Badge>
+          )
+        })}
       </div>
 
       {ev.kind === "target.cell.commit" && (
@@ -246,6 +258,7 @@ export function ProposalCard({
   applyContext,
   onApplied,
 }: ProposalCardProps) {
+  const t = useT()
   // Tier 2 (testimony): all-validation proposals get the per-item queue —
   // one Confirm per cell, no apply-all (agent-complete design §3/§6).
   // Before any hooks: a proposal's composition never changes, but React
@@ -256,7 +269,7 @@ export function ProposalCard({
         proposal={proposal}
         applyContext={applyContext}
         onApplied={onApplied}
-        canValidate={canApply("cell.validate", roleLevel).allowed}
+        canValidate={canApply(t, "cell.validate", roleLevel).allowed}
       />
     )
   }
@@ -272,10 +285,12 @@ function StagedProposalCard({
   applyContext,
   onApplied,
 }: ProposalCardProps) {
+  const t = useT()
   const [state, setState] = useState<CardState>("idle")
   const [applyError, setApplyError] = useState<string | null>(null)
 
   const enabledRules = useMemo(() => rules.filter((r) => r.enabled), [rules])
+  const ruleById = useMemo(() => new Map(rules.map((r) => [r.id, r])), [rules])
 
   // Deterministic lint on every commit's AFTER text, before any apply.
   const lintByIndex = useMemo(() => {
@@ -294,11 +309,11 @@ function StagedProposalCard({
   const hasUnsupported = proposal.events.some((ev) => !isSupportedApplyKind(ev.kind))
   const roleBlock = useMemo(() => {
     for (const ev of proposal.events) {
-      const verdict = canApply(ev.kind, roleLevel)
+      const verdict = canApply(t, ev.kind, roleLevel)
       if (!verdict.allowed) return verdict
     }
     return null
-  }, [proposal.events, roleLevel])
+  }, [proposal.events, roleLevel, t])
 
   const blockedReason = hasUnsupported
     ? "Contains event kinds this app can't apply yet"
@@ -344,6 +359,7 @@ function StagedProposalCard({
             key={`${proposal.proposalId}-${i}`}
             ev={ev}
             infractions={lintByIndex.get(i) ?? []}
+            ruleById={ruleById}
           />
         ))}
       </div>
@@ -384,7 +400,7 @@ function StagedProposalCard({
             </AppTooltip>
           </div>
           {blockedReason && (
-            <div className="text-right text-[10px] text-muted-foreground">{blockedReason}</div>
+            <div className="text-end text-[10px] text-muted-foreground">{blockedReason}</div>
           )}
         </div>
       )}

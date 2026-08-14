@@ -457,7 +457,7 @@ export function OutboxInspectorPopover({ trigger, records, pendingCount, onRetry
                       <CollapsibleTrigger
                         disabled={!hasMore}
                         className={cn(
-                          "group/row flex w-full items-start gap-2 px-3 py-2.5 text-left transition-colors",
+                          "group/row flex w-full items-start gap-2 px-3 py-2.5 text-start transition-colors",
                           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
                           hasMore && "hover:bg-muted/60",
                           !hasMore && "cursor-default",
@@ -519,7 +519,7 @@ export function OutboxInspectorPopover({ trigger, records, pendingCount, onRetry
                       </CollapsibleTrigger>
                       {hasMore && (
                         <CollapsibleContent className="overflow-hidden">
-                          <div className="space-y-1.5 border-t border-border/60 bg-muted/30 px-3 py-2 pl-8 text-xs">
+                          <div className="space-y-1.5 border-t border-border/60 bg-muted/30 px-3 py-2 ps-8 text-xs">
                             {rec.event.cellId && (
                               <div className="flex gap-2">
                                 <span className="w-16 shrink-0 text-muted-foreground">{t("nav.outbox.cellDetailLabel")}</span>

@@ -91,21 +91,21 @@ describe("mergeBlotInfractions", () => {
     ruleId: "term:concept-1:forbidden:verboten",
     cellId: "cell-1",
     fileId: "file-1",
-    message: "stale term span",
+    reason: "target-forbids",
     spans: [{ side: "target", start: 99, end: 107, matchedText: "verboten" }],
   }
   const committedUser: RuleInfraction = {
     ruleId: "user:no-tabs",
     cellId: "cell-1",
     fileId: "file-1",
-    message: "tab present",
+    reason: "target-forbids",
     spans: [{ side: "target", start: 3, end: 4, matchedText: "\t" }],
   }
   const liveTerm: RuleInfraction = {
     ruleId: "term:concept-1:forbidden:verboten",
     cellId: "cell-1",
     fileId: "file-1",
-    message: "fresh term span",
+    reason: "target-forbids",
     spans: [{ side: "target", start: 0, end: 8, matchedText: "verboten" }],
   }
 

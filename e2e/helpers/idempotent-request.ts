@@ -32,7 +32,7 @@ export async function postIdempotentJson({
   operation,
   fetchImpl = fetch,
   retryDelaysMs = DEFAULT_RETRY_DELAYS_MS,
-}: PostIdempotentJsonArgs): Promise<void> {
+}: PostIdempotentJsonArgs): Promise<Response> {
   const serializedBody = JSON.stringify(body)
   const attempts = retryDelaysMs.length + 1
   let lastError: Error | undefined
@@ -52,7 +52,7 @@ export async function postIdempotentJson({
     }
 
     if (response) {
-      if (response.ok) return
+      if (response.ok) return response
       const detail = await response.text().catch(() => "")
       lastError = new Error(
         `${operation} failed: HTTP ${response.status}${detail ? ` — ${detail.slice(0, 300)}` : ""}`,

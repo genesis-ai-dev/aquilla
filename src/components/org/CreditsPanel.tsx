@@ -5,6 +5,7 @@ import { ROLE } from "@/lib/frontier/roles"
 import { Section } from "@/components/ui/page"
 import { SegmentedCapBar, RailLegend } from "@/components/credits/credit-visuals"
 import { pctTextClass } from "@/components/credits/rails"
+import { useI18n, useT } from "@/lib/i18n/I18nProvider"
 
 /**
  * Credit cap usage panel for the org Overview (maintainer+ view).
@@ -35,6 +36,7 @@ export function CreditsPanel({
   orgRoleLevel: number
   action?: ReactNode
 }) {
+  const t = useT()
   const [data, setData] = useState<OrgCredits | null>(null)
 
   useEffect(() => {
@@ -61,15 +63,15 @@ export function CreditsPanel({
 
   return (
     <Section
-      title="Compute credits"
-      description="Usage against daily & weekly caps, broken out by rail"
+      title={t("onboarding.credits.panelTitle")}
+      description={t("onboarding.credits.panelDescription")}
       action={action}
       data-testid="credits-panel"
     >
       <div className="space-y-5">
         {/* Overall caps — total fill = spend/cap, segmented by rail. */}
-        <CapWindow label="Today" total={day.totalCredits} cap={config.dailyCap} byRail={day.byRail} window="day" />
-        <CapWindow label="This week" total={week.totalCredits} cap={config.weeklyCap} byRail={week.byRail} window="week" />
+        <CapWindow label={t("onboarding.timeWindow.today")} total={day.totalCredits} cap={config.dailyCap} byRail={day.byRail} window="day" />
+        <CapWindow label={t("onboarding.timeWindow.thisWeek")} total={week.totalCredits} cap={config.weeklyCap} byRail={week.byRail} window="week" />
 
         {/* Agent sub-cap — the totals above already include this; it's broken
             out because agent is the elevated rail (own cap, 5× markup, fastest
@@ -78,12 +80,12 @@ export function CreditsPanel({
           <div className="mb-2 flex items-center gap-1.5">
             <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
             <p className="text-[11px] font-medium text-amber-800 dark:text-amber-300">
-              Agent spend (elevated rail — own cap, 5× markup)
+              {t("onboarding.credits.agentSpendNote")}
             </p>
           </div>
           <div className="space-y-1.5">
-            <AgentCapRow label="Today" used={day.agentCredits} cap={config.agentDailyCap} testId="agentcap-day" />
-            <AgentCapRow label="This week" used={week.agentCredits} cap={config.agentWeeklyCap} testId="agentcap-week" />
+            <AgentCapRow label={t("onboarding.timeWindow.today")} used={day.agentCredits} cap={config.agentDailyCap} testId="agentcap-day" />
+            <AgentCapRow label={t("onboarding.timeWindow.thisWeek")} used={week.agentCredits} cap={config.agentWeeklyCap} testId="agentcap-week" />
           </div>
         </div>
       </div>
@@ -105,15 +107,16 @@ function CapWindow({
   byRail: Record<string, number>
   window: "day" | "week"
 }) {
+  const { locale } = useI18n()
   const pct = capUsagePct(total, cap)
   return (
     <div>
       <div className="mb-1.5 flex items-baseline justify-between gap-2">
         <span className="text-xs font-medium">{label}</span>
         <span className="text-xs tabular-nums" data-testid={`cap-${window}-total`}>
-          <span className="font-semibold">{formatCredits(total)}</span>
-          <span className="text-muted-foreground"> / {formatCredits(cap)}</span>
-          <span className={`ml-1.5 font-medium ${pctTextClass(pct)}`}>{pct}%</span>
+          <span className="font-semibold">{formatCredits(total, locale)}</span>
+          <span className="text-muted-foreground"> / {formatCredits(cap, locale)}</span>
+          <span className={`ms-1.5 font-medium ${pctTextClass(pct)}`}>{pct}%</span>
         </span>
       </div>
       <SegmentedCapBar byRail={byRail} cap={cap} />
@@ -136,6 +139,7 @@ function AgentCapRow({
   cap: number
   testId: string
 }) {
+  const { locale } = useI18n()
   const pct = capUsagePct(used, cap)
   return (
     <div className="flex items-center gap-2.5">
@@ -144,8 +148,8 @@ function AgentCapRow({
         <div className="h-full rounded-full bg-amber-500" style={{ width: `${pct}%` }} aria-hidden />
       </div>
       <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground" data-testid={testId}>
-        <span className="font-medium text-foreground">{formatCredits(used)}</span> / {formatCredits(cap)}
-        <span className="ml-1">· {pct}%</span>
+        <span className="font-medium text-foreground">{formatCredits(used, locale)}</span> / {formatCredits(cap, locale)}
+        <span className="ms-1">· {pct}%</span>
       </span>
     </div>
   )

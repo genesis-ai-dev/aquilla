@@ -42,7 +42,7 @@ import { MoreHorizontal, Search } from "lucide-react"
 
 function columnMetaClass(meta: unknown) {
   const m = meta as { align?: "right"; className?: string; hidden?: boolean } | undefined
-  return cn(m?.align === "right" && "text-right", m?.className)
+  return cn(m?.align === "right" && "text-end", m?.className)
 }
 
 function columnId<TData, TValue>(col: ColumnDef<TData, TValue>): string | undefined {

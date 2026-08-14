@@ -139,7 +139,7 @@ const builtinRule: TranslationRule = {
 function makeInfractions(ruleId: string, count: number): Map<string, RuleInfraction[]> {
   const m = new Map<string, RuleInfraction[]>()
   for (let i = 0; i < count; i++) {
-    m.set(`cell-${i}`, [{ ruleId, cellId: `cell-${i}`, fileId: "f1", message: "double space", spans: [] }])
+    m.set(`cell-${i}`, [{ ruleId, cellId: `cell-${i}`, fileId: "f1", reason: "builtin:double-space", spans: [] }])
   }
   return m
 }

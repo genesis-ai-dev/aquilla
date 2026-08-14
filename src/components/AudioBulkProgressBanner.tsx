@@ -51,7 +51,7 @@ export function AudioBulkProgressBanner() {
             size="icon-xs"
             onClick={handleCancel}
             aria-label={t("audio.bulkProgress.cancelTooltip")}
-            className="ml-1 text-muted-foreground"
+            className="ms-1 text-muted-foreground"
           >
             <X />
           </Button>

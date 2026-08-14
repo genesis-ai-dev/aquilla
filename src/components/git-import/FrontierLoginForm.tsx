@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input"
 import { RevealableInput } from "@/components/ui/revealable-input"
 import { Spinner } from "@/components/ui/spinner"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
+import { useT } from "@/lib/i18n/I18nProvider"
 import { FrontierAuthError } from "@/lib/frontier/auth"
 import { isFieldInvalid } from "@/lib/forms/field-state"
 import { requiredString } from "@/lib/forms/schemas"
@@ -34,6 +35,7 @@ export function FrontierLoginForm({
   returnTo?: string
 }) {
   const { login } = useFrontierSession()
+  const t = useT()
   const navigate = useNavigate()
   const [isOnline, setIsOnline] = useState(() => navigator.onLine)
   const { submitError, setSubmitError, clearSubmitError } = useSubmitError()
@@ -52,7 +54,7 @@ export function FrontierLoginForm({
         onSuccess()
         if (returnTo) navigate(returnTo)
       } catch (err) {
-        setSubmitError(err instanceof FrontierAuthError ? err.message : "Login failed")
+        setSubmitError(err instanceof FrontierAuthError ? err.message : t("auth.login.failed"))
       }
     },
   })

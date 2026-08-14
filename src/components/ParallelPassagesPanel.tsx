@@ -22,7 +22,8 @@ import { SegmentTabs } from "@/components/ui/tabs"
 import { cn } from "@/lib/utils"
 import type { WorkspaceSearchResult, SearchOptions } from "@/lib/search/workspace-index"
 import { computeReplaceDiffs, type CellReplaceDiff } from "@/lib/search/replace-action"
-import { useT } from "@/lib/i18n/I18nProvider"
+import { useI18n } from "@/lib/i18n/I18nProvider"
+import { formatCount } from "@/lib/i18n/format"
 import type { TFunction } from "@/lib/i18n/I18nProvider"
 
 export type ParallelPanelMode = "search" | "passages" | "replace"
@@ -200,7 +201,7 @@ function SearchResultContent({ result, t }: { result: WorkspaceSearchResult; t: 
         <Snippet html={result.snippet || (result.original || result.translated)} />
       </div>
       {result.paired != null && result.paired !== "" && (
-        <div className="mt-1.5 w-full pl-2.5 border-l-2 border-muted text-xs text-muted-foreground leading-snug">
+        <div className="mt-1.5 w-full ps-2.5 border-s-2 border-muted text-xs text-muted-foreground leading-snug">
           {result.paired}
         </div>
       )}
@@ -413,7 +414,7 @@ function ReplaceSection({ query, results, isReadOnly, onAfterReplace, t }: Repla
 const DEBOUNCE_MS = 250
 
 export function ParallelPassagesPanel(props: ParallelPassagesPanelProps) {
-  const t = useT()
+  const { t, locale } = useI18n()
   const {
     open,
     onOpenChange,
@@ -576,9 +577,9 @@ export function ParallelPassagesPanel(props: ParallelPassagesPanelProps) {
         shouldFilter={false}
         className="flex max-h-[85vh] flex-col gap-0 rounded-none bg-transparent p-0"
       >
-        {/* Controls row — pr-10 reserves clearance for the absolute-positioned X close button */}
+        {/* Controls row — pe-10 reserves clearance for the absolute-positioned X close button */}
         <div
-          className="flex shrink-0 flex-wrap items-center gap-3 pb-3 pl-4 pr-10 pt-4"
+          className="flex shrink-0 flex-wrap items-center gap-3 pb-3 ps-4 pe-10 pt-4"
           aria-label={t("search.dialog.controlsAriaLabel")}
         >
           <SegmentTabs<ParallelPanelScope>
@@ -697,9 +698,9 @@ export function ParallelPassagesPanel(props: ParallelPassagesPanelProps) {
         {!loading && results.length > 0 && (
           <div className="flex shrink-0 items-center justify-between border-t border-border bg-muted/20 px-4 py-2.5">
             <span className="text-xs tabular-nums text-muted-foreground">
-              {t("search.resultCount", { count: results.length.toLocaleString() })}
+              {t("search.resultCount", { count: formatCount(results.length, locale) })}
             </span>
-            <span className="max-w-[60%] truncate text-right text-xs text-muted-foreground">
+            <span className="max-w-[60%] truncate text-end text-xs text-muted-foreground">
               {mode === "passages" ? t("search.dialog.titlePassages") : scopeLabel}
             </span>
           </div>

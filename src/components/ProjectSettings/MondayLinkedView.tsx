@@ -13,6 +13,8 @@ import { SparkleButton } from "@/components/SparkleButton"
 import type { MondayBoardLink, MondayBoardStructure } from "@/lib/monday/api"
 import type { MondayMapping } from "@/lib/monday/types"
 import { MondayMappingEditor, MondayMappingTable } from "./MondayMappingEditor"
+import { useI18n } from "@/lib/i18n/I18nProvider"
+import { formatDateTime } from "@/lib/i18n/format"
 
 export function MondayLinkedView({
   link,
@@ -49,6 +51,7 @@ export function MondayLinkedView({
   onUnlink: () => void
   warnings: string[]
 }) {
+  const { locale } = useI18n()
   return (
     <div className="space-y-4">
       {link.structureStale && (
@@ -76,7 +79,7 @@ export function MondayLinkedView({
           <p className="text-xs text-muted-foreground">
             One item per {link.config.itemGranularity === "file" ? "file" : "project"}.
             {link.lastPushedAt
-              ? ` Last push ${new Date(link.lastPushedAt).toLocaleString()} — ${
+              ? ` Last push ${formatDateTime(link.lastPushedAt, locale)} — ${
                   link.lastPushStatus === "ok" ? "ok" : "failed"
                 }.`
               : " Not pushed yet."}

@@ -28,6 +28,12 @@ import { search } from "./search"
 import { audio } from "./audio"
 import { fileDetails } from "./fileDetails"
 import { autopilot } from "./autopilot"
+import { org } from "./org"
+import { onboarding } from "./onboarding"
+import { importExport } from "./importExport"
+import { projectSettings } from "./projectSettings"
+import { rules } from "./rules"
+import { terminology } from "./terminology"
 
 export const NAMESPACES = [
   common,
@@ -42,4 +48,10 @@ export const NAMESPACES = [
   audio,
   fileDetails,
   autopilot,
+  org,
+  onboarding,
+  importExport,
+  projectSettings,
+  rules,
+  terminology,
 ] as const

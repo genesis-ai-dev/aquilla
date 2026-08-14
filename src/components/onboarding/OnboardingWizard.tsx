@@ -16,6 +16,7 @@ import {
   ONBOARDING_STEP_VIEWED,
   ONBOARDING_RETURNING_USER_SKIP,
 } from "@/lib/event-names"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 // Human-readable label for each wizard step number.
 const STEP_LABELS: Record<number, string> = {
@@ -32,6 +33,7 @@ const STEP_LABELS: Record<number, string> = {
 const TOTAL_STEPS = 8
 
 export function OnboardingWizard() {
+  const t = useT()
   const navigate = useNavigate()
   const { refresh: refreshOrgs } = useActiveOrg()
   const [step, setStep] = useState(1)
@@ -131,7 +133,7 @@ export function OnboardingWizard() {
   }, [navigate])
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-background p-4" aria-label="Account setup">
+    <main className="flex min-h-screen items-center justify-center bg-background p-4" aria-label={t("onboarding.wizard.setupAriaLabel")}>
       <div className="w-full max-w-md">
         {/* Step indicator */}
         <div
@@ -140,7 +142,7 @@ export function OnboardingWizard() {
           aria-valuenow={step}
           aria-valuemin={1}
           aria-valuemax={TOTAL_STEPS}
-          aria-label={`Step ${step} of ${TOTAL_STEPS}`}
+          aria-label={t("onboarding.wizard.stepProgress", { step, total: TOTAL_STEPS })}
         >
           {Array.from({ length: TOTAL_STEPS }, (_, i) => (
             <div

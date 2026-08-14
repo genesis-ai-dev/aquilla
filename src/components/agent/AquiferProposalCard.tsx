@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import type { AquiferPublishProposal } from "@/lib/agent/protocol"
 import { aquiferPublishAnswer } from "@/lib/aquifer/client"
+import { InlineAiError } from "@/components/InlineAiError"
 
 const TRUNCATE_AT = 280
 
@@ -83,7 +84,7 @@ export function AquiferProposalCard({ proposal, projectId, jwt }: AquiferProposa
           <button
             type="button"
             onClick={() => setExpanded((v) => !v)}
-            className="ml-1 inline-flex items-center align-baseline text-[10px] text-muted-foreground underline underline-offset-2 hover:text-foreground"
+            className="ms-1 inline-flex items-center align-baseline text-[10px] text-muted-foreground underline underline-offset-2 hover:text-foreground"
           >
             {expanded ? "Show less" : "Show more"}
           </button>
@@ -109,7 +110,7 @@ export function AquiferProposalCard({ proposal, projectId, jwt }: AquiferProposa
       )}
 
       {applyError && (
-        <div className="text-[11px] text-destructive">Publish failed: {applyError}</div>
+        <InlineAiError message={applyError} label="Publish failed" className="text-[11px]" />
       )}
 
       {state === "applied" ? (

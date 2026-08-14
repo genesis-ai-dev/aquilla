@@ -181,7 +181,7 @@ function ProjectTableName({ name }: { name: string }) {
         <span
           aria-hidden="true"
           data-testid="project-table-name-expanded"
-          className="pointer-events-none absolute top-1/2 -left-2 z-50 -translate-y-1/2 whitespace-nowrap rounded-md bg-popover px-2 py-1 font-medium text-popover-foreground opacity-0 shadow-md ring-1 ring-border/60 transition-opacity duration-100 group-hover/name:opacity-100"
+          className="pointer-events-none absolute top-1/2 -start-2 z-50 -translate-y-1/2 whitespace-nowrap rounded-md bg-popover px-2 py-1 font-medium text-popover-foreground opacity-0 shadow-md ring-1 ring-border/60 transition-opacity duration-100 group-hover/name:opacity-100"
         >
           {name}
         </span>
@@ -340,7 +340,7 @@ export function ProjectTable({
             )}
           >
             <span>Project</span>
-            {showOrg && <span className="hidden text-left @md/project-table:block">Org</span>}
+            {showOrg && <span className="hidden text-start @md/project-table:block">Org</span>}
           </span>
           {/* AQU-538: lane chips column (see the LaneChips cell in each row). */}
           <span className="hidden @md/project-table:block">Language</span>
@@ -457,21 +457,21 @@ export function ProjectTable({
 
                 <span
                   data-testid="project-table-translated-value"
-                  className="justify-self-start text-left font-medium tabular-nums text-foreground"
+                  className="justify-self-start text-start font-medium tabular-nums text-foreground"
                   aria-label={`${tpct}% translated`}
                 >
                   {tpct}%
                 </span>
                 <span
                   data-testid="project-table-validated-value"
-                  className="justify-self-start text-left tabular-nums text-muted-foreground"
+                  className="justify-self-start text-start tabular-nums text-muted-foreground"
                   aria-label={`${pct}% validated`}
                 >
                   {pct}%
                 </span>
                 <span
                   data-testid="project-table-audio-value"
-                  className="hidden justify-self-start text-left tabular-nums text-muted-foreground @md/project-table:block"
+                  className="hidden justify-self-start text-start tabular-nums text-muted-foreground @md/project-table:block"
                   aria-label={`${apct}% audio`}
                 >
                   {apct}%
@@ -584,7 +584,7 @@ export function OrgHome() {
     return (
       <AppShell
         sidebar={<OrgSidebar />}
-        header={<OrgBreadcrumb section="Overview" />}
+        header={<OrgBreadcrumb section="Overview" isProjectsLanding />}
         statusBar={null}
         main={
           <div className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center">
@@ -639,7 +639,7 @@ export function OrgHome() {
       return (
         <AppShell
           sidebar={<OrgSidebar />}
-          header={<OrgBreadcrumb section="Overview" />}
+          header={<OrgBreadcrumb section="Overview" isProjectsLanding />}
           statusBar={null}
           main={
             <Page size="wide">
@@ -662,7 +662,7 @@ export function OrgHome() {
       return (
         <AppShell
           sidebar={<OrgSidebar />}
-          header={<OrgBreadcrumb section="Overview" />}
+          header={<OrgBreadcrumb section="Overview" isProjectsLanding />}
           statusBar={null}
           main={
             <Page size="wide">
@@ -763,7 +763,7 @@ export function OrgHome() {
   return (
     <AppShell
       sidebar={<OrgSidebar />}
-      header={<OrgBreadcrumb section="Overview" />}
+      header={<OrgBreadcrumb section="Overview" isProjectsLanding />}
       statusBar={null}
       main={
         <Page size="wide">

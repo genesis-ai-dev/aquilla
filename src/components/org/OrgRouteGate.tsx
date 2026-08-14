@@ -18,6 +18,7 @@ import { orgKeyFromParam, ALL_ORGS_PARAM, orgHomePath, parseOrgPath } from "@/li
 import { AccountSwitcher } from "@/components/AccountSwitcher"
 import { Button } from "@/components/ui/button"
 import { LoadingOverlay } from "@/components/ui/loading-overlay"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 export function OrgRouteGate() {
   const { orgId: orgIdParam } = useParams<{ orgId: string }>()
@@ -70,18 +71,19 @@ function OrgAccessProblem({
   orgId?: number
   detail?: string
 }) {
+  const t = useT()
   const title =
     reason === "error"
-      ? "Couldn’t load organizations"
+      ? t("org.routeGate.errorTitle")
       : reason === "invalid"
-        ? "Invalid organization"
-        : "Organization not found"
+        ? t("org.routeGate.invalidTitle")
+        : t("org.routeGate.missingTitle")
   const body =
     reason === "error"
-      ? (detail ?? "Something went wrong loading your organizations.")
+      ? (detail ?? t("org.routeGate.errorFallbackBody"))
       : reason === "invalid"
-        ? "That organization URL isn’t valid."
-        : `You don’t have access to organization #${orgId}, or it doesn’t exist.`
+        ? t("org.routeGate.invalidBody")
+        : t("org.routeGate.missingBody", { orgId: orgId ?? "" })
 
   return (
     <OrgGateChrome>
@@ -91,7 +93,7 @@ function OrgAccessProblem({
           <p className="max-w-md text-sm text-muted-foreground">{body}</p>
         </div>
         <Button nativeButton={false} render={<Link to={orgHomePath(ALL_ORGS_PARAM)} />}>
-          All organizations
+          {t("org.breadcrumb.allOrganizations")}
         </Button>
       </div>
     </OrgGateChrome>

@@ -2,6 +2,7 @@ import { forwardRef } from "react"
 import { cn } from "@/lib/utils"
 import { OutboxInspectorPopover } from "./OutboxInspectorPopover"
 import type { OutboxRecord } from "@/lib/sync/outbox"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 interface OutboxSyncIndicatorProps {
   pendingCount: number
@@ -31,26 +32,27 @@ export function OutboxSyncIndicator({
   onRetryNow,
   className,
 }: OutboxSyncIndicatorProps) {
+  const t = useT()
   const stuck = failureStreak >= 3
   const hasFailed = failedCount > 0
   const tone: ChipTone = hasFailed ? "warning" : stuck ? "stuck" : pendingCount > 0 ? "queued" : "idle"
 
   const label =
     tone === "warning"
-      ? `${failedCount} failed`
+      ? t("nav.outbox.failedCount", { count: failedCount })
       : tone === "stuck"
-        ? "Sync backlog"
+        ? t("editor.outbox.backlogLabel")
         : tone === "queued"
-          ? `Queued ${pendingCount}`
-          : "Synced"
+          ? t("editor.outbox.queuedLabel", { count: pendingCount })
+          : t("editor.outbox.syncedLabel")
   const title =
     tone === "warning"
-      ? `${failedCount} change(s) could not be synced after repeated attempts. Click to inspect.`
+      ? t("editor.outbox.failedTooltip", { count: failedCount })
       : tone === "stuck"
-        ? "Could not sync changes to the server. Edits are still saved locally. Click to review."
+        ? t("editor.outbox.backlogTooltip")
         : tone === "queued"
-          ? `${pendingCount} change(s) queued for server sync. Click to review.`
-          : "All changes synced. Click to review pending changes."
+          ? t("editor.outbox.queuedTooltip", { count: pendingCount })
+          : t("editor.outbox.syncedTooltip")
 
   const trigger = <ChipButton label={label} title={title} tone={tone} className={className} />
 

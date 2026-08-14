@@ -40,10 +40,14 @@ import {
   LINK_ROLE_OPTIONS,
   PROJECT_ROLE_OPTIONS,
   humanRoleName,
+  roleDisplayText,
 } from "@/lib/frontier/roles"
 import { ConfirmActionDialog } from "@/components/ConfirmActionDialog"
 import { RoleLabel } from "@/components/RoleLabel"
 import { RoleSelect } from "@/components/RoleSelect"
+import { useT } from "@/lib/i18n/I18nProvider"
+import { RichMessage } from "@/lib/i18n/RichMessage"
+import type { MessageKey } from "@/lib/i18n/messages/en"
 import type { ProjectMember } from "@/lib/frontier/members"
 import { toUserFacingError } from "@/lib/errors/user-error"
 
@@ -52,11 +56,13 @@ import { toUserFacingError } from "@/lib/errors/user-error"
 // ──────────────────────────────────────────────────────────────────────────
 
 const DEFAULT_INVITE_ROLE = ROLE.CONTRIBUTOR
-const EXPIRY_OPTIONS: { label: string; value: number | null }[] = [
-  { label: "1 day", value: 1 },
-  { label: "7 days (default)", value: 7 },
-  { label: "30 days", value: 30 },
-  { label: "No expiry", value: null },
+// Labels resolve via t() at render time (InviteLinkTab) rather than being
+// hardcoded here, so they stay locale-reactive.
+const EXPIRY_OPTIONS: { labelKey: MessageKey; value: number | null }[] = [
+  { labelKey: "projectSettings.share.expiryOneDay", value: 1 },
+  { labelKey: "org.membersPage.expiry7DaysDefault", value: 7 },
+  { labelKey: "common.thirtyDays", value: 30 },
+  { labelKey: "common.noExpiry", value: null },
 ]
 const DEFAULT_EXPIRY_DAYS = 7
 
@@ -76,6 +82,7 @@ export function MembersTab({
   /** Layout wrapper classes; override when embedding outside the members page. */
   className?: string
 }) {
+  const t = useT()
   const { session } = useFrontierSession()
   const { members, isLoading, error, rosterHidden, refresh, add, addMany, remove } = useProjectMembers(projectId)
   const callerMaxRole = ROLE.MAINTAINER
@@ -163,9 +170,9 @@ export function MembersTab({
     const isLocked = m.role.source === "org" || m.role.source === "creator"
     const lockedHint =
       m.role.source === "org"
-        ? "Access via org membership — remove from org to revoke"
+        ? t("org.membersPage.lockedHintOrgAccess")
         : m.role.source === "creator"
-          ? "Project creator"
+          ? t("projectSettings.share.lockedHintCreator")
           : undefined
 
     return (
@@ -184,7 +191,7 @@ export function MembersTab({
           </span>
         )}
 
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ms-auto flex items-center gap-2">
           {/* Role change dropdown — only for direct grants, not self */}
           {!isLocked && !isSelf && (
             <RoleSelect
@@ -199,19 +206,19 @@ export function MembersTab({
                 void add(m.username, level)
               }}
               size="sm"
-              aria-label="Change role"
+              aria-label={t("org.membersPage.changeRoleAria")}
             />
           )}
 
           {/* Remove button for direct grants */}
           {!isLocked && !isSelf && m.role.source === "override" ? (
-            <AppTooltip content={`Removes ${m.username}'s direct project access. Access via org, team, or creator status is unaffected.`}>
+            <AppTooltip content={t("org.membersPage.removeDirectAccessTooltip", { username: m.username })}>
               <Button
                 variant="ghost"
                 className="text-muted-foreground"
                 onClick={() => setRemoveTarget(m)}
               >
-                Remove
+                {t("org.membersPage.remove")}
               </Button>
             </AppTooltip>
           ) : isLocked ? (
@@ -224,14 +231,14 @@ export function MembersTab({
 
           {/* Revoke all — available when session exists + maintainer+ */}
           {session?.jwt && !isSelf && (
-            <AppTooltip content="Review every access path this member holds (direct, org, team), then revoke with typed confirmation.">
+            <AppTooltip content={t("org.membersPage.revokeAllTooltip")}>
               <Button
                 variant="ghost"
                 className="gap-1 text-destructive/70 hover:text-destructive"
                 onClick={() => setRevokeTarget(m)}
               >
                 <ShieldOff className="h-3.5 w-3.5" />
-                Revoke all
+                {t("org.membersPage.revokeAll")}
               </Button>
             </AppTooltip>
           )}
@@ -255,10 +262,10 @@ export function MembersTab({
           <span>{error}</span>
           <button
             type="button"
-            className="ml-auto text-xs underline"
+            className="ms-auto text-xs underline"
             onClick={() => void refresh()}
           >
-            Retry
+            {t("common.retry")}
           </button>
         </div>
       )}
@@ -272,7 +279,9 @@ export function MembersTab({
             per-row labeled with how each person got access below). */}
         <div className="mb-2 flex items-center justify-between">
           <h2 className="text-sm font-medium">
-            {orgAccessMembers.length > 0 ? "Project members" : "Current members"}
+            {orgAccessMembers.length > 0
+              ? t("editor.navTitle.projectMembers")
+              : t("org.membersPage.currentMembersHeading")}
           </h2>
           <Button
             variant="ghost"
@@ -280,25 +289,24 @@ export function MembersTab({
             onClick={() => void refresh()}
           >
             <RefreshCcw className="h-3.5 w-3.5" />
-            Refresh
+            {t("common.refresh")}
           </Button>
         </div>
         {members.length > 0 && (
           <p className="mb-2 text-xs text-muted-foreground">
-            Everyone who currently has access to this project. Each row shows how
-            they got it — direct invite, org membership, or team.
+            {t("org.membersPage.rosterHint")}
           </p>
         )}
 
         {isLoading && members.length === 0 ? (
-          <LoadingPanel label="Loading members" className="min-h-48" />
+          <LoadingPanel label={t("org.membersPage.loadingMembers")} className="min-h-48" />
         ) : members.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No members yet.</p>
+          <p className="text-sm text-muted-foreground">{t("org.membersPage.noMembersYet")}</p>
         ) : (
           <>
             {projectMembers.length === 0 ? (
               <p className="text-sm text-muted-foreground">
-                No one has been added directly to this project yet.
+                {t("org.membersPage.noDirectMembers")}
               </p>
             ) : (
               <ul className="divide-y rounded border bg-background">
@@ -312,13 +320,10 @@ export function MembersTab({
             {orgAccessMembers.length > 0 && (
               <div className="mt-5" data-testid="org-access-members">
                 <h3 className="mb-1 text-sm font-medium">
-                  Organization members with access
+                  {t("org.membersPage.orgAccessHeading")}
                 </h3>
                 <p className="mb-2 text-xs text-muted-foreground">
-                  {orgAccessMembers.length}{" "}
-                  {orgAccessMembers.length === 1 ? "person has" : "people have"}{" "}
-                  access through their organization role — they were not added to
-                  this project directly. Remove them from the org to revoke.
+                  {t("org.membersPage.orgAccessSummary", { count: orgAccessMembers.length })}
                 </p>
                 <ul className="divide-y rounded border bg-background">
                   {orgAccessMembers.map(renderMemberRow)}
@@ -334,7 +339,7 @@ export function MembersTab({
       <div className="space-y-3 rounded border bg-background p-4">
         <h2 className="text-sm font-medium flex items-center gap-2">
           <UserPlus className="h-4 w-4 text-muted-foreground" />
-          Add member
+          {t("org.membersPage.addMemberHeading")}
         </h2>
         <MemberMultiAddRow
           roleOptions={grantableRoles}
@@ -346,7 +351,7 @@ export function MembersTab({
               ? eligibleOrgMembers.map((m) => ({ id: m.userId, username: m.username }))
               : undefined
           }
-          emptySuggestionsHint="All org members are already on this project."
+          emptySuggestionsHint={t("org.membersPage.allOrgMembersAdded")}
           onAddStart={() => setAddForbidden(false)}
           onBatchErrorMessage={(e) => {
             const uf = toUserFacingError(e, "project")
@@ -360,8 +365,8 @@ export function MembersTab({
         />
         {addForbidden && (
           <PermissionDeniedAlert
-            action="add members to this project"
-            requiredRole="Maintainer or higher"
+            action="org.membersPage.addMembersAction"
+            requiredRoleLevel={ROLE.MAINTAINER}
           />
         )}
       </div>
@@ -370,13 +375,16 @@ export function MembersTab({
       <ConfirmActionDialog
         open={removeTarget !== null}
         onOpenChange={(open) => { if (!open) setRemoveTarget(null) }}
-        title="Remove member"
+        title={t("org.membersPage.removeMemberTitle")}
         description={
           removeTarget
-            ? `Remove ${removeTarget.username}'s direct ${humanRoleName(removeTarget.role.level)} access to this project? Any access via org, team, or creator status is unaffected — use "Revoke all" to review every path.`
+            ? t("org.membersPage.removeMemberDescription", {
+                username: removeTarget.username,
+                role: roleDisplayText(removeTarget.role.name),
+              })
             : ""
         }
-        confirmLabel="Remove"
+        confirmLabel={t("org.membersPage.remove")}
         variant="destructive"
         onConfirm={() => {
           if (removeTarget) void remove(removeTarget.userId)
@@ -414,6 +422,7 @@ interface RevokeAllDialogProps {
 export function RevokeAllDialog({
   member, projectId, onClose, onRevoked,
 }: RevokeAllDialogProps) {
+  const t = useT()
   const { session } = useFrontierSession()
   const [confirmation, setConfirmation] = useState("")
   const [busy, setBusy] = useState(false)
@@ -445,22 +454,28 @@ export function RevokeAllDialog({
       <Dialog open onOpenChange={(v) => { if (!v) onRevoked() }}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Access revoked</DialogTitle>
+            <DialogTitle>{t("org.membersPage.accessRevokedTitle")}</DialogTitle>
           </DialogHeader>
           <div className="space-y-3 text-sm">
             {result.removed ? (
               <p>
-                Direct grant for <strong>{member.username}</strong> has been removed.
+                <RichMessage
+                  k="org.membersPage.directGrantRemoved"
+                  values={{ username: <strong>{member.username}</strong> }}
+                />
               </p>
             ) : (
               <p>
-                <strong>{member.username}</strong> had no direct grant to remove.
+                <RichMessage
+                  k="org.membersPage.noDirectGrantToRemove"
+                  values={{ username: <strong>{member.username}</strong> }}
+                />
               </p>
             )}
             {remainingNonRemovable.length > 0 && (
               <div className="rounded border border-amber-200 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-950/30">
                 <p className="mb-2 font-medium text-amber-800 dark:text-amber-300">
-                  Access still granted via:
+                  {t("org.membersPage.accessStillGrantedVia")}
                 </p>
                 <ul className="space-y-1">
                   {remainingNonRemovable.map((p, i) => (
@@ -475,7 +490,7 @@ export function RevokeAllDialog({
             )}
           </div>
           <DialogFooter>
-            <Button onClick={onRevoked}>Done</Button>
+            <Button onClick={onRevoked}>{t("common.done")}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -488,21 +503,22 @@ export function RevokeAllDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-destructive">
             <ShieldOff className="h-5 w-5" />
-            Revoke all access
+            {t("org.membersPage.revokeAllAccessTitle")}
           </DialogTitle>
         </DialogHeader>
 
         <div className="space-y-4 text-sm">
           <p>
-            This will remove <strong>{member.username}</strong>&apos;s direct
-            membership grant from this project. Any access they have via org,
-            group, or creator status will remain.
+            <RichMessage
+              k="org.membersPage.revokeAllExplanation"
+              values={{ username: <strong>{member.username}</strong> }}
+            />
           </p>
 
           {/* Show known grant paths */}
           <div className="rounded border p-3 space-y-1">
             <p className="text-xs font-medium text-muted-foreground mb-2">
-              Current grant paths for {member.username}:
+              {t("org.membersPage.currentGrantPathsFor", { username: member.username })}
             </p>
             <GrantPathRow
               source={member.role.source}
@@ -521,7 +537,10 @@ export function RevokeAllDialog({
 
           <div className="space-y-1">
             <FieldLabel htmlFor="revoke-confirm" className="text-xs">
-              Type <strong>{confirmationRequired}</strong> to confirm
+              <RichMessage
+                k="org.membersPage.typeToConfirm"
+                values={{ username: <strong>{confirmationRequired}</strong> }}
+              />
             </FieldLabel>
             <Input
               id="revoke-confirm"
@@ -539,14 +558,14 @@ export function RevokeAllDialog({
 
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button
             variant="destructive"
             disabled={!confirmed || busy}
             onClick={() => void handleRevoke()}
           >
-            {busy ? "Revoking…" : "Revoke access"}
+            {busy ? t("common.revoking") : t("org.membersPage.revokeAccess")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -566,6 +585,7 @@ export function InviteLinkTab({
   /** When true (settings Card), drop the page-style max-width + duplicate title. */
   embedded?: boolean
 }) {
+  const t = useT()
   const { session } = useFrontierSession()
   const [inviteRole, setInviteRole] = useState<number>(DEFAULT_INVITE_ROLE)
   const [inviteEmail, setInviteEmail] = useState<string>("")
@@ -583,11 +603,11 @@ export function InviteLinkTab({
     setIssuedUrl(null)
     const trimmedEmail = inviteEmail.trim()
     if (trimmedEmail.length > 0 && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
-      setEmailError("Enter a valid email address, or leave blank for an open link.")
+      setEmailError(t("projectSettings.share.inviteEmailInvalid"))
       return
     }
     if (!session?.jwt) {
-      setServerError("Sign in to create an invite link.")
+      setServerError(t("projectSettings.share.signInToInvite"))
       return
     }
     setBusy(true)
@@ -601,9 +621,7 @@ export function InviteLinkTab({
         expiresInDays,
       )
       if (!serverInvite) {
-        setServerError(
-          "Couldn't create invite. You may not have permission, or the server is unreachable.",
-        )
+        setServerError(t("projectSettings.share.createInviteFailed"))
         return
       }
       const url = `${window.location.origin}/join/${serverInvite.token}`
@@ -633,32 +651,35 @@ export function InviteLinkTab({
         {!embedded && (
           <h2 className="text-sm font-medium flex items-center gap-2">
             <LinkIcon className="h-4 w-4 text-muted-foreground" />
-            Invite link ready
+            {t("org.membersPage.inviteLinkReadyHeading")}
           </h2>
         )}
         <p className="text-sm text-muted-foreground">
-          Send this link to the recipient. Anyone with the link can join.
+          {t("org.membersPage.inviteLinkReadyBody")}
         </p>
         <div className="flex items-center gap-1">
           <Input value={issuedUrl} readOnly className="text-xs font-mono" />
-          <AppTooltip content="Copy URL">
+          <AppTooltip content={t("projectSettings.share.copyUrlLabel")}>
             <Button
               variant="ghost"
               onClick={() => copyUrl(issuedUrl)}
-              aria-label="Copy URL"
+              aria-label={t("projectSettings.share.copyUrlLabel")}
             >
               <Copy className="h-3.5 w-3.5" />
             </Button>
           </AppTooltip>
         </div>
-        {copied && <p className="text-xs text-green-600">Copied!</p>}
+        {copied && <p className="text-xs text-green-600">{t("nav.report.copied")}</p>}
         <p className="text-[10px] text-muted-foreground">
-          The recipient signs in (or signs up) and is added as{" "}
-          {LINK_ROLE_OPTIONS.find((o) => o.level === inviteRole)?.name ?? "a member"}.
-          To revoke later, use Project settings → Members to remove them.
+          {t("org.membersPage.inviteRecipientNote", {
+            role: (() => {
+              const opt = LINK_ROLE_OPTIONS.find((o) => o.level === inviteRole)
+              return opt ? humanRoleName(opt.level) : t("projectSettings.share.recipientJoinsAsFallbackRole")
+            })(),
+          })}
         </p>
         <Button variant="outline" onClick={reset} className="w-full">
-          Create another link
+          {t("projectSettings.share.createAnotherLinkButton")}
         </Button>
       </div>
     )
@@ -669,32 +690,35 @@ export function InviteLinkTab({
       {!embedded && (
         <h2 className="text-sm font-medium flex items-center gap-2">
           <LinkIcon className="h-4 w-4 text-muted-foreground" />
-          Create invite link
+          {t("projectSettings.share.createInviteLinkButton")}
         </h2>
       )}
 
       <div className={cn("space-y-4", !embedded && "rounded border p-4")}>
         {/* Role */}
         <div className="space-y-1">
-          <FieldLabel className="text-xs">Role</FieldLabel>
+          <FieldLabel className="text-xs">{t("common.roleLabel")}</FieldLabel>
           <RoleSelect
             options={LINK_ROLE_OPTIONS}
             value={inviteRole}
             onValueChange={setInviteRole}
             disabled={!session?.jwt}
-            aria-label="Role"
+            aria-label={t("common.roleLabel")}
           />
-          {!session?.jwt && (
-            <p className="text-[10px] text-muted-foreground">
-              Sign in to create an invite link
-            </p>
-          )}
+          <p className="text-[10px] text-muted-foreground">
+            {session?.jwt
+              ? (() => {
+                  const opt = LINK_ROLE_OPTIONS.find((o) => o.level === inviteRole)
+                  return opt ? t(opt.descriptionKey) : ""
+                })()
+              : t("projectSettings.share.signInToCreateLink")}
+          </p>
         </div>
 
         {/* Optional email */}
         <div className="space-y-1">
           <FieldLabel htmlFor="pm-invite-email" className="text-xs">
-            Recipient email <OptionalMark />
+            {t("org.membersPage.recipientEmailLabel")} <OptionalMark />
           </FieldLabel>
           <Input
             id="pm-invite-email"
@@ -714,19 +738,19 @@ export function InviteLinkTab({
           ) : (
             <p className="text-[10px] text-muted-foreground">
               {inviteEmail.trim()
-                ? "The join page prefills sign-up with this email."
-                : "Leave blank for an open link anyone signed in can redeem."}
+                ? t("org.membersPage.emailPrefillHint")
+                : t("projectSettings.share.openLinkNote")}
             </p>
           )}
         </div>
 
         {/* Expiry */}
         <div className="space-y-1">
-          <FieldLabel className="text-xs">Link expires</FieldLabel>
+          <FieldLabel className="text-xs">{t("projectSettings.share.linkExpiresLabel")}</FieldLabel>
           <Select
             items={EXPIRY_OPTIONS.map((opt) => ({
               value: String(opt.value),
-              label: opt.label,
+              label: t(opt.labelKey),
             }))}
             value={expiresInDays === null ? "null" : String(expiresInDays)}
             onValueChange={(v) =>
@@ -736,14 +760,14 @@ export function InviteLinkTab({
             }
             disabled={!session?.jwt}
           >
-            <SelectTrigger aria-label="Link expires">
+            <SelectTrigger className="w-full" aria-label={t("projectSettings.share.linkExpiresLabel")}>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
               <SelectGroup>
                 {EXPIRY_OPTIONS.map((opt) => (
                   <SelectItem key={String(opt.value)} value={String(opt.value)}>
-                    {opt.label}
+                    {t(opt.labelKey)}
                   </SelectItem>
                 ))}
               </SelectGroup>
@@ -760,7 +784,7 @@ export function InviteLinkTab({
           disabled={busy || !session?.jwt}
           className="w-full"
         >
-          {busy ? "Creating…" : "Create invite link"}
+          {busy ? t("common.creating") : t("projectSettings.share.createInviteLinkButton")}
         </Button>
       </div>
     </div>
@@ -776,17 +800,19 @@ export function InviteLinkTab({
 // ProjectMemberRole in src/lib/frontier/members.ts. Labeling every row (not
 // just org-sourced ones) is what makes project-specific vs. org-wide
 // membership visually distinct, per the AQU-488 acceptance criteria.
-const SOURCE_LABELS: Record<string, string> = {
-  override: "direct invite",
-  group: "via team",
-  org: "via org",
-  creator: "project creator",
+const SOURCE_LABEL_KEYS: Record<string, MessageKey> = {
+  override: "org.membersPage.sourceDirectInvite",
+  group: "org.membersPage.sourceViaTeam",
+  org: "org.membersPage.sourceViaOrg",
+  creator: "org.membersPage.sourceProjectCreator",
 }
 
 function SourceBadge({ source }: { source: string }) {
+  const t = useT()
+  const key = SOURCE_LABEL_KEYS[source]
   return (
     <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
-      {SOURCE_LABELS[source] ?? source}
+      {key ? t(key) : source}
     </span>
   )
 }
@@ -798,6 +824,7 @@ function GrantPathRow({
   level: number
   removable: boolean
 }) {
+  const t = useT()
   return (
     <div className="flex items-center gap-2 text-xs">
       <span className={cn("font-medium capitalize", removable ? "text-foreground" : "text-muted-foreground")}>
@@ -806,9 +833,9 @@ function GrantPathRow({
       {/* Role LABEL only — numeric levels are internal (FRO-368). */}
       <span className="text-muted-foreground">→ {humanRoleName(level)}</span>
       {removable ? (
-        <span className="text-xs text-destructive/70">will be removed</span>
+        <span className="text-xs text-destructive/70">{t("org.membersPage.willBeRemoved")}</span>
       ) : (
-        <span className="text-xs text-amber-600 dark:text-amber-400">stays</span>
+        <span className="text-xs text-amber-600 dark:text-amber-400">{t("org.membersPage.staysGranted")}</span>
       )}
     </div>
   )

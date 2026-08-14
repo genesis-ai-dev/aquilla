@@ -8,22 +8,22 @@ describe("SidebarProjectSection", () => {
     render(
       <SidebarProjectSection
         items={[
-          { id: "rules", label: "Rules", icon: Scale, onClick: vi.fn() },
+          { id: "rules", labelKey: "nav.sidebarSection.rules", icon: Scale, onClick: vi.fn() },
           {
             id: "comments",
-            label: "Comments",
+            labelKey: "common.comments",
             icon: MessagesSquare,
             pinned: true,
             onClick: vi.fn(),
           },
           {
             id: "terminology",
-            label: "Terminology",
+            labelKey: "nav.sidebarSection.terminology",
             icon: BookOpen,
             pinned: true,
             onClick: vi.fn(),
           },
-          { id: "trash", label: "Recently deleted", icon: Trash2, onClick: vi.fn() },
+          { id: "trash", labelKey: "nav.sidebarSection.trash", icon: Trash2, onClick: vi.fn() },
         ]}
       />,
     )
@@ -51,21 +51,21 @@ describe("SidebarProjectSection", () => {
         items={[
           {
             id: "comments",
-            label: "Comments",
+            labelKey: "common.comments",
             icon: MessagesSquare,
             pinned: true,
             onClick: vi.fn(),
           },
           {
             id: "terminology",
-            label: "Terminology",
+            labelKey: "nav.sidebarSection.terminology",
             icon: BookOpen,
             pinned: true,
             onClick: vi.fn(),
           },
           {
             id: "trash",
-            label: "Recently deleted",
+            labelKey: "nav.sidebarSection.trash",
             icon: Trash2,
             pinned: true,
             onClick: vi.fn(),
@@ -90,19 +90,19 @@ describe("SidebarProjectSection", () => {
         items={[
           {
             id: "comments",
-            label: "Comments",
+            labelKey: "common.comments",
             icon: MessagesSquare,
             pinned: true,
             onClick: vi.fn(),
           },
           {
             id: "terminology",
-            label: "Terminology",
+            labelKey: "nav.sidebarSection.terminology",
             icon: BookOpen,
             pinned: true,
             onClick: vi.fn(),
           },
-          { id: "trash", label: "Recently deleted", icon: Trash2, onClick: vi.fn() },
+          { id: "trash", labelKey: "nav.sidebarSection.trash", icon: Trash2, onClick: vi.fn() },
         ]}
       />,
     )

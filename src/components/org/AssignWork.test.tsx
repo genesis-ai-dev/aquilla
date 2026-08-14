@@ -47,7 +47,7 @@ async function pickSelectOption(triggerName: RegExp, optionName: RegExp) {
   fireEvent.mouseMove(option)
   fireEvent.keyDown(option, { key: "Enter" })
   // Prefer the username span over option.textContent — the latter includes the
-  // decorative avatar initial (e.g. "Aanna") which the closed trigger does not.
+  // decorative avatar initials (e.g. "ANanna") which the closed trigger does not.
   const selectedLabel =
     option.querySelector('[data-slot="username"]')?.textContent?.trim() ||
     optionName.source.replace(/^\^|\$$/g, "")

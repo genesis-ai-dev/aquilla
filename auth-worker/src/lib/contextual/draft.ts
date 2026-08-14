@@ -183,7 +183,7 @@ export async function performSpan(deps: PerformSpanDeps): Promise<PerformSpanRes
     system,
     user: userPrompt(deps),
     tier: "mid",
-    maxTokens: 4096,
+    maxTokens: 6144,
     temperature: 0,
     label: "draft",
   })

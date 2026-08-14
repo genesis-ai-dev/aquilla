@@ -78,6 +78,13 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
+      # i18n context-catalog check (AQU-832): every message key needs coverage
+      # in src/lib/i18n/context.ts. Previously wired into `pnpm test` only; it
+      # had never run as its own CI step. Mirrors the lint lane in
+      # scripts/cloudflare-ci-checks.mjs, which is the gate that actually runs
+      # on pull requests (this workflow is workflow_dispatch-only). Keep the
+      # two in step.
+      - run: pnpm run i18n:check
       # Credential guard (docs/OPSEC.md §5). Mirrors the lint lane in
       # scripts/cloudflare-ci-checks.mjs, which is the gate that actually runs
       # on pull requests (this workflow is workflow_dispatch-only). Keep the

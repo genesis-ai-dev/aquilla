@@ -156,7 +156,9 @@ describe("OrgProjectsDataTable lane chips (AQU-538 §3.2)", () => {
     expect(screen.getByRole("textbox", { name: /Search projects/i })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: /Project/i })).toBeInTheDocument()
     expect(screen.getByText("Gospels")).toHaveClass("font-medium")
-    expect(screen.getByText("maintainer")).toHaveClass("capitalize")
+    // RoleLabel resolves the localized display name (AQU-511) — "Maintainer",
+    // not the raw role name with a CSS capitalize class.
+    expect(screen.getByText("Maintainer")).toBeInTheDocument()
   })
 
   it("renders one chip per lane with the '' default lane first, labeled with the target language", () => {

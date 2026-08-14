@@ -1,6 +1,7 @@
 import type { FileReference } from "@/lib/parsers/types"
 import { fileOrderedBy } from "@/lib/parsers/types"
-import { useT } from "@/lib/i18n/I18nProvider"
+import { useI18n } from "@/lib/i18n/I18nProvider"
+import { bidiIsolate, formatDate, formatNumber } from "@/lib/i18n/format"
 import {
   Dialog,
   DialogBody,
@@ -23,7 +24,7 @@ function DetailRow({ label, children }: { label: string; children: React.ReactNo
   return (
     <div className="flex items-baseline justify-between gap-4 py-1">
       <dt className="shrink-0 text-muted-foreground">{label}</dt>
-      <dd className="min-w-0 truncate text-right" title={typeof children === "string" ? children : undefined}>
+      <dd className="min-w-0 truncate text-end" title={typeof children === "string" ? children : undefined}>
         {children}
       </dd>
     </div>
@@ -37,7 +38,7 @@ function DetailRow({ label, children }: { label: string; children: React.ReactNo
 export function FileDetailsModal({
   file, open, onOpenChange, progress,
 }: FileDetailsModalProps) {
-  const t = useT()
+  const { t, locale } = useI18n()
   if (!file) return null
 
   const translatedPct = progress && progress.total > 0
@@ -45,13 +46,22 @@ export function FileDetailsModal({
   const validatedPct = progress && progress.total > 0
     ? Math.round((progress.validated / progress.total) * 100) : null
 
-  const languages = [file.sourceLanguage, file.targetLanguage].filter(Boolean).join(" → ")
+  // AQU-i18n: arrow glyph is wrapped so it visually mirrors under RTL instead
+  // of pointing away from the target language.
+  const languages =
+    file.sourceLanguage && file.targetLanguage ? (
+      <>
+        {file.sourceLanguage} <span className="inline-block rtl:-scale-x-100">→</span> {file.targetLanguage}
+      </>
+    ) : (
+      file.sourceLanguage || file.targetLanguage || null
+    )
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle className="truncate pr-8">{file.name}</DialogTitle>
+          <DialogTitle className="truncate pe-8">{file.name}</DialogTitle>
           {file.originalName && file.originalName !== file.name && (
             <DialogDescription>{t("fileDetails.importedAs", { name: file.originalName })}</DialogDescription>
           )}
@@ -69,13 +79,14 @@ export function FileDetailsModal({
             </DetailRow>
             {languages && <DetailRow label={t("fileDetails.languages")}>{languages}</DetailRow>}
             <DetailRow label={t("fileDetails.imported")}>
-              {new Date(file.createdAt).toLocaleDateString(undefined, {
-                year: "numeric", month: "short", day: "numeric",
-              })}
+              {formatDate(file.createdAt, locale, { year: "numeric", month: "short", day: "numeric" })}
             </DetailRow>
             {translatedPct !== null && validatedPct !== null && (
               <DetailRow label={t("fileDetails.progress")}>
-                {t("fileDetails.progressValue", { translated: translatedPct, validated: validatedPct })}
+                {t("fileDetails.progressValue", {
+                  translated: bidiIsolate(formatNumber(translatedPct, locale)),
+                  validated: bidiIsolate(formatNumber(validatedPct, locale)),
+                })}
               </DetailRow>
             )}
           </dl>

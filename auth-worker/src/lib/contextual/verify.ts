@@ -139,7 +139,7 @@ export async function verifySpan(
     system: verifierSystemPrompt(stanceKey, deps),
     user: `Verify these ${deps.draft.cells.length} drafted cells:\n${draftBlock(deps)}`,
     tier,
-    maxTokens: 2048,
+    maxTokens: 3072,
     temperature: 0,
     label: `verify:${stanceKey}`,
   })

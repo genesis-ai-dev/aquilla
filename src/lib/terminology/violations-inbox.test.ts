@@ -7,7 +7,7 @@ import type { RuleInfraction } from "@/lib/parsers/types"
 import type { Concept } from "./types"
 
 function inf(ruleId: string, cellId = "cell-1"): RuleInfraction {
-  return { ruleId, cellId, fileId: "file-1", message: "m", spans: [] }
+  return { ruleId, cellId, fileId: "file-1", reason: "target-forbids", spans: [] }
 }
 
 describe("parseTerminologyRuleId", () => {

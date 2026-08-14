@@ -21,6 +21,7 @@ describe("summarizeConstrual", () => {
     expect(result.fallback).toBe(false)
     expect(result.l1Summary).toHaveLength(L1_MAX_CHARS)
     expect(calls[0].tier).toBe("fast")
+    expect(calls[0].maxTokens).toBe(2048)
     expect(calls[0].system).toContain(String(L1_MAX_CHARS))
   })
 

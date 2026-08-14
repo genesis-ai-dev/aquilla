@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
+import { useT } from "@/lib/i18n/I18nProvider"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 
 /**
@@ -32,6 +33,7 @@ import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
  * them apart.
  */
 export function WorkloadRollup({ jwt, orgId, action }: { jwt: string; orgId: number; action?: ReactNode }) {
+  const t = useT()
   const [rows, setRows] = useState<OrgWorkloadAssignment[] | null>(null)
   const [removingId, setRemovingId] = useState<string | null>(null)
   const [removeError, setRemoveError] = useState<string | null>(null)
@@ -49,7 +51,7 @@ export function WorkloadRollup({ jwt, orgId, action }: { jwt: string; orgId: num
 
   const handleRemove = useCallback(async (a: OrgWorkloadAssignment) => {
     if (!a.fileId) {
-      setRemoveError("Can't remove this assignment — it has no resolved cells to route through.")
+      setRemoveError(t("org.workloadRollup.removeErrorGeneric"))
       return
     }
     setRemoveError(null)
@@ -70,12 +72,12 @@ export function WorkloadRollup({ jwt, orgId, action }: { jwt: string; orgId: num
     } finally {
       setRemovingId(null)
     }
-  }, [jwt, session?.username])
+  }, [jwt, session?.username, t])
 
   if (!rows || rows.length === 0) return null
 
   return (
-    <Section title="Team workload" action={action} contentClassName="pt-0">
+    <Section title={t("org.workloadRollup.title")} action={action} contentClassName="pt-0">
       <div className="divide-y">
         {rows.map((a) => {
           const pct = a.cellsTotal > 0 ? Math.round((a.cellsDone / a.cellsTotal) * 100) : 0
@@ -84,7 +86,7 @@ export function WorkloadRollup({ jwt, orgId, action }: { jwt: string; orgId: num
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
                   <UsernameWithAvatar
-                    username={a.username ?? `User ${a.assigneeUserId}`}
+                    username={a.username ?? t("org.workloadRollup.unknownUser", { id: a.assigneeUserId })}
                     className="min-w-0"
                   />
                   <span className="shrink-0 truncate text-xs text-muted-foreground">{a.projectName}</span>
@@ -98,18 +100,21 @@ export function WorkloadRollup({ jwt, orgId, action }: { jwt: string; orgId: num
                   <div className="h-full rounded-full bg-primary" style={{ width: `${pct}%` }} />
                 </div>
               </div>
-              <div className="shrink-0 text-right">
+              <div className="shrink-0 text-end">
                 <p className="text-sm font-semibold tabular-nums">
                   {a.cellsDone}/{a.cellsTotal}
                 </p>
                 <p className="text-xs text-muted-foreground tabular-nums">{pct}%</p>
               </div>
-              <AppTooltip content="Remove this assignment">
+              <AppTooltip content={t("org.workloadRollup.removeTooltip")}>
                 <Button
                   type="button"
                   variant="ghost"
                   size="icon-sm"
-                  aria-label={`Remove assignment: ${a.scopeLabel} (${a.username ?? `User ${a.assigneeUserId}`})`}
+                  aria-label={t("org.workloadRollup.removeAriaLabel", {
+                    scope: a.scopeLabel,
+                    user: a.username ?? t("org.workloadRollup.unknownUser", { id: a.assigneeUserId }),
+                  })}
                   disabled={removingId === a.assignmentId}
                   onClick={() => void handleRemove(a)}
                 >

@@ -377,7 +377,7 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
                           <Field data-invalid={invalid}>
                             <div className="flex items-center gap-1.5">
                               <FieldLabel htmlFor="project-create-target">
-                                {shape === "self-contained" ? "Target language(s)" : "Target language"}
+                                {shape === "self-contained" ? "Target language(s)" : "Target Language"}
                               </FieldLabel>
                               <LanguageFieldHint />
                             </div>

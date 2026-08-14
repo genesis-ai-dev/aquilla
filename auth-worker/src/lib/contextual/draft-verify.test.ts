@@ -43,6 +43,7 @@ describe("performSpan", () => {
     )
     // Register rides the system prompt as a hard constraint; discourse context in user msg.
     expect(calls[0].system).toContain("span1:amb:1")
+    expect(calls[0].maxTokens).toBe(6144)
     expect(calls[0].user).toContain("Immediately preceding")
     expect(calls[0].user).toContain("imitate them")
   })
@@ -121,6 +122,7 @@ describe("verifySpan / parseVoteReply", () => {
       { cellId: "c2", approve: false, reason: "resolves span1:amb:1" },
     ])
     expect(calls[0].tier).toBe("deep")
+    expect(calls[0].maxTokens).toBe(3072)
     expect(calls[0].system).toContain("span1:amb:1")
     expect(calls[0].user).toContain("source of c2")
   })

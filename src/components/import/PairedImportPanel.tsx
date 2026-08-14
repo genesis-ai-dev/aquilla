@@ -206,7 +206,7 @@ export function PairedImportPanel({
             <button
               key={i}
               type="button"
-              className="rounded-lg border p-3 text-left hover:border-primary hover:bg-primary/5 transition-colors"
+              className="rounded-lg border p-3 text-start hover:border-primary hover:bg-primary/5 transition-colors"
               onClick={() => {
                 setSelectedSheet(s)
                 setStep("mapping")

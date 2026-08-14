@@ -46,6 +46,7 @@ import { laneTranslatedPct, laneValidatedPct, type PortfolioLane } from "@/lib/f
 import { formatRelativeTime } from "@/lib/time/relative"
 import type { FileReference } from "@/lib/parsers/types"
 import type { ProjectMember } from "@/lib/frontier/members"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 export interface OverviewLaneTableProps {
   projectId: string
@@ -97,7 +98,7 @@ function LanePeople({ members }: { members: ProjectMember[] }) {
     <AvatarGroup data-size="sm">
       {shown.map((m) => (
         <AppTooltip key={m.userId} content={m.username}>
-          <InitialsAvatar name={m.username} size="sm" singleInitial />
+          <InitialsAvatar name={m.username} size="sm" />
         </AppTooltip>
       ))}
       {extra > 0 && <AvatarGroupCount>+{extra}</AvatarGroupCount>}
@@ -132,6 +133,7 @@ export function OverviewLaneTable({
   onChanged,
   now,
 }: OverviewLaneTableProps) {
+  const t = useT()
   const navigate = useNavigate()
   const { members, refresh: refreshMembers } = useProjectMembers(projectId)
   const [scopesByUser, setScopesByUser] = useState<Record<number, MemberScope[]>>({})
@@ -187,7 +189,7 @@ export function OverviewLaneTable({
       {
         id: "language",
         accessorFn: (l) => laneLabel(l.lane).toLowerCase(),
-        header: ({ column }) => <DataTableColumnHeader column={column} title="Language" />,
+        header: ({ column }) => <DataTableColumnHeader column={column} title={t("org.orgHome.table.languageHeader")} />,
         meta: { className: "min-w-[7rem]" },
         cell: ({ row }) => (
           <span className="text-sm font-medium text-foreground">{laneLabel(row.original.lane)}</span>
@@ -196,7 +198,7 @@ export function OverviewLaneTable({
       {
         id: "translated",
         accessorFn: (l) => laneTranslatedPct(l),
-        header: ({ column }) => <DataTableColumnHeader column={column} title="Translated" />,
+        header: ({ column }) => <DataTableColumnHeader column={column} title={t("org.orgHome.table.translatedHeaderLabel")} />,
         meta: { className: "w-[9rem]" },
         cell: ({ row }) => (
           <LaneProgressBar pct={laneTranslatedPct(row.original)} fillClass="bg-amber-500" />
@@ -205,7 +207,7 @@ export function OverviewLaneTable({
       {
         id: "validated",
         accessorFn: (l) => laneValidatedPct(l),
-        header: ({ column }) => <DataTableColumnHeader column={column} title="Validated" />,
+        header: ({ column }) => <DataTableColumnHeader column={column} title={t("org.orgHome.table.validatedHeaderLabel")} />,
         meta: { className: "w-[9rem]" },
         cell: ({ row }) => (
           <LaneProgressBar pct={laneValidatedPct(row.original)} fillClass="bg-emerald-500" />
@@ -214,7 +216,7 @@ export function OverviewLaneTable({
       {
         id: "people",
         enableSorting: false,
-        header: ({ column }) => <DataTableColumnHeader column={column} title="People" />,
+        header: ({ column }) => <DataTableColumnHeader column={column} title={t("org.overviewLaneTable.peopleColumn")} />,
         meta: { className: "w-[6.5rem]" },
         cell: ({ row }) => (
           <LanePeople members={membersByLane.get(row.original.lane) ?? []} />
@@ -223,7 +225,7 @@ export function OverviewLaneTable({
       {
         id: "activity",
         accessorFn: (l) => l.lastEditAt ?? 0,
-        header: ({ column }) => <DataTableColumnHeader column={column} title="Last activity" />,
+        header: ({ column }) => <DataTableColumnHeader column={column} title={t("org.overviewLaneTable.lastActivityColumn")} />,
         meta: { className: "min-w-[7rem]" },
         cell: ({ row }) => {
           const at = row.original.lastEditAt
@@ -232,7 +234,7 @@ export function OverviewLaneTable({
             : null
           return (
             <span className="text-sm text-muted-foreground">
-              {rel ?? "No activity yet"}
+              {rel ?? t("org.overviewLaneTable.noActivityYet")}
             </span>
           )
         },
@@ -291,13 +293,14 @@ export function OverviewLaneTable({
       projectId,
       refreshMembers,
       staffLane,
+      t,
     ],
   )
 
   return (
     <Section
       data-testid="overview-lane-table"
-      title="Languages"
+      title={t("fileDetails.languages")}
       description="Progress, people, and actions for each target language on this project."
       headerClassName={ADMIN_TABLE_SECTION_HEADER}
       contentClassName={ADMIN_TABLE_SECTION_CONTENT}
@@ -313,7 +316,7 @@ export function OverviewLaneTable({
               />
             }
           >
-            Add language
+            {t("org.overviewLaneTable.addLanguageAction")}
           </Button>
         ) : null
       }
@@ -338,14 +341,14 @@ export function OverviewLaneTable({
                 onClick={() => setAssignLane(l.lane)}
               >
                 <Users className="size-4" />
-                Assign…
+                {t("org.assignWork.assignButtonLabel")}
               </MenuItem>
               <MenuItem
                 data-testid={`overview-lane-staff-menu-${tagId}`}
                 onClick={() => setStaffLane(l.lane)}
               >
                 <UserPlus className="size-4" />
-                Staff…
+                {t("org.overviewLaneTable.staffAction")}
               </MenuItem>
             </>
           )

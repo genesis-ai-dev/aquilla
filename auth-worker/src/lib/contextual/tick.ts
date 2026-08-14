@@ -45,7 +45,7 @@ import {
 import { selectCellPairs, type CellPair } from "../agent/tools/select-cells"
 import { type LintRule } from "../agent/lint"
 import { loadProjectContext, type ProjectContext } from "./project-context"
-import { openRouterUsage } from "../llm-vendor"
+import { openRouterExtras } from "../llm-vendor"
 import { deriveSpanSeeds } from "./segment"
 import { lintSpanDraft } from "./lint-node"
 import { runSpan, EXAMPLES_TARGET } from "./pipeline"
@@ -199,7 +199,7 @@ export function makeLlmCall(cfg: {
       ],
       max_tokens: req.maxTokens,
       temperature: req.temperature,
-      ...openRouterUsage(cfg.url),
+      ...openRouterExtras(cfg.url, "none"),
     })
     const RETRIABLE = new Set([429, 500, 502, 503, 504])
     const MAX_ATTEMPTS = 5

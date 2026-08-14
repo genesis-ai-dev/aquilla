@@ -38,7 +38,7 @@ export default defineConfig({
   use: {
     // Defaults to the single-stack Vite port; scripts/e2e-up.ts overrides this
     // per shard (E2E_BASE_URL) so each isolated stack drives its own preview.
-    baseURL: process.env.E2E_BASE_URL ?? "http://127.0.0.1:5173",
+    baseURL: process.env.E2E_BASE_URL ?? "http://127.0.0.1:6173",
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
     video: "retain-on-failure",

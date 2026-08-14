@@ -46,13 +46,13 @@ export function getDefaultAction(
 
 export const workspaceActions: WorkspaceAction[] = [
   {
-    id: "import-new", label: "Import", icon: Plus, group: "primary",
+    id: "import-new", labelKey: "nav.workspaceActions.import", icon: Plus, group: "primary",
     isAvailable: () => true,
     isDefault: (c) => c.activeFileId == null,
     run: (_c, args) => args.openImport(),
   },
   {
-    id: "run-completions", label: "Run AI completions", icon: Sparkles, group: "primary",
+    id: "run-completions", labelKey: "nav.workspaceActions.runCompletions.label", icon: Sparkles, group: "primary",
     isAvailable: (c) => c.activeFileId != null && roleAllows(c, "target.cell.commit"),
     isDefault: (c) => {
       if (!c.activeFileId) return false
@@ -60,20 +60,26 @@ export const workspaceActions: WorkspaceAction[] = [
       return !!p && p.total > 0 && p.translated < p.total
     },
     requiresConfirmation: {
-      title: "Run completions",
-      description: (c) => {
+      titleKey: "nav.workspaceActions.runCompletions.title",
+      description: (c, t) => {
         if (!c.activeFileId) return ""
         const p = c.fileProgress.get(c.activeFileId)
         const untranslated = p ? p.total - p.translated : 0
         const next = Math.min(completionBatchSizeFor(c.project), untranslated)
-        return `Generate an approved-example draft package for the next ${next} untranslated cell${next === 1 ? "" : "s"}${untranslated > next ? ` (${untranslated - next} more after this)` : ""}. Every draft still needs individual human review.`
+        const remaining = untranslated - next
+        return (
+          t("nav.workspaceActions.runCompletions.description", { next }) +
+          (remaining > 0 ? t("nav.workspaceActions.moreAfterThis", { count: remaining }) : "") +
+          t("nav.workspaceActions.runCompletions.descriptionTail")
+        )
       },
-      confirmLabel: "Run AI completions",
+      // Same visible text as the button label above — reuse the same key.
+      confirmLabelKey: "nav.workspaceActions.runCompletions.label",
     },
     run: (_c, args) => args.runCompletions(),
   },
   {
-    id: "complete-all", label: "Draft all (review required)", icon: Sparkles, group: "primary",
+    id: "complete-all", labelKey: "nav.workspaceActions.completeAll.label", icon: Sparkles, group: "primary",
     isAvailable: (c) => {
       if (!c.activeFileId) return false
       if (!roleAllows(c, "target.cell.commit")) return false
@@ -81,19 +87,22 @@ export const workspaceActions: WorkspaceAction[] = [
       return !!p && p.total > 0 && p.translated < p.total
     },
     requiresConfirmation: {
-      title: "Draft all untranslated cells",
-      description: (c) => {
+      titleKey: "nav.workspaceActions.completeAll.title",
+      description: (c, t) => {
         if (!c.activeFileId) return ""
         const p = c.fileProgress.get(c.activeFileId)
         const untranslated = p ? p.total - p.translated : 0
-        return `Generate drafts for all ${untranslated} untranslated cell${untranslated === 1 ? "" : "s"}, split into packages of at most ${completionBatchSizeFor(c.project)}. Packaging preserves context but is not a quality guarantee; every draft remains unapproved until a human reviews it individually.`
+        return t("nav.workspaceActions.completeAll.description", {
+          untranslated,
+          batchSize: completionBatchSizeFor(c.project),
+        })
       },
-      confirmLabel: "Draft all",
+      confirmLabelKey: "nav.workspaceActions.completeAll.confirmLabel",
     },
     run: (_c, args) => args.runCompleteAll(),
   },
   {
-    id: "batch-validate", label: "Batch validate…", icon: CheckSquare, group: "primary",
+    id: "batch-validate", labelKey: "nav.workspaceActions.batchValidate.label", icon: CheckSquare, group: "primary",
     isAvailable: (c) => c.activeFileId != null && roleAllows(c, "cell.validate"),
     isDefault: (c) => {
       if (!c.activeFileId) return false
@@ -101,8 +110,8 @@ export const workspaceActions: WorkspaceAction[] = [
       return !!p && p.total > 0 && p.translated === p.total && p.validated < p.total
     },
     requiresConfirmation: {
-      title: "Batch validate",
-      description: (c) => {
+      titleKey: "nav.workspaceActions.batchValidate.title",
+      description: (c, t) => {
         if (!c.activeFileId) return ""
         const p = c.fileProgress.get(c.activeFileId)
         const unvalidated = p ? p.total - p.validated : 0
@@ -111,16 +120,18 @@ export const workspaceActions: WorkspaceAction[] = [
         const cap = c.project.completionSettings?.validationBatchSize
         const capNote =
           typeof cap === "number" && cap > 0
-            ? ` At most ${cap} eligible cell${cap === 1 ? "" : "s"} are validated per run (project batch size); run again to continue.`
+            ? t("nav.workspaceActions.batchValidate.capNote", { cap })
             : ""
-        return `This marks eligible human-authored or human-edited cells as validated under your name. Untouched AI drafts are excluded and still need individual review. (${unvalidated} cells are currently unvalidated.)${capNote}`
+        return t("nav.workspaceActions.batchValidate.description", { unvalidated }) + capNote
       },
-      confirmLabel: "Validate",
+      // Same imperative as the selection-toolbar Validate button — reuse it
+      // rather than mint a duplicate "Validate" string in this namespace.
+      confirmLabelKey: "editor.selection.validate",
     },
     run: (_c, args) => args.runBatchValidate(),
   },
   {
-    id: "export", label: "Export", icon: Download, group: "primary",
+    id: "export", labelKey: "nav.workspaceActions.export", icon: Download, group: "primary",
     // AQU-253 (revised): stay visible even when org policy forbids export —
     // the ExportDialog shows a permission gate explaining the block, which
     // beats a menu item that silently disappears.
@@ -136,33 +147,33 @@ export const workspaceActions: WorkspaceAction[] = [
     // AQU-503: the label must carry the word "target" so PMs looking for the
     // "Target Import" option can find it — this file-scoped importer populates
     // the open file's TARGET column, distinct from the primary "Import" (source).
-    id: "import-into-file", label: "Import target translations into this file", icon: Upload, group: "secondary",
+    id: "import-into-file", labelKey: "nav.workspaceActions.importIntoFile", icon: Upload, group: "secondary",
     isAvailable: (c) => c.activeFileId != null,
     run: (_c, args) => args.runImportIntoFile(),
   },
   {
-    id: "transcribe-all", label: "Transcribe all audio", icon: Mic, group: "secondary",
+    id: "transcribe-all", labelKey: "nav.workspaceActions.transcribeAll.label", icon: Mic, group: "secondary",
     isAvailable: (c) => c.activeFileId != null && (c.audioCounts?.untranscribed ?? 0) > 0,
     requiresConfirmation: {
-      title: "Transcribe all audio in this file",
-      description: (c) => {
+      titleKey: "nav.workspaceActions.transcribeAll.title",
+      description: (c, t) => {
         const n = c.audioCounts?.untranscribed ?? 0
-        return `Run Whisper on ${n} cell${n === 1 ? "" : "s"} that already have a recording but no karaoke timings yet.`
+        return t("nav.workspaceActions.transcribeAll.description", { n })
       },
-      confirmLabel: "Transcribe all",
+      confirmLabelKey: "nav.workspaceActions.transcribeAll.confirmLabel",
     },
     run: (_c, args) => args.runTranscribeAll(),
   },
   {
-    id: "synth-all", label: "Generate AI voice for empty cells", icon: Wand2, group: "secondary",
+    id: "synth-all", labelKey: "nav.workspaceActions.synthAll.label", icon: Wand2, group: "secondary",
     isAvailable: (c) => c.activeFileId != null && (c.audioCounts?.unsynthesized ?? 0) > 0,
     requiresConfirmation: {
-      title: "Generate AI voice",
-      description: (c) => {
+      titleKey: "nav.workspaceActions.synthAll.title",
+      description: (c, t) => {
         const n = c.audioCounts?.unsynthesized ?? 0
-        return `Generate AI voice audio for ${n} cell${n === 1 ? "" : "s"} that have translated text but no recording yet. Existing recordings are not touched.`
+        return t("nav.workspaceActions.synthAll.description", { n })
       },
-      confirmLabel: "Generate audio",
+      confirmLabelKey: "nav.workspaceActions.synthAll.confirmLabel",
     },
     run: (_c, args) => args.runSynthAll(),
   },

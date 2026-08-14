@@ -86,7 +86,7 @@ export function AgentDockPanel({
       <div className="flex items-center gap-2 border-b px-3 py-2">
         <Bot className="h-3.5 w-3.5 text-muted-foreground" />
         <span className="text-xs font-medium">AI Agent</span>
-        <span className="ml-auto flex items-center gap-1">
+        <span className="ms-auto flex items-center gap-1">
           {/* When the workbench owns the session, its header shows the dial —
               a second copy here would compete for the same click/popover. */}
           {credits && !expanded && <CreditsDial {...credits} />}

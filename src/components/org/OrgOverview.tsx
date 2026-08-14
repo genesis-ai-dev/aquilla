@@ -160,7 +160,7 @@ export function OrgOverview() {
     return (
       <AppShell
         sidebar={<OrgSidebar />}
-        header={<OrgBreadcrumb section="Overview" />}
+        header={<OrgBreadcrumb section="Overview" isProjectsLanding />}
         statusBar={null}
         main={
           <div className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center">
@@ -199,7 +199,7 @@ export function OrgOverview() {
   return (
     <AppShell
       sidebar={<OrgSidebar />}
-      header={<OrgBreadcrumb section="Overview" />}
+      header={<OrgBreadcrumb section="Overview" isProjectsLanding />}
       statusBar={null}
       main={
         <Page size="wide">

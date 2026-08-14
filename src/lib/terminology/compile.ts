@@ -17,6 +17,7 @@
 import type { TranslationRule } from "@/lib/parsers/types"
 import type { Concept } from "./types"
 import { termToRegexSource } from "./match"
+import { t } from "@/lib/i18n/standalone"
 
 /**
  * Escape a string for safe use inside a RegExp literal. Only used to build the
@@ -66,8 +67,11 @@ export function compileConceptsToRules(concepts: Concept[]): TranslationRule[] {
       // is "" (which would match anything). Emit no rule in that degenerate case.
       if (targetPattern) rules.push({
         id: `term:${concept.id}:approved`,
-        name: `Term: ${concept.sourceTerm}`,
-        description: `"${concept.sourceTerm}" must be rendered with an approved rendering (${approved.map((r) => r.rendering).join(", ")})`,
+        name: t("terminology.compile.ruleName", { term: concept.sourceTerm }),
+        description: t("terminology.compile.approvedRequired", {
+          term: concept.sourceTerm,
+          renderings: approved.map((r) => r.rendering).join(", "),
+        }),
         severity: "minor",
         source: "user",
         scope: "project",
@@ -95,8 +99,11 @@ export function compileConceptsToRules(concepts: Concept[]): TranslationRule[] {
       rules.push({
         // id discriminator keeps the EXACT escapeRegex scheme — other code groups by it.
         id: `term:${concept.id}:forbidden:${escapeRegex(f.rendering)}`,
-        name: `Term: ${concept.sourceTerm} — forbidden rendering`,
-        description: `"${f.rendering}" is a forbidden rendering for "${concept.sourceTerm}"`,
+        name: t("terminology.compile.ruleNameForbidden", { term: concept.sourceTerm }),
+        description: t("terminology.compile.forbiddenRendering", {
+          rendering: f.rendering,
+          term: concept.sourceTerm,
+        }),
         severity: "major",
         source: "user",
         scope: "project",

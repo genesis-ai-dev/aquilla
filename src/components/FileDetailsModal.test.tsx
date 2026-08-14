@@ -9,6 +9,7 @@ import { render, screen } from "@testing-library/react"
 import { describe, it, expect, vi } from "vitest"
 import type { FileReference } from "@/lib/parsers/types"
 import { I18nProvider } from "@/lib/i18n/I18nProvider"
+import { BIDI_FSI, BIDI_PDI } from "@/lib/i18n/format"
 import { FileDetailsModal } from "./FileDetailsModal"
 
 const usfmFile: FileReference = {
@@ -53,7 +54,13 @@ describe("FileDetailsModal", () => {
 
   it("shows progress when stats are provided", () => {
     renderModal({ progress: { translated: 10, validated: 5, total: 20 } })
-    expect(screen.getByText(/50% translated/i)).toBeTruthy()
-    expect(screen.getByText(/25% validated/i)).toBeTruthy()
+    // Percentages are wrapped in FSI/PDI bidi isolates (AQU-511) — match
+    // around them rather than the exact "50%" substring.
+    expect(
+      screen.getByText(new RegExp(`${BIDI_FSI}?50${BIDI_PDI}?% translated`, "i")),
+    ).toBeTruthy()
+    expect(
+      screen.getByText(new RegExp(`${BIDI_FSI}?25${BIDI_PDI}?% validated`, "i")),
+    ).toBeTruthy()
   })
 })

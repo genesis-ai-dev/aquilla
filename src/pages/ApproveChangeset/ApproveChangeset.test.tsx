@@ -211,6 +211,8 @@ describe("ApproveChangeset", () => {
 
     renderPage()
 
-    expect(await screen.findByText("not your changeset")).toBeInTheDocument()
+    // AQU-820: the server's raw message never renders — the keyed 403 sentence does.
+    expect(await screen.findByText("You aren't authorized to view this approval.")).toBeInTheDocument()
+    expect(screen.queryByText("not your changeset")).not.toBeInTheDocument()
   })
 })

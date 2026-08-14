@@ -53,7 +53,7 @@ export function FileActionMenu({
         )}
         {onExport && (
           <MenuItem onClick={onExport}>
-            <Download /> {t("nav.fileRow.export")}
+            <Download /> {t("nav.workspaceActions.export")}
           </MenuItem>
         )}
         {onExportSource && (

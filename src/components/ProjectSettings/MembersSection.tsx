@@ -318,7 +318,7 @@ export function MembersSection({ projectId }: { projectId: string }) {
                                 {r.level === m.role.level ? " (current)" : ""}
                               </span>
                               <span className="text-xs font-normal whitespace-normal text-muted-foreground">
-                                {r.description || roleDescription(r.level)}
+                                {roleDescription(r.level)}
                               </span>
                             </span>
                           </MenuItem>
@@ -418,8 +418,8 @@ export function MembersSection({ projectId }: { projectId: string }) {
               />
               {addForbidden && (
                 <PermissionDeniedAlert
-                  action="add members to this project"
-                  requiredRole="Maintainer or higher"
+                  action="org.membersPage.addMembersAction"
+                  requiredRoleLevel={ROLE.MAINTAINER}
                 />
               )}
             </TabsContent>

@@ -29,6 +29,7 @@ import { RoleLabel } from "@/components/RoleLabel"
 import { formatRelativeTime } from "@/lib/time/relative"
 import type { PendingOrgInvite } from "@/lib/frontier/orgs"
 import { useActiveOrg } from "@/context/OrgContext"
+import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
 
 type MembersTab = "roster" | "matrix"
 
@@ -38,6 +39,7 @@ type MembersTab = "roster" | "matrix"
  * projects grid.
  */
 export function MembersPage() {
+  const t = useT()
   const { activeOrg, isAllOrgs, isLoading, error } = useActiveOrg()
 
   if (isLoading) {
@@ -45,8 +47,8 @@ export function MembersPage() {
       <MembersShell>
         <Page size="wide">
           <PageHeader
-            title="Members"
-            description="People in this organization and their access."
+            title={t("editor.navTitle.members")}
+            description={t("org.membersPage.orgPage.description")}
             inset={false}
           />
           <div className="h-48 animate-pulse rounded-lg border bg-card" />
@@ -60,16 +62,15 @@ export function MembersPage() {
       <MembersShell>
         <Page size="wide">
           <PageHeader
-            title="Members"
-            description="People in this organization and their access."
+            title={t("editor.navTitle.members")}
+            description={t("org.membersPage.orgPage.description")}
             inset={false}
           />
-          <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-4">
-            <p className="text-sm font-medium text-destructive">Couldn't load your organization</p>
+          <div className="rounded-2xl border border-destructive/30 bg-destructive/5 p-4">
+            <p className="text-sm font-medium text-destructive">{t("org.membersPage.orgPage.loadErrorTitle")}</p>
             <p className="mt-1 text-xs text-muted-foreground">{error}</p>
             <p className="mt-2 text-xs text-muted-foreground">
-              Common causes: the Frontier worker is unreachable, your session expired,
-              or the request timed out. Check your network and try again.
+              {t("org.membersPage.orgPage.loadErrorHint")}
             </p>
           </div>
         </Page>
@@ -82,17 +83,17 @@ export function MembersPage() {
       <MembersShell>
         <Page size="wide">
           <PageHeader
-            title="Members"
-            description="People in this organization and their access."
+            title={t("editor.navTitle.members")}
+            description={t("org.membersPage.orgPage.description")}
             inset={false}
           />
           <EmptyState
             icon={AlertTriangle}
-            title={isAllOrgs ? "Select an organization" : "Sign in to manage members"}
+            title={isAllOrgs ? t("org.teamsList.selectOrgTitle") : t("org.membersPage.orgPage.signInTitle")}
             description={
               isAllOrgs
-                ? "Member access is managed within a single organization. Choose one from the switcher to continue."
-                : "Member access requires a Frontier session. Sign in from the dashboard and come back to this page."
+                ? t("org.membersPage.orgPage.selectOrgDescription")
+                : t("org.membersPage.orgPage.signInDescription")
             }
           />
         </Page>
@@ -100,7 +101,7 @@ export function MembersPage() {
     )
   }
 
-  return <MembersPageContent orgId={activeOrg.id} orgName={activeOrg.name ?? "Organization"} />
+  return <MembersPageContent orgId={activeOrg.id} orgName={activeOrg.name ?? t("org.breadcrumb.organizationFallback")} />
 }
 
 /**
@@ -111,10 +112,11 @@ export function MembersPage() {
  * AppShell's main wrapper is overflow-hidden and the roster can run tall.
  */
 function MembersShell({ children }: { children: React.ReactNode }) {
+  const t = useT()
   return (
     <AppShell
       sidebar={<OrgSidebar />}
-      header={<OrgBreadcrumb section="Members" />}
+      header={<OrgBreadcrumb section={t("editor.navTitle.members")} />}
       statusBar={null}
       main={children}
     />
@@ -127,6 +129,7 @@ interface MembersPageContentProps {
 }
 
 function MembersPageContent({ orgId, orgName }: MembersPageContentProps) {
+  const t = useT()
   const { activeOrg } = useActiveOrg()
   const { canViewRoster, hasFetched: rosterPolicyReady } = useOrgSettings(
     orgId,
@@ -170,15 +173,15 @@ function MembersPageContent({ orgId, orgName }: MembersPageContentProps) {
     <MembersShell>
       <Page size="wide">
       <PageHeader
-        title="Members"
-        description="People in this organization and their access."
+        title={t("editor.navTitle.members")}
+        description={t("org.membersPage.orgPage.description")}
         inset={false}
       />
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as MembersTab)}>
-        <TabsList aria-label="Members views">
-          <TabsTrigger value="roster">Roster</TabsTrigger>
-          <TabsTrigger value="matrix">Matrix</TabsTrigger>
+        <TabsList aria-label={t("org.membersPage.orgPage.tabsAriaLabel")}>
+          <TabsTrigger value="roster">{t("org.membersPage.orgPage.roster")}</TabsTrigger>
+          <TabsTrigger value="matrix">{t("org.membersPage.orgPage.matrixTab")}</TabsTrigger>
         </TabsList>
 
         <TabsContent value="roster">
@@ -222,8 +225,7 @@ function MembersPageContent({ orgId, orgName }: MembersPageContentProps) {
           {tab === "matrix" && (
             <div className="space-y-4">
               <p className="text-xs text-muted-foreground">
-                Every member × every project you can see, at a glance. Click a
-                cell to change a role; hover a row to load its lane scopes.
+                {t("org.membersPage.orgPage.matrixHint")}
               </p>
               <MembersMatrixView />
             </div>
@@ -263,7 +265,6 @@ function MembersPageContent({ orgId, orgName }: MembersPageContentProps) {
   )
 }
 
-
 /**
  * Pending share-link invitations across this org. Owner-only (the server
  * gates the listing, returning null on 403, and the hook hides the section
@@ -274,6 +275,7 @@ function MembersPageContent({ orgId, orgName }: MembersPageContentProps) {
  * server later errors, the hook re-fetches and the row reappears.
  */
 function PendingInvitesSection({ orgId }: { orgId: number }) {
+  const t = useT()
   const { invites, isLoading, error, revoke } = useOrgInvites(orgId)
 
   // Non-owner callers (server returned null/403) → hide the section entirely.
@@ -286,10 +288,10 @@ function PendingInvitesSection({ orgId }: { orgId: number }) {
       title={
         <span className="flex items-center gap-1.5">
           <Mail className="size-4 text-muted-foreground" aria-hidden />
-          Pending invitations
+          {t("org.orgHome.pendingInvitations.heading")}
         </span>
       }
-      description="Share-link invitations that haven't been redeemed yet. Revoke to cancel."
+      description={t("org.membersPage.orgPage.pendingInvitesDescription")}
       action={isLoading ? <Spinner className="size-3.5 text-muted-foreground" /> : null}
     >
       {error && <p className="mb-2 text-xs text-destructive">{error}</p>}
@@ -312,13 +314,21 @@ function PendingInviteRow({
   invite: PendingOrgInvite
   onRevoke: (projectId: string, token: string) => Promise<boolean>
 }) {
+  const t = useT()
   const [busy, setBusy] = useState(false)
+  // SWARM-TODO(AQU-832): formatRelativeTime (src/lib/time/relative.ts) itself
+  // returns hardcoded, un-i18n'd English ("3 days ago") — out of scope here
+  // (shared util, many other call sites). This wrapper's own literal text is
+  // keyed below; the relative-time fragment inside it stays English until
+  // that util is localized.
   const expiresLabel = invite.expiresAt
-    ? `expires ${formatRelativeTime(invite.expiresAt)?.replace(" ago", " from now") ?? ""}`
-    : "no expiry"
+    ? t("org.membersPage.orgPage.expiresRelativePrefix", {
+        relative: formatRelativeTime(invite.expiresAt)?.replace(" ago", " from now") ?? "",
+      })
+    : t("org.membersPage.orgPage.noExpiry")
   // Hack-y: formatRelativeTime is past-tense; for an expiry we want
   // "expires in 2 days". Recompute properly when expiresAt is in the future.
-  const futureLabel = computeFutureLabel(invite.expiresAt)
+  const futureLabel = computeFutureLabel(t, invite.expiresAt)
 
   return (
     <li className="flex items-center gap-2 py-1.5 text-xs">
@@ -328,33 +338,37 @@ function PendingInviteRow({
           <span className="text-muted-foreground">·</span>
           <RoleLabel name={invite.role.name} className="text-muted-foreground" />
           {invite.email ? (
-            <AppTooltip content="Targeted invite: sign-up form will be prefilled with this email">
+            <AppTooltip content={t("org.membersPage.orgPage.targetedInviteTooltip")}>
               <span className="rounded bg-blue-500/15 text-blue-700 dark:text-blue-300 px-1.5 py-0.5 text-[9px] font-mono">
                 {invite.email}
               </span>
             </AppTooltip>
           ) : (
-            <AppTooltip content="Open link: anyone holding the URL can redeem">
+            <AppTooltip content={t("org.membersPage.orgPage.openLinkTooltip")}>
               <span className="rounded bg-muted px-1.5 py-0.5 text-[9px] text-muted-foreground">
-                open link
+                {t("projectSettings.share.openLinkConnector")}
               </span>
             </AppTooltip>
           )}
         </div>
         <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
-          <span>by {invite.createdBy?.username ?? "unknown"}</span>
+          <span>
+            {t("org.membersPage.orgPage.invitedByLabel", {
+              username: invite.createdBy?.username ?? t("org.membersPage.orgPage.unknownInviter"),
+            })}
+          </span>
           <span>·</span>
           <Clock className="h-2.5 w-2.5" />
           <span>{futureLabel ?? expiresLabel}</span>
         </div>
       </div>
-      <AppTooltip content="Revoke invitation">
+      <AppTooltip content={t("org.membersPage.orgPage.revokeInviteTooltip")}>
         <Button
           size="icon-sm"
           variant="ghost"
           className="text-muted-foreground hover:text-destructive"
           disabled={busy}
-          aria-label={`Revoke invitation to ${invite.projectName}`}
+          aria-label={t("org.membersPage.orgPage.revokeInviteAriaLabel", { project: invite.projectName })}
           onClick={async () => {
             setBusy(true)
             try {
@@ -372,16 +386,16 @@ function PendingInviteRow({
 }
 
 /** "expires in 2 days" / "expired" / null when no expiry set. */
-function computeFutureLabel(iso: string | null): string | null {
+function computeFutureLabel(t: TFunction, iso: string | null): string | null {
   if (!iso) return null
-  const t = Date.parse(iso)
-  if (Number.isNaN(t)) return null
-  const ms = t - Date.now()
-  if (ms <= 0) return "expired"
+  const parsed = Date.parse(iso)
+  if (Number.isNaN(parsed)) return null
+  const ms = parsed - Date.now()
+  if (ms <= 0) return t("org.membersPage.orgPage.expired")
   const days = Math.floor(ms / (24 * 60 * 60 * 1000))
-  if (days >= 1) return `expires in ${days} day${days === 1 ? "" : "s"}`
+  if (days >= 1) return t("org.membersPage.orgPage.expiresInDays", { count: days })
   const hours = Math.floor(ms / (60 * 60 * 1000))
-  if (hours >= 1) return `expires in ${hours} hour${hours === 1 ? "" : "s"}`
+  if (hours >= 1) return t("org.membersPage.orgPage.expiresInHours", { count: hours })
   const minutes = Math.max(1, Math.floor(ms / (60 * 1000)))
-  return `expires in ${minutes} minute${minutes === 1 ? "" : "s"}`
+  return t("org.membersPage.orgPage.expiresInMinutes", { count: minutes })
 }

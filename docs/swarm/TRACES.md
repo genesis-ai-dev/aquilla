@@ -1,183 +1,438 @@
-# SWARM TRACES — stigmergic TODO registry
+# SWARM TRACES — i18n coverage
 
-Open signals for future loop iterations / swarm agents. Each trace = something a
-later agent can pick up. Also drop `SWARM-TODO(<id>): ...` comments in code at the
-exact gap; register them here. Honesty over optimism — if it's not production-ready, say so.
+## BLOCKERS (surface to user)
+- [OPEN] (email-locale) Email localization is architecturally blocked: no `users.locale`
+  column, no worker reads Accept-Language, `aquilla-locale` is client localStorage only.
+  Sends are async so only the ACTOR's locale is in scope, not the recipient's — and invite
+  recipients often have no user row. Needs a schema migration + a product decision on what
+  locale an invite is sent in. — auth-worker/src, sync-worker/src
+- [OPEN] (permission-denied-alert-contract) WS-14 changed the shared
+  `PermissionDeniedAlert` component's props: `action: string` → `action: MessageKey`,
+  `requiredRole?: string` → `requiredRoleLevel?: RoleLevel` (src/components/
+  PermissionDeniedAlert.tsx), so a caller can't leak untranslated English into an
+  otherwise-localized alert. `src/components/ProjectSettings.tsx`'s call site (mine) is
+  updated. `src/components/ProjectMembersPage.tsx:480-483` (WS-11's file, forbidden to
+  WS-14) still passes the old raw strings (`action="add members to this project"`,
+  `requiredRole="Maintainer or higher"`) and now fails `tsc -b --noEmit` with TS2322 —
+  the one remaining type error in the tree as of this handoff. Precedent: the
+  orchestrator log (WS-02/03 handoff row, 08-12) already resolved one cross-workstream
+  `PermissionDeniedAlert` conflict the same way (fix the shared contract, patch the other
+  call site at integration). Two-line fix once picked up: `action="projectMembers.<a
+  new key naming 'add members to this project'>"` (or a shared key WS-11 mints) and
+  `requiredRoleLevel={ROLE.MAINTAINER}` (from `@/lib/frontier/roles`).
 
-Format: `- [STATUS] (id) description — blocker / how-to-pick-up — file:line`
-STATUS: OPEN | CLAIMED | DONE
+## Deferred (decided, not forgotten)
+- [OPEN] (marketing) 670 strings across src/pages/Homepage|CaseStudy|PrivacyPolicy.
+  SKIP: no marketing render tree mounts I18nProvider and prerender-marketing.ts renders
+  once in Node with no locale, so runtime localization is invisible to crawlers. Real
+  localization = per-locale prerendered URLs + hreflang. Revisit only if the locale set
+  expands toward buyer languages. Residual: 4 keys for the analytics opt-in control.
+- [OPEN] (admin) ~50 strings in src/components/admin/**. SKIP: staff-only, operational
+  jargon. Recorded as a decision, not neglect.
+- [OPEN] (server-contract) 91 API error sentences. Defer the code+params contract change.
+  The cheap client-side half is now complete (WS-07, AQU-820): no audited call site
+  still shows server text verbatim. What the contract change would BUY is now a
+  concrete list — see `server-contract-codes` in the WS-07 section for the three
+  distinctions the client had to collapse for want of an error code.
 
-## Phase 1 paragraph-drafting (2026-06-19) — deferred follow-ups (NOT §0 blockers)
-- [DONE 2026-06-19] (p1-d4-source-fallback) Implemented on `feat/p1-followups`: `gatherPrecedingContext` gained an opt-in `sourceFallback` param (default OFF → shipped single-cell path unchanged); `completeParagraph` opts in, so preceding cells with source but no committed target are included (target ""). `buildParagraphPrompt` renders those as `Preceding (source, not yet translated): …` (NOT a mimickable Source/Translation pair). +3 gather tests, rewrote the paragraph blank-target test (tsc 0 · completion+hooks 226). NOTE: `completeSingle` intentionally still committed-target-only (avoids regressing the shipped Phase-0 prompt); enable there only if desired. — `src/lib/completion/draft-context.ts`, `completion-service.ts`, `src/hooks/useCompletion.ts`
-- [DONE 2026-06-19] (p1-following-source) Implemented on `feat/p1-followups`: new `gatherFollowingSource(cells, cellId, count)` (forward scan, same-file, skip empty source, doc order) + `completeParagraph` now passes `followingSource` from the last group cell (reusing `precedingTargetCells` as a symmetric window for v1; SWARM-TODO to split into its own budget+UI). The render already existed ("Following context (source only — do not translate)"). +4 unit tests (tsc 0 · completion+hooks 230). — `src/lib/completion/draft-context.ts`, `src/hooks/useCompletion.ts`
-- [DONE 2026-06-19] (p1-paragraph-abort) Done on `feat/p1-followups`: `completeParagraph(startCellId, signal?)` now accepts an optional `AbortSignal` threaded into `complete()` (mirrors `completeSingle`); the existing AbortError catch clears state without committing/erroring. +1 test (aborted signal → no commit, no error, fetch sees aborted signal). tsc 0 · hooks+completion 232. — `src/hooks/useCompletion.ts`
-- [OPEN] (p1-paragraph-streaming) paragraph calls are `stream:false`; `<c id>` tag format already supports progressive parse — enable once Frontier SSE fix ships. — `src/hooks/useCompletion.ts`
-- [DONE 2026-07-23] (p1-paragraph-ui-wiring) Done on `feat/paragraph-drafting-ui` (8 commits, SDD loop): (a) root-cause fix — `paragraphStart` was silently dropped at the sync-worker `/import` payload whitelist; now carried via the extensible `cells.metadata` JSONB (client-only: `import.ts` folds it into `metadata`, `useCells.buildCellData` maps `source.metadata.paragraphStart` → `CellData.paragraphStart`); (b) paragraph-boundary visuals (pilcrow + top rule) on flagged non-file-first rows in `EditorTable`; (c) "Draft paragraph" rail button → confirm dialog (truthful "N of M" copy) → `completeParagraph`; validated cells are skipped from drafting but rendered as locked in-position segments in `buildParagraphPrompt` (no silent discourse gap); group-wide in-flight guard ignores stuck `error` entries; (d) e2e `e2e/specs/ai/paragraph-draft.smoke.spec.ts` + JOURNEYS row, mock-LLM extended to echo the `<c id>` protocol, seed-project helper fixed to write `metadata.paragraphStart`. Legacy imports (no flags) render byte-identical. tsc 0 · paragraph suite 31 · e2e spec 1/1. Follow-ups traced below. — plan `docs/superpowers/plans/2026-07-23-paragraph-drafting-ui-wiring.md`
-- [OPEN] (p1-locked-extra-error) If a model emits a `<c id>` tag for a locked (validated) cell, the extra-tag handler sets an `errors` entry on that validated cell (error badge on a validated row); filter extra-tag errors to ids not in the locked set. Also: `errors` entries keyed to `extra` ids are never cleared by any path. — `src/hooks/useCompletion.ts`
-- [OPEN] (p1-mock-llm-example-echo) e2e mock-LLM `REQUEST_TAG_RE` also matches the system prompt's literal `<c id="CELL_ID">` example, echoing one phantom tag per paragraph request (harmless — discarded as `extra`); scope the scan to the user message or UUID-shaped ids. — `e2e/helpers/mock-llm-server.ts`
-- [OPEN] (p1-import-preview-paragraphs) Import preview does not indicate paragraph grouping; surface boundaries in `PreviewPanel` so users see paragraphs before committing an import. — `src/components/import/PreviewPanel.tsx`
-- [DONE 2026-06-19] (p1-partial-commit-visibility) Fixed on `feat/p1-followups`: `completeParagraph` now tracks committed ids in a function-scoped `committedIds` set; the catch skips already-committed cells (clears their spinner, no error relabel) and marks only the still-uncommitted ones errored. +1 regression test (commit throws on cell-2 → cell-1 stays clean, cell-2/3 errored). tsc 0 · hooks+completion 231. — `src/hooks/useCompletion.ts`
-- [DONE 2026-06-19] (p1-usfm-chapter-no-p) Fixed on `feat/p1-followups`: the USFM pre-scan now marks a verse `paragraphStart` when its backward scan stops at a `\c` (chapter boundary) with no `\p`/`\q`/etc. between — a new chapter always opens a paragraph group. Mid-chapter unmarked verses still continue (break on prior `\v`). Rewrote the old "no marker → no start" test (which used a chapter-first verse) to assert both the chapter-boundary start and the mid-chapter continuation. tsc 0 · parsers 374 · import 86. — `src/lib/parsers/usfm-lossless.ts` pre-scan
-- [DONE 2026-06-19] (p1-draftcontext-idb) Fixed on `feat/p1-followups`: `localSettingsFrom` now extracts `record.draftContext` (one line, mirrors `translationBrief`), so offline/IDB loads surface the local override instead of the server default. +1 read-path test (local draftContext=7 wins when server has none). tsc 0 · useProjectSettings+ProjectSettings 26. — `src/hooks/useProjectSettings.ts`
+## Known hazards for any agent touching these
+- [OPEN] (control-flow-string) OrgBreadcrumb.tsx:115 branches on `section !== "Projects"`,
+  5 callers pass that literal. Keying it naively duplicates a crumb in every non-English
+  locale. Translating this string CHANGES BEHAVIOUR.
+- [DONE] (keyed-but-dead) The 6 sites where a fully-translated key existed but
+  `err.message` won at runtime are fixed — see the WS-07 section below. One more,
+  structurally identical, pattern remains at EditorTable.tsx:4407/4481
+  (`editor.write.saveFailed` / `saveSourceFailed`) — left alone because the editor
+  namespace and this file are WS-06 territory, not because it's fine.
+- [OPEN] (bidi) "cells · 0 translated (0%) 3" reorders under RTL — that trailing number is
+  the bidi algorithm, not a missing translation. Needs FSI/PDI isolation, not a key.
+- [OPEN] (megafiles) ImportDialog.tsx is 3,618 lines / 14 components. WS-14 (project
+  settings) considered this same advice for ProjectSettings.tsx (2,041 lines) and
+  deliberately did NOT split it before keying: the file is a single component with
+  heavy shared local state (~30 `useState`s feeding one `handleSave`), so a split would
+  be a real refactor with its own regression risk, not a mechanical extraction — see the
+  WS-14 handoff section below for the reasoning. It stayed one file, fully keyed
+  (~330 keys once duplicates were consolidated, not the ~195 originally estimated). The
+  advice still holds for whichever wave picks up ImportDialog.tsx.
+- [OPEN] (stale-surface) The `project-settings` screenshot surface is already wrong: its
+  driver stops at /settings which now renders an 8-card index, not the ~150 form strings
+  its notes promise. Nothing detects this.
 
-## BLOCKERS (production-readiness — surface to user)
-- [DONE 2026-05-31] (sync-worker-6fail) FIXED by WS-SWTEST-FIX — all 6 confirmed stale tests; refreshed assertions + `d1-fake.ts`, ZERO production code touched (audio DELETE verified as intended F8 owner-DELETE, test renamed/split). sync-worker now **381/381 green** on main `e16759a`. (Historical diagnosis below.) 6 sync-worker tests failed on committed HEAD. **DIAGNOSIS: all are TEST-STALENESS, NOT production bugs** (full detail `docs/swarm/SYNC-WORKER-FAILURES.md`). The audio "auth bypass" is a **FALSE ALARM** (feature F8 / commit 1811d31 — sync-token DELETE by file owner is intended, fully auth'd; test is stale). Fixes: admin.test.ts×3 + audio.test.ts×1 = stale assertions (NOT in dirty set, safely fixable); files-read×2 = `d1-fake.ts:494–548` test-helper drift (IS the actor's dirty file → coordinate). Swarm NOT touching it (actor's active package, ~5-min fix for them). sync-worker *production code* is OK; only the *test suite* is stale.
-- [OPEN] (e2e-smoke-unrun) `npm run test:e2e:smoke` + hands-on golden-path QA NOT yet run (heavy dev stack; preview serves main not integration). The last untested Layer-1/Layer-2 gate. Run carefully off `.worktrees/swarm-integration` once feasible (it kills ports 8787/8788/5173 → would stop the running preview).
+## WS-02 / WS-03 handoff
+- [OPEN] (guard-forbidden-suppressions) `eslint-suppressions.json` (WS-02's ratchet
+  baseline, generated against the tree as of this commit) still carries entries for
+  `src/components/{TerminologyPage,RulesPage,RuleCreateDialog,RuleSuggestDialog}.tsx` —
+  files WS-03 is deleting. Not hand-edited out: the suppressions file is meant to stay a
+  pure ESLint-generated artifact. Once WS-03's deletion lands, run
+  `npx eslint --prune-suppressions 'src/**/*.tsx'` and commit the result — the rule will
+  no longer find those files, so pruning drops the stale entries automatically. No
+  manual JSON surgery needed.
 
-## Deferred features (need event-layer work — currently forbidden path)
-- [OPEN] (comments) Re-enable Comments UI. comment.create/edit/delete/resolve event kinds EXIST (`sync-worker/src/events/types.ts:22`) and `handlers/comment-events.ts` is being actively edited by the user. Pick up AFTER the user's sync-worker work commits. Then: wire `useComments` hook to real events + drawer surface. — `src/hooks/useComments.ts`, `src/components/CommentsPage.tsx:21`
-- [OPEN] (writeback) Transcript-to-cell writeback. `target.cell.commit` exists; verify it's not entangled in the in-flight `handlers/cell-events.ts` before implementing. — `src/components/CellTranscriptPreview.tsx:102`
-- [OPEN] (autofix) Autofix "Try to fix all" — needs bulk-patch flow over target.cell.commit. — `src/components/RuleDrawer.tsx:25`, `src/components/RulesPage.tsx`
-- [OPEN] (bulk-audio) Bulk transcribe-all + synth-all — cell.audio.* events exist; needs a client job coordinator. — `src/components/ProjectWorkspace.tsx` (transcribe-all warn)
-- [DONE 2026-05-31] (backtranslation-write) BUILT — `cell.backtranslation.set` event + `cell_backtranslations` projection + read route (sync-worker, migration 0021), statistical Markov glosser (`src/lib/completion/bt-glosser.ts`) + BT-tab edit/Polish/stale/role-gate (EditorTable), emit-on-save via outbox + hydrate-on-load via read route (ProjectWorkspace). BT now PERSISTS + syncs multi-user. On main `e16759a`. (The old "forbidden event layer" blocker is gone — the actor's sync-worker work landed; see ORCHESTRATION.md archive note.)
+## Lint-guard limitations (WS-02, i18n/no-unkeyed-string)
+- [OPEN] (guard-template-exprs) `tools/eslint-rules/no-unkeyed-string.cjs` cannot see
+  template literals WITH expressions (`` `Deleted ${n} files` ``) — only zero-expression
+  templates are treated as static strings. Interpolated strings are exactly the ones that
+  need catalog placeholders and plural categories, so this is a real coverage hole. Left
+  out deliberately: flagging static quasis inside an interpolated template raises the
+  false-positive rate a lot (`` `${label}:` `` would report the literal `":"`).
+- [OPEN] (guard-hoisted-arrays) Strings in const arrays/objects hoisted outside component
+  scope (`const ROLE_OPTIONS = [{ label: 'Owner' }]`, e.g. `LINK_ROLE_OPTIONS` in
+  ProjectMembersPage.tsx) are invisible to the rule — no data-flow analysis, so it cannot
+  know `.label` later reaches JSX. These two gaps are exactly the mechanisms behind the
+  most visible remaining leaks. A later workstream should close them via a typed
+  `MessageKey` prop convention rather than extending this AST-only rule.
+- [OPEN] (guard-ts-scope) Only `src/**/*.tsx` is linted. User-visible strings assembled in
+  plain `.ts` files (error messages in `src/lib/*` that surface in toasts; worker response
+  strings the UI renders verbatim) are out of scope for this client-side rule.
+- [OPEN] (guard-suppression-granularity) ESLint's bulk suppressions are counted per
+  (file, rule), not per line — exceeding a file's suppressed count re-reports every
+  suppressed violation in that file as an error (measured: 1 new string in a 20-violation
+  file surfaced 21 errors). Moving/reordering code in a suppressed file does not trip it;
+  the count is a ceiling, not a fingerprint.
 
-## Queued (no blocker, just not yet dispatched)
-- [OPEN] (btseed-glue) LLM-BT terminology seeding is BUILT in the service but NOT wired from the editor. `generateBacktranslation` now accepts optional `concepts?: Concept[]` + `sourceText?: string` (derives relevant preferred-rendering hints internally) OR explicit `terminologyHints?: {sourceTerm;preferred[]}[]` (explicit wins). Glue wave: at the ProjectWorkspace BT-generation call site feeding EditorTable's BT tab, pass the project's active `Concept[]` as `concepts` and the cell's source string as `sourceText`. Source active concepts the same way the statistical glosser seeds (`bt-glosser.ts` BtSeed). Both fields optional → omitting them is byte-identical to old behavior. — `src/lib/completion/backtranslation-service.ts` (SWARM-TODO(btseed-glue)), `src/components/ProjectWorkspace.tsx` (FORBIDDEN to this agent)
+## WS-07 handoff (AQU-820, error-message i18n wiring)
+- [DONE] (verbatim-bypass-remainder) All 9 remaining sites were checked
+  case-by-case against the DOM. 7 reached the user and are fixed; 2 were false
+  positives. See the DONE entries below for what each became.
+- [OPEN] (server-contract-codes) Three of the fixes had to COLLAPSE a
+  distinction the server does make, because the server expresses it only in
+  untranslated prose:
+  - `parse-document`: the worker separates "unsupported type" / "image-only or
+    encrypted" / "extractor threw" (auth-worker/src/routes/parse-document.ts
+    :170,196,201). The client now shows one keyed sentence naming the likely
+    causes, because the 422 case interpolates a raw exception and there is no
+    code to branch on.
+  - `monday`, `termbase`: the server's reason string is the only signal for
+    *why* a call failed; the client now shows a per-call-site keyed sentence
+    ("Couldn't save the Monday board link.") which says WHAT failed, not why.
+  Each is a strictly better user-facing outcome than untranslated server prose,
+  but the lost precision is real and comes back only with the deferred
+  `server-contract` item (error CODE + params). Do not "fix" these by
+  re-introducing the passthrough.
+- [OPEN] (approve-changeset-unkeyed) `src/pages/ApproveChangeset/ApproveChangeset.tsx`
+  now uses keyed error messages but the REST of the page is still hardcoded
+  English (0 other `t()` calls in the file). It is a standalone route with no
+  owning workstream — nobody's sweep currently includes it.
+- [OPEN] (monday-section-unkeyed) Same shape: `MondayIntegrationSection.tsx` and
+  `OrgSettingsMonday.tsx` now render translated errors, but their own labels and
+  the `Sync failed: {err}` / `Sync failed{: reason}` notice built inline at
+  MondayIntegrationSection.tsx:274,278 are unkeyed and still interpolate raw
+  server text from `MondaySyncResult.error` (a 200-response field, so it never
+  passed through `readError`). That notice is the one remaining raw-server-text
+  path in the Monday surface.
+- [OPEN] (dev-login-message) `devLogin()` in src/lib/frontier/auth.ts still
+  throws `Dev login failed (${res.status})`. Left alone deliberately: it is
+  `import.meta.env.DEV`-gated and never reachable in a production build.
 
-- [OPEN] (complete-all) Remove `comingSoon` on "Complete all"; implement run = `completeBatch(allUntranslated)` (completeBatch already chunks at 30) + spend/cost display + pagination. — `src/lib/workspace-actions/registry.ts:55`, `src/hooks/useCompletion.ts:66`, ProjectWorkspace actionArgs `:1166`. DEFER until WS-EXPORT releases ProjectWorkspace.tsx.
-- [DONE] (search) Parallel passages + project-wide search was NOT a stub — fully implemented server+client, just mis-wired. W2-B fixed the 1-line `useWorkspaceSearch` call (projectId was null). Plain FTS5 search panel now works.
-- [OPEN] (search-passages-panel) `useWorkspaceSearch` returns `searchParallelPassages` but `ParallelPassagesPanel` only exposes a single `onSearch` prop with no mode-aware routing. To surface the multi-project passages mode, extend the panel props (`onSearchPassages` or a mode arg). — `src/components/ParallelPassagesPanel.tsx`, `src/components/ProjectWorkspace.tsx`
+## WS-14 handoff (AQU-832, project creation / settings / sharing)
 
-## Learning loop follow-ups (W2-A landed the core)
-- [OPEN] (rule-suggest-cells) `RuleSuggestDialog` accepts an optional `cells` prop and suggests rules from validated pairs, but `RulesPage.tsx:75` renders it WITHOUT cells → "No human-validated translations found." Wire RulesPage to pass validated cells (use `useLivingMemory({projectId})` from `src/hooks/useLivingMemory.ts` to aggregate, adapt to `{status,original,translated}[]`). — `src/components/RulesPage.tsx` (claimed by W3-A).
-- [DONE] (memory-wiring) useCompletion call site activated at ProjectWorkspace.tsx:698 (rules + allProjectCells passed). Learning loop is LIVE.
+Scope: `ProjectCreateDialog.tsx`, `SharePanel.tsx`, `ProjectSettings.tsx` + its
+`ProjectSettings/*` sub-panels (`SettingsNav`, `ValidationSettingsSection`,
+`DecaySettingsSection`, `AudioMediaStrategySection`, `SourceLinkSection`,
+`LanguagesSection`, `ExperimentalFlagsSection` — already fully keyed by a prior wave,
+verified not re-touched), and `PermissionDeniedAlert.tsx`'s project-settings call site.
+Namespace `projectSettings`, ~330 keys (not the ~195 originally estimated for
+ProjectSettings.tsx alone — the audit undercounted; ProjectCreateDialog.tsx and
+SharePanel.tsx together contributed roughly as many again).
 
-## Fidelity bugs (found by round-trip verification W10 — `docs/swarm/ROUNDTRIP-FIDELITY.md`)
-- [DONE] (tsv-corruption) FIXED by W12 @ `25f4302`: `exporters/tsv.ts` now RFC-4180-quotes fields with `"`/tab/newline (import was already quote-aware). Round-trip TSV assertions flipped to clean. TSV now round-trips losslessly like CSV.
-- [NOTE] (tmx-untranslated) TMX drops untranslated (empty-target) cells — inherent to TMX (TM-exchange format). Not a bug; document only.
+- [DONE] (formatList-verified) The brief's structural blocker #1 — "verify a prior wave
+  converted the 'Saved: X, Y, Z.' call site to `formatList`" — was already true
+  (`ProjectSettings.tsx:812-813` pre-dates this wave). What was NOT done: the 32
+  `changedFieldLabels.push("lowercase english")` field-noun literals feeding that list.
+  All 32 are now `t("projectSettings.field.*")` or reuse an existing FieldLabel/section
+  key (see the no-duplicates note below). The `>3 changed` branch ("Saved N changes: …
+  +M more.") is now `plural({ other: "Saved {count} changes: …" })` —
+  `projectSettings.save.savedMany` — since it wasn't counted-string-safe before (a raw
+  template literal with no CLDR forms).
+- [DONE] (permission-denied-alert) Structural blocker #2. `PermissionDeniedAlert.tsx`'s
+  `action`/`requiredRole` props were raw `string`s a caller could (and did) pass
+  untranslated English into. Now `action: MessageKey` and `requiredRoleLevel?: RoleLevel`
+  — the component resolves both itself via `t()`/`resolveRoleName()`, so a caller
+  physically cannot pass raw English and have it compile. New composed key
+  `projectSettings.permission.roleOrHigher` ("{role} or higher") reuses
+  `resolveRoleName()`/`common.role.*` rather than minting a duplicate "Maintainer"
+  label, per the brief's "roles are done, don't mint labels" instruction — same pattern
+  now covers the two `sharedDisabledTooltip`/`renameDisabledTooltip` strings on
+  ProjectSettings.tsx that also used to say "Maintainer or higher" by hand. This is a
+  **shared component** — see the BLOCKERS entry above for the one cross-workstream call
+  site (ProjectMembersPage.tsx, WS-11) this leaves broken until picked up.
+- [DONE] (no-duplicates-sweep) `no-duplicates.test.ts`'s third assertion
+  ("does not let one exception excuse a second unrelated collision") turned out to be a
+  **hard block** on any 2+-key unexcused collision, not the warn-only first assertion the
+  doc narrative leads with — this wave's first ~250-key draft tripped it 3 different ways
+  (SharePanel's "Loading…" vs `common.loading`, a stray "Add" vs `common.add`, and a
+  breadcrumb "Project" vs `common.project`), then a systematic audit found 30 more
+  collision groups once the whole file was written. Resolution split two ways: (1)
+  **within `projectSettings` itself** — mostly a Title-Case FieldLabel and a lowercase
+  `field.*` delta-list noun for the same concept (e.g. "Model"/"model",
+  "Bible resources"/"Bible resources") — consolidated onto ONE key each (13 nouns
+  deleted from `field.*`, the call site now reuses the label/section key; the delta-list
+  sentence loses its all-lowercase styling for those items — e.g. "Saved: Model, Max
+  Tokens." rather than "Saved: model, max tokens." — a minor, accepted English cosmetic
+  regression, not a translation-fidelity one). "Target language"/"Source language"/
+  "Project name" each had a THIRD, sentence-case copy in `ProjectCreateDialog.tsx` too —
+  also consolidated onto the settings-page Title-Case key, so the create dialog's
+  labels are now Title Case where they used to be sentence case (see
+  `ProjectCreateDialog.extraLanguages.test.tsx`, updated). (2) **cross-namespace**, where
+  the colliding key lives in a namespace this wave is forbidden to edit (audio/
+  autopilot/editor/fileDetails/nav/search) — 15 reviewed entries added to
+  `duplicate-exceptions.ts`, each justified by a genuine surface/role difference (a
+  settings-card heading vs a nav-title, a term of art vs an everyday word), never by
+  case alone (the doc explicitly forbids that reason, and it's checked mechanically —
+  `no-duplicates.test.ts`'s second assertion hard-fails a case-only-justified entry the
+  moment the string stops colliding).
+- [DONE] (audio-media-labels) `AUDIO_MEDIA_STRATEGY_LABELS` in
+  `src/lib/parsers/types.ts` (a pure-lib data table, only consumed by
+  `AudioMediaStrategySection.tsx`) changed from `{ name, description }` string pairs to
+  `{ nameKey, descriptionKey }` `MessageKey`s, mirroring `roleNameKey()`/
+  `roleDescriptionKey()` in `src/lib/frontier/roles.ts` — same "pure lib returns a
+  descriptor, caller resolves it" shape already established there.
+- [DEFERRED] (monday-trio) `MondayIntegrationSection.tsx` + `MondayLinkedView.tsx` +
+  `MondayMappingEditor.tsx` (~50 strings, per the audit's own scope call) — left
+  entirely unkeyed, per instruction. Added a SWARM-TODO comment naming the deferral at
+  the top of `MondayIntegrationSection.tsx` so the next wave finds it without re-auditing.
+- [SKIPPED] (termbase-sharing) `TermbaseSharingSection.tsx` — gated behind
+  `SHOW_TERMBASE_SHARING_IN_SETTINGS = false` in `ProjectSettings.tsx`; per instruction,
+  untouched.
+- [SKIPPED] (local-models) `ProjectSettings/LocalModelsSection.tsx` — per instruction,
+  this is dead code from the settings surface's perspective (it actually mounts on
+  `/preferences`, another agent's area per `docs/swarm/ORCHESTRATION.md`); untouched.
+- [DEFERRED] (settings-search-keywords) `ALL_SECTIONS[].label` in `ProjectSettings.tsx`
+  is fully keyed (also reused as the matching Card's `<CardTitle>` where the text
+  matches exactly). `ALL_SECTIONS[].keywords` — the ~110-string English-only
+  search-matching index the audit counted separately from the 483 — was left as
+  literal English on purpose: it's compared against the raw (English) search-box input,
+  not rendered, so keying the array without ALSO building a per-locale keyword index and
+  reworking the match to try every locale's terms would be pure catalog bloat with zero
+  UX effect. Real localization of settings search is its own follow-up (translate the
+  query, or maintain keyword lists per locale) — flagging, not silently skipping.
+- [DEFERRED] (zod-validation-messages) `src/lib/forms/schemas.ts`'s `requiredString()`/
+  `optionalString` build a hardcoded `"${label} is required"` message consumed by
+  `<FieldError>` across MANY forms outside this wave's scope (org create/rename, team
+  create, login, onboarding steps, AddConceptDialog, provider sections — see the
+  file's other callers). `ProjectCreateDialog.tsx`'s own two `superRefine` custom
+  messages ("Target language is required", "Choose an upstream project") ARE this
+  wave's own code and are now keyed (`projectSettings.create.validation*`), built via a
+  new `buildProjectSchema(t)` — `useMemo`'d in the component since Zod schemas are
+  normally built at module scope where `useT()` isn't callable. The shared
+  `requiredString()`/`optionalString` helper itself was left untouched: fixing it
+  properly needs either a `MessageKey`-accepting variant or routing `FieldError`'s
+  rendering through `t()`, and touching it here would silently affect every other
+  workstream's forms without their review. Flagging for a coordinated follow-up, not
+  fixing in isolation.
+- [DONE] (permission-alert-test) Added two explicit regression tests to
+  `PermissionDeniedAlert.test.tsx` (`AQU-832: resolves \`action\` through the message
+  catalog rather than rendering it verbatim`, and the equivalent for
+  `requiredRoleLevel`) — the brief specifically asked for proof the component renders
+  translated action/role rather than raw English, which is the failure mode the old
+  `string` props allowed.
+- [DONE] (eslint-i18n-guard) `eslint-suppressions.json` pruned for every file this wave
+  touched — `i18n/no-unkeyed-string` now reports 0 remaining unkeyed strings in
+  `ProjectCreateDialog.tsx`, `SharePanel.tsx`, `ProjectSettings.tsx`, and all 5 keyed
+  `ProjectSettings/*.tsx` sub-panels (2 residual literal API path fragments in
+  `ProjectSettings.tsx`, `/chat/completions` and `/models`, marked
+  `// i18n-exempt` — technical path text inside `<code>`, not prose).
 
-## AQU-206 drill-down gaps
-- [OPEN] (drilldown-cells) TerminologyPage passes `cells=[]` to TerminologyTermDetail; occurrences list is empty until a follow-up wires useCells for the active file (or all project files). To pick up: import useCells + useProject in TerminologyPage, fetch cells for each file, map CellData[] into the detail prop. — `src/components/TerminologyPage.tsx` (drill-down guard, ~L650), `src/components/TerminologyTermDetail.tsx`
-- [OPEN] (drilldown-username) TerminologyPage passes `username="local"` to TerminologyTermDetail. Wire the real auth username (useIdentity / useProjectSettings) before shipping. — `src/components/TerminologyPage.tsx`
-- [RESOLVED] (drilldown-canEdit) now passes canEdit={canEditCells} (syncRole>=400 or local). TerminologyPage passes `canEdit={true}` unconditionally. AQU-208 is adding role-gating to TerminologyPage; once that lands, pass `permissions.canEditContent` here too. — `src/components/TerminologyPage.tsx`
+## [DONE] resolved traces
+- [DONE] (AQU-820) `src/lib/i18n/standalone.ts` — the provider-less `t()` that
+  WS-07 had copy-pasted into `user-error.ts` and `frontier/auth.ts` is now one
+  shared module, and both files import it. Nine more non-React modules needed
+  the same helper; a tenth copy was not the answer.
+- [DONE] (AQU-820) 7 verbatim-bypass sites fixed. The shape is the same
+  everywhere: the thrown `.message` is now a client-chosen keyed sentence, and
+  the server's raw string moves to `.cause` (or `UserError.raw`) so DevTools
+  keeps it.
+  - `SourceLinkSection.tsx` → throws `UserError`, catch renders
+    `toUserFacingError(err, "project").message` (which also covers the offline
+    case the old `err.message` catch showed as "Failed to fetch").
+  - `monday/api.ts` → `readError()` takes a `MessageKey`; 11 new
+    `error.monday.*` keys replace 11 hardcoded English fallbacks.
+  - `terminology/subscriptions-api.ts` → same, 7 `error.termbase.*` keys. Its
+    old fallbacks were bare diagnostics (`publishTermbase failed: HTTP 500`),
+    i.e. worse than the server text they were falling back from.
+  - `agent/artifact-upload.ts` → `common.uploadFailed` + new
+    `error.upload.emptyFile`/`tooLarge` (the two client-side pre-checks were
+    also unkeyed English).
+  - `frontier/parse-document.ts` → new `error.parseDocument.failed`. The 200-
+    with-no-`text` branch ("Worker returned empty text.") folds into the same
+    message: identical dead end for the user.
+  - `sync/archive.ts` → `parseError()` returns
+    `messageForStatus(status, raw, "project").message`. `linkProjectSource()`
+    now really throws `UserError`, which its doc comment had claimed all along.
+  - `ApproveChangeset.tsx` → 3 new `error.changeset.*` keys; the status-based
+    branch it already had is now the ONLY branch.
+- [DONE] (AQU-820) 2 of the 9 audited sites are FALSE POSITIVES, verified, no
+  change made — same reason as `cloud-projects.ts:366`:
+  - `frontier/admin.ts:142` — `readError(res)`'s return feeds
+    `new UserError(res.status, <here>)`, i.e. the `rawBody` parameter. It lands
+    on `.raw`/`.cause`, never on `.message`.
+  - `diarization/run-diarization.ts:114` — `ProjectWorkspace` stores the thrown
+    message in `diarizeError` but only ever reads it as a BOOLEAN (line 4913,
+    picking the keyed `nav.fileMenu.diarizeFailed` label). The string itself
+    never renders. The module's other messages ("diarization cancelled",
+    "diarization timed out") confirm the intent: these are diagnostics.
+- [DONE] (AQU-820) The 4 non-keyed hardcoded fallbacks are keyed, plus
+  `login()`'s own messages which wave 2 deliberately left:
+  `auth.login.failed` (new) covers Login.tsx, FrontierLoginForm, and both of
+  `login()`'s non-401 throws; `auth.login.invalidCredentials` (new) covers the
+  401. FrontierSignupForm reuses `auth.signup.failedGeneric` and
+  FrontierForgotPasswordForm reuses `auth.resetPassword.failedToSend` rather
+  than minting near-duplicates. `login()` no longer puts `(${res.status})` in
+  the visible message — `FrontierAuthError.status` already carried it.
+  Regression coverage: the 6 lib/page tests that ASSERTED the old passthrough
+  are inverted (they encoded the bug), and `parse-document.test.ts` is new.
+- [DONE] (AQU-820) `messageForStatus()` in src/lib/errors/user-error.ts — the 9 hardcoded
+  HTTP-status sentences (400/401/403/404/409/410/429/5xx/default) plus the 2 in
+  `toUserFacingError` (offline, generic fallback) are now keyed under `error.network.*` in
+  src/lib/i18n/namespaces/error.ts. Runs outside React, so it reads the active locale via
+  a small `t()` that mirrors I18nProvider's provider-less fallback (readStoredLocale +
+  CATALOGS + translate). Every UserError/messageForStatus caller across the app gets
+  translated messages for free.
+- [DONE] (AQU-820) auth.ts's 6 `body.error`/`body.detail` bypass sites (register,
+  redeemAccessLink, requestPasswordReset, verifyResetToken, verifyEmail, resetPassword)
+  now throw client-controlled, keyed messages instead of raw server text — login()'s
+  never-surface-server-body pattern applied to the rest of the file. register() is the one
+  exception that still shows server detail (woven into a translated frame,
+  `auth.signup.failedWithDetail`), because a username/email-conflict reason is genuinely
+  actionable and the server doesn't enumerate a fixed set of values for it.
+  redeemAccessLink()'s fix also closes a latent oracle risk: the function used to show
+  whatever `body.error` the server sent, which could in principle vary by failure reason
+  even though the file's own doc comment requires every failure to look identical.
+- [DONE] (AQU-820) 6 keyed-but-dead sites fixed: AccessLinkPage.tsx (the confirmed
+  example — removed a vestigial `/^Login failed/` regex check that made
+  `auth.accessLink.genericError` unreachable), ResetPassword.tsx x2
+  (`auth.resetPassword.failedToSend`/`failedToReset`), VerifyEmailPage.tsx
+  (`auth.verifyEmail.verificationFailed`), VideoAttachmentDialog.tsx
+  (`common.uploadFailed` — was showing raw IndexedDB exceptions), AssignModal.tsx
+  (`dialog.assign.error.unknown`). The ResetPassword/VerifyEmailPage sites needed no
+  component-side edit: their existing `err instanceof FrontierAuthError ? err.message : t(…)`
+  ternary was already correct once auth.ts stopped putting raw server text in `.message`.
+  Regression coverage: src/lib/frontier/auth.test.ts (server body text no longer reaches
+  `.message`, even when the server varies it) and
+  src/components/VideoAttachmentDialog.test.tsx (keyed message wins over a raw thrown
+  error).
 
-## Quality / hardening (pick up opportunistically)
-- [OPEN] (lastEditAt) `buildCellData` drops `lastEditAt` from CellRow → CellData; forward it (one-line client change) so recency-sorted views (Living Memory) work without server changes. — `src/hooks/useCells.ts`
-- [OPEN] (export-all-warn) `openExportFlow` is a console.warn stub. — `src/components/ProjectWorkspace.tsx:1162` (owned by WS-EXPORT)
-- [OPEN] (5 TODOs) Pre-existing diffuse TODOs: event-projection.ts ×2 (forbidden), useCells.ts, useCellWaivers.ts, RulesPage.tsx.
+## Quality / polish
+- [OPEN] (dup-rule-name) EditorTable.tsx:7169 renders `{rule.name}` immediately before
+  `— {inf.message}`, which already contains the name. It prints twice. Pre-existing bug
+  found during the audit.
 
-## License caution (judgment call baked in)
-- Aquilla is a COMMERCIAL product. Do NOT copy GPL/copyleft code (e.g. MateCat filters are LGPL). Implement CAT formats from the OPEN SPECS (OASIS XLIFF 1.2/2.0, LISA TMX 1.4b, TBX, SRX) or from Apache-2.0/MIT sources (e.g. Okapi is Apache-2.0). When in doubt, reimplement from spec.
+## [DONE] resolved traces
 
-## AQU-203 auto-BT (statistical BT on every target commit)
-- [DONE] (fro203-stat-bt-core) Statistical BT now fires automatically on every target commit. `src/lib/completion/bt-auto.ts` adds `buildStatisticalBt` + `shouldAutoRecomputeBt`. `ProjectWorkspace.tsx` wires auto-BT in `handleCellCommitted` (hand-typed EditorTable commits) and `commitCompletedCell` (AI completion commits). LLM polish remains opt-in via `runBacktranslation`. Seed wiring: preferred→+3, admitted→+1, forbidden→-3 (pre-existing code confirmed). `applyOptimisticTargetEditWithCapture` intercepts EditorTable's optimistic edit to capture which cell was last committed.
-- [DEFERRED-OK] (fro203-editortable-wiring) SWARM-TODO(AQU-203): EditorTable's `onCellCommitted` prop currently has signature `() => void` — it does NOT pass the committed cell or translated text. The current workaround captures the cell via `applyOptimisticTargetEditWithCapture` (intercepted at the `onOptimisticEdit` prop). If a more reliable signal is needed (e.g. for concurrent multi-cell edits), change `onCellCommitted` to `(cellId: string, translatedText: string) => void` in EditorTable.tsx (line ~343, ~1197, ~1386, all call sites). ProjectWorkspace.tsx would then receive the cell data directly in `handleCellCommitted`. NOT done now — EditorTable.tsx is forbidden for this agent. — `src/components/EditorTable.tsx:343`
+## Wave 1 additions
+- [OPEN] (load-flakes) `src/components/PermissionDeniedAlert.test.tsx` and
+  `src/context/OrgContext.test.tsx` pass in isolation but fail intermittently under
+  full-suite parallel load. THREE separate swarm agents reported these as "pre-existing
+  failures" when they are load flakes. Every agent brief now warns about them. Real fix:
+  isolate the shared localStorage/DOM state these tests race on. Until then they can mask a
+  genuine regression.
+- [OPEN] (stale-hashes) `source-hashes.json` does not exist yet. WS-01's staleness detection
+  only activates for a key once an import touches it, so English that changes under an
+  already-translated key is still undetected today. The wave-4 re-translation pass will
+  populate it. Latent gap, not live protection.
+- [DONE] (autopilot-aria) `autopilot.inspector.activity.logAria` now carries its own context
+  entry in `autopilot.ts`, and `LEGACY_CONTEXT_GAPS` is empty. The carve-out's self-correcting
+  check stays exercised: `catalogContextIssues()` takes the gap list as an optional argument,
+  so the stale-exemption path is still covered with the real list empty.
+- [OPEN] (lint-blind-spots) The ESLint rule cannot see template literals with expressions,
+  strings in hoisted const arrays, or `.ts` files. Those are exactly the mechanisms behind the
+  most visible leaks — typed `MessageKey` props (WS-05/WS-06) are the compensating control.
+- [DONE] (import-data-loss) i18n:import now merges. Verified: 2-key partial import preserves
+  all 1,335 translations; `--replace` retains the destructive path.
 
-## Deferred — BT + Terminology v1-core (built 2026-05-31, main `e16759a`; scoped-out tails)
-Both features shipped to spec for v1-core. These tails were deliberately deferred (design: `docs/superpowers/specs/2026-05-31-bt-terminology-design.md`). None block the demo.
-- [OPEN] (term-verdict-event) Server-emitted idempotent `cell.terminology.verdict` events. v1 DERIVES verdicts on read (concepts → rule engine: `src/lib/terminology/compile.ts` + `src/hooks/useRules.ts`), matching the derived-over-materialized preference. Materialized server verdicts (scale/privacy of subscribed concepts) = v2: new sync-worker event kind + fan-out re-derivation job.
-- [OPEN] (term-org-subscribe) Org termbase publish/subscribe (cross-project). Needs a `project_termbase_subscriptions` join table + implicit viewer grant on the upstream termbase + server-side union materialization. v1 = per-project termbase only. — stories `publish-termbase-to-org`, `subscribe-to-org-termbase`.
-- [OPEN] (term-lemmatizer) Concept-presence uses normalized exact match in v1. Per-language lemmatization (Strong's for Greek/Hebrew; spaCy/Stanza for moderns) = v2 (recall on inflected forms). — `src/lib/terminology/compile.ts`.
-- [OPEN] (term-concepts-as-cells) v1 stores concepts as a `ProjectRecord.terminology` blob synced via project-settings. The spec's richer model treats each concept as a CELL (per-concept history/validation/comments). v2. — `src/lib/terminology/types.ts`.
-- [OPEN] (term-ai-suggest) AI concept suggestions + review queue + merge-duplicates (stories `accept-ai-concept-suggestion`, `review-terminology-queue`, `merge-duplicate-concepts`). v2.
-- [OPEN] (term-dictionary) Dictionary entries as a separate file kind (open-ended lexicon/style-guide). v1 folds notes into concepts. v2.
-- [OPEN] (bt-termbase-seed-verify) The glosser IS seeded from the termbase (preferred=+3/admitted=+1/forbidden=−3 in ProjectWorkspace `buildGlosser` useMemo). Effectiveness not yet measured on a populated corpus — confirm BT quality improves as the termbase grows.
-- [NOTE] (localization-deferred) UI localization (CP-7/AD-16 `t(key)` shim + prose-clarity copy pass) was DEFERRED by the user this round — separate future effort, NOT part of this build.
-- [OPEN P3] (term-violation-face-indicator) Terminology `source-requires-target` violations render in the cell's **Issues tab** + the source term gets a dotted underline, but there is **no face-level indicator** (blot/count badge) on the UNEXPANDED row — a translator scanning rows won't see a terminology-violation signal without expanding the cell. `source-requires-target` is about the *absence* of a required rendering (no character span to blot), so it needs a row-level infraction badge/count rather than an inline blot. UX polish, not a break. — `EditorTable` row face / infraction-count rendering. (Found in final QA, `UI-QA-PUNCHLIST.md` → Re-QA 2.)
+## Wave 2 additions
+- [DONE] (permission-alert-flake) Fixed: the test gated on prop-derived text then counted
+  styled spans, while the account name arrived from an async session. Waits on the async
+  value now. Full suite 7121/7121.
+- [OPEN] (orgcontext-flake) `src/context/OrgContext.test.tsx` is the remaining known load
+  flake — same class, not yet diagnosed. Passes 5/5 in isolation.
+- [OPEN] (movetocorpus) `MoveToCorpusDialog` inside ProjectWorkspace.tsx (~line 6600) still
+  hardcodes "Move to corpus" / "Ungrouped" / "Create a corpus" / "Corpus name". Out of WS-05's
+  named scope. Cancel/Save there can reuse common.cancel/common.save.
+- [OPEN] (derivetitle-parallel-source) `editor.navTitle.*` is a parallel English source for
+  words `nav.*` also owns; one collision ("Terminology") already surfaced and was deduped.
+  Several more (`Members`, `Teams`, `Project settings`) will collide once the org/settings
+  sweeps add their keys. Decide ownership before wave 4 rather than minting exceptions.
+- [DONE] (ws07-remainder) All 9 closed: 7 fixed, 2 false positives (frontier/admin,
+  diarization/run-diarization — neither string reaches the DOM). See the WS-07 section.
+- [OPEN] (ungrouped-sentinel) `group-by-corpus.ts` / `section-index.ts` "Ungrouped" is a
+  load-bearing sentinel compared by `AssignModal.tsx:293,608` and `ExpandableFileList.tsx:132`.
+  Needs a stable identity key split from the display label before it can be localized.
 
-## WS-WARN pre-acceptance terminology advisory band (Slice 4)
-- [OPEN] (preaccept-band-mount) `PreAcceptanceWarningBand` + `detectPreAcceptanceWarnings` are built standalone and unit-tested but NOT wired. Glue wave must mount the band in the copilot completion path in `src/components/ProjectWorkspace.tsx` (FORBIDDEN to the building agent): compute warnings via `detectPreAcceptanceWarnings(completionText, sourceText, activeConcepts)` when a completion returns, re-render against the POST-ACCEPT back-translation verdict, and keep it ADVISORY ONLY (never gate the accept/commit). — `src/components/PreAcceptanceWarningBand.tsx`, `src/lib/terminology/preacceptance.ts`
+## Wave 2 verification (live Arabic run, integration branch)
+Confirmed FIXED on screen: Terminology → المصطلحات · Setup: 2/4 → الإعداد: 2/4 ·
+Synced → متزامن · No file open → لا ملف مفتوح · Comments → التعليقات · empty state fully Arabic.
+Still English, each attributable to a LATER scheduled wave (not a wave-2 miss):
+- [OPEN] (import-button) The top-left "Import" button lives in `ImportDialog.tsx` (3,618 lines,
+  ~183 keys) — the import/export area, wave 4. WS-05 keyed `nav.workspaceActions.import`
+  (→ استيراد) for the workspace-action registry, which is a different control.
+- [OPEN] (breadcrumb) "Editor / Dev Project / Dev Org / All organizations" — "All organizations"
+  is `src/components/org/OrgHome.tsx:723`, the org/teams area (wave 3/4). "Dev Project" and
+  "Dev Org" are DATA and correctly stay untranslated.
 
-## PD4 carry-forwards (2026-06-09)
-- [OPEN] (fro180-group-detach) Revoke-all removes the direct project_members row only; spec (members-and-sharing.md) wants group-detach too. Result dialog hints at remaining non-removable paths. Needs group-management surface — follow-up issue filed. — auth-worker/src/routes/project-members.ts, src/components/ProjectMembersPage.tsx
-- [OPEN] (fro233-mixed-runs) DOCX export: mixed-format paragraphs collapse to dominant (first text-bearing) run's rPr. Full fidelity needs import-time per-run text→format map stored alongside cells. — src/lib/export/exporters/docx.ts (SWARM-TODO in header)
-- [RESOLVED 2026-06-09] (org-settings-floor) Premise was partly stale: the client floor was already MAINTAINER(600) (ORG_SETTINGS_WRITE_MIN_ROLE), and below-floor callers were blocked before the optimistic apply. The real gap was forbidden/error PATCH responses never reverting the optimistic write ("a refresh will revert" comment with no refresh call). Fixed: rollback to pre-write snapshot + refresh on forbidden/error; floor guard comment; useOrgSettings.test.ts covers floor, blocked-no-apply, and rollback. — src/hooks/useOrgSettings.ts (commit 6573e81)
-- [OPEN] (userules-patchshared) useRules.ts calls patchShared fire-and-forget; rejections silently dropped (same fail-loud gap AQU-255 closed in useProjectSettings). — src/hooks/useRules.ts
-- [OPEN] (pw-stale-floor-comments) ProjectWorkspace.tsx ~:2124/:2180 still carry stale "mismatch" notes about the 500/600 floor — now fixed by AQU-255; update comments opportunistically. — src/components/ProjectWorkspace.tsx
-- [OPEN] (fro173-backfill-decision) PRODUCT DECISION: legacy GitLab audio EXISTS and was deliberately deferred by the importer. Backfill = scripts/migrate-all.ts --audio --apply (canary --only <gitlabId> first; needs GitLab LFS access + SYNC_SECRET_KEY + staging worker). Full evidence: docs/swarm/AUDIO-GAP-FRO173.md.
+## Wave 4 lesson — forbid sub-delegation in agent briefs
+WS-11 (org area) spawned SIX of its own subagents into its single worktree and then
+reported "finished" while all six kept writing. Consequences observed:
+- The completion notification was misleading; `tsc` and `vitest` results were a moving
+  target for ~25 minutes. Two rounds of "fixes" I made were against files that changed
+  underneath me.
+- `tsc -b` is INCREMENTAL: it reported errors at line numbers from a cached build, sending
+  me to the wrong code. Delete `*.tsbuildinfo` before trusting a `tsc -b` run on a worktree
+  other agents have been writing to.
+- The namespace-per-agent scheme prevents collisions BETWEEN workstreams, but WS-11's six
+  children shared one namespace and re-created the problem inside it: duplicate
+  `org.assignWork.groupAriaLabel`, plus `org.guestOrgHome.loading` / `org.orgHome.*`
+  colliding with `common.loading` and `common.project`. Two children caught and fixed their
+  own; the rest needed orchestrator dedupe.
+- `echo "tsc: $?"` after a pipe reports the exit code of the LAST pipeline stage (`tail`),
+  not tsc. Use `npx tsc -b --noEmit > out.txt 2>&1; echo $?`.
 
-## PD5 carry-forwards (2026-06-09 overnight run)
-- [OPEN] (fro177-retain-validations-server) The Replace "Retain my validations" toggle threads `retain_validations` onto `target.cell.commit` payloads, but the sync-worker projector IGNORES the field — no validation re-anchoring happens server-side (spec Q25). UI-QA: if the label reads as a promise, implement projector support or soften the copy. — src/lib/sync/events-emit.ts, sync-worker projector.
-- [OPEN] (fro181-cell-edges-graph) AD-14 confidence derives via FTS top-k neighbors (existing mechanism), NOT a materialized `cell_edges` graph; `WITH RECURSIVE` spec language not literal yet. DO `health.rollup` push-broadcast also deferred — client polls `GET /api/v1/projects/:id/health-rollup`. — sync-worker/src/events/health-rollup-route.ts, src/hooks/useHealthRollup.ts.
-- [OPEN] (fro181-endorsement-writes) `cells.endorsement_count` column retained and still WRITTEN by event-projection; all reads migrated off it. Cleanup = stop writing + eventual column drop (needs its own migration). — sync-worker event-projection.
-- [OPEN] (fro178-morph-surfacing) Macula import populates cell_word_morph (migration 0032) and imports as a normal source file, but no editor surface renders morphology yet. Follow-up UI: per-word morph popover/interlinear. — src/lib/parsers/macula.ts, sync-worker/src/events/import-morph-route.ts.
-- [OPEN] (fro175-chat-tails) Chat panel: cross-session persistence (needs table/IDB) + markdown rendering in bubbles deliberately deferred. — src/components/ChatPanel.tsx, src/hooks/useChat.ts.
-- [HITL] (fro215-homepage-flags) 4 marketing-claim judgment calls for the user in docs/swarm/HOMEPAGE-AUDIT-215.md (stats attribution, partner-band consent, JESUS Film trademark, "system learns" claim). RESOLVED 2026-06-09: the audit's 5th flag ("BT not delivered") was a FALSE NEGATIVE from a stale claims audit — wave-1 UI-QA verified BT live (statistical gloss + optional LLM polish); audit doc corrected.
+**Rule for all future briefs: the agent does the work itself and MUST NOT spawn subagents.**
+If an area is too large for one agent, the ORCHESTRATOR splits it into separate workstreams
+with separate worktrees and separate namespaces — that is the only split that preserves the
+isolation the merge protocol depends on.
 
----
+Also of note: bidi isolation belongs on VISIBLE text only. WS-11 wrapped an aria-label in
+FSI/PDI, which broke `toHaveAccessibleName` — screen readers linearise text, so the invisible
+control characters are pure noise in an accessible name.
 
-## PD6 wave (2026-06-10) — AQU-262/263/264 [re-append; first append was clobbered by concurrent session]
+## Adversarial review before promotion (3 read-only skeptics over `git diff dev...HEAD`)
 
-Orchestration: docs/swarm/PD6-ORCHESTRATION.md. Base main@cfd4470 → promoted main@9628782 (--no-ff).
-- [DONE] AQU-262 tour copy + org-switcher step (743c78e) — UI-QA PASS.
-- [DONE] AQU-263 hero subtitle centering + .aq-blitz-verse same-reset fix (de03d11) — UI-QA PASS.
-- [DONE] AQU-264 team edit button/no-wipe rename/project links (a25de34) + server description in
-  getOrgGroupDetail (db0a005) — UI-QA PARTIAL: description-prefill not live-verified (user's own
-  dev stack held :8788, browser hit old server — which DID verify the defensive no-wipe path);
-  server half covered by groups-read.test.ts. Sub-600 gating not live-verified (pre-existing gate,
-  restyle-only change). Follow-up QA: re-check prefill once deployed.
-- [DONE] Orchestrator fix 7cdb650: rls-backstop.test.ts TS7022 (UXA AQU-289 file) broke
-  `cd auth-worker && tsc --noEmit` on main — 3-line annotation.
-- [DONE] (pd6-syncworker-tsc-debt) `cd sync-worker && npx tsc --noEmit` was RED on main with ~60
-  errors in TEST files only (CellRow/EventRow/CellsFtsRow not assignable to Record<string,unknown>
-  in pg-test-db helper signatures; node:fs resolution in pg-test-db.ts). Pre-existing (last touch
-  4728e9c D1-redact). Resolved 2026-06-10: Seed/seedRows widened to `ReadonlyArray<object>` (one
-  internal cast, no call-site casts) + `"node"` added to tsconfig types (matches auth-worker).
-  tsc exits 0; runtime tests stayed green 552/552.
+### Fixed before merge
+- [DONE] (plural-latn) **BLOCKER.** Four `plural()` keys were fed counts formatted by
+  `formatNumber`, which does not force `numberingSystem: "latn"`. `pluralCountFrom` recovers
+  magnitude by stripping non-ASCII digits, so an Arabic locale rendering Arabic-Indic numerals
+  yielded `undefined` and pinned EVERY count to the `other` form — silently, permanently, and
+  only in Arabic. Sites: DcsPanel ×2, HelloaoPanel, BiblicaPanel (the reviewer found 3; a
+  sweep found the 4th). Verified exhaustively: 0 plural keys fed by a non-latn formatter.
+- [DONE] (nav-title-english) **SERIOUS.** `deriveNavTitle` resolves against the English base
+  catalog by design, so the workspace breadcrumb and nav-history label were English in every
+  locale. Both `ProjectWorkspace` call sites migrated to `deriveNavTitleKey` + `t()`. The
+  `section === "Editor"` check compared a RENDERED label and would have stopped matching once
+  translated; it now compares the message key.
 
----
+### Traced, NOT fixed before merge (deliberate)
+- [OPEN] (arrows-in-strings) **SERIOUS.** Literal `→`/`←` inside catalog STRINGS:
+  `autopilot.ts:493`, `nav.ts:349`, `rules.ts:202,216`, `importExport.ts:40`. CSS cannot mirror
+  a glyph embedded in prose, so it points against the reading flow in Arabic. NOT fixed here
+  because changing the English invalidates those keys' translations in four locales and
+  triggers a re-translation cycle — do it as its own pass with the import loop, not under
+  merge pressure.
+- [OPEN] (bidi-import-panels) **SERIOUS.** None of the 8 import panels wrap embedded numbers in
+  `bidiIsolate`, while `StatusBar`/`FileDetailsModal` correctly do. Multi-digit counts inside
+  Arabic sentences are exposed to bidi reordering. Mechanical but touches 8 components;
+  deserves its own verified pass.
+- [OPEN] (originsRef-exits) MINOR/latent. `UploadPanel`'s `originsRef` is not cleared on the
+  parse-failure early return or the checkpoint fast-path. Not exploitable today — the upload
+  and gdrive variants are separate mounts and the Drive picker always overwrites before use —
+  but it becomes real if a dropzone is ever added beside the picker in one instance.
+- [OPEN] (ungrouped-sentinel) MINOR. `group-by-corpus.ts:57` still emits the literal
+  `"Ungrouped"`, compared in `AssignModal.tsx:293,613` and `ExpandableFileList.tsx:132,135`.
+  Pre-existing gap, unchanged by this diff; needs an identity key split from the display label.
 
-## UXA swarm (2026-06-10) — UX Journey Audit, AQU-265..298 — CONVERGED
-
-All 34 issues Fixed + promoted to main (final UI-QA on 7d934fd; punchlist 6c63e85).
-Orchestration: docs/swarm/UXA-ORCHESTRATION.md. Open follow-ups:
-
-- [OPEN] (uxa-deploy-migrations) Migrations NOT applied to live Neon: db/postgres 0034_rls_backstop,
-  0035_backfill_validation_count_threshold (AQU-279 backfill), 0036_files_soft_delete, 0037_cells_ai_drafted;
-  auth-worker 0034_ai_usage_daily. Apply via scripts/neon-migrate.ts; CI ledger check flags until applied.
-- [OPEN] (uxa-rls-staging) AQU-289 RLS: PGlite can't test role-level policy enforcement — verify on a
-  staging Neon branch (runtime role + policies) before trusting; rollback = per-table DISABLE RLS.
-- [OPEN] (uxa-284-env) AQU-284 mention emails need RESEND_API_KEY/EMAIL_FROM/BASE_URL in sync-worker env.
-- [OPEN] (uxa-265-enforce) AQU-265 AI caps ship LOG-ONLY (AI_BUDGET_ENFORCE unset); flip to "true" after
-  sizing thresholds (defaults: user 500/day, global 5000/day).
-- [OPEN] (uxa-dev-jwt-mismatch) Pre-existing dev-env bug: auth-worker vs sync-worker JWT secrets differ in
-  .dev.vars → all sync API calls 401 on the dev stack; blocked full UI-QA of AQU-272 restore + AQU-279/280
-  aggregate %. Fix .dev.vars parity; re-verify those two flows.
-- [OPEN] (uxa-validation-history-dead) ValidationHistoryTimeline is dead UI (validationHistory always []);
-  EditorTable was locked during AQU-298 — delete in a follow-up.
-- [OPEN] (uxa-283-joinpage-prewarn) JoinPage doesn't pre-warn on invite email mismatch (server now enforces;
-  user learns via 403) — small UX follow-up.
-- [NOTE] (uxa-291-rescue-stash) Stash "rescue: foreign media-timeline WIP found in fro-291 worktree" is
-  REDUNDANT (that WIP was the user's media-lens work, committed as 5750005) — safe to drop after confirming.
-
-## 2026-07-01 — Swarm: Prototype Debugging (Biblica demo bugs)
-- Base: main tip `77cd6abb7` (main is live/moving; re-verify before promotion). Integration: `swarm/proto-debug-integration`.
-- Surface-mapping: 2 Explore agents completed (AQU-457, AQU-458); 2 died on mid-turn process exit (AQU-455, AQU-460) → re-mapped in-process via grep.
-- Collision found+resolved: AQU-455 & AQU-460 both could touch `ProjectWorkspace.tsx` → serialized (455 wave 1 forbidden from it; 460 wave 2).
-- Wave 1 dispatched (sonnet, isolated worktrees off integration tip): AQU-455 (a20c9007), AQU-457 (aebd06ec), AQU-458 (a78dcf9e). All 3 claimed → Dispatched, assigned Ryder.
-- Wave 2 (pending wave-1 merge): AQU-460 Bible-resources default (needs brainstorming/design).
-- 2026-07-01 · WS D · AQU-460 → integration `02fdf5861` (ff) · root tsc ✅ · vitest 394f/3230 ✅ (ONE flaky fail on first run, 0 on two re-runs — known happy-dom teardown flakiness, not a regression). Bible-resources default: auto-enable when flag-unset + scripture-file + MAINTAINER+; card surfaced. Adversarial-verify wf + live UI-QA running.
-- 2026-07-01 · **AQU-460 adversarial-verify wf = FIX-FIRST (HIGH)**: settings-hydration race — auto-enable effect reads `bibleResourcesEnabled` before the async settings GET hydrates, so an explicit server `false` reads as `undefined` on first render → effect fires → overrides opt-out (trust violation). Also: on-load PATCH bumps version + stamps updatedBy to the opener; hint copy shown regardless of role; effect untested. → AQU-460 back to Dispatched; finisher a16ecacd gating effect on `hasFetched`. Live UI-QA (acf6e4df) still running — its check#3 (toggle OFF→reload→stays OFF) should confirm the race empirically.
-- 2026-07-01 · **AQU-460 live UI-QA CONFIRMS the race** (independent of the adversarial wf): Check3 (toggle OFF→Save→back-to-editor) FAILED deterministically ×2 — Settings-save remounts ProjectWorkspace, resetting the instance-scoped fired-ref; remounted minimalProjectRecord + fresh useProjectSettings read `undefined` while server holds `false` → auto-enable re-writes `true` in ~0.5s. Normal opt-out path, not an edge case. Checks 1/2/4/5 PASS. Finisher a16ecacd hasFetched-gate fixes exactly this (effect waits for settings GET → sees real false). After fix: focused live re-QA of Check3 required before promote.
-- 2026-07-01 · **AQU-460 focused re-QA FAILED ×2** — settingsHasFetched gate insufficient; multi-instance remount race (stale in-flight refresh flips hasFetched against transient/stale value → unrequested true PATCH overrides explicit OFF, server false→true v44/v46). Secondary (auto-enable-genuinely-unset) PASS. ROOT ISSUE: persist-on-load effect is race-prone by design → correct fix = DERIVE-ON-READ (explicit ?? isScripture at consumers + server aquifer gate), no write-on-load. 3 gate attempts failed. AQU-460 → Dispatched; escalating scope decision to user (descope to safe discoverability half vs derive-on-read redesign). AQU-455/457/458 verified & green, held on dirty main.
-- 2026-07-01 · **AQU-460 derive-on-read adversarial wf = PROMOTE** (correctness CONFIRMED sev-none; regression REFUTED sev-low). Trust invariant (explicit false wins) holds client+server; all consumers read derived value; server gate short-circuits explicit before the bounded+indexed files.kind query (idx_files_project_active, fails-closed); nothing writes on load. Regression lens inverted derivation → 6/8 tests failed (non-vacuous). 3 LOW/semantic follow-ups (non-blocking): (1) test assert exact false payload, (2) route-level explicit-false+scripture→404 test, (3) no affordance to reset to derived default. Independent live-QA running to close explicit-OFF empirically.
-- 2026-07-01 · **AQU-460 derive-on-read independent live-QA: 4/4 PASS**. Check1 (explicit OFF respected) PASS ×2 hard-reload+nav — server false, version frozen @51, ZERO unrequested writes (the invariant that failed 3× is now solid). Check2 scripture-default-on no-write (settings stayed v0). Check3 non-scripture off no-write. Check4 explicit-on 200. Trust invariant SOLID. NON-BLOCKING display race found: ProjectSettings switch transiently paints checked (~2-5s, rarely >5s) for server-false scripture project — seededRef baseline locks pre-hydration undefined → derived-true; never persists/writes. Dispatched finisher ae774a30 to fix display (gate baseline seed on hasFetched / read hydrated value); self-verifying live. Then re-gate + promote AQU-460.
-
-## §PD7 (2026-07-06) — Prototype Debugging Urgent/High batch (13 issues, promoted dev@0189d3971)
-
-Deferred/open tails, honestly traced:
-- **AQU-361 happy path unverified live**: dev stack's cell-completion route (auth-worker routes/chat.ts
-  completion path) has no `OPENROUTER_BASE_URL` override, so mock-openrouter can't serve it keyless —
-  only the failure-banner path was live-verified. DX gap: add the override like the Agent/chat route.
-- **AQU-360 "Omni voice" hover string**: not present anywhere in this tree — likely prod/main divergence;
-  labels now derive from the same provider resolution the synthesis call uses. Follow-up chip: NewVoiceModal
-  still offers only Gemini/Clone (orphaned 4-provider CharacterModal exists).
-- **AQU-366 original symptom never reproduced**: the intermittent "list won't scroll" couldn't be triggered
-  live (real wheel-scroll works); shipped overscroll-contain + structural regression tests as hardening.
-- **AQU-414 root attribution**: regular-chat spend is recorded under org 0 by design/accident
-  (auth-worker routes/chat.ts hardcodes orgId=0) — labels are now honest, but real per-org chat attribution
-  needs a product decision + creditGuard change (chip task_7bc10238).
-- **AQU-334 residual server gap**: AiInstructionsStep/AiModelsStep persist via IDB/localStorage-only paths
-  that never reach the maintainer-gated PATCH /settings — client gating closes the UI, but the write path
-  itself has no server floor to hit. Needs a follow-up (route the checklist saves through the gated PATCH).
-- **AQU-347 legacy route**: the single-project invite preview (`/invite-preview/:token` family) has the same
-  no-`used_by`-check bug the multi route had (fixer chip spawned).
-- **AQU-346 org-level removal**: org-member removal routes do NOT yet send the DO eject (project-member
-  routes only); org removal cascades access loss without the live kick.
-- **scripts/e2e-up.ts**: same `env:`-vs-`--var` wrangler bug dev-stack.ts had (vars never reach c.env) —
-  chip spawned.
-- **New issue filed from QA**: AQU-481 — viewer role can open/interact with the full Import dialog
-  (server rejects; affordance honesty gap).
-- **QA cadence lesson**: three rounds were needed for AQU-347 (server logic → client Authorization header →
-  browser HTTP-cache of the anonymous 410). "Server returns the right thing" ≠ "the UI shows it" —
-  the live-UI gate caught both inert halves; unit suites alone would have shipped them broken.
+### Clean on review
+Deletions verified genuinely unreachable in the MERGED tree (dev had not advanced past the
+merge base). Tests not weakened — removals are exactly the deleted components' own specs;
+`it()` blocks went 47 removed / 99 added. `roles.ts` keeps `roleName()` untranslated for
+comparisons. Placeholder agreement across all six Arabic plural forms: 163/163 keys, 0
+mismatches. RTL conversion correctly left media timelines/waveforms/playheads physical.

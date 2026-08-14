@@ -1,4 +1,4 @@
-import { test, expect } from "../../helpers/multi-user"
+import { test, expect, orgRoute } from "../../helpers/multi-user"
 
 /**
  * AccountSwitcher — "Add another account" dialog + forgot password flow.
@@ -15,7 +15,7 @@ import { test, expect } from "../../helpers/multi-user"
  * verify dialog title becomes "Reset your password".
  */
 test("account switcher add-account dialog Forgot password switches to reset mode", async ({ alice }) => {
-  await alice.goto("/projects")
+  await alice.goto(orgRoute(alice, "/overview"))
   // Open the account switcher (username button with ChevronsUpDown icon).
   const accountBtn = alice.getByRole("button", { name: /Account menu: alice/i })
   await expect(accountBtn).toBeVisible({ timeout: 10_000 })

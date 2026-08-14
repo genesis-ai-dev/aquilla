@@ -4463,9 +4463,9 @@ export function ProjectWorkspace() {
       // stays visible; everything else unpinned collapses into "More".
       { id: "comments", labelKey: "common.comments" as const, icon: MessagesSquare, pinned: true,
         badge: Array.from(openCommentCount.values()).reduce((a, b) => a + b, 0),
-        onClick: () => navigate(`/project/${projectId}/comments`) },
+        onClick: () => openOverlay("comments") },
       { id: "terminology", labelKey: "nav.sidebarSection.terminology" as const, icon: BookOpen, pinned: true,
-        onClick: () => navigate(`/project/${projectId}/terminology`) },
+        onClick: () => openOverlay("terminology") },
       { id: "living-memory", labelKey: "nav.sidebarSection.memory" as const, icon: BookMarked,
         onClick: () => navigate(`/project/${projectId}/memory`) },
       // Audio/Media lens lives in the header EditorModeToggle — keep it out of
@@ -5079,15 +5079,6 @@ export function ProjectWorkspace() {
       },
     )
 
-    if (canAssignWork) {
-      items.push({
-        id: "assign-work",
-        label: t("dialog.assign.title"),
-        icon: UserCheck,
-        onClick: () => setAssignModalOpen(true),
-      })
-    }
-
     if (lens === "audio" && canDiarize) {
       items.push({
         id: "diarize",
@@ -5154,7 +5145,7 @@ export function ProjectWorkspace() {
     if (canAssignWork) {
       items.push({
         id: "assign-work",
-        label: "Assign work",
+        label: t("dialog.assign.title"),
         icon: UserCheck,
         onClick: () => {
           setAssignTargetFileId(null)

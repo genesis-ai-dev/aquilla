@@ -61,5 +61,5 @@ test("file hydration shows explicit progress and withholds unresolved zero stati
 
   const workspace = new Workspace(alice)
   await workspace.waitForEditor(seeded.cellIds[0])
-  await expect(alice.getByText(/cells · \d+ translated/).first()).toBeVisible()
+  await expect(alice.locator("footer").getByText(/cells.*translated/i).first()).toBeVisible()
 })

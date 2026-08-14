@@ -1,4 +1,4 @@
-import { test, expect } from "../../helpers/multi-user"
+import { test, expect, orgRoute } from "../../helpers/multi-user"
 
 /**
  * FrontierForgotPasswordForm — validates email on submit.
@@ -6,7 +6,7 @@ import { test, expect } from "../../helpers/multi-user"
  * Submit stays enabled; clicking with an empty/invalid email shows validation.
  */
 test("forgot password form validates email on submit", async ({ alice }) => {
-  await alice.goto("/projects")
+  await alice.goto(orgRoute(alice, "/overview"))
   const accountBtn = alice.getByRole("button", { name: /Account menu: alice/i })
   await expect(accountBtn).toBeVisible({ timeout: 10_000 })
   await accountBtn.click()

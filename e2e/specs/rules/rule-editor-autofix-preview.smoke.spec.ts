@@ -5,9 +5,9 @@ import { jwtFor, seedProjectWithFile } from "../../helpers/seed-project"
  * RuleEditor — autofix "Preview on sample text" input shows before/after.
  *
  * When the autofix section is expanded in RuleEditor.tsx:
- *   - A "Find pattern" input (placeholder="pattern")
- *   - A "Replace with" input (placeholder="replacement")
- *   - A "Preview on sample text" input (placeholder="Type sample text to see before/after…")
+ *   - A "Find pattern" input
+ *   - A "Replace with" input
+ *   - A "Preview on sample text" input
  * (data-autofix-field attributes belong to the rule-row AutofixEditor in
  * RulesSurface.tsx, not to RuleEditor.)
  *
@@ -39,18 +39,18 @@ test("rule editor autofix preview shows before/after transform", async ({ alice 
   await expect(toggleAutofix).toBeVisible({ timeout: 3_000 })
   await toggleAutofix.click()
 
-  // Fill the autofix find pattern and replacement (RuleEditor's autofix
-  // inputs are identified by their literal placeholders).
-  const afPatInput = alice.locator('input[placeholder="pattern"]')
+  // Fill the autofix find pattern and replacement through their accessible labels.
+  const dialog = alice.getByRole("dialog", { name: "Create translation rule" })
+  const afPatInput = dialog.getByRole("textbox", { name: "Find pattern" })
   await expect(afPatInput).toBeVisible({ timeout: 5_000 })
   await afPatInput.fill("hello")
 
-  const afReplInput = alice.locator('input[placeholder="replacement"]')
+  const afReplInput = dialog.getByRole("textbox", { name: "Replace with" })
   await expect(afReplInput).toBeVisible({ timeout: 3_000 })
   await afReplInput.fill("world")
 
   // Type in the sample text preview input.
-  const sampleInput = alice.locator('input[placeholder="Type sample text to see before/after…"]')
+  const sampleInput = dialog.getByRole("textbox", { name: "Preview on sample text" })
   await expect(sampleInput).toBeVisible({ timeout: 3_000 })
   await sampleInput.fill("say hello there")
 

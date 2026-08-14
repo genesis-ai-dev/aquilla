@@ -1,4 +1,4 @@
-import { test, expect } from "../../helpers/multi-user"
+import { test, expect, orgRoute } from "../../helpers/multi-user"
 
 /**
  * FrontierSignupForm — show/hide password toggle in the create account form.
@@ -16,7 +16,7 @@ import { test, expect } from "../../helpers/multi-user"
  * click "Hide password" → verify reverts.
  */
 test("signup form show/hide password toggle switches input type", async ({ alice }) => {
-  await alice.goto("/projects")
+  await alice.goto(orgRoute(alice, "/overview"))
   // Open account switcher.
   const accountBtn = alice.getByRole("button", { name: /Account menu: alice/i })
   await expect(accountBtn).toBeVisible({ timeout: 10_000 })

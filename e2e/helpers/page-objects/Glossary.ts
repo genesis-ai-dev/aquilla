@@ -25,7 +25,9 @@ export class Glossary {
     const dialog = this.page.getByRole("dialog")
     await expect(dialog).toBeVisible({ timeout: 5_000 })
     await dialog.getByPlaceholder("New source term…").fill(sourceTerm)
-    if (rendering) await dialog.getByPlaceholder("rendering", { exact: true }).fill(rendering)
+    if (rendering) {
+      await dialog.getByRole("textbox", { name: "Rendering", exact: true }).fill(rendering)
+    }
     const saved = this.waitForSettingsPatch()
     await dialog.getByRole("button", { name: "Add term" }).click()
     await this.expectSettingsPatchOk(saved)

@@ -22,6 +22,7 @@ test("project settings retrieval support is under validation and marks form dirt
   await expect(validationSection).toBeVisible({ timeout: 10_000 })
   await expect(retrievalSection).toBeVisible({ timeout: 10_000 })
   await expect(retrievalSection.getByText(/Retrieval support/i)).toBeVisible()
+  await retrievalSection.locator("summary").click()
 
   // Retrieval support must appear after Validation on this pane.
   const order = await alice.evaluate(() => {

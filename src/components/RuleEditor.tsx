@@ -472,8 +472,11 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel, className }: 
             </p>
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
               <div>
-                <FieldLabel className="text-[10px]">{t("rules.editor.findPatternLabel")}</FieldLabel>
+                <FieldLabel htmlFor="re-af-pattern" className="text-[10px]">
+                  {t("rules.editor.findPatternLabel")}
+                </FieldLabel>
                 <Input
+                  id="re-af-pattern"
                   value={afPattern}
                   onChange={(e) => setAfPattern(e.target.value)}
                   placeholder={t("rules.editor.patternLabel")}
@@ -481,8 +484,11 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel, className }: 
                 />
               </div>
               <div>
-                <FieldLabel className="text-[10px]">{t("rules.editor.replaceWithLabel")}</FieldLabel>
+                <FieldLabel htmlFor="re-af-replacement" className="text-[10px]">
+                  {t("rules.editor.replaceWithLabel")}
+                </FieldLabel>
                 <Input
+                  id="re-af-replacement"
                   value={afReplacement}
                   onChange={(e) => setAfReplacement(e.target.value)}
                   placeholder={t("rules.surface.autofixEditor.replacementPlaceholder")}
@@ -501,8 +507,11 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel, className }: 
             </div>
             {/* Sample before/after */}
             <div>
-              <FieldLabel className="text-[10px]">{t("rules.editor.previewOnSampleLabel")}</FieldLabel>
+              <FieldLabel htmlFor="re-af-sample" className="text-[10px]">
+                {t("rules.editor.previewOnSampleLabel")}
+              </FieldLabel>
               <Input
+                id="re-af-sample"
                 value={afSample}
                 onChange={(e) => setAfSample(e.target.value)}
                 placeholder={t("rules.editor.sampleTextPlaceholder")}

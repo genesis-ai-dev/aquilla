@@ -17,6 +17,6 @@ test("glossary renders toolbar and opens add-term dialog", async ({ alice }) => 
   const dialog = alice.getByRole("dialog")
   await expect(dialog).toBeVisible({ timeout: 5_000 })
   await expect(dialog.getByPlaceholder("New source term…")).toBeVisible()
-  await expect(dialog.getByPlaceholder("rendering", { exact: true })).toBeVisible()
+  await expect(dialog.getByRole("textbox", { name: "Rendering", exact: true })).toBeVisible()
   await expect(dialog.getByRole("button", { name: "Add term" })).toBeDisabled()
 })

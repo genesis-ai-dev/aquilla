@@ -285,6 +285,11 @@ export function VoicePlaybackBar({
             // disagree. Driving the queue there is no such flag and mute stays
             // what it always was: volume 0.
             muted={drivesVideo ? !sourceAudible : volume === 0}
+            // Driving the film this reaches the SOURCE flag only, so the dub
+            // takes playing over the picture are untouched — which is exactly
+            // what an operator wants and could not tell from the word "Mute".
+            // Driving the queue it is the queue's own volume, i.e. everything.
+            what={drivesVideo ? "the film's own sound" : "playback"}
             onChange={(v) => (drivesVideo ? videoController?.setVolume(v) : setQueueVolume(v))}
             onToggleMute={() => {
               if (drivesVideo && fileId) {
@@ -408,22 +413,29 @@ function SpeedButton({ rate, onChange }: { rate: number; onChange: (r: number) =
 function VolumeControl({
   volume,
   muted,
+  what,
   onChange,
   onToggleMute,
 }: {
   volume: number
   muted: boolean
+  /** What goes quiet, named. This button silences DIFFERENT things depending on
+   *  which engine is driving, and it used to say only "Mute" — so on a film with
+   *  takes playing over it there was no way to tell, before clicking, whether
+   *  you were about to lose the picture's sound or your own recordings. */
+  what: string
   onChange: (v: number) => void
   onToggleMute: () => void
 }) {
+  const label = `${muted ? "Unmute" : "Mute"} ${what}`
   return (
     <div className="flex items-center gap-2">
-      <AppTooltip content={muted ? "Unmute" : "Mute"}>
+      <AppTooltip content={label}>
         <Button
           type="button"
           size="icon-sm"
           variant="ghost"
-          aria-label={muted ? "Unmute" : "Mute"}
+          aria-label={label}
           aria-pressed={muted}
           onClick={onToggleMute}
         >

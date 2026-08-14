@@ -1057,11 +1057,15 @@ describe("TimelineEditor — the Source-audio row (the audio VTT's cues)", () =>
     expect(screen.queryByTestId("tl-source-regions")).not.toBeInTheDocument()
   })
 
-  // Stage 2: the film's mute moved onto the film (the video pane's header). This
-  // button publishes into the play queue, which can only reach the queue's own
-  // elements — and a subtitle file has none — so leaving it here would have left
-  // two source-mute controls on screen, one of them silencing nothing.
-  it("hands the source mute to the video pane — no gutter speaker on a subtitle file", () => {
+  // Stage 2 withheld this button here and gave the film's mute to the video
+  // pane, reasoning that it could only reach the play queue's own elements and a
+  // subtitle file has none. That was already untrue by the end of that stage:
+  // MediaVideoPane reads the audibility flag directly and mutes its element from
+  // it. So the button works, and 2026-08-14 it came back — this row IS the
+  // source audio, the way the row below is the target audio, and the pair
+  // carries the same control. (The picture itself has none; the only other copy
+  // is the playback bar's, on the same flag.)
+  it("gives the Source-audio row its speaker on a subtitle file, naming the film", () => {
     setVideoDurationSec(VIDEO, 120)
     render(
       <TimelineEditor
@@ -1069,7 +1073,11 @@ describe("TimelineEditor — the Source-audio row (the audio VTT's cues)", () =>
         tracks={subtitleTracks(true)} audioCues={audioCues} onRetimeSubtitle={() => {}}
       />,
     )
-    expect(screen.queryByTestId("tl-speaker-source")).not.toBeInTheDocument()
+    const speaker = screen.getByTestId("tl-speaker-source")
+    // Named for what actually goes quiet. On this file the row's cues are
+    // timings over the FILM's soundtrack, and "source audio" would be true but
+    // useless at the moment of clicking.
+    expect(speaker).toHaveAttribute("aria-label", "Mute the film's own sound")
   })
 
   it("leaves the target row's speaker button alone", () => {

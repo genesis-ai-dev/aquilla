@@ -21,11 +21,10 @@
 // reports cannot be laid out around. The long note beside the element explains.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { Volume2, VolumeX } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import type { CellData } from "@/hooks/useCells"
-import { seedAudibility, toggleAudibility, useQueueAudibility } from "@/lib/audio/audibility"
+import { seedAudibility, useQueueAudibility } from "@/lib/audio/audibility"
 import { queueClockIsFileTime, useQueueForFile } from "@/lib/audio/play-queue"
 import { effectiveSourceText } from "@/lib/cell-text"
 import type { DirectionMode, TextDirection } from "@/lib/text-direction"
@@ -778,50 +777,15 @@ export function MediaVideoPane({
            the line in the black below it. Anchored to the FIELD, so it
            lands in the bar when there is one. */}
       {hasCaption && placement === "bar" && <VideoPaneCaption {...captionProps} />}
-      {/* The film's own soundtrack, muted from the corner of the film — the
-          same place and the same gesture as the recording modal's (2026-08-14,
-          Sam). It began life as a speaker button on the timeline's Source-audio
-          track, then spent a day in this pane's header; neither put it on the
-          thing it silences.
+      {/* NO MUTE BUTTON ON THE PICTURE. It was here for a few hours on
+          2026-08-14 and came straight back off (Sam): the playback bar already
+          carries one, and the Source-audio row in the timeline gutter carries
+          the matching one beside Target-audio's. A third copy on the film would
+          be a third place to look for one piece of state.
 
-          It rides the FIELD, not the picture, so it keeps its corner when the
-          picture is letterboxed down to a small box — exactly why
-          VideoPaneControls sits here too. It can sit flush now that the
-          browser's own control bar is gone; it spent a few hours lifted clear
-          of it.
-
-          This is a TRUE MUTE and it overrides the volume slider in the playback
-          bar, the way mute works everywhere else. The bar reads the same flag,
-          so the two surfaces always agree — the failure this avoids is a bar
-          reading "volume 80%" over a film that is silent, with nothing on
-          screen saying why.
-
-          Only the standalone arrangement has it at all: a slaved picture is
-          force-muted below whatever the preference says, so the control would
-          visibly do nothing. */}
-      {!slaved && (
-        <button
-          type="button"
-          data-testid="video-pane-mute"
-          aria-label={sourceAudible ? "Mute the video's sound" : "Unmute the video's sound"}
-          aria-pressed={sourceAudible}
-          title={
-            sourceAudible
-              ? "The video's sound is on — click to mute"
-              : "The video is muted — click to unmute"
-          }
-          onClick={() => toggleAudibility(fileId, "source")}
-          className={cn(
-            "absolute right-2 bottom-2 z-30 inline-flex h-7 w-7 items-center justify-center rounded-md",
-            "bg-black/55 backdrop-blur-sm transition-colors",
-            sourceAudible
-              ? "text-white hover:bg-black/70"
-              : "text-white/60 hover:bg-black/70 hover:text-white",
-          )}
-        >
-          {sourceAudible ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
-        </button>
-      )}
+          The element still HONOURS the flag — see `muted` above — it just does
+          not offer a control for it. Whichever of those two buttons is clicked,
+          this picture goes quiet. */}
       <VideoPaneControls
         mode={mode}
         placement={placement}

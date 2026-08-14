@@ -324,8 +324,11 @@ describe("MediaVideoPane", () => {
     expect(video.controls).toBe(false)
     expect(video.muted).toBe(false)
     expect(screen.getByTestId("tl-video-pane")).toHaveAttribute("data-video-state", "standalone")
-    // The mute the operator actually gets, in the corner of the picture.
-    expect(screen.getByTestId("video-pane-mute")).toBeInTheDocument()
+    // And no mute of its own: the picture honours the audibility flag but offers
+    // no control for it. That lives on the Source-audio row in the timeline
+    // gutter and on the playback bar — one piece of state, two places, both of
+    // them where the rest of the file's sound is managed.
+    expect(screen.queryByTestId("video-pane-mute")).not.toBeInTheDocument()
 
     fireEvent.timeUpdate(video)
     expect(onVideoTime).toHaveBeenCalled()

@@ -1940,22 +1940,42 @@ export function TimelineEditor({
                   is the whole seam a rename arrives through. */}
               {tracks.map((track, index) => {
                 const render = TRACK_RENDER[track.kind]
-                // Stage 2: EXACTLY ONE source-mute control on screen, whatever the
-                // arrangement. The film's mute now lives on the film itself (the
-                // video pane's header), and this button can only reach the play
-                // queue's own elements — which exist only for a file with media
-                // cells. So a dubbing file keeps its gutter speaker and this one
-                // loses it, rather than showing two buttons for the same sound or
-                // (worse) one that silences nothing.
-                const speaker =
-                  render.audibilityKey === "source" && subtitleFileWithFootage ? null : render.audibilityKey
+                // EVERY audible row gets its speaker, in every arrangement.
+                //
+                // Stage 2 withheld this one on a subtitle file, on the reasoning
+                // that the button could only reach the play queue's own elements
+                // and the film's sound was not one of them. That stopped being
+                // true in the same stage: MediaVideoPane reads the audibility
+                // flag directly and mutes its element from it, so this button
+                // silences the film perfectly well. The mute then spent a day in
+                // the video pane's header and a few hours on the picture itself
+                // before landing back here (2026-08-14, Sam) — this row IS the
+                // source audio, the way the row below is the target audio, and
+                // the pair should carry the same control.
+                //
+                // The playback bar's mute is the same flag, not a second one.
+                const speaker = render.audibilityKey
                 return (
                   <LaneLabel
                     key={track.id}
                     name={track.name}
                     sub={render.sub}
                     dot={render.dot}
-                    trailing={speaker ? speakerToggle(speaker, render.speakerName) : undefined}
+                    trailing={
+                      speaker
+                        ? speakerToggle(
+                            speaker,
+                            // On a subtitle file this row's cues are timings over
+                            // the FILM's soundtrack, and that is what the button
+                            // silences. Saying "source audio" there would be
+                            // true and useless; the operator wants to know the
+                            // film is about to go quiet.
+                            speaker === "source" && subtitleFileWithFootage
+                              ? "the film's own sound"
+                              : render.speakerName,
+                          )
+                        : undefined
+                    }
                     reorder={
                       onReorderTrack
                         ? {

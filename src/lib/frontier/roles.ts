@@ -105,6 +105,41 @@ export const VALIDATION_FLOOR_ROLES: readonly RoleLevel[] = [
   ROLE.MAINTAINER,
 ]
 
+/**
+ * Canonical name + capability blurb per role level, keyed identically for
+ * `roleName` and `roleDescription` (mirrors server's ROLE_NAMES).
+ */
+const ROLE_INFO: Record<number, { name: string; description: string }> = {
+  100: {
+    name: "viewer",
+    description: "Can read all org projects. No edit or management actions.",
+  },
+  200: {
+    name: "commenter",
+    description: "Can read and leave comments. Cannot edit content.",
+  },
+  300: {
+    name: "reviewer",
+    description: "Can read, comment, and review. Cannot make direct edits.",
+  },
+  400: {
+    name: "contributor",
+    description: "Can edit project content. Maximum level grantable via share link.",
+  },
+  500: {
+    name: "project_lead",
+    description: "Can add members to projects, mint share-link invites, and lead project work.",
+  },
+  600: {
+    name: "maintainer",
+    description: "Can create/manage teams, rename the org, set project deadlines, and remove project members.",
+  },
+  700: {
+    name: "owner",
+    description: "Full control: add/remove org members, archive/restore projects, and all maintainer actions.",
+  },
+}
+
 /** Canonical role name for a given level (mirrors server's ROLE_NAMES).
  *
  * This is the machine-readable, locale-free identifier — the wire format
@@ -115,16 +150,7 @@ export const VALIDATION_FLOOR_ROLES: readonly RoleLevel[] = [
  * locale renders. For a user-facing label, resolve `roleNameKey()` through
  * `useT()` instead — see the module doc comment below. */
 export function roleName(level: number): string {
-  switch (level) {
-    case 100: return "viewer"
-    case 200: return "commenter"
-    case 300: return "reviewer"
-    case 400: return "contributor"
-    case 500: return "project_lead"
-    case 600: return "maintainer"
-    case 700: return "owner"
-    default: return `level_${level}`
-  }
+  return ROLE_INFO[level]?.name ?? `level_${level}`
 }
 
 /** Underscore-free role string for display with CSS `capitalize`. */
@@ -183,16 +209,7 @@ const ROLE_DESCRIPTION_KEY: Partial<Record<number, MessageKey>> = {
  * Name + level stay on the label line — this is the "what it does" copy only.
  */
 export function roleDescription(level: number): string {
-  switch (level) {
-    case 100: return "Can read all org projects. No edit or management actions."
-    case 200: return "Can read and leave comments. Cannot edit content."
-    case 300: return "Can read, comment, and review. Cannot make direct edits."
-    case 400: return "Can edit project content. Maximum level grantable via share link."
-    case 500: return "Can add members to projects, mint share-link invites, and lead project work."
-    case 600: return "Can create/manage teams, rename the org, set project deadlines, and remove project members."
-    case 700: return "Full control: add/remove org members, archive/restore projects, and all maintainer actions."
-    default: return ""
-  }
+  return ROLE_INFO[level]?.description ?? ""
 }
 
 /** Full "Viewer (100) — …" string for tooltips and help affordances. */

@@ -8,6 +8,7 @@ import {
   attachOutput,
   openLogFile,
   isolatedWranglerName,
+  inspectorPortForWorkerPort,
   type SpawnedWorker,
 } from "./lib/spawn-worker"
 import { MockLLMServer } from "../e2e/helpers/mock-llm-server"
@@ -60,14 +61,29 @@ const PG_CONTAINER = "aquilla-dev-pg"
 // Override with E2E_PG_ADMIN_URL for non-standard local setups.
 const E2E_PG_ADMIN_URL = process.env.E2E_PG_ADMIN_URL || "postgresql:///postgres"
 const HYPERDRIVE_ENV = { WRANGLER_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE: E2E_PG_URL }
-// Ports fan out by K*100 so shards never collide (8787/8788, 8887/8888, …).
-const IDENTITY_PORT = 8787 + K * 100
-const SYNC_WORKER_PORT = 8788 + K * 100
-const VITE_PORT = 5173 + K * 100
-const LEGACY_MIGRATION_MOCK_PORT = 9460 + K * 100
+// Live `pnpm dev` owns 5173 (Vite), 8788 (identity), 8789 (sync), 8790
+// (agent), and 9456 (OpenRouter mock). E2E never shares that block — even
+// shard 0 sits `E2E_PORT_SHIFT` above it — so smoke can run beside a live
+// stack. Shards then fan out by K*100 (9787/9788, 9887/9888, …).
+const E2E_PORT_SHIFT = 1000
+const IDENTITY_PORT = 8787 + E2E_PORT_SHIFT + K * 100
+const SYNC_WORKER_PORT = 8788 + E2E_PORT_SHIFT + K * 100
+const VITE_PORT = 5173 + E2E_PORT_SHIFT + K * 100
+const LEGACY_MIGRATION_MOCK_PORT = 9460 + E2E_PORT_SHIFT + K * 100
+const OPENROUTER_MOCK_PORT = 9456 + E2E_PORT_SHIFT + K * 100
+const MANAGED_PORTS = [
+  IDENTITY_PORT,
+  SYNC_WORKER_PORT,
+  VITE_PORT,
+  LEGACY_MIGRATION_MOCK_PORT,
+  OPENROUTER_MOCK_PORT,
+  inspectorPortForWorkerPort(IDENTITY_PORT),
+  inspectorPortForWorkerPort(SYNC_WORKER_PORT),
+]
 // Per-shard build output so concurrent `vite build`s don't overwrite one dist.
 // Single-stack keeps the default `dist` so nothing else changes.
 const DIST_DIR = SHARDED ? `dist-e2e-s${K}` : "dist"
+const VITE_MODE = process.env.E2E_VITE_MODE === "dev" && !SHARDED ? "dev" : "preview"
 
 const VERBOSE = process.env.E2E_VERBOSE === "1" || process.argv.includes("--verbose")
 const LOG_DIR = path.join(REPO_ROOT, `.e2e-logs${SUFFIX}`)
@@ -88,6 +104,11 @@ async function shutdown(code = 0): Promise<never> {
   // Iterate a copy so the array isn't mutated.
   for (const fn of [...cleanup].reverse()) {
     try { await fn() } catch (e) { console.error(e) }
+  }
+  // Reap workerd/vite orphans that survived SIGTERM so the next run (and a
+  // still-running `pnpm dev`) does not inherit our listeners.
+  for (const port of MANAGED_PORTS) {
+    await freePort(port)
   }
   process.exit(code)
 }
@@ -344,11 +365,11 @@ async function main(): Promise<void> {
     VITE_GOOGLE_API_KEY: "",
   }
 
-  // 0. Free our managed ports — survives stale processes from a prior aborted run.
-  await freePort(IDENTITY_PORT)
-  await freePort(SYNC_WORKER_PORT)
-  await freePort(VITE_PORT)
-  await freePort(LEGACY_MIGRATION_MOCK_PORT)
+  // 0. Free our managed ports — survives stale processes from a prior aborted
+  // run. These are the e2e block only; never 5173/8788/8789/9456.
+  for (const port of MANAGED_PORTS) {
+    await freePort(port)
+  }
 
   // Set up the log dir. Worker stdout/stderr is piped here in non-verbose
   // mode so the developer's terminal stays clean. On test failure we tail
@@ -383,7 +404,6 @@ async function main(): Promise<void> {
   // reach c.env bindings).
   // Scripted OpenRouter mock (scripts/mock-openrouter.ts) — the agent route's
   // "model brain" for e2e. Per-shard port so concurrent stacks don't clash.
-  const OPENROUTER_MOCK_PORT = 9456 + K * 100
   console.log(`${TAG}[boot 3/8] starting mock OpenRouter on :${OPENROUTER_MOCK_PORT} + identity (auth-worker) on :${IDENTITY_PORT}…`)
   const openrouterMock = spawn(
     "npx",
@@ -494,23 +514,31 @@ async function main(): Promise<void> {
     cleanup.push(async () => rmSync(envFile, { force: true }))
   }
 
-  // 7. Build once, then serve via `vite preview` (static).
+  // 7. Full suites build once and serve static output. The changed-file gate
+  // runs only a handful of specs on one stack, so dev mode avoids paying the
+  // ~30-second production build before useful feedback.
   //
-  // Why not `vite dev`? Dev mode runs babel/react-compiler on every request,
-  // keeps an HMR watcher alive, and forces re-optimize roundtrips that
-  // crater CPU/RAM under E2E load. A pre-built dist is served by a plain
-  // static server with ~0 ongoing CPU and ~50 MB RAM vs. several hundred MB.
+  // Full suites avoid dev mode because it runs babel/react-compiler on every
+  // request, keeps an HMR watcher alive, and forces re-optimize roundtrips that
+  // crater CPU/RAM under sustained E2E load. A pre-built dist is served by a
+  // plain static server with ~0 ongoing CPU and ~50 MB RAM.
   //
   // The build cost (~15-30s) pays for itself after the second spec. The backend
   // URLs are passed via env so each shard bakes its own (VITE_* process env is
   // inlined by Vite at build time and takes priority over .env files).
-  console.log(`${TAG}[boot 7/8] building app for test mode (one-time, ~30s)…`)
-  await runOnce("npx", ["vite", "build", "--mode", "test", "--outDir", DIST_DIR], REPO_ROOT, "build", browserEnv)
+  if (VITE_MODE === "preview") {
+    console.log(`${TAG}[boot 7/8] building app for test mode (one-time, ~30s)…`)
+    await runOnce("npx", ["vite", "build", "--mode", "test", "--outDir", DIST_DIR], REPO_ROOT, "build", browserEnv)
+  } else {
+    console.log(`${TAG}[boot 7/8] changed-file gate: skipping production build`)
+  }
 
-  console.log(`${TAG}[boot 8/8] starting Vite preview on :${VITE_PORT}…`)
+  console.log(`${TAG}[boot 8/8] starting Vite ${VITE_MODE} server on :${VITE_PORT}…`)
   const vite = spawn(
     "npx",
-    ["vite", "preview", "--port", String(VITE_PORT), "--strictPort", "--mode", "test", "--outDir", DIST_DIR],
+    VITE_MODE === "preview"
+      ? ["vite", "preview", "--port", String(VITE_PORT), "--strictPort", "--mode", "test", "--outDir", DIST_DIR]
+      : ["vite", "--port", String(VITE_PORT), "--strictPort", "--mode", "test"],
     {
       cwd: REPO_ROOT,
       stdio: ["ignore", "pipe", "pipe"],

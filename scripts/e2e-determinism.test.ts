@@ -33,11 +33,12 @@ describe("E2E determinism guardrails", () => {
     const scripts = packageJson.scripts ?? {}
 
     expect(scripts["test:e2e:guard"]).toBe(
-      "vitest run scripts/e2e-determinism.test.ts",
+      "vitest run scripts/e2e-determinism.test.ts scripts/e2e-impact.test.ts",
     )
 
     for (const scriptName of [
       "test:e2e:smoke",
+      "test:e2e:affected",
       "test:e2e",
       "test:e2e:shard",
       "test:e2e:ui",
@@ -165,6 +166,25 @@ describe("E2E backend-reset transport retry", () => {
     expect(source).toContain("function abortIfWorkerDies")
     expect(source).toMatch(/abortIfWorkerDies\(identity,\s*"identity"\)/)
     expect(source).toMatch(/abortIfWorkerDies\(sync,\s*"sync"\)/)
+  })
+
+  it("keeps e2e ports off the live pnpm dev block and frees them on shutdown", () => {
+    const source = readFileSync(path.join(REPO_ROOT, "scripts/e2e-up.ts"), "utf8")
+    expect(source).toContain("E2E_PORT_SHIFT")
+    expect(source).toContain("MANAGED_PORTS")
+    // Shard 0 used to bind Vite 5173, sync 8788, and OpenRouter 9456 — the
+    // same ports as `pnpm dev`. The shift must stay in the formulas.
+    expect(source).toMatch(/const VITE_PORT = 5173 \+ E2E_PORT_SHIFT \+ K \* 100/)
+    expect(source).toMatch(/const IDENTITY_PORT = 8787 \+ E2E_PORT_SHIFT \+ K \* 100/)
+    expect(source).toMatch(/const SYNC_WORKER_PORT = 8788 \+ E2E_PORT_SHIFT \+ K \* 100/)
+    expect(source).toMatch(/const OPENROUTER_MOCK_PORT = 9456 \+ E2E_PORT_SHIFT \+ K \* 100/)
+    expect(source).not.toMatch(/const VITE_PORT = 5173 \+ K \* 100/)
+    expect(source).not.toMatch(/const IDENTITY_PORT = 8787 \+ K \* 100/)
+    expect(source).not.toMatch(/const SYNC_WORKER_PORT = 8788 \+ K \* 100/)
+    // Shutdown must reap the e2e block so a later run (or a live dev stack)
+    // does not inherit leftover workerd/vite listeners.
+    expect(source).toMatch(/for \(const port of MANAGED_PORTS\) \{\s*await freePort\(port\)/)
+    expect(source.match(/for \(const port of MANAGED_PORTS\)/g)?.length).toBe(2)
   })
 
   it("isolates Wrangler registry heartbeat files per e2e stack", () => {

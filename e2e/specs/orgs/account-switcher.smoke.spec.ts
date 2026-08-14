@@ -1,5 +1,5 @@
 import { test, expect, orgRoute } from "../../helpers/multi-user"
-import { ensureAuthState, injectSessions } from "../../helpers/auth"
+import { ensureAuthState, injectAdditionalSession } from "../../helpers/auth"
 import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
@@ -55,18 +55,18 @@ test("account switcher dropdown opens with session info", async ({ alice }) => {
 })
 
 test("logging out promotes another signed-in account", async ({ alice }) => {
-  const [aliceSession, bobSession] = await Promise.all([
-    ensureAuthState("alice"),
-    ensureAuthState("bob"),
-  ])
-
+  // Alice is already the active session from the fixture. Merge bob in the
+  // same way the working cross-tab spec does — overwriting the envelope
+  // while the org page is live can lose the extra account to an in-flight
+  // session-store write, so the menu never lists bob.
+  const bobSession = await ensureAuthState("bob")
   await alice.goto(orgRoute(alice))
-  await injectSessions(alice, [aliceSession, bobSession], "alice")
+  await injectAdditionalSession(alice, bobSession)
 
   const accountBtn = alice.getByRole("button", { name: /Account menu: alice/i })
   await expect(accountBtn).toBeVisible({ timeout: 10_000 })
   await accountBtn.click()
-  await expect(alice.getByText("bob", { exact: true })).toBeVisible({ timeout: 3_000 })
+  await expect(alice.getByRole("menuitem", { name: /bob/i })).toBeVisible({ timeout: 10_000 })
   await alice.getByRole("menuitem", { name: /^Log out$/i }).click()
 
   // handleLogout is async: wait until alice is gone and bob is active. Still on

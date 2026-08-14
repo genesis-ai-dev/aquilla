@@ -1,11 +1,5 @@
 import { test, expect } from "../../helpers/multi-user"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
-import { Workspace } from "../../helpers/page-objects/Workspace"
-import path from "node:path"
-import { fileURLToPath } from "node:url"
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
+import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
  * CommentThread — "Translation changed since this thread was created" indicator.
@@ -29,16 +23,10 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  *      is visible on the thread.
  */
 test("comment stale indicator appears when translation changes after thread was created", async ({ alice }) => {
-  const dash = new Dashboard(alice)
-  await dash.goto()
-  const name = `StaleComment ${Date.now()}`
-  await dash.createProject({ name, source: "en", target: "fr" })
-  await dash.openProject(name)
-
-  const ws = new Workspace(alice)
-  await ws.importFile(SAMPLE_MD)
-  await ws.openFileBySubstring("sample")
-  await ws.waitForEditor()
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), {
+    name: `StaleComment ${Date.now()}`,
+  })
+  const ws = await openSeededProject(alice, seeded)
 
   // Step 1: Add a comment when cell 0 has no translation yet.
   const row = ws.cellRow(0)
@@ -98,16 +86,10 @@ test("comment stale indicator appears when translation changes after thread was 
  * "no stale badge" assertion.
  */
 test("comment on an already-translated cell is NOT stale, but genuine drift is", async ({ alice }) => {
-  const dash = new Dashboard(alice)
-  await dash.goto()
-  const name = `StaleComment2 ${Date.now()}`
-  await dash.createProject({ name, source: "en", target: "fr" })
-  await dash.openProject(name)
-
-  const ws = new Workspace(alice)
-  await ws.importFile(SAMPLE_MD)
-  await ws.openFileBySubstring("sample")
-  await ws.waitForEditor()
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), {
+    name: `StaleComment2 ${Date.now()}`,
+  })
+  const ws = await openSeededProject(alice, seeded)
 
   // Step 1: translate cell 0 FIRST, so the cell already has target text when the
   // thread is created (the key precondition the original spec never exercised).

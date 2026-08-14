@@ -135,12 +135,39 @@ export async function injectSession(page: Page, session: PersistedSession): Prom
   await page.reload()
 }
 
+async function readEnvelopeUsernames(page: Page): Promise<string[]> {
+  return page.evaluate(async () => {
+    const DB = "frontier"
+    const STORE = "session"
+    const ENVELOPE_KEY = "envelope"
+    const open = indexedDB.open(DB, 1)
+    await new Promise<void>((resolve, reject) => {
+      open.onsuccess = () => resolve()
+      open.onerror = () => reject(open.error)
+    })
+    const db = open.result
+    const tx = db.transaction(STORE, "readonly")
+    const existing = await new Promise<{ sessions?: Record<string, { username?: string }> } | undefined>(
+      (resolve, reject) => {
+        const req = tx.objectStore(STORE).get(ENVELOPE_KEY)
+        req.onsuccess = () => resolve(req.result)
+        req.onerror = () => reject(req.error)
+      },
+    )
+    db.close()
+    return Object.values(existing?.sessions ?? {})
+      .map((s) => s.username)
+      .filter((name): name is string => Boolean(name))
+  })
+}
+
 /** Inject multiple FrontierSessions with a chosen active account. */
 export async function injectSessions(
   page: Page,
   sessions: PersistedSession[],
   activeUsername: string,
 ): Promise<void> {
+  const expected = sessions.map((s) => s.username)
   await page.evaluate(async ({ sessions, activeUsername }) => {
     const DB = "frontier"
     const STORE = "session"
@@ -179,6 +206,13 @@ export async function injectSessions(
   }, { sessions, activeUsername })
 
   await page.reload()
+  const names = await readEnvelopeUsernames(page)
+  const missing = expected.filter((name) => !names.includes(name))
+  if (missing.length > 0) {
+    throw new Error(
+      `injectSessions: IDB envelope missing ${missing.join(", ")} after reload (have: ${names.join(", ") || "(none)"})`,
+    )
+  }
 }
 
 /** Convenience: load JSON from disk and inject into a page in one call. */
@@ -238,4 +272,10 @@ export async function injectAdditionalSession(
   }, session)
 
   await page.reload()
+  const names = await readEnvelopeUsernames(page)
+  if (!names.includes(session.username)) {
+    throw new Error(
+      `injectAdditionalSession: ${session.username} missing from IDB after reload (have: ${names.join(", ") || "(none)"})`,
+    )
+  }
 }

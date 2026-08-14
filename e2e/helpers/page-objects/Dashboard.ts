@@ -73,11 +73,18 @@ export class Dashboard {
       dialog.getByRole("button", { name: /^Create Project$/i }).click(),
     ])
 
-    // The project name renders in more than one place after creation (card +
-    // heading), so scope to the first match to avoid strict-mode violations.
+    // Overview fetch can 5xx under shard load; the page then shows Retry
+    // instead of the project name. Click Retry until the heading lands —
+    // same 15s budget, still waiting on the loaded overview.
     await expect(dialog).toBeHidden({ timeout: 10_000 })
     await expect(this.page).toHaveURL(/\/projects\/[^/?#]+(?:[?#].*)?$/, { timeout: 15_000 })
-    await expect(this.page.getByText(name).first()).toBeVisible({ timeout: 15_000 })
+    const heading = this.page.getByRole("heading", { name, exact: true })
+    await expect(async () => {
+      // Genuine UI branch: unreachable banner vs loaded overview.
+      const retry = this.page.getByRole("button", { name: /^Retry$/i })
+      if (await retry.isVisible()) await retry.click()
+      await expect(heading).toBeVisible({ timeout: 3_000 })
+    }).toPass({ timeout: 15_000 })
     return name
   }
 

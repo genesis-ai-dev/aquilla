@@ -1,16 +1,19 @@
 #!/usr/bin/env sh
 
-echo "[pre-push] running E2E smoke (pnpm run test:e2e:smoke)…"
-pnpm run test:e2e:smoke
+echo "[pre-push] running changed-file E2E gate (pnpm run test:e2e:affected)…"
+# Preserve Git's ref update stream before pnpm/vitest inherit stdin.
+E2E_PUSH_REFS=$(cat)
+export E2E_PUSH_REFS
+pnpm run test:e2e:affected
 status=$?
 
 if [ $status -ne 0 ]; then
   echo ""
-  echo "❌ E2E smoke failed. Push blocked."
+  echo "❌ Affected E2E gate failed. Push blocked."
   echo "   Debug: npm run test:e2e:ui"
   echo "   Bypass (NOT recommended): git push --no-verify"
   exit $status
 fi
 
-echo "[pre-push] ✅ smoke passed"
+echo "[pre-push] ✅ affected E2E passed"
 exit 0

@@ -17,9 +17,9 @@ Playwright-driven end-to-end tests against a hermetic local backend.
 
 - `npx playwright install chromium` (once per machine).
 
-> **Warning:** `scripts/e2e-up.ts` force-kills whatever is listening on ports 5173
-> (Vite), 8787 (auth-worker), and 8788 (sync-worker) before starting. Do not run
-> it while your live dev stack is using those ports.
+> **Note:** `scripts/e2e-up.ts` binds its own port block (Vite **6173**, identity
+> **9787**, sync **9788** for shard 0; +100 per extra shard) and frees those
+> ports on shutdown. It does **not** take `pnpm dev`'s 5173/8788/8789/9456.
 
 ## Quick start
 
@@ -28,7 +28,10 @@ Playwright-driven end-to-end tests against a hermetic local backend.
 
 npx playwright install chromium
 
-# Run smoke (~2 min target)
+# Run the fast changed-file gate used by pre-push
+pnpm test:e2e:affected
+
+# Run every smoke spec (merge/deploy/release gate)
 pnpm test:e2e:smoke
 
 # Run full suite
@@ -38,15 +41,21 @@ pnpm test:e2e
 pnpm test:e2e:ui
 ```
 
+`test:e2e:affected` reads Git's pre-push ref stream, always includes smoke
+specs changed by the pushed commits, and adds a small sentinel set for affected
+product domains. It skips browser startup for docs/unit-test-only pushes and
+uses a single Vite dev-mode stack. `test:e2e:smoke` still runs every smoke spec
+and is required at the merge/deploy/release boundary.
+
 ## Architecture
 
 `scripts/e2e-up.ts` boots:
-1. `auth-worker` via `wrangler dev --local` on port 8787 (identity, orgs, members,
+1. `auth-worker` via `wrangler dev --local` on port 9787 (identity, orgs, members,
    sync-token, `/__test__/reset`, `/__dev__/login`)
-2. `sync-worker` via `wrangler dev --local` on port 8788 (event log + projection
+2. `sync-worker` via `wrangler dev --local` on port 9788 (event log + projection
    writer + ProjectSync DO)
 3. `MockLLMServer` on a random port (OpenAI-compatible)
-4. `vite --mode test` on port 5173
+4. `vite preview` on port 6173 (or Vite dev mode for `test:e2e:affected`)
 
 Both workers use
 `WRANGLER_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE=postgresql://aquilla:aquilla@127.0.0.1:5432/aquilla_dev`
@@ -54,12 +63,12 @@ to point Hyperdrive at the local Docker Postgres.
 
 Then writes `.env.test.local` (loaded by Vite via `--mode test`):
 ```
-VITE_AUTH_BASE=http://127.0.0.1:8787
-VITE_SYNC_WORKER_HOST=127.0.0.1:8788
+VITE_AUTH_BASE=http://127.0.0.1:9787
+VITE_SYNC_WORKER_HOST=127.0.0.1:9788
 VITE_LLM_BASE_URL=http://127.0.0.1:<random>
 ```
 
-Playwright runs against `http://127.0.0.1:5173`.
+Playwright runs against `http://127.0.0.1:6173`.
 
 ## Per-test isolation
 
@@ -164,12 +173,11 @@ screenshots, video, and service logs are retained.
 - **Mock LLM not connected** → `VITE_LLM_BASE_URL` isn't being passed to Vite. Check
   `.env.test.local` contents during a run; it should be regenerated each time
   `e2e-up.ts` boots.
-- **Port already in use** → `e2e-up.ts` force-kills 5173/8787/8788 at startup. If it
-  still fails, kill processes manually before retrying. **Do not `git push` while
-  `pnpm dev` or a recording `e2e-up` is running** — shard 1 reuses those ports
-  (and `pnpm dev`'s identity worker is on **8788**, the same port smoke uses for
-  sync-worker). The live stack and the pre-push stack will kill each other.
-- **Many specs fail in 0.0s with `ECONNREFUSED 127.0.0.1:8787`** → this is not
+- **Port already in use** → `e2e-up.ts` force-kills only its own block
+  (6173/9787/9788 for shard 0) at startup and again on shutdown. A live
+  `pnpm dev` on 5173/8788/8789 is left alone. If an e2e port is still held,
+  a previous shard was killed mid-boot — rerun; shutdown reaps leftovers.
+- **Many specs fail in 0.0s with `ECONNREFUSED 127.0.0.1:9787`** → this is not
   a product bug in those specs. Identity (auth-worker) died mid-suite, so
   `resetBackend()` cannot reach `POST /__test__/reset`. `e2e-up` now aborts the
   shard as soon as wrangler exits instead of cascading. Check

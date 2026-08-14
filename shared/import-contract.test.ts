@@ -11,6 +11,7 @@ describe("source artifact format registry", () => {
       "custom-original",
       "docx",
       "ebible",
+      "epub",
       "helloao",
       "html",
       "idml",

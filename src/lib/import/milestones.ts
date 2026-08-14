@@ -77,7 +77,7 @@ export function planImportMilestones(
     return worksheetMilestones(units, options.fileName)
   }
 
-  if (options.fileType === "md" || options.fileType === "docx" || options.fileType === "html") {
+  if (options.fileType === "md" || options.fileType === "docx" || options.fileType === "html" || options.fileType === "epub") {
     const milestones = headingMilestones(units)
     if (milestones) return milestones
   }

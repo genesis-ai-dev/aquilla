@@ -3,6 +3,7 @@ import { readdirSync, readFileSync } from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { selectAffectedE2E } from "./lib/e2e-impact"
+import { affectedRunMode } from "./lib/e2e-run-mode"
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 const ZERO_SHA = /^0+$/
@@ -73,13 +74,19 @@ if (impact.specs.length === 0) {
   process.exit(0)
 }
 
+const runMode = affectedRunMode(impact.specs.length)
+console.log(
+  `[e2e-affected] execution mode: ${runMode.shards} isolated ${runMode.viteMode} stack(s)`,
+)
 const result = spawnSync(
   "npx",
-  ["tsx", "scripts/e2e-up.ts", "--", ...impact.specs],
+  runMode.shards === 1
+    ? ["tsx", "scripts/e2e-up.ts", "--", ...impact.specs]
+    : ["tsx", "scripts/e2e-shard.ts", String(runMode.shards), "--", ...impact.specs],
   {
     cwd: REPO_ROOT,
     stdio: "inherit",
-    env: { ...process.env, E2E_VITE_MODE: "dev" },
+    env: { ...process.env, E2E_VITE_MODE: runMode.viteMode },
   },
 )
 process.exit(result.status ?? 1)

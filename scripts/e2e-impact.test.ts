@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest"
 import { selectAffectedE2E } from "./lib/e2e-impact"
+import {
+  affectedRunMode,
+  FAST_AFFECTED_SPEC_LIMIT,
+  shouldWriteTestEnvFile,
+} from "./lib/e2e-run-mode"
 
 const specs = [
   "e2e/specs/auth/login-account-setup-status.smoke.spec.ts",
@@ -54,3 +59,18 @@ describe("changed-file E2E impact selection", () => {
   })
 })
 
+describe("affected E2E run mode", () => {
+  it("uses one dev-mode stack only for genuinely small suites", () => {
+    expect(affectedRunMode(FAST_AFFECTED_SPEC_LIMIT)).toEqual({ viteMode: "dev", shards: 1 })
+  })
+
+  it("routes a 115-spec selection to three preview-mode shards", () => {
+    expect(affectedRunMode(115)).toEqual({ viteMode: "preview", shards: 3 })
+  })
+
+  it("never writes Vite's watched env file in dev mode", () => {
+    expect(shouldWriteTestEnvFile(false, "dev")).toBe(false)
+    expect(shouldWriteTestEnvFile(false, "preview")).toBe(true)
+    expect(shouldWriteTestEnvFile(true, "preview")).toBe(false)
+  })
+})

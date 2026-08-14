@@ -12,6 +12,7 @@ import {
   type SpawnedWorker,
 } from "./lib/spawn-worker"
 import { MockLLMServer } from "../e2e/helpers/mock-llm-server"
+import { shouldWriteTestEnvFile } from "./lib/e2e-run-mode"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = path.resolve(__dirname, "..")
@@ -498,7 +499,7 @@ async function main(): Promise<void> {
   //
   // Skipped when sharding: concurrent stacks would race on this one shared file,
   // and the build picks the URLs up from process.env (browserEnv) instead.
-  if (!SHARDED) {
+  if (shouldWriteTestEnvFile(SHARDED, VITE_MODE)) {
     const envFile = path.join(REPO_ROOT, ".env.test.local")
     writeFileSync(
       envFile,

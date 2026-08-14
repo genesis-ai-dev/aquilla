@@ -43,9 +43,10 @@ pnpm test:e2e:ui
 
 `test:e2e:affected` reads Git's pre-push ref stream, always includes smoke
 specs changed by the pushed commits, and adds a small sentinel set for affected
-product domains. It skips browser startup for docs/unit-test-only pushes and
-uses a single Vite dev-mode stack. `test:e2e:smoke` still runs every smoke spec
-and is required at the merge/deploy/release boundary.
+product domains. It skips browser startup for docs/unit-test-only pushes. Up to
+eight selected specs use a single Vite dev-mode stack; larger selections use
+two or three isolated preview-mode shards. `test:e2e:smoke` still runs every
+smoke spec and is required at the merge/deploy/release boundary.
 
 ## Architecture
 

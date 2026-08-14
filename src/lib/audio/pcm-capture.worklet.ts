@@ -20,10 +20,11 @@
 // both are ambient and erase to nothing, which `erasableSyntaxOnly` requires.
 declare abstract class AudioWorkletProcessor {
   readonly port: MessagePort
+  constructor(options?: unknown)
 }
 declare function registerProcessor(
   name: string,
-  ctor: new () => AudioWorkletProcessor,
+  ctor: new (options?: unknown) => AudioWorkletProcessor,
 ): void
 
 // Must match PROCESSOR_NAME in pcm-capture.ts. It cannot be a shared import:
@@ -39,11 +40,33 @@ class PcmCaptureProcessor extends AudioWorkletProcessor {
   private buf = new Int16Array(CHUNK_SAMPLES)
   private used = 0
   private stopped = false
+  // ARMED (AQU-646 take-shift fix): constructed with {processorOptions:
+  // {armed: true}}, the processor runs but emits NOTHING until a "mark"
+  // message arrives — the graph is brought up during the pre-record countdown
+  // and GO becomes a bookmark instead of a starter pistol. Marking here, on
+  // the audio thread, is what makes sample 0 land within one render quantum
+  // (~2.7ms) of the GO instant; it also means the take can never contain the
+  // countdown's own beeps, and the ~50ms of zero-filled quanta the graph
+  // delivers while the mic's frames are still in flight all happen — and are
+  // discarded — before the take begins. Without the option the processor
+  // emits from construction, which is what the un-prewarmed fallback path and
+  // the voice-clone recorder still rely on.
+  private waitingForMark: boolean
 
-  constructor() {
-    super()
+  constructor(options?: unknown) {
+    super(options)
+    const armed = (options as { processorOptions?: { armed?: boolean } } | undefined)
+      ?.processorOptions?.armed
+    this.waitingForMark = armed === true
     this.port.onmessage = (e: MessageEvent) => {
-      if ((e.data as { type?: string } | null)?.type !== "flush") return
+      const type = (e.data as { type?: string } | null)?.type
+      if (type === "mark") {
+        // Drop the partial buffer: anything in it predates the mark.
+        this.used = 0
+        this.waitingForMark = false
+        return
+      }
+      if (type !== "flush") return
       // Stop first: the graph is still running while the host tears it down,
       // and a chunk posted after `done` would be dropped on the floor.
       this.stopped = true
@@ -53,7 +76,7 @@ class PcmCaptureProcessor extends AudioWorkletProcessor {
   }
 
   process(inputs: Float32Array[][]): boolean {
-    if (this.stopped) return true
+    if (this.stopped || this.waitingForMark) return true
     const channel = inputs[0]?.[0]
     if (channel) {
       for (let i = 0; i < channel.length; i++) {

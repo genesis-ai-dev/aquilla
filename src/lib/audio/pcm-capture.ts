@@ -91,9 +91,20 @@ export interface PcmCaptureOptions {
   /** Live mic stream. Ownership stays with the caller: capture never stops
    *  the tracks, because the tracks must outlive the flush. */
   stream: MediaStream
-  /** Stop-worthy sample count. onLimit fires once, when it is crossed. */
+  /** Stop-worthy sample count. onLimit fires once, when it is crossed.
+   *  Counted from mark() when armed, since only emitted frames are counted. */
   maxFrames?: number
   onLimit?: () => void
+  /**
+   * ARMED capture (the take-shift fix): the graph comes up and runs — pulling
+   * the mic, warming every buffer in the path — but the worklet emits nothing
+   * until mark() is called. Built during the pre-record countdown so that at
+   * GO there is no context construction, no worklet fetch, and no zero-filled
+   * head left to pay for: mark() is a synchronous bookmark and sample 0 lands
+   * within a render quantum of it. The countdown's beeps play while the mic is
+   * hot, but they fall before the mark and are never emitted.
+   */
+  armed?: boolean
 }
 
 export interface PcmCaptureHandle {
@@ -104,8 +115,13 @@ export interface PcmCaptureHandle {
    * silently, and unrecoverably once it has been uploaded.
    */
   readonly sampleRate: number
-  /** Samples captured so far; final once finish() resolves. */
+  /** Samples captured so far; final once finish() resolves. When the capture
+   *  was armed, counts from mark() — pre-mark audio never leaves the worklet. */
   frames(): number
+  /** Armed captures only: from this instant, samples count. Sample 0 of the
+   *  take is the first frame the worklet processes after receiving this. No-op
+   *  on an unarmed capture (it has been emitting since construction). */
+  mark(): void
   /** Flush the worklet's partial buffer and tear the graph down. Resolves to
    *  every chunk captured, in order, ready for encodeWavPcm16Chunks. */
   finish(): Promise<Pcm16Chunk[]>
@@ -145,6 +161,7 @@ export async function startPcmCapture(opts: PcmCaptureOptions): Promise<PcmCaptu
       // the signal and sound thin rather than obviously wrong.
       channelCount: 1,
       channelCountMode: "explicit",
+      processorOptions: { armed: opts.armed === true },
     })
 
     // The graph has to terminate somewhere for the worklet to be pulled, and
@@ -223,6 +240,9 @@ export async function startPcmCapture(opts: PcmCaptureOptions): Promise<PcmCaptu
     return {
       sampleRate: ctx.sampleRate,
       frames: () => frames,
+      mark: () => {
+        try { node.port.postMessage({ type: "mark" }) } catch {}
+      },
       finish,
       dispose: teardown,
     }

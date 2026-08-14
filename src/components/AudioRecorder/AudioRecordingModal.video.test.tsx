@@ -8,8 +8,9 @@
 //
 // The other two guard the sound rule the whole surface exists under: the mic is
 // opened with echo cancellation, noise suppression and auto gain ALL off, so an
-// audible film records straight into the take. Muted by default, and running
-// only while the take is actually capturing.
+// audible film records straight into the take. Muted by default, and still in
+// the two states where a moving picture would be wrong — before anything has
+// been asked for, and while a finished take is under review.
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
@@ -135,7 +136,13 @@ describe("AudioRecordingModal — the film", () => {
     expect((screen.getByTestId("rec-video") as HTMLVideoElement).muted).toBe(false)
   })
 
-  it("the picture runs ONLY while the take is capturing", async () => {
+  // NOT "only while capturing" any more (2026-08-14): the picture also rolls
+  // through the countdown as a lead-in, arriving at the line's first frame at
+  // zero. What stays true — and is what this pins — is the two states where it
+  // must be still: nothing has been asked for yet, and a finished take is being
+  // reviewed. (The lead-in itself is pinned in RecordingVideoSurface.test.tsx,
+  // where the element's readiness can be controlled.)
+  it("the picture is still in idle, runs while capturing, and stops for the preview", async () => {
     const play = vi.spyOn(window.HTMLMediaElement.prototype, "play").mockResolvedValue(undefined)
     const pause = vi.spyOn(window.HTMLMediaElement.prototype, "pause").mockImplementation(() => {})
     try {

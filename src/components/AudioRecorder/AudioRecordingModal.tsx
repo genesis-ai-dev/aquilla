@@ -25,7 +25,7 @@ import { useOnline } from "@/hooks/useOnline"
 import { pushAudioShortcutOverride } from "@/lib/audio/audio-coordinator"
 import { probeDurationMsSafe } from "@/lib/import"
 import { generateCellVoice } from "@/lib/audio/voice-generate-helpers"
-import { useCountdown } from "./useCountdown"
+import { COUNTDOWN_FROM, useCountdown } from "./useCountdown"
 import { AudioWaveform } from "./AudioWaveform"
 import { DurationBar } from "./DurationBar"
 import { RecordingVideoSurface } from "./RecordingVideoSurface"
@@ -133,6 +133,12 @@ export function AudioRecordingModal({
   // nonce and not a boolean because re-arming the SAME cell — a retake, or
   // coming back to a line already recorded — has to re-fire.
   const [armNonce, setArmNonce] = useState(0)
+  // THE ROLLING LEAD-IN (2026-08-14). Non-null only while a countdown is
+  // running, and carries the wall-clock instant of zero so the film can play
+  // the seconds leading up to the line and arrive at its first frame exactly
+  // as the count reaches it. Held as state with a STABLE identity (set once
+  // per countdown, cleared once) because the surface keys effects on it.
+  const [leadIn, setLeadIn] = useState<{ zeroAtMs: number } | null>(null)
 
   const activeIndex = useMemo(
     () => (activeCellId ? cells.findIndex((c) => c.id === activeCellId) : -1),
@@ -338,6 +344,7 @@ export function AudioRecordingModal({
   useEffect(() => {
     recorder.reset()
     countdown.cancel()
+    setLeadIn(null)
     setPhase("idle")
     setErrorMessage(null)
     if (previewUrl) { URL.revokeObjectURL(previewUrl); setPreviewUrl(null) }
@@ -355,9 +362,11 @@ export function AudioRecordingModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeCellId])
 
-  // Re-arm the picture at the top of the countdown, so the frame is already on
-  // the line's start by the time capture begins, and again when a take lands in
-  // PREVIEW — where `running` is false, so the surface rewinds and stays paused.
+  // Re-arm the picture at the top of the countdown — which is now where the
+  // ROLLING LEAD-IN starts, so the surface rewinds by the countdown's length
+  // and plays the run-up to the line, arriving on its first frame at zero —
+  // and again when a take lands in PREVIEW, where `leadIn` is null and
+  // `running` is false, so the surface simply rewinds and stays paused.
   //
   // Running the film under the preview player is a NON-GOAL, not an oversight:
   // unmuted it talks over the take, and muted it drifts the moment the user
@@ -375,6 +384,8 @@ export function AudioRecordingModal({
     if (open) return
     recorder.reset()
     countdown.cancel()
+    // Also releases the armed capture graph and the mic: reset() → cleanup().
+    setLeadIn(null)
     if (previewUrl) { URL.revokeObjectURL(previewUrl); setPreviewUrl(null) }
     consumedBlobRef.current = null
     setPhase("idle")
@@ -445,13 +456,25 @@ export function AudioRecordingModal({
       // "granted" or "prompt" (system will ask, or already asked successfully).
       // Safe to run the countdown and hand off to the recorder.
       setPhase("counting")
-      // Pre-warm the mic NOW so macOS/Chrome AGC has the 3-second countdown
-      // to stabilise gain before we actually start capturing bytes.
+      // Bring the mic AND the whole capture graph up now, during the countdown.
+      // It runs armed — listening, discarding — so that when the count reaches
+      // zero, starting the take is a bookmark rather than a build. Everything
+      // this used to do at zero instead (construct an AudioContext, fetch the
+      // worklet, wait out the mic's first zero-filled buffers) landed inside
+      // the take as dead air, gluing the operator's voice that much later onto
+      // the timeline. It also gives macOS/Chrome AGC the same head start it
+      // always had.
       void recorder.prewarm()
+      // The film rolls the run-up to the line and lands on it at zero. Fixed
+      // from the countdown's own length so the two cues cannot drift apart.
+      setLeadIn({ zeroAtMs: Date.now() + COUNTDOWN_FROM * 1000 })
       countdown.start({
         beep: beepEnabled,
-        from: 3,
+        from: COUNTDOWN_FROM,
         onDone: () => {
+          // ZERO. The countdown says "now", the film is on the line's first
+          // frame, and the take begins — one instant, not three.
+          setLeadIn(null)
           void recorder.start()
         },
       })
@@ -794,7 +817,7 @@ export function AudioRecordingModal({
       if (e.key === "Escape") {
         e.preventDefault()
         if (phase === "recording") { stopRecording(); return }
-        if (phase === "counting") { countdown.cancel(); setPhase("idle"); return }
+        if (phase === "counting") { countdown.cancel(); setLeadIn(null); setPhase("idle"); return }
         if (phase === "preview") { retake(); return }
         onClose()
         return
@@ -889,13 +912,14 @@ export function AudioRecordingModal({
             <RecordingVideoSurface
               src={filmUrl}
               startSec={activeCell.startTime ?? null}
-              // The PHASE, not the end of the countdown: recorder.start() is
-              // async, so binding the picture to the phase is what makes
-              // picture-start equal capture-start — and that equality is what
-              // makes an overrun readable.
+              // The picture is already rolling by now — the lead-in below
+              // started it at the top of the countdown and brought it to this
+              // line's first frame at zero. `running` only keeps it going, and
+              // it runs ON past the end of the line so an overrun is visible.
               running={displayPhase === "recording"}
               armNonce={armNonce}
               overrun={targetOverrun}
+              leadIn={leadIn}
             />
             <AppTooltip content="Hide the film and use the narrow recorder">
               <Button
@@ -1211,7 +1235,7 @@ export function AudioRecordingModal({
             ) : displayPhase === "counting" ? (
               <Button
                 variant="outline"
-                onClick={() => { countdown.cancel(); setPhase("idle") }}
+                onClick={() => { countdown.cancel(); setLeadIn(null); setPhase("idle") }}
                 className="h-[52px] w-full text-sm font-semibold"
               >
                 Cancel <span className="ml-1.5 opacity-60">· ESC</span>

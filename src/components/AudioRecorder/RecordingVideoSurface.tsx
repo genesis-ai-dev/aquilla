@@ -40,6 +40,16 @@ import { cn } from "@/lib/utils"
  *  that it can be retried. */
 const HAVE_METADATA = 1
 
+/** How far the picture may be from where the countdown says it should be
+ *  before the lead-in corrects it. Below this a seek costs more than it buys —
+ *  a visible stutter to fix an error nobody can perceive. */
+const LEAD_IN_TOLERANCE_SEC = 0.12
+
+/** Corrections stop this long before zero. A seek landing on the operator's
+ *  entrance is worse than the drift it removes, and the take's timing does not
+ *  depend on the picture anyway — the countdown is the clock. */
+const LEAD_IN_SETTLE_SEC = 0.4
+
 /**
  * Where the picture should sit for the line being recorded — pure, so the seek
  * target can be checked without a media pipeline (happy-dom has no decoder).
@@ -59,8 +69,25 @@ export interface RecordingVideoSurfaceProps {
   /** Where the line starts in the film. Null for an untimed line. */
   startSec: number | null
   /** True only while the take is actually capturing — the modal passes
-   *  `phase === "recording"`, NOT the end of the countdown. See below. */
+   *  `phase === "recording"`. See below. */
   running: boolean
+  /**
+   * THE ROLLING LEAD-IN (Sam, 2026-08-14). While the countdown runs, the film
+   * plays the seconds LEADING UP TO the line and arrives at its first frame as
+   * the count reaches zero, so the operator joins the picture the way you join
+   * a duet — anticipating an entrance instead of reacting to one after it has
+   * gone past. A frozen frame gives you nothing to come in on, and reaction
+   * time is the one part of the take-shift problem no code may trim away
+   * (Sam's ruling: never trim room noise — a performer's breath is content).
+   *
+   * `zeroAtMs` is wall-clock `Date.now()` for the countdown's zero. The picture
+   * is slaved to THAT, not the other way round: the countdown is the take's
+   * clock, and a film that cannot keep up is a reading aid that runs slightly
+   * behind, never a take that records at the wrong moment.
+   *
+   * Null whenever no countdown is running.
+   */
+  leadIn: { zeroAtMs: number } | null
   /** Nonce-keyed "put the picture on this line", following the `seekSec:
    *  {sec, nonce}` idiom the timeline already uses for the main pane. A nonce
    *  and not a boolean because re-arming the SAME cell — retake, or coming back
@@ -79,6 +106,7 @@ export function RecordingVideoSurface({
   running,
   armNonce,
   overrun,
+  leadIn,
 }: RecordingVideoSurfaceProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const audible = useRecordingFilmAudible()
@@ -96,27 +124,85 @@ export function RecordingVideoSurface({
   useEffect(() => {
     startSecRef.current = startSec
   }, [startSec])
+  // Read through a ref for the same reason, and declared before the arm effect
+  // so a countdown that starts in the same commit as the nonce bump is visible
+  // to it.
+  const leadInRef = useRef(leadIn)
+  useEffect(() => {
+    leadInRef.current = leadIn
+  }, [leadIn])
 
   useEffect(() => {
     const video = videoRef.current
     if (!video) return
     const target = seekTargetSec(startSecRef.current)
     if (target == null) return
-    const apply = () => {
-      try {
-        video.currentTime = target
-      } catch {
-        /* not seekable yet — nothing else is going to move the picture, and a
-           frame from the wrong part of the film is better than a thrown error
-           in the middle of arming a take */
+    const zeroAtMs = leadInRef.current?.zeroAtMs ?? null
+
+    let playTimer: ReturnType<typeof setTimeout> | null = null
+    let rafId: number | null = null
+    let cancelled = false
+
+    // Hold the picture where the countdown says it should be. A film opened
+    // over the network can take a few hundred milliseconds to actually start,
+    // and without this the lead-in arrives late by however long that was — the
+    // exact class of drift this whole change exists to remove. Corrections
+    // stop before the entrance so no seek ever lands under the operator.
+    const track = () => {
+      if (cancelled || zeroAtMs == null) return
+      const toZeroSec = (zeroAtMs - Date.now()) / 1000
+      if (toZeroSec <= LEAD_IN_SETTLE_SEC) return
+      const expected = Math.max(0, target - toZeroSec)
+      if (Math.abs(video.currentTime - expected) > LEAD_IN_TOLERANCE_SEC) {
+        try { video.currentTime = expected } catch { /* not seekable yet */ }
       }
+      rafId = requestAnimationFrame(track)
     }
+
+    const apply = () => {
+      if (cancelled) return
+      if (zeroAtMs == null) {
+        try {
+          video.currentTime = target
+        } catch {
+          /* not seekable yet — nothing else is going to move the picture, and a
+             frame from the wrong part of the film is better than a thrown error
+             in the middle of arming a take */
+        }
+        return
+      }
+      // Rewind by however much runway is left, so playing forward from here
+      // reaches the line's first frame exactly at zero.
+      const remainingSec = Math.max(0, (zeroAtMs - Date.now()) / 1000)
+      const from = Math.max(0, target - remainingSec)
+      try { video.currentTime = from } catch { /* not seekable yet */ }
+      // A line closer to the head of the film than one lead-in has less runway
+      // than the countdown is long. Rather than start mid-count and arrive
+      // early, the picture WAITS on frame 0 and sets off late enough to still
+      // land on zero — a shorter run-up, never a wrong one.
+      const beginAtMs = zeroAtMs - (target - from) * 1000
+      const begin = () => {
+        if (cancelled) return
+        const attempt = video.play()
+        if (attempt && typeof attempt.catch === "function") attempt.catch(() => {})
+        track()
+      }
+      const delay = beginAtMs - Date.now()
+      if (delay <= 0) begin()
+      else playTimer = setTimeout(begin, delay)
+    }
+
     if (video.readyState >= HAVE_METADATA) {
       apply()
-      return
+    } else {
+      video.addEventListener("loadedmetadata", apply, { once: true })
     }
-    video.addEventListener("loadedmetadata", apply, { once: true })
-    return () => video.removeEventListener("loadedmetadata", apply)
+    return () => {
+      cancelled = true
+      if (playTimer) clearTimeout(playTimer)
+      if (rafId != null) cancelAnimationFrame(rafId)
+      video.removeEventListener("loadedmetadata", apply)
+    }
     // The NONCE is the command. Re-running on `startSec` would re-seek the
     // picture out from under a take whenever the caller happened to recompute
     // it; not re-running on an unchanged nonce is what makes a retake re-arm.
@@ -125,11 +211,12 @@ export function RecordingVideoSurface({
 
   // ── The transport, such as it is.
   //
-  // Bound to `running` — the modal's `phase === "recording"` — and deliberately
-  // NOT to the end of the countdown: `recorder.start()` is async, so binding to
-  // the phase is what makes picture-start equal capture-start. That equality is
-  // the whole point of showing the film at all. What you see running past the
-  // end of the line is what you recorded running past the end of the line.
+  // The picture is already rolling by the time this runs: the lead-in above
+  // started it during the countdown and it crosses the line's first frame at
+  // zero, so `running` does not START the film, it INHERITS it. Calling play()
+  // on an element that is already playing is a no-op, and it is what covers the
+  // arrangements with no lead-in (an untimed line, or a countdown that was
+  // never run because the take began some other way).
   //
   // This is a READING AID, not a sync engine. Frame accuracy is neither
   // achievable from here nor the goal; "the picture is roughly where your voice
@@ -140,6 +227,8 @@ export function RecordingVideoSurface({
     const video = videoRef.current
     if (!video) return
     if (!running) {
+      // A countdown owns the picture — leave it rolling through the lead-in.
+      if (leadIn) return
       // No rewind. The frame the take stopped on is informative — it is the
       // visible evidence of an overrun, and throwing it away to go back to the
       // line's first frame would discard the one thing worth looking at.
@@ -157,7 +246,7 @@ export function RecordingVideoSurface({
       // frame rather than to interrupt a recording with a prompt.
       attempt.catch(() => {})
     }
-  }, [running])
+  }, [running, leadIn])
 
   // The element is captured at effect time rather than read from the ref in the
   // cleanup, because React detaches refs before passive cleanups run on an

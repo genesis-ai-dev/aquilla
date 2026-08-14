@@ -9,6 +9,24 @@
 //   - webm/opus through MediaRecorder — the opt-out, and the fallback whenever
 //     anything about the WAV path fails.
 //
+// THE TAKE-SHIFT FIX (2026-08-14). Sample 0 of a saved take is anchored to the
+// line's start on the timeline, so every millisecond between "the app told the
+// operator to speak" and "the file actually began" lands in the take as dead
+// air at the head — and Sam measured over a second of it (GO rendered a full
+// second before onDone, then 25–160ms of AudioContext construction, then ~50ms
+// of zero-filled quanta while the mic's frames were still in flight). The fix
+// inverts the ordering: prewarm() — called at the TOP of the countdown — now
+// builds the whole capture graph ARMED, running but emitting nothing, and
+// start() collapses to mark(): a synchronous bookmark that makes sample 0 land
+// within one render quantum of the instant the operator was cued. If the armed
+// build failed, or the pref is webm, start() is exactly the old path.
+//
+// The other half: stop() used to seal the file immediately, but the audio
+// travelling mic → device buffer → graph hadn't all arrived, so the last
+// ~50ms of every take — the tail of the final word — was simply gone (one of
+// Sam's takes ends at full speech level, cut mid-sound). finishWavTake now
+// waits a short grace before flushing so the in-flight tail lands.
+//
 // THE PUBLIC SHAPE MUST NOT CHANGE. Every consumer of this hook is tested by
 // module-mocking it and returning a PARTIAL object, so anything new that a
 // consumer *requires* from here reds those suites. The options argument is
@@ -32,6 +50,15 @@ import { getRecordingFormatPref, type RecordingFormat } from "@/lib/store/record
 const WEBM_LIMITS = recordingLimitsFor("webm")
 export const RECORDING_WARN_MS = WEBM_LIMITS.warnMs  // 25 minutes
 export const RECORDING_HARD_STOP_MS = WEBM_LIMITS.hardStopMs  // 30 minutes
+
+// How long stop() keeps capturing before sealing the file. The audio still in
+// flight (mic hardware → device buffer → the worklet) measured ~50ms on a
+// wired mic; Bluetooth chains run several times that. The grace lands inside
+// the take as a beat of trailing room tone, which is what a recording that
+// wasn't cut off short is supposed to end with. It also means a limit-stop
+// runs slightly past maxFrames — covered by the 0.9 headroom recording-limits
+// builds into the frame cap.
+const STOP_TAIL_GRACE_MS = 250
 
 export type RecorderState =
   | { kind: "idle" }
@@ -106,6 +133,12 @@ export function useAudioRecorder(opts?: UseAudioRecorderOptions): UseAudioRecord
   const chunksRef = useRef<Blob[]>([])
   const pcmRef = useRef<PcmCaptureHandle | null>(null)
   const pcmFinishRef = useRef<Promise<void> | null>(null)
+  // The ARMED graph: built by prewarm() during the countdown, running and
+  // discarding, waiting for start() to mark it. Distinct from pcmRef — armed
+  // means "no take yet". Kept across a cancelled countdown (like the warm mic
+  // stream, it makes the retry instant); disposed by cleanup().
+  const armedRef = useRef<PcmCaptureHandle | null>(null)
+  const armedBuildRef = useRef<Promise<void> | null>(null)
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const elapsedMsRef = useRef(0)
   useEffect(() => { elapsedMsRef.current = elapsedMs }, [elapsedMs])
@@ -115,6 +148,10 @@ export function useAudioRecorder(opts?: UseAudioRecorderOptions): UseAudioRecord
     if (recorderRef.current) {
       try { if (recorderRef.current.state !== "inactive") recorderRef.current.stop() } catch {}
       recorderRef.current = null
+    }
+    if (armedRef.current) {
+      try { armedRef.current.dispose() } catch {}
+      armedRef.current = null
     }
     if (pcmRef.current) {
       // dispose() is flush-less and closes the AudioContext. Browsers cap a
@@ -144,6 +181,13 @@ export function useAudioRecorder(opts?: UseAudioRecorderOptions): UseAudioRecord
     if (!handle || pcmFinishRef.current) return
     pcmFinishRef.current = (async () => {
       try {
+        // THE TAIL GRACE: keep capturing for a beat before sealing the file.
+        // The audio of the final word is still travelling mic → device buffer
+        // → worklet when the operator presses stop; flushing immediately cut
+        // it off mid-sound. The graph stays connected through this wait, so
+        // the in-flight tail lands as real samples.
+        await new Promise((r) => setTimeout(r, STOP_TAIL_GRACE_MS))
+        if (pcmRef.current !== handle) return
         const chunks = await handle.finish()
         // reset() or an unmount can land while the flush is in flight; the take
         // has been abandoned, so don't resurrect it as `stopped`.
@@ -184,25 +228,70 @@ export function useAudioRecorder(opts?: UseAudioRecorderOptions): UseAudioRecord
   }
 
   const prewarm = useCallback(async () => {
+    const format = formatOpt ?? getRecordingFormatPref()
     // Fetch the capture worklet while the countdown runs, so its round trip is
     // not charged to the operator's first word. Deliberately NOT awaited (the
-    // mic prompt should go up immediately) and it never rejects. It must not
-    // build the AudioContext either — a cancelled countdown would leak one.
-    if ((formatOpt ?? getRecordingFormatPref()) === "wav") void preloadPcmCaptureModule()
-    if (streamRef.current) return
-    try {
-      const s = await navigator.mediaDevices.getUserMedia({ audio: MIC_CONSTRAINTS })
-      streamRef.current = s
-      setStream(s)
-    } catch {
-      // Ignore — permission errors surface again when start() is called.
+    // mic prompt should go up immediately) and it never rejects.
+    if (format === "wav") void preloadPcmCaptureModule()
+    else if (armedRef.current) {
+      // The pref flipped to webm between two countdowns (it is only lockable
+      // once a take is in hand). An armed WAV graph from the earlier countdown
+      // must not be adopted by a webm take — drop it.
+      try { armedRef.current.dispose() } catch {}
+      armedRef.current = null
     }
+    if (!streamRef.current) {
+      try {
+        const s = await navigator.mediaDevices.getUserMedia({ audio: MIC_CONSTRAINTS })
+        streamRef.current = s
+        setStream(s)
+      } catch {
+        // Ignore — permission errors surface again when start() is called.
+        return
+      }
+    }
+    // ARM: bring the whole capture graph up NOW, during the countdown, running
+    // and discarding. start() then collapses to mark() — a synchronous
+    // bookmark — instead of AudioContext construction, a worklet fetch and a
+    // head of zero-filled quanta, all of which used to land INSIDE the take as
+    // dead air gluing the operator's voice that much later onto the timeline.
+    // (This is the reversal of an older rule that prewarm must not build the
+    // context: the leak it feared is closed by cleanup()/the pref branch above
+    // disposing armedRef, and one armed context is the working maximum.)
+    if (format !== "wav" || !isPcmCaptureSupported()) return
+    if (armedRef.current || armedBuildRef.current) return
+    const stream = streamRef.current
+    armedBuildRef.current = (async () => {
+      try {
+        const limits = recordingLimitsFor(format, { maxBytes: maxBytesOpt })
+        const handle = await startPcmCapture({
+          stream,
+          armed: true,
+          maxFrames: limits.maxFrames,
+          onLimit: () => finishWavTake(),
+        })
+        // reset() can land while the build is in flight — the mic it was
+        // built on is already stopped, so the graph is a silent leak. Drop it.
+        // So can a take: a countdown short enough (or a machine slow enough)
+        // that zero arrived first sent start() down the un-armed path, and
+        // this graph now has no take to serve and nothing to close it.
+        if (streamRef.current !== stream || pcmRef.current) {
+          try { handle.dispose() } catch {}
+          return
+        }
+        armedRef.current = handle
+      } catch {
+        // Fall through silently — start() takes the un-prewarmed path.
+      } finally {
+        armedBuildRef.current = null
+      }
+    })()
+    await armedBuildRef.current
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [formatOpt])
+  }, [formatOpt, maxBytesOpt, finishWavTake])
 
   const start = useCallback(async () => {
     if (state.kind === "requesting" || state.kind === "recording") return
-    setState({ kind: "requesting" })
     setElapsedMs(0)
     // Read the preference PLAINLY, not reactively: this pins the format for
     // this take. Subscribing would re-render the recorder on every pref change
@@ -210,6 +299,25 @@ export function useAudioRecorder(opts?: UseAudioRecorderOptions): UseAudioRecord
     const format = formatOpt ?? getRecordingFormatPref()
     const limits = recordingLimitsFor(format, { maxBytes: maxBytesOpt })
     setWarnMs(limits.warnMs)
+
+    // THE MARK PATH: prewarm() armed the graph during the countdown, so
+    // starting a take is a bookmark, not a build. SYNCHRONOUS on purpose —
+    // every await between "the operator was cued" and "sample 0" used to land
+    // inside the take as dead air at the head, and that is the whole bug. No
+    // "requesting" state on this path either: there is nothing to request.
+    if (format === "wav" && armedRef.current) {
+      const handle = armedRef.current
+      armedRef.current = null
+      pcmRef.current = handle
+      pcmFinishRef.current = null
+      handle.mark()
+      const startedAt = Date.now()
+      setState({ kind: "recording", startedAt })
+      tickRef.current = setInterval(() => setElapsedMs(Date.now() - startedAt), 100)
+      return
+    }
+
+    setState({ kind: "requesting" })
     try {
       const stream = streamRef.current ?? await navigator.mediaDevices.getUserMedia({
         audio: MIC_CONSTRAINTS,

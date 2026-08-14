@@ -71,7 +71,7 @@ export function ModelListEditor({
           spellCheck={false}
           className="font-mono text-xs"
         />
-        <Button type="button" variant="outline" size="sm" onClick={addModel} disabled={!draft.trim()}>
+        <Button type="button" variant="outline" onClick={addModel} disabled={!draft.trim()}>
           <Plus className="size-3.5" /> Add
         </Button>
       </div>

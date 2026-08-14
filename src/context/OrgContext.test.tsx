@@ -1,9 +1,10 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest"
 import { render, screen, waitFor, act } from "@testing-library/react"
-import { MemoryRouter } from "react-router-dom"
+import { MemoryRouter, useNavigate } from "react-router-dom"
 import { OrgProvider, useActiveOrg } from "./OrgContext"
 import { UserError } from "@/lib/errors/user-error"
-import { onSessionExpired } from "@/lib/errors/session-expired-signal"
+import { clearSessionExpired, onSessionExpired } from "@/lib/errors/session-expired-signal"
+import { clearSession, saveSession } from "@/lib/frontier/session-store"
 
 // This vitest/happy-dom env doesn't provide localStorage (the reason this
 // suite was red before FRO-367 added the shim). OrgContext reads/writes it
@@ -66,6 +67,17 @@ function Probe() {
   )
 }
 
+function RouteProbe() {
+  const navigate = useNavigate()
+  const { isLoading } = useActiveOrg()
+  return (
+    <div>
+      <span data-testid="loading">{isLoading ? "yes" : "no"}</span>
+      <button onClick={() => navigate("/orgs/1/settings")}>settings</button>
+    </div>
+  )
+}
+
 beforeEach(() => {
   localStorage.clear()
   sessionState.loading = false
@@ -76,6 +88,26 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks())
 
 describe("OrgProvider", () => {
+  it("keeps resolved organization state across client-side route changes", async () => {
+    listMyOrgs.mockResolvedValue([
+      { id: 1, name: "A", role: { level: 700, name: "owner" } },
+    ])
+
+    render(
+      <MemoryRouter initialEntries={["/orgs/1"]}>
+        <OrgProvider><RouteProbe /></OrgProvider>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByTestId("loading").textContent).toBe("no"))
+    expect(listMyOrgs).toHaveBeenCalledTimes(1)
+
+    await act(async () => { screen.getByText("settings").click() })
+
+    expect(screen.getByTestId("loading").textContent).toBe("no")
+    expect(listMyOrgs).toHaveBeenCalledTimes(1)
+  })
+
   it("loads the shared project directory once while organization state resolves", async () => {
     listMyOrgs.mockResolvedValue([
       { id: 1, name: "A", role: { level: 700, name: "owner" } },
@@ -308,6 +340,9 @@ describe("OrgProvider", () => {
     })
 
     it("still signals session-expired on a 401 (AQU-293 path intact)", async () => {
+      // The guarded notifier (AQU-884 race fix) checks the session store, so
+      // the store must hold the same JWT the provider is fetching with.
+      await saveSession({ jwt: "jwt", username: "anna", createdAt: "x" })
       const expired = vi.fn()
       const unsubscribe = onSessionExpired(expired)
       listMyOrgs.mockRejectedValue(new UserError(401, "token expired"))
@@ -316,6 +351,67 @@ describe("OrgProvider", () => {
       // Still an error state — the banner and the retry affordance coexist.
       expect(screen.getByTestId("error").textContent).not.toBe("none")
       unsubscribe()
+      await clearSession()
+      clearSessionExpired()
+    })
+
+    // AQU-884 race fix: a 401 from a JWT the session store no longer holds
+    // (re-login replaced it while the request was in flight or React state
+    // lagged) must NOT signal — it would re-latch the banner over a healthy
+    // dashboard.
+    it("does not signal when the failing JWT is no longer the active credential", async () => {
+      await saveSession({ jwt: "jwt-fresh", username: "anna", createdAt: "x" })
+      const expired = vi.fn()
+      const unsubscribe = onSessionExpired(expired)
+      // The provider still fetches with the mocked hook's stale "jwt".
+      listMyOrgs.mockRejectedValue(new UserError(401, "token expired"))
+      render(<MemoryRouter><OrgProvider><Probe /></OrgProvider></MemoryRouter>)
+      // Wait for the failure to surface, then flush the guard's async check.
+      await waitFor(() => expect(screen.getByTestId("error").textContent).not.toBe("none"))
+      await act(async () => {})
+      expect(expired).not.toHaveBeenCalled()
+      unsubscribe()
+      await clearSession()
+      clearSessionExpired()
+    })
+  })
+
+  // AQU-885: the stored JWT's `exp` is knowable before any request goes out.
+  // Booting on an already-expired token used to fire both fetches anyway, take
+  // two 401s, and land the user on an empty all-orgs dashboard.
+  describe("already-expired stored token at boot (AQU-885)", () => {
+    /** Fake JWT with an `exp` claim `secondsFromNow` out (isJwtExpired is real). */
+    function fakeJwt(secondsFromNow: number): string {
+      const exp = Math.floor(Date.now() / 1000) + secondsFromNow
+      return `h.${btoa(JSON.stringify({ exp }))}.s`
+    }
+
+    afterEach(() => {
+      sessionState.session = { jwt: "jwt", username: "anna", createdAt: "x" }
+    })
+
+    it("issues no org or project-directory request, and signals session-expired", async () => {
+      sessionState.session = { jwt: fakeJwt(-60), username: "anna", createdAt: "x" }
+      const expired = vi.fn()
+      const unsubscribe = onSessionExpired(expired)
+
+      render(<MemoryRouter><OrgProvider><Probe /></OrgProvider></MemoryRouter>)
+
+      await waitFor(() => expect(expired).toHaveBeenCalled())
+      await waitFor(() => expect(screen.getByTestId("loading").textContent).toBe("no"))
+      expect(listMyOrgs).not.toHaveBeenCalled()
+      expect(fetchAccessibleProjects).not.toHaveBeenCalled()
+      unsubscribe()
+    })
+
+    it("still fetches normally for a valid unexpired token", async () => {
+      sessionState.session = { jwt: fakeJwt(3600), username: "anna", createdAt: "x" }
+      listMyOrgs.mockResolvedValue([{ id: 1, name: "A", role: { level: 700, name: "owner" } }])
+
+      render(<MemoryRouter><OrgProvider><Probe /></OrgProvider></MemoryRouter>)
+
+      await waitFor(() => expect(screen.getByTestId("count").textContent).toBe("1"))
+      expect(fetchAccessibleProjects).toHaveBeenCalled()
     })
   })
 })

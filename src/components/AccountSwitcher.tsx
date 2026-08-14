@@ -189,7 +189,15 @@ export function AccountSwitcher({
       </DropdownMenuGroup>
       <DropdownMenuSeparator className="mx-0 my-1" />
       <DropdownMenuGroup>
-        <DropdownMenuItem render={<Link to="/preferences" onClick={() => setOpen(false)} />}>
+        <DropdownMenuItem
+          render={
+            <Link
+              to="/preferences"
+              state={{ backgroundLocation: location, preferencesModalDepth: 1 }}
+              onClick={() => setOpen(false)}
+            />
+          }
+        >
           <Settings2 />
           {t("nav.account.preferences")}
         </DropdownMenuItem>

@@ -226,6 +226,15 @@ function FieldError({
   )
 }
 
+/** Grayed “(optional)” suffix for field labels — matches AI provider keys. */
+function OptionalMark({ className }: { className?: string }) {
+  return (
+    <span className={cn("font-normal text-muted-foreground/70", className)}>
+      (optional)
+    </span>
+  )
+}
+
 export {
   Field,
   FieldLabel,
@@ -237,4 +246,5 @@ export {
   FieldSet,
   FieldContent,
   FieldTitle,
+  OptionalMark,
 }

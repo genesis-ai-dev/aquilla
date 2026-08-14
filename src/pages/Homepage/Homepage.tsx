@@ -5,8 +5,8 @@ import { AppTooltip } from "@/components/ui/tooltip"
 import { MultimodalWorkspace } from "./MultimodalWorkspace"
 import { LanguageBlitz, LanguageMarquee } from "./LanguageBlitz"
 import { BetaBar } from "./BetaBar"
-import { AppEntryBanner } from "./AppEntryBanner"
 import { BookCallSection } from "./BookCallSection"
+import { MarketingAuthOrDocsLink } from "./MarketingAuthOrDocsLink"
 import { useMarketingShell } from "./useMarketingShell"
 import "./homepage.css"
 
@@ -43,8 +43,7 @@ export function Homepage() {
   // `/` is the marketing homepage for everyone now, so "open app" can't point
   // there — /app is the workspace entry, and it sends signed-out visitors to
   // /login itself. No cookie read here: the marketing pages are prerendered and
-  // edge-cached, so their markup must not depend on who is asking. Signed-in
-  // visitors get steered by AppEntryBanner after mount instead.
+  // edge-cached, so their markup must not depend on who is asking.
   const appHref = "/app"
 
   return (
@@ -56,7 +55,6 @@ export function Homepage() {
       </div>
 
       {/* ── Beta strip (above the sticky nav; scrolls away) ──────────────── */}
-      <AppEntryBanner />
       <BetaBar />
 
       {/* ── Nav ───────────────────────────────────────────────────────── */}
@@ -72,7 +70,6 @@ export function Homepage() {
             <a className="aq-nav-link" href="#languages">Languages</a>
             <a className="aq-nav-link" href="#quality">Quality</a>
             <a className="aq-nav-link" href="#pricing">Pricing</a>
-            <a className="aq-nav-link" href={DOCS_URL}>Docs</a>
             <a className="aq-nav-link" href="#book-call">Book a call</a>
           </div>
           <div className="aq-nav-cta">
@@ -86,8 +83,11 @@ export function Homepage() {
                 {theme === "dark" ? <IconSun /> : <IconMoon />}
               </button>
             </AppTooltip>
-            <a href={appHref} className="aq-btn aq-btn-ghost aq-btn-sm">Open app</a>
-            <a href="/onboarding" className="aq-btn aq-btn-gold aq-btn-sm">Sign up free</a>
+            <MarketingAuthOrDocsLink
+              docsUrl={DOCS_URL}
+              className="aq-btn aq-btn-ghost aq-btn-sm"
+            />
+            <a href={appHref} className="aq-btn aq-btn-gold aq-btn-sm">Open app</a>
           </div>
         </div>
       </nav>
@@ -107,7 +107,7 @@ export function Homepage() {
             that learns — so every language reaches every medium it's heard, read, and watched in.
           </p>
           <div className="aq-hero-actions aq-load aq-d4">
-            <a href="/onboarding" className="aq-btn aq-btn-gold aq-btn-lg">Sign up free</a>
+            <a href={appHref} className="aq-btn aq-btn-gold aq-btn-lg">Open app</a>
             <a href="#workspace" className="aq-btn aq-btn-ghost aq-btn-lg">See how it works <IconArrow /></a>
           </div>
           <div className="aq-hero-trust aq-load aq-d5">
@@ -464,7 +464,9 @@ export function Homepage() {
                 <li><IconCheck /> Cloud sync &amp; team collaboration</li>
                 <li><IconCheck /> On-device speech</li>
               </ul>
-              <a href="/onboarding" className="aq-btn aq-btn-gold">Sign up free</a>
+              <div className="aq-price-cta">
+                <a href="/onboarding" className="aq-btn aq-btn-gold">Sign up free</a>
+              </div>
             </div>
             <div className="aq-price">
               <span className="aq-chip" style={{ position: "absolute", top: 20, right: 20 }}>Coming soon</span>
@@ -476,7 +478,9 @@ export function Homepage() {
                 <li><IconCheck /> Higher AI usage caps per project</li>
                 <li><IconCheck /> Pay-as-you-go for usage above the cap</li>
               </ul>
-              <a href="mailto:hello@aquilla.app?subject=Pro%20waitlist" className="aq-btn aq-btn-ghost">Join the waitlist</a>
+              <div className="aq-price-cta">
+                <a href="mailto:hello@aquilla.app?subject=Pro%20waitlist" className="aq-btn aq-btn-ghost">Join the waitlist</a>
+              </div>
             </div>
             <div className="aq-price" data-feature="true">
               <h4 className="aq-display">Enterprise support</h4>
@@ -487,7 +491,9 @@ export function Homepage() {
                 <li><IconCheck /> Coordination across large programs</li>
                 <li><IconCheck /> We want to see you succeed</li>
               </ul>
-              <a href="mailto:hello@aquilla.app" className="aq-btn aq-btn-ghost">Talk to us</a>
+              <div className="aq-price-cta">
+                <a href="mailto:hello@aquilla.app" className="aq-btn aq-btn-ghost">Talk to us</a>
+              </div>
             </div>
           </div>
         </section>
@@ -515,6 +521,7 @@ export function Homepage() {
             <div className="aq-footer-brand">
               <a className="aq-brand" href="#top"><Mark className="aq-brand-mark" /><span className="aq-brand-name">{brand.app.name}</span></a>
               <p>{brand.app.tagline} A multimodal translation workspace for every language still waiting.</p>
+              <p className="aq-footer-copy">© {new Date().getFullYear()} {brand.app.name}</p>
             </div>
             <div className="aq-footer-cols">
               <div className="aq-footer-col">
@@ -528,8 +535,8 @@ export function Homepage() {
               </div>
               <div className="aq-footer-col">
                 <h5>Get started</h5>
+                <MarketingAuthOrDocsLink docsUrl={DOCS_URL} />
                 <a href={appHref}>Open app</a>
-                <a href="/onboarding">Sign up free</a>
                 <a href="#book-call">Book a call</a>
                 <a href="#pricing">Enterprise</a>
               </div>
@@ -539,9 +546,6 @@ export function Homepage() {
                 <a href="mailto:hello@aquilla.app">Contact us</a>
               </div>
             </div>
-          </div>
-          <div className="aq-footer-base">
-            <span>© {new Date().getFullYear()} {brand.app.name} · {brand.deploy?.domain ?? "aquilla.app"}</span>
           </div>
         </div>
       </footer>

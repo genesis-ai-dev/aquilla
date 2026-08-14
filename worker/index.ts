@@ -2,8 +2,8 @@
 //
 // Routes requests on aquilla.app to either one of the static marketing pages
 // (homepage.html, beta.html, …) or the SPA (index.html). The root is the
-// marketing homepage for everyone — identity is resolved in the browser
-// (AppEntryBanner), not here, so `/` stays edge-cacheable.
+// marketing homepage for everyone — identity is not resolved here (nav CTAs
+// are the same for every visitor), so `/` stays edge-cacheable.
 //
 // Request flow:
 //   <static page>      → always serve its .html (bypass for QA / sharing / SEO)
@@ -116,10 +116,9 @@ async function route(req: Request, env: Env): Promise<Response> {
   //     serve one shared-cached marketing page at `/` and neither varies on
   //     Cookie.
   //
-  // Identity is now resolved in the browser instead: AppEntryBanner reads the
-  // session from IndexedDB after mount and offers signed-in visitors a way
-  // into the workspace at /app. That keeps this response identical for every
-  // visitor, so it caches.
+  // Identity is not resolved here. The homepage ships the same Sign in /
+  // Open app CTAs for every visitor, so this response stays identical and
+  // caches. /app and /login handle signed-in vs signed-out in the SPA.
   if (url.pathname === "/") {
     const target = new URL("/homepage.html", req.url)
     const asset = await env.ASSETS.fetch(target.toString())

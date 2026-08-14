@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { EmptyState } from "@/components/ui/page"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { useMemberAccess } from "@/hooks/useMemberAccess"
 import type { ProjectAccessBreakdown } from "@/lib/frontier/orgs"
 import { roleName, roleDisplayText } from "@/lib/frontier/roles"
@@ -32,8 +33,8 @@ export function MemberAccessDrillDown({ orgId, userId, username, onClose }: Prop
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b">
         <div>
-          <p className="text-sm font-semibold">{username}</p>
-          <p className="text-xs text-muted-foreground">Project access breakdown</p>
+          <UsernameWithAvatar username={username} nameClassName="text-sm font-semibold" />
+          <p className="mt-0.5 text-xs text-muted-foreground">Project access breakdown</p>
         </div>
         <Button
           type="button"

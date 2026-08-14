@@ -361,7 +361,6 @@ export const editor = defineNamespace({
     "editor.view.increaseFontSize": "Increase {side} font size",
     "editor.view.directionMismatch":
       "{side} is forced {forced}, but content looks {detected}",
-    "editor.view.dismissDirectionWarning": "Dismiss direction warning",
     "editor.view.dirLtr": "left-to-right",
     "editor.view.dirRtl": "right-to-left",
     "editor.view.dirMixed": "mixed",
@@ -1903,10 +1902,10 @@ export const editor = defineNamespace({
       },
       "editor.view.directionMismatch": {
         description:
-          "Warning bubble beside the settings gear when a column's direction has " +
-          "been forced by hand but its actual text runs the other way — so the text " +
-          "will look wrong. Two contrasting halves: what was chosen, then what was " +
-          "detected. Rendered on one non-wrapping line, so keep it tight.",
+          "Warning toast when a column's direction has been forced by hand but " +
+          "its actual text runs the other way — so the text will look wrong. Two " +
+          "contrasting halves: what was chosen, then what was detected. Stays on " +
+          "screen until the translator dismisses it or repairs the direction.",
         placeholders: {
           side:
             "Which column is mis-set — the translated editor.column.source or " +
@@ -1919,11 +1918,6 @@ export const editor = defineNamespace({
             "editor.view.dirLtr / dirRtl / dirMixed. Also rendered bold — the two " +
             "bold values are what the reader compares, so keep both placeholders.",
         },
-      },
-      "editor.view.dismissDirectionWarning": {
-        description:
-          "Screen-reader name of the X that hides the direction-mismatch warning. " +
-          "It hides the warning only; the mis-set direction is unchanged.",
       },
       "editor.view.dirLtr": {
         description:

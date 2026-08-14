@@ -84,6 +84,7 @@ function resolveState(
   if (initialLoadFailed || startFailed) return "attention"
   if (starting || overview.files.some((file) => WORKING_STATUSES.has(file.status))) return "working"
   if (overview.files.some((file) => file.status === "failed")) return "attention"
+  if (overview.files.some((file) => file.status === "parked" && file.failedSpans > 0 && !fileHasQueuedWork(file))) return "attention"
   if (overview.files.some((file) => file.status === "paused")) return "paused"
   if (overview.files.some(fileHasQueuedWork)) return "queued"
   if (overview.files.some((file) => file.status === "parked")) return "idle"

@@ -201,16 +201,19 @@ export function parseConstrualReply(content: string, spanId: string): Construal 
   }
 }
 
-/** Fixpoint test: deep equality ignoring evidenceCellIds ORDER. */
+/** Fixpoint test: compare stable claims, not prose-order accidents.
+ *  Unordered fields are sorted; whitespace is collapsed. A model that
+ *  paraphrases the same situation with shuffled participants still converges. */
 export function construalsEqual(a: Construal, b: Construal): boolean {
-  const sorted = (xs: string[]) => [...xs].sort()
+  const text = (value: string) => value.trim().replace(/\s+/g, " ")
+  const sorted = (xs: string[]) => [...xs].map(text).filter(Boolean).sort()
   return (
-    a.situation === b.situation &&
-    a.tenor === b.tenor &&
+    text(a.situation) === text(b.situation) &&
+    text(a.tenor) === text(b.tenor) &&
     a.closed === b.closed &&
-    JSON.stringify(a.participants) === JSON.stringify(b.participants) &&
-    JSON.stringify(a.moves) === JSON.stringify(b.moves) &&
-    JSON.stringify(a.openQuestions) === JSON.stringify(b.openQuestions) &&
+    JSON.stringify(sorted(a.participants)) === JSON.stringify(sorted(b.participants)) &&
+    JSON.stringify(sorted(a.moves)) === JSON.stringify(sorted(b.moves)) &&
+    JSON.stringify(sorted(a.openQuestions)) === JSON.stringify(sorted(b.openQuestions)) &&
     JSON.stringify(sorted(a.evidenceCellIds)) === JSON.stringify(sorted(b.evidenceCellIds))
   )
 }
@@ -246,10 +249,12 @@ export async function construeScene(deps: ConstrueSceneDeps): Promise<ClosureRes
 
   // A prior construal (re-construe path) counts as round 0's baseline.
   let last: Construal | undefined = prior
+  let parsedRounds = 0
 
   for (;;) {
     if (rounds >= CLOSURE_MAX_ITERATIONS) {
-      return exitWith(last ?? emptyConstrual(seed.id), "max-iterations")
+      const exit = parsedRounds === 0 ? "unparseable" : "max-iterations"
+      return exitWith(last ?? emptyConstrual(seed.id), exit)
     }
     if (loopUnits + TIER_WEIGHTS.mid > CLOSURE_LOOP_MAX_UNITS) {
       return exitWith(last ?? emptyConstrual(seed.id), "budget")
@@ -281,9 +286,11 @@ export async function construeScene(deps: ConstrueSceneDeps): Promise<ClosureRes
     const construal = parseConstrualReply(reply, seed.id)
     if (!construal) {
       // Unparseable round: retry consumes the next iteration's budget; a run
-      // of failures exhausts max_iterations and exits incomplete.
+      // of failures exhausts max_iterations as `unparseable` rather than
+      // pretending the scene churned semantically.
       continue
     }
+    parsedRounds += 1
 
     if (construal.closed) return exitWith(construal, "model-closed")
     if (last && construalsEqual(construal, last)) {

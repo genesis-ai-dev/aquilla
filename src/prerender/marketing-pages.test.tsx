@@ -36,13 +36,16 @@ describe.each(MARKETING_PAGE_IDS)("%s renders without a browser", (id) => {
 describe("the prerendered page is identity-independent", () => {
   // The Worker serves one copy of this page to every visitor and lets the edge
   // cache it, so the prerendered markup must not encode who is asking.
-  // AppEntryBanner does that in the browser after mount instead.
   const html = renderToStaticMarkup(marketingPageElement("homepage"))
 
   it("points 'open app' at the workspace entry, not at / or /login", () => {
     expect(html).toContain('href="/app"')
     // `/` is this very page — linking there would bounce the user in a circle.
     expect(html).not.toMatch(/href="\/"[^>]*>[^<]*open app/i)
+  })
+
+  it("points Sign in at /login", () => {
+    expect(html).toMatch(/href="\/login"[^>]*>Sign in</)
   })
 
   it("carries no signed-in banner", () => {

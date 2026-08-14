@@ -258,4 +258,15 @@ describe("ContextualDraftCard", () => {
     expect(multilingualLane.onAccept).not.toHaveBeenCalled()
     expect(reviewMock).not.toHaveBeenCalled()
   })
+
+  it("shows and applies a draft that belongs to the open language lane", () => {
+    hydrateContextualDrafts(attachContextualDrafts("p1", "file-1", "fr"), [
+      { draftId: "d-fr", cellId: "c1", text: "Au commencement était la Parole" },
+    ])
+    const { onAccept } = renderCard({ targetLang: "fr" })
+
+    expect(screen.getByTestId("contextual-draft-card")).toBeInTheDocument()
+    fireEvent.click(screen.getByLabelText("Use this translation"))
+    expect(onAccept).toHaveBeenCalledWith("Au commencement était la Parole")
+  })
 })

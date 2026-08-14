@@ -70,10 +70,11 @@ const EVENT_LINES: Record<string, string> = {
   "target.cell.commit":
     "target.cell.commit {value, valueHtml?} — write a target cell's text. Needs fileId+cellId. Server resolves parentId (current target head) and sourceEventId (AD-9 staleness pin) and injects ai_suggestion+agent_run_id.",
   "target.cell.create":
-    "target.cell.create {cellId, value, anchorCellId?} — new target cell (rare; most target rows exist from import).",
+    "target.cell.create {value, anchorCellId?, cellId?} — mint a NEW target row. Needs fileId. anchorCellId is the existing cell it lands after (null/omitted = first); server mints cellId when omitted and injects ai_suggestion+agent_run_id. Rare — most target rows already exist from import; use target.cell.commit to fill one.",
   "target.cell.delete": "target.cell.delete {} — delete a target cell. Needs fileId+cellId.",
   "target.cell.reorder": "target.cell.reorder {anchorCellId|null} — move a cell after another.",
-  "source.cell.create": "source.cell.create {cellId, value, canonicalRef?, anchorCellId?} — import-path only; avoid.",
+  "source.cell.create":
+    "source.cell.create {value, anchorCellId?, canonicalRef?, type?, cellId?} — mint a NEW source row (e.g. a heading the import missed). Needs fileId. anchorCellId is the existing cell it lands after (null/omitted = first); server mints cellId when omitted. Structural — propose only when asked to add a row.",
   "source.cell.commit": "source.cell.commit {value, valueHtml?} — edit source text; avoid unless explicitly asked.",
   "source.cell.delete": "source.cell.delete {} — delete a source cell; avoid.",
   "source.cell.reorder": "source.cell.reorder {anchorCellId|null} — reorder source; avoid.",
@@ -162,6 +163,7 @@ const SAFETY = `## Safety & stance
 - Never fabricate validated pairs, never invent canonical_refs, never guess payload shapes — fetch the cookbook.
 - Bulk writes are PROPOSALS: stage them and summarise; the user applies.
 - Prefer ACTING over asking: staging IS the confirmation mechanism — the user reviews every proposal before anything is written, so do not ask "shall I?" or "which one?" when you can derive the answer (languages from settings or existing target text; "next" from the focused cell; scope from the open file) and stage it. Ask at most ONE question, only when the request is truly underdetermined.
+- WHICH FILE is the one exception to that: never guess it. A request phrased relative to the user's view ("the next five verses", "this chapter", "keep going") means the file they have open — scope it to :file. If no file is focused and the request names none, ASK which file and stage nothing; picking a plausible file is a correctness bug, because the user approves the proposal believing it lands in the file they are looking at.
 - If a proposal comes back stale or rejected, surface that to the user rather than silently retrying.
 - Reads (read/examples/search/docs) are cheap and unbudgeted; draft/propose/sql are budgeted — plan writes before you make them.
 - Keep sql tight: select only needed columns, LIMIT generously, prefer counts/aggregates for overview questions.`
@@ -271,9 +273,11 @@ export function buildSystemPrompt(ctx: AgentPromptContext): string {
   // "This file" / "the next three" / "segment 8" resolve HERE, not project-wide.
   const situation = ctx.fileId
     ? `## Current situation
-The user is working in file :file${ctx.fileName ? ` — "${ctx.fileName}"` : ""}${ctx.fileKind ? ` (kind: ${ctx.fileKind})` : ""}${ctx.cellId ? ", focused on cell :cell" : ""}. Relative requests ("this file", "the next N", "segment 8") refer to THIS file in its display order — start your queries scoped to :file.${ctx.cellId ? ` "Next" / "previous" mean relative to the focused cell :cell in that order — not the file's first untranslated cell.` : ""}
+The user is working in file :file${ctx.fileName ? ` — "${ctx.fileName}"` : ""}${ctx.fileKind ? ` (kind: ${ctx.fileKind})` : ""}${ctx.cellId ? ", focused on cell :cell" : ""}. Relative requests ("this file", "the next N", "segment 8") refer to THIS file in its display order — start your queries scoped to :file.${ctx.cellId ? ` "Next" / "previous" mean relative to the focused cell :cell in that order — not the file's first untranslated cell.` : ""} Stage writes into THIS file unless the user names a different one outright; never move the work to another file because it looked like a better fit.
 `
-    : ""
+    : `## Current situation
+No file is open. Relative requests ("the next N", "this chapter", "keep going") have no anchor, so you cannot derive a target file — ask the user which file to work in before reading or staging anything. Do not pick one.
+`
 
   const eventCard =
     kinds.length === 0

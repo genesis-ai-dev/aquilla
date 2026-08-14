@@ -87,6 +87,38 @@ export async function applyStagedEvent(
       return eventId
     }
 
+    case "source.cell.create":
+    case "target.cell.create": {
+      // AQU-890: genesis events (isGenesisKind) — parentId is ALWAYS null; the
+      // row's position comes from the anchor pointer, not a chain parent. The
+      // payload repeats cellId the same way emitSourceCellCreate does, because
+      // the projection reads the new row's id out of the payload.
+      const cellId =
+        (typeof ev.payload.cellId === "string" && ev.payload.cellId) || ev.cellId
+      if (!ev.fileId || !cellId) {
+        throw new Error(`agent apply: ${ev.kind} needs fileId and cellId`)
+      }
+      if (typeof ev.payload.value !== "string") {
+        throw new Error(`agent apply: ${ev.kind} needs a string value`)
+      }
+      const { eventId } = await enqueueEvent({
+        kind: ev.kind,
+        projectId: ctx.projectId,
+        fileId: ev.fileId,
+        cellId,
+        parentId: null,
+        author: ctx.author,
+        // Verbatim passthrough (keeps ai_suggestion / agent_run_id); cellId and
+        // anchorCellId go last so an absent key can't shadow the fallback.
+        payload: {
+          ...ev.payload,
+          cellId,
+          anchorCellId: (ev.payload.anchorCellId as string | null | undefined) ?? null,
+        } as OutboxPayloadFor<"source.cell.create" | "target.cell.create">,
+      })
+      return eventId
+    }
+
     case "comment.create": {
       // Server-staged payloads carry commentId/scope; tolerate omissions the
       // same way useComments builds them client-side. Computed fields go
@@ -144,10 +176,22 @@ export async function applyStagedEvent(
   }
 }
 
+/** Which side of a cell's chain an applied event becomes the head of. */
+function headSideFor(kind: string): "targetEventId" | "sourceEventId" | null {
+  if (kind === "target.cell.commit" || kind === "target.cell.create") return "targetEventId"
+  if (kind === "source.cell.create") return "sourceEventId"
+  return null
+}
+
 /**
  * Apply a proposal's events in order. Sequential on purpose: two commits to
  * the SAME cell within one proposal must chain (the second's parentId is the
  * first's event id), so later events see earlier ones through the head map.
+ *
+ * AQU-890: creates seed that map too, per side — a `target.cell.create` +
+ * `target.cell.commit` pair in one proposal chains the commit onto the create,
+ * and a `source.cell.create` gives a following target commit its AD-9 source
+ * fallback instead of stranding it with a null parent.
  */
 export async function applyStagedEvents(
   events: StagedEvent[],
@@ -155,17 +199,20 @@ export async function applyStagedEvents(
 ): Promise<string[]> {
   const ids: string[] = []
   // Heads minted within this apply — overlays ctx.resolveCell.
-  const localHeads = new Map<string, string>()
+  const localHeads = new Map<string, { targetEventId?: string; sourceEventId?: string }>()
   const resolveCell: ApplyContext["resolveCell"] = (cellId) => {
     const base = ctx.resolveCell?.(cellId)
     const local = localHeads.get(cellId)
-    return local ? { ...base, targetEventId: local } : base
+    return local ? { ...base, ...local } : base
   }
   for (const ev of events) {
     const id = await applyStagedEvent(ev, { ...ctx, resolveCell })
     ids.push(id)
-    if (ev.kind === "target.cell.commit" && ev.cellId) {
-      localHeads.set(ev.cellId, id)
+    const side = headSideFor(ev.kind)
+    const cellId =
+      (typeof ev.payload.cellId === "string" && ev.payload.cellId) || ev.cellId
+    if (side && cellId) {
+      localHeads.set(cellId, { ...localHeads.get(cellId), [side]: id })
     }
   }
   return ids

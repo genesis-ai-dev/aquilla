@@ -349,6 +349,35 @@ export async function loadProjectContext(
   }
 }
 
+function stringList(raw: unknown): string[] {
+  return Array.isArray(raw)
+    ? raw.filter((item): item is string => typeof item === "string" && item.trim() !== "")
+    : []
+}
+
+/** Empty string is always the project-default lane. Named lanes must be
+ *  registered in settings.targetLanes and not archived. */
+export async function isRegisteredTargetLane(
+  db: SettingsDb,
+  projectId: string,
+  lane: string,
+): Promise<boolean> {
+  if (lane === "") return true
+  try {
+    const row = await db
+      .prepare(`SELECT settings FROM project_settings WHERE project_id = ?`)
+      .bind(projectId)
+      .first<{ settings: unknown }>()
+    if (!row) return false
+    const settings = parseSettings(row.settings)
+    const lanes = stringList(settings.targetLanes)
+    const archived = stringList(settings.archivedLanes)
+    return lanes.includes(lane) && !archived.includes(lane)
+  } catch {
+    return false
+  }
+}
+
 /** Concepts from termbases this project subscribes to, in priority order.
  *  An org that publishes one shared termbase expects it to bind everywhere. */
 async function loadSubscribedConcepts(db: SettingsDb, projectId: string): Promise<Concept[]> {

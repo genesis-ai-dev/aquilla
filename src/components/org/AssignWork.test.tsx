@@ -43,11 +43,15 @@ async function pickSelectOption(triggerName: RegExp, optionName: RegExp) {
   const trigger = screen.getByRole("combobox", { name: triggerName })
   fireEvent.click(trigger)
   const option = await screen.findByRole("option", { name: optionName })
-  const label = option.textContent ?? ""
   fireEvent.pointerMove(option)
   fireEvent.mouseMove(option)
   fireEvent.keyDown(option, { key: "Enter" })
-  await waitFor(() => expect(trigger.textContent).toContain(label))
+  // Prefer the username span over option.textContent — the latter includes the
+  // decorative avatar initial (e.g. "Aanna") which the closed trigger does not.
+  const selectedLabel =
+    option.querySelector('[data-slot="username"]')?.textContent?.trim() ||
+    optionName.source.replace(/^\^|\$$/g, "")
+  await waitFor(() => expect(trigger.textContent).toContain(selectedLabel))
 }
 
 function renderAssign(onAssigned = vi.fn()) {

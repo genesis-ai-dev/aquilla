@@ -123,6 +123,39 @@ describe("construeScene — the three exits", () => {
     expect(result.rounds).toBe(2)
     expect(result.register).toEqual([])
   })
+
+  it("treats shuffled unordered fields as the same construal (fixpoint)", async () => {
+    const first = construalJson({
+      participants: ["crowd", "teacher"],
+      moves: ["teach", "summon"],
+      openQuestions: ["who sent them?"],
+    })
+    const shuffled = construalJson({
+      participants: ["teacher", "crowd"],
+      moves: ["summon", "teach"],
+      openQuestions: ["who sent them?"],
+    })
+    const { llm } = scriptedLlm([first, shuffled])
+    const result = await construeScene({ seed, llm, budget: createRunBudget(), context: makeContext() })
+
+    expect(result.exit).toBe("fixpoint")
+    expect(result.closed).toBe(true)
+    expect(result.rounds).toBe(2)
+  })
+
+  it("records unparseable when every round fails to parse", async () => {
+    const { llm, calls } = scriptedLlm(Array.from({ length: 10 }, () => "not json"))
+    const context = makeContext({
+      orderedPairs: Array.from({ length: 60 }, (_, i) => pair(`c${i + 1}`)),
+      layerAbove: [{ ref: "project-brief", text: "a project" }],
+    })
+    const result = await construeScene({ seed, llm, budget: createRunBudget(), context })
+
+    expect(result.exit).toBe("unparseable")
+    expect(result.incomplete).toBe(true)
+    expect(result.rounds).toBe(6)
+    expect(calls).toHaveLength(6)
+  })
 })
 
 describe("expandWindow — growth policy", () => {

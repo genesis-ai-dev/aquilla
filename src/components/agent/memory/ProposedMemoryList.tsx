@@ -97,7 +97,6 @@ export function ProposedMemoryList({
               <div className="flex items-center justify-end gap-1.5">
                 <Button
                   variant="ghost"
-                  size="sm"
                   className="h-6 text-[11px]"
                   disabled={busy}
                   onClick={() => setRejectTarget(memory)}
@@ -105,7 +104,6 @@ export function ProposedMemoryList({
                   Reject
                 </Button>
                 <Button
-                  size="sm"
                   className="h-6 text-[11px]"
                   disabled={busy}
                   onClick={() => onApprove(memory)}

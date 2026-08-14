@@ -48,7 +48,8 @@ describe("worker/index — routing", () => {
   // `/` is the marketing homepage for everyone. It used to branch on the
   // aq_hint cookie; that never actually ran in production (the asset router
   // preempted the Worker) and it made the most-requested URL on the site
-  // uncacheable. Identity is resolved in the browser now — AppEntryBanner.
+  // uncacheable. Nav CTAs are the same for every visitor; /app and /login
+  // handle signed-in vs signed-out in the SPA.
   it("GET / serves homepage.html with no cookie", async () => {
     const res = await fetchWorker("/")
     expect(await res.text()).toBe("served:/homepage.html")

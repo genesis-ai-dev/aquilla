@@ -18,18 +18,13 @@ export class ProjectSettings {
 
   /**
    * Navigate from the open workspace ("/project/:id/editor") into Settings →
-   * General, where the Languages section renders. Mirrors the sidebar
-   * "More project options" → "Settings" flow already exercised by
-   * `workspace-settings-navigate.smoke.spec.ts`.
+   * General, where the Languages section renders. Mirrors the header Settings
+   * cog flow already exercised by `workspace-settings-navigate.smoke.spec.ts`.
    */
   async openSettings(): Promise<void> {
-    const moreBtn = this.page.getByRole("button", { name: /^More project options$/i })
-    await expect(moreBtn).toBeVisible({ timeout: 10_000 })
-    await moreBtn.click()
-
-    const settingsItem = this.page.getByRole("button", { name: /^Settings$/i })
-    await expect(settingsItem).toBeVisible({ timeout: 3_000 })
-    await settingsItem.click()
+    const settingsBtn = this.page.getByRole("button", { name: /^Settings$/i })
+    await expect(settingsBtn).toBeVisible({ timeout: 10_000 })
+    await settingsBtn.click()
     await this.page.waitForURL(/\/project\/[^/]+\/settings/, { timeout: 10_000 })
 
     // Lands on the settings index (index path — no section segment yet) — drill into "General",
@@ -71,5 +66,35 @@ export class ProjectSettings {
   async backToEditor(): Promise<void> {
     await this.page.getByRole("button", { name: /^Editor$/i }).click()
     await this.page.waitForURL(/\/project\/[^/]+\/editor(?:\/file\/[^/]+)?(?:\?|$)/, { timeout: 10_000 })
+  }
+
+  /** Project id from `/project/:id/...` or `/projects/:id`. */
+  projectIdFromCurrentUrl(): string {
+    const match = this.page.url().match(/\/project(?:s)?\/([^/?#]+)/)
+    if (!match?.[1]) throw new Error(`No project id in ${this.page.url()}`)
+    return match[1]
+  }
+
+  /** Open Settings → Members (`/project/:id/settings/members`). */
+  async openMembers(projectId: string): Promise<void> {
+    await this.page.goto(`/project/${projectId}/settings/members`)
+    await expect(this.page.getByTestId("settings-members-section")).toBeVisible({ timeout: 10_000 })
+    await expect(this.page.getByRole("button", { name: /^Add a member$/i })).toBeVisible({ timeout: 10_000 })
+  }
+
+  /** Open the Add a member dialog (members + invite-link tabs). */
+  async openAddMemberDialog(projectId: string): Promise<Locator> {
+    await this.openMembers(projectId)
+    await this.page.getByRole("button", { name: /^Add a member$/i }).click()
+    const dialog = this.page.getByRole("dialog", { name: /Add a member/i })
+    await expect(dialog).toBeVisible({ timeout: 5_000 })
+    return dialog
+  }
+
+  /** Open Add a member → Invite link (replacement for the old Share panel). */
+  async openInviteLinkTab(projectId: string): Promise<Locator> {
+    const dialog = await this.openAddMemberDialog(projectId)
+    await dialog.getByRole("tab", { name: /^Invite link$/i }).click()
+    return dialog
   }
 }

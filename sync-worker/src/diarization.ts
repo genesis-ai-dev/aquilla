@@ -18,7 +18,7 @@
 // in the cloud). `DIARIZATION_PUBLIC_BASE` is the externally-reachable base URL
 // of this worker (incl. any `/sync` apex prefix). Local dev needs a tunnel.
 
-import { verifyTokenForFile } from "./auth"
+import { verifyTokenForFile, WRITE_ROLE_LEVEL } from "./auth"
 import { audioObjectKey } from "./audio"
 import { secureCompare as constantTimeEqual } from "./lib/secure-compare"
 
@@ -87,7 +87,10 @@ async function start(request: Request, env: DiarizationEnv): Promise<Response> {
   }
 
   // Auth: sync-token scoped to (projectId, fileId), same as /audio + voice-convert.
-  const auth = await requireFileToken(request, env, projectId, fileId)
+  // Starting a job spends real GPU money, so require the same CONTRIBUTOR
+  // floor as the equivalent cell.audio.attach event — a viewer/commenter/
+  // reviewer token can poll status but must not be able to trigger billed work.
+  const auth = await requireFileToken(request, env, projectId, fileId, { minRole: WRITE_ROLE_LEVEL })
   if (!auth.ok) return auth.response
 
   const jobId = crypto.randomUUID()
@@ -238,6 +241,7 @@ async function requireFileToken(
   env: DiarizationEnv,
   projectId: string,
   fileId: string,
+  opts?: { minRole?: number },
 ): Promise<AuthResult> {
   const header = request.headers.get("Authorization") ?? ""
   const token = header.startsWith("Bearer ") ? header.slice("Bearer ".length) : null
@@ -245,6 +249,9 @@ async function requireFileToken(
   if (!verified.ok) return { ok: false, response: new Response(verified.reason, { status: verified.status }) }
   if (verified.claims.projectId !== projectId) {
     return { ok: false, response: new Response("token scoped to different project", { status: 403 }) }
+  }
+  if (opts?.minRole != null && verified.claims.role < opts.minRole) {
+    return { ok: false, response: new Response("insufficient role", { status: 403 }) }
   }
   return { ok: true }
 }

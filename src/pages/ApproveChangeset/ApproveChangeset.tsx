@@ -160,9 +160,8 @@ export function ApproveChangeset() {
         </CardHeader>
         <CardContent className="space-y-4">
           {sessionLoading ? (
-            <div className="flex items-center gap-2 py-1">
-              <Spinner className="text-muted-foreground" />
-              <p className="text-sm text-muted-foreground">Loading…</p>
+            <div className="flex items-center py-1 text-muted-foreground">
+              <Spinner />
             </div>
           ) : isSignedOut ? (
             <div className="space-y-3">

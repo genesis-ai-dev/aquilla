@@ -12,6 +12,7 @@ import {
   type ExternalCollaborator,
 } from "@/lib/frontier/external-collaborators"
 import { RoleLabel } from "@/components/RoleLabel"
+import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { toUserFacingError } from "@/lib/errors/user-error"
 
 /**
@@ -84,10 +85,10 @@ export function ExternalCollaboratorsSection({
     >
       {error && <p className="text-xs text-destructive">{error}</p>}
 
-      <ul className="divide-y rounded-2xl border">
+      <ul className="divide-y rounded-lg border">
         {externals.map((e) => (
           <li key={e.userId} className="flex flex-wrap items-center gap-2 px-3 py-2 text-sm">
-            <span className="font-medium">{e.username}</span>
+            <UsernameWithAvatar username={e.username} />
             <Badge className="border-transparent bg-amber-500/15 text-[10px] text-amber-700 dark:text-amber-300">
               external
             </Badge>

@@ -118,7 +118,7 @@ export function BriefPanel({
             <span className="text-[10px] text-muted-foreground">v{brief.version}</span>
           </div>
           {allowed ? (
-            <Button variant="ghost" size="sm" className="h-6 text-[11px]" onClick={() => setEditOpen(true)}>
+            <Button variant="ghost" className="h-6 text-[11px]" onClick={() => setEditOpen(true)}>
               <Pencil data-icon="inline-start" />
               Edit
             </Button>
@@ -172,7 +172,6 @@ export function BriefPanel({
                     <div className="flex items-center justify-end gap-1.5">
                       <Button
                         variant="ghost"
-                        size="sm"
                         className="h-6 text-[11px]"
                         disabled={busy}
                         onClick={() => onRejectProposal(proposal)}
@@ -180,7 +179,6 @@ export function BriefPanel({
                         Reject
                       </Button>
                       <Button
-                        size="sm"
                         className="h-6 text-[11px]"
                         disabled={busy || Boolean(stale)}
                         onClick={() => onApproveProposal(proposal)}
@@ -270,7 +268,7 @@ function EditBriefDialog({
           />
           {error && <FieldError role="alert">{error}</FieldError>}
           {conflict && (
-            <Button variant="outline" size="sm" onClick={onReload}>
+            <Button variant="outline" onClick={onReload}>
               Reload latest brief
             </Button>
           )}

@@ -202,14 +202,31 @@ describe("POST /contextual/runs", () => {
     expect(body.error.details.runId).toBe(runId)
   })
 
-  it("rejects unsupported multilingual lanes before starting model work", async () => {
+  it("rejects an unregistered multilingual lane and starts a registered one", async () => {
     const { contrib } = await seedWorld()
-    const response = await req("POST", "/runs", contrib, { fileId: FILE, targetLang: "fr" })
-    expect(response.status).toBe(400)
-    const body = await response.json() as { error: { code: string; message: string } }
+    const unregistered = await req("POST", "/runs", contrib, { fileId: FILE, targetLang: "fr" })
+    expect(unregistered.status).toBe(400)
+    const body = await unregistered.json() as { error: { code: string; message: string } }
     expect(body.error).toMatchObject({ code: "validation_failed" })
-    expect(body.error.message).toMatch(/default target-language lane/i)
+    expect(body.error.message).toMatch(/not registered/i)
     expect(syncFrames).toEqual([])
+
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO project_settings (project_id, settings, version, updated_by)
+       VALUES (?, ?, 1, 1)`,
+    ).bind(PROJECT, JSON.stringify({ targetLanes: ["fr", "es"] })).run()
+
+    const started = await req("POST", "/runs", contrib, { fileId: FILE, targetLang: "fr" })
+    expect(started.status).toBe(201)
+    const startedBody = await started.json() as { runId: string }
+    if (_test.lastLoop) await _test.lastLoop
+    _test.lastLoop = null
+    const frenchRun = await getRun(env.AQUILLA_PG, startedBody.runId)
+    expect(frenchRun).toMatchObject({ targetLang: "fr", status: "parked" })
+    const frenchDrafts = await listDrafts(env.AQUILLA_PG, PROJECT, FILE, "proposed", "fr")
+    expect(frenchDrafts.length).toBeGreaterThan(0)
+    expect(frenchDrafts.every((draft) => draft.targetLang === "fr")).toBe(true)
+    expect(await listDrafts(env.AQUILLA_PG, PROJECT, FILE, "proposed", "")).toEqual([])
 
     const whitespace = await req("POST", "/runs", contrib, { fileId: FILE, targetLang: "   " })
     expect(whitespace.status).toBe(201)
@@ -219,7 +236,7 @@ describe("POST /contextual/runs", () => {
     expect((await getRun(env.AQUILLA_PG, whitespaceBody.runId))?.targetLang).toBe("")
   })
 
-  it("fails a legacy non-default run before cell selection and keeps both lanes visible", async () => {
+  it("keeps default and named-lane runs independently hydratable", async () => {
     const { viewer } = await seedWorld()
     const defaultRun = await createRun(env.AQUILLA_PG, {
       projectId: PROJECT,
@@ -227,49 +244,32 @@ describe("POST /contextual/runs", () => {
       targetLang: "",
     })
     if (defaultRun.status !== "ok") throw new Error("default run not created")
-    const legacyLane = await createRun(env.AQUILLA_PG, {
+    const frenchRun = await createRun(env.AQUILLA_PG, {
       projectId: PROJECT,
       fileId: FILE,
       targetLang: "fr",
     })
-    if (legacyLane.status !== "ok") throw new Error("legacy lane not created")
+    if (frenchRun.status !== "ok") throw new Error("french run not created")
     await env.AQUILLA_PG.prepare(
       "UPDATE contextual_runs SET created_at = '2026-01-01T00:00:00Z' WHERE id = ?",
     ).bind(defaultRun.run.id).run()
     await env.AQUILLA_PG.prepare(
       "UPDATE contextual_runs SET created_at = '2026-01-02T00:00:00Z' WHERE id = ?",
-    ).bind(legacyLane.run.id).run()
-
-    let modelCalls = 0
-    const tick = await runOneTick({
-      db: env.AQUILLA_PG,
-      runId: legacyLane.run.id,
-      llm: async () => {
-        modelCalls++
-        throw new Error("must not be called")
-      },
-    })
-    expect(tick).toMatchObject({ continueRun: false, status: "failed" })
-    expect(modelCalls).toBe(0)
-    expect(await getRun(env.AQUILLA_PG, legacyLane.run.id)).toMatchObject({
-      status: "failed",
-      lastError: "unsupported_target_language_lane",
-    })
+    ).bind(frenchRun.run.id).run()
 
     const activityResponse = await req(
       "GET",
-      `/runs/${legacyLane.run.id}/activity`,
+      `/runs/${frenchRun.run.id}/activity`,
       viewer,
     )
     expect(activityResponse.status).toBe(200)
     const activity = await activityResponse.json() as {
-      run: { runId: string; targetLang: string; status: string; lastError: string | null }
+      run: { runId: string; targetLang: string; status: string }
     }
     expect(activity.run).toMatchObject({
-      runId: legacyLane.run.id,
+      runId: frenchRun.run.id,
       targetLang: "fr",
-      status: "failed",
-      lastError: "unsupported_target_language_lane",
+      status: "running",
     })
 
     const overviewResponse = await req("GET", "/overview", viewer)
@@ -279,15 +279,17 @@ describe("POST /contextual/runs", () => {
     }
     expect(overview.files).toEqual(expect.arrayContaining([
       expect.objectContaining({ runId: defaultRun.run.id, targetLang: "", status: "running" }),
-      expect.objectContaining({ runId: legacyLane.run.id, targetLang: "fr", status: "failed" }),
+      expect.objectContaining({ runId: frenchRun.run.id, targetLang: "fr", status: "running" }),
     ]))
-    expect(overview.activeRuns).toBe(1)
+    expect(overview.activeRuns).toBe(2)
 
-    // File hydration defaults to the supported lane and cannot pick the newer
-    // terminal multilingual row.
-    const snapshot = await req("GET", `/runs?fileId=${FILE}`, viewer)
-    const snapshotBody = await snapshot.json() as { run: { runId: string; targetLang: string } }
-    expect(snapshotBody.run).toMatchObject({ runId: defaultRun.run.id, targetLang: "" })
+    const defaultSnapshot = await req("GET", `/runs?fileId=${FILE}`, viewer)
+    const defaultBody = await defaultSnapshot.json() as { run: { runId: string; targetLang: string } }
+    expect(defaultBody.run).toMatchObject({ runId: defaultRun.run.id, targetLang: "" })
+
+    const frenchSnapshot = await req("GET", `/runs?fileId=${FILE}&targetLang=fr`, viewer)
+    const frenchBody = await frenchSnapshot.json() as { run: { runId: string; targetLang: string } }
+    expect(frenchBody.run).toMatchObject({ runId: frenchRun.run.id, targetLang: "fr" })
   })
 
   it("never persists or surfaces a provider error response body", async () => {
@@ -318,7 +320,7 @@ describe("POST /contextual/runs", () => {
 })
 
 describe("GET /contextual/runs snapshot", () => {
-  it("keeps legacy non-default proposals as evidence without exposing them to the editor queue", async () => {
+  it("counts named-lane proposals in overview and hydrates them on that lane", async () => {
     const { viewer } = await seedWorld()
     const defaultOwner = await createRun(env.AQUILLA_PG, {
       projectId: PROJECT,
@@ -333,24 +335,30 @@ describe("GET /contextual/runs snapshot", () => {
     })
     await terminateRun(env.AQUILLA_PG, defaultOwner.run.id)
 
-    const legacyFrenchOwner = await createRun(env.AQUILLA_PG, {
+    const frenchOwner = await createRun(env.AQUILLA_PG, {
       projectId: PROJECT,
       fileId: FILE,
       targetLang: "fr",
     })
-    if (legacyFrenchOwner.status !== "ok") throw new Error("French run not created")
+    if (frenchOwner.status !== "ok") throw new Error("French run not created")
     await insertDrafts(env.AQUILLA_PG, {
-      runId: legacyFrenchOwner.run.id,
+      runId: frenchOwner.run.id,
       projectId: PROJECT,
       fileId: FILE,
-      drafts: [{ cellId: "french-evidence-only", text: "proposition française" }],
+      drafts: [{ cellId: "french-review", text: "proposition française" }],
     })
-    await terminateRun(env.AQUILLA_PG, legacyFrenchOwner.run.id)
+    await terminateRun(env.AQUILLA_PG, frenchOwner.run.id)
 
     const editor = await req("GET", `/drafts?fileId=${FILE}&status=proposed`, viewer)
     expect(editor.status).toBe(200)
     const editorBody = await editor.json() as { drafts: { cellId: string }[] }
     expect(editorBody.drafts.map((draft) => draft.cellId)).toEqual(["default-editor-review"])
+
+    const frenchEditor = await req("GET", `/drafts?fileId=${FILE}&status=proposed&targetLang=fr`, viewer)
+    const frenchEditorBody = await frenchEditor.json() as { drafts: { cellId: string; targetLang: string }[] }
+    expect(frenchEditorBody.drafts).toEqual([
+      expect.objectContaining({ cellId: "french-review", targetLang: "fr" }),
+    ])
 
     const snapshot = await req("GET", `/runs?fileId=${FILE}`, viewer)
     const snapshotBody = await snapshot.json() as {
@@ -360,21 +368,24 @@ describe("GET /contextual/runs snapshot", () => {
     expect(snapshotBody.run).toMatchObject({ runId: defaultOwner.run.id, proposedDrafts: 1 })
     expect(snapshotBody.draftCounts.proposed).toBe(1)
 
+    const frenchSnapshot = await req("GET", `/runs?fileId=${FILE}&targetLang=fr`, viewer)
+    const frenchSnapshotBody = await frenchSnapshot.json() as {
+      run: { runId: string; proposedDrafts: number } | null
+      draftCounts: Record<string, number>
+    }
+    expect(frenchSnapshotBody.run).toMatchObject({ runId: frenchOwner.run.id, proposedDrafts: 1 })
+    expect(frenchSnapshotBody.draftCounts.proposed).toBe(1)
+
     const overview = await req("GET", "/overview", viewer)
     const overviewBody = await overview.json() as { proposedDrafts: number }
-    expect(overviewBody.proposedDrafts).toBe(1)
+    expect(overviewBody.proposedDrafts).toBe(2)
 
     const reviewOwners = await req("GET", "/runs?proposedOnly=true", viewer)
-    const reviewOwnerBody = await reviewOwners.json() as { runs: { runId: string }[] }
-    expect(reviewOwnerBody.runs.map((run) => run.runId)).toEqual([defaultOwner.run.id])
-
-    const evidence = await req(
-      "GET",
-      `/runs/${legacyFrenchOwner.run.id}/activity?draftStatus=proposed`,
-      viewer,
-    )
-    const evidenceBody = await evidence.json() as { drafts: { cellId: string }[] }
-    expect(evidenceBody.drafts.map((draft) => draft.cellId)).toEqual(["french-evidence-only"])
+    const reviewOwnerBody = await reviewOwners.json() as { runs: { runId: string; targetLang: string }[] }
+    expect(reviewOwnerBody.runs).toEqual(expect.arrayContaining([
+      expect.objectContaining({ runId: defaultOwner.run.id, targetLang: "" }),
+      expect.objectContaining({ runId: frenchOwner.run.id, targetLang: "fr" }),
+    ]))
   })
 
   it("viewer can hydrate: run snapshot + active directions + draft counts", async () => {

@@ -140,9 +140,9 @@ describe("ProjectSettings — Gemini key discoverability (AQU-522)", () => {
   it("the deep link filters to the Voice card — no unrelated section is shown", () => {
     renderAt(`/project/${PROJECT_ID}/settings?q=gemini`)
 
-    // A control from a different section (General → Project Name) must NOT be in
+    // A control from a different section (General → Project Title) must NOT be in
     // the document: proving the user landed on the key, not the top of the page.
-    expect(screen.queryByLabelText(/project name/i)).toBeNull()
+    expect(screen.queryByLabelText(/project title/i)).toBeNull()
     // And General's group header must not appear either (no matches in that group).
     expect(screen.queryByText("General")).toBeNull()
   })

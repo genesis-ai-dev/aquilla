@@ -10,6 +10,7 @@ import { canPerform } from "@/lib/sync/role-policy"
 import { denialMessage } from "@/lib/permissions/denial"
 import { ROLE } from "@/lib/frontier/roles"
 import { CommentThread } from "./CommentThread"
+import { RightSidebarPanel } from "./RightSidebarPanel"
 import { useT } from "@/lib/i18n/I18nProvider"
 
 interface CommentsDrawerProps {
@@ -91,7 +92,8 @@ export function CommentsDrawer({ project, cell, liveComments, onClose, onNewThre
   }
 
   return (
-    <div className="bg-card relative z-10 flex h-full w-96 flex-col border-l" data-testid="comments-drawer">
+    <RightSidebarPanel storageKey="comments" defaultWidth={384} resizeLabel="Resize comments panel">
+    <div className="bg-card relative z-10 flex h-full w-full flex-col border-l" data-testid="comments-drawer">
       <div className="flex items-center justify-between border-b p-2">
         <h3 className="text-sm font-semibold">
           {t("common.comments")} {cell.context && <span className="text-muted-foreground">· {cell.context}</span>}
@@ -142,7 +144,7 @@ export function CommentsDrawer({ project, cell, liveComments, onClose, onNewThre
             rows={2}
             className="resize-none"
           />
-          <Button size="sm" onClick={handleCreate} disabled={!newThreadText.trim()} className="w-full">
+          <Button onClick={handleCreate} disabled={!newThreadText.trim()} className="w-full">
             {t("comments.drawer.post")}
           </Button>
         </div>
@@ -155,5 +157,6 @@ export function CommentsDrawer({ project, cell, liveComments, onClose, onNewThre
         </div>
       )}
     </div>
+    </RightSidebarPanel>
   )
 }

@@ -1,10 +1,13 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react"
-import { useParams, useNavigate } from "react-router-dom"
-import { MoreHorizontal, ChevronRight, Copy, Check, Download, Search, SlidersHorizontal } from "lucide-react"
+import { useParams, useNavigate, Link } from "react-router-dom"
+import { MoreHorizontal, ChevronRight, Copy, Check, Download, Search, SlidersHorizontal, Archive, PlayCircle, PauseCircle, Settings } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { ExpandableName } from "@/components/ui/expandable-name"
-import { Button } from "@/components/ui/button"
+import { InitialsAvatar } from "@/components/InitialsAvatar"
+import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
+import { Button, buttonVariants } from "@/components/ui/button"
+import { orgProjectsPath, projectSettingsPath } from "@/lib/navigation/org-paths"
 import { Spinner } from "@/components/ui/spinner"
 import { ButtonGroup } from "@/components/ui/button-group"
 import { useOpenWorkspace } from "@/hooks/useOpenWorkspace"
@@ -14,6 +17,8 @@ import { useProject } from "@/hooks/useProject"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useActiveOrg } from "@/context/OrgContext"
+import { useNavHistoryTitle } from "@/context/NavHistoryContext"
+import { ConfirmActionDialog } from "@/components/ConfirmActionDialog"
 import { archiveProjectRemote, unarchiveProjectRemote } from "@/lib/sync/archive"
 import { setProjectDeadline, setProjectPm } from "@/lib/sync/cloud-projects"
 import { markProjectOpened } from "@/lib/frontier/opened-shared-store"
@@ -94,6 +99,7 @@ import {
 } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
 import { LoadingTemplate } from "@/components/ui/loading-overlay"
+import { SegmentTabs } from "@/components/ui/tabs"
 
 /** Max per-file rows shown on the overview; the rest are counted as "+N more". */
 const FILE_ROW_CAP = 12
@@ -118,7 +124,7 @@ interface FileRollup {
 function ProjectOverviewSkeleton() {
   return (
     <div className="max-w-5xl space-y-4">
-      <div className="rounded-xl border bg-card shadow-sm p-6 space-y-2">
+      <div className="rounded-lg border bg-card shadow-sm p-6 space-y-2">
         <div className="flex items-center gap-2">
           <Skeleton className="h-6 w-48" />
           <Skeleton className="h-5 w-16 rounded-md" />
@@ -126,7 +132,7 @@ function ProjectOverviewSkeleton() {
         <Skeleton className="h-4 w-32" />
         <Skeleton className="h-4 w-20" />
       </div>
-      <div className="rounded-xl border bg-card shadow-sm p-5 space-y-4">
+      <div className="rounded-lg border bg-card shadow-sm p-5 space-y-4">
         <Skeleton className="h-3 w-20" />
         <div className="flex flex-wrap gap-3">
           {Array.from({ length: 3 }).map((_, i) => (
@@ -139,7 +145,7 @@ function ProjectOverviewSkeleton() {
           ))}
         </div>
       </div>
-      <div className="rounded-xl border bg-card shadow-sm p-5 space-y-3">
+      <div className="rounded-lg border bg-card shadow-sm p-5 space-y-3">
         <Skeleton className="h-3 w-16" />
         {Array.from({ length: 4 }).map((_, i) => (
           <div key={i} className="flex items-center gap-3">
@@ -149,7 +155,7 @@ function ProjectOverviewSkeleton() {
           </div>
         ))}
       </div>
-      <div className="rounded-xl border bg-card shadow-sm p-5 space-y-2">
+      <div className="rounded-lg border bg-card shadow-sm p-5 space-y-2">
         <Skeleton className="h-3 w-20" />
         <Skeleton className="h-4 w-40" />
       </div>
@@ -216,30 +222,23 @@ function StatTile({ label, pct, colorClass, tooltip, display }: {
   return tooltip ? <AppTooltip content={tooltip}>{tile}</AppTooltip> : tile
 }
 
-// ── Lane filter pill (AQU-538 §3.3) ───────────────────────────────────────────
+// ── Lane filter tabs (AQU-538 §3.3) ───────────────────────────────────────────
+// SegmentTabs needs a non-empty string value; map null/"All" and the default
+// lane ('' on the portfolio) to sentinels so triggers stay unique.
 
-function LanePill({ active, onClick, testId, children }: {
-  active: boolean
-  onClick: () => void
-  testId: string
-  children: React.ReactNode
-}) {
-  return (
-    <button
-      type="button"
-      data-testid={testId}
-      aria-pressed={active}
-      onClick={onClick}
-      className={cn(
-        "rounded-md border px-2.5 py-0.5 text-xs font-medium transition-colors",
-        active
-          ? "border-transparent bg-primary text-primary-foreground"
-          : "bg-background text-muted-foreground hover:bg-muted hover:text-foreground",
-      )}
-    >
-      {children}
-    </button>
-  )
+const LANE_TAB_ALL = "__all__"
+const LANE_TAB_DEFAULT = "__default__"
+
+function laneTagToTab(tag: string | null): string {
+  if (tag === null) return LANE_TAB_ALL
+  if (tag === "") return LANE_TAB_DEFAULT
+  return tag
+}
+
+function tabToLaneTag(tab: string): string | null {
+  if (tab === LANE_TAB_ALL) return null
+  if (tab === LANE_TAB_DEFAULT) return ""
+  return tab
 }
 
 // ── Stat bar ──────────────────────────────────────────────────────────────────
@@ -516,6 +515,7 @@ export function ProjectOverview() {
   // `openingOverlay` blocks the rest of the page while the open is in flight.
   const { open: openWorkspace, isPending: openPending, overlay: openingOverlay } = useOpenWorkspace()
   const { project, status, refresh, pm, roleLevel } = useProject(id)
+  useNavHistoryTitle(project?.name)
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
   // AQU-507: candidate PMs = the project's effective members. Only fetched for
@@ -537,6 +537,7 @@ export function ProjectOverview() {
 
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [archiveConfirmOpen, setArchiveConfirmOpen] = useState(false)
   const [audio, setAudio] = useState<PortfolioProject | null>(null)
   const [files, setFiles] = useState<FileSummary[]>([])
   // fileId → display name for the autopilot panel, which knows runs by file id
@@ -554,10 +555,10 @@ export function ProjectOverview() {
   const [showAllFiles, setShowAllFiles] = useState(false)
   const [workload, setWorkload] = useState<AssigneeWorkload[]>([])
 
-  // AQU-538 §3.3: the lane filter pill selection. `null` = "All" — today's
+  // AQU-538 §3.3: the lane filter tab selection. `null` = "All" — today's
   // cross-lane behavior, byte-identical (StatTiles read the PortfolioProject
   // scalars, file drill-down reads with no lane param). A non-null value is a
-  // real lane tag ('' = the default lane) selected from the pill row; the tiles
+  // real lane tag ('' = the default lane) selected from the tab row; the tiles
   // recompute from that lane's PortfolioLane and the drill-down re-reads with
   // `?lane=`.
   const [selectedLaneTag, setSelectedLaneTag] = useState<string | null>(null)
@@ -572,7 +573,7 @@ export function ProjectOverview() {
     })
   }, [])
   // The lane passed to the per-file progress reads. "All" (null) and the
-  // default lane pill both map to '' server-side (the default lane == the
+  // default lane tab both map to '' server-side (the default lane == the
   // no-param request), so the drill-down only ever diverges for a selected
   // non-default lane.
   const fileLane = selectedLaneTag ?? ""
@@ -794,13 +795,20 @@ export function ProjectOverview() {
   const showText = hasText
   const showAudio = hasAudio
 
-  // AQU-538 §3.3: lane pills + tile recompute. Pills only surface once a project
+  // AQU-538 §3.3: lane tabs + tile recompute. Tabs only surface once a project
   // has more than one lane (N=1 stays byte-identical). `activeLane` is the
-  // PortfolioLane the pills are filtered to (null = "All"); when set, the
+  // PortfolioLane the tabs are filtered to (null = "All"); when set, the
   // Translated/Validated tiles + bars read that lane, and the cross-language
   // tiles (AI Drafted, audio) grey out — they have no per-lane breakdown.
   const projectLanes: PortfolioLane[] = audio?.lanes ?? []
-  const showLanePills = projectLanes.length > 1
+  const showLaneTabs = projectLanes.length > 1
+  const laneTabOptions = [
+    { label: "All", value: LANE_TAB_ALL },
+    ...projectLanes.map((l) => ({
+      label: l.lane === "" ? (project?.targetLanguage || "Default") : l.lane,
+      value: l.lane === "" ? LANE_TAB_DEFAULT : l.lane,
+    })),
+  ]
   const activeLane: PortfolioLane | null =
     selectedLaneTag != null ? projectLanes.find((l) => l.lane === selectedLaneTag) ?? null : null
   const tileTranslatedPct = activeLane ? laneTranslatedPct(activeLane) : audio ? translatedPct(audio) : 0
@@ -879,7 +887,9 @@ export function ProjectOverview() {
     const res = await archiveProjectRemote(id, jwt)
     setBusy(false)
     if (res.kind === "archived" || res.kind === "local-only") {
-      navigate("/projects")
+      // Member orgs split Overview (`/orgs/:id`) from Projects — land on the
+      // projects table so the archived row is gone from the active list.
+      navigate(activeOrgId != null ? orgProjectsPath(activeOrgId) : "/projects")
     } else if (res.kind === "forbidden") {
       setError(res.message ?? "Only owners can archive a project.")
     } else if (res.kind === "error") {
@@ -924,7 +934,6 @@ export function ProjectOverview() {
         </span>
         <Button
           type="button"
-          size="sm"
           onClick={refresh}
           className="shrink-0 bg-amber-800 text-white hover:bg-amber-700 dark:bg-amber-700 dark:hover:bg-amber-600"
         >
@@ -936,7 +945,6 @@ export function ProjectOverview() {
         <p>Sign in to open this project from the cloud.</p>
         <Button
           type="button"
-          size="sm"
           variant="outline"
           className="mt-3"
           onClick={() => navigate(`/login?next=${encodeURIComponent(`/projects/${id}`)}`)}
@@ -968,7 +976,7 @@ export function ProjectOverview() {
             ) : (
               <div className="max-w-5xl space-y-4">
               {/* ── Header card ── */}
-              <div className="rounded-xl border bg-card p-6">
+              <div className="rounded-lg border bg-card p-6">
                 <div className="flex items-start justify-between gap-4">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
@@ -993,7 +1001,6 @@ export function ProjectOverview() {
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
                     <Button
-                      size="sm"
                       onClick={() => openWorkspace(`/project/${id}/editor`)}
                       disabled={openPending}
                       aria-busy={openPending || undefined}
@@ -1007,8 +1014,18 @@ export function ProjectOverview() {
                         "Open project"
                       )}
                     </Button>
+                    {id && (
+                      <Link
+                        to={projectSettingsPath(id)}
+                        aria-label="Project settings"
+                        data-testid="overview-project-settings"
+                        className={cn(buttonVariants({ variant: "outline", size: "icon-sm" }), "shrink-0")}
+                      >
+                        <Settings className="h-4 w-4" />
+                      </Link>
+                    )}
                     {isOwner && isArchived && (
-                      <Button size="sm" variant="outline" onClick={handleRestore} disabled={busy}>
+                      <Button variant="outline" onClick={handleRestore} disabled={busy}>
                         Restore
                       </Button>
                     )}
@@ -1033,6 +1050,7 @@ export function ProjectOverview() {
                               onClick={handleDownloadBundle}
                               disabled={busy || (project?.files.length ?? 0) === 0}
                             >
+                              <Download className="size-4" />
                               Download deliverable
                             </DropdownMenuItem>
                           )}
@@ -1041,15 +1059,21 @@ export function ProjectOverview() {
                               onClick={handleToggleLifecycle}
                               disabled={lifecycleBusy}
                             >
+                              {isFrozen ? (
+                                <PlayCircle className="size-4" />
+                              ) : (
+                                <PauseCircle className="size-4" />
+                              )}
                               {isFrozen ? "Mark as Active" : "Mark as Inactive"}
                             </DropdownMenuItem>
                           )}
                           {isOwner && (
                             <DropdownMenuItem
-                              onClick={handleArchive}
+                              onClick={() => setArchiveConfirmOpen(true)}
                               disabled={busy}
                               variant="destructive"
                             >
+                              <Archive className="size-4" />
                               Archive
                             </DropdownMenuItem>
                           )}
@@ -1058,6 +1082,23 @@ export function ProjectOverview() {
                     )}
                   </div>
                 </div>
+
+                <ConfirmActionDialog
+                  open={archiveConfirmOpen}
+                  onOpenChange={setArchiveConfirmOpen}
+                  title="Archive project"
+                  description={
+                    project?.name
+                      ? `Archive "${project.name}"? It will be hidden from the active projects list. Data is kept and owners can restore it anytime from Archived projects.`
+                      : "Archive this project? It will be hidden from the active projects list. Data is kept and owners can restore it anytime from Archived projects."
+                  }
+                  confirmLabel="Archive"
+                  checkboxLabel="I understand this project will be hidden from the active list."
+                  variant="destructive"
+                  onConfirm={() => {
+                    void handleArchive()
+                  }}
+                />
 
                 {error && <p className="mt-3 text-sm text-destructive">{error}</p>}
               </div>
@@ -1079,7 +1120,7 @@ export function ProjectOverview() {
                * what's missing.
                */}
               {audio && audio.totalCells > 0 && (
-                <div className="rounded-xl border bg-card p-5" data-testid="progress-card">
+                <div className="rounded-lg border bg-card p-5" data-testid="progress-card">
                   <div className="mb-3 flex items-center justify-between gap-2">
                     <h2 className="text-xs font-semibold text-muted-foreground">Progress</h2>
                     <div className="flex items-center gap-1.5">
@@ -1122,32 +1163,17 @@ export function ProjectOverview() {
                     </div>
                   </div>
 
-                  {/* AQU-538 §3.3: lane filter pills — All + one per lane
+                  {/* AQU-538 §3.3: lane filter tabs — All + one per lane
                       (default lane labeled with the project's targetLanguage).
                       Only rendered when the project has >1 lane. */}
-                  {showLanePills && (
-                    <div className="mb-3 flex flex-wrap items-center gap-1.5" data-testid="lane-filter-pills">
-                      <LanePill
-                        active={selectedLaneTag === null}
-                        onClick={() => setSelectedLaneTag(null)}
-                        testId="lane-pill-all"
-                      >
-                        All
-                      </LanePill>
-                      {projectLanes.map((l) => {
-                        const tagId = l.lane === "" ? "default" : l.lane
-                        const label = l.lane === "" ? (project?.targetLanguage || "Default") : l.lane
-                        return (
-                          <LanePill
-                            key={tagId}
-                            active={selectedLaneTag === l.lane}
-                            onClick={() => setSelectedLaneTag(l.lane)}
-                            testId={`lane-pill-${tagId}`}
-                          >
-                            {label}
-                          </LanePill>
-                        )
-                      })}
+                  {showLaneTabs && (
+                    <div className="mb-3" data-testid="lane-filter-tabs">
+                      <SegmentTabs
+                        value={laneTagToTab(selectedLaneTag)}
+                        onValueChange={(next) => setSelectedLaneTag(tabToLaneTag(next))}
+                        aria-label="Filter progress by language"
+                        options={laneTabOptions}
+                      />
                     </div>
                   )}
 
@@ -1277,7 +1303,7 @@ export function ProjectOverview() {
               {/* ── Languages / lane table (AQU-538 §3.3) ── */}
               {/* Rendered only when the project has more than one target
                   language lane — N=1 projects are byte-identical to before. */}
-              {showLanePills && audio && (
+              {showLaneTabs && audio && (
                 <OverviewLaneTable
                   projectId={id}
                   orgId={portfolioOrgId}
@@ -1344,7 +1370,7 @@ export function ProjectOverview() {
                 }
 
                 return (
-                  <div className="rounded-xl border bg-card p-5">
+                  <div className="rounded-lg border bg-card p-5">
                     <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                       <h2 className="text-xs font-semibold text-muted-foreground">
                         Files {!showAllFiles && hidden > 0 ? `(top ${FILE_ROW_CAP} of ${sorted.length})` : `(${sorted.length})`}
@@ -1376,7 +1402,6 @@ export function ProjectOverview() {
                         <AppTooltip content="Copy the file list below as CSV">
                           <Button
                             type="button"
-                            size="sm"
                             variant="outline"
                             onClick={() => void handleCopyCsv()}
                             data-testid="export-csv-copy"
@@ -1388,7 +1413,6 @@ export function ProjectOverview() {
                         <AppTooltip content="Download the file list below as a .csv file">
                           <Button
                             type="button"
-                            size="sm"
                             variant="outline"
                             onClick={handleDownloadCsv}
                             data-testid="export-csv-download"
@@ -1428,7 +1452,7 @@ export function ProjectOverview() {
                         value={fileSortMode}
                         onValueChange={(v) => setFileSortMode((v as FileSortMode) ?? "last-updated")}
                       >
-                        <SelectTrigger aria-label="Sort files by" className="w-44">
+                        <SelectTrigger aria-label="Sort files by">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
@@ -1541,7 +1565,7 @@ export function ProjectOverview() {
               })()}
 
               {/* ── Deadline card ── */}
-              <div className="rounded-xl border bg-card p-5">
+              <div className="rounded-lg border bg-card p-5">
                 <h2 className="mb-2 text-xs font-semibold text-muted-foreground">Deadline</h2>
                 <div className="flex flex-wrap items-center gap-2 text-sm">
                   {audio?.deadlineAt ? (
@@ -1556,7 +1580,6 @@ export function ProjectOverview() {
                     <ButtonGroup>
                       <Button
                         type="button"
-                        size="sm"
                         variant="outline"
                         disabled={busy}
                         onClick={() => {
@@ -1569,7 +1592,6 @@ export function ProjectOverview() {
                       {audio?.deadlineAt && (
                         <Button
                           type="button"
-                          size="sm"
                           variant="outline"
                           disabled={busy}
                           onClick={() => saveDeadline(null)}
@@ -1625,11 +1647,11 @@ export function ProjectOverview() {
               </Dialog>
 
               {/* ── Project manager card (AQU-507) ── */}
-              <div className="rounded-xl border bg-card p-5">
+              <div className="rounded-lg border bg-card p-5">
                 <h2 className="mb-2 text-xs font-semibold tracking-wide text-muted-foreground">Project manager</h2>
                 <div className="flex flex-wrap items-center gap-2 text-sm">
                   {pm ? (
-                    <span className="font-medium" data-testid="overview-pm-name">{pm.username}</span>
+                    <UsernameWithAvatar username={pm.username} nameTestId="overview-pm-name" />
                   ) : (
                     <span className="text-muted-foreground" data-testid="overview-pm-name">Unassigned</span>
                   )}
@@ -1637,7 +1659,6 @@ export function ProjectOverview() {
                     <ButtonGroup>
                       <Button
                         type="button"
-                        size="sm"
                         variant="outline"
                         disabled={busy}
                         data-testid="overview-pm-edit"
@@ -1651,7 +1672,6 @@ export function ProjectOverview() {
                       {pm && (
                         <Button
                           type="button"
-                          size="sm"
                           variant="outline"
                           disabled={busy}
                           onClick={() => savePm(null)}
@@ -1697,7 +1717,12 @@ export function ProjectOverview() {
                             <SelectItem value="">Unassigned</SelectItem>
                             {pmCandidates.map((m) => (
                               <SelectItem key={m.userId} value={String(m.userId)}>
-                                {m.username}
+                                <UsernameWithAvatar
+                                  username={m.username}
+                                  size="xs"
+                                  menuSafe
+                                  nameClassName="text-sm font-normal"
+                                />
                               </SelectItem>
                             ))}
                           </SelectGroup>
@@ -1736,7 +1761,7 @@ export function ProjectOverview() {
                 viewerRoleLevel={projectRoleLevel}
                 ready={orgSettings.hasFetched}
               >
-                <div className={cn("relative rounded-xl border bg-card p-5", sectionTintClass(orgSettings.memberProgressViewMinRole))}>
+                <div className={cn("relative rounded-lg border bg-card p-5", sectionTintClass(orgSettings.memberProgressViewMinRole))}>
                   <div className="mb-3 flex items-center justify-between gap-2">
                     <h2 className="text-xs font-semibold text-muted-foreground">Team</h2>
                     <SectionVisibilityBadge
@@ -1757,7 +1782,13 @@ export function ProjectOverview() {
                           <li key={w.userId} className="flex items-center gap-3 text-sm">
                             {/* AQU-491: click-to-reveal affordance, see file-name cell above. */}
                             <AppTooltip content={w.username ?? String(w.userId)}>
-                              <span className="w-32 shrink-0 font-medium">
+                              <span className="flex w-40 shrink-0 items-center gap-2 font-medium">
+                                <InitialsAvatar
+                                  name={w.username ?? `User ${w.userId}`}
+                                  size="sm"
+                                  singleInitial
+                                  className="shrink-0"
+                                />
                                 <ExpandableName name={w.username ?? `User ${w.userId}`} />
                               </span>
                             </AppTooltip>
@@ -1775,7 +1806,6 @@ export function ProjectOverview() {
                               <Button
                                 type="button"
                                 variant="ghost"
-                                size="sm"
                                 className="h-6 shrink-0 px-2 text-xs text-muted-foreground"
                                 aria-label={`View activity for ${w.username}`}
                                 aria-pressed={isSelected}
@@ -1814,8 +1844,8 @@ export function ProjectOverview() {
               </SectionVisibilityGate>
 
               {/* ── Members card (AQU-335) — same add / change-role / revoke
-                  surface as the in-project members page, so access can be
-                  managed from the overview without opening the workspace. ──
+                  surface as Project Settings → Team members, so access can be
+                  managed from the overview without opening settings. ──
                   AQU-486: gated by AQU-485's rosterViewMinRole — the same
                   policy MembersTab itself enforces server-side (see its
                   "Roster hidden" state), applied here one layer up so a
@@ -1827,7 +1857,7 @@ export function ProjectOverview() {
                   ready={orgSettings.hasFetched}
                 >
                   <div
-                    className={cn("relative rounded-xl border bg-card p-5", sectionTintClass(orgSettings.rosterViewMinRole))}
+                    className={cn("relative rounded-lg border bg-card p-5", sectionTintClass(orgSettings.rosterViewMinRole))}
                     data-testid="overview-members-card"
                   >
                     <div className="mb-3 flex items-center justify-between gap-2">

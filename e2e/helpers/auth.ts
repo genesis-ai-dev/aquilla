@@ -5,20 +5,15 @@ import {
   type PersistedSession,
   writePersistedSession,
 } from "./auth-state"
+import {
+  E2E_TRANSPORT_ATTEMPTS,
+  isRetryableTransportError,
+  waitForTransportRetry,
+} from "./transport-retry"
 
 export { readPersistedSession, type PersistedSession } from "./auth-state"
 
 const FRONTIER_BASE = process.env.VITE_FRONTIER_BASE ?? "http://127.0.0.1:8787"
-const AUTH_TRANSPORT_ATTEMPTS = 3
-
-function isRetryableTransportError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error)
-  return /socket hang up|ECONNRESET|ECONNREFUSED|fetch failed/i.test(message)
-}
-
-async function waitForAuthRetry(attempt: number): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, 100 * (attempt + 1)))
-}
 
 interface AuthResponse {
   access_token: string
@@ -35,17 +30,17 @@ export async function ensureAuthState(username: SeedUser["username"]): Promise<P
   const ctx = await pwRequest.newContext()
   try {
     let r: Awaited<ReturnType<typeof ctx.post>> | null = null
-    for (let attempt = 0; attempt < AUTH_TRANSPORT_ATTEMPTS; attempt++) {
+    for (let attempt = 0; attempt < E2E_TRANSPORT_ATTEMPTS; attempt++) {
       try {
         r = await ctx.post(`${FRONTIER_BASE}/api/v1/auth/token`, {
           data: { username: u.username, password: u.password },
         })
         break
       } catch (error) {
-        if (!isRetryableTransportError(error) || attempt === AUTH_TRANSPORT_ATTEMPTS - 1) {
+        if (!isRetryableTransportError(error) || attempt === E2E_TRANSPORT_ATTEMPTS - 1) {
           throw error
         }
-        await waitForAuthRetry(attempt)
+        await waitForTransportRetry(attempt)
       }
     }
     if (!r) throw new Error(`login ${username} failed before receiving a response`)

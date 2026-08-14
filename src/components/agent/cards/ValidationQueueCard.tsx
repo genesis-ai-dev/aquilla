@@ -89,7 +89,6 @@ export function ValidationQueueCard({ proposal, applyContext, onApplied, canVali
                   <Button
                     type="button"
                     variant="outline"
-                    size="sm"
                     className="h-5 shrink-0 px-1.5 text-[10px]"
                     disabled={!canValidate || state === "applying"}
                     onClick={() => void confirm(ev, idx)}

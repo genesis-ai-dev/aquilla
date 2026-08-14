@@ -30,8 +30,8 @@ export function SuggestionBanner({ suggestions, onApply, onDismiss }: Props) {
           <div className="flex-1">
             <p className="font-medium">{label} — apply friendly names?</p>
             <div className="mt-1.5 flex gap-1">
-              <Button size="sm" variant="outline" onClick={() => setReviewOpen(true)}>Review</Button>
-              <Button size="sm" onClick={() => onApply(suggestions)}>Apply all</Button>
+              <Button variant="outline" onClick={() => setReviewOpen(true)}>Review</Button>
+              <Button onClick={() => onApply(suggestions)}>Apply all</Button>
             </div>
           </div>
           <Button

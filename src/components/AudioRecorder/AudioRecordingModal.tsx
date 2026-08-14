@@ -16,6 +16,7 @@ import { AppTooltip } from "@/components/ui/tooltip"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
 import { MIN_USEFUL_REGION_SEC, targetOffsetMsFor } from "@/lib/timeline/lane-timing"
+import { takeMarginTrims } from "@/lib/audio/take-margins"
 import { isLinkableVideoUrl } from "@/components/timeline/LinkVideoUrlDialog"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectRecord } from "@/lib/parsers/types"
@@ -654,6 +655,19 @@ export function AudioRecordingModal({
       // worse than the number already in hand. Do not re-add one for either
       // branch.
       const takeDurationMs = Math.round(recorder.state.durationSec * 1000)
+      // Round 5: the take is BORN trimmed to what was performed. The pre-roll
+      // and the stop-grace are real audio and stay in the file — the window
+      // simply starts and ends where the performance does, plus a sliver of
+      // runway at each end. This is what keeps a well-placed take from being
+      // drawn (and flagged) as though it overlapped its neighbours: both
+      // margins used to stick out into the gap between two hand-written cues
+      // and collide there. The edge handles walk the margin back whenever a
+      // line disagrees. See take-margins.ts for the full reasoning.
+      const takeTrims = takeMarginTrims({
+        preRollMs,
+        tailGraceMs: recorder.state.tailGraceMs,
+        durationMs: takeDurationMs,
+      })
       const audioId = buildAudioId(activeCell.id)
       // Warm the OPFS byte cache BEFORE upload (FRO-355), keyed exactly as
       // transcribeCell/useCellAudio look bytes up (audioId+ext of the
@@ -691,6 +705,7 @@ export function AudioRecordingModal({
           slot: "recording",
           mimeType: blob.type || undefined,
           durationMs: takeDurationMs,
+          ...takeTrims,
           label: takeLabel,
           author: username,
         })
@@ -720,8 +735,11 @@ export function AudioRecordingModal({
         referenceAudioId: null,
         durationMs: takeDurationMs,
         label: takeLabel,
-        trimStartMs: null,
-        trimEndMs: null,
+        // The SAME window the attach carried — an optimistic chip drawn at full
+        // clip length would flash its margins (and any overlap warning they
+        // trip) until the server projection lands and silently corrected it.
+        trimStartMs: takeTrims.trimStartMs ?? null,
+        trimEndMs: takeTrims.trimEndMs ?? null,
       }, attachEventId)
       notifyAudioAttachmentsChanged(activeCell.fileId)
       // THE PRE-ROLL'S OTHER HALF. Kept head audio that isn't repositioned
@@ -729,9 +747,12 @@ export function AudioRecordingModal({
       // hat — so the take is anchored preRollMs BEFORE its line: the sample
       // at the mark (the GO instant) lands exactly on the line's start, and
       // an early entrance sounds exactly as early as it was performed.
-      // Nothing is trimmed: Sam's standing ruling is that room tone and
-      // breaths are performance, and the trim handles remain for lines that
-      // disagree. This deliberately re-derives the anchor on every save — a
+      // Nothing is DELETED: the take attaches with a window that starts at the
+      // performance (see takeTrims above), so the anchor and the trim compose —
+      // sample zero sits `preRollMs` early, the window opens HEAD_KEEP_MS before
+      // the line, and dragging the head handle out walks the rest of the
+      // pre-roll back into audibility. This deliberately re-derives the anchor
+      // on every save — a
       // hand-dragged chip position describes the PREVIOUS take, and the new
       // recording was performed against the line's own start. Non-fatal on
       // failure: the take is already attached and merely sits at the line

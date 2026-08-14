@@ -66,6 +66,10 @@ export interface TargetAudioLaneProps {
    *  badge (decision 2026-08-05). */
   missingCellIds?: ReadonlySet<string>
   editable: boolean
+  /** The linked PICTURE is the transport's master (video-first): takes fire
+   *  through the external dub driver, which honours their trims, so chips are
+   *  trimmable even on text cells that own no source clip of their own. */
+  externalMaster?: boolean
   snapEnabled?: boolean
   onSelect(id: string): void
   /** Clean chip click navigates playback to the section (same as a card). */
@@ -601,6 +605,7 @@ export function TargetAudioLane({
   loadingCellId,
   missingCellIds,
   editable,
+  externalMaster,
   snapEnabled,
   onSelect,
   onSeek,
@@ -630,8 +635,18 @@ export function TargetAudioLane({
       // section plays via the MASTER (which ignores dub trims), so a handle
       // there would lie. Audio-first plays the dub as its own clip, trims and
       // all, so only the unknown-length case disqualifies it.
+      //
+      // 2026-08-14: …and when the PICTURE is the master, that "take-only"
+      // reasoning inverts, exactly as planTargetOverlay's masterIsExternal
+      // gate already spells out. Every cue is a section of the film whether or
+      // not it has a source clip of its own, and takes on a VTT-timed file
+      // hang on TEXT cells, which never have one — so this gate was switching
+      // the handles off across the whole video-first workflow. The external
+      // dub driver fires those takes through the overlay pool, which honours
+      // trimStart AND trimEnd, so a handle there tells the truth.
       resizable:
-        !geom.usingFallback && (audioFirst || sourceClipAudioForCell(item.cell) != null),
+        !geom.usingFallback &&
+        (audioFirst || externalMaster || sourceClipAudioForCell(item.cell) != null),
       ratio:
         slot && slot.targetLenSec > 0 && slot.sourceLenSec > 0
           ? slot.targetLenSec / slot.sourceLenSec

@@ -1571,6 +1571,7 @@ export function TimelineEditor({
             loadingCellId={loadingCellId}
             missingCellIds={missingCellIds}
             editable={editable}
+            externalMaster={Boolean(coreMediaUrl)}
             snapEnabled={snapOn && !audioFirst}
             onSelect={selectFromChip}
             onSeek={laneProps.onSeek}

@@ -89,6 +89,11 @@ export type RecorderState =
        *  no ring. Additive on purpose: consumers that mock this hook with
        *  partial objects read it as undefined and treat it as 0. */
       preRollMs?: number
+      /** How much of the clip's tail postdates the stop press (ms) — the
+       *  grace this hook holds the graph open for. Reported rather than
+       *  assumed by the saver, because the MediaRecorder path has no grace at
+       *  all and must not be trimmed as though it did. */
+      tailGraceMs?: number
     }
   | { kind: "error"; message: string }
 
@@ -296,7 +301,10 @@ export function useAudioRecorder(opts?: UseAudioRecorderOptions): UseAudioRecord
         }
         if (tickRef.current) { clearInterval(tickRef.current); tickRef.current = null }
         pcmRef.current = null
-        setState({ kind: "stopped", blob, mimeType: "audio/wav", ext: "wav", durationSec, preRollMs })
+        setState({
+          kind: "stopped", blob, mimeType: "audio/wav", ext: "wav", durationSec,
+          preRollMs, tailGraceMs: STOP_TAIL_GRACE_MS,
+        })
       } catch (e) {
         cleanup()
         setState({ kind: "error", message: e instanceof Error ? e.message : String(e) })

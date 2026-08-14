@@ -453,6 +453,18 @@ export const autopilot = defineNamespace({
     // — Stable evidence/readiness enums (raw unknown values remain evidence) —
     "autopilot.evidence.status.proposed": "Proposed",
     "autopilot.evidence.status.applied": "Applied",
+
+    // — Agent proposal review cards ———————————————————————————————
+    "autopilot.proposal.showLess": "Show less",
+    "autopilot.proposal.showMore": "Show more",
+    "autopilot.proposal.unsupportedKind":
+      "not supported yet — apply this kind in the app directly",
+    "autopilot.proposal.currentlyEmpty": "(currently empty)",
+    "autopilot.proposal.newRow": "(new row)",
+    "autopilot.proposal.discarded": "Discarded: {summary}",
+    "autopilot.proposal.applyFailed": "Apply failed",
+    "autopilot.proposal.applying": "Applying…",
+    "autopilot.proposal.apply": "Apply",
     "autopilot.evidence.status.rejected": "Rejected",
     "autopilot.evidence.status.superseded": "Superseded",
     "autopilot.evidence.status.approved": "Approved",
@@ -500,6 +512,34 @@ export const autopilot = defineNamespace({
         "Autopilot automation controls, progress, human-review boundaries, recovery messages, and durable evidence across the project overview and translation editor.",
     },
     keys: {
+      "autopilot.proposal.showLess": {
+        description: "Inline action that collapses a long staged proposal value.",
+      },
+      "autopilot.proposal.showMore": {
+        description: "Inline action that expands a truncated staged proposal value.",
+      },
+      "autopilot.proposal.unsupportedKind": {
+        description: "Explanation beside an agent event kind the current app cannot apply.",
+      },
+      "autopilot.proposal.currentlyEmpty": {
+        description: "Diff placeholder showing that the target cell has no current text.",
+      },
+      "autopilot.proposal.newRow": {
+        description: "Diff placeholder identifying a proposed source or target row creation.",
+      },
+      "autopilot.proposal.discarded": withPlaceholders(
+        "Status line for a discarded proposal followed by its human-readable summary.",
+        { summary: "Agent-authored proposal summary; translate only the surrounding status text." },
+      ),
+      "autopilot.proposal.applyFailed": {
+        description: "Label on the inline error shown when applying a staged proposal fails.",
+      },
+      "autopilot.proposal.applying": {
+        description: "Progress label inside the proposal action button while writes are being queued.",
+      },
+      "autopilot.proposal.apply": {
+        description: "Primary action that applies every supported event in a staged proposal.",
+      },
       "autopilot.settings.controlsLabel": {
         description:
           "Device-local switch label that shows or hides Autopilot controls without starting or stopping server work.",

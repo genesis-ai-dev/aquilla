@@ -97,6 +97,22 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "is the transient state of the unrelated find-and-replace panel's Apply " +
     "button while it rewrites matched cells. Two independent async operations " +
     "that happen to share an English gerund; nothing ties their wording together.",
+  "autopilot.proposal.applying":
+    "Progress label in an agent proposal card while a heterogeneous batch of staged " +
+    "events is being queued. search.replace.applying belongs to the unrelated " +
+    "find-and-replace workflow, while nav.fileMenu.applying describes diarization. " +
+    "The English gerund happens to match, but each operation needs independent " +
+    "translation context and may use a different verb in target languages.",
+  "autopilot.proposal.applyFailed":
+    "Inline failure label for applying a heterogeneous agent proposal. " +
+    "importExport.ebible.applyFailed instead reports failure while committing a " +
+    "specific eBible target import. The affected objects and recovery contexts are " +
+    "unrelated, so target languages may require different verbs or grammatical objects.",
+  "autopilot.proposal.apply":
+    "Imperative button that commits every supported event in a staged agent proposal. " +
+    "terminology.lookup.applyButton applies one selected glossary rendering to an " +
+    "editor cell. English uses the same generic verb, but the operations and their " +
+    "objects are distinct and may be translated differently.",
   "terminology.editor.showArchived":
     "Toggle revealing archived (deprecated) GLOSSARY TERMS in the termbase editor. " +
     "editor.lane.showArchived is a menu item revealing retired LANGUAGE LANES in the " +

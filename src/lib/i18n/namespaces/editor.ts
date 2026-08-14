@@ -798,6 +798,7 @@ export const editor = defineNamespace({
       "wrong word choices. Use it as a hint, not a reading.",
     "editor.bt.alignment": "Alignment",
     "editor.bt.alignmentSub": "— word-level source/target view",
+    "editor.bt.failed": "Back-translation failed",
 
     // — Expansion tab: recording ————————————————————————————————
     "editor.expansion.recording": "Recording",
@@ -3857,6 +3858,10 @@ export const editor = defineNamespace({
           "leading dash joins it to the heading; do not start with a capital. The " +
           "slash separates the two sides, named by editor.column.source and " +
           "editor.column.target elsewhere.",
+      },
+      "editor.bt.failed": {
+        description:
+          "Label on the inline error shown when generating a cell's back-translation fails.",
       },
       "editor.expansion.recording": {
         description:

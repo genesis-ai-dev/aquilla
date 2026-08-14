@@ -49,11 +49,9 @@ async function makeAuthedPage(
       localStorage.setItem("org:active", String(orgId))
     }, ownOrg.id)
   }
-  // RootRedirect (AQU-172) hard-replaces "/" with /homepage when the aq_hint
-  // cookie is absent — always true for a fresh context — and that document
-  // navigation destroys injectSession's evaluate mid-flight ("Execution
-  // context was destroyed"). Pre-set the hint cookie so the SPA stays on "/"
-  // while the session is seeded.
+  // AppEntry redirects a fresh unsigned context away from "/" before session
+  // injection finishes. Pre-set the hint cookie so the SPA stays put while
+  // the IndexedDB session is seeded.
   await ctx.addCookies([
     { name: "aq_hint", value: "1", url: baseURL ?? "http://127.0.0.1:5173" },
   ])

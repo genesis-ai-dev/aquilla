@@ -18,9 +18,9 @@
 # No service bindings needed — the SPA fetch()es absolute URLs from
 # VITE_AUTH_BASE / VITE_SYNC_WORKER_HOST / VITE_CHAT_BASE wired in deploy.yml.
 #
-# aquilla.app is the canonical app domain. web.aquilla.app is retired.
-# `/` serves the marketing homepage for everyone (worker/index.ts); identity
-# is resolved in the browser, so the root stays edge-cacheable.
+# aquilla.app is the canonical domain. web.aquilla.app is retired. The
+# aquilla-marketing Worker owns the specific public routes; this Worker's
+# aquilla.app/* catch-all serves the SPA everywhere else.
 #
 # =============================================================================
 # ROUTE / ENV CONVENTION — same pattern as auth-worker / sync-worker
@@ -61,13 +61,9 @@ enabled = true
 directory = "./dist"
 binding = "ASSETS"
 not_found_handling = "single-page-application"
-# The asset router serves matching assets BEFORE the Worker runs. `/` resolves
-# to index.html there, so the Worker's aq_hint branch never executed and the
-# bare domain served the empty SPA shell to signed-out visitors and crawlers
-# alike (verified in production: `/` was byte-identical to a nonexistent path).
-# Listing `/` here runs the Worker first for the root only; every other path
-# keeps the cheaper asset-first behaviour.
-run_worker_first = ["/"]
+# `/` serves the SPA shell asset-first when this Worker sees it (for example on
+# workers.dev previews). On the custom domains, the more-specific marketing
+# Worker route owns `/` before this catch-all is considered.
 
 # Pull-request previews are isolated from every live Worker and route. They use
 # development API hosts but publish only a workers.dev preview alias.
@@ -81,9 +77,8 @@ preview_urls = true
 directory = "./dist"
 binding = "ASSETS"
 not_found_handling = "single-page-application"
-# Same as every other environment: run the Worker first for `/` so previews
-# exercise the same root routing as production instead of the raw SPA shell.
-run_worker_first = ["/"]
+# Preview aliases have no marketing route carve-out, so `/` intentionally
+# resolves to the SPA shell like any other app path.
 
 # ---------------------------------------------------------------------------
 # Production environment — attaches aquilla.app/* to this Worker. web.aquilla.app is retired.
@@ -104,13 +99,8 @@ command = "bash scripts/verify-deploy-branch.sh main"
 directory = "./dist"
 binding = "ASSETS"
 not_found_handling = "single-page-application"
-# The asset router serves matching assets BEFORE the Worker runs. `/` resolves
-# to index.html there, so the Worker's aq_hint branch never executed and the
-# bare domain served the empty SPA shell to signed-out visitors and crawlers
-# alike (verified in production: `/` was byte-identical to a nonexistent path).
-# Listing `/` here runs the Worker first for the root only; every other path
-# keeps the cheaper asset-first behaviour.
-run_worker_first = ["/"]
+# The aquilla-marketing Worker owns `/` via its exact zone route. This catch-all
+# remains asset-first and handles the SPA routes only.
 
 # ---------------------------------------------------------------------------
 # Development — served from dev branch, deploys to dev.aquilla.app
@@ -127,10 +117,5 @@ routes = ["dev.aquilla.app/*"]
 directory = "./dist"
 binding = "ASSETS"
 not_found_handling = "single-page-application"
-# The asset router serves matching assets BEFORE the Worker runs. `/` resolves
-# to index.html there, so the Worker's aq_hint branch never executed and the
-# bare domain served the empty SPA shell to signed-out visitors and crawlers
-# alike (verified in production: `/` was byte-identical to a nonexistent path).
-# Listing `/` here runs the Worker first for the root only; every other path
-# keeps the cheaper asset-first behaviour.
-run_worker_first = ["/"]
+# The development marketing Worker owns `/` via its exact zone route. This
+# catch-all remains asset-first and handles the SPA routes only.

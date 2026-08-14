@@ -43,7 +43,12 @@ not a micro-spec farm.
 | Collab | Cross-user validate | `e2e/specs/collab/cross-user-validate.smoke.spec.ts` |
 | Sharing | Invite link → join → dashboard visibility (surface) | `e2e/specs/projects/share-invite.smoke.spec.ts` |
 | Terminology | Wildcard term chip (domain sentinel) | `e2e/specs/terminology/wildcard-term-chip.smoke.spec.ts` |
-| Marketing | Homepage book-a-call (domain sentinel) | `e2e/specs/marketing/book-call.smoke.spec.ts` |
+
+## Journeys moved to another repository
+
+| Area | Journey | Current owner |
+| --- | --- | --- |
+| Marketing | Homepage book-a-call | `aquilla-marketing`: producer behavior is covered by `src/pages/Homepage/BookCallSection.test.tsx`; the immediate API consumer remains covered by `auth-worker/src/__tests__/contact.test.ts` here. The old app-repo smoke was retired when this repo stopped building the marketing page (AQU-918). |
 
 ## Surface sessions (one `test()`, one reset)
 

@@ -79,10 +79,9 @@ async function readEnvelope(): Promise<Envelope> {
 }
 
 // ---- auth-hint cookie ----
-// A non-credential, host-only 1-bit cookie that the aquilla-web Worker reads
-// at the edge to decide whether to serve the SPA or the homepage without
-// waiting for IDB. No Domain attribute → cookie is scoped to whichever host
-// (aquilla.app, dev.aquilla.app, localhost) wrote it, keeping envs isolated.
+// A non-credential, host-only 1-bit cookie used by the SPA's entry/login guards
+// before IndexedDB hydration. No Domain attribute → cookie is scoped to the
+// current environment host (aquilla.app, dev.aquilla.app, localhost).
 const HINT_COOKIE = "aq_hint"
 
 function setAuthHint(): void {
@@ -96,9 +95,8 @@ export function clearAuthHint(): void {
 /**
  * Returns true when the auth-hint cookie (aq_hint=1) is present.
  *
- * Marketing pages call this during render and are also rendered in Node by the
- * build-time prerender (scripts/prerender-marketing.ts), where there is no
- * `document` — the prerendered fallback is always the signed-out variant.
+ * The guard is also safe in non-browser test/build contexts where `document`
+ * does not exist.
  */
 export function hasAuthHintCookie(): boolean {
   if (typeof document === "undefined") return false

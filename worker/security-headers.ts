@@ -1,4 +1,4 @@
-// Response security headers for aquilla-web (the SPA + marketing Worker).
+// Response security headers for aquilla-web (the SPA Worker).
 //
 // Context: the Tauri desktop shell has carried a real CSP since June
 // (src-tauri/tauri.conf.json → app.security.csp), but the browser build shipped
@@ -15,27 +15,18 @@
 //   REPORT-ONLY — the full policy (script-src/style-src/connect-src/…). The
 //               SPA talks to a build-time-configurable set of hosts (identity
 //               and sync Workers, PostHog, Hugging Face / R2 model hosts,
-//               door43, OpenRouter via the proxy) and the marketing pages are
-//               prerendered, so enforcing a full policy blind would risk a
+//               door43, OpenRouter via the proxy), so enforcing a full policy
+//               blind would risk a
 //               production outage for a defence-in-depth control. Report-only
 //               surfaces every violation in devtools first; promote directives
 //               into ENFORCED_CSP as each one comes back clean.
 //
 // Coverage note — READ THIS BEFORE ASSUMING A HEADER SET HERE IS LIVE.
 //
-// This Worker runs for `/` and nothing else. `run_worker_first = ["/"]` lists
-// exactly one path, and `not_found_handling = "single-page-application"` means
-// the asset router answers every unmatched path with index.html ITSELF — the
-// request never reaches the Worker, so there is no ASSETS.fetch fallback to
-// ride headers in on. Deep links (`/app`, `/project/*`), the prerendered
-// marketing pages and hashed build assets are all served without this module
-// executing.
-//
-// Verified against the live deployment rather than reasoned about: `/` returns
-// the Worker-only `X-Robots-Tag: noindex` on dev.aquilla.app, while a
-// never-before-requested path returns 200 HTML with no such header. An earlier
-// version of this comment claimed deep links reached the Worker; they do not,
-// and a header file that only *looks* deployed is worse than a known gap.
+// The static asset router can answer SPA documents and hashed assets without
+// executing this module. After the marketing split there is deliberately no
+// `run_worker_first` root exception: the marketing Worker owns `/` on the live
+// domains, while preview aliases serve the SPA asset-first.
 //
 // public/_headers is therefore not an optimisation, it is the majority of the
 // coverage. security-headers.test.ts asserts the two declare identical values,
@@ -56,7 +47,7 @@ export const ENFORCED_CSP = [
  *  shells converge, with the web-only additions (Google Fonts stylesheet,
  *  `'wasm-unsafe-eval'` for the onnxruntime-web / sherpa-onnx WASM runtimes,
  *  blob: workers for the audio pipeline). Report-only until the console is
- *  clean on both the SPA and the prerendered marketing pages. */
+ *  clean on the SPA. */
 export const REPORT_ONLY_CSP = [
   "default-src 'self'",
   "script-src 'self' 'wasm-unsafe-eval'",

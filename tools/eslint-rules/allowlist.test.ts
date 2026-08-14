@@ -47,9 +47,7 @@ describe("i18n guard allowlist / isIgnoredFile", () => {
     expect(isIgnoredFile("e2e/specs/foo.spec.ts")).toBe(true)
   })
 
-  it("ignores marketing and legal surfaces (deliberate scope decisions)", () => {
-    expect(isIgnoredFile("src/pages/Homepage/Homepage.tsx")).toBe(true)
-    expect(isIgnoredFile("src/pages/CaseStudy/Biblica.tsx")).toBe(true)
+  it("ignores legal surfaces (deliberate scope decision)", () => {
     expect(isIgnoredFile("src/pages/PrivacyPolicy.tsx")).toBe(true)
   })
 

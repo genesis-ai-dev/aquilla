@@ -127,11 +127,10 @@ function SyncFreezeOverlay() {
 /**
  * Workspace entry point, mounted at both `/app` and `/`.
  *
- * `/` is served as the marketing homepage to every visitor now — the Worker
- * doesn't branch on a cookie any more (see worker/index.ts), which is what lets
- * that page be edge-cached. So a fresh load never reaches this component at `/`;
- * only in-app navigation does. `/app` is the URL that opens the workspace, and
- * it's where the marketing nav's "Open app" CTA points.
+ * The separate marketing Worker owns `/` on the live custom domains, so a fresh
+ * production load never reaches this component there. The app Worker and local
+ * Vite server still expose `/` as a SPA fallback; `/app` is the stable workspace
+ * entry linked by the marketing site.
  *
  * Signed-out visitors go to /login rather than back to the marketing page:
  * anyone arriving here clicked something that said "open the app", and bouncing

@@ -6,8 +6,9 @@ import { addOrgMember, getMyOrg, ROLE } from "../../helpers/frontier-api"
  * RemoveOrgMemberDialog — remove a member from the org.
  *
  * Requires bob to be a member of Acme. We add him via the API, then
- * alice navigates to /members and clicks his "Remove bob" button.
- * RemoveOrgMemberDialog opens with title "Remove bob from Acme?".
+ * alice navigates to /members, opens his row-actions menu, and chooses
+ * "Remove from org". RemoveOrgMemberDialog opens with title
+ * "Remove bob from Acme?".
  *
  * This spec verifies the dialog opens and Cancel dismisses without removing.
  */
@@ -18,13 +19,12 @@ test("remove member dialog opens and Cancel keeps member", async ({ alice }) => 
   await addOrgMember(aliceSession.jwt, acme.id, "bob", ROLE.CONTRIBUTOR)
 
   await alice.goto(orgRoute(alice, "/members"))
-  // Wait for bob to appear in the members list.
   await expect(alice.getByText("bob").first()).toBeVisible({ timeout: 10_000 })
 
-  // Click "Remove bob" button.
-  const removeBtn = alice.getByRole("button", { name: /Remove bob/i })
-  await expect(removeBtn).toBeVisible({ timeout: 5_000 })
-  await removeBtn.click()
+  const actionsBtn = alice.getByRole("button", { name: /Actions for bob/i })
+  await expect(actionsBtn).toBeVisible({ timeout: 5_000 })
+  await actionsBtn.click()
+  await alice.getByRole("menuitem", { name: /Remove bob/i }).click()
 
   // RemoveOrgMemberDialog opens.
   const dialog = alice.getByRole("dialog")

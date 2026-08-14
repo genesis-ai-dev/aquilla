@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react"
 import { ChevronDown, ChevronRight } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Spinner } from "@/components/ui/spinner"
+import { TableCell, TableRow } from "@/components/ui/table"
 import { getMemberAccess, type MemberEffectiveAccess, type ProjectAccessBreakdown } from "@/lib/frontier/orgs"
 import { removeProjectMember } from "@/lib/frontier/members"
 import { ROLE } from "@/lib/frontier/roles"
@@ -39,9 +40,72 @@ export function MemberAccessRow({
    */
   callerOrgRoleLevel?: number | null
 }) {
+  const [open, setOpen] = useState(false)
+
+  return (
+    <li className="py-1.5">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center gap-1.5 rounded px-1 py-0.5 text-left text-xs hover:bg-muted"
+      >
+        {open ? (
+          <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" />
+        ) : (
+          <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground" />
+        )}
+        <UsernameWithAvatar username={username} size="xs" nameClassName="text-xs" />
+      </button>
+
+      {open && (
+        <div className="ml-4 mt-1">
+          <MemberAccessDetails
+            orgId={orgId}
+            userId={userId}
+            callerOrgRoleLevel={callerOrgRoleLevel}
+          />
+        </div>
+      )}
+    </li>
+  )
+}
+
+/** DataTable sub-row for org Members — same grant breakdown as MemberAccessRow. */
+export function MemberAccessSubRow({
+  orgId,
+  userId,
+  callerOrgRoleLevel,
+  colSpan,
+}: {
+  orgId: number
+  userId: number
+  callerOrgRoleLevel?: number | null
+  colSpan: number
+}) {
+  return (
+    <TableRow className="hover:bg-transparent">
+      <TableCell colSpan={colSpan} className="bg-muted/20 px-4 py-3">
+        <MemberAccessDetails
+          orgId={orgId}
+          userId={userId}
+          callerOrgRoleLevel={callerOrgRoleLevel}
+        />
+      </TableCell>
+    </TableRow>
+  )
+}
+
+export function MemberAccessDetails({
+  orgId,
+  userId,
+  callerOrgRoleLevel,
+}: {
+  orgId: number
+  userId: number
+  callerOrgRoleLevel?: number | null
+}) {
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
-  const [open, setOpen] = useState(false)
   const [data, setData] = useState<MemberEffectiveAccess | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -66,8 +130,8 @@ export function MemberAccessRow({
   }, [jwt, orgId, userId])
 
   useEffect(() => {
-    if (open && data === null) void fetchAccess()
-  }, [open, data, fetchAccess])
+    void fetchAccess()
+  }, [fetchAccess])
 
   async function revokeDirect(projectId: string) {
     if (!jwt) return
@@ -85,69 +149,45 @@ export function MemberAccessRow({
   }
 
   return (
-    <li className="py-1.5">
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center gap-1.5 rounded px-1 py-0.5 text-left text-xs hover:bg-muted"
-      >
-        {open ? (
-          <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" />
-        ) : (
-          <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground" />
-        )}
-        <UsernameWithAvatar username={username} size="xs" nameClassName="text-xs" />
-        {data && (
-          <span className="text-[10px] text-muted-foreground">
-            {data.projects.length > 0
-              ? `${data.projects.length} project${data.projects.length === 1 ? "" : "s"} with explicit access`
-              : "org-role only; no project overrides"}
-          </span>
-        )}
-      </button>
-
-      {open && (
-        <div className="ml-4 mt-1 space-y-2">
-          {loading && (
-            <span className="inline-flex items-center text-muted-foreground">
-              <Spinner className="size-3" />
-            </span>
-          )}
-          {error && <p className="text-[10px] text-destructive">{error}</p>}
-          {data && !loading && (
-            <>
-              <p className="text-[10px] text-muted-foreground">
-                {data.orgRole != null ? (
-                  <>
-                    Org role: <RoleLevelLabel level={data.orgRole} as="strong" /> — applies to every project in this org.
-                  </>
-                ) : (
-                  "No org-wide role."
-                )}
-              </p>
-              {data.projects.length === 0 ? (
-                <p className="text-[10px] text-muted-foreground">
-                  No direct, team, or creator grants on any project.
-                </p>
-              ) : (
-                <ul className="space-y-1.5">
-                  {data.projects.map((p) => (
-                    <AccessProjectRow
-                      key={p.projectId}
-                      p={p}
-                      revoking={revoking === p.projectId}
-                      canRevoke={canRevoke}
-                      callerOrgRoleLevel={callerOrgRoleLevel ?? null}
-                      onRevokeDirect={() => revokeDirect(p.projectId)}
-                    />
-                  ))}
-                </ul>
-              )}
-            </>
-          )}
-        </div>
+    <div className="space-y-2">
+      {loading && (
+        <span className="inline-flex items-center text-muted-foreground">
+          <Spinner className="size-3" />
+        </span>
       )}
-    </li>
+      {error && <p className="text-[10px] text-destructive">{error}</p>}
+      {data && !loading && (
+        <>
+          <p className="text-[10px] text-muted-foreground">
+            {data.orgRole != null ? (
+              <>
+                Org role: <RoleLevelLabel level={data.orgRole} as="strong" /> — applies to every project in this org.
+              </>
+            ) : (
+              "No org-wide role."
+            )}
+          </p>
+          {data.projects.length === 0 ? (
+            <p className="text-[10px] text-muted-foreground">
+              No direct, team, or creator grants on any project.
+            </p>
+          ) : (
+            <ul className="space-y-1.5">
+              {data.projects.map((p) => (
+                <AccessProjectRow
+                  key={p.projectId}
+                  p={p}
+                  revoking={revoking === p.projectId}
+                  canRevoke={canRevoke}
+                  callerOrgRoleLevel={callerOrgRoleLevel ?? null}
+                  onRevokeDirect={() => revokeDirect(p.projectId)}
+                />
+              ))}
+            </ul>
+          )}
+        </>
+      )}
+    </div>
   )
 }
 

@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Frontier R&D Partner Newsletter</title>
+    <meta
+      name="description"
+      content="A short monthly letter from Frontier R&D's Head of Partnerships: what shipped across Aquilla, Codex, and LangQuest, what's changing, and what we'd love partner input on."
+    />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Frontier R&D Partner Newsletter" />
+    <meta
+      property="og:description"
+      content="A short monthly letter for the organizations building with Frontier R&D. Add yourself — one-click unsubscribe any time."
+    />
+    <!--
+      Standalone static page (served from /public, no build step) so the team
+      has a clean shareable link: https://aquilla.app/newsletter
+      Posts to the auth-worker endpoint (routes/contact.ts POST
+      /api/v2/contact/newsletter). SELF-SERVE: when the Resend secrets are
+      configured on the worker, submitting adds the subscriber directly to
+      the "Frontier R&D Newsletter" segment; Joel gets a heads-up email.
+      Without the secrets it degrades to request-mode (email only, manual
+      add). See docs/partner-newsletter/PLAYBOOK.md.
+    -->
+    <style>
+      :root {
+        --bg: #0c1018;
+        --text: #e9edf7;
+        --muted: #aeb7ca;
+        --accent: #7db1ff;
+        --card: #131a28;
+        --border: #2a3550;
+        --gold: #e2b45a;
+      }
+      @media (prefers-color-scheme: light) {
+        :root {
+          --bg: #f6f8fc;
+          --text: #1b2540;
+          --muted: #4a5570;
+          --accent: #2f6fd0;
+          --card: #ffffff;
+          --border: #c9d2e6;
+          --gold: #a97b1f;
+        }
+      }
+      * { box-sizing: border-box; margin: 0; }
+      body {
+        min-height: 100vh;
+        background: var(--bg);
+        color: var(--text);
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 32px 20px;
+        line-height: 1.55;
+      }
+      main { max-width: 480px; width: 100%; }
+      .eyebrow {
+        font-size: 13px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--gold);
+        font-weight: 600;
+      }
+      h1 {
+        font-size: clamp(28px, 6vw, 40px);
+        font-weight: 500;
+        letter-spacing: -0.02em;
+        line-height: 1.1;
+        margin: 10px 0 14px;
+      }
+      h1 em { font-style: italic; color: var(--accent); }
+      .lead { color: var(--muted); font-size: 16px; margin-bottom: 6px; }
+      .note { color: var(--muted); font-size: 14px; margin-bottom: 26px; }
+      form {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        padding: 22px;
+        display: grid;
+        gap: 14px;
+      }
+      label { display: grid; gap: 6px; font-size: 13.5px; font-weight: 560; }
+      label em { font-weight: 400; color: var(--muted); font-style: normal; }
+      input, textarea {
+        width: 100%;
+        padding: 11px 12px;
+        border-radius: 10px;
+        border: 1px solid var(--border);
+        background: var(--bg);
+        color: var(--text);
+        font: inherit;
+        font-size: 15px;
+      }
+      input:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+      button {
+        padding: 13px 24px;
+        border-radius: 12px;
+        border: none;
+        background: var(--accent);
+        color: var(--bg);
+        font-weight: 600;
+        font-size: 15px;
+        cursor: pointer;
+      }
+      button:disabled { opacity: 0.6; cursor: default; }
+      .hp { position: absolute; left: -9999px; top: -9999px; height: 1px; width: 1px; overflow: hidden; }
+      .error { color: #ff9c9c; font-size: 14px; display: none; }
+      @media (prefers-color-scheme: light) { .error { color: #b3261e; } }
+      .sent { display: none; text-align: left; padding: 8px 2px; }
+      .sent h2 { font-size: 22px; font-weight: 560; margin-bottom: 8px; }
+      .sent p { color: var(--muted); font-size: 15px; }
+      footer { margin-top: 22px; font-size: 12.5px; color: var(--muted); }
+      footer a { color: var(--accent); text-decoration: none; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <span class="eyebrow">For partners</span>
+      <h1>The Frontier R&amp;D <em>partner newsletter</em></h1>
+      <p class="lead">
+        Once a month, a short letter from Joel — our Head of Partnerships — to the
+        organizations building with Frontier R&amp;D: what shipped across Aquilla, Codex, and
+        LangQuest, what's changing, and what we'd love your input on.
+      </p>
+      <p class="note">
+        No marketing, no filler — quiet months make short letters. Add your details below and
+        you're on the list; every letter includes one-click unsubscribe.
+      </p>
+
+      <form id="nl-form" novalidate>
+        <label>Name
+          <input name="name" type="text" required autocomplete="name" placeholder="Your name" />
+        </label>
+        <label>Email
+          <input name="email" type="email" required autocomplete="email" placeholder="you@example.com" />
+        </label>
+        <label>Organization
+          <input name="organization" type="text" required autocomplete="organization" placeholder="Your organization" />
+        </label>
+        <label>How do you work with Frontier R&amp;D? <em>(optional)</em>
+          <textarea name="message" rows="3" placeholder="Projects, languages, or how we're connected."></textarea>
+        </label>
+        <!-- Honeypot: off-screen, skipped by humans, filled by naive bots. -->
+        <label class="hp" aria-hidden="true">Website
+          <input name="website" type="text" tabindex="-1" autocomplete="off" />
+        </label>
+        <p class="error" id="nl-error" role="alert"></p>
+        <button type="submit" id="nl-submit">Subscribe</button>
+      </form>
+
+      <div class="sent" id="nl-sent" role="status">
+        <h2>You're on the list.</h2>
+        <p>
+          The next monthly letter will land at the address you gave. If it's ever not for you,
+          every letter has a one-click unsubscribe.
+        </p>
+      </div>
+
+      <footer>
+        <a href="/">aquilla.app</a> · Frontier R&amp;D · You can leave the list any time — every
+        letter includes one-click unsubscribe.
+      </footer>
+    </main>
+
+    <script>
+      (function () {
+        var API = "https://api.aquilla.app/identity/api/v2/contact/newsletter";
+        var form = document.getElementById("nl-form");
+        var sent = document.getElementById("nl-sent");
+        var err = document.getElementById("nl-error");
+        var btn = document.getElementById("nl-submit");
+        form.addEventListener("submit", function (e) {
+          e.preventDefault();
+          err.style.display = "none";
+          var data = new FormData(form);
+          var payload = {
+            name: String(data.get("name") || "").trim(),
+            email: String(data.get("email") || "").trim(),
+            organization: String(data.get("organization") || "").trim(),
+            message: String(data.get("message") || "").trim() || undefined,
+            website: String(data.get("website") || ""),
+          };
+          if (!payload.name || !payload.email || !payload.organization) {
+            err.textContent = "Name, email, and organization are required.";
+            err.style.display = "block";
+            return;
+          }
+          btn.disabled = true;
+          btn.textContent = "Adding you…";
+          fetch(API, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          })
+            .then(function (res) {
+              if (!res.ok) {
+                return res
+                  .json()
+                  .catch(function () { return null; })
+                  .then(function (body) {
+                    throw new Error((body && body.error) || "Request failed (" + res.status + ")");
+                  });
+              }
+              form.style.display = "none";
+              sent.style.display = "block";
+            })
+            .catch(function (e2) {
+              err.textContent = e2 && e2.message ? e2.message : "Something went wrong — please try again.";
+              err.style.display = "block";
+              btn.disabled = false;
+              btn.textContent = "Subscribe";
+            });
+        });
+      })();
+    </script>
+  </body>
+</html>

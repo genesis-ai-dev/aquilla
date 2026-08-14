@@ -7,6 +7,7 @@ import { MultimodalWorkspace } from "./MultimodalWorkspace"
 import { LanguageBlitz, LanguageMarquee } from "./LanguageBlitz"
 import { BetaBar } from "./BetaBar"
 import { BookCallSection } from "./BookCallSection"
+import { NewsletterSection } from "./NewsletterSection"
 import { useMarketingShell } from "./useMarketingShell"
 import "./homepage.css"
 
@@ -493,6 +494,9 @@ export function Homepage() {
 
         {/* ── Book a call ─────────────────────────────────────────────── */}
         <BookCallSection />
+
+        {/* ── Partner letter (curated monthly newsletter) ─────────────── */}
+        <NewsletterSection />
 
         {/* ── Final CTA ───────────────────────────────────────────────── */}
         <section className="aq-container aq-section" style={{ paddingTop: 0 }}>

@@ -3,3 +3,8 @@
 # `pnpm install` run in this directory: pnpm walks up, installs the ROOT project,
 # and never creates sync-worker/node_modules — breaking type-check/test/deploy on
 # any fresh checkout (CI deploy-workers.yml, new worktrees).
+
+allowBuilds:
+  esbuild: set this to true or false
+  sharp: set this to true or false
+  workerd: set this to true or false

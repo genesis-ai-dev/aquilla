@@ -97,7 +97,7 @@ export function MondayLinkedView({
               disabled={!canManage || toggling}
             />
           </span>
-          <Button variant="outline" size="sm" onClick={onSyncNow} disabled={!canManage || syncing}>
+          <Button variant="outline" onClick={onSyncNow} disabled={!canManage || syncing}>
             {syncing ? <Spinner data-icon="inline-start" /> : <RefreshCw data-icon="inline-start" />}
             Sync now
           </Button>

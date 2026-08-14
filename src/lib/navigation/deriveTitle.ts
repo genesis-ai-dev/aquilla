@@ -28,12 +28,19 @@ export function deriveNavTitle(pathname: string): string {
 
   const org = parseOrgPath(p)
   if (org) {
-    if (org.orgKey === ALL_ORGS_PARAM || org.rest === "") return "Projects"
+    // Portfolio home is Overview-only (no /projects under `/orgs/all`).
+    if (org.orgKey === ALL_ORGS_PARAM) return "Overview"
+    // Guest org index is the project list; member index redirects to /overview.
+    if (org.rest === "") return "Projects"
     const rest = org.rest.replace(/^\//, "")
     const parts = rest.split("/").filter(Boolean)
     switch (parts[0]) {
+      case "overview":
+        return "Overview"
+      case "projects":
+        return "Projects"
       case "archived":
-        return "Archived projects"
+        return parts[1] === "files" ? "Recently deleted" : "Archived projects"
       case "assigned":
         return "Assigned to me"
       case "settings":
@@ -62,6 +69,8 @@ export function deriveNavTitle(pathname: string): string {
       case "editor":
         return seg[3] === "file" ? "File" : "Editor"
       case "settings":
+        if (seg[3] === "rules") return "Checks & rules"
+        if (seg[3] === "memory") return "Project memory"
         return "Project settings"
       case "rules":
         return "Checks & rules"
@@ -75,8 +84,6 @@ export function deriveNavTitle(pathname: string): string {
         return "Comments"
       case "memory":
         return "Project memory"
-      case "members":
-        return "Project members"
       default:
         return "Project"
     }

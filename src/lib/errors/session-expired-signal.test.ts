@@ -6,11 +6,17 @@
 //  3. Multiple subscribers all receive the event.
 
 import { describe, it, expect, vi, afterEach } from "vitest"
-import { notifySessionExpired, onSessionExpired } from "./session-expired-signal"
+import {
+  clearSessionExpired,
+  isSessionExpired,
+  notifySessionExpired,
+  onSessionExpired,
+} from "./session-expired-signal"
 
 afterEach(() => {
-  // No global state to reset — bus is module-level but listeners are removed
-  // in each test via the cleanup function.
+  // The latched flag (AQU-884) IS module-level state — reset it. Listeners are
+  // still removed per-test via the cleanup function.
+  clearSessionExpired()
 })
 
 describe("onSessionExpired / notifySessionExpired", () => {
@@ -47,6 +53,40 @@ describe("onSessionExpired / notifySessionExpired", () => {
     notifySessionExpired()
     notifySessionExpired()
     expect(handler).toHaveBeenCalledTimes(2)
+    unsub()
+  })
+})
+
+// AQU-884: the flag latches so a 401 raised before the banner mounts (the boot
+// redirect case) is not lost, and navigation cannot silently drop it.
+describe("latched session-expired state", () => {
+  it("starts clear and latches on notify", () => {
+    expect(isSessionExpired()).toBe(false)
+    notifySessionExpired()
+    expect(isSessionExpired()).toBe(true)
+  })
+
+  it("stays latched until explicitly cleared", () => {
+    notifySessionExpired()
+    expect(isSessionExpired()).toBe(true)
+    clearSessionExpired()
+    expect(isSessionExpired()).toBe(false)
+  })
+
+  it("hands subscribers the current value on both set and clear", () => {
+    const handler = vi.fn()
+    const unsub = onSessionExpired(handler)
+    notifySessionExpired()
+    clearSessionExpired()
+    expect(handler.mock.calls).toEqual([[true], [false]])
+    unsub()
+  })
+
+  it("does not notify subscribers when clearing an already-clear flag", () => {
+    const handler = vi.fn()
+    const unsub = onSessionExpired(handler)
+    clearSessionExpired()
+    expect(handler).not.toHaveBeenCalled()
     unsub()
   })
 })

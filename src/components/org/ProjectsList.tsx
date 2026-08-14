@@ -10,12 +10,20 @@ import { partitionSharedProjects } from "@/lib/frontier/shared-projects"
 import { isProjectNew, readProjectOpenedAt } from "@/lib/frontier/opened-shared-store"
 import { ProjectCreateDialog } from "@/components/ProjectCreateDialog"
 import type { ProjectRecord } from "@/lib/parsers/types"
-import { notifySessionExpired } from "@/lib/errors/session-expired-signal"
+import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
 import { attentionRank, deadlineStatus, getPortfolios, translatedPct, type PortfolioProject } from "@/lib/frontier/portfolio"
 import { UserError } from "@/lib/errors/user-error"
-import { buttonVariants, Button } from "@/components/ui/button"
+import { buttonVariants } from "@/components/ui/button"
 import { RoleLabel } from "@/components/RoleLabel"
 import { Badge } from "@/components/ui/badge"
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { LoadingPanel } from "@/components/ui/loading-overlay"
 import {
   InputGroup,
@@ -249,7 +257,7 @@ export function ProjectsList() {
           setUnreachable(result.reason === "unreachable")
           // AQU-293: 401/403 from the projects fetch means the session is no
           // longer valid — raise the global session-expired banner.
-          if (result.reason === "unauthorized") notifySessionExpired()
+          if (result.reason === "unauthorized") void notifySessionExpiredIfCurrent(jwt)
         }
       })
       .finally(() => { if (!cancelled) setLoading(false) })
@@ -279,7 +287,7 @@ export function ProjectsList() {
       .catch((err) => {
         if (!cancelled) {
           setPortfolioProjects([])
-          if (err instanceof UserError && err.category === "session-expired") notifySessionExpired()
+          if (err instanceof UserError && err.category === "session-expired") void notifySessionExpiredIfCurrent(jwt)
         }
       })
     return () => { cancelled = true }
@@ -439,19 +447,34 @@ export function ProjectsList() {
                 </div>
 
                 {isAllOrgs && (
-                  <div className="flex flex-wrap items-center gap-1 border-b px-4 py-3" aria-label="Project list view">
-                    {PROJECT_LENSES.map((lens) => (
-                      <Button
-                        key={lens.value}
-                        type="button"
-                        size="xs"
-                        variant={projectLens === lens.value ? "default" : "secondary"}
-                        onClick={() => selectProjectLens(lens.value)}
-                        aria-pressed={projectLens === lens.value}
+                  <div className="flex flex-wrap items-center gap-2 border-b px-4 py-3">
+                    <span className="text-xs font-medium text-muted-foreground">View</span>
+                    <Select
+                      items={PROJECT_LENSES.map((lens) => ({ value: lens.value, label: lens.label }))}
+                      value={projectLens}
+                      onValueChange={(v) => {
+                        if (v && PROJECT_LENS_VALUES.includes(v as ProjectLens)) {
+                          selectProjectLens(v as ProjectLens)
+                        }
+                      }}
+                    >
+                      <SelectTrigger
+                        size="sm"
+                        className="bg-background"
+                        aria-label="Project list view"
                       >
-                        {lens.label}
-                      </Button>
-                    ))}
+                        <SelectValue className="flex-none" />
+                      </SelectTrigger>
+                      <SelectContent align="start">
+                        <SelectGroup>
+                          {PROJECT_LENSES.map((lens) => (
+                            <SelectItem key={lens.value} value={lens.value}>
+                              {lens.label}
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
                   </div>
                 )}
 

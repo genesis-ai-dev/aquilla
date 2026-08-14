@@ -20,8 +20,7 @@
 // every project member — see the SWARM-TODO in ProjectOverview.tsx next to
 // `selectedMemberUsername` for why and what widening it would take.
 
-import { useEffect, useState } from "react"
-import { Check } from "lucide-react"
+import { useState } from "react"
 import { FieldDescription, FieldError } from "@/components/ui/field"
 import { SettingsGroup, SettingsRow } from "@/components/ui/page"
 import {
@@ -54,34 +53,17 @@ export function RosterProgressSection({ orgSettings, canEdit }: RosterProgressSe
 
   const [rosterBusy, setRosterBusy] = useState(false)
   const [rosterError, setRosterError] = useState<string | null>(null)
-  const [rosterSaved, setRosterSaved] = useState(false)
   const [progressBusy, setProgressBusy] = useState(false)
   const [progressError, setProgressError] = useState<string | null>(null)
-  const [progressSaved, setProgressSaved] = useState(false)
-
-  useEffect(() => {
-    if (!rosterSaved) return
-    const t = setTimeout(() => setRosterSaved(false), 2500)
-    return () => clearTimeout(t)
-  }, [rosterSaved])
-
-  useEffect(() => {
-    if (!progressSaved) return
-    const t = setTimeout(() => setProgressSaved(false), 2500)
-    return () => clearTimeout(t)
-  }, [progressSaved])
 
   async function handleRosterChange(newLevel: number) {
     setRosterBusy(true)
     setRosterError(null)
-    setRosterSaved(false)
     const result = await patch({ rosterViewMinRole: newLevel })
     if (result.kind === "error") {
       setRosterError(result.message ?? "Save failed")
     } else if (result.kind === "blocked") {
       setRosterError("Only org owners can change the roster visibility policy.")
-    } else {
-      setRosterSaved(true)
     }
     setRosterBusy(false)
   }
@@ -89,14 +71,11 @@ export function RosterProgressSection({ orgSettings, canEdit }: RosterProgressSe
   async function handleProgressChange(newLevel: number) {
     setProgressBusy(true)
     setProgressError(null)
-    setProgressSaved(false)
     const result = await patch({ memberProgressViewMinRole: newLevel })
     if (result.kind === "error") {
       setProgressError(result.message ?? "Save failed")
     } else if (result.kind === "blocked") {
       setProgressError("Only org owners can change the member-progress visibility policy.")
-    } else {
-      setProgressSaved(true)
     }
     setProgressBusy(false)
   }
@@ -115,7 +94,7 @@ export function RosterProgressSection({ orgSettings, canEdit }: RosterProgressSe
             onValueChange={(v) => { if (v) void handleRosterChange(Number(v)) }}
             disabled={!canEdit || rosterBusy}
           >
-            <SelectTrigger id="roster-min-role" aria-label="Who can view the roster" className="w-full max-w-sm">
+            <SelectTrigger id="roster-min-role" aria-label="Who can view the roster">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -134,11 +113,6 @@ export function RosterProgressSection({ orgSettings, canEdit }: RosterProgressSe
           {rosterError && (
             <FieldError className="text-xs">{rosterError}</FieldError>
           )}
-          {rosterSaved && (
-            <p className="flex items-center gap-1 text-xs text-green-600 dark:text-green-400" role="status" data-testid="roster-role-saved">
-              <Check className="size-3.5" /> Saved
-            </p>
-          )}
         </SettingsRow>
       </SettingsGroup>
 
@@ -154,7 +128,7 @@ export function RosterProgressSection({ orgSettings, canEdit }: RosterProgressSe
             onValueChange={(v) => { if (v) void handleProgressChange(Number(v)) }}
             disabled={!canEdit || progressBusy}
           >
-            <SelectTrigger id="progress-min-role" aria-label="Who can view member progress" className="w-full max-w-sm">
+            <SelectTrigger id="progress-min-role" aria-label="Who can view member progress">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -172,11 +146,6 @@ export function RosterProgressSection({ orgSettings, canEdit }: RosterProgressSe
           )}
           {progressError && (
             <FieldError className="text-xs">{progressError}</FieldError>
-          )}
-          {progressSaved && (
-            <p className="flex items-center gap-1 text-xs text-green-600 dark:text-green-400" role="status" data-testid="progress-role-saved">
-              <Check className="size-3.5" /> Saved
-            </p>
           )}
         </SettingsRow>
       </SettingsGroup>

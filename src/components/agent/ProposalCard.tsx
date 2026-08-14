@@ -17,7 +17,7 @@
  */
 
 import { useMemo, useState } from "react"
-import { Check, ChevronDown, ChevronUp, MessageSquare, Pencil, ShieldCheck } from "lucide-react"
+import { Check, ChevronDown, ChevronUp, FileText, MessageSquare, Pencil, Plus, ShieldCheck } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -30,6 +30,7 @@ import { applyStagedEvents, type ApplyContext } from "@/lib/agent/apply"
 import { ValidationQueueCard } from "./cards/ValidationQueueCard"
 import { isValidationProposal } from "./cards/registry"
 import { canApply, isSupportedApplyKind } from "@/lib/agent/role-floors"
+import { InlineAiError } from "@/components/InlineAiError"
 
 // ── Lint ───────────────────────────────────────────────────────────────────
 
@@ -104,8 +105,17 @@ function TruncatableText({ text, className }: { text: string; className?: string
 
 const KIND_META: Record<string, { label: string; Icon: typeof Pencil }> = {
   "target.cell.commit": { label: "Edit", Icon: Pencil },
+  // AQU-890: creates read as "new row" — the label names the lane so a source
+  // insertion is never mistaken for a translation.
+  "source.cell.create": { label: "New source row", Icon: Plus },
+  "target.cell.create": { label: "New target row", Icon: Plus },
   "comment.create": { label: "Comment", Icon: MessageSquare },
   "cell.validate": { label: "Validate", Icon: ShieldCheck },
+}
+
+/** True for the genesis kinds that mint a row rather than editing one. */
+function isCellCreateKind(kind: string): boolean {
+  return kind === "source.cell.create" || kind === "target.cell.create"
 }
 
 function StagedEventRow({
@@ -143,6 +153,17 @@ function StagedEventRow({
       <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
         <Icon className="h-3 w-3 shrink-0 text-muted-foreground" />
         <span className="font-medium">{label}</span>
+        {/* AQU-846: name the destination file on every row. The user approves
+            believing the change lands in the file they have open — say so
+            explicitly rather than leaving it to a bare verse ref. */}
+        {ev.display.fileName && (
+          <AppTooltip content={`This change lands in ${ev.display.fileName}`}>
+            <Badge variant="outline" className="max-w-[12rem] gap-1 px-1.5 py-0 text-[10px]">
+              <FileText className="h-2.5 w-2.5 shrink-0" />
+              <span className="truncate">{ev.display.fileName}</span>
+            </Badge>
+          </AppTooltip>
+        )}
         {ev.display.canonicalRef && (
           <Badge variant="secondary" className="px-1.5 py-0 font-mono text-[10px]">
             {ev.display.canonicalRef}
@@ -166,6 +187,20 @@ function StagedEventRow({
           )}
           <div>
             <TruncatableText text={ev.display.after ?? ""} />
+          </div>
+        </div>
+      )}
+
+      {isCellCreateKind(ev.kind) && (
+        <div className="space-y-0.5 text-xs">
+          <div className="text-[10px] italic text-muted-foreground">(new row)</div>
+          <div>
+            <TruncatableText
+              text={
+                ev.display.after ??
+                (typeof ev.payload.value === "string" ? ev.payload.value : "")
+              }
+            />
           </div>
         </div>
       )}
@@ -246,7 +281,9 @@ function StagedProposalCard({
   const lintByIndex = useMemo(() => {
     const out = new Map<number, RuleInfraction[]>()
     proposal.events.forEach((ev, i) => {
-      if (ev.kind !== "target.cell.commit") return
+      // Rules run over TARGET text only — a new target row is draft text just
+      // like a commit, but source text must never be linted as a translation.
+      if (ev.kind !== "target.cell.commit" && ev.kind !== "target.cell.create") return
       if (enabledRules.length === 0) return
       const cell = lintCellFor(ev, resolveCell)
       out.set(i, checkRulesForCell(cell, ev.fileId ?? "", enabledRules))
@@ -312,7 +349,7 @@ function StagedProposalCard({
       </div>
 
       {applyError && (
-        <div className="text-[11px] text-destructive">Apply failed: {applyError}</div>
+        <InlineAiError message={applyError} label="Apply failed" className="text-[11px]" />
       )}
 
       {state === "applied" ? (
@@ -324,7 +361,6 @@ function StagedProposalCard({
           <div className="flex items-center justify-end gap-1.5">
             <Button
               variant="ghost"
-              size="sm"
               className="h-6 text-[11px]"
               onClick={() => setState("discarded")}
               disabled={state === "applying"}
@@ -333,7 +369,6 @@ function StagedProposalCard({
             </Button>
             <AppTooltip content={blockedReason ?? undefined} disabled={!blockedReason}>
               <Button
-                size="sm"
                 className="h-6 text-[11px]"
                 onClick={() => void handleApply()}
                 disabled={Boolean(blockedReason) || state === "applying"}

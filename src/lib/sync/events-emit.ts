@@ -902,6 +902,11 @@ export interface SourceCellCommitInput {
   parentId: string | null
   value: string
   valueHtml?: string
+  /** AQU-847: corrected source text for a MEDIA section. An imported media
+   *  cell's `value` holds the import FILENAME (provenance) and must stay put,
+   *  so a source edit on such a cell sends its text here instead. Omitted for
+   *  ordinary text cells, which keep writing `value`/`valueHtml`. */
+  transcription?: string
   /** Pre-generated event id (deterministic uuidv5 for the DCS delta path so a
    *  re-run dedupes idempotently). Defaults to a fresh UUIDv7. */
   id?: string
@@ -932,6 +937,7 @@ export async function emitSourceCellCommit(input: SourceCellCommitInput): Promis
     payload: {
       value: input.value,
       ...(input.valueHtml !== undefined ? { valueHtml: input.valueHtml } : {}),
+      ...(input.transcription !== undefined ? { transcription: input.transcription } : {}),
     },
     ...(input.id !== undefined ? { id: input.id } : {}),
     clientTs: input.clientTs,

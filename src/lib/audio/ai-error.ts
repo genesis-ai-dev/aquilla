@@ -1,8 +1,14 @@
-// Categorize raw AI-feature error strings (TTS, transcription) into one of a
-// small set of failure modes that map cleanly to UI affordances. The mapping
-// is heuristic — pattern-matched on messages we generate locally — but it
-// keeps the user from having to read raw exception text to figure out what
-// to do next.
+// Categorize raw AI-feature error strings (TTS, transcription, drafting,
+// agent runs) into one of a small set of failure modes that map cleanly to UI
+// affordances. The mapping is heuristic — pattern-matched on messages we
+// generate locally — but it keeps the user from having to read raw exception
+// text to figure out what to do next.
+//
+// AQU-891: every branch must produce a `body` the user can act on WITHOUT
+// reading `raw`. When we can't improve on the raw text we still say something
+// plain-language and leave the verbatim message to the "Technical detail"
+// disclosure — a raw provider payload (an OpenRouter 413 JSON blob, say) is
+// never the primary message.
 
 export type ErrorCategory =
   | "missing-gemini-key"
@@ -17,7 +23,21 @@ export type ErrorCategory =
   | "audio-format-unsupported"
   | "daily-quota-exceeded"
   | "model-not-allowed"
+  | "request-too-large"
+  | "rate-limited"
+  | "timed-out"
+  | "provider-unavailable"
+  | "provider-rejected"
   | "unknown"
+
+/** Pull an HTTP status out of the messages we format locally, e.g.
+ *  `Completion failed: 413 {"error":…}` or `Failed to fetch models: 500 …`.
+ *  Deliberately anchored to a "failed/error/status/http" lead-in so a bare
+ *  three-digit number inside a provider payload isn't mistaken for a status. */
+function extractStatus(lowered: string): number | null {
+  const match = lowered.match(/(?:failed|error|status|http)[:\s]+(\d{3})\b/)
+  return match ? Number(match[1]) : null
+}
 
 export interface ActionableError {
   category: ErrorCategory
@@ -32,6 +52,7 @@ export interface ActionableError {
 export function categorizeAiError(rawMessage: string): ActionableError {
   const raw = rawMessage.trim()
   const m = raw.toLowerCase()
+  const status = extractStatus(m)
 
   // Platform daily quota (AQU-265): 429 responses from the Frontier/Aquilla proxy.
   if (
@@ -54,6 +75,26 @@ export function categorizeAiError(rawMessage: string): ActionableError {
       category: "model-not-allowed",
       title: "Model not available",
       body: raw,
+      raw,
+    }
+  }
+
+  // Prompt exceeded the model's context window (AQU-891). OpenRouter answers
+  // 413 with a "request too large for model" payload; other providers phrase
+  // it as a context-length error. Checked early because the payload often also
+  // mentions "model", which later heuristics would misread.
+  if (
+    status === 413 ||
+    m.includes("request too large") ||
+    m.includes("too large for model") ||
+    m.includes("context length") ||
+    m.includes("context_length_exceeded") ||
+    m.includes("maximum context")
+  ) {
+    return {
+      category: "request-too-large",
+      title: "Too much text for this model",
+      body: "This request was larger than the selected model can handle. Draft fewer cells at once, lower the number of examples in AI settings, or pick a model with a larger context window.",
       raw,
     }
   }
@@ -118,5 +159,61 @@ export function categorizeAiError(rawMessage: string): ActionableError {
       raw,
     }
   }
-  return { category: "unknown", title: "Couldn't generate", body: raw || "Something went wrong.", raw }
+  if (m.includes("timed out") || m.includes("timeout")) {
+    return {
+      category: "timed-out",
+      title: "The request timed out",
+      body: "The AI provider took too long to respond. Try again — if it keeps happening, send a smaller request or switch models.",
+      raw,
+    }
+  }
+  // Provider rate limit that isn't our own daily budget (handled far above).
+  if (status === 429 || m.includes("rate limit") || m.includes("too many requests")) {
+    return {
+      category: "rate-limited",
+      title: "Too many requests right now",
+      body: "The AI provider is rate-limiting requests. Wait a moment and try again.",
+      raw,
+    }
+  }
+  if (status !== null && status >= 500) {
+    return {
+      category: "provider-unavailable",
+      title: "The AI service is unavailable",
+      body: "The AI provider returned a server error. This is usually temporary — try again in a moment.",
+      raw,
+    }
+  }
+  if (status !== null && status >= 400) {
+    return {
+      category: "provider-rejected",
+      title: "The AI provider rejected this request",
+      body: "The request didn't reach a model. Open the technical detail below and copy it to support if this keeps happening.",
+      raw,
+    }
+  }
+  // Uncategorized. Most of these are messages we wrote ourselves and are
+  // already plain language — keep showing them. Only a machine dump (a JSON
+  // payload, a stack, a wall of text) gets swapped for the generic line, with
+  // the verbatim text left to the "Technical detail" disclosure.
+  if (!raw || looksLikeMachineDump(raw)) {
+    return {
+      category: "unknown",
+      title: "Something went wrong",
+      body: "The AI request didn't finish. Open the technical detail below and copy it to support if this keeps happening.",
+      raw,
+    }
+  }
+  return { category: "unknown", title: "Something went wrong", body: raw, raw }
+}
+
+/** Heuristic: does this read as a payload/stack rather than a sentence we'd
+ *  be happy showing a translator? */
+function looksLikeMachineDump(raw: string): boolean {
+  return (
+    raw.length > 180 ||
+    /[{}[\]]/.test(raw) ||
+    /\bat\s+\S+\s*\(/.test(raw) || // stack frame
+    /\b[a-z_]+_[a-z_]+\b/.test(raw) // snake_case machine code, e.g. invalid_request_error
+  )
 }

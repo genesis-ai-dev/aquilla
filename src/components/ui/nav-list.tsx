@@ -10,7 +10,7 @@ import { cn } from "@/lib/utils"
  * tappable rows — a leading icon tile, a title, an optional right-aligned hint
  * (a count or the current value, e.g. "System", "12", "Maintainer"), and a
  * chevron — that navigate into a focused detail sub-page. Same visual family as
- * the Section primitive in page.tsx: one bordered, rounded-2xl card with the
+ * the Section primitive in page.tsx: one bordered, rounded-lg card with the
  * border carrying the separation in both light and dark themes.
  */
 
@@ -30,11 +30,11 @@ function NavList({
   return (
     <div className={cn("space-y-2", className)}>
       {label ? (
-        <p className="px-1 font-heading text-base font-medium tracking-tight text-foreground">
+        <p className="pl-4 font-heading text-base font-medium tracking-tight text-foreground">
           {label}
         </p>
       ) : null}
-      <div className="divide-y overflow-hidden rounded-2xl border bg-card">
+      <div className="divide-y overflow-hidden rounded-lg border bg-card">
         {children}
       </div>
     </div>
@@ -113,7 +113,7 @@ function BackLink({
   className?: string
 }) {
   const classes = cn(
-    "group -ml-1.5 inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-sm text-muted-foreground hover:bg-accent/40 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+    "group -ml-1.5 inline-flex w-fit items-center gap-1 self-start rounded-md py-1 pr-1.5 pl-4 text-sm text-muted-foreground hover:bg-accent/40 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
     className,
   )
   if (onClick) {

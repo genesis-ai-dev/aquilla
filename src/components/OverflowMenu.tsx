@@ -10,7 +10,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { AppTooltip } from "@/components/ui/tooltip"
 
 export interface OverflowMenuItem {
   id: string
@@ -30,11 +29,8 @@ interface Props {
   triggerVariant?: "ghost" | "outline"
   triggerSize?: NonNullable<VariantProps<typeof buttonVariants>["size"]>
   triggerClassName?: string
-  tooltip?: string
   ariaLabel?: string
   testId?: string
-  /** Skip tooltip wrapper so the trigger can sit inside a ButtonGroup. */
-  inButtonGroup?: boolean
   /** Anchor for popovers opened from this menu (e.g. View settings). */
   triggerRef?: Ref<HTMLButtonElement>
 }
@@ -74,38 +70,28 @@ export function OverflowMenu({
   triggerVariant = "ghost",
   triggerSize = "icon",
   triggerClassName,
-  tooltip = "More",
   ariaLabel = "More",
   testId,
-  inButtonGroup = false,
   triggerRef,
 }: Props) {
   if (items.length === 0) return null
 
-  const trigger = (
-    <DropdownMenuTrigger
-      render={
-        <Button
-          ref={triggerRef}
-          variant={triggerVariant}
-          size={triggerSize}
-          className={triggerClassName}
-          aria-label={ariaLabel}
-          data-testid={testId}
-        >
-          <MoreHorizontal className="h-4 w-4" />
-        </Button>
-      }
-    />
-  )
-
   return (
     <DropdownMenu>
-      {inButtonGroup ? trigger : (
-        <AppTooltip content={tooltip}>
-          {trigger}
-        </AppTooltip>
-      )}
+      <DropdownMenuTrigger
+        render={
+          <Button
+            ref={triggerRef}
+            variant={triggerVariant}
+            size={triggerSize}
+            className={triggerClassName}
+            aria-label={ariaLabel}
+            data-testid={testId}
+          >
+            <MoreHorizontal className="h-4 w-4" />
+          </Button>
+        }
+      />
       <OverflowMenuPanel items={items} />
     </DropdownMenu>
   )

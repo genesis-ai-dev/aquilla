@@ -23,6 +23,8 @@ import { fetchProjectFiles, fetchFileCells } from "@/lib/sync/cells-read"
 import { cn } from "@/lib/utils"
 import { BookOpen, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Spinner } from "@/components/ui/spinner"
+import { RightSidebarPanel } from "./RightSidebarPanel"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { RichMessage } from "@/lib/i18n/RichMessage"
 
@@ -181,9 +183,10 @@ export function TranslationNotesSidebar({
   }
 
   return (
+    <RightSidebarPanel storageKey="translation-notes" defaultWidth={288} resizeLabel="Resize translation notes panel">
     <div
       className={cn(
-        "flex h-full w-72 flex-col border-l bg-card text-sm",
+        "flex h-full w-full flex-col border-l bg-card text-sm",
         className,
       )}
     >
@@ -217,7 +220,9 @@ export function TranslationNotesSidebar({
             {t("editor.tn.focusHint")}
           </p>
         ) : loading ? (
-          <p className="p-4 text-xs text-muted-foreground">{t("common.loading")}</p>
+          <div className="flex items-center p-4 text-muted-foreground" aria-label={t("common.loading")}>
+            <Spinner className="size-3.5" />
+          </div>
         ) : error ? (
           <p className="p-4 text-xs text-destructive">{error}</p>
         ) : notes.length === 0 ? (
@@ -247,6 +252,7 @@ export function TranslationNotesSidebar({
         )}
       </div>
     </div>
+    </RightSidebarPanel>
   )
 }
 

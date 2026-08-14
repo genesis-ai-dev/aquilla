@@ -42,7 +42,7 @@ export function WorkspaceSkeleton() {
               {Array.from({ length: ROWS }).map((_, index) => (
                 <div
                   key={index}
-                  className="grid grid-cols-[56px_1fr_1fr_56px] gap-3 rounded-2xl bg-card px-4 py-3"
+                  className="grid grid-cols-[56px_1fr_1fr_56px] gap-3 rounded-lg bg-card px-4 py-3"
                 >
                   <Skeleton className="h-6 w-10" />
                   <Skeleton className="h-16 w-full" />

@@ -54,7 +54,7 @@ export function PrivacyStep({ onNext, onBack }: { onNext: () => void; onBack: ()
         <Button size="lg" onClick={handleContinue} className="w-full">
           Continue
         </Button>
-        <Button variant="ghost" size="sm" onClick={onBack} className="w-full">
+        <Button variant="ghost" onClick={onBack} className="w-full">
           ← Back
         </Button>
       </div>

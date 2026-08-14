@@ -26,6 +26,11 @@ import type { ToolItem } from "@/lib/agent/run-state"
  */
 export const KIND_TIER: Record<string, "prepared" | "testimony"> = {
   "target.cell.commit": "prepared",
+  // AQU-890: row creation is prepared work, not testimony — it asserts nothing
+  // about quality, and its role floor (project_lead for the source lane) is the
+  // gate that matters.
+  "source.cell.create": "prepared",
+  "target.cell.create": "prepared",
   "comment.create": "prepared",
   "cell.validate": "testimony",
   "cell.unvalidate": "testimony",

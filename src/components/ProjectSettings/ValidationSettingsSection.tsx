@@ -1,6 +1,5 @@
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
-import { FieldLabel } from "@/components/ui/field"
+import { FieldDescription, OptionalMark } from "@/components/ui/field"
 import { Switch } from "@/components/ui/switch"
 import {
   Select,
@@ -10,7 +9,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { SettingsGroup, SettingsRow } from "@/components/ui/page"
+import { MemberMultiSelect } from "@/components/MemberMultiSelect"
 import { DisabledFieldTooltip } from "./DisabledFieldTooltip"
+import { useProjectMembers } from "@/hooks/useProjectMembers"
 import { VALIDATION_FLOOR_ROLE_OPTIONS, roleDisplayText } from "@/lib/frontier/roles"
 import type { ProjectRecord } from "@/lib/parsers/types"
 
@@ -29,11 +31,13 @@ const ROLE_OPTIONS: { value: ValidationRoleFloor; label: string }[] =
   }))
 
 interface Props {
+  /** Project id for loading member usernames into the named-validators combobox. */
+  projectId?: string | null
   validationCount: number
   validationCountAudio: number
   hasAnyAudioData: boolean
   validationRoleFloor?: ValidationRoleFloor
-  /** Comma-separated string representation of named users (stored as string[] in ProjectRecord). */
+  /** Named-user allowlist (usernames). Empty = any sufficiently-privileged user. */
   validationNamedUsers?: string[]
   allowSelfValidation?: boolean
   /** When true, all inputs are disabled (role/offline gate). */
@@ -60,13 +64,14 @@ interface Props {
  *  - Required validator counts (text / audio)
  *  - Role floor (minimum role that can validate)
  *  - Allow self-validation toggle
- *  - Named-user allowlist (comma-separated text input)
+ *  - Named-user allowlist (MemberMultiSelect over project members)
  *
  * Server enforcement of role floor, named-user, and self-validation is
  * deferred — see SWARM-TODOs in src/lib/parsers/types.ts (validationRoleFloor,
  * validationNamedUsers, allowSelfValidation fields).
  */
 export function ValidationSettingsSection({
+  projectId = null,
   validationCount,
   validationCountAudio,
   hasAnyAudioData,
@@ -77,6 +82,17 @@ export function ValidationSettingsSection({
   disabledTooltip,
   onChange,
 }: Props) {
+  const { members } = useProjectMembers(projectId)
+
+  // Offer project members, and keep any already-saved names that left the roster
+  // so they remain selectable / visible in the trigger.
+  const namedUserItems = Array.from(
+    new Set([
+      ...members.map((m) => m.username),
+      ...validationNamedUsers,
+    ]),
+  ).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }))
+
   function clamp(raw: string): number {
     const n = Math.floor(Number(raw))
     if (!Number.isFinite(n)) return 1
@@ -85,23 +101,12 @@ export function ValidationSettingsSection({
     return n
   }
 
-  /** Convert comma-separated raw string to trimmed username array. */
-  function parseNamedUsers(raw: string): string[] {
-    return raw
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean)
-  }
-
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Validation</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {/* ── Count thresholds ── */}
-        <div className="space-y-2">
-          <FieldLabel htmlFor="validation-count">Required validators (text)</FieldLabel>
+    <SettingsGroup label="Validation">
+      <SettingsRow
+        label={<label htmlFor="validation-count">Required validators (text)</label>}
+        description="Cells need this many distinct validators to count as fully validated."
+        control={
           <DisabledFieldTooltip disabled={disabled} tooltip={disabledTooltip ?? null}>
             <Input
               id="validation-count"
@@ -111,15 +116,20 @@ export function ValidationSettingsSection({
               disabled={disabled}
               value={validationCount}
               onChange={(e) => onChange({ validationCount: clamp(e.target.value) })}
-              className="w-24"
+              className="w-24 bg-background"
+              aria-label="Required validators (text)"
             />
           </DisabledFieldTooltip>
-          <p className="text-xs text-muted-foreground">
-            Cells need this many distinct validators to count as fully validated.
-          </p>
-        </div>
-        <div className="space-y-2">
-          <FieldLabel htmlFor="validation-count-audio">Required validators (audio)</FieldLabel>
+        }
+      />
+      <SettingsRow
+        label={<label htmlFor="validation-count-audio">Required validators (audio)</label>}
+        description={
+          hasAnyAudioData
+            ? "Applies to audio translations."
+            : "Enabled once audio translations exist."
+        }
+        control={
           <DisabledFieldTooltip
             disabled={disabled || !hasAnyAudioData}
             tooltip={disabled ? (disabledTooltip ?? null) : null}
@@ -132,19 +142,16 @@ export function ValidationSettingsSection({
               disabled={disabled || !hasAnyAudioData}
               value={validationCountAudio}
               onChange={(e) => onChange({ validationCountAudio: clamp(e.target.value) })}
-              className="w-24"
+              className="w-24 bg-background"
+              aria-label="Required validators (audio)"
             />
           </DisabledFieldTooltip>
-          <p className="text-xs text-muted-foreground">
-            {hasAnyAudioData
-              ? "Applies to audio translations."
-              : "Enabled once audio translations exist."}
-          </p>
-        </div>
-
-        {/* ── Role floor ── */}
-        <div className="space-y-2">
-          <FieldLabel htmlFor="validation-role-floor">Minimum validator role</FieldLabel>
+        }
+      />
+      <SettingsRow
+        label={<label htmlFor="validation-role-floor">Minimum validator role</label>}
+        description="Only users with at least this role can cast a validation vote. Defaults to reviewer."
+        control={
           <DisabledFieldTooltip disabled={disabled} tooltip={disabledTooltip ?? null}>
             <Select
               items={ROLE_OPTIONS}
@@ -156,7 +163,11 @@ export function ValidationSettingsSection({
                 })
               }
             >
-              <SelectTrigger id="validation-role-floor" className="w-48">
+              <SelectTrigger
+                id="validation-role-floor"
+                className="w-48 bg-background"
+                aria-label="Minimum validator role"
+              >
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -170,57 +181,52 @@ export function ValidationSettingsSection({
               </SelectContent>
             </Select>
           </DisabledFieldTooltip>
-          <p className="text-xs text-muted-foreground">
-            Only users with at least this role can cast a validation vote. Defaults to reviewer.
-            {/* SWARM-TODO(server-enforcement): enforce in sync-worker cell.validate branch */}
-          </p>
-        </div>
-
-        {/* ── Allow self-validation ── */}
-        <div className="flex items-center gap-3">
+        }
+      />
+      <SettingsRow
+        label={<label htmlFor="allow-self-validation">Allow self-validation</label>}
+        description="When off, a contributor's vote on their own commit is ignored."
+        control={
           <DisabledFieldTooltip disabled={disabled} tooltip={disabledTooltip ?? null}>
             <Switch
               id="allow-self-validation"
               disabled={disabled}
               checked={allowSelfValidation}
               onCheckedChange={(checked) => onChange({ allowSelfValidation: checked })}
+              aria-label="Allow self-validation"
             />
           </DisabledFieldTooltip>
-          <div className="space-y-0.5">
-            <FieldLabel htmlFor="allow-self-validation">Allow self-validation</FieldLabel>
-            <p className="text-xs text-muted-foreground">
-              When off, a contributor's vote on their own commit is ignored.
-              {/* SWARM-TODO(server-enforcement): enforce in sync-worker cell.validate branch */}
-            </p>
-          </div>
-        </div>
-
-        {/* ── Named-user allowlist ── */}
-        <div className="space-y-2">
-          <FieldLabel htmlFor="validation-named-users">Named validators (optional)</FieldLabel>
-          <DisabledFieldTooltip disabled={disabled} tooltip={disabledTooltip ?? null}>
-            <Input
-              id="validation-named-users"
-              type="text"
-              disabled={disabled}
-              placeholder="alice, bob, carol"
-              value={validationNamedUsers.join(", ")}
-              onChange={(e) =>
-                onChange({ validationNamedUsers: parseNamedUsers(e.target.value) })
-              }
-              className="w-72"
-            />
-          </DisabledFieldTooltip>
-          <p className="text-xs text-muted-foreground">
-            Comma-separated usernames. When set, only these users' votes count toward the
-            threshold (AND'd with the role floor). Leave empty to allow any sufficiently-
-            privileged user.
-            {/* SWARM-TODO(server-enforcement): enforce in sync-worker cell.validate branch.
-                Full typeahead (UsernameTypeahead) would improve UX — blocked on integrating
-                the component here while keeping Props lightweight. */}
-          </p>
-        </div>
-      </CardContent>
-    </Card>
+        }
+      />
+      <SettingsRow
+        label={
+          <label htmlFor="validation-named-users">
+            Named validators <OptionalMark />
+          </label>
+        }
+        description={
+          <>
+            When set, only these users&apos; votes count toward the threshold (AND&apos;d with
+            the role floor). Leave empty to allow any sufficiently-privileged user.
+          </>
+        }
+        block
+      >
+        <DisabledFieldTooltip disabled={disabled} tooltip={disabledTooltip ?? null}>
+          <MemberMultiSelect
+            id="validation-named-users"
+            members={namedUserItems}
+            value={validationNamedUsers}
+            disabled={disabled}
+            placeholder="Select project members…"
+            aria-label="Named validators"
+            onValueChange={(next) => onChange({ validationNamedUsers: next })}
+          />
+        </DisabledFieldTooltip>
+        {disabled ? (
+          <FieldDescription className="mt-2">{disabledTooltip}</FieldDescription>
+        ) : null}
+      </SettingsRow>
+    </SettingsGroup>
   )
 }

@@ -56,6 +56,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { DatePicker, dateToDeadlineString } from "@/components/ui/date-picker"
+import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { RichMessage } from "@/lib/i18n/RichMessage"
 import { partitionMembers, type ProjectMember } from "@/lib/frontier/members"
@@ -419,16 +420,16 @@ export function AssignModal({
 
     if (scopeKind === "selection" || scopeKind === "verses") {
       if (!activeFileId) { setError(t("dialog.assign.error.noFileOpen")); return }
-      const file = projectFiles.find((f) => f.id === activeFileId)
-      const fileName = file?.name ?? activeFileId
       scope = [{ fileId: activeFileId }]
+      // File identity rides `fileId` (and the Assigned-to-me File column) —
+      // keep scopeLabel as the work description only, not "… in <fileName>".
       // Persisted scope-label data (stored on the assignment record), not a
       // rendered UI string — left in English; see AQU-511 dialog namespace notes.
       scopeLabel = scopeKind === "selection"
-        ? `${selectedCellIds.size} ${segmentNoun}(s) in ${fileName}`
+        ? `${selectedCellIds.size} ${segmentNoun}(s)`
         : isScripture
-          ? `All verses in ${fileName}`
-          : `Entire ${fileName}`
+          ? "All verses"
+          : "Entire file"
       apiScopeKind = "books"
     } else if (scopeKind === "chapters") {
       if (!activeFileId) { setError(t("dialog.assign.error.noFileOpen")); return }
@@ -436,9 +437,8 @@ export function AssignModal({
         setError(t(selectUnitErrorKey))
         return
       }
-      const file = projectFiles.find((f) => f.id === activeFileId)
       scope = Array.from(selectedChapters).map((ch) => ({ fileId: activeFileId, chapter: ch }))
-      scopeLabel = `${Array.from(selectedChapters).join(", ")} in ${file?.name ?? activeFileId}`
+      scopeLabel = Array.from(selectedChapters).join(", ")
       apiScopeKind = "chapters"
     }
 
@@ -529,7 +529,7 @@ export function AssignModal({
               value={scopeKind}
               onValueChange={(v) => setScopeKind(v as ScopeKind)}
             >
-              <SelectTrigger id="assign-modal-scope" className="w-full">
+              <SelectTrigger id="assign-modal-scope">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -566,7 +566,7 @@ export function AssignModal({
                 value={selectedLane}
                 onValueChange={(v) => setSelectedLane(v ?? "")}
               >
-                <SelectTrigger id="assign-modal-lane" className="w-full">
+                <SelectTrigger id="assign-modal-lane">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -669,16 +669,29 @@ export function AssignModal({
               onValueChange={(v) => setSelectedMemberId(v ?? "")}
               disabled={isSelfAssignMode}
             >
-              <SelectTrigger id="assign-modal-assignee" className="w-full">
+              <SelectTrigger id="assign-modal-assignee">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
                 <SelectGroup>
-                  {assigneeItems.map((item) => (
-                    <SelectItem key={item.value} value={item.value}>
-                      {item.label}
-                    </SelectItem>
-                  ))}
+                  {assigneeItems.map((item) => {
+                    const member = members.find((m) => String(m.userId) === item.value)
+                    return (
+                      <SelectItem key={item.value || "empty"} value={item.value}>
+                        {member ? (
+                          <UsernameWithAvatar
+                            username={member.username}
+                            label={item.label}
+                            size="xs"
+                            menuSafe
+                            nameClassName="text-sm font-normal"
+                          />
+                        ) : (
+                          item.label
+                        )}
+                      </SelectItem>
+                    )
+                  })}
                 </SelectGroup>
               </SelectContent>
             </Select>

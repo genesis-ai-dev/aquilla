@@ -5,31 +5,33 @@
  * When the signal fires (any fetch helper threw UserError(401)), shows a
  * fixed top banner with a direct link to /login?next=<current-path>.
  *
- * The banner is dismissible and resets on any navigation — it is not a
+ * AQU-884: the banner persists across navigation. It used to clear itself on
+ * every `location.pathname` change, which meant the boot redirect (`/` →
+ * `/orgs/all`) wiped it in the same tick it appeared — a user reloading with an
+ * expired session landed on an empty dashboard with no explanation. It now
+ * mirrors the latched flag in the signal module: visible from the first 401
+ * until the user dismisses it or re-authenticates. It is still a banner, not a
  * full-page takeover.
  */
 
-import { useEffect, useState } from "react"
+import { useSyncExternalStore } from "react"
 import { Link, useLocation } from "react-router-dom"
 import { X } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { onSessionExpired } from "@/lib/errors/session-expired-signal"
+import {
+  clearSessionExpired,
+  isSessionExpired,
+  onSessionExpired,
+} from "@/lib/errors/session-expired-signal"
 import { useT } from "@/lib/i18n/I18nProvider"
 
 export function SessionExpiredBanner() {
   const t = useT()
-  const [visible, setVisible] = useState(false)
+  // The signal module is the store; reading it through useSyncExternalStore
+  // means the first render already reflects a 401 that fired during boot,
+  // before this component mounted.
+  const visible = useSyncExternalStore(onSessionExpired, isSessionExpired)
   const location = useLocation()
-
-  // Subscribe to session-expired signal
-  useEffect(() => {
-    return onSessionExpired(() => setVisible(true))
-  }, [])
-
-  // Clear banner on navigation (user went to /login themselves, or navigated away)
-  useEffect(() => {
-    setVisible(false)
-  }, [location.pathname])
 
   if (!visible) return null
 
@@ -55,7 +57,7 @@ export function SessionExpiredBanner() {
         type="button"
         variant="ghost"
         size="icon-xs"
-        onClick={() => setVisible(false)}
+        onClick={() => clearSessionExpired()}
         aria-label={t("common.dismiss")}
         className="shrink-0 text-amber-700 hover:text-amber-900 dark:text-amber-400 dark:hover:text-amber-100"
       >

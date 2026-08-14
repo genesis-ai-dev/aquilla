@@ -52,7 +52,7 @@ export function IntentStep({
           </span>
         </button>
       </div>
-      <Button variant="ghost" size="sm" onClick={onBack} className="w-full">
+      <Button variant="ghost" onClick={onBack} className="w-full">
         ← Back
       </Button>
     </div>

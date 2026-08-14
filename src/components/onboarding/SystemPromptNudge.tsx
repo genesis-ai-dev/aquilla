@@ -57,7 +57,6 @@ export function SystemPromptNudge({ project, onProjectUpdated, onCustomize }: Sy
         </span>
       </p>
       <Button
-        size="sm"
         variant="default"
         onClick={() => {
           // Customizing fires the same dismiss path so we don't re-nag if the

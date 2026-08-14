@@ -20,13 +20,9 @@ interface SettingsNavProps {
 }
 
 /**
- * AQU-501: Project Settings' search box. Used to be paired with a flat,
- * scroll-spy-highlighted list of every section (one long scrolling page) —
- * that list is gone now that ProjectSettings.tsx groups sections into
- * sub-menu panes (see SETTINGS_GROUPS there) and renders its own NavList /
- * pane content. This component is just the search input; typing a query
- * still filters `ALL_SECTIONS` across every group (ProjectSettings.tsx does
- * the filtering and renders matches directly).
+ * AQU-501: Project Settings search box. Search filters across every settings
+ * group on the index (and during search results). Detail panes intentionally
+ * omit it — matching org settings / Preferences (no search bar on detail).
  */
 export function SettingsNav({ onSearch, searchQuery }: SettingsNavProps) {
   return (

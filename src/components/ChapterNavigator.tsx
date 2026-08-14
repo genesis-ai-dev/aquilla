@@ -600,15 +600,17 @@ export function MilestoneNavigator({
             <span
               className={
                 iconOnlyTrigger
-                  ? "hidden min-w-0 truncate text-left font-semibold xl:inline"
-                  : "min-w-0 truncate text-left font-semibold"
+                  ? "hidden min-w-0 items-center gap-2 text-left xl:flex"
+                  : "flex min-w-0 items-center gap-2 text-left"
               }
             >
-              {active.label}
-            </span>
-            {/* Below xl: chapter label only — drop the verse/cell summary. */}
-            <span className="hidden min-w-0 truncate text-xs font-normal text-muted-foreground xl:inline">
-              {activeSummary}
+              <span className="min-w-0 truncate font-semibold leading-none">
+                {active.label}
+              </span>
+              {/* Below xl: chapter label only — drop the verse/cell summary. */}
+              <span className="hidden min-w-0 truncate text-xs font-normal leading-none text-muted-foreground xl:inline">
+                {activeSummary}
+              </span>
             </span>
           </ComboboxTrigger>
           <ComboboxContent

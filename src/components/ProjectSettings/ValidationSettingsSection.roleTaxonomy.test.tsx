@@ -13,6 +13,20 @@ import { render } from "@testing-library/react"
 import { ValidationSettingsSection } from "./ValidationSettingsSection"
 import { roleDisplayText, roleName } from "@/lib/frontier/roles"
 
+vi.mock("@/hooks/useProjectMembers", () => ({
+  useProjectMembers: () => ({
+    members: [],
+    isLoading: false,
+    error: null,
+    rosterHidden: false,
+    refresh: async () => {},
+    add: async () => null,
+    addMany: async () => [],
+    remove: async () => {},
+    changeRole: async () => null,
+  }),
+}))
+
 function renderFloor(validationRoleFloor: "reviewer" | "project_lead" | "maintainer") {
   return render(
     <ValidationSettingsSection

@@ -371,7 +371,7 @@ function StagedProposalCard({
 
       {state === "applied" ? (
         <div className="flex items-center gap-1 text-[11px] font-medium text-emerald-600">
-          <Check className="h-3 w-3" /> {t("autopilot.proposal.applied")}
+          <Check className="h-3 w-3" /> {t("autopilot.evidence.status.applied")}
         </div>
       ) : (
         <div className="space-y-1">

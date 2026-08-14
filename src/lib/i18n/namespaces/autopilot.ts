@@ -463,7 +463,6 @@ export const autopilot = defineNamespace({
     "autopilot.proposal.newRow": "(new row)",
     "autopilot.proposal.discarded": "Discarded: {summary}",
     "autopilot.proposal.applyFailed": "Apply failed",
-    "autopilot.proposal.applied": "Applied",
     "autopilot.proposal.applying": "Applying…",
     "autopilot.proposal.apply": "Apply",
     "autopilot.evidence.status.rejected": "Rejected",
@@ -534,9 +533,6 @@ export const autopilot = defineNamespace({
       ),
       "autopilot.proposal.applyFailed": {
         description: "Label on the inline error shown when applying a staged proposal fails.",
-      },
-      "autopilot.proposal.applied": {
-        description: "Success state shown after a staged proposal has been applied.",
       },
       "autopilot.proposal.applying": {
         description: "Progress label inside the proposal action button while writes are being queued.",

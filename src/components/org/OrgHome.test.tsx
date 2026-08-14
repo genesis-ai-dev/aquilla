@@ -228,6 +228,26 @@ function mockProjectNameOverflow(overflowing: boolean) {
   })
 }
 
+describe("OrgHome loading template", () => {
+  it("keeps the header breadcrumb-only (no trailing profile chip)", () => {
+    mockUseFrontierSession.mockReturnValue({
+      session: { jwt: "jwt", username: "anna", createdAt: "x" },
+      loading: true,
+    })
+    render(
+      <MemoryRouter initialEntries={["/orgs/all"]}>
+        <OrgProvider>
+          <OrgHome />
+        </OrgProvider>
+      </MemoryRouter>,
+    )
+    expect(screen.getByTestId("org-home-loading-template")).toBeInTheDocument()
+    const header = document.querySelector("[data-slot='app-shell-header']")
+    expect(header).not.toBeNull()
+    expect(header!.querySelectorAll("[data-slot='skeleton']")).toHaveLength(1)
+  })
+})
+
 describe("ProjectTable", () => {
   const project: PortfolioProject & { orgName: string } = {
     id: "long-project",

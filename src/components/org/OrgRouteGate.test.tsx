@@ -84,7 +84,8 @@ describe("OrgRouteGate (AQU-790 guest orgs)", () => {
     orgContext.accessibleProjectsLoading = true
     renderGate("/orgs/2")
     expect(screen.queryByText(/not found/i)).not.toBeInTheDocument()
-    expect(screen.getByText("Loading…")).toBeInTheDocument()
+    expect(screen.getByRole("status", { name: "Loading organization" })).toBeInTheDocument()
+    expect(screen.queryByTestId("account-switcher")).not.toBeInTheDocument()
   })
 
   it("shows not-found once the directory has loaded and the org is unknown", () => {
@@ -99,9 +100,10 @@ describe("OrgRouteGate (AQU-790 guest orgs)", () => {
     expect(screen.getByTestId("account-switcher")).toBeInTheDocument()
   })
 
-  it("keeps the account switcher while orgs are loading", () => {
+  it("does not flash a header account switcher while orgs are loading", () => {
     orgContext.isLoading = true
     renderGate("/orgs/7")
-    expect(screen.getByTestId("account-switcher")).toBeInTheDocument()
+    expect(screen.getByRole("status", { name: "Loading organization" })).toBeInTheDocument()
+    expect(screen.queryByTestId("account-switcher")).not.toBeInTheDocument()
   })
 })

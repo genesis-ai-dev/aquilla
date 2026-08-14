@@ -98,9 +98,8 @@ function OrgHomeLoadingTemplate() {
           </div>
         }
         header={
-          <div className="flex items-center justify-between gap-4 px-4">
+          <div className="flex items-center gap-4 px-4">
             <Skeleton className="h-5 w-40" />
-            <Skeleton className="h-7 w-56 rounded-lg" />
           </div>
         }
         statusBar={null}

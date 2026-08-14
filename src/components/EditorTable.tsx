@@ -72,6 +72,7 @@ import {
   railFocusOwnerOnBlur,
   railFocusOwnerOnFocus,
 } from "@/lib/editor/cell-rail-pin"
+import { shouldDismissCellErrorsOnBlur } from "@/lib/editor/cell-error-dismiss"
 import { CellExpansion } from "./CellExpansion"
 import { CellMetadataTab, hasCellMetadata } from "./CellMetadataTab"
 import { tokenizeWords, activeWordRange } from "@/lib/audio/timings"
@@ -763,6 +764,11 @@ interface EditorTableProps {
    *  so the user sees progress immediately instead of waiting for the
    *  commit + outbox flush to land. */
   previews: Map<string, string>
+  /** AQU-913: forget this cell's inline AI failures — the draft error, the
+   *  back-translation error, and the per-cell "error" status behind them.
+   *  Called when focus leaves the cell's row so a failure stops following the
+   *  user around the file. Omit to keep errors sticky (legacy callers). */
+  onClearCellErrors?: (cellId: string) => void
   onCompleteSingle: (cell: CellData, opts?: { regenerate?: boolean }) => void | Promise<boolean>
   onCompleteBatch: (cells: CellData[]) => void
   /** p1-paragraph-ui-wiring: draft the whole paragraph group containing
@@ -868,7 +874,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   project, cellStore, fileType, username, activeLane = "", lanes, archivedLanes, onLaneChange, defaultLaneLabel,
   onEditTargetLanguage,
   isCompletionConfigured, isCompletionAvailable,
-  completing, examples, errors, previews,
+  completing, examples, errors, previews, onClearCellErrors,
   onCompleteSingle, onCompleteBatch, onCompleteParagraph, healthMap,
   infractions = new Map(), rules = [],
   isBacktranslationConfigured, onBacktranslate, backtranslating, backtranslationErrors,
@@ -2078,6 +2084,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           isRowFocused={isRailFocusPinned(focusedRailCellId, cell.id)}
           onRowFocusPin={handleRowFocusPin}
           onRowFocusRelease={handleRowFocusRelease}
+          onClearCellErrors={onClearCellErrors}
           onActivateEditor={handleActivateEditor}
           getEditorActivationVersion={getEditorActivationVersion}
           onDeactivateEditor={handleDeactivateEditor}
@@ -2183,6 +2190,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     focusedRailCellId,
     handleRowFocusPin,
     handleRowFocusRelease,
+    onClearCellErrors,
     activeLane,
     audioByCellId,
     audioLens,
@@ -2629,6 +2637,8 @@ interface MemoizedRowProps {
   onRowFocusPin: (cellId: string) => void
   /** AQU-669: called when focus leaves this row — clears the owner if still ours. */
   onRowFocusRelease: (cellId: string) => void
+  /** AQU-913: called when focus leaves this row — dismisses this cell's AI errors. */
+  onClearCellErrors?: (cellId: string) => void
   onActivateEditor: ActivateEditor
   getEditorActivationVersion: () => number
   onDeactivateEditor: (cellId: string) => void
@@ -2785,6 +2795,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     isRowFocused,
     onRowFocusPin,
     onRowFocusRelease,
+    onClearCellErrors,
     onActivateEditor,
     getEditorActivationVersion,
     onDeactivateEditor,
@@ -2899,6 +2910,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         isRowFocused={isRowFocused}
         onRowFocusPin={onRowFocusPin}
         onRowFocusRelease={onRowFocusRelease}
+        onClearCellErrors={onClearCellErrors}
         onActivateEditor={onActivateEditor}
         getEditorActivationVersion={getEditorActivationVersion}
         onDeactivateEditor={onDeactivateEditor}
@@ -3003,6 +3015,8 @@ interface EditorRowProps {
   /** AQU-669: report focus entering / leaving this row to the exclusive owner. */
   onRowFocusPin: (cellId: string) => void
   onRowFocusRelease: (cellId: string) => void
+  /** AQU-913: dismiss this cell's inline AI errors when focus leaves the row. */
+  onClearCellErrors?: (cellId: string) => void
   onActivateEditor: ActivateEditor
   getEditorActivationVersion: () => number
   onDeactivateEditor: (cellId: string) => void
@@ -3950,7 +3964,7 @@ function SourceReferenceAttachments({ metadata }: { metadata?: Record<string, un
 }
 
 function EditorRow({
-  project, cell, isEditorActive, isRowFocused, onRowFocusPin, onRowFocusRelease, onActivateEditor, getEditorActivationVersion, onDeactivateEditor,
+  project, cell, isEditorActive, isRowFocused, onRowFocusPin, onRowFocusRelease, onClearCellErrors, onActivateEditor, getEditorActivationVersion, onDeactivateEditor,
   username, activeLane = "", editable, canValidate, canEditSource, sourceReadOnlyReason, isCompletionConfigured, isCompletionAvailable, isLoading,
   completionPreview, loadingPhase,
   cellExamples, highlights, error, health,
@@ -5363,6 +5377,13 @@ function EditorRow({
   }
   const handleRowBlurCapture = (e: React.FocusEvent) => {
     const next = e.relatedTarget as Node | null
+    // AQU-913: dismiss this cell's inline AI errors (draft + back-translation)
+    // once focus has really left the cell. Evaluated BEFORE the containment
+    // early-return below because it uses a wider notion of "still in the cell":
+    // the error's info popover is portaled out of the row, so reading it must
+    // not count as leaving, while the focus-pin release deliberately still
+    // fires for that case (AQU-669).
+    if (shouldDismissCellErrorsOnBlur(rowRef.current, next)) onClearCellErrors?.(cell.id)
     if (next && rowRef.current?.contains(next)) return
     // AQU-669: focus left the row entirely — relinquish the pin (only if this
     // row still holds it; a newer focus may already own it).

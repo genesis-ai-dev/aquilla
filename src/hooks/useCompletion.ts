@@ -954,5 +954,30 @@ export function useCompletion(
     }
   }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, searchPassages, session, provider, modelName, commitCompletedCell, rules, getAllCells, briefSummary, draftContext, draftProvenance])
 
-  return { completeSingle, completeBatch, completeParagraph, cancelCompletion: cancelBatchCompletion, isConfigured, isAvailable, completing, examples, errors, previews }
+  /**
+   * AQU-913: forget a cell's failure entirely — the visible message AND the
+   * per-cell `"error"` status that rides alongside it. Until this existed the
+   * only thing that cleared either was starting a new attempt on the same cell,
+   * so a stuck `completing: "error"` entry kept the cell looking failed
+   * downstream long after the message had served its purpose.
+   *
+   * Deliberately narrow: an in-flight attempt ("searching"/"generating") is
+   * left alone, so dismissing a stale error can never cancel a live draft.
+   */
+  const clearCellError = useCallback((cellId: string) => {
+    setErrors((p) => {
+      if (!p.has(cellId)) return p
+      const next = new Map(p)
+      next.delete(cellId)
+      return next
+    })
+    setCompleting((p) => {
+      if (p.get(cellId) !== "error") return p
+      const next = new Map(p)
+      next.delete(cellId)
+      return next
+    })
+  }, [])
+
+  return { completeSingle, completeBatch, completeParagraph, cancelCompletion: cancelBatchCompletion, clearCellError, isConfigured, isAvailable, completing, examples, errors, previews }
 }

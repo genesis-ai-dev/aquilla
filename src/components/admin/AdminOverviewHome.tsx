@@ -1,9 +1,11 @@
 import { useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { type ColumnDef } from "@tanstack/react-table"
-import { ArrowRight, Building2, ShieldAlert } from "lucide-react"
+import { Building2, ShieldAlert } from "lucide-react"
 import { Section, StatTile, STAT_TILE_GRID } from "@/components/ui/page"
 import { EmptyState } from "@/components/ui/empty"
+import { buttonVariants } from "@/components/ui/button"
+import { cn } from "@/lib/utils"
 import { DataTable, DataTableColumnHeader } from "@/components/ui/data-table"
 import { missingLast, SORT_MISSING_LAST } from "@/components/ui/data-table-missing"
 import { ProjectStatus } from "@/components/ProjectStatus"
@@ -178,9 +180,9 @@ export function AdminOverviewHome({
             <button
               type="button"
               onClick={onViewProjects}
-              className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+              className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
             >
-              View all {atRiskTotal} <ArrowRight className="size-3" />
+              View all {atRiskTotal}
             </button>
           ) : null
         }
@@ -240,9 +242,9 @@ export function AdminOverviewHome({
             <button
               type="button"
               onClick={onViewActivity}
-              className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+              className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
             >
-              View all <ArrowRight className="size-3" />
+              View all
             </button>
           }
         >

@@ -107,7 +107,10 @@ describe("AdminOverviewHome", () => {
     expect(orgsTable).toHaveClass("border-0")
     fireEvent.click(within(orgsTable).getByText("Busy").closest("tr")!)
     expect(props.onOpenOrg).toHaveBeenCalledWith(1)
-    fireEvent.click(screen.getByRole("button", { name: /view all/i }))
+    const viewAll = screen.getByRole("button", { name: "View all" })
+    expect(viewAll).toHaveClass("border-border")
+    expect(viewAll.querySelector("svg")).toBeNull()
+    fireEvent.click(viewAll)
     expect(props.onViewActivity).toHaveBeenCalled()
   })
 

@@ -100,6 +100,18 @@ export interface UseAudioRecorderOptions {
    *  stop. The voice-clone reference has one; checking it once the take is
    *  already over is a late failure the operator pays for. */
   maxBytes?: number
+  /**
+   * ONE mic stream and ONE capture graph for the hook's whole session
+   * (2026-08-14 round 4). Takes stop stopping the tracks, reset() keeps the
+   * stream and the armed graph, and only releaseMic() or unmount truly let
+   * go. This exists because opening/closing the mic and its contexts around
+   * takes makes the OS reconfigure the input device, and the recovery ramp
+   * lands inside the next take — measured at a fifteenth of the real level
+   * through Sam's first words. The recording modal passes true and releases
+   * on close; the voice-clone recorder keeps the default, where the mic
+   * indicator turning off at stop is the expected behaviour.
+   */
+  holdMic?: boolean
 }
 
 export interface UseAudioRecorder {
@@ -120,6 +132,11 @@ export interface UseAudioRecorder {
   start: () => Promise<void>
   stop: () => void
   reset: () => void
+  /** Truly let the mic go — the counterpart to holdMic, called when the
+   *  surface that held it closes. Idempotent; a no-op without holdMic (takes
+   *  release the mic themselves there). Consumers that mock this hook with
+   *  partial objects may omit it — callers use `recorder.releaseMic?.()`. */
+  releaseMic?: () => void
 }
 
 // Preference order matches desktop (webm/opus 256k). Browsers that lack opus
@@ -153,6 +170,7 @@ export function useAudioRecorder(opts?: UseAudioRecorderOptions): UseAudioRecord
   // consumer a new start()/prewarm() on every render.
   const formatOpt = opts?.format
   const maxBytesOpt = opts?.maxBytes
+  const holdMic = opts?.holdMic === true
   const streamRef = useRef<MediaStream | null>(null)
   const recorderRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<Blob[]>([])
@@ -168,31 +186,59 @@ export function useAudioRecorder(opts?: UseAudioRecorderOptions): UseAudioRecord
   const elapsedMsRef = useRef(0)
   useEffect(() => { elapsedMsRef.current = elapsedMs }, [elapsedMs])
 
-  const cleanup = useCallback(() => {
+  /**
+   * End the current TAKE. With holdMic this is the everyday cleanup — the
+   * stream and the armed graph survive so the next take starts on the same
+   * device configuration the last one ended on (churn there is what put a
+   * multi-second recovery ramp under Sam's first words). Without holdMic it
+   * behaves as it always did once `releaseSession` follows it.
+   */
+  const cleanupTake = useCallback(() => {
     if (tickRef.current) { clearInterval(tickRef.current); tickRef.current = null }
     if (recorderRef.current) {
       try { if (recorderRef.current.state !== "inactive") recorderRef.current.stop() } catch {}
       recorderRef.current = null
     }
+    if (pcmRef.current) {
+      const handle = pcmRef.current
+      pcmRef.current = null
+      if (holdMic) {
+        // Abandon the take WITHOUT killing the graph: flush (discarding the
+        // result) so the worklet re-arms for the next cycle, and hand the
+        // handle back to the armed slot for the next take. dispose() here
+        // would close the shared context — the churn this option exists to
+        // prevent.
+        try { void handle.finish().catch(() => {}) } catch {}
+        if (!armedRef.current) armedRef.current = handle
+      } else {
+        // dispose() is flush-less and closes the AudioContext. Browsers cap a
+        // page at roughly six contexts, so every exit path has to come
+        // through here.
+        try { handle.dispose() } catch {}
+      }
+    }
+    pcmFinishRef.current = null
+    chunksRef.current = []
+  }, [holdMic])
+
+  /** Truly let go: the armed graph and the mic itself. The whole teardown is
+   *  this plus cleanupTake — releaseMic and unmount are the only callers. */
+  const releaseSession = useCallback(() => {
     if (armedRef.current) {
       try { armedRef.current.dispose() } catch {}
       armedRef.current = null
     }
-    if (pcmRef.current) {
-      // dispose() is flush-less and closes the AudioContext. Browsers cap a
-      // page at roughly six contexts and the live waveform already builds one
-      // per take, so every exit path has to come through here.
-      try { pcmRef.current.dispose() } catch {}
-      pcmRef.current = null
-    }
-    pcmFinishRef.current = null
     if (streamRef.current) {
       for (const t of streamRef.current.getTracks()) t.stop()
       streamRef.current = null
     }
     setStream(null)
-    chunksRef.current = []
   }, [])
+
+  const cleanup = useCallback(() => {
+    cleanupTake()
+    if (!holdMic) releaseSession()
+  }, [cleanupTake, releaseSession, holdMic])
 
   /**
    * Finish a WAV take: flush the worklet, encode, publish `stopped`.
@@ -223,16 +269,31 @@ export function useAudioRecorder(opts?: UseAudioRecorderOptions): UseAudioRecord
         // repair once it has been uploaded.
         const blob = encodeWavPcm16Chunks(chunks, handle.sampleRate)
         // Sample-exact, unlike the webm branch's wall clock (which is all
-        // Chrome leaves us, since it writes no duration header).
-        const durationSec = handle.frames() / handle.sampleRate
+        // Chrome leaves us, since it writes no duration header). Counted from
+        // the chunks IN HAND, never handle.frames(): a persistent handle has
+        // already reset its per-cycle counter for the next take by the time
+        // finish() resolves, and reading it here shipped durationMs 0 — the
+        // whole missing-duration bug class back from the dead.
+        const frames = chunks.reduce((n, c) => n + c.length, 0)
+        const durationSec = frames / handle.sampleRate
         const preRollMs = (handle.preRollFrames() / handle.sampleRate) * 1000
-        // Release the mic only now: the flush above had to complete first, or
-        // the last ~85ms — the end of the final word — is lost on every take.
-        if (streamRef.current) {
-          for (const t of streamRef.current.getTracks()) t.stop()
-          streamRef.current = null
+        if (holdMic) {
+          // The session HOLDS: no track stops, no context close — finish()
+          // has already re-armed this same graph, so hand it back for the
+          // next take. Stopping anything here is what used to make the OS
+          // reconfigure the device and put a recovery ramp under the head of
+          // the take after this one.
+          if (!armedRef.current) armedRef.current = handle
+        } else {
+          // Release the mic only now: the flush above had to complete first,
+          // or the last ~85ms — the end of the final word — is lost on every
+          // take.
+          if (streamRef.current) {
+            for (const t of streamRef.current.getTracks()) t.stop()
+            streamRef.current = null
+          }
+          setStream(null)
         }
-        setStream(null)
         if (tickRef.current) { clearInterval(tickRef.current); tickRef.current = null }
         pcmRef.current = null
         setState({ kind: "stopped", blob, mimeType: "audio/wav", ext: "wav", durationSec, preRollMs })
@@ -241,9 +302,11 @@ export function useAudioRecorder(opts?: UseAudioRecorderOptions): UseAudioRecord
         setState({ kind: "error", message: e instanceof Error ? e.message : String(e) })
       }
     })()
-  }, [cleanup])
+  }, [cleanup, holdMic])
 
-  useEffect(() => () => cleanup(), [cleanup])
+  // Unmount lets go of EVERYTHING, holdMic included — there is no surface
+  // left to hold the mic for.
+  useEffect(() => () => { cleanup(); releaseSession() }, [cleanup, releaseSession])
 
   const MIC_CONSTRAINTS = {
     channelCount: 1,
@@ -293,6 +356,9 @@ export function useAudioRecorder(opts?: UseAudioRecorderOptions): UseAudioRecord
         const handle = await startPcmCapture({
           stream,
           armed: true,
+          // With holdMic the graph is a SESSION: takes are mark→finish cycles
+          // on one context, and finish() re-arms instead of tearing down.
+          persistent: holdMic,
           preRollMs: PRE_ROLL_MS,
           maxFrames: limits.maxFrames,
           onLimit: () => finishWavTake(),
@@ -315,7 +381,7 @@ export function useAudioRecorder(opts?: UseAudioRecorderOptions): UseAudioRecord
     })()
     await armedBuildRef.current
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [formatOpt, maxBytesOpt, finishWavTake])
+  }, [formatOpt, maxBytesOpt, holdMic, finishWavTake])
 
   const start = useCallback(async () => {
     if (state.kind === "requesting" || state.kind === "recording") return
@@ -394,12 +460,16 @@ export function useAudioRecorder(opts?: UseAudioRecorderOptions): UseAudioRecord
       rec.onstop = () => {
         const blob = new Blob(chunksRef.current, { type: pick.mimeType || "audio/webm" })
         const durationSec = elapsedMsRef.current / 1000
-        // Release the mic promptly — we've already captured bytes.
-        if (streamRef.current) {
-          for (const t of streamRef.current.getTracks()) t.stop()
-          streamRef.current = null
+        // Release the mic promptly — we've already captured bytes. Unless the
+        // session HOLDS it (see holdMic): stopping tracks between takes is
+        // what makes the OS reconfigure the device under the next one.
+        if (!holdMic) {
+          if (streamRef.current) {
+            for (const t of streamRef.current.getTracks()) t.stop()
+            streamRef.current = null
+          }
+          setStream(null)
         }
-        setStream(null)
         if (tickRef.current) { clearInterval(tickRef.current); tickRef.current = null }
         recorderRef.current = null
         setState({ kind: "stopped", blob, mimeType: pick.mimeType || "audio/webm", ext: pick.ext, durationSec })
@@ -425,7 +495,7 @@ export function useAudioRecorder(opts?: UseAudioRecorderOptions): UseAudioRecord
       setState({ kind: "error", message })
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cleanup, finishWavTake, formatOpt, maxBytesOpt, state.kind])
+  }, [cleanup, finishWavTake, formatOpt, maxBytesOpt, holdMic, state.kind])
 
   const stop = useCallback(() => {
     // A WAV take has no MediaRecorder to stop — flushing the worklet IS the
@@ -442,5 +512,10 @@ export function useAudioRecorder(opts?: UseAudioRecorderOptions): UseAudioRecord
     setState({ kind: "idle" })
   }, [cleanup])
 
-  return { state, elapsedMs, isNearLimit, stream, prewarm, start, stop, reset }
+  const releaseMic = useCallback(() => {
+    cleanupTake()
+    releaseSession()
+  }, [cleanupTake, releaseSession])
+
+  return { state, elapsedMs, isNearLimit, stream, prewarm, start, stop, reset, releaseMic }
 }

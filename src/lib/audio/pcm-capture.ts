@@ -115,6 +115,16 @@ export interface PcmCaptureOptions {
    * last beep — over a second before the mark — can never be inside it.
    */
   preRollMs?: number
+  /**
+   * Armed captures only: finish() re-arms the SAME graph for the next take
+   * instead of tearing it down. Takes become mark→finish CYCLES on one
+   * long-lived context, because opening and closing capture graphs around
+   * takes is precisely what makes the OS reconfigure the input device — the
+   * churn that handed Sam takes whose first second sat at a fifteenth of its
+   * real level while the device recovered. dispose() remains the real
+   * teardown, and the caller owns calling it exactly once per session.
+   */
+  persistent?: boolean
 }
 
 export interface PcmCaptureHandle {
@@ -137,8 +147,10 @@ export interface PcmCaptureHandle {
    *  0 until the worklet acknowledges the mark, and always 0 without a
    *  preRollMs. The caller anchors the take this many frames early. */
   preRollFrames(): number
-  /** Flush the worklet's partial buffer and tear the graph down. Resolves to
-   *  every chunk captured, in order, ready for encodeWavPcm16Chunks. */
+  /** Flush the worklet's partial buffer and end the take. Resolves to every
+   *  chunk captured this cycle, in order, ready for encodeWavPcm16Chunks.
+   *  Non-persistent: also tears the graph down. Persistent: re-arms the same
+   *  graph for the next mark() and resets the per-cycle counters. */
   finish(): Promise<Pcm16Chunk[]>
   /** Abandon the take. Safe to call at any point, including after finish(). */
   dispose(): void
@@ -196,7 +208,9 @@ export async function startPcmCapture(opts: PcmCaptureOptions): Promise<PcmCaptu
     const sink = ctx.createMediaStreamDestination()
     source.connect(node).connect(sink)
 
-    const chunks: Pcm16Chunk[] = []
+    // Per-CYCLE state: one take's worth. A persistent capture runs many cycles
+    // on this one graph, and finish() resets these for the next.
+    let chunks: Pcm16Chunk[] = []
     let frames = 0
     let preRoll = 0
     let limitFired = false
@@ -261,8 +275,28 @@ export async function startPcmCapture(opts: PcmCaptureOptions): Promise<PcmCaptu
               resolve()
             }
           })
-          teardown()
-          return chunks
+          const out = chunks
+          if (opts.persistent && !torndown) {
+            // The graph LIVES. Re-arm the worklet and hand back a clean cycle
+            // — the port is FIFO, so the rearm cannot overtake the flush it
+            // follows. The next mark() starts the next take on this same
+            // context, which is the whole point: no open, no close, nothing
+            // for the OS to reconfigure between takes.
+            try { node.port.postMessage({ type: "rearm" }) } catch {}
+            chunks = []
+            // frames resets — the maxFrames limit counts per take. preRoll
+            // deliberately does NOT: the caller reads it AFTER finish() to
+            // anchor the take it just collected, and each cycle's own mark
+            // overwrites it anyway. (Zeroing it here made every persistent
+            // take report preRollMs 0, which silently skipped the anchor and
+            // re-shifted the kept head late — caught by the probe, not a user.)
+            frames = 0
+            limitFired = false
+            finishing = null
+          } else {
+            teardown()
+          }
+          return out
         })()
       }
       return finishing

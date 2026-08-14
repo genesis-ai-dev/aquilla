@@ -94,6 +94,20 @@ class PcmCaptureProcessor extends AudioWorkletProcessor {
         this.port.postMessage({ marked: true, preRollFrames: kept })
         return
       }
+      if (type === "rearm") {
+        // Back to ARMED for the next take — same processor, same graph, same
+        // device stream. This exists because tearing the graph down between
+        // takes is exactly the churn that makes the OS reconfigure the input:
+        // Sam's takes came back with their first second at a fifteenth of its
+        // real level while the device recovered from the previous take's
+        // teardown. One graph per session; takes are cycles, not lifetimes.
+        this.stopped = false
+        this.waitingForMark = true
+        this.used = 0
+        this.ring = []
+        this.ringFrames = 0
+        return
+      }
       if (type !== "flush") return
       // Stop first: the graph is still running while the host tears it down,
       // and a chunk posted after `done` would be dropped on the floor.

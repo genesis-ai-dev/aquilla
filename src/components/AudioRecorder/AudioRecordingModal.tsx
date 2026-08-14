@@ -94,7 +94,12 @@ export function AudioRecordingModal({
   open, project, cells, activeCellId, username,
   onActiveCellChange, onTakeSaved, onLastTakeRemoved, onClose,
 }: Props) {
-  const recorder = useAudioRecorder()
+  // ONE mic stream and ONE capture graph for as long as this dialog is open
+  // (round 4 of the take-head hunt). Opening and closing them around takes is
+  // what made the OS reconfigure the input device — measured as the first
+  // second of a take at a fifteenth of its real level while the device
+  // recovered. The close-cleanup below is what lets go.
+  const recorder = useAudioRecorder({ holdMic: true })
   const countdown = useCountdown()
   const { session } = useFrontierSession()
   const online = useOnline()
@@ -389,12 +394,31 @@ export function AudioRecordingModal({
     if (phase !== "counting") setLeadIn((prev) => (prev == null ? prev : null))
   }, [phase])
 
+  // Warm the session the moment the dialog opens — but only when the mic
+  // permission is already granted, so opening the recorder never ambushes a
+  // first-time user with a browser prompt they didn't ask for. By the first
+  // countdown the device has had many seconds to settle instead of 3, and
+  // every take in the session then runs on the same warmed stream.
+  useEffect(() => {
+    if (!open) return
+    let live = true
+    void probeMicPermission().then((s) => {
+      if (live && s === "granted") void recorder.prewarm()
+    })
+    return () => { live = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open])
+
   // Close cleanup.
   useEffect(() => {
     if (open) return
     recorder.reset()
+    // holdMic means reset() deliberately KEPT the mic; closing the dialog is
+    // the one moment it truly lets go (the tab's recording indicator must not
+    // outlive the surface that explains it). Optional-called because consumer
+    // tests mock this hook with partial objects.
+    recorder.releaseMic?.()
     countdown.cancel()
-    // Also releases the armed capture graph and the mic: reset() → cleanup().
     setLeadIn(null)
     if (previewUrl) { URL.revokeObjectURL(previewUrl); setPreviewUrl(null) }
     consumedBlobRef.current = null
@@ -1156,8 +1180,19 @@ export function AudioRecordingModal({
                 does cause lands in discarded pre-mark audio; it also puts the
                 live meter under the count, which is the honest version of
                 "the mic is already hot when GO appears". */}
-            {(displayPhase === "counting" || displayPhase === "recording") && (
-              <div className="space-y-2">
+            {/* Mounted whenever the session HOLDS a stream — not just while
+                counting/recording — and merely display-hidden otherwise. The
+                meter owns an AudioContext on the live mic, and unmounting it
+                between takes closes and reopens that context per take: churn
+                the OS answers with an input-gain recovery ramp through the
+                next take's head. One mount, one context, whole session. */}
+            {(displayPhase === "counting" || displayPhase === "recording" || recorder.stream != null) && (
+              <div
+                className={cn(
+                  "space-y-2",
+                  displayPhase !== "counting" && displayPhase !== "recording" && "hidden",
+                )}
+              >
                 {displayPhase === "counting" ? (
                   <div className="flex h-[28px] items-center justify-center">
                     <div

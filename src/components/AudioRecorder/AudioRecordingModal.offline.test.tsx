@@ -111,9 +111,13 @@ describe("AudioRecordingModal — offline gate", () => {
     expect(screen.getByTestId("rec-generate-tts")).toBeDisabled()
   })
 
-  it("offline: Space shows the offline message and never touches the mic", () => {
+  it("offline: Space shows the offline message and never starts the record flow", () => {
     onlineState.value = false
     renderModal()
+    // Opening the modal performs ONE passive permission-status read (it warms
+    // the mic session when access is already granted — round 4). That is not
+    // the record flow; clear it so the assertions below pin the flow alone.
+    probeMic.mockClear()
     fireEvent.keyDown(window, { key: " " })
     expect(screen.getByText(OFFLINE_RE)).toBeInTheDocument()
     expect(probeMic).not.toHaveBeenCalled()
@@ -163,6 +167,8 @@ describe("AudioRecordingModal — offline gate", () => {
   it("back online: Space reaches the mic probe again", () => {
     onlineState.value = true
     renderModal()
+    // Discard the open-time permission read (see the offline Space test).
+    probeMic.mockClear()
     fireEvent.keyDown(window, { key: " " })
     expect(probeMic).toHaveBeenCalledTimes(1)
   })
@@ -190,6 +196,8 @@ describe("AudioRecordingModal — offline gate", () => {
       </>,
     )
     const okButton = screen.getByTestId("timing-ack-ok")
+    // Discard the open-time permission read (see the offline Space test).
+    probeMic.mockClear()
     fireEvent.keyDown(okButton, { key: " " })
     expect(probeMic).not.toHaveBeenCalled()
     fireEvent.keyDown(okButton, { key: "Escape" })

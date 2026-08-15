@@ -3471,8 +3471,11 @@ export function ProjectWorkspace() {
    * would claim something does.
    */
   const handleCueActivated = useCallback(
-    (cueCellId: string) => {
-      const linked = cueLinks.textForCue.get(cueCellId) ?? []
+    (cueCellId: string, textCellIds?: readonly string[]) => {
+      // `textCellIds` is given for a PROPOSED pairing, which has no links yet —
+      // following the links there would find none, clear the selection, and
+      // look like a dead row.
+      const linked = textCellIds ?? cueLinks.textForCue.get(cueCellId) ?? []
       if (linked.length === 0) {
         clearSelection()
         return
@@ -7635,6 +7638,27 @@ export function ProjectWorkspace() {
                 if (projectId) writeTnSidebarVisible(projectId, next)
               }}
             />
+            {/* Sits in the SAME slot as the file-check drawer, inside the
+                content box — the file tabs, breadcrumbs and import button live
+                above it and a drawer has no business covering them. */}
+            {cueLinkDrawerOpen && audioCueSibling && (
+              <CueLinkDrawer
+                review={cueLinkReview}
+                pending={cueLinksPending}
+                textById={cueLinkTextById}
+                cueById={cueLinkCueById}
+                onClose={closeCueLinkDrawer}
+                onNavigate={(cueCellId, textCellIds) => {
+                  // Both surfaces: the cue centred on the timeline, and its
+                  // line(s) selected and scrolled to in the dialogue table.
+                  setTimelineActivateRequest({ cellId: cueCellId, nonce: Date.now() })
+                  handleCueActivated(cueCellId, textCellIds)
+                }}
+                onPair={(t, c) => handleReviewPair(t, c, true)}
+                onReject={(t, c) => handleReviewPair(t, c, false)}
+                onRepairAll={() => void handleRepairAllCueLinks()}
+              />
+            )}
             {checkOpen && (
               <CheckFindingsDrawer
                 result={checkResult}
@@ -7809,24 +7833,6 @@ export function ProjectWorkspace() {
           author={currentUsername}
           onAssigned={() => setAssignmentsRefreshKey((k) => k + 1)}
         />
-      )}
-      {cueLinkDrawerOpen && audioCueSibling && (
-        <div className="fixed inset-y-0 right-0 z-30 flex pt-[var(--app-header-h,0px)]">
-          <CueLinkDrawer
-            review={cueLinkReview}
-            pending={cueLinksPending}
-            textById={cueLinkTextById}
-            cueById={cueLinkCueById}
-            onClose={closeCueLinkDrawer}
-            onNavigate={(cueCellId) => {
-              setTimelineActivateRequest({ cellId: cueCellId, nonce: Date.now() })
-              handleCueActivated(cueCellId)
-            }}
-            onPair={(t, c) => handleReviewPair(t, c, true)}
-            onReject={(t, c) => handleReviewPair(t, c, false)}
-            onRepairAll={() => void handleRepairAllCueLinks()}
-          />
-        </div>
       )}
       {project && (
         <AudioRecordingModal

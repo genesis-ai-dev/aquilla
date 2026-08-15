@@ -38,8 +38,16 @@ interface Props {
   textById: ReadonlyMap<string, LinkableCue>
   cueById: ReadonlyMap<string, LinkableCue>
   onClose(): void
-  /** Select the cue on the timeline and scroll both sides into view. */
-  onNavigate(cueCellId: string): void
+  /**
+   * Show this pairing in context: the cue on the timeline, and the subtitle
+   * line(s) in the dialogue table.
+   *
+   * `textCellIds` is passed for a PROPOSED pairing, where the two are not
+   * linked yet — without it the workspace would follow the cue's links, find
+   * none, and clear the selection, which is exactly the "nothing happens" a
+   * candidate row used to produce.
+   */
+  onNavigate(cueCellId: string, textCellIds?: readonly string[]): void
   onPair(textCellId: string, cueCellId: string): void
   onReject(textCellId: string, cueCellId: string): void
   /** Re-derive every pairing. Discards hand corrections, hence the confirm. */
@@ -74,13 +82,20 @@ function CandidateRow({
   return (
     <div
       data-testid={`cue-link-candidate-${row.cueCellId}`}
-      className="rounded-md border border-border p-2 text-xs"
+      role="button"
+      tabIndex={0}
+      // The whole card is the target — clicking the padding beside the words
+      // did nothing, which reads as a dead row. Both ids go over, because the
+      // pairing does not exist yet and the links cannot answer for it.
+      onClick={() => onNavigate(row.cueCellId, [row.textCellId])}
+      onKeyDown={(e) => {
+        if (e.key !== "Enter" && e.key !== " ") return
+        e.preventDefault()
+        onNavigate(row.cueCellId, [row.textCellId])
+      }}
+      className="cursor-pointer rounded-md border border-border p-2 text-xs transition-colors hover:bg-muted/40"
     >
-      <button
-        type="button"
-        className="flex w-full flex-col gap-1 text-left"
-        onClick={() => onNavigate(row.cueCellId)}
-      >
+      <div className="flex w-full flex-col gap-1 text-left">
         <div className="flex items-baseline gap-2">
           <TimeLabel cue={cue} />
           <span className="text-muted-foreground">heard</span>
@@ -91,8 +106,10 @@ function CandidateRow({
           <span className="text-muted-foreground">line</span>
           <span className="min-w-0 flex-1 truncate">{clip(text?.original)}</span>
         </div>
-      </button>
-      <div className="mt-2 flex items-center gap-2">
+      </div>
+      {/* The actions must not also navigate — a click that both pairs and
+          scrolls would make the list jump under the pointer as it shortens. */}
+      <div className="mt-2 flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
         <Button
           size="sm"
           data-testid={`cue-link-pair-${row.cueCellId}`}
@@ -126,20 +143,29 @@ function PairRow({
   const cue = cueById.get(pair.cueCellId)
   const text = textById.get(pair.textCellId)
   return (
-    <div className="rounded-md border border-border p-2 text-xs">
-      <button
-        type="button"
-        data-testid={`cue-link-pair-row-${pair.cueCellId}`}
-        className="flex w-full flex-col gap-1 text-left"
-        onClick={() => onNavigate(pair.cueCellId)}
-      >
+    <div
+      data-testid={`cue-link-pair-row-${pair.cueCellId}`}
+      role="button"
+      tabIndex={0}
+      onClick={() => onNavigate(pair.cueCellId, [pair.textCellId])}
+      onKeyDown={(e) => {
+        if (e.key !== "Enter" && e.key !== " ") return
+        e.preventDefault()
+        onNavigate(pair.cueCellId, [pair.textCellId])
+      }}
+      className="cursor-pointer rounded-md border border-border p-2 text-xs transition-colors hover:bg-muted/40"
+    >
+      <div className="flex w-full flex-col gap-1 text-left">
         <div className="truncate">{clip(cue?.original)}</div>
         <div className="truncate text-muted-foreground">{clip(text?.original)}</div>
-      </button>
+      </div>
       <button
         type="button"
         className="mt-1.5 text-[11px] text-muted-foreground underline-offset-2 hover:underline"
-        onClick={() => onReject(pair.textCellId, pair.cueCellId)}
+        onClick={(e) => {
+          e.stopPropagation()
+          onReject(pair.textCellId, pair.cueCellId)
+        }}
       >
         Not a pair
       </button>
@@ -224,7 +250,11 @@ export function CueLinkDrawer({
   return (
     <aside
       data-testid="cue-link-drawer"
-      className="flex h-full w-[340px] shrink-0 flex-col border-l border-border bg-background"
+      // Matches CheckFindingsDrawer exactly: a flex sibling inside the content
+      // box, NOT a fixed overlay. Sam, 2026-08-15 — above this box live the
+      // file tabs, the breadcrumbs and the import button, and a drawer has no
+      // business covering any of them.
+      className="flex h-full min-w-0 max-w-80 shrink basis-80 flex-col overflow-hidden border-l bg-card"
     >
       <header className="flex items-center gap-2 border-b border-border px-3 py-2">
         <Link2 className="h-4 w-4 text-violet-600 dark:text-violet-400" />

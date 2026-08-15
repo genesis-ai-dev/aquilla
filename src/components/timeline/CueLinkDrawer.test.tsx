@@ -97,10 +97,23 @@ describe("the two kinds of proposal", () => {
     expect(onReject).toHaveBeenCalledWith("s1", "c1")
   })
 
-  it("navigates to the cue when the row is clicked", () => {
+  it("navigates from ANYWHERE on the card, carrying the proposed line", () => {
+    // Clicking the padding beside the words used to do nothing, and the
+    // proposed subtitle has to travel with it: the pairing does not exist yet,
+    // so following the cue's links would find none and clear the selection —
+    // which is exactly the "nothing happens" this row used to produce.
     const { onNavigate } = renderDrawer(review({ confident: [confidentRow], actionable: 1 }))
-    fireEvent.click(within(screen.getByTestId("cue-link-candidate-c1")).getByText(/heard/))
-    expect(onNavigate).toHaveBeenCalledWith("c1")
+    fireEvent.click(screen.getByTestId("cue-link-candidate-c1"))
+    expect(onNavigate).toHaveBeenCalledWith("c1", ["s1"])
+  })
+
+  it("does not navigate when an action button is pressed", () => {
+    // A click that both pairs and scrolls would make the list jump under the
+    // pointer as it shortens.
+    const { onNavigate, onPair } = renderDrawer(review({ confident: [confidentRow], actionable: 1 }))
+    fireEvent.click(screen.getByTestId("cue-link-pair-c1"))
+    expect(onPair).toHaveBeenCalledOnce()
+    expect(onNavigate).not.toHaveBeenCalled()
   })
 })
 
@@ -139,12 +152,28 @@ describe("existing pairings worth a look", () => {
     expect(screen.getByTestId("cue-link-pair-row-c4")).toBeInTheDocument()
   })
 
+  it("navigates an existing pairing to both surfaces too", () => {
+    const { onNavigate } = renderDrawer(
+      review({ crossScript: [{ cueCellId: "c4", textCellId: "s4", confidence: 0.8 }], actionable: 1 }),
+    )
+    fireEvent.click(screen.getByTestId("cue-link-pair-row-c4"))
+    expect(onNavigate).toHaveBeenCalledWith("c4", ["s4"])
+  })
+
   it("lets an existing pairing be undone from here too", () => {
     const { onReject } = renderDrawer(
       review({ lowConfidence: [{ cueCellId: "c2", textCellId: "s2", confidence: 0.3 }], actionable: 1 }),
     )
     fireEvent.click(screen.getByText("Not a pair"))
     expect(onReject).toHaveBeenCalledWith("s2", "c2")
+  })
+
+  it("does not navigate when undoing one", () => {
+    const { onNavigate } = renderDrawer(
+      review({ lowConfidence: [{ cueCellId: "c2", textCellId: "s2", confidence: 0.3 }], actionable: 1 }),
+    )
+    fireEvent.click(screen.getByText("Not a pair"))
+    expect(onNavigate).not.toHaveBeenCalled()
   })
 })
 

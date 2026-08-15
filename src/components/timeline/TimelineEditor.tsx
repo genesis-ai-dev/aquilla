@@ -1553,7 +1553,11 @@ export function TimelineEditor({
   // identical to a clean card click. Reads the live clientWidth (viewportPx
   // state can still be 0 pre-measurement). Untimed cells: no timecode, no-op.
   function centerAndCue(cellId: string) {
-    const cell = cells.find((c) => c.id === cellId)
+    // Searches the AUDIO CUES too. A cue is a legitimate destination now — the
+    // pairing drawer navigates to one — and looking only in `cells` meant every
+    // such request found nothing and silently returned, so the track never
+    // moved.
+    const cell = cells.find((c) => c.id === cellId) ?? audioCues?.find((c) => c.id === cellId)
     const at = cell ? layout.seekSecFor(cell) : null
     if (at == null) return
     const viewport = scrollRef.current?.clientWidth ?? 0

@@ -13,11 +13,17 @@
  * never mistaken for "doing nothing".
  */
 
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import type { ImportResult } from "@/lib/import"
 import { formatBytesProgress } from "@/lib/format-bytes"
+import {
+  defaultEpubSkipMemberPaths,
+  filterEpubStrings,
+  type EpubSpineMember,
+} from "@/lib/parsers/epub"
 import { usfmDisplayText } from "@/lib/parsers/usfm-display"
 import { useI18n, useT } from "@/lib/i18n/I18nProvider"
 import { formatNumber } from "@/lib/i18n/format"
@@ -34,11 +40,15 @@ export interface ImportUploadProgress {
   bytesTotal?: number
 }
 
+export interface PreviewConfirmOptions {
+  skipMemberPaths?: ReadonlySet<string>
+}
+
 export interface PreviewPanelProps {
   /** One entry per file; USFM may produce multiple results (one per book). */
   results: ImportResult[]
   /** Called when the user clicks Confirm — triggers the actual upload. */
-  onConfirm: () => void | Promise<void>
+  onConfirm: (options?: PreviewConfirmOptions) => void | Promise<void>
   /** Called when the user cancels — parent returns to the upload screen. */
   onCancel: () => void
   /**
@@ -66,14 +76,39 @@ export function PreviewPanel({ results, onConfirm, onCancel, uploadPhase, upload
   const { locale } = useI18n()
   const t = useT()
   const [confirming, setConfirming] = useState(false)
+  const epubMembers = useMemo(
+    () => results.flatMap((result) => result.epubMembers ?? []),
+    [results],
+  )
+  const [skipMemberPaths, setSkipMemberPaths] = useState<ReadonlySet<string>>(
+    () => defaultEpubSkipMemberPaths(epubMembers),
+  )
 
-  const totalCells = results.reduce((n, r) => n + r.strings.length, 0)
+  const visibleResults = useMemo(
+    () => results.map((result) => (
+      result.epubMembers
+        ? { ...result, strings: filterEpubStrings(result.strings, skipMemberPaths) }
+        : result
+    )),
+    [results, skipMemberPaths],
+  )
+  const totalCells = visibleResults.reduce((n, r) => n + r.strings.length, 0)
+
+  function toggleMember(memberPath: string) {
+    const key = memberPath.toLowerCase()
+    setSkipMemberPaths((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
 
   async function handleConfirm() {
-    if (confirming) return
+    if (confirming || totalCells === 0) return
     setConfirming(true)
     try {
-      await onConfirm()
+      await onConfirm(epubMembers.length > 0 ? { skipMemberPaths } : undefined)
     } finally {
       setConfirming(false)
     }
@@ -133,11 +168,19 @@ export function PreviewPanel({ results, onConfirm, onCancel, uploadPhase, upload
         </p>
       </div>
 
+      {epubMembers.length > 0 && (
+        <EpubChapterPicker
+          members={epubMembers}
+          skipMemberPaths={skipMemberPaths}
+          onToggle={toggleMember}
+        />
+      )}
+
       {/* Native overflow scroll: ScrollArea's size-full viewport can't resolve
           against a max-h-only root, so content paints past the border. */}
       <div className="max-h-80 overflow-y-auto rounded-md border">
         <div className="divide-y">
-          {results.map((r, ri) => {
+          {visibleResults.map((r, ri) => {
             // AQU-580: USFM cell text is stored raw (lossless), so strip the
             // intra-cell markers for the preview — a translator should never
             // see backslash codes. Non-USFM formats are shown verbatim.
@@ -236,10 +279,65 @@ export function PreviewPanel({ results, onConfirm, onCancel, uploadPhase, upload
         <Button variant="ghost" onClick={onCancel} disabled={confirming}>
           {t("common.cancel")}
         </Button>
-        <Button onClick={handleConfirm} disabled={confirming}>
+        <Button onClick={handleConfirm} disabled={confirming || totalCells === 0}>
           {t("importExport.preview.confirmImport")}
         </Button>
       </div>
+    </div>
+  )
+}
+
+function EpubChapterPicker({
+  members,
+  skipMemberPaths,
+  onToggle,
+}: {
+  members: EpubSpineMember[]
+  skipMemberPaths: ReadonlySet<string>
+  onToggle: (memberPath: string) => void
+}) {
+  const { locale } = useI18n()
+  const t = useT()
+
+  function roleLabel(role: EpubSpineMember["role"]) {
+    switch (role) {
+      case "chapter": return t("importExport.preview.epubRoleChapter")
+      case "nav": return t("importExport.preview.epubRoleNavigation")
+      case "cover": return t("importExport.preview.epubRoleCover")
+      case "notes": return t("importExport.preview.epubRoleNotes")
+      case "empty": return t("importExport.preview.epubRoleEmpty")
+    }
+  }
+
+  return (
+    <div className="rounded-md border" data-testid="epub-chapter-picker">
+      <p className="border-b px-3 py-2 text-xs font-medium">
+        {t("importExport.preview.epubChaptersTitle")}
+      </p>
+      <ul className="max-h-40 divide-y overflow-y-auto">
+        {members.map((member) => {
+          const included = !skipMemberPaths.has(member.memberPath.toLowerCase())
+          return (
+            <li key={member.memberPath} className="flex items-center gap-2 px-3 py-1.5">
+              <Checkbox
+                checked={included}
+                disabled={member.cellCount === 0}
+                onCheckedChange={() => onToggle(member.memberPath)}
+                aria-label={t("importExport.preview.includeEpubMember", { title: member.title })}
+              />
+              <span className={`min-w-0 flex-1 truncate text-sm ${included ? "" : "text-muted-foreground line-through"}`}>
+                {member.title}
+              </span>
+              <span className="shrink-0 text-xs text-muted-foreground">
+                {roleLabel(member.role)}
+                {member.cellCount > 0
+                  ? ` · ${t("common.cellCount", { count: formatNumber(member.cellCount, locale) })}`
+                  : ""}
+              </span>
+            </li>
+          )
+        })}
+      </ul>
     </div>
   )
 }

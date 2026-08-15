@@ -1,4 +1,5 @@
 import type { FileType, TranslatableString } from "@/lib/parsers/types"
+import type { EpubSpineMember } from "@/lib/parsers/epub"
 import {
   normalizeTranslatableStrings,
   type DeclarativeImportRecipe,
@@ -33,6 +34,8 @@ export interface ParsedImportResult {
   roundTripFidelity?: RoundTripFidelity
   /** Exact multi-member container retained once and bound to every emitted file. */
   sharedSourceArtifact?: { name: string; bytes: ArrayBuffer; format: SourceArtifactFormat }
+  /** EPUB spine members shown in the chapter picker. Absent for other formats. */
+  epubMembers?: EpubSpineMember[]
 }
 
 export interface PreparedImportFile {

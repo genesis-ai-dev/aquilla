@@ -776,6 +776,13 @@ export const importExport = defineNamespace({
     "importExport.preview.commitFailed": "Import failed: {error}",
     "importExport.preview.confidencePercent": "{percent}% confidence",
     "importExport.preview.confirmImport": "Confirm import",
+    "importExport.preview.epubChaptersTitle": "Chapters in this book",
+    "importExport.preview.epubRoleChapter": "Chapter",
+    "importExport.preview.epubRoleNavigation": "Table of contents",
+    "importExport.preview.epubRoleCover": "Cover",
+    "importExport.preview.epubRoleNotes": "Notes",
+    "importExport.preview.epubRoleEmpty": "No text",
+    "importExport.preview.includeEpubMember": "Include {title}",
     "importExport.preview.headerSummary": "Preview — {cells} across {files}",
     "importExport.preview.instructions": "Review what will be imported, then click Confirm to upload.",
     "importExport.preview.needsCarefulReview": "Needs careful review",
@@ -2315,6 +2322,33 @@ export const importExport = defineNamespace({
           "Primary button in the footer of the preview screen that commits the " +
           "previewed lines into the project and starts the upload. Imperative verb " +
           "plus noun; it is the point of no return, so it should read as decisive.",
+      },
+      "importExport.preview.epubChaptersTitle": {
+        description:
+          "Heading above the selectable EPUB spine members in import preview. " +
+          "The list can include chapters as well as navigation, cover, and notes pages.",
+      },
+      "importExport.preview.epubRoleChapter": {
+        description: "Short EPUB spine-member classification for a normal book chapter.",
+      },
+      "importExport.preview.epubRoleNavigation": {
+        description: "Short EPUB spine-member classification for the table of contents.",
+      },
+      "importExport.preview.epubRoleCover": {
+        description: "Short EPUB spine-member classification for a cover page.",
+      },
+      "importExport.preview.epubRoleNotes": {
+        description: "Short EPUB spine-member classification for notes or end matter.",
+      },
+      "importExport.preview.epubRoleEmpty": {
+        description: "Short EPUB spine-member classification for a member with no importable text.",
+      },
+      "importExport.preview.includeEpubMember": {
+        description:
+          "Accessible label for the checkbox that includes one EPUB spine member in the import.",
+        placeholders: {
+          title: "Title of the EPUB spine member; preserve it verbatim.",
+        },
       },
       "importExport.preview.headerSummary": {
         description:

@@ -54,7 +54,7 @@ const link = (fromCellId: string, toFileId: string, toCellId: string, linked = 1
   created_ts: 1000,
 })
 
-async function read(fileId: string, seed: Parameters<typeof makeTestDb>[0]) {
+async function readFull(fileId: string, seed: Parameters<typeof makeTestDb>[0]) {
   const { db } = await makeTestDb(seed)
   const token = await makeTestToken(SECRET, { projectId: PROJECT, fileId })
   const req = new Request(
@@ -66,7 +66,14 @@ async function read(fileId: string, seed: Parameters<typeof makeTestDb>[0]) {
     SYNC_SECRET_KEY: SECRET,
   }))!
   expect(res.status).toBe(200)
-  return ((await res.json()) as { links: LinkOut[] }).links
+  return (await res.json()) as {
+    links: LinkOut[]
+    rejected: { fromCellId: string; toCellId: string }[]
+  }
+}
+
+async function read(fileId: string, seed: Parameters<typeof makeTestDb>[0]) {
+  return (await readFull(fileId, seed)).links
 }
 
 describe("cue-link read", () => {
@@ -135,6 +142,33 @@ describe("cue-link read", () => {
       ],
     })
     expect(links.map((l) => l.fromCellId)).toEqual(["s1"])
+  })
+
+  // A person saying "these two are not a pair" is recorded as a manual
+  // tombstone, and the review list reads them so it never proposes a dismissed
+  // pair again. An AUTO tombstone is different — that is the matcher changing
+  // its mind, and re-proposing later is legitimate — so only manual ones come
+  // back.
+  it("returns MANUAL rejections, and only manual ones", async () => {
+    const res = await readFull(TEXT, {
+      files: [file(TEXT, null), file(CUES, null)],
+      cell_links: [
+        { ...link("s1", CUES, "c1", 0), origin: "manual" },
+        { ...link("s2", CUES, "c2", 0), origin: "auto" },
+        link("s3", CUES, "c3", 1),
+      ],
+    })
+    expect(res.rejected).toEqual([{ fromCellId: "s1", toCellId: "c1" }])
+    // And a rejection is never also a live link.
+    expect(res.links.map((l) => l.fromCellId)).toEqual(["s3"])
+  })
+
+  it("drops a rejection whose cue file has been replaced", async () => {
+    const res = await readFull(TEXT, {
+      files: [file(TEXT, null), file(OLD_CUES, 1699999999000)],
+      cell_links: [{ ...link("s1", OLD_CUES, "old-c1", 0), origin: "manual" }],
+    })
+    expect(res.rejected).toEqual([])
   })
 
   it("refuses without a token", async () => {

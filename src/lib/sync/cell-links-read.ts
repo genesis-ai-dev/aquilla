@@ -21,8 +21,16 @@ export interface CueLink {
   confidence: number | null
 }
 
+/** A pair a person has said is NOT a pair. Manual tombstones only — the review
+ *  list uses these to stop proposing something already dismissed. */
+export interface CueLinkRejection {
+  fromCellId: string
+  toCellId: string
+}
+
 export interface CellLinksResponse {
   links: CueLink[]
+  rejected?: CueLinkRejection[]
 }
 
 export async function fetchFileCellLinks(

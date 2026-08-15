@@ -46,6 +46,13 @@ interface LinkOut {
   confidence: number | null
 }
 
+/** A pair a PERSON said is not a pair. Returned so the review list can stop
+ *  proposing it — see the `rejected` query below. */
+interface RejectionOut {
+  fromCellId: string
+  toCellId: string
+}
+
 export async function handleCellLinksReadRequest(
   request: Request,
   env: CellLinksReadEnv,
@@ -112,5 +119,30 @@ export async function handleCellLinksReadRequest(
     confidence: r.confidence,
   }))
 
-  return Response.json({ links })
+  // MANUAL tombstones only. An unlink written by the matcher (`origin: auto`)
+  // means "the algorithm changed its mind", and re-proposing that pair later is
+  // legitimate. A manual one means a person looked at the two lines and said
+  // they do not go together, and the review list must never ask again.
+  const rejectedRes = await env.AQUILLA_PG.prepare(
+    `SELECT cl.from_cell_id, cl.to_cell_id
+       FROM cell_links cl
+       JOIN files f ON f.id = cl.to_file_id AND f.deleted_at IS NULL
+      WHERE cl.project_id = ? AND cl.linked = 0 AND cl.origin = 'manual'
+        AND cl.from_file_id = ?
+      UNION ALL
+     SELECT cl.from_cell_id, cl.to_cell_id
+       FROM cell_links cl
+       JOIN files f ON f.id = cl.from_file_id AND f.deleted_at IS NULL
+      WHERE cl.project_id = ? AND cl.linked = 0 AND cl.origin = 'manual'
+        AND cl.to_file_id = ? AND cl.from_file_id <> ?`,
+  )
+    .bind(projectId, fileId, projectId, fileId, fileId)
+    .all<{ from_cell_id: string; to_cell_id: string }>()
+
+  const rejected: RejectionOut[] = (rejectedRes.results ?? []).map((r) => ({
+    fromCellId: r.from_cell_id,
+    toCellId: r.to_cell_id,
+  }))
+
+  return Response.json({ links, rejected })
 }

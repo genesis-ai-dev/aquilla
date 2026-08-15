@@ -4,9 +4,12 @@ import {
   ROW_H_DEFAULT,
   ROW_H_MAX,
   MIN_CHIP_LABEL_H_PX,
+  SLOT_BUTTON_MAX_PX,
+  SLOT_BUTTON_MIN_PX,
   chipPadPx,
   chipHeightPx,
   clampRowHeight,
+  slotButtonPx,
 } from "./row-metrics"
 
 describe("row-metrics", () => {
@@ -42,5 +45,47 @@ describe("row-metrics", () => {
     // without thinking and this fails rather than silently reintroducing the
     // clipped half-line of text the compact band exists to avoid.
     expect(chipHeightPx(ROW_H_MIN)).toBeLessThan(MIN_CHIP_LABEL_H_PX)
+  })
+})
+
+// THE RULE (Sam, 2026-08-14): the hover record/add button scales with the ROW,
+// which every slot on that row shares, and never with its own REGION's width,
+// which is per-chip. Sizing on width drew a 20px circle beside a 28px one and
+// made a single control read as several down one track.
+describe("slotButtonPx", () => {
+  it("gives the same circle to a sliver and to a wide-open stretch", () => {
+    // The whole point, and the reason the width parameter is gone rather than
+    // merely unused: a signature that still accepted it would invite it back.
+    expect(slotButtonPx(chipHeightPx(ROW_H_DEFAULT))).toBe(SLOT_BUTTON_MAX_PX)
+    expect(slotButtonPx.length).toBe(1)
+  })
+
+  it("hands back exactly the size the button was hard-coded to, at the default row", () => {
+    // 46px of chip. Nothing about a normal timeline may have moved.
+    expect(slotButtonPx(46)).toBe(28)
+  })
+
+  it("shrinks with row height, because every slot on the row shrinks together", () => {
+    expect(slotButtonPx(30)).toBe(26)
+    expect(slotButtonPx(24)).toBe(20)
+    // Monotonic: a shorter row never yields a bigger button.
+    for (const [tall, short] of [[46, 32], [32, 26], [26, 20]] as const) {
+      expect(slotButtonPx(tall)).toBeGreaterThanOrEqual(slotButtonPx(short))
+    }
+  })
+
+  it("stops at the floor rather than vanishing", () => {
+    // Below a 16px target the circle is smaller than the pointer that has to
+    // hit it — and this is the only way to record into an empty stretch.
+    expect(slotButtonPx(chipHeightPx(ROW_H_MIN))).toBe(SLOT_BUTTON_MIN_PX)
+    expect(slotButtonPx(0)).toBe(SLOT_BUTTON_MIN_PX)
+  })
+
+  it("never exceeds the max, however tall the row", () => {
+    expect(slotButtonPx(chipHeightPx(ROW_H_MAX))).toBe(SLOT_BUTTON_MAX_PX)
+  })
+
+  it("falls back to the full size on a junk height rather than a floor", () => {
+    expect(slotButtonPx(Number.NaN)).toBe(SLOT_BUTTON_MAX_PX)
   })
 })

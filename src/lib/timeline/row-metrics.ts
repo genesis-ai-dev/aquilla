@@ -99,8 +99,7 @@ export const SLOT_BUTTON_MAX_PX = 28
 export const SLOT_BUTTON_MIN_PX = 16
 
 /**
- * How big the "add a line here" / "record here" circle is in a slot this tall
- * and this wide.
+ * How big the "add a line here" / "record here" circle is on a row this tall.
  *
  * IT SHRINKS, IT DOES NOT VANISH. Stage 3 gated it to disappear below a 28px
  * chip, reasoning that a fixed circle would overhang a short row and be
@@ -110,17 +109,25 @@ export const SLOT_BUTTON_MIN_PX = 16
  * are the only way to put a line in a silence, and a compact timeline is
  * exactly when you can see all the silences at once.
  *
- * Height is the constraint that actually bites; width is allowed to overhang a
- * narrow gap the way it always has (`MIN_SLOT_PX` is 5px, deliberately), which
- * is why the floor applies after both. Nothing changes at the default row: 46px
- * of chip and any normal gap give back exactly the 28px that was hard-coded.
+ * HEIGHT ONLY. IT TAKES NO ACCOUNT OF HOW WIDE ITS REGION IS (Sam, 2026-08-14).
+ * Row height is shared by every slot on the row, so scaling with it keeps the
+ * row internally consistent — the same control, at one size, all the way
+ * along. Region width is per-chip, so scaling with THAT drew a 20px button
+ * beside a 28px one and made a single control read as several. A narrow region
+ * is now simply overflowed: the circle keeps its size and shape and sits
+ * centred, sticking out either side. That is already safe — `MIN_SLOT_PX` is
+ * 5px deliberately, and TimelineSlotButton stops pointer events reaching the
+ * chip beneath — and it is what this function's comment claimed all along
+ * while the code did something else.
+ *
+ * Nothing changes at the default row: 46px of chip gives back exactly the 28px
+ * the button was hard-coded to before the vertical zoom existed.
  */
-export function slotButtonPx(chipH: number, slotWidthPx: number): number {
-  if (!Number.isFinite(chipH) || !Number.isFinite(slotWidthPx)) return SLOT_BUTTON_MAX_PX
-  // -4 so the circle keeps a little air inside its slot rather than reaching
+export function slotButtonPx(chipH: number): number {
+  if (!Number.isFinite(chipH)) return SLOT_BUTTON_MAX_PX
+  // -4 so the circle keeps a little air inside its row rather than reaching
   // the chip's own edges, where it reads as a badge rather than a button.
-  const fits = Math.min(SLOT_BUTTON_MAX_PX, Math.floor(chipH) - 4, Math.floor(slotWidthPx))
-  return Math.max(SLOT_BUTTON_MIN_PX, Math.min(SLOT_BUTTON_MAX_PX, fits))
+  return Math.max(SLOT_BUTTON_MIN_PX, Math.min(SLOT_BUTTON_MAX_PX, Math.floor(chipH) - 4))
 }
 
 /** The glyph inside it. Half the circle — at the full 28px that is the 14px

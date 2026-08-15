@@ -670,9 +670,11 @@ export function TargetAudioLane({
   const { hotKey, slotHoverProps } = useHotSlot(viewStartSec, pxPerSec)
   // The mic is a circle in a slot with no overflow-hidden, so at a fixed size it
   // draws over the lanes above and below on a short row. Stage 3 hid it there;
-  // it shrinks now instead, because a compact timeline is exactly when you can
-  // see every un-dubbed stretch at once and want to record into one. See
-  // `slotButtonPx`.
+  // it shrinks with the ROW HEIGHT instead, because a compact timeline is
+  // exactly when you can see every un-dubbed stretch at once and want to record
+  // into one. It takes no account of how WIDE its region is (Sam, 2026-08-14):
+  // a narrow region gets the same circle, centred and overflowing either side.
+  // See `slotButtonPx`.
   const { chipH } = useRowMetrics()
 
   // SUB-51: a record button hiding in the empty space under each dub-free
@@ -725,7 +727,7 @@ export function TargetAudioLane({
             {...slotHoverProps(`add-${span.startSec}`)}
           >
             {(() => {
-              const buttonPx = slotButtonPx(chipH, widthPx)
+              const buttonPx = slotButtonPx(chipH)
               const iconPx = slotIconPx(buttonPx)
               return (
               <TimelineSlotButton
@@ -751,7 +753,7 @@ export function TargetAudioLane({
           {...slotHoverProps(`empty-${cell.id}`)}
         >
           {(() => {
-            const buttonPx = slotButtonPx(chipH, widthPx)
+            const buttonPx = slotButtonPx(chipH)
             const iconPx = slotIconPx(buttonPx)
             return (
               <TimelineSlotButton

@@ -22,6 +22,7 @@ import {
   ChevronsUpDown,
   Film,
   GripVertical,
+  Link2,
   LocateFixed,
   Magnet,
   Minus,
@@ -34,7 +35,10 @@ import { cn } from "@/lib/utils"
 import { deriveLanes } from "@/lib/timeline/lanes"
 import { deriveSourceRegions, EMPTY_SOURCE_REGIONS } from "@/lib/timeline/source-regions"
 import { isLineEmpty, isUserAddedLine } from "@/lib/timeline/user-lines"
+import { Spinner } from "@/components/ui/spinner"
 import { SourceRegionLane } from "./SourceRegionLane"
+import type { LaneLinkOverlay } from "./CueLinkOverlay"
+import { EMPTY_CUE_LINK_INDEX, type CueLinkIndex } from "@/lib/sync/cell-links-read"
 import { chipOverlaps, MIN_ADDABLE_SPAN_SEC } from "@/lib/timeline/lane-timing"
 import { buildTimelineLayout, type TimelineLayout } from "@/lib/timeline/layout"
 import { deriveTracksForFile, type TimelineTrack, type TrackKind } from "@/lib/timeline/tracks"
@@ -64,7 +68,7 @@ import { useQueueForFile, useMissingClipCells, queueClockIsFileTime } from "@/li
 import { seedAudibility, toggleAudibility, useQueueAudibility, type TrackAudibility } from "@/lib/audio/audibility"
 import { isInEditableContext, isTopAudioShortcutOwner, pushAudioShortcutOverride } from "@/lib/audio/audio-coordinator"
 import { spacebarShouldToggle } from "@/lib/audio/playback-keys"
-import { activeTargetForCell, resolveTargetAudio } from "@/lib/audio/track-audio"
+import { resolveTargetAudio } from "@/lib/audio/track-audio"
 import { loadSnapEnabled, saveSnapEnabled } from "@/lib/timeline/snap"
 import { setMediaCursorCell, setMediaSyncActive } from "@/lib/timeline/media-cursor"
 import { useVideoClockSec, useVideoClockPlaying } from "@/lib/timeline/video-clock"
@@ -117,7 +121,19 @@ export interface TimelineEditorProps {
    */
   onAddLine?(startSec: number, endSec: number, opts?: { thenRecord?: boolean }): Promise<string | null>
   /** Whether this user may create cells at all (source.* is PROJECT_LEAD+). */
+  /** MAY they — the `source.cell.create` clearance. Deliberately separate from
+   *  `allowLineCreation` below: this one also governs taking a line back, and
+   *  policy must not be able to strand a line somebody already made. */
   canAddLine?: boolean
+  /**
+   * SHOULD they — the project's `allowLineCreation` setting, off by default.
+   *
+   * Adding lines was built speculatively and is underdeveloped, so it stays
+   * hidden until a project turns it on. Removal of an empty added line is NOT
+   * gated on this, which is what makes the off state recoverable rather than
+   * frozen.
+   */
+  allowLineCreation?: boolean
   /** Take back a line someone added, while it is still empty. */
   onRemoveLine?(cellId: string): void
   /** False disables the control — `file.video.set` needs contributor access,
@@ -127,6 +143,32 @@ export interface TimelineEditorProps {
    *  workspace for the same reason the link-video one does — it owns the upload
    *  and the refresh. Presence renders the control. */
   onRequestImportAudioVtt?(): void
+  /**
+   * Stage 4: the cells that CARRY TARGET AUDIO, when that is not this file's
+   * own cells — the audio cues, merged with their attachments.
+   *
+   * A subtitle line performed as two heard lines needs two takes, and
+   * `cell_audio.selected` is per (cell, slot), so the takes have to hang on the
+   * cues. Absent ⇒ the historic arrangement, takes on this file's cells.
+   */
+  targetCells?: CellData[] | null
+  /** An audio cue chip was selected. Separate from `onChipActivated`, which
+   *  scrolls the dialogue table BY CELL ID — a cue has no row there, so it
+   *  reaches the table through its links instead. */
+  onCueActivated?(cueCellId: string): void
+  /** Stage 4: which subtitle line each heard line performs. Empty until an
+   *  audio VTT has been imported and the auto-linker has run. */
+  cueLinks?: CueLinkIndex
+  /** The auto-linker is writing pairings right now — several hundred events,
+   *  a few seconds. Without a sign of life the row looks like a matcher that
+   *  did nothing rather than one still working. */
+  cueLinksPending?: boolean
+  /** The links READ failed — which must render differently from "no links":
+   *  when we couldn't ask, we don't know what is linked, and painting every
+   *  chip as an orphan would state a fact nobody has. */
+  cueLinksFailed?: boolean
+  /** Add or remove one pairing. Absent ⇒ linking mode is not offered at all. */
+  onToggleCueLink?(textCellId: string, cueCellId: string, linked: boolean): void
   /** False disables it. The import creates cells, so the server enforces
    *  `source.cell.create` (PROJECT_LEAD): offering a button that can only mint
    *  a 403 is worse than offering none. */
@@ -421,9 +463,16 @@ export function TimelineEditor({
   onRequestLinkVideo,
   onAddLine,
   canAddLine,
+  allowLineCreation = false,
   onRemoveLine,
   canLinkVideo = true,
   onRequestImportAudioVtt,
+  targetCells,
+  onCueActivated,
+  cueLinks,
+  cueLinksFailed = false,
+  cueLinksPending = false,
+  onToggleCueLink,
   canImportAudioVtt = true,
   hasAudioCueTrack = false,
   audioCues,
@@ -762,19 +811,131 @@ export function TimelineEditor({
   // the pencil appear over a silence the row had declined to draw — an offer to
   // fill a stretch you cannot see. Both the pencil and the mic read this array,
   // so one filter covers both surfaces.
+  //
+  // STAGE 4 TURNS ALL OF IT OFF (Sam, 2026-08-14). Once an episode's audio VTT
+  // is imported, the timeline is describing a FINISHED FILM against two cue
+  // lists that already exist — the subtitles and the transcript of what is
+  // heard. Inventing a line into a silence has no meaning there: a stretch with
+  // no subtitle is either a line nobody wrote or a moment nobody speaks in, and
+  // neither is fixed by minting an empty cell. Worse on the Target row, where
+  // the mic over a silence would create a subtitle line and record against it —
+  // producing a take that corresponds to NO audio cue, which is precisely the
+  // thing this stage exists to make impossible. Emptying this one array closes
+  // all three surfaces at once (both subtitle pencils and the empty-stretch
+  // mic); the mic over a real cue with no take yet is a different affordance,
+  // comes from `emptyCells`, and stays.
   const addableSpans = useMemo(
     () =>
-      sourceRegions.regions
-        .filter((r) => r.kind === "gap" && r.endSec - r.startSec >= MIN_ADDABLE_SPAN_SEC)
-        .map((r) => ({ startSec: r.startSec, endSec: r.endSec })),
-    [sourceRegions],
+      hasAudioCueTrack || !allowLineCreation || !canAddLine
+        ? []
+        : sourceRegions.regions
+            .filter((r) => r.kind === "gap" && r.endSec - r.startSec >= MIN_ADDABLE_SPAN_SEC)
+            .map((r) => ({ startSec: r.startSec, endSec: r.endSec })),
+    [sourceRegions, hasAudioCueTrack, allowLineCreation, canAddLine],
   )
   // Round 5: the Target-audio track's chips — one per section with dub audio.
   // AQU-646: in the VTT-plus-footage arrangement the takes hang off TEXT cells
   // — there are no media cells to hang them on — so the Target track resolves
   // them without the medium gate. Everywhere else it is exactly as before.
-  const targetSource = subtitleFileWithFootage ? subtitle : dialogue
-  const resolveTarget = subtitleFileWithFootage ? resolveTargetAudio : activeTargetForCell
+  // ── Linking mode (stage 4) ───────────────────────────────────────────────
+  // OFF BY DEFAULT AND OFF IS THE NORMAL STATE (Sam, 2026-08-14). While it is
+  // off nothing about clicking changes anywhere on the timeline — the overlays
+  // are simply not rendered — which is why this is a mode and not a modifier
+  // key or a special click target on the chips themselves.
+  const [linkingMode, setLinkingMode] = useState(false)
+  // Which chip a pairing is being made FROM, and which row it came from. A pick
+  // can start on either row: from a heard line to find its subtitle, or from a
+  // subtitle to find the lines that perform it.
+  const [pickedLink, setPickedLink] = useState<{ id: string; side: "cue" | "text" } | null>(null)
+  const linkingAvailable = Boolean(onToggleCueLink && audioCues && editable)
+  // Leaving the mode must not strand a half-made pairing on screen.
+  useEffect(() => {
+    if (!linkingMode) setPickedLink(null)
+  }, [linkingMode])
+  useEffect(() => {
+    if (!linkingAvailable) setLinkingMode(false)
+  }, [linkingAvailable])
+
+  const links = cueLinks ?? EMPTY_CUE_LINK_INDEX
+  // The amber "no subtitle behind this" mark exists to surface a HANDFUL of
+  // genuine orphans (~10 per episode) among hundreds of paired cues. Two states
+  // make it a lie and suppress it entirely:
+  //  - the read FAILED: we don't know what is linked, so marking anything as
+  //    unlinked would state a fact nobody has (this is exactly how a dead
+  //    links table rendered as "548 confident orphans" on 2026-08-14);
+  //  - NOTHING is linked: the matcher has simply never run, and a wall of
+  //    amber says nothing — the notice below says the true thing instead.
+  const neverPaired =
+    !cueLinksPending && links.textForCue.size === 0 && (audioCues?.length ?? 0) > 0
+  const suppressUnlinkedMarks = cueLinksFailed || neverPaired
+  const unlinkedCueIds = useMemo(
+    () =>
+      suppressUnlinkedMarks
+        ? new Set<string>()
+        : new Set((audioCues ?? []).filter((c) => !links.textForCue.has(c.id)).map((c) => c.id)),
+    [audioCues, links, suppressUnlinkedMarks],
+  )
+  const unlinkedTextIds = useMemo(
+    () =>
+      suppressUnlinkedMarks
+        ? new Set<string>()
+        : new Set(subtitle.filter((c) => !links.cuesForText.has(c.id)).map((c) => c.id)),
+    [subtitle, links, suppressUnlinkedMarks],
+  )
+  /** Flip one pairing. `linked` is what it should BECOME. */
+  const toggleLink = (textCellId: string, cueCellId: string) => {
+    const already = (links.cuesForText.get(textCellId) ?? []).includes(cueCellId)
+    onToggleCueLink?.(textCellId, cueCellId, !already)
+  }
+  const cueLinkOverlay: LaneLinkOverlay | undefined = linkingMode
+    ? {
+        pickedId: pickedLink?.side === "cue" ? pickedLink.id : null,
+        linkedIds:
+          pickedLink?.side === "text"
+            ? new Set(links.cuesForText.get(pickedLink.id) ?? [])
+            : new Set<string>(),
+        unlinkedIds: unlinkedCueIds,
+        onPick: (id) => {
+          if (pickedLink?.side === "text") toggleLink(pickedLink.id, id)
+          else setPickedLink((p) => (p?.id === id ? null : { id, side: "cue" }))
+        },
+      }
+    : undefined
+  const textLinkOverlay: LaneLinkOverlay | undefined = linkingMode
+    ? {
+        pickedId: pickedLink?.side === "text" ? pickedLink.id : null,
+        linkedIds:
+          pickedLink?.side === "cue"
+            ? new Set(links.textForCue.get(pickedLink.id) ?? [])
+            : new Set<string>(),
+        unlinkedIds: unlinkedTextIds,
+        onPick: (id) => {
+          if (pickedLink?.side === "cue") toggleLink(id, pickedLink.id)
+          else setPickedLink((p) => (p?.id === id ? null : { id, side: "text" }))
+        },
+      }
+    : undefined
+
+  // Stage 4: when the file has audio cues, THEY are what the Target row is
+  // about — one chip per heard line, on that line's own window. Their cells are
+  // ordinary text cells (`medium` is never "media" — cue cells deliberately
+  // read as text so they miss the media surfaces), so the resolver has to be
+  // the ungated one, exactly as for a subtitle file with footage.
+  // WHAT THE TARGET ROW IS ABOUT: whatever this file's units ARE. Audio cues
+  // once an audio VTT is imported, the imported recording's media cells for an
+  // mp3, the subtitle cues otherwise. A linked video has nothing to do with it
+  // (Sam, 2026-08-14) — it used to, and that was the defect: the middle term
+  // read `subtitleFileWithFootage ? subtitle : dialogue`, so a subtitle file
+  // with no video fell through to `dialogue`, which a VTT import never fills,
+  // and the row came up empty with every record button gone. Nothing else
+  // changes: a subtitle-with-footage file has an empty dialogue lane and still
+  // lands on `subtitle`, an mp3 import still lands on `dialogue`.
+  const targetSource = targetCells ?? (dialogue.length > 0 ? dialogue : subtitle)
+  // Always the ungated resolver now. The `medium: "media"` gate existed only to
+  // stop a MIXED file putting dub chips on every subtitle cue as well as its
+  // media cells — and picking the cell set above already decides that, so the
+  // gate was guarding a case that can no longer arise.
+  const resolveTarget = resolveTargetAudio
   const targetItems = useMemo<TargetAudioItem[]>(
     () =>
       targetSource.flatMap((c) => {
@@ -825,9 +986,15 @@ export function TimelineEditor({
     setSelectedId((sel) => (sel === prev ? null : sel))
   }, [soundingId])
   const currentCellId = selectedId ?? soundingId ?? lastTouchedId
+  // Searches the AUDIO CUES too (stage 4): a cue is a legitimate selection now,
+  // and it lives in the hidden sibling file, so looking only in `cells` left the
+  // timing readout blank for every chip on the Source-audio row.
   const currentCell = useMemo(
-    () => cells.find((c) => c.id === currentCellId) ?? null,
-    [cells, currentCellId],
+    () =>
+      cells.find((c) => c.id === currentCellId) ??
+      audioCues?.find((c) => c.id === currentCellId) ??
+      null,
+    [cells, audioCues, currentCellId],
   )
   // Meeting note (2026-08-05): the detail readout carries the dub's own
   // numbers — its range, its duration, and ALWAYS the end-to-end difference
@@ -1427,6 +1594,16 @@ export function TimelineEditor({
   // 2026-08-07 (wire a): USER chip selection — as opposed to programmatic
   // selection from a row click — also notifies the workspace so the text
   // table scrolls to and flashes the matching row.
+  // A cue chip SELECTS now (Sam, 2026-08-14) — it draws as selected and fills
+  // the timing readout like any other chip. Deliberately not `selectFromChip`:
+  // that one fires `onChipActivated`, which scrolls the dialogue table by cell
+  // id, and a cue has no row there to scroll to. The table is reached through
+  // the cue's LINKS instead, which is the workspace's job.
+  const selectCueFromChip = (cueCellId: string) => {
+    setSelectedId(cueCellId)
+    onCueActivated?.(cueCellId)
+  }
+
   const selectFromChip = (cellId: string) => {
     setSelectedId(cellId)
     onChipActivated?.(cellId)
@@ -1501,8 +1678,18 @@ export function TimelineEditor({
             // Only a line someone added here, and only while it is still
             // empty — deleting a cell with takes or comments on it would
             // leave every one of them behind.
-            canRemove={subtitleFileWithFootage && canAddLine ? (c) => isUserAddedLine(c) && isLineEmpty(c) : undefined}
+            // TAKING A LINE BACK IS NEVER GATED ON POLICY (Sam, 2026-08-14).
+            // Only on clearance and on the cell qualifying — still user-added,
+            // still empty. Turning `allowLineCreation` off, or importing an
+            // audio VTT, must not strand a line somebody already made with no
+            // way to clear it up; an off state you cannot recover from is worse
+            // than the feature it hides.
+            canRemove={canAddLine ? (c) => isUserAddedLine(c) && isLineEmpty(c) : undefined}
             onRemove={onRemoveLine}
+            // Only THIS subtitle row takes part in linking. The target-subtitles
+            // row below draws the same cells, and giving both an overlay would
+            // put two click targets on one line for the same pairing.
+            linkOverlay={textLinkOverlay}
           />
         )
       case "source-audio":
@@ -1524,16 +1711,17 @@ export function TimelineEditor({
             viewEndSec={viewEndSec}
             selectedId={selectedId}
             editable={editable}
-            // AUDIO CHIPS SEEK, BUT THEY DO NOT SELECT. Selection means "this is
-            // the current chip", and all three things it drives — the detail
-            // readout, the media cursor, and `onChipActivated`, which scrolls
-            // the text table to the matching row — are TEXT-cell surfaces. An
-            // audio cue has no row in any of them, so selecting one would blank
-            // the readout and scroll the table to nothing. The chip's job is to
-            // take you to that second of the film, and it still does.
-            onSelect={() => {}}
+            // AUDIO CHIPS SELECT, AND ALWAYS SHOULD HAVE. Stage 2 refused it
+            // because selection drove three TEXT-cell surfaces at once and a
+            // cue has a row in none of them — but the fix was to separate them,
+            // not to make the chip inert. It now draws as selected and fills
+            // the timing readout (`currentCell` searches the cues); reaching
+            // the dialogue table goes through the cue's LINKS, which is a
+            // question stage 4 can finally answer and stage 2 could not.
+            onSelect={selectCueFromChip}
             onSeek={seekAudioCue}
             onSeekSec={seekTo}
+            linkOverlay={cueLinkOverlay}
           />
         )
       case "target-subtitles":
@@ -1775,6 +1963,56 @@ export function TimelineEditor({
                 {hasAudioCueTrack ? "Replace audio VTT" : "Import audio VTT"}
               </button>
             </AppTooltip>
+          )}
+          {/* Stage 4: linking mode. An explicit toggle, off by default, because
+              while it is off clicking must stay exactly what it always was —
+              seek, select, drag, trim. Only offered once there are cues to pair
+              with and the file is editable. */}
+          {linkingAvailable && (
+            <AppTooltip
+              content={
+                cueLinksPending
+                  ? "Working out which subtitle each heard line performs — this takes a few seconds"
+                  : "Pair each heard line with the subtitle it performs"
+              }
+            >
+              <button
+                type="button"
+                data-testid="tl-linking-mode"
+                aria-pressed={linkingMode}
+                onClick={() => setLinkingMode((on) => !on)}
+                className={cn(
+                  "inline-flex items-center gap-1.5 rounded-md border border-border px-2 py-1 text-xs",
+                  linkingMode
+                    ? "bg-violet-100 text-violet-700 dark:bg-violet-950 dark:text-violet-300"
+                    : "bg-background text-foreground/80 hover:bg-muted",
+                )}
+              >
+                {cueLinksPending ? (
+                  <Spinner className="h-3.5 w-3.5" />
+                ) : (
+                  <Link2 className="h-3.5 w-3.5" />
+                )}
+                {cueLinksPending ? "Pairing…" : linkingMode ? "Linking" : "Link cues"}
+              </button>
+            </AppTooltip>
+          )}
+          {/* The two states in which the overlay would otherwise lie by
+              omission get a sentence instead of paint (2026-08-14: a dead
+              links table rendered as every chip confidently amber). */}
+          {linkingAvailable && linkingMode && cueLinksFailed && (
+            <span
+              data-testid="tl-linking-notice"
+              className="text-xs text-red-600 dark:text-red-400"
+            >
+              The pairings couldn't be loaded — what's shown may be incomplete.
+            </span>
+          )}
+          {linkingAvailable && linkingMode && !cueLinksFailed && neverPaired && (
+            <span data-testid="tl-linking-notice" className="text-xs text-muted-foreground">
+              These cues have never been paired with the subtitles — re-import the audio VTT
+              and tick "work out the subtitle pairings".
+            </span>
           )}
           <div className="inline-flex items-center rounded-md border border-border">
             <button

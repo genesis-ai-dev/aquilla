@@ -8,6 +8,7 @@ import { selectQueueForFile } from "@/lib/audio/queue-scope"
 import { sourceClipAudioForCell } from "@/lib/audio/track-audio"
 import { resetVideoDurationsForTests, setVideoDurationSec } from "@/lib/timeline/video-duration"
 import { deriveTracksForFile } from "@/lib/timeline/tracks"
+import { buildCueLinkIndex } from "@/lib/sync/cell-links-read"
 import { ZOOM_DEFAULT, ZOOM_MAX } from "@/lib/timeline/scale"
 
 // AQU-646: the editor subscribes to the play-queue (read-only) for playhead
@@ -1195,7 +1196,12 @@ describe("TimelineEditor — the Source-audio row (the audio VTT's cues)", () =>
   // current chip", and everything it drives — the detail readout, the media
   // cursor, the row the text table scrolls to — is a TEXT-cell surface. An audio
   // cue has no row in any of them.
-  it("an audio chip seeks the film but never selects", () => {
+  // REWRITTEN 2026-08-14. Stage 2 asserted that an audio chip never selects,
+  // because selection drove three text-cell surfaces at once and a cue has a
+  // row in none of them. Stage 4 separates them instead: the chip selects and
+  // fills the readout, and the dialogue table is reached through the cue's
+  // LINKS. The seek half of the original is unchanged and still pinned here.
+  it("an audio chip seeks the film AND selects, without touching the table", () => {
     setVideoDurationSec(VIDEO, 120)
     const onSeekToTime = vi.fn()
     const onChipActivated = vi.fn()
@@ -1212,8 +1218,12 @@ describe("TimelineEditor — the Source-audio row (the audio VTT's cues)", () =>
     // own cells, where "c2" does not exist, and the chip would be a dead click.
     fireEvent.click(within(screen.getByTestId("tl-source-regions")).getByTestId("tl-card-c2"))
     expect(onSeekToTime).toHaveBeenCalledWith(30)
+    // Still never onChipActivated: that scrolls the table BY CELL ID and a cue
+    // has no row, so it would scroll to nothing.
     expect(onChipActivated).not.toHaveBeenCalled()
-    expect(screen.getByTestId("tl-detail-empty")).toBeInTheDocument()
+    // ...but the readout is no longer blank — the cue IS the current chip.
+    expect(screen.queryByTestId("tl-detail-empty")).not.toBeInTheDocument()
+    expect(screen.getByTestId("tl-detail")).toBeInTheDocument()
   })
 
   // Round 8, "no room, no add". These run ZOOMED IN ON PURPOSE: the buttons
@@ -1227,7 +1237,7 @@ describe("TimelineEditor — the Source-audio row (the audio VTT's cues)", () =>
       return render(
         <TimelineEditor
           fileId="fzoom" coreMediaUrl={VIDEO} editable cells={cells}
-          canAddLine onAddLine={async () => null} onRetimeSubtitle={() => {}}
+          canAddLine allowLineCreation onAddLine={async () => null} onRetimeSubtitle={() => {}}
         />,
       )
     }
@@ -1254,6 +1264,52 @@ describe("TimelineEditor — the Source-audio row (the audio VTT's cues)", () =>
         cell({ id: "b", original: "B", medium: "text", startTime: 20.3, endTime: 30 }),
       ])
       expect(screen.getByTestId("tl-add-line-20")).toBeInTheDocument()
+    })
+
+    // The project setting, off unless turned on (Sam, 2026-08-14). Adding
+    // lines was built speculatively — no client asked for it — and its mic over
+    // an empty stretch could mint a subtitle line and record a take matching no
+    // audio cue. Clearance alone must not be enough to surface it.
+    it("offers nothing without the project setting, however much clearance you have", () => {
+      setVideoDurationSec(VIDEO, 120)
+      localStorage.setItem("codex:timelineZoom:fzoom", String(ZOOM_MAX))
+      render(
+        <TimelineEditor
+          fileId="fzoom" coreMediaUrl={VIDEO} editable
+          cells={[
+            cell({ id: "a", original: "A", medium: "text", startTime: 10, endTime: 20 }),
+            cell({ id: "b", original: "B", medium: "text", startTime: 20.3, endTime: 30 }),
+          ]}
+          canAddLine onAddLine={async () => null} onRetimeSubtitle={() => {}}
+        />,
+      )
+      expect(screen.queryByTestId("tl-add-line-20")).not.toBeInTheDocument()
+      expect(screen.queryByTestId(/^tl-target-add-20/)).not.toBeInTheDocument()
+    })
+
+    // STAGE 4 (Sam, 2026-08-14): once an episode's audio VTT is in, the
+    // timeline is describing a finished film against two cue lists that already
+    // exist, and inventing a line into a silence means nothing. The mic over a
+    // silence is the worse half — it would mint a subtitle line and record
+    // against it, producing a take that matches NO audio cue, which is exactly
+    // what this stage exists to make impossible.
+    it("withdraws BOTH ways in once the file has an audio-cue track", () => {
+      setVideoDurationSec(VIDEO, 120)
+      localStorage.setItem("codex:timelineZoom:fzoom", String(ZOOM_MAX))
+      render(
+        <TimelineEditor
+          fileId="fzoom" coreMediaUrl={VIDEO} editable
+          cells={[
+            cell({ id: "a", original: "A", medium: "text", startTime: 10, endTime: 20 }),
+            cell({ id: "b", original: "B", medium: "text", startTime: 20.3, endTime: 30 }),
+          ]}
+          canAddLine allowLineCreation onAddLine={async () => null} onRetimeSubtitle={() => {}}
+          hasAudioCueTrack
+        />,
+      )
+      // The same silence the test above offers both over.
+      expect(screen.queryByTestId("tl-add-line-20")).not.toBeInTheDocument()
+      expect(screen.queryByTestId(/^tl-target-add-20/)).not.toBeInTheDocument()
     })
   })
 })
@@ -1416,5 +1472,258 @@ describe("TimelineEditor — withholding the timing-mode control", () => {
     render(editor({ onChangeTimingMode: vi.fn() }))
     expect(screen.getByTestId("tl-timing-mode")).toHaveAttribute("data-mode", "dubbing")
     expect(screen.getByTestId("tl-timing-mode-audioFirst")).toBeInTheDocument()
+  })
+})
+
+// ── Stage 4: what linking mode says when it KNOWS nothing ──
+//
+// 2026-08-14: a dead cell_links table (read failing) plus a matcher that had
+// never run rendered as every one of 548 cues confidently amber — "unlinked" —
+// which reads as a fact nobody has. The amber mark exists to surface a handful
+// of genuine orphans among hundreds of pairings; in both know-nothing states it
+// is suppressed and a sentence says the true thing instead.
+describe("TimelineEditor — linking mode's know-nothing states", () => {
+  beforeEach(() => { topOwner.value = 1; resetVideoDurationsForTests() })
+
+  const VIDEO = "https://cdn/episode.m3u8"
+
+  const subs = [
+    cell({ id: "s1", original: "One", medium: "text", startTime: 10, endTime: 20 }),
+    cell({ id: "s2", original: "Two", medium: "text", startTime: 30, endTime: 40 }),
+  ]
+  const cues = [
+    cell({ id: "c1", original: "One", startTime: 10, endTime: 20 }),
+    cell({ id: "c2", original: "Whoa!", startTime: 25, endTime: 26 }),
+  ]
+  const tracks = deriveTracksForFile(null, { isSubtitleImport: true, hasMediaCells: false, hasAudioCues: true })
+
+  const renderLinking = (over: Record<string, unknown> = {}) => {
+    setVideoDurationSec(VIDEO, 120)
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={VIDEO} editable cells={subs}
+        tracks={tracks} audioCues={cues} onRetimeSubtitle={() => {}}
+        onToggleCueLink={() => {}}
+        {...over}
+      />,
+    )
+    fireEvent.click(screen.getByTestId("tl-linking-mode"))
+  }
+
+  const amberCount = () =>
+    screen.getAllByTestId("tl-link-target").filter((el) => el.dataset.linkState === "unlinked").length
+
+  it("suppresses every amber mark and explains, when nothing has ever been paired", () => {
+    renderLinking({ cueLinks: buildCueLinkIndex([]) })
+    expect(amberCount()).toBe(0)
+    expect(screen.getByTestId("tl-linking-notice")).toHaveTextContent(/never been paired/)
+  })
+
+  it("suppresses amber and says so in red when the links READ failed", () => {
+    // Failed ≠ empty: we could not ask, so we do not know. Even links we DO
+    // hold locally may be stale, hence the notice rather than silence.
+    renderLinking({
+      cueLinks: buildCueLinkIndex([{
+        kind: "text-audio", fromFileId: "f1", fromCellId: "s1",
+        toFileId: "f-cues", toCellId: "c1", origin: "auto", confidence: 1,
+      }]),
+      cueLinksFailed: true,
+    })
+    expect(amberCount()).toBe(0)
+    expect(screen.getByTestId("tl-linking-notice")).toHaveTextContent(/couldn't be loaded/)
+  })
+
+  it("marks ONLY the genuine orphans once real pairings exist", () => {
+    // c1 is paired; c2 ("Whoa!") is a real orphan and keeps its mark. s2 is an
+    // unpaired subtitle and keeps its mark on the text row.
+    renderLinking({
+      cueLinks: buildCueLinkIndex([{
+        kind: "text-audio", fromFileId: "f1", fromCellId: "s1",
+        toFileId: "f-cues", toCellId: "c1", origin: "auto", confidence: 1,
+      }]),
+    })
+    const amber = screen.getAllByTestId("tl-link-target").filter((el) => el.dataset.linkState === "unlinked")
+    expect(amber.map((el) => el.dataset.cellId).sort()).toEqual(["c2", "s2"])
+    expect(screen.queryByTestId("tl-linking-notice")).not.toBeInTheDocument()
+  })
+})
+
+// ── The Target audio row is about the file's UNITS, not about a video ──
+//
+// Sam, 2026-08-14: "the target audio recording buttons aligned with existing
+// cells should always be there and should not be gated by anything." The row
+// used to resolve `subtitleFileWithFootage ? subtitle : dialogue`, so a
+// subtitle file with no video linked fell through to `dialogue` — which a VTT
+// import never fills — and came up completely empty: no chips, no per-line
+// record buttons, no way in from the timeline at all.
+describe("TimelineEditor — the Target audio row's units", () => {
+  beforeEach(() => { topOwner.value = 1; resetVideoDurationsForTests() })
+
+  const subs = [
+    cell({ id: "s1", original: "One", medium: "text", startTime: 0, endTime: 4 }),
+    cell({ id: "s2", original: "Two", medium: "text", startTime: 5, endTime: 9 }),
+  ]
+  const tracks = (hasAudioCues: boolean) =>
+    deriveTracksForFile(null, { isSubtitleImport: true, hasMediaCells: false, hasAudioCues })
+
+  const recordButtons = () => screen.queryAllByTestId(/^tl-target-empty-.*-record$/)
+
+  it("offers a record button per subtitle line with NO video linked", () => {
+    // The case that was broken outright.
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={subs}
+        tracks={tracks(false)} onRetimeSubtitle={() => {}} onOpenRecording={() => {}}
+      />,
+    )
+    expect(recordButtons()).toHaveLength(2)
+  })
+
+  it("still offers one per line WITH a video linked", () => {
+    // Unchanged: a subtitle-with-footage file has an empty dialogue lane and
+    // still lands on the subtitle cells.
+    setVideoDurationSec("https://cdn/e.m3u8", 60)
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl="https://cdn/e.m3u8" editable cells={subs}
+        tracks={tracks(false)} onRetimeSubtitle={() => {}} onOpenRecording={() => {}}
+      />,
+    )
+    expect(recordButtons()).toHaveLength(2)
+  })
+
+  it("realigns onto the audio cues once an audio VTT is imported", () => {
+    // Same row, different units — three cues, so three buttons, regardless of
+    // there being two subtitle lines.
+    const cues = [
+      cell({ id: "c1", original: "One", startTime: 0, endTime: 2 }),
+      cell({ id: "c2", original: "and a half", startTime: 2, endTime: 4 }),
+      cell({ id: "c3", original: "Two", startTime: 5, endTime: 9 }),
+    ]
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={subs}
+        tracks={tracks(true)} audioCues={cues} targetCells={cues}
+        onRetimeSubtitle={() => {}} onOpenRecording={() => {}}
+      />,
+    )
+    expect(recordButtons().map((b) => b.getAttribute("data-testid")).sort()).toEqual([
+      "tl-target-empty-c1-record",
+      "tl-target-empty-c2-record",
+      "tl-target-empty-c3-record",
+    ])
+  })
+})
+
+// While the matcher is writing pairings (Sam, 2026-08-14: "a little loading
+// circle... just to indicate the links are working themselves out and it's not
+// just broken"). It is several hundred events and a few round trips, and until
+// it lands the row is indistinguishable from a matcher that found nothing.
+describe("TimelineEditor — pairing in progress", () => {
+  beforeEach(() => { topOwner.value = 1; resetVideoDurationsForTests() })
+
+  const subs = [cell({ id: "s1", original: "One", medium: "text", startTime: 10, endTime: 20 })]
+  const cues = [cell({ id: "c1", original: "One", startTime: 10, endTime: 20 })]
+  const tracks = deriveTracksForFile(null, {
+    isSubtitleImport: true, hasMediaCells: false, hasAudioCues: true,
+  })
+
+  const renderPairing = (over: Record<string, unknown> = {}) =>
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={subs}
+        tracks={tracks} audioCues={cues} onRetimeSubtitle={() => {}}
+        onToggleCueLink={() => {}} {...over}
+      />,
+    )
+
+  it("says it is pairing rather than offering to", () => {
+    renderPairing({ cueLinksPending: true })
+    expect(screen.getByTestId("tl-linking-mode")).toHaveTextContent("Pairing…")
+  })
+
+  it("goes back to offering once the pairings have landed", () => {
+    renderPairing({ cueLinksPending: false })
+    expect(screen.getByTestId("tl-linking-mode")).toHaveTextContent("Link cues")
+  })
+
+  it("does not claim 'never been paired' while pairing is still running", () => {
+    // The notice is for a standing state. Mid-write it is a state actively
+    // being left, and saying so would send you off to fix what is fixing itself.
+    renderPairing({ cueLinksPending: true })
+    fireEvent.click(screen.getByTestId("tl-linking-mode"))
+    expect(screen.queryByTestId("tl-linking-notice")).not.toBeInTheDocument()
+  })
+
+  it("still says it once pairing has finished and found nothing", () => {
+    renderPairing({ cueLinksPending: false })
+    fireEvent.click(screen.getByTestId("tl-linking-mode"))
+    expect(screen.getByTestId("tl-linking-notice")).toHaveTextContent(/never been paired/)
+  })
+})
+
+// ── An audio cue is a real selection (Sam, 2026-08-14) ──
+//
+// Stage 2 made cue chips seek-only, because selection drove three text-cell
+// surfaces and a cue has a row in none of them. That was the wrong repair: the
+// chip should select and draw as selected and fill the timing readout, and the
+// one surface that genuinely needs a text row — the dialogue table — should be
+// reached through the cue's LINKS, which stage 4 finally makes possible.
+describe("TimelineEditor — selecting an audio cue", () => {
+  beforeEach(() => { topOwner.value = 1; resetVideoDurationsForTests() })
+
+  const subs = [cell({ id: "s1", original: "One", medium: "text", startTime: 0, endTime: 4 })]
+  const cues = [
+    cell({ id: "c1", original: "Whoa there", startTime: 10, endTime: 20 }),
+    cell({ id: "c2", original: "Easy now", startTime: 30, endTime: 40 }),
+  ]
+  const tracks = deriveTracksForFile(null, {
+    isSubtitleImport: true, hasMediaCells: false, hasAudioCues: true,
+  })
+
+  const CUE_VIDEO = "https://cdn/episode.m3u8"
+  const renderCues = (over: Record<string, unknown> = {}) => {
+    setVideoDurationSec(CUE_VIDEO, 120)
+    return render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={CUE_VIDEO} editable cells={subs}
+        tracks={tracks} audioCues={cues} onRetimeSubtitle={() => {}} {...over}
+      />,
+    )
+  }
+
+  const cueCard = (id: string) =>
+    within(screen.getByTestId("tl-source-regions")).getByTestId(`tl-card-${id}`)
+
+  it("marks the chip as selected when it is clicked", () => {
+    renderCues()
+    expect(cueCard("c1").className).not.toContain("ring-sky-500")
+    fireEvent.click(cueCard("c1"))
+    expect(cueCard("c1").className).toContain("ring-sky-500")
+  })
+
+  it("fills the timing readout, which used to come up blank for cues", () => {
+    // `currentCell` searched only this file's cells, and a cue lives in the
+    // hidden sibling — so every chip on this row read as nothing selected.
+    renderCues()
+    expect(screen.getByTestId("tl-detail-empty")).toBeInTheDocument()
+    fireEvent.click(cueCard("c1"))
+    expect(screen.getByTestId("tl-detail")).toBeInTheDocument()
+  })
+
+  it("reports the cue so the workspace can follow its links to the table", () => {
+    const onCueActivated = vi.fn()
+    renderCues({ onCueActivated })
+    fireEvent.click(cueCard("c2"))
+    expect(onCueActivated).toHaveBeenCalledWith("c2")
+  })
+
+  it("never routes a cue through onChipActivated", () => {
+    // That one scrolls the dialogue table BY CELL ID, and a cue has no row —
+    // it would scroll to nothing and silently disengage follow.
+    const onChipActivated = vi.fn()
+    renderCues({ onChipActivated, onCueActivated: vi.fn() })
+    fireEvent.click(cueCard("c1"))
+    expect(onChipActivated).not.toHaveBeenCalled()
   })
 })

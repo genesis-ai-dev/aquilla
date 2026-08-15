@@ -13,7 +13,7 @@
  * fetch; there is no invalidation to arrange.
  */
 
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 
 import { buildCellData, type CellData } from "@/hooks/useCells"
 import { fetchAllFileCells } from "@/lib/sync/cells-read"
@@ -35,6 +35,13 @@ export interface UseAudioCueCellsResult {
   audioCues: CellData[] | null
   isLoading: boolean
   error?: Error
+  /**
+   * Re-read the sibling. Needed for exactly one thing: a RETIME, which is the
+   * only operation that edits these otherwise-frozen cues in place (same cell
+   * ids, new timings, so takes and links survive). Nothing else calls it — a
+   * replace mints a new file id, and the id change alone re-runs the fetch.
+   */
+  refresh(): void
 }
 
 export function useAudioCueCells({
@@ -45,6 +52,7 @@ export function useAudioCueCells({
   const [audioCues, setAudioCues] = useState<CellData[] | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<Error | undefined>()
+  const [refreshKey, setRefreshKey] = useState(0)
   const generationRef = useRef(0)
 
   // The caller builds `getToken` inline, so its identity changes on every
@@ -96,7 +104,9 @@ export function useAudioCueCells({
     return () => {
       cancelled = true
     }
-  }, [projectId, siblingFileId])
+  }, [projectId, siblingFileId, refreshKey])
 
-  return { audioCues, isLoading, error }
+  const refresh = useCallback(() => setRefreshKey((k) => k + 1), [])
+
+  return { audioCues, isLoading, error, refresh }
 }

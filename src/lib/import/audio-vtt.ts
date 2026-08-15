@@ -35,6 +35,8 @@ import { buildBulkCellsWithSpeakers } from "@/lib/import"
 import { extractVttStrings } from "@/lib/parsers/subtitle"
 import { AUDIO_CUES_ROLE, type TranslatableString } from "@/lib/parsers/types"
 import { bulkUploadSource } from "@/lib/sync/bulk-import"
+import type { LinkableCue } from "@/lib/timeline/cue-links"
+import { applyTimebaseScale } from "./timebase"
 
 export interface AudioVttReport {
   /** Cues that survived parsing + stripping — what actually gets imported. */
@@ -153,6 +155,38 @@ export function parseAudioVtt(content: string): ParsedAudioVtt {
   }
 }
 
+/**
+ * Rescale every cue onto a different frame grid. (AQU-646, 2026-08-14)
+ *
+ * The ONLY place this module changes a timestamp's value — see `timebase.ts`
+ * for why that restraint matters and how the factor is arrived at. Cues with
+ * no timing are passed through untouched rather than defaulted to zero: a cue
+ * without a start has nothing to correct, and inventing one would put it at
+ * the head of the film.
+ */
+export function scaleCueTimes(
+  cues: readonly TranslatableString[],
+  scale: number,
+): TranslatableString[] {
+  if (!Number.isFinite(scale) || scale === 1) return [...cues]
+  return cues.map((cue) => ({
+    ...cue,
+    ...(typeof cue.start === "number" ? { start: applyTimebaseScale(cue.start, scale) } : {}),
+    ...(typeof cue.end === "number" ? { end: applyTimebaseScale(cue.end, scale) } : {}),
+  }))
+}
+
+/** What was done to the cues' clock on the way in, kept in the import manifest
+ *  so a timeline that looks half a second off can be traced to a decision
+ *  rather than re-derived by whoever is looking at it next. */
+export interface AudioVttTimebaseRecord {
+  /** The rate the file was authored at, as written for people ("24"). */
+  fromFps: string
+  /** The rate it was corrected onto — the anchor file's own. */
+  toFps: string
+  scale: number
+}
+
 export interface UploadAudioCueFileArgs {
   projectId: string
   /** The text file these cues time — `files.anchor_file_id`, and the only
@@ -164,6 +198,9 @@ export interface UploadAudioCueFileArgs {
   /** The picked file's name, kept in the import manifest as provenance. */
   sourceFileName: string
   cues: TranslatableString[]
+  /** Set when the cues were rescaled onto the anchor's frame grid on the way
+   *  in. Recorded, never re-applied — `cues` are already corrected. */
+  timebase?: AudioVttTimebaseRecord
   /** Mints a sync-token scoped to (projectId, fileId) — for a brand-new file
    *  that is `getTokenForFile(newFileId)`, as with every fresh import. */
   getToken: (fileId: string) => Promise<string | null>
@@ -173,6 +210,14 @@ export interface UploadAudioCueFileArgs {
 export interface UploadedAudioCueFile {
   fileId: string
   cellCount: number
+  /**
+   * The cue cells as they were actually written, with the ids the upload
+   * minted. Returned so the auto-linker can pair them with the anchor's
+   * subtitle cells straight away — the ids exist nowhere else until the
+   * sibling is read back, and waiting for that read would mean linking
+   * against a file that may not have propagated yet.
+   */
+  cues: LinkableCue[]
 }
 
 /**
@@ -220,7 +265,11 @@ export async function uploadAudioCueFile(
       importFormat: "vtt",
       orderedBy: "time",
       importManifest: {
-        audioVtt: { sourceFileName: args.sourceFileName, cueCount: args.cues.length },
+        audioVtt: {
+          sourceFileName: args.sourceFileName,
+          cueCount: args.cues.length,
+          ...(args.timebase ? { timebase: args.timebase } : {}),
+        },
       },
     },
     cells,
@@ -228,5 +277,17 @@ export async function uploadAudioCueFile(
     signal: args.signal,
   })
 
-  return { fileId, cellCount: cells.length }
+  return {
+    fileId,
+    cellCount: cells.length,
+    // `startMs`/`endMs` are absent on an untimed row; leaving the seconds
+    // undefined rather than defaulting to 0 keeps the linker's own "no usable
+    // timing" branch reachable instead of filing the cue at the film's head.
+    cues: cells.map((c) => ({
+      id: c.cellId,
+      ...(c.startMs !== undefined ? { startTime: c.startMs / 1000 } : {}),
+      ...(c.endMs !== undefined ? { endTime: c.endMs / 1000 } : {}),
+      original: c.value,
+    })),
+  }
 }

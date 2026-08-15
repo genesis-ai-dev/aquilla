@@ -29,6 +29,7 @@ import {
 } from "@/lib/timeline/row-metrics"
 import { useRowMetrics } from "./useRowMetrics"
 import { fmtClock } from "./format"
+import { CueLinkOverlay, type LaneLinkOverlay } from "./CueLinkOverlay"
 import { MIN_CARD_TEXT_PX, TimelineCard } from "./TimelineCard"
 import type { CellData } from "@/hooks/useCells"
 import type { SourceRegionMap } from "@/lib/timeline/source-regions"
@@ -64,6 +65,9 @@ export interface SourceRegionLaneProps {
    * naming, and it is where you would start listening.
    */
   onSeekSec(sec: number): void
+  /** Stage 4: linking mode is ON. Absent — the normal case — means no overlay
+   *  is rendered at all and a click cannot mean anything new. */
+  linkOverlay?: LaneLinkOverlay
 }
 
 function SourceRegionLaneImpl({
@@ -77,6 +81,7 @@ function SourceRegionLaneImpl({
   onSelect,
   onSeek,
   onSeekSec,
+  linkOverlay,
 }: SourceRegionLaneProps) {
   const spanOf = (c: CellData): { start: number; end: number } => {
     const start = c.startTime ?? 0
@@ -160,6 +165,16 @@ function SourceRegionLaneImpl({
           onSeek={onSeek}
         />
       ))}
+      {linkOverlay && (
+        <CueLinkOverlay
+          items={visibleCells.map((c) => {
+            const s = spanOf(c)
+            return { id: c.id, startSec: s.start, endSec: s.end }
+          })}
+          pxPerSec={pxPerSec}
+          {...linkOverlay}
+        />
+      )}
     </div>
   )
 }

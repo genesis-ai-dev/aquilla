@@ -48,7 +48,8 @@ import { effectiveSourceText } from "@/lib/cell-text"
 import { resolveDeepLinkLane } from "./project-workspace-lane-deeplink"
 import { resolveActiveTargetLanguage } from "./project-workspace-lane-target"
 import { useAudioCueCells } from "@/hooks/useAudioCueCells"
-import { uploadAudioCueFile, type ParsedAudioVtt } from "@/lib/import/audio-vtt"
+import { scaleCueTimes, uploadAudioCueFile, type ParsedAudioVtt } from "@/lib/import/audio-vtt"
+import type { TimebaseCorrection } from "@/lib/import/timebase"
 import { useWorkspaceSearch } from "@/hooks/useWorkspaceSearch"
 import { ParallelPassagesPanel, type ParallelPanelMode, type ParallelPanelScope, type ReplaceAllPayload } from "./ParallelPassagesPanel"
 import type { EditorTableHandle } from "./EditorTable"
@@ -90,7 +91,11 @@ import {
   buildFileScopedTokenFetcher,
   buildProjectAwareMinter,
 } from "@/lib/sync/cqrs-bridge"
-import { emitTargetCellCommit, emitCellBacktranslationSet, emitFileRename, emitFileDelete, emitFileRestore, emitCellValidate, emitCellRetime, emitCellLaneRetime, emitCellAudioTrim, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, enqueueEvents } from "@/lib/sync/events-emit"
+import { emitTargetCellCommit, emitCellBacktranslationSet, emitFileRename, emitFileDelete, emitFileRestore, emitCellValidate, emitCellRetime, emitCellLaneRetime, emitCellAudioTrim, emitCellLinkSet, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, enqueueEvents } from "@/lib/sync/events-emit"
+import { planCueLinks } from "@/lib/timeline/cue-links"
+import type { CueReconcilePlan } from "@/lib/import/cue-reconcile"
+import { diffCueLinks } from "@/lib/timeline/cue-link-diff"
+import { useFileCellLinks } from "@/hooks/useFileCellLinks"
 import { v7 as uuidv7 } from "uuid"
 import { sequenceBetween } from "@/lib/timeline/derive"
 import { isLineEmpty, isUserAddedLine, userLineOrigin } from "@/lib/timeline/user-lines"
@@ -246,7 +251,7 @@ import { ProjectAssignedToMe } from "./ProjectAssignedToMe"
 import { getMyAssignments, getProjectAssignments, type MyAssignment, type AssigneeWorkload } from "@/lib/sync/assignments"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
 import { useMyScopes } from "@/hooks/useMyScopes"
-import { getSelectedIds } from "@/lib/audio/selection"
+import { clearSelection, getSelectedIds, setSelection } from "@/lib/audio/selection"
 
 // Import runs inline in the workspace (upload + eBible corpus tabs). The
 // AD-11 plan carves import into a standalone apps/import Worker, but that
@@ -1144,6 +1149,30 @@ export function ProjectWorkspace() {
   // rides a ref so early-declared callbacks can reach it without stale-closure
   // or dependency-ordering problems (it is assigned where the hook runs).
   const workspaceAudioByCellIdRef = useRef<Parameters<typeof mergeCellsWithAudio>[1]>(new Map())
+  /**
+   * Stage 4: where a take actually lives, resolved from the cell id alone.
+   *
+   * Takes hang on AUDIO CUES when the file has a cue sibling, and on the file's
+   * own cells otherwise — see the `audioCueCells` block far below for why that
+   * is forced rather than chosen. The retime/trim handlers are declared a few
+   * lines from here and the cue data is ~3,900 lines down, so naming it in
+   * their dependency arrays would be a temporal-dead-zone crash. A ref carrying
+   * a resolver is the same escape `workspaceAudioByCellIdRef` above takes, and
+   * it keeps "which file owns this take" in ONE place rather than repeated at
+   * every call site.
+   */
+  const resolveTakeCellRef = useRef<(cellId: string) => { fileId: string; cell: CellData } | null>(
+    () => null,
+  )
+  /** Paint a dragged cue chip's new anchor. Same dependency-ordering escape as
+   *  the resolver above — the state it writes is declared far below. */
+  const setCueAnchorOverridesRef = useRef<(cellId: string, offsetMs: number) => void>(() => {})
+  /** Maps whatever id asked for the recorder onto the cell it should open on.
+   *  Null ⇒ nothing to record here (a subtitle line no cue performs). */
+  const openRecordingTargetRef = useRef<(cellId: string) => string | null>((id) => id)
+  /** How many takes are attached to the CURRENT audio cues. Read by the import
+   *  handler, which is declared above the attachment read it needs. */
+  const cueTakeCountRef = useRef<() => number>(() => 0)
 
   // FRO-IMPORT-OPT: when the active file's queued target commits finish draining
   // to the server, do ONE soft refetch to reconcile the read model and clear the
@@ -1720,14 +1749,16 @@ export function ProjectWorkspace() {
   const handleTrimTarget = useCallback(
     async (cellId: string, audioId: string, trims: { trimStartMs?: number; trimEndMs?: number }) => {
       if (!project?.id || !activeFileId) return
-      // Fortify pass: raw store cells never carry attachments/selectedAudioId
-      // — reading them unmerged made every timeline chip trim a SILENT NO-OP
-      // (att was always undefined). Merge the per-file audio reads in, the
-      // same way runTranscribeAll does.
-      const cell = mergeCellsWithAudio(getActiveCells(), workspaceAudioByCellIdRef.current)
-        .find((c) => c.id === cellId)
+      // Stage 4: a chip on the Target row may belong to an AUDIO CUE in the
+      // hidden sibling rather than to a cell of this file, so the owner is
+      // resolved rather than assumed. (The resolver also does the attachment
+      // merge that the fortify pass added here: raw store cells never carry
+      // attachments, and reading them unmerged made every trim a silent no-op.)
+      const owner = resolveTakeCellRef.current(cellId)
+      const cell = owner?.cell
       const att = cell?.attachments?.[audioId]
-      if (!cell || !att) return
+      if (!owner || !cell || !att) return
+      const takeFileId = owner.fileId
       const slot = audioId === cell.selectedAudioId ? "recording" : "generatedVoice"
       // 2026-08-14: a trim is its own event now, not a re-attach echoing back
       // every field it isn't changing. That echo was where trims got lost —
@@ -1737,14 +1768,14 @@ export function ProjectWorkspace() {
       // stated; null means back to the clip's own edge.
       const trimP = emitCellAudioTrim({
         projectId: project.id,
-        fileId: activeFileId,
+        fileId: takeFileId,
         cellId,
         audioId,
         trimStartMs: trims.trimStartMs ?? null,
         trimEndMs: trims.trimEndMs ?? null,
         author: currentUsername,
       })
-      injectOptimisticAudioTrim(activeFileId, cellId, {
+      injectOptimisticAudioTrim(takeFileId, cellId, {
         audioId,
         url: att.url,
         slot,
@@ -1757,9 +1788,9 @@ export function ProjectWorkspace() {
       }, trimP)
       await trimP
       await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
-      notifyAudioAttachmentsChanged(activeFileId)
+      notifyAudioAttachmentsChanged(takeFileId)
     },
-    [project?.id, activeFileId, currentUsername, getActiveCells, getTokenForProjectFile],
+    [project?.id, activeFileId, currentUsername, getTokenForProjectFile],
   )
 
   // Round 6 (SUB-38), re-homed 2026-08-07: assign a voice/character from the
@@ -1798,15 +1829,24 @@ export function ProjectWorkspace() {
       if (!project?.id || !activeFileId) return
       // Without the cell we'd have no start to measure against, and defaulting
       // it to 0 would quietly persist an absolute value into an offset field.
-      const cell = getActiveCell(cellId)
-      if (!cell) return
+      // Stage 4: the chip may belong to an audio cue in the hidden sibling.
+      const owner = resolveTakeCellRef.current(cellId)
+      if (!owner) return
+      const { fileId: takeFileId, cell } = owner
       // targetOffsetMsFor carries the old "never before file zero" floor into
       // the offset domain; enforced here, at the single persistence point.
       const targetOffsetMs = targetOffsetMsFor(cell, anchorSec)
-      applyOptimisticCellTiming(cellId, { metadata: { target_offset_ms: targetOffsetMs } })
+      if (takeFileId === activeFileId) {
+        applyOptimisticCellTiming(cellId, { metadata: { target_offset_ms: targetOffsetMs } })
+      } else {
+        // A cue cell is not in this file's store, so the store's optimistic
+        // path cannot reach it — and its file is read once and never
+        // revalidated, so without this the chip springs back until a reload.
+        setCueAnchorOverridesRef.current(cellId, targetOffsetMs)
+      }
       await emitCellLaneRetime({
         projectId: project.id,
-        fileId: activeFileId,
+        fileId: takeFileId,
         cellId,
         targetOffsetMs,
         author: currentUsername,
@@ -1814,7 +1854,7 @@ export function ProjectWorkspace() {
       await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
       revalidateCells()
     },
-    [project?.id, activeFileId, currentUsername, getActiveCell, applyOptimisticCellTiming, getTokenForProjectFile, revalidateCells],
+    [project?.id, activeFileId, currentUsername, applyOptimisticCellTiming, getTokenForProjectFile, revalidateCells],
   )
 
   // Timeline editor: set/clear the file's core video URL. coreMediaUrl lives on
@@ -1892,11 +1932,76 @@ export function ProjectWorkspace() {
       ),
     [audioCueSiblings],
   )
-  const { audioCues } = useAudioCueCells({
+  const { audioCues, refresh: refreshAudioCues } = useAudioCueCells({
     projectId: project?.id ?? null,
     siblingFileId: audioCueSibling?.id ?? null,
     getToken: getTokenForFile,
   })
+  // Stage 4: which subtitle line each heard line performs. Read against the
+  // SUBTITLE file — the route returns edges from both sides, so this single
+  // request covers the cue sibling too and no second read is needed.
+  const {
+    index: cueLinks,
+    error: cueLinksError,
+    setLinkLocally: setCueLinkLocally,
+    refresh: refreshCueLinks,
+  } = useFileCellLinks({
+    projectId: project?.id ?? null,
+    fileId: audioCueSibling ? (activeFileId ?? null) : null,
+  })
+  /**
+   * Toggle one pairing by hand (linking mode). Paints first, then emits — the
+   * event can sit in the outbox for a while and the chip has to answer the
+   * click immediately.
+   *
+   * No `isReadOnly` guard, deliberately: it is declared ~2,000 lines below this
+   * point, so naming it in the deps array here is a temporal-dead-zone crash
+   * (the array is evaluated at render, unlike the body). The linking-mode
+   * toggle is gated on `editable` at the timeline, and the server enforces the
+   * contributor floor regardless, so the check would be a third lock on the
+   * same door.
+   */
+  const handleToggleCueLink = useCallback(
+    async (textCellId: string, cueCellId: string, linked: boolean) => {
+      if (!project?.id || !activeFileId || !audioCueSibling) return
+      setCueLinkLocally(textCellId, cueCellId, linked)
+      try {
+        await emitCellLinkSet({
+          projectId: project.id,
+          fileId: activeFileId,
+          cellId: textCellId,
+          toFileId: audioCueSibling.id,
+          toCellId: cueCellId,
+          linked,
+          origin: "manual",
+          author: currentUsername,
+        })
+      } catch (e) {
+        console.warn("[cue-links] toggle failed", e)
+        // Put the paint back where the server still has it.
+        setCueLinkLocally(textCellId, cueCellId, !linked)
+        toast.error("Couldn't save that pairing.")
+      }
+    },
+    [project?.id, activeFileId, audioCueSibling, currentUsername, setCueLinkLocally],
+  )
+  // The frame grid the incoming cues are checked against (AQU-646,
+  // 2026-08-14). Read off the SUMMARIES rather than `legacyCells`, which is
+  // gated on the media arrangement and can legitimately be empty here — the
+  // check has to work on any timed file, and an empty reference silently
+  // disables it rather than reporting a mismatch it cannot see.
+  const anchorCueTimesSec = useMemo(() => {
+    const out: number[] = []
+    for (const c of cellSummaries) {
+      if (typeof c.startTime === "number") out.push(c.startTime)
+      if (typeof c.endTime === "number") out.push(c.endTime)
+    }
+    return out
+  }, [cellSummaries])
+  /** The auto-linker is writing pairings right now. Several hundred events and
+   *  a handful of round trips, so without a sign of life the timeline just
+   *  looks like the matcher did nothing. */
+  const [cueLinksPending, setCueLinksPending] = useState(false)
   const [importAudioVttOpen, setImportAudioVttOpen] = useState(false)
   /**
    * Write the picked cues as this file's audio-cue sibling.
@@ -1913,7 +2018,11 @@ export function ProjectWorkspace() {
    * replace whose delete leg failed.
    */
   const handleImportAudioVtt = useCallback(
-    async (parsed: ParsedAudioVtt, sourceFileName: string) => {
+    async (
+      parsed: ParsedAudioVtt,
+      sourceFileName: string,
+      timebase: TimebaseCorrection | null,
+    ) => {
       if (!project?.id || !activeFile) return
       // The upload is a direct HTTP write, not an outbox event, so offline it
       // fails at the network rather than queueing — say so up front instead of
@@ -1922,7 +2031,17 @@ export function ProjectWorkspace() {
         toast.error("Audio cues can't be imported while offline.")
         return
       }
+      // NO TAKES-EXIST REFUSAL ANY MORE. This path is a FIRST import now — the
+      // dialog reconciles in place whenever cues already exist, which keeps
+      // every recording attached instead of stranding it — so there is nothing
+      // here to protect. The guard that used to sit here could only ever have
+      // fired on a file with no cues, i.e. never.
       const stale = audioCueSiblings.map((f) => f.id)
+      // The cues are corrected HERE, once, and stored corrected — everything
+      // downstream (chips, links, recording windows, takes) then works in one
+      // honest clock instead of each surface remembering to apply a factor.
+      // What was done rides along in the import manifest.
+      const cues = timebase ? scaleCueTimes(parsed.cues, timebase.scale) : parsed.cues
       let uploaded
       try {
         uploaded = await uploadAudioCueFile({
@@ -1930,7 +2049,16 @@ export function ProjectWorkspace() {
           anchorFileId: activeFile.id,
           anchorFileName: activeFile.name,
           sourceFileName,
-          cues: parsed.cues,
+          cues,
+          ...(timebase
+            ? {
+                timebase: {
+                  fromFps: timebase.cue.label,
+                  toFps: timebase.reference.label,
+                  scale: timebase.scale,
+                },
+              }
+            : {}),
           getToken: getTokenForFile,
         })
       } catch (e) {
@@ -1950,11 +2078,273 @@ export function ProjectWorkspace() {
         console.warn("[audio-cues] replacing sibling: delete failed", e)
         toast.warning("The new audio cues are in, but the ones they replaced couldn't be tidied away.")
       }
+      // The cues exist now, so put them on screen BEFORE pairing them. Pairing
+      // is several hundred events and takes a few seconds; running it first
+      // meant the Source-audio row — and the Link cues button the pairing
+      // spinner rides on — did not exist yet, so there was nothing anywhere to
+      // say work was still going on.
       refresh()
-      toast.success(`Imported ${uploaded.cellCount} audio cues.`)
+
+      // ── The auto-linker runs HERE, once, and never again ────────────────
+      // Pair each heard line with the subtitle it performs, and write the
+      // result as ordinary link events. Deliberately not recomputed on any
+      // later read: recomputing would silently undo every hand correction the
+      // next time anything re-imported, and a pairing you cannot fix is worse
+      // than none. Failure is non-fatal — the cues are already in and the
+      // pairings can be made by hand in linking mode.
+      let linkCount = 0
+      setCueLinksPending(true)
+      try {
+        const plans = planCueLinks({
+          textCells: readAtVersion(cellStoreVersion, () => cellStore.getAllSummaries()),
+          audioCues: uploaded.cues,
+        })
+        for (const plan of plans) {
+          await emitCellLinkSet({
+            projectId: project.id,
+            fileId: activeFile.id,
+            cellId: plan.textCellId,
+            toFileId: uploaded.fileId,
+            toCellId: plan.cueCellId,
+            linked: true,
+            origin: "auto",
+            confidence: plan.confidence,
+            author: currentUsername,
+          })
+        }
+        linkCount = plans.length
+        // ~650 events for a full episode, and MAX_BATCH is 100 — so this is
+        // several round trips. Awaited before the success toast so the message
+        // is not claiming work the queue has not done yet.
+        if (linkCount > 0) await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+        refreshCueLinks()
+      } catch (e) {
+        console.warn("[audio-cues] auto-linking failed", e)
+        toast.warning("The cues are in, but pairing them with the subtitles didn't finish.")
+      } finally {
+        setCueLinksPending(false)
+      }
+
+      const retimed = timebase
+        ? `, retimed from ${timebase.cue.label} to ${timebase.reference.label} fps`
+        : ""
+      toast.success(
+        linkCount > 0
+          ? `Imported ${uploaded.cellCount} audio cues${retimed}, and paired ${linkCount} of them with subtitle lines.`
+          : `Imported ${uploaded.cellCount} audio cues${retimed}.`,
+      )
     },
-    [project?.id, activeFile, audioCueSiblings, currentUsername, getTokenForFile, getTokenForProjectFile, refresh],
+    [project?.id, activeFile, audioCueSiblings, currentUsername, getTokenForFile, getTokenForProjectFile, refresh, refreshCueLinks, cellStore, cellStoreVersion],
   )
+
+  /**
+   * The same cue set, re-timed in place. (AQU-646 stage 4, 2026-08-14)
+   *
+   * The alternative — replacing — mints a new sibling file with new cell ids,
+   * which strands every take recorded against the old cues AND leaves their
+   * bytes under the old file's R2 path. Retiming edits the cells that are
+   * already there, so ids never change and takes and pairings both survive
+   * untouched. `planCueRetime` only offers this when the two files are provably
+   * the same cue set, so there is no chance of a take landing on another line.
+   */
+  /**
+   * Reconcile the audio cues against a freshly picked VTT. (AQU-646 stage 4)
+   *
+   * Replaces what used to be "replace", which minted a NEW sibling file and so
+   * stranded every recording (takes are keyed by file id, and their bytes live
+   * under a per-file R2 path) and orphaned every subtitle pairing (links point
+   * at cue cell ids). Here the file stays and its cells are edited: a cue that
+   * survives keeps its id, so its takes and its pairings simply remain
+   * attached, with nothing copied and nothing re-derived.
+   *
+   * A pure retime is this with no creates and no deletes.
+   */
+  const handleReconcileAudioCues = useCallback(
+    async (plan: CueReconcilePlan, relinkAll: boolean) => {
+      if (!project?.id || !activeFile || !audioCueSibling) return
+      if (!navigator.onLine) {
+        toast.error("Audio cues can't be updated while offline.")
+        return
+      }
+      const siblingId = audioCueSibling.id
+      try {
+        // Creates first, so there is never a moment where a stretch of the film
+        // has lost its old cue and not yet gained the new one.
+        for (const c of plan.creates) {
+          await enqueueEvents([
+            {
+              kind: "source.cell.create" as const,
+              projectId: project.id,
+              fileId: siblingId,
+              cellId: c.cellId,
+              parentId: null,
+              author: currentUsername,
+              payload: {
+                cellId: c.cellId,
+                anchorCellId: c.anchorCellId,
+                value: c.value,
+                startMs: c.startMs,
+                endMs: c.endMs,
+                sequenceIndex: c.sequenceIndex,
+                type: "cue",
+              },
+            },
+          ])
+        }
+        for (const move of plan.retimes) {
+          await emitCellRetime({
+            projectId: project.id,
+            fileId: siblingId,
+            cellId: move.cellId,
+            startMs: move.startMs,
+            endMs: move.endMs,
+            author: currentUsername,
+          })
+        }
+        for (const d of plan.deletes) {
+          // A delete is chain-mutating and cannot be arbitrated without its
+          // chain head. Skipping beats sending one that can only be rejected.
+          if (!d.sourceEventId) continue
+          await enqueueEvents([
+            {
+              kind: "source.cell.delete" as const,
+              projectId: project.id,
+              fileId: siblingId,
+              cellId: d.cellId,
+              parentId: d.sourceEventId,
+              author: currentUsername,
+              payload: {},
+            },
+          ])
+        }
+        await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+      } catch (e) {
+        toast.error(
+          e instanceof Error ? `Couldn't update the cues: ${e.message}` : "Couldn't update the cues.",
+        )
+        return
+      }
+
+      // Pairing. Newly created cues are ALWAYS paired — they have none, and
+      // would otherwise sit unpaired forever — but the diff is scoped to them,
+      // so a cue this reconcile never touched keeps its pairing, including one
+      // somebody fixed by hand. Re-deriving the whole set is the explicit
+      // opt-in the dialog asks for separately.
+      let changedLinks = 0
+      const newCueIds = new Set(plan.creates.map((c) => c.cellId))
+      if (relinkAll || newCueIds.size > 0) {
+        setCueLinksPending(true)
+        try {
+          const retimed = new Map(plan.retimes.map((m) => [m.cellId, m]))
+          const gone = new Set(plan.deletes.map((d) => d.cellId))
+          const cuesAfter = [
+            ...(audioCues ?? [])
+              .filter((c) => !gone.has(c.id))
+              .map((c) => {
+                const move = retimed.get(c.id)
+                return move
+                  ? { ...c, startTime: move.startMs / 1000, endTime: move.endMs / 1000 }
+                  : c
+              }),
+            ...plan.creates.map((c) => ({
+              id: c.cellId,
+              startTime: c.startMs / 1000,
+              endTime: c.endMs / 1000,
+              original: c.value,
+            })),
+          ]
+          const diff = diffCueLinks({
+            current: cueLinks,
+            wanted: planCueLinks({
+              textCells: readAtVersion(cellStoreVersion, () => cellStore.getAllSummaries()),
+              audioCues: cuesAfter,
+            }),
+            ...(relinkAll ? {} : { onlyCues: newCueIds }),
+          })
+          for (const e of [
+            ...diff.link.map((l) => ({ ...l, linked: true })),
+            ...diff.unlink.map((l) => ({ ...l, linked: false })),
+          ]) {
+            await emitCellLinkSet({
+              projectId: project.id,
+              fileId: activeFile.id,
+              cellId: e.textCellId,
+              toFileId: siblingId,
+              toCellId: e.cueCellId,
+              linked: e.linked,
+              origin: "auto",
+              confidence: e.confidence,
+              author: currentUsername,
+            })
+            changedLinks++
+          }
+          if (changedLinks > 0) await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+          refreshCueLinks()
+        } catch (e) {
+          console.warn("[audio-cues] pairing after reconcile failed", e)
+          toast.warning("The cues are updated, but pairing them didn't finish.")
+        } finally {
+          setCueLinksPending(false)
+        }
+      }
+
+      // The cues are frozen and read once, so nothing shows the new shape
+      // without asking for them again.
+      refreshAudioCues()
+      const parts: string[] = []
+      if (plan.retimes.length > 0) parts.push(`retimed ${plan.retimes.length}`)
+      if (plan.creates.length > 0) parts.push(`added ${plan.creates.length}`)
+      if (plan.deletes.length > 0) parts.push(`removed ${plan.deletes.length}`)
+      if (changedLinks > 0) parts.push(`changed ${changedLinks} pairings`)
+      toast.success(
+        parts.length === 0
+          ? "Nothing needed changing."
+          : `Audio cues updated — ${parts.join(", ")}.` +
+              (plan.orphanedTakes > 0
+                ? ` ${plan.orphanedTakes} recording${plan.orphanedTakes === 1 ? " is" : "s are"} no longer reachable.`
+                : plan.keptTakes > 0
+                  ? ` All ${plan.keptTakes} recording${plan.keptTakes === 1 ? "" : "s"} stayed attached.`
+                  : ""),
+      )
+    },
+    [
+      project?.id, activeFile, audioCueSibling, audioCues, cueLinks, currentUsername,
+      getTokenForProjectFile, refreshAudioCues, refreshCueLinks, cellStore, cellStoreVersion,
+    ],
+  )
+
+  /**
+   * Take the audio-cue track away without putting another in its place.
+   *
+   * Soft-deletes every sibling anchored to this file — `file.delete` stamps
+   * `deleted_at` and leaves cells and audio alone, so the recordings are
+   * retained server-side even though nothing in the app can reach them once
+   * the track is gone. Sweeping ALL siblings rather than the visible one is
+   * the same self-heal the import does: a previous replace whose delete leg
+   * failed leaves an orphan behind, and "remove" should mean removed.
+   */
+  const handleRemoveAudioCues = useCallback(async () => {
+    if (!project?.id || audioCueSiblings.length === 0) return
+    if (!navigator.onLine) {
+      toast.error("Audio cues can't be removed while offline.")
+      return
+    }
+    try {
+      for (const f of audioCueSiblings) {
+        await emitFileDelete({ projectId: project.id, fileId: f.id, author: currentUsername })
+      }
+      await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+    } catch (e) {
+      toast.error(
+        e instanceof Error ? `Couldn't remove the audio cues: ${e.message}` : "Couldn't remove the audio cues.",
+      )
+      return
+    }
+    // The sibling is found by scanning the project's files, so the track only
+    // disappears once that list is re-read.
+    refresh()
+    toast.success("Removed the audio cues. The Source audio track is gone.")
+  }, [project?.id, audioCueSiblings, currentUsername, getTokenForProjectFile, refresh])
 
   const [videoDialogOpen, setVideoDialogOpen] = useState(false)
   // Nothing reads this any more (round 8 removed the dead cue clock below), but
@@ -3053,6 +3443,37 @@ export function ProjectWorkspace() {
   const jumpToCellIdFollowing = useCallback((cellId: string) => {
     editorRef.current?.scrollToCellId(cellId, { flash: true, follow: "engage" })
   }, [])
+
+  /**
+   * A heard line was selected on the timeline — take the dialogue table to the
+   * subtitle line(s) it performs. (AQU-646 stage 4)
+   *
+   * A cue has no row of its own, so this is the ONLY route from that row into
+   * the table, and it exists because the links do. Several lines get selected
+   * TOGETHER when one heard line covers several subtitle rows — 154 cues on
+   * episode 101 do — because selecting only the first would misdescribe what
+   * you clicked.
+   *
+   * An unlinked cue clears the selection rather than leaving the last one
+   * standing: nothing in the table corresponds to it, and a stale highlight
+   * would claim something does.
+   */
+  const handleCueActivated = useCallback(
+    (cueCellId: string) => {
+      const linked = cueLinks.textForCue.get(cueCellId) ?? []
+      if (linked.length === 0) {
+        clearSelection()
+        return
+      }
+      // Document order, not the order the edges came back in — the selection
+      // bar and any range operation read this as a span of the file.
+      const order = new Map(cellSummaries.map((c, i) => [c.id, i]))
+      const ordered = [...linked].sort((a, b) => (order.get(a) ?? 0) - (order.get(b) ?? 0))
+      setSelection(ordered, ordered[0])
+      editorRef.current?.scrollToCellId(ordered[0], { flash: true, follow: "engage" })
+    },
+    [cueLinks, cellSummaries],
+  )
   // AQU-646 stage 2: a gap click used to scroll the table to the silence and
   // pulse the lines bracketing it. The band it belonged to is gone, and the
   // gaps on the row that replaced it are gaps in SPEECH, whose boundaries do
@@ -3074,9 +3495,17 @@ export function ProjectWorkspace() {
   // not state — no workspace re-render per card click); mediaTraceCellId seeds
   // the timeline's selection on mount (state — must be render-visible then).
   const timelineSelectedCellIdRef = useRef<string | null>(null)
-  const handleTimelineSelectedCell = useCallback((cellId: string | null) => {
-    timelineSelectedCellIdRef.current = cellId
-  }, [])
+  const handleTimelineSelectedCell = useCallback(
+    (cellId: string | null) => {
+      // Media → Text scrolls to whatever is parked here, so a CUE id would
+      // scroll to nothing. Park the line it performs instead.
+      timelineSelectedCellIdRef.current =
+        cellId && cueLinks.textForCue.has(cellId)
+          ? (cueLinks.textForCue.get(cellId) ?? [])[0] ?? null
+          : cellId
+    },
+    [cueLinks],
+  )
   const [mediaTraceCellId, setMediaTraceCellId] = useState<string | null>(null)
 
   // The single traced lens-switch entry point — every setLens call site routes
@@ -3790,7 +4219,14 @@ export function ProjectWorkspace() {
     // clip both — so the mic never records over sounding audio. Module
     // functions, so deps stay [] and the editor-actions memo contract holds.
     pauseAllPlayback()
-    setRecordingCellId(cellId)
+    // Stage 4: takes hang on audio cues, so a subtitle row's mic has to open
+    // the cue that performs it. Null means no cue does — nothing to record.
+    const target = openRecordingTargetRef.current(cellId)
+    if (!target) {
+      toast.info("No heard line is paired with this subtitle yet.")
+      return
+    }
+    setRecordingCellId(target)
   }, [])
 
   /**
@@ -4936,6 +5372,128 @@ export function ProjectWorkspace() {
     project?.id ?? null,
     timelineEditorVisible ? activeFileId : null,
   )
+  // ── Stage 4: takes live on the AUDIO CUES, not the subtitle rows ─────────
+  // Forced by the data model, not chosen: `cell_audio.selected` is per (cell,
+  // slot), so a cell holds ONE selected recording — and on episode 101, 93
+  // subtitle lines are performed as two or more heard lines. Those lines could
+  // never hold their takes.
+  //
+  // The cue sibling's CELLS stay frozen and outside live sync (useAudioCueCells
+  // is a one-shot read — they are a transcript of a finished film and no event
+  // ever edits them). Only their ATTACHMENTS are live, which is exactly what
+  // this second per-file read gives us.
+  const { byCellId: cueAudioByCellId } = useFileAudioAttachments(
+    project?.id ?? null,
+    audioCueSibling?.id ?? null,
+  )
+  // Dragging a take on a cue: the anchor the drag writes lands in the CUE
+  // cell's metadata, and useAudioCueCells reads its file ONCE (frozen
+  // transcript, no live sync, nothing to invalidate). Without a local overlay
+  // the chip would spring back to where it started and only move after a
+  // reload. Server truth still wins on the next mount — this only covers the
+  // gap between the drag and that read.
+  const [cueAnchorOverrides, setCueAnchorOverrides] = useState<ReadonlyMap<string, number>>(
+    new Map(),
+  )
+  setCueAnchorOverridesRef.current = (cellId, offsetMs) =>
+    setCueAnchorOverrides((prev) => new Map(prev).set(cellId, offsetMs))
+  const audioCueCells = useMemo(() => {
+    if (!audioCues) return null
+    const merged = mergeCellsWithAudio(audioCues, cueAudioByCellId)
+    if (cueAnchorOverrides.size === 0) return merged
+    return merged.map((c) => {
+      const offset = cueAnchorOverrides.get(c.id)
+      return offset === undefined
+        ? c
+        : { ...c, metadata: { ...(c.metadata ?? {}), target_offset_ms: offset } }
+    })
+  }, [audioCues, cueAudioByCellId, cueAnchorOverrides])
+  cueTakeCountRef.current = () => {
+    let n = 0
+    for (const entry of cueAudioByCellId.values()) {
+      // Only live clips count. A tombstoned attachment is already gone, and
+      // refusing an import over one would be a dead end with no way out.
+      n += Object.keys(entry.attachments).length > 0 ? 1 : 0
+    }
+    return n
+  }
+
+  // Which cell the recorder should OPEN on, given whatever id asked for it.
+  // The timeline's Target row already hands over a cue id; the dialogue table's
+  // mic hands over a subtitle row, which has no take of its own any more, so it
+  // opens the first cue that performs that line. One rule serves both because
+  // the test is "is this already a cue?" rather than "who is calling?".
+  openRecordingTargetRef.current = (cellId: string) => {
+    if (!audioCueCells) return cellId
+    if (audioCueCells.some((c) => c.id === cellId)) return cellId
+    const cues = cueLinks.cuesForText.get(cellId) ?? []
+    if (cues.length === 0) return null
+    const order = new Map(audioCueCells.map((c, i) => [c.id, i]))
+    // "First" by position on the film, not by the order the edges came back in.
+    return [...cues].sort((a, b) => (order.get(a) ?? 0) - (order.get(b) ?? 0))[0]
+  }
+
+  /**
+   * What the performer reads when recording an audio cue.
+   *
+   * The cue itself carries only a transcript of the English soundtrack; the
+   * words to perform are on the subtitle cells it is linked to, joined in
+   * their own order when a heard line covers more than one. Sam's ruling
+   * (2026-08-14): the target subtitle text IS the read-aloud line, because
+   * there is no separate dub script — a question already filed for the client.
+   */
+  /** The subtitle rows a take on this cell counts towards. Without audio cues
+   *  a take counts for its own cell, which is what it always did. */
+  const linkedTextIdsFor = useCallback(
+    (cellId: string): string[] =>
+      audioCueCells ? [...(cueLinks.textForCue.get(cellId) ?? [])] : [cellId],
+    [audioCueCells, cueLinks],
+  )
+
+  const resolveCueReadAloud = useCallback(
+    (cueCellId: string) => {
+      if (!audioCueCells) return null
+      const cue = audioCueCells.find((c) => c.id === cueCellId)
+      const transcript = cue?.original?.trim() || null
+      const textIds = cueLinks.textForCue.get(cueCellId) ?? []
+      // An unlinked cue is a line that needs dubbing with no subtitle behind
+      // it — about ten per episode. There is nothing to read, so the transcript
+      // is all we can offer, and it is offered as reference rather than as
+      // words to say.
+      if (textIds.length === 0) return { text: "", reference: transcript }
+      const byId = new Map(cellSummaries.map((c) => [c.id, c]))
+      const linked = textIds
+        .map((id) => byId.get(id))
+        .filter((c): c is (typeof cellSummaries)[number] => Boolean(c))
+        .sort((a, b) => (a.startTime ?? 0) - (b.startTime ?? 0))
+      const text = linked
+        .map((c) => c.translated?.trim())
+        .filter((t): t is string => Boolean(t))
+        .join(" ")
+      // Only worth showing the transcript when the subtitle is SHARED with
+      // other cues — that is the only case where the performer has to work out
+      // which part of the line in front of them belongs to this take.
+      const shared = textIds.some((id) => (cueLinks.cuesForText.get(id) ?? []).length > 1)
+      return { text, reference: shared ? transcript : null }
+    },
+    [audioCueCells, cueLinks, cellSummaries],
+  )
+  // Publish the resolver declared near the top of the component. Assigned on
+  // every render, deliberately: it closes over this render's cue cells, and a
+  // memoised version would hand the handlers a stale set after every import.
+  resolveTakeCellRef.current = (cellId: string) => {
+    if (audioCueSibling && audioCueCells) {
+      const cue = audioCueCells.find((c) => c.id === cellId)
+      if (cue) return { fileId: audioCueSibling.id, cell: cue }
+    }
+    if (!activeFileId) return null
+    // Raw store cells carry no attachments; reading them unmerged is what made
+    // every timeline trim a silent no-op before the fortify pass.
+    const cell = mergeCellsWithAudio(getActiveCells(), workspaceAudioByCellIdRef.current).find(
+      (c) => c.id === cellId,
+    )
+    return cell ? { fileId: activeFileId, cell } : null
+  }
   // Pre-merge round: takes that predate duration capture (duration_ms NULL).
   // The timeline shows a deliberate fix-it notice; the count and the batch's
   // work-list come from the same enumeration.
@@ -5187,20 +5745,25 @@ export function ProjectWorkspace() {
   // Driving is gated on the pane being on screen: in Free timing there is no
   // picture to be in sync with, and the queue owns playback there.
   const videoDrivesDubs = videoIsTransport
+  // Stage 4: the driver fires takes over the picture at cell boundaries, so it
+  // has to be given whichever cells actually hold them — the audio cues once a
+  // cue sibling exists. It takes plain CellData, so this is the entire change
+  // needed for video-first dub playback to follow the takes to their new home.
+  const dubDriverCells = audioCueCells ?? audioMergedCells
   useEffect(() => {
     if (!videoDrivesDubs || !project?.id || !frontierSession) {
       stopExternalDubs()
       return
     }
-    startExternalDubs({ cells: audioMergedCells, projectId: project.id, session: frontierSession })
+    startExternalDubs({ cells: dubDriverCells, projectId: project.id, session: frontierSession })
     return () => stopExternalDubs()
     // Cells are refreshed by the effect below rather than here — restarting the
     // driver on every take would cut a dub off mid-word.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [videoDrivesDubs, project?.id, frontierSession])
   useEffect(() => {
-    updateExternalDubCells(audioMergedCells)
-  }, [audioMergedCells])
+    updateExternalDubCells(dubDriverCells)
+  }, [dubDriverCells])
   const videoDubSec = useVideoClockSec()
   const videoDubPlaying = useVideoClockPlaying()
   useEffect(() => {
@@ -6713,6 +7276,7 @@ export function ProjectWorkspace() {
                     initialSelectedCellId={mediaTraceCellId}
                     onSelectedCellChange={handleTimelineSelectedCell}
                     onChipActivated={jumpToCellIdFollowing}
+                    onCueActivated={handleCueActivated}
                     activateRequest={timelineActivateRequest}
                     coreMediaUrl={activeFile.coreMediaUrl ?? null}
                     editable={!isReadOnly}
@@ -6728,6 +7292,10 @@ export function ProjectWorkspace() {
                     // server. Offering the button below that bar would mint a
                     // guaranteed 403 and wedge the outbox.
                     canAddLine={canPerform("source.cell.create", project?.syncRole?.level ?? null)}
+                    // Off unless this project has turned it on. Clearance and
+                    // policy stay separate props so switching this off still
+                    // leaves an already-added empty line deletable.
+                    allowLineCreation={project?.allowLineCreation ?? false}
                     canLinkVideo={canPerform("file.video.set", project?.syncRole?.level ?? null)}
                     // AQU-646 stage 2: the audio VTT. The import writes cells,
                     // so it sits behind the SAME source.* floor as the add-line
@@ -6736,6 +7304,13 @@ export function ProjectWorkspace() {
                     canImportAudioVtt={canPerform("source.cell.create", project?.syncRole?.level ?? null)}
                     hasAudioCueTrack={audioCueSibling !== null}
                     audioCues={audioCues}
+                    targetCells={audioCueCells}
+                    cueLinks={cueLinks}
+                    cueLinksFailed={Boolean(cueLinksError)}
+                    cueLinksPending={cueLinksPending}
+                    onToggleCueLink={(textCellId, cueCellId, linked) => {
+                      void handleToggleCueLink(textCellId, cueCellId, linked)
+                    }}
                     onSeekToTime={handleTimelineSeekToTime}
                     tracks={timelineTracks}
                     timingMode={timingMode}
@@ -7138,21 +7713,41 @@ export function ProjectWorkspace() {
         <AudioRecordingModal
           open={recordingCellId !== null}
           project={project}
-          cells={legacyCells}
+          // Stage 4: with an audio VTT imported, the recorder walks the CUES —
+          // the units the picture wants recorded — and Next/Prev, the count-in
+          // and the take's window all follow the cue's own timing.
+          cells={audioCueCells ?? legacyCells}
           activeCellId={recordingCellId}
           username={currentUsername}
+          readAloudFor={audioCueCells ? resolveCueReadAloud : undefined}
+          // The take goes to the cue sibling; the PICTURE belongs to the file
+          // on screen. Always passed, not just in the cue arrangement, so the
+          // two can never drift apart again.
+          filmFileId={activeFileId}
           onActiveCellChange={(cellId) => {
             setRecordingCellId(cellId)
             // Scroll the underlying editor to the new cell so the row is visible
-            // when the modal closes.
-            const idx = cellStore.findIndexByCellId(cellId)
+            // when the modal closes. A CUE has no row of its own, so the scroll
+            // follows its linked subtitle instead — and an unlinked cue simply
+            // does not scroll, which is honest: there is no row to show.
+            const rowId = audioCueCells
+              ? (cueLinks.textForCue.get(cellId) ?? [])[0]
+              : cellId
+            const idx = rowId ? cellStore.findIndexByCellId(rowId) : -1
             if (idx >= 0) editorRef.current?.scrollToCellIndex(idx)
             // A cell transition (auto-advance or Next/Prev) means the take is
             // confirmed — stop deferring a pending timing-mode heads-up.
             timingAck.surfaceNow()
           }}
-          onTakeSaved={(cellId) => void ensureTargetRowForTake(cellId)}
-          onLastTakeRemoved={(cellId) => void resetTargetRowAfterLastTake(cellId)}
+          // A take on a cue still counts as work done on the LINES it performs,
+          // so the target row is given to each of them, not to the cue (which
+          // has no target side and never appears in the table).
+          onTakeSaved={(cellId) => {
+            for (const textId of linkedTextIdsFor(cellId)) void ensureTargetRowForTake(textId)
+          }}
+          onLastTakeRemoved={(cellId) => {
+            for (const textId of linkedTextIdsFor(cellId)) void resetTargetRowAfterLastTake(textId)
+          }}
           onClose={() => setRecordingCellId(null)}
         />
       )}
@@ -7346,12 +7941,33 @@ export function ProjectWorkspace() {
         open={importAudioVttOpen}
         replacing={audioCueSibling !== null}
         textFileName={activeFile?.name ?? ""}
+        referenceTimesSec={anchorCueTimesSec}
+        existingCues={audioCues ?? undefined}
+        takeCount={cueTakeCountRef.current()}
+        // Deleting a file is PROJECT_LEAD, a step above the contributor floor
+        // most of this dialog sits on, so the button is gated on its own kind
+        // rather than on the import's.
+        onRemove={
+          audioCueSibling && canPerform("file.delete", project?.syncRole?.level ?? null)
+            ? () => {
+                setImportAudioVttOpen(false)
+                void handleRemoveAudioCues()
+              }
+            : undefined
+        }
         onCancel={() => setImportAudioVttOpen(false)}
-        onConfirm={(parsed, sourceFileName) => {
+        cueHasTake={(cellId) => (cueAudioByCellId.get(cellId)?.attachments
+          ? Object.keys(cueAudioByCellId.get(cellId)!.attachments).length > 0
+          : false)}
+        onReconcile={(plan, relinkAll) => {
+          setImportAudioVttOpen(false)
+          void handleReconcileAudioCues(plan, relinkAll)
+        }}
+        onConfirm={(parsed, sourceFileName, timebase) => {
           // Close FIRST, like the link dialog above: the import runs for
           // several seconds and reports with toasts, which a modal covers.
           setImportAudioVttOpen(false)
-          void handleImportAudioVtt(parsed, sourceFileName)
+          void handleImportAudioVtt(parsed, sourceFileName, timebase)
         }}
       />
       <LinkVideoTimingDialog

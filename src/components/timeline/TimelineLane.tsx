@@ -19,6 +19,7 @@ import { TimelineSlotButton } from "./TimelineSlotButton"
 import { MIN_SLOT_PX, useHotSlot } from "./slot-hover"
 import { subtitleSpanSec } from "@/lib/timeline/lane-timing"
 import { TimelineCard } from "./TimelineCard"
+import { CueLinkOverlay, type LaneLinkOverlay } from "./CueLinkOverlay"
 import type { TimelineLayout } from "@/lib/timeline/layout"
 import type { CellData } from "@/hooks/useCells"
 
@@ -61,6 +62,9 @@ export interface TimelineLaneProps {
   /** Take back a line. The lane decides nothing — it asks this per cell. */
   canRemove?(cell: CellData): boolean
   onRemove?(cellId: string): void
+  /** Stage 4: linking mode is ON for this lane. Absent — the normal case —
+   *  renders no overlay, so a click cannot mean anything new. */
+  linkOverlay?: LaneLinkOverlay
 }
 
 export function TimelineLane({
@@ -83,6 +87,7 @@ export function TimelineLane({
   onAddLine,
   canRemove,
   onRemove,
+  linkOverlay,
 }: TimelineLaneProps) {
   // Which add-line slot the pointer is on. State rather than CSS `:hover` —
   // see TimelineSlotButton's header for the six-lit-at-once bug that forced it.
@@ -91,7 +96,9 @@ export function TimelineLane({
   // size it draws over the lanes above and below on a short row and can be
   // clicked from either of them. Stage 3 answered that by hiding it, which took
   // away the only way to put a line in a silence at exactly the zoom where every
-  // silence is visible at once. It shrinks instead — see `slotButtonPx`.
+  // silence is visible at once. It shrinks with the ROW HEIGHT instead — never
+  // with the silence's width, which would make one control several sizes down a
+  // single row. See `slotButtonPx`.
   const { chipH } = useRowMetrics()
 
   const spanOf = (c: CellData): { start: number; end: number } => {
@@ -181,7 +188,7 @@ export function TimelineLane({
           {...slotHoverProps(String(span.startSec))}
         >
           {(() => {
-            const buttonPx = slotButtonPx(chipH, widthPx)
+            const buttonPx = slotButtonPx(chipH)
             const iconPx = slotIconPx(buttonPx)
             return (
               <TimelineSlotButton
@@ -222,6 +229,16 @@ export function TimelineLane({
         />
         )
       })}
+      {linkOverlay && (
+        <CueLinkOverlay
+          items={visible.map((c) => {
+            const s = spanOf(c)
+            return { id: c.id, startSec: s.start, endSec: s.end }
+          })}
+          pxPerSec={pxPerSec}
+          {...linkOverlay}
+        />
+      )}
     </div>
   )
 }

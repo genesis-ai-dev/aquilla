@@ -65,6 +65,37 @@ interface Props {
    *  see `ensureTargetRowForTake`. Fired after the attach event is safely
    *  emitted, so a failed upload never claims work that does not exist. */
   onTakeSaved?: (cellId: string) => void
+  /**
+   * AQU-646 stage 4: what to put in front of the performer for this cell.
+   *
+   * When an episode's audio VTT has been imported, `cells` are the AUDIO CUES
+   * — the units the picture actually wants recorded — and a cue carries only a
+   * transcript of the English soundtrack, never a translation. The words to
+   * perform live on the SUBTITLE cells it is linked to. So the modal stops
+   * assuming the line it shows and the line it records are the same row, and
+   * asks instead.
+   *
+   * `reference` is the cue's own transcript, shown small underneath: when one
+   * subtitle spans several cues the performer is handed the whole subtitle and
+   * needs to know which part of it is this cue's.
+   *
+   * Absent ⇒ the historic behaviour, the cell's own translated text.
+   */
+  readAloudFor?: (cellId: string) => { text: string; reference?: string | null } | null
+  /**
+   * AQU-646 stage 4: the file whose linked picture this recording is against.
+   *
+   * Needed because the cell being RECORDED and the file that owns the FILM
+   * stopped being the same thing. With an audio VTT imported, `cells` are cues
+   * living in a hidden sibling file — and that sibling has no `coreMediaUrl`
+   * and is deliberately filtered out of `project.files` altogether, so looking
+   * the film up by the cue's own fileId finds nothing twice over and the
+   * picture silently disappears.
+   *
+   * Defaults to the active cell's own file, which is every arrangement without
+   * audio cues.
+   */
+  filmFileId?: string | null
   onClose: () => void
 }
 
@@ -93,7 +124,7 @@ const READ_ALOUD_MIN_PX = Math.round(READ_ALOUD_BASE_PX * 0.5)
 
 export function AudioRecordingModal({
   open, project, cells, activeCellId, username,
-  onActiveCellChange, onTakeSaved, onLastTakeRemoved, onClose,
+  onActiveCellChange, onTakeSaved, onLastTakeRemoved, readAloudFor, filmFileId, onClose,
 }: Props) {
   // ONE mic stream and ONE capture graph for as long as this dialog is open
   // (round 4 of the take-head hunt). Opening and closing them around takes is
@@ -172,10 +203,13 @@ export function AudioRecordingModal({
   // stored as its video URL, and nothing downstream can tell that apart from a
   // real address; a <video> pointed at it renders a black rectangle, which is
   // worse than no picture at all.
+  // Stage 4: the picture belongs to the file being TRANSLATED, which is no
+  // longer the file the take is written to — see `filmFileId`.
+  const filmOwnerId = filmFileId ?? activeCell?.fileId
   const filmUrl = useMemo(() => {
-    const raw = project.files?.find((f) => f.id === activeCell?.fileId)?.coreMediaUrl
+    const raw = project.files?.find((f) => f.id === filmOwnerId)?.coreMediaUrl
     return raw && isLinkableVideoUrl(raw) ? raw : null
-  }, [project.files, activeCell?.fileId])
+  }, [project.files, filmOwnerId])
 
   // Two layouts, one control (Sam's design exploration, 2026-08-13). Expanded
   // is a 16:9 room with the picture down the left; collapsed is a tall portrait
@@ -217,7 +251,12 @@ export function AudioRecordingModal({
   const readAloudRatio = READ_ALOUD_LINE_RATIO
   const readAloudBudget = READ_ALOUD_LINES * READ_ALOUD_LINE_PX
   const [readAloudPx, setReadAloudPx] = useState(readAloudBase)
-  const readAloudText = activeCell?.translated ?? ""
+  // Stage 4: the line to perform may live on a DIFFERENT cell from the one
+  // being recorded — see `readAloudFor`. Falls back to the cell's own
+  // translation, which is what every arrangement without audio cues does.
+  const readAloud = activeCell && readAloudFor ? readAloudFor(activeCell.id) : null
+  const readAloudText = readAloud?.text ?? activeCell?.translated ?? ""
+  const readAloudReference = readAloud?.reference ?? null
   // Re-fit when the column's WIDTH changes (window resize) — a narrower box
   // rewraps and can need a smaller size. Width only: the box's height is what
   // the fit itself moves, and observing that would chase its own tail.
@@ -1185,11 +1224,24 @@ export function AudioRecordingModal({
                   lineHeight: `${Math.round(readAloudPx * readAloudRatio)}px`,
                 }}
               >
-                {activeCell.translated || (
+                {readAloudText || (
                   <span className="text-base text-muted-foreground/60 italic">not translated</span>
                 )}
               </p>
             </div>
+            {/* The cue's own transcript. Only shown when the line above came
+                from somewhere else — i.e. one subtitle covers several heard
+                lines — because that is the only time the performer has to work
+                out which part of it belongs to this take. */}
+            {readAloudReference && (
+              <p
+                data-testid="rec-cue-reference"
+                className="mt-1.5 line-clamp-2 text-[11px] leading-snug text-muted-foreground/70"
+              >
+                <span className="font-medium">This cue: </span>
+                {readAloudReference}
+              </p>
+            )}
           </div>
 
           {/* Beside a picture the instruments sit at the BOTTOM of the column,

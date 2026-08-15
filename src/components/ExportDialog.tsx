@@ -1191,6 +1191,7 @@ export function ExportDialog({
                     <span className="text-xs text-muted-foreground">
                       <RichMessage
                         k="importExport.dialog.prefixWithRef"
+                        // i18n-exempt machine-readable USFM reference sample
                         values={{ example: <code className="font-mono">GEN 1:1</code> }}
                       />
                     </span>

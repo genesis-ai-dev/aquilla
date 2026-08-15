@@ -13,7 +13,7 @@ import { Check, X } from "lucide-react"
 import { RevealableInput } from "@/components/ui/revealable-input"
 import { Spinner } from "@/components/ui/spinner"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
-import { useT } from "@/lib/i18n/I18nProvider"
+import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
 import { FrontierAuthError } from "@/lib/frontier/auth"
 import { isFieldInvalid } from "@/lib/forms/field-state"
 import { useSubmitError } from "@/lib/forms/submit-error"
@@ -44,6 +44,7 @@ export function passwordStrength(password: string): "weak" | "medium" | "strong"
 }
 
 function PasswordChecklist({ password, email }: { password: string; email: string }) {
+  const t = useT()
   const checks = checkPasswordRequirements(password, email)
   const strength = passwordStrength(password)
   const hasTyped = password.length > 0
@@ -57,8 +58,8 @@ function PasswordChecklist({ password, email }: { password: string; email: strin
   const strengthWidth = { weak: "w-1/3", medium: "w-2/3", strong: "w-full" }[strength]
 
   const items: { key: keyof typeof checks; label: string }[] = [
-    { key: "minLength", label: "At least 8 characters" },
-    { key: "notContainsEmail", label: "Does not contain your email" },
+    { key: "minLength", label: t("auth.resetPassword.checklistMinLength") },
+    { key: "notContainsEmail", label: t("auth.signup.checklistNotContainsEmail") },
   ]
 
   return (
@@ -81,44 +82,51 @@ function PasswordChecklist({ password, email }: { password: string; email: strin
           <div className="h-1 w-full rounded bg-muted overflow-hidden">
             <div className={`h-full rounded transition-all ${strengthColor} ${strengthWidth}`} />
           </div>
-          <p className="text-[10px] text-muted-foreground capitalize">Strength: {strength}</p>
+          <p className="text-[10px] text-muted-foreground capitalize">
+            {t("auth.resetPassword.checklistStrengthPrefix", { strength })}
+          </p>
         </div>
       )}
     </div>
   )
 }
 
-const signupSchema = z
-  .object({
-    username: z
-      .string()
-      .trim()
-      .min(3, "Username must be at least 3 characters")
-      .max(50, "Username must be at most 50 characters"),
-    email: z
-      .string()
-      .trim()
-      .min(1, "Email is required")
-      .email("Enter a valid email address"),
-    password: z.string().min(1, "Password is required"),
-  })
-  .superRefine((data, ctx) => {
-    const checks = checkPasswordRequirements(data.password, data.email)
-    if (!checks.minLength) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "Password must be at least 8 characters",
-        path: ["password"],
-      })
-    }
-    if (!checks.notContainsEmail) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "Password must not contain your email",
-        path: ["password"],
-      })
-    }
-  })
+/** Built per-render so its messages resolve in the active locale — the same
+ *  shape OrgCreateDialog uses. `lib/forms/schemas.ts` helpers stay English
+ *  because they cannot reach the `t()` hook (AQU-510). */
+function buildSignupSchema(t: TFunction) {
+  return z
+    .object({
+      username: z
+        .string()
+        .trim()
+        .min(3, t("auth.signup.usernameTooShort"))
+        .max(50, t("auth.signup.usernameTooLong")),
+      email: z
+        .string()
+        .trim()
+        .min(1, t("auth.resetPassword.emailRequired"))
+        .email(t("auth.resetPassword.emailInvalid")),
+      password: z.string().min(1, t("auth.signup.passwordRequired")),
+    })
+    .superRefine((data, ctx) => {
+      const checks = checkPasswordRequirements(data.password, data.email)
+      if (!checks.minLength) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: t("auth.resetPassword.passwordTooShort"),
+          path: ["password"],
+        })
+      }
+      if (!checks.notContainsEmail) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: t("auth.signup.passwordContainsEmail"),
+          path: ["password"],
+        })
+      }
+    })
+}
 
 interface FrontierSignupFormProps {
   onSuccess: () => void
@@ -135,7 +143,7 @@ export function FrontierSignupForm({ onSuccess, initialEmail }: FrontierSignupFo
 
   const form = useForm({
     defaultValues: { username: "", email: initialEmail ?? "", password: "" },
-    validators: { onSubmit: signupSchema },
+    validators: { onSubmit: buildSignupSchema(t) },
     onSubmit: async ({ value }) => {
       clearSubmitError()
       try {
@@ -175,7 +183,7 @@ export function FrontierSignupForm({ onSuccess, initialEmail }: FrontierSignupFo
     >
       {!isOnline && (
         <p className="rounded-md bg-muted px-3 py-2 text-sm text-muted-foreground">
-          You're offline — connect to sign in
+          {t("auth.login.offlineNotice")}
         </p>
       )}
       <FieldGroup>
@@ -185,7 +193,7 @@ export function FrontierSignupForm({ onSuccess, initialEmail }: FrontierSignupFo
             const invalid = isFieldInvalid(field)
             return (
               <Field data-invalid={invalid}>
-                <FieldLabel htmlFor="s-user">Username</FieldLabel>
+                <FieldLabel htmlFor="s-user">{t("auth.signup.usernameLabel")}</FieldLabel>
                 <Input
                   id="s-user"
                   name={field.name}
@@ -207,7 +215,7 @@ export function FrontierSignupForm({ onSuccess, initialEmail }: FrontierSignupFo
             const invalid = isFieldInvalid(field)
             return (
               <Field data-invalid={invalid}>
-                <FieldLabel htmlFor="s-email">Email</FieldLabel>
+                <FieldLabel htmlFor="s-email">{t("common.email")}</FieldLabel>
                 <Input
                   id="s-email"
                   name={field.name}
@@ -235,7 +243,7 @@ export function FrontierSignupForm({ onSuccess, initialEmail }: FrontierSignupFo
                 const invalid = isFieldInvalid(field)
                 return (
                   <Field data-invalid={invalid}>
-                    <FieldLabel htmlFor="s-pass">Password</FieldLabel>
+                    <FieldLabel htmlFor="s-pass">{t("auth.login.passwordLabel")}</FieldLabel>
                     <RevealableInput
                       id="s-pass"
                       name={field.name}
@@ -257,7 +265,7 @@ export function FrontierSignupForm({ onSuccess, initialEmail }: FrontierSignupFo
       {submitError && <FieldError>{submitError}</FieldError>}
       <Button type="submit" form="signup-form" className="w-full">
         {form.state.isSubmitting && <Spinner data-icon="inline-start" />}
-        {form.state.isSubmitting ? "Creating account…" : "Create account"}
+        {form.state.isSubmitting ? t("auth.signup.submitCreating") : t("auth.signup.submitDefault")}
       </Button>
     </form>
   )

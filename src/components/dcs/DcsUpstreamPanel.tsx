@@ -30,6 +30,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Spinner } from "@/components/ui/spinner"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useProjectSettings } from "@/hooks/useProjectSettings"
+import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
 import { buildFileScopedTokenFetcher } from "@/lib/sync/cqrs-bridge"
 import { FRONTIER_API_URL } from "@/lib/sync/sync-token"
 import { fetchProjectFiles, fetchAllFileCells } from "@/lib/sync/cells-read"
@@ -109,6 +110,7 @@ function isNewer(cursor: DcsCursor, latest: DcsCatalogEntry): boolean {
 }
 
 export function DcsUpstreamPanel({ projectId, roleLevel, client }: DcsUpstreamPanelProps) {
+  const t = useT()
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
   const author = session?.username ?? "local"
@@ -256,7 +258,7 @@ export function DcsUpstreamPanel({ projectId, roleLevel, client }: DcsUpstreamPa
       //    unchanged cells are suppressed. Keyed by cellId; carries the chain
       //    head eventId (the parent for a commit) and the owning fileId (deletes
       //    are scoped by file).
-      const currentCells = await buildCurrentCells(projectId, getToken)
+      const currentCells = await buildCurrentCells(projectId, getToken, t)
 
       // 3. Compute + apply the delta through the typed source emitters.
       const delta = await computeDelta({
@@ -290,7 +292,7 @@ export function DcsUpstreamPanel({ projectId, roleLevel, client }: DcsUpstreamPa
     } finally {
       busyRef.current = false
     }
-  }, [cursor, check, canImport, dcs, projectId, getToken, runApply, patch])
+  }, [cursor, check, canImport, dcs, projectId, getToken, runApply, patch, t])
 
   // Repair: re-read the source at the PINNED ref with today's parser and fix any
   // cells that were imported incorrectly (e.g. by a since-fixed parser bug).
@@ -309,7 +311,7 @@ export function DcsUpstreamPanel({ projectId, roleLevel, client }: DcsUpstreamPa
     setRepairState({ kind: "scanning" })
     try {
       const entry = await dcs.getCatalogEntry(cursor.owner, cursor.repo, cursor.ref)
-      const currentCells = await buildCurrentCells(projectId, getToken)
+      const currentCells = await buildCurrentCells(projectId, getToken, t)
       const delta = await computeRepairDelta({ client: dcs, entry, currentCells })
       const total = delta.creates.length + delta.commits.length + delta.deletes.length
       if (total === 0) {
@@ -325,7 +327,7 @@ export function DcsUpstreamPanel({ projectId, roleLevel, client }: DcsUpstreamPa
     } finally {
       busyRef.current = false
     }
-  }, [cursor, canImport, dcs, projectId, getToken])
+  }, [cursor, canImport, dcs, projectId, getToken, t])
 
   const handleRepairApply = useCallback(async () => {
     if (!cursor || busyRef.current) return
@@ -345,8 +347,7 @@ export function DcsUpstreamPanel({ projectId, roleLevel, client }: DcsUpstreamPa
       if (!freshCursor || freshCursor.commitSha !== cursor.commitSha) {
         setRepairState({
           kind: "error",
-          message:
-            "the upstream link changed while confirming (detached or re-imported in another tab). Nothing was applied — run the scan again.",
+          message: t("importExport.dcs.repairStaleCursorError"),
         })
         return
       }
@@ -366,7 +367,7 @@ export function DcsUpstreamPanel({ projectId, roleLevel, client }: DcsUpstreamPa
     } finally {
       busyRef.current = false
     }
-  }, [cursor, canImport, repairState, refresh, runApply])
+  }, [cursor, canImport, repairState, refresh, runApply, t])
 
   // Detach: the ONLY sanctioned way out of the DCS lockdown. Persist the
   // settings with the dcsUpstream key REMOVED. patch() merges shallowly (the
@@ -394,8 +395,8 @@ export function DcsUpstreamPanel({ projectId, roleLevel, client }: DcsUpstreamPa
             out.kind === "error"
               ? out.message
               : out.kind === "blocked"
-                ? `blocked (${out.reason})`
-                : "conflict — settings changed elsewhere; try again",
+                ? t("importExport.dcs.settingsBlocked", { reason: out.reason })
+                : t("importExport.dcs.settingsConflict"),
         })
       }
     } catch (err) {
@@ -403,7 +404,7 @@ export function DcsUpstreamPanel({ projectId, roleLevel, client }: DcsUpstreamPa
     } finally {
       busyRef.current = false
     }
-  }, [cursor, canImport, patch])
+  }, [cursor, canImport, patch, t])
 
   // Not a DCS adapter project (or just detached) — render nothing.
   if (!cursor) return null
@@ -418,20 +419,22 @@ export function DcsUpstreamPanel({ projectId, roleLevel, client }: DcsUpstreamPa
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <DownloadCloud className="h-4 w-4 text-muted-foreground" />
-          Door43 upstream
+          {t("projectSettings.section.dcsUpstream")}
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
         <div className="text-sm text-muted-foreground">
-          This project mirrors a Door43 resource. Check for a newer published
-          release and import upstream changes into the source lane.
+          {t("importExport.dcs.panelDescription")}
         </div>
 
         <div className="flex flex-wrap items-center gap-1.5 text-xs">
+          {/* i18n-exempt Door43 owner/repo identifier */}
           <Badge variant="outline">{cursor.owner}/{cursor.repo}</Badge>
-          <Badge variant="secondary">pinned {cursor.ref}</Badge>
+          <Badge variant="secondary">{t("importExport.dcs.pinnedRefBadge", { ref: cursor.ref })}</Badge>
           <Badge variant="outline">
-            {cursor.trackMode === "head" ? "tracking HEAD" : "tracking release"}
+            {cursor.trackMode === "head"
+              ? t("importExport.dcs.trackingHead")
+              : t("importExport.dcs.trackingRelease")}
           </Badge>
         </div>
 
@@ -442,38 +445,39 @@ export function DcsUpstreamPanel({ projectId, roleLevel, client }: DcsUpstreamPa
             disabled={checking || importing || repairing || detaching || !jwt}
           >
             {checking ? <Spinner className="h-4 w-4" /> : <RefreshCw className="h-4 w-4" />}
-            Check for updates
+            {t("importExport.dcs.checkForUpdates")}
           </Button>
         </div>
 
         {check.kind === "up-to-date" && (
           <div className="flex items-center gap-2 rounded border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-100">
             <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
-            Up to date with {check.latest.ref}.
+            {t("importExport.dcs.upToDateWith", { ref: check.latest.ref })}
           </div>
         )}
 
         {check.kind === "update-available" && (
           <div className="space-y-2 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm dark:border-amber-800 dark:bg-amber-950">
             <p className="font-medium text-amber-900 dark:text-amber-100">
-              {cursor.ref} → {check.latest.ref}, {check.changedFiles}{" "}
-              {check.changedFiles === 1 ? "file" : "files"} changed
+              {t("importExport.dcs.updateAvailable", {
+                count: check.changedFiles,
+                oldRef: cursor.ref,
+                newRef: check.latest.ref,
+              })}
             </p>
             <p className="text-amber-800 dark:text-amber-200">
-              Importing advances the source cells to {check.latest.ref}.
-              Downstream linked projects will show stale flags for the affected
-              cells so translators can review them.
+              {t("importExport.dcs.importAdvancesNote", { ref: check.latest.ref })}
             </p>
             {canImport ? (
               <div className="flex justify-end">
                 <Button onClick={handleImport} disabled={importing || repairing || detaching}>
                   {importing ? <Spinner className="h-4 w-4" /> : <DownloadCloud className="h-4 w-4" />}
-                  Import changes
+                  {t("importExport.dcs.importChanges")}
                 </Button>
               </div>
             ) : (
               <p className="text-xs text-amber-700 dark:text-amber-300">
-                Maintainer or above required to import upstream changes.
+                {t("importExport.dcs.importRoleRequired")}
               </p>
             )}
           </div>
@@ -482,7 +486,7 @@ export function DcsUpstreamPanel({ projectId, roleLevel, client }: DcsUpstreamPa
         {check.kind === "error" && (
           <div className="flex items-start gap-2 rounded border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-            <span>Could not check for updates: {check.message}</span>
+            <span>{t("importExport.dcs.checkFailed", { message: check.message })}</span>
           </div>
         )}
 
@@ -490,9 +494,11 @@ export function DcsUpstreamPanel({ projectId, roleLevel, client }: DcsUpstreamPa
           <div className="flex items-start gap-2 rounded border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-100">
             <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
             <span>
-              Imported: {importState.created} created, {importState.updated}{" "}
-              updated, {importState.removed} removed. Downstream linked projects
-              will now show stale flags for the changed cells.
+              {t("importExport.dcs.importSummary", {
+                created: importState.created,
+                updated: importState.updated,
+                removed: importState.removed,
+              })}
             </span>
           </div>
         )}
@@ -500,7 +506,7 @@ export function DcsUpstreamPanel({ projectId, roleLevel, client }: DcsUpstreamPa
         {importState.kind === "error" && (
           <div className="flex items-start gap-2 rounded border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-            <span>Import failed: {importState.message}</span>
+            <span>{t("importExport.dcs.importFailed", { message: importState.message })}</span>
           </div>
         )}
 
@@ -512,24 +518,25 @@ export function DcsUpstreamPanel({ projectId, roleLevel, client }: DcsUpstreamPa
               disabled={checking || importing || repairing || detaching || !jwt}
             >
               {repairing ? <Spinner className="h-4 w-4" /> : <Wrench className="h-4 w-4" />}
-              Re-sync content
+              {t("importExport.dcs.resyncButton")}
             </Button>
             <p className="text-xs text-muted-foreground">
-              Scans the source at the pinned version for cells that were
-              imported incorrectly. Nothing is changed until you confirm.
+              {t("importExport.dcs.resyncHint")}
             </p>
             {repairState.kind === "scanned" && (
               <div className="space-y-2 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm dark:border-amber-800 dark:bg-amber-950">
                 <p className="font-medium text-amber-900 dark:text-amber-100">
-                  Scan complete: {repairState.delta.commits.length} to repair,{" "}
-                  {repairState.delta.creates.length} new,{" "}
-                  {repairState.delta.deletes.length} to remove.
+                  {t("importExport.dcs.resyncScanSummary", {
+                    repair: repairState.delta.commits.length,
+                    created: repairState.delta.creates.length,
+                    removed: repairState.delta.deletes.length,
+                  })}
                 </p>
                 {repairState.delta.deletes.length > 0 && (
                   <p className="text-amber-800 dark:text-amber-200">
-                    {repairState.delta.deletes.length}{" "}
-                    {repairState.delta.deletes.length === 1 ? "cell" : "cells"} will be
-                    removed — translations attached to them will be hidden.
+                    {t("importExport.dcs.resyncRemovalWarning", {
+                      count: repairState.delta.deletes.length,
+                    })}
                   </p>
                 )}
                 <div className="flex justify-end">
@@ -539,16 +546,21 @@ export function DcsUpstreamPanel({ projectId, roleLevel, client }: DcsUpstreamPa
                     disabled={checking || importing || detaching}
                   >
                     <Wrench className="h-4 w-4" />
-                    Apply re-sync…
+                    {t("importExport.dcs.applyResyncEllipsis")}
                   </Button>
                 </div>
                 <ConfirmActionDialog
                   open={repairConfirmOpen}
                   onOpenChange={setRepairConfirmOpen}
-                  title="Apply re-sync?"
-                  description={`${repairState.delta.commits.length} ${repairState.delta.commits.length === 1 ? "cell" : "cells"} will be repaired and ${repairState.delta.creates.length} created. ${repairState.delta.deletes.length} ${repairState.delta.deletes.length === 1 ? "cell" : "cells"} will be removed — translations attached to removed cells will be hidden.`}
-                  confirmLabel="Apply re-sync"
-                  checkboxLabel="I understand removed cells hide their translations."
+                  title={t("importExport.dcs.applyResyncConfirmTitle")}
+                  description={`${t("importExport.dcs.applyResyncConfirmRepairs", {
+                    count: repairState.delta.commits.length,
+                    created: repairState.delta.creates.length,
+                  })} ${t("importExport.dcs.applyResyncConfirmRemovals", {
+                    count: repairState.delta.deletes.length,
+                  })}`}
+                  confirmLabel={t("importExport.dcs.applyResyncConfirmLabel")}
+                  checkboxLabel={t("importExport.dcs.applyResyncCheckbox")}
                   variant="destructive"
                   onConfirm={() => { void handleRepairApply() }}
                 />
@@ -557,13 +569,13 @@ export function DcsUpstreamPanel({ projectId, roleLevel, client }: DcsUpstreamPa
             {repairState.kind === "done" && (
               <p className="text-xs text-emerald-700 dark:text-emerald-400">
                 {repairState.repaired === 0
-                  ? "Everything already matches the pinned source."
-                  : `Repaired ${repairState.repaired} ${repairState.repaired === 1 ? "cell" : "cells"}.`}
+                  ? t("importExport.dcs.resyncNoChanges")
+                  : t("importExport.dcs.resyncRepaired", { count: repairState.repaired })}
               </p>
             )}
             {repairState.kind === "error" && (
               <p className="text-xs text-destructive">
-                Re-sync failed: {repairState.message}
+                {t("importExport.dcs.resyncFailed", { message: repairState.message })}
               </p>
             )}
           </div>
@@ -578,24 +590,25 @@ export function DcsUpstreamPanel({ projectId, roleLevel, client }: DcsUpstreamPa
               disabled={checking || importing || repairing || detaching}
             >
               {detaching ? <Spinner className="h-4 w-4" /> : <Unlink className="h-4 w-4" />}
-              Detach from upstream
+              {t("importExport.dcs.detachButton")}
             </Button>
             <p className="text-xs text-muted-foreground">
-              Permanently unlink this project from {cursor.owner}/{cursor.repo} and
-              make source cells editable again.
+              {t("importExport.dcs.detachHint", { repo: `${cursor.owner}/${cursor.repo}` })}
             </p>
             {detachState.kind === "error" && (
               <p className="text-xs text-destructive">
-                Detach failed: {detachState.message}
+                {t("importExport.dcs.detachFailed", { message: detachState.message })}
               </p>
             )}
             <ConfirmActionDialog
               open={detachConfirmOpen}
               onOpenChange={setDetachConfirmOpen}
-              title="Detach from upstream?"
-              description={`This project will stop receiving updates from ${cursor.owner}/${cursor.repo}. Source cells become editable. This cannot be undone from here — relinking requires a fresh import.`}
-              confirmLabel="Detach"
-              checkboxLabel="I understand this permanently unlinks the project."
+              title={t("importExport.dcs.detachConfirmTitle")}
+              description={t("importExport.dcs.detachConfirmDescription", {
+                repo: `${cursor.owner}/${cursor.repo}`,
+              })}
+              confirmLabel={t("projectSettings.sourceLink.detachConfirmButton")}
+              checkboxLabel={t("importExport.dcs.detachConfirmCheckbox")}
               variant="destructive"
               onConfirm={() => { void handleDetach() }}
             />
@@ -614,12 +627,15 @@ export function DcsUpstreamPanel({ projectId, roleLevel, client }: DcsUpstreamPa
 async function buildCurrentCells(
   projectId: string,
   getToken: (fileId: string) => Promise<string | null>,
+  // Its failure message surfaces verbatim in the panel, so the caller's
+  // translate function is threaded in rather than resolved at module scope.
+  t: TFunction,
 ): Promise<Map<string, CurrentCell>> {
   const out = new Map<string, CurrentCell>()
   // Any fileId mints a project-scoped token (the token's project claim, not the
   // fileId, is what authorizes the reads).
   const listToken = await getToken("__dcs_list__")
-  if (!listToken) throw new Error("Could not mint a sync token for this project.")
+  if (!listToken) throw new Error(t("importExport.dcs.syncTokenError"))
   const files = await fetchProjectFiles(projectId, listToken)
   for (const file of files) {
     const fileToken = (await getToken(file.fileId)) ?? listToken

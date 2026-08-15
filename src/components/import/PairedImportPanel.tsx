@@ -21,6 +21,7 @@
 import { useState, useCallback } from "react"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { useT } from "@/lib/i18n/I18nProvider"
 import type { SourceCellRef } from "@/lib/import"
 import { applyEBibleTargetImport } from "@/lib/import"
 import { decodeImportText } from "@/lib/import/ai-recipe"
@@ -58,6 +59,7 @@ export function PairedImportPanel({
   onImported,
   onCancel,
 }: PairedImportPanelProps) {
+  const t = useT()
   const [step, setStep] = useState<PanelStep>("file")
   const [error, setError] = useState<string | null>(null)
   const [sheets, setSheets] = useState<SpreadsheetSheet[]>([])
@@ -73,14 +75,14 @@ export function PairedImportPanel({
     try {
       assertSourceUploadByteLength(file.size)
       if (ext === "xls") {
-        setError("Legacy .xls workbooks are not supported. Save the file as .xlsx or CSV and try again.")
+        setError(t("importExport.spreadsheet.legacyXlsUnsupported"))
         return
       }
       if (ext === "xlsx") {
         const buf = await file.arrayBuffer()
         const parsed = await parseXlsxToSheets(buf)
         if (parsed.length === 0) {
-          setError("No sheets found in XLSX file.")
+          setError(t("importExport.spreadsheet.noSheetsFound"))
           return
         }
         setSheets(parsed)
@@ -99,9 +101,9 @@ export function PairedImportPanel({
         setStep("mapping")
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to parse file")
+      setError(err instanceof Error ? err.message : t("importExport.errors.failedToParseFile"))
     }
-  }, [])
+  }, [t])
 
   function handleMappingConfirm(mapping: ColumnMapping, hasHeader: boolean) {
     if (!selectedSheet) return
@@ -143,7 +145,7 @@ export function PairedImportPanel({
       )
       onImported(committedCount)
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Import failed")
+      setError(err instanceof Error ? err.message : t("importExport.errors.importFailed"))
       setStep("review")
     }
   }
@@ -153,10 +155,9 @@ export function PairedImportPanel({
     return (
       <div className="flex flex-col gap-4 py-2">
         <div>
-          <p className="text-sm font-medium">Import paired source + target</p>
+          <p className="text-sm font-medium">{t("importExport.paired.title")}</p>
           <p className="text-xs text-muted-foreground">
-            Upload a CSV or XLSX file where each row has both source and target text.
-            Rows are matched to existing source cells by canonical reference.
+            {t("importExport.paired.description")}
           </p>
         </div>
         <div
@@ -168,10 +169,10 @@ export function PairedImportPanel({
             if (file) handleFile(file)
           }}
         >
-          <p className="text-sm text-muted-foreground">Drop a CSV or XLSX file here, or</p>
+          <p className="text-sm text-muted-foreground">{t("importExport.spreadsheet.dropZoneHint")}</p>
           <label>
             <span className="inline-flex items-center rounded-md border border-input bg-background px-3 py-1.5 text-xs font-medium hover:bg-accent transition-colors">
-              Choose file
+              {t("editor.video.chooseFile")}
             </span>
             <input
               type="file"
@@ -183,11 +184,11 @@ export function PairedImportPanel({
               }}
             />
           </label>
-          <p className="text-xs text-muted-foreground">CSV, TSV, or XLSX</p>
+          <p className="text-xs text-muted-foreground">{t("importExport.spreadsheet.acceptedFormats")}</p>
         </div>
         {error && <p className="text-xs text-destructive">{error}</p>}
         <div className="flex justify-end">
-          <Button variant="ghost" onClick={onCancel}>Cancel</Button>
+          <Button variant="ghost" onClick={onCancel}>{t("common.cancel")}</Button>
         </div>
       </div>
     )
@@ -198,8 +199,8 @@ export function PairedImportPanel({
     return (
       <div className="flex flex-col gap-4 py-2">
         <div>
-          <p className="text-sm font-medium">Select a sheet</p>
-          <p className="text-xs text-muted-foreground">This XLSX has multiple sheets. Pick one to import.</p>
+          <p className="text-sm font-medium">{t("importExport.spreadsheet.selectSheetTitle")}</p>
+          <p className="text-xs text-muted-foreground">{t("importExport.spreadsheet.selectSheetHint")}</p>
         </div>
         <div className="flex flex-col gap-2">
           {sheets.map((s, i) => (
@@ -213,12 +214,12 @@ export function PairedImportPanel({
               }}
             >
               <p className="text-sm font-medium">{s.name}</p>
-              <p className="text-xs text-muted-foreground">{s.rows.length} row{s.rows.length !== 1 ? "s" : ""}</p>
+              <p className="text-xs text-muted-foreground">{t("importExport.spreadsheet.sheetRowCount", { count: s.rows.length })}</p>
             </button>
           ))}
         </div>
         <div className="flex justify-end">
-          <Button variant="ghost" onClick={onCancel}>Cancel</Button>
+          <Button variant="ghost" onClick={onCancel}>{t("common.cancel")}</Button>
         </div>
       </div>
     )
@@ -252,12 +253,12 @@ export function PairedImportPanel({
     return (
       <div className="flex flex-col gap-4 py-2">
         <div>
-          <p className="text-sm font-medium">Review matches</p>
+          <p className="text-sm font-medium">{t("importExport.review.title")}</p>
           <div className="mt-1 flex flex-wrap gap-3 text-xs text-muted-foreground">
-            <span>{matched.length} matched</span>
-            {conflicts.length > 0 && <span className="text-amber-600">{conflicts.length} conflict{conflicts.length !== 1 ? "s" : ""}</span>}
-            {orphans.length > 0 && <span>{orphans.length} unmatched row{orphans.length !== 1 ? "s" : ""}</span>}
-            {unmatchedSourceCount > 0 && <span>{unmatchedSourceCount} source cell{unmatchedSourceCount !== 1 ? "s" : ""} not covered</span>}
+            <span>{t("importExport.review.matchedCount", { count: matched.length })}</span>
+            {conflicts.length > 0 && <span className="text-amber-600">{t("importExport.review.conflictCount", { count: conflicts.length })}</span>}
+            {orphans.length > 0 && <span>{t("importExport.review.unmatchedRowCount", { count: orphans.length })}</span>}
+            {unmatchedSourceCount > 0 && <span>{t("importExport.review.uncoveredSourceCellCount", { count: unmatchedSourceCount })}</span>}
           </div>
         </div>
 
@@ -276,7 +277,7 @@ export function PairedImportPanel({
                   <p className="truncate text-xs text-foreground/80">{m.incomingText}</p>
                   {m.hasConflict && (
                     <p className="truncate text-[10px] text-amber-600">
-                      Replaces: {m.currentText}
+                      {t("importExport.review.replacesExisting", { text: m.currentText })}
                     </p>
                   )}
                 </div>
@@ -297,15 +298,15 @@ export function PairedImportPanel({
               setSelectedCellIds(allSelected ? new Set() : allIds)
             }}
           >
-            {selectedCellIds.size === matched.length ? "Deselect all" : "Select all"}
+            {selectedCellIds.size === matched.length ? t("importExport.review.deselectAll") : t("common.selectAll")}
           </button>
           <div className="flex gap-2">
-            <Button variant="ghost" onClick={onCancel}>Cancel</Button>
+            <Button variant="ghost" onClick={onCancel}>{t("common.cancel")}</Button>
             <Button
               disabled={selectedCellIds.size === 0}
               onClick={handleApply}
             >
-              Import {selectedCellIds.size} cell{selectedCellIds.size !== 1 ? "s" : ""}
+              {t("importExport.review.importCellCount", { count: selectedCellIds.size })}
             </Button>
           </div>
         </div>
@@ -316,8 +317,8 @@ export function PairedImportPanel({
   // ── Step: importing ─────────────────────────────────────────────────────────
   return (
     <div className="flex flex-col items-center justify-center gap-3 py-8">
-      <p className="text-sm font-medium">Importing…</p>
-      <p className="text-xs text-muted-foreground">Applying target translations to cells.</p>
+      <p className="text-sm font-medium">{t("importExport.action.importing")}</p>
+      <p className="text-xs text-muted-foreground">{t("importExport.paired.applyingTargets")}</p>
     </div>
   )
 }

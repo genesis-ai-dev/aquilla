@@ -45,6 +45,9 @@ const REQUIRED_ROLE: Record<string, number> = {
   "cell.audio.remove": ROLE.CONTRIBUTOR,
   "cell.audio.rename": ROLE.CONTRIBUTOR,
   "cell.audio.trim": ROLE.CONTRIBUTOR,
+  // Stage 4: pairing a subtitle line with the cue that performs it is ordinary
+  // dubbing work, not structure.
+  "cell.link.set": ROLE.CONTRIBUTOR,
   "cell.audio.measure": ROLE.CONTRIBUTOR,
 
   "file.create": ROLE.PROJECT_LEAD,

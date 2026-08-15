@@ -5,7 +5,13 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 vi.mock("./cqrs-bridge", () => ({ getCqrsOutboxBridge: () => null }))
 vi.mock("./outbox", () => ({ enqueueOutboxEvent: vi.fn(async () => {}) }))
 
-import { emitCellAudioTrim, emitCellRetime, emitFileTrackSet, emitFileVideoSet } from "./events-emit"
+import {
+  emitCellAudioTrim,
+  emitCellLinkSet,
+  emitCellRetime,
+  emitFileTrackSet,
+  emitFileVideoSet,
+} from "./events-emit"
 import { enqueueOutboxEvent } from "./outbox"
 
 const mockEnqueue = enqueueOutboxEvent as unknown as ReturnType<typeof vi.fn>
@@ -64,6 +70,54 @@ describe("emitCellAudioTrim", () => {
     expect(Object.keys(ev.payload).sort()).toEqual(["audioId", "trimEndMs", "trimStartMs"])
     expect(ev.payload.trimStartMs).toBeNull()
     expect(ev.payload.trimEndMs).toBeNull()
+  })
+})
+
+describe("emitCellLinkSet", () => {
+  it("puts the SUBTITLE side on the envelope and the cue in the payload", async () => {
+    // The split is what lets per-file auth and routing work without a second
+    // lookup — the same shape comment.* uses.
+    await emitCellLinkSet({
+      projectId: "p1",
+      fileId: "f-subs",
+      cellId: "sub-12",
+      toFileId: "f-cues",
+      toCellId: "cue-7",
+      linked: true,
+      origin: "auto",
+      confidence: 0.92,
+      author: "u",
+    })
+    const ev = mockEnqueue.mock.calls.at(-1)![0] as any
+    expect(ev.kind).toBe("cell.link.set")
+    expect(ev.fileId).toBe("f-subs")
+    expect(ev.cellId).toBe("sub-12")
+    expect(ev.parentId).toBeNull()
+    expect(ev.payload).toEqual({
+      kind: "text-audio",
+      toFileId: "f-cues",
+      toCellId: "cue-7",
+      linked: true,
+      origin: "auto",
+      confidence: 0.92,
+    })
+  })
+
+  it("states linked: false to unlink — never an omitted field", async () => {
+    await emitCellLinkSet({
+      projectId: "p1", fileId: "f-subs", cellId: "sub-12",
+      toFileId: "f-cues", toCellId: "cue-7",
+      linked: false, origin: "manual", author: "u",
+    })
+    const ev = mockEnqueue.mock.calls.at(-1)![0] as any
+    // Present-and-false, with confidence explicitly null: the projection plain-
+    // assigns `linked`, so an absent key could only mean "leave it alone" —
+    // the exact ambiguity that wiped every take's trim window in stage 4.5.
+    expect(Object.keys(ev.payload).sort()).toEqual([
+      "confidence", "kind", "linked", "origin", "toCellId", "toFileId",
+    ])
+    expect(ev.payload.linked).toBe(false)
+    expect(ev.payload.confidence).toBeNull()
   })
 })
 

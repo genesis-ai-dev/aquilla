@@ -516,6 +516,55 @@ export async function emitCellAudioTrim(input: CellAudioTrimInput): Promise<stri
   return eventId
 }
 
+export interface CellLinkSetInput {
+  projectId: string
+  /** The SUBTITLE side — rides the envelope, so per-file auth works. */
+  fileId: string
+  cellId: string
+  /** The AUDIO CUE side, in the hidden `role: "audio-cues"` sibling file. */
+  toFileId: string
+  toCellId: string
+  linked: boolean
+  origin: "auto" | "manual"
+  /** The linker's score; null for a hand edit. Diagnostic only. */
+  confidence?: number | null
+  author: string
+  clientTs?: number
+}
+
+/**
+ * Emit a `cell.link.set` — one edge between a subtitle cell and an audio cue.
+ *
+ * `linked` is ALWAYS stated. An unlink is `linked: false`, never an omitted
+ * field: the server keys the row on the two endpoints and plain-assigns the
+ * flag, so a missing value could only ever mean "leave it alone", which is
+ * exactly the ambiguity that cost every take its trim window in stage 4.5.
+ *
+ * The import-time linker emits several hundred of these in one pass. They are
+ * ordinary outbox events — no bulk path — because that is what makes a later
+ * hand correction, an undo, and cross-device sync all work the same way.
+ */
+export async function emitCellLinkSet(input: CellLinkSetInput): Promise<string> {
+  const { eventId } = await enqueueEvent({
+    kind: "cell.link.set",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    cellId: input.cellId,
+    parentId: null,
+    author: input.author,
+    payload: {
+      kind: "text-audio",
+      toFileId: input.toFileId,
+      toCellId: input.toCellId,
+      linked: input.linked,
+      origin: input.origin,
+      confidence: input.confidence ?? null,
+    },
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
 export interface CellAudioMeasureInput {
   projectId: string
   fileId: string

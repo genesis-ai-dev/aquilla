@@ -41,6 +41,9 @@ export type OutboxEventKind =
   | "cell.audio.rename"
   | "cell.audio.trim"
   | "cell.audio.measure"
+  // Stage 4: one edge between a subtitle cell and an audio cue
+  // (contributor-level; non-chain-mutating).
+  | "cell.link.set"
   // Back-translation (contributor-level; non-chain-mutating).
   | "cell.backtranslation.set"
   // File lifecycle.
@@ -303,6 +306,22 @@ export interface OutboxEventPayloads {
   "cell.audio.measure": {
     audioId: string
     durationMs: number
+  }
+  /**
+   * Stage 4: link or unlink ONE subtitle cell and ONE audio cue. The subtitle
+   * side rides the envelope (fileId/cellId), the cue rides the payload.
+   *
+   * `linked` is required and boolean — an unlink is a stated `false`, never an
+   * absent field. Same rule as the trim window above, and for the same reason:
+   * absence must never be the way something is expressed.
+   */
+  "cell.link.set": {
+    kind: "text-audio"
+    toFileId: string
+    toCellId: string
+    linked: boolean
+    origin: "auto" | "manual"
+    confidence: number | null
   }
 
   /**

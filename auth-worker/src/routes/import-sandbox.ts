@@ -23,6 +23,7 @@ import {
   sandboxReadFile,
 } from "../lib/agent/sandbox-client"
 import { MAX_SANDBOX_PROGRAM_CHARS } from "../../../shared/import-contract"
+import { DEFAULT_LLM_MODEL_ID } from "../lib/model-defaults"
 
 const imports = new Hono<{ Bindings: Env; Variables: Variables }>()
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
@@ -301,7 +302,7 @@ imports.post("/parse/:projectId", authMiddleware, async (c) => {
     || c.env.AGENT_MODEL_DEFAULT
     || settings.defaultLlmModel
     || c.env.DEFAULT_LLM_MODEL
-    || "anthropic/claude-sonnet-4.5"
+    || DEFAULT_LLM_MODEL_ID
   const aiGuard = await runAiGuard(model, user.id, c.env.AQUILLA_PG, c.env)
   if (!aiGuard.ok) return c.json(aiGuard.body, aiGuard.status)
   const project = await c.env.AQUILLA_PG.prepare("SELECT org_id FROM projects WHERE id = ?")

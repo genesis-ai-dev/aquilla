@@ -10,7 +10,6 @@ import { useMemo, useState } from "react"
 import { Bot, Maximize2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
-import type { CellContext } from "@/lib/cell-context"
 import type { ContextChip } from "@/lib/agent/context-chip"
 import { AgentDockView, type AgentDockViewProps } from "./agent/AgentDockView"
 import { CreditsDial, type CreditsDialProps } from "./agent/CreditsDial"
@@ -27,12 +26,10 @@ export interface BibleSummaryContext {
 }
 
 export interface AgentDockPanelProps {
-  /** The currently focused cell; wired in ProjectWorkspace via focusedCellIdRef */
-  currentCell: CellContext | null
   /** Agent-run wiring. */
   agent: Omit<
     AgentDockViewProps,
-    "currentCell" | "suggestedActions" | "pendingPrompt" | "onPendingPromptConsumed" | "pendingChip" | "onPendingChipConsumed"
+    "suggestedActions" | "pendingPrompt" | "onPendingPromptConsumed" | "pendingChip" | "onPendingChipConsumed"
   >
   /** When a scripture file is open, shows Summarize book/chapter buttons that
    *  run an agent-backed, vetted-resource summary. */
@@ -51,7 +48,7 @@ export interface AgentDockPanelProps {
 }
 
 export function AgentDockPanel({
-  currentCell, agent, bibleSummary, pendingChip, onPendingChipConsumed, credits, onExpand, expanded,
+  agent, bibleSummary, pendingChip, onPendingChipConsumed, credits, onExpand, expanded,
 }: AgentDockPanelProps) {
   // A summary prompt queued by a button tap; AgentDockView runs it once.
   const [pendingAgentPrompt, setPendingAgentPrompt] = useState<string | null>(null)
@@ -119,7 +116,6 @@ export function AgentDockPanel({
       ) : (
         <AgentDockView
           {...agent}
-          currentCell={currentCell}
           suggestedActions={summaryActions}
           pendingPrompt={pendingAgentPrompt}
           onPendingPromptConsumed={() => setPendingAgentPrompt(null)}

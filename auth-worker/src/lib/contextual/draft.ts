@@ -17,8 +17,7 @@ import {
 } from "./project-context"
 import { chargeBudget, type AmbiguityEntry, type LlmCall, type RunBudget, type SpanDraft } from "./types"
 
-export const CONTEXTUAL_PROMPT_VERSION = "contextual-draft-v1"
-const CLIP = 300
+export const CONTEXTUAL_PROMPT_VERSION = "contextual-draft-v2"
 
 export interface ExamplePair {
   cellId?: string
@@ -69,8 +68,10 @@ export function promptFingerprint(prompt: string): string {
   return (hash >>> 0).toString(16).padStart(8, "0")
 }
 
-function clip(s: string, n: number): string {
-  return s.length > n ? `${s.slice(0, n)}…` : s
+// Keep supporting metadata bounded without truncating source or target text.
+// Translation examples and preceding segments are serialized in full below.
+function clip(value: string, maxLength: number): string {
+  return value.length > maxLength ? `${value.slice(0, maxLength)}…` : value
 }
 
 function performerSystemPrompt(deps: PerformSpanDeps): string {
@@ -152,13 +153,13 @@ function userPrompt(deps: PerformSpanDeps): string {
   const examplesBlock =
     deps.examples.length > 0
       ? `Translation pairs from this project (imitate them):\n${deps.examples
-          .map((e) => `${e.validated ? "✓" : "·"} ${clip(e.source, CLIP)} → ${clip(e.target, CLIP)}`)
+          .map((e) => `${e.validated ? "✓" : "·"} ${JSON.stringify(e.source)} → ${JSON.stringify(e.target)}`)
           .join("\n")}\n\n`
       : ""
   const precedingBlock =
     deps.precedingValidated.length > 0
       ? `Immediately preceding, already-translated segments (continue their discourse flow):\n${deps.precedingValidated
-          .map((p) => `${p.canonicalRef ?? "·"}: ${clip(p.source, CLIP)} → ${clip(p.target, CLIP)}`)
+          .map((p) => `${p.canonicalRef ?? "·"}: ${JSON.stringify(p.source)} → ${JSON.stringify(p.target)}`)
           .join("\n")}\n\n`
       : ""
   const constraintsById = new Map((deps.constraints ?? []).map((c) => [c.cellId, c.constraints]))

@@ -89,6 +89,7 @@ Expensive format/agent/access journeys live as `*.spec.ts` and run on
 | Org access lifecycle (multi-path revoke) | `e2e/specs/orgs/org-access-lifecycle.spec.ts` |
 | Legacy D1-only first login | `e2e/specs/auth/legacy-user-first-login.spec.ts` |
 | Agent changeset approval | `e2e/specs/agent/changeset-approval.spec.ts` |
+| Translate-as-read drafting workflow | `e2e/specs/ai/translate-as-read.spec.ts` |
 | Agent draft / sidebar | `e2e/specs/ai/agent-draft.spec.ts` |
 | Completion races / lanes / footnotes | `e2e/specs/ai/completion-*.spec.ts` |
 | Agent-import sandbox | `e2e/specs/agent-import.spec.ts` |

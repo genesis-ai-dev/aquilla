@@ -49,7 +49,7 @@ export const env = {
   EMAIL_FROM: "noreply@support.aquilla.app",
   BASE_URL: "https://aquilla.app",
   SYNC_WORKER_URL: "https://api.aquilla.app/sync",
-  DEFAULT_LLM_MODEL: "anthropic/claude-sonnet-4.5",
+  DEFAULT_LLM_MODEL: "openai/gpt-5.6-luna",
   OPENROUTER_API_KEY: undefined as string | undefined,
   ENVIRONMENT: "test",
   // AI budget controls (AQU-265). Tests override these per-suite as needed.

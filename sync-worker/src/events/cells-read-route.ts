@@ -53,6 +53,7 @@
 // Auth: sync-token JWT scoped to `projectId`; minimum role viewer (100).
 
 import { verifyTokenForProject } from "../auth"
+import type { AiDraftProvenance } from "./types"
 
 export interface CellsReadEnv {
   AQUILLA_PG?: AquillaDb
@@ -75,6 +76,7 @@ interface CellRowRaw {
   last_edit_at: number
   validated: number
   ai_drafted: number
+  ai_draft: AiDraftProvenance | string | null
   word_count: number
   endorsement_count: number
   start_ms: number | null
@@ -104,6 +106,7 @@ interface CellRowOut {
   lastEditAt: number
   validated: boolean
   aiDrafted: boolean
+  aiDraft: AiDraftProvenance | null
   wordCount: number
   endorsementCount: number
   startMs: number | null
@@ -133,6 +136,19 @@ function parseMetadata(
   return raw
 }
 
+function parseAiDraft(raw: AiDraftProvenance | string | null): AiDraftProvenance | null {
+  if (raw == null) return null
+  if (typeof raw === "string") {
+    try {
+      const parsed = JSON.parse(raw) as AiDraftProvenance
+      return parsed && typeof parsed === "object" ? parsed : null
+    } catch {
+      return null
+    }
+  }
+  return raw
+}
+
 function mapRow(row: CellRowRaw): CellRowOut {
   return {
     cellId: row.cell_id,
@@ -149,6 +165,7 @@ function mapRow(row: CellRowRaw): CellRowOut {
     lastEditAt: row.last_edit_at,
     validated: row.validated === 1,
     aiDrafted: row.ai_drafted === 1,
+    aiDraft: row.ai_drafted === 1 ? parseAiDraft(row.ai_draft) : null,
     wordCount: row.word_count,
     endorsementCount: row.endorsement_count ?? 0,
     startMs: row.start_ms,
@@ -409,7 +426,7 @@ export async function handleCellsReadRequest(
   // walk dominates only at >10x current file sizes.
   const columns =
     "cell_id, side, target_lang, value, value_html, type, canonical_ref, anchor_cell_id, " +
-    "event_id, source_event_id, last_editor, last_edit_at, validated, ai_drafted, word_count, " +
+    "event_id, source_event_id, last_editor, last_edit_at, validated, ai_drafted, ai_draft, word_count, " +
     "endorsement_count, start_ms, end_ms, " +
     "medium, sequence_index, transcription, camera_state, metadata"
 

@@ -43,8 +43,8 @@ describe("GET/PATCH /api/v2/admin/settings", () => {
     expect(body.version).toBe(0)
     expect(body.settings).toEqual({})
     // env DEFAULT_LLM_MODEL in pg-test-env.
-    expect(body.effective.defaultLlmModel).toBe("anthropic/claude-sonnet-4.5")
-    expect(body.effective.allowedModels).toContain("anthropic/claude-haiku-4-5")
+    expect(body.effective.defaultLlmModel).toBe("openai/gpt-5.6-luna")
+    expect(body.effective.allowedModels).toContain("openai/gpt-5.6-luna")
   })
 
   it("PATCH sets an allowed model and GET reflects it (version bumps)", async () => {

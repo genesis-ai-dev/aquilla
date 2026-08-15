@@ -16,6 +16,7 @@ import { creditGuard, recordCredit } from "../lib/credits"
 import { getPlatformSettingsCached } from "../lib/platform-settings"
 import { openRouterExtras } from "../lib/llm-vendor"
 import { resolveProjectRole } from "../services/project-permissions"
+import { DEFAULT_LLM_MODEL_ID } from "../lib/model-defaults"
 
 const imports = new Hono<{ Bindings: Env; Variables: Variables }>()
 
@@ -125,7 +126,7 @@ imports.post(
     }
 
     const settings = await getPlatformSettingsCached(c.env)
-    const model = settings.defaultLlmModel || c.env.DEFAULT_LLM_MODEL || "anthropic/claude-sonnet-4.5"
+    const model = settings.defaultLlmModel || c.env.DEFAULT_LLM_MODEL || DEFAULT_LLM_MODEL_ID
     const aiGuard = await runAiGuard(model, user.id, c.env.AQUILLA_PG, c.env)
     if (!aiGuard.ok) return c.json(aiGuard.body, aiGuard.status)
 

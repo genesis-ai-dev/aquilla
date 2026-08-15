@@ -21,6 +21,7 @@ import { readCellsCache, writeCellsCache, mergeCellsDelta } from "@/lib/sync/cel
 import { peekOutboxBatch, subscribeToOutbox } from "@/lib/sync/outbox"
 import { formatVttTime } from "@/lib/video/vtt-generator"
 import { decodeHtmlEntities } from "@/lib/html-entities"
+import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
 
 // AQU-538 (slice 2): one source, N target lanes; `''` is the default lane.
 // SWARM-TODO(AQU-538): slice 1 adds `targetLang` to `CellRow` in
@@ -62,6 +63,8 @@ export interface CellData {
   hasPendingEdit?: boolean
   /** Current target head is machine-generated and has not been human-edited or approved. */
   aiDrafted?: boolean
+  /** Provenance for the current untouched AI draft; absent on human-owned text. */
+  aiDraft?: AiDraftProvenance
   cellLabel?: string
   original: string
   originalHtml?: string
@@ -171,6 +174,7 @@ function cellsEqual(a: CellData, b: CellData): boolean {
     a.fileId === b.fileId &&
     a.hasPendingEdit === b.hasPendingEdit &&
     a.aiDrafted === b.aiDrafted &&
+    a.aiDraft?.generatedAt === b.aiDraft?.generatedAt &&
     a.cellLabel === b.cellLabel &&
     a.original === b.original &&
     a.originalHtml === b.originalHtml &&
@@ -318,6 +322,7 @@ export function buildCellData(
     translated,
     translatedHtml: target?.valueHtml ?? undefined,
     aiDrafted: target?.aiDrafted ?? false,
+    aiDraft: target?.aiDraft ?? undefined,
     sourceEventId: source?.eventId,
     targetEventId: target?.eventId,
     targetSourceEventId: target?.sourceEventId ?? null,

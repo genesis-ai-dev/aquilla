@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
 import type { AgentFrame } from "@/lib/agent/protocol"
 
 // Stub the chat rail but keep the workbench seam: render each proposal
@@ -138,12 +138,72 @@ function workbenchProps(): AgentWorkbenchProps {
       author: "alice",
       roleLevel: 400,
       context: {},
-      currentCell: null,
       rules: [],
       resolveCell: () => undefined,
       onApplied: vi.fn(),
     },
     onClose: () => {},
+    onChooseFile: vi.fn(),
+    workspace: {
+      fileName: "Mark.md",
+      sourceLanguage: "English",
+      targetLanguage: "Italian",
+      focusedCellId: "c1",
+      totalCells: 2,
+      cells: [
+        {
+          cellId: "c1",
+          fileId: "f1",
+          ref: "MRK 1:1",
+          source: "The beginning",
+          sourceHtml: "<p>The <strong>beginning</strong></p>",
+          target: "L'inizio",
+          targetHtml: "<p>L'<em>inizio</em></p>",
+          status: "unvalidated",
+          healthRibbonPoint: {
+            id: "c1",
+            stage: "automatic",
+            rawScore: 72,
+            smoothedScore: 72,
+            evidenceWeight: 1,
+          },
+          validationStatus: "none",
+          activeValidators: [],
+          validationHistory: [],
+          canValidate: true,
+        },
+        {
+          cellId: "c2",
+          fileId: "f1",
+          ref: "MRK 1:2",
+          source: "As it is written",
+          target: "",
+          status: "empty",
+          healthRibbonPoint: {
+            id: "c2",
+            stage: "untranslated",
+            evidenceWeight: 0.1,
+          },
+          validationStatus: "empty",
+          activeValidators: [],
+          validationHistory: [],
+          canValidate: true,
+        },
+      ],
+      editable: true,
+      onCommitTarget: vi.fn(),
+      isAnonymous: false,
+      isCompletionConfigured: true,
+      isCompletionAvailable: true,
+      completing: new Map(),
+      onDraftTarget: vi.fn().mockResolvedValue(true),
+      onOpenComments: vi.fn(),
+      onOpenHistory: vi.fn(),
+      currentUsername: "alice",
+      validationRequirement: 1,
+      canValidate: true,
+      onValidationChange: vi.fn().mockResolvedValue(true),
+    },
   }
 }
 
@@ -162,23 +222,93 @@ beforeEach(() => {
   agentSessionStore(PROJECT).reset()
 })
 
-describe("AgentWorkbench layout (chat spine vs stage)", () => {
-  it("an empty session is a single centered chat column — no empty grid", () => {
+describe("AgentWorkbench three-pane layout", () => {
+  it("always shows source, Agent, and target around the conversation", () => {
     render(<AgentWorkbench {...workbenchProps()} />)
-    // No working-set stage until there's an artifact to review.
-    expect(screen.queryByLabelText("Working set")).toBeNull()
-    expect(screen.queryByText(/cells the agent reads and drafts appear here/)).toBeNull()
+    const sourcePane = screen.getByLabelText("Source pane")
+    const targetPane = screen.getByLabelText("Target pane")
+    expect(sourcePane).toBeInTheDocument()
+    const agentPane = screen.getByLabelText("Agent pane")
+    expect(agentPane).toBeInTheDocument()
+    expect(within(agentPane).getByRole("button", { name: "Minimize Agent" })).toBeInTheDocument()
+    expect(targetPane).toBeInTheDocument()
+    expect(sourcePane).toHaveTextContent("The beginning")
+    expect(targetPane).toHaveTextContent("L'inizio")
+    // The workbench is another presentation of the editor, not a lookalike:
+    // its cells consume the same extracted surfaces as EditorTable.
+    expect(sourcePane.querySelectorAll('[data-editor-cell-surface="source"]')).toHaveLength(2)
+    expect(targetPane.querySelectorAll('[data-editor-cell-surface="target-column"]')).toHaveLength(2)
+    expect(targetPane.querySelectorAll('[data-editor-cell-surface="target"]')).toHaveLength(2)
+    expect(targetPane.querySelectorAll('[data-editor-cell-surface="target-read"]')).toHaveLength(2)
+    expect(within(targetPane).getAllByTestId("health-ribbon")).toHaveLength(2)
+    expect(within(targetPane).getByRole("button", { name: "Not validated — MRK 1:1. Click to validate." })).toBeEnabled()
+    expect(sourcePane.querySelector("strong")).toHaveTextContent("beginning")
+    expect(targetPane.querySelector("em")).toHaveTextContent("inizio")
+    expect(screen.getAllByRole("separator")).toHaveLength(2)
   })
 
-  it("summons the working-set stage once the run STAGES drafts", async () => {
+  it("turns the target pane into the review editor when the agent stages drafts", async () => {
     await primeSessionWithDraftRun()
     render(<AgentWorkbench {...workbenchProps()} />)
-    expect(screen.getByLabelText("Working set")).toBeInTheDocument()
+    expect(screen.getByLabelText("Target review pane")).toBeInTheDocument()
+    expect(screen.getByLabelText("Source pane")).toHaveTextContent("The house is red")
+    expect(screen.getByLabelText("Target review pane")).not.toHaveTextContent("The house is red")
   })
 
-  it("a read-only run stays in the chat spine — passage cards, no grid", async () => {
-    // Reads render as PassageCards in the conversation; mirroring them into
-    // the stage was the double-display the user report flagged.
+  it("uses the editor's real target actions in agent mode", () => {
+    const props = workbenchProps()
+    render(<AgentWorkbench {...props} />)
+
+    const targetPane = screen.getByLabelText("Target pane")
+    const emptyTarget = targetPane.querySelector('article[data-cell-id="c2"]')
+    expect(emptyTarget).not.toBeNull()
+    const targetActions = within(emptyTarget as HTMLElement)
+
+    fireEvent.click(targetActions.getByRole("button", { name: "Translate with AI" }))
+    expect(props.workspace?.onDraftTarget).toHaveBeenCalledWith("c2")
+
+    fireEvent.click(targetActions.getByRole("button", { name: "Add comment" }))
+    expect(props.workspace?.onOpenComments).toHaveBeenCalledWith("c2")
+
+    fireEvent.click(targetActions.getByRole("button", { name: "Edit history" }))
+    expect(props.workspace?.onOpenHistory).toHaveBeenCalledWith("c2")
+  })
+
+  it("reports the target cells visible in the three-pane viewport", () => {
+    const props = workbenchProps()
+    const onVisibleCellIdsChange = vi.fn()
+    props.workspace!.onVisibleCellIdsChange = onVisibleCellIdsChange
+    const view = render(<AgentWorkbench {...props} />)
+
+    const scroll = screen.getByTestId("target-context-scroll")
+    const rows = Array.from(scroll.querySelectorAll<HTMLElement>("article[data-cell-id]"))
+    vi.spyOn(scroll, "getBoundingClientRect").mockReturnValue({ top: 0, bottom: 150 } as DOMRect)
+    vi.spyOn(rows[0], "getBoundingClientRect").mockReturnValue({ top: 0, bottom: 100 } as DOMRect)
+    vi.spyOn(rows[1], "getBoundingClientRect").mockReturnValue({ top: 160, bottom: 260 } as DOMRect)
+
+    fireEvent.scroll(scroll)
+    expect(onVisibleCellIdsChange).toHaveBeenLastCalledWith(["c1"])
+
+    // Streaming/completion state may replace cell objects without changing
+    // the viewport. That must not emit a transient empty viewport and abort
+    // an in-flight translate-as-read request.
+    onVisibleCellIdsChange.mockClear()
+    const updated = workbenchProps()
+    updated.workspace!.onVisibleCellIdsChange = onVisibleCellIdsChange
+    updated.workspace!.cells = updated.workspace!.cells.map((cell) => ({ ...cell }))
+    view.rerender(<AgentWorkbench {...updated} />)
+    expect(onVisibleCellIdsChange).not.toHaveBeenCalledWith([])
+  })
+
+  it("uses the editor's real validation control in agent mode", () => {
+    const props = workbenchProps()
+    render(<AgentWorkbench {...props} />)
+
+    fireEvent.click(screen.getByRole("button", { name: "Not validated — MRK 1:1. Click to validate." }))
+    expect(props.workspace?.onValidationChange).toHaveBeenCalledWith("c1", true)
+  })
+
+  it("a read-only run leaves the document panes visible", async () => {
     scriptedFrames = [
       { type: "run_start", runId: "run-r" },
       { type: "code_start", step: 1, kind: "read", summary: ":file" },
@@ -200,7 +330,8 @@ describe("AgentWorkbench layout (chat spine vs stage)", () => {
     await waitFor(() => expect(agentSessionStore(PROJECT).getState().isStreaming).toBe(false))
 
     render(<AgentWorkbench {...workbenchProps()} />)
-    expect(screen.queryByLabelText("Working set")).toBeNull()
+    expect(screen.getByLabelText("Source pane")).toHaveTextContent("The beginning")
+    expect(screen.getByLabelText("Target pane")).toHaveTextContent("L'inizio")
   })
 })
 
@@ -237,13 +368,20 @@ describe("AgentWorkbench review loop", () => {
   })
 })
 
-describe("AgentWorkbench Sessions | Memory tab slot (AQU-AGENT §5)", () => {
-  it("defaults to the Sessions tab and offers a Memory tab that lazy-loads its content", async () => {
+describe("AgentWorkbench Chat | Project knowledge tab slot (AQU-AGENT §5)", () => {
+  it("defaults to Chat and offers Project knowledge that lazy-loads its content", async () => {
     render(<AgentWorkbench {...workbenchProps()} />)
 
-    expect(screen.getByRole("tab", { name: "Sessions" })).toHaveAttribute("aria-selected", "true")
-    const memoryTab = screen.getByRole("tab", { name: "Memory" })
+    const chatTab = screen.getByRole("tab", { name: "Chat" })
+    expect(chatTab).toHaveAttribute("aria-selected", "true")
+    const memoryTab = screen.getByRole("tab", { name: "Project knowledge" })
     expect(memoryTab).toHaveAttribute("aria-selected", "false")
+
+    const header = chatTab.closest("[role=tablist]")?.parentElement
+    expect(header).not.toBeNull()
+    expect(within(header!).getByText("Agent")).toBeInTheDocument()
+    expect(within(header!).getByRole("button", { name: /New session/ })).toBeInTheDocument()
+    expect(within(header!).getByRole("button", { name: /Collapse Agent pane/ })).toBeInTheDocument()
 
     fireEvent.click(memoryTab)
     await waitFor(() => expect(memoryTab).toHaveAttribute("aria-selected", "true"))

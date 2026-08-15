@@ -37,6 +37,16 @@ interface Props {
   inButtonGroup?: boolean
   /** Anchor for popovers opened from this menu (e.g. View settings). */
   triggerRef?: Ref<HTMLButtonElement>
+  /**
+   * Turn the "…" into a NAMED menu. AQU-646 stage 6: the timeline's Sources
+   * menu is a labelled dropdown, not an overflow — it is the primary way to
+   * attach a film, audio cues or a character sheet to a file, so hiding it
+   * behind an ellipsis would make three discoverable buttons undiscoverable.
+   * Everything else about the menu is identical, which is why this is a prop
+   * rather than a second component.
+   */
+  triggerLabel?: string
+  triggerIcon?: ComponentType<{ className?: string }>
 }
 
 /**
@@ -79,21 +89,26 @@ export function OverflowMenu({
   testId,
   inButtonGroup = false,
   triggerRef,
+  triggerLabel,
+  triggerIcon,
 }: Props) {
   if (items.length === 0) return null
 
+  const TriggerIcon = triggerIcon ?? MoreHorizontal
   const trigger = (
     <DropdownMenuTrigger
       render={
         <Button
           ref={triggerRef}
           variant={triggerVariant}
-          size={triggerSize}
+          // A labelled trigger cannot be an icon-sized square.
+          size={triggerLabel ? (triggerSize === "icon" ? "sm" : triggerSize) : triggerSize}
           className={triggerClassName}
-          aria-label={ariaLabel}
+          aria-label={triggerLabel ?? ariaLabel}
           data-testid={testId}
         >
-          <MoreHorizontal className="h-4 w-4" />
+          <TriggerIcon className="h-4 w-4" />
+          {triggerLabel}
         </Button>
       }
     />

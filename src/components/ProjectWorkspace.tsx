@@ -91,8 +91,10 @@ import {
   buildFileScopedTokenFetcher,
   buildProjectAwareMinter,
 } from "@/lib/sync/cqrs-bridge"
-import { emitTargetCellCommit, emitCellBacktranslationSet, emitFileRename, emitFileDelete, emitFileRestore, emitCellValidate, emitCellRetime, emitCellLaneRetime, emitCellAudioTrim, emitCellLinkSet, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, enqueueEvents } from "@/lib/sync/events-emit"
+import { emitCastAssign, emitTargetCellCommit, emitCellBacktranslationSet, emitFileRename, emitFileDelete, emitFileRestore, emitCellValidate, emitCellRetime, emitCellLaneRetime, emitCellAudioTrim, emitCellLinkSet, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, enqueueEvents } from "@/lib/sync/events-emit"
 import { autoLinkable, planCueLinks } from "@/lib/timeline/cue-links"
+import type { CharacterAssignmentPlan } from "@/lib/import/character-sheet"
+import { ImportCharactersDialog } from "./timeline/ImportCharactersDialog"
 import type { CueReconcilePlan } from "@/lib/import/cue-reconcile"
 import { diffCueLinks } from "@/lib/timeline/cue-link-diff"
 import { useFileCellLinks } from "@/hooks/useFileCellLinks"
@@ -2015,6 +2017,66 @@ export function ProjectWorkspace() {
    *  looks like the matcher did nothing. */
   const [cueLinksPending, setCueLinksPending] = useState(false)
   const [importAudioVttOpen, setImportAudioVttOpen] = useState(false)
+  const [importCharactersOpen, setImportCharactersOpen] = useState(false)
+  /** How many lines already carry a character — the Sources row's state, and
+   *  what makes the dialog say "Replace" rather than "Import". */
+  const characterCount = useMemo(
+    () =>
+      // From the cell VIEWS, not the summaries: `cast_name` lives in
+      // `metadata`, which summaries do not carry — counting off them would
+      // report zero forever.
+      readAtVersion(cellStoreVersion, () => cellStore.getAllCellViews()).filter(
+        (c) => typeof c.metadata?.cast_name === "string" && c.metadata.cast_name !== "",
+      ).length,
+    [cellStore, cellStoreVersion],
+  )
+
+  /**
+   * Apply the character sheet. (AQU-646 stage 6)
+   *
+   * `cast.assign` per line — non-chain-mutating, and it carries the camera
+   * state as well as the name, so nothing else has to be emitted. Being
+   * per-cell and idempotent is what makes a corrected sheet safe to re-import:
+   * it overwrites rather than duplicating.
+   *
+   * No voices are minted. `EditorTable`'s cast gutter and `ExportDialog`'s
+   * voice filter both read `metadata.cast_name` directly, so names alone are
+   * enough for everything downstream — including stage 7's per-character
+   * export. Building the roster is the separate design session's job.
+   */
+  const handleImportCharacters = useCallback(
+    async (plan: CharacterAssignmentPlan) => {
+      if (!project?.id || !activeFileId) return
+      if (!navigator.onLine) {
+        toast.error("Characters can't be imported while offline.")
+        return
+      }
+      try {
+        for (const a of plan.assignments) {
+          await emitCastAssign({
+            projectId: project.id,
+            fileId: activeFileId,
+            cellId: a.cellId,
+            castName: a.castName,
+            ...(a.cameraState !== undefined ? { cameraState: a.cameraState } : {}),
+            author: currentUsername,
+          })
+        }
+        await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+      } catch (e) {
+        toast.error(
+          e instanceof Error ? `Couldn't import the characters: ${e.message}` : "Couldn't import the characters.",
+        )
+        return
+      }
+      revalidateCells()
+      toast.success(
+        `${plan.assignments.length} lines now carry a character — ${plan.distinctCharacters} people` +
+          (plan.blankRows > 0 ? `, ${plan.blankRows} rows skipped as unspoken text.` : "."),
+      )
+    },
+    [project?.id, activeFileId, currentUsername, getTokenForProjectFile, revalidateCells],
+  )
   /**
    * Write the picked cues as this file's audio-cue sibling.
    *
@@ -7432,6 +7494,11 @@ export function ProjectWorkspace() {
                     // button above and for the same reason.
                     onRequestImportAudioVtt={() => setImportAudioVttOpen(true)}
                     canImportAudioVtt={canPerform("source.cell.create", project?.syncRole?.level ?? null)}
+                    // Writes cell metadata rather than creating cells, so it
+                    // sits at the contributor floor `cast.assign` requires.
+                    onRequestImportCharacters={() => setImportCharactersOpen(true)}
+                    canImportCharacters={canPerform("cast.assign", project?.syncRole?.level ?? null)}
+                    characterCount={characterCount}
                     hasAudioCueTrack={audioCueSibling !== null}
                     audioCues={audioCues}
                     targetCells={audioCueCells}
@@ -8131,6 +8198,21 @@ export function ProjectWorkspace() {
           void handleImportAudioVtt(parsed, sourceFileName, timebase)
         }}
       />
+      {project && activeFile && (
+        <ImportCharactersDialog
+          open={importCharactersOpen}
+          textFileName={activeFile.name}
+          cells={cellSummaries}
+          existingCount={characterCount}
+          onCancel={() => setImportCharactersOpen(false)}
+          onConfirm={(plan) => {
+            // Close FIRST: the import runs for a few seconds over hundreds of
+            // lines and reports with toasts, which a modal covers.
+            setImportCharactersOpen(false)
+            void handleImportCharacters(plan)
+          }}
+        />
+      )}
       <LinkVideoTimingDialog
         open={pendingVideoUrl !== null}
         onCancel={() => setPendingVideoUrl(null)}

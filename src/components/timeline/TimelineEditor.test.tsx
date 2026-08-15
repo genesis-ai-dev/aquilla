@@ -233,7 +233,7 @@ describe("TimelineEditor", () => {
     expect(document.querySelector("video")).toBeNull()
   })
 
-  it("offers the link-video control, and disables it below contributor", () => {
+  it("offers the film row in Sources, with its state, and disables it below contributor", () => {
     const onRequestLinkVideo = vi.fn()
     const { rerender } = render(
       <TimelineEditor
@@ -245,9 +245,16 @@ describe("TimelineEditor", () => {
         onRequestLinkVideo={onRequestLinkVideo}
       />,
     )
-    const button = screen.getByTestId("tl-link-video")
-    expect(button).toHaveTextContent("Link video")
-    fireEvent.click(button)
+    // REWRITTEN 2026-08-15: the standalone Link-video button folded into the
+    // Sources menu, along with the audio-VTT and character imports — all three
+    // attach material to the file already open, as distinct from Import, which
+    // mints a new one. The row carries the file's STATE, which is the gain: a
+    // button label had to choose between "Link" and "Change" and told you
+    // nothing about audio cues or characters at all.
+    fireEvent.click(screen.getByTestId("tl-sources-menu"))
+    const film = screen.getByRole("menuitem", { name: /Film/ })
+    expect(film).toHaveTextContent("not linked")
+    fireEvent.click(film)
     expect(onRequestLinkVideo).toHaveBeenCalledTimes(1)
 
     rerender(
@@ -261,9 +268,11 @@ describe("TimelineEditor", () => {
         canLinkVideo={false}
       />,
     )
-    const gated = screen.getByTestId("tl-link-video")
-    expect(gated).toHaveTextContent("Change video")
-    expect(gated).toBeDisabled()
+    fireEvent.click(screen.getByTestId("tl-sources-menu"))
+    const gated = screen.getByRole("menuitem", { name: /Film/ })
+    expect(gated).toHaveTextContent("linked")
+    // Permission is per ROW now, rather than greying out a whole button.
+    expect(gated).toHaveAttribute("data-disabled")
   })
 
   // ── AQU-646: playhead follows the audio queue; clicks navigate playback ──

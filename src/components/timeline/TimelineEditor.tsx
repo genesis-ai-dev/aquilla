@@ -21,12 +21,14 @@ import {
   ChevronsDownUp,
   ChevronsUpDown,
   Film,
+  FolderInput,
   GripVertical,
   Link2,
   LocateFixed,
   Magnet,
   Minus,
   Plus,
+  Users,
   Volume2,
   VolumeX,
   X,
@@ -36,6 +38,7 @@ import { deriveLanes } from "@/lib/timeline/lanes"
 import { deriveSourceRegions, EMPTY_SOURCE_REGIONS } from "@/lib/timeline/source-regions"
 import { isLineEmpty, isUserAddedLine } from "@/lib/timeline/user-lines"
 import { Spinner } from "@/components/ui/spinner"
+import { OverflowMenu, type OverflowMenuItem } from "@/components/OverflowMenu"
 import { SourceRegionLane } from "./SourceRegionLane"
 import type { LaneLinkOverlay } from "./CueLinkOverlay"
 import { EMPTY_CUE_LINK_INDEX, type CueLinkIndex } from "@/lib/sync/cell-links-read"
@@ -143,6 +146,11 @@ export interface TimelineEditorProps {
    *  workspace for the same reason the link-video one does — it owns the upload
    *  and the refresh. Presence renders the control. */
   onRequestImportAudioVtt?(): void
+  /** AQU-646 stage 6: the character spreadsheet. */
+  onRequestImportCharacters?(): void
+  canImportCharacters?: boolean
+  /** How many cells already carry a cast name — the Characters row's state. */
+  characterCount?: number
   /**
    * Stage 4: the cells that CARRY TARGET AUDIO, when that is not this file's
    * own cells — the audio cues, merged with their attachments.
@@ -474,6 +482,9 @@ export function TimelineEditor({
   onRemoveLine,
   canLinkVideo = true,
   onRequestImportAudioVtt,
+  onRequestImportCharacters,
+  canImportCharacters = false,
+  characterCount = 0,
   targetCells,
   onLinkingModeChange,
   linkingModeRequest,
@@ -873,6 +884,62 @@ export function TimelineEditor({
   useEffect(() => {
     if (!linkingAvailable) setLinkingMode(false)
   }, [linkingAvailable])
+
+  // Each row states what the file HAS, and opens the dialog that owns that
+  // source's verbs — so no row needs two actions. Permission is per row rather
+  // than per button, which is strictly better than the buttons were: linking a
+  // film is contributor-level, while both cell-writing imports sit at the
+  // source.cell.create floor.
+  const sourceMenuItems = useMemo<OverflowMenuItem[]>(() => {
+    const items: OverflowMenuItem[] = []
+    if (onRequestLinkVideo) {
+      items.push({
+        id: "film",
+        label: "Film",
+        icon: Film,
+        disabled: !canLinkVideo,
+        badge: (
+          <span className="text-[11px] text-muted-foreground">
+            {coreMediaUrl ? "linked" : "not linked"}
+          </span>
+        ),
+        onClick: onRequestLinkVideo,
+      })
+    }
+    if (onRequestImportAudioVtt) {
+      items.push({
+        id: "audio-cues",
+        label: "Audio cues",
+        icon: AudioLines,
+        disabled: !canImportAudioVtt,
+        badge: (
+          <span className="text-[11px] text-muted-foreground">
+            {hasAudioCueTrack ? `${audioCues?.length ?? 0} imported` : "not imported"}
+          </span>
+        ),
+        onClick: onRequestImportAudioVtt,
+      })
+    }
+    if (onRequestImportCharacters) {
+      items.push({
+        id: "characters",
+        label: "Characters",
+        icon: Users,
+        disabled: !canImportCharacters,
+        badge: (
+          <span className="text-[11px] text-muted-foreground">
+            {characterCount > 0 ? `${characterCount} named` : "not imported"}
+          </span>
+        ),
+        onClick: onRequestImportCharacters,
+      })
+    }
+    return items
+  }, [
+    onRequestLinkVideo, canLinkVideo, coreMediaUrl,
+    onRequestImportAudioVtt, canImportAudioVtt, hasAudioCueTrack, audioCues?.length,
+    onRequestImportCharacters, canImportCharacters, characterCount,
+  ])
 
   const links = cueLinks ?? EMPTY_CUE_LINK_INDEX
   // The amber "no subtitle behind this" mark exists to surface a HANDFUL of
@@ -1954,37 +2021,26 @@ export function TimelineEditor({
               <LocateFixed className="h-3.5 w-3.5" />
             </button>
           </AppTooltip>
-          {onRequestLinkVideo && (
-            <AppTooltip content="Requires at least contributor access" disabled={canLinkVideo}>
-              <button
-                type="button"
-                data-testid="tl-link-video"
-                disabled={!canLinkVideo}
-                onClick={onRequestLinkVideo}
-                className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground/80 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <Film className="h-3.5 w-3.5 text-muted-foreground" />
-                {coreMediaUrl ? "Change video" : "Link video"}
-              </button>
-            </AppTooltip>
-          )}
-          {/* AQU-646 stage 2: the audio VTT — a near-verbatim transcript of the
-              film's own speech, ~550 cues, which becomes the Source audio row.
-              It lands in a hidden sibling file, so this never adds anything to
-              the file list, the dialogue table or the counters. */}
-          {onRequestImportAudioVtt && (
-            <AppTooltip content="Requires project lead access" disabled={canImportAudioVtt}>
-              <button
-                type="button"
-                data-testid="tl-import-audio-vtt"
-                disabled={!canImportAudioVtt}
-                onClick={onRequestImportAudioVtt}
-                className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground/80 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <AudioLines className="h-3.5 w-3.5 text-muted-foreground" />
-                {hasAudioCueTrack ? "Replace audio VTT" : "Import audio VTT"}
-              </button>
-            </AppTooltip>
+          {/* AQU-646 stage 6: ONE menu for everything that attaches material to
+              the file already open — the film, the heard lines, the cast — as
+              distinct from the Import button, which mints a NEW file. Three
+              separate buttons said nothing about what a file already had;
+              a menu row can carry its state, so "548 imported" replaces a
+              label that had to choose between "Import" and "Replace" and got
+              it wrong either way.
+
+              Built from `items`, not three hardcoded rows: stage 8's untimed
+              pocket bin is the same category and will want a fourth. */}
+          {sourceMenuItems.length > 0 && (
+            <OverflowMenu
+              items={sourceMenuItems}
+              triggerVariant="outline"
+              triggerLabel="Sources"
+              triggerIcon={FolderInput}
+              testId="tl-sources-menu"
+              ariaLabel="Attach material to this file"
+              tooltip="Film, audio cues and characters for this file"
+            />
           )}
           {/* Stage 4: linking mode. An explicit toggle, off by default, because
               while it is off clicking must stay exactly what it always was —

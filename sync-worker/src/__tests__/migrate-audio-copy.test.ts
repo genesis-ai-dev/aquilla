@@ -149,6 +149,27 @@ describe("handleMigrateAudioCopyRequest", () => {
     expect(res?.status).toBe(401)
   })
 
+  it("uses ADMIN_SECRET on migration routes and retires the signing-key fallback", async () => {
+    const LFS_SRC = makeStubBucket()
+    const SNAPSHOTS = makeStubBucket()
+    LFS_SRC._seed(gitlabLfsKey(OID), "WEBMBYTES", "audio/webm")
+    const env = {
+      SNAPSHOTS: SNAPSHOTS as unknown as R2Bucket,
+      LFS_SRC: LFS_SRC as unknown as R2Bucket,
+      ADMIN_SECRET: "dedicated-admin",
+      SYNC_SECRET_KEY: SECRET,
+    }
+
+    const legacy = await handleMigrateAudioCopyRequest(req(base), env)
+    expect(legacy?.status).toBe(401)
+
+    const dedicated = await handleMigrateAudioCopyRequest(
+      req(base, "Bearer dedicated-admin"),
+      env,
+    )
+    expect(dedicated?.status).toBe(200)
+  })
+
   it("returns null for non-matching paths (lets the router fall through)", async () => {
     const res = await handleMigrateAudioCopyRequest(
       new Request("https://sync.example/something-else", { method: "POST" }),

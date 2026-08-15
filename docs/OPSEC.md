@@ -11,6 +11,8 @@
 > current consolidated status see `docs/OPSEC-REVIEW-2026-08-11.md` — §0.1 maps the two series
 > against each other and §6 carries the live status table. Merging the two series into one
 > standing document is outstanding work.
+> The later `docs/OPSEC-REVIEW-2026-08-13.md` records the follow-up verification and the
+> passive-resource, session-replay, dependency-audit, and operator-credential findings.
 
 _Standing OPSEC review of Aquilla's handling of sensitive data. Complements
 `docs/SECURITY-NOTES-2026-06-10.md` (application-security findings, June audit)

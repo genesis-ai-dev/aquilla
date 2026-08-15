@@ -35,6 +35,11 @@ export async function ensureAuthState(username: SeedUser["username"]): Promise<P
         r = await ctx.post(`${FRONTIER_BASE}/api/v1/auth/token`, {
           data: { username: u.username, password: u.password },
         })
+        // workerd can 503 "worker restarted mid-request" during shard load.
+        if (r.status() === 503 && attempt < E2E_TRANSPORT_ATTEMPTS - 1) {
+          await waitForTransportRetry(attempt)
+          continue
+        }
         break
       } catch (error) {
         if (!isRetryableTransportError(error) || attempt === E2E_TRANSPORT_ATTEMPTS - 1) {

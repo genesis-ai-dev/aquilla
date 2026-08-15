@@ -25,6 +25,14 @@ async function loginViaUi(page: Page): Promise<void> {
   await page.getByRole("button", { name: "Sign in" }).click()
 }
 
+/** Post-login org-shell hydration is a multi-service boot — 30s watchdog. */
+async function expectSignedInAsAlice(page: Page): Promise<void> {
+  await expect(page).not.toHaveURL(/\/login(?:\?|$)/, { timeout: 30_000 })
+  await expect(page.getByRole("button", { name: /Account menu: alice/i })).toBeVisible({
+    timeout: 30_000,
+  })
+}
+
 /** Corrupt the active session's JWT signature in IDB so the server 401s it. */
 async function tamperStoredJwt(page: Page): Promise<void> {
   await page.evaluate(() => new Promise<void>((resolve, reject) => {
@@ -58,13 +66,12 @@ test.beforeEach(async () => {
 })
 
 test("dead credential raises the banner; it persists, dismisses, and re-login clears it", async ({ page }) => {
+  test.setTimeout(120_000)
   // Sign in through the real UI so the session lands in IDB the same way a
   // user's would (auth hint cookie included).
   await page.goto("/login")
   await loginViaUi(page)
-  await expect(page.getByRole("button", { name: /Account menu: alice/i })).toBeVisible({
-    timeout: 10_000,
-  })
+  await expectSignedInAsAlice(page)
 
   // Invalidate the stored credential and cold-boot the org surface with it.
   await tamperStoredJwt(page)
@@ -91,8 +98,6 @@ test("dead credential raises the banner; it persists, dismisses, and re-login cl
   // still 401s with the replaced JWT, and the guarded notifier must drop
   // those stragglers instead of re-latching the banner.
   await loginViaUi(page)
-  await expect(page.getByRole("button", { name: /Account menu: alice/i })).toBeVisible({
-    timeout: 10_000,
-  })
+  await expectSignedInAsAlice(page)
   await expect(banner(page)).toBeHidden()
 })

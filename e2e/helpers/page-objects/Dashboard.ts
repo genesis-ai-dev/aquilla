@@ -27,7 +27,7 @@ export class Dashboard {
       typeof orgId === "number" && orgId > 0 ? `/orgs/${orgId}/projects` : "/"
     await this.page.goto(target)
     await expect(this.page.getByRole("button", { name: /new project/i }).first()).toBeVisible({
-      timeout: 15_000,
+      timeout: 30_000,
     })
   }
 

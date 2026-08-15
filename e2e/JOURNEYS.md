@@ -111,6 +111,7 @@ UI chrome that used to be one smoke file per click is covered under
 - Rules page toggles / severity / regex mode (RTL on RulesPage + rule editor)
 - Comments page empty / filter / sort chrome (RTL + comments-page surface session)
 - Living-memory empty state
+- Back-translation generation, editing, stale/provenance, and statistical-pairs comparison (`BacktranslationPanel.test.tsx`); the cross-user edit lock remains in the smoke keep-list
 - Admin console tab clicks, formatting Ctrl+B alone, breadcrumb-only nav
 
 When you change one of these surfaces, update the matching `*.test.tsx`. If RTL

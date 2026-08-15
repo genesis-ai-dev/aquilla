@@ -84,6 +84,7 @@ export function dispatchEvent(
     case 'cell.audio.measure':
     case 'cell.audio.validate':
     case 'cell.audio.unvalidate':
+    case 'cell.link.set':
       return {
         ok: true,
         result: handleCellEvent(

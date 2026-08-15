@@ -305,7 +305,7 @@ export function buildBulkSourceCellCreateStmt(
 }
 
 /** Caller hint: which projection tables this event will touch. */
-export type ProjectionTouches = 'cells' | 'cell_validators' | 'cell_waivers' | 'files' | 'cell_audio' | 'comments' | 'cell_backtranslations'
+export type ProjectionTouches = 'cells' | 'cell_validators' | 'cell_waivers' | 'files' | 'cell_audio' | 'comments' | 'cell_backtranslations' | 'cell_links'
 
 /**
  * Apply one event to the projection (without the AD-2 sibling guard — the
@@ -1135,6 +1135,55 @@ case 'cell.audio.attach': {
           ),
       )
       return ['cell_audio']
+    }
+
+    case 'cell.link.set': {
+      // One edge between a subtitle cell (the envelope) and an audio cue (the
+      // payload). The ENDPOINTS are the primary key, so this is idempotent by
+      // construction: re-delivering an event, or replaying the whole log,
+      // lands on the same row rather than accumulating duplicates.
+      //
+      // `linked` is PLAIN-ASSIGNED, and that is correct here precisely because
+      // the payload always states it — do not "fix" this to COALESCE. An
+      // unlink is a tombstone (linked = 0) rather than a deleted row so that a
+      // later replay of the auto-linker's own event cannot resurrect an edge a
+      // person deliberately removed.
+      //
+      // `created_ts` is NOT overwritten: it records when the edge first
+      // appeared, which survives every later toggle of the same pair.
+      const p = event.payload as EventPayloads['cell.link.set']
+      if (!event.fileId || !event.cellId) {
+        throw new Error(`cell.link.set event ${event.id} is missing fileId or cellId`)
+      }
+      stmts.push(
+        db
+          .prepare(
+            `INSERT INTO cell_links (
+              project_id, kind, from_file_id, from_cell_id, to_file_id, to_cell_id,
+              linked, origin, confidence, event_id, created_ts
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(project_id, kind, from_file_id, from_cell_id, to_file_id, to_cell_id)
+            DO UPDATE SET
+              linked     = excluded.linked,
+              origin     = excluded.origin,
+              confidence = excluded.confidence,
+              event_id   = excluded.event_id`,
+          )
+          .bind(
+            event.projectId,
+            p.kind,
+            event.fileId,
+            event.cellId,
+            p.toFileId,
+            p.toCellId,
+            p.linked ? 1 : 0,
+            p.origin,
+            p.confidence ?? null,
+            event.id,
+            event.serverTs,
+          ),
+      )
+      return ['cell_links']
     }
 
     case 'cell.audio.measure': {

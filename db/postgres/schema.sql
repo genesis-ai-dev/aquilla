@@ -560,6 +560,31 @@ CREATE TABLE cell_audio (
     PRIMARY KEY (project_id, file_id, cell_id, audio_id)
 );
 
+-- AQU-646 stage 4: many-to-many edges between a SUBTITLE cell and an AUDIO
+-- CUE (the hidden `role: 'audio-cues'` sibling). The two cue lists an episode
+-- ships with deliberately disagree in segmentation, so clusters are whatever
+-- the edges connect — there is no group object. Endpoints ARE the key, which
+-- makes cell.link.set idempotent under replay; unlinking is a tombstone
+-- (`linked = 0`) so replaying the import-time linker cannot resurrect an edge
+-- a person removed. Full rationale in migrations/0073_cell_links.sql.
+CREATE TABLE cell_links (
+    project_id   TEXT    NOT NULL,
+    kind         TEXT    NOT NULL,
+    from_file_id TEXT    NOT NULL,
+    from_cell_id TEXT    NOT NULL,
+    to_file_id   TEXT    NOT NULL,
+    to_cell_id   TEXT    NOT NULL,
+    linked       INTEGER NOT NULL DEFAULT 1,
+    origin       TEXT    NOT NULL,
+    confidence   REAL,
+    event_id     TEXT    NOT NULL,
+    created_ts   BIGINT  NOT NULL,
+    PRIMARY KEY (project_id, kind, from_file_id, from_cell_id, to_file_id, to_cell_id)
+);
+
+CREATE INDEX idx_cell_links_from ON cell_links (project_id, from_file_id) WHERE linked = 1;
+CREATE INDEX idx_cell_links_to   ON cell_links (project_id, to_file_id)   WHERE linked = 1;
+
 CREATE TABLE cell_backtranslations (
     project_id      TEXT NOT NULL,
     file_id         TEXT NOT NULL,

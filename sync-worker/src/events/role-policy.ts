@@ -63,6 +63,10 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
   'cell.audio.rename': ROLE.CONTRIBUTOR,
   'cell.audio.trim': ROLE.CONTRIBUTOR,
   'cell.audio.measure': ROLE.CONTRIBUTOR,
+
+  // Stage 4: pairing a subtitle line with the audio cue that performs it is
+  // ordinary dubbing work, not structure — contributor, like target.* edits.
+  'cell.link.set': ROLE.CONTRIBUTOR,
   // AQU-508: approving/withdrawing approval of a cell's audio is a review
   // action — reviewer(300)+, mirroring the text-side cell.validate gate.
   'cell.audio.validate': ROLE.REVIEWER,

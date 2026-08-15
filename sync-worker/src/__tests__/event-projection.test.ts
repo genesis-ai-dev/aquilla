@@ -848,6 +848,9 @@ describe('isChainMutatingKind', () => {
     'cell.retime': false,
     'cell.audio.rename': false,
     'cell.audio.trim': false,
+    // A link says which subtitle a heard line performs; it never moves the
+    // cell's own text chain.
+    'cell.link.set': false,
     'cell.audio.measure': false,
     'cell.lane.retime': false,
     'file.video.set': false,

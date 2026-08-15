@@ -115,6 +115,16 @@ export type EventKind =
   // emits this kind until stage 3 puts renaming and adding tracks in the UI.
   // Shipping the pipeline first means stage 3 is a UI change, not a migration.
   | 'file.track.set'
+  // Stage 4: one edge between a SUBTITLE cell and an AUDIO CUE, the two cue
+  // lists an episode ships with. Many-to-many — a sentence the subtitles keep
+  // whole may be performed as two heard lines, and one heard line may cover
+  // several subtitle rows — so clusters are whatever the edges connect and
+  // there is no group object. Non-chain-mutating; contributor-level.
+  //
+  // Written in bulk ONCE by the auto-linker at audio-VTT import, and after
+  // that only by hand. Deliberately never recomputed: recomputing would
+  // silently undo every manual correction on the next import.
+  | 'cell.link.set'
   // AQU-476: live source links — mirror engine. Server-emitted only (the
   // mirror sync engine in link-sync.ts; never a client outbox kind). Mirror
   // events replicate an ordering the UPSTREAM already arbitrated, so they
@@ -397,6 +407,35 @@ export interface EventPayloads {
     audioId: string
     trimStartMs: number | null
     trimEndMs: number | null
+  }
+  /**
+   * Stage 4: link or unlink ONE subtitle cell and ONE audio cue.
+   *
+   * The subtitle side rides the ENVELOPE (`fileId`/`cellId`), the audio cue
+   * rides the payload — the same split `comment.*` uses, so per-file auth and
+   * routing work without a second lookup.
+   *
+   * `linked` IS REQUIRED AND BOOLEAN. Unlinking is a tombstone (`linked: 0`),
+   * never a deleted row and never an absent field: an absent field meaning
+   * "unlinked" is the exact shape that cost us every take's trim window in
+   * stage 4.5, where "clear this" and "no opinion" became indistinguishable.
+   *
+   * The endpoints are the projection's primary key, so re-delivering an event
+   * is a no-op and a replay of the whole log lands in the same place.
+   */
+  'cell.link.set': {
+    /** Only `text-audio` today. The pocket bin adds its own edge type later
+     *  over this same table, which is why the discriminator exists now. */
+    kind: 'text-audio'
+    toFileId: string
+    toCellId: string
+    linked: boolean
+    /** `auto` = the import-time linker, `manual` = a person. Kept so a later
+     *  round can offer "reset the ones nobody has touched" without guessing. */
+    origin: 'auto' | 'manual'
+    /** The linker's score, null for a hand edit. Diagnostic only — nothing
+     *  reads it to make a decision. */
+    confidence: number | null
   }
   // Measured duration for a take that predates duration capture. Fills only
   // a NULL duration_ms; a repeat delivery or a race with a real re-attach is

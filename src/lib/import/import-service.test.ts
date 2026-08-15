@@ -132,6 +132,46 @@ describe("ImportService", () => {
     expect(result.manifests[0].units[0].targetHtml).toContain("data-idml-version")
   })
 
+  it("normalizes an EPUB container as a content-only package import", async () => {
+    const { instance } = service({
+      detectFileType: vi.fn((_name: string): FileType | null => "epub"),
+      parseFile: vi.fn(async () => [{
+        name: "book.epub",
+        rawSourceFormat: "epub" as const,
+        rawBytes: new ArrayBuffer(8),
+        roundTripFidelity: "content-only" as const,
+        strings: [{
+          id: "epub-unit",
+          original: "The river was wide.",
+          translated: "",
+          context: "Chapter One · Paragraph",
+          group: "chapter-1",
+          section: "Chapter One",
+          type: "text" as const,
+          sourceLocation: { file: "OEBPS/Text/ch1.xhtml", blockPath: "1" },
+        }],
+      }]),
+    })
+
+    const result = await instance.importFile(new File(["epub"], "book.epub"), {})
+
+    expect(result.manifests[0]).toMatchObject({
+      fileType: "epub",
+      profileId: "builtin:epub",
+      deterministic: true,
+      fidelity: "content-only",
+    })
+    expect(result.manifests[0].units[0]).toMatchObject({
+      unitKey: "document:OEBPS/Text/ch1.xhtml:1:1",
+      sourceLocator: {
+        kind: "package-block",
+        memberPath: "OEBPS/Text/ch1.xhtml",
+        blockPath: "1",
+        segment: 1,
+      },
+    })
+  })
+
   it("honours existing whole-file and per-book collision skip decisions", async () => {
     const first = service()
     const skippedFile = await first.instance.importFile(

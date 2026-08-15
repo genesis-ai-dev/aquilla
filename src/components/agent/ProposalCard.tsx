@@ -395,7 +395,7 @@ function StagedProposalCard({
                   <Spinner className="size-3" /> {t("autopilot.proposal.applying")}
                 </>
               ) : (
-                "Apply"
+                t("autopilot.proposal.apply")
               )}
             </Button>
             </AppTooltip>

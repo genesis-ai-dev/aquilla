@@ -9,9 +9,12 @@ import { renderWithTooltips, expectTooltip } from "@/test-utils/tooltip"
 import type { PortfolioProject } from "@/lib/frontier/portfolio"
 
 function projectsRollupStat() {
-  // Overview (and all-orgs) rollup tiles sit outside the nav.
+  // Overview (and all-orgs) rollup tiles sit outside the nav. The label lives
+  // in a nested wrapper so the tile can be a single row on small screens.
   const label = screen.getAllByText("Projects").find((el) => !el.closest("nav"))!
-  return label.parentElement!
+  const tile = label.parentElement?.parentElement
+  if (!tile) throw new Error("rollup tile root not found")
+  return tile
 }
 
 function renderMemberShell(path: string) {
@@ -224,6 +227,26 @@ function mockProjectNameOverflow(overflowing: boolean) {
     get: () => 128,
   })
 }
+
+describe("OrgHome loading template", () => {
+  it("keeps the header breadcrumb-only (no trailing profile chip)", () => {
+    mockUseFrontierSession.mockReturnValue({
+      session: { jwt: "jwt", username: "anna", createdAt: "x" },
+      loading: true,
+    })
+    render(
+      <MemoryRouter initialEntries={["/orgs/all"]}>
+        <OrgProvider>
+          <OrgHome />
+        </OrgProvider>
+      </MemoryRouter>,
+    )
+    expect(screen.getByTestId("org-home-loading-template")).toBeInTheDocument()
+    const header = document.querySelector("[data-slot='app-shell-header']")
+    expect(header).not.toBeNull()
+    expect(header!.querySelectorAll("[data-slot='skeleton']")).toHaveLength(1)
+  })
+})
 
 describe("ProjectTable", () => {
   const project: PortfolioProject & { orgName: string } = {
@@ -527,6 +550,8 @@ describe("OrgOverview / OrgProjects", () => {
     await waitFor(() => expect(screen.getByText("Avg translated")).toBeInTheDocument())
     const projectsStat = projectsRollupStat()
     expect(within(projectsStat).getByText("2")).toBeInTheDocument()
+    expect(projectsStat).toHaveClass("flex-row-reverse")
+    expect(projectsStat.parentElement).toHaveClass("grid-cols-1")
   })
 
   it("shows the overdue rollup card and at-risk rows on overview", async () => {

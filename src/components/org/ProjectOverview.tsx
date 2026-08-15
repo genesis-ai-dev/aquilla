@@ -1876,9 +1876,9 @@ export function ProjectOverview() {
                   surface as Project Settings → Team members, so access can be
                   managed from the overview without opening settings. ──
                   AQU-486: gated by AQU-485's rosterViewMinRole — the same
-                  policy MembersTab itself enforces server-side (see its
-                  "Roster hidden" state), applied here one layer up so a
-                  below-floor caller never sees the card shell at all. */}
+                  policy MembersTab itself enforces server-side, applied here
+                  one layer up so a below-floor caller never sees the card
+                  shell at all. */}
               {canManage && !isArchived && (
                 <SectionVisibilityGate
                   minRole={orgSettings.rosterViewMinRole}

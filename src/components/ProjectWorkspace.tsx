@@ -130,7 +130,7 @@ import { getVoiceLibrary, newVoiceId, VOICE_PALETTE } from "@/lib/audio/voices"
 import { attachMediaFileToTimeline, attachMediaUrlToTimeline } from "@/lib/timeline/attach-media"
 import { useCellsAuditStatsWithOverlay } from "@/hooks/useCellsAuditStatsWithOverlay"
 import { useComments } from "@/hooks/useComments"
-import { Film, Bot, MessagesSquare, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, BookOpen, BookMarked, Users, UserCheck, ArrowRight, PanelLeftClose, Mic, Plus, Pencil, FolderInput, Download, Scale, Share2 } from "lucide-react"
+import { Film, Bot, MessagesSquare, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, BookOpen, Users, UserCheck, ArrowRight, PanelLeftClose, Mic, Plus, Pencil, FolderInput, Download } from "lucide-react"
 import { toast } from "@/components/ui/toast"
 import { AgentDockPanel } from "./AgentDockPanel"
 import { agentSessionStore } from "@/lib/agent/session-store"
@@ -4457,34 +4457,20 @@ export function ProjectWorkspace() {
 
   const projectNavItems = useMemo(() => {
     const items = [
-      { id: "rules", labelKey: "nav.sidebarSection.rules" as const, icon: Scale,
-        onClick: () => navigate(`/project/${projectId}/rules`) },
-      // Pinned below Comments: Terminology is a frequent destination, so it
-      // stays visible; everything else unpinned collapses into "More".
+      // Pinned below Comments: Terminology and Recently deleted stay visible.
+      // Unpinned items (none today) still collapse into "More".
       { id: "comments", labelKey: "common.comments" as const, icon: MessagesSquare, pinned: true,
         badge: Array.from(openCommentCount.values()).reduce((a, b) => a + b, 0),
         onClick: () => openOverlay("comments") },
       { id: "terminology", labelKey: "nav.sidebarSection.terminology" as const, icon: BookOpen, pinned: true,
         onClick: () => openOverlay("terminology") },
-      { id: "living-memory", labelKey: "nav.sidebarSection.memory" as const, icon: BookMarked,
-        onClick: () => navigate(`/project/${projectId}/memory`) },
-      // Audio/Media lens lives in the header EditorModeToggle — keep it out of
-      // the sidebar More menu so the overflow list stays structural (share,
-      // settings, trash) rather than view-mode toggles.
-      { id: "share", labelKey: "nav.sidebarSection.share" as const, icon: Share2,
-        onClick: () => setShareOpen(true) },
-      { id: "settings", labelKey: "nav.settings" as const, icon: SettingsIcon,
-        onClick: () => {
-          if (!projectId) return
-          window.location.assign(buildProjectSettingsHandoffUrl({
-            projectId,
-            returnTo: workspaceReturnPath(projectId, activeFileId),
-          }))
-        } },
-      // FRO-272: trash moved out of the always-visible files footer into the
-      // "More" menu — it opens a dialog now (project_lead+ only).
+      // Project settings is a header cog beside Import. Audio/Media lens lives
+      // in the header EditorModeToggle. Sharing lives in Settings → Members.
+      // FRO-272: trash opens a dialog (project_lead+). Pinned in the same
+      // footer slot as "More" used to occupy — recovery is a destination,
+      // not an overflow item.
       ...(currentRoleLevel >= ROLE.PROJECT_LEAD
-        ? [{ id: "trash", labelKey: "nav.sidebarSection.trash" as const, icon: Trash2,
+        ? [{ id: "trash", labelKey: "nav.sidebarSection.trash" as const, icon: Trash2, pinned: true,
             onClick: () => setTrashOpen(true) }]
         : []),
     ]
@@ -6671,8 +6657,8 @@ export function ProjectWorkspace() {
           if (target) void applyTimingMode("audioFirst", target)
         }}
       />
-      {/* FRO-272: "Recently deleted" trash list — opened from the sidebar's
-          More menu (project_lead+); was an inline expander in the files panel. */}
+      {/* FRO-272: "Recently deleted" trash list — opened from the pinned
+          sidebar row (project_lead+); was an inline expander in the files panel. */}
       <Dialog open={trashOpen} onOpenChange={setTrashOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader><DialogTitle>Recently deleted</DialogTitle></DialogHeader>

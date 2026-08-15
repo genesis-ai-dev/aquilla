@@ -509,6 +509,7 @@ export const org = defineNamespace({
     "org.routeGate.invalidBody": "That organization URL isn’t valid.",
     "org.routeGate.missingBody": "You don’t have access to organization #{orgId}, or it doesn’t exist.",
     "org.routeGate.errorFallbackBody": "Something went wrong loading your organizations.",
+    "org.routeGate.loading": "Loading organization",
 
     // -- OrgInviteByEmail: owner-only invite-by-email form --
     "org.inviteByEmail.emailLabel": "Invitee email",
@@ -595,6 +596,24 @@ export const org = defineNamespace({
     // "open link" connector → projectSettings.share.openLinkConnector (identical text)
     "org.membersPage.orgPage.openLinkTooltip": "Open link: anyone holding the URL can redeem",
     "org.membersPage.orgPage.orgOwnerHint": "Org owner",
+
+    // -- OrgMembersTable: org roster table and member-management dialogs --
+    "org.membersPage.orgTable.changeRoleDescription":
+      "This updates their organization-level role across every project.",
+    "org.membersPage.orgTable.addMemberTitle": "Add a member",
+    "org.membersPage.orgTable.addMemberDescription":
+      "Grant an org-wide role, or invite someone by email who doesn't have an account yet.",
+    "org.membersPage.orgTable.addMethodAriaLabel": "Add member method",
+    "org.membersPage.orgTable.addMembersTab": "Add members",
+    "org.membersPage.orgTable.inviteByEmailTab": "Invite by email",
+    "org.membersPage.orgTable.noMembersTitle": "No members in this org yet.",
+    "org.membersPage.orgTable.noSearchMatch": "No members match this search.",
+    "org.membersPage.orgTable.removeFromOrg": "Remove from org",
+
+    // -- Org settings: consolidated security and permission-floor controls --
+    "org.settingsSecurity.groupLabel": "Permissions",
+    "org.settingsSecurity.groupDescription":
+      "Who can export deliverables, claim work, and manage terminology.",
 
     // -- ProjectsList: org-wide "all projects" list --
     "org.projectsList.signedOutTitle": "Sign in to see your projects",
@@ -1227,6 +1246,10 @@ export const org = defineNamespace({
       "org.membersPage.orgPage.revokeInviteAriaLabel": {
         description: "Accessible name for the icon-only button that revokes one pending org invite.",
         placeholders: { project: "The invited project's display name — not translated." },
+      },
+      "org.membersPage.orgTable.addMethodAriaLabel": {
+        description:
+          "Accessible name for the tabs that choose whether the org-member dialog adds an existing Aquilla user or sends an email invitation.",
       },
       "org.projectsList.shownOfTotal": {
         description:

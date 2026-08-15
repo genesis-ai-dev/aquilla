@@ -893,7 +893,7 @@ const POPULAR_OPTIONS: ImportOption[] = [
   { id: "upload", titleKey: "importExport.landing.upload.title", icon: Upload,
     descriptionKey: "importExport.landing.upload.description" },
   { id: "gdrive", titleKey: "importExport.landing.gdrive.title", hintKey: "importExport.landing.gdrive.hint", icon: CloudDownload, badge: "beta",
-    descriptionKey: "importExport.landing.gdrive.description" },
+    descriptionKey: "importExport.googleDrive.description" },
   { id: "ebible", titleKey: "importExport.landing.ebible.title", hintKey: "importExport.landing.ebible.hint", icon: Library,
     descriptionKey: "importExport.landing.ebible.description" },
   { id: "helloao", titleKey: "importExport.landing.helloao.title", hintKey: "importExport.landing.helloao.hint", icon: Globe,

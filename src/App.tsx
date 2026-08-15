@@ -64,8 +64,8 @@ const Settings = lazy(() =>
 const OrgSettingsIdentity = lazy(() =>
   import("@/pages/Settings").then((m) => ({ default: m.OrgSettingsIdentity })),
 )
-const OrgSettingsExport = lazy(() =>
-  import("@/pages/Settings").then((m) => ({ default: m.OrgSettingsExport })),
+const OrgSettingsSecurity = lazy(() =>
+  import("@/pages/Settings").then((m) => ({ default: m.OrgSettingsSecurity })),
 )
 const OrgSettingsProviders = lazy(() =>
   import("@/pages/Settings").then((m) => ({ default: m.OrgSettingsProviders })),
@@ -76,15 +76,6 @@ const OrgSettingsMonday = lazy(() =>
 // Monday OAuth landing — Monday's registered redirect URI is this SPA route.
 const MondayOAuthCallback = lazy(() =>
   import("@/pages/settings/MondayOAuthCallback").then((m) => ({ default: m.MondayOAuthCallback })),
-)
-const OrgSettingsRoster = lazy(() =>
-  import("@/pages/Settings").then((m) => ({ default: m.OrgSettingsRoster })),
-)
-const OrgSettingsTerminology = lazy(() =>
-  import("@/pages/Settings").then((m) => ({ default: m.OrgSettingsTerminology })),
-)
-const OrgSettingsAssignment = lazy(() =>
-  import("@/pages/Settings").then((m) => ({ default: m.OrgSettingsAssignment })),
 )
 const TeamsList = lazy(() =>
   import("@/components/org/TeamsList").then((m) => ({ default: m.TeamsList })),
@@ -272,10 +263,11 @@ function AppRoutes() {
           <Route path="members/matrix" element={<OrgLazyRoute><MembersPage /></OrgLazyRoute>} />
           <Route path="settings" element={<OrgLazyRoute><Settings /></OrgLazyRoute>} />
           <Route path="settings/identity" element={<OrgLazyRoute><OrgSettingsIdentity /></OrgLazyRoute>} />
-          <Route path="settings/export" element={<OrgLazyRoute><OrgSettingsExport /></OrgLazyRoute>} />
-          <Route path="settings/roster" element={<OrgLazyRoute><OrgSettingsRoster /></OrgLazyRoute>} />
-          <Route path="settings/assignment" element={<OrgLazyRoute><OrgSettingsAssignment /></OrgLazyRoute>} />
-          <Route path="settings/terminology" element={<OrgLazyRoute><OrgSettingsTerminology /></OrgLazyRoute>} />
+          <Route path="settings/security" element={<OrgLazyRoute><OrgSettingsSecurity /></OrgLazyRoute>} />
+          <Route path="settings/export" element={<Navigate to="../security" replace relative="path" />} />
+          <Route path="settings/roster" element={<Navigate to="../security" replace relative="path" />} />
+          <Route path="settings/assignment" element={<Navigate to="../security" replace relative="path" />} />
+          <Route path="settings/terminology" element={<Navigate to="../security" replace relative="path" />} />
           <Route path="settings/providers" element={<OrgLazyRoute><OrgSettingsProviders /></OrgLazyRoute>} />
           <Route path="settings/monday" element={<OrgLazyRoute><OrgSettingsMonday /></OrgLazyRoute>} />
         </Route>

@@ -3,6 +3,7 @@
 // so the button and the waveform stay in lock-step on play / pause / seek.
 // AQU-238: aria-label mirrors title so screen-readers and test selectors work.
 
+import type { ReactNode } from "react"
 import { AlertCircle, CloudDownload, CloudOff, FileQuestion, Pause, Play, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
@@ -71,32 +72,32 @@ export function CellAudioButton({ controller, hidden }: Props) {
   )
 }
 
+type ErrorIconKind = "pointer-missing" | "pointer-invalid" | "no-session" | "no-git-origin" | "batch-failed" | "audio-deleted"
+
+const ERROR_ICON: Readonly<Record<ErrorIconKind, ReactNode>> = {
+  "pointer-missing": <FileQuestion />,
+  "pointer-invalid": <FileQuestion />,
+  "no-session": <CloudOff />,
+  "no-git-origin": <CloudOff />,
+  "batch-failed": <CloudOff />,
+  // F10: permanent deletion — show a trash icon instead of a generic error
+  "audio-deleted": <Trash2 />,
+}
+
 function errorIcon(kind: string | undefined) {
-  switch (kind) {
-    case "pointer-missing":
-    case "pointer-invalid":
-      return <FileQuestion />
-    case "no-session":
-    case "no-git-origin":
-    case "batch-failed":
-      return <CloudOff />
-    case "audio-deleted":
-      // F10: permanent deletion — show a trash icon instead of a generic error
-      return <Trash2 />
-    default:
-      return <AlertCircle />
-  }
+  return (kind && kind in ERROR_ICON ? ERROR_ICON[kind as ErrorIconKind] : undefined) ?? <AlertCircle />
+}
+
+const ERROR_TOOLTIP: Readonly<Record<string, string>> = {
+  "pointer-missing": "Audio not available — sync the project",
+  "pointer-invalid": "Audio format unrecognized",
+  "batch-failed": "Couldn't reach audio server",
+  "audio-deleted": "Audio was deleted — re-record this cell",
+  "download-failed": "Audio download failed — try again",
+  "no-session": "Sign in to play audio",
+  "no-git-origin": "This project isn't connected to git",
 }
 
 function errorTooltip(kind: string): string {
-  switch (kind) {
-    case "pointer-missing": return "Audio not available — sync the project"
-    case "pointer-invalid": return "Audio format unrecognized"
-    case "batch-failed": return "Couldn't reach audio server"
-    case "audio-deleted": return "Audio was deleted — re-record this cell"
-    case "download-failed": return "Audio download failed — try again"
-    case "no-session": return "Sign in to play audio"
-    case "no-git-origin": return "This project isn't connected to git"
-    default: return "Audio error"
-  }
+  return ERROR_TOOLTIP[kind] ?? "Audio error"
 }

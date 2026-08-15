@@ -799,7 +799,6 @@ export const editor = defineNamespace({
       "wrong word choices. Use it as a hint, not a reading.",
     "editor.bt.alignment": "Alignment",
     "editor.bt.alignmentSub": "— word-level source/target view",
-
     // — Expansion tab: recording ————————————————————————————————
     "editor.expansion.recording": "Recording",
     "editor.voice.synthesizeWith": "Synthesize with {name}",

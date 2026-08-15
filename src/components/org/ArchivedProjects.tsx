@@ -272,7 +272,6 @@ export function ArchivedProjects() {
                 : "Projects you've archived. Restore one to bring it back to the active list."
             }
             inset={false}
-            className="mb-6"
           />
 
           {error && (
@@ -291,7 +290,6 @@ export function ArchivedProjects() {
             <Tabs
               value={tab}
               onValueChange={(v) => setTab(v as ArchivedTab)}
-              className="gap-4"
             >
               <TabsList aria-label="Archived views">
                 <TabsTrigger value="projects">Projects</TabsTrigger>

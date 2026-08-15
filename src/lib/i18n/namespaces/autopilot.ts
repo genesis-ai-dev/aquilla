@@ -462,6 +462,8 @@ export const autopilot = defineNamespace({
     // — Stable evidence/readiness enums (raw unknown values remain evidence) —
     "autopilot.evidence.status.proposed": "Proposed",
     "autopilot.evidence.status.applied": "Applied",
+
+    "autopilot.proposal.apply": "Apply",
     "autopilot.evidence.status.rejected": "Rejected",
     "autopilot.evidence.status.superseded": "Superseded",
     "autopilot.evidence.status.approved": "Approved",
@@ -509,6 +511,28 @@ export const autopilot = defineNamespace({
         "Autopilot automation controls, progress, human-review boundaries, recovery messages, and durable evidence across the project overview and translation editor.",
     },
     keys: {
+      "autopilot.proposal.unsupportedKind": {
+        description: "Explanation beside an agent event kind the current app cannot apply.",
+      },
+      "autopilot.proposal.currentlyEmpty": {
+        description: "Diff placeholder showing that the target cell has no current text.",
+      },
+      "autopilot.proposal.newRow": {
+        description: "Diff placeholder identifying a proposed source or target row creation.",
+      },
+      "autopilot.proposal.discarded": withPlaceholders(
+        "Status line for a discarded proposal followed by its human-readable summary.",
+        { summary: "Agent-authored proposal summary; translate only the surrounding status text." },
+      ),
+      "autopilot.proposal.applyFailed": {
+        description: "Label on the inline error shown when applying a staged proposal fails.",
+      },
+      "autopilot.proposal.applying": {
+        description: "Progress label inside the proposal action button while writes are being queued.",
+      },
+      "autopilot.proposal.apply": {
+        description: "Primary action that applies every supported event in a staged proposal.",
+      },
       "autopilot.settings.controlsLabel": {
         description:
           "Device-local switch label that shows or hides Autopilot controls without starting or stopping server work.",
@@ -796,38 +820,6 @@ export const autopilot = defineNamespace({
           targetLanguage: "Configured target-language name; do not translate the substituted value.",
         },
       ),
-      "autopilot.proposal.unsupportedKind": {
-        description:
-          "Note beside a staged change the app cannot apply for the user, telling them " +
-          "to make that kind of change by hand instead. Follows a technical event name " +
-          "on the same line, so it reads as the continuation of a sentence and starts " +
-          "lowercase in English.",
-      },
-      "autopilot.proposal.currentlyEmpty": {
-        description:
-          "Stands in for the existing translation on a staged edit when there is none " +
-          "yet, in the place the old text would be struck through. Parenthesised " +
-          "because it describes the absence rather than being content itself.",
-      },
-      "autopilot.proposal.newRow": {
-        description:
-          "Marks a staged change that adds a new line to the file rather than editing " +
-          "an existing one; the new text is shown below it. Parenthesised aside.",
-      },
-      "autopilot.proposal.discarded": withPlaceholders(
-        "Replaces the whole proposal card after the user rejects it, so the summary of " +
-          "what was turned down stays visible.",
-        { summary: "The agent's one-line summary of the proposal that was discarded." },
-      ),
-      "autopilot.proposal.applyFailed": {
-        description:
-          "Label on the inline error shown when saving the approved changes failed; the " +
-          "underlying error message is shown beside it and the changes were not saved.",
-      },
-      "autopilot.proposal.applying": {
-        description:
-          "Replaces the Apply button's label while the approved changes are being saved.",
-      },
     },
   },
   surfaces: [],

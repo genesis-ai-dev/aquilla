@@ -40,7 +40,7 @@ function ProjectsLoadingTemplate() {
         }
         statusBar={null}
         main={
-          <Page size="full" className="px-6">
+          <Page size="full">
             <div className="mb-12 max-w-6xl">
               <Skeleton className="h-7 w-32" />
             </div>
@@ -116,7 +116,7 @@ export function OrgProjectsPage() {
       header={<OrgBreadcrumb section="Projects" />}
       statusBar={null}
       main={
-        <Page size="full" className="px-6">
+        <Page size="full">
           {/* Title matches Teams/Members max width; table uses the full content well. */}
           <div className="max-w-6xl">
             <PageHeader

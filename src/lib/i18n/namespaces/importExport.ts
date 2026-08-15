@@ -193,8 +193,6 @@ export const importExport = defineNamespace({
       "Import any released Door43 resource as source and pin it to a release — pull upstream changes later.",
     "importExport.landing.gdrive.title": "Google Drive",
     "importExport.landing.gdrive.hint": "cloud",
-    "importExport.landing.gdrive.description":
-      "Pick files or a whole folder from your Google Drive. Only the items you pick are shared with Aquilla. Google Docs import as DOCX.",
     "importExport.landing.sdbh.title": "SDBH Hebrew Lexicon",
     "importExport.landing.sdbh.hint": "UBS MARBLE",
     "importExport.landing.sdbh.description":
@@ -340,7 +338,7 @@ export const importExport = defineNamespace({
     "importExport.upload.categoryTranslation": "Translation",
     "importExport.upload.formatsTranslation": "XLIFF/XLF, TMX, CSV/TSV",
     "importExport.upload.categoryDocuments": "Documents",
-    "importExport.upload.formatsDocuments": "DOCX, TXT, MD, HTML, JSON/ARB, PPTX, IDML (InDesign)",
+    "importExport.upload.formatsDocuments": "DOCX, TXT, MD, HTML, EPUB, JSON/ARB, PPTX, IDML (InDesign)",
     "importExport.upload.categoryLocalization": "Localization",
     "importExport.upload.formatsLocalization": "PO/POT, Java properties",
     "importExport.upload.categorySubtitles": "Subtitles",

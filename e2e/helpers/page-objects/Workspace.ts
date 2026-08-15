@@ -49,6 +49,11 @@ export class Workspace {
     await this.confirmImportPreview()
   }
 
+  async importPayload(payload: FilePayload): Promise<void> {
+    await this.previewImportPayload(payload)
+    await this.confirmImportPreview()
+  }
+
   /** Select a spreadsheet through the normal Upload files card, accept the
    * auto-detected column mapping, and stop at the shared human-review preview. */
   async previewMappedSpreadsheet(filePath: string): Promise<void> {

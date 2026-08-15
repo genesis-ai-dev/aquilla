@@ -17,10 +17,9 @@
 // affects terminology ONLY — every other project setting stays maintainer-
 // gated (see the terminology-scoped carve-out in project-settings.ts).
 
-import { useEffect, useState } from "react"
-import { Check } from "lucide-react"
-import { FieldDescription, FieldError } from "@/components/ui/field"
-import { SettingsGroup, SettingsRow } from "@/components/ui/page"
+import { useState } from "react"
+import { FieldError } from "@/components/ui/field"
+import { SettingsRow } from "@/components/ui/page"
 import {
   Select,
   SelectContent,
@@ -30,6 +29,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { ROLE } from "@/lib/frontier/roles"
+import { FLOOR_LABEL } from "@/pages/settings/constants"
 import type { UseOrgSettings } from "@/hooks/useOrgSettings"
 
 interface TermbaseEditSectionProps {
@@ -49,65 +49,50 @@ export function TermbaseEditSection({ orgSettings, canEdit }: TermbaseEditSectio
 
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [saved, setSaved] = useState(false)
-
-  useEffect(() => {
-    if (!saved) return
-    const t = setTimeout(() => setSaved(false), 2500)
-    return () => clearTimeout(t)
-  }, [saved])
 
   async function handleChange(newLevel: number) {
     setBusy(true)
     setError(null)
-    setSaved(false)
     const result = await patch({ termbaseEditMinRole: newLevel })
     if (result.kind === "error") {
       setError(result.message ?? "Save failed")
     } else if (result.kind === "blocked") {
       setError("Only org owners can change the terminology permission policy.")
-    } else {
-      setSaved(true)
     }
     setBusy(false)
   }
 
   return (
-    <SettingsGroup label="Terminology">
-      <SettingsRow
-        label="Who can manage terminology"
-        description="Minimum role required to add, edit, delete, and archive terms in a project's term base. Defaults to Project lead. Below this role the term base is read-only. This setting covers terminology only — every other project setting still requires Maintainer."
-        block
-      >
-        <Select
-          items={TERMBASE_ROLE_OPTIONS.map((opt) => ({ value: String(opt.level), label: opt.label }))}
-          value={String(termbaseEditMinRole)}
-          onValueChange={(v) => { if (v) void handleChange(Number(v)) }}
-          disabled={!canEdit || busy}
-        >
-          <SelectTrigger id="termbase-min-role" aria-label="Who can manage terminology" className="w-full max-w-sm">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectGroup>
-              {TERMBASE_ROLE_OPTIONS.map((opt) => (
-                <SelectItem key={opt.level} value={String(opt.level)}>
-                  {opt.label}
-                </SelectItem>
-              ))}
-            </SelectGroup>
-          </SelectContent>
-        </Select>
-        {!canEdit && (
-          <FieldDescription>Only org owners can change the terminology permission policy.</FieldDescription>
-        )}
-        {error && <FieldError className="text-xs">{error}</FieldError>}
-        {saved && (
-          <p className="flex items-center gap-1 text-xs text-green-600 dark:text-green-400" role="status" data-testid="termbase-role-saved">
-            <Check className="size-3.5" /> Saved
-          </p>
-        )}
-      </SettingsRow>
-    </SettingsGroup>
+    <SettingsRow
+      label="Who can manage terminology"
+      description="Minimum role required to add, edit, delete, and archive terms in a project's term base. Below this role the term base is read-only. This setting covers terminology only — every other project setting still requires Maintainer."
+      control={
+        <div className="flex min-w-44 flex-col items-end gap-1">
+          <Select
+            items={TERMBASE_ROLE_OPTIONS.map((opt) => ({
+              value: String(opt.level),
+              label: FLOOR_LABEL[opt.level] ?? opt.label,
+            }))}
+            value={String(termbaseEditMinRole)}
+            onValueChange={(v) => { if (v) void handleChange(Number(v)) }}
+            disabled={!canEdit || busy}
+          >
+            <SelectTrigger id="termbase-min-role" aria-label="Who can manage terminology" className="w-44">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                {TERMBASE_ROLE_OPTIONS.map((opt) => (
+                  <SelectItem key={opt.level} value={String(opt.level)}>
+                    {opt.label}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+          {error && <FieldError className="text-xs">{error}</FieldError>}
+        </div>
+      }
+    />
   )
 }

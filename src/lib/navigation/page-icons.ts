@@ -27,8 +27,6 @@ import {
   Bot,
   BrainCircuit,
   Building2,
-  Download,
-  EyeOff,
   FileText,
   FolderOpen,
   House,
@@ -40,11 +38,11 @@ import {
   Mic,
   Settings,
   Share2,
+  Shield,
   ShieldUser,
   SlidersHorizontal,
   SpellCheck,
   SquareUserRound,
-  UserCheck,
   Users,
   Workflow,
 } from "lucide-react"
@@ -92,9 +90,7 @@ const LABEL_ICONS: Record<string, LucideIcon> = {
   Project: NAV_PAGE_ICONS.project,
   // Org settings sections (match OrgSettingsIndex).
   Identity: Building2,
-  "Export permissions": Download,
-  "Roster & progress visibility": EyeOff,
-  "Assignment authority": UserCheck,
+  Security: Shield,
   "AI provider keys": KeyRound,
   "Monday.com": Workflow,
   // Project workspace surfaces.
@@ -148,9 +144,9 @@ export function deriveNavIcon(pathname: string): LucideIcon {
         return NAV_PAGE_ICONS.assigned
       case "settings":
         if (parts[1] === "identity") return Building2
-        if (parts[1] === "export") return Download
-        if (parts[1] === "roster") return EyeOff
-        if (parts[1] === "assignment") return UserCheck
+        if (parts[1] === "security" || parts[1] === "export" || parts[1] === "roster" || parts[1] === "assignment" || parts[1] === "terminology") {
+          return Shield
+        }
         if (parts[1] === "providers") return KeyRound
         if (parts[1] === "monday") return Workflow
         return NAV_PAGE_ICONS.settings

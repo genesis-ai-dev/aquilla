@@ -144,7 +144,7 @@ export function OrgProjectsDataTable({
           id: "name",
           accessorFn: (p) => p.name.toLowerCase(),
           header: ({ column }) => <DataTableColumnHeader column={column} title="Project" />,
-          meta: { className: embedded ? "min-w-0 max-w-0" : "min-w-0" },
+          meta: { className: embedded ? "min-w-[12rem]" : "min-w-0" },
           cell: ({ row }) => {
             const p = row.original
             return (
@@ -165,7 +165,7 @@ export function OrgProjectsDataTable({
           accessorFn: (p) => missingLast((p.orgName ?? "").toLowerCase()),
           sortUndefined: SORT_MISSING_LAST,
           header: ({ column }) => <DataTableColumnHeader column={column} title="Org" />,
-          meta: { className: embedded ? "min-w-0 w-[7.5rem] max-w-[7.5rem]" : "min-w-0 w-[9rem]" },
+          meta: { className: embedded ? "min-w-[7.5rem] whitespace-nowrap" : "min-w-0 w-[9rem]" },
           cell: ({ row }) =>
             row.original.orgName ? (
               <span
@@ -191,7 +191,7 @@ export function OrgProjectsDataTable({
           id: "languages",
           enableSorting: false,
           header: ({ column }) => <DataTableColumnHeader column={column} title="Language" />,
-          meta: { className: embedded ? "min-w-0 w-[9rem] max-w-[9rem]" : "min-w-0" },
+          meta: { className: embedded ? "min-w-[9rem] whitespace-nowrap" : "min-w-0" },
           cell: ({ row }) => {
             const p = row.original
             return (
@@ -219,7 +219,7 @@ export function OrgProjectsDataTable({
               data-testid="project-table-translated-header"
             />
           ),
-          meta: { align: "right", className: embedded ? "w-[6rem]" : "w-[6.5rem]" },
+          meta: { align: "right", className: embedded ? "w-[6rem] whitespace-nowrap" : "w-[6.5rem]" },
           cell: ({ row }) => {
             const pct = Math.round(translatedPct(row.original) * 100)
             return (
@@ -244,7 +244,7 @@ export function OrgProjectsDataTable({
               data-testid="project-table-validated-header"
             />
           ),
-          meta: { align: "right", className: embedded ? "w-[6rem]" : "w-[6.5rem]" },
+          meta: { align: "right", className: embedded ? "w-[6rem] whitespace-nowrap" : "w-[6.5rem]" },
           cell: ({ row }) => {
             const pct = Math.round(validatedPct(row.original) * 100)
             return (
@@ -269,7 +269,7 @@ export function OrgProjectsDataTable({
               data-testid="project-table-audio-header"
             />
           ),
-          meta: { align: "right", className: embedded ? "w-[4.5rem]" : "w-[6.5rem]" },
+          meta: { align: "right", className: embedded ? "w-[4.5rem] whitespace-nowrap" : "w-[6.5rem]" },
           cell: ({ row }) => {
             const pct = Math.round(audioPct(row.original) * 100)
             return (
@@ -334,7 +334,7 @@ export function OrgProjectsDataTable({
         id: "status",
         accessorFn: (p) => attentionRank(p, tableNow),
         header: ({ column }) => <DataTableColumnHeader column={column} title="Status" />,
-        meta: { className: embedded ? "w-[6.75rem] overflow-hidden" : "w-[9.5rem] whitespace-nowrap" },
+        meta: { className: embedded ? "w-[6.75rem] whitespace-nowrap" : "w-[9.5rem] whitespace-nowrap" },
         cell: ({ row }) => {
           const p = row.original
           return (
@@ -491,17 +491,14 @@ export function OrgProjectsDataTable({
           )
         }}
         testId={testId}
-        tableClassName={embedded ? "table-fixed" : undefined}
         className={
           embedded
             ? cn(
                 ADMIN_TABLE_CLASS,
-                // Fit the Section card: no -mx-2 bleed, no nested scrollport,
-                // and table-fixed so columns share the card width instead of
-                // growing to min-content and clipping Status off the edge.
+                // Scroll wide columns inside the Section card instead of
+                // table-fixed shrinking (and clipping) Status off the edge.
                 "mx-0 min-w-0 w-full",
-                "[&_[data-slot=table-container]]:min-w-0 [&_[data-slot=table-container]]:overflow-hidden",
-                "[&_th]:overflow-hidden [&_td]:overflow-hidden",
+                "[&_[data-slot=table-container]]:min-w-0 [&_[data-slot=table-container]]:overflow-visible",
               )
             : ADMIN_TABLE_PANEL_CLASS
         }

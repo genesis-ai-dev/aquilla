@@ -28,7 +28,7 @@ import { OrgProjectsDataTable } from "./OrgProjectsDataTable"
 import type { StatusFilter } from "@/hooks/useOrgPortfolio"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Page, PageHeader, Section, StatTile, EmptyState } from "@/components/ui/page"
+import { Page, PageHeader, Section, StatTile, STAT_TILE_GRID, EmptyState } from "@/components/ui/page"
 import { DataTable, DataTableColumnHeader } from "@/components/ui/data-table"
 import { OrgWithAvatar } from "@/components/OrgWithAvatar"
 import {
@@ -98,9 +98,8 @@ function OrgHomeLoadingTemplate() {
           </div>
         }
         header={
-          <div className="flex items-center justify-between gap-4 px-4">
+          <div className="flex items-center gap-4 px-4">
             <Skeleton className="h-5 w-40" />
-            <Skeleton className="h-7 w-56 rounded-lg" />
           </div>
         }
         statusBar={null}
@@ -108,13 +107,13 @@ function OrgHomeLoadingTemplate() {
           <Page size="wide">
             <Skeleton className="mb-8 h-7 w-48" />
             <div className="flex flex-col gap-6">
-              <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-6">
+              <div className={STAT_TILE_GRID}>
                 {Array.from({ length: 6 }).map((_, index) => (
                   <div
                     key={index}
-                    className="flex h-[88px] flex-col gap-2 rounded-lg border bg-card px-5 py-4"
+                    className="flex h-[88px] items-center justify-between rounded-lg border bg-card px-5 py-4 min-[480px]:flex-col min-[480px]:items-start min-[480px]:justify-start min-[480px]:gap-2"
                   >
-                    <Skeleton className="h-6 w-12" />
+                    <Skeleton className="order-last h-6 w-12 min-[480px]:order-none" />
                     <Skeleton className="h-3 w-20" />
                   </div>
                 ))}
@@ -233,7 +232,7 @@ const ORG_SUMMARY_COLUMNS: ColumnDef<OrgPortfolioSummary>[] = [
     id: "organization",
     accessorFn: (s) => orgDisplayName(s.org).toLowerCase(),
     header: ({ column }) => <DataTableColumnHeader column={column} title="Organization" />,
-    meta: { className: "min-w-0" },
+    meta: { className: "min-w-[12rem]" },
     cell: ({ row }) => (
       <OrgWithAvatar name={orgDisplayName(row.original.org)} size="xs" className="max-w-full" />
     ),
@@ -808,7 +807,7 @@ export function OrgHome() {
                 </Section>
               )}
 
-              <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-6">
+              <div className={STAT_TILE_GRID}>
                 <StatTile label="Organizations" value={orgs.length} />
                 <StatTile label="Projects" value={projects.length} />
                 <StatTile label="Avg translated" value={`${Math.round(avgTranslatedPct * 100)}%`} />
@@ -917,7 +916,7 @@ export function OrgHome() {
                 >
                   <div
                     data-testid="organizations-scroll"
-                    className="min-h-0 min-w-0 overflow-x-hidden overflow-y-auto overscroll-contain"
+                    className="min-h-0 min-w-0 overflow-x-auto overflow-y-auto overscroll-contain"
                   >
                     {orgSummaries.length === 0 ? (
                       <EmptyState
@@ -942,9 +941,9 @@ export function OrgHome() {
                         testId="all-orgs-organizations-table"
                         className={cn(
                           ADMIN_TABLE_CLASS,
-                          // No -mx-2 bleed here: it widens past the card and
-                          // creates a horizontal scrollbar on the scrollport.
-                          "mx-0 overflow-x-hidden [&_[data-slot=table-container]]:overflow-x-hidden",
+                          // Keep the -mx-2 bleed inside the card; the table
+                          // container owns horizontal scroll when columns overflow.
+                          "mx-0",
                         )}
                         dense
                         emptyState={

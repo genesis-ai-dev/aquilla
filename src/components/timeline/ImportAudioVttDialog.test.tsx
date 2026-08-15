@@ -9,7 +9,6 @@
 
 import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
-import userEvent from "@testing-library/user-event"
 
 import { ImportAudioVttDialog } from "./ImportAudioVttDialog"
 import type { ReconcilableCue } from "@/lib/import/cue-reconcile"
@@ -59,21 +58,6 @@ async function pick(
   return { onConfirm, onReconcile }
 }
 
-/** The identical-file case: nothing to retime, but the matcher can still run. */
-async function pickIdentical() {
-  const onReconcile = vi.fn()
-  render(
-    <ImportAudioVttDialog
-      open replacing textFileName="ep101.vtt" existingCues={existing}
-      onConfirm={vi.fn()} onReconcile={onReconcile} onCancel={() => {}}
-    />,
-  )
-  const file = new File([VTT("10.000", "20.000")], "audio.vtt", { type: "text/vtt" })
-  fireEvent.change(screen.getByTestId("import-audio-vtt-input"), { target: { files: [file] } })
-  await waitFor(() => expect(screen.getByTestId("import-audio-vtt-reconcile")).toBeInTheDocument())
-  return { onReconcile }
-}
-
 describe("the same cues with different timings", () => {
   it("offers a RETIME rather than a replacement", async () => {
     const { onConfirm, onReconcile } = await pick(VTT("10.500", "20.500"), { existingCues: existing })
@@ -84,7 +68,7 @@ describe("the same cues with different timings", () => {
     // The replacement path must not run: it is what would strand the takes.
     expect(onConfirm).not.toHaveBeenCalled()
     expect(onReconcile).toHaveBeenCalledOnce()
-    const [plan, relink] = onReconcile.mock.calls[0]
+    const [plan] = onReconcile.mock.calls[0]
     // Both cues keep their cell ids — which is what leaves their recordings
     // and their pairings attached with nothing copied.
     expect(plan.retimes).toEqual([
@@ -93,23 +77,15 @@ describe("the same cues with different timings", () => {
     ])
     expect(plan.creates).toEqual([])
     expect(plan.deletes).toEqual([])
-    // Re-pairing discards hand corrections, so it is never the default.
-    expect(relink).toBe(false)
   })
 
-  it("carries the re-pair choice through when it is asked for", async () => {
-    const { onReconcile } = await pick(VTT("10.500", "20.500"), { existingCues: existing })
-    // Base UI's checkbox is a <span role="checkbox"> driven by real pointer
-    // events, so fireEvent.click alone never toggles it.
-    await userEvent.click(screen.getByTestId("import-audio-vtt-relink-toggle"))
-    await waitFor(() =>
-      expect(screen.getByTestId("import-audio-vtt-relink-toggle")).toHaveAttribute(
-        "aria-checked",
-        "true",
-      ),
-    )
-    fireEvent.click(screen.getByTestId("import-audio-vtt-confirm"))
-    expect(onReconcile.mock.calls[0][1]).toBe(true)
+  // The re-pair action used to live here as a checkbox and now lives in the
+  // pairing drawer — reaching it by re-picking a VTT you had already imported
+  // was a button wearing an import dialog. This dialog only ever pairs the cues
+  // a reconcile ADDS, which needs no choice from anybody.
+  it("offers no re-pair choice — that moved to the pairing drawer", async () => {
+    await pick(VTT("10.500", "20.500"), { existingCues: existing })
+    expect(screen.queryByTestId("import-audio-vtt-relink-toggle")).not.toBeInTheDocument()
   })
 
   it("refuses to pretend when the file is identical", async () => {
@@ -128,21 +104,6 @@ describe("the same cues with different timings", () => {
     expect(screen.getByTestId("import-audio-vtt-confirm")).toBeDisabled()
   })
 
-  it("still lets you re-pair when nothing moved — the matcher needs no file", async () => {
-    // Re-running the matcher is a reason to be here in its own right. Gating it
-    // on a timing shift would mean the only way to recompute pairings is to
-    // hunt for a file whose timings happen to differ.
-    const { onReconcile } = await pickIdentical()
-    await userEvent.click(screen.getByTestId("import-audio-vtt-relink-toggle"))
-    await waitFor(() =>
-      expect(screen.getByTestId("import-audio-vtt-confirm")).toHaveTextContent("Re-pair 2 cues"),
-    )
-    expect(screen.getByTestId("import-audio-vtt-confirm")).not.toBeDisabled()
-    fireEvent.click(screen.getByTestId("import-audio-vtt-confirm"))
-    const [plan, relink] = onReconcile.mock.calls[0]
-    expect(plan.retimes).toEqual([])
-    expect(relink).toBe(true)
-  })
 })
 
 describe("a genuinely different cue set", () => {

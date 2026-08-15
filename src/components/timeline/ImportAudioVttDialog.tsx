@@ -60,8 +60,10 @@ interface Props {
     sourceFileName: string,
     timebase: TimebaseCorrection | null,
   ): void
-  /** Update the cues already there rather than minting a new file. */
-  onReconcile?(plan: CueReconcilePlan, relink: boolean): void
+  /** Update the cues already there rather than minting a new file. Newly added
+   *  cues are paired automatically; re-deriving the REST lives in the pairing
+   *  drawer, which is where you are when you decide they need redoing. */
+  onReconcile?(plan: CueReconcilePlan): void
   /** Take the audio-cue track away entirely, without putting another in its
    *  place. Absent ⇒ not offered (no cues yet, or no clearance to delete). */
   onRemove?(): void
@@ -98,11 +100,6 @@ export function ImportAudioVttDialog({
    *  rates to get a usable track. The opt-out exists because the evidence is
    *  statistical, not because declining is the ordinary choice. */
   const [correctTimebase, setCorrectTimebase] = useState(true)
-  /** Re-pair the cues with the subtitles after a retime. OFF by default: links
-   *  are never recomputed on their own precisely so that hand corrections
-   *  stick, and this is the one place that rule may be broken — so it has to be
-   *  broken deliberately, by a person, with the cost stated. */
-  const [relinkAfterRetime, setRelinkAfterRetime] = useState(false)
   /** Removal asks twice, in place. It takes a whole track away and — when
    *  takes hang off the cues — puts recordings out of reach, so it does not
    *  get to be a single click sitting next to Cancel. */
@@ -113,7 +110,6 @@ export function ImportAudioVttDialog({
       setPicked(null)
       setError(null)
       setCorrectTimebase(true)
-      setRelinkAfterRetime(false)
       setConfirmingRemove(false)
     }
   }, [open])
@@ -306,8 +302,7 @@ export function ImportAudioVttDialog({
             {planIsNoop ? (
               <p>
                 These are the {plan.total} cues this file already has, on the same timings —
-                there is nothing to update. You can still work out the subtitle pairings again
-                from here.
+                there is nothing to update.
               </p>
             ) : (
               <>
@@ -359,28 +354,6 @@ export function ImportAudioVttDialog({
                 )}
               </>
             )}
-            {/* Offered even when nothing moves. Re-running the matcher is a
-                reason to be here in its own right — the cues and the subtitles
-                are both already in the app, so this is the one action that
-                needs no file at all. It only lives behind a file pick until the
-                linking UI grows a home for it. */}
-            <label className="flex items-start gap-2">
-              <Checkbox
-                data-testid="import-audio-vtt-relink-toggle"
-                checked={relinkAfterRetime}
-                onCheckedChange={(checked) => setRelinkAfterRetime(checked)}
-              />
-              <span>
-                {planIsNoop
-                  ? "Work out the subtitle pairings again."
-                  : "Also work out every subtitle pairing again."}{" "}
-                <span className="text-muted-foreground">
-                  Newly added cues are always paired. This re-derives the rest as well — worth
-                  it if the old timings were wrong enough to have paired cues with the wrong
-                  lines, but it discards any pairing you fixed by hand.
-                </span>
-              </span>
-            </label>
           </div>
         )}
 
@@ -466,7 +439,7 @@ export function ImportAudioVttDialog({
             // Dead only when there is genuinely nothing to do: no timings to
             // move AND no re-pairing asked for. Re-pairing alone is reason
             // enough to confirm, which is why it is not gated on a shift.
-            disabled={!picked || (planIsNoop && !relinkAfterRetime)}
+            disabled={!picked || planIsNoop}
             onClick={() => {
               if (!picked) return
               // The retime wins whenever it is available. It is strictly better
@@ -474,7 +447,7 @@ export function ImportAudioVttDialog({
               // timeline, and takes and pairings survive rather than being
               // stranded — so there is no case for offering the worse one too.
               if (plan && onReconcile) {
-                onReconcile(plan, relinkAfterRetime)
+                onReconcile(plan)
                 return
               }
               onConfirm(picked.parsed, picked.fileName, correctTimebase ? timebase : null)
@@ -484,9 +457,7 @@ export function ImportAudioVttDialog({
               ? "Import cues"
               : plan
                 ? planIsNoop
-                  ? relinkAfterRetime
-                    ? `Re-pair ${plan.total} cues`
-                    : "Nothing to update"
+                  ? "Nothing to update"
                   : `Update ${plan.total} cues`
                 : `Import ${picked.parsed.cues.length} cues`}
           </Button>

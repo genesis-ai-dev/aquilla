@@ -152,6 +152,13 @@ export interface TimelineEditorProps {
    * cues. Absent ⇒ the historic arrangement, takes on this file's cells.
    */
   targetCells?: CellData[] | null
+  /** Linking mode turned on or off here. The workspace opens its review
+   *  drawer in step, so the drawer being open IS the mode. */
+  onLinkingModeChange?(on: boolean): void
+  /** Push the mode from outside — the drawer's own close button. Nonce-keyed
+   *  like `activateRequest`, so setting it to the same value twice still
+   *  fires. */
+  linkingModeRequest?: { on: boolean; nonce: number }
   /** An audio cue chip was selected. Separate from `onChipActivated`, which
    *  scrolls the dialogue table BY CELL ID — a cue has no row there, so it
    *  reaches the table through its links instead. */
@@ -468,6 +475,8 @@ export function TimelineEditor({
   canLinkVideo = true,
   onRequestImportAudioVtt,
   targetCells,
+  onLinkingModeChange,
+  linkingModeRequest,
   onCueActivated,
   cueLinks,
   cueLinksFailed = false,
@@ -852,6 +861,15 @@ export function TimelineEditor({
   useEffect(() => {
     if (!linkingMode) setPickedLink(null)
   }, [linkingMode])
+  // The drawer's close button reaches back in here. Nonce-keyed so closing,
+  // reopening and closing again all land.
+  const linkingNonceRef = useRef<number | null>(null)
+  useEffect(() => {
+    if (!linkingModeRequest) return
+    if (linkingNonceRef.current === linkingModeRequest.nonce) return
+    linkingNonceRef.current = linkingModeRequest.nonce
+    setLinkingMode(linkingModeRequest.on)
+  }, [linkingModeRequest])
   useEffect(() => {
     if (!linkingAvailable) setLinkingMode(false)
   }, [linkingAvailable])
@@ -1980,7 +1998,12 @@ export function TimelineEditor({
                 type="button"
                 data-testid="tl-linking-mode"
                 aria-pressed={linkingMode}
-                onClick={() => setLinkingMode((on) => !on)}
+                onClick={() =>
+                  setLinkingMode((on) => {
+                    onLinkingModeChange?.(!on)
+                    return !on
+                  })
+                }
                 className={cn(
                   "inline-flex items-center gap-1.5 rounded-md border border-border px-2 py-1 text-xs",
                   linkingMode

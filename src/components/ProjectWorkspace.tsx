@@ -96,6 +96,8 @@ import { planCueLinks } from "@/lib/timeline/cue-links"
 import type { CueReconcilePlan } from "@/lib/import/cue-reconcile"
 import { diffCueLinks } from "@/lib/timeline/cue-link-diff"
 import { useFileCellLinks } from "@/hooks/useFileCellLinks"
+import { reviewCueLinks } from "@/lib/timeline/cue-link-review"
+import { CueLinkDrawer } from "./timeline/CueLinkDrawer"
 import { v7 as uuidv7 } from "uuid"
 import { sequenceBetween } from "@/lib/timeline/derive"
 import { isLineEmpty, isUserAddedLine, userLineOrigin } from "@/lib/timeline/user-lines"
@@ -1942,6 +1944,8 @@ export function ProjectWorkspace() {
   // request covers the cue sibling too and no second read is needed.
   const {
     index: cueLinks,
+    rows: cueLinkRows,
+    rejected: cueLinkRejections,
     error: cueLinksError,
     setLinkLocally: setCueLinkLocally,
     refresh: refreshCueLinks,
@@ -1998,6 +2002,14 @@ export function ProjectWorkspace() {
     }
     return out
   }, [cellSummaries])
+  /** The pairing review drawer. Open IS linking mode — one state rather than
+   *  two that can disagree. */
+  const [cueLinkDrawerOpen, setCueLinkDrawerOpen] = useState(false)
+  const [linkingModeRequest, setLinkingModeRequest] = useState<{ on: boolean; nonce: number }>()
+  const closeCueLinkDrawer = useCallback(() => {
+    setCueLinkDrawerOpen(false)
+    setLinkingModeRequest((r) => ({ on: false, nonce: (r?.nonce ?? 0) + 1 }))
+  }, [])
   /** The auto-linker is writing pairings right now. Several hundred events and
    *  a handful of round trips, so without a sign of life the timeline just
    *  looks like the matcher did nothing. */
@@ -2160,7 +2172,7 @@ export function ProjectWorkspace() {
    * A pure retime is this with no creates and no deletes.
    */
   const handleReconcileAudioCues = useCallback(
-    async (plan: CueReconcilePlan, relinkAll: boolean) => {
+    async (plan: CueReconcilePlan) => {
       if (!project?.id || !activeFile || !audioCueSibling) return
       if (!navigator.onLine) {
         toast.error("Audio cues can't be updated while offline.")
@@ -2226,13 +2238,13 @@ export function ProjectWorkspace() {
       }
 
       // Pairing. Newly created cues are ALWAYS paired — they have none, and
-      // would otherwise sit unpaired forever — but the diff is scoped to them,
+      // would otherwise sit unpaired forever — but the diff is SCOPED to them,
       // so a cue this reconcile never touched keeps its pairing, including one
-      // somebody fixed by hand. Re-deriving the whole set is the explicit
-      // opt-in the dialog asks for separately.
+      // somebody fixed by hand. Re-deriving the whole set is a separate,
+      // explicit act and lives in the pairing drawer.
       let changedLinks = 0
       const newCueIds = new Set(plan.creates.map((c) => c.cellId))
-      if (relinkAll || newCueIds.size > 0) {
+      if (newCueIds.size > 0) {
         setCueLinksPending(true)
         try {
           const retimed = new Map(plan.retimes.map((m) => [m.cellId, m]))
@@ -2259,7 +2271,7 @@ export function ProjectWorkspace() {
               textCells: readAtVersion(cellStoreVersion, () => cellStore.getAllSummaries()),
               audioCues: cuesAfter,
             }),
-            ...(relinkAll ? {} : { onlyCues: newCueIds }),
+            onlyCues: newCueIds,
           })
           for (const e of [
             ...diff.link.map((l) => ({ ...l, linked: true })),
@@ -5442,6 +5454,93 @@ export function ProjectWorkspace() {
    * (2026-08-14): the target subtitle text IS the read-aloud line, because
    * there is no separate dub script — a question already filed for the client.
    */
+  /**
+   * The review list, recomputed from CURRENT links whenever the drawer is open
+   * so a pairing accepted in it disappears from it. Cheap — a bracketing walk
+   * over ~550 cues — and only while the drawer is showing.
+   */
+  const cueLinkReview = useMemo(() => {
+    if (!cueLinkDrawerOpen || !audioCues) return null
+    return reviewCueLinks({
+      textCells: readAtVersion(cellStoreVersion, () => cellStore.getAllSummaries()),
+      audioCues,
+      links: cueLinkRows,
+      rejected: cueLinkRejections,
+    })
+  }, [cueLinkDrawerOpen, audioCues, cueLinkRows, cueLinkRejections, cellStore, cellStoreVersion])
+
+  /** Lookups the drawer needs to show a row's two lines. */
+  const cueLinkTextById = useMemo(
+    () => new Map(readAtVersion(cellStoreVersion, () => cellStore.getAllSummaries()).map((c) => [c.id, c])),
+    [cellStore, cellStoreVersion],
+  )
+  const cueLinkCueById = useMemo(() => new Map((audioCues ?? []).map((c) => [c.id, c])), [audioCues])
+
+  /** Accept or reject one proposed pairing. A rejection is the SAME event with
+   *  `linked: false` — it writes a tombstone the review list then skips, so a
+   *  pair you have dismissed is never proposed again. */
+  const handleReviewPair = useCallback(
+    (textCellId: string, cueCellId: string, linked: boolean) => {
+      void handleToggleCueLink(textCellId, cueCellId, linked)
+    },
+    [handleToggleCueLink],
+  )
+
+  /**
+   * Re-derive every pairing from scratch. The one place the never-recompute
+   * rule is deliberately broken, which is why it is an explicit act behind a
+   * confirmation rather than something any operation does on its own.
+   *
+   * Emitted as a DIFF: pairings the matcher still agrees with are left alone
+   * rather than re-stated (~650 events otherwise), and the ones it no longer
+   * wants are unlinked out loud, because silence would leave them standing.
+   */
+  const handleRepairAllCueLinks = useCallback(async () => {
+    if (!project?.id || !activeFile || !audioCueSibling || !audioCues) return
+    setCueLinksPending(true)
+    try {
+      const diff = diffCueLinks({
+        current: cueLinks,
+        wanted: planCueLinks({
+          textCells: readAtVersion(cellStoreVersion, () => cellStore.getAllSummaries()),
+          audioCues,
+        }),
+      })
+      for (const e of [
+        ...diff.link.map((l) => ({ ...l, linked: true })),
+        ...diff.unlink.map((l) => ({ ...l, linked: false })),
+      ]) {
+        await emitCellLinkSet({
+          projectId: project.id,
+          fileId: activeFile.id,
+          cellId: e.textCellId,
+          toFileId: audioCueSibling.id,
+          toCellId: e.cueCellId,
+          linked: e.linked,
+          origin: "auto",
+          confidence: e.confidence,
+          author: currentUsername,
+        })
+      }
+      const changed = diff.link.length + diff.unlink.length
+      if (changed > 0) await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+      refreshCueLinks()
+      toast.success(
+        changed === 0
+          ? "The pairings came out the same."
+          : `Re-paired the cues — changed ${changed} pairing${changed === 1 ? "" : "s"}.`,
+      )
+    } catch (e) {
+      console.warn("[cue-links] re-pair failed", e)
+      toast.error("Couldn't re-pair the cues.")
+    } finally {
+      setCueLinksPending(false)
+    }
+  }, [
+    project?.id, activeFile, audioCueSibling, audioCues, cueLinks, currentUsername,
+    getTokenForProjectFile, refreshCueLinks, cellStore, cellStoreVersion,
+  ])
+
   /** The subtitle rows a take on this cell counts towards. Without audio cues
    *  a take counts for its own cell, which is what it always did. */
   const linkedTextIdsFor = useCallback(
@@ -7335,6 +7434,8 @@ export function ProjectWorkspace() {
                         : undefined
                     }
                     onReorderTrack={canReorderTracks ? handleReorderTrack : undefined}
+                    onLinkingModeChange={setCueLinkDrawerOpen}
+                    linkingModeRequest={linkingModeRequest}
                   />
                   </ResizablePanel>
                   <ResizableHandle withHandle />
@@ -7709,6 +7810,24 @@ export function ProjectWorkspace() {
           onAssigned={() => setAssignmentsRefreshKey((k) => k + 1)}
         />
       )}
+      {cueLinkDrawerOpen && audioCueSibling && (
+        <div className="fixed inset-y-0 right-0 z-30 flex pt-[var(--app-header-h,0px)]">
+          <CueLinkDrawer
+            review={cueLinkReview}
+            pending={cueLinksPending}
+            textById={cueLinkTextById}
+            cueById={cueLinkCueById}
+            onClose={closeCueLinkDrawer}
+            onNavigate={(cueCellId) => {
+              setTimelineActivateRequest({ cellId: cueCellId, nonce: Date.now() })
+              handleCueActivated(cueCellId)
+            }}
+            onPair={(t, c) => handleReviewPair(t, c, true)}
+            onReject={(t, c) => handleReviewPair(t, c, false)}
+            onRepairAll={() => void handleRepairAllCueLinks()}
+          />
+        </div>
+      )}
       {project && (
         <AudioRecordingModal
           open={recordingCellId !== null}
@@ -7959,9 +8078,9 @@ export function ProjectWorkspace() {
         cueHasTake={(cellId) => (cueAudioByCellId.get(cellId)?.attachments
           ? Object.keys(cueAudioByCellId.get(cellId)!.attachments).length > 0
           : false)}
-        onReconcile={(plan, relinkAll) => {
+        onReconcile={(plan) => {
           setImportAudioVttOpen(false)
-          void handleReconcileAudioCues(plan, relinkAll)
+          void handleReconcileAudioCues(plan)
         }}
         onConfirm={(parsed, sourceFileName, timebase) => {
           // Close FIRST, like the link dialog above: the import runs for

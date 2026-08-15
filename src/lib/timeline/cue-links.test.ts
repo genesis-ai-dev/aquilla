@@ -116,7 +116,9 @@ describe("planCueLinks", () => {
       textCells: [{ id: "sub-1", original: "hello" }, cue("sub-2", 5, 6, "hello")],
       audioCues: [cue("cue-1", 5, 6, "hello"), { id: "cue-2", original: "hello" }],
     })
-    expect(plans).toEqual([{ textCellId: "sub-2", cueCellId: "cue-1", confidence: 1 }])
+    expect(plans).toEqual([
+      { textCellId: "sub-2", cueCellId: "cue-1", confidence: 1, basis: "words" },
+    ])
   })
 
   it("survives empty input", () => {

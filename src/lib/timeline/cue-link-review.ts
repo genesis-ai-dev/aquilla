@@ -28,8 +28,16 @@
 // in time and two short cues that near each other do not. Rather than loosen
 // the matcher (auto-linking on zero overlap is genuinely risky), the finding is
 // proposed here and a person clicks accept.
+//
+// IT ALSO CARRIES WHAT THE MATCHER FOUND AND DELIBERATELY DID NOT WRITE
+// (Sam, 2026-08-15): cross-script and weak-wording matches. Those used to be
+// auto-paired, which made the person's job noticing what had been decided for
+// them — nothing verified what either pair of lines actually says. They arrive
+// here as proposals in their own right rather than being rediscovered by the
+// bracketing, since the analysis already did that work and discarding it would
+// be lossy. On episode 101 this holds back 2 of 655 pairings.
 
-import { cueSimilarity, dominantScript, type LinkableCue } from "./cue-links"
+import { cueSimilarity, dominantScript, planCueLinks, type LinkableCue } from "./cue-links"
 import type { CueLink } from "@/lib/sync/cell-links-read"
 
 /** Above this, identical-enough wording makes the pairing near-certain. */
@@ -56,6 +64,13 @@ export interface ReviewPair {
 export interface CueLinkReview {
   /** Same words, near in time, sitting in a hole in the alignment. Accept. */
   confident: ReviewCandidate[]
+  /** The matcher found these and deliberately did NOT pair them: the timings
+   *  line up but the two sides are in different writing systems, so nothing
+   *  compared what they say. Strong, unverified — a person's call. */
+  crossScriptCandidates: ReviewCandidate[]
+  /** Overlapping in time with a little shared wording, but not enough to be
+   *  sure. Also found by the matcher and deliberately not paired. */
+  weakCandidates: ReviewCandidate[]
   /** The only unpaired line in the hole, but the words do not agree. Judgement. */
   uncertain: ReviewCandidate[]
   /** Unpaired heard lines with no candidate at all — the real orphans. */
@@ -102,14 +117,39 @@ export function reviewCueLinks({
     .map((c, i) => (textToCue.has(c.id) ? -1 : i))
     .filter((i) => i >= 0)
 
+  // What the matcher FOUND but declined to write. These are proposals in their
+  // own right rather than something the bracketing has to rediscover — the
+  // analysis already did the work, and throwing it away would be lossy.
+  const crossScriptCandidates: ReviewCandidate[] = []
+  const weakCandidates: ReviewCandidate[] = []
+  for (const plan of planCueLinks({ textCells, audioCues })) {
+    if (plan.basis === "words") continue
+    if (cueToText.has(plan.cueCellId) || textToCue.has(plan.textCellId)) continue
+    if (declined.has(key(plan.textCellId, plan.cueCellId))) continue
+    const cue = audioCues.find((c) => c.id === plan.cueCellId)
+    const text = textCells.find((c) => c.id === plan.textCellId)
+    const row: ReviewCandidate = {
+      cueCellId: plan.cueCellId,
+      textCellId: plan.textCellId,
+      similarity: plan.basis === "cross-script" ? 0 : plan.confidence,
+      gapSec: Math.abs((cue?.startTime ?? 0) - (text?.startTime ?? 0)),
+    }
+    ;(plan.basis === "cross-script" ? crossScriptCandidates : weakCandidates).push(row)
+  }
+  const proposedCues = new Set([...crossScriptCandidates, ...weakCandidates].map((r) => r.cueCellId))
+  const proposedText = new Set([...crossScriptCandidates, ...weakCandidates].map((r) => r.textCellId))
+
   const confident: ReviewCandidate[] = []
   const uncertain: ReviewCandidate[] = []
   const unpairedCues: string[] = []
-  const claimed = new Set<string>()
+  const claimed = new Set<string>(proposedText)
 
   for (let i = 0; i < audioCues.length; i++) {
     const cue = audioCues[i]
     if (cueToText.has(cue.id)) continue
+    // Already the subject of a matcher proposal above — asking twice about the
+    // same cue in two different groups would be noise.
+    if (proposedCues.has(cue.id)) continue
 
     // The nearest PAIRED cues either side. Without both, this cue sits outside
     // the alignment's span — the head or tail of the file — and there is no
@@ -185,15 +225,25 @@ export function reviewCueLinks({
   // least certain judgement call is the last.
   confident.sort((a, b) => b.similarity - a.similarity || a.gapSec - b.gapSec)
   uncertain.sort((a, b) => a.gapSec - b.gapSec)
+  crossScriptCandidates.sort((a, b) => a.gapSec - b.gapSec)
+  weakCandidates.sort((a, b) => b.similarity - a.similarity)
   lowConfidence.sort((a, b) => (a.confidence ?? 0) - (b.confidence ?? 0))
 
   return {
     confident,
+    crossScriptCandidates,
+    weakCandidates,
     uncertain,
     unpairedCues,
     unpairedText,
     lowConfidence,
     crossScript,
-    actionable: confident.length + uncertain.length + lowConfidence.length + crossScript.length,
+    actionable:
+      confident.length +
+      crossScriptCandidates.length +
+      weakCandidates.length +
+      uncertain.length +
+      lowConfidence.length +
+      crossScript.length,
   }
 }

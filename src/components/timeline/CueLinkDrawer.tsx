@@ -48,6 +48,10 @@ interface Props {
    * candidate row used to produce.
    */
   onNavigate(cueCellId: string, textCellIds?: readonly string[]): void
+  /** Show an unpaired SUBTITLE line: its own row in the table, and its place on
+   *  the timeline. Separate from `onNavigate` because it is not a cue and has
+   *  no pairing to follow. */
+  onNavigateText(textCellId: string): void
   onPair(textCellId: string, cueCellId: string): void
   onReject(textCellId: string, cueCellId: string): void
   /** Re-derive every pairing. Discards hand corrections, hence the confirm. */
@@ -240,6 +244,7 @@ export function CueLinkDrawer({
   cueById,
   onClose,
   onNavigate,
+  onNavigateText,
   onPair,
   onReject,
   onRepairAll,
@@ -328,6 +333,28 @@ export function CueLinkDrawer({
               </Section>
             )}
 
+            {review.crossScriptCandidates.length > 0 && (
+              <Section
+                title="Different writing systems"
+                hint="The timings line up, but nothing could compare the words — so this was not paired for you."
+              >
+                {review.crossScriptCandidates.map((row) => (
+                  <CandidateRow key={row.cueCellId} row={row} {...rowProps} />
+                ))}
+              </Section>
+            )}
+
+            {review.weakCandidates.length > 0 && (
+              <Section
+                title="Overlapping, words barely agree"
+                hint="Enough shared wording to notice, not enough to pair on its own."
+              >
+                {review.weakCandidates.map((row) => (
+                  <CandidateRow key={row.cueCellId} row={row} {...rowProps} />
+                ))}
+              </Section>
+            )}
+
             {review.uncertain.length > 0 && (
               <Section
                 title="The only candidate nearby"
@@ -364,13 +391,16 @@ export function CueLinkDrawer({
                 label={(n) => `${n} heard line${n === 1 ? "" : "s"} with no subtitle nearby`}
                 ids={review.unpairedCues}
                 byId={cueById}
-                onNavigate={onNavigate}
+                onNavigate={(id) => onNavigate(id)}
               />
               <CollapsedGroup
                 testId="cue-link-orphan-text"
                 label={(n) => `${n} line${n === 1 ? "" : "s"} with no speech nearby`}
                 ids={review.unpairedText}
                 byId={textById}
+                // A SUBTITLE, not a cue — it has a row of its own to scroll to,
+                // and the timeline can seat its chip directly.
+                onNavigate={onNavigateText}
               />
             </div>
           </>

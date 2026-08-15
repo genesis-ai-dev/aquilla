@@ -92,7 +92,7 @@ import {
   buildProjectAwareMinter,
 } from "@/lib/sync/cqrs-bridge"
 import { emitTargetCellCommit, emitCellBacktranslationSet, emitFileRename, emitFileDelete, emitFileRestore, emitCellValidate, emitCellRetime, emitCellLaneRetime, emitCellAudioTrim, emitCellLinkSet, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, enqueueEvents } from "@/lib/sync/events-emit"
-import { planCueLinks } from "@/lib/timeline/cue-links"
+import { autoLinkable, planCueLinks } from "@/lib/timeline/cue-links"
 import type { CueReconcilePlan } from "@/lib/import/cue-reconcile"
 import { diffCueLinks } from "@/lib/timeline/cue-link-diff"
 import { useFileCellLinks } from "@/hooks/useFileCellLinks"
@@ -2107,10 +2107,10 @@ export function ProjectWorkspace() {
       let linkCount = 0
       setCueLinksPending(true)
       try {
-        const plans = planCueLinks({
+        const plans = autoLinkable(planCueLinks({
           textCells: readAtVersion(cellStoreVersion, () => cellStore.getAllSummaries()),
           audioCues: uploaded.cues,
-        })
+        }))
         for (const plan of plans) {
           await emitCellLinkSet({
             projectId: project.id,
@@ -2267,10 +2267,15 @@ export function ProjectWorkspace() {
           ]
           const diff = diffCueLinks({
             current: cueLinks,
-            wanted: planCueLinks({
-              textCells: readAtVersion(cellStoreVersion, () => cellStore.getAllSummaries()),
-              audioCues: cuesAfter,
-            }),
+            // Only what may be written without asking. A cross-script or
+            // weak-wording match is surfaced in the review drawer instead —
+            // nothing verified what those two lines say.
+            wanted: autoLinkable(
+              planCueLinks({
+                textCells: readAtVersion(cellStoreVersion, () => cellStore.getAllSummaries()),
+                audioCues: cuesAfter,
+              }),
+            ),
             onlyCues: newCueIds,
           })
           for (const e of [
@@ -3477,7 +3482,28 @@ export function ProjectWorkspace() {
       // look like a dead row.
       const linked = textCellIds ?? cueLinks.textForCue.get(cueCellId) ?? []
       if (linked.length === 0) {
+        // Nothing in the table corresponds to this cue, so a selection would
+        // claim something that isn't true. Take the table as close as it can
+        // honestly get instead — the line nearest it in time, flashed rather
+        // than selected — which is what makes an orphan row in the review
+        // drawer worth clicking at all.
         clearSelection()
+        // `audioCues`, not `audioCueCells` — the merged version is declared
+        // ~1,600 lines below this and naming it here is a temporal-dead-zone
+        // crash. Only the timing is wanted, which the raw cues carry.
+        const cueStart = audioCues?.find((c) => c.id === cueCellId)?.startTime
+        if (cueStart == null) return
+        let nearest: string | null = null
+        let best = Infinity
+        for (const c of cellSummaries) {
+          if (typeof c.startTime !== "number") continue
+          const d = Math.abs(c.startTime - cueStart)
+          if (d < best) {
+            best = d
+            nearest = c.id
+          }
+        }
+        if (nearest) editorRef.current?.scrollToCellId(nearest, { flash: true })
         return
       }
       // Document order, not the order the edges came back in — the selection
@@ -3487,7 +3513,7 @@ export function ProjectWorkspace() {
       setSelection(ordered, ordered[0])
       editorRef.current?.scrollToCellId(ordered[0], { flash: true, follow: "engage" })
     },
-    [cueLinks, cellSummaries],
+    [cueLinks, cellSummaries, audioCues],
   )
   // AQU-646 stage 2: a gap click used to scroll the table to the silence and
   // pulse the lines bracketing it. The band it belonged to is gone, and the
@@ -5504,10 +5530,12 @@ export function ProjectWorkspace() {
     try {
       const diff = diffCueLinks({
         current: cueLinks,
-        wanted: planCueLinks({
-          textCells: readAtVersion(cellStoreVersion, () => cellStore.getAllSummaries()),
-          audioCues,
-        }),
+        wanted: autoLinkable(
+          planCueLinks({
+            textCells: readAtVersion(cellStoreVersion, () => cellStore.getAllSummaries()),
+            audioCues,
+          }),
+        ),
       })
       for (const e of [
         ...diff.link.map((l) => ({ ...l, linked: true })),
@@ -7653,6 +7681,14 @@ export function ProjectWorkspace() {
                   // line(s) selected and scrolled to in the dialogue table.
                   setTimelineActivateRequest({ cellId: cueCellId, nonce: Date.now() })
                   handleCueActivated(cueCellId, textCellIds)
+                }}
+                onNavigateText={(textCellId) => {
+                  // A subtitle has a row of its own, so both surfaces can go
+                  // straight to it: seat its chip on the timeline, select and
+                  // scroll to the row in the table.
+                  setTimelineActivateRequest({ cellId: textCellId, nonce: Date.now() })
+                  setSelection([textCellId], textCellId)
+                  editorRef.current?.scrollToCellId(textCellId, { flash: true, follow: "engage" })
                 }}
                 onPair={(t, c) => handleReviewPair(t, c, true)}
                 onReject={(t, c) => handleReviewPair(t, c, false)}

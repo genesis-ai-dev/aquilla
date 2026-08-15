@@ -12,7 +12,7 @@ import path from "node:path"
 import { describe, it, expect } from "vitest"
 
 import { reviewCueLinks } from "./cue-link-review"
-import { planCueLinks, type LinkableCue } from "./cue-links"
+import { autoLinkable, planCueLinks, type LinkableCue } from "./cue-links"
 import { applyTimebaseScale } from "@/lib/import/timebase"
 import type { CueLink } from "@/lib/sync/cell-links-read"
 
@@ -145,6 +145,76 @@ describe("what never ranks", () => {
   })
 })
 
+describe("what the matcher declines to pair", () => {
+  // Sam, 2026-08-15: these are FLAGGED rather than written. Nothing verified
+  // what the two lines say, so the person decides.
+  it("surfaces a cross-script match as a proposal, not a pairing", () => {
+    const textCells = [
+      cue("s0", 0, 2, "One"),
+      cue("s1", 5, 7, "Messiah will destroy the Romans"),
+      cue("s2", 20, 22, "Three"),
+    ]
+    const audioCues = [
+      cue("c0", 0, 2, "One"),
+      cue("c1", 5, 7, "המשיח יהרוס את הרומאים"),
+      cue("c2", 20, 22, "Three"),
+    ]
+    const r = reviewCueLinks({
+      textCells,
+      audioCues,
+      links: [link("s0", "c0"), link("s2", "c2")],
+    })
+    expect(r.crossScriptCandidates.map((c) => c.cueCellId)).toEqual(["c1"])
+    // ...and it must not ALSO appear as a bracketing candidate. One question
+    // per cue.
+    expect(r.confident).toEqual([])
+    expect(r.uncertain).toEqual([])
+  })
+
+  it("surfaces a weak-wording overlap as a different proposal", () => {
+    // Two words in common out of five: 0.4 similarity — over the noise floor,
+    // under the bar for pairing on its own. (A short cue fully contained in a
+    // long line, like "boat" inside "the boat is over there", scores 1.00 on
+    // containment and is a STRONG match, not a weak one.)
+    const textCells = [
+      cue("s0", 0, 2, "One"),
+      cue("s1", 5, 9, "alpha beta gamma delta epsilon zeta"),
+      cue("s2", 20, 22, "Three"),
+    ]
+    const audioCues = [
+      cue("c0", 0, 2, "One"),
+      cue("c1", 5, 9, "alpha beta theta iota kappa"),
+      cue("c2", 20, 22, "Three"),
+    ]
+    const r = reviewCueLinks({
+      textCells,
+      audioCues,
+      links: [link("s0", "c0"), link("s2", "c2")],
+    })
+    expect([...r.crossScriptCandidates, ...r.weakCandidates].map((c) => c.cueCellId)).toContain("c1")
+  })
+
+  it("never proposes one a person has rejected", () => {
+    const textCells = [
+      cue("s0", 0, 2, "One"),
+      cue("s1", 5, 7, "Messiah will destroy the Romans"),
+      cue("s2", 20, 22, "Three"),
+    ]
+    const audioCues = [
+      cue("c0", 0, 2, "One"),
+      cue("c1", 5, 7, "המשיח יהרוס את הרומאים"),
+      cue("c2", 20, 22, "Three"),
+    ]
+    const r = reviewCueLinks({
+      textCells,
+      audioCues,
+      links: [link("s0", "c0"), link("s2", "c2")],
+      rejected: [{ fromCellId: "s1", toCellId: "c1" }],
+    })
+    expect(r.crossScriptCandidates).toEqual([])
+  })
+})
+
 describe("existing pairings worth a second look", () => {
   const textCells = [cue("s1", 0, 2, "Messiah will destroy the Romans"), cue("s2", 5, 7, "Hello there")]
   const audioCues = [cue("c1", 0, 2, "המשיח יהרוס את הרומאים"), cue("c2", 5, 7, "Hi")]
@@ -223,7 +293,9 @@ describe.skipIf(!haveSamples)("against The Chosen episode 101", () => {
     startTime: applyTimebaseScale(c.startTime!, NTSC),
     endTime: applyTimebaseScale(c.endTime!, NTSC),
   }))
-  const links: CueLink[] = planCueLinks({ textCells, audioCues }).map((p) =>
+  // Only what the matcher would actually WRITE — cross-script and weak-wording
+  // matches are proposals now, not pairings.
+  const links: CueLink[] = autoLinkable(planCueLinks({ textCells, audioCues })).map((p) =>
     link(p.textCellId, p.cueCellId, p.confidence),
   )
   const r = reviewCueLinks({ textCells, audioCues, links })
@@ -232,6 +304,12 @@ describe.skipIf(!haveSamples)("against The Chosen episode 101", () => {
     // ~28 unpaired cells on the timeline; a handful of rows here.
     expect(r.confident.length + r.uncertain.length).toBeLessThan(12)
     expect(r.actionable).toBeLessThan(30)
+  })
+
+  it("no longer auto-pairs anything the matcher could not verify", () => {
+    // Cross-script and weak-wording matches are proposals now, so the links
+    // that DO exist all rest on wording agreement.
+    expect(links.every((l) => (l.confidence ?? 0) >= 0.5)).toBe(true)
   })
 
   it("finds the identical-wording misses the matcher structurally cannot make", () => {

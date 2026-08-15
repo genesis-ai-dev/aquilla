@@ -31,6 +31,7 @@ const want = (textCellId: string, cueCellId: string, confidence = 0.8): CueLinkP
   textCellId,
   cueCellId,
   confidence,
+  basis: "words",
 })
 
 const index = (...edges: CueLink[]) => buildCueLinkIndex(edges)

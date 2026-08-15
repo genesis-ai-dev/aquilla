@@ -35,6 +35,8 @@ const cueById = new Map([
 
 const review = (over: Partial<CueLinkReview> = {}): CueLinkReview => ({
   confident: [],
+  crossScriptCandidates: [],
+  weakCandidates: [],
   uncertain: [],
   unpairedCues: [],
   unpairedText: [],
@@ -48,6 +50,7 @@ function renderDrawer(r: CueLinkReview | null, over: Record<string, unknown> = {
   const onPair = vi.fn()
   const onReject = vi.fn()
   const onNavigate = vi.fn()
+  const onNavigateText = vi.fn()
   const onRepairAll = vi.fn()
   const onClose = vi.fn()
   render(
@@ -57,13 +60,14 @@ function renderDrawer(r: CueLinkReview | null, over: Record<string, unknown> = {
       cueById={cueById}
       onClose={onClose}
       onNavigate={onNavigate}
+      onNavigateText={onNavigateText}
       onPair={onPair}
       onReject={onReject}
       onRepairAll={onRepairAll}
       {...over}
     />,
   )
-  return { onPair, onReject, onNavigate, onRepairAll, onClose }
+  return { onPair, onReject, onNavigate, onNavigateText, onRepairAll, onClose }
 }
 
 const confidentRow = { cueCellId: "c1", textCellId: "s1", similarity: 1, gapSec: 0.7 }
@@ -137,9 +141,50 @@ describe("the cases with no answer", () => {
     expect(screen.getByText(/Whoa!/)).toBeInTheDocument()
   })
 
+  it("navigates from an orphan HEARD line", () => {
+    // These used to be inert, which made the count feel like a dead end.
+    const { onNavigate } = renderDrawer(review({ unpairedCues: ["c3"] }))
+    fireEvent.click(screen.getByTestId("cue-link-orphan-cues"))
+    fireEvent.click(screen.getByText(/Whoa!/))
+    expect(onNavigate).toHaveBeenCalledWith("c3")
+  })
+
+  it("navigates an orphan SUBTITLE through its own path", () => {
+    // A subtitle has a row of its own, so it does not go through the cue
+    // navigation — that one follows pairings this line has none of.
+    const { onNavigateText, onNavigate } = renderDrawer(review({ unpairedText: ["s3"] }))
+    fireEvent.click(screen.getByTestId("cue-link-orphan-text"))
+    fireEvent.click(screen.getByText(/THE CHOSEN IS BASED ON/))
+    expect(onNavigateText).toHaveBeenCalledWith("s3")
+    expect(onNavigate).not.toHaveBeenCalled()
+  })
+
   it("says nothing at all when there are none", () => {
     renderDrawer(review())
     expect(screen.queryByTestId("cue-link-orphan-cues")).not.toBeInTheDocument()
+  })
+})
+
+describe("what the matcher found but would not pair", () => {
+  // Sam, 2026-08-15: a cross-script or weak-wording match should be FLAGGED,
+  // not written. Nothing verified what those two lines say, so pairing them
+  // silently makes the person's job noticing what was decided for them.
+  const row = { cueCellId: "c4", textCellId: "s4", similarity: 0, gapSec: 0.2 }
+
+  it("offers a cross-script match as its own group", () => {
+    renderDrawer(review({ crossScriptCandidates: [row], actionable: 1 }))
+    expect(screen.getByText(/Different writing systems/)).toBeInTheDocument()
+    expect(screen.getByTestId("cue-link-pair-c4")).toBeInTheDocument()
+  })
+
+  it("offers a weak-wording match as a different group", () => {
+    renderDrawer(review({ weakCandidates: [{ ...row, similarity: 0.3 }], actionable: 1 }))
+    expect(screen.getByText(/Overlapping, words barely agree/)).toBeInTheDocument()
+  })
+
+  it("counts them in the size of the job", () => {
+    renderDrawer(review({ crossScriptCandidates: [row], weakCandidates: [row], actionable: 2 }))
+    expect(screen.getByTestId("cue-link-actionable")).toHaveTextContent("2 to review")
   })
 })
 

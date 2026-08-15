@@ -35,6 +35,23 @@ export interface LinkableCue {
   original?: string
 }
 
+/**
+ * What the pairing rests on — and therefore whether it may be written without
+ * asking. (Sam, 2026-08-15)
+ *
+ *  - `words`: the two lines say the same thing. Safe to pair automatically.
+ *  - `cross-script`: the timings line up, and the words CANNOT be compared
+ *    because the two sides are in different writing systems. Strong evidence,
+ *    but nothing has actually checked that they mean the same thing.
+ *  - `weak-words`: they overlap in time and share a little wording, but not
+ *    enough to be sure.
+ *
+ * Only `words` is auto-linked. The other two are surfaced in the review drawer
+ * as proposals, because a pairing nothing verified should be a person's
+ * decision rather than something they have to notice was made for them.
+ */
+export type CueLinkBasis = "words" | "cross-script" | "weak-words"
+
 export interface CueLinkPlan {
   /** The subtitle cell. */
   textCellId: string
@@ -43,6 +60,13 @@ export interface CueLinkPlan {
   /** `max(dice, containment)`, or the time-overlap fraction when the two sides
    *  are in different scripts and words cannot be compared at all. */
   confidence: number
+  basis: CueLinkBasis
+}
+
+/** The pairings safe to write without asking. Every emit path filters through
+ *  this; the review drawer reads the whole list. */
+export function autoLinkable(plans: readonly CueLinkPlan[]): CueLinkPlan[] {
+  return plans.filter((p) => p.basis === "words")
 }
 
 /** Below this the two cues merely touch; they do not overlap. */
@@ -200,14 +224,21 @@ export function planCueLinks({ textCells, audioCues }: PlanCueLinksArgs): CueLin
       // letters at all must not trigger this.
       if (cueScript && subtitleScript && cueScript !== subtitleScript) {
         if (frac >= CROSS_SCRIPT_MIN_FRAC) {
-          plans.push({ textCellId: text.id, cueCellId: cue.id, confidence: frac })
+          plans.push({
+            textCellId: text.id,
+            cueCellId: cue.id,
+            confidence: frac,
+            basis: "cross-script",
+          })
         }
         continue
       }
 
       const sim = cueSimilarity(cueText, subtitleText)
-      if (sim >= STRONG_SIM || (sim >= WEAK_SIM && frac >= WEAK_SIM_MIN_FRAC)) {
-        plans.push({ textCellId: text.id, cueCellId: cue.id, confidence: sim })
+      if (sim >= STRONG_SIM) {
+        plans.push({ textCellId: text.id, cueCellId: cue.id, confidence: sim, basis: "words" })
+      } else if (sim >= WEAK_SIM && frac >= WEAK_SIM_MIN_FRAC) {
+        plans.push({ textCellId: text.id, cueCellId: cue.id, confidence: sim, basis: "weak-words" })
       }
     }
   }

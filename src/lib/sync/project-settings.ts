@@ -39,6 +39,17 @@ export interface ProjectWideSettings {
   validationNamedUsers?: string[]
   allowSelfValidation?: boolean
   /**
+   * AQU-646: may people add new lines into the silences on the timeline?
+   *
+   * OFF unless explicitly turned on. The affordance was built speculatively —
+   * no client has asked for it — and it is underdeveloped enough to be a
+   * liability: its mic over an empty stretch used to mint a subtitle line and
+   * record against it, producing a take matching no audio cue at all. Removal
+   * of an empty added line is deliberately NOT gated on this, so switching it
+   * off can never strand a line somebody already made.
+   */
+  allowLineCreation?: boolean
+  /**
    * AQU-186: minimum role level required to trigger a harmonization sweep on
    * this project. Default (absent) = project_lead (500). Configurable up to
    * maintainer (600); lowering below project_lead is not allowed (hard floor).

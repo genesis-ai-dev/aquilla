@@ -159,6 +159,8 @@ interface Baseline {
   validationRoleFloor: "reviewer" | "project_lead" | "maintainer"
   validationNamedUsers: string[]
   allowSelfValidation: boolean
+  /** AQU-646: may people add lines into the timeline's silences? */
+  allowLineCreation: boolean
   harmonize_min_role: "project_lead" | "maintainer"
   /** AQU-460: EXPLICIT persisted value only. `undefined` = no explicit choice
    *  yet — the effective (displayed) state is derived via
@@ -204,6 +206,9 @@ function buildBaseline(project: ProjectRecord): Baseline {
     validationRoleFloor: project.validationRoleFloor ?? "reviewer",
     validationNamedUsers: project.validationNamedUsers ?? [],
     allowSelfValidation: project.allowSelfValidation ?? true,
+    // Off unless a project has said otherwise: the affordance is speculative
+    // and underdeveloped, so absent must read as off, not as unset.
+    allowLineCreation: project.allowLineCreation ?? false,
     harmonize_min_role: project.harmonize_min_role ?? "project_lead",
     // AQU-460: preserve "unset" — do NOT default to false here, that would
     // make an unset scripture project look explicitly off in the diff/baseline.
@@ -344,6 +349,7 @@ export function ProjectSettings() {
   const [validationRoleFloor, setValidationRoleFloor] = useState<"reviewer" | "project_lead" | "maintainer">("reviewer")
   const [validationNamedUsers, setValidationNamedUsers] = useState<string[]>([])
   const [allowSelfValidation, setAllowSelfValidation] = useState(true)
+  const [allowLineCreation, setAllowLineCreation] = useState(false)
   // AQU-186: harmonize_min_role — project_lead floor, configurable up to maintainer.
   const [harmonizeMinRole, setHarmonizeMinRole] = useState<"project_lead" | "maintainer">("project_lead")
   // AQU-460: EXPLICIT persisted value only — `undefined` means no explicit
@@ -404,6 +410,7 @@ export function ProjectSettings() {
     setValidationRoleFloor(b.validationRoleFloor)
     setValidationNamedUsers(b.validationNamedUsers)
     setAllowSelfValidation(b.allowSelfValidation)
+    setAllowLineCreation(b.allowLineCreation)
     setHarmonizeMinRole(b.harmonize_min_role)
     setBibleResourcesEnabled(b.bibleResourcesEnabled)
     setDecaySettings(b.decaySettings)
@@ -503,6 +510,7 @@ export function ProjectSettings() {
       validationRoleFloor !== baseline.validationRoleFloor ||
       JSON.stringify(validationNamedUsers) !== JSON.stringify(baseline.validationNamedUsers) ||
       allowSelfValidation !== baseline.allowSelfValidation ||
+      allowLineCreation !== baseline.allowLineCreation ||
       harmonizeMinRole !== baseline.harmonize_min_role ||
       bibleResourcesEnabled !== baseline.bibleResourcesEnabled ||
       audioMediaStrategy !== baseline.audioMediaStrategy ||
@@ -517,7 +525,7 @@ export function ProjectSettings() {
     topK, contextSize, useOnlyValidatedExamples, fewShotExampleFormat, mainChatLanguage,
     completionBatchSize, validationBatchSize,
     autoSyncEnabled, autoSyncInterval, validationCount, validationCountAudio,
-    validationRoleFloor, validationNamedUsers, allowSelfValidation,
+    validationRoleFloor, validationNamedUsers, allowSelfValidation, allowLineCreation,
     harmonizeMinRole, bibleResourcesEnabled, audioMediaStrategy, decaySettings, geminiApiKey,
     precedingTargetCells, importExcludeFrontMatter,
   ])
@@ -714,6 +722,7 @@ export function ProjectSettings() {
         changedFieldLabels.push("named validators")
       }
       if (allowSelfValidation !== baseline.allowSelfValidation) { sharedUpdates.allowSelfValidation = allowSelfValidation; changedFieldLabels.push("self-validation") }
+      if (allowLineCreation !== baseline.allowLineCreation) { sharedUpdates.allowLineCreation = allowLineCreation; changedFieldLabels.push("adding timeline lines") }
       if (harmonizeMinRole !== baseline.harmonize_min_role) { sharedUpdates.harmonize_min_role = harmonizeMinRole; changedFieldLabels.push("harmonize min role") }
       if (bibleResourcesEnabled !== baseline.bibleResourcesEnabled) { sharedUpdates.bibleResourcesEnabled = bibleResourcesEnabled; changedFieldLabels.push("Bible resources") }
       if (importExcludeFrontMatter !== baseline.importExcludeFrontMatter) { sharedUpdates.importExcludeFrontMatter = importExcludeFrontMatter; changedFieldLabels.push("USFM front matter") }
@@ -783,6 +792,7 @@ export function ProjectSettings() {
         validationRoleFloor,
         validationNamedUsers,
         allowSelfValidation,
+        allowLineCreation,
         harmonize_min_role: harmonizeMinRole,
         bibleResourcesEnabled,
         decaySettings,
@@ -881,6 +891,7 @@ export function ProjectSettings() {
     { id: "section-decay", label: "Decay", keywords: ["decay", "decay threshold", "half life"] },
     { id: "section-validation", label: "Validation", keywords: ["validation count", "approvals", "audio validation"] },
     { id: "section-audio-media", label: "Audio Media", keywords: ["audio media strategy", "lazy", "eager"] },
+    { id: "section-timeline", label: "Timeline", keywords: ["timeline", "add line", "create cell", "silence", "dubbing", "lines"] },
     { id: "section-git-sync", label: "Git Sync", keywords: ["git", "sync", "auto sync", "interval", "branch", "clone"], visible: hasGitOrigin },
     { id: "section-terminology", label: "Terminology", keywords: ["terminology", "termbase", "glossary", "concepts"] },
     { id: "section-termbase-sharing", label: "Term Base Sharing", keywords: ["term base", "termbase", "publish", "subscribe", "org", "shared", "glossary"], visible: SHOW_TERMBASE_SHARING_IN_SETTINGS },
@@ -963,7 +974,7 @@ export function ProjectSettings() {
       label: "Audio media",
       description: "How audio is fetched from storage",
       icon: AudioLines,
-      sectionIds: ["section-audio-media"],
+      sectionIds: ["section-audio-media", "section-timeline"],
     },
     {
       id: "metrics",
@@ -1032,6 +1043,7 @@ export function ProjectSettings() {
       "section-decay",
       "section-validation",
       "section-audio-media",
+      "section-timeline",
       "section-git-sync",
       "section-terminology",
       "section-termbase-sharing",
@@ -1922,6 +1934,35 @@ export function ProjectSettings() {
               onChange={setAudioMediaStrategy}
             />
           </div>
+        )}
+
+        {searchGroupLabel("section-timeline")}
+        {sectionsToRender.some((s) => s.id === "section-timeline") && (
+          <Card id="section-timeline">
+            <CardHeader><CardTitle>Timeline</CardTitle></CardHeader>
+            <CardContent className="space-y-3">
+              <div className="flex items-start gap-2">
+                <Checkbox
+                  id="allow-line-creation"
+                  data-testid="settings-allow-line-creation"
+                  checked={allowLineCreation}
+                  disabled={!canEditShared}
+                  onCheckedChange={(checked) => setAllowLineCreation(checked)}
+                />
+                <label htmlFor="allow-line-creation" className="text-sm">
+                  Let people add new lines into the timeline's silences
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Off by default. With this on, a pencil appears over each stretch of the
+                    timeline that no line covers, and a microphone beside it that creates a
+                    line and starts recording. It is never offered on a file with imported
+                    audio cues — there the cues already say where the lines are. Deleting an
+                    empty line somebody added stays available either way, so turning this back
+                    off can never strand one.
+                  </p>
+                </label>
+              </div>
+            </CardContent>
+          </Card>
         )}
 
         {searchGroupLabel("section-git-sync")}

@@ -381,6 +381,10 @@ export interface ProjectRecord {
   syncSettings?: ProjectSyncSettings
   suggestionsDismissedAt?: string  // ISO timestamp; suggestion banner is hidden after this is set.
   setupChecklistDismissed?: boolean
+  /** AQU-646: may people add lines into the timeline's silences? Off unless
+   *  turned on in project settings — see ProjectWideSettings.allowLineCreation.
+   *  Deleting an empty added line is not gated on it. */
+  allowLineCreation?: boolean
   /**
    * AQU-701: set when the user explicitly skips the voice & transcription setup
    * step ("we don't use voice or transcription"). Marks that step complete in

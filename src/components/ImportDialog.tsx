@@ -3404,7 +3404,7 @@ function SdbhPanel({ projectId, username, getToken, onImported }: SdbhPanelProps
           />
         </Button>
         <Button variant="outline" nativeButton={false} render={<label />}>
-          {localizedFile ? localizedFile.name : <>{t("importExport.sdbh.chooseLocalizedLabel")} <OptionalMark /></>}
+          {localizedFile ? localizedFile.name : <>{t("importExport.sdbh.chooseLocalized")} <OptionalMark /></>}
           <input
             type="file"
             className="hidden"

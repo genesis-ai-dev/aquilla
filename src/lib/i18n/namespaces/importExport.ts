@@ -191,6 +191,10 @@ export const importExport = defineNamespace({
     "importExport.landing.dcs.hint": "upstream",
     "importExport.landing.dcs.description":
       "Import any released Door43 resource as source and pin it to a release — pull upstream changes later.",
+    "importExport.landing.gdrive.title": "Google Drive",
+    "importExport.landing.gdrive.hint": "cloud",
+    "importExport.landing.gdrive.description":
+      "Pick files or a whole folder from your Google Drive. Only the items you pick are shared with Aquilla. Google Docs import as DOCX.",
     "importExport.landing.sdbh.title": "SDBH Hebrew Lexicon",
     "importExport.landing.sdbh.hint": "UBS MARBLE",
     "importExport.landing.sdbh.description":
@@ -352,6 +356,7 @@ export const importExport = defineNamespace({
     "importExport.dialog.titleCollision": "Re-import detected",
     "importExport.dialog.backToFileSelection": "Back to file selection",
     "importExport.dialog.backToImportTypes": "Back to import types",
+    "importExport.dialog.titlePreview": "Import preview",
     "importExport.dialog.titleHelloao": "Bible API (helloao.org)",
     "importExport.dialog.titleTn": "Translation Notes (TSV)",
     "importExport.dialog.titleSpreadsheet": "Spreadsheet (CSV / XLSX)",
@@ -706,6 +711,125 @@ export const importExport = defineNamespace({
     "importExport.linked.syncTokenError": "could not obtain a sync token",
     "importExport.linked.tombstonedLine": "This line was removed upstream.",
     "importExport.linked.tombstonedTranslationKept": "Its translation is kept: {translation}",
+
+    // — import-panels batch —
+    "importExport.columnMapping.castColumnLabel": "Cast / character",
+    "importExport.columnMapping.columnFallbackName": "Column {index}",
+    "importExport.columnMapping.createModeHint": "Tell us which column contains each piece of data. Only \"Source text\" is " +
+      "required.",
+    "importExport.columnMapping.endColumnLabel": "End timestamp",
+    "importExport.columnMapping.firstRowIsHeader": "First row is a header",
+    "importExport.columnMapping.ignoreOption": "— ignore —",
+    "importExport.columnMapping.labelColumnLabel": "Cell label / ref",
+    "importExport.columnMapping.mapColumns": "Map columns",
+    "importExport.columnMapping.previewRowsHeading": plural({
+      one: "Preview (first {count} data row)",
+      other: "Preview (first {count} data rows)",
+    }),
+    "importExport.columnMapping.sourceColumnLabel": "Source text",
+    "importExport.columnMapping.startColumnLabel": "Start timestamp",
+    "importExport.columnMapping.targetColumnLabel": "Target translation",
+    "importExport.columnMapping.targetModeHint": "Pick the column with the translations. Map a ref column to match by " +
+      "reference; leave it unmapped to match rows to cells in order.",
+    "importExport.columnMapping.typeColumnLabel": "Content type",
+    "importExport.errors.failedToParseFile": "Failed to parse file",
+    "importExport.fileTarget.acceptedFormats": "USFM, CSV, TSV, or XLSX",
+    "importExport.fileTarget.description": "Fills this file's target column from a USFM file or spreadsheet. Source " +
+      "text is never changed. You'll review every match before anything is " +
+      "saved.",
+    "importExport.fileTarget.dropZoneHint": "Drop a file here, or",
+    "importExport.fileTarget.noVersesInUsfm": "No verses found in this USFM file.",
+    "importExport.fileTarget.title": "Import target translations into \"{fileName}\"",
+    "importExport.fileTarget.unsupportedFileType": "Unsupported file type. Use USFM (.usfm/.sfm) or a spreadsheet " +
+      "(.csv/.tsv/.xlsx).",
+    "importExport.labels.choosePlaceholder": "Choose a file…",
+    "importExport.labels.couldNotMintToken": "Could not mint a sync token for this file.",
+    "importExport.labels.csvTooLarge": "The label CSV exceeds the 10 MB safety limit.",
+    "importExport.labels.description": "Download a template with a file's cell references, fill in cast names, " +
+      "then re-upload.",
+    "importExport.labels.downloadTemplate": "Download CSV template",
+    "importExport.labels.emptyCsv": "The label CSV is empty.",
+    "importExport.labels.failedToApply": "Failed to apply labels",
+    "importExport.labels.failedToLoadCells": "Failed to load cells for this file",
+    "importExport.labels.importLabelCount": plural({
+      one: "Import {count} label",
+      other: "Import {count} labels",
+    }),
+    "importExport.labels.loadingCells": "Loading cells…",
+    "importExport.labels.noRowsFound": "No rows found in file.",
+    "importExport.labels.previewCameraHeader": "Camera",
+    "importExport.labels.previewLabelCount": plural({
+      one: "{count} label to import",
+      other: "{count} labels to import",
+    }),
+    "importExport.labels.refCellCount": plural({
+      one: "{count} cell with references in {fileName}.",
+      other: "{count} cells with references in {fileName}.",
+    }),
+    "importExport.labels.step1Heading": "Step 1 — Choose file & download template",
+    "importExport.labels.step2Heading": "Step 2 — Upload filled template",
+    "importExport.labels.thisFileFallback": "this file",
+    "importExport.labels.title": "Cell Labels / Cast Import",
+    "importExport.paired.applyingTargets": "Applying target translations to cells.",
+    "importExport.paired.description": "Upload a CSV or XLSX file where each row has both source and target " +
+      "text. Rows are matched to existing source cells by canonical reference.",
+    "importExport.paired.title": "Import paired source + target",
+    "importExport.preview.aiAssistedStructure": "AI-assisted structure",
+    "importExport.preview.commitFailed": "Import failed: {error}",
+    "importExport.preview.confidencePercent": "{percent}% confidence",
+    "importExport.preview.confirmImport": "Confirm import",
+    "importExport.preview.headerSummary": "Preview — {cells} across {files}",
+    "importExport.preview.instructions": "Review what will be imported, then click Confirm to upload.",
+    "importExport.preview.needsCarefulReview": "Needs careful review",
+    "importExport.preview.recipeNote": "Recipe: {name}. The original is preserved; translated round-trip is not " +
+      "yet verified.",
+    "importExport.preview.reviewBeforeImporting": "Review before importing",
+    "importExport.preview.structuralContentAriaLabel": "Structural content",
+    "importExport.review.conflictCount": plural({
+      one: "{count} conflict",
+      other: "{count} conflicts",
+    }),
+    "importExport.review.deselectAll": "Deselect all",
+    "importExport.review.importCellCount": plural({
+      one: "Import {count} cell",
+      other: "Import {count} cells",
+    }),
+    "importExport.review.matchedCount": "{count} matched",
+    "importExport.review.orderMatchWarning": "No ref column mapped — rows were matched to cells in order. Check the " +
+      "source text next to each row to confirm alignment before importing.",
+    "importExport.review.replacesExisting": "Replaces: {text}",
+    "importExport.review.title": "Review matches",
+    "importExport.review.uncoveredCellCount": plural({
+      one: "{count} cell not covered",
+      other: "{count} cells not covered",
+    }),
+    "importExport.review.uncoveredSourceCellCount": plural({
+      one: "{count} source cell not covered",
+      other: "{count} source cells not covered",
+    }),
+    "importExport.review.unmatchedRowCount": plural({
+      one: "{count} unmatched row",
+      other: "{count} unmatched rows",
+    }),
+    "importExport.spreadsheet.acceptedFormats": "CSV, TSV, or XLSX",
+    "importExport.spreadsheet.description": "Upload a CSV or XLSX file. You will map columns (source, target, ref, " +
+      "cast, timestamps) before importing.",
+    "importExport.spreadsheet.dropZoneHint": "Drop a CSV or XLSX file here, or",
+    "importExport.spreadsheet.legacyXlsUnsupported": "Legacy .xls workbooks are not supported. Save the file as .xlsx or CSV " +
+      "and try again.",
+    "importExport.spreadsheet.noDataRows": "No data rows found after applying the mapping. Check that the source " +
+      "column is not empty.",
+    "importExport.spreadsheet.noSheetsFound": "No sheets found in XLSX file.",
+    "importExport.spreadsheet.selectSheetHint": "This XLSX has multiple sheets. Pick one to import.",
+    "importExport.spreadsheet.selectSheetTitle": "Select a sheet",
+    "importExport.spreadsheet.selectSheetUnitHint": "This XLSX has multiple sheets — each sheet is one importable unit.",
+    "importExport.spreadsheet.sendingCells": "Sending cells to the server.",
+    "importExport.spreadsheet.sheetRowCount": plural({
+      one: "{count} row",
+      other: "{count} rows",
+    }),
+    "importExport.spreadsheet.sourceUnavailable": "The selected spreadsheet is no longer available",
+    "importExport.spreadsheet.title": "Spreadsheet import",
   },
   context: {
     _context: {
@@ -1847,6 +1971,593 @@ export const importExport = defineNamespace({
           translation: "The existing translation of the removed line, shown in italics between " +
             "quotation marks. Do not translate the substituted value.",
         },
+      },
+      "importExport.columnMapping.castColumnLabel": {
+        description:
+          "Label of the dropdown on the column-mapping screen where the user says " +
+          "which column names the person or character speaking each row. Field " +
+          "label for a control; the slash offers two words for the same thing, so " +
+          "keep both senses.",
+      },
+      "importExport.columnMapping.columnFallbackName": {
+        description:
+          "Stand-in name for a spreadsheet column that has no heading of its own, " +
+          "used both in the column dropdowns and above the sample data table on the " +
+          "column-mapping screen. The noun for a spreadsheet column plus its " +
+          "position, counting from one.",
+        placeholders: {
+          index: "Position of the column in the sheet, counting from one.",
+        },
+      },
+      "importExport.columnMapping.createModeHint": {
+        description:
+          "Instruction under the column-mapping heading when a spreadsheet is being " +
+          "imported as a new file. Asks the user to say what each column holds, " +
+          "then reassures them that only one choice is compulsory. The quoted " +
+          "phrase must match the translation of the 'Source text' field label on " +
+          "the same screen, since it names that field.",
+      },
+      "importExport.columnMapping.endColumnLabel": {
+        description:
+          "Label of the dropdown on the column-mapping screen where the user says " +
+          "which column holds the time at which each row finishes in the " +
+          "accompanying recording. Field label for a control, paired with the " +
+          "start-time label above it.",
+      },
+      "importExport.columnMapping.firstRowIsHeader": {
+        description:
+          "Label of the tick box on the column-mapping screen that says the " +
+          "spreadsheet's first row holds column names rather than real data, so it " +
+          "should be used to name the columns instead of being imported. Statement " +
+          "in the third person, not an instruction.",
+      },
+      "importExport.columnMapping.ignoreOption": {
+        description:
+          "First entry in every column dropdown on the column-mapping screen, " +
+          "meaning that no column is assigned to this kind of data and nothing will " +
+          "be read for it. A single verb framed by dashes to mark it as a special " +
+          "choice rather than a column name; keep the dashes.",
+      },
+      "importExport.columnMapping.labelColumnLabel": {
+        description:
+          "Label of the dropdown on the column-mapping screen where the user says " +
+          "which column identifies each line, either as a free label or as a formal " +
+          "reference such as a book, chapter and verse. Field label for a control; " +
+          "the slash offers two words for the same thing, so keep both senses.",
+      },
+      "importExport.columnMapping.mapColumns": {
+        description:
+          "Serves two places on the same screen with identical text: the heading of " +
+          "the step where the user says what each spreadsheet column contains, and " +
+          "the primary button in that step's footer which accepts those choices and " +
+          "moves on. Imperative verb plus noun, and it must work as both a step " +
+          "title and a button.",
+      },
+      "importExport.columnMapping.previewRowsHeading": {
+        description:
+          "Small heading above the sample table on the column-mapping screen, which " +
+          "shows a handful of real rows so the user can check their choices against " +
+          "actual content. A noun naming the sample, then a parenthesis saying how " +
+          "many rows are shown and that the heading row is not among them.",
+        placeholders: {
+          count: "Number of sample rows shown, excluding any heading row.",
+        },
+      },
+      "importExport.columnMapping.sourceColumnLabel": {
+        description:
+          "Label of the required dropdown on the column-mapping screen where the " +
+          "user says which column holds the text to be translated. Field label for " +
+          "a control, marked with an asterisk as compulsory. 'Source' here means " +
+          "the original wording the translation is made from.",
+      },
+      "importExport.columnMapping.startColumnLabel": {
+        description:
+          "Label of the dropdown on the column-mapping screen where the user says " +
+          "which column holds the time at which each row begins in the accompanying " +
+          "recording. Field label for a control.",
+      },
+      "importExport.columnMapping.targetColumnLabel": {
+        description:
+          "Label of the dropdown on the column-mapping screen where the user says " +
+          "which column holds the translated text. Field label for a control; " +
+          "compulsory when the spreadsheet is filling in translations for existing " +
+          "lines, optional otherwise. 'Target' here means the language being " +
+          "translated into.",
+      },
+      "importExport.columnMapping.targetModeHint": {
+        description:
+          "Instruction under the column-mapping heading when the spreadsheet is " +
+          "being used to fill in translations for lines that already exist. First " +
+          "sentence names the one required choice. The rest explains the " +
+          "consequence of the optional reference column: name one and rows are " +
+          "paired by that reference, leave it out and rows are paired top to bottom " +
+          "by position.",
+      },
+      "importExport.columnMapping.typeColumnLabel": {
+        description:
+          "Label of the dropdown on the column-mapping screen where the user says " +
+          "which column tells the importer what kind of unit each row is — a " +
+          "heading, a verse, a spoken cue, and so on. Field label for a control.",
+      },
+      "importExport.errors.failedToParseFile": {
+        description:
+          "Last-resort error shown when reading a chosen file threw a failure that " +
+          "carried no message of its own. Appears in red under the file picker on " +
+          "several import panels. Short statement, no closing full stop, and it " +
+          "must stay generic because it covers any unexpected reading failure.",
+      },
+      "importExport.fileTarget.acceptedFormats": {
+        description:
+          "Caption in small grey text under the drag-and-drop area of the panel " +
+          "that fills in the open file's translations, listing the file kinds it " +
+          "accepts. Only the conjunction joining the four format names is " +
+          "translated; the format names themselves stay as they are.",
+      },
+      "importExport.fileTarget.description": {
+        description:
+          "Three short reassuring sentences under the heading of the panel that " +
+          "fills in the open file's translations. They state where the translations " +
+          "come from, promise that the original text is left untouched, and promise " +
+          "a review step before anything is written. 'Target column' is where " +
+          "translations live beside the original text.",
+      },
+      "importExport.fileTarget.dropZoneHint": {
+        description:
+          "Invitation inside the dashed drag-and-drop area on the panel that fills " +
+          "in the open file's translations. Deliberately unfinished: the sentence " +
+          "continues into the 'Choose file' button rendered directly beneath it, so " +
+          "keep the trailing 'or' (or its equivalent) leading into that button.",
+      },
+      "importExport.fileTarget.noVersesInUsfm": {
+        description:
+          "Error shown in red under the drop area when a scripture markup file was " +
+          "read successfully but contained no verses, so there is nothing to fill " +
+          "in. Single short statement of fact.",
+      },
+      "importExport.fileTarget.title": {
+        description:
+          "Heading of the panel that fills in the translations of the file the user " +
+          "currently has open, from an uploaded file. Names the destination file in " +
+          "quotation marks so the user cannot mistake which file will be changed. " +
+          "Imperative phrase; keep the quotation marks around the file name.",
+        placeholders: {
+          fileName: "Display name of the file being filled in — do not translate the " +
+            "substituted value.",
+        },
+      },
+      "importExport.fileTarget.unsupportedFileType": {
+        description:
+          "Error shown in red under the drop area when the chosen file is of a kind " +
+          "this panel cannot read. A short statement followed by an imperative " +
+          "sentence naming the acceptable alternatives. The bracketed file " +
+          "extensions are literal and stay untranslated.",
+      },
+      "importExport.labels.choosePlaceholder": {
+        description:
+          "Placeholder inside the file dropdown on the cast-labelling panel, shown " +
+          "before a file has been picked. Imperative invitation ending in an " +
+          "ellipsis to signal that a choice follows.",
+      },
+      "importExport.labels.couldNotMintToken": {
+        description:
+          "Error shown in red on the cast-labelling panel when the app could not " +
+          "obtain the short-lived permission it needs to read the chosen file's " +
+          "lines, usually because the sign-in has lapsed. Single past-tense " +
+          "statement of failure.",
+      },
+      "importExport.labels.csvTooLarge": {
+        description:
+          "Error shown in red on the cast-labelling panel when the uploaded " +
+          "spreadsheet is bigger than the ceiling the app will read into memory. " +
+          "Single statement naming the limit; the size figure and its unit are " +
+          "literal.",
+      },
+      "importExport.labels.description": {
+        description:
+          "Explanatory sentence under the cast-labelling heading, summarising the " +
+          "three-step round trip: get a prepared spreadsheet listing the references " +
+          "that identify each line, type the character names into it, then upload " +
+          "it again.",
+      },
+      "importExport.labels.downloadTemplate": {
+        description:
+          "Button in the first box of the cast-labelling panel that saves a " +
+          "prepared spreadsheet, pre-filled with one row per line of the chosen " +
+          "file, for the user to type character names into. Imperative verb; the " +
+          "format name stays untranslated.",
+      },
+      "importExport.labels.emptyCsv": {
+        description:
+          "Error shown in red on the cast-labelling panel when the spreadsheet the " +
+          "user uploaded contains no bytes at all, so there is nothing to read. " +
+          "Single short statement of fact.",
+      },
+      "importExport.labels.failedToApply": {
+        description:
+          "Last-resort error shown in red on the cast-labelling panel when writing " +
+          "the character names onto the project's lines failed without a message of " +
+          "its own. Short statement with no closing full stop, since it is rendered " +
+          "as an error line.",
+      },
+      "importExport.labels.failedToLoadCells": {
+        description:
+          "Last-resort error shown in red on the cast-labelling panel when fetching " +
+          "the chosen file's lines failed without any message of its own. Short " +
+          "statement with no closing full stop, since it is rendered as an error " +
+          "line.",
+      },
+      "importExport.labels.importLabelCount": {
+        description:
+          "Primary button in the footer of the cast-labelling panel, which writes " +
+          "the previewed character names onto the project's lines. Imperative verb " +
+          "followed by how many rows will be applied.",
+        placeholders: {
+          count: "Number of character-name rows that will be applied.",
+        },
+      },
+      "importExport.labels.loadingCells": {
+        description:
+          "Temporary grey status line under the file dropdown on the cast-labelling " +
+          "panel while the chosen file's lines are being fetched, before the count " +
+          "of labelable lines can be shown. Present participle ending in an " +
+          "ellipsis.",
+      },
+      "importExport.labels.noRowsFound": {
+        description:
+          "Error shown in red on the cast-labelling panel when the uploaded " +
+          "spreadsheet was readable but held no rows, so there are no character " +
+          "names to apply. Single short statement of fact.",
+      },
+      "importExport.labels.previewCameraHeader": {
+        description:
+          "Third column header of the preview table on the cast-labelling panel. " +
+          "The column shows whether the character is on screen, off screen, or " +
+          "mixed for that line, as read from the uploaded spreadsheet. Single short " +
+          "noun; the column is narrow.",
+      },
+      "importExport.labels.previewLabelCount": {
+        description:
+          "Small heading above the preview table on the cast-labelling panel, " +
+          "counting the character-name rows read out of the uploaded spreadsheet " +
+          "and awaiting confirmation. A count plus noun plus an infinitive phrase " +
+          "meaning 'still to be brought in'.",
+        placeholders: {
+          count: "Number of character-name rows read from the uploaded spreadsheet.",
+        },
+      },
+      "importExport.labels.refCellCount": {
+        description:
+          "Grey status line under the file dropdown on the cast-labelling panel " +
+          "once the chosen file has loaded, saying how many of its lines carry the " +
+          "reference needed to match a template row, and naming the file. A count " +
+          "plus noun phrase, then the file name, as a full sentence.",
+        placeholders: {
+          count: "Number of lines in the chosen file that carry a reference.",
+          fileName: "Display name of the chosen file, or a generic 'this file' fallback when " +
+            "none is selected — do not translate the substituted value when it is a " +
+            "file name.",
+        },
+      },
+      "importExport.labels.step1Heading": {
+        description:
+          "Heading of the first box on the cast-labelling panel, where the user " +
+          "picks which file to label and downloads the prepared spreadsheet for it. " +
+          "Numbered step label; keep the step number first.",
+      },
+      "importExport.labels.step2Heading": {
+        description:
+          "Heading of the second box on the cast-labelling panel, where the user " +
+          "sends back the spreadsheet they have typed character names into. " +
+          "Numbered step label; keep the step number first.",
+      },
+      "importExport.labels.thisFileFallback": {
+        description:
+          "Stand-in for a file name in the cast-labelling panel's status line when " +
+          "no file name is available, giving 'N cells with references in this " +
+          "file.' A short demonstrative noun phrase used mid-sentence, so it must " +
+          "not be capitalised as a title.",
+      },
+      "importExport.labels.title": {
+        description:
+          "Heading of the panel for labelling existing lines with the name of the " +
+          "character who speaks them, by filling in a downloadable template. Noun " +
+          "phrase naming the panel; 'cast' is the set of characters or voices in " +
+          "the project.",
+      },
+      "importExport.paired.applyingTargets": {
+        description:
+          "Reassurance line under the 'Importing…' heading while paired rows are " +
+          "being saved, naming what is happening: the translations from the upload " +
+          "are being written onto the project's existing lines.",
+      },
+      "importExport.paired.description": {
+        description:
+          "Explanatory sentences under the paired-import heading. The first states " +
+          "what the uploaded file must look like: every row holds the original text " +
+          "and its translation. The second explains that rows are paired with the " +
+          "project's existing lines using the standard reference that identifies a " +
+          "passage, such as a book, chapter and verse.",
+      },
+      "importExport.paired.title": {
+        description:
+          "Heading of the import panel for a spreadsheet in which every row carries " +
+          "both the original text and its translation. Short noun phrase naming " +
+          "what is being imported; 'source' is the original text and 'target' is " +
+          "the translation of it.",
+      },
+      "importExport.preview.aiAssistedStructure": {
+        description:
+          "Bold label at the top of a notice on the preview screen, shown when the " +
+          "shape of an unrecognised file had to be worked out automatically rather " +
+          "than read from a known format. Short noun phrase naming what the notice " +
+          "is about.",
+      },
+      "importExport.preview.commitFailed": {
+        description:
+          "Red alert above the buttons on the preview screen when committing the " +
+          "import failed. A short statement followed by the underlying technical " +
+          "reason. Both buttons stay available so the user can try again or back " +
+          "out.",
+        placeholders: {
+          error: "Raw underlying failure message, often English and technical — do not " +
+            "translate the substituted value.",
+        },
+      },
+      "importExport.preview.confidencePercent": {
+        description:
+          "Grey figure inside the automatic-structure notice on the preview screen, " +
+          "saying how sure the automatic analysis is about the shape it proposed. A " +
+          "whole-number percentage followed by the noun for certainty; no verb.",
+        placeholders: {
+          percent: "Whole number from 0 to 100 giving how certain the automatic analysis is.",
+        },
+      },
+      "importExport.preview.confirmImport": {
+        description:
+          "Primary button in the footer of the preview screen that commits the " +
+          "previewed lines into the project and starts the upload. Imperative verb " +
+          "plus noun; it is the point of no return, so it should read as decisive.",
+      },
+      "importExport.preview.headerSummary": {
+        description:
+          "Heading of the screen that shows what an import will produce, before the " +
+          "user commits to it. Frames two already-counted phrases: how many " +
+          "individual translatable lines were found, and how many files they came " +
+          "from. The word before the dash is a noun naming the screen, and the word " +
+          "between the two figures relates them, in the sense of 'spread over'.",
+        placeholders: {
+          cells: "Already-rendered phrase counting the translatable lines found, for " +
+            "example '124 cells' — place it, do not re-count it.",
+          files: "Already-rendered phrase counting the files involved, for example '2 " +
+            "files' — place it, do not re-count it.",
+        },
+      },
+      "importExport.preview.instructions": {
+        description:
+          "Instruction under the preview heading, telling the user to check the " +
+          "listed lines and then press the confirm button. The word standing for " +
+          "the button should match the wording used on the 'Confirm import' button " +
+          "itself so the two read as the same action.",
+      },
+      "importExport.preview.needsCarefulReview": {
+        description:
+          "Red badge inside the automatic-structure notice on the preview screen, " +
+          "shown when the automatic analysis was not very sure of itself and the " +
+          "user should check the result closely before importing. Short warning " +
+          "phrase in the third person.",
+      },
+      "importExport.preview.recipeNote": {
+        description:
+          "Final line of the automatic-structure notice on the preview screen. The " +
+          "word before the colon labels the named set of rules chosen for reading " +
+          "the file. The sentence after it promises that the uploaded file is " +
+          "stored untouched, but warns that exporting the translation back into the " +
+          "same shape has not been proven to work yet.",
+        placeholders: {
+          name: "Name of the chosen set of reading rules, as generated by the analysis — " +
+            "do not translate the substituted value.",
+        },
+      },
+      "importExport.preview.reviewBeforeImporting": {
+        description:
+          "Bold label at the top of a notice on the preview screen that lists " +
+          "warnings raised while the file was read, next to a badge counting them. " +
+          "Short imperative instruction telling the user to read the list before " +
+          "committing.",
+      },
+      "importExport.preview.structuralContentAriaLabel": {
+        description:
+          "Screen-reader name for the placeholder dash shown instead of a reference " +
+          "on preview rows that hold structure rather than translatable prose, such " +
+          "as a heading or a layout marker. Short noun phrase; sighted users see " +
+          "only the dash.",
+      },
+      "importExport.review.conflictCount": {
+        description:
+          "Amber-coloured figure in the summary strip under the 'Review matches' " +
+          "heading: how many of the pairings would overwrite a translation that " +
+          "already exists. A count plus the noun for a clash; no verb, since it " +
+          "sits beside sibling fragments.",
+        placeholders: {
+          count: "Number of pairings that would overwrite existing translated text.",
+        },
+      },
+      "importExport.review.deselectAll": {
+        description:
+          "Small text button under the match-review list that clears every tick at " +
+          "once. It swaps places with the 'Select all' button depending on whether " +
+          "everything is already ticked, so the two should read as a matched pair " +
+          "of opposite imperative commands.",
+      },
+      "importExport.review.importCellCount": {
+        description:
+          "Primary button in the footer of the match-review step, which saves the " +
+          "ticked translations into the project. Imperative verb followed by how " +
+          "many lines will be written, so the user can confirm the scale before " +
+          "committing.",
+        placeholders: {
+          count: "Number of ticked lines that will be written into the project.",
+        },
+      },
+      "importExport.review.matchedCount": {
+        description:
+          "First figure in the summary strip under the 'Review matches' heading: " +
+          "how many incoming rows were successfully paired with an existing line. " +
+          "Terse count-plus-participle fragment sitting beside sibling fragments, " +
+          "so it must stay short.",
+        placeholders: {
+          count: "Number of incoming rows that were paired with an existing line.",
+        },
+      },
+      "importExport.review.orderMatchWarning": {
+        description:
+          "Amber warning above the match-review list, shown when the user did not " +
+          "nominate a column holding the reference that identifies each line. It " +
+          "explains that rows were therefore paired top to bottom by position, " +
+          "which is easy to get wrong, and asks the user to eyeball the original " +
+          "text shown beside each row before committing.",
+      },
+      "importExport.review.replacesExisting": {
+        description:
+          "Amber warning line under one row of the match-review list, shown only " +
+          "when accepting that row would overwrite a translation that is already " +
+          "there. The word before the colon is a verb in the third person " +
+          "describing what the incoming text would do; the existing translation " +
+          "follows and is truncated if long.",
+        placeholders: {
+          text: "The translation currently stored for this line, shown so the user can " +
+            "see what would be lost — do not translate the substituted value.",
+        },
+      },
+      "importExport.review.title": {
+        description:
+          "Heading of the step where the user checks which incoming rows were " +
+          "paired with which existing lines of the project before any translation " +
+          "is saved. Imperative instruction acting as a step title; 'matches' are " +
+          "the pairings the system proposes.",
+      },
+      "importExport.review.uncoveredCellCount": {
+        description:
+          "Figure in the summary strip under the 'Review matches' heading when " +
+          "filling the translations of the file the user currently has open: how " +
+          "many lines of that file got no translation from the uploaded file. Count " +
+          "plus noun phrase plus a past participle meaning 'left without a match'.",
+        placeholders: {
+          count: "Number of lines in the open file the upload did not supply a translation " +
+            "for.",
+        },
+      },
+      "importExport.review.uncoveredSourceCellCount": {
+        description:
+          "Figure in the summary strip under the 'Review matches' heading when " +
+          "importing paired original-and-translation rows: how many lines of " +
+          "original text in the project got no translation from the uploaded file. " +
+          "Count plus noun phrase plus a past participle meaning 'left without a " +
+          "match'.",
+        placeholders: {
+          count: "Number of existing original-text lines the upload did not supply a " +
+            "translation for.",
+        },
+      },
+      "importExport.review.unmatchedRowCount": {
+        description:
+          "Figure in the summary strip under the 'Review matches' heading: how many " +
+          "rows of the uploaded file could not be paired with anything in the " +
+          "project and will therefore be ignored. Count plus noun phrase, no verb.",
+        placeholders: {
+          count: "Number of uploaded rows that were not paired with anything.",
+        },
+      },
+      "importExport.spreadsheet.acceptedFormats": {
+        description:
+          "Caption in small grey text under the drag-and-drop area, listing the " +
+          "file kinds this importer accepts. Only the conjunction joining the three " +
+          "format names is translated; the format names themselves are file-format " +
+          "identifiers that stay as they are.",
+      },
+      "importExport.spreadsheet.description": {
+        description:
+          "Explanatory sentence under the spreadsheet import heading. Tells the " +
+          "user which file kinds are accepted and promises that a column-mapping " +
+          "step comes before anything is imported. The parenthesised list names the " +
+          "kinds of data a column can hold: the original text, its translation, the " +
+          "reference that identifies a line, the speaking character, and the " +
+          "start/end times.",
+      },
+      "importExport.spreadsheet.dropZoneHint": {
+        description:
+          "Invitation inside the dashed drag-and-drop area on the spreadsheet and " +
+          "paired-translation import panels. Deliberately unfinished: the sentence " +
+          "continues into the 'Choose file' button rendered directly beneath it, so " +
+          "keep the trailing 'or' (or its equivalent) leading into that button.",
+      },
+      "importExport.spreadsheet.legacyXlsUnsupported": {
+        description:
+          "Error shown in red under the drop area when the chosen file is an " +
+          "old-style Excel workbook. Two sentences: a statement that the old " +
+          "workbook format cannot be read, then the concrete remedy of re-saving in " +
+          "a newer format. The file extensions are literal and stay untranslated.",
+      },
+      "importExport.spreadsheet.noDataRows": {
+        description:
+          "Error shown after the user confirms the column mapping on the general " +
+          "spreadsheet importer but every row turned out to be empty in the column " +
+          "they nominated as the original text. First sentence states the outcome, " +
+          "second suggests what to check.",
+      },
+      "importExport.spreadsheet.noSheetsFound": {
+        description:
+          "Error shown in red under the drop area when an Excel workbook was read " +
+          "successfully but turned out to contain no worksheets at all, so there is " +
+          "nothing to import. Single short statement of fact.",
+      },
+      "importExport.spreadsheet.selectSheetHint": {
+        description:
+          "Sentence under the 'Select a sheet' heading, shown when importing paired " +
+          "source-and-translation rows or filling an existing file's translations. " +
+          "Explains why the extra step exists and asks the user to choose exactly " +
+          "one worksheet.",
+      },
+      "importExport.spreadsheet.selectSheetTitle": {
+        description:
+          "Heading of the step that appears when an uploaded Excel workbook holds " +
+          "more than one worksheet and the user must pick which one to import. " +
+          "Imperative instruction acting as a step title.",
+      },
+      "importExport.spreadsheet.selectSheetUnitHint": {
+        description:
+          "Sentence under the 'Select a sheet' heading on the general spreadsheet " +
+          "importer. Unlike the paired-import wording it explains the rule rather " +
+          "than giving an instruction: one worksheet becomes one imported file, so " +
+          "only one can be chosen at a time.",
+      },
+      "importExport.spreadsheet.sendingCells": {
+        description:
+          "Reassurance line under the 'Uploading…' heading while an imported " +
+          "spreadsheet is being saved, naming what is happening. 'Cells' are the " +
+          "individual translatable lines the spreadsheet was split into.",
+      },
+      "importExport.spreadsheet.sheetRowCount": {
+        description:
+          "Second line of a selectable worksheet card on the 'Select a sheet' step, " +
+          "telling the user how big that worksheet is. A bare count plus the noun " +
+          "for a spreadsheet row, with no verb.",
+        placeholders: {
+          count: "Number of rows the worksheet contains.",
+        },
+      },
+      "importExport.spreadsheet.sourceUnavailable": {
+        description:
+          "Failure message shown when the import is committed but the browser can " +
+          "no longer read the file the user picked earlier, for instance because it " +
+          "was moved or renamed in the meantime. Statement of fact with no closing " +
+          "full stop, since it is rendered as an error line.",
+      },
+      "importExport.spreadsheet.title": {
+        description:
+          "Heading at the top of the spreadsheet import panel, shown when the user " +
+          "has chosen to import a comma- or tab-separated file or an Excel " +
+          "workbook. Short noun phrase naming the panel, not an instruction.",
       },
     },
   },

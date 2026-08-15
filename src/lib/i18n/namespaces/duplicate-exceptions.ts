@@ -536,4 +536,11 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "run wrote into. One describes an input's language, the other identifies a " +
     "destination track; languages that mark that difference with case or an " +
     "adposition cannot share a single rendering.",
+  "importExport.columnMapping.sourceColumnLabel":
+    "Labels the SOURCE-TEXT column picker in the spreadsheet column-mapping " +
+    "step during import — a form-field label naming which uploaded column " +
+    "holds source text. editor.source.textAria is the accessible name of the " +
+    "source-column text region inside the cell editor. A mapping-field label " +
+    "and an accessibility name for an existing pane serve different purposes " +
+    "and different audiences (sighted vs. screen-reader users).",
 }

@@ -83,6 +83,7 @@ export function lintCellFor(
 const TRUNCATE_AT = 160
 
 function TruncatableText({ text, className }: { text: string; className?: string }) {
+  const t = useT()
   const [expanded, setExpanded] = useState(false)
   const needsTruncation = text.length > TRUNCATE_AT
   const shown = expanded || !needsTruncation ? text : `${text.slice(0, TRUNCATE_AT)}…`
@@ -96,9 +97,9 @@ function TruncatableText({ text, className }: { text: string; className?: string
           className="ms-1 inline-flex items-center align-baseline text-[10px] text-muted-foreground underline underline-offset-2 hover:text-foreground"
         >
           {expanded ? (
-            <>Show less <ChevronUp className="ms-0.5 h-2.5 w-2.5" /></>
+            <>{t("common.showLess")} <ChevronUp className="ms-0.5 h-2.5 w-2.5" /></>
           ) : (
-            <>Show more <ChevronDown className="ms-0.5 h-2.5 w-2.5" /></>
+            <>{t("common.showMore")} <ChevronDown className="ms-0.5 h-2.5 w-2.5" /></>
           )}
         </button>
       )}
@@ -141,7 +142,7 @@ function StagedEventRow({
       <div className="space-y-1 rounded-md border border-dashed px-2 py-1.5">
         <div className="flex items-center gap-1.5 text-[11px]">
           <Badge variant="outline" className="px-1.5 py-0 font-mono text-[10px]">{ev.kind}</Badge>
-          <span className="text-muted-foreground">not supported yet — apply this kind in the app directly</span>
+          <span className="text-muted-foreground">{t("autopilot.proposal.unsupportedKind")}</span>
         </div>
         <pre className="overflow-x-auto font-mono text-[10px] leading-relaxed text-muted-foreground">
           {JSON.stringify(ev, null, 2)}
@@ -195,7 +196,7 @@ function StagedEventRow({
               <TruncatableText text={ev.display.before} />
             </div>
           ) : (
-            <div className="text-[10px] italic text-muted-foreground">(currently empty)</div>
+            <div className="text-[10px] italic text-muted-foreground">{t("autopilot.proposal.currentlyEmpty")}</div>
           )}
           <div>
             <TruncatableText text={ev.display.after ?? ""} />
@@ -205,7 +206,7 @@ function StagedEventRow({
 
       {isCellCreateKind(ev.kind) && (
         <div className="space-y-0.5 text-xs">
-          <div className="text-[10px] italic text-muted-foreground">(new row)</div>
+          <div className="text-[10px] italic text-muted-foreground">{t("autopilot.proposal.newRow")}</div>
           <div>
             <TruncatableText
               text={
@@ -339,7 +340,7 @@ function StagedProposalCard({
   if (state === "discarded") {
     return (
       <div className="rounded-lg border border-dashed px-2.5 py-1.5 text-[11px] text-muted-foreground">
-        Discarded: {proposal.summary}
+        {t("autopilot.proposal.discarded", { summary: proposal.summary })}
       </div>
     )
   }
@@ -365,12 +366,12 @@ function StagedProposalCard({
       </div>
 
       {applyError && (
-        <InlineAiError message={applyError} label="Apply failed" className="text-[11px]" />
+        <InlineAiError message={applyError} label={t("autopilot.proposal.applyFailed")} className="text-[11px]" />
       )}
 
       {state === "applied" ? (
         <div className="flex items-center gap-1 text-[11px] font-medium text-emerald-600">
-          <Check className="h-3 w-3" /> Applied
+          <Check className="h-3 w-3" /> {t("autopilot.evidence.status.applied")}
         </div>
       ) : (
         <div className="space-y-1">
@@ -381,7 +382,7 @@ function StagedProposalCard({
               onClick={() => setState("discarded")}
               disabled={state === "applying"}
             >
-              Discard
+              {t("common.discard")}
             </Button>
             <AppTooltip content={blockedReason ?? undefined} disabled={!blockedReason}>
               <Button
@@ -391,7 +392,7 @@ function StagedProposalCard({
               >
               {state === "applying" ? (
                 <>
-                  <Spinner className="size-3" /> Applying…
+                  <Spinner className="size-3" /> {t("autopilot.proposal.applying")}
                 </>
               ) : (
                 "Apply"

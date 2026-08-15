@@ -2380,7 +2380,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
             )}
           </div>
           <div className="flex items-center gap-2 ps-3">
-            Target
+            {t("editor.column.target")}
             {/* AQU-602 / AQU-583: the target-language tag doubles as the lane
                 switcher AND the entry point to change the target language.
                 • >1 lane (+ change handler) → a dropdown that switches the active
@@ -6980,7 +6980,7 @@ function EditorRow({
                     </div>
                   )}
                   {backtranslationError && (
-                    <InlineAiError message={backtranslationError} label="Back-translation failed" />
+                    <InlineAiError message={backtranslationError} label={t("editor.bt.failed")} />
                   )}
                 </div>
               ),

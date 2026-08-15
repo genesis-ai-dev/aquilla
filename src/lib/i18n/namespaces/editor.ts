@@ -778,6 +778,7 @@ export const editor = defineNamespace({
     "editor.bt.regenerateAria": "Regenerate the back-translation",
     "editor.bt.editTooltip": "Edit the back-translation",
     "editor.bt.contributorRequired": "Contributor+ required to edit back-translations",
+    "editor.bt.failed": "Back-translation failed",
     "editor.bt.translateFirst": "Translate this cell to read it back.",
     "editor.bt.staleWarning": "Your translation changed since this was written",
     "editor.bt.emptyPitch":
@@ -3778,6 +3779,12 @@ export const editor = defineNamespace({
           "Tooltip on the disabled pencil when the user's project role is below " +
           "contributor. 'Contributor+' means contributor or any higher role — keep " +
           "the 'or above' sense.",
+      },
+      "editor.bt.failed": {
+        description:
+          "Label on the inline error shown inside the back-translation tab when the " +
+          "AI request to read the translation back did not complete. The provider's " +
+          "own error message is shown beside it.",
       },
       "editor.bt.translateFirst": {
         description:

@@ -47,10 +47,21 @@ export const auth = defineNamespace({
     "auth.login.createAccountLink": "Create an account",
     "auth.login.invalidCredentials": "Invalid username or password",
     "auth.login.failed": "Couldn't sign you in. Please try again.",
+    "auth.login.aquillaUsernameLabel": "Aquilla username or email",
+    "auth.login.offlineNotice": "You're offline — connect to sign in",
+    "auth.login.submitLoggingIn": "Logging in…",
 
     // --- Sign up (account creation, e.g. git-import linked-account flow) ---
     "auth.signup.failedGeneric": "Couldn't create your account. Please try again.",
     "auth.signup.failedWithDetail": "Couldn't create your account: {detail}",
+    "auth.signup.usernameLabel": "Username",
+    "auth.signup.usernameTooShort": "Username must be at least 3 characters",
+    "auth.signup.usernameTooLong": "Username must be at most 50 characters",
+    "auth.signup.passwordRequired": "Password is required",
+    "auth.signup.passwordContainsEmail": "Password must not contain your email",
+    "auth.signup.checklistNotContainsEmail": "Does not contain your email",
+    "auth.signup.submitCreating": "Creating account…",
+    "auth.signup.submitDefault": "Create account",
 
     // --- Reset password (/reset-password) ----------------------------------
     "auth.resetPassword.title": "Reset your password",
@@ -76,6 +87,12 @@ export const auth = defineNamespace({
     "auth.resetPassword.backToApp": "Back to app",
     "auth.resetPassword.requestNewLink": "Request a new link",
     "auth.resetPassword.sending": "Sending…",
+    "auth.resetPassword.backToLogin": "Back to login",
+    "auth.resetPassword.submitSendLink": "Send reset link",
+    "auth.resetPassword.emailFieldHint": "We'll send a link to reset your password.",
+    "auth.resetPassword.linkSentIfAccountExists":
+      "If an account exists for {email}, a password reset link has been sent. " +
+      "Check your email and follow the link to choose a new password.",
 
     // --- Access link (/link/:token) ----------------------------------------
     "auth.accessLink.title": "Enter your PIN",
@@ -241,11 +258,84 @@ export const auth = defineNamespace({
           "the sign-in page, on the invite landing page, and in the account dialog — same " +
           "intent everywhere: start the sign-up flow.",
       },
+      "auth.login.aquillaUsernameLabel": {
+        description:
+          "Form label above the identifier field on the sign-in form that appears " +
+          "inside the import flow, where the reader signs into their main Aquilla " +
+          "account so a project can be pulled from it. The product name is in the " +
+          "label deliberately, because the same flow also asks for credentials " +
+          "belonging to other services, and it must be left exactly as it is. The " +
+          "field accepts either a username or an email address, so avoid wording " +
+          "that implies only one of the two will work.",
+      },
+      "auth.login.offlineNotice": {
+        description:
+          "Notice telling the reader their device has no network connection, so " +
+          "signing in cannot be attempted until it is back. It appears as a grey " +
+          "banner above both the sign-in form and the account-creation form while " +
+          "the device is offline, and the same wording is shown as the form-level " +
+          "error if the reader presses the sign-in button anyway. A short sentence " +
+          "with no closing full stop; the dash separates the current state from " +
+          "what to do about it.",
+      },
       "auth.signup.failedGeneric": {
         description:
           "Form-level error shown when account creation fails for a reason that " +
           "isn't a specific, safe-to-show field validation (network problem, " +
           "server error). Never includes raw server diagnostics.",
+      },
+      "auth.signup.usernameLabel": {
+        description:
+          "Form label above the field where someone creating a new account chooses " +
+          "the name they will sign in with from then on. A single-word noun naming " +
+          "the account's own identifier — not an instruction, and not the person's " +
+          "real or display name.",
+      },
+      "auth.signup.usernameTooShort": {
+        description:
+          "Validation error under the sign-up username field when the chosen name " +
+          "is shorter than the three-character minimum. The number is a fixed rule " +
+          "rather than a substituted value, so keep it in the sentence.",
+      },
+      "auth.signup.usernameTooLong": {
+        description:
+          "Validation error under the sign-up username field when the chosen name " +
+          "exceeds the fifty-character ceiling the field enforces. Mirror of " +
+          "auth.signup.usernameTooShort, so keep the two phrased as a pair.",
+      },
+      "auth.signup.passwordRequired": {
+        description:
+          "Validation error under the sign-up password field when it was left " +
+          "empty. States that the field must be filled in, without saying anything " +
+          "about how strong the password has to be.",
+      },
+      "auth.signup.passwordContainsEmail": {
+        description:
+          "Validation error under the sign-up password field when the password " +
+          "repeats the name part of the email address being registered, which would " +
+          "make it trivially guessable. States the rule that was broken.",
+      },
+      "auth.signup.checklistNotContainsEmail": {
+        description:
+          "One requirement in the live checklist under the sign-up password field, " +
+          "which ticks green as the reader types. Phrased as the condition being " +
+          "met rather than as an error — the companion requirement is " +
+          "auth.resetPassword.checklistMinLength ('At least 8 characters'), so " +
+          "match its clipped, label-like register rather than writing a sentence.",
+      },
+      "auth.signup.submitCreating": {
+        description:
+          "Submit button label on the sign-up form while the account is being " +
+          "created on the server. Present continuous, ends with an ellipsis glyph " +
+          "(…), and replaces auth.signup.submitDefault in place — so keep it close " +
+          "to that label's length to stop the button resizing mid-request.",
+      },
+      "auth.signup.submitDefault": {
+        description:
+          "Submit button of the sign-up form, in its resting state. An imperative " +
+          "naming the act of registering a new account. Distinct from " +
+          "auth.login.createAccountLink, which is the link that merely opens this " +
+          "form from the sign-in page; this one actually creates the account.",
       },
       "auth.signup.failedWithDetail": {
         description:
@@ -372,6 +462,52 @@ export const auth = defineNamespace({
         description:
           "Submit button label on the recovery form while the new reset-link email is " +
           "being requested. Present continuous, ends with an ellipsis glyph (…).",
+      },
+      "auth.login.submitLoggingIn": {
+        description:
+          "Submit button label on the import flow's sign-in form while the " +
+          "credentials are being checked. Present continuous, ends with an ellipsis " +
+          "glyph (…). This form says 'Log in' where the main sign-in page says " +
+          "'Sign in' (common.logIn vs auth.login.submitDefault), and this label is " +
+          "the progress form of the former — keep it consistent with whichever word " +
+          "you chose for common.logIn.",
+      },
+      "auth.resetPassword.submitSendLink": {
+        description:
+          "Submit button of the password-recovery form in its resting state, naming " +
+          "what pressing it sends: an email containing a link that lets the reader " +
+          "choose a new password. Imperative. auth.resetPassword.sending replaces it " +
+          "while the request is in flight.",
+      },
+      "auth.resetPassword.backToLogin": {
+        description:
+          "Button that abandons the password-recovery form and returns the reader " +
+          "to the sign-in form. It appears twice on this one surface: as a bordered " +
+          "button after the reset email has been sent, and as a quiet button below " +
+          "the send button while the form is still being filled in. A short " +
+          "imperative navigation label, so keep it brief enough for a full-width " +
+          "button.",
+      },
+      "auth.resetPassword.emailFieldHint": {
+        description:
+          "Helper sentence directly under the email field on the password-recovery " +
+          "form, telling the reader what will happen after they submit it. A " +
+          "complete sentence spoken by the product in the first person plural — not " +
+          "a field label, not an error, and not a button.",
+      },
+      "auth.resetPassword.linkSentIfAccountExists": {
+        description:
+          "Confirmation paragraph that replaces the password-recovery form once the " +
+          "request has been sent. Worded conditionally on purpose, so it never " +
+          "reveals whether an account actually exists for that address — keep that " +
+          "hedge in translation. Two sentences: the first states the conditional " +
+          "outcome, the second tells the reader to open their inbox and follow the " +
+          "link. Not a heading and not an error.",
+        placeholders: {
+          email:
+            "The email address the reader typed into the recovery form, rendered in " +
+            "medium weight inside the sentence. Do not translate the substituted value.",
+        },
       },
       "auth.accessLink.title": {
         description:

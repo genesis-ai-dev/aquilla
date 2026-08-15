@@ -356,6 +356,7 @@ export const importExport = defineNamespace({
     "importExport.dialog.titleTn": "Translation Notes (TSV)",
     "importExport.dialog.titleSpreadsheet": "Spreadsheet (CSV / XLSX)",
     "importExport.dialog.titlePaired": "Paired Translation Import",
+    "importExport.dialog.titleFileTarget": "Import target translations",
     "importExport.dialog.finishSaveFailed": "Couldn't finish saving your import — please try again. ({message})",
     "importExport.dialog.saveFailed": "Couldn't save your import — please try again. ({message})",
     "importExport.dialog.labelsNeedSourceFile":
@@ -598,6 +599,113 @@ export const importExport = defineNamespace({
     "importExport.errors.sourceUploadFailed": "Source upload failed",
     "importExport.errors.artifactBindingNetworkFailed": "Artifact binding failed: {detail}",
     "importExport.errors.artifactBindingFailed": "Artifact binding failed",
+
+    // — Door43 (DCS) sync badge, catalog browser and upstream panel —
+    // (importExport.linked.* below is the linked-project upstream-changes
+    //  review surface, which is not Door43-specific.)
+    "importExport.dcs.anyOwner": "Any owner",
+    "importExport.dcs.anySubject": "Any subject",
+    "importExport.dcs.applyResyncCheckbox": "I understand removed cells hide their translations.",
+    "importExport.dcs.applyResyncConfirmLabel": "Apply re-sync",
+    "importExport.dcs.applyResyncConfirmRemovals": plural({
+      one: "{count} cell will be removed — translations attached to removed cells will be hidden.",
+      other: "{count} cells will be removed — translations attached to removed cells will be hidden.",
+    }),
+    "importExport.dcs.applyResyncConfirmRepairs": plural({
+      one: "{count} cell will be repaired and {created} created.",
+      other: "{count} cells will be repaired and {created} created.",
+    }),
+    "importExport.dcs.applyResyncConfirmTitle": "Apply re-sync?",
+    "importExport.dcs.applyResyncEllipsis": "Apply re-sync…",
+    "importExport.dcs.badgeAriaLabel": "Door43 source link — open Project Settings",
+    "importExport.dcs.catalogIntro": "Browse released resources on {link}. Importing pins the project to the " +
+      "chosen release; you can pull later changes from the project's settings. " +
+      "Bible (USFM) resources import today; more resource types are rolling " +
+      "out.",
+    "importExport.dcs.catalogSearchFailed": "Catalog search failed",
+    "importExport.dcs.checkFailed": "Could not check for updates: {message}",
+    "importExport.dcs.checkForUpdates": "Check for updates",
+    "importExport.dcs.customOwnerAriaLabel": "Custom owner",
+    "importExport.dcs.customOwnerPlaceholder": "…or type any owner (overrides the picker)",
+    "importExport.dcs.detachButton": "Detach from upstream",
+    "importExport.dcs.detachConfirmCheckbox": "I understand this permanently unlinks the project.",
+    "importExport.dcs.detachConfirmDescription": "This project will stop receiving updates from {repo}. Source cells " +
+      "become editable. This cannot be undone from here — relinking requires a " +
+      "fresh import.",
+    "importExport.dcs.detachConfirmTitle": "Detach from upstream?",
+    "importExport.dcs.detachFailed": "Detach failed: {message}",
+    "importExport.dcs.detachHint": "Permanently unlink this project from {repo} and make source cells " +
+      "editable again.",
+    "importExport.dcs.importAdvancesNote": "Importing advances the source cells to {ref}. Downstream linked projects " +
+      "will show stale flags for the affected cells so translators can review " +
+      "them.",
+    "importExport.dcs.importChanges": "Import changes",
+    "importExport.dcs.importFailed": "Import failed: {message}",
+    "importExport.dcs.importRoleRequired": "Maintainer or above required to import upstream changes.",
+    "importExport.dcs.importSummary": "Imported: {created} created, {updated} updated, {removed} removed. " +
+      "Downstream linked projects will now show stale flags for the changed " +
+      "cells.",
+    "importExport.dcs.languageCodeAriaLabel": "Language code",
+    "importExport.dcs.languageFilterLabel": "Language",
+    "importExport.dcs.loadingCatalog": "Loading catalog…",
+    "importExport.dcs.noResults": "No released resources match these filters.",
+    "importExport.dcs.noResultsHint": "Try a broader language, owner, or subject.",
+    "importExport.dcs.notYetSupportedBadge": "Not yet supported",
+    "importExport.dcs.ownerFilterLabel": "Owner",
+    "importExport.dcs.panelDescription": "This project mirrors a Door43 resource. Check for a newer published " +
+      "release and import upstream changes into the source lane.",
+    "importExport.dcs.pinnedRefBadge": "pinned {ref}",
+    "importExport.dcs.pinTooltip": "Source synced from {repo} ({subject}) @ {ref} · imported {imported}. " +
+      "Source cells are managed by this link — update or detach in Project " +
+      "Settings.",
+    "importExport.dcs.repairStaleCursorError": "the upstream link changed while confirming (detached or re-imported in " +
+      "another tab). Nothing was applied — run the scan again.",
+    "importExport.dcs.resyncButton": "Re-sync content",
+    "importExport.dcs.resyncFailed": "Re-sync failed: {message}",
+    "importExport.dcs.resyncHint": "Scans the source at the pinned version for cells that were imported " +
+      "incorrectly. Nothing is changed until you confirm.",
+    "importExport.dcs.resyncNoChanges": "Everything already matches the pinned source.",
+    "importExport.dcs.resyncRemovalWarning": plural({
+      one: "{count} cell will be removed — translations attached to them will be hidden.",
+      other: "{count} cells will be removed — translations attached to them will be hidden.",
+    }),
+    "importExport.dcs.resyncRepaired": plural({
+      one: "Repaired {count} cell.",
+      other: "Repaired {count} cells.",
+    }),
+    "importExport.dcs.resyncScanSummary": "Scan complete: {repair} to repair, {created} new, {removed} to remove.",
+    "importExport.dcs.settingsBlocked": "blocked ({reason})",
+    "importExport.dcs.settingsConflict": "conflict — settings changed elsewhere; try again",
+    "importExport.dcs.stageFilterLabel": "Stage",
+    "importExport.dcs.stageLatest": "Latest (HEAD)",
+    "importExport.dcs.stagePreprod": "Pre-release",
+    "importExport.dcs.stageProd": "Released (prod)",
+    "importExport.dcs.subjectFilterLabel": "Subject",
+    "importExport.dcs.syncTokenError": "Could not mint a sync token for this project.",
+    "importExport.dcs.trackingHead": "tracking HEAD",
+    "importExport.dcs.trackingRelease": "tracking release",
+    "importExport.dcs.unsupportedResourceTooltip": "Aquilla can't import this resource type yet (tracked in AQU-615)",
+    "importExport.dcs.updateAvailable": plural({
+      one: "{oldRef} → {newRef}, {count} file changed",
+      other: "{oldRef} → {newRef}, {count} files changed",
+    }),
+    "importExport.dcs.upToDateWith": "Up to date with {ref}.",
+    "importExport.linked.acceptAllButton": "Accept as-is ({count})",
+    "importExport.linked.acceptButton": "Accept as-is",
+    "importExport.linked.awaitingTranslationBadge": "awaiting upstream translation",
+    "importExport.linked.checking": "Checking for upstream changes…",
+    "importExport.linked.flaggedCount": "{count} flagged",
+    "importExport.linked.loadError": "Couldn't load upstream changes right now.",
+    "importExport.linked.nothingFlagged": "Nothing flagged — this project is current with its upstream source.",
+    "importExport.linked.removedUpstreamBadge": "removed upstream",
+    "importExport.linked.repinRoleRequired": "Reviewer or above required to accept a change; project lead required to " +
+      "accept in bulk.",
+    "importExport.linked.selectForBulkAriaLabel": "Select {cell} for bulk repin",
+    "importExport.linked.skippedRetranslatedBadge": "skipped — retranslated since",
+    "importExport.linked.syncBatchHeading": "Sync batch — {date}",
+    "importExport.linked.syncTokenError": "could not obtain a sync token",
+    "importExport.linked.tombstonedLine": "This line was removed upstream.",
+    "importExport.linked.tombstonedTranslationKept": "Its translation is kept: {translation}",
   },
   context: {
     _context: {
@@ -926,6 +1034,10 @@ export const importExport = defineNamespace({
           total: "Total cell count, already locale-formatted.",
         },
       },
+      "importExport.dialog.titleFileTarget": {
+        description:
+          "Title of the dialog that fills in the translated column of the file the reader currently has open, from a document or spreadsheet they upload. A heading naming what the dialog does, not a button. 'Target' here means the translated side of the file, as opposed to the original text being translated from.",
+      },
       "importExport.dialog.downloadFile": {
         description: "Label of the primary download button on the Export dialog, naming the exact file it will produce.",
         placeholders: { fileName: "Filename (with extension) the download will produce — not translated." },
@@ -1161,6 +1273,579 @@ export const importExport = defineNamespace({
         placeholders: {
           done: "Number of files downloaded so far.",
           total: "Total number of files being downloaded.",
+        },
+      },
+      "importExport.dcs.anyOwner": {
+        description:
+          "Option in the publisher picker for the Door43 catalog, and the picker's " +
+          "own placeholder text, meaning the search should not be narrowed to one " +
+          "publishing organisation. Sits in a list beside individual organisation " +
+          "names.",
+      },
+      "importExport.dcs.anySubject": {
+        description:
+          "Option in the resource-category picker for the Door43 catalog, and the " +
+          "picker's own placeholder text, meaning the search should not be narrowed " +
+          "to one category. Sits in a list beside individual category names.",
+      },
+      "importExport.dcs.applyResyncCheckbox": {
+        description:
+          "Label of the tick box the reader must select before the re-sync " +
+          "confirmation dialog will let them proceed. Written in the first person " +
+          "as an acknowledgement the reader makes about the consequence.",
+      },
+      "importExport.dcs.applyResyncConfirmLabel": {
+        description:
+          "Confirming button in the footer of the re-sync confirmation dialog, " +
+          "sitting beside the cancel button. Imperative verb phrase with no " +
+          "ellipsis, because pressing it performs the action immediately.",
+      },
+      "importExport.dcs.applyResyncConfirmRemovals": {
+        description:
+          "Second sentence of the confirmation dialog's body text, warning that the " +
+          "re-sync would take lines away and that translated work hanging off them " +
+          "disappears from view. A complete sentence in the future tense, following " +
+          "the sentence about repairs in the same paragraph.",
+        placeholders: {
+          count: "Number of source lines that would be taken away.",
+        },
+      },
+      "importExport.dcs.applyResyncConfirmRepairs": {
+        description:
+          "First sentence of the confirmation dialog's body text, stating how many " +
+          "source lines the re-sync would correct and how many it would add. A " +
+          "complete sentence in the future tense; a second sentence about removals " +
+          "follows it in the same paragraph.",
+        placeholders: {
+          count: "Number of existing source lines whose text would be corrected.",
+          created: "Number of source lines that would be added.",
+        },
+      },
+      "importExport.dcs.applyResyncConfirmTitle": {
+        description:
+          "Heading of the confirmation dialog that opens before a re-sync is " +
+          "carried out. A short question asking the reader to confirm the action " +
+          "named on the button they just pressed.",
+      },
+      "importExport.dcs.applyResyncEllipsis": {
+        description:
+          "Red button inside the re-sync scan notice that opens the confirmation " +
+          "dialog. Imperative verb phrase; the trailing ellipsis is the convention " +
+          "meaning a dialog will open rather than the action running immediately.",
+      },
+      "importExport.dcs.badgeAriaLabel": {
+        description:
+          "Accessible name, read aloud by screen readers, for the header badge that " +
+          "can be clicked to jump to the settings page where the upstream link is " +
+          "managed. Names the thing first and then the action the click performs.",
+      },
+      "importExport.dcs.catalogIntro": {
+        description:
+          "Introductory paragraph above the list of resources published on the " +
+          "Door43 sharing service, shown while the reader is choosing something to " +
+          "import. Three short statements of explanatory prose: what the list is, " +
+          "what importing commits them to, and which kinds of material can be " +
+          "imported so far.",
+        placeholders: {
+          link: "A hyperlink to the Door43 service whose visible text is the service's " +
+            "own name. Do not translate the substituted value.",
+        },
+      },
+      "importExport.dcs.catalogSearchFailed": {
+        description:
+          "Short error line shown in place of results when the request to the " +
+          "Door43 catalog could not be completed and the service gave no reason of " +
+          "its own. A statement of fact, not an instruction, and not a full " +
+          "sentence.",
+      },
+      "importExport.dcs.checkFailed": {
+        description:
+          "Red error line shown when the request asking whether a newer release " +
+          "exists did not complete. A complete sentence followed by a colon and the " +
+          "underlying reason.",
+        placeholders: {
+          message: "The underlying failure reason as reported by the service or the network. " +
+            "Do not translate the substituted value.",
+        },
+      },
+      "importExport.dcs.checkForUpdates": {
+        description:
+          "Button in the upstream card that asks the Door43 service whether a newer " +
+          "release of the linked resource exists. Imperative verb phrase; it only " +
+          "looks, it does not change anything.",
+      },
+      "importExport.dcs.customOwnerAriaLabel": {
+        description:
+          "Accessible name, read aloud by screen readers, for the free-text box " +
+          "where a publishing organisation can be typed instead of chosen from the " +
+          "picker. A short noun phrase; the box has no visible label of its own.",
+      },
+      "importExport.dcs.customOwnerPlaceholder": {
+        description:
+          "Grey hint text inside an empty text box, below the Door43 catalog " +
+          "filters, where the reader can type a publishing organisation that the " +
+          "picker above does not list. The leading ellipsis continues from that " +
+          "picker; the parenthesis warns that typing here wins.",
+      },
+      "importExport.dcs.detachButton": {
+        description:
+          "Destructive button at the bottom of the upstream card that permanently " +
+          "breaks this project's link to the published resource. Imperative verb " +
+          "phrase; it opens a confirmation dialog rather than acting at once.",
+      },
+      "importExport.dcs.detachConfirmCheckbox": {
+        description:
+          "Label of the tick box the reader must select before the detach " +
+          "confirmation dialog will let them proceed. Written in the first person " +
+          "as an acknowledgement the reader makes about the consequence.",
+      },
+      "importExport.dcs.detachConfirmDescription": {
+        description:
+          "Body text of the confirmation dialog for breaking the upstream link. " +
+          "Three short sentences: what is lost, what is gained, and that the step " +
+          "cannot be reversed from this screen.",
+        placeholders: {
+          repo: "Owner and repository name of the upstream resource, joined by a slash. " +
+            "Do not translate the substituted value.",
+        },
+      },
+      "importExport.dcs.detachConfirmTitle": {
+        description:
+          "Heading of the confirmation dialog that opens before the upstream link " +
+          "is broken. A short question echoing the button the reader just pressed.",
+      },
+      "importExport.dcs.detachFailed": {
+        description:
+          "Small red line shown when breaking the upstream link did not complete " +
+          "and the project is still linked. A short statement followed by a colon " +
+          "and the underlying reason.",
+        placeholders: {
+          message: "The underlying failure reason as reported by the service or the network. " +
+            "Do not translate the substituted value.",
+        },
+      },
+      "importExport.dcs.detachHint": {
+        description:
+          "Small explanatory line directly beneath the detach button, describing " +
+          "both consequences of pressing it. One sentence joining the loss of the " +
+          "link to the gain of being able to edit the source lines by hand.",
+        placeholders: {
+          repo: "Owner and repository name of the upstream resource, joined by a slash. " +
+            "Do not translate the substituted value.",
+        },
+      },
+      "importExport.dcs.importAdvancesNote": {
+        description:
+          "Explanatory paragraph under the headline of the amber update notice, " +
+          "warning what importing will do before the reader presses the button. Two " +
+          "sentences: the first states the direct effect on this project, the " +
+          "second the knock-on effect on projects that translate from it.",
+        placeholders: {
+          ref: "The newer release tag the source lines would be moved to. Do not " +
+            "translate the substituted value.",
+        },
+      },
+      "importExport.dcs.importChanges": {
+        description:
+          "Primary button inside the amber update notice that pulls the newer " +
+          "upstream release into this project's source lines. Imperative verb " +
+          "phrase; this is the action that actually writes.",
+      },
+      "importExport.dcs.importFailed": {
+        description:
+          "Red error line shown when pulling the newer upstream release did not " +
+          "complete. A short statement followed by a colon and the underlying " +
+          "reason.",
+        placeholders: {
+          message: "The underlying failure reason as reported by the service or the network. " +
+            "Do not translate the substituted value.",
+        },
+      },
+      "importExport.dcs.importRoleRequired": {
+        description:
+          "Line shown in place of the import button when the reader's permission " +
+          "level on this project is too low to run the import. A complete sentence " +
+          "naming the minimum permission level, which is a rung on this product's " +
+          "permission ladder.",
+      },
+      "importExport.dcs.importSummary": {
+        description:
+          "Green confirmation shown after an upstream import finishes: a tally of " +
+          "how the source lines changed, then a reminder of the effect on projects " +
+          "that translate from this one. The tally is a label, a colon, and three " +
+          "counted items; a full sentence follows.",
+        placeholders: {
+          created: "Number of source lines newly added by the import.",
+          updated: "Number of existing source lines whose text changed.",
+          removed: "Number of source lines that no longer exist upstream.",
+        },
+      },
+      "importExport.dcs.languageCodeAriaLabel": {
+        description:
+          "Accessible name, read aloud by screen readers, for the same box the " +
+          "visible Language label sits above. It is more specific than the visible " +
+          "label because the box takes a short standard language code rather than a " +
+          "language name.",
+      },
+      "importExport.dcs.languageFilterLabel": {
+        description:
+          "Visible field label above the box where the reader types the language of " +
+          "the resources they want to find in the Door43 catalog. A noun naming " +
+          "what the box filters on, not an instruction and not the language of the " +
+          "interface.",
+      },
+      "importExport.dcs.loadingCatalog": {
+        description:
+          "Status line beside a spinner filling the results area while the first " +
+          "list of Door43 resources is being fetched. Present-tense progress " +
+          "wording, shown only before any result has ever arrived.",
+      },
+      "importExport.dcs.noResults": {
+        description:
+          "First line of the empty state filling the results area when the Door43 " +
+          "catalog returned nothing for the chosen filters. A complete sentence " +
+          "stating the outcome; a shorter hint line follows beneath it.",
+      },
+      "importExport.dcs.noResultsHint": {
+        description:
+          "Second, smaller line of the empty state in the Door43 catalog results " +
+          "area, suggesting how to get results. An imperative sentence naming the " +
+          "three filters above the list.",
+      },
+      "importExport.dcs.notYetSupportedBadge": {
+        description:
+          "Small badge on a greyed-out row in the Door43 catalog listing, marking a " +
+          "resource this product cannot import yet. A very short adjectival phrase " +
+          "that must fit inside a chip beside the resource's name.",
+      },
+      "importExport.dcs.ownerFilterLabel": {
+        description:
+          "Visible field label above the picker that narrows the Door43 catalog to " +
+          "resources published by one organisation, and reused as that picker's " +
+          "accessible name. A noun meaning the publishing account a resource " +
+          "belongs to.",
+      },
+      "importExport.dcs.panelDescription": {
+        description:
+          "Explanatory paragraph at the top of the settings card for a project " +
+          "whose source text comes from the Door43 sharing service. Two sentences: " +
+          "the first states the situation, the second says what the buttons below " +
+          "the paragraph let the reader do.",
+      },
+      "importExport.dcs.pinnedRefBadge": {
+        description:
+          "Small badge in a row of badges summarising the upstream link, stating " +
+          "which published version the project is currently fixed to. Lower-case " +
+          "and telegraphic by design; it sits beside a badge holding the repository " +
+          "name.",
+        placeholders: {
+          ref: "The release tag or branch the project is fixed to. Do not translate the " +
+            "substituted value.",
+        },
+      },
+      "importExport.dcs.pinTooltip": {
+        description:
+          "Tooltip on the small badge in the workspace header that tells the reader " +
+          "this project's source text is kept in step with a published resource on " +
+          "the Door43 sharing service. Two sentences of explanatory prose: the " +
+          "first states what is synced and from where, the second says the source " +
+          "lines are owned by that link and points to where the link is managed.",
+        placeholders: {
+          repo: "Owner and repository name of the upstream resource, joined by a slash. " +
+            "Do not translate the substituted value.",
+          subject: "The upstream resource's category as published by the service, for " +
+            "example an aligned Bible or a set of translation notes. Do not translate " +
+            "the substituted value.",
+          ref: "The release tag or branch the project is pinned to. Do not translate the " +
+            "substituted value.",
+          imported: "The date the resource was imported, already formatted for the reader's " +
+            "language.",
+        },
+      },
+      "importExport.dcs.repairStaleCursorError": {
+        description:
+          "Reason text appended after 'Re-sync failed:' when the upstream link was " +
+          "altered somewhere else between the scan and the confirmation, so the " +
+          "planned work was abandoned. Begins lower-case because it continues that " +
+          "line; reassures the reader nothing was written and tells them what to do " +
+          "next.",
+      },
+      "importExport.dcs.resyncButton": {
+        description:
+          "Secondary button in the upstream card that re-reads the already-pinned " +
+          "upstream version to find source lines that were brought in incorrectly. " +
+          "Imperative verb phrase; pressing it only scans, it does not change " +
+          "anything yet.",
+      },
+      "importExport.dcs.resyncFailed": {
+        description:
+          "Small red line shown when a re-sync scan or its application did not " +
+          "complete. A short statement followed by a colon and the underlying " +
+          "reason.",
+        placeholders: {
+          message: "The underlying failure reason as reported by the service or the network. " +
+            "Do not translate the substituted value.",
+        },
+      },
+      "importExport.dcs.resyncHint": {
+        description:
+          "Small explanatory paragraph directly beneath the re-sync button. Two " +
+          "sentences describing what the button does and reassuring the reader that " +
+          "a confirmation step comes first.",
+      },
+      "importExport.dcs.resyncNoChanges": {
+        description:
+          "Small green line shown after a re-sync scan that found nothing to fix. A " +
+          "complete sentence reporting that this project's source lines already " +
+          "agree with the upstream version it is fixed to.",
+      },
+      "importExport.dcs.resyncRemovalWarning": {
+        description:
+          "Warning under the re-sync scan headline, shown only when the scan would " +
+          "take lines away, telling the reader that translated work hanging off " +
+          "those lines disappears from view. A complete sentence in the future " +
+          "tense.",
+        placeholders: {
+          count: "Number of source lines that would be taken away.",
+        },
+      },
+      "importExport.dcs.resyncRepaired": {
+        description:
+          "Small green line shown after a re-sync has been carried out, reporting " +
+          "how many source lines were corrected. A complete sentence in the past " +
+          "tense.",
+        placeholders: {
+          count: "Number of source lines that were corrected.",
+        },
+      },
+      "importExport.dcs.resyncScanSummary": {
+        description:
+          "Bold headline of the amber notice reporting what a re-sync scan found, " +
+          "before anything is applied. A label, a colon, and three counted items " +
+          "describing the work that would be done.",
+        placeholders: {
+          repair: "Number of existing source lines whose text would be corrected.",
+          created: "Number of source lines that would be added.",
+          removed: "Number of source lines that would be taken away.",
+        },
+      },
+      "importExport.dcs.settingsBlocked": {
+        description:
+          "Reason text appended after 'Detach failed:' when the server refused the " +
+          "change outright. Begins lower-case because it continues that line; a " +
+          "single word with the server's own explanation in parentheses.",
+        placeholders: {
+          reason: "The server's short machine-readable explanation for refusing. Do not " +
+            "translate the substituted value.",
+        },
+      },
+      "importExport.dcs.settingsConflict": {
+        description:
+          "Reason text appended after 'Detach failed:' when someone else changed " +
+          "this project's settings at the same time, so the change was not saved. " +
+          "Begins lower-case because it continues that line, and ends with an " +
+          "instruction to retry.",
+      },
+      "importExport.dcs.stageFilterLabel": {
+        description:
+          "Visible field label above the picker that chooses how finished the " +
+          "resources in the Door43 catalog listing must be, and reused as that " +
+          "picker's accessible name. A noun meaning the point a resource has " +
+          "reached in its publishing cycle.",
+      },
+      "importExport.dcs.stageLatest": {
+        description:
+          "Option in the publishing-stage picker for the Door43 catalog: show the " +
+          "newest state of each resource, including work not yet released. The " +
+          "parenthesised word is the standard version-control term for the newest " +
+          "state and is not translated.",
+      },
+      "importExport.dcs.stagePreprod": {
+        description:
+          "Option in the publishing-stage picker for the Door43 catalog: show " +
+          "resources their publisher has prepared but not yet formally released. " +
+          "Sits between the released and the unreviewed-latest options in the same " +
+          "list.",
+      },
+      "importExport.dcs.stageProd": {
+        description:
+          "Option in the publishing-stage picker for the Door43 catalog: show only " +
+          "resources their publisher has formally released for use. The default " +
+          "choice. The parenthesised word is the short technical name the service " +
+          "itself uses for this stage.",
+      },
+      "importExport.dcs.subjectFilterLabel": {
+        description:
+          "Visible field label above the picker that narrows the Door43 catalog to " +
+          "one kind of resource, and reused as that picker's accessible name. A " +
+          "noun meaning the category of material, such as a Bible or a set of " +
+          "translation notes.",
+      },
+      "importExport.dcs.syncTokenError": {
+        description:
+          "Reason text appended after 'Import failed:' or 'Re-sync failed:' when " +
+          "the permission needed to read this project's lines could not be " +
+          "obtained. A complete sentence; 'token' here is the short-lived " +
+          "credential the app requests before reading.",
+      },
+      "importExport.dcs.trackingHead": {
+        description:
+          "Small badge in the row summarising the upstream link, stating that the " +
+          "project follows the newest state of the upstream resource rather than a " +
+          "formal release. Lower-case and telegraphic; the capitalised word is the " +
+          "standard version-control term for that newest state and is not " +
+          "translated.",
+      },
+      "importExport.dcs.trackingRelease": {
+        description:
+          "Small badge in the row summarising the upstream link, stating that the " +
+          "project follows formal published releases rather than day-to-day " +
+          "upstream work. Lower-case and telegraphic; the alternative badge in the " +
+          "same position says the project follows the newest state instead.",
+      },
+      "importExport.dcs.unsupportedResourceTooltip": {
+        description:
+          "Tooltip on a greyed-out row in the Door43 catalog listing, explaining " +
+          "why that resource cannot be chosen. A statement of a current product " +
+          "limitation; the parenthesis cites the internal work item and its code is " +
+          "not translated.",
+      },
+      "importExport.dcs.updateAvailable": {
+        description:
+          "Bold headline of the amber notice shown after the check finds a newer " +
+          "release: which version the project is on, which one is available, and " +
+          "how many files differ between them. A telegraphic summary line, not a " +
+          "sentence; the arrow shows the move from the old version to the new one.",
+        placeholders: {
+          oldRef: "The release tag the project is currently fixed to. Do not translate the " +
+            "substituted value.",
+          newRef: "The newer release tag available upstream. Do not translate the " +
+            "substituted value.",
+          count: "Number of files that differ between the two releases.",
+        },
+      },
+      "importExport.dcs.upToDateWith": {
+        description:
+          "Green confirmation line shown after the check finds no newer release. A " +
+          "complete sentence reporting that the project already holds the newest " +
+          "published version.",
+        placeholders: {
+          ref: "The newest published release tag, which the project already matches. Do " +
+            "not translate the substituted value.",
+        },
+      },
+      "importExport.linked.acceptAllButton": {
+        description:
+          "Button in the bar that appears once rows are ticked, confirming every " +
+          "ticked translation should stand unchanged against the new source text. " +
+          "Imperative verb phrase with the number of ticked rows in parentheses.",
+        placeholders: {
+          count: "Number of rows currently ticked.",
+        },
+      },
+      "importExport.linked.acceptButton": {
+        description:
+          "Button on one row of the upstream-changes list, confirming that the " +
+          "existing translation should stand unchanged against the new source text. " +
+          "Imperative verb phrase; it clears the row without opening the editor.",
+      },
+      "importExport.linked.awaitingTranslationBadge": {
+        description:
+          "Badge on a row of the upstream-changes list, marking a line that has " +
+          "changed but has no translation here yet, so there is nothing to accept. " +
+          "Lower-case and telegraphic; it must fit inside a chip beside the line's " +
+          "identifier.",
+      },
+      "importExport.linked.checking": {
+        description:
+          "Status line beside a spinner filling the upstream-changes card while the " +
+          "app works out which lines need review. Present-tense progress wording, " +
+          "shown only before any result has arrived.",
+      },
+      "importExport.linked.flaggedCount": {
+        description:
+          "Small badge beside the upstream-changes heading, counting how many lines " +
+          "are waiting to be reviewed. Telegraphic label, not a sentence, and it " +
+          "must stay short enough to fit in a chip.",
+        placeholders: {
+          count: "Number of lines waiting to be reviewed.",
+        },
+      },
+      "importExport.linked.loadError": {
+        description:
+          "Message filling the upstream-changes card when the list of lines needing " +
+          "review could not be fetched. A complete sentence implying the problem " +
+          "may be temporary; a retry link follows it on the same line.",
+      },
+      "importExport.linked.nothingFlagged": {
+        description:
+          "Message filling the upstream-changes card when no line needs review. A " +
+          "reassuring complete sentence: the short verdict, then the reason for it.",
+      },
+      "importExport.linked.removedUpstreamBadge": {
+        description:
+          "Red badge on a row of the upstream-changes list, marking a line that no " +
+          "longer exists in the source this project follows. Lower-case and " +
+          "telegraphic; it must fit inside a chip beside the line's identifier.",
+      },
+      "importExport.linked.repinRoleRequired": {
+        description:
+          "Small line at the top of the upstream-changes card, shown when the " +
+          "reader's permission level is too low to act on the listed lines. One " +
+          "sentence naming two different minimum permission levels, which are rungs " +
+          "on this product's permission ladder, for the single and the many-at-once " +
+          "actions.",
+      },
+      "importExport.linked.selectForBulkAriaLabel": {
+        description:
+          "Accessible name, read aloud by screen readers, for the tick box on one " +
+          "row of the upstream-changes list. Imperative phrase naming which line " +
+          "the tick box belongs to and what ticking it prepares: accepting several " +
+          "translations unchanged in one go.",
+        placeholders: {
+          cell: "The identifier of the line the tick box belongs to, such as a scripture " +
+            "reference. Do not translate the substituted value.",
+        },
+      },
+      "importExport.linked.skippedRetranslatedBadge": {
+        description:
+          "Badge that appears on a row after an accept attempt was deliberately not " +
+          "carried out, because someone had already retranslated that line in the " +
+          "meantime. Lower-case and telegraphic: the outcome, then the reason.",
+      },
+      "importExport.linked.syncBatchHeading": {
+        description:
+          "Heading of a collapsible group in the upstream-changes list. Lines are " +
+          "grouped by the moment their upstream update arrived, so this names the " +
+          "group by that moment. A short label, not a sentence.",
+        placeholders: {
+          date: "The date and time the group of upstream updates arrived, already " +
+            "formatted for the reader's language.",
+        },
+      },
+      "importExport.linked.syncTokenError": {
+        description:
+          "Reason shown in the red error line at the top of the upstream-changes " +
+          "card when the permission needed to read this project's lines was not " +
+          "granted, so an accept could not be carried out. A lower-case fragment, " +
+          "not a sentence; 'token' here is the short-lived credential the app " +
+          "requests before reading.",
+      },
+      "importExport.linked.tombstonedLine": {
+        description:
+          "Body text of a row in the upstream-changes list, shown in place of a " +
+          "before-and-after comparison when the source line no longer exists. A " +
+          "complete sentence; a second sentence about the kept translation may " +
+          "follow it.",
+      },
+      "importExport.linked.tombstonedTranslationKept": {
+        description:
+          "Sentence following the notice that a line was removed from the source, " +
+          "reassuring the reader that the work done here has not been thrown away. " +
+          "Ends with a colon introducing the quoted text.",
+        placeholders: {
+          translation: "The existing translation of the removed line, shown in italics between " +
+            "quotation marks. Do not translate the substituted value.",
         },
       },
     },

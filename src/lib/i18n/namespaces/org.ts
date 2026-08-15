@@ -445,6 +445,20 @@ export const org = defineNamespace({
     "org.orgSidebar.archived": "Archived",
     "org.orgSidebar.admin": "Admin",
 
+    // -- OrgSettingsExport: who may export a project's deliverables --
+    "org.exportSettings.deliverablesGroupLabel": "Deliverables",
+    "org.exportSettings.whoCanExportLabel": "Who can export",
+    "org.exportSettings.whoCanExportDescription":
+      "Lower the floor to let translators export their own work; raise it to " +
+      "keep deliverables with leads. Client-side formats (CSV, TSV) operate on " +
+      "already-loaded cells and can't be enforced here.",
+    "org.exportSettings.ownersOnlyPolicyNote": "Only org owners can change the export permission policy.",
+    "org.exportSettings.roleOptionPlain": "{role} ({level})",
+    "org.exportSettings.roleOptionViewer": "{role} ({level}) — anyone with project access",
+    "org.exportSettings.roleOptionMaintainer": "{role} ({level}) — default",
+    "org.exportSettings.roleOptionOwner": "{role} ({level}) — most restrictive",
+    "org.exportSettings.saveFailedFallback": "Couldn't save the export permission.",
+
     // -- AddLanguagePopover: "+ Language" quick action on an OrgHome project row --
     "org.addLanguagePopover.triggerLabel": "Language",
     "org.addLanguagePopover.triggerAriaLabel": "Add a target language lane",
@@ -1074,6 +1088,62 @@ export const org = defineNamespace({
           percent:
             "Percentage of cells with audio, already formatted with a '%' sign and bidi-isolated for RTL locales.",
         },
+      },
+      "org.exportSettings.deliverablesGroupLabel": {
+        description:
+          "Heading of the settings group that holds the export-permission control on an organization's export settings page. A short plural noun for the finished files a team hands over to whoever commissioned the work — the exported documents themselves, not the act of exporting them.",
+      },
+      "org.exportSettings.whoCanExportLabel": {
+        description:
+          "Label for the dropdown that sets the lowest team role allowed to export files from any project in this organization, and also the name read aloud for that dropdown by screen readers. A question-shaped noun phrase with no question mark — it names the choice rather than asking one, so avoid turning it into a full question.",
+      },
+      "org.exportSettings.whoCanExportDescription": {
+        description:
+          "Explanatory paragraph under the export-permission dropdown on an organization's export settings page, addressed to the administrator making the choice. Two sentences: the first says what moving the minimum role down or up achieves, the second warns that two spreadsheet formats are produced entirely inside the reader's own browser and so cannot be blocked by this setting. The two abbreviations in brackets are file-format names and stay exactly as they are.",
+      },
+      "org.exportSettings.ownersOnlyPolicyNote": {
+        description:
+          "Sentence explaining that the export-permission dropdown is not editable by this reader, because changing it is reserved for owners of the organization. Shown as quiet helper text under the dropdown for anyone below that level, and shown again as an error message when a save is refused for the same reason. A complete sentence stating a rule, not an instruction to the reader.",
+      },
+      "org.exportSettings.roleOptionPlain": {
+        description:
+          "One entry in the export-permission dropdown, for the two roles that need no further explanation (contributor and project lead). Just the role's own name followed by its numeric level in brackets — the level is shown so administrators can see the ladder these roles sit on.",
+        placeholders: {
+          role: "The role's already-translated display name, resolved from common.role.* — do not translate it again here.",
+          level:
+            "The role's numeric level (100–700), a fixed permission code shared with the server. Keep it in Western digits and do not localize the numerals.",
+        },
+      },
+      "org.exportSettings.roleOptionViewer": {
+        description:
+          "The lowest entry in the export-permission dropdown. Same shape as org.exportSettings.roleOptionPlain, with a note after the dash saying that choosing it lets everyone who can open the project export from it — i.e. the most permissive setting.",
+        placeholders: {
+          role: "The role's already-translated display name, resolved from common.role.* — do not translate it again here.",
+          level:
+            "The role's numeric level (100–700), a fixed permission code shared with the server. Keep it in Western digits and do not localize the numerals.",
+        },
+      },
+      "org.exportSettings.roleOptionMaintainer": {
+        description:
+          "Entry in the export-permission dropdown for the level a new organization starts on. Same shape as org.exportSettings.roleOptionPlain, with a one-word note after the dash marking it as the value in force unless somebody changes it.",
+        placeholders: {
+          role: "The role's already-translated display name, resolved from common.role.* — do not translate it again here.",
+          level:
+            "The role's numeric level (100–700), a fixed permission code shared with the server. Keep it in Western digits and do not localize the numerals.",
+        },
+      },
+      "org.exportSettings.roleOptionOwner": {
+        description:
+          "The highest entry in the export-permission dropdown. Same shape as org.exportSettings.roleOptionPlain, with a note after the dash saying this choice narrows exporting to the fewest people — the opposite end of the ladder from org.exportSettings.roleOptionViewer.",
+        placeholders: {
+          role: "The role's already-translated display name, resolved from common.role.* — do not translate it again here.",
+          level:
+            "The role's numeric level (100–700), a fixed permission code shared with the server. Keep it in Western digits and do not localize the numerals.",
+        },
+      },
+      "org.exportSettings.saveFailedFallback": {
+        description:
+          "Error shown under the export-permission dropdown when saving the new setting failed and the server gave no explanation of its own — the setting is unchanged and the reader can simply try again. A complete sentence in the product's voice.",
       },
       "org.addLanguagePopover.triggerAriaLabel": {
         description:

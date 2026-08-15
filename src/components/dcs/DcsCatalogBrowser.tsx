@@ -6,6 +6,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useI18n } from "@/lib/i18n/I18nProvider"
+import { RichMessage } from "@/lib/i18n/RichMessage"
+import type { MessageKey } from "@/lib/i18n/messages/en"
 import { formatDate } from "@/lib/i18n/format"
 import { Search, RefreshCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -32,10 +34,12 @@ const ANY = "__any__"
 /** Owners users start from most often. `unfoldingWord` is the English upstream
  *  author; the rest are the largest Gateway-Language orgs. Free-text owner is
  *  also allowed via the input below. */
+// i18n-exempt Door43 organisation account names — query values, never translated
 const OWNER_OPTIONS = ["unfoldingWord", "Door43-Catalog", "STR", "es-419_gl", "ru_gl"]
 
 /** Subjects we surface as first-class filters. The catalog holds more, but these
  *  cover the v1 resource stack (spec §4). "Any" leaves the filter off. */
+// i18n-exempt DCS catalog `subject` query values — sent verbatim to the API
 const SUBJECT_OPTIONS = [
   "Aligned Bible",
   "Bible",
@@ -48,11 +52,13 @@ const SUBJECT_OPTIONS = [
   "Translation Academy",
 ]
 
-/** Release stages (spec §6 — track prod releases by default). */
-const STAGE_OPTIONS: { value: string; label: string }[] = [
-  { value: "prod", label: "Released (prod)" },
-  { value: "preprod", label: "Pre-release" },
-  { value: "latest", label: "Latest (HEAD)" },
+/** Release stages (spec §6 — track prod releases by default). The label is held
+ *  as a catalog key because this table lives at module scope, where the `t`
+ *  hook cannot be called; it is resolved at the render site instead. */
+const STAGE_OPTIONS: { value: string; labelKey: MessageKey }[] = [
+  { value: "prod", labelKey: "importExport.dcs.stageProd" },
+  { value: "preprod", labelKey: "importExport.dcs.stagePreprod" },
+  { value: "latest", labelKey: "importExport.dcs.stageLatest" },
 ]
 
 export interface DcsCatalogBrowserProps {
@@ -72,7 +78,7 @@ function formatReleased(iso: string, locale: string): string {
 }
 
 export function DcsCatalogBrowser({ onPick, client, defaultLang }: DcsCatalogBrowserProps) {
-  const { locale } = useI18n()
+  const { locale, t } = useI18n()
   // A stable client instance across renders (real network unless injected).
   const clientRef = useRef<DcsClient>(client ?? new DcsClient())
 
@@ -109,12 +115,12 @@ export function DcsCatalogBrowser({ onPick, client, defaultLang }: DcsCatalogBro
       setResults(rows)
     } catch (err) {
       if (seq !== searchSeq.current) return
-      setError(err instanceof Error ? err.message : "Catalog search failed")
+      setError(err instanceof Error ? err.message : t("importExport.dcs.catalogSearchFailed"))
       setResults([])
     } finally {
       if (seq === searchSeq.current) setLoading(false)
     }
-  }, [lang, owner, ownerText, subject, stage])
+  }, [lang, owner, ownerText, subject, stage, t])
 
   // Run an initial search on mount so the panel isn't empty.
   useEffect(() => {
@@ -127,45 +133,49 @@ export function DcsCatalogBrowser({ onPick, client, defaultLang }: DcsCatalogBro
   return (
     <div className="flex flex-col gap-3 py-1">
       <p className="text-xs text-muted-foreground">
-        Browse released resources on{" "}
-        <a
-          href="https://git.door43.org"
-          target="_blank"
-          rel="noreferrer"
-          className="underline"
-        >
-          Door43
-        </a>
-        . Importing pins the project to the chosen release; you can pull later
-        changes from the project&apos;s settings. Bible (USFM) resources import today;
-        more resource types are rolling out.
+        <RichMessage
+          k="importExport.dcs.catalogIntro"
+          values={{
+            link: (
+              <a
+                href="https://git.door43.org"
+                target="_blank"
+                rel="noreferrer"
+                className="underline"
+              >
+                Door43
+              </a>
+            ),
+          }}
+        />
       </p>
 
       {/* Filters */}
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
         <label className="flex flex-col gap-1 text-xs">
-          <span className="text-muted-foreground">Language</span>
+          <span className="text-muted-foreground">{t("importExport.dcs.languageFilterLabel")}</span>
           <Input
             value={lang}
             onChange={(e) => setLang(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") void runSearch() }}
+            // i18n-exempt example BCP-47 language codes
             placeholder="en, es-419, hbo…"
-            aria-label="Language code"
+            aria-label={t("importExport.dcs.languageCodeAriaLabel")}
             className="h-8 text-sm"
           />
         </label>
 
         <label className="flex flex-col gap-1 text-xs">
-          <span className="text-muted-foreground">Owner</span>
+          <span className="text-muted-foreground">{t("importExport.dcs.ownerFilterLabel")}</span>
           <Select
             value={ownerText.trim() ? ANY : owner}
             onValueChange={(v) => { setOwner(v ?? ANY); setOwnerText("") }}
           >
-            <SelectTrigger className="h-8 text-sm" aria-label="Owner">
-              <SelectValue placeholder="Any owner" />
+            <SelectTrigger className="h-8 text-sm" aria-label={t("importExport.dcs.ownerFilterLabel")}>
+              <SelectValue placeholder={t("importExport.dcs.anyOwner")} />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value={ANY}>Any owner</SelectItem>
+              <SelectItem value={ANY}>{t("importExport.dcs.anyOwner")}</SelectItem>
               {OWNER_OPTIONS.map((o) => (
                 <SelectItem key={o} value={o}>{o}</SelectItem>
               ))}
@@ -174,14 +184,14 @@ export function DcsCatalogBrowser({ onPick, client, defaultLang }: DcsCatalogBro
         </label>
 
         <label className="flex flex-col gap-1 text-xs">
-          <span className="text-muted-foreground">Subject</span>
+          <span className="text-muted-foreground">{t("importExport.dcs.subjectFilterLabel")}</span>
           <Select value={subject} onValueChange={(v) => setSubject(v ?? ANY)}>
-            <SelectTrigger className="h-8 text-sm" aria-label="Subject">
-              <SelectValue placeholder="Any subject" />
+            <SelectTrigger className="h-8 text-sm" aria-label={t("importExport.dcs.subjectFilterLabel")}>
+              <SelectValue placeholder={t("importExport.dcs.anySubject")} />
             </SelectTrigger>
             {/* Grow past the narrow filter trigger so long subjects aren't clipped. */}
             <SelectContent>
-              <SelectItem value={ANY}>Any subject</SelectItem>
+              <SelectItem value={ANY}>{t("importExport.dcs.anySubject")}</SelectItem>
               {SUBJECT_OPTIONS.map((s) => (
                 <SelectItem key={s} value={s}>{s}</SelectItem>
               ))}
@@ -190,14 +200,14 @@ export function DcsCatalogBrowser({ onPick, client, defaultLang }: DcsCatalogBro
         </label>
 
         <label className="flex flex-col gap-1 text-xs">
-          <span className="text-muted-foreground">Stage</span>
+          <span className="text-muted-foreground">{t("importExport.dcs.stageFilterLabel")}</span>
           <Select value={stage} onValueChange={(v) => setStage(v ?? "prod")}>
-            <SelectTrigger className="h-8 text-sm" aria-label="Stage">
+            <SelectTrigger className="h-8 text-sm" aria-label={t("importExport.dcs.stageFilterLabel")}>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
               {STAGE_OPTIONS.map((s) => (
-                <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
+                <SelectItem key={s.value} value={s.value}>{t(s.labelKey)}</SelectItem>
               ))}
             </SelectContent>
           </Select>
@@ -209,13 +219,13 @@ export function DcsCatalogBrowser({ onPick, client, defaultLang }: DcsCatalogBro
           value={ownerText}
           onChange={(e) => setOwnerText(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter") void runSearch() }}
-          placeholder="…or type any owner (overrides the picker)"
-          aria-label="Custom owner"
+          placeholder={t("importExport.dcs.customOwnerPlaceholder")}
+          aria-label={t("importExport.dcs.customOwnerAriaLabel")}
           className="h-8 flex-1 text-sm"
         />
         <Button onClick={() => void runSearch()} disabled={loading}>
           {loading ? <Spinner className="size-4" /> : <Search className="size-4" />}
-          Search
+          {t("nav.search")}
         </Button>
       </div>
 
@@ -226,7 +236,7 @@ export function DcsCatalogBrowser({ onPick, client, defaultLang }: DcsCatalogBro
       <div className="max-h-72 overflow-y-auto rounded border">
         {loading && results === null ? (
           <div className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground">
-            <Spinner className="size-4" /> Loading catalog…
+            <Spinner className="size-4" /> {t("importExport.dcs.loadingCatalog")}
           </div>
         ) : results && results.length > 0 ? (
           <ul className="divide-y">
@@ -235,7 +245,7 @@ export function DcsCatalogBrowser({ onPick, client, defaultLang }: DcsCatalogBro
               // resources are shown but not pickable, so the user never hits
               // importDcsResource's "no route" throw AFTER committing.
               const supported = isSupportedCatalogEntry(entry)
-              const unsupportedReason = "Aquilla can't import this resource type yet (tracked in AQU-615)"
+              const unsupportedReason = t("importExport.dcs.unsupportedResourceTooltip")
               return (
                 <AppTooltip
                   key={`${entry.fullName}@${entry.ref}`}
@@ -265,7 +275,7 @@ export function DcsCatalogBrowser({ onPick, client, defaultLang }: DcsCatalogBro
                       )}
                       {!supported && (
                         <Badge variant="outline" className="shrink-0 px-1.5 py-0 text-[10px]">
-                          Not yet supported
+                          {t("importExport.dcs.notYetSupportedBadge")}
                         </Badge>
                       )}
                     </div>
@@ -283,8 +293,8 @@ export function DcsCatalogBrowser({ onPick, client, defaultLang }: DcsCatalogBro
         ) : (
           <div className="flex flex-col items-center gap-1 py-8 text-center text-sm text-muted-foreground">
             <RefreshCw className="size-4 opacity-60" />
-            <p>No released resources match these filters.</p>
-            <p className="text-xs">Try a broader language, owner, or subject.</p>
+            <p>{t("importExport.dcs.noResults")}</p>
+            <p className="text-xs">{t("importExport.dcs.noResultsHint")}</p>
           </div>
         )}
       </div>

@@ -11,11 +11,14 @@ import {
 } from "@/components/ui/select"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useOrgSettings } from "@/hooks/useOrgSettings"
-import { ROLE } from "@/lib/frontier/roles"
+import { ROLE, resolveRoleName } from "@/lib/frontier/roles"
+import { useT } from "@/lib/i18n/I18nProvider"
+import type { MessageKey } from "@/lib/i18n/messages/en"
 import { ORG_SETTINGS_SECTION_DESCRIPTIONS, ORG_SETTINGS_SECTION_TITLES } from "./constants"
 import { OrgSettingsDetailPage } from "./OrgSettingsDetailPage"
 
 export function OrgSettingsExport() {
+  const t = useT()
   const { activeOrg, activeOrgId } = useActiveOrg()
   const { exportMinRole, patch: patchOrgSettings } = useOrgSettings(activeOrgId, activeOrg?.role?.level)
 
@@ -23,12 +26,16 @@ export function OrgSettingsExport() {
   const [exportRoleBusy, setExportRoleBusy] = useState(false)
   const [exportRoleError, setExportRoleError] = useState<string | null>(null)
 
+  const roleOption = (level: number, k: MessageKey) => ({
+    level,
+    label: t(k, { role: resolveRoleName(t, level), level: String(level) }),
+  })
   const exportRoleOptions = [
-    { level: ROLE.VIEWER, label: "Viewer (100) — anyone with project access" },
-    { level: ROLE.CONTRIBUTOR, label: "Contributor (400)" },
-    { level: ROLE.PROJECT_LEAD, label: "Project lead (500)" },
-    { level: ROLE.MAINTAINER, label: "Maintainer (600) — default" },
-    { level: ROLE.OWNER, label: "Owner (700) — most restrictive" },
+    roleOption(ROLE.VIEWER, "org.exportSettings.roleOptionViewer"),
+    roleOption(ROLE.CONTRIBUTOR, "org.exportSettings.roleOptionPlain"),
+    roleOption(ROLE.PROJECT_LEAD, "org.exportSettings.roleOptionPlain"),
+    roleOption(ROLE.MAINTAINER, "org.exportSettings.roleOptionMaintainer"),
+    roleOption(ROLE.OWNER, "org.exportSettings.roleOptionOwner"),
   ]
   const displayedExportMinRole = exportMinRole ?? ROLE.MAINTAINER
 
@@ -37,9 +44,9 @@ export function OrgSettingsExport() {
     setExportRoleError(null)
     const result = await patchOrgSettings({ exportMinRole: newLevel })
     if (result.kind === "error") {
-      setExportRoleError(result.message ?? "Save failed")
+      setExportRoleError(result.message ?? t("org.exportSettings.saveFailedFallback"))
     } else if (result.kind === "blocked") {
-      setExportRoleError("Only org owners can change the export permission policy.")
+      setExportRoleError(t("org.exportSettings.ownersOnlyPolicyNote"))
     }
     setExportRoleBusy(false)
   }
@@ -49,10 +56,10 @@ export function OrgSettingsExport() {
       title={ORG_SETTINGS_SECTION_TITLES.export}
       description={ORG_SETTINGS_SECTION_DESCRIPTIONS.export}
     >
-      <SettingsGroup label="Deliverables">
+      <SettingsGroup label={t("org.exportSettings.deliverablesGroupLabel")}>
         <SettingsRow
-          label="Who can export"
-          description="Lower the floor to let translators export their own work; raise it to keep deliverables with leads. Client-side formats (CSV, TSV) operate on already-loaded cells and can't be enforced here."
+          label={t("org.exportSettings.whoCanExportLabel")}
+          description={t("org.exportSettings.whoCanExportDescription")}
           block
         >
           <Select
@@ -61,7 +68,7 @@ export function OrgSettingsExport() {
             onValueChange={(v) => { if (v) void handleExportRoleChange(Number(v)) }}
             disabled={!canEditExportFloor || exportRoleBusy}
           >
-            <SelectTrigger id="export-min-role" aria-label="Who can export">
+            <SelectTrigger id="export-min-role" aria-label={t("org.exportSettings.whoCanExportLabel")}>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -75,7 +82,7 @@ export function OrgSettingsExport() {
             </SelectContent>
           </Select>
           {!canEditExportFloor && (
-            <FieldDescription>Only org owners can change the export permission policy.</FieldDescription>
+            <FieldDescription>{t("org.exportSettings.ownersOnlyPolicyNote")}</FieldDescription>
           )}
           {exportRoleError && (
             <FieldError className="text-xs">{exportRoleError}</FieldError>

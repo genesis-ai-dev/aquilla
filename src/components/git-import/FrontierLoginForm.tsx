@@ -19,6 +19,9 @@ import { isFieldInvalid } from "@/lib/forms/field-state"
 import { requiredString } from "@/lib/forms/schemas"
 import { useSubmitError } from "@/lib/forms/submit-error"
 
+// requiredString() composes "<label> is required" inside lib/forms/schemas.ts,
+// which cannot call the t() hook (AQU-510, out of scope) — these labels stay
+// English there even though the visible FieldLabels below are translated.
 const loginSchema = z.object({
   username: requiredString("Username or email"),
   password: requiredString("Password"),
@@ -46,7 +49,7 @@ export function FrontierLoginForm({
     onSubmit: async ({ value }) => {
       clearSubmitError()
       if (!isOnline) {
-        setSubmitError("You're offline — connect to sign in")
+        setSubmitError(t("auth.login.offlineNotice"))
         return
       }
       try {
@@ -81,7 +84,7 @@ export function FrontierLoginForm({
     >
       {!isOnline && (
         <p className="rounded-md bg-muted px-3 py-2 text-sm text-muted-foreground">
-          You're offline — connect to sign in
+          {t("auth.login.offlineNotice")}
         </p>
       )}
       <FieldGroup className="gap-3">
@@ -91,7 +94,7 @@ export function FrontierLoginForm({
             const invalid = isFieldInvalid(field)
             return (
               <Field data-invalid={invalid}>
-                <FieldLabel htmlFor="f-user">Aquilla username or email</FieldLabel>
+                <FieldLabel htmlFor="f-user">{t("auth.login.aquillaUsernameLabel")}</FieldLabel>
                 <Input
                   id="f-user"
                   name={field.name}
@@ -113,14 +116,14 @@ export function FrontierLoginForm({
             return (
               <Field data-invalid={invalid}>
                 <div className="flex items-center justify-between">
-                  <FieldLabel htmlFor="f-pass">Password</FieldLabel>
+                  <FieldLabel htmlFor="f-pass">{t("auth.login.passwordLabel")}</FieldLabel>
                   {onForgotPassword && (
                     <button
                       type="button"
                       onClick={onForgotPassword}
                       className="text-xs text-muted-foreground underline-offset-4 hover:underline"
                     >
-                      Forgot password?
+                      {t("auth.login.forgotPasswordLink")}
                     </button>
                   )}
                 </div>
@@ -144,7 +147,7 @@ export function FrontierLoginForm({
       )}
       <Button type="submit" form="frontier-login-form" className="w-full">
         {form.state.isSubmitting && <Spinner data-icon="inline-start" />}
-        {form.state.isSubmitting ? "Logging in…" : "Log in"}
+        {form.state.isSubmitting ? t("auth.login.submitLoggingIn") : t("common.logIn")}
       </Button>
     </form>
   )

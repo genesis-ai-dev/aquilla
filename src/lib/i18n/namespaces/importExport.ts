@@ -191,6 +191,10 @@ export const importExport = defineNamespace({
     "importExport.landing.dcs.hint": "upstream",
     "importExport.landing.dcs.description":
       "Import any released Door43 resource as source and pin it to a release — pull upstream changes later.",
+    "importExport.landing.gdrive.title": "Google Drive",
+    "importExport.landing.gdrive.hint": "cloud",
+    "importExport.landing.gdrive.description":
+      "Pick files or a whole folder from your Google Drive. Only the items you pick are shared with Aquilla. Google Docs import as DOCX.",
     "importExport.landing.sdbh.title": "SDBH Hebrew Lexicon",
     "importExport.landing.sdbh.hint": "UBS MARBLE",
     "importExport.landing.sdbh.description":
@@ -352,10 +356,12 @@ export const importExport = defineNamespace({
     "importExport.dialog.titleCollision": "Re-import detected",
     "importExport.dialog.backToFileSelection": "Back to file selection",
     "importExport.dialog.backToImportTypes": "Back to import types",
+    "importExport.dialog.titlePreview": "Import preview",
     "importExport.dialog.titleHelloao": "Bible API (helloao.org)",
     "importExport.dialog.titleTn": "Translation Notes (TSV)",
     "importExport.dialog.titleSpreadsheet": "Spreadsheet (CSV / XLSX)",
     "importExport.dialog.titlePaired": "Paired Translation Import",
+    "importExport.dialog.titleFileTarget": "Import target translations",
     "importExport.dialog.finishSaveFailed": "Couldn't finish saving your import — please try again. ({message})",
     "importExport.dialog.saveFailed": "Couldn't save your import — please try again. ({message})",
     "importExport.dialog.labelsNeedSourceFile":
@@ -598,6 +604,232 @@ export const importExport = defineNamespace({
     "importExport.errors.sourceUploadFailed": "Source upload failed",
     "importExport.errors.artifactBindingNetworkFailed": "Artifact binding failed: {detail}",
     "importExport.errors.artifactBindingFailed": "Artifact binding failed",
+
+    // — Door43 (DCS) sync badge, catalog browser and upstream panel —
+    // (importExport.linked.* below is the linked-project upstream-changes
+    //  review surface, which is not Door43-specific.)
+    "importExport.dcs.anyOwner": "Any owner",
+    "importExport.dcs.anySubject": "Any subject",
+    "importExport.dcs.applyResyncCheckbox": "I understand removed cells hide their translations.",
+    "importExport.dcs.applyResyncConfirmLabel": "Apply re-sync",
+    "importExport.dcs.applyResyncConfirmRemovals": plural({
+      one: "{count} cell will be removed — translations attached to removed cells will be hidden.",
+      other: "{count} cells will be removed — translations attached to removed cells will be hidden.",
+    }),
+    "importExport.dcs.applyResyncConfirmRepairs": plural({
+      one: "{count} cell will be repaired and {created} created.",
+      other: "{count} cells will be repaired and {created} created.",
+    }),
+    "importExport.dcs.applyResyncConfirmTitle": "Apply re-sync?",
+    "importExport.dcs.applyResyncEllipsis": "Apply re-sync…",
+    "importExport.dcs.badgeAriaLabel": "Door43 source link — open Project Settings",
+    "importExport.dcs.catalogIntro": "Browse released resources on {link}. Importing pins the project to the " +
+      "chosen release; you can pull later changes from the project's settings. " +
+      "Bible (USFM) resources import today; more resource types are rolling " +
+      "out.",
+    "importExport.dcs.catalogSearchFailed": "Catalog search failed",
+    "importExport.dcs.checkFailed": "Could not check for updates: {message}",
+    "importExport.dcs.checkForUpdates": "Check for updates",
+    "importExport.dcs.customOwnerAriaLabel": "Custom owner",
+    "importExport.dcs.customOwnerPlaceholder": "…or type any owner (overrides the picker)",
+    "importExport.dcs.detachButton": "Detach from upstream",
+    "importExport.dcs.detachConfirmCheckbox": "I understand this permanently unlinks the project.",
+    "importExport.dcs.detachConfirmDescription": "This project will stop receiving updates from {repo}. Source cells " +
+      "become editable. This cannot be undone from here — relinking requires a " +
+      "fresh import.",
+    "importExport.dcs.detachConfirmTitle": "Detach from upstream?",
+    "importExport.dcs.detachFailed": "Detach failed: {message}",
+    "importExport.dcs.detachHint": "Permanently unlink this project from {repo} and make source cells " +
+      "editable again.",
+    "importExport.dcs.importAdvancesNote": "Importing advances the source cells to {ref}. Downstream linked projects " +
+      "will show stale flags for the affected cells so translators can review " +
+      "them.",
+    "importExport.dcs.importChanges": "Import changes",
+    "importExport.dcs.importFailed": "Import failed: {message}",
+    "importExport.dcs.importRoleRequired": "Maintainer or above required to import upstream changes.",
+    "importExport.dcs.importSummary": "Imported: {created} created, {updated} updated, {removed} removed. " +
+      "Downstream linked projects will now show stale flags for the changed " +
+      "cells.",
+    "importExport.dcs.languageCodeAriaLabel": "Language code",
+    "importExport.dcs.languageFilterLabel": "Language",
+    "importExport.dcs.loadingCatalog": "Loading catalog…",
+    "importExport.dcs.noResults": "No released resources match these filters.",
+    "importExport.dcs.noResultsHint": "Try a broader language, owner, or subject.",
+    "importExport.dcs.notYetSupportedBadge": "Not yet supported",
+    "importExport.dcs.ownerFilterLabel": "Owner",
+    "importExport.dcs.panelDescription": "This project mirrors a Door43 resource. Check for a newer published " +
+      "release and import upstream changes into the source lane.",
+    "importExport.dcs.pinnedRefBadge": "pinned {ref}",
+    "importExport.dcs.pinTooltip": "Source synced from {repo} ({subject}) @ {ref} · imported {imported}. " +
+      "Source cells are managed by this link — update or detach in Project " +
+      "Settings.",
+    "importExport.dcs.repairStaleCursorError": "the upstream link changed while confirming (detached or re-imported in " +
+      "another tab). Nothing was applied — run the scan again.",
+    "importExport.dcs.resyncButton": "Re-sync content",
+    "importExport.dcs.resyncFailed": "Re-sync failed: {message}",
+    "importExport.dcs.resyncHint": "Scans the source at the pinned version for cells that were imported " +
+      "incorrectly. Nothing is changed until you confirm.",
+    "importExport.dcs.resyncNoChanges": "Everything already matches the pinned source.",
+    "importExport.dcs.resyncRemovalWarning": plural({
+      one: "{count} cell will be removed — translations attached to them will be hidden.",
+      other: "{count} cells will be removed — translations attached to them will be hidden.",
+    }),
+    "importExport.dcs.resyncRepaired": plural({
+      one: "Repaired {count} cell.",
+      other: "Repaired {count} cells.",
+    }),
+    "importExport.dcs.resyncScanSummary": "Scan complete: {repair} to repair, {created} new, {removed} to remove.",
+    "importExport.dcs.settingsBlocked": "blocked ({reason})",
+    "importExport.dcs.settingsConflict": "conflict — settings changed elsewhere; try again",
+    "importExport.dcs.stageFilterLabel": "Stage",
+    "importExport.dcs.stageLatest": "Latest (HEAD)",
+    "importExport.dcs.stagePreprod": "Pre-release",
+    "importExport.dcs.stageProd": "Released (prod)",
+    "importExport.dcs.subjectFilterLabel": "Subject",
+    "importExport.dcs.syncTokenError": "Could not mint a sync token for this project.",
+    "importExport.dcs.trackingHead": "tracking HEAD",
+    "importExport.dcs.trackingRelease": "tracking release",
+    "importExport.dcs.unsupportedResourceTooltip": "Aquilla can't import this resource type yet (tracked in AQU-615)",
+    "importExport.dcs.updateAvailable": plural({
+      one: "{oldRef} → {newRef}, {count} file changed",
+      other: "{oldRef} → {newRef}, {count} files changed",
+    }),
+    "importExport.dcs.upToDateWith": "Up to date with {ref}.",
+    "importExport.linked.acceptAllButton": "Accept as-is ({count})",
+    "importExport.linked.acceptButton": "Accept as-is",
+    "importExport.linked.awaitingTranslationBadge": "awaiting upstream translation",
+    "importExport.linked.checking": "Checking for upstream changes…",
+    "importExport.linked.flaggedCount": "{count} flagged",
+    "importExport.linked.loadError": "Couldn't load upstream changes right now.",
+    "importExport.linked.nothingFlagged": "Nothing flagged — this project is current with its upstream source.",
+    "importExport.linked.removedUpstreamBadge": "removed upstream",
+    "importExport.linked.repinRoleRequired": "Reviewer or above required to accept a change; project lead required to " +
+      "accept in bulk.",
+    "importExport.linked.selectForBulkAriaLabel": "Select {cell} for bulk repin",
+    "importExport.linked.skippedRetranslatedBadge": "skipped — retranslated since",
+    "importExport.linked.syncBatchHeading": "Sync batch — {date}",
+    "importExport.linked.syncTokenError": "could not obtain a sync token",
+    "importExport.linked.tombstonedLine": "This line was removed upstream.",
+    "importExport.linked.tombstonedTranslationKept": "Its translation is kept: {translation}",
+
+    // — import-panels batch —
+    "importExport.columnMapping.castColumnLabel": "Cast / character",
+    "importExport.columnMapping.columnFallbackName": "Column {index}",
+    "importExport.columnMapping.createModeHint": "Tell us which column contains each piece of data. Only \"Source text\" is " +
+      "required.",
+    "importExport.columnMapping.endColumnLabel": "End timestamp",
+    "importExport.columnMapping.firstRowIsHeader": "First row is a header",
+    "importExport.columnMapping.ignoreOption": "— ignore —",
+    "importExport.columnMapping.labelColumnLabel": "Cell label / ref",
+    "importExport.columnMapping.mapColumns": "Map columns",
+    "importExport.columnMapping.previewRowsHeading": plural({
+      one: "Preview (first {count} data row)",
+      other: "Preview (first {count} data rows)",
+    }),
+    "importExport.columnMapping.sourceColumnLabel": "Source text",
+    "importExport.columnMapping.startColumnLabel": "Start timestamp",
+    "importExport.columnMapping.targetColumnLabel": "Target translation",
+    "importExport.columnMapping.targetModeHint": "Pick the column with the translations. Map a ref column to match by " +
+      "reference; leave it unmapped to match rows to cells in order.",
+    "importExport.columnMapping.typeColumnLabel": "Content type",
+    "importExport.errors.failedToParseFile": "Failed to parse file",
+    "importExport.fileTarget.acceptedFormats": "USFM, CSV, TSV, or XLSX",
+    "importExport.fileTarget.description": "Fills this file's target column from a USFM file or spreadsheet. Source " +
+      "text is never changed. You'll review every match before anything is " +
+      "saved.",
+    "importExport.fileTarget.dropZoneHint": "Drop a file here, or",
+    "importExport.fileTarget.noVersesInUsfm": "No verses found in this USFM file.",
+    "importExport.fileTarget.title": "Import target translations into \"{fileName}\"",
+    "importExport.fileTarget.unsupportedFileType": "Unsupported file type. Use USFM (.usfm/.sfm) or a spreadsheet " +
+      "(.csv/.tsv/.xlsx).",
+    "importExport.labels.choosePlaceholder": "Choose a file…",
+    "importExport.labels.couldNotMintToken": "Could not mint a sync token for this file.",
+    "importExport.labels.csvTooLarge": "The label CSV exceeds the 10 MB safety limit.",
+    "importExport.labels.description": "Download a template with a file's cell references, fill in cast names, " +
+      "then re-upload.",
+    "importExport.labels.downloadTemplate": "Download CSV template",
+    "importExport.labels.emptyCsv": "The label CSV is empty.",
+    "importExport.labels.failedToApply": "Failed to apply labels",
+    "importExport.labels.failedToLoadCells": "Failed to load cells for this file",
+    "importExport.labels.importLabelCount": plural({
+      one: "Import {count} label",
+      other: "Import {count} labels",
+    }),
+    "importExport.labels.loadingCells": "Loading cells…",
+    "importExport.labels.noRowsFound": "No rows found in file.",
+    "importExport.labels.previewCameraHeader": "Camera",
+    "importExport.labels.previewLabelCount": plural({
+      one: "{count} label to import",
+      other: "{count} labels to import",
+    }),
+    "importExport.labels.refCellCount": plural({
+      one: "{count} cell with references in {fileName}.",
+      other: "{count} cells with references in {fileName}.",
+    }),
+    "importExport.labels.step1Heading": "Step 1 — Choose file & download template",
+    "importExport.labels.step2Heading": "Step 2 — Upload filled template",
+    "importExport.labels.thisFileFallback": "this file",
+    "importExport.labels.title": "Cell Labels / Cast Import",
+    "importExport.paired.applyingTargets": "Applying target translations to cells.",
+    "importExport.paired.description": "Upload a CSV or XLSX file where each row has both source and target " +
+      "text. Rows are matched to existing source cells by canonical reference.",
+    "importExport.paired.title": "Import paired source + target",
+    "importExport.preview.aiAssistedStructure": "AI-assisted structure",
+    "importExport.preview.commitFailed": "Import failed: {error}",
+    "importExport.preview.confidencePercent": "{percent}% confidence",
+    "importExport.preview.confirmImport": "Confirm import",
+    "importExport.preview.headerSummary": "Preview — {cells} across {files}",
+    "importExport.preview.instructions": "Review what will be imported, then click Confirm to upload.",
+    "importExport.preview.needsCarefulReview": "Needs careful review",
+    "importExport.preview.recipeNote": "Recipe: {name}. The original is preserved; translated round-trip is not " +
+      "yet verified.",
+    "importExport.preview.reviewBeforeImporting": "Review before importing",
+    "importExport.preview.structuralContentAriaLabel": "Structural content",
+    "importExport.review.conflictCount": plural({
+      one: "{count} conflict",
+      other: "{count} conflicts",
+    }),
+    "importExport.review.deselectAll": "Deselect all",
+    "importExport.review.importCellCount": plural({
+      one: "Import {count} cell",
+      other: "Import {count} cells",
+    }),
+    "importExport.review.matchedCount": "{count} matched",
+    "importExport.review.orderMatchWarning": "No ref column mapped — rows were matched to cells in order. Check the " +
+      "source text next to each row to confirm alignment before importing.",
+    "importExport.review.replacesExisting": "Replaces: {text}",
+    "importExport.review.title": "Review matches",
+    "importExport.review.uncoveredCellCount": plural({
+      one: "{count} cell not covered",
+      other: "{count} cells not covered",
+    }),
+    "importExport.review.uncoveredSourceCellCount": plural({
+      one: "{count} source cell not covered",
+      other: "{count} source cells not covered",
+    }),
+    "importExport.review.unmatchedRowCount": plural({
+      one: "{count} unmatched row",
+      other: "{count} unmatched rows",
+    }),
+    "importExport.spreadsheet.acceptedFormats": "CSV, TSV, or XLSX",
+    "importExport.spreadsheet.description": "Upload a CSV or XLSX file. You will map columns (source, target, ref, " +
+      "cast, timestamps) before importing.",
+    "importExport.spreadsheet.dropZoneHint": "Drop a CSV or XLSX file here, or",
+    "importExport.spreadsheet.legacyXlsUnsupported": "Legacy .xls workbooks are not supported. Save the file as .xlsx or CSV " +
+      "and try again.",
+    "importExport.spreadsheet.noDataRows": "No data rows found after applying the mapping. Check that the source " +
+      "column is not empty.",
+    "importExport.spreadsheet.noSheetsFound": "No sheets found in XLSX file.",
+    "importExport.spreadsheet.selectSheetHint": "This XLSX has multiple sheets. Pick one to import.",
+    "importExport.spreadsheet.selectSheetTitle": "Select a sheet",
+    "importExport.spreadsheet.selectSheetUnitHint": "This XLSX has multiple sheets — each sheet is one importable unit.",
+    "importExport.spreadsheet.sendingCells": "Sending cells to the server.",
+    "importExport.spreadsheet.sheetRowCount": plural({
+      one: "{count} row",
+      other: "{count} rows",
+    }),
+    "importExport.spreadsheet.sourceUnavailable": "The selected spreadsheet is no longer available",
+    "importExport.spreadsheet.title": "Spreadsheet import",
   },
   context: {
     _context: {
@@ -926,6 +1158,10 @@ export const importExport = defineNamespace({
           total: "Total cell count, already locale-formatted.",
         },
       },
+      "importExport.dialog.titleFileTarget": {
+        description:
+          "Title of the dialog that fills in the translated column of the file the reader currently has open, from a document or spreadsheet they upload. A heading naming what the dialog does, not a button. 'Target' here means the translated side of the file, as opposed to the original text being translated from.",
+      },
       "importExport.dialog.downloadFile": {
         description: "Label of the primary download button on the Export dialog, naming the exact file it will produce.",
         placeholders: { fileName: "Filename (with extension) the download will produce — not translated." },
@@ -1162,6 +1398,1166 @@ export const importExport = defineNamespace({
           done: "Number of files downloaded so far.",
           total: "Total number of files being downloaded.",
         },
+      },
+      "importExport.dcs.anyOwner": {
+        description:
+          "Option in the publisher picker for the Door43 catalog, and the picker's " +
+          "own placeholder text, meaning the search should not be narrowed to one " +
+          "publishing organisation. Sits in a list beside individual organisation " +
+          "names.",
+      },
+      "importExport.dcs.anySubject": {
+        description:
+          "Option in the resource-category picker for the Door43 catalog, and the " +
+          "picker's own placeholder text, meaning the search should not be narrowed " +
+          "to one category. Sits in a list beside individual category names.",
+      },
+      "importExport.dcs.applyResyncCheckbox": {
+        description:
+          "Label of the tick box the reader must select before the re-sync " +
+          "confirmation dialog will let them proceed. Written in the first person " +
+          "as an acknowledgement the reader makes about the consequence.",
+      },
+      "importExport.dcs.applyResyncConfirmLabel": {
+        description:
+          "Confirming button in the footer of the re-sync confirmation dialog, " +
+          "sitting beside the cancel button. Imperative verb phrase with no " +
+          "ellipsis, because pressing it performs the action immediately.",
+      },
+      "importExport.dcs.applyResyncConfirmRemovals": {
+        description:
+          "Second sentence of the confirmation dialog's body text, warning that the " +
+          "re-sync would take lines away and that translated work hanging off them " +
+          "disappears from view. A complete sentence in the future tense, following " +
+          "the sentence about repairs in the same paragraph.",
+        placeholders: {
+          count: "Number of source lines that would be taken away.",
+        },
+      },
+      "importExport.dcs.applyResyncConfirmRepairs": {
+        description:
+          "First sentence of the confirmation dialog's body text, stating how many " +
+          "source lines the re-sync would correct and how many it would add. A " +
+          "complete sentence in the future tense; a second sentence about removals " +
+          "follows it in the same paragraph.",
+        placeholders: {
+          count: "Number of existing source lines whose text would be corrected.",
+          created: "Number of source lines that would be added.",
+        },
+      },
+      "importExport.dcs.applyResyncConfirmTitle": {
+        description:
+          "Heading of the confirmation dialog that opens before a re-sync is " +
+          "carried out. A short question asking the reader to confirm the action " +
+          "named on the button they just pressed.",
+      },
+      "importExport.dcs.applyResyncEllipsis": {
+        description:
+          "Red button inside the re-sync scan notice that opens the confirmation " +
+          "dialog. Imperative verb phrase; the trailing ellipsis is the convention " +
+          "meaning a dialog will open rather than the action running immediately.",
+      },
+      "importExport.dcs.badgeAriaLabel": {
+        description:
+          "Accessible name, read aloud by screen readers, for the header badge that " +
+          "can be clicked to jump to the settings page where the upstream link is " +
+          "managed. Names the thing first and then the action the click performs.",
+      },
+      "importExport.dcs.catalogIntro": {
+        description:
+          "Introductory paragraph above the list of resources published on the " +
+          "Door43 sharing service, shown while the reader is choosing something to " +
+          "import. Three short statements of explanatory prose: what the list is, " +
+          "what importing commits them to, and which kinds of material can be " +
+          "imported so far.",
+        placeholders: {
+          link: "A hyperlink to the Door43 service whose visible text is the service's " +
+            "own name. Do not translate the substituted value.",
+        },
+      },
+      "importExport.dcs.catalogSearchFailed": {
+        description:
+          "Short error line shown in place of results when the request to the " +
+          "Door43 catalog could not be completed and the service gave no reason of " +
+          "its own. A statement of fact, not an instruction, and not a full " +
+          "sentence.",
+      },
+      "importExport.dcs.checkFailed": {
+        description:
+          "Red error line shown when the request asking whether a newer release " +
+          "exists did not complete. A complete sentence followed by a colon and the " +
+          "underlying reason.",
+        placeholders: {
+          message: "The underlying failure reason as reported by the service or the network. " +
+            "Do not translate the substituted value.",
+        },
+      },
+      "importExport.dcs.checkForUpdates": {
+        description:
+          "Button in the upstream card that asks the Door43 service whether a newer " +
+          "release of the linked resource exists. Imperative verb phrase; it only " +
+          "looks, it does not change anything.",
+      },
+      "importExport.dcs.customOwnerAriaLabel": {
+        description:
+          "Accessible name, read aloud by screen readers, for the free-text box " +
+          "where a publishing organisation can be typed instead of chosen from the " +
+          "picker. A short noun phrase; the box has no visible label of its own.",
+      },
+      "importExport.dcs.customOwnerPlaceholder": {
+        description:
+          "Grey hint text inside an empty text box, below the Door43 catalog " +
+          "filters, where the reader can type a publishing organisation that the " +
+          "picker above does not list. The leading ellipsis continues from that " +
+          "picker; the parenthesis warns that typing here wins.",
+      },
+      "importExport.dcs.detachButton": {
+        description:
+          "Destructive button at the bottom of the upstream card that permanently " +
+          "breaks this project's link to the published resource. Imperative verb " +
+          "phrase; it opens a confirmation dialog rather than acting at once.",
+      },
+      "importExport.dcs.detachConfirmCheckbox": {
+        description:
+          "Label of the tick box the reader must select before the detach " +
+          "confirmation dialog will let them proceed. Written in the first person " +
+          "as an acknowledgement the reader makes about the consequence.",
+      },
+      "importExport.dcs.detachConfirmDescription": {
+        description:
+          "Body text of the confirmation dialog for breaking the upstream link. " +
+          "Three short sentences: what is lost, what is gained, and that the step " +
+          "cannot be reversed from this screen.",
+        placeholders: {
+          repo: "Owner and repository name of the upstream resource, joined by a slash. " +
+            "Do not translate the substituted value.",
+        },
+      },
+      "importExport.dcs.detachConfirmTitle": {
+        description:
+          "Heading of the confirmation dialog that opens before the upstream link " +
+          "is broken. A short question echoing the button the reader just pressed.",
+      },
+      "importExport.dcs.detachFailed": {
+        description:
+          "Small red line shown when breaking the upstream link did not complete " +
+          "and the project is still linked. A short statement followed by a colon " +
+          "and the underlying reason.",
+        placeholders: {
+          message: "The underlying failure reason as reported by the service or the network. " +
+            "Do not translate the substituted value.",
+        },
+      },
+      "importExport.dcs.detachHint": {
+        description:
+          "Small explanatory line directly beneath the detach button, describing " +
+          "both consequences of pressing it. One sentence joining the loss of the " +
+          "link to the gain of being able to edit the source lines by hand.",
+        placeholders: {
+          repo: "Owner and repository name of the upstream resource, joined by a slash. " +
+            "Do not translate the substituted value.",
+        },
+      },
+      "importExport.dcs.importAdvancesNote": {
+        description:
+          "Explanatory paragraph under the headline of the amber update notice, " +
+          "warning what importing will do before the reader presses the button. Two " +
+          "sentences: the first states the direct effect on this project, the " +
+          "second the knock-on effect on projects that translate from it.",
+        placeholders: {
+          ref: "The newer release tag the source lines would be moved to. Do not " +
+            "translate the substituted value.",
+        },
+      },
+      "importExport.dcs.importChanges": {
+        description:
+          "Primary button inside the amber update notice that pulls the newer " +
+          "upstream release into this project's source lines. Imperative verb " +
+          "phrase; this is the action that actually writes.",
+      },
+      "importExport.dcs.importFailed": {
+        description:
+          "Red error line shown when pulling the newer upstream release did not " +
+          "complete. A short statement followed by a colon and the underlying " +
+          "reason.",
+        placeholders: {
+          message: "The underlying failure reason as reported by the service or the network. " +
+            "Do not translate the substituted value.",
+        },
+      },
+      "importExport.dcs.importRoleRequired": {
+        description:
+          "Line shown in place of the import button when the reader's permission " +
+          "level on this project is too low to run the import. A complete sentence " +
+          "naming the minimum permission level, which is a rung on this product's " +
+          "permission ladder.",
+      },
+      "importExport.dcs.importSummary": {
+        description:
+          "Green confirmation shown after an upstream import finishes: a tally of " +
+          "how the source lines changed, then a reminder of the effect on projects " +
+          "that translate from this one. The tally is a label, a colon, and three " +
+          "counted items; a full sentence follows.",
+        placeholders: {
+          created: "Number of source lines newly added by the import.",
+          updated: "Number of existing source lines whose text changed.",
+          removed: "Number of source lines that no longer exist upstream.",
+        },
+      },
+      "importExport.dcs.languageCodeAriaLabel": {
+        description:
+          "Accessible name, read aloud by screen readers, for the same box the " +
+          "visible Language label sits above. It is more specific than the visible " +
+          "label because the box takes a short standard language code rather than a " +
+          "language name.",
+      },
+      "importExport.dcs.languageFilterLabel": {
+        description:
+          "Visible field label above the box where the reader types the language of " +
+          "the resources they want to find in the Door43 catalog. A noun naming " +
+          "what the box filters on, not an instruction and not the language of the " +
+          "interface.",
+      },
+      "importExport.dcs.loadingCatalog": {
+        description:
+          "Status line beside a spinner filling the results area while the first " +
+          "list of Door43 resources is being fetched. Present-tense progress " +
+          "wording, shown only before any result has ever arrived.",
+      },
+      "importExport.dcs.noResults": {
+        description:
+          "First line of the empty state filling the results area when the Door43 " +
+          "catalog returned nothing for the chosen filters. A complete sentence " +
+          "stating the outcome; a shorter hint line follows beneath it.",
+      },
+      "importExport.dcs.noResultsHint": {
+        description:
+          "Second, smaller line of the empty state in the Door43 catalog results " +
+          "area, suggesting how to get results. An imperative sentence naming the " +
+          "three filters above the list.",
+      },
+      "importExport.dcs.notYetSupportedBadge": {
+        description:
+          "Small badge on a greyed-out row in the Door43 catalog listing, marking a " +
+          "resource this product cannot import yet. A very short adjectival phrase " +
+          "that must fit inside a chip beside the resource's name.",
+      },
+      "importExport.dcs.ownerFilterLabel": {
+        description:
+          "Visible field label above the picker that narrows the Door43 catalog to " +
+          "resources published by one organisation, and reused as that picker's " +
+          "accessible name. A noun meaning the publishing account a resource " +
+          "belongs to.",
+      },
+      "importExport.dcs.panelDescription": {
+        description:
+          "Explanatory paragraph at the top of the settings card for a project " +
+          "whose source text comes from the Door43 sharing service. Two sentences: " +
+          "the first states the situation, the second says what the buttons below " +
+          "the paragraph let the reader do.",
+      },
+      "importExport.dcs.pinnedRefBadge": {
+        description:
+          "Small badge in a row of badges summarising the upstream link, stating " +
+          "which published version the project is currently fixed to. Lower-case " +
+          "and telegraphic by design; it sits beside a badge holding the repository " +
+          "name.",
+        placeholders: {
+          ref: "The release tag or branch the project is fixed to. Do not translate the " +
+            "substituted value.",
+        },
+      },
+      "importExport.dcs.pinTooltip": {
+        description:
+          "Tooltip on the small badge in the workspace header that tells the reader " +
+          "this project's source text is kept in step with a published resource on " +
+          "the Door43 sharing service. Two sentences of explanatory prose: the " +
+          "first states what is synced and from where, the second says the source " +
+          "lines are owned by that link and points to where the link is managed.",
+        placeholders: {
+          repo: "Owner and repository name of the upstream resource, joined by a slash. " +
+            "Do not translate the substituted value.",
+          subject: "The upstream resource's category as published by the service, for " +
+            "example an aligned Bible or a set of translation notes. Do not translate " +
+            "the substituted value.",
+          ref: "The release tag or branch the project is pinned to. Do not translate the " +
+            "substituted value.",
+          imported: "The date the resource was imported, already formatted for the reader's " +
+            "language.",
+        },
+      },
+      "importExport.dcs.repairStaleCursorError": {
+        description:
+          "Reason text appended after 'Re-sync failed:' when the upstream link was " +
+          "altered somewhere else between the scan and the confirmation, so the " +
+          "planned work was abandoned. Begins lower-case because it continues that " +
+          "line; reassures the reader nothing was written and tells them what to do " +
+          "next.",
+      },
+      "importExport.dcs.resyncButton": {
+        description:
+          "Secondary button in the upstream card that re-reads the already-pinned " +
+          "upstream version to find source lines that were brought in incorrectly. " +
+          "Imperative verb phrase; pressing it only scans, it does not change " +
+          "anything yet.",
+      },
+      "importExport.dcs.resyncFailed": {
+        description:
+          "Small red line shown when a re-sync scan or its application did not " +
+          "complete. A short statement followed by a colon and the underlying " +
+          "reason.",
+        placeholders: {
+          message: "The underlying failure reason as reported by the service or the network. " +
+            "Do not translate the substituted value.",
+        },
+      },
+      "importExport.dcs.resyncHint": {
+        description:
+          "Small explanatory paragraph directly beneath the re-sync button. Two " +
+          "sentences describing what the button does and reassuring the reader that " +
+          "a confirmation step comes first.",
+      },
+      "importExport.dcs.resyncNoChanges": {
+        description:
+          "Small green line shown after a re-sync scan that found nothing to fix. A " +
+          "complete sentence reporting that this project's source lines already " +
+          "agree with the upstream version it is fixed to.",
+      },
+      "importExport.dcs.resyncRemovalWarning": {
+        description:
+          "Warning under the re-sync scan headline, shown only when the scan would " +
+          "take lines away, telling the reader that translated work hanging off " +
+          "those lines disappears from view. A complete sentence in the future " +
+          "tense.",
+        placeholders: {
+          count: "Number of source lines that would be taken away.",
+        },
+      },
+      "importExport.dcs.resyncRepaired": {
+        description:
+          "Small green line shown after a re-sync has been carried out, reporting " +
+          "how many source lines were corrected. A complete sentence in the past " +
+          "tense.",
+        placeholders: {
+          count: "Number of source lines that were corrected.",
+        },
+      },
+      "importExport.dcs.resyncScanSummary": {
+        description:
+          "Bold headline of the amber notice reporting what a re-sync scan found, " +
+          "before anything is applied. A label, a colon, and three counted items " +
+          "describing the work that would be done.",
+        placeholders: {
+          repair: "Number of existing source lines whose text would be corrected.",
+          created: "Number of source lines that would be added.",
+          removed: "Number of source lines that would be taken away.",
+        },
+      },
+      "importExport.dcs.settingsBlocked": {
+        description:
+          "Reason text appended after 'Detach failed:' when the server refused the " +
+          "change outright. Begins lower-case because it continues that line; a " +
+          "single word with the server's own explanation in parentheses.",
+        placeholders: {
+          reason: "The server's short machine-readable explanation for refusing. Do not " +
+            "translate the substituted value.",
+        },
+      },
+      "importExport.dcs.settingsConflict": {
+        description:
+          "Reason text appended after 'Detach failed:' when someone else changed " +
+          "this project's settings at the same time, so the change was not saved. " +
+          "Begins lower-case because it continues that line, and ends with an " +
+          "instruction to retry.",
+      },
+      "importExport.dcs.stageFilterLabel": {
+        description:
+          "Visible field label above the picker that chooses how finished the " +
+          "resources in the Door43 catalog listing must be, and reused as that " +
+          "picker's accessible name. A noun meaning the point a resource has " +
+          "reached in its publishing cycle.",
+      },
+      "importExport.dcs.stageLatest": {
+        description:
+          "Option in the publishing-stage picker for the Door43 catalog: show the " +
+          "newest state of each resource, including work not yet released. The " +
+          "parenthesised word is the standard version-control term for the newest " +
+          "state and is not translated.",
+      },
+      "importExport.dcs.stagePreprod": {
+        description:
+          "Option in the publishing-stage picker for the Door43 catalog: show " +
+          "resources their publisher has prepared but not yet formally released. " +
+          "Sits between the released and the unreviewed-latest options in the same " +
+          "list.",
+      },
+      "importExport.dcs.stageProd": {
+        description:
+          "Option in the publishing-stage picker for the Door43 catalog: show only " +
+          "resources their publisher has formally released for use. The default " +
+          "choice. The parenthesised word is the short technical name the service " +
+          "itself uses for this stage.",
+      },
+      "importExport.dcs.subjectFilterLabel": {
+        description:
+          "Visible field label above the picker that narrows the Door43 catalog to " +
+          "one kind of resource, and reused as that picker's accessible name. A " +
+          "noun meaning the category of material, such as a Bible or a set of " +
+          "translation notes.",
+      },
+      "importExport.dcs.syncTokenError": {
+        description:
+          "Reason text appended after 'Import failed:' or 'Re-sync failed:' when " +
+          "the permission needed to read this project's lines could not be " +
+          "obtained. A complete sentence; 'token' here is the short-lived " +
+          "credential the app requests before reading.",
+      },
+      "importExport.dcs.trackingHead": {
+        description:
+          "Small badge in the row summarising the upstream link, stating that the " +
+          "project follows the newest state of the upstream resource rather than a " +
+          "formal release. Lower-case and telegraphic; the capitalised word is the " +
+          "standard version-control term for that newest state and is not " +
+          "translated.",
+      },
+      "importExport.dcs.trackingRelease": {
+        description:
+          "Small badge in the row summarising the upstream link, stating that the " +
+          "project follows formal published releases rather than day-to-day " +
+          "upstream work. Lower-case and telegraphic; the alternative badge in the " +
+          "same position says the project follows the newest state instead.",
+      },
+      "importExport.dcs.unsupportedResourceTooltip": {
+        description:
+          "Tooltip on a greyed-out row in the Door43 catalog listing, explaining " +
+          "why that resource cannot be chosen. A statement of a current product " +
+          "limitation; the parenthesis cites the internal work item and its code is " +
+          "not translated.",
+      },
+      "importExport.dcs.updateAvailable": {
+        description:
+          "Bold headline of the amber notice shown after the check finds a newer " +
+          "release: which version the project is on, which one is available, and " +
+          "how many files differ between them. A telegraphic summary line, not a " +
+          "sentence; the arrow shows the move from the old version to the new one.",
+        placeholders: {
+          oldRef: "The release tag the project is currently fixed to. Do not translate the " +
+            "substituted value.",
+          newRef: "The newer release tag available upstream. Do not translate the " +
+            "substituted value.",
+          count: "Number of files that differ between the two releases.",
+        },
+      },
+      "importExport.dcs.upToDateWith": {
+        description:
+          "Green confirmation line shown after the check finds no newer release. A " +
+          "complete sentence reporting that the project already holds the newest " +
+          "published version.",
+        placeholders: {
+          ref: "The newest published release tag, which the project already matches. Do " +
+            "not translate the substituted value.",
+        },
+      },
+      "importExport.linked.acceptAllButton": {
+        description:
+          "Button in the bar that appears once rows are ticked, confirming every " +
+          "ticked translation should stand unchanged against the new source text. " +
+          "Imperative verb phrase with the number of ticked rows in parentheses.",
+        placeholders: {
+          count: "Number of rows currently ticked.",
+        },
+      },
+      "importExport.linked.acceptButton": {
+        description:
+          "Button on one row of the upstream-changes list, confirming that the " +
+          "existing translation should stand unchanged against the new source text. " +
+          "Imperative verb phrase; it clears the row without opening the editor.",
+      },
+      "importExport.linked.awaitingTranslationBadge": {
+        description:
+          "Badge on a row of the upstream-changes list, marking a line that has " +
+          "changed but has no translation here yet, so there is nothing to accept. " +
+          "Lower-case and telegraphic; it must fit inside a chip beside the line's " +
+          "identifier.",
+      },
+      "importExport.linked.checking": {
+        description:
+          "Status line beside a spinner filling the upstream-changes card while the " +
+          "app works out which lines need review. Present-tense progress wording, " +
+          "shown only before any result has arrived.",
+      },
+      "importExport.linked.flaggedCount": {
+        description:
+          "Small badge beside the upstream-changes heading, counting how many lines " +
+          "are waiting to be reviewed. Telegraphic label, not a sentence, and it " +
+          "must stay short enough to fit in a chip.",
+        placeholders: {
+          count: "Number of lines waiting to be reviewed.",
+        },
+      },
+      "importExport.linked.loadError": {
+        description:
+          "Message filling the upstream-changes card when the list of lines needing " +
+          "review could not be fetched. A complete sentence implying the problem " +
+          "may be temporary; a retry link follows it on the same line.",
+      },
+      "importExport.linked.nothingFlagged": {
+        description:
+          "Message filling the upstream-changes card when no line needs review. A " +
+          "reassuring complete sentence: the short verdict, then the reason for it.",
+      },
+      "importExport.linked.removedUpstreamBadge": {
+        description:
+          "Red badge on a row of the upstream-changes list, marking a line that no " +
+          "longer exists in the source this project follows. Lower-case and " +
+          "telegraphic; it must fit inside a chip beside the line's identifier.",
+      },
+      "importExport.linked.repinRoleRequired": {
+        description:
+          "Small line at the top of the upstream-changes card, shown when the " +
+          "reader's permission level is too low to act on the listed lines. One " +
+          "sentence naming two different minimum permission levels, which are rungs " +
+          "on this product's permission ladder, for the single and the many-at-once " +
+          "actions.",
+      },
+      "importExport.linked.selectForBulkAriaLabel": {
+        description:
+          "Accessible name, read aloud by screen readers, for the tick box on one " +
+          "row of the upstream-changes list. Imperative phrase naming which line " +
+          "the tick box belongs to and what ticking it prepares: accepting several " +
+          "translations unchanged in one go.",
+        placeholders: {
+          cell: "The identifier of the line the tick box belongs to, such as a scripture " +
+            "reference. Do not translate the substituted value.",
+        },
+      },
+      "importExport.linked.skippedRetranslatedBadge": {
+        description:
+          "Badge that appears on a row after an accept attempt was deliberately not " +
+          "carried out, because someone had already retranslated that line in the " +
+          "meantime. Lower-case and telegraphic: the outcome, then the reason.",
+      },
+      "importExport.linked.syncBatchHeading": {
+        description:
+          "Heading of a collapsible group in the upstream-changes list. Lines are " +
+          "grouped by the moment their upstream update arrived, so this names the " +
+          "group by that moment. A short label, not a sentence.",
+        placeholders: {
+          date: "The date and time the group of upstream updates arrived, already " +
+            "formatted for the reader's language.",
+        },
+      },
+      "importExport.linked.syncTokenError": {
+        description:
+          "Reason shown in the red error line at the top of the upstream-changes " +
+          "card when the permission needed to read this project's lines was not " +
+          "granted, so an accept could not be carried out. A lower-case fragment, " +
+          "not a sentence; 'token' here is the short-lived credential the app " +
+          "requests before reading.",
+      },
+      "importExport.linked.tombstonedLine": {
+        description:
+          "Body text of a row in the upstream-changes list, shown in place of a " +
+          "before-and-after comparison when the source line no longer exists. A " +
+          "complete sentence; a second sentence about the kept translation may " +
+          "follow it.",
+      },
+      "importExport.linked.tombstonedTranslationKept": {
+        description:
+          "Sentence following the notice that a line was removed from the source, " +
+          "reassuring the reader that the work done here has not been thrown away. " +
+          "Ends with a colon introducing the quoted text.",
+        placeholders: {
+          translation: "The existing translation of the removed line, shown in italics between " +
+            "quotation marks. Do not translate the substituted value.",
+        },
+      },
+      "importExport.columnMapping.castColumnLabel": {
+        description:
+          "Label of the dropdown on the column-mapping screen where the user says " +
+          "which column names the person or character speaking each row. Field " +
+          "label for a control; the slash offers two words for the same thing, so " +
+          "keep both senses.",
+      },
+      "importExport.columnMapping.columnFallbackName": {
+        description:
+          "Stand-in name for a spreadsheet column that has no heading of its own, " +
+          "used both in the column dropdowns and above the sample data table on the " +
+          "column-mapping screen. The noun for a spreadsheet column plus its " +
+          "position, counting from one.",
+        placeholders: {
+          index: "Position of the column in the sheet, counting from one.",
+        },
+      },
+      "importExport.columnMapping.createModeHint": {
+        description:
+          "Instruction under the column-mapping heading when a spreadsheet is being " +
+          "imported as a new file. Asks the user to say what each column holds, " +
+          "then reassures them that only one choice is compulsory. The quoted " +
+          "phrase must match the translation of the 'Source text' field label on " +
+          "the same screen, since it names that field.",
+      },
+      "importExport.columnMapping.endColumnLabel": {
+        description:
+          "Label of the dropdown on the column-mapping screen where the user says " +
+          "which column holds the time at which each row finishes in the " +
+          "accompanying recording. Field label for a control, paired with the " +
+          "start-time label above it.",
+      },
+      "importExport.columnMapping.firstRowIsHeader": {
+        description:
+          "Label of the tick box on the column-mapping screen that says the " +
+          "spreadsheet's first row holds column names rather than real data, so it " +
+          "should be used to name the columns instead of being imported. Statement " +
+          "in the third person, not an instruction.",
+      },
+      "importExport.columnMapping.ignoreOption": {
+        description:
+          "First entry in every column dropdown on the column-mapping screen, " +
+          "meaning that no column is assigned to this kind of data and nothing will " +
+          "be read for it. A single verb framed by dashes to mark it as a special " +
+          "choice rather than a column name; keep the dashes.",
+      },
+      "importExport.columnMapping.labelColumnLabel": {
+        description:
+          "Label of the dropdown on the column-mapping screen where the user says " +
+          "which column identifies each line, either as a free label or as a formal " +
+          "reference such as a book, chapter and verse. Field label for a control; " +
+          "the slash offers two words for the same thing, so keep both senses.",
+      },
+      "importExport.columnMapping.mapColumns": {
+        description:
+          "Serves two places on the same screen with identical text: the heading of " +
+          "the step where the user says what each spreadsheet column contains, and " +
+          "the primary button in that step's footer which accepts those choices and " +
+          "moves on. Imperative verb plus noun, and it must work as both a step " +
+          "title and a button.",
+      },
+      "importExport.columnMapping.previewRowsHeading": {
+        description:
+          "Small heading above the sample table on the column-mapping screen, which " +
+          "shows a handful of real rows so the user can check their choices against " +
+          "actual content. A noun naming the sample, then a parenthesis saying how " +
+          "many rows are shown and that the heading row is not among them.",
+        placeholders: {
+          count: "Number of sample rows shown, excluding any heading row.",
+        },
+      },
+      "importExport.columnMapping.sourceColumnLabel": {
+        description:
+          "Label of the required dropdown on the column-mapping screen where the " +
+          "user says which column holds the text to be translated. Field label for " +
+          "a control, marked with an asterisk as compulsory. 'Source' here means " +
+          "the original wording the translation is made from.",
+      },
+      "importExport.columnMapping.startColumnLabel": {
+        description:
+          "Label of the dropdown on the column-mapping screen where the user says " +
+          "which column holds the time at which each row begins in the accompanying " +
+          "recording. Field label for a control.",
+      },
+      "importExport.columnMapping.targetColumnLabel": {
+        description:
+          "Label of the dropdown on the column-mapping screen where the user says " +
+          "which column holds the translated text. Field label for a control; " +
+          "compulsory when the spreadsheet is filling in translations for existing " +
+          "lines, optional otherwise. 'Target' here means the language being " +
+          "translated into.",
+      },
+      "importExport.columnMapping.targetModeHint": {
+        description:
+          "Instruction under the column-mapping heading when the spreadsheet is " +
+          "being used to fill in translations for lines that already exist. First " +
+          "sentence names the one required choice. The rest explains the " +
+          "consequence of the optional reference column: name one and rows are " +
+          "paired by that reference, leave it out and rows are paired top to bottom " +
+          "by position.",
+      },
+      "importExport.columnMapping.typeColumnLabel": {
+        description:
+          "Label of the dropdown on the column-mapping screen where the user says " +
+          "which column tells the importer what kind of unit each row is — a " +
+          "heading, a verse, a spoken cue, and so on. Field label for a control.",
+      },
+      "importExport.errors.failedToParseFile": {
+        description:
+          "Last-resort error shown when reading a chosen file threw a failure that " +
+          "carried no message of its own. Appears in red under the file picker on " +
+          "several import panels. Short statement, no closing full stop, and it " +
+          "must stay generic because it covers any unexpected reading failure.",
+      },
+      "importExport.fileTarget.acceptedFormats": {
+        description:
+          "Caption in small grey text under the drag-and-drop area of the panel " +
+          "that fills in the open file's translations, listing the file kinds it " +
+          "accepts. Only the conjunction joining the four format names is " +
+          "translated; the format names themselves stay as they are.",
+      },
+      "importExport.fileTarget.description": {
+        description:
+          "Three short reassuring sentences under the heading of the panel that " +
+          "fills in the open file's translations. They state where the translations " +
+          "come from, promise that the original text is left untouched, and promise " +
+          "a review step before anything is written. 'Target column' is where " +
+          "translations live beside the original text.",
+      },
+      "importExport.fileTarget.dropZoneHint": {
+        description:
+          "Invitation inside the dashed drag-and-drop area on the panel that fills " +
+          "in the open file's translations. Deliberately unfinished: the sentence " +
+          "continues into the 'Choose file' button rendered directly beneath it, so " +
+          "keep the trailing 'or' (or its equivalent) leading into that button.",
+      },
+      "importExport.fileTarget.noVersesInUsfm": {
+        description:
+          "Error shown in red under the drop area when a scripture markup file was " +
+          "read successfully but contained no verses, so there is nothing to fill " +
+          "in. Single short statement of fact.",
+      },
+      "importExport.fileTarget.title": {
+        description:
+          "Heading of the panel that fills in the translations of the file the user " +
+          "currently has open, from an uploaded file. Names the destination file in " +
+          "quotation marks so the user cannot mistake which file will be changed. " +
+          "Imperative phrase; keep the quotation marks around the file name.",
+        placeholders: {
+          fileName: "Display name of the file being filled in — do not translate the " +
+            "substituted value.",
+        },
+      },
+      "importExport.fileTarget.unsupportedFileType": {
+        description:
+          "Error shown in red under the drop area when the chosen file is of a kind " +
+          "this panel cannot read. A short statement followed by an imperative " +
+          "sentence naming the acceptable alternatives. The bracketed file " +
+          "extensions are literal and stay untranslated.",
+      },
+      "importExport.labels.choosePlaceholder": {
+        description:
+          "Placeholder inside the file dropdown on the cast-labelling panel, shown " +
+          "before a file has been picked. Imperative invitation ending in an " +
+          "ellipsis to signal that a choice follows.",
+      },
+      "importExport.labels.couldNotMintToken": {
+        description:
+          "Error shown in red on the cast-labelling panel when the app could not " +
+          "obtain the short-lived permission it needs to read the chosen file's " +
+          "lines, usually because the sign-in has lapsed. Single past-tense " +
+          "statement of failure.",
+      },
+      "importExport.labels.csvTooLarge": {
+        description:
+          "Error shown in red on the cast-labelling panel when the uploaded " +
+          "spreadsheet is bigger than the ceiling the app will read into memory. " +
+          "Single statement naming the limit; the size figure and its unit are " +
+          "literal.",
+      },
+      "importExport.labels.description": {
+        description:
+          "Explanatory sentence under the cast-labelling heading, summarising the " +
+          "three-step round trip: get a prepared spreadsheet listing the references " +
+          "that identify each line, type the character names into it, then upload " +
+          "it again.",
+      },
+      "importExport.labels.downloadTemplate": {
+        description:
+          "Button in the first box of the cast-labelling panel that saves a " +
+          "prepared spreadsheet, pre-filled with one row per line of the chosen " +
+          "file, for the user to type character names into. Imperative verb; the " +
+          "format name stays untranslated.",
+      },
+      "importExport.labels.emptyCsv": {
+        description:
+          "Error shown in red on the cast-labelling panel when the spreadsheet the " +
+          "user uploaded contains no bytes at all, so there is nothing to read. " +
+          "Single short statement of fact.",
+      },
+      "importExport.labels.failedToApply": {
+        description:
+          "Last-resort error shown in red on the cast-labelling panel when writing " +
+          "the character names onto the project's lines failed without a message of " +
+          "its own. Short statement with no closing full stop, since it is rendered " +
+          "as an error line.",
+      },
+      "importExport.labels.failedToLoadCells": {
+        description:
+          "Last-resort error shown in red on the cast-labelling panel when fetching " +
+          "the chosen file's lines failed without any message of its own. Short " +
+          "statement with no closing full stop, since it is rendered as an error " +
+          "line.",
+      },
+      "importExport.labels.importLabelCount": {
+        description:
+          "Primary button in the footer of the cast-labelling panel, which writes " +
+          "the previewed character names onto the project's lines. Imperative verb " +
+          "followed by how many rows will be applied.",
+        placeholders: {
+          count: "Number of character-name rows that will be applied.",
+        },
+      },
+      "importExport.labels.loadingCells": {
+        description:
+          "Temporary grey status line under the file dropdown on the cast-labelling " +
+          "panel while the chosen file's lines are being fetched, before the count " +
+          "of labelable lines can be shown. Present participle ending in an " +
+          "ellipsis.",
+      },
+      "importExport.labels.noRowsFound": {
+        description:
+          "Error shown in red on the cast-labelling panel when the uploaded " +
+          "spreadsheet was readable but held no rows, so there are no character " +
+          "names to apply. Single short statement of fact.",
+      },
+      "importExport.labels.previewCameraHeader": {
+        description:
+          "Third column header of the preview table on the cast-labelling panel. " +
+          "The column shows whether the character is on screen, off screen, or " +
+          "mixed for that line, as read from the uploaded spreadsheet. Single short " +
+          "noun; the column is narrow.",
+      },
+      "importExport.labels.previewLabelCount": {
+        description:
+          "Small heading above the preview table on the cast-labelling panel, " +
+          "counting the character-name rows read out of the uploaded spreadsheet " +
+          "and awaiting confirmation. A count plus noun plus an infinitive phrase " +
+          "meaning 'still to be brought in'.",
+        placeholders: {
+          count: "Number of character-name rows read from the uploaded spreadsheet.",
+        },
+      },
+      "importExport.labels.refCellCount": {
+        description:
+          "Grey status line under the file dropdown on the cast-labelling panel " +
+          "once the chosen file has loaded, saying how many of its lines carry the " +
+          "reference needed to match a template row, and naming the file. A count " +
+          "plus noun phrase, then the file name, as a full sentence.",
+        placeholders: {
+          count: "Number of lines in the chosen file that carry a reference.",
+          fileName: "Display name of the chosen file, or a generic 'this file' fallback when " +
+            "none is selected — do not translate the substituted value when it is a " +
+            "file name.",
+        },
+      },
+      "importExport.labels.step1Heading": {
+        description:
+          "Heading of the first box on the cast-labelling panel, where the user " +
+          "picks which file to label and downloads the prepared spreadsheet for it. " +
+          "Numbered step label; keep the step number first.",
+      },
+      "importExport.labels.step2Heading": {
+        description:
+          "Heading of the second box on the cast-labelling panel, where the user " +
+          "sends back the spreadsheet they have typed character names into. " +
+          "Numbered step label; keep the step number first.",
+      },
+      "importExport.labels.thisFileFallback": {
+        description:
+          "Stand-in for a file name in the cast-labelling panel's status line when " +
+          "no file name is available, giving 'N cells with references in this " +
+          "file.' A short demonstrative noun phrase used mid-sentence, so it must " +
+          "not be capitalised as a title.",
+      },
+      "importExport.labels.title": {
+        description:
+          "Heading of the panel for labelling existing lines with the name of the " +
+          "character who speaks them, by filling in a downloadable template. Noun " +
+          "phrase naming the panel; 'cast' is the set of characters or voices in " +
+          "the project.",
+      },
+      "importExport.paired.applyingTargets": {
+        description:
+          "Reassurance line under the 'Importing…' heading while paired rows are " +
+          "being saved, naming what is happening: the translations from the upload " +
+          "are being written onto the project's existing lines.",
+      },
+      "importExport.paired.description": {
+        description:
+          "Explanatory sentences under the paired-import heading. The first states " +
+          "what the uploaded file must look like: every row holds the original text " +
+          "and its translation. The second explains that rows are paired with the " +
+          "project's existing lines using the standard reference that identifies a " +
+          "passage, such as a book, chapter and verse.",
+      },
+      "importExport.paired.title": {
+        description:
+          "Heading of the import panel for a spreadsheet in which every row carries " +
+          "both the original text and its translation. Short noun phrase naming " +
+          "what is being imported; 'source' is the original text and 'target' is " +
+          "the translation of it.",
+      },
+      "importExport.preview.aiAssistedStructure": {
+        description:
+          "Bold label at the top of a notice on the preview screen, shown when the " +
+          "shape of an unrecognised file had to be worked out automatically rather " +
+          "than read from a known format. Short noun phrase naming what the notice " +
+          "is about.",
+      },
+      "importExport.preview.commitFailed": {
+        description:
+          "Red alert above the buttons on the preview screen when committing the " +
+          "import failed. A short statement followed by the underlying technical " +
+          "reason. Both buttons stay available so the user can try again or back " +
+          "out.",
+        placeholders: {
+          error: "Raw underlying failure message, often English and technical — do not " +
+            "translate the substituted value.",
+        },
+      },
+      "importExport.preview.confidencePercent": {
+        description:
+          "Grey figure inside the automatic-structure notice on the preview screen, " +
+          "saying how sure the automatic analysis is about the shape it proposed. A " +
+          "whole-number percentage followed by the noun for certainty; no verb.",
+        placeholders: {
+          percent: "Whole number from 0 to 100 giving how certain the automatic analysis is.",
+        },
+      },
+      "importExport.preview.confirmImport": {
+        description:
+          "Primary button in the footer of the preview screen that commits the " +
+          "previewed lines into the project and starts the upload. Imperative verb " +
+          "plus noun; it is the point of no return, so it should read as decisive.",
+      },
+      "importExport.preview.headerSummary": {
+        description:
+          "Heading of the screen that shows what an import will produce, before the " +
+          "user commits to it. Frames two already-counted phrases: how many " +
+          "individual translatable lines were found, and how many files they came " +
+          "from. The word before the dash is a noun naming the screen, and the word " +
+          "between the two figures relates them, in the sense of 'spread over'.",
+        placeholders: {
+          cells: "Already-rendered phrase counting the translatable lines found, for " +
+            "example '124 cells' — place it, do not re-count it.",
+          files: "Already-rendered phrase counting the files involved, for example '2 " +
+            "files' — place it, do not re-count it.",
+        },
+      },
+      "importExport.preview.instructions": {
+        description:
+          "Instruction under the preview heading, telling the user to check the " +
+          "listed lines and then press the confirm button. The word standing for " +
+          "the button should match the wording used on the 'Confirm import' button " +
+          "itself so the two read as the same action.",
+      },
+      "importExport.preview.needsCarefulReview": {
+        description:
+          "Red badge inside the automatic-structure notice on the preview screen, " +
+          "shown when the automatic analysis was not very sure of itself and the " +
+          "user should check the result closely before importing. Short warning " +
+          "phrase in the third person.",
+      },
+      "importExport.preview.recipeNote": {
+        description:
+          "Final line of the automatic-structure notice on the preview screen. The " +
+          "word before the colon labels the named set of rules chosen for reading " +
+          "the file. The sentence after it promises that the uploaded file is " +
+          "stored untouched, but warns that exporting the translation back into the " +
+          "same shape has not been proven to work yet.",
+        placeholders: {
+          name: "Name of the chosen set of reading rules, as generated by the analysis — " +
+            "do not translate the substituted value.",
+        },
+      },
+      "importExport.preview.reviewBeforeImporting": {
+        description:
+          "Bold label at the top of a notice on the preview screen that lists " +
+          "warnings raised while the file was read, next to a badge counting them. " +
+          "Short imperative instruction telling the user to read the list before " +
+          "committing.",
+      },
+      "importExport.preview.structuralContentAriaLabel": {
+        description:
+          "Screen-reader name for the placeholder dash shown instead of a reference " +
+          "on preview rows that hold structure rather than translatable prose, such " +
+          "as a heading or a layout marker. Short noun phrase; sighted users see " +
+          "only the dash.",
+      },
+      "importExport.review.conflictCount": {
+        description:
+          "Amber-coloured figure in the summary strip under the 'Review matches' " +
+          "heading: how many of the pairings would overwrite a translation that " +
+          "already exists. A count plus the noun for a clash; no verb, since it " +
+          "sits beside sibling fragments.",
+        placeholders: {
+          count: "Number of pairings that would overwrite existing translated text.",
+        },
+      },
+      "importExport.review.deselectAll": {
+        description:
+          "Small text button under the match-review list that clears every tick at " +
+          "once. It swaps places with the 'Select all' button depending on whether " +
+          "everything is already ticked, so the two should read as a matched pair " +
+          "of opposite imperative commands.",
+      },
+      "importExport.review.importCellCount": {
+        description:
+          "Primary button in the footer of the match-review step, which saves the " +
+          "ticked translations into the project. Imperative verb followed by how " +
+          "many lines will be written, so the user can confirm the scale before " +
+          "committing.",
+        placeholders: {
+          count: "Number of ticked lines that will be written into the project.",
+        },
+      },
+      "importExport.review.matchedCount": {
+        description:
+          "First figure in the summary strip under the 'Review matches' heading: " +
+          "how many incoming rows were successfully paired with an existing line. " +
+          "Terse count-plus-participle fragment sitting beside sibling fragments, " +
+          "so it must stay short.",
+        placeholders: {
+          count: "Number of incoming rows that were paired with an existing line.",
+        },
+      },
+      "importExport.review.orderMatchWarning": {
+        description:
+          "Amber warning above the match-review list, shown when the user did not " +
+          "nominate a column holding the reference that identifies each line. It " +
+          "explains that rows were therefore paired top to bottom by position, " +
+          "which is easy to get wrong, and asks the user to eyeball the original " +
+          "text shown beside each row before committing.",
+      },
+      "importExport.review.replacesExisting": {
+        description:
+          "Amber warning line under one row of the match-review list, shown only " +
+          "when accepting that row would overwrite a translation that is already " +
+          "there. The word before the colon is a verb in the third person " +
+          "describing what the incoming text would do; the existing translation " +
+          "follows and is truncated if long.",
+        placeholders: {
+          text: "The translation currently stored for this line, shown so the user can " +
+            "see what would be lost — do not translate the substituted value.",
+        },
+      },
+      "importExport.review.title": {
+        description:
+          "Heading of the step where the user checks which incoming rows were " +
+          "paired with which existing lines of the project before any translation " +
+          "is saved. Imperative instruction acting as a step title; 'matches' are " +
+          "the pairings the system proposes.",
+      },
+      "importExport.review.uncoveredCellCount": {
+        description:
+          "Figure in the summary strip under the 'Review matches' heading when " +
+          "filling the translations of the file the user currently has open: how " +
+          "many lines of that file got no translation from the uploaded file. Count " +
+          "plus noun phrase plus a past participle meaning 'left without a match'.",
+        placeholders: {
+          count: "Number of lines in the open file the upload did not supply a translation " +
+            "for.",
+        },
+      },
+      "importExport.review.uncoveredSourceCellCount": {
+        description:
+          "Figure in the summary strip under the 'Review matches' heading when " +
+          "importing paired original-and-translation rows: how many lines of " +
+          "original text in the project got no translation from the uploaded file. " +
+          "Count plus noun phrase plus a past participle meaning 'left without a " +
+          "match'.",
+        placeholders: {
+          count: "Number of existing original-text lines the upload did not supply a " +
+            "translation for.",
+        },
+      },
+      "importExport.review.unmatchedRowCount": {
+        description:
+          "Figure in the summary strip under the 'Review matches' heading: how many " +
+          "rows of the uploaded file could not be paired with anything in the " +
+          "project and will therefore be ignored. Count plus noun phrase, no verb.",
+        placeholders: {
+          count: "Number of uploaded rows that were not paired with anything.",
+        },
+      },
+      "importExport.spreadsheet.acceptedFormats": {
+        description:
+          "Caption in small grey text under the drag-and-drop area, listing the " +
+          "file kinds this importer accepts. Only the conjunction joining the three " +
+          "format names is translated; the format names themselves are file-format " +
+          "identifiers that stay as they are.",
+      },
+      "importExport.spreadsheet.description": {
+        description:
+          "Explanatory sentence under the spreadsheet import heading. Tells the " +
+          "user which file kinds are accepted and promises that a column-mapping " +
+          "step comes before anything is imported. The parenthesised list names the " +
+          "kinds of data a column can hold: the original text, its translation, the " +
+          "reference that identifies a line, the speaking character, and the " +
+          "start/end times.",
+      },
+      "importExport.spreadsheet.dropZoneHint": {
+        description:
+          "Invitation inside the dashed drag-and-drop area on the spreadsheet and " +
+          "paired-translation import panels. Deliberately unfinished: the sentence " +
+          "continues into the 'Choose file' button rendered directly beneath it, so " +
+          "keep the trailing 'or' (or its equivalent) leading into that button.",
+      },
+      "importExport.spreadsheet.legacyXlsUnsupported": {
+        description:
+          "Error shown in red under the drop area when the chosen file is an " +
+          "old-style Excel workbook. Two sentences: a statement that the old " +
+          "workbook format cannot be read, then the concrete remedy of re-saving in " +
+          "a newer format. The file extensions are literal and stay untranslated.",
+      },
+      "importExport.spreadsheet.noDataRows": {
+        description:
+          "Error shown after the user confirms the column mapping on the general " +
+          "spreadsheet importer but every row turned out to be empty in the column " +
+          "they nominated as the original text. First sentence states the outcome, " +
+          "second suggests what to check.",
+      },
+      "importExport.spreadsheet.noSheetsFound": {
+        description:
+          "Error shown in red under the drop area when an Excel workbook was read " +
+          "successfully but turned out to contain no worksheets at all, so there is " +
+          "nothing to import. Single short statement of fact.",
+      },
+      "importExport.spreadsheet.selectSheetHint": {
+        description:
+          "Sentence under the 'Select a sheet' heading, shown when importing paired " +
+          "source-and-translation rows or filling an existing file's translations. " +
+          "Explains why the extra step exists and asks the user to choose exactly " +
+          "one worksheet.",
+      },
+      "importExport.spreadsheet.selectSheetTitle": {
+        description:
+          "Heading of the step that appears when an uploaded Excel workbook holds " +
+          "more than one worksheet and the user must pick which one to import. " +
+          "Imperative instruction acting as a step title.",
+      },
+      "importExport.spreadsheet.selectSheetUnitHint": {
+        description:
+          "Sentence under the 'Select a sheet' heading on the general spreadsheet " +
+          "importer. Unlike the paired-import wording it explains the rule rather " +
+          "than giving an instruction: one worksheet becomes one imported file, so " +
+          "only one can be chosen at a time.",
+      },
+      "importExport.spreadsheet.sendingCells": {
+        description:
+          "Reassurance line under the 'Uploading…' heading while an imported " +
+          "spreadsheet is being saved, naming what is happening. 'Cells' are the " +
+          "individual translatable lines the spreadsheet was split into.",
+      },
+      "importExport.spreadsheet.sheetRowCount": {
+        description:
+          "Second line of a selectable worksheet card on the 'Select a sheet' step, " +
+          "telling the user how big that worksheet is. A bare count plus the noun " +
+          "for a spreadsheet row, with no verb.",
+        placeholders: {
+          count: "Number of rows the worksheet contains.",
+        },
+      },
+      "importExport.spreadsheet.sourceUnavailable": {
+        description:
+          "Failure message shown when the import is committed but the browser can " +
+          "no longer read the file the user picked earlier, for instance because it " +
+          "was moved or renamed in the meantime. Statement of fact with no closing " +
+          "full stop, since it is rendered as an error line.",
+      },
+      "importExport.spreadsheet.title": {
+        description:
+          "Heading at the top of the spreadsheet import panel, shown when the user " +
+          "has chosen to import a comma- or tab-separated file or an Excel " +
+          "workbook. Short noun phrase naming the panel, not an instruction.",
       },
     },
   },

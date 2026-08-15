@@ -63,6 +63,21 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "labels the switcher that changes the language of the interface itself. Two " +
     "unrelated referents that happen to share one English word; conflating them " +
     "would mislabel one of the two controls.",
+  "importExport.dcs.languageFilterLabel":
+    "Labels the form field naming the CONTENT language being searched for in an " +
+    "external resource catalog — the language of the Bible resource, a piece of " +
+    "data. language.label is the accessible name of the control that changes the " +
+    "language of the interface itself. This is the same content-vs-interface split " +
+    "already recorded above for audio.newVoice.mmsLanguageLabel, and several " +
+    "target languages also distinguish an editable filter field's label from " +
+    "interface chrome and from a table column heading.",
+  "importExport.dcs.ownerFilterLabel":
+    "Here Owner means the organization ACCOUNT that publishes a resource on an " +
+    "external repository host — a namespace, not a person's standing in this " +
+    "product. common.role.owner is the top rung of the permission ladder, whoever " +
+    "has full control of a project. Unrelated referents that English spells the " +
+    "same; languages that borrow a repository-hosting term for one and a " +
+    "governance term for the other need both.",
   "editor.state.empty":
     "A cell-status word read mid-phrase inside the editor's accessible name ('… " +
     "empty'), alongside 'draft' and 'validated'. audio.recordingModal.emptySource " +
@@ -73,6 +88,13 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "audio.recordingModal.recordingStatus is the present participle shown beside a " +
     "pulsing dot while the microphone is live. Noun vs progressive verb: English " +
     "spells both 'Recording', almost nothing else does.",
+  "auth.signup.usernameLabel":
+    "Labels the account identifier being chosen at sign-up and sent to the identity " +
+    "server — the name this person will type to sign in from then on. " +
+    "projectSettings.user.usernameLabel labels the local author name recorded " +
+    "against edits in a project's history, a per-device display preference that " +
+    "never authenticates anything. Languages that distinguish a chosen login " +
+    "handle from a displayed personal name need the two separately.",
   "auth.login.submitDefault":
     "The submit button of the sign-in form. auth.login.title is the heading naming " +
     "the whole form. Languages that nominalize headings ('Anmeldung') while keeping " +
@@ -91,6 +113,18 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "resuming it automatically. autopilot.status.paused is a person deliberately " +
     "pausing an autopilot run. Automatic vs deliberate pausing are different " +
     "concepts a translator would render with different verbs in most languages.",
+  "autopilot.proposal.applying":
+    "Transient label of the Apply button on a staged agent proposal while the " +
+    "approved events are written to the outbox. search.replace.applying is the " +
+    "find-and-replace panel rewriting matched cells, and nav.fileMenu.applying is " +
+    "diarization results being written back. Three unrelated async operations that " +
+    "share one English gerund; nothing ties their wording together.",
+  "autopilot.proposal.applyFailed":
+    "Error label when writing an approved agent proposal's events failed, so nothing " +
+    "was saved and the user can retry. importExport.ebible.applyFailed is an eBible " +
+    "corpus import failing to apply a downloaded delta. Approving someone else's " +
+    "staged edits and importing a corpus are different acts, and the object of " +
+    "'apply' differs, which several target languages spell differently.",
   "nav.fileMenu.applying":
     "Transient state of the file-options-menu 'Diarize' item while its speaker-" +
     "detection results are being written back to cells. search.replace.applying " +
@@ -502,4 +536,11 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "run wrote into. One describes an input's language, the other identifies a " +
     "destination track; languages that mark that difference with case or an " +
     "adposition cannot share a single rendering.",
+  "importExport.columnMapping.sourceColumnLabel":
+    "Labels the SOURCE-TEXT column picker in the spreadsheet column-mapping " +
+    "step during import — a form-field label naming which uploaded column " +
+    "holds source text. editor.source.textAria is the accessible name of the " +
+    "source-column text region inside the cell editor. A mapping-field label " +
+    "and an accessibility name for an existing pane serve different purposes " +
+    "and different audiences (sighted vs. screen-reader users).",
 }

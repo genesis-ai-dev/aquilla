@@ -17,6 +17,7 @@
 // settings, and is invalidated immediately on save.
 
 import type { Env } from "../types"
+import type { FieldPlanSettings } from "./billing/plans"
 
 /**
  * Champion/challenger experiment on the platform-default chat model. While
@@ -51,6 +52,8 @@ export interface PlatformSettings {
   aiBudgetEnforce?: boolean
   /** Champion/challenger A/B experiment on the default chat model. */
   abTest?: AbTestConfig
+  /** Field Plan catalog overrides (amounts + Stripe price ids). */
+  fieldPlan?: FieldPlanSettings
 }
 
 export interface PlatformSettingsRecord {
@@ -104,6 +107,20 @@ function parseSettings(raw: string): PlatformSettings {
         trafficPct: Math.min(100, Math.max(0, a.trafficPct)),
       }
     }
+  }
+  const fp = obj.fieldPlan
+  if (fp && typeof fp === "object" && !Array.isArray(fp)) {
+    const f = fp as Record<string, unknown>
+    const fieldPlan: FieldPlanSettings = {}
+    if (typeof f.priceCents === "number") fieldPlan.priceCents = f.priceCents
+    if (typeof f.includedWords === "number") fieldPlan.includedWords = f.includedWords
+    if (typeof f.addonWords === "number") fieldPlan.addonWords = f.addonWords
+    if (typeof f.addonPriceCents === "number") fieldPlan.addonPriceCents = f.addonPriceCents
+    if (typeof f.talkToUsWordsPerYear === "number") fieldPlan.talkToUsWordsPerYear = f.talkToUsWordsPerYear
+    if (typeof f.intervalDays === "number") fieldPlan.intervalDays = f.intervalDays
+    if (typeof f.stripePriceField === "string") fieldPlan.stripePriceField = f.stripePriceField
+    if (typeof f.stripePriceAddon === "string") fieldPlan.stripePriceAddon = f.stripePriceAddon
+    if (Object.keys(fieldPlan).length > 0) out.fieldPlan = fieldPlan
   }
   return out
 }

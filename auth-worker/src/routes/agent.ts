@@ -17,6 +17,8 @@ import { authMiddleware } from "../middleware/auth"
 import { runAiGuard } from "../lib/ai-budget"
 import { getPlatformSettingsCached, type PlatformSettings } from "../lib/platform-settings"
 import { creditGuard, creditsFor, recordCredit, resolveCreditConfig } from "../lib/credits"
+import { countWords } from "../lib/billing/plans"
+import { recordWords, wordCapBody, wordGuard } from "../lib/billing/words"
 import { makeCostMeter } from "../lib/cost-meter"
 import { resolveProjectRole } from "../services/project-permissions"
 import { AliasMap, compressRows } from "../lib/agent/compress"
@@ -489,6 +491,10 @@ agent.post("/run", authMiddleware, zValidator("json", runRequestSchema), async (
       { error: "credit_cap_exceeded", reason: creditCheck.reason, message: "Agent credit cap reached. Contact your org admin." },
       429,
     )
+  }
+  const agentWordCheck = await wordGuard(c.env.AQUILLA_PG, orgId)
+  if (!agentWordCheck.ok) {
+    return c.json(wordCapBody(agentWordCheck.reason), 429)
   }
 
   // Session-native conversation (v2): load the stored convo — including tool
@@ -1039,6 +1045,13 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
   // Record agent cost in org credit ledger (graceful-degrade — never throws).
   // costCents is the sum of OpenRouter usage.cost×100 across all iterations.
   await recordCredit(env.AQUILLA_PG, orgId, user.id, "agent", costCents, 1)
+  await recordWords(
+    env.AQUILLA_PG,
+    orgId,
+    user.id,
+    "agent",
+    countWords(body.messages.map((m) => m.content).join(" ")),
+  )
 }
 
 interface ToolCallEnv {

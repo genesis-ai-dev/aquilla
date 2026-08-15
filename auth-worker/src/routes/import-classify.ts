@@ -13,6 +13,8 @@ import type { Env, Variables } from "../types"
 import { authMiddleware } from "../middleware/auth"
 import { runAiGuard } from "../lib/ai-budget"
 import { creditGuard, recordCredit } from "../lib/credits"
+import { countWords } from "../lib/billing/plans"
+import { recordWords, wordCapBody, wordGuard } from "../lib/billing/words"
 import { getPlatformSettingsCached } from "../lib/platform-settings"
 import { openRouterExtras } from "../lib/llm-vendor"
 import { resolveProjectRole } from "../services/project-permissions"
@@ -142,6 +144,8 @@ imports.post(
         message: "LLM credit cap reached. Contact your org admin.",
       }, 429)
     }
+    const words = await wordGuard(c.env.AQUILLA_PG, orgId)
+    if (!words.ok) return c.json(wordCapBody(words.reason), 429)
 
     try {
       const upstream = await fetch(resolveOpenRouterUrl(c.env), {
@@ -193,6 +197,7 @@ imports.post(
         ? data.usage.cost * 100
         : 1
       await recordCredit(c.env.AQUILLA_PG, orgId, user.id, "llm", cost, 1)
+      await recordWords(c.env.AQUILLA_PG, orgId, user.id, "llm", countWords(input.sample))
       return c.json({ classification: classification.data })
     } catch (error) {
       console.error("Import classification failed:", error)

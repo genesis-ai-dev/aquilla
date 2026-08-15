@@ -1,0 +1,40 @@
+import { defineNamespace } from "./types"
+
+export const billing = defineNamespace({
+  keys: {
+    "billing.usage.aiWords": "AI words",
+    "billing.usage.open": "Billing",
+    "billing.usage.words": "words",
+    "billing.loading": "Loading billing…",
+    "billing.maintainersOnly": "Billing is visible to organization maintainers.",
+    "billing.plan.group": "Plan",
+    "billing.plan.current": "Current plan",
+    "billing.plan.field": "Field Plan",
+    "billing.plan.manage": "Manage",
+    "billing.plan.manageHelp": "Update the card, invoices, or cancel in Stripe.",
+    "billing.usage.period": "AI words this period",
+    "billing.usage.label": "Usage",
+    "billing.usage.unpaidHelp": "Unpaid orgs are not capped. Subscribe to get a 100,000-word allowance every four weeks.",
+    "billing.addon.prompt": "Need more words?",
+    "billing.contact.prompt": "Talk to us",
+    "billing.contact.email": "Email support",
+    "billing.settings.title": "Organization settings",
+    "billing.settings.description": "Manage this organization. Personal preferences moved to",
+    "billing.settings.preferences": "Preferences",
+    "billing.settings.organization": "Organization",
+    "billing.settings.identity": "Identity",
+    "billing.settings.security": "Security",
+    "billing.settings.billing": "Billing & usage",
+    "billing.settings.providers": "AI provider keys",
+    "billing.settings.peopleProjects": "People & Projects",
+    "billing.settings.members": "Members",
+    "billing.settings.teams": "Teams",
+    "billing.settings.archived": "Archived projects",
+  },
+  context: {
+    _context: {
+      description: "Organization billing, word usage, plan controls, and the organization-settings navigation that exposes them.",
+    },
+  },
+  surfaces: [],
+})

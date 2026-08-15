@@ -35,6 +35,7 @@ import { projectSettings } from "./projectSettings"
 import { rules } from "./rules"
 import { terminology } from "./terminology"
 import { agentWorkspace } from "./agentWorkspace"
+import { billing } from "./billing"
 
 export const NAMESPACES = [
   common,
@@ -56,4 +57,5 @@ export const NAMESPACES = [
   rules,
   terminology,
   agentWorkspace,
+  billing,
 ] as const

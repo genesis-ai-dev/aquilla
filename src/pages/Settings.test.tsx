@@ -96,6 +96,11 @@ function renderSettings(path = "/orgs/1/settings") {
 }
 
 describe("Org Settings", () => {
+  it("lists Billing & usage on the settings index", async () => {
+    renderSettings("/orgs/1/settings")
+    expect(await screen.findByRole("link", { name: /Billing & usage/i })).toBeDefined()
+  })
+
   it("shows the org name and an owner can rename it on blur", async () => {
     renderSettings("/orgs/1/settings/identity")
     const input = await screen.findByLabelText(/^Organization name$/i)

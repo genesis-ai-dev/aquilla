@@ -15,6 +15,7 @@ import { listMyPendingInvites, type MyPendingInvite } from "@/lib/sync/invites"
 import { WorkloadRollup } from "./WorkloadRollup"
 import { UsageRollup } from "./UsageRollup"
 import { CreditsPanel } from "./CreditsPanel"
+import { BillingUsagePanel } from "./BillingUsagePanel"
 import {
   SectionVisibilityBadge,
   SectionVisibilityGate,
@@ -368,6 +369,23 @@ export function OrgOverview() {
                           description="Who can see each teammate's usage on this org's overview."
                         />
                       }
+                    />
+                  </div>
+                </SectionVisibilityGate>
+              )}
+              {jwt && activeOrgId != null && (
+                <SectionVisibilityGate
+                  minRole={ROLE.MAINTAINER}
+                  viewerRoleLevel={activeOrg?.role?.level ?? null}
+                >
+                  <div
+                    className={cn("relative rounded-lg", sectionTintClass(ROLE.MAINTAINER))}
+                    data-testid="section-billing"
+                  >
+                    <BillingUsagePanel
+                      jwt={jwt}
+                      orgId={activeOrgId}
+                      orgRoleLevel={activeOrg?.role.level ?? 0}
                     />
                   </div>
                 </SectionVisibilityGate>

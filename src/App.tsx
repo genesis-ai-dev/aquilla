@@ -67,6 +67,9 @@ const OrgSettingsIdentity = lazy(() =>
 const OrgSettingsSecurity = lazy(() =>
   import("@/pages/Settings").then((m) => ({ default: m.OrgSettingsSecurity })),
 )
+const OrgSettingsBilling = lazy(() =>
+  import("@/pages/Settings").then((m) => ({ default: m.OrgSettingsBilling })),
+)
 const OrgSettingsProviders = lazy(() =>
   import("@/pages/Settings").then((m) => ({ default: m.OrgSettingsProviders })),
 )
@@ -264,6 +267,7 @@ function AppRoutes() {
           <Route path="settings" element={<OrgLazyRoute><Settings /></OrgLazyRoute>} />
           <Route path="settings/identity" element={<OrgLazyRoute><OrgSettingsIdentity /></OrgLazyRoute>} />
           <Route path="settings/security" element={<OrgLazyRoute><OrgSettingsSecurity /></OrgLazyRoute>} />
+          <Route path="settings/billing" element={<OrgLazyRoute><OrgSettingsBilling /></OrgLazyRoute>} />
           <Route path="settings/export" element={<Navigate to="../security" replace relative="path" />} />
           <Route path="settings/roster" element={<Navigate to="../security" replace relative="path" />} />
           <Route path="settings/assignment" element={<Navigate to="../security" replace relative="path" />} />

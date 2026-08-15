@@ -66,6 +66,11 @@ export const env = {
   ELEVATION_TTL_MINUTES: undefined as string | undefined,
   ELEVATION_SESSION_HOURS: undefined as string | undefined,
   WRANGLER_LOCAL: undefined as string | undefined,
+  STRIPE_SECRET_KEY: undefined as string | undefined,
+  STRIPE_WEBHOOK_SECRET: undefined as string | undefined,
+  STRIPE_PUBLISHABLE_KEY: undefined as string | undefined,
+  STRIPE_PRICE_FIELD: "price_test_field",
+  STRIPE_PRICE_ADDON: "price_test_addon",
 }
 
 /** Load the canonical Postgres schema into the test PGlite (call once, beforeAll). */

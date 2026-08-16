@@ -140,6 +140,7 @@ export const agent = defineNamespace({
     "agent.memory.staleNotice": "Stale — brief changed since this was proposed",
     "agent.memory.requiresLeadNotice": "Requires project lead or higher to review",
     "agent.memory.editBriefTitle": "Edit project brief",
+    "agent.memory.editMemoryTitle": "Edit {path}",
     "agent.memory.briefContentAriaLabel": "Brief content",
     "agent.memory.reloadLatestBrief": "Reload latest brief",
     "agent.memory.overwriteTitle": "Overwrite the project brief?",
@@ -417,6 +418,16 @@ export const agent = defineNamespace({
       },
       "agent.memory.contentAriaLabel": {
         description: "Accessible name for the textarea editing an approved memory's raw content.",
+      },
+      "agent.memory.editMemoryTitle": {
+        description:
+          "Title of the dialog for editing one approved agent memory, naming the memory " +
+          "by its file path. The English was previously glued together in JSX as the word " +
+          "'Edit' followed by the path expression, which puts the verb before the object " +
+          "in every locale; it is one string with a placeholder so the path can move.",
+        placeholders: {
+          path: "File path of the memory being edited, e.g. 'glossary/terms.md'. A literal path — never translate the substituted value.",
+        },
       },
       "agent.memory.briefContentAriaLabel": {
         description: "Accessible name for the textarea editing the project brief's raw content.",

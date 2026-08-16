@@ -131,6 +131,7 @@ export function PersonalProviderSection() {
                           k="settings.personalProvider.trailingPathHint"
                           values={{
                             v1Path: <code className="font-mono">/v1</code>,
+                            // i18n-exempt literal API path, shown verbatim as syntax
                             chatCompletionsPath: <code className="font-mono">/chat/completions</code>,
                           }}
                         />
@@ -182,6 +183,7 @@ export function PersonalProviderSection() {
                       <RichMessage
                         k="settings.personalProvider.authHeaderHint"
                         values={{
+                          // i18n-exempt literal HTTP header, shown verbatim as syntax
                           authHeader: <code className="font-mono">Authorization: Bearer …</code>,
                         }}
                       />

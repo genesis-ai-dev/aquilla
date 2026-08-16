@@ -151,7 +151,7 @@ function EditMemoryDialog({
     >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Edit {memory.path}</DialogTitle>
+          <DialogTitle>{t("agent.memory.editMemoryTitle", { path: memory.path })}</DialogTitle>
         </DialogHeader>
         <DialogBody className="space-y-2">
           <Textarea

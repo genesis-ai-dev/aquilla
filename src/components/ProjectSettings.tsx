@@ -1813,9 +1813,13 @@ export function ProjectSettings() {
             <SettingsGroup
               label={
                 <span className="inline-flex w-full items-center justify-between gap-4 pr-4">
-                  <span>Advanced LLM settings</span>
+                  <span>{t("projectSettings.advancedLlm.summary")}</span>
                   <span className="text-xs font-normal text-muted-foreground">
-                    {provider === "frontier" ? "Frontier (default)" : `Custom: ${endpoint || "not set"}`}
+                    {provider === "frontier"
+                      ? t("projectSettings.advancedLlm.frontierDefaultStatus")
+                      : t("projectSettings.advancedLlm.customEndpointStatus", {
+                          endpoint: endpoint || t("projectSettings.advancedLlm.notSet"),
+                        })}
                   </span>
                 </span>
               }

@@ -148,7 +148,10 @@ export const settings = defineNamespace({
     "settings.monday.connectPrompt":
       "Connect a Monday.com account to let projects in this organization link " +
       "boards and push translation progress automatically.",
-    "settings.monday.connectButton": "Connect Monday.com",
+    // "Connect Monday.com" button → projectSettings.monday.connectButton. Both
+    // this page and the project setup wizard start the SAME org-level OAuth
+    // connection (the wizard passes the same orgId), so this is one action with
+    // one label, not two that happen to share wording.
     "settings.monday.connectRestrictedNotice": "Ask an org maintainer or owner to connect Monday.com.",
     "settings.monday.awaitingOAuthNotice":
       "Waiting for the Monday.com tab… this page updates automatically once the connection completes.",

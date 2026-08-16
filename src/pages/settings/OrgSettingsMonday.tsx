@@ -275,7 +275,7 @@ export function OrgSettingsMonday() {
               {canManage ? (
                 <Button onClick={() => setAdminStepOpen(true)} disabled={busy}>
                   <ExternalLink data-icon="inline-start" />
-                  {t("settings.monday.connectButton")}
+                  {t("projectSettings.monday.connectButton")}
                 </Button>
               ) : (
                 <p className="text-xs text-muted-foreground">

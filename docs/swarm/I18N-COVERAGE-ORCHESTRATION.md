@@ -37,15 +37,15 @@ Closing 1–3 is WS-SCAN's job; it is the "scan the entire app" half of the requ
 - [x] WS-SCAN has produced `docs/swarm/I18N-COVERAGE-SCAN.md`: a complete inventory of raw
       UI-facing strings across `src/**` including all four blind-spot classes, each row
       classified `key-it` / `exempt-<reason>` / `already-keyed`
-- [ ] The 339 `key-it` findings from that scan are keyed (wave 2 — blocked on wave 1, whose
-      agents own the consumer components of the `src/lib/**` call sites)
-- [ ] The 1,261 suppressed `.tsx` strings are keyed or explicitly exempted with a reason
-- [ ] `eslint-suppressions.json` is pruned; `npx eslint src` reports 0 errors and a strictly
-      smaller suppression count than the 1,261 baseline
-- [ ] `pnpm test src/lib/i18n` green with ≥143 tests (context coverage + no-duplicates enforced)
-- [ ] `pnpm i18n:check` reports no context issues
-- [ ] `npm run build` passes (`tsc -b && vite build` — **not** `tsc --noEmit`)
-- [ ] Directly affected Vitest/RTL suites green for every touched component
+- [ ] The 337 `key-it` findings from that scan are keyed (wave 2, in flight)
+- [x] The 1,261 suppressed `.tsx` strings are keyed or explicitly exempted with a reason
+- [x] `eslint-suppressions.json` is pruned; `npx eslint src` reports **0 errors, 0 active, 0
+      suppressed** — the file is now `{}` (baseline was 1,261 live / 1,608 recorded)
+- [x] `pnpm test src/lib/i18n` green with ≥143 tests (context coverage + no-duplicates enforced)
+- [x] `pnpm i18n:check` reports no context issues — 4,141 keys covered
+- [x] `npm run build` passes (`tsc -b && vite build` — **not** `tsc --noEmit`)
+- [x] Directly affected Vitest/RTL suites green — and the **full root suite**: 804 files /
+      7,500 tests, exit 0
 - [ ] Every locale catalogue at 100% of base keys, or the shortfall itemized with a reason
 - [ ] Translation provenance recorded — no key is silently machine-translated without saying so
 - [ ] Every gap has a trace in `docs/swarm/I18N-COVERAGE-TRACES.md`
@@ -88,7 +88,7 @@ Closing 1–3 is WS-SCAN's job; it is the "scan the entire app" half of the requ
 | WS-B | `projectSettings` | 243 | 9 | **merged** |
 | WS-F | `workspace` (new) | 246 | 48 | **merged** |
 | WS-D | `agent` (new) | 190 | 23 | **merged** |
-| WS-C | `settings` (new) | 137 | 14 | dispatched |
+| WS-C | `settings` (new) | 137 | 14 | **merged** |
 | WS-E | `rules` + `terminology` | 117 | 7 | **merged** |
 | WS-T-{th,my,mfa,ar} | *(none — emits JSON)* | full catalogue | — | wave 3 |
 

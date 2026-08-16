@@ -84,7 +84,7 @@ export function RulesSettingsSection({ projectId }: { projectId: string }) {
   }, [cells, enabledRules])
 
   if (loading || !project) {
-    return <LoadingPanel label={t("projectSettings.rules.loadingLabel")} />
+    return <LoadingPanel label={t("rules.loadingLabel")} />
   }
 
   return (

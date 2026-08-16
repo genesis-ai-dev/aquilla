@@ -546,7 +546,6 @@ export const projectSettings = defineNamespace({
     "projectSettings.gitSync.minutesAbbrev": "min",
 
     // ── RulesSection.tsx ──
-    "projectSettings.rules.loadingLabel": "Loading rules",
 
     // ── LocalModelsSection.tsx (device-model download rows) ──
     "projectSettings.localModels.downloadedBadge": "Downloaded",

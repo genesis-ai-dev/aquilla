@@ -603,4 +603,43 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "features that happen to share the generic English verb — the object " +
     "being applied differs in each, and several target languages would " +
     "translate the verb differently depending on that object.",
+  "terminology.libraryStats.enforcedLabel":
+    "Stat-tile HEADING above a percentage figure on the Terminology page's " +
+    "summary panel — a title-case label naming what the number below it means. " +
+    "terminology.termDetail.verdictEnforced is a lowercase inline VERDICT word " +
+    "describing a single occurrence's outcome ('enforced' / 'infringed' / 'n/a') " +
+    "in a table cell. A panel-heading noun and an inline verdict adjective are " +
+    "different grammatical roles that many languages inflect or phrase " +
+    "differently depending on which one they are.",
+  "terminology.libraryStats.infringedLabel":
+    "Stat-tile heading counterpart to terminology.libraryStats.enforcedLabel, " +
+    "for the infringed-percentage tile. Distinct from " +
+    "terminology.termDetail.verdictInfringed (lowercase inline verdict word) for " +
+    "the same heading-vs-verdict reason documented on enforcedLabel above.",
+  "terminology.conceptDialog.renderingPlaceholder":
+    "Inline placeholder hint shown INSIDE an empty rendering-text input in the " +
+    "add/edit concept dialog's renderings list — a terse, lowercase instructional " +
+    "hint per normal placeholder convention. terminology.editor.renderingLabel is " +
+    "a visible FIELD LABEL heading (title case) above a single-rendering input " +
+    "elsewhere in GlossaryEditor. A heading noun and an inline instructional hint " +
+    "are different grammatical registers that several languages phrase " +
+    "differently (e.g. an imperative or truncated hint vs. a standalone noun).",
+  "terminology.common.statusLabel":
+    "Field/column label for a TERM's review status (draft/active/deprecated) in " +
+    "the Terminology page's own add/edit-concept dialog and concepts table. " +
+    "org.orgHome.projectsPanel.statusLabel is the column header for a PROJECT's " +
+    "own status in the org-home projects table — an unrelated entity with its own " +
+    "status vocabulary. Both happen to be the single English word 'Status', but " +
+    "many languages lexicalize 'a term's review state' and 'a project's state' " +
+    "differently, or decline the noun differently depending on the thing it " +
+    "describes.",
+  "rules.createDialog.descriptionLabel":
+    "Visible field label above the free-text description input in the standalone " +
+    "rule-creation dialog — a sighted user reads it beside the input. " +
+    "nav.report.descriptionFieldLabel is a visually-hidden (screen-reader-only) " +
+    "label for a bug-report textarea that shows a placeholder instead of a visible " +
+    "label. A visible form label and an sr-only accessible name serve different " +
+    "audiences and often take different phrasing (e.g. a visible label can be " +
+    "terser since layout already implies context; an sr-only label must stand " +
+    "alone).",
 }

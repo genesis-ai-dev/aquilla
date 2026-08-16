@@ -62,8 +62,13 @@ describe("raiseDecision", () => {
     await expect(seed({ reason: multiByte })).rejects.toThrow(/reason/i)
   })
 
-  // WHY: parseJson's reparse fallback makes a double-encoded column round-trip
-  // correctly in JS, so only a SQL-level assertion can catch the corruption.
+  // WHY: documents the intended stored shape — a real jsonb array, not a
+  // double-encoded string. It does NOT regression-guard that under this
+  // harness: PGlite's ?::jsonb binding doesn't reproduce postgres.js's
+  // client-side double-serialization, so a pre-stringified value would
+  // still parse correctly here and this test would still pass. The actual
+  // guarantee comes from binding the plain array/object directly, per the
+  // convention documented at contextual-runs.ts:718-721.
   it("stores cell_ids as a real jsonb array, not a double-encoded string", async () => {
     const d = await seed({ cellIds: ["c1", "c2", "c3"] })
     const row = await db

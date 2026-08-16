@@ -62,7 +62,10 @@ construal, verifiers, and a quorum can make, and Aquilla already has all three.
    than living on a separate screen (§6).
 5. **The agent may research its own knowledge gaps** and propose additions to the knowledge
    base, gated by human approval (§4.3).
-6. **Org URL scanning during onboarding is acceptable** and will be visible and skippable.
+6. **The agent's default is low-judgment, high-friction work.** It acts alone on the
+   laborious and mechanical; it asks only about the genuinely judgment-shaped; and it never
+   surfaces work as a bulk list. See §4.6, which turns this into a hard cap.
+7. **Org URL scanning during onboarding is acceptable** and will be visible and skippable.
    Rationale (user): it surfaces the org's current translation philosophy, security-sensitive
    users will skip it, and the lookup is attributable to us from our own servers. Noted
    against [`OPSEC.md`](../../OPSEC.md) D3, which treats "which language is being worked on
@@ -366,7 +369,45 @@ mandate's `{ kind: "on-approval"; of: "decision" }` trigger, no new mechanism. O
 run proceeds with nobody having touched the card. The second path should be the common one.
 
 **`waiting → parked`** on expiry, so an unanswered decision releases the lease and leaves
-drafts reviewable rather than failing the run. Expiry duration is open (§11).
+drafts reviewable rather than failing the run. **Expiry is one cycle** — 4 weeks (§4.4).
+Deliberately generous, because supersession carries the real load and the clock is only a
+backstop against a question nobody will ever answer. Reusing the cycle avoids inventing a
+third time unit.
+
+### 4.6 Surfacing policy
+
+The standing rule from §2.6, made concrete: **the agent's default is to do the low-judgment,
+high-friction work itself, and to surface the rest intelligently rather than as a list.**
+
+**What it does alone** (no decision raised): segmentation, drafting, redrafting, consistency
+sweeps, lint, and — where `mandate.authority.research` allows — researching a gap and
+proposing a memory. All of it laborious, all of it verifiable, none of it requiring a
+judgment only this organization can make.
+
+**What it asks about:** decisions that set policy rather than apply it — a key term with no
+approved rendering that will recur, a conflict with an existing human decision, an ambiguity
+the register or audience must settle. If the deterministic path can resolve it, it is not a
+decision.
+
+**Three rules that keep it from becoming a queue:**
+
+1. **A hard cap on concurrent open decisions per project.** Over the cap, the supervisor
+   holds the surplus rather than showing it. A held decision is very likely to be superseded
+   (§4.3) before anyone would have reached it, so showing it would have been make-work
+   twice over.
+2. **Rank by blast radius, not recency.** The `anchor.cellIds` and the term's later
+   occurrences already make this computable — "this name appears in six later passages" is
+   the difference between a question worth interrupting for and one worth holding. The
+   `reason` field should carry that number, because it is also what makes the card
+   answerable.
+3. **Prefer research to asking.** When authority allows and the gap is researchable, the
+   supervisor spends budget before it spends the user's attention. Escalation is the
+   expensive path, and the metrics in §4.2 are what stop it becoming the default one.
+
+**The posture this produces:** the ledger's normal content is *what it did*, and a decision
+is a rare, well-argued interruption — not a to-do list with the agent's name on it. A
+supervisor that surfaces ten things so the user can ignore five has already failed, and
+§4.2's dismissal rate is what says so out loud.
 
 ---
 
@@ -445,7 +486,7 @@ Sequence, role-forked per §5:
 2. **Source material** — the honest URL-to-aha for this product is *give me a document you
    want translated*, not *give me your website*. Coded importers where they exist, agent
    importer where they don't.
-3. **Org inference** (visible, skippable, per §2.6) — scan the org's public material for
+3. **Org inference** (visible, skippable, per §2.7) — scan the org's public material for
    translation philosophy, audience, and register; pre-fill **brief proposals**, never
    approved brief content. `proposeBriefUpdate` already exists and `BriefHumanOnlyError`
    already guarantees a human owns the brief.
@@ -537,9 +578,10 @@ excludes worker packages.
 
 ## 11. Open questions
 
-1. **How long until an unanswered decision expires?** With supersession (§4.3) carrying most
-   of the load, the clock is a backstop rather than the main mechanism, so the duration can
-   be generous. Still a product call. How it is counted is settled (§4.2).
+1. **What is the concurrent-decision cap in §4.6?** The rule is settled; the number is not.
+   It should start low — a supervisor allowed three open questions per project behaves very
+   differently from one allowed thirty — and be raised only if held decisions are routinely
+   waiting rather than being superseded.
 2. **Does the judgment-shaped supersession check earn its cost?** The deterministic sweep is
    free; the model call on free-text ambiguities is not. Ship the deterministic half first
    and measure how many decisions survive it before building the second half.
@@ -560,6 +602,8 @@ excludes worker packages.
   on its own as an expiry count.
 - *Who owns a mandate?* → Project-scoped. An org-level default that projects inherit is
   deferred until a second project needs it.
+- *How long until a decision expires?* → One cycle, 4 weeks (§4.5). Generous on purpose;
+  supersession is the real mechanism and the clock is a backstop.
 - *Should decisions expire only on a clock?* → No. They are primarily **superseded** when
   the underlying gap is filled by other means (§4.3), checked deterministically each wake.
   The clock is a backstop, and `superseded` stays a distinct status from `expired`.

@@ -63,4 +63,20 @@ describe("DecisionCard", () => {
     await userEvent.click(screen.getByRole("button", { name: /not needed/i }))
     expect(actOnContextualDecision).toHaveBeenCalledWith("p1", "d1", "dismiss", {})
   })
+
+  it("shows an error and re-enables the buttons when the submit fails — a silent failure would look like a recorded answer", async () => {
+    const { actOnContextualDecision } = await import("@/lib/contextual/transport")
+    vi.mocked(actOnContextualDecision).mockClear()
+    vi.mocked(actOnContextualDecision).mockRejectedValueOnce(new Error("network error"))
+    const onResolved = vi.fn()
+    render(<DecisionCard decision={decision} projectId="p1" onResolved={onResolved} />)
+
+    await userEvent.type(screen.getByRole("textbox"), "Use 'council'")
+    await userEvent.click(screen.getByRole("button", { name: /answer/i }))
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/couldn.t be saved/i)
+    expect(onResolved).not.toHaveBeenCalled()
+    expect(screen.getByRole("button", { name: /answer/i })).not.toBeDisabled()
+    expect(screen.getByRole("button", { name: /not needed/i })).not.toBeDisabled()
+  })
 })

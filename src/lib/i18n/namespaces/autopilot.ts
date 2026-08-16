@@ -334,6 +334,8 @@ export const autopilot = defineNamespace({
       "Could not refresh detailed activity. Showing the last available run summary.",
     "autopilot.inspector.warning.olderDrafts":
       "Could not load older draft evidence. The draft records already shown are still current.",
+    "autopilot.inspector.warning.decisionsRefresh":
+      "Could not refresh decisions. Showing the last available list.",
     "autopilot.inspector.action.stopping": "Stopping Autopilot…",
     "autopilot.inspector.action.pausing": "Pausing Autopilot…",
     "autopilot.inspector.action.resuming": "Resuming Autopilot…",
@@ -465,6 +467,7 @@ export const autopilot = defineNamespace({
     "autopilot.decisions.answerPlaceholder": "Your decision…",
     "autopilot.decisions.dismiss": "Not needed",
     "autopilot.decisions.assign": "Ask someone else",
+    "autopilot.decisions.actionFailed": "This decision couldn’t be saved. Retry.",
 
     // — Stable evidence/readiness enums (raw unknown values remain evidence) —
     "autopilot.evidence.status.proposed": "Proposed",

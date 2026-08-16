@@ -748,6 +748,19 @@ describe("AutopilotActivityInspector", () => {
     expect(screen.getByText(/Could not refresh run history/)).toBeInTheDocument()
   })
 
+  it("warns when decisions fail to load instead of claiming nothing needs the user", async () => {
+    // A 500 (or any non-404/501 failure) must not render like "no open
+    // decisions" — that would be a false reassurance in the one region whose
+    // entire job is to say a person is needed. Assert both: the warning is
+    // shown, AND the empty-state text is not — showing both, or showing only
+    // the empty state, is exactly the bug this guards against.
+    decisionsMock.mockRejectedValueOnce(new Error("server error"))
+    renderInspector({ fallbackRun: run })
+
+    expect(await screen.findByText(/Could not refresh decisions/)).toBeInTheDocument()
+    expect(screen.queryByText(/Nothing needs you right now/)).not.toBeInTheDocument()
+  })
+
   it("Refresh retries both run history and selected activity", async () => {
     activityMock.mockRejectedValueOnce(new Error("offline"))
     renderInspector({ fallbackRun: run })

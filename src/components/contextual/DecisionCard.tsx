@@ -27,13 +27,20 @@ export function DecisionCard({ decision, projectId, onResolved }: DecisionCardPr
   const t = useT()
   const [answer, setAnswer] = useState("")
   const [busy, setBusy] = useState(false)
+  const [actionFailed, setActionFailed] = useState(false)
 
   async function act(action: "answer" | "dismiss", payload: Record<string, unknown>) {
     if (busy) return
     setBusy(true)
+    setActionFailed(false)
     try {
       await actOnContextualDecision(projectId, decision.id, action, payload)
       onResolved()
+    } catch {
+      // A silent failure here reads as "your answer was recorded" when it
+      // wasn't — the one thing this card must never do. Surface it and leave
+      // the card interactive so the user can retry immediately.
+      setActionFailed(true)
     } finally {
       setBusy(false)
     }
@@ -79,6 +86,11 @@ export function DecisionCard({ decision, projectId, onResolved }: DecisionCardPr
           {t("autopilot.decisions.dismiss")}
         </Button>
       </div>
+      {actionFailed && (
+        <p role="alert" className="text-xs text-destructive">
+          {t("autopilot.decisions.actionFailed")}
+        </p>
+      )}
     </div>
   )
 }

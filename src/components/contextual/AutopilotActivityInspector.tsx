@@ -739,6 +739,7 @@ export function AutopilotActivityInspector({
   const [actionMessage, setActionMessage] = useState<InspectorNotice | null>(null)
   const [decisions, setDecisions] = useState<ContextualDecisionView[]>([])
   const [decisionsOpenCount, setDecisionsOpenCount] = useState(0)
+  const [decisionsWarning, setDecisionsWarning] = useState<MessageKey | null>(null)
   const seqRef = useRef(0)
   const decisionsSeqRef = useRef(0)
   const activitySeqRef = useRef(0)
@@ -858,10 +859,15 @@ export function AutopilotActivityInspector({
       if (seq !== decisionsSeqRef.current) return
       setDecisions(page.decisions)
       setDecisionsOpenCount(page.openCount)
+      setDecisionsWarning(null)
     } catch {
-      // Decisions are one signal among several in this panel; a failed fetch
-      // here must not block the run history/activity the rest of the sheet
-      // already shows. Leave the last-known list in place.
+      // The transport only degrades 404/501 to an empty page; anything else
+      // reaching here is a real failure. Silence would render exactly like
+      // "no open decisions" — the one false reassurance this region must
+      // never give — so surface it instead of swallowing it.
+      if (seq === decisionsSeqRef.current) {
+        setDecisionsWarning("autopilot.inspector.warning.decisionsRefresh")
+      }
     }
   }, [projectId])
 
@@ -948,6 +954,7 @@ export function AutopilotActivityInspector({
     setSelectedRunId(openingRunId)
     setDecisions([])
     setDecisionsOpenCount(0)
+    setDecisionsWarning(null)
     void loadRuns()
     void loadDecisions()
   }, [fallbackRuns, focusRunId, initialSection, loadDecisions, loadRuns, open])
@@ -1126,6 +1133,7 @@ export function AutopilotActivityInspector({
   const selectedRunError = selectedRun ? humanRunError(selectedRun, t) : null
   const runsWarningText = runsWarning ? t(runsWarning) : null
   const activityWarningText = activityWarning ? t(activityWarning) : null
+  const decisionsWarningText = decisionsWarning ? t(decisionsWarning) : null
   const actionMessageText = noticeText(actionMessage, t)
 
   return (
@@ -1264,6 +1272,12 @@ export function AutopilotActivityInspector({
 
             <section aria-label={t("autopilot.decisions.heading")} className="flex flex-col gap-2">
               <h3 className="text-sm font-medium">{t("autopilot.decisions.heading")}</h3>
+              {decisionsWarningText && (
+                <p role="status" className="flex items-start gap-2 text-sm text-destructive">
+                  <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden />
+                  {decisionsWarningText}
+                </p>
+              )}
               {decisions.length > 0 ? (
                 <div className="flex flex-col gap-2">
                   {decisions.map((decision) => (
@@ -1276,9 +1290,15 @@ export function AutopilotActivityInspector({
                   ))}
                 </div>
               ) : (
-                <p className="text-sm text-muted-foreground">
-                  {t("autopilot.decisions.empty")}
-                </p>
+                // A fetch failure must not read as "nothing needs you" — that
+                // is a false reassurance in the one region whose job is to
+                // say a person is needed. Only show the empty state when the
+                // fetch actually succeeded with zero decisions.
+                !decisionsWarningText && (
+                  <p className="text-sm text-muted-foreground">
+                    {t("autopilot.decisions.empty")}
+                  </p>
+                )
               )}
               {decisionsOpenCount > decisions.length && (
                 <p className="text-xs text-muted-foreground">

@@ -16,12 +16,11 @@
 // Postgres, so a dropped loop resumes exactly where it stopped.
 
 import { Hono, type Context } from "hono"
-import type { ContentfulStatusCode } from "hono/utils/http-status"
 import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import { ROLE, type Env } from "../types"
-import { resolveProjectRole } from "../services/project-permissions"
+import { errorJson, requireRole } from "./_contextual-helpers"
 import { runAiGuard } from "../lib/ai-budget"
 import { getPlatformSettingsCached } from "../lib/platform-settings"
 import { creditGuard } from "../lib/credits"
@@ -104,41 +103,6 @@ function resolveMaxProjectConcurrency(raw: string | undefined): number {
 /** Files a single project-wide start will fan out to. Additional eligible
  * files are reported as deferred and become reachable on the next start. */
 const MAX_PROJECT_FILES = 24
-
-type ErrorCode =
-  | "not_found"
-  | "permission_denied"
-  | "validation_failed"
-  | "invalid_state"
-  | "not_projected"
-  | "run_exists"
-  | "credit_cap_exceeded"
-  | "not_configured"
-
-function errorJson(code: ErrorCode, message: string, status: ContentfulStatusCode, details?: unknown) {
-  return {
-    body: { error: { code, message, ...(details !== undefined ? { details } : {}) } },
-    status,
-  } as const
-}
-
-async function requireRole(
-  c: Context<AuthHonoEnv>,
-  projectId: string,
-  floor: number,
-): Promise<{ ok: true; level: number } | { ok: false; res: Response }> {
-  const user = c.get("user")
-  const role = await resolveProjectRole(c.env, user, projectId)
-  if (!role || role.level < floor) {
-    const { body, status } = errorJson(
-      "permission_denied",
-      "you do not have sufficient access on this project",
-      403,
-    )
-    return { ok: false, res: c.json(body, status) }
-  }
-  return { ok: true, level: role.level }
-}
 
 /** Activity must never become the reason a translation run wedges. Writes are
  * awaited (so they normally precede the live notification) but degrade to a

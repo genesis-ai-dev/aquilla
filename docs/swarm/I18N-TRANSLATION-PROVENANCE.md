@@ -21,15 +21,24 @@ than silently shipping a translation that now describes something else.
 
 ## Coverage after this pass
 
-| Locale | Keys translated | Of base | Left as English |
-| --- | ---: | ---: | ---: |
-| `th` Thai | 4,085 | 4,141 | 56 |
-| `my` Burmese | 4,089 | 4,141 | 52 |
-| `mfa` Patani Malay | 4,070 | 4,141 | 71 |
-| `ar` Arabic | 4,097 | 4,141 | 44 |
+Two rounds ran: the main pass against a 4,141-key base, then a top-up after wave 2's keying
+added 193 more (4,334 total).
 
-Baseline before this pass was ~93% for each. The keys still in English are deliberate: product
-names, file formats, protocol/unit tokens, and values the app *parses* rather than displays.
+| Locale | Keys translated | Of base | Coverage | Left as English |
+| --- | ---: | ---: | ---: | ---: |
+| `th` Thai | 4,279 | 4,334 | 98.7% | 55 |
+| `my` Burmese | 4,282 | 4,334 | 98.8% | 52 |
+| `mfa` Patani Malay | 4,267 | 4,334 | 98.5% | 67 |
+| `ar` Arabic | 4,282 | 4,334 | 98.8% | 52 |
+
+Baseline before this work was ~93% of a 3,523-key base. The keys still in English are
+deliberate — see "Why coverage can never read 100%" below. **Exactly one genuine gap** was
+found across all four locales at the end (`org.orgSettings.noSessionError` in `my`, dropped by
+an agent) and was filled separately.
+
+The top-up round's brief was rewritten to counter over-conservatism observed in round one, and
+it measurably worked: `mfa` went from arguing that "Audio"/"Status"/"Metadata" must stay English
+to rendering them as "Suara"/"Keadaan"/"Maklumat".
 
 ## How it was produced
 

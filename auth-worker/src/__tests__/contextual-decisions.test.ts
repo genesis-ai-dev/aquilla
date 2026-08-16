@@ -227,13 +227,12 @@ describe("waiting run status", () => {
     expect((await getRun(db, run.id))?.status).toBe("running")
   })
 
-  // THE regression test for §4.5. A waiting run adopted by the sweeper gets
-  // flipped to running and re-ticked forever — burning budget while the human
-  // it is waiting for never gets asked again. The predicate must name statuses
-  // explicitly and must never include 'waiting'.
-  // A waiting run holds its lane, so starting another run on the same file
-  // must report `active_exists` — NOT surface a raw unique-violation error
-  // from Postgres. See Step 3 item 6.
+  // A waiting run holds its lane (it's a member of ACTIVE_STATUSES), so
+  // starting a second run on the same (project, file, lane) must report
+  // `active_exists` — NOT surface a raw unique-violation error from Postgres.
+  // This is the case createRun's pre-check AND its race-recovery lookup both
+  // have to recognize; missing either one turns a clean refusal into a thrown
+  // exception. See Step 3 item 6.
   it("reports active_exists rather than throwing when a waiting run holds the lane", async () => {
     const project = `proj-lane-${Date.now()}`
     const run = await newRun(project)
@@ -246,6 +245,10 @@ describe("waiting run status", () => {
     expect(second.runId).toBe(run.id)
   })
 
+  // THE regression test for §4.5. A waiting run adopted by the sweeper gets
+  // flipped to running and re-ticked forever — burning budget while the human
+  // it is waiting for never gets asked again. The predicate must name statuses
+  // explicitly and must never include 'waiting'.
   it("is never adopted by the stranded-run sweeper", async () => {
     const project = `proj-sweep-${Date.now()}`
     const run = await newRun(project)

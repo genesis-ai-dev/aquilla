@@ -76,7 +76,15 @@ export interface ContextualRun {
   callsSpent: number
   lastError: string | null
   steeringCursor: string | null
-  /** Set only while status is 'waiting' — the decision this run is blocked on. */
+  /** Set by `blockRunOnDecision` when the run enters 'waiting' and cleared by
+   *  `unblockRun` when it resumes. Deliberately NOT cleared by
+   *  `terminateRun`/`failRun` — both go through the shared `transitionRun`,
+   *  which only ever writes `status`/`last_error`/`updated_at`, so a
+   *  terminated or failed run that was blocked keeps naming the decision it
+   *  died waiting on. Consequence for whoever wires this up: terminating or
+   *  failing a waiting run leaves that decision `open` with no live run
+   *  behind it, so the wiring needs to resolve it too (`dismissDecision` /
+   *  `supersedeDecisions` in `./contextual-decisions`). */
   blockedOnDecisionId: string | null
   /** Where the user was looking at start — rotates the first wave's seeds. */
   anchorCellId: string | null
